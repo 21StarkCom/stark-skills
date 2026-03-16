@@ -75,3 +75,32 @@ class TestBaseFlag:
             multi_review.main()
         mock_review.assert_called_once()
         assert mock_review.call_args[0][2] == "abc1234def"
+
+
+class TestModelFlags:
+    """Sub-agents must use max-power model flags."""
+
+    @patch("multi_review.subprocess.run")
+    def test_claude_uses_opus(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="[]", returncode=0)
+        multi_review._run_subagent("claude", "architecture", "abc123")
+        cmd = mock_run.call_args[0][0]
+        assert "--model" in cmd
+        assert "claude-opus-4-6" in cmd
+        assert "--max-tokens" in cmd
+
+    @patch("multi_review.subprocess.run")
+    def test_codex_uses_xhigh(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="[]", returncode=0)
+        multi_review._run_subagent("codex", "architecture", "abc123")
+        cmd = mock_run.call_args[0][0]
+        assert "--effort" in cmd
+        assert "xhigh" in cmd
+
+    @patch("multi_review.subprocess.run")
+    def test_gemini_uses_pro(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="[]", returncode=0)
+        multi_review._run_subagent("gemini", "architecture", "abc123")
+        cmd = mock_run.call_args[0][0]
+        assert "--model" in cmd
+        assert "gemini-2.5-pro" in cmd
