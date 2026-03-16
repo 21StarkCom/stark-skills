@@ -27,6 +27,10 @@ Multi-agent PR code review system. 3 AI CLI tools (Claude, Codex, Gemini) × N d
 ./install.sh --uninstall  # remove symlinks
 ```
 
+## Skills
+
+- `/stark-review [PR_NUMBER]` — multi-agent PR review (3 LLMs × 6 domains). Full mode with fix loop requires `test_command` in config. Otherwise review-only.
+
 ## Conventions
 
 - Prompts are per-agent: each LLM gets its own version of each domain
