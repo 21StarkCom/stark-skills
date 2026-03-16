@@ -406,6 +406,20 @@ def _parse_findings(agent: str, domain: str, raw: str) -> list[Finding]:
     return findings
 
 
+def apply_severity_overrides(
+    findings: list[Finding], overrides: dict[str, dict],
+) -> list[Finding]:
+    """Apply severity_overrides: findings below min_severity get downgraded to 'low'."""
+    for f in findings:
+        domain_override = overrides.get(f.domain)
+        if not domain_override:
+            continue
+        min_sev = domain_override.get("min_severity")
+        if min_sev and SEVERITY_ORDER.get(f.severity, 99) > SEVERITY_ORDER.get(min_sev, 99):
+            f.severity = "low"
+    return findings
+
+
 # ── Sub-agent runners ──────────────────────────────────────────────────
 
 
@@ -477,8 +491,13 @@ def run_review_round(
     """Run one round of parallel reviews: agents × domains."""
     if out is None:
         out = sys.stdout
-    agents = agents or list(AGENTS.keys())
-    domains = domains or list(DOMAINS.keys())
+    if agents is None or domains is None:
+        config = discover_config(cwd=cwd)
+        if agents is None:
+            agents = [a for a in config.get("agents", list(AGENTS.keys())) if a in AGENTS]
+        if domains is None:
+            disabled = set(config.get("disabled_domains", []))
+            domains = [d for d in DOMAINS if d not in disabled]
     rnd = ReviewRound(round_num=round_num)
 
     total = len(agents) * len(domains)
@@ -649,6 +668,11 @@ def review_pr(
 ) -> dict[str, Any]:
     """Run the full multi-agent review on a single PR."""
     out = sys.stderr if json_only else sys.stdout
+    config = discover_config(cwd=cwd)
+    active_agents = [a for a in config.get("agents", list(AGENTS.keys())) if a in AGENTS]
+    disabled = set(config.get("disabled_domains", []))
+    active_domains = [d for d in DOMAINS if d not in disabled]
+    sev_overrides = config.get("severity_overrides", {})
     n_agents = len(AGENTS)
     n_domains = len(DOMAINS)
 
@@ -668,8 +692,12 @@ def review_pr(
 
     while True:
         round_num += 1
-        rnd = run_review_round(base, round_num, cwd=cwd, out=out)
+        rnd = run_review_round(base, round_num, agents=active_agents, domains=active_domains, cwd=cwd, out=out)
         rounds.append(rnd)
+
+        if sev_overrides:
+            for res in rnd.results:
+                apply_severity_overrides(res.findings, sev_overrides)
 
         # Post reviews to GitHub — one review per agent, consolidating all domains
         if not dry_run:

@@ -214,3 +214,56 @@ class TestPromptResolution:
             global_prompts_dir=str(tmp_path / "nonexistent"),
         )
         assert result == ""
+
+
+class TestConfigWiring:
+    """Config should filter agents/domains and apply severity overrides."""
+
+    @patch("multi_review._run_subagent")
+    @patch("multi_review.discover_config")
+    def test_disabled_domains_excluded(self, mock_config, mock_sub):
+        mock_config.return_value = {
+            **multi_review.DEFAULT_CONFIG,
+            "disabled_domains": ["accessibility"],
+        }
+        mock_sub.return_value = multi_review.SubAgentResult(
+            agent="claude", domain="architecture", raw_output="[]",
+        )
+
+        rnd = multi_review.run_review_round("abc123", 1, cwd="/tmp")
+
+        domains_called = {call[0][1] for call in mock_sub.call_args_list}
+        assert "accessibility" not in domains_called
+
+    @patch("multi_review._run_subagent")
+    @patch("multi_review.discover_config")
+    def test_agents_config_respected(self, mock_config, mock_sub):
+        mock_config.return_value = {
+            **multi_review.DEFAULT_CONFIG,
+            "agents": ["claude"],
+        }
+        mock_sub.return_value = multi_review.SubAgentResult(
+            agent="claude", domain="architecture", raw_output="[]",
+        )
+
+        rnd = multi_review.run_review_round("abc123", 1, cwd="/tmp")
+
+        agents_called = {call[0][0] for call in mock_sub.call_args_list}
+        assert agents_called == {"claude"}
+
+    def test_severity_override_applied(self):
+        """severity_overrides should reclassify findings below min_severity."""
+        findings = [
+            multi_review.Finding(
+                agent="claude", domain="accessibility", severity="medium",
+                file="a.py", line=1, title="t", description="d", suggestion="s",
+            ),
+            multi_review.Finding(
+                agent="claude", domain="accessibility", severity="critical",
+                file="b.py", line=2, title="t2", description="d2", suggestion="s2",
+            ),
+        ]
+        overrides = {"accessibility": {"min_severity": "critical"}}
+        result = multi_review.apply_severity_overrides(findings, overrides)
+        assert result[0].severity == "low"  # medium < critical -> downgraded
+        assert result[1].severity == "critical"  # unchanged
