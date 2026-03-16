@@ -335,14 +335,16 @@ def _run_subagent(
             f"Then review them according to these instructions:\n\n"
             f"{full_prompt}"
         )
-        cmd = ["claude", "-p", prompt, "--output-format", "text"]
+        cmd = [
+            "claude", "-p", prompt, "--output-format", "text",
+            "--model", "claude-opus-4-6", "--max-tokens", "16384",
+        ]
 
     elif agent == "codex":
-        cmd = ["codex", "review", "--base", base, full_prompt]
+        cmd = ["codex", "--effort", "xhigh", "review", "--base", base, full_prompt]
 
     elif agent == "gemini":
-        # Gemini prompts already include "run git diff" instructions in the domain file
-        cmd = ["gemini", "-p", full_prompt]
+        cmd = ["gemini", "--model", "gemini-2.5-pro", "-p", full_prompt]
 
     else:
         return SubAgentResult(
