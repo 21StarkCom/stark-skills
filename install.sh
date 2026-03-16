@@ -110,6 +110,14 @@ install() {
         warn "Evinced dir not found at $EVINCED_DIR — skipping org config"
     fi
 
+    # 4. Skill: ~/.claude/skills/stark-review/SKILL.md → repo/skill/SKILL.md
+    mkdir -p "$HOME/.claude/skills/stark-review"
+    if [ -f "$REPO_DIR/skill/SKILL.md" ]; then
+        link_dir "$REPO_DIR/skill/SKILL.md" "$HOME/.claude/skills/stark-review/SKILL.md" "Skill"
+    else
+        warn "Skill file not found at $REPO_DIR/skill/SKILL.md"
+    fi
+
     echo ""
     echo "Installation complete. Verify with: ./install.sh --status"
     echo ""
@@ -163,6 +171,7 @@ uninstall() {
     unlink_dir "$CODE_REVIEW_DIR/prompts" "Prompts"
     unlink_dir "$CODE_REVIEW_DIR/scripts" "Scripts"
     unlink_dir "$EVINCED_DIR/.code-review" "Evinced org config"
+    unlink_dir "$HOME/.claude/skills/stark-review/SKILL.md" "Skill"
 
     echo ""
     echo "Note: $CODE_REVIEW_DIR/history/ was not removed (contains local data)"
@@ -179,6 +188,7 @@ status() {
     check_dir "$CODE_REVIEW_DIR/prompts" "Prompts"
     check_dir "$CODE_REVIEW_DIR/scripts" "Scripts"
     check_dir "$EVINCED_DIR/.code-review" "Evinced org config"
+    check_dir "$HOME/.claude/skills/stark-review/SKILL.md" "Skill"
 
     echo ""
     if [ -d "$CODE_REVIEW_DIR/history" ]; then
