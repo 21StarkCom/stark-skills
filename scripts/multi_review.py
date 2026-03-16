@@ -673,8 +673,8 @@ def review_pr(
     disabled = set(config.get("disabled_domains", []))
     active_domains = [d for d in DOMAINS if d not in disabled]
     sev_overrides = config.get("severity_overrides", {})
-    n_agents = len(AGENTS)
-    n_domains = len(DOMAINS)
+    n_agents = len(active_agents)
+    n_domains = len(active_domains)
 
     print(f"\n{'#'*60}", file=out)
     print(f"  Multi-Agent Review: {repo} PR #{pr_number}", file=out)
