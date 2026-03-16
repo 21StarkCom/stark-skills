@@ -1,0 +1,6 @@
+{
+  "severity_overrides": {
+    "accessibility": { "min_severity": "critical" }
+  },
+  "test_command": "pnpm test"
+}

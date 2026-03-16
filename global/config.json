@@ -1,0 +1,15 @@
+{
+  "agents": ["claude", "codex", "gemini"],
+  "fix_threshold": "medium",
+  "test_command": null,
+  "build_command": null,
+  "verify_before_clean": true,
+  "disabled_domains": [],
+  "extra_domains": [],
+  "severity_overrides": {},
+  "github_apps": {
+    "claude": "stark-claude",
+    "codex": "stark-codex",
+    "gemini": "stark-gemini"
+  }
+}
