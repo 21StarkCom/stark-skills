@@ -170,3 +170,47 @@ class TestConfigDiscovery:
         cfg = multi_review.discover_config(cwd=str(tmp_path), global_dir=str(tmp_path / "nonexistent"))
         assert cfg["agents"] == ["claude", "codex", "gemini"]
         assert cfg["fix_threshold"] == "medium"
+
+
+class TestPromptResolution:
+    """Prompts resolve: repo → org → global, per agent × domain."""
+
+    def test_global_prompt_found(self, tmp_path):
+        """Global prompt is used when no overrides exist."""
+        global_prompts = tmp_path / "global" / "prompts" / "claude"
+        global_prompts.mkdir(parents=True)
+        (global_prompts / "01-architecture.md").write_text("Global arch prompt")
+
+        result = multi_review.resolve_prompt(
+            "claude", "01-architecture.md",
+            cwd=str(tmp_path / "repo"),
+            global_prompts_dir=str(tmp_path / "global" / "prompts"),
+        )
+        assert result == "Global arch prompt"
+
+    def test_repo_prompt_overrides_global(self, tmp_path):
+        """Repo-level prompt wins over global."""
+        global_prompts = tmp_path / "global" / "prompts" / "claude"
+        global_prompts.mkdir(parents=True)
+        (global_prompts / "01-architecture.md").write_text("Global arch prompt")
+
+        repo_dir = tmp_path / "repo"
+        repo_prompts = repo_dir / ".code-review" / "prompts" / "claude"
+        repo_prompts.mkdir(parents=True)
+        (repo_prompts / "01-architecture.md").write_text("Repo arch prompt")
+
+        result = multi_review.resolve_prompt(
+            "claude", "01-architecture.md",
+            cwd=str(repo_dir),
+            global_prompts_dir=str(tmp_path / "global" / "prompts"),
+        )
+        assert result == "Repo arch prompt"
+
+    def test_no_prompt_returns_empty(self, tmp_path):
+        """When no prompt file exists anywhere, return empty string."""
+        result = multi_review.resolve_prompt(
+            "claude", "99-nonexistent.md",
+            cwd=str(tmp_path),
+            global_prompts_dir=str(tmp_path / "nonexistent"),
+        )
+        assert result == ""

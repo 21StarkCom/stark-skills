@@ -11,7 +11,7 @@ Architecture:
     ├── codex  × 6 domains  → stark-codex bot
     └── gemini × 6 domains  → stark-gemini bot
 
-Prompts loaded from ~/git/Personal/Prompts/CodeReviews/{agent}/:
+Prompts loaded from ~/.claude/code-review/prompts/{agent}/ (with repo/org overrides):
     agent.md          Agent-specific preamble
     01-architecture   Architecture & design patterns
     02-accessibility   WCAG 2.1 AA compliance
@@ -47,7 +47,7 @@ from typing import Any
 SCRIPTS_DIR = Path(__file__).parent
 PYTHON = str(SCRIPTS_DIR / ".venv" / "bin" / "python3")
 GITHUB_APP = str(SCRIPTS_DIR / "github_app.py")
-PROMPTS_DIR = Path.home() / "git" / "Personal" / "Prompts" / "CodeReviews"
+GLOBAL_PROMPTS_DIR = Path.home() / ".claude" / "code-review" / "prompts"
 
 # Agent definitions — CLI tool + GitHub App mapping
 AGENTS = {
@@ -146,15 +146,10 @@ def discover_config(cwd: str | None = None, global_dir: str | None = None) -> di
 
 
 def _discover_domains() -> dict[str, dict[str, Any]]:
-    """Discover domains from prompt files in any agent directory.
-
-    Scans the first agent directory to find numbered domain files like
-    01-architecture.md and builds the domain registry.
-    """
+    """Discover domains from prompt files in any agent directory."""
     domains: dict[str, dict[str, Any]] = {}
-    # Use any agent dir as reference — they all have the same domain files
     for agent in AGENTS:
-        agent_dir = PROMPTS_DIR / agent
+        agent_dir = GLOBAL_PROMPTS_DIR / agent
         if not agent_dir.exists():
             continue
         for f in sorted(agent_dir.glob("[0-9]*.md")):
@@ -166,7 +161,7 @@ def _discover_domains() -> dict[str, dict[str, Any]]:
                     "filename": f.name,
                 }
         if domains:
-            break  # Found domains from first agent dir
+            break
     return domains
 
 
@@ -228,29 +223,47 @@ class ReviewRound:
 # ── Prompt loading ─────────────────────────────────────────────────────
 
 
-def _load_agent_preamble(agent: str) -> str:
-    """Load the agent-specific preamble (agent.md)."""
-    path = PROMPTS_DIR / agent / "agent.md"
-    if path.exists():
-        return path.read_text().strip()
+def resolve_prompt(agent: str, filename: str, cwd: str | None = None,
+                   global_prompts_dir: str | None = None) -> str:
+    """Resolve a prompt file: repo → org → global."""
+    if cwd is None:
+        cwd = os.getcwd()
+    if global_prompts_dir is None:
+        global_prompts_dir = str(GLOBAL_PROMPTS_DIR)
+
+    home = Path.home()
+    current = Path(cwd).resolve()
+    while current != home and current != current.parent:
+        candidate = current / ".code-review" / "prompts" / agent / filename
+        if candidate.exists():
+            return candidate.read_text().strip()
+        current = current.parent
+    global_path = Path(global_prompts_dir) / agent / filename
+    if global_path.exists():
+        return global_path.read_text().strip()
     return ""
 
 
-def _load_domain_prompt(agent: str, domain_key: str) -> str:
+def _load_agent_preamble(agent: str, cwd: str | None = None) -> str:
+    """Load the agent-specific preamble (agent.md)."""
+    return resolve_prompt(agent, "agent.md", cwd=cwd)
+
+
+def _load_domain_prompt(agent: str, domain_key: str, cwd: str | None = None) -> str:
     """Load the domain-specific review prompt for a given agent."""
     domain = DOMAINS.get(domain_key)
     if not domain:
         return f"Review this code for {domain_key} issues. {FINDINGS_FORMAT}"
-    path = PROMPTS_DIR / agent / domain["filename"]
-    if path.exists():
-        return path.read_text().strip()
-    # Fallback: try another agent's prompt
+    content = resolve_prompt(agent, domain["filename"], cwd=cwd)
+    if content:
+        return content
     for fallback_agent in AGENTS:
-        fallback_path = PROMPTS_DIR / fallback_agent / domain["filename"]
-        if fallback_path.exists():
+        if fallback_agent == agent:
+            continue
+        content = resolve_prompt(fallback_agent, domain["filename"], cwd=cwd)
+        if content:
             print(f"  [!] Using {fallback_agent}'s prompt for {agent}/{domain_key}", file=sys.stderr)
-            return fallback_path.read_text().strip()
-    print(f"  [!] No prompt file found for {agent}/{domain_key}", file=sys.stderr)
+            return content
     return f"Review this code for {domain_key} issues. {FINDINGS_FORMAT}"
 
 
@@ -401,8 +414,8 @@ def _run_subagent(
 ) -> SubAgentResult:
     """Run a single sub-agent: one CLI tool × one domain."""
     t0 = time.time()
-    preamble = _load_agent_preamble(agent)
-    domain_prompt = _load_domain_prompt(agent, domain_key)
+    preamble = _load_agent_preamble(agent, cwd=cwd)
+    domain_prompt = _load_domain_prompt(agent, domain_key, cwd=cwd)
     full_prompt = f"{preamble}\n\n{domain_prompt}" if preamble else domain_prompt
 
     if agent == "claude":
@@ -646,7 +659,7 @@ def review_pr(
     print(f"{'#'*60}", file=out)
 
     if not DOMAINS:
-        print("  [!] No domain prompt files found in:", PROMPTS_DIR, file=sys.stderr)
+        print("  [!] No domain prompt files found in:", GLOBAL_PROMPTS_DIR, file=sys.stderr)
         print("  [!] Expected files like 01-architecture.md", file=sys.stderr)
         sys.exit(1)
 
