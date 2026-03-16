@@ -62,3 +62,16 @@ class TestJsonOnlyFlag:
 
         stderr_text = captured_stderr.getvalue()
         assert "Multi-Agent Review" in stderr_text
+
+
+class TestBaseFlag:
+    """--base must accept a commit SHA and pass it through."""
+
+    @patch("multi_review.review_pr", return_value={"summary": {"clean": True}})
+    @patch("multi_review.detect_repo", return_value="GetEvinced/test-repo")
+    def test_base_sha_passed_through(self, mock_repo, mock_review):
+        """When --base is a SHA, it should be passed directly, no auto-detect."""
+        with patch("sys.argv", ["multi_review.py", "--pr", "1", "--base", "abc1234def", "--dry-run", "--json-only"]):
+            multi_review.main()
+        mock_review.assert_called_once()
+        assert mock_review.call_args[0][2] == "abc1234def"
