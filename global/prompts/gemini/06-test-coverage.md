@@ -1,7 +1,7 @@
 # Test Coverage & Quality
 
 First, run these commands:
-1. Run `git diff main...HEAD` to see what changed
+1. Run `git diff <base>...HEAD` to see what changed
 2. Read the test files in full
 3. Read the component files to understand what should be tested
 4. Read sibling component tests for pattern comparison

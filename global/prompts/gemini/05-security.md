@@ -1,7 +1,7 @@
 # Security & Error Handling
 
 First, run these commands:
-1. Run `git diff main...HEAD` to see what changed
+1. Run `git diff <base>...HEAD` to see what changed
 2. Read each changed file in full
 3. Check package.json if dependencies changed
 

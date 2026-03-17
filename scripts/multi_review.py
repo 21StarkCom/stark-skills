@@ -86,8 +86,14 @@ DEFAULT_CONFIG = {
     },
 }
 
-REPLACE_FIELDS = {"agents", "fix_threshold", "test_command", "build_command",
-                  "verify_before_clean", "disabled_domains"}
+REPLACE_FIELDS = {
+    "agents",
+    "fix_threshold",
+    "test_command",
+    "build_command",
+    "verify_before_clean",
+    "disabled_domains",
+}
 ADDITIVE_FIELDS = {"extra_domains"}
 DEEP_MERGE_FIELDS = {"severity_overrides", "github_apps"}
 
@@ -223,8 +229,9 @@ class ReviewRound:
 # ── Prompt loading ─────────────────────────────────────────────────────
 
 
-def resolve_prompt(agent: str, filename: str, cwd: str | None = None,
-                   global_prompts_dir: str | None = None) -> str:
+def resolve_prompt(
+    agent: str, filename: str, cwd: str | None = None, global_prompts_dir: str | None = None
+) -> str:
     """Resolve a prompt file: repo → org → global."""
     if cwd is None:
         cwd = os.getcwd()
@@ -262,7 +269,9 @@ def _load_domain_prompt(agent: str, domain_key: str, cwd: str | None = None) -> 
             continue
         content = resolve_prompt(fallback_agent, domain["filename"], cwd=cwd)
         if content:
-            print(f"  [!] Using {fallback_agent}'s prompt for {agent}/{domain_key}", file=sys.stderr)
+            print(
+                f"  [!] Using {fallback_agent}'s prompt for {agent}/{domain_key}", file=sys.stderr
+            )
             return content
     return f"Review this code for {domain_key} issues. {FINDINGS_FORMAT}"
 
@@ -275,7 +284,10 @@ def detect_repo(cwd: str | None = None) -> str:
     try:
         result = subprocess.run(
             ["git", "remote", "get-url", "origin"],
-            capture_output=True, text=True, timeout=5, cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=cwd,
         )
         if result.returncode != 0:
             return ""
@@ -296,13 +308,19 @@ def detect_base_branch(cwd: str | None = None) -> str:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--verify", "main"],
-            capture_output=True, text=True, timeout=5, cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=cwd,
         )
         if result.returncode == 0:
             return "main"
         result = subprocess.run(
             ["git", "rev-parse", "--verify", "master"],
-            capture_output=True, text=True, timeout=5, cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=cwd,
         )
         if result.returncode == 0:
             return "master"
@@ -317,7 +335,10 @@ def get_open_prs(repo: str) -> list[dict]:
     env = {**os.environ, "GH_TOKEN": token}
     result = subprocess.run(
         ["gh", "api", f"repos/{repo}/pulls", "--jq", ".[].number"],
-        capture_output=True, text=True, env=env, timeout=30,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
     )
     if result.returncode != 0:
         return []
@@ -327,7 +348,10 @@ def get_open_prs(repo: str) -> list[dict]:
     for num in numbers:
         pr_result = subprocess.run(
             ["gh", "api", f"repos/{repo}/pulls/{num}"],
-            capture_output=True, text=True, env=env, timeout=30,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
         )
         if pr_result.returncode == 0:
             prs.append(json.loads(pr_result.stdout))
@@ -340,7 +364,9 @@ def get_open_prs(repo: str) -> list[dict]:
 def _get_gh_token(app: str) -> str:
     result = subprocess.run(
         [PYTHON, GITHUB_APP, "--app", app, "token"],
-        capture_output=True, text=True, timeout=15,
+        capture_output=True,
+        text=True,
+        timeout=15,
     )
     if result.returncode != 0:
         raise RuntimeError(f"Failed to get token for {app}: {result.stderr}")
@@ -358,12 +384,20 @@ def post_review(repo: str, pr_number: int, app: str, body: str) -> bool:
     env = {**os.environ, "GH_TOKEN": token}
     result = subprocess.run(
         [
-            "gh", "api", f"repos/{repo}/pulls/{pr_number}/reviews",
-            "--method", "POST",
-            "-f", "event=COMMENT",
-            "-f", f"body={body}",
+            "gh",
+            "api",
+            f"repos/{repo}/pulls/{pr_number}/reviews",
+            "--method",
+            "POST",
+            "-f",
+            "event=COMMENT",
+            "-f",
+            f"body={body}",
         ],
-        capture_output=True, text=True, env=env, timeout=30,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
     )
     if result.returncode != 0:
         print(f"  [!] Failed to post review as {app}: {result.stderr}", file=sys.stderr)
@@ -393,21 +427,24 @@ def _parse_findings(agent: str, domain: str, raw: str) -> list[Finding]:
     for item in items:
         if not isinstance(item, dict):
             continue
-        findings.append(Finding(
-            agent=agent,
-            domain=domain,
-            severity=item.get("severity", "medium").lower(),
-            file=item.get("file", "unknown"),
-            line=int(item.get("line", 0)),
-            title=item.get("title", "Untitled"),
-            description=item.get("description", ""),
-            suggestion=item.get("suggestion", ""),
-        ))
+        findings.append(
+            Finding(
+                agent=agent,
+                domain=domain,
+                severity=item.get("severity", "medium").lower(),
+                file=item.get("file", "unknown"),
+                line=int(item.get("line", 0)),
+                title=item.get("title", "Untitled"),
+                description=item.get("description", ""),
+                suggestion=item.get("suggestion", ""),
+            )
+        )
     return findings
 
 
 def apply_severity_overrides(
-    findings: list[Finding], overrides: dict[str, dict],
+    findings: list[Finding],
+    overrides: dict[str, dict],
 ) -> list[Finding]:
     """Apply severity_overrides: findings below min_severity get downgraded to 'low'."""
     for f in findings:
@@ -424,7 +461,10 @@ def apply_severity_overrides(
 
 
 def _run_subagent(
-    agent: str, domain_key: str, base: str, cwd: str | None = None,
+    agent: str,
+    domain_key: str,
+    base: str,
+    cwd: str | None = None,
 ) -> SubAgentResult:
     """Run a single sub-agent: one CLI tool × one domain."""
     t0 = time.time()
@@ -439,41 +479,70 @@ def _run_subagent(
             f"{full_prompt}"
         )
         cmd = [
-            "claude", "-p", prompt, "--output-format", "text",
-            "--model", "claude-opus-4-6", "--max-tokens", "16384",
+            "claude",
+            "-p",
+            prompt,
+            "--output-format",
+            "text",
+            "--model",
+            "claude-opus-4-6",
+            "--max-tokens",
+            "16384",
         ]
 
     elif agent == "codex":
         cmd = ["codex", "--effort", "xhigh", "review", "--base", base, full_prompt]
 
     elif agent == "gemini":
-        cmd = ["gemini", "--model", "gemini-2.5-pro", "-p", full_prompt]
+        prompt = (
+            f"Run 'git diff {base}...HEAD' and read all changed files. "
+            f"ONLY review files that appear in the diff. "
+            f"Then review them according to these instructions:\n\n"
+            f"{full_prompt}"
+        )
+        cmd = ["gemini", "--model", "gemini-2.5-pro", "-p", prompt]
 
     else:
         return SubAgentResult(
-            agent=agent, domain=domain_key, raw_output="",
-            error=f"Unknown agent: {agent}", duration_s=0.0,
+            agent=agent,
+            domain=domain_key,
+            raw_output="",
+            error=f"Unknown agent: {agent}",
+            duration_s=0.0,
         )
 
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=600, cwd=cwd,
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=600,
+            cwd=cwd,
         )
         raw = result.stdout
         findings = _parse_findings(agent, domain_key, raw)
         return SubAgentResult(
-            agent=agent, domain=domain_key, raw_output=raw,
-            findings=findings, duration_s=time.time() - t0,
+            agent=agent,
+            domain=domain_key,
+            raw_output=raw,
+            findings=findings,
+            duration_s=time.time() - t0,
         )
     except subprocess.TimeoutExpired:
         return SubAgentResult(
-            agent=agent, domain=domain_key, raw_output="",
-            error="Timed out after 600s", duration_s=time.time() - t0,
+            agent=agent,
+            domain=domain_key,
+            raw_output="",
+            error="Timed out after 600s",
+            duration_s=time.time() - t0,
         )
     except Exception as e:
         return SubAgentResult(
-            agent=agent, domain=domain_key, raw_output="",
-            error=str(e), duration_s=time.time() - t0,
+            agent=agent,
+            domain=domain_key,
+            raw_output="",
+            error=str(e),
+            duration_s=time.time() - t0,
         )
 
 
@@ -501,9 +570,12 @@ def run_review_round(
     rnd = ReviewRound(round_num=round_num)
 
     total = len(agents) * len(domains)
-    print(f"\n{'='*60}", file=out)
-    print(f"  Review Round {round_num} — {len(agents)} agents × {len(domains)} domains = {total} sub-agents", file=out)
-    print(f"{'='*60}", file=out)
+    print(f"\n{'=' * 60}", file=out)
+    print(
+        f"  Review Round {round_num} — {len(agents)} agents × {len(domains)} domains = {total} sub-agents",
+        file=out,
+    )
+    print(f"{'=' * 60}", file=out)
 
     with ThreadPoolExecutor(max_workers=min(total, MAX_WORKERS)) as pool:
         futures = {}
@@ -530,8 +602,7 @@ def run_review_round(
 
             if result.error:
                 print(
-                    f"  [{agent_cfg['emoji']}] {agent} × {domain_key}: "
-                    f"ERROR — {result.error}",
+                    f"  [{agent_cfg['emoji']}] {agent} × {domain_key}: ERROR — {result.error}",
                     file=out,
                 )
             else:
@@ -583,9 +654,7 @@ def format_agent_review_body(agent: str, rnd: ReviewRound) -> str:
 
         # Group by severity
         by_severity: dict[str, list[Finding]] = {}
-        for f in sorted(
-            result.findings, key=lambda f: SEVERITY_ORDER.get(f.severity, 99)
-        ):
+        for f in sorted(result.findings, key=lambda f: SEVERITY_ORDER.get(f.severity, 99)):
             by_severity.setdefault(f.severity, []).append(f)
 
         for sev, findings in by_severity.items():
@@ -648,10 +717,7 @@ def all_findings(rnd: ReviewRound) -> list[Finding]:
 
 def has_actionable_findings(rnd: ReviewRound) -> bool:
     """Check if a round has critical, high, or medium findings that need fixing."""
-    return any(
-        f.severity in ("critical", "high", "medium")
-        for f in all_findings(rnd)
-    )
+    return any(f.severity in ("critical", "high", "medium") for f in all_findings(rnd))
 
 
 # ── Main ───────────────────────────────────────────────────────────────
@@ -676,11 +742,13 @@ def review_pr(
     n_agents = len(active_agents)
     n_domains = len(active_domains)
 
-    print(f"\n{'#'*60}", file=out)
+    print(f"\n{'#' * 60}", file=out)
     print(f"  Multi-Agent Review: {repo} PR #{pr_number}", file=out)
     print(f"  Base: {base}", file=out)
-    print(f"  {n_agents} agents × {n_domains} domains = {n_agents * n_domains} sub-agents", file=out)
-    print(f"{'#'*60}", file=out)
+    print(
+        f"  {n_agents} agents × {n_domains} domains = {n_agents * n_domains} sub-agents", file=out
+    )
+    print(f"{'#' * 60}", file=out)
 
     if not DOMAINS:
         print("  [!] No domain prompt files found in:", GLOBAL_PROMPTS_DIR, file=sys.stderr)
@@ -692,7 +760,9 @@ def review_pr(
 
     while True:
         round_num += 1
-        rnd = run_review_round(base, round_num, agents=active_agents, domains=active_domains, cwd=cwd, out=out)
+        rnd = run_review_round(
+            base, round_num, agents=active_agents, domains=active_domains, cwd=cwd, out=out
+        )
         rounds.append(rnd)
 
         if sev_overrides:
@@ -711,12 +781,12 @@ def review_pr(
 
         # Check for actionable findings (critical/high/medium)
         if not has_actionable_findings(rnd):
-            print(f"\n  Round {round_num}: No critical/high/medium findings. Review clean.", file=out)
+            print(
+                f"\n  Round {round_num}: No critical/high/medium findings. Review clean.", file=out
+            )
             break
 
-        actionable = [
-            f for f in all_findings(rnd) if f.severity in ("critical", "high", "medium")
-        ]
+        actionable = [f for f in all_findings(rnd) if f.severity in ("critical", "high", "medium")]
         print(f"\n  Round {round_num}: {len(actionable)} actionable findings to fix.", file=out)
         print("  Findings require fixing. Outputting for orchestrator...", file=out)
         break
@@ -747,25 +817,20 @@ def review_pr(
         "summary": {
             "total_findings": sum(len(all_findings(r)) for r in rounds),
             "critical": sum(
-                sum(1 for f in all_findings(r) if f.severity == "critical")
-                for r in rounds
+                sum(1 for f in all_findings(r) if f.severity == "critical") for r in rounds
             ),
-            "high": sum(
-                sum(1 for f in all_findings(r) if f.severity == "high")
-                for r in rounds
-            ),
+            "high": sum(sum(1 for f in all_findings(r) if f.severity == "high") for r in rounds),
             "medium": sum(
-                sum(1 for f in all_findings(r) if f.severity == "medium")
-                for r in rounds
+                sum(1 for f in all_findings(r) if f.severity == "medium") for r in rounds
             ),
             "clean": not has_actionable_findings(rounds[-1]) if rounds else False,
         },
     }
 
     if not json_output:
-        print(f"\n{'='*60}", file=out)
+        print(f"\n{'=' * 60}", file=out)
         print("  Summary", file=out)
-        print(f"{'='*60}", file=out)
+        print(f"{'=' * 60}", file=out)
         print(format_summary_table(rounds), file=out)
         print(file=out)
 
@@ -791,7 +856,9 @@ def main() -> None:
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument("--pr", type=int, help="PR number to review")
     target.add_argument(
-        "--all-repos", nargs="+", metavar="DIR",
+        "--all-repos",
+        nargs="+",
+        metavar="DIR",
         help="Directories of repos to scan for open PRs",
     )
 
@@ -800,7 +867,9 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Don't post reviews to GitHub")
     parser.add_argument("--json", action="store_true", dest="json_output", help="Output JSON only")
     parser.add_argument(
-        "--json-only", action="store_true", dest="json_only",
+        "--json-only",
+        action="store_true",
+        dest="json_only",
         help="Strict JSON mode: stdout is JSON payload only, all logs go to stderr",
     )
 
@@ -814,10 +883,12 @@ def main() -> None:
         base = args.base or detect_base_branch()
 
         result = review_pr(
-            repo, args.pr, base,
+            repo,
+            args.pr,
+            base,
             dry_run=args.dry_run,
             json_output=args.json_output or args.json_only,
-            json_only=getattr(args, 'json_only', False),
+            json_only=getattr(args, "json_only", False),
         )
 
         if args.json_output or args.json_only:
@@ -848,8 +919,11 @@ def main() -> None:
                 pr_num = pr["number"]
                 print(f"  Found PR #{pr_num}: {pr['title']}")
                 result = review_pr(
-                    repo, pr_num, base,
-                    dry_run=args.dry_run, json_output=args.json_output,
+                    repo,
+                    pr_num,
+                    base,
+                    dry_run=args.dry_run,
+                    json_output=args.json_output,
                     cwd=repo_dir,
                 )
                 all_results.append(result)
@@ -857,9 +931,9 @@ def main() -> None:
         if args.json_output:
             print(json.dumps(all_results, indent=2))
         else:
-            print(f"\n{'#'*60}")
+            print(f"\n{'#' * 60}")
             print(f"  Reviewed {len(all_results)} PRs across {len(args.all_repos)} repos")
-            print(f"{'#'*60}")
+            print(f"{'#' * 60}")
 
 
 if __name__ == "__main__":

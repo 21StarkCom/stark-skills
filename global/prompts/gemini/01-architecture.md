@@ -1,7 +1,7 @@
 # Architecture & Design Patterns
 
 First, run these commands to understand the changes:
-1. Run `git diff main...HEAD` to see what changed
+1. Run `git diff <base>...HEAD` to see what changed
 2. Read each changed file in full
 3. Read sibling components in the same directory for pattern comparison
 

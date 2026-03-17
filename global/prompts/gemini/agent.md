@@ -15,9 +15,11 @@ gemini -p "<prompt>"
 
 ## How You Receive Context
 You must explicitly read the code. Start every review by running these shell commands:
-1. `git diff main...HEAD` — see what changed
+1. `git diff <base>...HEAD` — see what changed (replace `<base>` with the base ref provided in your prompt)
 2. Read each changed file in full
 3. Read sibling components/files to compare patterns and conventions
+
+**IMPORTANT:** ONLY review files that appear in the diff output. Do not review, comment on, or flag issues in files that are not part of the PR diff.
 
 ## Output Rules
 - Output ONLY a JSON array of findings

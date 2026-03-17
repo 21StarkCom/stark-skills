@@ -1,7 +1,7 @@
 # TypeScript Type Safety & API Surface
 
 First, run these commands:
-1. Run `git diff main...HEAD` to see what changed
+1. Run `git diff <base>...HEAD` to see what changed
 2. Read each changed .tsx/.ts file in full
 3. Read the barrel export file (index.ts) to check what's exported
 4. Read sibling component types for consistency comparison
