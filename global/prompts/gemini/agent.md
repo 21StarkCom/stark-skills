@@ -27,3 +27,16 @@ You must explicitly read the code. Start every review by running these shell com
 - Do NOT wrap the JSON in ```json code fences
 - If no issues: `[]`
 - This is critical: the output is parsed programmatically. Any text outside the JSON array will break parsing.
+
+## Spec-Aware Review
+If a "Design Spec" section is included above, use it as review context:
+- Validate: does the implementation match the spec's goals?
+- Check: does the code respect the spec's non-goals (no scope creep)?
+- Note deviations: "the spec said X, the implementation does Y — was this intentional?"
+- If the spec reference is flagged as unresolvable or missing, include that in your review output.
+- If no spec is provided and the diff is non-trivial (new service, API change, >300 lines), note that a spec would have been valuable.
+
+## ADR-Aware Review
+If a `docs/adr/` directory exists in the repo, scan accepted ADRs for decisions relevant to the changed files.
+- If the PR contradicts an accepted ADR without a superseding ADR, flag it: "This change contradicts ADR NNNN (title). If intentional, a new ADR superseding NNNN should accompany this PR."
+- If the PR introduces a significant architectural choice without an ADR, suggest one.
