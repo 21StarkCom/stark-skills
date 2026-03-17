@@ -173,6 +173,37 @@ def _discover_domains() -> dict[str, dict[str, Any]]:
 
 DOMAINS = _discover_domains()
 
+
+
+# ── Spec extraction ───────────────────────────────────────────────────
+
+
+def extract_spec_link(pr_body: str | None) -> str | None:
+    """Extract spec link from PR description. Returns path/URL, 'N/A', or None."""
+    if not pr_body:
+        return None
+    match = re.search(r'##\s*Spec:\s*(.+)', pr_body)
+    if not match:
+        return None
+    value = match.group(1).strip()
+    if not value or value.startswith('<!--'):
+        return None
+    return value
+
+
+def resolve_spec_content(spec_link: str, cwd: str) -> str | None:
+    """Read spec file content. Returns content string or None if unresolvable."""
+    if spec_link == "N/A":
+        return None
+    if spec_link.startswith("http"):
+        return None
+    spec_path = os.path.join(cwd, spec_link)
+    if os.path.isfile(spec_path):
+        with open(spec_path, 'r') as f:
+            return f.read()
+    return None
+
+
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 SEVERITY_ICONS = {
     "critical": "\U0001f534",
@@ -465,12 +496,20 @@ def _run_subagent(
     domain_key: str,
     base: str,
     cwd: str | None = None,
+    spec_context: str | None = None,
 ) -> SubAgentResult:
     """Run a single sub-agent: one CLI tool × one domain."""
     t0 = time.time()
     preamble = _load_agent_preamble(agent, cwd=cwd)
     domain_prompt = _load_domain_prompt(agent, domain_key, cwd=cwd)
-    full_prompt = f"{preamble}\n\n{domain_prompt}" if preamble else domain_prompt
+    if preamble and spec_context:
+        full_prompt = f"{preamble}\n\n{spec_context}\n\n{domain_prompt}"
+    elif preamble:
+        full_prompt = f"{preamble}\n\n{domain_prompt}"
+    elif spec_context:
+        full_prompt = f"{spec_context}\n\n{domain_prompt}"
+    else:
+        full_prompt = domain_prompt
 
     if agent == "claude":
         prompt = (
@@ -556,6 +595,7 @@ def run_review_round(
     domains: list[str] | None = None,
     cwd: str | None = None,
     out: Any = None,
+    spec_context: str | None = None,
 ) -> ReviewRound:
     """Run one round of parallel reviews: agents × domains."""
     if out is None:
@@ -583,7 +623,7 @@ def run_review_round(
             agent_cfg = AGENTS[agent]
             for domain_key in domains:
                 domain_cfg = DOMAINS[domain_key]
-                future = pool.submit(_run_subagent, agent, domain_key, base, cwd)
+                future = pool.submit(_run_subagent, agent, domain_key, base, cwd, spec_context)
                 futures[future] = (agent, domain_key)
                 print(
                     f"  [{agent_cfg['emoji']}] {agent} × {domain_cfg['label']}...",
@@ -755,13 +795,42 @@ def review_pr(
         print("  [!] Expected files like 01-architecture.md", file=sys.stderr)
         sys.exit(1)
 
+    # Fetch PR body and extract spec context
+    pr_body = None
+    try:
+        token = _get_gh_token("stark-claude")
+        env = {**os.environ, "GH_TOKEN": token}
+        pr_meta = subprocess.run(
+            ["gh", "api", f"repos/{repo}/pulls/{pr_number}", "--jq", ".body"],
+            capture_output=True, text=True, env=env, timeout=30,
+        )
+        if pr_meta.returncode == 0:
+            pr_body = pr_meta.stdout.strip() or None
+    except Exception as e:
+        print(f"  [!] Could not fetch PR body: {e}", file=sys.stderr)
+
+    spec_link = extract_spec_link(pr_body)
+    effective_cwd = cwd or os.getcwd()
+    spec_content = resolve_spec_content(spec_link, effective_cwd) if spec_link else None
+
+    if spec_content:
+        spec_context = f"## Design Spec\nThe PR references this spec:\n\n{spec_content}"
+    elif spec_link and spec_link != "N/A":
+        spec_context = f"## Design Spec\nThe PR references a spec at `{spec_link}` but it could not be resolved. Flag this in your review."
+    elif spec_link is None:
+        spec_context = "## Design Spec\nNo spec field found in PR description. RED FLAG: The PR template was not followed. Open your review by flagging this process issue."
+    else:
+        # N/A
+        spec_context = None
+
     rounds: list[ReviewRound] = []
     round_num = 0
 
     while True:
         round_num += 1
         rnd = run_review_round(
-            base, round_num, agents=active_agents, domains=active_domains, cwd=cwd, out=out
+            base, round_num, agents=active_agents, domains=active_domains, cwd=cwd, out=out,
+            spec_context=spec_context,
         )
         rounds.append(rnd)
 
