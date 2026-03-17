@@ -1,0 +1,17 @@
+site_name: "__REPO_NAME__ Docs"
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.expand
+    - search.suggest
+plugins:
+  - search
+nav:
+  - Start Here: index.md
+  - Specs: specs/
+  - Plans: plans/
+  - ADRs: adr/
+  - Guides: guides/
+  - Reference: reference/
+  - Architecture: architecture/
