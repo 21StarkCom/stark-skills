@@ -110,12 +110,19 @@ install() {
         warn "Evinced dir not found at $EVINCED_DIR — skipping org config"
     fi
 
-    # 4. Skill: ~/.claude/skills/stark-review/SKILL.md → repo/skill/SKILL.md
+    # 4. Skills: ~/.claude/skills/{name}/SKILL.md → repo/skill/{name}/SKILL.md
     mkdir -p "$HOME/.claude/skills/stark-review"
     if [ -f "$REPO_DIR/skill/SKILL.md" ]; then
-        link_dir "$REPO_DIR/skill/SKILL.md" "$HOME/.claude/skills/stark-review/SKILL.md" "Skill"
+        link_dir "$REPO_DIR/skill/SKILL.md" "$HOME/.claude/skills/stark-review/SKILL.md" "Skill: stark-review"
     else
         warn "Skill file not found at $REPO_DIR/skill/SKILL.md"
+    fi
+
+    mkdir -p "$HOME/.claude/skills/start-review-improvement"
+    if [ -f "$REPO_DIR/skill/start-review-improvement/SKILL.md" ]; then
+        link_dir "$REPO_DIR/skill/start-review-improvement/SKILL.md" "$HOME/.claude/skills/start-review-improvement/SKILL.md" "Skill: start-review-improvement"
+    else
+        warn "Skill file not found at $REPO_DIR/skill/start-review-improvement/SKILL.md"
     fi
 
     echo ""
@@ -171,7 +178,8 @@ uninstall() {
     unlink_dir "$CODE_REVIEW_DIR/prompts" "Prompts"
     unlink_dir "$CODE_REVIEW_DIR/scripts" "Scripts"
     unlink_dir "$EVINCED_DIR/.code-review" "Evinced org config"
-    unlink_dir "$HOME/.claude/skills/stark-review/SKILL.md" "Skill"
+    unlink_dir "$HOME/.claude/skills/stark-review/SKILL.md" "Skill: stark-review"
+    unlink_dir "$HOME/.claude/skills/start-review-improvement/SKILL.md" "Skill: start-review-improvement"
 
     echo ""
     echo "Note: $CODE_REVIEW_DIR/history/ was not removed (contains local data)"
@@ -188,7 +196,8 @@ status() {
     check_dir "$CODE_REVIEW_DIR/prompts" "Prompts"
     check_dir "$CODE_REVIEW_DIR/scripts" "Scripts"
     check_dir "$EVINCED_DIR/.code-review" "Evinced org config"
-    check_dir "$HOME/.claude/skills/stark-review/SKILL.md" "Skill"
+    check_dir "$HOME/.claude/skills/stark-review/SKILL.md" "Skill: stark-review"
+    check_dir "$HOME/.claude/skills/start-review-improvement/SKILL.md" "Skill: start-review-improvement"
 
     echo ""
     if [ -d "$CODE_REVIEW_DIR/history" ]; then
