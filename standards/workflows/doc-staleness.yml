@@ -1,0 +1,80 @@
+name: Doc Staleness Check
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  check-staleness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for stale docs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const { execSync } = require('child_process');
+
+            // Load config
+            let config = { threshold_days: 90, exclude_paths: ['docs/adr/', 'docs/specs/', 'docs/plans/'] };
+            try {
+              const configFile = fs.readFileSync('.doc-staleness.yml', 'utf8');
+              const lines = configFile.split('\n');
+              for (const line of lines) {
+                const match = line.match(/^threshold_days:\s*(\d+)/);
+                if (match) config.threshold_days = parseInt(match[1]);
+              }
+              const excludes = [];
+              let inExcludes = false;
+              for (const line of lines) {
+                if (line.match(/^exclude_paths:/)) { inExcludes = true; continue; }
+                if (inExcludes && line.match(/^\s+-\s+(.+)/)) {
+                  excludes.push(line.match(/^\s+-\s+(.+)/)[1].trim());
+                } else if (inExcludes && !line.match(/^\s/)) {
+                  inExcludes = false;
+                }
+              }
+              if (excludes.length) config.exclude_paths = excludes;
+            } catch (e) { /* use defaults */ }
+
+            const threshold = Date.now() - (config.threshold_days * 24 * 60 * 60 * 1000);
+            const stale = [];
+
+            function walkDir(dir) {
+              if (!fs.existsSync(dir)) return [];
+              const files = [];
+              for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                const full = path.join(dir, entry.name);
+                if (entry.isDirectory()) files.push(...walkDir(full));
+                else if (entry.name.endsWith('.md')) files.push(full);
+              }
+              return files;
+            }
+
+            const docs = walkDir('docs');
+            for (const file of docs) {
+              if (config.exclude_paths.some(ex => file.startsWith(ex))) continue;
+              try {
+                const ts = execSync(`git log -1 --format=%ct -- "${file}"`, { encoding: 'utf8' }).trim();
+                if (!ts) continue;
+                const lastModified = parseInt(ts) * 1000;
+                if (lastModified < threshold) {
+                  const date = new Date(lastModified).toISOString().split('T')[0];
+                  stale.push(`- \`${file}\` (last updated ${date})`);
+                }
+              } catch (e) { /* skip */ }
+            }
+
+            if (stale.length > 0) {
+              const body = `**Stale docs detected** (not updated in ${config.threshold_days}+ days):\n\n${stale.join('\n')}\n\nThese may be outdated. Consider reviewing them if your changes affect related areas.`;
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
