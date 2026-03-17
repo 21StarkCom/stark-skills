@@ -1,0 +1,5 @@
+threshold_days: 90
+exclude_paths:
+  - docs/adr/
+  - docs/specs/
+  - docs/plans/
