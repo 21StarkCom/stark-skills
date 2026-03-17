@@ -38,6 +38,29 @@ FINDINGS_FORMAT = (
 
 DEFAULT_TIMEOUT = 300
 
+
+
+@dataclass
+class PlanFinding:
+    agent: str
+    domain: str
+    severity: str
+    section: str
+    title: str
+    description: str
+    suggestion: str
+
+
+@dataclass
+class PlanSubAgentResult:
+    agent: str
+    domain: str
+    raw_output: str = ""
+    findings: list[PlanFinding] = field(default_factory=list)
+    error: str | None = None
+    duration_s: float = 0.0
+
+
 DEFAULT_PLAN_REVIEW_CONFIG = {
     "agents": ["claude", "codex", "gemini"],
     "fix_threshold": "medium",
@@ -153,3 +176,116 @@ def _load_plan_review_config(
                 pass
 
     return config
+
+
+# ── Sub-agent dispatch ────────────────────────────────────────────────
+
+
+def _parse_plan_findings(
+    agent: str, domain: str, raw: str,
+) -> list[PlanFinding]:
+    """Parse JSON array of findings from raw agent output.
+
+    Strips markdown fences and locates the outermost JSON array brackets.
+    Returns [] on any parse failure.
+    """
+    text = raw.strip()
+    # Strip markdown code fences
+    if text.startswith("```"):
+        lines = text.splitlines()
+        # Remove first and last fence lines
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    # Find outermost [ ... ]
+    start = text.find("[")
+    end = text.rfind("]")
+    if start == -1 or end == -1 or end <= start:
+        return []
+
+    try:
+        items = json.loads(text[start : end + 1])
+    except (json.JSONDecodeError, ValueError):
+        return []
+
+    if not isinstance(items, list):
+        return []
+
+    findings = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        findings.append(
+            PlanFinding(
+                agent=agent,
+                domain=domain,
+                severity=item.get("severity", "medium"),
+                section=item.get("section", ""),
+                title=item.get("title", ""),
+                description=item.get("description", ""),
+                suggestion=item.get("suggestion", ""),
+            )
+        )
+    return findings
+
+
+def _run_plan_subagent(
+    agent: str,
+    domain_key: str,
+    plan_content: str,
+    prompt_text: str = "",
+    timeout: int = DEFAULT_TIMEOUT,
+) -> PlanSubAgentResult:
+    """Run a single sub-agent CLI and return parsed results.
+
+    Builds the appropriate CLI command per agent, captures output,
+    parses findings JSON, and handles timeouts / missing agents.
+    """
+    full_prompt = f"{prompt_text}\n\n{plan_content}".strip() if prompt_text else plan_content
+    result = PlanSubAgentResult(agent=agent, domain=domain_key)
+
+    # Build CLI command per agent
+    if agent == "claude":
+        cmd = [
+            "claude", "-p", full_prompt,
+            "--output-format", "text",
+            "--model", "claude-opus-4-6",
+            "--max-tokens", "16384",
+        ]
+    elif agent == "codex":
+        cmd = ["codex", "--effort", "xhigh", "-p", full_prompt]
+    elif agent == "gemini":
+        cmd = ["gemini", "--model", "gemini-2.5-pro", "-p", full_prompt]
+    else:
+        result.error = "unknown_agent"
+        return result
+
+    t0 = time.monotonic()
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        result.raw_output = proc.stdout or ""
+    except subprocess.TimeoutExpired:
+        result.duration_s = time.monotonic() - t0
+        result.error = "timeout"
+        return result
+    except FileNotFoundError:
+        result.duration_s = time.monotonic() - t0
+        result.error = "agent_unavailable"
+        return result
+
+    result.duration_s = time.monotonic() - t0
+    result.findings = _parse_plan_findings(agent, domain_key, result.raw_output)
+
+    # If we got non-trivial output but couldn't parse findings, flag it
+    if not result.findings and result.raw_output.strip() and result.raw_output.strip() != "[]":
+        result.error = "parse_error"
+
+    return result

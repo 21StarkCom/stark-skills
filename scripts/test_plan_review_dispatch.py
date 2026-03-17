@@ -1,6 +1,8 @@
 """Tests for plan_review_dispatch.py — prompt resolution and config loading."""
 
 import json
+import subprocess
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -133,3 +135,70 @@ class TestLoadPlanReviewConfig:
         )
         assert cfg["max_rounds"] == 5
         assert cfg["agents"] == ["claude", "codex", "gemini"]  # default preserved
+
+
+class TestSubAgentDispatch:
+    """Sub-agent dispatch builds correct CLI commands and handles errors."""
+
+    @patch("plan_review_dispatch.subprocess.run")
+    def test_claude_dispatch(self, mock_run):
+        mock_run.return_value = MagicMock(
+            stdout='[{"severity":"medium","section":"Auth","title":"test","description":"d","suggestion":"s"}]',
+            returncode=0,
+        )
+        result = plan_review_dispatch._run_plan_subagent(
+            "claude", "feasibility", "Test plan content", timeout=300,
+        )
+        cmd = mock_run.call_args[0][0]
+        assert cmd[0] == "claude"
+        assert "--model" in cmd
+        assert "claude-opus-4-6" in cmd
+        assert len(result.findings) == 1
+        assert result.error is None
+
+    @patch("plan_review_dispatch.subprocess.run")
+    def test_codex_dispatch(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="[]", returncode=0)
+        result = plan_review_dispatch._run_plan_subagent(
+            "codex", "general", "Test plan", timeout=300,
+        )
+        cmd = mock_run.call_args[0][0]
+        assert cmd[0] == "codex"
+        assert "--effort" in cmd
+
+    @patch("plan_review_dispatch.subprocess.run")
+    def test_gemini_dispatch(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="[]", returncode=0)
+        result = plan_review_dispatch._run_plan_subagent(
+            "gemini", "security", "Test plan", timeout=300,
+        )
+        cmd = mock_run.call_args[0][0]
+        assert cmd[0] == "gemini"
+        assert "--model" in cmd
+        assert "gemini-2.5-pro" in cmd
+
+    @patch("plan_review_dispatch.subprocess.run")
+    def test_timeout_recorded(self, mock_run):
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd=["claude"], timeout=300)
+        result = plan_review_dispatch._run_plan_subagent(
+            "claude", "feasibility", "Test plan", timeout=300,
+        )
+        assert result.error == "timeout"
+        assert len(result.findings) == 0
+
+    @patch("plan_review_dispatch.subprocess.run")
+    def test_malformed_json_recorded(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="This is not JSON at all", returncode=0)
+        result = plan_review_dispatch._run_plan_subagent(
+            "claude", "general", "Test plan", timeout=300,
+        )
+        assert result.error == "parse_error"
+        assert len(result.findings) == 0
+
+    @patch("plan_review_dispatch.subprocess.run")
+    def test_agent_unavailable(self, mock_run):
+        mock_run.side_effect = FileNotFoundError("codex not found")
+        result = plan_review_dispatch._run_plan_subagent(
+            "codex", "general", "Test plan", timeout=300,
+        )
+        assert result.error == "agent_unavailable"
