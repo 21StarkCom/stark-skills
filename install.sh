@@ -125,6 +125,13 @@ install() {
         warn "Skill file not found at $REPO_DIR/skill/start-review-improvement/SKILL.md"
     fi
 
+    mkdir -p "$HOME/.claude/skills/stark-review-plan"
+    if [ -f "$REPO_DIR/skill/stark-review-plan/SKILL.md" ]; then
+        link_dir "$REPO_DIR/skill/stark-review-plan/SKILL.md" "$HOME/.claude/skills/stark-review-plan/SKILL.md" "Skill: stark-review-plan"
+    else
+        warn "Skill file not found at $REPO_DIR/skill/stark-review-plan/SKILL.md"
+    fi
+
     echo ""
     echo "Installation complete. Verify with: ./install.sh --status"
     echo ""
@@ -180,6 +187,7 @@ uninstall() {
     unlink_dir "$EVINCED_DIR/.code-review" "Evinced org config"
     unlink_dir "$HOME/.claude/skills/stark-review/SKILL.md" "Skill: stark-review"
     unlink_dir "$HOME/.claude/skills/start-review-improvement/SKILL.md" "Skill: start-review-improvement"
+    unlink_dir "$HOME/.claude/skills/stark-review-plan/SKILL.md" "Skill: stark-review-plan"
 
     echo ""
     echo "Note: $CODE_REVIEW_DIR/history/ was not removed (contains local data)"
@@ -198,6 +206,7 @@ status() {
     check_dir "$EVINCED_DIR/.code-review" "Evinced org config"
     check_dir "$HOME/.claude/skills/stark-review/SKILL.md" "Skill: stark-review"
     check_dir "$HOME/.claude/skills/start-review-improvement/SKILL.md" "Skill: start-review-improvement"
+    check_dir "$HOME/.claude/skills/stark-review-plan/SKILL.md" "Skill: stark-review-plan"
 
     echo ""
     if [ -d "$CODE_REVIEW_DIR/history" ]; then
