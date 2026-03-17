@@ -202,3 +202,62 @@ class TestSubAgentDispatch:
             "codex", "general", "Test plan", timeout=300,
         )
         assert result.error == "agent_unavailable"
+
+
+class TestParallelDispatch:
+    """Parallel dispatch orchestrates agents × domains via ThreadPoolExecutor."""
+
+    @patch("plan_review_dispatch._run_plan_subagent")
+    def test_dispatches_all_agent_domain_combinations(self, mock_sub, tmp_path):
+        from plan_review_dispatch import PlanSubAgentResult, dispatch_plan_review
+        for agent in ["claude", "codex", "gemini"]:
+            d = tmp_path / "prompts" / agent
+            d.mkdir(parents=True)
+            (d / "agent.md").write_text(f"{agent} preamble")
+            (d / "00-general.md").write_text("General prompt")
+            (d / "01-feasibility.md").write_text("Feasibility prompt")
+        mock_sub.return_value = PlanSubAgentResult(agent="claude", domain="general", raw_output="[]")
+        result = dispatch_plan_review(
+            plan_content="Test plan", round_num=1,
+            global_prompts_dir=str(tmp_path / "prompts"),
+        )
+        assert mock_sub.call_count == 6  # 3 agents × 2 domains
+        assert result["round"] == 1
+
+    @patch("plan_review_dispatch._run_plan_subagent")
+    def test_partial_failure_still_returns(self, mock_sub, tmp_path):
+        from plan_review_dispatch import PlanSubAgentResult, dispatch_plan_review
+        for agent in ["claude", "codex", "gemini"]:
+            d = tmp_path / "prompts" / agent
+            d.mkdir(parents=True)
+            (d / "agent.md").write_text(f"{agent} preamble")
+            (d / "00-general.md").write_text("General prompt")
+        def side_effect(agent, domain_key, plan_content, prompt_text="", timeout=300):
+            if agent == "codex":
+                return PlanSubAgentResult(agent=agent, domain=domain_key, error="timeout")
+            return PlanSubAgentResult(agent=agent, domain=domain_key, raw_output="[]")
+        mock_sub.side_effect = side_effect
+        result = dispatch_plan_review(
+            plan_content="Test plan", round_num=1,
+            global_prompts_dir=str(tmp_path / "prompts"),
+        )
+        errors = [r for r in result["results"] if r.get("error")]
+        assert len(errors) == 1
+
+    @patch("plan_review_dispatch._run_plan_subagent")
+    def test_low_coverage_warning(self, mock_sub, tmp_path, capsys):
+        """Warn when <50% of sub-agents succeed."""
+        from plan_review_dispatch import PlanSubAgentResult, dispatch_plan_review
+        for agent in ["claude", "codex", "gemini"]:
+            d = tmp_path / "prompts" / agent
+            d.mkdir(parents=True)
+            (d / "agent.md").write_text(f"{agent} preamble")
+            (d / "00-general.md").write_text("General prompt")
+        # All fail
+        mock_sub.return_value = PlanSubAgentResult(agent="claude", domain="general", error="timeout")
+        result = dispatch_plan_review(
+            plan_content="Test plan", round_num=1,
+            global_prompts_dir=str(tmp_path / "prompts"),
+        )
+        captured = capsys.readouterr()
+        assert "Low coverage" in captured.err

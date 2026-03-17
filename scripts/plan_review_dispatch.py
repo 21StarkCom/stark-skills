@@ -10,6 +10,7 @@ with repo-level overrides from .code-review/plan-prompts/{agent}/.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import subprocess
@@ -289,3 +290,170 @@ def _run_plan_subagent(
         result.error = "parse_error"
 
     return result
+
+
+# ── Parallel dispatch ─────────────────────────────────────────────────
+
+MAX_WORKERS = 21
+
+
+def dispatch_plan_review(
+    plan_content: str,
+    round_num: int,
+    repo_dir: str | None = None,
+    global_prompts_dir: str | None = None,
+    agents: list[str] | None = None,
+    disabled_domains: list[str] | None = None,
+    timeout: int = DEFAULT_TIMEOUT,
+) -> dict[str, Any]:
+    """Dispatch plan review across agents × domains in parallel.
+
+    Returns structured dict with round, agents, domains, results, and summary.
+    """
+    if global_prompts_dir is None:
+        global_prompts_dir = str(GLOBAL_PROMPTS_DIR)
+    if agents is None:
+        agents = list(AGENTS)
+    if disabled_domains is None:
+        disabled_domains = []
+
+    # Discover and filter domains
+    domains = _discover_plan_domains(global_prompts_dir=global_prompts_dir)
+    for dd in disabled_domains:
+        domains.pop(dd, None)
+
+    domain_keys = sorted(domains.keys(), key=lambda k: domains[k].get("order", "99"))
+
+    # Build work items: (agent, domain_key, prompt_text)
+    work_items = []
+    for agent in agents:
+        for dk in domain_keys:
+            preamble = resolve_plan_prompt(
+                agent, "agent.md",
+                repo_dir=repo_dir, global_prompts_dir=global_prompts_dir,
+            )
+            domain_prompt = resolve_plan_prompt(
+                agent, domains[dk]["filename"],
+                repo_dir=repo_dir, global_prompts_dir=global_prompts_dir,
+            )
+            prompt_text = f"{preamble}\n\n{domain_prompt}\n\n{FINDINGS_FORMAT}".strip()
+            work_items.append((agent, dk, prompt_text))
+
+    # Dispatch in parallel
+    results: list[PlanSubAgentResult] = []
+    total = len(work_items)
+    completed = 0
+
+    with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, total or 1)) as pool:
+        futures = {
+            pool.submit(
+                _run_plan_subagent,
+                agent=agent,
+                domain_key=dk,
+                plan_content=plan_content,
+                prompt_text=prompt_text,
+                timeout=timeout,
+            ): (agent, dk)
+            for agent, dk, prompt_text in work_items
+        }
+
+        for future in as_completed(futures):
+            agent, dk = futures[future]
+            completed += 1
+            try:
+                sub_result = future.result()
+            except Exception as exc:
+                sub_result = PlanSubAgentResult(
+                    agent=agent, domain=dk, error=str(exc),
+                )
+            results.append(sub_result)
+            print(
+                f"  [{completed}/{total}] {agent}:{dk} "
+                f"({'OK' if not sub_result.error else sub_result.error})",
+                file=sys.stderr,
+            )
+
+    # Check coverage
+    valid_count = sum(1 for r in results if not r.error)
+    if total > 0 and valid_count / total < 0.5:
+        print(
+            f"  Low coverage warning: only {valid_count}/{total} sub-agents succeeded.",
+            file=sys.stderr,
+        )
+
+    # Build summary
+    severity_counts: dict[str, int] = {}
+    all_findings: list[dict[str, Any]] = []
+    for r in results:
+        for f in r.findings:
+            severity_counts[f.severity] = severity_counts.get(f.severity, 0) + 1
+            all_findings.append(asdict(f))
+
+    # Serialize results
+    serialized_results = []
+    for r in results:
+        entry: dict[str, Any] = {
+            "agent": r.agent,
+            "domain": r.domain,
+            "duration_s": r.duration_s,
+            "findings_count": len(r.findings),
+        }
+        if r.error:
+            entry["error"] = r.error
+        if r.findings:
+            entry["findings"] = [asdict(f) for f in r.findings]
+        serialized_results.append(entry)
+
+    return {
+        "round": round_num,
+        "agents": agents,
+        "domains": domain_keys,
+        "results": serialized_results,
+        "findings": all_findings,
+        "summary": {
+            "total_sub_agents": total,
+            "succeeded": valid_count,
+            "failed": total - valid_count,
+            "total_findings": len(all_findings),
+            "by_severity": severity_counts,
+        },
+    }
+
+
+# ── CLI ───────────────────────────────────────────────────────────────
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Plan review dispatch")
+    parser.add_argument("--file", required=True, help="Path to plan/spec file")
+    parser.add_argument("--round", type=int, default=1, help="Review round number")
+    parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="Per-agent timeout (s)")
+    parser.add_argument("--repo-dir", help="Repository root for config/prompt overrides")
+    parser.add_argument("--agents", help="Comma-separated list of agents")
+    parser.add_argument("--disabled-domains", help="Comma-separated domains to skip")
+    args = parser.parse_args()
+
+    # Load config, merge with CLI overrides
+    config = _load_plan_review_config(args.repo_dir)
+    agents = args.agents.split(",") if args.agents else config.get("agents")
+    disabled = (
+        args.disabled_domains.split(",")
+        if args.disabled_domains
+        else config.get("disabled_domains")
+    )
+    timeout = args.timeout if args.timeout != DEFAULT_TIMEOUT else config.get("timeout", DEFAULT_TIMEOUT)
+
+    plan_content = Path(args.file).read_text()
+    result = dispatch_plan_review(
+        plan_content=plan_content,
+        round_num=args.round,
+        repo_dir=args.repo_dir,
+        agents=agents,
+        disabled_domains=disabled,
+        timeout=timeout,
+    )
+    print(json.dumps(result, indent=2))
+
+
+if __name__ == "__main__":
+    main()
