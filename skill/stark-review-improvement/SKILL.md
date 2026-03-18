@@ -1,15 +1,15 @@
 ---
-name: start-review-improvement
+name: stark-review-improvement
 description: >
   Improve stark-review prompts based on the Prompt Improvement Assessment from a
   completed /stark-review run. Reads the assessment from conversation context (or
   history files), edits the relevant prompt files in ~/git/Evinced/stark-review/,
   patches multi_review.py if needed, and logs the learning. Use when the user says
   "improve review prompts", "start review improvement", "fix review prompts", or
-  invokes /start-review-improvement.
+  invokes /stark-review-improvement.
 ---
 
-# start-review-improvement
+# stark-review-improvement
 
 Closes the feedback loop on stark-review: reads the prompt improvement assessment from the current conversation, makes targeted edits to the prompt and orchestrator files, and commits a changelog entry.
 

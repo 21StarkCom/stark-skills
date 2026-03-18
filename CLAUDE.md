@@ -33,7 +33,7 @@ Multi-agent PR code review system. 3 AI CLI tools (Claude, Codex, Gemini) × N d
 ## Skills
 
 - `/stark-review [PR_NUMBER]` — multi-agent PR review (3 LLMs × 6 domains). Full mode with fix loop requires `test_command` in config. Otherwise review-only.
-- `/start-review-improvement` — improve prompts based on a completed stark-review's Prompt Improvement Assessment. Reads assessment from conversation context or history, edits prompt/orchestrator/config files, validates, logs to `docs/prompt-changelog.md`, and commits.
+- `/stark-review-improvement` — improve prompts based on a completed stark-review's Prompt Improvement Assessment. Reads assessment from conversation context or history, edits prompt/orchestrator/config files, validates, logs to `docs/prompt-changelog.md`, and commits.
 - `/stark-review-plan <path>` — multi-agent plan/spec review (3 LLMs × 7 domains). Review-fix loop with auto-fixes, then final review-only round. Outputs `.review.md` sibling file.
 - `/init-docs [--template|--backfill|--upgrade|--clean]` — scaffold dev docs structure into any repo
 
