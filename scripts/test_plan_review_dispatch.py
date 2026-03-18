@@ -182,16 +182,24 @@ class TestSubAgentDispatch:
 
     @patch("plan_review_dispatch.subprocess.run")
     def test_gemini_dispatch(self, mock_run):
-        mock_run.return_value = MagicMock(stdout="[]", returncode=0)
+        mock_run.return_value = MagicMock(
+            stdout='{"response": "[]"}', returncode=0,
+        )
         result = plan_review_dispatch._run_plan_subagent(
-            "gemini", "security", "Test plan", timeout=300,
+            "gemini", "security", "Test plan", prompt_text="Review prompt", timeout=300,
         )
         cmd = mock_run.call_args[0][0]
         assert cmd[0] == "gemini"
         assert "--model" in cmd
         assert "gemini-2.5-pro" in cmd
-        # gemini keeps prompt in argv (stdin not verified)
-        assert "Test plan" in cmd[-1]
+        assert "-o" in cmd
+        assert "json" in cmd
+        # Gemini pipes plan content via stdin, prompt_text via -p
+        call_kwargs = mock_run.call_args[1]
+        assert "input" in call_kwargs
+        assert "Test plan" in call_kwargs["input"]
+        assert "env" in call_kwargs
+        assert "GEMINI_CLI_HOME" in call_kwargs["env"]
 
     @patch("plan_review_dispatch.subprocess.run")
     def test_timeout_recorded(self, mock_run):
@@ -292,10 +300,10 @@ class TestCLIFlagsSmoke:
         assert result.returncode == 0, f"codex exec rejected flags: {result.stderr}"
 
     @pytest.mark.skipif(not shutil.which("gemini"), reason="gemini CLI not installed")
-    def test_gemini_accepts_model_flag(self):
-        """gemini --model gemini-2.5-pro must not error."""
+    def test_gemini_accepts_flags(self):
+        """gemini --model gemini-2.5-pro -o json must not error."""
         result = subprocess.run(
-            ["gemini", "--model", "gemini-2.5-pro", "--help"],
+            ["gemini", "--model", "gemini-2.5-pro", "-o", "json", "--help"],
             capture_output=True, text=True, timeout=10,
         )
         assert result.returncode == 0, f"gemini rejected flags: {result.stderr}"

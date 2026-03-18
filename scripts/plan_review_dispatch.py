@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -252,6 +253,7 @@ def _run_plan_subagent(
 
     stdin_input = None
     codex_output_file = None
+    gemini_home = None
 
     # Build CLI command per agent
     if agent == "claude":
@@ -274,21 +276,32 @@ def _run_plan_subagent(
         ]
         stdin_input = full_prompt
     elif agent == "gemini":
-        # gemini CLI stdin support via '-' not verified; keeping prompt in argv
-        cmd = ["gemini", "--model", "gemini-2.5-pro", "-p", full_prompt]
+        # Gemini: -p is the instruction, stdin is context (piped plan content).
+        # -o json gives structured JSON output. GEMINI_CLI_HOME isolates sessions.
+        gemini_home = tempfile.mkdtemp(prefix="gemini-plan-review-")
+        cmd = [
+            "gemini", "--model", "gemini-2.5-pro",
+            "-p", prompt_text or "Review this plan document.",
+            "-o", "json",
+        ]
+        stdin_input = plan_content  # piped as context via stdin
     else:
         result.error = "unknown_agent"
         return result
 
-    def _cleanup_codex_output():
+    def _cleanup_temp():
         if codex_output_file and os.path.exists(codex_output_file):
             os.unlink(codex_output_file)
+        if gemini_home and os.path.isdir(gemini_home):
+            shutil.rmtree(gemini_home, ignore_errors=True)
 
     run_kwargs: dict[str, Any] = {
         "capture_output": True, "text": True, "timeout": timeout,
     }
     if stdin_input is not None:
         run_kwargs["input"] = stdin_input
+    if gemini_home:
+        run_kwargs["env"] = {**os.environ, "GEMINI_CLI_HOME": gemini_home}
 
     max_attempts = 2
     t0 = time.monotonic()
@@ -302,7 +315,7 @@ def _run_plan_subagent(
                     f"{proc.stderr[:500]}",
                     file=sys.stderr,
                 )
-                _cleanup_codex_output()
+                _cleanup_temp()
                 result.duration_s = time.monotonic() - t0
                 result.error = "cli_error"
                 return result
@@ -317,8 +330,18 @@ def _run_plan_subagent(
             else:
                 raw = proc.stdout or ""
 
+            # Gemini -o json wraps the response in {"response": "...",...}
+            if gemini_home and raw.strip():
+                try:
+                    envelope = json.loads(raw)
+                    raw = envelope.get("response", raw)
+                except (json.JSONDecodeError, AttributeError):
+                    pass  # fall through to parse raw stdout as-is
+                _cleanup_temp()
+
             if not raw.strip():
                 print(f"  [{agent}:{domain_key}] Empty output", file=sys.stderr)
+                _cleanup_temp()
                 result.duration_s = time.monotonic() - t0
                 result.error = "empty_output"
                 return result
@@ -332,12 +355,12 @@ def _run_plan_subagent(
                     file=sys.stderr,
                 )
                 continue
-            _cleanup_codex_output()
+            _cleanup_temp()
             result.duration_s = time.monotonic() - t0
             result.error = "timeout"
             return result
         except FileNotFoundError:
-            _cleanup_codex_output()
+            _cleanup_temp()
             result.duration_s = time.monotonic() - t0
             result.error = "agent_unavailable"
             return result

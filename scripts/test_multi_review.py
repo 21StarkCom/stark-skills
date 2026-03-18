@@ -110,11 +110,21 @@ class TestModelFlags:
 
     @patch("multi_review.subprocess.run")
     def test_gemini_uses_pro(self, mock_run):
-        mock_run.return_value = MagicMock(stdout="[]", returncode=0)
+        mock_run.return_value = MagicMock(
+            stdout='{"response": "[]"}', returncode=0,
+        )
         multi_review._run_subagent("gemini", "architecture", "abc123")
         cmd = mock_run.call_args[0][0]
         assert "--model" in cmd
         assert "gemini-2.5-pro" in cmd
+        assert "-o" in cmd
+        assert "json" in cmd
+        assert "--approval-mode" in cmd
+        assert "plan" in cmd
+        # Gemini uses GEMINI_CLI_HOME env var for isolation
+        call_kwargs = mock_run.call_args[1]
+        assert "env" in call_kwargs
+        assert "GEMINI_CLI_HOME" in call_kwargs["env"]
 
 
 class TestCLIFlagsSmoke:
@@ -135,10 +145,11 @@ class TestCLIFlagsSmoke:
         assert result.returncode == 0, f"codex exec review rejected flags: {result.stderr}"
 
     @pytest.mark.skipif(not shutil.which("gemini"), reason="gemini CLI not installed")
-    def test_gemini_accepts_model_flag(self):
-        """gemini --model gemini-2.5-pro must not error."""
+    def test_gemini_accepts_flags(self):
+        """gemini --model gemini-2.5-pro -o json --approval-mode plan must not error."""
         result = subprocess.run(
-            ["gemini", "--model", "gemini-2.5-pro", "--help"],
+            ["gemini", "--model", "gemini-2.5-pro", "-o", "json",
+             "--approval-mode", "plan", "--help"],
             capture_output=True, text=True, timeout=10,
         )
         assert result.returncode == 0, f"gemini rejected flags: {result.stderr}"

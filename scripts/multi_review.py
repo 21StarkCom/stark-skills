@@ -34,6 +34,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -516,6 +517,7 @@ def _run_subagent(
 
     stdin_input = None
     codex_output_file = None
+    gemini_home = None
 
     if agent == "claude":
         prompt = (
@@ -550,14 +552,24 @@ def _run_subagent(
         stdin_input = full_prompt
 
     elif agent == "gemini":
-        # gemini CLI stdin support via '-' not verified; keeping prompt in argv
+        # Gemini reads stdin as context; -p is the instruction appended to it.
+        # -o json gives structured JSON output (no spinners/status).
+        # --approval-mode plan = read-only sandbox (git diff, file reads OK).
+        # GEMINI_CLI_HOME tmpdir prevents session artifacts across parallel runs.
         prompt = (
             f"Run 'git diff {base}...HEAD' and read all changed files. "
             f"ONLY review files that appear in the diff. "
             f"Then review them according to these instructions:\n\n"
             f"{full_prompt}"
         )
-        cmd = ["gemini", "--model", "gemini-2.5-pro", "-p", prompt]
+        gemini_home = tempfile.mkdtemp(prefix="gemini-review-")
+        cmd = [
+            "gemini", "--model", "gemini-2.5-pro",
+            "-p", prompt,
+            "-o", "json",
+            "--approval-mode", "plan",
+        ]
+        stdin_input = None  # gemini uses -p for instruction, stdin for context (no diff context here)
 
     else:
         return SubAgentResult(
@@ -568,9 +580,11 @@ def _run_subagent(
             duration_s=0.0,
         )
 
-    def _cleanup_codex_output():
+    def _cleanup_temp():
         if codex_output_file and os.path.exists(codex_output_file):
             os.unlink(codex_output_file)
+        if gemini_home and os.path.isdir(gemini_home):
+            shutil.rmtree(gemini_home, ignore_errors=True)
 
     max_attempts = 2
     timeout_s = 600
@@ -580,6 +594,8 @@ def _run_subagent(
     }
     if stdin_input is not None:
         run_kwargs["input"] = stdin_input
+    if gemini_home:
+        run_kwargs["env"] = {**os.environ, "GEMINI_CLI_HOME": gemini_home}
 
     for attempt in range(1, max_attempts + 1):
         try:
@@ -591,7 +607,7 @@ def _run_subagent(
                     f"{result.stderr[:500]}",
                     file=sys.stderr,
                 )
-                _cleanup_codex_output()
+                _cleanup_temp()
                 return SubAgentResult(
                     agent=agent, domain=domain_key, raw_output="",
                     findings=[], error="cli_error",
@@ -608,8 +624,18 @@ def _run_subagent(
             else:
                 raw = result.stdout
 
+            # Gemini -o json wraps the response in {"response": "...",...}
+            if gemini_home and raw.strip():
+                try:
+                    envelope = json.loads(raw)
+                    raw = envelope.get("response", raw)
+                except (json.JSONDecodeError, AttributeError):
+                    pass  # fall through to parse raw stdout as-is
+                _cleanup_temp()
+
             if not raw.strip():
                 print(f"  [{agent}:{domain_key}] Empty output", file=sys.stderr)
+                _cleanup_temp()
                 return SubAgentResult(
                     agent=agent, domain=domain_key, raw_output="",
                     findings=[], error="empty_output",
@@ -631,7 +657,7 @@ def _run_subagent(
                     file=sys.stderr,
                 )
                 continue
-            _cleanup_codex_output()
+            _cleanup_temp()
             return SubAgentResult(
                 agent=agent,
                 domain=domain_key,
@@ -640,7 +666,7 @@ def _run_subagent(
                 duration_s=time.time() - t0,
             )
         except Exception as e:
-            _cleanup_codex_output()
+            _cleanup_temp()
             return SubAgentResult(
                 agent=agent,
                 domain=domain_key,
