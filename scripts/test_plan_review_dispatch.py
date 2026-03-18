@@ -1,6 +1,7 @@
 """Tests for plan_review_dispatch.py — prompt resolution and config loading."""
 
 import json
+import os
 import shutil
 import subprocess
 from unittest.mock import MagicMock, patch
@@ -200,6 +201,20 @@ class TestSubAgentDispatch:
         assert "Test plan" in call_kwargs["input"]
         assert "env" in call_kwargs
         assert "GEMINI_CLI_HOME" in call_kwargs["env"]
+
+    @patch("plan_review_dispatch.subprocess.run")
+    def test_gemini_temp_dir_seeded(self, mock_run):
+        """projects.json must exist before subprocess.run is called."""
+        def check_projects_json(cmd, **kwargs):
+            env = kwargs.get("env", {})
+            gemini_home = env.get("GEMINI_CLI_HOME", "")
+            pj = os.path.join(gemini_home, ".gemini", "projects.json")
+            assert os.path.isfile(pj), f"projects.json missing at call time: {pj}"
+            return MagicMock(stdout='{"response": "[]"}', returncode=0)
+        mock_run.side_effect = check_projects_json
+        plan_review_dispatch._run_plan_subagent(
+            "gemini", "security", "Test plan", prompt_text="Review", timeout=300,
+        )
 
     @patch("plan_review_dispatch.subprocess.run")
     def test_timeout_recorded(self, mock_run):

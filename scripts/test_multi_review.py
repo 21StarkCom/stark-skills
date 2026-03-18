@@ -1,6 +1,7 @@
 """Tests for multi_review.py CLI changes."""
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -126,6 +127,18 @@ class TestModelFlags:
         assert "env" in call_kwargs
         assert "GEMINI_CLI_HOME" in call_kwargs["env"]
 
+    @patch("multi_review.subprocess.run")
+    def test_gemini_temp_dir_seeded(self, mock_run):
+        """projects.json must exist before subprocess.run is called."""
+        def check_projects_json(cmd, **kwargs):
+            env = kwargs.get("env", {})
+            gemini_home = env.get("GEMINI_CLI_HOME", "")
+            pj = os.path.join(gemini_home, ".gemini", "projects.json")
+            assert os.path.isfile(pj), f"projects.json missing at call time: {pj}"
+            return MagicMock(stdout='{"response": "[]"}', returncode=0)
+        mock_run.side_effect = check_projects_json
+        multi_review._run_subagent("gemini", "architecture", "abc123")
+
 
 class TestCLIFlagsSmoke:
     """Smoke tests: verify each CLI actually accepts the flags we pass.
@@ -162,6 +175,37 @@ class TestCLIFlagsSmoke:
             capture_output=True, text=True, timeout=10,
         )
         assert result.returncode == 0, f"claude rejected flags: {result.stderr}"
+
+    @pytest.mark.skipif(not shutil.which("gemini"), reason="gemini CLI not installed")
+    def test_gemini_temp_dir_survives_startup(self):
+        """Gemini CLI must not crash on temp dir filesystem layout.
+
+        Uses GEMINI_API_KEY=invalid to force auth failure (exit 41) rather
+        than a filesystem error. If we get exit 41, the temp dir was fine.
+        Any other non-zero exit means the dir setup is broken.
+        """
+        import tempfile
+        cwd = os.getcwd()
+        gemini_home = tempfile.mkdtemp(prefix="gemini-test-")
+        gemini_dir = os.path.join(gemini_home, ".gemini")
+        os.makedirs(gemini_dir, exist_ok=True)
+        # Gemini's ProjectRegistry needs the cwd registered in projects.json
+        import json as _json
+        projects = {"projects": {cwd: "test"}}
+        with open(os.path.join(gemini_dir, "projects.json"), "w") as f:
+            _json.dump(projects, f)
+        env = {**os.environ, "GEMINI_CLI_HOME": gemini_home, "GEMINI_API_KEY": "invalid"}
+        result = subprocess.run(
+            ["gemini", "--model", "gemini-2.5-pro", "-p", "test", "-o", "json"],
+            capture_output=True, text=True, timeout=30, env=env,
+        )
+        shutil.rmtree(gemini_home, ignore_errors=True)
+        # Auth-related exit codes (expected with invalid key):
+        # 41 = fatal auth error, 144 = API call failed (invalid key rejected by server)
+        # Any other non-zero = filesystem or flag issue (the bug we're testing for).
+        assert result.returncode in (0, 41, 144), (
+            f"Gemini failed with unexpected exit {result.returncode}: {result.stderr[:500]}"
+        )
 
 
 class TestCLIEndToEnd:

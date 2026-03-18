@@ -280,9 +280,9 @@ def _run_plan_subagent(
         gemini_home = tempfile.mkdtemp(prefix="gemini-plan-review-")
         gemini_dir = os.path.join(gemini_home, ".gemini")
         os.makedirs(gemini_dir, exist_ok=True)
-        # Gemini CLI expects projects.json to exist for atomic rename
+        # Gemini CLI ProjectRegistry needs cwd registered (value = short slug string)
         with open(os.path.join(gemini_dir, "projects.json"), "w") as f:
-            f.write("{}")
+            json.dump({"projects": {os.getcwd(): "review"}}, f)
         cmd = [
             "gemini", "--model", "gemini-2.5-pro",
             "-p", prompt_text or "Review this plan document.",
