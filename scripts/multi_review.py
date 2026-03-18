@@ -584,14 +584,20 @@ def _run_subagent(
                 error=f"Timed out after {timeout_s}s (2 attempts)",
                 duration_s=time.time() - t0,
             )
-    except Exception as e:
-        return SubAgentResult(
-            agent=agent,
-            domain=domain_key,
-            raw_output="",
-            error=str(e),
-            duration_s=time.time() - t0,
-        )
+        except Exception as e:
+            return SubAgentResult(
+                agent=agent,
+                domain=domain_key,
+                raw_output="",
+                error=str(e),
+                duration_s=time.time() - t0,
+            )
+
+    # Unreachable, but satisfies type checker
+    return SubAgentResult(
+        agent=agent, domain=domain_key, raw_output="",
+        error="unexpected loop exit", duration_s=time.time() - t0,
+    )
 
 
 # ── Orchestration ──────────────────────────────────────────────────────
