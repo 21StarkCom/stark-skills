@@ -139,6 +139,21 @@ install() {
         warn "Skill file not found at $REPO_DIR/skill/init-docs/SKILL.md"
     fi
 
+    mkdir -p "$HOME/.claude/skills/stark-session"
+    if [ -f "$REPO_DIR/skill/stark-session/SKILL.md" ]; then
+        link_dir "$REPO_DIR/skill/stark-session/SKILL.md" "$HOME/.claude/skills/stark-session/SKILL.md" "Skill: stark-session"
+    else
+        warn "Skill file not found at $REPO_DIR/skill/stark-session/SKILL.md"
+    fi
+
+    # Backup old session-start if it exists (not a symlink — it was a standalone file)
+    if [ -f "$HOME/.claude/skills/session-start/SKILL.md" ] && [ ! -L "$HOME/.claude/skills/session-start/SKILL.md" ]; then
+        mv "$HOME/.claude/skills/session-start/SKILL.md" "$HOME/.claude/skills/session-start/SKILL.md.bak"
+        info "Old session-start: backed up to SKILL.md.bak"
+    elif [ -f "$HOME/.claude/skills/session-start/SKILL.md" ]; then
+        info "Old session-start: exists (symlink, not backing up)"
+    fi
+
     # 5. Standards: ~/.claude/code-review/standards/ → repo/standards/
     link_dir "$REPO_DIR/standards" "$CODE_REVIEW_DIR/standards" "Standards templates"
 
@@ -204,6 +219,7 @@ uninstall() {
     unlink_dir "$HOME/.claude/skills/stark-review-improvement/SKILL.md" "Skill: stark-review-improvement"
     unlink_dir "$HOME/.claude/skills/stark-review-plan/SKILL.md" "Skill: stark-review-plan"
     unlink_dir "$HOME/.claude/skills/init-docs/SKILL.md" "Skill: init-docs"
+    unlink_dir "$HOME/.claude/skills/stark-session/SKILL.md" "Skill: stark-session"
     unlink_dir "$CODE_REVIEW_DIR/standards" "Standards templates"
 
     echo ""
@@ -225,6 +241,7 @@ status() {
     check_dir "$HOME/.claude/skills/stark-review-improvement/SKILL.md" "Skill: stark-review-improvement"
     check_dir "$HOME/.claude/skills/stark-review-plan/SKILL.md" "Skill: stark-review-plan"
     check_dir "$HOME/.claude/skills/init-docs/SKILL.md" "Skill: init-docs"
+    check_dir "$HOME/.claude/skills/stark-session/SKILL.md" "Skill: stark-session"
     check_dir "$CODE_REVIEW_DIR/standards" "Standards templates"
 
     echo ""
