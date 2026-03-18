@@ -42,14 +42,22 @@ From `git remote get-url origin`, parse org/repo. Or use `--repo` override.
 export GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)
 ```
 
-If this fails → error: "stark-claude GitHub App not configured for this repo."
+If this fails → warn "stark-claude auth failed, degrading to local-only review." Set `auth_failed = true`. Continue — the review still runs because sub-agents use local `git diff`, not the GitHub API. Posting to the PR (Phase 4a) and fetching PR body (spec context) will be skipped.
 
 ### 1.3 Fetch PR metadata
 
+If `auth_failed`: skip API call. Fall back to local git:
+```bash
+base_ref=$(git log --oneline --merges -1 --format=%P HEAD | cut -d' ' -f1)  # or infer from branch name
+head_ref=$(git branch --show-current)
+head_sha=$(git rev-parse HEAD)
+```
+Set `pr_body = None` (spec context unavailable — do NOT flag "no spec found" as a red flag when it's due to auth failure).
+
+If auth succeeded:
 ```bash
 gh api repos/{repo}/pulls/{number}
 ```
-
 Extract: `title`, `body`, `base.ref`, `head.ref`, `head.sha`, `head.repo.full_name`
 
 ### 1.4 Determine mode
@@ -202,7 +210,9 @@ Analyze patterns across all rounds:
 
 ### 4a. Post to PR
 
-Post the final summary as a single comment via `stark-claude[bot]`:
+If `auth_failed`: skip posting entirely. Print summary to terminal with a note: "Review not posted to PR (auth failed). Copy the above to post manually."
+
+Otherwise, post the final summary as a single comment via `stark-claude[bot]`:
 
 ```bash
 $PYTHON $SCRIPTS/github_app.py --app stark-claude pr review {number} --comment --body "$summary"

@@ -111,7 +111,16 @@ Edit the plan file directly to address all `fix` and `recurring` findings:
 
 ### 2d. Early termination check
 
-If this round produced zero findings classified as `fix` or `recurring`:
+First, check dispatch health from the JSON output's `summary` field:
+- If `summary.succeeded == 0` (all sub-agents failed): this is a **dispatch failure**, not a clean plan. Run diagnostics:
+  ```bash
+  which claude codex gemini  # verify CLIs are installed
+  $PYTHON $SCRIPTS/plan_review_dispatch.py --file "$path" --round $round --agents claude --timeout 60  # single-agent probe
+  ```
+  Report the failure with stderr details. Do NOT treat zero findings as "clean." Skip remaining rounds and Phase 3 (re-dispatching will hit the same failure). Go directly to Phase 4 with a dispatch-failure summary.
+- If `summary.succeeded > 0` but `summary.succeeded / summary.total_sub_agents < 0.5`: warn "Low coverage — only N/M sub-agents succeeded. Results may be incomplete." Continue normally.
+
+If dispatch was healthy and this round produced zero findings classified as `fix` or `recurring`:
 - Skip remaining fix rounds
 - Go directly to Phase 3 (final review)
 
@@ -121,7 +130,9 @@ Write a temporary `in-progress.json` to `~/.claude/code-review/history/plan-revi
 
 ## Phase 3: Final Review
 
-Run one more dispatch:
+**Skip this phase if Phase 2 ended due to dispatch failure** (all sub-agents failed). Re-dispatching would hit the same failure.
+
+Otherwise, run one more dispatch:
 
 ```bash
 $PYTHON $SCRIPTS/plan_review_dispatch.py --file "$path" --round $((max_rounds + 1)) --timeout 300
@@ -135,6 +146,29 @@ This round is review-only — no fixes applied. The findings represent the final
 ## Phase 4: Summary
 
 Generate a consolidated markdown summary with these sections:
+
+**If dispatch failure occurred**, use this template instead of the normal summary:
+
+```markdown
+## Plan Review — Dispatch Failure
+
+**File:** {path}
+**Status:** Review could not complete — {succeeded}/{total} sub-agents succeeded.
+
+### Error Details
+| Agent | Domain | Error | Stderr (truncated) |
+|-------|--------|-------|-------------------|
+(one row per failed sub-agent from the dispatch JSON)
+
+### Diagnostics
+- CLI availability: claude={yes/no}, codex={yes/no}, gemini={yes/no}
+- Single-agent probe: {result of diagnostic dispatch}
+
+### Recommendation
+{e.g., "Check API keys/auth", "CLI not installed", "Network issue"}
+```
+
+**Otherwise, use the normal summary:**
 
 ### 4a. All Findings Table
 
