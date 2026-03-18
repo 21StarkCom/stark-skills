@@ -11,5 +11,13 @@
     "claude": "stark-claude",
     "codex": "stark-codex",
     "gemini": "stark-gemini"
+  },
+  "session": {
+    "health_checks": [],
+    "build_command": null,
+    "test_command": null,
+    "doc_paths": ["docs/", "CLAUDE.md"],
+    "devlog_path": null,
+    "pr_merge_strategy": "squash"
   }
 }
