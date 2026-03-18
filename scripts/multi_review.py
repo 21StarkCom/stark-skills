@@ -86,6 +86,8 @@ DEFAULT_CONFIG = {
     },
 }
 
+CODEX_REASONING_CONFIG = 'model_reasoning_effort="xhigh"'
+
 REPLACE_FIELDS = {
     "agents",
     "fix_threshold",
@@ -530,7 +532,7 @@ def _run_subagent(
         ]
 
     elif agent == "codex":
-        cmd = ["codex", "--effort", "xhigh", "review", "--base", base, full_prompt]
+        cmd = ["codex", "review", "-c", CODEX_REASONING_CONFIG, "--base", base, full_prompt]
 
     elif agent == "gemini":
         prompt = (

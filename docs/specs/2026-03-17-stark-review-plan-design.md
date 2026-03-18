@@ -138,7 +138,7 @@ For each agent × domain combination, the script:
 
 ```
 Claude: claude -p "$prompt" --output-format text --model claude-opus-4-6 --max-tokens 16384
-Codex:  codex --effort xhigh "$prompt"
+Codex:  codex exec -c 'model_reasoning_effort="xhigh"' "$prompt"
 Gemini: gemini --model gemini-2.5-pro -p "$prompt"
 ```
 

@@ -38,6 +38,7 @@ FINDINGS_FORMAT = (
 )
 
 DEFAULT_TIMEOUT = 300
+CODEX_REASONING_CONFIG = 'model_reasoning_effort="xhigh"'
 
 
 
@@ -257,7 +258,7 @@ def _run_plan_subagent(
             "--max-tokens", "16384",
         ]
     elif agent == "codex":
-        cmd = ["codex", "--effort", "xhigh", "-p", full_prompt]
+        cmd = ["codex", "exec", "-c", CODEX_REASONING_CONFIG, full_prompt]
     elif agent == "gemini":
         cmd = ["gemini", "--model", "gemini-2.5-pro", "-p", full_prompt]
     else:

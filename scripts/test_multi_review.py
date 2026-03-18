@@ -1,6 +1,8 @@
 """Tests for multi_review.py CLI changes."""
 
 import json
+import shutil
+import subprocess
 import sys
 from io import StringIO
 from unittest.mock import MagicMock, patch
@@ -94,8 +96,9 @@ class TestModelFlags:
         mock_run.return_value = MagicMock(stdout="[]", returncode=0)
         multi_review._run_subagent("codex", "architecture", "abc123")
         cmd = mock_run.call_args[0][0]
-        assert "--effort" in cmd
-        assert "xhigh" in cmd
+        assert cmd[:2] == ["codex", "review"]
+        assert "-c" in cmd
+        assert multi_review.CODEX_REASONING_CONFIG in cmd
 
     @patch("multi_review.subprocess.run")
     def test_gemini_uses_pro(self, mock_run):
@@ -104,6 +107,41 @@ class TestModelFlags:
         cmd = mock_run.call_args[0][0]
         assert "--model" in cmd
         assert "gemini-2.5-pro" in cmd
+
+
+class TestCLIFlagsSmoke:
+    """Smoke tests: verify each CLI actually accepts the flags we pass.
+
+    These run the real binary with --help to validate flag acceptance
+    without making API calls. Catches flag renames/removals across CLI upgrades.
+    """
+
+    @pytest.mark.skipif(not shutil.which("codex"), reason="codex CLI not installed")
+    def test_codex_review_accepts_config_flag(self):
+        """codex review -c 'model_reasoning_effort=...' must not error."""
+        result = subprocess.run(
+            ["codex", "review", "-c", multi_review.CODEX_REASONING_CONFIG, "--help"],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0, f"codex review rejected flags: {result.stderr}"
+
+    @pytest.mark.skipif(not shutil.which("gemini"), reason="gemini CLI not installed")
+    def test_gemini_accepts_model_flag(self):
+        """gemini --model gemini-2.5-pro must not error."""
+        result = subprocess.run(
+            ["gemini", "--model", "gemini-2.5-pro", "--help"],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0, f"gemini rejected flags: {result.stderr}"
+
+    @pytest.mark.skipif(not shutil.which("claude"), reason="claude CLI not installed")
+    def test_claude_accepts_model_flag(self):
+        """claude --model claude-opus-4-6 must not error."""
+        result = subprocess.run(
+            ["claude", "--model", "claude-opus-4-6", "--help"],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0, f"claude rejected flags: {result.stderr}"
 
 
 class TestConfigDiscovery:

@@ -271,8 +271,8 @@ class TestModelFlags:
         from multi_review import _run_subagent
         _run_subagent("codex", "architecture", "abc123")
         cmd = mock_run.call_args[0][0]
-        assert "--effort" in cmd
-        assert "xhigh" in cmd
+        assert "-c" in cmd
+        assert 'model_reasoning_effort="xhigh"' in cmd
 
     @patch("multi_review.subprocess.run")
     def test_gemini_uses_pro(self, mock_run):
@@ -306,7 +306,7 @@ if agent == "claude":
     ]
 
 elif agent == "codex":
-    cmd = ["codex", "--effort", "xhigh", "review", "--base", base, full_prompt]
+    cmd = ["codex", "review", "-c", 'model_reasoning_effort="xhigh"', "--base", base, full_prompt]
 
 elif agent == "gemini":
     cmd = ["gemini", "--model", "gemini-2.5-pro", "-p", full_prompt]

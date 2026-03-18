@@ -1,6 +1,7 @@
 """Tests for plan_review_dispatch.py — prompt resolution and config loading."""
 
 import json
+import shutil
 import subprocess
 from unittest.mock import MagicMock, patch
 
@@ -164,7 +165,10 @@ class TestSubAgentDispatch:
         )
         cmd = mock_run.call_args[0][0]
         assert cmd[0] == "codex"
-        assert "--effort" in cmd
+        assert cmd[1] == "exec"
+        assert "-c" in cmd
+        assert plan_review_dispatch.CODEX_REASONING_CONFIG in cmd
+        assert "Test plan" in cmd
 
     @patch("plan_review_dispatch.subprocess.run")
     def test_gemini_dispatch(self, mock_run):
@@ -202,6 +206,41 @@ class TestSubAgentDispatch:
             "codex", "general", "Test plan", timeout=300,
         )
         assert result.error == "agent_unavailable"
+
+
+class TestCLIFlagsSmoke:
+    """Smoke tests: verify each CLI actually accepts the flags we pass.
+
+    Runs the real binary with --help to validate flag acceptance
+    without making API calls. Catches flag renames/removals across CLI upgrades.
+    """
+
+    @pytest.mark.skipif(not shutil.which("codex"), reason="codex CLI not installed")
+    def test_codex_exec_accepts_config_flag(self):
+        """codex exec -c 'model_reasoning_effort=...' must not error."""
+        result = subprocess.run(
+            ["codex", "exec", "-c", plan_review_dispatch.CODEX_REASONING_CONFIG, "--help"],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0, f"codex exec rejected flags: {result.stderr}"
+
+    @pytest.mark.skipif(not shutil.which("gemini"), reason="gemini CLI not installed")
+    def test_gemini_accepts_model_flag(self):
+        """gemini --model gemini-2.5-pro must not error."""
+        result = subprocess.run(
+            ["gemini", "--model", "gemini-2.5-pro", "--help"],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0, f"gemini rejected flags: {result.stderr}"
+
+    @pytest.mark.skipif(not shutil.which("claude"), reason="claude CLI not installed")
+    def test_claude_accepts_model_flag(self):
+        """claude --model claude-opus-4-6 --help must not error."""
+        result = subprocess.run(
+            ["claude", "--model", "claude-opus-4-6", "--help"],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0, f"claude rejected flags: {result.stderr}"
 
 
 class TestParallelDispatch:

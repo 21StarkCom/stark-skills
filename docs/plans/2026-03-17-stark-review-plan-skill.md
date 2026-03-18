@@ -300,8 +300,8 @@ class TestSubAgentDispatch:
         result = _run_plan_subagent("codex", "general", "Test plan", timeout=300)
         cmd = mock_run.call_args[0][0]
         assert cmd[0] == "codex"
-        assert "--effort" in cmd
-        assert "xhigh" in cmd
+        assert "-c" in cmd
+        assert 'model_reasoning_effort="xhigh"' in cmd
 
     @patch("plan_review_dispatch.subprocess.run")
     def test_gemini_dispatch(self, mock_run):
@@ -431,7 +431,7 @@ def _run_plan_subagent(
             "--model", "claude-opus-4-6", "--max-tokens", "16384",
         ]
     elif agent == "codex":
-        cmd = ["codex", "--effort", "xhigh", "-p", full_prompt]
+        cmd = ["codex", "exec", "-c", 'model_reasoning_effort="xhigh"', full_prompt]
     elif agent == "gemini":
         cmd = ["gemini", "--model", "gemini-2.5-pro", "-p", full_prompt]
     else:
