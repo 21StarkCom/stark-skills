@@ -118,11 +118,11 @@ install() {
         warn "Skill file not found at $REPO_DIR/skill/SKILL.md"
     fi
 
-    mkdir -p "$HOME/.claude/skills/start-review-improvement"
-    if [ -f "$REPO_DIR/skill/start-review-improvement/SKILL.md" ]; then
-        link_dir "$REPO_DIR/skill/start-review-improvement/SKILL.md" "$HOME/.claude/skills/start-review-improvement/SKILL.md" "Skill: start-review-improvement"
+    mkdir -p "$HOME/.claude/skills/stark-review-improvement"
+    if [ -f "$REPO_DIR/skill/stark-review-improvement/SKILL.md" ]; then
+        link_dir "$REPO_DIR/skill/stark-review-improvement/SKILL.md" "$HOME/.claude/skills/stark-review-improvement/SKILL.md" "Skill: stark-review-improvement"
     else
-        warn "Skill file not found at $REPO_DIR/skill/start-review-improvement/SKILL.md"
+        warn "Skill file not found at $REPO_DIR/skill/stark-review-improvement/SKILL.md"
     fi
 
     mkdir -p "$HOME/.claude/skills/stark-review-plan"
@@ -201,7 +201,7 @@ uninstall() {
     unlink_dir "$CODE_REVIEW_DIR/scripts" "Scripts"
     unlink_dir "$EVINCED_DIR/.code-review" "Evinced org config"
     unlink_dir "$HOME/.claude/skills/stark-review/SKILL.md" "Skill: stark-review"
-    unlink_dir "$HOME/.claude/skills/start-review-improvement/SKILL.md" "Skill: start-review-improvement"
+    unlink_dir "$HOME/.claude/skills/stark-review-improvement/SKILL.md" "Skill: stark-review-improvement"
     unlink_dir "$HOME/.claude/skills/stark-review-plan/SKILL.md" "Skill: stark-review-plan"
     unlink_dir "$HOME/.claude/skills/init-docs/SKILL.md" "Skill: init-docs"
     unlink_dir "$CODE_REVIEW_DIR/standards" "Standards templates"
@@ -222,7 +222,7 @@ status() {
     check_dir "$CODE_REVIEW_DIR/scripts" "Scripts"
     check_dir "$EVINCED_DIR/.code-review" "Evinced org config"
     check_dir "$HOME/.claude/skills/stark-review/SKILL.md" "Skill: stark-review"
-    check_dir "$HOME/.claude/skills/start-review-improvement/SKILL.md" "Skill: start-review-improvement"
+    check_dir "$HOME/.claude/skills/stark-review-improvement/SKILL.md" "Skill: stark-review-improvement"
     check_dir "$HOME/.claude/skills/stark-review-plan/SKILL.md" "Skill: stark-review-plan"
     check_dir "$HOME/.claude/skills/init-docs/SKILL.md" "Skill: init-docs"
     check_dir "$CODE_REVIEW_DIR/standards" "Standards templates"

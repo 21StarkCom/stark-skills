@@ -1140,7 +1140,7 @@ git commit -m "feat: create /stark-review-plan skill definition"
 
 - [ ] **Step 1: Add skill symlink to install function**
 
-After the existing `start-review-improvement` skill block (~line 125), add:
+After the existing `stark-review-improvement` skill block (~line 125), add:
 
 ```bash
 mkdir -p "$HOME/.claude/skills/stark-review-plan"

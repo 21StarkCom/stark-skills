@@ -258,7 +258,7 @@ Analyze patterns across all rounds:
 
 **Decision rule:** most specific level that would fix the problem. Only promote to global when the pattern repeats across repos. If it's a single repo → repo level. Single folder → folder level.
 
-Recommend only — do NOT auto-modify prompts. Recommendations feed into `/start-review-improvement`.
+Recommend only — do NOT auto-modify prompts. Recommendations feed into `/stark-review-improvement`.
 
 ### Phase 5: Output & Persist
 
@@ -296,7 +296,7 @@ History files are always written, even in `--dry-run` mode.
 
 ### Phase 6: Learning Log (V2 — deferred)
 
-The `summary.md` history files capture per-review learnings including the prompt improvement assessment. A consolidated learning log that merges patterns across reviews will be added in V2 once enough review history exists to make aggregation meaningful. For V1, the `/start-review-improvement` skill can analyze accumulated `summary.md` files from `~/.claude/code-review/history/plan-reviews/` to identify patterns manually.
+The `summary.md` history files capture per-review learnings including the prompt improvement assessment. A consolidated learning log that merges patterns across reviews will be added in V2 once enough review history exists to make aggregation meaningful. For V1, the `/stark-review-improvement` skill can analyze accumulated `summary.md` files from `~/.claude/code-review/history/plan-reviews/` to identify patterns manually.
 
 ## Files to Create/Modify
 
