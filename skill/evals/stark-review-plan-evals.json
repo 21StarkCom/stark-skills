@@ -1,0 +1,81 @@
+{
+  "skill_name": "stark-review-plan",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "review this plan docs/specs/2026-03-18-new-feature.md",
+      "expected_output": "Dispatches plan_review_dispatch.py with --file, runs 3 agents x 7 domains, classifies findings, produces summary",
+      "files": [],
+      "assertions": [
+        {"name": "uses_venv_python", "check": "Uses $SCRIPTS/.venv/bin/python3, not system python"},
+        {"name": "calls_plan_dispatch", "check": "Invokes plan_review_dispatch.py with --file docs/specs/2026-03-18-new-feature.md"},
+        {"name": "validates_file_exists", "check": "Checks that the plan file exists before dispatching"},
+        {"name": "checks_uncommitted", "check": "Runs git diff --name-only to check for uncommitted changes"},
+        {"name": "parses_json_output", "check": "Parses plan_review_dispatch.py JSON stdout for findings"},
+        {"name": "writes_review_file", "check": "Creates .review.md sibling file with summary"}
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "run stark-review-plan on the design spec, dry run only",
+      "expected_output": "Single review round, no fixes applied, no review file written, no PR posting",
+      "files": [],
+      "assertions": [
+        {"name": "single_round_only", "check": "Runs exactly one dispatch round, no fix loop"},
+        {"name": "no_file_edits", "check": "Does not modify the plan file"},
+        {"name": "no_review_file", "check": "Does not write .review.md in dry-run mode"},
+        {"name": "no_pr_posting", "check": "Does not call github_app.py to post to PR"}
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "review this spec and fix any issues — docs/specs/migration-plan.md, max 2 rounds",
+      "expected_output": "Fix loop with max 2 rounds, then final review-only round, writes review file",
+      "files": [],
+      "assertions": [
+        {"name": "respects_max_rounds", "check": "Runs at most 2 fix rounds (not default 3)"},
+        {"name": "runs_final_review", "check": "After fix rounds, dispatches one more review-only round"},
+        {"name": "edits_plan_file", "check": "Modifies the plan file to address fix-classified findings"},
+        {"name": "saves_history", "check": "Writes rounds.json and summary.md to history directory"},
+        {"name": "detects_pr_context", "check": "Checks for open PR on current branch for posting"}
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "review this plan my-design (ambiguous path, no file extension, multiple candidates in docs/)",
+      "expected_output": "Searches for candidates, lists matches, asks user to pick one",
+      "files": [],
+      "assertions": [
+        {"name": "file_not_found", "check": "Detects that 'my-design' does not exist as a literal path"},
+        {"name": "searches_candidates", "check": "Runs find or glob to locate files matching the partial name"},
+        {"name": "lists_matches", "check": "Presents candidate files to the user"},
+        {"name": "asks_for_selection", "check": "Asks user to confirm which file they meant before proceeding"}
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "review this plan docs/specs/draft.md (file has uncommitted changes, no --force)",
+      "expected_output": "Detects uncommitted changes, warns user, aborts unless --force is passed",
+      "files": [],
+      "assertions": [
+        {"name": "checks_git_diff", "check": "Runs git diff --name-only -- docs/specs/draft.md"},
+        {"name": "detects_uncommitted", "check": "Identifies that the file has uncommitted changes"},
+        {"name": "warns_user", "check": "Prints warning about uncommitted changes"},
+        {"name": "suggests_force", "check": "Mentions --force flag as an option to proceed"},
+        {"name": "aborts", "check": "Does not proceed with dispatch — aborts the review"}
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "review this plan docs/specs/api-design.md (all sub-agents timeout — dispatch returns all errors)",
+      "expected_output": "Reports dispatch failures, warns about low coverage, still produces partial summary",
+      "files": [],
+      "assertions": [
+        {"name": "handles_dispatch_errors", "check": "Does not crash when all sub-agents return errors"},
+        {"name": "reports_failures", "check": "Lists which agents/domains failed and why"},
+        {"name": "warns_low_coverage", "check": "Notes that review coverage is incomplete"},
+        {"name": "produces_partial_summary", "check": "Still generates summary with available (possibly zero) findings"}
+      ]
+    }
+  ]
+}

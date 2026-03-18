@@ -33,7 +33,11 @@ To call github_app.py: `$PYTHON $SCRIPTS/github_app.py <args>`
 ### 1.1 Validate input
 
 - Confirm `<path>` argument was provided. If not, error: "Usage: /stark-review-plan <path>"
-- Confirm file exists and is readable.
+- Confirm file exists and is readable. If not found and path looks like a partial name (no directory separator), search for candidates:
+  ```bash
+  find docs/ -name "*${path}*" -o -name "*${path}*.md" 2>/dev/null | head -5
+  ```
+  If candidates found, list them and ask: "Did you mean one of these?" If no candidates, error and abort.
 - Check if file has uncommitted changes:
   ```bash
   git diff --name-only -- "$path"
@@ -189,3 +193,15 @@ Write:
 - `summary.md` — human-readable summary (same as PR comment)
 
 Remove `in-progress.json` if it exists.
+
+## Debugging Dispatch Failures
+
+If sub-agents return 0 findings or errors, check the dispatch layer:
+
+- **Orchestrator**: `$SCRIPTS/plan_review_dispatch.py` — dispatches 3 CLI agents in parallel via `subprocess.run`
+- **CLI flags per agent**:
+  - Claude: `claude -p - --output-format text --model claude-opus-4-6` (prompt via stdin)
+  - Codex: `codex exec -c ... --ephemeral --json -o <tmpfile> -` (prompt via stdin, output from `-o` file)
+  - Gemini: `gemini --model gemini-2.5-pro -p <instruction> -o json` (plan content via stdin, response in `{"response": "..."}` envelope, `GEMINI_CLI_HOME` tmpdir for isolation)
+- **Error detection**: non-zero exit code → `cli_error`, empty output → `empty_output`. Check stderr in orchestrator output.
+- **Smoke test**: `$PYTHON -m pytest $SCRIPTS/test_plan_review_dispatch.py::TestCLIFlagsSmoke -v` verifies each CLI accepts its flags

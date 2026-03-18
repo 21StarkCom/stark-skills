@@ -164,6 +164,62 @@ class TestCLIFlagsSmoke:
         assert result.returncode == 0, f"claude rejected flags: {result.stderr}"
 
 
+class TestCLIEndToEnd:
+    """End-to-end tests: invoke real CLIs with trivial prompts to verify
+    the full flag set works, not just --help acceptance.
+
+    These make real API calls (minimal tokens) and are slow.
+    Mark as e2e so they can be skipped in CI: pytest -m 'not e2e'
+    """
+
+    @pytest.mark.e2e
+    @pytest.mark.skipif(not shutil.which("codex"), reason="codex CLI not installed")
+    def test_codex_exec_review_e2e(self, tmp_path):
+        """codex exec review with --ephemeral --json -o produces output file."""
+        output_file = str(tmp_path / "codex_output.txt")
+        result = subprocess.run(
+            ["codex", "exec", "review", "-c", multi_review.CODEX_REASONING_CONFIG,
+             "--ephemeral", "--json", "-o", output_file, "--base", "HEAD~1", "-"],
+            capture_output=True, text=True, timeout=120,
+            input="Return exactly: []",
+        )
+        assert result.returncode == 0, f"codex exec review failed: {result.stderr[:500]}"
+
+    @pytest.mark.e2e
+    @pytest.mark.skipif(not shutil.which("gemini"), reason="gemini CLI not installed")
+    def test_gemini_json_output_e2e(self, tmp_path):
+        """gemini -o json returns a JSON envelope with 'response' key."""
+        import tempfile
+        gemini_home = tempfile.mkdtemp(prefix="gemini-test-")
+        import os
+        os.makedirs(os.path.join(gemini_home, ".gemini"), exist_ok=True)
+        env = {**os.environ, "GEMINI_CLI_HOME": gemini_home}
+        result = subprocess.run(
+            ["gemini", "--model", "gemini-2.5-pro", "-p", "Return exactly: []",
+             "-o", "json", "--approval-mode", "plan"],
+            capture_output=True, text=True, timeout=120, env=env,
+        )
+        import shutil as _shutil
+        _shutil.rmtree(gemini_home, ignore_errors=True)
+        assert result.returncode == 0, f"gemini failed: {result.stderr[:500]}"
+        # Verify JSON envelope
+        import json
+        envelope = json.loads(result.stdout)
+        assert "response" in envelope, f"Missing 'response' key in gemini output: {list(envelope.keys())}"
+
+    @pytest.mark.e2e
+    @pytest.mark.skipif(not shutil.which("claude"), reason="claude CLI not installed")
+    def test_claude_stdin_e2e(self):
+        """claude -p - reads prompt from stdin and returns text output."""
+        result = subprocess.run(
+            ["claude", "-p", "-", "--output-format", "text", "--model", "claude-opus-4-6"],
+            capture_output=True, text=True, timeout=120,
+            input="Return exactly: hello",
+        )
+        assert result.returncode == 0, f"claude failed: {result.stderr[:500]}"
+        assert result.stdout.strip(), "claude returned empty output"
+
+
 class TestConfigDiscovery:
     """Config files are discovered and merged: repo -> org -> global."""
 

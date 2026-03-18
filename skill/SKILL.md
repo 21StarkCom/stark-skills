@@ -18,6 +18,7 @@ Multi-agent PR review: 3 LLMs (Claude, Codex, Gemini) × 6 domain specialization
 - `--repo ORG/REPO` — override repo detection
 - `--dry-run` — review only, no fixes, no GitHub posting
 - If number omitted, detect from current branch: `gh pr view --json number --jq .number`
+- If detection fails (e.g., on `main`), list open PRs and ask: `gh pr list --json number,title,headRefName --jq '.[] | "#\(.number) \(.title) (\(.headRefName))"'`
 
 ## Constants
 
@@ -248,3 +249,15 @@ Best-effort — don't fail if cleanup fails. If a crashed session left a worktre
 - Be specific: include file paths, line numbers, and concrete fix suggestions
 - Distinguish between "this will break" (critical) and "this could be better" (suggestion/nit)
 - If the project has PR review guidelines in CLAUDE.md, those take precedence
+
+## Debugging Dispatch Failures
+
+If sub-agents return 0 findings or errors, check the dispatch layer:
+
+- **Orchestrator**: `$SCRIPTS/multi_review.py` — dispatches 3 CLI agents in parallel via `subprocess.run`
+- **CLI flags per agent**:
+  - Claude: `claude -p - --output-format text --model claude-opus-4-6` (prompt via stdin)
+  - Codex: `codex exec review -c ... --ephemeral --json -o <tmpfile> --base <ref> -` (prompt via stdin, output from `-o` file)
+  - Gemini: `gemini --model gemini-2.5-pro -p <prompt> -o json --approval-mode plan` (response in `{"response": "..."}` envelope, `GEMINI_CLI_HOME` tmpdir for isolation)
+- **Error detection**: non-zero exit code → `cli_error`, empty output → `empty_output`. Check stderr in orchestrator output.
+- **Smoke test**: `$PYTHON -m pytest $SCRIPTS/test_multi_review.py::TestCLIFlagsSmoke -v` verifies each CLI accepts its flags
