@@ -604,43 +604,50 @@ All commands run inside the worktree (cwd = worktree path) where `HEAD` is the P
 
 **Claude:**
 ```bash
-claude -p "Run 'git diff {merge_base}..HEAD' and read all changed files. <preamble + domain prompt>" --output-format text
+claude -p - --output-format text --model claude-opus-4-6 --max-tokens 16384
+# Prompt piped via stdin: "Run 'git diff {merge_base}..HEAD' and read all changed files. <preamble + domain prompt>"
 ```
-Context: Claude runs inside the worktree. `HEAD` = PR head. The merge-base SHA is injected into the prompt.
+Context: Claude runs inside the worktree. `HEAD` = PR head. The merge-base SHA is injected into the prompt. Prompt passed via stdin to avoid argv limits and `ps` leakage.
 
 **Codex:**
 ```bash
-codex review --base {merge_base} "<preamble + domain prompt>"
+codex exec review -c 'model_reasoning_effort="xhigh"' --ephemeral --json -o <output_file> --base {merge_base} -
+# Prompt piped via stdin. Final review text written to -o file (stdout is JSONL event stream).
 ```
-Context: Codex's `--base` flag takes a branch or commit to diff against. Running inside the worktree means `HEAD` = PR head, so `--base {merge_base}` produces the correct diff range. (Note: verify that `--base` accepts a raw SHA — if not, create a temporary tag/ref.)
+Context: Codex's `--base` flag takes a branch or commit to diff against. `--ephemeral` prevents session artifacts across parallel runs. `--json` produces structured JSONL on stdout; `-o` captures the final message to a file for reliable parsing.
 
 **Gemini:**
 ```bash
-gemini -p "Run 'git diff {merge_base}..HEAD' and read all changed files. <preamble + domain prompt>"
+GEMINI_CLI_HOME=$(mktemp -d) gemini --model gemini-2.5-pro -p "<instruction prompt>" -o json --approval-mode plan
+# Plan content or diff context piped via stdin. GEMINI_CLI_HOME isolates session state per agent.
 ```
-Context: Gemini runs inside the worktree. `HEAD` = PR head. The merge-base SHA is injected. Output parsing must strip markdown fences.
+Context: Gemini runs inside the worktree. `HEAD` = PR head. The merge-base SHA is injected. `-o json` returns `{"response": "..."}` envelope — orchestrator extracts `.response` before parsing findings. `--approval-mode plan` enforces read-only sandbox (git diff, file reads OK, no writes). `GEMINI_CLI_HOME` tmpdir prevents session file accumulation across parallel runs.
 
 ### JSON extraction
 
 All agents are instructed to output only a JSON array. The orchestrator:
-1. Strips markdown code fences (```` ```json ... ``` ````)
-2. Finds the first `[...]` block via regex
-3. Parses as JSON
-4. Falls back to empty findings list on parse failure
+1. Checks `returncode != 0` → `cli_error` (never parses stdout on failure)
+2. For Codex: reads final message from `-o` output file (stdout is JSONL events)
+3. For Gemini: unwraps `{"response": "..."}` JSON envelope from `-o json` output
+4. Strips markdown code fences (```` ```json ... ``` ````)
+5. Finds the first `[...]` block via regex
+6. Parses as JSON
+7. Falls back to empty findings list on parse failure (or `empty_output` if stdout/file is blank)
 
 ### Timeout and error handling
 
-| Scenario | Behavior |
-|----------|----------|
-| Sub-agent timeout (600s default) | Record error in `SubAgentResult`, mark as `failed`, continue |
-| Sub-agent crashes | Catch exception, record error, mark as `failed`, continue |
-| JSON parse failure | Mark as `failed` with warning, continue |
-| GitHub App auth failure | Log warning, skip posting for that agent, continue |
-| All sub-agents fail | Round completes with all errors, orchestrator reports and breaks |
+| Scenario | Error tag | Behavior |
+|----------|-----------|----------|
+| CLI returns non-zero exit code | `cli_error` | Log stderr (truncated to 500 chars), return empty findings, do NOT parse stdout |
+| Stdout/output file empty or whitespace | `empty_output` | Return empty findings |
+| Sub-agent timeout (600s default) | `timeout` | Retry once, then record error and continue |
+| Sub-agent binary not found | `agent_unavailable` | Record error, continue |
+| Non-trivial output but no parseable JSON | `parse_error` | Record error with raw output preserved |
+| JSON parse failure | (empty findings) | Fall back to empty findings list, continue |
+| GitHub App auth failure | — | Log warning, skip posting for that agent, continue |
+| All sub-agents fail | — | Round completes with all errors, orchestrator reports and breaks |
 
-Sub-agents run independently — one failure never blocks others. Partial results are valid. The audit comment notes any agent errors.
-
-No retries. If an agent fails, its domain goes unreviewed for that round.
+Sub-agents run independently — one failure never blocks others. Partial results are valid. The audit comment notes any agent errors. Temp resources (Codex `-o` files, Gemini `GEMINI_CLI_HOME` dirs) are cleaned up on all exit paths.
 
 ### Coverage threshold (prevents false clean)
 

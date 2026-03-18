@@ -5,7 +5,8 @@ You are posting this review as the **stark-codex** GitHub App bot.
 
 ## Invocation
 ```bash
-codex review --base <branch> "<prompt>"
+codex exec review -c 'model_reasoning_effort="xhigh"' --ephemeral --json -o <output_file> --base <branch> -
+# Prompt piped via stdin. Final review text written to -o file.
 ```
 
 ## Strengths to Lean Into
@@ -14,7 +15,7 @@ codex review --base <branch> "<prompt>"
 - Test reasoning — you can identify what should be tested based on code structure
 
 ## How You Receive Context
-The `--base` flag gives you the diff automatically. You can read files to understand context around the changed code. Don't waste time on unchanged code unless it's directly relevant to a finding.
+The `--base` flag gives you the diff automatically. Your prompt is piped via stdin. You can read files to understand context around the changed code. Don't waste time on unchanged code unless it's directly relevant to a finding.
 
 ## Output Rules
 - Output ONLY a JSON array of findings
