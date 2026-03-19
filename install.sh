@@ -146,6 +146,20 @@ install() {
         warn "Skill file not found at $REPO_DIR/skill/stark-session/SKILL.md"
     fi
 
+    mkdir -p "$HOME/.claude/skills/onboard-project"
+    if [ -f "$REPO_DIR/skill/onboard-project/SKILL.md" ]; then
+        link_dir "$REPO_DIR/skill/onboard-project/SKILL.md" "$HOME/.claude/skills/onboard-project/SKILL.md" "Skill: onboard-project"
+    else
+        warn "Skill file not found at $REPO_DIR/skill/onboard-project/SKILL.md"
+    fi
+
+    mkdir -p "$HOME/.claude/skills/update-deps"
+    if [ -f "$REPO_DIR/skill/update-deps/SKILL.md" ]; then
+        link_dir "$REPO_DIR/skill/update-deps/SKILL.md" "$HOME/.claude/skills/update-deps/SKILL.md" "Skill: update-deps"
+    else
+        warn "Skill file not found at $REPO_DIR/skill/update-deps/SKILL.md"
+    fi
+
     # Backup old session-start if it exists (not a symlink — it was a standalone file)
     if [ -f "$HOME/.claude/skills/session-start/SKILL.md" ] && [ ! -L "$HOME/.claude/skills/session-start/SKILL.md" ]; then
         mv "$HOME/.claude/skills/session-start/SKILL.md" "$HOME/.claude/skills/session-start/SKILL.md.bak"
@@ -220,6 +234,8 @@ uninstall() {
     unlink_dir "$HOME/.claude/skills/stark-review-plan/SKILL.md" "Skill: stark-review-plan"
     unlink_dir "$HOME/.claude/skills/init-docs/SKILL.md" "Skill: init-docs"
     unlink_dir "$HOME/.claude/skills/stark-session/SKILL.md" "Skill: stark-session"
+    unlink_dir "$HOME/.claude/skills/onboard-project/SKILL.md" "Skill: onboard-project"
+    unlink_dir "$HOME/.claude/skills/update-deps/SKILL.md" "Skill: update-deps"
     unlink_dir "$CODE_REVIEW_DIR/standards" "Standards templates"
 
     echo ""
@@ -242,6 +258,8 @@ status() {
     check_dir "$HOME/.claude/skills/stark-review-plan/SKILL.md" "Skill: stark-review-plan"
     check_dir "$HOME/.claude/skills/init-docs/SKILL.md" "Skill: init-docs"
     check_dir "$HOME/.claude/skills/stark-session/SKILL.md" "Skill: stark-session"
+    check_dir "$HOME/.claude/skills/onboard-project/SKILL.md" "Skill: onboard-project"
+    check_dir "$HOME/.claude/skills/update-deps/SKILL.md" "Skill: update-deps"
     check_dir "$CODE_REVIEW_DIR/standards" "Standards templates"
 
     echo ""
