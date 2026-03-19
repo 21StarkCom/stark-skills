@@ -32,9 +32,10 @@ Context is inferred: org and host from git remote, sibling repos from parent dir
 
 Concrete invocation:
 ```bash
-GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)
-gh api -X PATCH "/repos/{org}/{old-name}" -f name="{new-name}"
+GH_TOKEN="$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)" gh api -X PATCH "/repos/{org}/{old-name}" -f name="{new-name}"
 ```
+
+(Single line ensures `GH_TOKEN` is exported to the `gh` child process.)
 
 - Verify response: check that returned `name` matches `new-name`
 - Handle errors: 403 → "App lacks admin permission"; 404 → "Repo not found"; 422 → "Name already taken"; 5xx → "GitHub error, retry manually"
@@ -60,11 +61,12 @@ Run this *before* modifying any files (Step 5 would change install.sh, making un
   ```bash
   old_abs_path="{parent}/{old-name}"
   find ~/.claude -type l | while read link; do
-    target=$(readlink -f "$link" 2>/dev/null || readlink "$link")
+    # macOS lacks readlink -f; use Python for portable absolute resolution
+    target=$(python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "$link")
     case "$target" in "$old_abs_path"*) echo "$link" ;; esac
   done
   ```
-  Remove only symlinks whose resolved targets are rooted under the old project's absolute path. Never delete non-symlink data (preserves `~/.claude/code-review/history/` and other local state).
+  Remove only symlinks whose resolved absolute targets are rooted under the old project path. Never delete non-symlink data (preserves `~/.claude/code-review/history/` and other local state).
 
 ### Step 5: Self-Update
 
@@ -114,8 +116,8 @@ All patterns use the parsed `host`, `org` values from Step 1 — no hardcoded li
 
 Post-rename checks:
 - `git ls-remote origin` succeeds (remote URL works)
-- Symlinks under `~/.claude/` resolve to valid targets
-- Grep for remaining references using all 5 patterns across the renamed project — report any residual matches as "may need manual review"
+- Symlinks under `~/.claude/` resolve to valid targets under `{parent}/{new-name}` (not under old path)
+- Grep for remaining references using all 5 patterns across the renamed project — apply the same exclusion rules from Step 5, so intentionally preserved references (skill invocations, frontmatter names) don't show as false positives. Report only unexpected residual matches as "may need manual review".
 - Scan `.github/workflows/*.yml` in renamed project and sibling repos for old-name references — report as "CI/CD files that may need manual update"
 
 ### Step 9: Summary
@@ -153,7 +155,7 @@ Post-rename checks:
 - **Org/host detection** — Parsed from `git remote get-url origin`. All replacement patterns are derived from parsed values, not hardcoded.
 - **Parent directory detection** — `dirname` of the current project path. Only sibling directories (same parent, same org) are scanned.
 - **Dry-run mode** — Prints every change it would make without executing. File modifications shown as diffs.
-- **Case-only renames** — If old and new names differ only in case, use a two-step rename via a temp name to handle case-insensitive filesystems (macOS default).
+- **Case-only renames** — If old and new names differ only in case, Step 1 skips the "new-name already exists locally" check (case-insensitive FS reports the existing dir as a match). Uses a two-step rename via a temp name: `mv old temp && mv temp new`.
 
 ## What This Skill Does NOT Do
 
