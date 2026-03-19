@@ -1,0 +1,86 @@
+{
+  "skill_name": "rename-project",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "rename stark-review to stark-skills",
+      "expected_output": "Validates inputs, renames on GitHub via gh api PATCH, updates git remote, renames local directory, uninstalls old symlinks, updates references in project and sibling repos, reinstalls symlinks, verifies, prints summary",
+      "files": [],
+      "assertions": [
+        {"name": "validates_name_format", "check": "Validates both names match ^[A-Za-z0-9._-]+$"},
+        {"name": "parses_remote", "check": "Extracts host, org, repo from git remote get-url origin"},
+        {"name": "checks_admin_permission", "check": "Verifies GitHub App has administration:write before renaming"},
+        {"name": "renames_on_github", "check": "Calls gh api -X PATCH /repos/{org}/{old-name} -f name={new-name}"},
+        {"name": "updates_remote_url", "check": "Runs git remote set-url origin with new repo name"},
+        {"name": "renames_local_dir", "check": "Runs mv and cd to new directory path"},
+        {"name": "uninstalls_before_modify", "check": "Runs install.sh --uninstall BEFORE modifying any files"},
+        {"name": "uses_custom_lookarounds", "check": "Uses (?<![A-Za-z0-9._-]) boundaries, not \\b"},
+        {"name": "skips_workflows", "check": "Does NOT auto-modify .github/workflows/ files"},
+        {"name": "commits_sibling_specific_files", "check": "Uses git add <files> && git commit, not git commit -am"},
+        {"name": "runs_install", "check": "Runs install.sh after modifications to recreate symlinks"},
+        {"name": "verifies_result", "check": "Runs git ls-remote origin and checks for stale symlinks"}
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "rename stark-review to stark-skills --dry-run",
+      "expected_output": "Shows all changes that would be made without executing any of them",
+      "files": [],
+      "assertions": [
+        {"name": "no_github_rename", "check": "Does NOT call gh api -X PATCH"},
+        {"name": "no_file_modifications", "check": "Does NOT modify any files on disk"},
+        {"name": "shows_preview", "check": "Prints list of files and patterns that would be changed"}
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "rename stark-review to Stark-Review",
+      "expected_output": "Handles case-only rename with two-step mv via temp name",
+      "files": [],
+      "assertions": [
+        {"name": "detects_case_only", "check": "Detects case-only rename and skips local existence check"},
+        {"name": "two_step_rename", "check": "Uses mv old temp && mv temp new for case-insensitive FS"}
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "rename stark-review to stark-skills (with uncommitted changes)",
+      "expected_output": "Refuses to run with clear error message",
+      "files": [],
+      "assertions": [
+        {"name": "refuses_dirty", "check": "Detects uncommitted changes and aborts before any mutation"},
+        {"name": "clear_error", "check": "Tells user to commit or stash first"}
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "rename stark-review to stark-skills (resume after partial failure)",
+      "expected_output": "Detects partially-completed rename and resumes from correct step",
+      "files": [],
+      "assertions": [
+        {"name": "detects_partial", "check": "Checks remote URL and local dir name to find resume point"},
+        {"name": "skips_completed_steps", "check": "Does not re-run GitHub rename if already done"}
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "rename stark-review to scripts (name already taken on GitHub by different repo)",
+      "expected_output": "Refuses to rename with clear error about name collision",
+      "files": [],
+      "assertions": [
+        {"name": "checks_collision", "check": "Compares repo IDs to detect different repo with same name"},
+        {"name": "aborts_before_mutation", "check": "Does not call PATCH or modify any files"}
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "rename stark-review to stark-skills (GitHub App lacks admin permission)",
+      "expected_output": "Fails with clear error about missing admin permission",
+      "files": [],
+      "assertions": [
+        {"name": "checks_permission", "check": "Calls GET /repos/{org}/{name} and checks permissions.admin"},
+        {"name": "fails_early", "check": "Aborts in validation phase, before any mutation"}
+      ]
+    }
+  ]
+}
