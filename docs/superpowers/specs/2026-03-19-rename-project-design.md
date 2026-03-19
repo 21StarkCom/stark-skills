@@ -15,10 +15,11 @@ Context is inferred: org and host from git remote, sibling repos from parent dir
 ### Step 1: Validate
 
 - **Input format** — Both names must match `^[A-Za-z0-9._-]+$` (GitHub repo name rules). Reject path separators, spaces, and shell metacharacters.
+- **Prerequisites** — Verify `install.sh` exists, is executable, and supports `--uninstall`. If missing, warn that symlink management will be manual.
 - **Resumable state detection** — Before standard validation, check for partially-completed renames:
   - If remote URL already contains `new-name` but local dir is `old-name` → resume from Step 4
-  - If local dir is already `new-name` → resume from Step 5
-  - If both remote and local already have `new-name` → resume from Step 5
+  - If local dir is already `new-name` but remote is still `old-name` → resume from Step 2
+  - If local dir is already `new-name` and remote has `new-name` → resume from Step 4.5 (symlinks may still be stale)
 - **Standard validation** (if not resuming):
   - Confirm current directory's git remote matches `old-name`
   - Confirm no uncommitted changes in target project
@@ -57,13 +58,17 @@ Run this *before* modifying any files (Step 5 would change install.sh, making un
 - Run `install.sh --uninstall` from the new project location
 - If `--uninstall` is not available, find stale symlinks dynamically:
   ```bash
-  find ~/.claude -type l -exec sh -c 'readlink "$1" | grep -q "{old-name}" && echo "$1"' _ {} \;
+  old_abs_path="{parent}/{old-name}"
+  find ~/.claude -type l | while read link; do
+    target=$(readlink -f "$link" 2>/dev/null || readlink "$link")
+    case "$target" in "$old_abs_path"*) echo "$link" ;; esac
+  done
   ```
-  Remove only symlinks whose targets contain the old project path. Never delete non-symlink data (preserves `~/.claude/code-review/history/` and other local state).
+  Remove only symlinks whose resolved targets are rooted under the old project's absolute path. Never delete non-symlink data (preserves `~/.claude/code-review/history/` and other local state).
 
 ### Step 5: Self-Update
 
-Grep-and-replace within the renamed project. Apply same directory exclusions as Step 6: skip `.git/`, `node_modules/`, `.venv/`, `__pycache__/`, `dist/`, `build/`. Use `git ls-files` to identify tracked text files.
+Grep-and-replace within the renamed project. Skip directories: `.git/`, `.github/workflows/`, `node_modules/`, `.venv/`, `__pycache__/`, `dist/`, `build/`. Use `git grep -Il ""` to identify tracked text files (the `-I` flag skips binary files).
 
 **Deterministic patterns (auto-applied):**
 
@@ -76,7 +81,7 @@ All patterns use the parsed `host`, `org` values from Step 1 — no hardcoded li
 
 **Heuristic pattern (word-boundary, restricted scope):**
 
-5. Bare `\b{old-name}\b` — only in known file types: `*.md`, `CLAUDE.md`, `*.json` (config files), `*.sh`, `*.yml`/`*.yaml`. Word-boundary anchors prevent matching substrings of longer identifiers (e.g., `stark-review-improvement` won't match when looking for `stark-review`).
+5. Bare `{old-name}` with repo-name-aware boundaries — only in known file types: `*.md`, `CLAUDE.md`, `*.json` (config files), `*.sh`. Use custom lookarounds `(?<![A-Za-z0-9._-]){old-name}(?![A-Za-z0-9._-])` instead of `\b`, because `\b` treats hyphens and dots as word boundaries and would incorrectly match inside `stark-review-improvement`. Exclude `.github/workflows/` from heuristic replacement (CI/CD files are only scanned and reported, not auto-modified).
 
 **Exclusion rules:**
 - `/{old-name}` (slash-prefixed) — skill invocation name, preserved
@@ -93,11 +98,12 @@ All patterns use the parsed `host`, `org` values from Step 1 — no hardcoded li
 
 - Discover sibling repos: directories under the same parent with a `.git/` subdirectory
 - **Scope restriction:** Only update repos whose `origin` remote points to the same `{host}` and `{org}`. Skip repos belonging to other orgs or hosts.
+- **Cleanliness check:** Before modifying any sibling repo, verify it has no staged or unstaged tracked changes. Skip repos with dirty worktrees and report them as "skipped — has uncommitted changes".
 - Apply the same pattern list and exclusion rules from Step 5
-- Skip directories: `.git/`, `node_modules/`, `.venv/`, `__pycache__/`, `dist/`, `build/`
-- Use `git ls-files` per repo to restrict to tracked text files
+- Skip directories: `.git/`, `.github/workflows/`, `node_modules/`, `.venv/`, `__pycache__/`, `dist/`, `build/`
+- Use `git ls-files` per repo to restrict to tracked text files; use `git grep -Il` to filter to text-only files
 - Track every file modified for the summary
-- **Auto-commit** changes in each modified sibling repo: `git commit -am "chore: update references from {old-name} to {new-name}"`
+- **Auto-commit** changes in each modified sibling repo using specific files, not `-am`: `git add <changed-files> && git commit -m "chore: update references from {old-name} to {new-name}"`. This prevents sweeping unrelated changes into the commit.
 
 ### Step 7: Reinstall
 
@@ -109,7 +115,7 @@ All patterns use the parsed `host`, `org` values from Step 1 — no hardcoded li
 Post-rename checks:
 - `git ls-remote origin` succeeds (remote URL works)
 - Symlinks under `~/.claude/` resolve to valid targets
-- Grep for remaining `\b{old-name}\b` across the renamed project — report any residual matches as "may need manual review"
+- Grep for remaining references using all 5 patterns across the renamed project — report any residual matches as "may need manual review"
 - Scan `.github/workflows/*.yml` in renamed project and sibling repos for old-name references — report as "CI/CD files that may need manual update"
 
 ### Step 9: Summary
@@ -128,18 +134,19 @@ Post-rename checks:
 | Absolute paths containing old name | Yes | Paths must resolve |
 | `{org}/{old-name}` repo references | Yes | API/clone URLs must work |
 | Git clone/remote URLs (SSH + HTTPS) | Yes | Git operations must work |
-| Bare `\b{old-name}\b` in .md/.json/.sh/.yml | Yes | Keeps docs/config accurate |
+| Bare `{old-name}` in .md/.json/.sh (custom lookarounds) | Yes | Keeps docs/config accurate |
 | `/{old-name}` (slash-prefixed invocations) | No | Skill invocation preserved |
 | `name:` frontmatter fields | No | Skill identity preserved |
 | GitHub App names | No | Independent of project name |
 | Historical doc filenames | No | Historical record preserved |
 | `~/.claude/code-review/` path | No | Does not contain project name |
-| Substrings of longer identifiers | No | Word-boundary matching prevents |
+| Substrings of longer identifiers | No | Custom lookarounds prevent |
+| `.github/workflows/*.yml` | No | CI/CD reported, not auto-modified |
 
 ## Edge Cases
 
 - **cwd invalidation** — Step 4 explicitly `cd`s to the new path before continuing. Step 9 prints the `cd` command for the user's shell.
-- **Uncommitted changes** — Skill refuses to run if target project has uncommitted changes. Sibling repos are checked only if they'll be modified.
+- **Uncommitted changes** — Skill refuses to run if target project has uncommitted changes. Sibling repos must have clean worktrees before modification; dirty sibling repos are skipped and reported.
 - **Stale symlinks** — Step 4.5 uninstalls old symlinks *before* Step 5 modifies install.sh, ensuring correct cleanup.
 - **install.sh safety** — Step 5 runs `bash -n install.sh` after modifications to catch syntax errors before Step 7 executes it.
 - **Partial failure recovery** — Step 1 detects partially-completed renames by checking current remote URL and directory name, then resumes from the appropriate step. Each step is idempotent: Step 2 checks if repo already renamed, Step 3 checks if remote already correct, Step 4 checks if directory already moved.
