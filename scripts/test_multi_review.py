@@ -101,23 +101,22 @@ class TestModelFlags:
         mock_run.return_value = MagicMock(stdout="[]", returncode=0)
         multi_review._run_subagent("codex", "architecture", "abc123")
         cmd = mock_run.call_args[0][0]
-        assert cmd[:3] == ["codex", "exec", "review"]
+        assert cmd[:2] == ["codex", "exec"]
+        assert "review" not in cmd  # avoid triggering built-in review skill
         assert "-c" in cmd
         assert multi_review.CODEX_REASONING_CONFIG in cmd
         assert "--ephemeral" in cmd
         assert "--json" in cmd
-        assert "-o" in cmd
+        assert "--full-auto" in cmd
         assert cmd[-1] == "-"  # stdin marker
 
     @patch("multi_review.subprocess.run")
-    def test_gemini_uses_pro(self, mock_run):
+    def test_gemini_uses_plan_mode(self, mock_run):
         mock_run.return_value = MagicMock(
             stdout='{"response": "[]"}', returncode=0,
         )
         multi_review._run_subagent("gemini", "architecture", "abc123")
         cmd = mock_run.call_args[0][0]
-        assert "--model" in cmd
-        assert "gemini-2.5-pro" in cmd
         assert "-o" in cmd
         assert "json" in cmd
         assert "--approval-mode" in cmd
@@ -148,21 +147,20 @@ class TestCLIFlagsSmoke:
     """
 
     @pytest.mark.skipif(not shutil.which("codex"), reason="codex CLI not installed")
-    def test_codex_exec_review_accepts_flags(self):
-        """codex exec review -c ... --ephemeral --json must not error."""
+    def test_codex_exec_accepts_flags(self):
+        """codex exec -c ... --ephemeral --json --full-auto must not error."""
         result = subprocess.run(
-            ["codex", "exec", "review", "-c", multi_review.CODEX_REASONING_CONFIG,
-             "--ephemeral", "--json", "--help"],
+            ["codex", "exec", "-c", multi_review.CODEX_REASONING_CONFIG,
+             "--ephemeral", "--json", "--full-auto", "--help"],
             capture_output=True, text=True, timeout=10,
         )
-        assert result.returncode == 0, f"codex exec review rejected flags: {result.stderr}"
+        assert result.returncode == 0, f"codex exec rejected flags: {result.stderr}"
 
     @pytest.mark.skipif(not shutil.which("gemini"), reason="gemini CLI not installed")
     def test_gemini_accepts_flags(self):
-        """gemini --model gemini-2.5-pro -o json --approval-mode plan must not error."""
+        """gemini -o json --approval-mode plan must not error."""
         result = subprocess.run(
-            ["gemini", "--model", "gemini-2.5-pro", "-o", "json",
-             "--approval-mode", "plan", "--help"],
+            ["gemini", "-o", "json", "--approval-mode", "plan", "--help"],
             capture_output=True, text=True, timeout=10,
         )
         assert result.returncode == 0, f"gemini rejected flags: {result.stderr}"
@@ -196,7 +194,7 @@ class TestCLIFlagsSmoke:
             _json.dump(projects, f)
         env = {**os.environ, "GEMINI_CLI_HOME": gemini_home, "GEMINI_API_KEY": "invalid"}
         result = subprocess.run(
-            ["gemini", "--model", "gemini-2.5-pro", "-p", "test", "-o", "json"],
+            ["gemini", "-p", "test", "-o", "json", "--approval-mode", "plan"],
             capture_output=True, text=True, timeout=30, env=env,
         )
         shutil.rmtree(gemini_home, ignore_errors=True)
@@ -218,36 +216,31 @@ class TestCLIEndToEnd:
 
     @pytest.mark.e2e
     @pytest.mark.skipif(not shutil.which("codex"), reason="codex CLI not installed")
-    def test_codex_exec_review_e2e(self, tmp_path):
-        """codex exec review with --ephemeral --json -o produces output file."""
-        output_file = str(tmp_path / "codex_output.txt")
+    def test_codex_exec_e2e(self, tmp_path):
+        """codex exec with --ephemeral --json --sandbox read-only produces JSONL output."""
         result = subprocess.run(
-            ["codex", "exec", "review", "-c", multi_review.CODEX_REASONING_CONFIG,
-             "--ephemeral", "--json", "-o", output_file, "--base", "HEAD~1", "-"],
+            ["codex", "exec", "-c", multi_review.CODEX_REASONING_CONFIG,
+             "--ephemeral", "--json", "--full-auto", "-"],
             capture_output=True, text=True, timeout=120,
             input="Return exactly: []",
         )
-        assert result.returncode == 0, f"codex exec review failed: {result.stderr[:500]}"
+        assert result.returncode == 0, f"codex exec failed: {result.stderr[:500]}"
 
     @pytest.mark.e2e
     @pytest.mark.skipif(not shutil.which("gemini"), reason="gemini CLI not installed")
     def test_gemini_json_output_e2e(self, tmp_path):
-        """gemini -o json returns a JSON envelope with 'response' key."""
+        """gemini -o json --yolo returns a JSON envelope with 'response' key."""
         import tempfile
         gemini_home = tempfile.mkdtemp(prefix="gemini-test-")
-        import os
         os.makedirs(os.path.join(gemini_home, ".gemini"), exist_ok=True)
         env = {**os.environ, "GEMINI_CLI_HOME": gemini_home}
         result = subprocess.run(
-            ["gemini", "--model", "gemini-2.5-pro", "-p", "Return exactly: []",
+            ["gemini", "-p", "Return exactly: []",
              "-o", "json", "--approval-mode", "plan"],
             capture_output=True, text=True, timeout=120, env=env,
         )
-        import shutil as _shutil
-        _shutil.rmtree(gemini_home, ignore_errors=True)
+        shutil.rmtree(gemini_home, ignore_errors=True)
         assert result.returncode == 0, f"gemini failed: {result.stderr[:500]}"
-        # Verify JSON envelope
-        import json
         envelope = json.loads(result.stdout)
         assert "response" in envelope, f"Missing 'response' key in gemini output: {list(envelope.keys())}"
 

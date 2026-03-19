@@ -259,7 +259,6 @@ def _run_plan_subagent(
     result = PlanSubAgentResult(agent=agent, domain=domain_key)
 
     stdin_input = None
-    codex_output_file = None
     gemini_home = None
 
     # Build CLI command per agent
@@ -271,37 +270,33 @@ def _run_plan_subagent(
         ]
         stdin_input = full_prompt
     elif agent == "codex":
-        codex_output_file = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".txt", delete=False,
-        ).name
         cmd = [
             "codex", "exec",
             "-c", CODEX_REASONING_CONFIG,
             "--ephemeral", "--json",
-            "-o", codex_output_file, "-",
+            "--full-auto",
+            "-",
         ]
         stdin_input = full_prompt
     elif agent == "gemini":
-        # Gemini: -p is the instruction, stdin is context (piped plan content).
-        # -o json gives structured JSON output. GEMINI_CLI_HOME isolates sessions.
+        # Gemini: -p for headless mode with prompt, -o json for structured output,
+        # --approval-mode plan = read-only sandbox. GEMINI_CLI_HOME isolates sessions.
         gemini_home = tempfile.mkdtemp(prefix="gemini-plan-review-")
         gemini_dir = os.path.join(gemini_home, ".gemini")
         os.makedirs(gemini_dir, exist_ok=True)
-        # Copy auth files from real GEMINI_CLI_HOME (or ~/.gemini) so OAuth
-        # tokens are available in the isolated tmpdir.
         real_gemini = os.environ.get("GEMINI_CLI_HOME", os.path.expanduser("~"))
         real_gemini_dir = os.path.join(real_gemini, ".gemini")
-        for auth_file in ("settings.json", "oauth_creds.json", "google_accounts.json"):
+        for auth_file in ("settings.json", "oauth_creds.json", "google_accounts.json", "installation_id"):
             src = os.path.join(real_gemini_dir, auth_file)
             if os.path.exists(src):
                 shutil.copy2(src, os.path.join(gemini_dir, auth_file))
-        # Gemini CLI ProjectRegistry needs cwd registered (value = short slug string)
         with open(os.path.join(gemini_dir, "projects.json"), "w") as f:
             json.dump({"projects": {os.getcwd(): "review"}}, f)
         cmd = [
-            "gemini", "--model", "gemini-2.5-pro",
+            "gemini",
             "-p", prompt_text or "Review this plan document.",
             "-o", "json",
+            "--approval-mode", "plan",
         ]
         stdin_input = plan_content  # piped as context via stdin
     else:
@@ -309,8 +304,6 @@ def _run_plan_subagent(
         return result
 
     def _cleanup_temp():
-        if codex_output_file and os.path.exists(codex_output_file):
-            os.unlink(codex_output_file)
         if gemini_home and os.path.isdir(gemini_home):
             shutil.rmtree(gemini_home, ignore_errors=True)
 
@@ -341,15 +334,33 @@ def _run_plan_subagent(
                 result.error = "cli_error"
                 return result
 
-            # For codex, read final output from -o file
-            if codex_output_file:
-                raw = ""
-                if os.path.exists(codex_output_file):
-                    with open(codex_output_file) as f:
-                        raw = f.read()
-                    os.unlink(codex_output_file)
-            else:
-                raw = proc.stdout or ""
+            raw = proc.stdout or ""
+
+            # Codex --json emits JSONL events to stdout. Extract assistant
+            # message text from completed message/agent_message items.
+            if agent == "codex" and raw.strip().startswith("{"):
+                parts = []
+                for line in raw.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        ev = json.loads(line)
+                        if ev.get("type") == "item.completed":
+                            item = ev.get("item", {})
+                            itype = item.get("type", "")
+                            if itype == "agent_message":
+                                text = item.get("text", "")
+                                if text:
+                                    parts.append(text)
+                            elif itype == "message":
+                                for c in item.get("content", []):
+                                    if c.get("type") == "output_text":
+                                        parts.append(c.get("text", ""))
+                    except json.JSONDecodeError:
+                        continue
+                if parts:
+                    raw = "\n".join(parts)
 
             # Gemini -o json wraps the response in {"response": "...",...}
             if gemini_home and raw.strip():

@@ -171,11 +171,12 @@ class TestSubAgentDispatch:
         cmd = mock_run.call_args[0][0]
         assert cmd[0] == "codex"
         assert cmd[1] == "exec"
+        assert "review" not in cmd  # avoid triggering built-in review skill
         assert "-c" in cmd
         assert plan_review_dispatch.CODEX_REASONING_CONFIG in cmd
         assert "--ephemeral" in cmd
         assert "--json" in cmd
-        assert "-o" in cmd
+        assert "--full-auto" in cmd
         assert cmd[-1] == "-"  # stdin marker
         call_kwargs = mock_run.call_args[1]
         assert "input" in call_kwargs
@@ -191,10 +192,10 @@ class TestSubAgentDispatch:
         )
         cmd = mock_run.call_args[0][0]
         assert cmd[0] == "gemini"
-        assert "--model" in cmd
-        assert "gemini-2.5-pro" in cmd
         assert "-o" in cmd
         assert "json" in cmd
+        assert "--approval-mode" in cmd
+        assert "plan" in cmd
         # Gemini pipes plan content via stdin, prompt_text via -p
         call_kwargs = mock_run.call_args[1]
         assert "input" in call_kwargs
@@ -316,9 +317,9 @@ class TestCLIFlagsSmoke:
 
     @pytest.mark.skipif(not shutil.which("gemini"), reason="gemini CLI not installed")
     def test_gemini_accepts_flags(self):
-        """gemini --model gemini-2.5-pro -o json must not error."""
+        """gemini -o json --approval-mode plan must not error."""
         result = subprocess.run(
-            ["gemini", "--model", "gemini-2.5-pro", "-o", "json", "--help"],
+            ["gemini", "-o", "json", "--approval-mode", "plan", "--help"],
             capture_output=True, text=True, timeout=10,
         )
         assert result.returncode == 0, f"gemini rejected flags: {result.stderr}"

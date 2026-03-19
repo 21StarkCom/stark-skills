@@ -550,10 +550,9 @@ def _run_subagent(
         stdin_input = prompt
 
     elif agent == "codex":
-        # codex exec review: --base and [PROMPT] are mutually exclusive,
-        # and --output-last-message (-o) writes empty for review subcommand.
-        # Drop --base and -o — instruct codex to run git diff itself.
-        # Use --json for JSONL stdout (parsed below to extract review text).
+        # Use `codex exec` (NOT `codex exec review`) to avoid triggering
+        # Codex's built-in review skill which overrides our domain prompts.
+        # --json emits JSONL to stdout; parsed below to extract agent text.
         prompt = (
             f"Run 'git diff {base}...HEAD' and read all changed files. "
             f"ONLY review files that appear in the diff. "
@@ -561,17 +560,17 @@ def _run_subagent(
             f"{full_prompt}"
         )
         cmd = [
-            "codex", "exec", "review",
+            "codex", "exec",
             "-c", CODEX_REASONING_CONFIG,
             "--ephemeral", "--json",
+            "--full-auto",
             "-",
         ]
         stdin_input = prompt
 
     elif agent == "gemini":
-        # Gemini reads stdin as context; -p is the instruction appended to it.
-        # -o json gives structured JSON output (no spinners/status).
-        # --approval-mode plan = read-only sandbox (git diff, file reads OK).
+        # Gemini: -p for headless mode with prompt, -o json for structured output,
+        # --approval-mode plan = read-only (git diff, file reads OK, no writes).
         # GEMINI_CLI_HOME tmpdir prevents session artifacts across parallel runs.
         prompt = (
             f"Run 'git diff {base}...HEAD' and read all changed files. "
@@ -582,27 +581,24 @@ def _run_subagent(
         gemini_home = tempfile.mkdtemp(prefix="gemini-review-")
         gemini_dir = os.path.join(gemini_home, ".gemini")
         os.makedirs(gemini_dir, exist_ok=True)
-        # Copy auth files from real GEMINI_CLI_HOME (or ~/.gemini) so OAuth
-        # tokens are available in the isolated tmpdir.
         real_gemini = os.environ.get(
             "GEMINI_CLI_HOME", os.path.expanduser("~"),
         )
         real_gemini_dir = os.path.join(real_gemini, ".gemini")
-        for auth_file in ("settings.json", "oauth_creds.json", "google_accounts.json"):
+        for auth_file in ("settings.json", "oauth_creds.json", "google_accounts.json", "installation_id"):
             src = os.path.join(real_gemini_dir, auth_file)
             if os.path.exists(src):
                 shutil.copy2(src, os.path.join(gemini_dir, auth_file))
-        # Gemini CLI ProjectRegistry needs cwd registered (value = short slug string)
         effective_cwd = cwd or os.getcwd()
         with open(os.path.join(gemini_dir, "projects.json"), "w") as f:
             json.dump({"projects": {effective_cwd: "review"}}, f)
         cmd = [
-            "gemini", "--model", "gemini-2.5-pro",
+            "gemini",
             "-p", prompt,
             "-o", "json",
             "--approval-mode", "plan",
         ]
-        stdin_input = None  # gemini uses -p for instruction, stdin for context (no diff context here)
+        stdin_input = None
 
     else:
         return SubAgentResult(
@@ -650,7 +646,7 @@ def _run_subagent(
             raw = result.stdout
 
             # Codex --json emits JSONL events to stdout. Extract assistant
-            # message text from completed message items.
+            # message text from completed message/agent_message items.
             if agent == "codex" and raw.strip().startswith("{"):
                 parts = []
                 for line in raw.splitlines():
@@ -659,10 +655,16 @@ def _run_subagent(
                         continue
                     try:
                         ev = json.loads(line)
-                        # item.completed events with type=message hold the review
                         if ev.get("type") == "item.completed":
                             item = ev.get("item", {})
-                            if item.get("type") == "message":
+                            itype = item.get("type", "")
+                            # Current format: type=agent_message, text=...
+                            if itype == "agent_message":
+                                text = item.get("text", "")
+                                if text:
+                                    parts.append(text)
+                            # Legacy format: type=message, content=[{type:output_text,text:...}]
+                            elif itype == "message":
                                 for c in item.get("content", []):
                                     if c.get("type") == "output_text":
                                         parts.append(c.get("text", ""))
