@@ -279,13 +279,18 @@ Re-run Phase 3, then proceed.
 
 Write to a temp file (`chmod 600`). Dispatch to each configured validation agent:
 
-```bash
-# Codex
-cat validation_envelope.json | codex exec -c 'model_reasoning_effort="high"' --ephemeral --json --full-auto -
+**Validation prompt:** Construct a prompt for the validation agent containing the full validation checklist (the 8 checks above). The prompt must instruct the agent to:
+- Output ONLY a JSON object: `{"schema_version": 1, "approved": true/false, "issues": [{"phase_id": "...", "task_id": "...", "field": "...", "problem": "...", "suggestion": "..."}]}`
+- If no issues found, return `{"schema_version": 1, "approved": true, "issues": []}`
+- Be adversarial — try to break the decomposition
 
-# Gemini
-gemini -p '{validation-prompt}' -o json --approval-mode plan < validation_envelope.json
+The prompt is embedded in the dispatch script at `$SCRIPTS/plan_to_tasks_validate.py` as the `VALIDATION_PROMPT` constant. To dispatch:
+
+```bash
+$PYTHON $SCRIPTS/plan_to_tasks_validate.py "$PLAN_FILE" "$BREAKDOWN_FILE" --timeout 300
 ```
+
+This script handles envelope construction, agent dispatch, output normalization, and structured JSON output.
 
 **Output normalization:**
 - Codex: extract `agent_message` content from JSONL events
@@ -500,7 +505,7 @@ Clean up temp files (decomposition JSON, validation envelope, any preview files)
 
 Follows the Skill Observability Protocol (`~/.claude/code-review/standards/observability.md`).
 
-- TaskCreate per phase with `activeForm` spinner text. TaskUpdate to mark in_progress → completed.
+- TaskCreate per step with `activeForm` spinner text. TaskUpdate to mark in_progress → completed.
 - Timestamped log lines: `[HH:MM:SS]` format with step names and elapsed times.
 - 5-minute checkpoints for large plans: elapsed time + current step.
 
@@ -519,3 +524,44 @@ Follows the Skill Observability Protocol (`~/.claude/code-review/standards/obser
 - Don't reference Step 6 docs from Step 5 issue bodies — those docs don't exist yet.
 - Don't use positional indexes for task references — use stable `task_id` and `phase_id`.
 - Don't create labels one at a time without `--force` — the flag is idempotent and avoids duplicate errors.
+
+## Failure Modes
+
+| Failure | Recovery |
+|---------|----------|
+| Plan file doesn't exist or is empty | Fail with clear error message |
+| Plan is not markdown (.md) | Fail with "expected .md file" error |
+| Target repo doesn't exist on GitHub | Fail at Step 1 with repo name and org |
+| Target repo doesn't match current checkout | Warn and ask user at Step 1 |
+| GitHub App auth fails | Fail at Step 1 before any LLM work |
+| `gh` CLI not found | Fail at Step 1 before any LLM work |
+| App lacks issue/label permissions on target repo | Fail at Step 1 after repo access probe |
+| GitHub API rate limit during issue creation | Stop, report partial state via run manifest, allow resume |
+| Partial issue creation (some succeeded, some failed) | Run manifest records `task_id → issue_number` mapping; re-run skips created issues |
+| Token expires mid-run (>1 hour with many issues) | Each `gh` command block inlines token acquisition; stale shell var is the risk, not cache |
+| Issue body exceeds 65,536 char GitHub limit | Truncate with note (section caps should prevent this); never split — splitting is a decomposition change |
+| LLM returns malformed JSON (Pass 2 or 3) | Validate against schema, retry once with error appended to prompt, halt if still invalid |
+| Plan quality gate can't pass after 3 user rounds | Stop at Step 2, report remaining gaps |
+| Validation can't converge after 2 iterations | Halt, do not create issues, surface remaining problems |
+| Validation agent CLI not found | Fail at Step 1 with message naming the missing agent |
+| Re-run on same plan (issues already exist) | Detected at Step 1; user chooses skip/update/fresh |
+| Step 6 commit fails (pre-commit hook, dirty tree) | Plan not deleted; warn and leave changes unstaged for user review |
+
+## What This Skill Does NOT Do
+
+- Challenge architectural decisions (those were validated during brainstorming)
+- Add scope beyond what the plan describes
+- Assign issues to people or agents
+- Kick off implementation (execution is a separate concern)
+- Create GitHub Projects or milestones
+- Supplement weak plans with external research — if the plan is insufficient, it stops and asks
+
+## Edge Cases
+
+- **Plan references no repo** — fall back to `git remote -v`. If that also fails, ask the user.
+- **Plan is too vague for any decomposition** — Pass 1 will flag this. If the plan can't pass the checklist after 3 rounds, stop.
+- **Target repo has no docs/ directory** — create `docs/` with minimal structure during knowledge extraction.
+- **Very large plan (20+ tasks)** — handled by per-phase task generation. Guardrails recommend max 6-8 phases × 8-10 tasks; exceeding this signals the plan should be split.
+- **Plan contains no extractable knowledge** — skip Phase 6 doc enrichment, still delete the plan.
+- **Detected repo doesn't match current checkout** — warn and ask user.
+- **Multiple git remotes** — prefer `origin`, warn if multiple remotes point to different orgs.
