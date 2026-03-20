@@ -394,7 +394,7 @@ PYTHON=$SCRIPTS/.venv/bin/python3
 
 - **Spec has no associated review** — skip `evolution`, `decision_defended`, and `agent_signal` categories. Still extract `decision`, `constraint`, `integration`, `data_model`, `glossary`.
 - **Spec has no associated plan** — skip plan-specific knowledge. Most knowledge comes from spec + review anyway.
-- **Target project has no `docs/` directory** — create minimal structure (`docs/adr/`, `docs/retrospectives/`, `docs/reference/`).
+- **Target project has no `docs/` directory** — create minimal structure (`docs/adr/`, `docs/reference/`). Only create `docs/retrospectives/` if retrospective content was extracted.
 - **ADR directory uses different name** — detect `docs/decisions/`, `docs/adrs/`, `docs/adr/` and use whatever exists.
 - **Batch mode with mixed spec locations** — process each spec independently, dedup across all at the end.
 - **Spec already processed** — check history file; if exists and spec hasn't changed (compare mtime or hash), skip with log message. Use `--force` to re-extract.

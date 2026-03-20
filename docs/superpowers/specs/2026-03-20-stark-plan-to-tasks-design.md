@@ -285,49 +285,12 @@ EOF
 
 After issues are created, the plan still holds knowledge that doesn't belong in any single task. This knowledge must survive the plan's deletion.
 
-**What gets extracted:**
+**Delegation to `stark-extract-docs`:** This phase calls `/stark-extract-docs <spec-path> --no-commit` to extract durable knowledge (architectural decisions, data models, integration points, constraints, glossary terms) into project documentation. `stark-extract-docs` is the canonical knowledge extractor — it owns all knowledge-to-docs routing, ADR generation, and deduplication logic. See `docs/superpowers/specs/2026-03-20-stark-extract-docs-design.md` for the full extraction and routing specification.
 
-- Architectural decisions (why the system is shaped this way)
-- Data models / schemas (entity definitions, relationships)
-- Integration points (how components communicate, API contracts)
-- Constraints (performance budgets, security requirements, compliance)
-- Glossary / domain terms (terminology defined in the plan)
-
-**Routing logic:**
-
-The skill scans the target project's `docs/` tree and matches knowledge to existing files/directories by name and content. The table below shows the detection heuristic and fallback:
-
-| Knowledge type | Detection | Fallback (if no match found) |
-|----------------|-----------|------------------------------|
-| Architectural decisions | Look for `docs/adr/`, `docs/decisions/`, `docs/architecture/decisions/` | Create `docs/adr/NNN-{title}.md` |
-| Data models / schemas | Look for existing model/schema docs in `docs/` | Create `docs/data-model.md` |
-| Integration / API contracts | Look for `docs/api/`, `docs/architecture/` | Create `docs/api.md` |
-| Constraints | Look for `docs/security.md`, `docs/performance.md`, etc. by keyword | Create `docs/constraints.md` |
-| Glossary terms | Look for `docs/glossary.md`, `docs/GLOSSARY.md` (case-insensitive) | Create `docs/glossary.md` |
-
-The detection step uses glob + file content scanning to find where similar content already lives. The fallback creates new files only when no existing match is found. This means the skill adapts to whatever structure exists but has deterministic behavior when nothing exists.
-
-**Decision record:**
-
-After knowledge extraction, the plan is compressed into a lightweight decision record appended to `docs/decisions.md` (created if missing with `# Decisions` as the title). One file, append-only — keeps decisions findable without file proliferation.
-
-```markdown
-## 2026-03-18 — Widget System
-
-- **Date:** 2026-03-18
-- **Status:** Decomposed → issues created
-- **Tracking:** #41 (Phase 1: Data Model), #42 (Phase 2: API), #43 (Phase 3: UI)
-- **Story Points:** 47 total (12 tasks across 3 phases)
-- **Summary:** Multi-tenant widget rendering system with plugin architecture.
-  Chose event-driven communication over direct coupling. PostgreSQL for
-  persistence, Redis for widget state cache.
-- **Knowledge extracted to:** `docs/adr/009-widget-architecture.md`, `docs/api/widgets.md`
-```
-
-**After enrichment:**
+**After extraction:**
 
 - Delete the plan file.
-- Single commit covering doc enrichment, decision record, and plan deletion.
+- Single commit covering doc enrichment (files written by `extract-docs`) and plan deletion.
 - Commit message references tracking issues: `docs: extract knowledge from plan, create tasks (#41, #42, #43)`
 - The commit is local-only. The skill does not push or create a PR — that's the user's decision.
 
