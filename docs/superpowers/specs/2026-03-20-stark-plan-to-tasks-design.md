@@ -97,7 +97,42 @@ Each task is a single unit of work an agent can pick up and execute independentl
 
 If a task can't be described in one issue without scrolling, it's too big — split it. If a task is just "create a file with one function," it might be too small — merge with a related task. Each task should be roughly one focused PR's worth of work.
 
-**Output:** Structured JSON held in memory. Not written to disk.
+**Output schema:**
+
+```json
+{
+  "phases": [
+    {
+      "name": "Data Model & Storage",
+      "description": "Define entities, relationships, and persistence layer",
+      "depends_on": [],
+      "tasks": [
+        {
+          "title": "Implement User entity with validation",
+          "what": "Create User model with email, role, and tenant fields...",
+          "why": "The system requires multi-tenant user management...",
+          "where": ["src/models/user.py", "src/db/migrations/001_users.sql"],
+          "how": "Use SQLAlchemy declarative base with...",
+          "acceptance_criteria": [
+            "User model passes all field validations",
+            "Migration creates users table with correct indexes"
+          ],
+          "dependencies": [],
+          "review_hints": [
+            "Verify email uniqueness is enforced at DB level, not just app level",
+            "Check that tenant_id is non-nullable"
+          ],
+          "story_points": 3,
+          "risk": "low",
+          "confidence": "high"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Output held in memory between Pass 2 and Pass 3. Not written to disk.
 
 ### Phase 4: Pass 3 — Validation
 
@@ -118,7 +153,7 @@ The validation pass receives both the fixed plan and the structured breakdown. I
 
 - Fixable issues (missing context, incomplete acceptance criteria, wrong dependency) → skill fixes them in the structured breakdown and re-validates.
 - Structural issues (missed feature, phases in wrong order) → loops back to Pass 2 for that section.
-- Max 2 fix iterations. If it can't converge, surfaces remaining issues to the user.
+- Max 2 fix iterations. If it can't converge, halt and surface remaining issues to the user. Do NOT proceed to issue creation with a known-incomplete breakdown — that violates the quality chain.
 
 ### Phase 5: GitHub Issue Creation
 
@@ -183,7 +218,19 @@ Labels: `sp:N`, `risk:level`, `confidence:level`, `stark-plan-to-tasks`.
 All issues posted via `stark-claude` GitHub App:
 ```bash
 GH_TOKEN="$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)" \
-  gh issue create --title "..." --body "..." --label "sp:5,risk:med,confidence:high,stark-plan-to-tasks" --repo "{org}/{repo}"
+  gh issue create --title "..." --body "..." \
+  --label "sp:5" --label "risk:med" --label "confidence:high" --label "stark-plan-to-tasks" \
+  --repo "{org}/{repo}"
+```
+
+**Updating phase tracking issues** (step 3 — add task checklist after task issues exist):
+```bash
+GH_TOKEN="$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)" \
+  gh api --method PATCH "/repos/{org}/{repo}/issues/{number}" \
+  --field body="$(cat <<'EOF'
+{updated body with task checklist}
+EOF
+)"
 ```
 
 ### Phase 6: Knowledge Extraction & Doc Enrichment
@@ -217,6 +264,7 @@ If the project has no docs structure at all, the skill creates minimal files und
 - Delete the plan file.
 - Single commit covering doc enrichment + plan deletion.
 - Commit message references tracking issues: `docs: extract knowledge from plan, create tasks (#41, #42, #43)`
+- The commit is local-only. The skill does not push or create a PR — that's the user's decision.
 
 ### Phase 7: Summary
 
@@ -236,12 +284,30 @@ Each task issue carries a `stark-plan-to-tasks` label and a `confidence:level` l
 - Query: `gh issue list --label "stark-plan-to-tasks" --label "confidence:high"` — then check which of those required extra context.
 - This signal feeds back into improving the quality gate (Pass 1) and decomposition (Pass 2) prompts, following the same pattern as `stark-review-improvement`.
 
+## SKILL.md Frontmatter
+
+```yaml
+---
+name: stark-plan-to-tasks
+description: >
+  Decompose a spec/design document into phased GitHub issues with
+  story points, risk, and confidence labels. Extracts domain knowledge
+  to project docs and deletes the plan. Use when the user says
+  "plan to tasks", "decompose plan", "break down this plan",
+  "create issues from spec", "create tasks from plan",
+  or invokes /stark-plan-to-tasks.
+argument-hint: "<path-to-spec>"
+---
+```
+
 ## Constants
 
 ```
-PYTHON=~/git/Evinced/scripts/.venv/bin/python3
 SCRIPTS=~/.claude/code-review/scripts
+PYTHON=$SCRIPTS/.venv/bin/python3
 ```
+
+This skill uses only the `stark-claude` GitHub App (not all three like `stark-review`).
 
 ## What This Skill Does NOT Do
 
@@ -261,3 +327,64 @@ SCRIPTS=~/.claude/code-review/scripts
 - **Label already exists** — `gh label create --force` is idempotent (updates description/color if changed).
 - **Very large plan (20+ tasks)** — the skill handles this naturally; phases keep the issue count manageable per tracking issue.
 - **Plan contains no extractable knowledge** — skip Phase 6 doc enrichment, still delete the plan (the knowledge lives in the issues).
+
+## Failure Modes
+
+| Failure | Recovery |
+|---------|----------|
+| Plan file doesn't exist or is empty | Fail with clear error message |
+| Plan is not markdown | Fail with "expected .md file" error |
+| Target repo doesn't exist on GitHub | Fail at Phase 1 with repo name and org |
+| GitHub App auth fails | Fail at Phase 1 before any LLM work |
+| GitHub API rate limit during issue creation | Stop, report partial state (which issues were created), provide issue numbers for cleanup |
+| Partial issue creation (some succeeded, some failed) | Report which succeeded with numbers, allow user to retry remaining |
+| Token expires mid-run (>1 hour with many issues) | Re-acquire token before Phase 5; token cache auto-refreshes |
+| Issue body exceeds 65,536 char GitHub limit | Split the issue or truncate `How` section with a note; flag to user |
+| Plan quality gate can't be fixed without human input | Stop at Phase 2, report what's missing, ask the user |
+| Validation can't converge after 2 iterations | Halt, do not create issues, surface remaining problems |
+
+## Mistakes to Avoid
+
+- Don't use `git add -A` for the doc enrichment commit — add specific files by name.
+- Don't delete the plan file before all issues are successfully created.
+- Don't create issues without error handling — if issue 8 of 15 fails, track partial state.
+- Don't use comma-separated `--label` values — use separate `--label` flags per label.
+- Don't commit plan edits from Pass 1 separately — they're part of the transient state until Phase 6.
+- Don't proceed to issue creation if validation (Pass 3) didn't converge — halt and ask.
+- Don't create labels one at a time without checking — use `--force` flag which is idempotent.
+
+## Observability
+
+Follows the Skill Observability Protocol (`~/.claude/code-review/standards/observability.md`).
+
+**Task-based progress:** TaskCreate per phase with `activeForm` spinner text. TaskUpdate to mark in_progress → completed.
+
+**Timestamped log lines:** `[HH:MM:SS]` format with phase names and elapsed times.
+
+**5-minute checkpoints:** For long-running plans with many tasks — elapsed time + current phase.
+
+**End metrics block:**
+
+```json
+{
+  "skill": "stark-plan-to-tasks",
+  "duration_seconds": 142,
+  "plan_file": "docs/superpowers/specs/2026-03-18-widget-system-design.md",
+  "target_repo": "GetEvinced/widget-system",
+  "pass_1_duration_seconds": 28,
+  "pass_1_fixes_applied": 3,
+  "pass_1_user_prompts": 0,
+  "pass_2_duration_seconds": 45,
+  "pass_3_duration_seconds": 32,
+  "pass_3_fix_iterations": 1,
+  "phases_created": 4,
+  "issues_created": 12,
+  "labels_created": 8,
+  "total_story_points": 47,
+  "risk_distribution": {"low": 5, "med": 6, "high": 1},
+  "confidence_distribution": {"low": 1, "med": 3, "high": 8},
+  "knowledge_files_written": 3,
+  "knowledge_files_updated": 1,
+  "plan_deleted": true
+}
+```
