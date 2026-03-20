@@ -1,7 +1,7 @@
 # stark-extract-docs Skill Design
 
 **Date:** 2026-03-20
-**Status:** Draft (rev 1)
+**Status:** Draft (rev 2)
 **Author:** Aryeh + Claude
 
 ## Overview
@@ -9,6 +9,18 @@
 Skill that takes a spec/design document and its associated artifacts (plan, review files), extracts durable knowledge into project documentation, and generates review retrospectives. Two-pass architecture: Pass 1 extracts knowledge into a structured intermediate format, Pass 2 routes it to the right doc types and locations.
 
 Serves three consumers: human engineers (onboarding context), AI review agents (stop re-flagging resolved decisions), and future research/learning (process patterns, agent behavior analysis).
+
+Both passes run in the current Claude Code session — no external agent dispatch.
+
+## Relationship to stark-plan-to-tasks
+
+`stark-plan-to-tasks` Phase 6 (Knowledge Extraction & Doc Enrichment) performs overlapping work: extracting decisions, data models, integration points, constraints, and glossary terms from plans. To avoid duplication:
+
+- **`extract-docs` is the canonical knowledge extractor.** It owns all knowledge-to-docs routing.
+- **`plan-to-tasks` delegates knowledge extraction to `extract-docs`.** Phase 6 of `plan-to-tasks` calls `/stark-extract-docs <spec-path>` instead of implementing its own extraction. `plan-to-tasks` then deletes the plan; `extract-docs` does not.
+- **Boundary:** `plan-to-tasks` decomposes plans into GitHub issues. `extract-docs` extracts durable knowledge into project docs. Neither does the other's job.
+
+If `extract-docs` detects that `plan-to-tasks` already ran on the same spec (via history file), it skips categories that `plan-to-tasks` would have covered and focuses on review-derived knowledge (`evolution`, `decision_defended`, `agent_signal`) which `plan-to-tasks` doesn't produce.
 
 ## Inputs
 
@@ -28,6 +40,7 @@ Serves three consumers: human engineers (onboarding context), AI review agents (
 | `--batch <dir>` | No | Process all `*-design.md` files in a directory |
 | `--dry-run` | No | Extract and show intermediate format, don't write files |
 | `--no-commit` | No | Write files but don't commit |
+| `--force` | No | Re-extract even if history file exists for this spec |
 | `--target-repo <org/repo>` | No | Override target repo detection |
 
 **Input resolution:** Given a spec path, the skill locates associated artifacts by naming convention:
@@ -39,9 +52,9 @@ Serves three consumers: human engineers (onboarding context), AI review agents (
 
 All associations are optional. A spec with no review still has ADR-worthy decisions. A spec with no plan still has architecture knowledge. The skill works with whatever exists.
 
-**Target repo:** Parse the spec for repo references, fall back to `git remote -v`. Extracted docs go into the target project's `docs/`, not stark-review's. The `--target-repo` flag overrides detection.
+**Target repo:** Parse the spec's content for repo references (e.g., "GetEvinced/widget-system"), fall back to `git remote -v`. The `--target-repo` flag overrides detection. When the spec describes stark-review itself (no external repo reference found), the target is stark-review's own `docs/`. When the spec references an external project, the target is that project's `docs/`.
 
-**Batch mode:** Iterates over all `*-design.md` files in the given directory, runs extraction on each, deduplicates across specs at the end.
+**Batch mode:** Iterates over all `*-design.md` files in the given directory sequentially (one spec at a time — avoids context window issues). Deduplicates across specs at the end.
 
 ## Two-Pass Architecture
 
@@ -109,6 +122,14 @@ The LLM reads all available artifacts for a spec and extracts knowledge into a s
 }
 ```
 
+**Confidence levels and their effect on routing:**
+
+| Level | Meaning | Routing behavior |
+|-------|---------|-----------------|
+| `high` | Clear, unambiguous knowledge with strong evidence | Route automatically |
+| `medium` | Likely correct but could be interpreted differently | Route with `<!-- needs review -->` marker in generated doc |
+| `low` | Uncertain — may be an implementation detail rather than durable knowledge | Include in `--dry-run` output but skip in actual generation unless `--force` |
+
 If `--dry-run`: print the intermediate format and exit.
 
 ### Phase 3: Pass 2 — Routing & Generation
@@ -121,7 +142,7 @@ Takes the intermediate extractions and routes each to the right document type an
 |----------|----------------|----------|--------|
 | `decision` | ADR | `docs/adr/NNNN-<slug>.md` | ADR template (Context, Decision, Alternatives, Consequences) |
 | `decision_defended` | ADR | `docs/adr/NNNN-<slug>.md` | Same template — Context includes the review challenge, Decision includes the rationale for holding |
-| `constraint` | ADR or append | `docs/adr/` or existing constraint doc | ADR if standalone decision; append if qualifier on existing doc |
+| `constraint` | ADR or reference | `docs/adr/` or `docs/reference/constraints.md` | ADR if it's a deliberate choice with alternatives (e.g., "chose X over Y because Z"); otherwise append to `docs/reference/constraints.md` as a boundary condition |
 | `integration` | Reference doc | `docs/reference/<component>.md` | Markdown with endpoints/contracts/auth patterns |
 | `data_model` | Reference doc | `docs/reference/<entity>.md` | Markdown with schema, fields, relationships |
 | `evolution` | Review retrospective | `docs/retrospectives/YYYY-MM-DD-<slug>.md` | Structured retrospective |
@@ -130,7 +151,7 @@ Takes the intermediate extractions and routes each to the right document type an
 
 **ADR numbering:** Read existing `docs/adr/` to find the highest `NNNN`, continue from there. If no `docs/adr/` exists, start at `0001`. Related decisions from the same spec get sequential numbers.
 
-**ADR deduplication:** Before creating an ADR, scan existing ADRs for title similarity. If a substantially similar decision already exists, skip and log the duplicate. In batch mode this prevents the same pattern from generating duplicate ADRs across specs.
+**ADR deduplication:** Before creating an ADR, the LLM compares the new ADR's title and context summary against existing ADR titles and first paragraphs to determine if they cover the same decision. If substantially similar: skip and log the duplicate. If uncertain: create the ADR with a `<!-- possible duplicate of NNNN -->` note rather than silently skipping. In batch mode this prevents the same pattern from generating duplicate ADRs across specs.
 
 **ADR format:** Uses the project's ADR template if one exists (`docs/adr/0000-template.md`), otherwise uses the standard template:
 
@@ -210,6 +231,8 @@ Qualitative observations distilled from review retrospectives.
 
 **Learning log categories:** `agent-behavior`, `agent-reliability`, `domain-signal`, `spec-quality`, `process`, `prompt-improvement`.
 
+**`docs/retrospectives/` directory:** This is a new doc type not in the current dev-docs taxonomy (`specs/`, `plans/`, `adr/`, `guides/`, `reference/`, `architecture/`). The skill creates it on demand when retrospective content exists. Retrospectives are point-in-time artifacts (like specs and plans), so staleness detection should exclude them — add `docs/retrospectives/` to `.doc-staleness.yml` exclude list if the file exists.
+
 **Location adaptation:** The skill reads the target project's existing `docs/` tree and follows what's there. If the project uses `docs/decisions/` instead of `docs/adr/`, it writes there. If there's no docs structure, it creates minimal directories as needed.
 
 ### Phase 4: Preview & Write
@@ -232,8 +255,8 @@ Qualitative observations distilled from review retrospectives.
 ### Phase 5: Batch Coordination (batch mode only)
 
 After all specs are individually processed:
-- Run a deduplication pass across all generated ADRs. If spec A and spec C both produced an ADR about the same pattern, keep the richer one, drop the duplicate.
-- Renumber ADRs sequentially if any were dropped.
+- Run a deduplication pass across all generated ADRs. If spec A and spec C both produced an ADR about the same pattern, keep the richer one, delete the duplicate.
+- Do NOT renumber remaining ADRs — gaps in numbering are expected and safe. Renumbering would break cross-references from other ADRs, specs, and code comments. This is consistent with the taxonomy spec's "never reuse numbers" rule.
 - Final commit covers the dedup cleanup.
 
 ### Phase 6: Summary
@@ -256,7 +279,6 @@ Batch mode additionally: cross-spec dedup stats, totals across all specs.
 ```json
 {
   "skill": "stark-extract-docs",
-  "duration_seconds": 87,
   "spec_path": "docs/superpowers/specs/2026-03-19-rename-project-design.md",
   "target_repo": "GetEvinced/stark-review",
   "artifacts_found": {
@@ -265,8 +287,18 @@ Batch mode additionally: cross-spec dedup stats, totals across all specs.
     "spec_review": true,
     "plan_review": true
   },
-  "pass_1_duration_seconds": 34,
-  "pass_2_duration_seconds": 41,
+  "timing": {
+    "started_at": "2026-03-20T14:30:00Z",
+    "completed_at": "2026-03-20T14:31:27Z",
+    "total_duration_s": 87,
+    "phases": [
+      {"name": "Setup", "duration_s": 8},
+      {"name": "Pass 1 — Knowledge Extraction", "duration_s": 34},
+      {"name": "Pass 2 — Routing & Generation", "duration_s": 41},
+      {"name": "Preview & Write", "duration_s": 3},
+      {"name": "Summary", "duration_s": 1}
+    ]
+  },
   "extractions": {
     "total": 14,
     "by_category": {
@@ -347,6 +379,17 @@ PYTHON=$SCRIPTS/.venv/bin/python3
 - Generate docs from code (that's `/init-docs --backfill`)
 - Push or create PRs (commit is local-only)
 
+## Mistakes to Avoid
+
+- Don't use `git add -A` for the doc commit — add specific files by name.
+- Don't modify the source spec or plan — they are point-in-time artifacts.
+- Don't write retrospectives/ADRs into stark-review's `docs/` when the spec describes an external project.
+- Don't renumber existing ADRs — gaps in numbering are safe; renumbering breaks cross-references.
+- Don't create duplicate ADRs silently — when uncertain, add a `<!-- possible duplicate -->` marker.
+- Don't route low-confidence extractions to docs without `--force` — they'll add noise.
+- Don't assume `docs/adr/` is the ADR directory — check for `docs/decisions/`, `docs/adrs/` first.
+- Don't create the `docs/retrospectives/` directory if no retrospective content was extracted.
+
 ## Edge Cases
 
 - **Spec has no associated review** — skip `evolution`, `decision_defended`, and `agent_signal` categories. Still extract `decision`, `constraint`, `integration`, `data_model`, `glossary`.
@@ -354,7 +397,7 @@ PYTHON=$SCRIPTS/.venv/bin/python3
 - **Target project has no `docs/` directory** — create minimal structure (`docs/adr/`, `docs/retrospectives/`, `docs/reference/`).
 - **ADR directory uses different name** — detect `docs/decisions/`, `docs/adrs/`, `docs/adr/` and use whatever exists.
 - **Batch mode with mixed spec locations** — process each spec independently, dedup across all at the end.
-- **Spec already processed** — check history file; if exists and spec hasn't changed (compare mtime or hash), skip with log message.
+- **Spec already processed** — check history file; if exists and spec hasn't changed (compare mtime or hash), skip with log message. Use `--force` to re-extract.
 - **Learning log doesn't exist** — create it with the header row.
 - **Glossary doesn't exist** — create it with a title.
 
