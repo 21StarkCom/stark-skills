@@ -111,71 +111,38 @@ install() {
     fi
 
     # 4. Skills: ~/.claude/skills/{name}/SKILL.md → repo/skill/{name}/SKILL.md
-    mkdir -p "$HOME/.claude/skills/stark-review"
-    if [ -f "$REPO_DIR/skill/SKILL.md" ]; then
-        link_dir "$REPO_DIR/skill/SKILL.md" "$HOME/.claude/skills/stark-review/SKILL.md" "Skill: stark-review"
-    else
-        warn "Skill file not found at $REPO_DIR/skill/SKILL.md"
-    fi
+    #    Auto-discover all stark-* skill dirs under skill/
+    for skill_dir in "$REPO_DIR"/skill/stark-*/; do
+        [ -d "$skill_dir" ] || continue
+        skill_dir="${skill_dir%/}"  # strip trailing slash
+        local skill_name
+        skill_name=$(basename "$skill_dir")
+        local skill_file="$skill_dir/SKILL.md"
 
-    mkdir -p "$HOME/.claude/skills/stark-review-improvement"
-    if [ -f "$REPO_DIR/skill/stark-review-improvement/SKILL.md" ]; then
-        link_dir "$REPO_DIR/skill/stark-review-improvement/SKILL.md" "$HOME/.claude/skills/stark-review-improvement/SKILL.md" "Skill: stark-review-improvement"
-    else
-        warn "Skill file not found at $REPO_DIR/skill/stark-review-improvement/SKILL.md"
-    fi
+        if [ -f "$skill_file" ]; then
+            mkdir -p "$HOME/.claude/skills/$skill_name"
+            link_dir "$skill_file" "$HOME/.claude/skills/$skill_name/SKILL.md" "Skill: $skill_name"
+        else
+            warn "Skill dir $skill_name has no SKILL.md"
+        fi
+    done
 
-    mkdir -p "$HOME/.claude/skills/stark-review-plan"
-    if [ -f "$REPO_DIR/skill/stark-review-plan/SKILL.md" ]; then
-        link_dir "$REPO_DIR/skill/stark-review-plan/SKILL.md" "$HOME/.claude/skills/stark-review-plan/SKILL.md" "Skill: stark-review-plan"
-    else
-        warn "Skill file not found at $REPO_DIR/skill/stark-review-plan/SKILL.md"
-    fi
-
-    mkdir -p "$HOME/.claude/skills/init-docs"
-    if [ -f "$REPO_DIR/skill/init-docs/SKILL.md" ]; then
-        link_dir "$REPO_DIR/skill/init-docs/SKILL.md" "$HOME/.claude/skills/init-docs/SKILL.md" "Skill: init-docs"
-    else
-        warn "Skill file not found at $REPO_DIR/skill/init-docs/SKILL.md"
-    fi
-
-    mkdir -p "$HOME/.claude/skills/stark-session"
-    if [ -f "$REPO_DIR/skill/stark-session/SKILL.md" ]; then
-        link_dir "$REPO_DIR/skill/stark-session/SKILL.md" "$HOME/.claude/skills/stark-session/SKILL.md" "Skill: stark-session"
-    else
-        warn "Skill file not found at $REPO_DIR/skill/stark-session/SKILL.md"
-    fi
-
-    mkdir -p "$HOME/.claude/skills/onboard-project"
-    if [ -f "$REPO_DIR/skill/onboard-project/SKILL.md" ]; then
-        link_dir "$REPO_DIR/skill/onboard-project/SKILL.md" "$HOME/.claude/skills/onboard-project/SKILL.md" "Skill: onboard-project"
-    else
-        warn "Skill file not found at $REPO_DIR/skill/onboard-project/SKILL.md"
-    fi
-
-    mkdir -p "$HOME/.claude/skills/update-deps"
-    if [ -f "$REPO_DIR/skill/update-deps/SKILL.md" ]; then
-        link_dir "$REPO_DIR/skill/update-deps/SKILL.md" "$HOME/.claude/skills/update-deps/SKILL.md" "Skill: update-deps"
-    else
-        warn "Skill file not found at $REPO_DIR/skill/update-deps/SKILL.md"
-    fi
-
-    mkdir -p "$HOME/.claude/skills/rename-project"
-    if [ -f "$REPO_DIR/skill/rename-project/SKILL.md" ]; then
-        link_dir "$REPO_DIR/skill/rename-project/SKILL.md" \
-                 "$HOME/.claude/skills/rename-project/SKILL.md" \
-                 "Skill: rename-project"
-    else
-        warn "Skill file not found at $REPO_DIR/skill/rename-project/SKILL.md"
-    fi
-
-    # Backup old session-start if it exists (not a symlink — it was a standalone file)
-    if [ -f "$HOME/.claude/skills/session-start/SKILL.md" ] && [ ! -L "$HOME/.claude/skills/session-start/SKILL.md" ]; then
-        mv "$HOME/.claude/skills/session-start/SKILL.md" "$HOME/.claude/skills/session-start/SKILL.md.bak"
-        info "Old session-start: backed up to SKILL.md.bak"
-    elif [ -f "$HOME/.claude/skills/session-start/SKILL.md" ]; then
-        info "Old session-start: exists (symlink, not backing up)"
-    fi
+    # Clean up old skill names (renamed to stark-* prefix)
+    for old_name in init-docs update-deps rename-project onboard-project review-deployment-plan release claude-md-improver session-start; do
+        local old_dir="$HOME/.claude/skills/$old_name"
+        if [ -d "$old_dir" ]; then
+            local old_file="$old_dir/SKILL.md"
+            if [ -L "$old_file" ]; then
+                rm "$old_file"
+                rmdir "$old_dir" 2>/dev/null
+                info "Cleaned up old skill: $old_name (was symlink)"
+            elif [ -f "$old_file" ]; then
+                rm "$old_file"
+                rmdir "$old_dir" 2>/dev/null
+                info "Cleaned up old skill: $old_name (was standalone)"
+            fi
+        fi
+    done
 
     # 5. Standards: ~/.claude/code-review/standards/ → repo/standards/
     link_dir "$REPO_DIR/standards" "$CODE_REVIEW_DIR/standards" "Standards templates"
@@ -238,14 +205,16 @@ uninstall() {
     unlink_dir "$CODE_REVIEW_DIR/prompts" "Prompts"
     unlink_dir "$CODE_REVIEW_DIR/scripts" "Scripts"
     unlink_dir "$EVINCED_DIR/.code-review" "Evinced org config"
-    unlink_dir "$HOME/.claude/skills/stark-review/SKILL.md" "Skill: stark-review"
-    unlink_dir "$HOME/.claude/skills/stark-review-improvement/SKILL.md" "Skill: stark-review-improvement"
-    unlink_dir "$HOME/.claude/skills/stark-review-plan/SKILL.md" "Skill: stark-review-plan"
-    unlink_dir "$HOME/.claude/skills/init-docs/SKILL.md" "Skill: init-docs"
-    unlink_dir "$HOME/.claude/skills/stark-session/SKILL.md" "Skill: stark-session"
-    unlink_dir "$HOME/.claude/skills/onboard-project/SKILL.md" "Skill: onboard-project"
-    unlink_dir "$HOME/.claude/skills/update-deps/SKILL.md" "Skill: update-deps"
-    unlink_dir "$HOME/.claude/skills/rename-project/SKILL.md" "Skill: rename-project"
+
+    # Unlink all stark-* skills
+    for skill_dir in "$HOME"/.claude/skills/stark-*/; do
+        [ -d "$skill_dir" ] || continue
+        local skill_name
+        skill_name=$(basename "$skill_dir")
+        unlink_dir "$skill_dir/SKILL.md" "Skill: $skill_name"
+        rmdir "$skill_dir" 2>/dev/null || true
+    done
+
     unlink_dir "$CODE_REVIEW_DIR/standards" "Standards templates"
 
     echo ""
@@ -263,14 +232,15 @@ status() {
     check_dir "$CODE_REVIEW_DIR/prompts" "Prompts"
     check_dir "$CODE_REVIEW_DIR/scripts" "Scripts"
     check_dir "$EVINCED_DIR/.code-review" "Evinced org config"
-    check_dir "$HOME/.claude/skills/stark-review/SKILL.md" "Skill: stark-review"
-    check_dir "$HOME/.claude/skills/stark-review-improvement/SKILL.md" "Skill: stark-review-improvement"
-    check_dir "$HOME/.claude/skills/stark-review-plan/SKILL.md" "Skill: stark-review-plan"
-    check_dir "$HOME/.claude/skills/init-docs/SKILL.md" "Skill: init-docs"
-    check_dir "$HOME/.claude/skills/stark-session/SKILL.md" "Skill: stark-session"
-    check_dir "$HOME/.claude/skills/onboard-project/SKILL.md" "Skill: onboard-project"
-    check_dir "$HOME/.claude/skills/update-deps/SKILL.md" "Skill: update-deps"
-    check_dir "$HOME/.claude/skills/rename-project/SKILL.md" "Skill: rename-project"
+
+    # Check all stark-* skills
+    for skill_dir in "$REPO_DIR"/skill/stark-*/; do
+        [ -d "$skill_dir" ] || continue
+        local skill_name
+        skill_name=$(basename "$skill_dir")
+        check_dir "$HOME/.claude/skills/$skill_name/SKILL.md" "Skill: $skill_name"
+    done
+
     check_dir "$CODE_REVIEW_DIR/standards" "Standards templates"
 
     echo ""

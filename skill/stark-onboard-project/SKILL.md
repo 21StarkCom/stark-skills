@@ -1,6 +1,6 @@
 ---
-name: onboard-project
-description: Bootstrap a new project end-to-end — initializes git, creates a GitHub repo in GetEvinced org, connects all 3 GitHub Apps (stark-claude, stark-codex, stark-gemini), then sets up Claude Code (CLAUDE.md, .claude/ directory, memory). Use when the user says "onboard project", "setup claude", "bootstrap claude", "init project", "create repo", "new project", or "onboard-project". Also use when starting work in a directory that has no git repo and no CLAUDE.md.
+name: stark-onboard-project
+description: Bootstrap a new project end-to-end — initializes git, creates a GitHub repo in GetEvinced org, connects all 3 GitHub Apps (stark-claude, stark-codex, stark-gemini), then sets up Claude Code (CLAUDE.md, .claude/ directory, memory). Use when the user says "onboard project", "setup claude", "bootstrap claude", "init project", "create repo", "new project", or "stark-onboard-project". Also use when starting work in a directory that has no git repo and no CLAUDE.md.
 argument-hint: <optional: path to the project directory, defaults to cwd>
 ---
 
@@ -227,7 +227,7 @@ If the `gh api` call fails with a 403/scope error, tell the user:
 ```
 Your gh token needs the 'read:user' scope to manage app installations.
 Run: gh auth refresh -h github.com -s read:user
-Then re-run /onboard-project
+Then re-run /stark-onboard-project
 ```
 
 Or provide the manual fallback:
@@ -260,7 +260,7 @@ done
 
 ### 4a. Check for existing CLAUDE.md
 
-If CLAUDE.md already exists: log "CLAUDE.md already exists — skipping. Use /claude-md-improver to enhance it." and skip to 4c.
+If CLAUDE.md already exists: log "CLAUDE.md already exists — skipping. Use /stark-claude-md-improver to enhance it." and skip to 4c.
 
 ### 4b. Auto-detect and generate CLAUDE.md
 
@@ -335,7 +335,7 @@ CLAUDE.md:   ✓ generated
 Next steps:
 - Review CLAUDE.md and adjust
 - Start a session with /stark-session start
-- Use /init-docs to scaffold documentation
+- Use /stark-init-docs to scaffold documentation
 ```
 
 ---
@@ -345,7 +345,7 @@ Next steps:
 | Failure | Recovery |
 |---------|----------|
 | CODEOWNERS already exists | Skip — don't overwrite |
-| CLAUDE.md already exists | Skip — suggest `/claude-md-improver` |
+| CLAUDE.md already exists | Skip — suggest `/stark-claude-md-improver` |
 | Git already initialized | Skip Phase 1 |
 | GitHub repo already exists | Add remote and push |
 | `gh` not authenticated | Run `gh auth login` |
@@ -353,6 +353,16 @@ Next steps:
 | Template file missing | Generate CLAUDE.md from scratch |
 | Not GetEvinced org | Skip GitHub App connection (apps are GetEvinced-only) |
 | No language detected | Ask user to specify |
+
+## Observability
+
+Follow the [Skill Observability Protocol](~/.claude/code-review/standards/observability.md) for all timing, checkpoints, and metrics reporting.
+
+Additional skill-specific metrics:
+- Phases: skipped (already done) vs executed
+- GitHub Apps: connected count (0-3), per-app status
+- CLAUDE.md: generated / already existed
+- Total onboarding time
 
 ## Mistakes to Avoid
 

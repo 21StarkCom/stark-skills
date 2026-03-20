@@ -228,6 +228,16 @@ Write:
 
 Remove `in-progress.json` if it exists.
 
+## Observability
+
+Follow the [Skill Observability Protocol](~/.claude/code-review/standards/observability.md) for all timing, checkpoints, and metrics reporting.
+
+Additional skill-specific metrics:
+- Per-round: dispatch duration, classify+fix duration
+- Per-agent: success/failure count, avg duration per agent (claude/codex/gemini)
+- Finding lifecycle: total → fixed / false positive / noise / recurring / unresolved
+- Dispatch health: succeeded/total sub-agents ratio per round
+
 ## Debugging Dispatch Failures
 
 If sub-agents return 0 findings or errors, check the dispatch layer:

@@ -172,6 +172,15 @@ Changes: {count} prompt edits, {count} orchestrator edits, {count} config edits"
 
 Do NOT push unless the user explicitly asks.
 
+## Observability
+
+Follow the [Skill Observability Protocol](~/.claude/code-review/standards/observability.md) for all timing, checkpoints, and metrics reporting.
+
+Additional skill-specific metrics:
+- Action items: total parsed, approved, applied (by category: prompt/orchestrator/config)
+- Validation: syntax checks passed/failed
+- Files modified: count by type (prompt, orchestrator, config)
+
 ## Important Constraints
 
 - **Never rewrite an entire prompt file.** Targeted edits only.

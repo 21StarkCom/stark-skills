@@ -1,10 +1,10 @@
 ---
-name: init-docs
+name: stark-init-docs
 description: >
   Scaffold dev docs structure into any repo. Modes: --template (empty skeleton),
   --backfill (generate from git history), --upgrade (migrate existing docs),
   --clean (remove skeleton). Use when the user says "init docs", "setup docs",
-  "scaffold docs", or invokes /init-docs.
+  "scaffold docs", or invokes /stark-init-docs.
 ---
 
 # init-docs
@@ -304,6 +304,16 @@ git commit -m "docs: remove doc scaffold"
 ```
 
 If nothing was removed, skip the commit.
+
+## Observability
+
+Follow the [Skill Observability Protocol](~/.claude/code-review/standards/observability.md) for all timing, checkpoints, and metrics reporting.
+
+Additional skill-specific metrics:
+- Mode(s) executed: template / backfill / upgrade / clean
+- Files: created, skipped (already exists), moved (upgrade), deleted (clean)
+- ADRs generated, specs generated, guides generated (backfill)
+- Internal links updated (upgrade)
 
 ## Error Handling
 

@@ -166,11 +166,19 @@ Session complete.
 
 ---
 
+## Observability
+
+Follow the [Skill Observability Protocol](~/.claude/code-review/standards/observability.md) for all timing, checkpoints, and metrics reporting.
+
+Additional skill-specific metrics:
+- **Start mode**: context load time, git state time, per-health-check duration (pass/fail), total briefing time
+- **End mode**: test duration (pass/fail), build duration (pass/fail), PRs merged count, docs committed count, push result
+
 ## Failure Modes
 
 | Failure | Recovery |
 |---------|----------|
-| No CLAUDE.md | Note in briefing — suggest `/onboard-project` |
+| No CLAUDE.md | Note in briefing — suggest `/stark-onboard-project` |
 | No memory files | "No previous session context" — not an error |
 | `gh` auth fails | Skip PR sections — show git state only |
 | Not a git repo | Skip git and PR sections |
