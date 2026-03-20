@@ -19,5 +19,10 @@
     "doc_paths": ["docs/", "CLAUDE.md"],
     "devlog_path": null,
     "pr_merge_strategy": "squash"
+  },
+  "plan_to_tasks": {
+    "validation_agents": ["codex"],
+    "max_quality_gate_rounds": 3,
+    "max_validation_iterations": 2
   }
 }
