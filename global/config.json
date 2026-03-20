@@ -1,5 +1,5 @@
 {
-  "agents": ["claude", "codex", "gemini"],
+  "agents": ["claude", "codex"],
   "fix_threshold": "medium",
   "test_command": null,
   "build_command": null,
