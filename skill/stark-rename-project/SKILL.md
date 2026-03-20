@@ -1,9 +1,9 @@
 ---
-name: rename-project
+name: stark-rename-project
 description: >
   Rename a project locally and on GitHub, update all references in sibling repos,
   and reinstall symlinks. Use when the user says "rename project", "rename repo",
-  "rename this to", or invokes /rename-project.
+  "rename this to", or invokes /stark-rename-project.
 argument-hint: <old-name> <new-name> [--dry-run]
 ---
 
@@ -389,6 +389,16 @@ Print:
 - Rename GitHub Apps or their credentials
 - Modify binary files or untracked files
 - Update external webhooks, Slack integrations, or Jira links
+
+## Observability
+
+Follow the [Skill Observability Protocol](~/.claude/code-review/standards/observability.md) for all timing, checkpoints, and metrics reporting.
+
+Additional skill-specific metrics:
+- GitHub rename: API call duration, success/failure
+- Files modified: count in renamed project, count per sibling repo
+- Symlinks: removed (old), recreated (new)
+- Verification: checks passed/failed, residual references found
 
 ## Mistakes to Avoid
 

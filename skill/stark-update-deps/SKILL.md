@@ -1,6 +1,6 @@
 ---
-name: update-deps
-description: Audit and update all dependency versions across a project to their latest stable releases. Scans pyproject.toml, package.json, requirements.txt, Dockerfile, docker-compose.yml, go.mod, Cargo.toml, and any other dependency manifest. Looks up each dependency on official sources (PyPI, npm, Docker Hub, GitHub releases) via WebSearch, checks for compatibility blockers and breaking changes, updates versions in-place, then re-verifies every updated version to ensure accuracy. Use when the user says "update dependencies", "check for outdated packages", "upgrade versions", "are my deps current", "update-deps", or any variation of wanting to bring project dependencies up to date. Also use proactively when you notice stale or outdated versions during other work.
+name: stark-update-deps
+description: Audit and update all dependency versions across a project to their latest stable releases. Scans pyproject.toml, package.json, requirements.txt, Dockerfile, docker-compose.yml, go.mod, Cargo.toml, and any other dependency manifest. Looks up each dependency on official sources (PyPI, npm, Docker Hub, GitHub releases) via WebSearch, checks for compatibility blockers and breaking changes, updates versions in-place, then re-verifies every updated version to ensure accuracy. Use when the user says "update dependencies", "check for outdated packages", "upgrade versions", "are my deps current", "stark-update-deps", or any variation of wanting to bring project dependencies up to date. Also use proactively when you notice stale or outdated versions during other work.
 ---
 
 # Dependency Version Updater
@@ -248,6 +248,16 @@ Action items for major bumps:
 Verification: All N updated versions confirmed on official registries.
 [explicit per-item listing here]
 ```
+
+## Observability
+
+Follow the [Skill Observability Protocol](~/.claude/code-review/standards/observability.md) for all timing, checkpoints, and metrics reporting.
+
+Additional skill-specific metrics:
+- Dependencies: total scanned, updated (safe/review/blocked/skip)
+- WebSearch calls: count, per-ecosystem breakdown
+- Verification: confirmed, failed, reverted
+- Major version bumps: count with migration flags
 
 ## Edge Cases
 

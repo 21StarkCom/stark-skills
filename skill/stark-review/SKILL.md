@@ -251,6 +251,15 @@ git branch -D review/pr-{number}
 
 Best-effort — don't fail if cleanup fails. If a crashed session left a worktree, the next invocation detects and reuses it (Phase 1.5).
 
+## Observability
+
+Follow the [Skill Observability Protocol](~/.claude/code-review/standards/observability.md) for all timing, checkpoints, and metrics reporting.
+
+Additional skill-specific metrics:
+- Per-round: dispatch duration, classify+fix duration, build+test duration
+- Per-agent: success/failure count, avg duration per agent (claude/codex/gemini)
+- Finding lifecycle: total → fixed / false positive / noise / recurring / unresolved
+
 ## Review Guidelines
 
 - Don't suggest adding tests unless there's a concrete logic bug risk

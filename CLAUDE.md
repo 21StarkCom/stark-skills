@@ -8,6 +8,7 @@ Multi-agent PR code review system. 3 AI CLI tools (Claude, Codex, Gemini) × N d
 
 - `global/` — global config + prompts, installed to `~/.claude/code-review/`
 - `scripts/` — Python orchestrator + GitHub App auth, installed to `~/.claude/code-review/scripts/`
+- `skill/` — all skills (`skill/stark-*/SKILL.md`), installed as symlinks to `~/.claude/skills/`
 - `org/evinced/` — Evinced org config, installed to `~/git/Evinced/.code-review/`
 - `docs/specs/` — design spec
 - `standards/` — org-wide doc templates and workflows, installed to `~/.claude/code-review/standards/`
@@ -32,12 +33,20 @@ Multi-agent PR code review system. 3 AI CLI tools (Claude, Codex, Gemini) × N d
 
 ## Skills
 
-- `/stark-review [PR_NUMBER]` — multi-agent PR review (3 LLMs × 6 domains). Full mode with fix loop requires `test_command` in config. Otherwise review-only.
-- `/stark-review-improvement` — improve prompts based on a completed stark-review's Prompt Improvement Assessment. Reads assessment from conversation context or history, edits prompt/orchestrator/config files, validates, logs to `docs/prompt-changelog.md`, and commits.
-- `/stark-review-plan <path>` — multi-agent plan/spec review (3 LLMs × 7 domains). Review-fix loop with auto-fixes, then final review-only round. Outputs `.review.md` sibling file.
-- `/init-docs [--template|--backfill|--upgrade|--clean]` — scaffold dev docs structure into any repo
-- `/stark-session [start|end]` — session management: briefing on start, test/merge/commit/push on end
-- `/rename-project <old-name> <new-name> [--dry-run]` — rename project locally and on GitHub, update references across sibling repos, reinstall symlinks
+All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.claude/skills/` via install.sh.
+
+- `/stark-review [PR_NUMBER]` — multi-agent PR review (3 LLMs × 6 domains)
+- `/stark-review-plan <path>` — multi-agent plan/spec review (3 LLMs × 7 domains)
+- `/stark-review-improvement` — improve prompts based on review assessment
+- `/stark-review-deployment-plan` — adversarial infra/deployment plan review
+- `/stark-session [start|end]` — session management: briefing on start, cleanup on end
+- `/stark-pr-flow` — end-to-end PR workflow: push, create, review, merge
+- `/stark-init-docs [--template|--backfill|--upgrade|--clean]` — scaffold dev docs
+- `/stark-onboard-project` — bootstrap new project: git, GitHub, apps, CLAUDE.md
+- `/stark-rename-project <old> <new> [--dry-run]` — rename project + update refs
+- `/stark-update-deps` — audit and update dependency versions
+- `/stark-release [patch|minor|major]` — cut a release: changelog, tag, GitHub Release
+- `/stark-claude-md-improver` — analyze and improve CLAUDE.md files
 
 ## Conventions
 
