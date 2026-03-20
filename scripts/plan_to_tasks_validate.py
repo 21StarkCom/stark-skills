@@ -154,46 +154,44 @@ def build_validation_envelope(
 def _extract_codex_output(raw: str) -> str:
     """Extract text content from Codex JSONL event stream.
 
-    Handles:
-    - agent_message events with output_text content blocks
-    - item.completed events with output_text content blocks
+    Codex --json emits JSONL events. The actual response text appears in
+    item.completed events in one of these forms (matching plan_review_dispatch.py):
+    1. item.type == "agent_message" → item.text (direct text field)
+    2. item.type == "message" → item.content[].output_text
     Falls back to raw string if no events are found.
     """
-    lines = raw.strip().splitlines()
-    extracted: list[str] = []
+    # Only attempt JSONL parsing if output looks like JSON events
+    if not raw.strip().startswith("{"):
+        return raw
 
-    for line in lines:
+    parts: list[str] = []
+    for line in raw.strip().splitlines():
         line = line.strip()
         if not line:
             continue
         try:
-            event = json.loads(line)
+            ev = json.loads(line)
         except json.JSONDecodeError:
             continue
 
-        event_type = event.get("type", "")
+        if ev.get("type") == "item.completed":
+            item = ev.get("item", {})
+            itype = item.get("type", "")
+            if itype == "agent_message":
+                # Primary path: direct text field on agent_message items
+                text = item.get("text", "")
+                if text:
+                    parts.append(text)
+            elif itype == "message":
+                # Secondary path: content blocks with output_text
+                for c in item.get("content", []):
+                    if isinstance(c, dict) and c.get("type") == "output_text":
+                        text = c.get("text", "")
+                        if text:
+                            parts.append(text)
 
-        # agent_message format
-        if event_type == "agent_message":
-            content = event.get("content", [])
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "output_text":
-                    text = block.get("text", "")
-                    if text:
-                        extracted.append(text)
-
-        # item.completed format
-        elif event_type == "item.completed":
-            item = event.get("item", {})
-            content = item.get("content", [])
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "output_text":
-                    text = block.get("text", "")
-                    if text:
-                        extracted.append(text)
-
-    if extracted:
-        return "\n".join(extracted)
+    if parts:
+        return "\n".join(parts)
     return raw
 
 

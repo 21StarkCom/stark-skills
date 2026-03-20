@@ -91,15 +91,40 @@ class TestOutputParsing:
         assert result.error is not None
         assert result.approved is False
 
-    def test_parse_codex_jsonl_events(self):
-        events = [json.dumps({"type": "agent_message", "content": [
-            {"type": "output_text", "text": json.dumps(
-                {"schema_version": 1, "approved": True, "issues": []}
-            )}
-        ]})]
+    def test_parse_codex_item_completed_agent_message(self):
+        """Codex primary path: item.completed → item.type=agent_message → item.text."""
+        validation_json = json.dumps(
+            {"schema_version": 1, "approved": True, "issues": []}
+        )
+        events = [json.dumps({
+            "type": "item.completed",
+            "item": {
+                "type": "agent_message",
+                "text": validation_json,
+            },
+        })]
         raw = "\n".join(events)
         result = parse_validation_output(raw, agent="codex")
         assert result.approved is True
+
+    def test_parse_codex_item_completed_message(self):
+        """Codex secondary path: item.completed → item.type=message → content[].output_text."""
+        validation_json = json.dumps(
+            {"schema_version": 1, "approved": False, "issues": [
+                {"phase_id": "p1", "task_id": "t1", "field": "how", "problem": "vague"}
+            ]}
+        )
+        events = [json.dumps({
+            "type": "item.completed",
+            "item": {
+                "type": "message",
+                "content": [{"type": "output_text", "text": validation_json}],
+            },
+        })]
+        raw = "\n".join(events)
+        result = parse_validation_output(raw, agent="codex")
+        assert result.approved is False
+        assert len(result.issues) == 1
 
     def test_parse_gemini_envelope(self):
         inner = json.dumps({"schema_version": 1, "approved": True, "issues": []})
