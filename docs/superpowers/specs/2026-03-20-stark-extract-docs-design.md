@@ -20,7 +20,9 @@ Both passes run in the current Claude Code session — no external agent dispatc
 - **`plan-to-tasks` delegates knowledge extraction to `extract-docs`.** Phase 6 of `plan-to-tasks` calls `/stark-extract-docs <spec-path>` instead of implementing its own extraction. `plan-to-tasks` then deletes the plan; `extract-docs` does not.
 - **Boundary:** `plan-to-tasks` decomposes plans into GitHub issues. `extract-docs` extracts durable knowledge into project docs. Neither does the other's job.
 
-If `extract-docs` detects that `plan-to-tasks` already ran on the same spec (via history file), it skips categories that `plan-to-tasks` would have covered and focuses on review-derived knowledge (`evolution`, `decision_defended`, `agent_signal`) which `plan-to-tasks` doesn't produce.
+If `extract-docs` detects that `plan-to-tasks` already ran on the same spec, it skips categories that `plan-to-tasks` covers (`decision`, `constraint`, `integration`, `data_model`, `glossary`) and focuses on review-derived knowledge (`evolution`, `decision_defended`, `agent_signal`) which `plan-to-tasks` doesn't produce.
+
+**Detection mechanism:** Check for a `plan-to-tasks` history file at `~/.claude/code-review/history/plan-to-tasks/{repo}/{spec-slug}.json`. If that file exists and contains `"plan_deleted": true`, consider `plan-to-tasks` as having completed for this spec.
 
 ## Inputs
 
@@ -41,7 +43,8 @@ If `extract-docs` detects that `plan-to-tasks` already ran on the same spec (via
 | `--dry-run` | No | Extract and show intermediate format, don't write files |
 | `--no-commit` | No | Write files but don't commit |
 | `--force` | No | Re-extract even if history file exists for this spec |
-| `--target-repo <org/repo>` | No | Override target repo detection |
+| `--include-low` | No | Include low-confidence extractions (normally skipped) |
+| `--target-repo <path>` | No | Override target repo detection with a local path (e.g., `~/git/Evinced/widget-system`) |
 
 **Input resolution:** Given a spec path, the skill locates associated artifacts by naming convention:
 
@@ -52,9 +55,24 @@ If `extract-docs` detects that `plan-to-tasks` already ran on the same spec (via
 
 All associations are optional. A spec with no review still has ADR-worthy decisions. A spec with no plan still has architecture knowledge. The skill works with whatever exists.
 
-**Target repo:** Parse the spec's content for repo references (e.g., "GetEvinced/widget-system"), fall back to `git remote -v`. The `--target-repo` flag overrides detection. When the spec describes stark-review itself (no external repo reference found), the target is stark-review's own `docs/`. When the spec references an external project, the target is that project's `docs/`.
+**Target repo detection and filesystem resolution:**
 
-**Batch mode:** Iterates over all `*-design.md` files in the given directory sequentially (one spec at a time — avoids context window issues). Deduplicates across specs at the end.
+1. If `--target-repo <path>` is provided, use that local path directly. Fail if the path doesn't exist.
+2. Parse the spec's content for repo references (e.g., "GetEvinced/widget-system").
+3. Fall back to `git remote -v` in the current directory.
+
+**Filesystem resolution** (steps 2-3): An `org/repo` identifier must be resolved to a local checkout. Resolution strategy:
+
+- Check sibling directories under the same parent as the current repo. E.g., if running from `~/git/Evinced/stark-review`, look for `~/git/Evinced/{repo-name}`.
+- If not found as a sibling, check `~/git/{org}/{repo-name}`.
+- If still not found, fail with: `"Target repo {org}/{repo} not found locally. Clone it or use --target-repo <path>."`
+- Do NOT clone repos automatically — that's a side effect the user should control.
+
+When no external repo reference is found in the spec, the target is the current directory (typically stark-review itself).
+
+**Multiple repo references in a single spec:** Use the first reference found. If the spec mentions multiple repos, log a warning: `"Multiple repo references found, using {first}. Override with --target-repo."`
+
+**Batch mode:** Iterates over all `*-design.md` files in the given directory sequentially (one spec at a time — avoids context window issues). Deduplicates across specs at the end. With `--dry-run`, batch mode prints the intermediate format for each spec and skips all write phases including deduplication.
 
 ## Two-Pass Architecture
 
@@ -95,12 +113,17 @@ The LLM reads all available artifacts for a spec and extracts knowledge into a s
 
 ```json
 {
+  "schema_version": 1,
   "spec_path": "docs/superpowers/specs/2026-03-19-rename-project-design.md",
   "associated_artifacts": [
     "docs/superpowers/plans/2026-03-19-rename-project.md",
     "docs/superpowers/specs/2026-03-19-rename-project-design.review.md",
     "docs/superpowers/plans/2026-03-19-rename-project.review.md"
   ],
+  "input_hashes": {
+    "docs/superpowers/specs/2026-03-19-rename-project-design.md": "sha256:abc123",
+    "docs/superpowers/plans/2026-03-19-rename-project.md": "sha256:def456"
+  },
   "extractions": [
     {
       "category": "decision_defended",
@@ -108,7 +131,8 @@ The LLM reads all available artifacts for a spec and extracts knowledge into a s
       "content": "Rare operation; git history + resume logic is sufficient recovery path",
       "evidence": "Flagged by all 3 agents across 3 rounds, consistently classified as over-engineering",
       "source": "rename-project-design.review.md → Intentional Design Choices table",
-      "confidence": "high"
+      "confidence": "high",
+      "has_alternatives": false
     },
     {
       "category": "agent_signal",
@@ -122,13 +146,28 @@ The LLM reads all available artifacts for a spec and extracts knowledge into a s
 }
 ```
 
+**Category-specific fields:** Beyond the common fields (`category`, `title`, `content`, `evidence`, `source`, `confidence`), categories may include:
+- `constraint`: `has_alternatives` (boolean) — determines ADR vs. reference routing
+- `evolution`: `round` (string, e.g., "1→2") — which review round triggered the change
+- `agent_signal`: `affected_agents` (string[], e.g., `["codex"]`) — which agents exhibited the pattern
+
 **Confidence levels and their effect on routing:**
 
 | Level | Meaning | Routing behavior |
 |-------|---------|-----------------|
 | `high` | Clear, unambiguous knowledge with strong evidence | Route automatically |
 | `medium` | Likely correct but could be interpreted differently | Route with `<!-- needs review -->` marker in generated doc |
-| `low` | Uncertain — may be an implementation detail rather than durable knowledge | Include in `--dry-run` output but skip in actual generation unless `--force` |
+| `low` | Uncertain — may be an implementation detail rather than durable knowledge | Include in `--dry-run` output but skip in actual generation unless `--include-low` |
+
+**Validation:** After the LLM produces the intermediate JSON, validate before proceeding:
+- `schema_version` equals `1`.
+- Every extraction has required fields: `category`, `title`, `content`, `source`, `confidence`.
+- `category` is one of the 8 defined categories. Unknown categories → log warning, skip the extraction.
+- `confidence` is one of `high`, `medium`, `low`.
+- Category-specific required fields are present: `constraint` must have `has_alternatives`.
+- At least one extraction exists (otherwise log "no extractable knowledge found" and exit cleanly).
+
+**Retry on malformed output:** If the LLM returns invalid JSON or fails schema validation, retry once with the validation error appended to the prompt. If still invalid, fail with a clear error message showing the validation failure.
 
 If `--dry-run`: print the intermediate format and exit.
 
@@ -142,11 +181,11 @@ Takes the intermediate extractions and routes each to the right document type an
 |----------|----------------|----------|--------|
 | `decision` | ADR | `docs/adr/NNNN-<slug>.md` | ADR template (Context, Decision, Alternatives, Consequences) |
 | `decision_defended` | ADR | `docs/adr/NNNN-<slug>.md` | Same template — Context includes the review challenge, Decision includes the rationale for holding |
-| `constraint` | ADR or reference | `docs/adr/` or `docs/reference/constraints.md` | ADR if it's a deliberate choice with alternatives (e.g., "chose X over Y because Z"); otherwise append to `docs/reference/constraints.md` as a boundary condition |
+| `constraint` | ADR or reference | `docs/adr/` or `docs/reference/constraints.md` | Pass 1 sets `has_alternatives: true/false` on constraint extractions. If `true` (deliberate choice with rejected alternatives), route to ADR. If `false` (boundary condition), append to `docs/reference/constraints.md`. |
 | `integration` | Reference doc | `docs/reference/<component>.md` | Markdown with endpoints/contracts/auth patterns |
 | `data_model` | Reference doc | `docs/reference/<entity>.md` | Markdown with schema, fields, relationships |
-| `evolution` | Review retrospective | `docs/retrospectives/YYYY-MM-DD-<slug>.md` | Structured retrospective |
-| `agent_signal` | Retrospective + learning log | Retrospective + `docs/retrospectives/learning-log.md` | Detail in retro, one-liner in log |
+| `evolution` | Review retrospective | `docs/retrospectives/YYYY-MM-DD-<slug>.md` in the **source repo** (where the spec lives, typically stark-review) | Structured retrospective |
+| `agent_signal` | Retrospective + learning log | Retrospective + `docs/retrospectives/learning-log.md` in the **source repo** | Detail in retro, one-liner in log |
 | `glossary` | Glossary | `docs/glossary.md` | Definition list, created if missing, appended if exists |
 
 **ADR numbering:** Read existing `docs/adr/` to find the highest `NNNN`, continue from there. If no `docs/adr/` exists, start at `0001`. Related decisions from the same spec get sequential numbers.
@@ -233,6 +272,16 @@ Qualitative observations distilled from review retrospectives.
 
 **`docs/retrospectives/` directory:** This is a new doc type not in the current dev-docs taxonomy (`specs/`, `plans/`, `adr/`, `guides/`, `reference/`, `architecture/`). The skill creates it on demand when retrospective content exists. Retrospectives are point-in-time artifacts (like specs and plans), so staleness detection should exclude them — add `docs/retrospectives/` to `.doc-staleness.yml` exclude list if the file exists.
 
+**Append deduplication:** For files that are appended to (glossary, learning log, constraints):
+- Before appending a glossary term, check if a term with the same name already exists. If so, skip (don't overwrite — the existing definition may have been manually improved).
+- Before appending a learning log entry, check if an entry with the same spec and observation already exists. If so, skip.
+
+**Force re-run behavior (`--force`):** The history file records which entries were previously written by this skill (see history schema below). On `--force` re-run:
+- ADRs: if the history records ADR numbers created by a previous run for this spec, overwrite those ADRs (same numbers) with fresh content.
+- Append targets (glossary, learning log): remove entries matching the previous run's recorded entries, then append the new ones. Match by spec slug + title for glossary, spec slug + observation for learning log.
+- Retrospectives: overwrite the existing retrospective file (same path).
+- If no history file exists for this spec, `--force` behaves like a first run.
+
 **Location adaptation:** The skill reads the target project's existing `docs/` tree and follows what's there. If the project uses `docs/decisions/` instead of `docs/adr/`, it writes there. If there's no docs structure, it creates minimal directories as needed.
 
 ### Phase 4: Preview & Write
@@ -250,7 +299,9 @@ Qualitative observations distilled from review retrospectives.
   ```
 - Write all files.
 - If `--no-commit`: stop here.
-- Otherwise: `git add` specific files by name, commit with message referencing the source spec: `docs: extract knowledge from <spec-slug>`.
+- Otherwise:
+  - Check for uncommitted changes in the target repo. If dirty, warn: "Target repo has uncommitted changes. Commit or stash first, or use --no-commit." and skip the commit (files are already written).
+  - `git add` specific files by name, commit with message referencing the source spec: `docs: extract knowledge from <spec-slug>`.
 
 ### Phase 5: Batch Coordination (batch mode only)
 
@@ -344,7 +395,36 @@ Batch mode additionally: cross-spec dedup stats, totals across all specs.
 - Pass 1 > 70% of total time → "Extraction is the bottleneck"
 - Missing artifacts → "No review found for spec — review-derived knowledge unavailable"
 
-**History file naming:** `~/.claude/code-review/history/extract-docs/{repo}/{spec-slug}.json`
+**History file naming:** `~/.claude/code-review/history/extract-docs/{target-repo}/{spec-slug}.json`
+
+The `{target-repo}` is the repo where docs were written (not the source repo where the spec lives). This matches the mental model: "what has been extracted into this project?"
+
+**History file schema** (persisted after each run, used for skip logic and `--force` replacement):
+
+```json
+{
+  "schema_version": 1,
+  "spec_path": "docs/superpowers/specs/2026-03-19-rename-project-design.md",
+  "target_repo": "GetEvinced/stark-review",
+  "completed_at": "2026-03-20T14:31:27Z",
+  "input_hashes": {
+    "spec": "sha256:abc123",
+    "plan": "sha256:def456",
+    "spec_review": "sha256:ghi789",
+    "plan_review": null
+  },
+  "created_artifacts": {
+    "adrs": [{"number": 3, "path": "docs/adr/0003-no-rollback-for-rename.md"}],
+    "retrospective": "docs/retrospectives/2026-03-19-rename-project.md",
+    "reference_docs": ["docs/reference/github-app-auth.md"],
+    "glossary_entries": ["domain ID"],
+    "learning_log_entries": [{"spec": "rename-project", "observation": "All 3 agents fixate on rollback..."}]
+  },
+  "timing": { "...": "same as metrics block" }
+}
+```
+
+The `input_hashes` enable skip logic: if all hashes match, the spec hasn't changed. The `created_artifacts` enable `--force` replacement: the skill knows exactly which entries to overwrite.
 
 Feeds into `stark-metrics` for aggregation alongside other skill runs.
 
@@ -359,7 +439,7 @@ description: >
   learning log. Use when the user says "extract docs", "generate ADRs",
   "extract knowledge", "create retrospective", "docs from spec",
   or invokes /stark-extract-docs.
-argument-hint: "<path-to-spec> [--batch <dir>] [--dry-run]"
+argument-hint: "<path-to-spec> [--batch <dir>] [--dry-run] [--force]"
 ---
 ```
 
@@ -386,7 +466,8 @@ PYTHON=$SCRIPTS/.venv/bin/python3
 - Don't write retrospectives/ADRs into stark-review's `docs/` when the spec describes an external project.
 - Don't renumber existing ADRs — gaps in numbering are safe; renumbering breaks cross-references.
 - Don't create duplicate ADRs silently — when uncertain, add a `<!-- possible duplicate -->` marker.
-- Don't route low-confidence extractions to docs without `--force` — they'll add noise.
+- Don't route low-confidence extractions to docs without `--include-low` — they'll add noise.
+- Don't confuse `--force` (bypass history check) with `--include-low` (include uncertain extractions) — they are independent flags.
 - Don't assume `docs/adr/` is the ADR directory — check for `docs/decisions/`, `docs/adrs/` first.
 - Don't create the `docs/retrospectives/` directory if no retrospective content was extracted.
 
@@ -397,7 +478,7 @@ PYTHON=$SCRIPTS/.venv/bin/python3
 - **Target project has no `docs/` directory** — create minimal structure (`docs/adr/`, `docs/reference/`). Only create `docs/retrospectives/` if retrospective content was extracted.
 - **ADR directory uses different name** — detect `docs/decisions/`, `docs/adrs/`, `docs/adr/` and use whatever exists.
 - **Batch mode with mixed spec locations** — process each spec independently, dedup across all at the end.
-- **Spec already processed** — check history file; if exists and spec hasn't changed (compare mtime or hash), skip with log message. Use `--force` to re-extract.
+- **Spec already processed** — check history file; if exists and none of the input files (spec, plan, review files) have changed since the last run (compare content hashes stored in history), skip with log message. Use `--force` to re-extract.
 - **Learning log doesn't exist** — create it with the header row.
 - **Glossary doesn't exist** — create it with a title.
 
