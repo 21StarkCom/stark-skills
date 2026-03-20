@@ -16,11 +16,24 @@ The plan is the source of truth. If the decomposition struggles, the plan is wea
 
 ## Three LLM Passes
 
-| Pass | Purpose | Input | Output |
-|------|---------|-------|--------|
-| 1. Quality Gate | Find gaps, ambiguities, contradictions, missing details | Raw plan | Fixed plan (edited in-place) |
-| 2. Decomposition | Break plan into phases → tasks with self-contained issues | Fixed plan | Structured breakdown (JSON in memory) |
-| 3. Validation | Verify nothing lost, every issue is self-contained, dependencies correct | Breakdown + fixed plan | Approved breakdown or flagged issues |
+| Pass | Purpose | Input | Output | Agent |
+|------|---------|-------|--------|-------|
+| 1. Quality Gate | Flag gaps, ambiguities, contradictions, missing details | Raw plan | Gap report → user fixes plan | Primary (Claude) |
+| 2. Decomposition | Break plan into phases → tasks with self-contained issues | Validated plan | Structured breakdown (JSON on disk) | Primary (Claude) |
+| 3. Validation | Verify nothing lost, every issue is self-contained, dependencies correct | Breakdown + plan | Approved breakdown or flagged issues | Separate agent(s) — configurable |
+
+**Why Pass 3 uses a different agent:** The same LLM reviewing its own decomposition shares the same blind spots that created it. Pass 3 dispatches to a different model (Codex, Gemini, or both) with a clean context — just the plan and the decomposition JSON, no carry-over from Passes 1-2.
+
+**Configuration** (in `config.json` under `plan_to_tasks`):
+```json
+{
+  "plan_to_tasks": {
+    "validation_agents": ["codex"]
+  }
+}
+```
+
+Accepts `["codex"]`, `["gemini"]`, or `["codex", "gemini"]` for multi-vote validation.
 
 ## Execution Sequence
 
@@ -49,13 +62,18 @@ The LLM evaluates the plan against a robustness checklist. This is not a generic
 
 **Actions:**
 
-- Edits the plan in-place to fix gaps it can infer from the plan's own context.
-- For gaps requiring human input, stops and asks the user before proceeding.
+- **Flags** gaps and presents them to the user as a structured report. Does NOT auto-fix.
+- Trivial clarifications (e.g., missing acceptance criteria that are obvious from the description) may be suggested inline, but the user approves all changes.
+- The user edits their plan based on the gap report. The skill re-validates after edits.
+- Only proceeds to Pass 2 when the plan passes the checklist with no open gaps.
+
+**Why flag, not fix:** The LLM will confidently infer implementation details that contradict the architect's intent (e.g., picking PostgreSQL when Redis was intended). Giving it unsupervised edit access to the plan undermines the quality chain. The plan is the architect's document — the skill validates it, the architect fixes it.
 
 **Scope:**
 
 - Does NOT challenge architectural decisions — those were validated during brainstorming.
-- Does NOT add scope — only fills gaps in what's already described.
+- Does NOT add scope — only identifies gaps in what's already described.
+- Does NOT infer or add implementation details — that's the architect's job.
 
 ### Phase 3: Pass 2 — Decomposition
 
@@ -132,7 +150,9 @@ If a task can't be described in one issue without scrolling, it's too big — sp
 }
 ```
 
-Output held in memory between Pass 2 and Pass 3. Not written to disk.
+Output written to a temp file (`/tmp/stark-plan-to-tasks-{timestamp}.json`) after Pass 2. This enables crash recovery and reduces context window pressure for Pass 3. The temp file is cleaned up after Phase 5 completes successfully.
+
+For plans producing >10 tasks, Pass 2 processes phases one at a time to maintain output quality (LLM quality degrades on long list outputs — later tasks get thinner `How` sections and generic review hints).
 
 ### Phase 4: Pass 3 — Validation
 
@@ -157,6 +177,10 @@ The validation pass receives both the fixed plan and the structured breakdown. I
 
 ### Phase 5: GitHub Issue Creation
 
+**Token refresh:** Re-acquire a fresh token at the start of this phase. The token exported during Phase 1 may have expired if Passes 1-3 took >55 minutes.
+
+**Issue body limits:** GitHub imposes a 65,536 character limit on issue bodies. To keep issues readable and within limits, cap sections: `How` ≤ 500 words, `Review Hints` ≤ 5 bullet points. If more detail is needed, link to extracted docs from Phase 6 rather than inlining.
+
 **Label setup:**
 
 Auto-create missing labels on the target repo:
@@ -164,6 +188,7 @@ Auto-create missing labels on the target repo:
 - `risk:low`, `risk:med`, `risk:high` (green, yellow, red)
 - `confidence:low`, `confidence:med`, `confidence:high` (gray shades)
 - `stark-plan-to-tasks` (metadata label — marks all issues created by this skill)
+- `plan:{plan-slug}` (e.g., `plan:2026-03-18-widget-system`) — derived from plan filename, enables cleanup and traceability per decomposition run
 
 ```bash
 GH_TOKEN="$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)" \
@@ -207,7 +232,7 @@ One issue per task. Contains:
 _Generated by `stark-plan-to-tasks` · Phase: {phase-name} · Tracking: #{phase-issue-number}_
 ```
 
-Labels: `sp:N`, `risk:level`, `confidence:level`, `stark-plan-to-tasks`.
+Labels: `sp:N`, `risk:level`, `confidence:level`, `stark-plan-to-tasks`, `plan:{plan-slug}`.
 
 **Creation order:**
 
@@ -259,10 +284,27 @@ The skill reads the target project's `docs/` tree and follows existing structure
 
 If the project has no docs structure at all, the skill creates minimal files under `docs/`.
 
+**Decision record:**
+
+After knowledge extraction, the plan is compressed into a lightweight decision record appended to `docs/decisions.md` (created if missing). One file, append-only — keeps decisions findable without file proliferation.
+
+```markdown
+## Widget System
+
+- **Date:** 2026-03-18
+- **Status:** Decomposed → issues created
+- **Tracking:** #41 (Phase 1: Data Model), #42 (Phase 2: API), #43 (Phase 3: UI)
+- **Story Points:** 47 total (12 tasks across 3 phases)
+- **Summary:** Multi-tenant widget rendering system with plugin architecture.
+  Chose event-driven communication over direct coupling. PostgreSQL for
+  persistence, Redis for widget state cache.
+- **Knowledge extracted to:** `docs/adr/009-widget-architecture.md`, `docs/api/widgets.md`
+```
+
 **After enrichment:**
 
 - Delete the plan file.
-- Single commit covering doc enrichment + plan deletion.
+- Single commit covering doc enrichment, decision record, and plan deletion.
 - Commit message references tracking issues: `docs: extract knowledge from plan, create tasks (#41, #42, #43)`
 - The commit is local-only. The skill does not push or create a PR — that's the user's decision.
 
@@ -276,13 +318,19 @@ Print to terminal:
 - Confidence distribution
 - Links to each phase tracking issue
 
-## Feedback Loop: Issue Quality Signal
+## Feedback Loop: Issue Quality Signal (Future Work)
 
-Each task issue carries a `stark-plan-to-tasks` label and a `confidence:level` label. After implementation:
+The labels enable retrospective analysis but the closed-loop feedback mechanism is not part of v1.
 
-- If the implementing agent had to pull additional context beyond what's in the issue, the issue was underspecified.
-- Query: `gh issue list --label "stark-plan-to-tasks" --label "confidence:high"` — then check which of those required extra context.
-- This signal feeds back into improving the quality gate (Pass 1) and decomposition (Pass 2) prompts, following the same pattern as `stark-review-improvement`.
+**What the labels enable:**
+- `plan:{slug}` — group all issues from a single decomposition for bulk analysis
+- `confidence:level` — correlate predicted vs. actual specification quality
+- `sp:N` — compare estimated vs. actual effort after implementation
+
+**What's NOT implemented yet:**
+- No mechanism to automatically detect when an implementing agent needed extra context. That requires instrumentation in the implementing agent, which is out of scope.
+- No skill to run the retrospective analysis. The query `gh issue list --label "stark-plan-to-tasks" --label "confidence:high"` finds the issues, but evaluating them is manual.
+- When a retrospective mechanism exists, it should feed back into improving the quality gate (Pass 1) and decomposition (Pass 2) prompts, following the same pattern as `stark-review-improvement`.
 
 ## SKILL.md Frontmatter
 
@@ -349,7 +397,8 @@ This skill uses only the `stark-claude` GitHub App (not all three like `stark-re
 - Don't delete the plan file before all issues are successfully created.
 - Don't create issues without error handling — if issue 8 of 15 fails, track partial state.
 - Don't use comma-separated `--label` values — use separate `--label` flags per label.
-- Don't commit plan edits from Pass 1 separately — they're part of the transient state until Phase 6.
+- Don't auto-fix the plan in Pass 1 — flag gaps, let the architect fix them.
+- Don't keep decomposition JSON only in memory — write to temp file for crash recovery.
 - Don't proceed to issue creation if validation (Pass 3) didn't converge — halt and ask.
 - Don't create labels one at a time without checking — use `--force` flag which is idempotent.
 
@@ -372,10 +421,11 @@ Follows the Skill Observability Protocol (`~/.claude/code-review/standards/obser
   "plan_file": "docs/superpowers/specs/2026-03-18-widget-system-design.md",
   "target_repo": "GetEvinced/widget-system",
   "pass_1_duration_seconds": 28,
-  "pass_1_fixes_applied": 3,
-  "pass_1_user_prompts": 0,
+  "pass_1_gaps_flagged": 3,
+  "pass_1_user_prompts": 1,
   "pass_2_duration_seconds": 45,
   "pass_3_duration_seconds": 32,
+  "pass_3_agents": ["codex"],
   "pass_3_fix_iterations": 1,
   "phases_created": 4,
   "issues_created": 12,
@@ -385,6 +435,7 @@ Follows the Skill Observability Protocol (`~/.claude/code-review/standards/obser
   "confidence_distribution": {"low": 1, "med": 3, "high": 8},
   "knowledge_files_written": 3,
   "knowledge_files_updated": 1,
+  "decision_record_appended": true,
   "plan_deleted": true
 }
 ```
