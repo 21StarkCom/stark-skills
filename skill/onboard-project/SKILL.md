@@ -117,7 +117,38 @@ gh api --method PUT /repos/{ORG}/{NAME}/topics \
   --input - <<< '{"names":["non-production","not-production"]}'
 ```
 
-### 2e. Verify
+### 2e. Create CODEOWNERS
+
+If `.github/CODEOWNERS` does not already exist, create it.
+
+Detect the repo creator's GitHub username:
+
+```bash
+# Get the authenticated user's GitHub username
+GH_USER=$(gh api /user --jq '.login' 2>/dev/null)
+```
+
+Create `.github/CODEOWNERS`:
+
+```bash
+mkdir -p .github
+cat > .github/CODEOWNERS << EOF
+# Default owner for everything in this repo
+* @${GH_USER}
+EOF
+```
+
+Stage it for the next commit (or commit immediately if Phase 1 already committed):
+
+```bash
+git add .github/CODEOWNERS
+git commit -m "chore: add CODEOWNERS"
+git push origin main 2>/dev/null  # push if remote exists
+```
+
+**If CODEOWNERS already exists:** Log "CODEOWNERS already exists — skipping" and move on.
+
+### 2f. Verify
 
 ```bash
 gh repo view {ORG}/{NAME} --json nameWithOwner -q .nameWithOwner
@@ -294,6 +325,7 @@ GitHub:      https://github.com/$ORG/$NAME
 
 Git:         ✓ initialized
 GitHub repo: ✓ created ($VISIBILITY)
+CODEOWNERS:  ✓ created (@$GH_USER)
 stark-claude: ✓ connected
 stark-codex:  ✓ connected
 stark-gemini: ✓ connected
@@ -312,6 +344,7 @@ Next steps:
 
 | Failure | Recovery |
 |---------|----------|
+| CODEOWNERS already exists | Skip — don't overwrite |
 | CLAUDE.md already exists | Skip — suggest `/claude-md-improver` |
 | Git already initialized | Skip Phase 1 |
 | GitHub repo already exists | Add remote and push |
@@ -323,6 +356,7 @@ Next steps:
 
 ## Mistakes to Avoid
 
+- **Don't overwrite an existing CODEOWNERS.** Check first, skip if present.
 - **Don't overwrite an existing CLAUDE.md.** Check first, suggest improver instead.
 - **Don't skip user confirmation** before creating GitHub repo or writing CLAUDE.md.
 - **Don't use `git add -A` after initial commit.** Add files individually.
