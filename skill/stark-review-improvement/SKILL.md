@@ -7,6 +7,7 @@ description: >
   patches multi_review.py if needed, and logs the learning. Use when the user says
   "improve review prompts", "start review improvement", "fix review prompts", or
   invokes /stark-review-improvement.
+argument-hint: (reads assessment from context or latest history)
 ---
 
 # stark-review-improvement

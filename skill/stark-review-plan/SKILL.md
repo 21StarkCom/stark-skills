@@ -4,6 +4,7 @@ description: >
   Multi-agent design document review using 3 LLMs × 7 domains with autonomous fix loop.
   Use when the user says "review this plan", "review this spec", "review design doc",
   or invokes /stark-review-plan. Also triggers on `/stark-review-plan <path>`.
+argument-hint: "<path> [--rounds N] [--dry-run] [--force]"
 ---
 
 # stark-review-plan
