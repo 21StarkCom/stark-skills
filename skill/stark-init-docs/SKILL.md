@@ -5,6 +5,7 @@ description: >
   --backfill (generate from git history), --upgrade (migrate existing docs),
   --clean (remove skeleton). Use when the user says "init docs", "setup docs",
   "scaffold docs", or invokes /stark-init-docs.
+argument-hint: "[--template] [--backfill] [--upgrade] [--clean]"
 ---
 
 # init-docs

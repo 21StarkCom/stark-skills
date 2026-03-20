@@ -5,6 +5,7 @@ description: >
   Use when the user says "stark review", "review this PR with all agents",
   "multi-agent review", or invokes /stark-review. Also triggers on
   `/stark-review` or `/stark-review <number>`.
+argument-hint: "[PR_NUMBER] [--rounds N] [--dry-run] [--repo ORG/REPO]"
 ---
 
 # stark-review
