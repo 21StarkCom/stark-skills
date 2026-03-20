@@ -4,6 +4,9 @@ Review the diff for type safety issues. This is your strongest domain — be tho
 
 > **Scope:** Only report findings specific to TypeScript types and API surface. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, security, accessibility, correctness, or test coverage, skip it — a dedicated reviewer covers that domain.
 
+**Do NOT flag:**
+- Missing TypeScript declarations (`.d.ts`) for plain JavaScript packages that have no TypeScript consumers or no `types` field in package.json. Only flag missing declarations when the package is consumed by TypeScript code.
+
 Check:
 - Would this pass tsc --noEmit from a consuming package?
 - Unsafe assertions: as unknown as T, as any, ! without justification

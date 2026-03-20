@@ -4,6 +4,12 @@ Review the PR diff for test coverage gaps and test quality issues. Think about w
 
 > **Scope:** Only report findings specific to test coverage and test quality. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, security, accessibility, correctness, or types, skip it — a dedicated reviewer covers that domain.
 
+## Critical Rules
+
+- **Do NOT suggest adding tests unless there is a concrete logic bug risk.** Generic "this code has no tests" findings are noise. Only flag test gaps where a specific, describable bug could slip through.
+- **If you find code that will crash, raise, or produce wrong results at runtime, classify it as a correctness bug** — report the bug itself with a concrete description, not "this needs a test." The correctness reviewer handles bugs; you handle test quality.
+- Frame findings as "this behavior is untested and could break in way X" — not "this file has no tests."
+
 ## Checklist
 
 **Coverage**

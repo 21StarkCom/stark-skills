@@ -67,7 +67,28 @@ Extract: `title`, `body`, `base.ref`, `head.ref`, `head.sha`, `head.repo.full_na
 - Read merged config via `$PYTHON $SCRIPTS/multi_review.py` internals or check for `.code-review/config.json` in repo. If `test_command` is NOT configured → **review-only**
 - Otherwise → **full mode** (review + fix loop)
 
-### 1.5 Create isolated worktree
+### 1.5 Push local changes
+
+Before creating the worktree, ensure the remote PR branch includes all local work. The worktree is created from `FETCH_HEAD` (the remote PR head), so any uncommitted or unpushed changes would be invisible to the review agents.
+
+```bash
+current_branch=$(git branch --show-current)
+if [ "$current_branch" = "{head_ref}" ]; then
+    # Check for uncommitted changes
+    if ! git diff --quiet || ! git diff --cached --quiet; then
+        git add <changed files>
+        git commit -m "fix: pre-review checkpoint"
+    fi
+    # Check for unpushed commits
+    if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/{head_ref})" ]; then
+        git push origin {head_ref}
+    fi
+fi
+```
+
+If on a different branch or detached HEAD, skip — the remote PR head is authoritative.
+
+### 1.6 Create isolated worktree
 
 Before creating, check if a worktree exists from a crashed session:
 
@@ -86,7 +107,7 @@ merge_base=$(git merge-base origin/{base_ref} HEAD)
 
 All subsequent work happens inside this worktree. The operator's checkout is never touched.
 
-### 1.6 Rebase over base branch
+### 1.7 Rebase over base branch
 
 If the PR branch is not `main` (or whatever `base_ref` is), rebase over the latest base to incorporate any recently merged branches:
 
@@ -103,7 +124,7 @@ If rebase succeeds, update the merge base:
 merge_base=$(git merge-base origin/{base_ref} HEAD)
 ```
 
-### 1.7 Capture baseline (full mode only)
+### 1.8 Capture baseline (full mode only)
 
 Run the configured `test_command` in the worktree. Parse output for failing test identifiers. Store as `baseline_failures` set. Pre-existing failures are not the skill's responsibility.
 
