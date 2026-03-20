@@ -127,7 +127,36 @@ class TestOutputParsing:
         assert len(result.issues) == 1
 
     def test_parse_gemini_envelope(self):
+        """Gemini wraps output in {"response": "..."} envelope."""
         inner = json.dumps({"schema_version": 1, "approved": True, "issues": []})
         raw = json.dumps({"response": inner})
+        result = parse_validation_output(raw, agent="gemini")
+        assert result.approved is True
+
+    def test_parse_gemini_with_issues(self):
+        """Gemini envelope containing validation issues."""
+        inner = json.dumps({
+            "schema_version": 1,
+            "approved": False,
+            "issues": [{"phase_id": "p1", "task_id": "t1",
+                        "field": "how", "problem": "Too vague",
+                        "suggestion": "Add implementation details"}],
+        })
+        raw = json.dumps({"response": inner})
+        result = parse_validation_output(raw, agent="gemini")
+        assert result.approved is False
+        assert len(result.issues) == 1
+        assert result.issues[0].problem == "Too vague"
+
+    def test_parse_gemini_raw_json_no_envelope(self):
+        """Gemini sometimes returns raw JSON without the response envelope."""
+        raw = json.dumps({"schema_version": 1, "approved": True, "issues": []})
+        result = parse_validation_output(raw, agent="gemini")
+        assert result.approved is True
+
+    def test_parse_gemini_markdown_fenced(self):
+        """Gemini response containing markdown-fenced JSON."""
+        inner_json = json.dumps({"schema_version": 1, "approved": True, "issues": []})
+        raw = json.dumps({"response": f"```json\n{inner_json}\n```"})
         result = parse_validation_output(raw, agent="gemini")
         assert result.approved is True

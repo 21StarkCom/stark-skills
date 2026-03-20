@@ -33,7 +33,7 @@ CODEX_REASONING_CONFIG = 'model_reasoning_effort="high"'
 DEFAULT_TIMEOUT = 300
 
 DEFAULT_PLAN_TO_TASKS_CONFIG: dict[str, Any] = {
-    "agents": ["codex", "gemini"],
+    "validation_agents": ["codex"],
     "timeout": DEFAULT_TIMEOUT,
 }
 
@@ -312,9 +312,20 @@ def _run_validation_agent(
             raw = result.stdout or result.stderr
 
         elif agent == "gemini":
-            with tempfile.TemporaryDirectory() as tmpdir:
-                env = {**os.environ, "GEMINI_CLI_HOME": tmpdir}
-                result = subprocess.run(
+            # Gemini needs an isolated GEMINI_CLI_HOME with auth files copied in.
+            # Matches the pattern in plan_review_dispatch.py lines 284-300.
+            gemini_home = tempfile.mkdtemp(prefix="stark-gemini-validate-")
+            gemini_dir = os.path.join(gemini_home, ".gemini")
+            os.makedirs(gemini_dir, exist_ok=True)
+            real_gemini = os.environ.get("GEMINI_CLI_HOME", os.path.expanduser("~"))
+            real_gemini_dir = os.path.join(real_gemini, ".gemini")
+            for auth_file in ("settings.json", "oauth_creds.json", "google_accounts.json", "installation_id"):
+                src = os.path.join(real_gemini_dir, auth_file)
+                if os.path.exists(src):
+                    shutil.copy2(src, os.path.join(gemini_dir, auth_file))
+            env = {**os.environ, "GEMINI_CLI_HOME": gemini_home}
+            try:
+                proc = subprocess.run(
                     [
                         "gemini",
                         "-p",
@@ -330,7 +341,9 @@ def _run_validation_agent(
                     timeout=timeout,
                     env=env,
                 )
-            raw = result.stdout or result.stderr
+                raw = proc.stdout or proc.stderr
+            finally:
+                shutil.rmtree(gemini_home, ignore_errors=True)
 
         else:
             return ValidationResult(
@@ -396,7 +409,7 @@ def dispatch_validators(
 
     if agents is None:
         config = load_config()
-        agents = config.get("agents", ["codex", "gemini"])
+        agents = config.get("validation_agents", ["codex"])
 
     envelope = build_validation_envelope(
         plan_content=plan_content,
@@ -436,7 +449,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--agents",
-        help="Comma-separated list of agents to use (default: codex,gemini).",
+        help="Comma-separated list of agents to use (default: from config, typically codex).",
     )
     parser.add_argument(
         "--timeout",
@@ -454,7 +467,7 @@ def main() -> int:
     config = load_config()
 
     agents: list[str] = (
-        args.agents.split(",") if args.agents else config.get("agents", ["codex", "gemini"])
+        args.agents.split(",") if args.agents else config.get("validation_agents", ["codex"])
     )
     timeout: int = (
         args.timeout if args.timeout != DEFAULT_TIMEOUT else config.get("timeout", DEFAULT_TIMEOUT)
