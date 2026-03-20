@@ -2,6 +2,30 @@
 
 Tracks improvements to review prompts based on stark-review assessments.
 
+## 2026-03-20 — Noise reduction: test-coverage, type-safety, correctness
+
+**Source:** PR #18 in GetEvinced/infra-sentinel (4 review rounds), plus assessments from 6 other repos
+**Assessment:** 23% signal-to-noise ratio. Claude test-coverage generated 9-10 "add tests" findings per round (all noise). Codex type-safety flagged missing .d.ts on plain JS 5 consecutive times. Codex correctness flagged Terraform moved blocks on greenfield 5 consecutive times.
+
+### Changes Made
+
+| File | Change | Reason |
+|------|--------|--------|
+| `global/prompts/claude/06-test-coverage.md` | Added "Critical Rules" section: don't suggest tests without concrete bug risk; classify runtime errors as correctness bugs | Claude framed actual bugs as "no tests" and generated pure-noise "add tests" findings every round |
+| `global/prompts/codex/04-type-safety.md` | Added "Do NOT flag" for .d.ts on plain JS packages | Codex flagged missing .d.ts on internal JS library with no TS consumers — 5 consecutive false positives |
+| `global/prompts/codex/03-correctness.md` | Added "Do NOT flag" for Terraform moved blocks on greenfield projects | Codex flagged state migration on a brand new repo with no existing Terraform state — 5 consecutive false positives |
+
+### Also Applied (skill change)
+
+| File | Change | Reason |
+|------|--------|--------|
+| `skill/stark-review/SKILL.md` | Added step 1.5: push local changes before creating worktree | Review agents were diffing against stale remote HEAD, missing local fixes |
+
+### Validation
+- [x] Prompt syntax OK
+- [x] No Python changes
+- [x] No config changes
+
 ## 2026-03-17 — Gemini diff scoping fix
 
 **Source:** PR #89 in GetEvinced/infra-pulse

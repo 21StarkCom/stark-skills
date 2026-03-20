@@ -4,6 +4,9 @@ Review the diff for correctness issues. Trace execution paths carefully.
 
 > **Scope:** Only report findings specific to correctness and logic bugs. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, security, accessibility, types, or test coverage, skip it — a dedicated reviewer covers that domain.
 
+**Do NOT flag:**
+- Missing Terraform `moved` blocks or state migration steps on greenfield projects that have never been applied. If the repo has no evidence of prior `terraform apply` (no existing state, new repo, or initial PR), resource renames are safe without `moved` blocks.
+
 Check:
 - Null/undefined access without guards
 - Wrong default values (color="primary" breaking CSS inheritance)
