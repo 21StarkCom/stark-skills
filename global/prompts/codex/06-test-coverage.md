@@ -2,6 +2,8 @@
 
 Review the diff for test coverage gaps. Read the test files carefully and check what's missing.
 
+> **Scope:** Only report findings specific to test coverage and test quality. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, security, accessibility, correctness, or types, skip it — a dedicated reviewer covers that domain.
+
 Check:
 - Every public prop has at least one test
 - Every variant/size/color value tested

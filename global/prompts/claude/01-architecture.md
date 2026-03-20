@@ -2,6 +2,8 @@
 
 Review the PR diff for architecture and design pattern issues. Think systemically — how do these changes affect the codebase as a whole?
 
+> **Scope:** Only report findings specific to architecture and design patterns. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about security, correctness, accessibility, types, or test coverage, skip it — a dedicated reviewer covers that domain.
+
 ## Checklist
 
 **Component API Design**

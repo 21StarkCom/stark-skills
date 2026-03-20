@@ -2,6 +2,8 @@
 
 Review the diff for architecture issues. You have the diff via --base.
 
+> **Scope:** Only report findings specific to architecture and design patterns. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about security, correctness, accessibility, types, or test coverage, skip it — a dedicated reviewer covers that domain.
+
 Check:
 - Props API consistent with sibling components (size, variant, disabled, as patterns)
 - forwardRef correct, ref type matches rendered element

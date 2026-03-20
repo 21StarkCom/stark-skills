@@ -2,6 +2,8 @@
 
 Review the diff for accessibility issues.
 
+> **Scope:** Only report findings specific to accessibility. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, security, correctness, types, or test coverage, skip it — a dedicated reviewer covers that domain.
+
 Check:
 - Correct semantic elements (button for actions, a for nav, label for labels)
 - label variant defaults to <label>, not <span>

@@ -6,6 +6,8 @@ First, run these commands:
 3. Read the component files to understand what should be tested
 4. Read sibling component tests for pattern comparison
 
+> **Scope:** Only report findings specific to test coverage and test quality. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, security, accessibility, correctness, or types, skip it — a dedicated reviewer covers that domain.
+
 Then review for test coverage gaps:
 
 **Coverage**

@@ -5,6 +5,8 @@ First, run these commands:
 2. Read each changed file in full
 3. Read related files to understand how changed code is consumed
 
+> **Scope:** Only report findings specific to correctness and logic bugs. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, security, accessibility, types, or test coverage, skip it — a dedicated reviewer covers that domain.
+
 Then review for correctness issues:
 
 **Runtime Errors**

@@ -5,6 +5,8 @@ First, run these commands:
 2. Read each changed file in full
 3. Check package.json if dependencies changed
 
+> **Scope:** Only report findings specific to security and error handling. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, accessibility, correctness, types, or test coverage, skip it — a dedicated reviewer covers that domain.
+
 Then review for security issues:
 
 **XSS & Injection**

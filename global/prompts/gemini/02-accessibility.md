@@ -5,6 +5,8 @@ First, run these commands:
 2. Read each changed file in full
 3. Check if components render correct semantic HTML elements
 
+> **Scope:** Only report findings specific to accessibility. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, security, correctness, types, or test coverage, skip it — a dedicated reviewer covers that domain.
+
 Then review for accessibility issues:
 
 **Semantic HTML**

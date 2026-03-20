@@ -6,6 +6,8 @@ First, run these commands:
 3. Read the barrel export file (index.ts) to check what's exported
 4. Read sibling component types for consistency comparison
 
+> **Scope:** Only report findings specific to TypeScript types and API surface. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, security, accessibility, correctness, or test coverage, skip it — a dedicated reviewer covers that domain.
+
 Then review for type safety issues:
 
 **Type Correctness**

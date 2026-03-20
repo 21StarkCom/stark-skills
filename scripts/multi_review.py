@@ -88,7 +88,7 @@ DEFAULT_CONFIG = {
     },
 }
 
-CODEX_REASONING_CONFIG = 'model_reasoning_effort="xhigh"'
+CODEX_REASONING_CONFIG = 'model_reasoning_effort="high"'
 
 REPLACE_FIELDS = {
     "agents",
@@ -616,7 +616,7 @@ def _run_subagent(
             shutil.rmtree(gemini_home, ignore_errors=True)
 
     max_attempts = 2
-    timeout_s = 600
+    timeout_s = 900
     run_kwargs: dict[str, Any] = {
         "capture_output": True, "text": True,
         "timeout": timeout_s, "cwd": cwd,
@@ -636,6 +636,14 @@ def _run_subagent(
                     f"{result.stderr[:500]}",
                     file=sys.stderr,
                 )
+                if attempt < max_attempts:
+                    backoff = 5 * attempt
+                    print(
+                        f"    {agent}:{domain_key} retrying in {backoff}s ({attempt}/{max_attempts})...",
+                        file=sys.stderr,
+                    )
+                    time.sleep(backoff)
+                    continue
                 _cleanup_temp()
                 return SubAgentResult(
                     agent=agent, domain=domain_key, raw_output="",
@@ -893,12 +901,48 @@ def format_summary_table(rounds: list[ReviewRound]) -> str:
     return "\n".join(lines)
 
 
+def _dedup_key(f: Finding) -> tuple[str, int, str]:
+    """Generate a dedup key: (file, line_bucket, normalized_title).
+
+    Line numbers within ±5 lines are bucketed together so that findings
+    about the same location from different agents/domains collapse.
+    """
+    line_bucket = (f.line // 10) * 10  # bucket to nearest 10
+    title_norm = re.sub(r"[^a-z0-9]+", " ", f.title.lower()).strip()
+    return (f.file, line_bucket, title_norm)
+
+
+def deduplicate_findings(findings: list[Finding]) -> list[Finding]:
+    """Collapse duplicate findings across agents/domains.
+
+    When multiple agents or domains report the same issue (same file,
+    similar line, similar title), keep the highest-severity instance and
+    append confirmation notes from the others.
+    """
+    groups: dict[tuple, list[Finding]] = {}
+    for f in findings:
+        key = _dedup_key(f)
+        groups.setdefault(key, []).append(f)
+
+    deduped: list[Finding] = []
+    for group in groups.values():
+        # Keep the highest-severity finding
+        group.sort(key=lambda f: SEVERITY_ORDER.get(f.severity, 99))
+        best = group[0]
+        if len(group) > 1:
+            confirmers = [f"{f.agent}/{f.domain}" for f in group[1:]]
+            best.description += f" (also flagged by: {', '.join(confirmers)})"
+        deduped.append(best)
+
+    return sorted(deduped, key=lambda f: SEVERITY_ORDER.get(f.severity, 99))
+
+
 def all_findings(rnd: ReviewRound) -> list[Finding]:
-    """Get all findings from a round, sorted by severity."""
+    """Get all findings from a round, deduplicated and sorted by severity."""
     findings = []
     for result in rnd.results:
         findings.extend(result.findings)
-    return sorted(findings, key=lambda f: SEVERITY_ORDER.get(f.severity, 99))
+    return deduplicate_findings(findings)
 
 
 def has_actionable_findings(rnd: ReviewRound) -> bool:
@@ -964,7 +1008,7 @@ def review_pr(
     elif spec_link and spec_link != "N/A":
         spec_context = f"## Design Spec\nThe PR references a spec at `{spec_link}` but it could not be resolved. Flag this in your review."
     elif spec_link is None:
-        spec_context = "## Design Spec\nNo spec field found in PR description. RED FLAG: The PR template was not followed. Open your review by flagging this process issue."
+        spec_context = None  # Missing spec is a process issue, not a code issue — don't inject into domain prompts
     else:
         # N/A
         spec_context = None

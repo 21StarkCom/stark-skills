@@ -2,6 +2,8 @@
 
 Review the PR diff for security vulnerabilities and error handling gaps.
 
+> **Scope:** Only report findings specific to security and error handling. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, accessibility, correctness, types, or test coverage, skip it — a dedicated reviewer covers that domain.
+
 ## Checklist
 
 **XSS & Injection**

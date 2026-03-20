@@ -2,6 +2,8 @@
 
 Review the PR diff for accessibility issues. Go beyond checklist compliance — think about the actual user experience for people using assistive technology.
 
+> **Scope:** Only report findings specific to accessibility. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, security, correctness, types, or test coverage, skip it — a dedicated reviewer covers that domain.
+
 ## Checklist
 
 **Semantic HTML**

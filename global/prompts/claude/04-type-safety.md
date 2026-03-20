@@ -2,6 +2,8 @@
 
 Review the PR diff for type safety issues. Think about downstream consumers — what happens when someone imports this component and tries to use it?
 
+> **Scope:** Only report findings specific to TypeScript types and API surface. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, security, accessibility, correctness, or test coverage, skip it — a dedicated reviewer covers that domain.
+
 ## Checklist
 
 **Type Correctness**

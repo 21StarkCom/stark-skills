@@ -2,6 +2,8 @@
 
 Review the PR diff for test coverage gaps and test quality issues. Think about what a future developer would need these tests to catch.
 
+> **Scope:** Only report findings specific to test coverage and test quality. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, security, accessibility, correctness, or types, skip it — a dedicated reviewer covers that domain.
+
 ## Checklist
 
 **Coverage**

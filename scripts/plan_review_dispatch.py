@@ -41,7 +41,7 @@ FINDINGS_FORMAT = (
 )
 
 DEFAULT_TIMEOUT = 300
-CODEX_REASONING_CONFIG = 'model_reasoning_effort="xhigh"'
+CODEX_REASONING_CONFIG = 'model_reasoning_effort="high"'
 
 
 
@@ -67,7 +67,7 @@ class PlanSubAgentResult:
 
 
 DEFAULT_PLAN_REVIEW_CONFIG = {
-    "agents": ["claude", "codex", "gemini"],
+    "agents": ["claude", "codex"],
     "fix_threshold": "medium",
     "disabled_domains": [],
     "max_rounds": 3,
@@ -329,6 +329,14 @@ def _run_plan_subagent(
                     f"{proc.stderr[:500]}",
                     file=sys.stderr,
                 )
+                if attempt < max_attempts:
+                    backoff = 5 * attempt
+                    print(
+                        f"    {agent}:{domain_key} retrying in {backoff}s ({attempt}/{max_attempts})...",
+                        file=sys.stderr,
+                    )
+                    time.sleep(backoff)
+                    continue
                 _cleanup_temp()
                 result.duration_s = time.monotonic() - t0
                 result.error = "cli_error"

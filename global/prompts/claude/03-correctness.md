@@ -2,6 +2,8 @@
 
 Review the PR diff for correctness issues. Trace execution paths — think about what happens at runtime, not just what the code looks like.
 
+> **Scope:** Only report findings specific to correctness and logic bugs. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, security, accessibility, types, or test coverage, skip it — a dedicated reviewer covers that domain.
+
 ## Checklist
 
 **Runtime Errors**

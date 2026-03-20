@@ -5,6 +5,8 @@ First, run these commands to understand the changes:
 2. Read each changed file in full
 3. Read sibling components in the same directory for pattern comparison
 
+> **Scope:** Only report findings specific to architecture and design patterns. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about security, correctness, accessibility, types, or test coverage, skip it — a dedicated reviewer covers that domain.
+
 Then review for architecture issues:
 
 **Component API**
