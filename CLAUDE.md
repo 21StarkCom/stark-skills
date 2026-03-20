@@ -46,6 +46,7 @@ All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.claude/skil
 - `/stark-rename-project <old> <new> [--dry-run]` — rename project + update refs
 - `/stark-update-deps` — audit and update dependency versions
 - `/stark-release [patch|minor|major]` — cut a release: changelog, tag, GitHub Release
+- `/stark-extract-docs <path-to-spec>` — extract knowledge from specs/reviews into ADRs, retrospectives, reference docs
 - `/stark-plan-to-tasks <path> [--dry-run] [--cleanup <slug>]` — decompose plan into phased GitHub issues (3 LLM passes)
 - `/stark-claude-md-improver` — analyze and improve CLAUDE.md files
 
