@@ -14,8 +14,8 @@ and optionally publishes a GitHub Release. Version source of truth is git tags (
 Must be on a clean main branch:
 
 ```bash
-# Auth (GitHub App — auto-detects repo from git remote)
-export GH_TOKEN=$(~/git/Evinced/scripts/.venv/bin/python3 ~/git/Evinced/scripts/github_app.py token)
+# Use user's PAT for all release operations (PRs, tags, releases show as user)
+unset GH_TOKEN
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 
 git checkout main && git pull --rebase origin main
@@ -98,18 +98,12 @@ Unreleased changes since v${CURRENT_VERSION}:
 
 If `$ARGUMENTS` contains `patch`, `minor`, or `major` → use that.
 
-Otherwise, analyze the unreleased changes and recommend:
-- Only `### Fixed` entries → recommend `patch`
-- Has `### Added` entries → recommend `minor`
-- Has `### Changed` with breaking changes → recommend `major`
+Otherwise, analyze the unreleased changes and auto-select:
+- Only `### Fixed` entries → `patch`
+- Has `### Added` entries → `minor`
+- Has `### Changed` with breaking changes → `major`
 
-Ask the user:
-```
-Recommended: patch (${CURRENT_VERSION} → ${NEXT_PATCH})
-Override? [patch / minor / major]
-```
-
-Wait for response. Calculate `$NEXT_VERSION` accordingly.
+Calculate `$NEXT_VERSION` accordingly. Do NOT ask for confirmation — proceed automatically.
 
 ---
 
@@ -180,23 +174,16 @@ git push origin v${NEXT_VERSION}
 
 ---
 
-## Step 9: GitHub Release (optional)
+## Step 9: GitHub Release
 
-Ask the user:
-```
-Create GitHub Release for v${NEXT_VERSION}? [y/n]
-```
+Always create a GitHub Release — no confirmation needed:
 
-If yes:
 ```bash
-
 gh release create v${NEXT_VERSION} \
   --repo $REPO \
   --title "v${NEXT_VERSION}" \
   --notes "[CHANGELOG content for this version, formatted as markdown]"
 ```
-
-If no → skip.
 
 ---
 
@@ -225,7 +212,7 @@ Commit:     [hash]
 | Empty [Unreleased] | Abort — nothing to release |
 | Tag already exists | Error — that version is taken, suggest next |
 | Push fails | `git pull --rebase origin main`, retry |
-| `gh` auth fails | Re-run github_app.py token export in prerequisites |
+| `gh` auth fails | Verify `gh auth status` — user's PAT must be active |
 
 ## Observability
 
@@ -241,7 +228,7 @@ Additional skill-specific metrics:
 
 - **Don't bump pyproject.toml.** Tags are the version source.
 - **Always bump `src/infra_pulse/__init__.py`.** This is the runtime `__version__` — if you skip it, the deployed app still shows the old version.
-- **Set GH_TOKEN once in prerequisites** using `github_app.py token`. Don't use the old `unset GH_TOKEN` workaround.
+- **Don't set GH_TOKEN.** Releases use the user's PAT via native `gh` auth. Releases should show as created by the user, not a bot.
 - **Don't release with empty [Unreleased].** Always verify content exists.
 - **Don't leave [Unreleased] content behind.** Move ALL entries to the versioned section.
 - **Don't create the tag before committing CHANGELOG.** Commit first, then tag (so the
