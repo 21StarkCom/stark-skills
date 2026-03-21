@@ -427,7 +427,7 @@ Record `T0` at skill start. Print timestamped lines for every phase transition a
 [HH:MM:SS] Phase 1: Setup — done (12s)
 [HH:MM:SS] Phase 2: Review-Fix Loop — started
 [HH:MM:SS]   ▸ Round 1: dispatching 18 sub-agents
-[HH:MM:SS]   ▸ Round 1: 18 complete (14 succeeded, 4 failed) — 127s
+[HH:MM:SS]   ▸ Round 1: 18 complete (14 succeeded, 4 failed: codex:scope, gemini:security, ...) — 127s
 [HH:MM:SS]   ▸ Round 1: 7 fix, 3 false positive, 2 noise — fixing
 [HH:MM:SS]   ▸ Round 1: build + test — passed
 [HH:MM:SS]   ▸ Round 1: commit + push — done
@@ -497,12 +497,28 @@ Include per-phase timing in `rounds.json`:
     "phases": [
       {"name": "Setup", "duration_s": 12},
       {"name": "Review-Fix Loop", "duration_s": 523, "rounds": [
-        {"round": 1, "dispatch_s": 131, "classify_fix_s": 82},
-        {"round": 2, "dispatch_s": 125, "classify_fix_s": 62}
-      ]}
-    ]
+        {"round": 1, "dispatch_s": 131, "classify_fix_s": 82, "build_test_s": 45},
+        {"round": 2, "dispatch_s": 125, "classify_fix_s": 62, "build_test_s": 38}
+      ]},
+      {"name": "Summary", "duration_s": 5},
+      {"name": "Post & Persist", "duration_s": 3},
+      {"name": "Cleanup", "duration_s": 2}
+    ],
+    "agents": {"dispatched": 18, "succeeded": 16, "failed": 2, "failed_agents": ["codex:scope", "gemini:security"]}
   }
 }
+```
+
+### Observability in review-only / dry-run mode
+
+When running in review-only mode (no fix loop), adapt the metrics:
+- Skip "Rounds" line (there are no fix rounds)
+- Show "Review-only mode — no fixes applied"
+- Agent counts still apply
+
+### Agent counting
+
+Agent counts are **per-round** (18 dispatched = 3 agents × 6 domains per round). The metrics block shows the **last round's** agent counts. Total dispatches across all rounds go in the phase timing breakdown.
 
 ## Review Guidelines
 
