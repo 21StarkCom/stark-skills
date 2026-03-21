@@ -1,4 +1,4 @@
-# CLAUDE.md — stark-review
+# CLAUDE.md — stark-skills
 
 ## What This Is
 

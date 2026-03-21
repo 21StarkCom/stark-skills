@@ -6,7 +6,7 @@
 
 ## Problem
 
-Session management skills (`/session-start`, `/session-end`) exist as independent copies across multiple repos with no shared structure. Each project has its own conventions for health checks, doc commits, PR merging, and devlogs. There's no global `/session-end` at all. The existing global `/session-start` is a plain file at `~/.claude/skills/session-start/SKILL.md` — not in any repo, not version-controlled, not part of the stark-review ecosystem.
+Session management skills (`/session-start`, `/session-end`) exist as independent copies across multiple repos with no shared structure. Each project has its own conventions for health checks, doc commits, PR merging, and devlogs. There's no global `/session-end` at all. The existing global `/session-start` is a plain file at `~/.claude/skills/session-start/SKILL.md` — not in any repo, not version-controlled, not part of the stark-skills ecosystem.
 
 ## Goals
 
@@ -151,7 +151,7 @@ Session complete.
 ### Where This Lives
 
 ```
-stark-review/
+stark-skills/
   skill/
     stark-session/
       SKILL.md              # /stark-session skill definition

@@ -63,12 +63,12 @@ All associations are optional. A spec with no review still has ADR-worthy decisi
 
 **Filesystem resolution** (steps 2-3): An `org/repo` identifier must be resolved to a local checkout. Resolution strategy:
 
-- Check sibling directories under the same parent as the current repo. E.g., if running from `~/git/Evinced/stark-review`, look for `~/git/Evinced/{repo-name}`.
+- Check sibling directories under the same parent as the current repo. E.g., if running from `~/git/Evinced/stark-skills`, look for `~/git/Evinced/{repo-name}`.
 - If not found as a sibling, check `~/git/{org}/{repo-name}`.
 - If still not found, fail with: `"Target repo {org}/{repo} not found locally. Clone it or use --target-repo <path>."`
 - Do NOT clone repos automatically — that's a side effect the user should control.
 
-When no external repo reference is found in the spec, the target is the current directory (typically stark-review itself).
+When no external repo reference is found in the spec, the target is the current directory (typically stark-skills itself).
 
 **Multiple repo references in a single spec:** Use the first reference found. If the spec mentions multiple repos, log a warning: `"Multiple repo references found, using {first}. Override with --target-repo."`
 
@@ -184,7 +184,7 @@ Takes the intermediate extractions and routes each to the right document type an
 | `constraint` | ADR or reference | `docs/adr/` or `docs/reference/constraints.md` | Pass 1 sets `has_alternatives: true/false` on constraint extractions. If `true` (deliberate choice with rejected alternatives), route to ADR. If `false` (boundary condition), append to `docs/reference/constraints.md`. |
 | `integration` | Reference doc | `docs/reference/<component>.md` | Markdown with endpoints/contracts/auth patterns |
 | `data_model` | Reference doc | `docs/reference/<entity>.md` | Markdown with schema, fields, relationships |
-| `evolution` | Review retrospective | `docs/retrospectives/YYYY-MM-DD-<slug>.md` in the **source repo** (where the spec lives, typically stark-review) | Structured retrospective |
+| `evolution` | Review retrospective | `docs/retrospectives/YYYY-MM-DD-<slug>.md` in the **source repo** (where the spec lives, typically stark-skills) | Structured retrospective |
 | `agent_signal` | Retrospective + learning log | Retrospective + `docs/retrospectives/learning-log.md` in the **source repo** | Detail in retro, one-liner in log |
 | `glossary` | Glossary | `docs/glossary.md` | Definition list, created if missing, appended if exists |
 
@@ -331,7 +331,7 @@ Batch mode additionally: cross-spec dedup stats, totals across all specs.
 {
   "skill": "stark-extract-docs",
   "spec_path": "docs/superpowers/specs/2026-03-19-rename-project-design.md",
-  "target_repo": "GetEvinced/stark-review",
+  "target_repo": "GetEvinced/stark-skills",
   "artifacts_found": {
     "spec": true,
     "plan": true,
@@ -405,7 +405,7 @@ The `{target-repo}` is the repo where docs were written (not the source repo whe
 {
   "schema_version": 1,
   "spec_path": "docs/superpowers/specs/2026-03-19-rename-project-design.md",
-  "target_repo": "GetEvinced/stark-review",
+  "target_repo": "GetEvinced/stark-skills",
   "completed_at": "2026-03-20T14:31:27Z",
   "input_hashes": {
     "spec": "sha256:abc123",
@@ -463,7 +463,7 @@ PYTHON=$SCRIPTS/.venv/bin/python3
 
 - Don't use `git add -A` for the doc commit — add specific files by name.
 - Don't modify the source spec or plan — they are point-in-time artifacts.
-- Don't write retrospectives/ADRs into stark-review's `docs/` when the spec describes an external project.
+- Don't write retrospectives/ADRs into stark-skills's `docs/` when the spec describes an external project.
 - Don't renumber existing ADRs — gaps in numbering are safe; renumbering breaks cross-references.
 - Don't create duplicate ADRs silently — when uncertain, add a `<!-- possible duplicate -->` marker.
 - Don't route low-confidence extractions to docs without `--include-low` — they'll add noise.

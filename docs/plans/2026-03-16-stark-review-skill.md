@@ -121,7 +121,7 @@ class TestJsonOnlyFlag:
 
 - [ ] **Step 3: Run tests to verify they fail**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_multi_review.py::TestJsonOnlyFlag -v`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_multi_review.py::TestJsonOnlyFlag -v`
 Expected: FAIL — `--json-only` not recognized or `discover_config` not found
 
 - [ ] **Step 4: Add `--json-only` flag to argparse**
@@ -191,7 +191,7 @@ Replace all `print(...)` in `run_review_round` with `print(..., file=out)`.
 
 - [ ] **Step 6: Run tests to verify they pass**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_multi_review.py::TestJsonOnlyFlag -v`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_multi_review.py::TestJsonOnlyFlag -v`
 Expected: PASS
 
 - [ ] **Step 7: Commit**
@@ -230,7 +230,7 @@ class TestBaseFlag:
 
 - [ ] **Step 2: Run test to verify behavior**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_multi_review.py::TestBaseFlag -v`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_multi_review.py::TestBaseFlag -v`
 
 The `--base` flag already exists in argparse (line 672). The code at line 683 is `base = args.base or detect_base_branch()` which short-circuits correctly. This test should pass as-is — just confirm the contract.
 
@@ -286,7 +286,7 @@ class TestModelFlags:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_multi_review.py::TestModelFlags -v`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_multi_review.py::TestModelFlags -v`
 Expected: FAIL — no model flags in commands
 
 - [ ] **Step 3: Update `_run_subagent` with model flags**
@@ -314,7 +314,7 @@ elif agent == "gemini":
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_multi_review.py::TestModelFlags -v`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_multi_review.py::TestModelFlags -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -405,7 +405,7 @@ class TestConfigDiscovery:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_multi_review.py::TestConfigDiscovery -v`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_multi_review.py::TestConfigDiscovery -v`
 Expected: FAIL — `discover_config` doesn't exist
 
 - [ ] **Step 3: Implement `discover_config`**
@@ -492,7 +492,7 @@ def discover_config(cwd: str | None = None, global_dir: str | None = None) -> di
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_multi_review.py::TestConfigDiscovery -v`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_multi_review.py::TestConfigDiscovery -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -551,7 +551,7 @@ class TestPromptResolution:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_multi_review.py::TestPromptResolution -v`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_multi_review.py::TestPromptResolution -v`
 Expected: FAIL — `resolve_prompt` doesn't exist
 
 - [ ] **Step 3: Implement `resolve_prompt` and update prompt loading**
@@ -642,7 +642,7 @@ Remove the `PROMPTS_DIR` constant (line 50) entirely. `GLOBAL_PROMPTS_DIR` is de
 
 - [ ] **Step 4: Run all tests**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_multi_review.py -v`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_multi_review.py -v`
 Expected: ALL PASS
 
 - [ ] **Step 5: Commit**
@@ -720,7 +720,7 @@ class TestConfigWiring:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_multi_review.py::TestConfigWiring -v`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_multi_review.py::TestConfigWiring -v`
 
 - [ ] **Step 3: Implement severity overrides and wire config**
 
@@ -764,7 +764,7 @@ In `run_review_round`, use the passed agents/domains instead of defaults.
 
 - [ ] **Step 4: Run all tests**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_multi_review.py -v`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_multi_review.py -v`
 Expected: ALL PASS
 
 - [ ] **Step 5: Commit**
@@ -788,7 +788,7 @@ The skill file is the core deliverable — narrative instructions that Claude Co
 - [ ] **Step 1: Create `skill/` directory**
 
 ```bash
-mkdir -p /Users/aryeh/git/Evinced/stark-review/skill
+mkdir -p /Users/aryeh/git/Evinced/stark-skills/skill
 ```
 
 - [ ] **Step 2: Write SKILL.md**
@@ -797,7 +797,7 @@ Create `skill/SKILL.md` with the full skill definition. The content follows the 
 
 ```markdown
 ---
-name: stark-review
+name: stark-skills
 description: >
   Multi-agent PR code review using 3 LLMs × N domains with autonomous fix loop.
   Use when the user says "stark review", "review this PR with all agents",
@@ -805,7 +805,7 @@ description: >
   `/stark-review` or `/stark-review <number>`.
 ---
 
-# stark-review
+# stark-skills
 
 Multi-agent PR review: 3 LLMs (Claude, Codex, Gemini) × 6 domain specializations
 dispatched in parallel. Autonomous fix-review loop until clean or max rounds.
@@ -1025,7 +1025,7 @@ check_dir "$HOME/.claude/skills/stark-review/SKILL.md" "Skill"
 - [ ] **Step 4: Run install and verify**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-review && ./install.sh --status
+cd /Users/aryeh/git/Evinced/stark-skills && ./install.sh --status
 ```
 
 Expected: All items show green checkmarks including the new "Skill" line.
@@ -1070,7 +1070,7 @@ git commit -m "docs: document /stark-review skill in CLAUDE.md"
 - [ ] **Step 1: Re-run install**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-review && ./install.sh
+cd /Users/aryeh/git/Evinced/stark-skills && ./install.sh
 ```
 
 - [ ] **Step 2: Verify all symlinks**
@@ -1098,7 +1098,7 @@ This should: create a worktree, run multi_review.py with `--json-only --dry-run`
 - [ ] **Step 5: Run all tests**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_multi_review.py -v
+cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_multi_review.py -v
 ```
 
 Expected: ALL PASS

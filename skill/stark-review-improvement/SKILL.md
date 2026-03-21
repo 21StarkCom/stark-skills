@@ -1,9 +1,9 @@
 ---
 name: stark-review-improvement
 description: >
-  Improve stark-review prompts based on the Prompt Improvement Assessment from a
+  Improve stark-skills prompts based on the Prompt Improvement Assessment from a
   completed /stark-review run. Reads the assessment from conversation context (or
-  history files), edits the relevant prompt files in ~/git/Evinced/stark-review/,
+  history files), edits the relevant prompt files in ~/git/Evinced/stark-skills/,
   patches multi_review.py if needed, and logs the learning. Use when the user says
   "improve review prompts", "start review improvement", "fix review prompts", or
   invokes /stark-review-improvement.
@@ -12,12 +12,12 @@ argument-hint: (reads assessment from context or latest history)
 
 # stark-review-improvement
 
-Closes the feedback loop on stark-review: reads the prompt improvement assessment from the current conversation, makes targeted edits to the prompt and orchestrator files, and commits a changelog entry.
+Closes the feedback loop on stark-skills: reads the prompt improvement assessment from the current conversation, makes targeted edits to the prompt and orchestrator files, and commits a changelog entry.
 
 ## Constants
 
 ```
-STARK_REPO = ~/git/Evinced/stark-review
+STARK_REPO = ~/git/Evinced/stark-skills
 PROMPTS    = $STARK_REPO/global/prompts
 SCRIPTS    = $STARK_REPO/scripts
 CONFIG     = $STARK_REPO/global/config.json

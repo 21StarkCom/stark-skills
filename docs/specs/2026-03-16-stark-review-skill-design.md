@@ -6,7 +6,7 @@
 
 ## Problem
 
-The stark-review system (3 LLMs × configurable domains = parallel sub-agent reviews) exists as a Python orchestrator (`multi_review.py`) and a set of prompts, but there's no way to trigger it as a single command from any Claude Code terminal. The fix-review loop described in `orchestrator.md` requires manual intervention. We need a skill that runs the full cycle autonomously.
+The stark-skills system (3 LLMs × configurable domains = parallel sub-agent reviews) exists as a Python orchestrator (`multi_review.py`) and a set of prompts, but there's no way to trigger it as a single command from any Claude Code terminal. The fix-review loop described in `orchestrator.md` requires manual intervention. We need a skill that runs the full cycle autonomously.
 
 ## Solution
 

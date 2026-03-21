@@ -63,7 +63,7 @@ Critical dropped 3→0 after round 1 (target repo resolution fix). Final round's
 | Machine-local history used as state | All stark skills work this way. Acceptable for single-operator tooling. |
 | No machine-readable error contract | Interactive skill, not CI automation. |
 | No test plan / acceptance criteria | This is a design spec, not an implementation plan. Tests are defined in the plan. |
-| Cross-spec ADR dedup relies on LLM judgment | Correct — same mechanism used throughout stark-review (agent classification is always LLM-based). Uncertain cases get `<!-- possible duplicate -->` marker. |
+| Cross-spec ADR dedup relies on LLM judgment | Correct — same mechanism used throughout stark-skills (agent classification is always LLM-based). Uncertain cases get `<!-- possible duplicate -->` marker. |
 
 ### Acknowledged Limitations
 

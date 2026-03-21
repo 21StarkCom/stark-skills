@@ -8,12 +8,12 @@
 
 Code reviews lack context. Reviewers (both human and AI agents) don't know the spec or design intent behind a PR, so reviews are slow, miss the point, or re-litigate decisions already made. There's no org-wide standard for dev docs — every repo has evolved independently. Docs that do exist go stale because nothing detects or flags it.
 
-The stark-review multi-agent system already reviews PRs and design docs, but there's no structured pipeline connecting specs to code reviews. The brainstorming skill already generates specs, but nothing nudges engineers to use it or links the output to the review process.
+The stark-skills multi-agent system already reviews PRs and design docs, but there's no structured pipeline connecting specs to code reviews. The brainstorming skill already generates specs, but nothing nudges engineers to use it or links the output to the review process.
 
 ## Goals
 
 1. Establish an org-wide doc taxonomy and repo structure, adoptable by any Evinced team
-2. Connect specs to code reviews — stark-review agents use the spec as review context
+2. Connect specs to code reviews — stark-skills agents use the spec as review context
 3. Detect stale docs before they become dangerously wrong
 4. Make `/init-docs` the zero-friction entry point for adopting the system
 5. Make the "Start Here" entry point scannable and instant — optimized for short attention spans
@@ -27,7 +27,7 @@ The stark-review multi-agent system already reviews PRs and design docs, but the
 
 ## Solution
 
-Seven components, all living in stark-review and symlinked via `install.sh`:
+Seven components, all living in stark-skills and symlinked via `install.sh`:
 
 ### 1. Doc Taxonomy & Repo Structure
 
@@ -49,7 +49,7 @@ mkdocs.yml         # MkDocs Material, nav mirrors directory layout
 ```
 
 **Naming conventions:**
-- Specs and plans: `YYYY-MM-DD-<slug>.md` (date-prefixed, matches existing stark-review pattern)
+- Specs and plans: `YYYY-MM-DD-<slug>.md` (date-prefixed, matches existing stark-skills pattern)
 - ADRs: `NNNN-<slug>.md` (sequential numbering, matches infra-pulse pattern)
 - Guides, reference, architecture: descriptive names, no date prefix (living docs)
 
@@ -66,14 +66,14 @@ Minimal. One functional field:
 Everything else (what, why, risk, test evidence, change size) is inferred by the AI reviewer from the diff, commit messages, and linked spec. The spec link is the only thing the AI can't derive on its own.
 
 The template exists to:
-- Give the stark-review agent a machine-readable pointer to the spec
+- Give the stark-skills agent a machine-readable pointer to the spec
 - Create a moment of reflection: "should I have written a spec for this?"
 
-### 3. Spec-Aware Reviews in stark-review
+### 3. Spec-Aware Reviews in stark-skills
 
 Closes the loop between specs and code reviews. Two-tier resolution:
 
-**Tier A — Agent-side (default):** Each stark-review agent prompt gets an instruction block: "Check the PR description for a spec link. If found, fetch and read the spec. Validate: does the implementation match the spec's goals? Does it respect the non-goals? Are there gaps between what was specified and what was built? Note deviations — not necessarily as problems, but as 'the spec said X, the implementation does Y, was this intentional?'"
+**Tier A — Agent-side (default):** Each stark-skills agent prompt gets an instruction block: "Check the PR description for a spec link. If found, fetch and read the spec. Validate: does the implementation match the spec's goals? Does it respect the non-goals? Are there gaps between what was specified and what was built? Note deviations — not necessarily as problems, but as 'the spec said X, the implementation does Y, was this intentional?'"
 
 **Tier B — Orchestrator fallback:** If agents can't resolve the spec (relative path, broken URL, access issue), `multi_review.py` resolves it before dispatching. Reads the PR description, extracts the spec path, reads the file content, injects it into each agent's prompt as additional context.
 
@@ -112,7 +112,7 @@ Architecture Decision Records per repo, immutable once accepted.
 - Once accepted, the file is never modified except to update Status to "Superseded by NNNN"
 - The superseding ADR links back with "Supersedes NNNN"
 - ADRs are referenced from PRs and specs — when a reviewer sees a surprising choice, the ADR link explains why
-- stark-review agents can cross-reference ADRs from `docs/adr/` when reviewing; contradicting an accepted ADR without superseding it is a flag
+- stark-skills agents can cross-reference ADRs from `docs/adr/` when reviewing; contradicting an accepted ADR without superseding it is a flag
 
 ### 5. Staleness Detection
 
@@ -158,7 +158,7 @@ Claude Code skill with four modes, combinable:
 
 **Combinable:** `/init-docs --upgrade --backfill` restructures what exists AND fills in gaps from git history.
 
-**Location:** Skill definition in `stark-review/skill/init-docs/SKILL.md`. Templates in `stark-review/standards/templates/`. Symlinked to `~/.claude/` via `install.sh`.
+**Location:** Skill definition in `stark-skills/skill/init-docs/SKILL.md`. Templates in `stark-skills/standards/templates/`. Symlinked to `~/.claude/` via `install.sh`.
 
 ### 7. "Start Here" Docs
 
@@ -170,7 +170,7 @@ Two entry-point documents, both optimized for scanability and short attention sp
 - Copy-paste commands for common operations
 - Progressive disclosure — links to deeper docs, never forces you to read them
 
-**Standards pitch page `standards/index.md`** (in stark-review):
+**Standards pitch page `standards/index.md`** (in stark-skills):
 - Why this system exists (one paragraph)
 - What you get (bullet list with outcomes, not features)
 - How to adopt it (`/init-docs --template` or `--backfill`)
@@ -186,10 +186,10 @@ Two entry-point documents, both optimized for scanability and short attention sp
 
 ## Where This Lives
 
-Everything lives in stark-review, following the existing `global/` → `org/` → `repo/` hierarchy:
+Everything lives in stark-skills, following the existing `global/` → `org/` → `repo/` hierarchy:
 
 ```
-stark-review/
+stark-skills/
   standards/
     templates/           # PR template, ADR template, mkdocs.yml scaffold,
                          # .doc-staleness.yml, CODEOWNERS template
@@ -209,7 +209,7 @@ stark-review/
 | System | Integration |
 |--------|-------------|
 | Brainstorming skill | Already generates specs in `docs/specs/`. No change needed. |
-| stark-review (PR) | Agent prompts updated to read spec from PR description. Orchestrator fallback for resolution. |
+| stark-skills (PR) | Agent prompts updated to read spec from PR description. Orchestrator fallback for resolution. |
 | stark-review-plan | Already reviews spec docs. No change needed. |
 | `/init-docs` | New skill. Scaffolds, backfills, upgrades, cleans. |
 | GitHub Actions | New workflow for staleness detection. |
@@ -217,6 +217,6 @@ stark-review/
 
 ## Open Questions
 
-1. Should the staleness GitHub Action live in stark-review as a reusable workflow, or be scaffolded directly into each repo by `/init-docs`? Default: reusable workflow in stark-review, referenced from each repo.
+1. Should the staleness GitHub Action live in stark-skills as a reusable workflow, or be scaffolded directly into each repo by `/init-docs`? Default: reusable workflow in stark-skills, referenced from each repo.
 2. For `--backfill`, how aggressively should it generate ADRs? Default: conservative — only obvious technology choices visible in the codebase (language, framework, database, major libraries). Inferred design patterns are too speculative.
 3. Should `--upgrade` handle Confluence pages (fetch and convert to Markdown) or only in-repo docs? Default: in-repo only. Confluence migration is a separate concern.

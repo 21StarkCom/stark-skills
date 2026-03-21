@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add an org-wide dev docs management system to stark-review: templates, `/init-docs` skill, spec-aware reviews, staleness detection, and ADHD-friendly "Start Here" docs.
+**Goal:** Add an org-wide dev docs management system to stark-skills: templates, `/init-docs` skill, spec-aware reviews, staleness detection, and ADHD-friendly "Start Here" docs.
 
 **Architecture:** Seven components built incrementally. Templates and standards are static files. `/init-docs` is a Claude Code skill. Spec-aware reviews require changes to agent prompts and `multi_review.py`. Staleness detection is a GitHub Action. Each component is independently useful.
 

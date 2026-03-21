@@ -1,4 +1,4 @@
-# stark-review
+# stark-skills
 
 Multi-agent PR code review system. Dispatches 3 AI agents (Claude, Codex, Gemini) across N domain specializations as parallel sub-agent reviews. Configuration and prompts merge from 3 levels (global → org → repo) following the CLAUDE.md pattern.
 
@@ -6,8 +6,8 @@ Multi-agent PR code review system. Dispatches 3 AI agents (Claude, Codex, Gemini
 
 ```bash
 # Clone and install
-git clone git@github.com:GetEvinced/stark-review.git ~/git/Evinced/stark-review
-cd ~/git/Evinced/stark-review
+git clone git@github.com:GetEvinced/stark-skills.git ~/git/Evinced/stark-skills
+cd ~/git/Evinced/stark-skills
 ./install.sh
 
 # Review a PR (from any repo with GitHub App access)
@@ -37,7 +37,7 @@ Each agent posts a consolidated review via its own GitHub App bot:
 ## Repo Structure
 
 ```
-stark-review/
+stark-skills/
 ├── install.sh                    ← symlinks repo contents to install locations
 ├── global/                       ← → ~/.claude/code-review/
 │   ├── config.json               ← global defaults

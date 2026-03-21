@@ -74,8 +74,8 @@ If none of the resume states match, proceed with standard validation.
 
 ```bash
 # Parse remote into components (not substring grep)
-# SSH: git@github.com:GetEvinced/stark-review.git → HOST=github.com ORG=GetEvinced REPO=stark-review
-# HTTPS: https://github.com/GetEvinced/stark-review.git → same
+# SSH: git@github.com:GetEvinced/stark-skills.git → HOST=github.com ORG=GetEvinced REPO=stark-skills
+# HTTPS: https://github.com/GetEvinced/stark-skills.git → same
 # Confirm parsed REPO matches OLD_NAME
 test "$REPO" = "$OLD_NAME" || error "Remote repo name '$REPO' doesn't match old-name '$OLD_NAME'"
 
@@ -102,8 +102,8 @@ Extract `HOST`, `ORG`, and repo name from the git remote URL:
 
 ```bash
 REMOTE_URL=$(git remote get-url origin)
-# SSH: git@github.com:GetEvinced/stark-review.git
-# HTTPS: https://github.com/GetEvinced/stark-review.git
+# SSH: git@github.com:GetEvinced/stark-skills.git
+# HTTPS: https://github.com/GetEvinced/stark-skills.git
 ```
 
 Parse HOST, ORG, OLD_NAME from the URL. All replacement patterns are

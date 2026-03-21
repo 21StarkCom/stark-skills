@@ -58,7 +58,7 @@ Group entries by `project` field.
 Derive a short project name from the path by taking the last two path segments:
 - `/Users/aryeh/git/Evinced/infra-pulse` → `Evinced/infra-pulse`
 - `/Users/aryeh/git/personal/dotfiles` → `personal/dotfiles`
-- `/Users/aryeh/git/Evinced/stark-review` → `Evinced/stark-review`
+- `/Users/aryeh/git/Evinced/stark-skills` → `Evinced/stark-skills`
 
 If `--project <name>` was given, filter to projects whose path contains `<name>` (case-insensitive partial match). If no match, error: "No project matching '{name}' found. Available: {list of short names}" and abort.
 

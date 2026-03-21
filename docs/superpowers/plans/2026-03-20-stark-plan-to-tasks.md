@@ -112,7 +112,7 @@ class TestCLISmoke:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_plan_to_tasks_validate.py -v -x`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_plan_to_tasks_validate.py -v -x`
 Expected: FAIL (script doesn't exist yet)
 
 - [ ] **Step 3: Create script with data models, config loading, and CLI**
@@ -267,7 +267,7 @@ if __name__ == "__main__":
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_plan_to_tasks_validate.py::TestCLISmoke -v`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_plan_to_tasks_validate.py::TestCLISmoke -v`
 Expected: 3 tests PASS
 
 - [ ] **Step 5: Commit**
@@ -376,7 +376,7 @@ class TestOutputParsing:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_plan_to_tasks_validate.py::TestEnvelope scripts/test_plan_to_tasks_validate.py::TestOutputParsing -v -x`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_plan_to_tasks_validate.py::TestEnvelope scripts/test_plan_to_tasks_validate.py::TestOutputParsing -v -x`
 Expected: FAIL (functions not defined)
 
 - [ ] **Step 3: Implement envelope builder and output parser**
@@ -497,7 +497,7 @@ def parse_validation_output(raw: str, agent: str) -> ValidationResult:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_plan_to_tasks_validate.py::TestEnvelope scripts/test_plan_to_tasks_validate.py::TestOutputParsing -v`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_plan_to_tasks_validate.py::TestEnvelope scripts/test_plan_to_tasks_validate.py::TestOutputParsing -v`
 Expected: All PASS
 
 - [ ] **Step 5: Implement agent dispatch function**
@@ -625,7 +625,7 @@ def dispatch_validators(
 
 - [ ] **Step 6: Run all tests**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_plan_to_tasks_validate.py -v`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_plan_to_tasks_validate.py -v`
 Expected: All PASS
 
 - [ ] **Step 7: Commit**
@@ -836,7 +836,7 @@ Expected: Shows usage with `plan_file` and `breakdown_file` positional args
 - [ ] **Step 5: Run all tests**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_plan_to_tasks_validate.py -v
+cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_plan_to_tasks_validate.py -v
 ```
 Expected: All tests PASS
 
