@@ -350,7 +350,8 @@ gh api /repos/{ORG}/{REPO}/issues \
   --method POST \
   --field title="$(cat $TITLE_FILE)" \
   --field body="$(cat $BODY_FILE)" \
-  --field labels="[\"type:bug\",\"stark-review\",\"{finding.severity}\"]"
+  --field labels="[\"type:bug\",\"stark-review\",\"{finding.severity}\"]" \
+  --field type="Bug"
 rm -f "$BODY_FILE" "$TITLE_FILE"
 ```
 

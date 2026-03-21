@@ -227,6 +227,16 @@ Each phase:
 
 Default to `task` if ambiguous. Use `feature` only when the task creates genuinely new functionality. Use `bug` only when the plan explicitly identifies broken existing behavior to fix.
 
+**GitHub Issue Type mapping:** In addition to labels, set the native GitHub Issue Type on each issue via `--field type="{GH_ISSUE_TYPE}"`. Map the task `type` field to the GitHub Issue Type name:
+
+| Task type | Label | GitHub Issue Type (`--field type`) |
+|-----------|-------|------------------------------------|
+| `feature` | `type:feature` | `Feature` |
+| `task` | `type:task` | `Task` |
+| `bug` | `type:bug` | `Bug` |
+
+GitHub Issue Types are org-level. The GetEvinced org defines: Task, Bug, Feature. If the API call fails due to missing issue types, fall back to labels only and warn.
+
 **Sizing guardrails:** If a task exceeds max 5 acceptance criteria, max 4 files, or max 500 words in `how` — split it. If a task has only 1 acceptance criterion and 1 file — consider merging. Recommend max 6-8 phases, max 8-10 tasks per phase. If exceeded, surface it as a signal the plan should be split.
 
 **Output schema:** Write to a temp file:
@@ -364,7 +374,8 @@ gh api /repos/{ORG}/{REPO}/issues \
   --method POST \
   --field title="$TITLE" \
   --field body="$(cat $BODY_FILE)" \
-  --field labels='["type:feature","sp:5","risk:med","confidence:high","stark-plan-to-tasks","plan:{PLAN_SLUG}"]'
+  --field labels='["type:feature","sp:5","risk:med","confidence:high","stark-plan-to-tasks","plan:{PLAN_SLUG}"]' \
+  --field type="{GH_ISSUE_TYPE}"
 ```
 
 **Issue body length:** GitHub limit is 65,536 characters. Section caps in Phase 3 should prevent this. If a body still exceeds the limit, truncate with:
