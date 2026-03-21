@@ -1,0 +1,62 @@
+[
+  {
+    "name": "low-ro-json-small",
+    "duration_s": 13.48,
+    "exit_code": 0,
+    "output_size": 1881,
+    "json_parseable": true,
+    "findings_count": 3,
+    "timed_out": false,
+    "error": ""
+  },
+  {
+    "name": "medium-ro-json-small",
+    "duration_s": 15.66,
+    "exit_code": 0,
+    "output_size": 1188,
+    "json_parseable": true,
+    "findings_count": 2,
+    "timed_out": false,
+    "error": ""
+  },
+  {
+    "name": "high-ro-json-small",
+    "duration_s": 12.37,
+    "exit_code": 0,
+    "output_size": 1680,
+    "json_parseable": true,
+    "findings_count": 3,
+    "timed_out": false,
+    "error": ""
+  },
+  {
+    "name": "high-fa-json-small",
+    "duration_s": 38.26,
+    "exit_code": 0,
+    "output_size": 2442,
+    "json_parseable": true,
+    "findings_count": 4,
+    "timed_out": false,
+    "error": ""
+  },
+  {
+    "name": "high-ro-file-small",
+    "duration_s": 45.23,
+    "exit_code": 0,
+    "output_size": 2120,
+    "json_parseable": true,
+    "findings_count": 3,
+    "timed_out": false,
+    "error": ""
+  },
+  {
+    "name": "high-ro-json-medium",
+    "duration_s": 34.16,
+    "exit_code": 0,
+    "output_size": 4389,
+    "json_parseable": true,
+    "findings_count": 6,
+    "timed_out": false,
+    "error": ""
+  }
+]
