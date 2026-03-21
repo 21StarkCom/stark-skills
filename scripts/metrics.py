@@ -464,7 +464,7 @@ def compute_report(records: list[RunRecord]) -> dict:
         "by_outcome": dict(outcome_totals),
         "by_severity": dict(severity_totals),
         "signal_to_noise_pct": round(issue_count / max(issue_count + noise_total, 1) * 100, 1),
-        "false_positive_rate_pct": round(fp_count / max(deduped_total, 1) * 100, 1),
+        "false_positive_rate_pct": round(fp_count / max(issue_count + noise_total, 1) * 100, 1),
     }
 
     # Worst FP sources (agent×domain combos)

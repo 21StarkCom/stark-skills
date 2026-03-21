@@ -337,23 +337,36 @@ cat > "$BODY_FILE" << 'ISSUE_EOF'
 _Created by `stark-review` · PR #{pr_number}_
 ISSUE_EOF
 
+TITLE_FILE=$(mktemp) && chmod 600 "$TITLE_FILE"
+echo "bug: {finding.title}" > "$TITLE_FILE"
+
 GH_TOKEN="$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)" \
   gh api /repos/{ORG}/{REPO}/issues \
   --method POST \
-  --field title="bug: {finding.title}" \
+  --field title="$(cat $TITLE_FILE)" \
   --field body="$(cat $BODY_FILE)" \
-  --field labels='["type:bug","stark-review","{finding.severity}"]'
-rm -f "$BODY_FILE"
+  --field labels="[\"type:bug\",\"stark-review\",\"{finding.severity}\"]"
+rm -f "$BODY_FILE" "$TITLE_FILE"
 ```
 
-**Shell injection prevention:** Same rules as stark-plan-to-tasks — write body to temp file, use `--field` for title.
-
-**Deduplication:** Before creating, check if an open issue with label `stark-review` already exists for the same file+title pattern:
+**Severity label setup** — also auto-create severity labels alongside type labels:
 ```bash
 GH_TOKEN="$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)" \
-  gh api "/repos/{ORG}/{REPO}/issues?labels=stark-review&state=open" --jq '.[].title'
+  gh label create "critical" --repo {ORG}/{REPO} --color "b60205" --force
+GH_TOKEN="$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)" \
+  gh label create "high" --repo {ORG}/{REPO} --color "d93f0b" --force
 ```
-If a matching issue title exists, skip and note "Bug already tracked in #{existing}".
+
+**Shell injection prevention:** Both title and body are written to temp files (`chmod 600`) to prevent LLM-generated content from being interpolated in shell commands. Variable substitution in the labels field is performed by the executing agent, not by the shell.
+
+**Deduplication:** Before creating, check if an open issue with label `stark-review` already exists for the same bug:
+```bash
+GH_TOKEN="$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)" \
+  gh api "/repos/{ORG}/{REPO}/issues?labels=stark-review&state=open" --jq '.[] | {number, title, body}'
+```
+Match by: title contains the finding title AND body contains the same file path. Both must match — two different files with the same finding title are distinct bugs. If a match is found, skip and note "Bug already tracked in #{existing}".
+
+**Review-only mode:** In review-only mode (no fix loop), bug issues are still created for critical/high findings since no fix was attempted. To prevent excessive issue creation on large PRs, cap at 5 bug issues per review run. If more qualify, list the remainder in the PR comment with a note: "N additional bugs not filed as issues — review the PR comment for details."
 
 **Include in summary:** Add a "Bug Issues Created" section after the Misalignment Analysis listing each created issue with its number and title. If no bugs qualify, omit the section.
 
