@@ -212,9 +212,20 @@ Each phase:
 | `acceptance_criteria` | Testable conditions for "done" (max 5 items) |
 | `dependencies` | Which `task_id`s must complete first |
 | `review_hints` | Edge cases, security concerns, architectural constraints (max 5 bullets) |
+| `type` | `feature`, `task`, or `bug` — see classification rules below |
 | `story_points` | Fibonacci: 1, 2, 3, 5, 8, 13 |
 | `risk` | `low`, `med`, `high` |
 | `confidence` | `low`, `med`, `high` — LLM's self-assessed confidence the task is fully specified |
+
+**Issue type classification:**
+
+| Type | When to use | Label color |
+|------|-------------|-------------|
+| `feature` | New user-facing capability, new endpoint, new UI component — something that didn't exist before | `#1d76db` (blue) |
+| `task` | Refactoring, migration, infrastructure, CI/CD, config changes, documentation — work that doesn't add new user-facing behavior | `#e4e669` (yellow) |
+| `bug` | Fix for existing broken behavior identified in the plan — a defect called out as something to fix | `#e11d48` (red) |
+
+Default to `task` if ambiguous. Use `feature` only when the task creates genuinely new functionality. Use `bug` only when the plan explicitly identifies broken existing behavior to fix.
 
 **Sizing guardrails:** If a task exceeds max 5 acceptance criteria, max 4 files, or max 500 words in `how` — split it. If a task has only 1 acceptance criterion and 1 file — consider merging. Recommend max 6-8 phases, max 8-10 tasks per phase. If exceeded, surface it as a signal the plan should be split.
 
@@ -238,6 +249,7 @@ Schema:
         {
           "task_id": "task-1-1-user-entity",
           "title": "Implement User entity with validation",
+          "type": "feature",
           "what": "...",
           "why": "...",
           "where": ["src/models/user.py", "src/db/migrations/001_users.sql"],
@@ -336,6 +348,7 @@ GH_TOKEN="$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)" \
 ```
 
 Labels to ensure exist:
+- `type:feature` (blue, `#1d76db`), `type:task` (yellow, `#e4e669`), `type:bug` (red, `#e11d48`)
 - `sp:1`, `sp:2`, `sp:3`, `sp:5`, `sp:8`, `sp:13` (blue shades, graduated)
 - `risk:low` (green, `#2cbe4e`), `risk:med` (yellow, `#e4e669`), `risk:high` (red, `#e11d48`)
 - `confidence:low` (gray, `#8b949e`), `confidence:med` (gray, `#6e7681`), `confidence:high` (gray, `#484f58`)
@@ -352,7 +365,7 @@ GH_TOKEN="$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)" \
   --method POST \
   --field title="$TITLE" \
   --field body="$(cat $BODY_FILE)" \
-  --field labels='["sp:5","risk:med","confidence:high","stark-plan-to-tasks","plan:{PLAN_SLUG}"]'
+  --field labels='["type:feature","sp:5","risk:med","confidence:high","stark-plan-to-tasks","plan:{PLAN_SLUG}"]'
 ```
 
 **Issue body length:** GitHub limit is 65,536 characters. Section caps in Phase 3 should prevent this. If a body still exceeds the limit, truncate with:
