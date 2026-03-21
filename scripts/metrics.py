@@ -510,7 +510,7 @@ def compute_report(records: list[RunRecord]) -> dict:
     assessments_generated = sum(
         1 for r in records if r.metrics.get("has_assessment")
     )
-    changelog = Path.home() / "git" / "Evinced" / "stark-review" / "docs" / "prompt-changelog.md"
+    changelog = Path.home() / "git" / "Evinced" / "stark-skills" / "docs" / "prompt-changelog.md"
     improvements_applied = 0
     if changelog.exists():
         improvements_applied = changelog.read_text().count("## 20")  # count dated entries

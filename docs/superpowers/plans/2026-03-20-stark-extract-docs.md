@@ -127,7 +127,7 @@ For each artifact: check if the file exists. Read it if found. Log which were fo
 
 If `--force` was NOT passed:
 - Derive spec slug from filename: strip directory, strip `-design.md` suffix. E.g., `2026-03-19-rename-project-design.md` → `2026-03-19-rename-project`.
-- Check for history file at `~/.claude/code-review/history/extract-docs/{target-repo}/{spec-slug}.json` (where `{target-repo}` is the `org/repo` identifier, e.g., `GetEvinced/stark-review`, creating a nested directory structure like `extract-docs/GetEvinced/stark-review/`).
+- Check for history file at `~/.claude/code-review/history/extract-docs/{target-repo}/{spec-slug}.json` (where `{target-repo}` is the `org/repo` identifier, e.g., `GetEvinced/stark-skills`, creating a nested directory structure like `extract-docs/GetEvinced/stark-skills/`).
 - If found, compute SHA-256 hashes of all current input files. Compare against `input_hashes` in the history file.
 - If ALL hashes match, log: "Spec already processed with identical inputs. Use --force to re-extract." and exit cleanly.
 

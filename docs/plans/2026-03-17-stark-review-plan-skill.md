@@ -114,7 +114,7 @@ class TestPromptResolution:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_plan_review_dispatch.py::TestPromptResolution -v`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_plan_review_dispatch.py::TestPromptResolution -v`
 Expected: FAIL — `plan_review_dispatch` not found
 
 - [ ] **Step 3: Create `plan_review_dispatch.py` with prompt resolution**
@@ -245,7 +245,7 @@ def _discover_plan_domains(global_prompts_dir: str | None = None) -> dict[str, s
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_plan_review_dispatch.py::TestPromptResolution -v`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_plan_review_dispatch.py::TestPromptResolution -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -338,7 +338,7 @@ class TestSubAgentDispatch:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_plan_review_dispatch.py::TestSubAgentDispatch -v`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_plan_review_dispatch.py::TestSubAgentDispatch -v`
 Expected: FAIL — `_run_plan_subagent` not found
 
 - [ ] **Step 3: Implement `_run_plan_subagent` and data structures**
@@ -473,7 +473,7 @@ def _run_plan_subagent(
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_plan_review_dispatch.py::TestSubAgentDispatch -v`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_plan_review_dispatch.py::TestSubAgentDispatch -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -557,7 +557,7 @@ class TestParallelDispatch:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_plan_review_dispatch.py::TestParallelDispatch -v`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_plan_review_dispatch.py::TestParallelDispatch -v`
 Expected: FAIL — `dispatch_plan_review` not found
 
 - [ ] **Step 3: Implement `dispatch_plan_review` and `main`**
@@ -702,7 +702,7 @@ if __name__ == "__main__":
 
 - [ ] **Step 4: Run all tests**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/test_plan_review_dispatch.py -v`
+Run: `cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/test_plan_review_dispatch.py -v`
 Expected: ALL PASS
 
 - [ ] **Step 5: Commit**
@@ -1209,7 +1209,7 @@ git commit -m "docs: document /stark-review-plan skill in CLAUDE.md"
 - [ ] **Step 1: Re-run install**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-review && ./install.sh
+cd /Users/aryeh/git/Evinced/stark-skills && ./install.sh
 ```
 
 - [ ] **Step 2: Verify all symlinks**
@@ -1248,7 +1248,7 @@ Expected: Help text showing `--file`, `--round`, `--timeout`, `--repo-dir`, `--a
 - [ ] **Step 5: Run all tests**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-review && python3 -m pytest scripts/ -v
+cd /Users/aryeh/git/Evinced/stark-skills && python3 -m pytest scripts/ -v
 ```
 
 Expected: ALL PASS (both `test_multi_review.py` and `test_plan_review_dispatch.py`).

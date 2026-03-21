@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# stark-review installer
+# stark-skills installer
 # Symlinks repo contents to the locations where the review system expects them.
 #
 # Usage:
@@ -89,7 +89,7 @@ check_dir() {
 
 install() {
     echo ""
-    echo "Installing stark-review from $REPO_DIR"
+    echo "Installing stark-skills from $REPO_DIR"
     echo ""
 
     # 1. Global: ~/.claude/code-review/ → repo/global/
@@ -197,7 +197,7 @@ install() {
 
 uninstall() {
     echo ""
-    echo "Uninstalling stark-review symlinks"
+    echo "Uninstalling stark-skills symlinks"
     echo ""
 
     unlink_dir "$CODE_REVIEW_DIR/config.json" "Global config"
@@ -224,7 +224,7 @@ uninstall() {
 
 status() {
     echo ""
-    echo "stark-review installation status"
+    echo "stark-skills installation status"
     echo ""
 
     check_dir "$CODE_REVIEW_DIR/config.json" "Global config"

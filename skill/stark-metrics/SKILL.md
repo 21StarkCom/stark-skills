@@ -71,4 +71,4 @@ Additional skill-specific metrics:
 | No history directory | "No history found. Run /stark-review to generate data." |
 | No matching records | "No records match filters. Try broader criteria." |
 | Corrupt JSON in history | Script warns on stderr, skips file, continues |
-| Script not found | "Run install.sh to set up stark-review" |
+| Script not found | "Run install.sh to set up stark-skills" |

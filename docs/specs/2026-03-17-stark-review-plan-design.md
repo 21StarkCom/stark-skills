@@ -6,7 +6,7 @@
 
 ## Problem
 
-The stark-review system reviews PR code diffs but has no way to review design documents, specs, or implementation plans. Design quality issues caught late (during code review or after implementation) are expensive. We need the same multi-agent, multi-domain parallel review approach applied to plan documents before implementation begins.
+The stark-skills system reviews PR code diffs but has no way to review design documents, specs, or implementation plans. Design quality issues caught late (during code review or after implementation) are expensive. We need the same multi-agent, multi-domain parallel review approach applied to plan documents before implementation begins.
 
 ## Solution
 

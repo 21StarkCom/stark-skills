@@ -6,11 +6,11 @@ The rename skill applies 5 replacement patterns in order from most specific to l
 
 | Tier | Pattern | Scope | Example |
 |------|---------|-------|---------|
-| 1 | `{parent-path}/{old-name}` | All tracked text files | `/Users/aryeh/git/Evinced/stark-review` |
-| 2 | `{org}/{old-name}` | All tracked text files | `GetEvinced/stark-review` |
-| 3 | `{host}:{org}/{old-name}` | All tracked text files | `github.com:GetEvinced/stark-review` |
-| 4 | `{host}/{org}/{old-name}` | All tracked text files | `github.com/GetEvinced/stark-review` |
-| 5 | Bare `{old-name}` with custom lookarounds | `*.md`, `*.json`, `*.sh` only | `stark-review` (standalone) |
+| 1 | `{parent-path}/{old-name}` | All tracked text files | `/Users/aryeh/git/Evinced/stark-skills` |
+| 2 | `{org}/{old-name}` | All tracked text files | `GetEvinced/stark-skills` |
+| 3 | `{host}:{org}/{old-name}` | All tracked text files | `github.com:GetEvinced/stark-skills` |
+| 4 | `{host}/{org}/{old-name}` | All tracked text files | `github.com/GetEvinced/stark-skills` |
+| 5 | Bare `{old-name}` with custom lookarounds | `*.md`, `*.json`, `*.sh` only | `stark-skills` (standalone) |
 
 Tier 5 uses `(?<![A-Za-z0-9._-]){old-name}(?![A-Za-z0-9._-])` to avoid matching inside longer identifiers.
 
