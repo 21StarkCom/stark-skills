@@ -396,38 +396,20 @@ Entry format: `- {task title} (#{issue_number})`
 
 If CHANGELOG.md doesn't exist, create one with standard Keep a Changelog format.
 
-### 3.2 Version bump
+### 3.2 Version bump & release
 
 Determine bump from task labels:
 - Any `type:feature` → minor
 - Only `type:fix` or `type:chore` → patch
 - Any `type:breaking` → major
 
-**Implement the release inline** (don't delegate to `/stark-release` which has user-confirmation gates):
+**Delegate to `/stark-release`** with the determined bump type as argument. This preserves the hierarchical config override chain — repos with custom release workflows (different version files, different tag formats, CI-triggered deploys) get their repo-level `/stark-release` overrides respected.
 
-1. Get current version from git tags: `git tag --sort=-v:refname | head -1`
-2. If no tags → baseline `0.1.0`
-3. Calculate next version based on bump type
-4. Detect version file: look for `__version__` in Python files, `version` in `package.json`, or similar. Update it.
-5. Move CHANGELOG `[Unreleased]` content to versioned section `[v{NEXT}] - {YYYY-MM-DD}`
-6. Commit:
-   ```bash
-   git add CHANGELOG.md {version_file}
-   git commit -m "release: v${NEXT_VERSION}"
-   ```
-7. Tag: `git tag -a v${NEXT_VERSION} -m "Release v${NEXT_VERSION}"`
-8. Push:
-   ```bash
-   unset GH_TOKEN   # user's PAT
-   git push origin main
-   git push origin v${NEXT_VERSION}
-   ```
-9. Create GitHub Release:
-   ```bash
-   gh release create v${NEXT_VERSION} --title "v${NEXT_VERSION}" --notes "{CHANGELOG content}"
-   ```
+```
+Invoke Skill: stark-release {bump_type}
+```
 
-**No asking for bump confirmation or release confirmation.** Auto-determine and execute.
+`/stark-release` has no user-confirmation gates — it auto-determines bump when passed as argument and always creates the GitHub Release.
 
 ### 3.3 Deploy
 
