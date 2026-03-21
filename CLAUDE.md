@@ -50,6 +50,7 @@ All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.claude/skil
 - `/stark-plan-to-tasks <path> [--dry-run] [--cleanup <slug>]` — decompose plan into phased GitHub issues (3 LLM passes)
 - `/stark-claude-md-improver` — analyze and improve CLAUDE.md files
 - `/stark-session-insights [--project <name>] [--refresh]` — analyze session history for usage patterns, skill invocations, corrections
+- `/stark-skill-analytics [--skill <name>] [--format table|full]` — analyze skill usage patterns, quality metrics, and adoption trends
 
 ## Conventions
 
