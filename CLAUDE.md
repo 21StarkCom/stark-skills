@@ -48,6 +48,7 @@ All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.claude/skil
 - `/stark-release [patch|minor|major]` — cut a release: changelog, tag, GitHub Release
 - `/stark-extract-docs <path-to-spec>` — extract knowledge from specs/reviews into ADRs, retrospectives, reference docs
 - `/stark-plan-to-tasks <path> [--dry-run] [--cleanup <slug>]` — decompose plan into phased GitHub issues (3 LLM passes)
+- `/stark-phase-execute <plan-slug> [--dry-run]` — autonomous phase execution: implement all tasks, PR, review, merge, release, dashboard
 - `/stark-claude-md-improver` — analyze and improve CLAUDE.md files
 - `/stark-session-insights [--project <name>] [--refresh]` — analyze session history for usage patterns, skill invocations, corrections
 - `/stark-skill-analytics [--skill <name>] [--format table|full]` — analyze skill usage patterns, quality metrics, and adoption trends
