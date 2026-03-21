@@ -292,7 +292,74 @@ pr_review("org/repo", NUMBER, event="COMMENT", body=summary_body)
 
 If posting fails, print the summary to terminal and warn. Do not fail.
 
-### 4b. Save history
+### 4b. Create bug issues for unfixed findings
+
+After the review-fix loop, some real issues may remain unfixed — either because they're too complex to auto-fix, they require human judgment, or they persist across max_rounds. For each finding that meets ALL of these criteria, create a GitHub issue:
+
+1. Classified as `fix` or `recurring` (real issue, not noise/FP)
+2. Severity is `critical` or `high`
+3. Still present after the final round (not resolved during the fix loop)
+
+**Label setup** (auto-create if missing):
+```bash
+GH_TOKEN="$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)" \
+  gh label create "type:bug" --repo {ORG}/{REPO} --color "e11d48" --force
+GH_TOKEN="$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)" \
+  gh label create "stark-review" --repo {ORG}/{REPO} --color "7057ff" --force
+```
+
+**For each qualifying finding**, create an issue:
+
+```bash
+BODY_FILE=$(mktemp) && chmod 600 "$BODY_FILE"
+cat > "$BODY_FILE" << 'ISSUE_EOF'
+## Bug
+
+{finding.description}
+
+## Location
+
+`{finding.file}:{finding.line}`
+
+## Suggested Fix
+
+{finding.suggestion}
+
+## Context
+
+- **Found by:** {finding.agent}/{finding.domain}
+- **Severity:** {finding.severity}
+- **PR:** #{pr_number}
+- **Review round:** {round where first detected}
+{if confirmed by multiple agents: "- **Confirmed by:** {list of agent/domain pairs}"}
+
+---
+_Created by `stark-review` · PR #{pr_number}_
+ISSUE_EOF
+
+GH_TOKEN="$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)" \
+  gh api /repos/{ORG}/{REPO}/issues \
+  --method POST \
+  --field title="bug: {finding.title}" \
+  --field body="$(cat $BODY_FILE)" \
+  --field labels='["type:bug","stark-review","{finding.severity}"]'
+rm -f "$BODY_FILE"
+```
+
+**Shell injection prevention:** Same rules as stark-plan-to-tasks — write body to temp file, use `--field` for title.
+
+**Deduplication:** Before creating, check if an open issue with label `stark-review` already exists for the same file+title pattern:
+```bash
+GH_TOKEN="$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)" \
+  gh api "/repos/{ORG}/{REPO}/issues?labels=stark-review&state=open" --jq '.[].title'
+```
+If a matching issue title exists, skip and note "Bug already tracked in #{existing}".
+
+**Include in summary:** Add a "Bug Issues Created" section after the Misalignment Analysis listing each created issue with its number and title. If no bugs qualify, omit the section.
+
+If `auth_failed` or issue creation fails, log the bug details in the summary comment instead — don't lose the information.
+
+### 4c. Save history
 
 Write to `~/.claude/code-review/history/{org}/{repo}/{pr}/`:
 
