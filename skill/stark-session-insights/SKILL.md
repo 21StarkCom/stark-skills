@@ -146,6 +146,61 @@ Collect prompts with > 200 characters. These typically represent:
 
 Show up to 15, sorted by length (longest first). Truncate each to 300 chars for display, with `...` if truncated.
 
+### 2.9 Day-of-week distribution
+
+Bucket prompts by day of week (Monday–Sunday, using local time). Show count and percentage for each day. This reveals work rhythm — weekend-heavy vs. weekday-focused, which days are deep work days.
+
+### 2.10 Weekly trends
+
+Group prompts by ISO week. Show a table with week label, prompt count, and a short characterization based on volume change vs. previous week (ramp-up, peak, sustained, tapering). This shows the project's lifecycle arc — when it started, when it peaked, whether it's growing or winding down.
+
+### 2.11 Skill evolution
+
+If more than 2 weeks of data exist, compare skill usage in the first half vs. second half of the project timeline. Flag skills that appeared, disappeared, or shifted in frequency. This catches migration patterns (e.g., moving from `/code-review` to `/stark-review`).
+
+### 2.12 Session shape analysis
+
+Analyze session behavior:
+- **How sessions begin**: most common first prompt per session (e.g., `/model`, `What's next?`, a direct command)
+- **How sessions end**: most common last prompt per session (e.g., `/clear`, `/exit`, `push`)
+- **Session types**: classify each session by its dominant action pattern:
+  - *Build/ship* — dominated by create/add/commit/push actions
+  - *Review/fix* — dominated by review/fix actions
+  - *Debug* — contains error pastes, "still broken", retry patterns
+  - *Architecture* — long sessions with option selections (A/B/C) and questions
+  - *Maintenance* — dominated by clean/delete/rename/update actions
+- Show count and percentage for each session type
+
+### 2.13 Correction categorization
+
+Group the corrections from 2.7 into categories:
+- **Data/logic errors** — wrong values, broken output, incorrect behavior ("wrong", "still not working", "broken")
+- **UX/direction** — design preferences, scope changes ("don't want", "instead", "I meant")
+- **Process/workflow** — how Claude should behave ("stop asking", "just do it", "don't write a file")
+- **Frustration** — emphasis, exclamation marks, repeated corrections ("Come on!", "still wrong", "this is not the first time")
+
+Show count per category and highlight the top 3 most recurring themes.
+
+### 2.14 Narrative synthesis
+
+This is the most important analysis step. Using ALL data from 2.1–2.13, write a **3–5 paragraph narrative** that interprets the numbers into a coherent story about how this project was used. The narrative should answer:
+
+- **What kind of project is this?** (from action patterns, topic clusters, key requirements)
+- **What's the work rhythm?** (from hourly, daily, weekly patterns — e.g., "weekend warrior", "evening deep work", "morning architect")
+- **How does the user interact with Claude?** (from session shape, short responses, decision patterns — e.g., "terse commander who delegates via options")
+- **What went wrong?** (from corrections, pain points — e.g., "data accuracy was the main friction point")
+- **How did the project evolve?** (from weekly trends, skill evolution, phase detection)
+
+Write this as prose, not bullet points. Be specific — cite numbers. Be opinionated — don't hedge. If the data shows something clearly, say it directly.
+
+### 2.15 Recommendations
+
+Based on the full analysis, generate 3–5 actionable recommendations. Each should be tied to a specific data point. Categories:
+- **Pain point fixes** — recurring corrections that could be prevented
+- **Workflow optimizations** — session patterns that suggest a better approach
+- **Tool adoption** — skills that are underused or could help
+- **Sustainability** — work rhythm concerns (e.g., late-night sessions, unsustainable pace)
+
 ## Phase 3: Generate Output
 
 ### 3.1 Per-project file
@@ -188,10 +243,37 @@ For each processed project, generate `{OUTPUT_DIR}/{slug}.md`:
 |----------|-------|
 {rows from 2.6}
 
+## Weekly Trends
+
+{table from 2.10: Week, Prompts, Trend}
+
+## Day of Week
+
+{table from 2.9: Day, Count, %}
+
+## Skill Evolution
+
+{from 2.11 — migration patterns, new/disappeared skills. Omit if < 2 weeks of data}
+
+## Session Behavior
+
+### How Sessions Start
+{top 5 first-prompt patterns from 2.12}
+
+### How Sessions End
+{top 5 last-prompt patterns from 2.12}
+
+### Session Types
+{table from 2.12: Type, Count, %}
+
 ## Corrections & Preferences
 
 These represent moments where the user corrected course — the most valuable signals for understanding working style.
 
+### By Category
+{category summary from 2.13: category, count, top themes}
+
+### Details
 | Date | Prompt |
 |------|--------|
 {rows from 2.7, date as YYYY-MM-DD HH:MM}
@@ -201,6 +283,14 @@ These represent moments where the user corrected course — the most valuable si
 Long prompts (>200 chars) that represent detailed specifications or decisions.
 
 {numbered list from 2.8, each as a blockquote with date prefix}
+
+## Narrative
+
+{3-5 paragraph prose synthesis from 2.14 — the "so what?" interpretation of all data above}
+
+## Recommendations
+
+{3-5 actionable recommendations from 2.15, each tied to a specific data point}
 ```
 
 ### 3.2 Summary index
