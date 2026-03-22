@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
+import pytest
 import requests.exceptions
 
 import github_app
@@ -264,6 +265,59 @@ class TestSetField(unittest.TestCase):
         self.assertEqual(call_vars["value"], {"singleSelectOptionId": "O2"})
         mock_sleep.assert_called_once_with(0.1)
 
+    @patch("github_projects.time.sleep")
+    @patch("github_app.graphql")
+    def test_set_number_field(self, mock_gql: MagicMock, mock_sleep: MagicMock) -> None:
+        """set_field sends value as float for NUMBER fields."""
+        github_projects._field_cache["PVT_1"] = {
+            "Priority": {"id": "F2", "type": "NUMBER", "options": {}},
+        }
+        mock_gql.return_value = {"data": {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "PVTI_1"}}}}
+
+        github_projects.set_field("PVT_1", "PVTI_1", "Priority", 5)
+
+        call_vars = mock_gql.call_args[1]["variables"]
+        self.assertEqual(call_vars["value"], {"number": 5.0})
+        self.assertIsInstance(call_vars["value"]["number"], float)
+
+    @patch("github_projects.time.sleep")
+    @patch("github_app.graphql")
+    def test_set_text_field(self, mock_gql: MagicMock, mock_sleep: MagicMock) -> None:
+        """set_field sends value as string for TEXT fields."""
+        github_projects._field_cache["PVT_1"] = {
+            "Notes": {"id": "F3", "type": "TEXT", "options": {}},
+        }
+        mock_gql.return_value = {"data": {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "PVTI_1"}}}}
+
+        github_projects.set_field("PVT_1", "PVTI_1", "Notes", "some text")
+
+        call_vars = mock_gql.call_args[1]["variables"]
+        self.assertEqual(call_vars["value"], {"text": "some text"})
+
+    def test_set_invalid_option_raises(self) -> None:
+        """set_field raises ValueError for invalid SINGLE_SELECT option."""
+        github_projects._field_cache["PVT_1"] = {
+            "Status": {"id": "F1", "type": "SINGLE_SELECT", "options": {"Backlog": "O1", "Done": "O2"}},
+        }
+
+        with self.assertRaises(ValueError) as ctx:
+            github_projects.set_field("PVT_1", "PVTI_1", "Status", "InvalidOption")
+
+        self.assertIn("InvalidOption", str(ctx.exception))
+        self.assertIn("not found", str(ctx.exception))
+
+    @patch("github_projects.time.sleep")
+    @patch("github_app.graphql")
+    def test_set_mutation_failure_raises(self, mock_gql: MagicMock, mock_sleep: MagicMock) -> None:
+        """set_field raises RuntimeError when GraphQL mutation fails."""
+        github_projects._field_cache["PVT_1"] = {
+            "Status": {"id": "F1", "type": "SINGLE_SELECT", "options": {"Backlog": "O1"}},
+        }
+        mock_gql.side_effect = RuntimeError("GraphQL error: mutation failed")
+
+        with self.assertRaises(RuntimeError):
+            github_projects.set_field("PVT_1", "PVTI_1", "Status", "Backlog")
+
     @patch("github_app.graphql")
     def test_set_field_unknown_field_raises(self, mock_gql: MagicMock) -> None:
         """set_field raises ValueError for unknown field name."""
@@ -311,6 +365,16 @@ class TestTransitionStatus(unittest.TestCase):
 
         self.assertFalse(result)
 
+    @patch("github_projects.set_field")
+    @patch("github_projects.get_item_fields")
+    def test_validate_false_skips_validation(self, mock_get_fields: MagicMock, mock_set: MagicMock) -> None:
+        """transition_status with validate=False skips reading current status."""
+        result = github_projects.transition_status("PVT_1", "PVTI_1", "Done", validate=False)
+
+        self.assertTrue(result)
+        mock_get_fields.assert_not_called()
+        mock_set.assert_called_once_with("PVT_1", "PVTI_1", "Status", "Done")
+
 
 class TestIsLegalTransition(unittest.TestCase):
     """Tests for github_projects.is_legal_transition()."""
@@ -323,6 +387,80 @@ class TestIsLegalTransition(unittest.TestCase):
 
     def test_unknown_from_status(self) -> None:
         self.assertFalse(github_projects.is_legal_transition("Nonexistent", "Done"))
+
+    def test_done_has_no_outgoing_transitions(self) -> None:
+        """Done is a terminal state — no outgoing transitions."""
+        self.assertFalse(github_projects.is_legal_transition("Done", "Backlog"))
+        self.assertFalse(github_projects.is_legal_transition("Done", "Needs Spec"))
+
+
+# ── Parametrized is_legal_transition coverage ─────────────────────────────
+
+_LEGAL_CASES = [
+    ("Backlog", "Needs Spec", True),
+    ("Backlog", "Done", False),
+    ("Backlog", "Agent Working", False),
+    ("Needs Spec", "Ready for Agent", True),
+    ("Needs Spec", "Human Working", True),
+    ("Needs Spec", "Blocked", True),
+    ("Needs Spec", "Done", False),
+    ("Needs Spec", "Backlog", False),
+    ("Ready for Agent", "Agent Working", True),
+    ("Ready for Agent", "Blocked", True),
+    ("Ready for Agent", "Done", False),
+    ("Ready for Agent", "Backlog", False),
+    ("Agent Working", "Human Review", True),
+    ("Agent Working", "Needs Clarification", True),
+    ("Agent Working", "Blocked", True),
+    ("Agent Working", "Done", False),
+    ("Agent Working", "Backlog", False),
+    ("Human Working", "Human Review", True),
+    ("Human Working", "Blocked", True),
+    ("Human Working", "Done", False),
+    ("Human Working", "Backlog", False),
+    ("Needs Clarification", "Ready for Agent", True),
+    ("Needs Clarification", "Blocked", True),
+    ("Needs Clarification", "Done", False),
+    ("Needs Clarification", "Backlog", False),
+    ("Human Review", "Agent Working", True),
+    ("Human Review", "Human Working", True),
+    ("Human Review", "Ready to Merge", True),
+    ("Human Review", "Blocked", True),
+    ("Human Review", "Done", False),
+    ("Human Review", "Backlog", False),
+    ("Ready to Merge", "Ready to Release", True),
+    ("Ready to Merge", "Human Review", True),
+    ("Ready to Merge", "Blocked", True),
+    ("Ready to Merge", "Done", False),
+    ("Ready to Merge", "Backlog", False),
+    ("Ready to Release", "Done", True),
+    ("Ready to Release", "Human Review", True),
+    ("Ready to Release", "Blocked", True),
+    ("Ready to Release", "Backlog", False),
+    # Blocked can go to any working state
+    ("Blocked", "Backlog", True),
+    ("Blocked", "Needs Spec", True),
+    ("Blocked", "Ready for Agent", True),
+    ("Blocked", "Agent Working", True),
+    ("Blocked", "Human Working", True),
+    ("Blocked", "Needs Clarification", True),
+    ("Blocked", "Human Review", True),
+    ("Blocked", "Ready to Merge", True),
+    ("Blocked", "Ready to Release", True),
+    ("Blocked", "Done", False),
+    # Done has no outgoing transitions
+    ("Done", "Backlog", False),
+    ("Done", "Needs Spec", False),
+    ("Done", "Agent Working", False),
+    # Unknown status
+    ("Nonexistent", "Backlog", False),
+]
+
+
+@pytest.mark.parametrize("from_status,to_status,expected", _LEGAL_CASES)
+def test_is_legal_transition_parametrized(from_status: str, to_status: str, expected: bool) -> None:
+    """Parametrized: is_legal_transition covers every status."""
+    assert github_projects.is_legal_transition(from_status, to_status) == expected
 
 
 class TestCheckSpecCompleteness(unittest.TestCase):
@@ -339,6 +477,12 @@ class TestCheckSpecCompleteness(unittest.TestCase):
         ok, missing = github_projects.check_spec_completeness(fields)
         self.assertFalse(ok)
         self.assertIn("Risk field is not set", missing)
+
+    def test_missing_ai_suitability(self) -> None:
+        fields = {"Risk": "Low"}
+        ok, missing = github_projects.check_spec_completeness(fields)
+        self.assertFalse(ok)
+        self.assertIn("AI Suitability field is not set", missing)
 
     def test_high_risk_needs_approval(self) -> None:
         fields = {"Risk": "High", "AI Suitability": "agent-led"}
@@ -479,6 +623,170 @@ class TestTransitionStatusMissingField(unittest.TestCase):
             github_projects.transition_status("PVT_1", "PVTI_1", "Needs Spec")
 
         self.assertIn("current Status field is missing", str(ctx.exception))
+
+
+class TestGetItems(unittest.TestCase):
+    """Tests for github_projects.get_items()."""
+
+    def _make_page(self, nodes: list[dict], has_next: bool = False, cursor: str | None = None) -> dict:
+        """Helper to build a GraphQL response page for get_items."""
+        return {
+            "data": {
+                "node": {
+                    "items": {
+                        "pageInfo": {"hasNextPage": has_next, "endCursor": cursor},
+                        "nodes": nodes,
+                    }
+                }
+            }
+        }
+
+    def _make_item_node(self, item_id: str, number: int, title: str, repo: str, state: str, field_values: list[dict] | None = None) -> dict:
+        return {
+            "id": item_id,
+            "content": {
+                "number": number,
+                "title": title,
+                "repository": {"nameWithOwner": repo},
+                "state": state,
+            },
+            "fieldValues": {"nodes": field_values or []},
+        }
+
+    @patch("github_app.graphql")
+    def test_single_page(self, mock_gql: MagicMock) -> None:
+        """get_items returns all items from a single page."""
+        mock_gql.return_value = self._make_page([
+            self._make_item_node("PVTI_1", 1, "Issue 1", "GetEvinced/repo", "OPEN"),
+            self._make_item_node("PVTI_2", 2, "Issue 2", "GetEvinced/repo", "CLOSED"),
+        ])
+
+        result = github_projects.get_items("PVT_1")
+
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["item_id"], "PVTI_1")
+        self.assertEqual(result[1]["issue_number"], 2)
+        mock_gql.assert_called_once()
+
+    @patch("github_app.graphql")
+    def test_multi_page_pagination(self, mock_gql: MagicMock) -> None:
+        """get_items paginates through multiple pages."""
+        mock_gql.side_effect = [
+            self._make_page(
+                [self._make_item_node("PVTI_1", 1, "Issue 1", "GetEvinced/repo", "OPEN")],
+                has_next=True, cursor="cursor_1",
+            ),
+            self._make_page(
+                [self._make_item_node("PVTI_2", 2, "Issue 2", "GetEvinced/repo", "OPEN")],
+                has_next=False,
+            ),
+        ]
+
+        result = github_projects.get_items("PVT_1")
+
+        self.assertEqual(len(result), 2)
+        self.assertEqual(mock_gql.call_count, 2)
+        # Second call should include cursor
+        second_call_vars = mock_gql.call_args_list[1][1]["variables"]
+        self.assertEqual(second_call_vars["cursor"], "cursor_1")
+
+    @patch("github_app.graphql")
+    def test_client_side_filtering_by_state(self, mock_gql: MagicMock) -> None:
+        """get_items filters by top-level keys."""
+        mock_gql.return_value = self._make_page([
+            self._make_item_node("PVTI_1", 1, "Issue 1", "GetEvinced/repo", "OPEN"),
+            self._make_item_node("PVTI_2", 2, "Issue 2", "GetEvinced/repo", "CLOSED"),
+        ])
+
+        result = github_projects.get_items("PVT_1", state="OPEN")
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["item_id"], "PVTI_1")
+
+    @patch("github_app.graphql")
+    def test_client_side_filtering_by_field(self, mock_gql: MagicMock) -> None:
+        """get_items filters by fields dict entries."""
+        field_values = [
+            {"field": {"name": "Status"}, "name": "Backlog"},
+        ]
+        mock_gql.return_value = self._make_page([
+            self._make_item_node("PVTI_1", 1, "Issue 1", "GetEvinced/repo", "OPEN", field_values),
+            self._make_item_node("PVTI_2", 2, "Issue 2", "GetEvinced/repo", "OPEN"),
+        ])
+
+        result = github_projects.get_items("PVT_1", Status="Backlog")
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["item_id"], "PVTI_1")
+
+    @patch("github_app.graphql")
+    def test_client_side_filtering_no_match(self, mock_gql: MagicMock) -> None:
+        """get_items returns empty list when filter matches nothing."""
+        mock_gql.return_value = self._make_page([
+            self._make_item_node("PVTI_1", 1, "Issue 1", "GetEvinced/repo", "OPEN"),
+        ])
+
+        result = github_projects.get_items("PVT_1", state="MERGED")
+
+        self.assertEqual(result, [])
+
+
+class TestGetItemFields(unittest.TestCase):
+    """Tests for github_projects.get_item_fields() and _parse_field_values()."""
+
+    @patch("github_app.graphql")
+    def test_parses_all_field_types(self, mock_gql: MagicMock) -> None:
+        """get_item_fields parses text, number, single_select, iteration, date fields."""
+        mock_gql.return_value = {
+            "data": {
+                "node": {
+                    "id": "PVTI_1",
+                    "fieldValues": {
+                        "nodes": [
+                            {"text": "some notes", "field": {"name": "Notes"}},
+                            {"number": 3.0, "field": {"name": "Priority"}},
+                            {"name": "Backlog", "field": {"name": "Status"}},
+                            {"title": "Sprint 5", "field": {"name": "Sprint"}},
+                            {"date": "2026-03-22", "field": {"name": "Due Date"}},
+                            # Node without field ref should be skipped
+                            {"text": "orphan"},
+                        ],
+                    },
+                }
+            }
+        }
+
+        result = github_projects.get_item_fields("PVTI_1")
+
+        self.assertEqual(result["Notes"], "some notes")
+        self.assertEqual(result["Priority"], 3.0)
+        self.assertEqual(result["Status"], "Backlog")
+        self.assertEqual(result["Sprint"], "Sprint 5")
+        self.assertEqual(result["Due Date"], "2026-03-22")
+        self.assertEqual(len(result), 5)  # orphan node skipped
+
+
+class TestSetFields(unittest.TestCase):
+    """Tests for github_projects.set_fields()."""
+
+    def setUp(self) -> None:
+        github_projects._field_cache.clear()
+
+    @patch("github_projects.set_field")
+    def test_calls_set_field_for_each_entry(self, mock_set: MagicMock) -> None:
+        """set_fields calls set_field once per field in the dict."""
+        github_projects.set_fields("PVT_1", "PVTI_1", {"Status": "Backlog", "Priority": 3})
+
+        self.assertEqual(mock_set.call_count, 2)
+        mock_set.assert_any_call("PVT_1", "PVTI_1", "Status", "Backlog")
+        mock_set.assert_any_call("PVT_1", "PVTI_1", "Priority", 3)
+
+    @patch("github_projects.set_field")
+    def test_empty_dict_calls_nothing(self, mock_set: MagicMock) -> None:
+        """set_fields with empty dict is a no-op."""
+        github_projects.set_fields("PVT_1", "PVTI_1", {})
+
+        mock_set.assert_not_called()
 
 
 if __name__ == "__main__":
