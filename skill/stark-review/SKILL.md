@@ -292,6 +292,17 @@ pr_review("org/repo", NUMBER, event="COMMENT", body=summary_body)
 
 If posting fails, print the summary to terminal and warn. Do not fail.
 
+#### Update Review Rounds
+
+After posting review findings to the PR:
+
+1. **Load project config:** Read `.github/project-config.json`. If not found, skip this step.
+2. **Extract issue number:** From PR body, find `Closes #N`.
+3. **Find project item:** Query project for the item linked to this issue.
+4. **Read current Review Rounds:** Get the current value (default 0 if not set).
+5. **Increment if findings were posted:** If this review round posted findings (finding count > 0), set Review Rounds → current + 1. If no findings were posted, do NOT increment.
+6. **Error handling:** If GraphQL update fails, log warning and continue. Review posting (the primary operation) already succeeded — this is supplementary tracking.
+
 ### 4b. Create bug issues for unfixed findings
 
 After the review-fix loop, some real issues may remain unfixed — either because they're too complex to auto-fix, they require human judgment, or they persist across max_rounds. For each finding that meets ALL of these criteria, create a GitHub issue:

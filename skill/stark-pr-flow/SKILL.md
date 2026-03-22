@@ -170,7 +170,7 @@ Ready to squash-merge?
 **STOP HERE. Wait for explicit user approval.**
 
 User may:
-- Approve → proceed to Step 7
+- Approve → proceed to Step 6
 - Request changes → apply them, push, re-check reviews
 - Reject → leave PR open or close it
 
@@ -178,7 +178,20 @@ Do NOT merge without "yes", "merge it", "go ahead", "ship it", or equivalent.
 
 ---
 
-## Step 6: Merge & Clean Up
+## Step 6: Documentation State Check (before merge)
+
+Before proceeding with merge:
+
+1. **Load project config:** Read `.github/project-config.json`. If not found, skip this check.
+2. **Find project item:** Extract issue number from PR body (`Closes #N`), query project for the item.
+3. **Read Documentation State:** If Documentation State is not `complete` or `reviewed`:
+   - Warn: "⚠️ Documentation State is '{current_state}' — consider updating documentation before merge."
+   - Do NOT block merge — this is a warning, not a gate. The release-gate Action handles hard blocking.
+4. **Error handling:** If GraphQL query fails, log warning and continue. PR flow should not break due to project integration issues.
+
+---
+
+## Step 7: Merge & Clean Up
 
 ```bash
 gh pr merge ${PR_NUM} --repo $REPO --squash --admin
