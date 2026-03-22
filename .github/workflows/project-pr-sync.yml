@@ -1,0 +1,155 @@
+name: Project PR Sync
+on:
+  pull_request:
+    types: [opened, synchronize, closed]
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read project config
+        id: config
+        run: |
+          if [ -f .github/project-config.json ]; then
+            echo "project_id=$(jq -r .project_id .github/project-config.json)" >> "$GITHUB_OUTPUT"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Extract issue number from PR body
+        if: steps.config.outputs.found == 'true'
+        id: issue
+        run: |
+          ISSUE=$(echo "${{ github.event.pull_request.body }}" | grep -oP 'Closes #\K\d+' | head -1)
+          if [ -z "$ISSUE" ]; then
+            echo "No 'Closes #N' found in PR body"
+            echo "number=" >> "$GITHUB_OUTPUT"
+          else
+            echo "number=$ISSUE" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update project status
+        if: steps.config.outputs.found == 'true' && steps.issue.outputs.number != ''
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const config = JSON.parse(fs.readFileSync('.github/project-config.json', 'utf8'));
+            const issueNumber = parseInt('${{ steps.issue.outputs.number }}');
+            const event = context.eventName;
+            const action = context.payload.action;
+            const merged = context.payload.pull_request?.merged || false;
+
+            // Find project item for this issue
+            const issueData = await github.graphql(`
+              query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  issue(number: $number) {
+                    projectItems(first: 10) {
+                      nodes {
+                        id
+                        project { id }
+                        fieldValues(first: 20) {
+                          nodes {
+                            ... on ProjectV2ItemFieldSingleSelectValue {
+                              name
+                              field { ... on ProjectV2SingleSelectField { name } }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            `, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              number: issueNumber,
+            });
+
+            const items = issueData.repository.issue.projectItems.nodes;
+            const item = items.find(i => i.project.id === config.project_id);
+            if (!item) {
+              console.log('Issue not in target project');
+              return;
+            }
+
+            // Read AI Suitability from current fields
+            let aiSuitability = 'autonomous';
+            for (const fv of item.fieldValues.nodes) {
+              if (fv.field?.name === 'AI Suitability') {
+                aiSuitability = fv.name || 'autonomous';
+              }
+            }
+
+            // Determine new status
+            let newStatus = null;
+            const fieldsToSet = {};
+
+            if (event === 'pull_request' && action === 'opened') {
+              newStatus = 'human review';
+            } else if (event === 'pull_request' && action === 'synchronize') {
+              // New commits — reset approval state
+              newStatus = 'human review';
+              fieldsToSet['Release Approval'] = 'pending';
+            } else if (event === 'pull_request' && action === 'closed' && merged) {
+              newStatus = 'done';
+            } else if (event === 'pull_request_review' && action === 'submitted') {
+              const reviewState = context.payload.review.state;
+              if (reviewState === 'changes_requested') {
+                newStatus = aiSuitability === 'human-led' ? 'human working' : 'agent working';
+              } else if (reviewState === 'approved') {
+                newStatus = 'ready to merge';
+              }
+            }
+
+            if (!newStatus) return;
+
+            // Set status
+            const statusField = config.fields['Status'];
+            const optionId = statusField?.options?.[newStatus];
+            if (optionId) {
+              await github.graphql(`
+                mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) {
+                  updateProjectV2ItemFieldValue(input: {
+                    projectId: $projectId, itemId: $itemId, fieldId: $fieldId, value: $value
+                  }) { projectV2Item { id } }
+                }
+              `, {
+                projectId: config.project_id,
+                itemId: item.id,
+                fieldId: statusField.id,
+                value: { singleSelectOptionId: optionId },
+              });
+              console.log(`Status → ${newStatus}`);
+            }
+
+            // Set additional fields (e.g., Release Approval reset)
+            for (const [fieldName, fieldValue] of Object.entries(fieldsToSet)) {
+              const field = config.fields[fieldName];
+              if (field?.options?.[fieldValue]) {
+                await github.graphql(`
+                  mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) {
+                    updateProjectV2ItemFieldValue(input: {
+                      projectId: $projectId, itemId: $itemId, fieldId: $fieldId, value: $value
+                    }) { projectV2Item { id } }
+                  }
+                `, {
+                  projectId: config.project_id,
+                  itemId: item.id,
+                  fieldId: field.id,
+                  value: { singleSelectOptionId: field.options[fieldValue] },
+                });
+                console.log(`${fieldName} → ${fieldValue}`);
+              }
+            }
