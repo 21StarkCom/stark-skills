@@ -1,0 +1,222 @@
+# Sync PR lifecycle events to GitHub Project V2 status fields.
+# Reads field IDs from .github/project-config.json (created by setup_project.py).
+
+name: Project PR Sync
+
+on:
+  pull_request:
+    types: [opened, synchronize, closed]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/project-config.json
+          sparse-checkout-cone-mode: false
+
+      - name: Sync PR to Project
+        uses: actions/github-script@v7
+        env:
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const fs = require('fs');
+
+            // ── Load config ──────────────────────────────────────────────
+            const configPath = '.github/project-config.json';
+            if (!fs.existsSync(configPath)) {
+              core.info('No .github/project-config.json found — skipping.');
+              return;
+            }
+
+            let config;
+            try {
+              config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            } catch (e) {
+              core.warning(`Failed to parse project-config.json: ${e.message}`);
+              return;
+            }
+
+            const projectId = config.project_id;
+            const fields = config.fields;
+
+            if (!projectId || !fields) {
+              core.warning('project-config.json missing project_id or fields — skipping.');
+              return;
+            }
+
+            // ── Extract linked issue number from PR body ─────────────────
+            const pr = context.payload.pull_request;
+            const body = pr?.body || '';
+            const match = body.match(/(?:closes|fixes|resolves)\s+#(\d+)/i);
+            if (!match) {
+              core.info('No linked issue found in PR body (Closes/Fixes/Resolves #N) — skipping.');
+              return;
+            }
+            const issueNumber = parseInt(match[1], 10);
+            core.info(`Linked issue: #${issueNumber}`);
+
+            // ── Find project item for this issue ─────────────────────────
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            let issueNodeId;
+            try {
+              const issueResult = await github.graphql(`
+                query($owner: String!, $repo: String!, $number: Int!) {
+                  repository(owner: $owner, name: $repo) {
+                    issue(number: $number) {
+                      id
+                    }
+                  }
+                }
+              `, { owner, repo, number: issueNumber });
+              issueNodeId = issueResult.repository.issue.id;
+            } catch (e) {
+              core.warning(`Could not find issue #${issueNumber}: ${e.message}`);
+              return;
+            }
+
+            // Find the project item for this issue
+            let itemId;
+            try {
+              const itemResult = await github.graphql(`
+                query($projectId: ID!, $issueId: ID!) {
+                  node(id: $projectId) {
+                    ... on ProjectV2 {
+                      items(first: 100) {
+                        nodes {
+                          id
+                          content {
+                            ... on Issue {
+                              id
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              `, { projectId, issueId: issueNodeId });
+
+              const items = itemResult.node.items.nodes;
+              const found = items.find(i => i.content?.id === issueNodeId);
+              if (!found) {
+                core.info(`Issue #${issueNumber} is not in the project — skipping.`);
+                return;
+              }
+              itemId = found.id;
+            } catch (e) {
+              core.warning(`Could not query project items: ${e.message}`);
+              return;
+            }
+
+            // ── Read current AI Suitability value ────────────────────────
+            let aiSuitability = null;
+            const aiSuitField = fields['AI Suitability'];
+            if (aiSuitField) {
+              try {
+                const fieldResult = await github.graphql(`
+                  query($itemId: ID!) {
+                    node(id: $itemId) {
+                      ... on ProjectV2Item {
+                        fieldValueByName(name: "AI Suitability") {
+                          ... on ProjectV2ItemFieldSingleSelectValue {
+                            name
+                          }
+                        }
+                      }
+                    }
+                  }
+                `, { itemId });
+                aiSuitability = fieldResult.node.fieldValueByName?.name || null;
+              } catch (e) {
+                core.info(`Could not read AI Suitability: ${e.message}`);
+              }
+            }
+            core.info(`AI Suitability: ${aiSuitability || '(not set)'}`);
+
+            // ── Determine new status ─────────────────────────────────────
+            const eventName = context.eventName;
+            const action = context.payload.action;
+            let newStatus = null;
+            let resetReleaseApproval = false;
+
+            if (eventName === 'pull_request') {
+              if (action === 'opened') {
+                newStatus = 'Human Review';
+              } else if (action === 'synchronize') {
+                newStatus = 'Human Review';
+                resetReleaseApproval = true;
+              } else if (action === 'closed' && pr.merged) {
+                newStatus = 'Done';
+              }
+            } else if (eventName === 'pull_request_review') {
+              const review = context.payload.review;
+              if (review.state === 'changes_requested') {
+                newStatus = (aiSuitability === 'Human-led') ? 'Human Working' : 'Agent Working';
+              } else if (review.state === 'approved') {
+                newStatus = 'Ready to Merge';
+              }
+            }
+
+            if (!newStatus) {
+              core.info(`No status change needed for ${eventName}.${action} — skipping.`);
+              return;
+            }
+            core.info(`Setting status to: ${newStatus}`);
+
+            // ── Helper: update a single-select field ─────────────────────
+            async function setField(fieldName, optionName) {
+              const fieldConfig = fields[fieldName];
+              if (!fieldConfig) {
+                core.warning(`Field "${fieldName}" not found in project-config.json`);
+                return;
+              }
+              const fieldId = fieldConfig.id;
+              const options = fieldConfig.options || {};
+              const optionId = options[optionName];
+              if (!optionId) {
+                core.warning(`Option "${optionName}" not found for field "${fieldName}"`);
+                return;
+              }
+
+              await github.graphql(`
+                mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) {
+                  updateProjectV2ItemFieldValue(input: {
+                    projectId: $projectId, itemId: $itemId, fieldId: $fieldId, value: $value
+                  }) {
+                    projectV2Item { id }
+                  }
+                }
+              `, {
+                projectId,
+                itemId,
+                fieldId,
+                value: { singleSelectOptionId: optionId },
+              });
+              core.info(`Updated ${fieldName} → ${optionName}`);
+            }
+
+            // ── Apply updates ────────────────────────────────────────────
+            try {
+              await setField('Status', newStatus);
+            } catch (e) {
+              core.warning(`Failed to update Status: ${e.message}`);
+            }
+
+            if (resetReleaseApproval) {
+              try {
+                await setField('Release Approval', 'Pending');
+              } catch (e) {
+                core.warning(`Failed to reset Release Approval: ${e.message}`);
+              }
+            }
+
+            core.info('Done.');
