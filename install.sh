@@ -99,6 +99,15 @@ install() {
     link_dir "$REPO_DIR/global/prompts" "$CODE_REVIEW_DIR/prompts" "Prompts"
     link_dir "$REPO_DIR/scripts" "$CODE_REVIEW_DIR/scripts" "Scripts"
 
+    # Verify key scripts are present in the scripts dir
+    for script in multi_review.py github_app.py github_projects.py setup_project.py; do
+        if [ -f "$REPO_DIR/scripts/$script" ]; then
+            info "  Script: $script"
+        else
+            warn "  Script: $script not found in $REPO_DIR/scripts/"
+        fi
+    done
+
     # 2. Create history dir (not symlinked — local working data)
     mkdir -p "$CODE_REVIEW_DIR/history"
     info "History dir: $CODE_REVIEW_DIR/history/"
@@ -231,6 +240,16 @@ status() {
     check_dir "$CODE_REVIEW_DIR/orchestrator.md" "Orchestrator"
     check_dir "$CODE_REVIEW_DIR/prompts" "Prompts"
     check_dir "$CODE_REVIEW_DIR/scripts" "Scripts"
+
+    # Verify key scripts are accessible
+    for script in multi_review.py github_app.py github_projects.py setup_project.py; do
+        if [ -f "$CODE_REVIEW_DIR/scripts/$script" ]; then
+            info "  Script: $script"
+        else
+            error "  Script: $script not found"
+        fi
+    done
+
     check_dir "$EVINCED_DIR/.code-review" "Evinced org config"
 
     # Check all stark-* skills
