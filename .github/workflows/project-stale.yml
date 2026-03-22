@@ -1,0 +1,283 @@
+# Detect stuck project items and warn/block based on stale thresholds.
+# Reads field IDs from .github/project-config.json (created by setup_project.py).
+
+name: Project Stale Detection
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # hourly
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  stale-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/project-config.json
+          sparse-checkout-cone-mode: false
+
+      - name: Detect Stale Items
+        uses: actions/github-script@v7
+        env:
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const fs = require('fs');
+
+            // ── Load config ──────────────────────────────────────────────
+            const configPath = '.github/project-config.json';
+            if (!fs.existsSync(configPath)) {
+              core.info('No .github/project-config.json found — skipping.');
+              return;
+            }
+
+            let config;
+            try {
+              config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            } catch (e) {
+              core.warning(`Failed to parse project-config.json: ${e.message}`);
+              return;
+            }
+
+            const projectId = config.project_id;
+            const fields = config.fields;
+
+            if (!projectId || !fields) {
+              core.warning('project-config.json missing project_id or fields — skipping.');
+              return;
+            }
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            // ── Stale thresholds (hours) ─────────────────────────────────
+            const THRESHOLDS = {
+              'Agent Working': {
+                'Autonomous': { warn: 4, block: 8 },
+                'Assisted':   { warn: 24, block: 48 },
+                '_default':   { warn: 24, block: 48 },
+              },
+              'Needs Clarification': {
+                '_any': { warn: 48, block: null },
+              },
+            };
+
+            // ── Paginate all project items ───────────────────────────────
+            let allItems = [];
+            let cursor = null;
+            let hasNextPage = true;
+
+            while (hasNextPage) {
+              const result = await github.graphql(`
+                query($projectId: ID!, $cursor: String) {
+                  node(id: $projectId) {
+                    ... on ProjectV2 {
+                      items(first: 100, after: $cursor) {
+                        pageInfo {
+                          hasNextPage
+                          endCursor
+                        }
+                        nodes {
+                          id
+                          updatedAt
+                          content {
+                            ... on Issue {
+                              id
+                              number
+                              title
+                            }
+                          }
+                          fieldValues(first: 20) {
+                            nodes {
+                              ... on ProjectV2ItemFieldSingleSelectValue {
+                                field { ... on ProjectV2SingleSelectField { name } }
+                                name
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              `, { projectId, cursor });
+
+              const page = result.node.items;
+              allItems = allItems.concat(page.nodes);
+              hasNextPage = page.pageInfo.hasNextPage;
+              cursor = page.pageInfo.endCursor;
+            }
+
+            core.info(`Fetched ${allItems.length} project items.`);
+
+            // ── Helper: extract field value from item ─────────────────────
+            function getFieldValue(item, fieldName) {
+              if (!item.fieldValues?.nodes) return null;
+              const fv = item.fieldValues.nodes.find(
+                n => n.field?.name === fieldName
+              );
+              return fv?.name || null;
+            }
+
+            // ── Helper: hours since a date ───────────────────────────────
+            function hoursSince(dateStr) {
+              return (Date.now() - new Date(dateStr).getTime()) / (1000 * 60 * 60);
+            }
+
+            // ── Helper: check for recent stale comment ───────────────────
+            async function hasRecentStaleComment(issueNumber) {
+              try {
+                const { data: comments } = await github.rest.issues.listComments({
+                  owner, repo, issue_number: issueNumber,
+                  per_page: 20,
+                  sort: 'created',
+                  direction: 'desc',
+                });
+                const fourHoursAgo = Date.now() - (4 * 60 * 60 * 1000);
+                return comments.some(c =>
+                  c.body?.includes('<!-- stale-detection -->') &&
+                  new Date(c.created_at).getTime() > fourHoursAgo
+                );
+              } catch (e) {
+                core.info(`Could not check comments for #${issueNumber}: ${e.message}`);
+                return false;
+              }
+            }
+
+            // ── Helper: post issue comment ───────────────────────────────
+            async function postComment(issueNumber, body) {
+              try {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: issueNumber,
+                  body: `<!-- stale-detection -->\n${body}`,
+                });
+                core.info(`Posted stale comment on #${issueNumber}`);
+              } catch (e) {
+                core.warning(`Failed to post comment on #${issueNumber}: ${e.message}`);
+              }
+            }
+
+            // ── Helper: set a single-select field ────────────────────────
+            async function setField(itemId, fieldName, optionName) {
+              const fieldConfig = fields[fieldName];
+              if (!fieldConfig) {
+                core.warning(`Field "${fieldName}" not found in project-config.json`);
+                return;
+              }
+              const optionId = fieldConfig.options?.[optionName];
+              if (!optionId) {
+                core.warning(`Option "${optionName}" not found for field "${fieldName}"`);
+                return;
+              }
+
+              await github.graphql(`
+                mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) {
+                  updateProjectV2ItemFieldValue(input: {
+                    projectId: $projectId, itemId: $itemId, fieldId: $fieldId, value: $value
+                  }) {
+                    projectV2Item { id }
+                  }
+                }
+              `, {
+                projectId,
+                itemId,
+                fieldId: fieldConfig.id,
+                value: { singleSelectOptionId: optionId },
+              });
+              core.info(`Updated ${fieldName} → ${optionName} for item ${itemId}`);
+            }
+
+            // ── Process each item ────────────────────────────────────────
+            const SKIP_STATUSES = new Set([
+              'Done', 'Blocked', 'Ready to Merge', 'Ready to Release',
+              'Backlog', 'Todo',
+            ]);
+
+            let warnCount = 0;
+            let blockCount = 0;
+
+            for (const item of allItems) {
+              const issueNumber = item.content?.number;
+              const issueTitle = item.content?.title;
+              if (!issueNumber) continue;
+
+              const status = getFieldValue(item, 'Status');
+              if (!status || SKIP_STATUSES.has(status)) continue;
+
+              const thresholdGroup = THRESHOLDS[status];
+              if (!thresholdGroup) continue;
+
+              const aiSuitability = getFieldValue(item, 'AI Suitability');
+              const elapsed = hoursSince(item.updatedAt);
+
+              // Determine applicable thresholds
+              let limits;
+              if (thresholdGroup['_any']) {
+                limits = thresholdGroup['_any'];
+              } else if (aiSuitability && thresholdGroup[aiSuitability]) {
+                limits = thresholdGroup[aiSuitability];
+              } else {
+                limits = thresholdGroup['_default'];
+              }
+
+              if (!limits) continue;
+
+              const elapsedStr = elapsed < 1
+                ? `${Math.round(elapsed * 60)}m`
+                : `${Math.round(elapsed * 10) / 10}h`;
+
+              // Check block threshold first
+              if (limits.block && elapsed >= limits.block) {
+                core.info(`BLOCK: #${issueNumber} "${issueTitle}" — ${status} for ${elapsedStr} (threshold: ${limits.block}h)`);
+
+                const alreadyCommented = await hasRecentStaleComment(issueNumber);
+                if (!alreadyCommented) {
+                  await postComment(issueNumber,
+                    `**Blocked — stale item detected**\n\n` +
+                    `This issue has been in **${status}** for **${elapsedStr}** ` +
+                    `(AI Suitability: ${aiSuitability || 'not set'}, threshold: ${limits.block}h).\n\n` +
+                    `Status has been set to **Blocked**. Please investigate and unblock.`
+                  );
+                }
+
+                try {
+                  await setField(item.id, 'Status', 'Blocked');
+                } catch (e) {
+                  core.warning(`Failed to set Blocked status for #${issueNumber}: ${e.message}`);
+                }
+
+                // Set Blocked Reason if the field exists
+                try {
+                  await setField(item.id, 'Blocked Reason', 'Stale');
+                } catch (e) {
+                  core.info(`Could not set Blocked Reason for #${issueNumber}: ${e.message}`);
+                }
+
+                blockCount++;
+              } else if (limits.warn && elapsed >= limits.warn) {
+                core.info(`WARN: #${issueNumber} "${issueTitle}" — ${status} for ${elapsedStr} (threshold: ${limits.warn}h)`);
+
+                const alreadyCommented = await hasRecentStaleComment(issueNumber);
+                if (!alreadyCommented) {
+                  await postComment(issueNumber,
+                    `**Warning — item may be stuck**\n\n` +
+                    `This issue has been in **${status}** for **${elapsedStr}** ` +
+                    `(AI Suitability: ${aiSuitability || 'not set'}, warn threshold: ${limits.warn}h` +
+                    `${limits.block ? `, will block at ${limits.block}h` : ''}).\n\n` +
+                    `Please check if progress is being made.`
+                  );
+                  warnCount++;
+                } else {
+                  core.info(`Skipping duplicate warn comment for #${issueNumber}`);
+                }
+              }
+            }
+
+            core.info(`\nStale detection complete: ${warnCount} warned, ${blockCount} blocked.`);
