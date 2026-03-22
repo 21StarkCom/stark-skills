@@ -1,0 +1,183 @@
+name: Release Gate Check
+on:
+  check_run:
+    types: [completed]
+  pull_request_review:
+    types: [submitted]
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read config and extract issue
+        id: setup
+        run: |
+          if [ ! -f .github/project-config.json ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "project_id=$(jq -r .project_id .github/project-config.json)" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+          # Get PR number from event
+          if [ "${{ github.event_name }}" = "check_run" ]; then
+            PR_NUM=$(echo '${{ toJSON(github.event.check_run.pull_requests) }}' | jq -r '.[0].number // empty')
+          else
+            PR_NUM="${{ github.event.pull_request.number }}"
+          fi
+          echo "pr_number=$PR_NUM" >> "$GITHUB_OUTPUT"
+
+      - name: Evaluate gates
+        if: steps.setup.outputs.skip != 'true' && steps.setup.outputs.pr_number != ''
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const config = JSON.parse(fs.readFileSync('.github/project-config.json', 'utf8'));
+            const prNumber = parseInt('${{ steps.setup.outputs.pr_number }}');
+
+            // Get PR details
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            // Extract issue number
+            const match = pr.body?.match(/Closes #(\d+)/);
+            if (!match) { console.log('No linked issue'); return; }
+            const issueNumber = parseInt(match[1]);
+
+            // Find project item and read fields
+            const issueData = await github.graphql(`
+              query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  issue(number: $number) {
+                    body
+                    projectItems(first: 10) {
+                      nodes {
+                        id
+                        project { id }
+                        fieldValues(first: 20) {
+                          nodes {
+                            ... on ProjectV2ItemFieldSingleSelectValue {
+                              name field { ... on ProjectV2SingleSelectField { name } }
+                            }
+                            ... on ProjectV2ItemFieldTextValue {
+                              text field { ... on ProjectV2Field { name } }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            `, { owner: context.repo.owner, repo: context.repo.repo, number: issueNumber });
+
+            const items = issueData.repository.issue.projectItems.nodes;
+            const item = items.find(i => i.project.id === config.project_id);
+            if (!item) return;
+
+            // Read current status
+            let currentStatus = '';
+            let docState = '';
+            let releaseApproval = '';
+            let risk = '';
+            for (const fv of item.fieldValues.nodes) {
+              const fname = fv.field?.name;
+              if (fname === 'Status') currentStatus = fv.name;
+              if (fname === 'Documentation State') docState = fv.name;
+              if (fname === 'Release Approval') releaseApproval = fv.name;
+              if (fname === 'Risk') risk = fv.name;
+            }
+
+            // Only evaluate if in 'ready to merge'
+            if (currentStatus !== 'ready to merge') {
+              console.log(`Status is '${currentStatus}', not 'ready to merge' — skipping`);
+              return;
+            }
+
+            // Gate checks
+            const gates = [];
+
+            // 1. PR approved
+            const reviews = await github.rest.pulls.listReviews({
+              owner: context.repo.owner, repo: context.repo.repo, pull_number: prNumber,
+            });
+            const approved = reviews.data.some(r => r.state === 'APPROVED');
+            gates.push({ name: 'PR approved', pass: approved });
+
+            // 2. All CI checks pass
+            const checks = await github.rest.checks.listForRef({
+              owner: context.repo.owner, repo: context.repo.repo,
+              ref: pr.head.sha, filter: 'latest',
+            });
+            const ciPass = checks.data.check_runs
+              .filter(c => c.name !== 'Release Gate Check')
+              .every(c => c.conclusion === 'success' || c.conclusion === 'skipped');
+            gates.push({ name: 'CI checks pass', pass: ciPass });
+
+            // 3. Documentation state
+            const docsOk = docState === 'complete' || docState === 'reviewed';
+            gates.push({ name: 'Documentation complete', pass: docsOk });
+
+            // 4. Artifacts section in issue body
+            const body = issueData.repository.issue.body || '';
+            const hasArtifacts = body.includes('## Artifacts') && /https?:\/\//.test(body.split('## Artifacts')[1] || '');
+            gates.push({ name: 'Artifact links present', pass: hasArtifacts });
+
+            // 5. Release approval (non-low risk)
+            const needsApproval = risk !== 'low';
+            const approvalOk = !needsApproval || releaseApproval === 'approved';
+            gates.push({ name: 'Release approval', pass: approvalOk });
+
+            // 6. Rollout notes (medium/high risk)
+            const needsRollout = risk === 'medium' || risk === 'high';
+            const hasRollout = body.includes('## Rollout') && body.split('## Rollout')[1]?.trim().length > 10;
+            gates.push({ name: 'Rollout notes', pass: !needsRollout || hasRollout });
+
+            const allPass = gates.every(g => g.pass);
+            console.log('Gate results:');
+            for (const g of gates) {
+              console.log(`  ${g.pass ? '✓' : '✗'} ${g.name}`);
+            }
+
+            // Set release-gate commit status
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner, repo: context.repo.repo,
+              sha: pr.head.sha,
+              state: allPass ? 'success' : 'pending',
+              context: 'release-gate',
+              description: allPass
+                ? 'All release gates passed'
+                : `Blocked: ${gates.filter(g => !g.pass).map(g => g.name).join(', ')}`,
+            });
+
+            // Transition to ready to release if all pass
+            if (allPass) {
+              const statusField = config.fields['Status'];
+              const optionId = statusField?.options?.['ready to release'];
+              if (optionId) {
+                await github.graphql(`
+                  mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) {
+                    updateProjectV2ItemFieldValue(input: {
+                      projectId: $projectId, itemId: $itemId, fieldId: $fieldId, value: $value
+                    }) { projectV2Item { id } }
+                  }
+                `, {
+                  projectId: config.project_id, itemId: item.id,
+                  fieldId: statusField.id, value: { singleSelectOptionId: optionId },
+                });
+                console.log('Status → ready to release');
+              }
+            }
