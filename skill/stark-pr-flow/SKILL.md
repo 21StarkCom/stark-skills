@@ -178,6 +178,28 @@ Do NOT merge without "yes", "merge it", "go ahead", "ship it", or equivalent.
 
 ---
 
+### Documentation State Check (advisory)
+
+Before merging, check the linked issue's Documentation State in the project:
+
+1. Load `.github/project-config.json`. If not found, skip this check.
+2. Extract issue number from PR body (`Closes #N` / `Fixes #N`)
+3. Use bot token: `export GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)`
+4. Find project item: `github_projects.find_item_for_issue(ORG, REPO, issue_number, config['project_id'])`
+5. Read fields: `github_projects.get_item_fields(item_id)`
+6. Check Documentation State:
+   - If `Complete` or `Reviewed` → proceed silently
+   - If `Not Started` or `Drafted` → print warning:
+     ```
+     ⚠️ Documentation State is '{state}' — consider updating docs before merge.
+     ```
+   - If field is missing → skip (no warning)
+7. `unset GH_TOKEN`
+
+**This check is advisory only — it NEVER blocks the merge.**
+
+---
+
 ## Step 6: Merge & Clean Up
 
 ```bash
