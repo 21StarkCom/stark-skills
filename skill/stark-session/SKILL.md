@@ -76,6 +76,36 @@ gh pr view --json number,title,state,reviewDecision,statusCheckRollup 2>/dev/nul
 
 If `gh` fails, skip PR info — not fatal.
 
+### Project Board Context
+
+If `.github/project-config.json` exists in the repo root:
+
+1. Use bot token: `export GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)`
+2. Query in-flight work:
+   ```python
+   in_flight = github_projects.get_items(config['project_id'], Status='Agent Working', Agent='Claude')
+   ```
+3. Query items needing attention:
+   ```python
+   needs_attention = github_projects.get_items(config['project_id'], Status='Needs Clarification')
+   blocked = github_projects.get_items(config['project_id'], Status='Blocked')
+   ```
+4. Display in briefing:
+   ```
+   📋 Project Board:
+     In-flight (Agent Working): {count}
+     {for each: #N — title (SP: X, Risk: Y)}
+
+     Needs Clarification: {count}
+     {for each: #N — title}
+
+     Blocked: {count}
+     {for each: #N — title (reason)}
+   ```
+5. `unset GH_TOKEN`
+
+If project config is missing, skip silently.
+
 ### Phase 3 — Health checks
 
 Run each command in `session.health_checks` from config. Capture stdout/stderr on failure for display in briefing. Report pass/fail — non-fatal, never blocking.
@@ -147,19 +177,35 @@ Uses user's PAT via `gh` CLI — NOT the GitHub App bots.
 - `git diff --cached --stat` — if empty, skip commit
 - Commit: `git commit -m "docs: session update — <summary>"`
 
-### Phase 4 — Push
+### Phase 4 — Project Field Updates
+
+If `.github/project-config.json` exists in the repo root:
+
+1. For each issue touched in this session (from git log):
+   - Extract issue numbers from commit messages
+   - Check if `docs/` files were modified in commits referencing that issue
+   - If docs modified: update Documentation State to 'Drafted' (if currently 'Not Started')
+2. Do NOT override manually-set Documentation State values ('Reviewed', 'Complete')
+3. Verify artifact links: for medium/high risk issues, check if `## Artifacts` section has URLs
+
+Failure handling: log warnings, never block session end.
+
+If project config is missing, skip silently.
+
+### Phase 5 — Push
 
 - If branch has upstream: `git push`
 - If on main and ahead of origin: `git push`
 - On push failure: report error, ask how to proceed
 - Otherwise (no upstream, not on main): ask "Push to origin?"
 
-### Phase 5 — Summary
+### Phase 6 — Summary
 
 ```
 Tests: ✓ passed
 PRs: #42 merged (squash)
 Docs: committed (3 files)
+Project: 2 issues updated (Documentation State → Drafted)
 Pushed: main → origin/main
 
 Session complete.
@@ -173,7 +219,7 @@ Follow the [Skill Observability Protocol](~/.claude/code-review/standards/observ
 
 Additional skill-specific metrics:
 - **Start mode**: context load time, git state time, per-health-check duration (pass/fail), total briefing time
-- **End mode**: test duration (pass/fail), build duration (pass/fail), PRs merged count, docs committed count, push result
+- **End mode**: test duration (pass/fail), build duration (pass/fail), PRs merged count, docs committed count, project fields updated count, push result
 
 ## Failure Modes
 
@@ -187,6 +233,8 @@ Additional skill-specific metrics:
 | Test/build fails | Warn, ask whether to proceed |
 | PR merge fails | Report error, offer to skip |
 | Push fails | Report error, ask how to proceed |
+| Project config missing | Skip project board/field sections silently |
+| Project API call fails | Log warning, continue — never block |
 | Config missing | Use hardcoded defaults |
 
 ## Mistakes to Avoid
