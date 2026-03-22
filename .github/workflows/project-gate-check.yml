@@ -1,0 +1,313 @@
+# Evaluate release gates and set commit status when a PR reaches "Ready to Merge".
+# Reads field IDs from .github/project-config.json (created by setup_project.py).
+
+name: Release Gate Check
+
+on:
+  check_run:
+    types: [completed]
+  pull_request_review:
+    types: [submitted]
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  gate-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/project-config.json
+          sparse-checkout-cone-mode: false
+
+      - name: Evaluate Release Gates
+        uses: actions/github-script@v7
+        env:
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const fs = require('fs');
+
+            // ── Load config ──────────────────────────────────────────────
+            const configPath = '.github/project-config.json';
+            if (!fs.existsSync(configPath)) {
+              core.info('No .github/project-config.json found — skipping.');
+              return;
+            }
+
+            let config;
+            try {
+              config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            } catch (e) {
+              core.warning(`Failed to parse project-config.json: ${e.message}`);
+              return;
+            }
+
+            const projectId = config.project_id;
+            const fields = config.fields;
+
+            if (!projectId || !fields) {
+              core.warning('project-config.json missing project_id or fields — skipping.');
+              return;
+            }
+
+            // ── Determine PR number from event ─────────────────────────
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            let prNumber;
+
+            if (context.eventName === 'check_run') {
+              const pullRequests = context.payload.check_run?.pull_requests;
+              if (!pullRequests || pullRequests.length === 0) {
+                core.info('check_run event has no associated PRs — skipping.');
+                return;
+              }
+              prNumber = pullRequests[0].number;
+            } else {
+              prNumber = context.payload.pull_request?.number;
+            }
+
+            if (!prNumber) {
+              core.info('Could not determine PR number — skipping.');
+              return;
+            }
+            core.info(`PR: #${prNumber}`);
+
+            // ── Get PR details ─────────────────────────────────────────
+            let pr;
+            try {
+              const { data } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
+              pr = data;
+            } catch (e) {
+              core.warning(`Could not fetch PR #${prNumber}: ${e.message}`);
+              return;
+            }
+
+            const sha = pr.head.sha;
+
+            // ── Extract linked issue number from PR body ───────────────
+            const body = pr.body || '';
+            const issueMatch = body.match(/(?:closes|fixes|resolves)\s+#(\d+)/i);
+            if (!issueMatch) {
+              core.info('No linked issue found in PR body (Closes/Fixes/Resolves #N) — skipping.');
+              return;
+            }
+            const issueNumber = parseInt(issueMatch[1], 10);
+            core.info(`Linked issue: #${issueNumber}`);
+
+            // ── Find project item for this issue ───────────────────────
+            let issueNodeId;
+            try {
+              const issueResult = await github.graphql(`
+                query($owner: String!, $repo: String!, $number: Int!) {
+                  repository(owner: $owner, name: $repo) {
+                    issue(number: $number) {
+                      id
+                      body
+                    }
+                  }
+                }
+              `, { owner, repo, number: issueNumber });
+              issueNodeId = issueResult.repository.issue.id;
+              var issueBody = issueResult.repository.issue.body || '';
+            } catch (e) {
+              core.warning(`Could not find issue #${issueNumber}: ${e.message}`);
+              return;
+            }
+
+            let itemId;
+            try {
+              const itemResult = await github.graphql(`
+                query($projectId: ID!, $issueId: ID!) {
+                  node(id: $projectId) {
+                    ... on ProjectV2 {
+                      items(first: 100) {
+                        nodes {
+                          id
+                          content {
+                            ... on Issue {
+                              id
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              `, { projectId, issueId: issueNodeId });
+
+              const items = itemResult.node.items.nodes;
+              const found = items.find(i => i.content?.id === issueNodeId);
+              if (!found) {
+                core.info(`Issue #${issueNumber} is not in the project — skipping.`);
+                return;
+              }
+              itemId = found.id;
+            } catch (e) {
+              core.warning(`Could not query project items: ${e.message}`);
+              return;
+            }
+
+            // ── Read current field values ──────────────────────────────
+            async function readField(name) {
+              try {
+                const result = await github.graphql(`
+                  query($itemId: ID!, $fieldName: String!) {
+                    node(id: $itemId) {
+                      ... on ProjectV2Item {
+                        fieldValueByName(name: $fieldName) {
+                          ... on ProjectV2ItemFieldSingleSelectValue {
+                            name
+                          }
+                        }
+                      }
+                    }
+                  }
+                `, { itemId, fieldName: name });
+                return result.node.fieldValueByName?.name || null;
+              } catch (e) {
+                core.info(`Could not read field "${name}": ${e.message}`);
+                return null;
+              }
+            }
+
+            const status = await readField('Status');
+            core.info(`Current status: ${status || '(not set)'}`);
+
+            // ── Only evaluate when Status = 'Ready to Merge' ──────────
+            if (status !== 'Ready to Merge') {
+              core.info(`Status is not "Ready to Merge" — skipping gate evaluation.`);
+              return;
+            }
+
+            const risk = await readField('Risk');
+            const docState = await readField('Documentation State');
+            const releaseApproval = await readField('Release Approval');
+            core.info(`Risk: ${risk || '(not set)'}, Documentation State: ${docState || '(not set)'}, Release Approval: ${releaseApproval || '(not set)'}`);
+
+            // ── Evaluate gates ─────────────────────────────────────────
+            const gates = [];
+
+            // Gate 1: PR approved
+            try {
+              const { data: reviews } = await github.rest.pulls.listReviews({
+                owner, repo, pull_number: prNumber,
+              });
+              const approved = reviews.some(r => r.state === 'APPROVED');
+              gates.push({ name: 'PR Approved', passed: approved });
+              core.info(`Gate "PR Approved": ${approved ? 'PASS' : 'FAIL'}`);
+            } catch (e) {
+              gates.push({ name: 'PR Approved', passed: false });
+              core.warning(`Could not check reviews: ${e.message}`);
+            }
+
+            // Gate 2: All CI checks pass (exclude self)
+            try {
+              const { data: checkRuns } = await github.rest.checks.listForRef({
+                owner, repo, ref: sha,
+              });
+              const otherChecks = checkRuns.check_runs.filter(
+                cr => cr.name !== 'Release Gate Check'
+              );
+              const allPassed = otherChecks.length > 0 && otherChecks.every(
+                cr => cr.conclusion === 'success' || cr.conclusion === 'skipped'
+              );
+              gates.push({ name: 'CI Checks Pass', passed: allPassed });
+              core.info(`Gate "CI Checks Pass": ${allPassed ? 'PASS' : 'FAIL'} (${otherChecks.length} checks)`);
+            } catch (e) {
+              gates.push({ name: 'CI Checks Pass', passed: false });
+              core.warning(`Could not check CI status: ${e.message}`);
+            }
+
+            // Gate 3: Documentation State = 'Complete' or 'Reviewed'
+            const docPassed = docState === 'Complete' || docState === 'Reviewed';
+            gates.push({ name: 'Documentation', passed: docPassed });
+            core.info(`Gate "Documentation": ${docPassed ? 'PASS' : 'FAIL'} (${docState || 'not set'})`);
+
+            // Gate 4: Artifacts section in issue body
+            const artifactsMatch = issueBody.match(/##\s*Artifacts[\s\S]*?(https?:\/\/\S+)/);
+            const artifactsPassed = !!artifactsMatch;
+            gates.push({ name: 'Artifacts', passed: artifactsPassed });
+            core.info(`Gate "Artifacts": ${artifactsPassed ? 'PASS' : 'FAIL'}`);
+
+            // Gate 5: Release Approval (skip for Risk = 'Low')
+            if (risk !== 'Low') {
+              const approvalPassed = releaseApproval === 'Approved';
+              gates.push({ name: 'Release Approval', passed: approvalPassed });
+              core.info(`Gate "Release Approval": ${approvalPassed ? 'PASS' : 'FAIL'} (${releaseApproval || 'not set'})`);
+            } else {
+              core.info('Gate "Release Approval": SKIP (Risk = Low)');
+            }
+
+            // Gate 6: Rollout notes (skip for Risk = 'Low')
+            if (risk !== 'Low') {
+              const rolloutMatch = issueBody.match(/##\s*Rollout\s*\n([\s\S]*?)(?=\n##|\n$|$)/);
+              const rolloutContent = rolloutMatch ? rolloutMatch[1].trim() : '';
+              const rolloutPassed = rolloutContent.length > 10;
+              gates.push({ name: 'Rollout Notes', passed: rolloutPassed });
+              core.info(`Gate "Rollout Notes": ${rolloutPassed ? 'PASS' : 'FAIL'} (${rolloutContent.length} chars)`);
+            } else {
+              core.info('Gate "Rollout Notes": SKIP (Risk = Low)');
+            }
+
+            // ── Summary ────────────────────────────────────────────────
+            const failedGates = gates.filter(g => !g.passed);
+            const allPassed = failedGates.length === 0;
+
+            core.info(`\nGate results: ${gates.length} evaluated, ${failedGates.length} failed`);
+
+            // ── Set commit status ──────────────────────────────────────
+            const statusState = allPassed ? 'success' : 'pending';
+            const description = allPassed
+              ? 'All release gates passed'
+              : `Failed: ${failedGates.map(g => g.name).join(', ')}`;
+
+            await github.rest.repos.createCommitStatus({
+              owner, repo, sha,
+              state: statusState,
+              context: 'release-gate',
+              description: description.substring(0, 140),
+            });
+            core.info(`Set release-gate status: ${statusState} — ${description}`);
+
+            // ── Transition to 'Ready to Release' if all passed ─────────
+            if (allPassed) {
+              const statusField = fields['Status'];
+              if (!statusField) {
+                core.warning('Status field not found in config — cannot transition.');
+                return;
+              }
+              const readyToReleaseId = statusField.options?.['Ready to Release'];
+              if (!readyToReleaseId) {
+                core.warning('"Ready to Release" option not found for Status field.');
+                return;
+              }
+
+              try {
+                await github.graphql(`
+                  mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) {
+                    updateProjectV2ItemFieldValue(input: {
+                      projectId: $projectId, itemId: $itemId, fieldId: $fieldId, value: $value
+                    }) {
+                      projectV2Item { id }
+                    }
+                  }
+                `, {
+                  projectId,
+                  itemId,
+                  fieldId: statusField.id,
+                  value: { singleSelectOptionId: readyToReleaseId },
+                });
+                core.info('Transitioned Status → Ready to Release');
+              } catch (e) {
+                core.warning(`Failed to transition status: ${e.message}`);
+              }
+            }
+
+            core.info('Done.');
