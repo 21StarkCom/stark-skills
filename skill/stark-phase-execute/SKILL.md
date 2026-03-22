@@ -78,6 +78,26 @@ If any check fails → stop and report. Don't proceed with a broken environment.
 
 ### 0.2 Fetch plan tasks
 
+#### Project-based task fetching (preferred)
+
+If `.github/project-config.json` exists:
+
+1. Load config, get project ID
+2. Use bot token: `export GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)`
+3. Query project items via Python:
+   ```python
+   import github_projects, github_app
+   github_app.select_app('stark-claude')
+   items = github_projects.get_items(config['project_id'], Status='Ready for Agent')
+   # Filter by AI Suitability: only Autonomous or Assisted
+   eligible = [i for i in items if i['fields'].get('AI Suitability') in ('Autonomous', 'Assisted')]
+   ```
+4. If items found, use these instead of label-based fetch
+5. If no project config or no items, fall back to label-based fetching
+6. `unset GH_TOKEN` after project queries
+
+#### Label-based task fetching (fallback)
+
 ```bash
 unset GH_TOKEN   # user's PAT for issue reads
 gh api "/repos/${ORG_REPO}/issues?labels=plan:${SLUG}&state=open&sort=created&direction=asc&per_page=100" \
@@ -143,6 +163,15 @@ git checkout main && git pull --rebase origin main
 git checkout -b phase/{SLUG}/issue-{NUMBER}-{slugified-title}
 ```
 
+If project config is loaded:
+1. Use bot token for project mutations: `export GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)`
+2. Validate spec completeness: `github_projects.check_spec_completeness(item['fields'])`
+   - If gate fails, log `"Skipping #{number}: spec incomplete ({missing})"`, skip to next task
+3. Claim the task:
+   - `github_projects.transition_status(project_id, item_id, 'Agent Working')`
+   - `github_projects.set_field(project_id, item_id, 'Agent', 'Claude')`
+4. `unset GH_TOKEN`
+
 Log: `[HH:MM:SS]   ▸ Task #{NUMBER}: {title}`
 
 ### 1.2 Implement
@@ -175,6 +204,14 @@ When the subagent completes, verify:
 - Files changed? (`git diff --stat HEAD`)
 - Uncommitted changes? (`git status --porcelain` → commit them)
 - No changes at all? → log failure, skip to next task
+
+If the implementation subagent reports ambiguity and project config is loaded:
+1. Use bot token: `export GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)`
+2. `github_projects.transition_status(project_id, item_id, 'Blocked')`
+3. `github_projects.set_field(project_id, item_id, 'Blocked Reason', 'Ambiguous requirements — needs clarification')`
+4. `unset GH_TOKEN`
+5. Post comment on issue explaining what's ambiguous
+6. Skip to next task
 
 ### 1.3 Push & create PR
 
@@ -273,6 +310,8 @@ git branch -D review/pr-${PR_NUM}
 ```
 
 ### 1.5 Merge
+
+**Do not update project Status when creating PRs or after merge** — the project-pr-sync GitHub Action handles these transitions automatically.
 
 Before merging, verify CI status:
 
