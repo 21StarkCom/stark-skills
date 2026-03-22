@@ -258,6 +258,40 @@ def api_delete(path: str) -> int:
     return r.status_code
 
 
+def graphql(query: str, *, variables: dict | None = None, retry: bool = True) -> Any:
+    """Send a GraphQL query to the GitHub API.
+
+    Posts to /graphql with the active app's token. Retries once on transient
+    connection failures (disable with retry=False). Raises RuntimeError if the
+    response contains GraphQL-level errors (fail-closed).
+    """
+    body: dict[str, Any] = {"query": query}
+    if variables is not None:
+        body["variables"] = variables
+
+    attempts = 2 if retry else 1
+    last_exc: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            r = requests.post(
+                f"{API}/graphql",
+                headers=_headers(),
+                json=body,
+                timeout=30,
+            )
+            r.raise_for_status()
+            data = r.json()
+            if "errors" in data:
+                msgs = "; ".join(e.get("message", str(e)) for e in data["errors"])
+                raise RuntimeError(f"GraphQL errors: {msgs}")
+            return data
+        except requests.exceptions.ConnectionError as exc:
+            last_exc = exc
+            if attempt + 1 >= attempts:
+                raise
+    raise last_exc  # unreachable, but keeps type-checker happy
+
+
 # ── High-level operations ───────────────────────────────────────────────
 # All functions accept `repo` param (org/name) to stay independent of globals.
 
