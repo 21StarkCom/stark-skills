@@ -78,6 +78,43 @@ If any check fails → stop and report. Don't proceed with a broken environment.
 
 ### 0.2 Fetch plan tasks
 
+#### Task Fetching — Project-Based (preferred)
+
+1. **Load project config:** Read `.github/project-config.json` for `project_id` and field IDs.
+   - If not found → fall back to label-based fetching below (backward compat).
+
+2. **Query project for ready tasks:**
+   ```bash
+   # Fetch all items from project, filter client-side
+   # Filter: Status = "ready for agent" AND AI Suitability in ("autonomous", "assisted")
+   ```
+   Use `gh api graphql` with the project items query. Filter results client-side since the API doesn't support server-side field filtering.
+
+3. **Spec completeness check:** Before picking up a task, verify:
+   - Risk field is set
+   - AI Suitability field is set
+   - For high-risk: Spec Approval = `approved`
+   If gate fails, skip task and log: "Skipping #{NUMBER} — spec incomplete: {missing fields}"
+
+4. **Claim task (optimistic):**
+   - Read Status, verify = `ready for agent`
+   - Set Status → `agent working` via GraphQL mutation
+   - Set Agent → `claude` (or whichever agent is running)
+   - If Status changed between read and write (race), skip task and pick next
+   - Two separate mutations (not atomic) — accepted risk per spec
+
+5. **On ambiguity detected during implementation:**
+   - Set Status → `needs clarification` via GraphQL
+   - Post comment on issue with specific question
+   - Do NOT attempt to resolve — skip task and pick next
+
+6. **On PR creation:**
+   - Do NOT update project Status — the GitHub Action (`project-pr-sync.yml`) handles the `agent working → human review` transition on PR opened event
+
+7. **Fallback:** If no `.github/project-config.json` exists, use the existing label-based fetching (keep current code as fallback).
+
+#### Task Fetching — Label-Based (fallback)
+
 ```bash
 unset GH_TOKEN   # user's PAT for issue reads
 gh api "/repos/${ORG_REPO}/issues?labels=plan:${SLUG}&state=open&sort=created&direction=asc&per_page=100" \
