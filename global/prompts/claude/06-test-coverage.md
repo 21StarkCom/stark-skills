@@ -9,6 +9,7 @@ Review the PR diff for test coverage gaps and test quality issues. Think about w
 - **Do NOT suggest adding tests unless there is a concrete logic bug risk.** Generic "this code has no tests" findings are noise. Only flag test gaps where a specific, describable bug could slip through.
 - **If you find code that will crash, raise, or produce wrong results at runtime, classify it as a correctness bug** — report the bug itself with a concrete description, not "this needs a test." The correctness reviewer handles bugs; you handle test quality.
 - Frame findings as "this behavior is untested and could break in way X" — not "this file has no tests."
+- **Scripts with built-in `--check` / `--verify` / `--dry-run` modes have implicit integration coverage.** Only flag missing tests for specific breakable inputs or logic branches that the self-check doesn't exercise.
 
 ## Checklist
 

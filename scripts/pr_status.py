@@ -408,6 +408,8 @@ def analyze_pr(repo: str, pr_data: dict, token: str) -> PRStatus:
             status.by_outcome = findings.get("by_outcome", {})
 
             n_rounds = rounds_data.get("rounds", 1)
+            if isinstance(n_rounds, list):
+                n_rounds = len(n_rounds)
             if n_rounds >= 1:
                 r1 = ReviewRound(
                     round_num=1,

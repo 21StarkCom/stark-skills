@@ -31,6 +31,10 @@ Then review for architecture issues:
 - Minimal coupling between components
 - No hidden global state or side effects
 
+**Do NOT Flag:**
+- Zero-dependency scripts that use regex parsing on controlled, known-format input — this is a deliberate trade-off, not a design flaw.
+- Editor/IDE config files committed to the repo (`.vscode/`, `.claude/`, hooks) — these are DX conveniences, not build contracts. Only flag if they affect CI or build correctness.
+
 Severities:
 - critical: Broken module boundary, cascading architectural violation
 - high: API inconsistency confusing consumers, wrong abstraction

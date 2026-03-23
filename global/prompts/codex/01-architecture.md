@@ -17,6 +17,8 @@ Check:
 
 Read sibling components to compare patterns.
 
+Do NOT flag: Zero-dependency scripts using regex on controlled input (deliberate trade-off). Editor/IDE configs committed to repo (DX convenience, not build contract — only flag if they affect CI).
+
 Severities: critical = broken module boundary, cascading violation. high = API inconsistency, wrong abstraction. medium = non-ideal pattern. low = suggestion.
 
 Output a JSON array only:

@@ -26,6 +26,54 @@ from typing import Any
 
 # ── Config ──────────────────────────────────────────────────────────────
 
+_gemini_api_key_cache: str | None = None
+
+
+def _get_gemini_api_key() -> str | None:
+    """Retrieve Gemini API key from macOS Keychain (cached)."""
+    global _gemini_api_key_cache
+    if _gemini_api_key_cache is not None:
+        return _gemini_api_key_cache or None
+    try:
+        result = subprocess.run(
+            ["security", "find-generic-password", "-s", "GEMINI_API_KEY", "-w"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            _gemini_api_key_cache = result.stdout.strip()
+            return _gemini_api_key_cache
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    _gemini_api_key_cache = ""
+    return None
+
+
+# ANSI escape codes for bold red text with border
+_RED = "\033[1;31m"
+_RED_BG = "\033[1;37;41m"
+_RESET = "\033[0m"
+_FALLBACK_LOG = Path.home() / ".claude" / "code-review" / "gemini-api-key-fallback.log"
+
+
+def _log_api_key_fallback(agent: str, domain: str, reason: str) -> None:
+    """Log API key fallback event to stderr (red+border) and to a persistent log file."""
+    import datetime
+    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    border = f"{_RED_BG}{'=' * 60}{_RESET}"
+    print(border, file=sys.stderr)
+    print(f"{_RED_BG}  ⚠  GEMINI API KEY FALLBACK  ⚠  {_RESET}", file=sys.stderr)
+    print(f"{_RED}  Agent: {agent}:{domain}{_RESET}", file=sys.stderr)
+    print(f"{_RED}  Reason: {reason}{_RESET}", file=sys.stderr)
+    print(f"{_RED}  Vertex AI auth failed → using GEMINI_API_KEY from Keychain{_RESET}", file=sys.stderr)
+    print(border, file=sys.stderr)
+    try:
+        _FALLBACK_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(_FALLBACK_LOG, "a") as f:
+            f.write(f"{ts}  {agent}:{domain}  reason={reason}\n")
+    except OSError:
+        pass
+
+
 SCRIPTS_DIR = Path(__file__).parent
 GLOBAL_PROMPTS_DIR = Path.home() / ".claude" / "code-review" / "prompts" / "plan-review"
 
@@ -64,6 +112,7 @@ class PlanSubAgentResult:
     findings: list[PlanFinding] = field(default_factory=list)
     error: str | None = None
     duration_s: float = 0.0
+    api_key_fallback: bool = False
 
 
 DEFAULT_PLAN_REVIEW_CONFIG = {
@@ -315,20 +364,40 @@ def _run_plan_subagent(
     if stdin_input is not None:
         run_kwargs["input"] = stdin_input
     if gemini_home:
-        run_kwargs["env"] = {**os.environ, "GEMINI_CLI_HOME": gemini_home}
+        run_kwargs["env"] = {
+            **os.environ,
+            "GEMINI_CLI_HOME": gemini_home,
+            "GOOGLE_CLOUD_LOCATION": "global",
+        }
 
     max_attempts = 2
     t0 = time.monotonic()
+    used_api_key_fallback = False
     for attempt in range(1, max_attempts + 1):
         try:
             proc = subprocess.run(cmd, **run_kwargs)
 
             if proc.returncode != 0:
+                stderr_snippet = proc.stderr[:500]
                 print(
                     f"  [{agent}:{domain_key}] CLI error (exit {proc.returncode}): "
-                    f"{proc.stderr[:500]}",
+                    f"{stderr_snippet}",
                     file=sys.stderr,
                 )
+                # Gemini Vertex AI fallback: if auth/model error, retry with API key
+                if (
+                    agent == "gemini"
+                    and attempt < max_attempts
+                    and ("ModelNotFound" in stderr_snippet or "403" in stderr_snippet
+                         or "PERMISSION_DENIED" in stderr_snippet)
+                ):
+                    api_key = _get_gemini_api_key()
+                    if api_key and "env" in run_kwargs:
+                        _log_api_key_fallback(agent, domain_key, stderr_snippet[:120])
+                        run_kwargs["env"]["GEMINI_API_KEY"] = api_key
+                        used_api_key_fallback = True
+                        time.sleep(2)
+                        continue
                 if attempt < max_attempts:
                     backoff = 5 * attempt
                     print(
@@ -406,6 +475,7 @@ def _run_plan_subagent(
             return result
 
     result.duration_s = time.monotonic() - t0
+    result.api_key_fallback = used_api_key_fallback
     result.findings = _parse_plan_findings(agent, domain_key, result.raw_output)
 
     # If we got non-trivial output but couldn't parse findings, flag it

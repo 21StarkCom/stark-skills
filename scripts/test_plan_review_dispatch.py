@@ -202,6 +202,7 @@ class TestSubAgentDispatch:
         assert "Test plan" in call_kwargs["input"]
         assert "env" in call_kwargs
         assert "GEMINI_CLI_HOME" in call_kwargs["env"]
+        assert call_kwargs["env"].get("GOOGLE_CLOUD_LOCATION") == "global"
 
     @patch("plan_review_dispatch.subprocess.run")
     def test_gemini_temp_dir_seeded(self, mock_run):
