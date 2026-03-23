@@ -37,6 +37,12 @@ Review the PR diff for security vulnerabilities and error handling gaps.
 - Object spread with user-controlled keys
 - Dynamic property access (`obj[userInput]`)
 
+## Plan/Spec Files
+When reviewing changes to plan or spec documents (`.md` files containing code blocks), distinguish between:
+- **Actual source code** being shipped → apply full security scrutiny
+- **Planned/proposed code** inside markdown documents → flag only design-level security concerns (e.g., "the planned auth model has a gap"), not implementation details that will be caught during actual code review
+- **Known unresolved items** explicitly documented in the plan (e.g., "Unresolved" sections, TODOs) → do NOT re-flag these as new findings; the author is already aware
+
 ## Severity Guide
 - **critical**: XSS vulnerability, secrets in code, eval with user input
 - **high**: Missing input validation at boundary, unsafe innerHTML, vulnerable dependency

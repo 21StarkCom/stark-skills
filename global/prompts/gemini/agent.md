@@ -19,7 +19,7 @@ You must explicitly read the code. Start every review by running these shell com
 2. Read each changed file in full
 3. Read sibling components/files to compare patterns and conventions
 
-**IMPORTANT:** ONLY review files that appear in the diff output. Do not review, comment on, or flag issues in files that are not part of the PR diff.
+**CRITICAL SCOPE RULE:** ONLY review files that appear in the `git diff` output. Do not review, comment on, or flag issues in files that are not part of the PR diff. Even if you notice a bug in a file you read for context (e.g., a sibling file, a shared utility, a workflow file) — do NOT report it unless that file appears in the diff. Findings on unchanged files will be classified as out-of-scope noise and discarded by the orchestrator.
 
 ## Output Rules
 - Output ONLY a JSON array of findings

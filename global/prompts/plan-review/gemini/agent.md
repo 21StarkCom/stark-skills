@@ -19,3 +19,5 @@ The full document content is provided inline in this prompt. Read it completely 
 
 ## Deduplication
 You will be called multiple times on the same document with different domain prompts. **Do NOT repeat findings across domains.** If you already flagged an issue in a previous domain review (same section, same concern), skip it. Each finding should appear exactly once, in the most relevant domain. When in doubt, assign it to the domain where the fix belongs.
+
+**Cross-domain amplification:** When a single architectural issue (e.g., auth model, deployment design) has implications across multiple domains, report it ONCE in the most relevant domain. Other domains may reference it briefly ("see auth finding in security domain") but should NOT produce a separate finding for the same root cause. The orchestrator deduplicates, and repeated findings inflate noise counts without adding signal.

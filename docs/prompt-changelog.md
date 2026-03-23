@@ -2,6 +2,27 @@
 
 Tracks improvements to review prompts based on stark-review assessments.
 
+## 2026-03-23 — Gemini scope restriction, plan/spec awareness, cross-domain dedup
+
+**Source:** PR #50 in GetEvinced/stark-skills + plan review of stark-signals
+**Assessment:** Gemini reviewed files outside PR diff (70% out-of-scope). Security domain re-flagged known plan-level design decisions. Both plan-review agents produced 15+ duplicate findings for the same auth issue across domains.
+
+### Changes Made
+
+| File | Change | Reason |
+|------|--------|--------|
+| `global/prompts/gemini/agent.md` | Strengthened diff scope rule — findings on unchanged files will be discarded | 7/10 Gemini findings were on files not in the PR diff |
+| `global/prompts/*/05-security.md` (all 3) | Added Plan/Spec Files section — distinguish planned code from shipped code | Security domain treated code blocks in .md plans as production vulnerabilities |
+| `global/prompts/codex/agent.md` | Added plan/spec file awareness | Codex flagged implementation details in plan code blocks as PR-level bugs |
+| `global/prompts/plan-review/*/agent.md` (all 3) | Added cross-domain amplification rule | Both agents repeated the same auth finding 15+ times across security, operability, feasibility, etc. |
+
+### Validation
+- [x] Prompt syntax OK (all markdown well-formed)
+- [x] No orchestrator changes
+- [x] No config changes
+
+---
+
 ## 2026-03-23 — Fix Gemini CLI dispatch + noise reduction
 
 **Source:** PR #56 in GetEvinced/infra-ai-platform

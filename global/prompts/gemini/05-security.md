@@ -40,6 +40,8 @@ Then review for security issues:
 - Object spread with user-controlled keys
 - Dynamic property access obj[userInput]
 
+**Plan/Spec Files:** When reviewing changes to `.md` plan or spec documents containing code blocks, only flag design-level security gaps (e.g., missing auth model). Do not flag implementation details in planned code — those will be caught during actual code review. Do not re-flag items already documented as "Unresolved" or TODO in the plan.
+
 Severities:
 - critical: XSS, secrets in code, eval with user input
 - high: Missing validation, unsafe innerHTML, vulnerable dep
