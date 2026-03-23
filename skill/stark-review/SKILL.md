@@ -43,7 +43,7 @@ From `git remote get-url origin`, parse org/repo. Or use `--repo` override.
 export GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)
 ```
 
-If this fails → warn "stark-claude auth failed, degrading to local-only review." Set `auth_failed = true`. Continue — the review still runs because sub-agents use local `git diff`, not the GitHub API. Posting to the PR (Phase 4a) and fetching PR body (spec context) will be skipped.
+If this fails → warn "stark-claude auth failed, degrading to local-only review." Set `auth_failed = true`. Continue — the review still runs because sub-agents use local `git diff`, not the GitHub API. Posting to the PR (Phase 4.1–4.3) and fetching PR body (spec context) will be skipped.
 
 ### 1.3 Fetch PR metadata
 
@@ -271,26 +271,21 @@ Analyze patterns across all rounds:
 
 ## Phase 4: Post & Persist
 
-### 4a. Post per-agent raw findings to PR
+If `auth_failed`: skip all posting (4.1–4.3). Print summary to terminal with a note: "Review not posted to PR (auth failed). Copy the above to post manually." Jump to 4.5.
 
-**Every agent's raw findings MUST be posted to the PR under that agent's bot identity.** GitHub serves as the permanent data store for learning and analysis — raw findings are never discarded or consolidated away.
+### 4.1 Post per-agent raw findings
 
-If `auth_failed`: skip posting entirely. Print summary to terminal with a note: "Review not posted to PR (auth failed). Copy the above to post manually."
+**Every agent's raw findings MUST be posted to the PR under that agent's bot identity.** GitHub is the permanent data store for learning and analysis — raw findings are never discarded or consolidated away.
 
-Otherwise, for each agent that returned findings, post a separate comment under that agent's bot:
+For each agent that participated, post a separate comment under that agent's bot:
 
 ```bash
-# Post claude's raw findings as stark-claude[bot]
 $PYTHON $SCRIPTS/github_app.py --app stark-claude pr review {number} --comment --body "$claude_findings"
-
-# Post codex's raw findings as stark-codex[bot]
 $PYTHON $SCRIPTS/github_app.py --app stark-codex pr review {number} --comment --body "$codex_findings"
-
-# Post gemini's raw findings as stark-gemini[bot]
 $PYTHON $SCRIPTS/github_app.py --app stark-gemini pr review {number} --comment --body "$gemini_findings"
 ```
 
-Each agent's comment should contain:
+Each agent's comment format:
 
 ```markdown
 ## stark-{agent} review — round {N}
@@ -302,55 +297,32 @@ Each agent's comment should contain:
 **{count} findings** | dispatched at {timestamp}
 ```
 
-If an agent returned 0 findings, post a short comment: `## stark-{agent} review — round {N}\n\nNo findings.`
+- 0 findings → post: `## stark-{agent} review — round {N}\n\nNo findings.`
+- Agent failed → post: `## stark-{agent} review — round {N}\n\n⚠️ Agent failed: {error}`
+- Posting fails for one agent → warn and continue with the next.
 
-If an agent failed (CLI error, timeout), post: `## stark-{agent} review — round {N}\n\n⚠️ Agent failed: {error}`
+### 4.2 Post orchestrator summary
 
-If posting fails for a specific agent, warn and continue with the next agent.
-
-### 4b. Post orchestrator classified summary
-
-After all per-agent comments are posted, post the orchestrator's consolidated summary as `stark-claude[bot]`. This comment contains the classification decisions (fix, noise, false_positive, ignored) with reasoning:
+Post the classified summary (Phase 3 output) as `stark-claude[bot]`:
 
 ```bash
 $PYTHON $SCRIPTS/github_app.py --app stark-claude pr review {number} --comment --body "$summary"
 ```
 
-The summary includes the standard sections (headline counts, findings table, noise reasoning, etc.) as defined in Phase 3. This is the human-readable analysis that explains what was fixed, what was dismissed, and why.
+This comment contains headline counts, the full findings table with classifications (fix/noise/FP/ignored), noise reasoning, misalignment analysis, and prompt improvement assessment.
 
-### Review Rounds Tracking
+### 4.3 Create bug issues
 
-After posting findings, update the Review Rounds field on the linked issue's project item:
+For each finding that is (a) classified `fix` or `recurring`, (b) severity `critical` or `high`, and (c) still present after the final round — create a GitHub issue.
 
-1. Load `.github/project-config.json`. If not found, skip.
-2. Extract issue number from PR body (`Closes #N` / `Fixes #N`)
-3. If no linked issue, skip.
-4. Use bot token: `export GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)`
-5. Find project item: `github_projects.find_item_for_issue(ORG, REPO, issue_number, config['project_id'])`
-6. If item not found, skip.
-7. Read current Review Rounds: `github_projects.get_item_fields(item_id).get('Review Rounds', 0)`
-8. If this round had findings > 0, increment:
-   `github_projects.set_field(config['project_id'], item_id, 'Review Rounds', current + 1)`
-9. If zero findings, do NOT increment (avoid inflating the metric).
-10. `unset GH_TOKEN`
-
-**Failure handling:** If any project operation fails, log warning and continue — review posting already succeeded.
-
-### 4c. Create bug issues for unfixed findings
-
-After the review-fix loop, some real issues may remain unfixed — either because they're too complex to auto-fix, they require human judgment, or they persist across max_rounds. For each finding that meets ALL of these criteria, create a GitHub issue:
-
-1. Classified as `fix` or `recurring` (real issue, not noise/FP)
-2. Severity is `critical` or `high`
-3. Still present after the final round (not resolved during the fix loop)
-
-**Auth: use the user's PAT, not the bot.** Bug issues should appear as created by the user, not by `stark-claude[bot]`. Ensure `GH_TOKEN` is NOT set (unset it if previously exported for review comments):
+**Auth: user's PAT, not the bot.** Bug issues should show as created by the user:
 
 ```bash
-unset GH_TOKEN  # Use user's native gh auth for issue creation
+unset GH_TOKEN  # Use native gh auth
 ```
 
-**Label setup** (auto-create if missing):
+**Labels** (auto-create if missing):
+
 ```bash
 gh label create "type:bug" --repo {ORG}/{REPO} --color "e11d48" --force
 gh label create "stark-review" --repo {ORG}/{REPO} --color "7057ff" --force
@@ -358,7 +330,7 @@ gh label create "critical" --repo {ORG}/{REPO} --color "b60205" --force
 gh label create "high" --repo {ORG}/{REPO} --color "d93f0b" --force
 ```
 
-**For each qualifying finding**, create an issue:
+**Issue body:**
 
 ```bash
 BODY_FILE=$(mktemp) && chmod 600 "$BODY_FILE"
@@ -399,36 +371,35 @@ gh api /repos/{ORG}/{REPO}/issues \
 rm -f "$BODY_FILE" "$TITLE_FILE"
 ```
 
-**Severity label setup** — also auto-create severity labels alongside type labels:
-```bash
-GH_TOKEN="$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)" \
-  gh label create "critical" --repo {ORG}/{REPO} --color "b60205" --force
-GH_TOKEN="$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)" \
-  gh label create "high" --repo {ORG}/{REPO} --color "d93f0b" --force
-```
+**Shell injection prevention:** Title and body written to temp files (`chmod 600`) — LLM content never interpolated in shell.
 
-**Shell injection prevention:** Both title and body are written to temp files (`chmod 600`) to prevent LLM-generated content from being interpolated in shell commands. Variable substitution in the labels field is performed by the executing agent, not by the shell.
+**Deduplication:** Check for existing open issue with `stark-review` label matching same title + file path before creating.
 
-**Deduplication:** Before creating, check if an open issue with label `stark-review` already exists for the same bug:
-```bash
-gh api "/repos/{ORG}/{REPO}/issues?labels=stark-review&state=open" --jq '.[] | {number, title, body}'
-```
-Match by: title contains the finding title AND body contains the same file path. Both must match — two different files with the same finding title are distinct bugs. If a match is found, skip and note "Bug already tracked in #{existing}".
+**Cap:** Max 5 bug issues per review run. Overflow listed in PR comment.
 
-**Review-only mode:** In review-only mode (no fix loop), bug issues are still created for critical/high findings since no fix was attempted. To prevent excessive issue creation on large PRs, cap at 5 bug issues per review run. If more qualify, list the remainder in the PR comment with a note: "N additional bugs not filed as issues — review the PR comment for details."
+**Include in summary:** "Bug Issues Created" section with issue numbers. If none qualify, omit.
 
-**Include in summary:** Add a "Bug Issues Created" section after the Misalignment Analysis listing each created issue with its number and title. If no bugs qualify, omit the section.
+### 4.4 Update review rounds tracking
 
-If `auth_failed` or issue creation fails, log the bug details in the summary comment instead — don't lose the information.
+Update the Review Rounds field on the linked issue's project item:
 
-### 4c. Save history
+1. Load `.github/project-config.json`. If not found, skip.
+2. Extract issue number from PR body (`Closes #N` / `Fixes #N`). If no linked issue, skip.
+3. `export GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)`
+4. Find project item via `github_projects.find_item_for_issue(...)`. If not found, skip.
+5. If this round had findings > 0, increment Review Rounds field. If zero findings, don't increment.
+6. `unset GH_TOKEN`
+
+Failure in any step → log warning and continue.
+
+### 4.5 Save history
 
 Write to `~/.claude/code-review/history/{org}/{repo}/{pr}/`:
 
 | File | Content |
 |------|---------|
 | `summary.md` | Human-readable final summary (same as PR comment) |
-| `rounds.json` | All rounds aggregated, all findings, all outcomes |
+| `rounds.json` | All rounds, all findings, all outcomes, per-phase timing |
 | `prompt-assessment.md` | Prompt improvement recommendations |
 
 Create directories on demand. If saving fails, warn but don't fail.
