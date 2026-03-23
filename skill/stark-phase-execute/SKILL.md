@@ -4,17 +4,20 @@ description: >
   Autonomously execute all tasks in a development phase end-to-end — for each task: session start,
   implement, PR, multi-agent review with fix rounds, merge, session end. Then regression tests,
   version bump, deploy, dashboard, memory/docs update, and prompt improvement detection.
-  Zero user intervention after trigger. Use when the user says "execute phase", "run phase",
+  Zero user intervention after trigger. If no GitHub issues exist for the plan slug, automatically
+  runs /stark-plan-to-tasks first to decompose the plan into issues, then executes them.
+  Use when the user says "execute phase", "run phase",
   "stark-phase-execute", "execute these tasks", "implement this phase", "run the plan",
   "autopilot", or any variation of wanting to autonomously execute a set of planned GitHub issues.
   Also triggers on `/stark-phase-execute`. Proactively suggest this skill when the user has just
-  run `/stark-plan-to-tasks` and has open phase issues.
-argument-hint: "<plan-slug> [--dry-run] [--skip-deploy] [--skip-release] [--start-from <issue-number>] [--rounds <N>] [--repo ORG/REPO]"
+  run `/stark-plan-to-tasks` and has open phase issues, OR when a plan file exists but hasn't
+  been decomposed yet.
+argument-hint: "<plan-slug-or-path> [--dry-run] [--skip-deploy] [--skip-release] [--start-from <issue-number>] [--rounds <N>] [--repo ORG/REPO]"
 ---
 
 # stark-phase-execute
 
-Autonomous execution engine for development phases. Takes a plan slug (from `/stark-plan-to-tasks`), fetches all associated GitHub issues, and executes each one through a complete development lifecycle: branch → implement → test → PR → multi-agent review → fix → merge → next.
+Autonomous execution engine for development phases. Takes a plan slug (or plan file path), fetches all associated GitHub issues, and executes each one through a complete development lifecycle: branch → implement → test → PR → multi-agent review → fix → merge → next. If no issues exist yet, automatically runs `/stark-plan-to-tasks` to decompose the plan first.
 
 After all tasks: regression tests, version bump, deploy, dashboard, memory update, prompt improvement detection.
 
@@ -32,7 +35,7 @@ This skill requires full autonomy. Before triggering, ensure:
 
 | Arg | Default | Description |
 |-----|---------|-------------|
-| `<plan-slug>` | required | Plan slug from `/stark-plan-to-tasks` — matches the `plan:{SLUG}` label on issues |
+| `<plan-slug>` | required | Plan slug — matches the `plan:{SLUG}` label on issues. If no issues exist yet, auto-runs `/stark-plan-to-tasks` first. Can also be a path to a plan file (auto-detected). |
 | `--dry-run` | off | Walk the plan, show what would happen, don't execute |
 | `--skip-deploy` | off | Skip deployment after release |
 | `--skip-release` | off | Skip version bump and release |
@@ -56,6 +59,14 @@ ORG_REPO=<parse org/repo from REMOTE>
 ORG=$(echo $ORG_REPO | cut -d/ -f1)
 REPO=$(echo $ORG_REPO | cut -d/ -f2)
 ```
+
+Resolve plan slug from argument:
+
+- If the argument is a file path (contains `/` or ends in `.md`):
+  - Store as `PLAN_FILE` for potential use in 0.3
+  - Extract slug from filename: strip directory, `.md` extension, and known suffixes (`-design`, `-spec`, `-plan`). **Keep the date prefix** — this matches `/stark-plan-to-tasks` slug derivation.
+  - Example: `docs/superpowers/plans/2026-03-23-stark-signals.md` → `SLUG=2026-03-23-stark-signals`
+- Otherwise: treat as slug directly (`SLUG=$1`)
 
 ---
 
@@ -110,9 +121,39 @@ Parse remaining issues into ordered task list. Extract from labels: story points
 
 If `--start-from` is set, skip tasks before that issue number.
 
-If no tasks found → stop: "No open task issues with label `plan:{SLUG}`".
+If no tasks found → **auto-decompose the plan** (see 0.3 below). If still no tasks after decomposition → stop: "No open task issues with label `plan:{SLUG}` and no plan file found to decompose."
 
-### 0.3 Phase briefing
+### 0.3 Auto-decompose plan (if no tasks exist)
+
+When no GitHub issues with `plan:{SLUG}` are found, the plan hasn't been decomposed yet. Automatically run `/stark-plan-to-tasks` before proceeding.
+
+**If `--dry-run`:** report that `/stark-plan-to-tasks` would be invoked, show the plan file path, but do NOT run it (it creates real GitHub issues). Stop with: "Dry run: would invoke /stark-plan-to-tasks on {PLAN_FILE}. Run without --dry-run to decompose and execute."
+
+Otherwise:
+
+1. **Locate the plan file.** If `PLAN_FILE` was set during slug resolution (argument was a file path), use it directly. Otherwise, search `docs/` recursively:
+
+   ```bash
+   PLAN_FILE=$(find docs/ -name "*${SLUG}*" -name "*.md" ! -name "*.review.md" 2>/dev/null | head -1)
+   ```
+
+   If no plan file found → stop: "No issues with label `plan:{SLUG}` and no plan file matching `*{SLUG}*.md` in docs/."
+
+2. **Run `/stark-plan-to-tasks`:**
+
+   Log: `[HH:MM:SS]   No tasks found for plan:{SLUG} — running /stark-plan-to-tasks on ${PLAN_FILE}`
+
+   ```
+   Invoke Skill: stark-plan-to-tasks ${PLAN_FILE}
+   ```
+
+   This decomposes the plan into phased GitHub issues with `plan:{SLUG}` labels. It runs autonomously (3 LLM passes: quality gate → decomposition → validation).
+
+3. **Re-fetch tasks** using the same logic from 0.2 (project-based or label-based) and filter per 0.2. The newly created issues should now appear.
+
+4. If still no tasks → stop: "Decomposition ran but produced no issues. Check /stark-plan-to-tasks output for errors."
+
+### 0.4 Phase briefing
 
 ```
 [HH:MM:SS] === stark-phase-execute: {SLUG} ===
@@ -128,7 +169,7 @@ Dry run:     {yes/no}
 
 Create a parent task for the phase. Create child tasks for each issue.
 
-### 0.4 Initialize observability log
+### 0.5 Initialize observability log
 
 Write to `{HISTORY}/{ORG}/{REPO}/phase-{SLUG}-{YYYYMMDD-HHMMSS}.json`:
 
