@@ -405,9 +405,12 @@ resource "google_cloud_run_v2_service" "stark_signals" {
         failure_threshold = 10
       }
 
+      # Liveness uses a lightweight endpoint that does NOT check DB.
+      # If liveness checked DB and DB was down, Cloud Run would kill all instances,
+      # preventing recovery when DB comes back. Readiness (startup) checks DB.
       liveness_probe {
         http_get {
-          path = "/health"
+          path = "/livez"
         }
         period_seconds = 30
       }
@@ -627,13 +630,20 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 Write to `~/git/Evinced/stark-signals/Dockerfile`:
 
 ```dockerfile
-# ── Build frontend ─────────────────────────────────────────────────────
+# ── Build frontend (Phase 2+) ─────────────────────────────────────────
+# Phase 1: frontend/ doesn't exist yet. Create a placeholder.
+# Phase 2+: full React build.
 FROM node:22-alpine AS frontend-build
 WORKDIR /app/frontend
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
-COPY frontend/ ./
-RUN npm run build
+COPY . /tmp/build-context
+RUN if [ -f /tmp/build-context/frontend/package.json ]; then \
+      cp /tmp/build-context/frontend/package.json /tmp/build-context/frontend/package-lock.json ./ && \
+      npm ci && \
+      cp -r /tmp/build-context/frontend/src /tmp/build-context/frontend/index.html /tmp/build-context/frontend/vite.config.ts ./ 2>/dev/null || true && \
+      npm run build; \
+    else \
+      mkdir -p dist && echo '<!doctype html><html><body>Dashboard available after Phase 2</body></html>' > dist/index.html; \
+    fi && rm -rf /tmp/build-context
 
 # ── Python backend ─────────────────────────────────────────────────────
 FROM python:3.13-slim AS backend
@@ -1706,6 +1716,13 @@ git commit -m "feat: add Alembic initial migration with all 9 tables (agents, ag
 3. Seed data inserts 3 agents and 18 initial weights
 4. All indexes from spec are created
 
+**Migration Rollback Procedure (production):**
+1. Before deploying a schema change, take a Cloud SQL backup: `gcloud sql backups create --instance=INSTANCE`
+2. Deploy the new image with `alembic upgrade head` as a pre-start command
+3. If migration fails or the new version has issues: `alembic downgrade -1` to revert one step
+4. If downgrade also fails: restore from backup (`gcloud sql backups restore`)
+5. Never run `alembic downgrade base` in production — only single-step downgrades
+
 ---
 
 ### Task 7: Server-side consensus engine
@@ -2358,7 +2375,13 @@ async def require_auth(request: Request) -> str:
     if not settings.gcp_project:
         return "dev@evinced.com"
 
-    # Check IAP header
+    # Check IAP/IAM header. When Cloud Run is behind IAP or uses IAM invoker,
+    # Google's infrastructure validates the caller before the request reaches
+    # the service — the header is set by Google, not the caller.
+    # Without IAP (allUsers invoker), this header is spoofable. The API key
+    # path below provides the alternative auth mechanism for that case.
+    # TODO: For production hardening, validate the X-Goog-IAP-JWT-Assertion
+    # header (signed JWT from Google) instead of the email header.
     email = request.headers.get("X-Goog-Authenticated-User-Email", "")
     if email:
         if email.startswith("accounts.google.com:"):
@@ -2829,20 +2852,31 @@ app.add_middleware(
 
 # ── Routes ─────────────────────────────────────────────────────────────
 
+from fastapi import Depends  # noqa: E402
+from stark_signals.api.deps import require_auth  # noqa: E402
 from stark_signals.api.routes_ingest import router as ingest_router  # noqa: E402
 from stark_signals.api.routes_read import router as read_router  # noqa: E402
 from stark_signals.api.routes_mutations import router as mutations_router  # noqa: E402
 from stark_signals.api.routes_webhooks import router as webhooks_router  # noqa: E402
 
-app.include_router(ingest_router, prefix="/api/v1/ingest", tags=["ingest"])
-app.include_router(read_router, prefix="/api/v1", tags=["read"])
-app.include_router(mutations_router, prefix="/api/v1", tags=["mutations"])
+# All routers except webhooks require authentication (require_auth dependency).
+# Webhooks use HMAC signature verification instead (server-side, in routes_webhooks.py).
+# This is necessary because allUsers IAM is granted for webhook access.
+app.include_router(ingest_router, prefix="/api/v1/ingest", tags=["ingest"], dependencies=[Depends(require_auth)])
+app.include_router(read_router, prefix="/api/v1", tags=["read"], dependencies=[Depends(require_auth)])
+app.include_router(mutations_router, prefix="/api/v1", tags=["mutations"], dependencies=[Depends(require_auth)])
 app.include_router(webhooks_router, prefix="/api/v1/webhooks", tags=["webhooks"])
+
+
+@app.get("/livez")
+async def livez():
+    """Liveness probe — lightweight, no DB check. Used by Cloud Run liveness probe."""
+    return {"status": "alive"}
 
 
 @app.get("/health")
 async def health():
-    """Health check — verifies database connectivity."""
+    """Readiness check — verifies database connectivity. Used by startup probe."""
     from sqlalchemy import text
     from stark_signals.db import get_async_session
 
@@ -3977,7 +4011,7 @@ logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 
-@router.post("/signals", status_code=201, response_model=SignalIngestResponse)
+@router.post("/admin/signals", status_code=201, response_model=SignalIngestResponse)
 async def create_signal_admin(
     req: SignalIngestRequest,
     admin_email: str = Depends(require_admin),
@@ -4264,6 +4298,8 @@ DOMAIN_KEYWORDS: dict[str, list[str]] = {
 
 
 def _verify_signature(body: bytes, signature: str, secret: str) -> bool:
+    if not secret:
+        return False  # Reject if webhook secret is unconfigured
     if not signature.startswith("sha256="):
         return False
     expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
@@ -4899,11 +4935,14 @@ git commit -m "feat: add signal_client.py with API writes, spool fallback, weigh
 
 ---
 
-### Task 14: Add signal_store config + update multi_review.py integration
+### Task 14: Add signal_store config + update multi_review.py + create consensus wrapper
 
 **Files:**
 - Modify: `~/git/Evinced/stark-skills/global/config.json`
 - Modify: `~/git/Evinced/stark-skills/scripts/multi_review.py`
+- Create: `~/git/Evinced/stark-skills/scripts/consensus.py`
+
+> **Note:** `scripts/consensus.py` is the thin client-side wrapper that calls the server-side consensus endpoint. When `signal_store.enabled` is true, it sends raw findings + coverage to `POST /api/v1/ingest/review` and returns the consensus results. When disabled, it falls back to the local classification logic in `multi_review.py`.
 
 - [ ] **Step 1: Read current config.json**
 
@@ -4977,6 +5016,22 @@ def _send_to_signal_store(
     }
 
     return signal_client.ingest_review(payload)
+```
+
+Add a call to `_send_to_signal_store` at the end of the existing `run_review()` function (or equivalent orchestration entry point) in `multi_review.py`, after all rounds complete and before returning results:
+
+```python
+# At the end of the review orchestration, after all rounds:
+_send_to_signal_store(
+    repo=repo,
+    pr_number=pr_number,
+    review_type=review_type,
+    base_sha=base_sha,
+    rounds_data=rounds_data,
+    agent_versions=agent_versions,
+    config_snapshot=config_snapshot,
+    duration=total_duration,
+)
 ```
 
 - [ ] **Step 5: Commit**
