@@ -10,6 +10,16 @@
 
 **Spec:** `docs/superpowers/specs/2026-03-23-stark-signals-design.md`
 
+**Success Criteria:**
+1. Consensus engine produces weighted severity/classification for multi-agent findings
+2. Signal store captures gold (human override), silver (regression), and bronze (convergence) signals
+3. Review pipeline integrates with signal_client (feature-flagged, non-breaking)
+4. Dashboard displays agent leaderboard, review stats, tournament stats, signal stats
+5. Recalibration proposes weight changes; human approval required before applying
+6. All API writes are idempotent; client spools when API unreachable
+
+**Scope Acknowledgment:** This plan is ambitious for a 7-week timeline. Phase 1 (signal store + consensus) is the highest-value deliverable and should be validated in production before Phase 2 begins. If Phase 1 takes longer than 2 weeks, Phase 2 scope should be reduced (dashboard pages 21-25 can be deferred). Tournament execution (Phase 2) depends on consensus being proven useful.
+
 ---
 
 ## File Map
@@ -44,7 +54,7 @@
 | Create | `src/stark_signals/recalibration.py` | Weight recalibration engine |
 | Create | `alembic.ini` | Alembic config |
 | Create | `alembic/env.py` | Alembic environment |
-| Create | `alembic/versions/001_initial_schema.py` | Initial migration (8 tables) |
+| Create | `alembic/versions/001_initial_schema.py` | Initial migration (9 tables) |
 | Create | `tests/__init__.py` | Test package |
 | Create | `tests/conftest.py` | Fixtures (async db, client) |
 | Create | `tests/test_consensus.py` | Consensus engine tests |
@@ -62,7 +72,7 @@
 | Action | Path | Purpose |
 |--------|------|---------|
 | Create | `scripts/signal_client.py` | Python client (writes to API, spool fallback) |
-| Create | `scripts/consensus.py` | Thin wrapper calling server-side consensus |
+| Create | `scripts/consensus.py` | Thin wrapper calling server-side consensus (Task 14, alongside multi_review.py integration) |
 | Create | `scripts/tournament.py` | Tournament runner (worktrees, dispatch, scoring) |
 | Create | `scripts/test_signal_client.py` | Client tests |
 | Create | `scripts/test_consensus.py` | Client-side consensus tests |
@@ -288,7 +298,7 @@ resource "google_sql_database" "stark_signals" {
 }
 
 resource "google_sql_user" "stark_signals" {
-  name     = "stark-signals"
+  name     = google_service_account.stark_signals.email
   instance = var.cloud_sql_instance
   type     = "CLOUD_IAM_SERVICE_ACCOUNT"
   project  = var.gcp_project
@@ -312,6 +322,28 @@ resource "google_project_iam_member" "secret_accessor" {
   project = var.gcp_project
   role    = "roles/secretmanager.secretAccessor"
   member  = "serviceAccount:${google_service_account.stark_signals.email}"
+}
+
+resource "google_project_iam_member" "run_invoker" {
+  project = var.gcp_project
+  role    = "roles/run.invoker"
+  member  = "serviceAccount:${google_service_account.stark_signals.email}"
+}
+
+# ── Secrets ─────────────────────────────────────────────────────────
+
+resource "google_secret_manager_secret" "webhook_secret" {
+  secret_id = "stark-signals-webhook-secret"
+  project   = var.gcp_project
+
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "webhook_secret" {
+  secret      = google_secret_manager_secret.webhook_secret.id
+  secret_data = var.github_webhook_secret
 }
 
 # ── Cloud Run Service ──────────────────────────────────────────────────
@@ -349,8 +381,13 @@ resource "google_cloud_run_v2_service" "stark_signals" {
         value = var.gcp_project
       }
       env {
-        name  = "GITHUB_WEBHOOK_SECRET"
-        value = var.github_webhook_secret
+        name = "GITHUB_WEBHOOK_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.webhook_secret.secret_id
+            version = "latest"
+          }
+        }
       }
 
       resources {
@@ -391,12 +428,45 @@ resource "google_cloud_run_v2_service" "stark_signals" {
 }
 
 # ── IAP ────────────────────────────────────────────────────────────────
+# NOTE: IAP for Cloud Run v2 requires a Google Cloud Load Balancer (GCLB) in front.
+# IAP cannot attach directly to a Cloud Run service. The setup requires:
+# 1. A serverless NEG pointing to the Cloud Run service
+# 2. A backend service with the NEG
+# 3. IAP enabled on the backend service
+# 4. An HTTPS load balancer with URL map routing
+#
+# For Phase 1, deploy Cloud Run with --no-allow-unauthenticated and use
+# IAM-based access control (allUsers removed). IAP via GCLB can be added
+# as a follow-up when the dashboard is ready (Phase 2).
+#
+# Webhook endpoint bypasses IAP: use a separate Cloud Run service or
+# a Cloud Run route with different auth (signature verification only).
 
-resource "google_iap_web_backend_service_iam_member" "iap_users" {
-  web_backend_service = google_cloud_run_v2_service.stark_signals.name
-  role                = "roles/iap.httpsResourceAccessor"
-  member              = "domain:evinced.com"
+resource "google_cloud_run_v2_service_iam_member" "invoker" {
+  name     = google_cloud_run_v2_service.stark_signals.name
+  location = var.region
+  project  = var.gcp_project
+  role     = "roles/run.invoker"
+  member   = "domain:evinced.com"
 }
+
+# Allow unauthenticated access for GitHub webhooks.
+# The webhook endpoint validates HMAC signatures server-side (X-Hub-Signature-256).
+# This is required because GitHub webhook IPs are not in the evinced.com domain.
+resource "google_cloud_run_v2_service_iam_member" "webhook_invoker" {
+  name     = google_cloud_run_v2_service.stark_signals.name
+  location = var.region
+  project  = var.gcp_project
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+# IMPORTANT: Since allUsers can invoke the Cloud Run service, ALL non-webhook
+# endpoints must verify the caller's identity server-side. The require_admin
+# dependency already does this (403 when GCP_PROJECT is set and no IAP header).
+# Read endpoints should also require authentication — add an auth middleware
+# that checks X-Goog-Authenticated-User-Email or Authorization: Bearer header
+# for all /api/v1/* routes except /api/v1/webhooks/*.
 
 # ── Cloud Run Job (Recalibration) ──────────────────────────────────────
 
@@ -575,10 +645,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev gcc \
     && rm -rf /var/lib/apt/lists/*
 
+# Copy source first, then install (pip install . needs the package source)
 COPY pyproject.toml ./
+COPY src/ ./src/
 RUN pip install --no-cache-dir .
 
-COPY src/ ./src/
 COPY alembic.ini ./
 COPY alembic/ ./alembic/
 COPY --from=frontend-build /app/frontend/dist ./static/
@@ -769,6 +840,7 @@ class Settings(BaseSettings):
     service_url: str = Field(default="http://localhost:8000")
 
     github_webhook_secret: str = Field(default="")
+    api_key: str = Field(default="")  # STARK_SIGNALS_API_KEY for CLI client auth
 
     db_pool_size: int = Field(default=5)
     db_max_overflow: int = Field(default=10)
@@ -907,7 +979,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -937,7 +1009,7 @@ class AgentDomainWeight(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     agent_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False, index=True
+        UUID(as_uuid=True), ForeignKey("agents.id"), nullable=False, index=True
     )
     domain: Mapped[str] = mapped_column(String(50), nullable=False)
     weight: Mapped[float] = mapped_column(Float, nullable=False)
@@ -967,7 +1039,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -1007,7 +1079,7 @@ class Finding(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     idempotency_key: Mapped[str] = mapped_column(String(500), unique=True, nullable=False)
     review_run_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False, index=True
+        UUID(as_uuid=True), ForeignKey("review_runs.id"), nullable=False, index=True
     )
     round: Mapped[int] = mapped_column(Integer, nullable=False)
     agent: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -1038,7 +1110,7 @@ class Vote(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     finding_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False, index=True
+        UUID(as_uuid=True), ForeignKey("findings.id"), nullable=False, index=True
     )
     voter_agent: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     voter_domain: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -1066,7 +1138,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -1101,7 +1173,7 @@ class TournamentImplementation(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tournament_run_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False, index=True
+        UUID(as_uuid=True), ForeignKey("tournament_runs.id"), nullable=False, index=True
     )
     agent: Mapped[str] = mapped_column(String(50), nullable=False)
     branch_name: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -1223,7 +1295,7 @@ git commit -m "feat: add SQLAlchemy models for all 8 tables"
 ```
 
 **Acceptance criteria:**
-1. All 8 tables defined: agents, agent_domain_weights, review_runs, findings, votes, tournament_runs, tournament_implementations, signals, weight_update_proposals (9 total including proposals)
+1. All 9 tables defined: agents, agent_domain_weights, review_runs, findings, votes, tournament_runs, tournament_implementations, signals, weight_update_proposals (9 total including proposals)
 2. All UUID primary keys use `uuid.uuid4` default
 3. All `created_at` columns use `server_default=func.now()`
 4. Unique constraints match spec (idempotency_key, agent_domain_effective)
@@ -1340,7 +1412,7 @@ else:
 Write to `~/git/Evinced/stark-signals/alembic/versions/001_initial_schema.py`:
 
 ```python
-"""Initial schema — all 9 tables.
+"""Initial schema — all 9 tables (agents, agent_domain_weights, review_runs, findings, votes, tournament_runs, tournament_implementations, signals, weight_update_proposals).
 
 Revision ID: 001
 Revises:
@@ -1625,11 +1697,11 @@ Expected: 9 tables listed, 3 agent rows (claude, codex, gemini)
 ```bash
 cd ~/git/Evinced/stark-signals
 git add alembic.ini alembic/
-git commit -m "feat: add Alembic initial migration with all 9 tables and seed data"
+git commit -m "feat: add Alembic initial migration with all 9 tables (agents, agent_domain_weights, review_runs, findings, votes, tournament_runs, tournament_implementations, signals, weight_update_proposals) and seed data"
 ```
 
 **Acceptance criteria:**
-1. `alembic upgrade head` creates all 9 tables without error
+1. `alembic upgrade head` creates all 9 tables (agents, agent_domain_weights, review_runs, findings, votes, tournament_runs, tournament_implementations, signals, weight_update_proposals) without error
 2. `alembic downgrade base` drops all tables cleanly
 3. Seed data inserts 3 agents and 18 initial weights
 4. All indexes from spec are created
@@ -1675,11 +1747,21 @@ def event_loop():
 
 @pytest.fixture(scope="session")
 async def engine():
-    """In-memory SQLite for unit tests. Use postgres for integration."""
-    eng = create_async_engine("sqlite+aiosqlite:///:memory:")
+    """Use PostgreSQL for tests — models use PostgreSQL-specific types (UUID, JSONB).
+
+    Requires local postgres via docker compose:
+        docker compose up -d db
+    Falls back to the docker-compose postgres at localhost:5432.
+    """
+    # Uses same docker-compose postgres; creates/drops tables per session (not per test)
+    test_url = "postgresql+asyncpg://stark_signals:localdev@localhost:5432/stark_signals"
+    eng = create_async_engine(test_url)
     async with eng.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     yield eng
+    async with eng.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
     await eng.dispose()
 
 
@@ -1920,19 +2002,9 @@ def normalize_title(title: str) -> str:
 
 
 def _levenshtein(a: str, b: str) -> int:
-    """Compute Levenshtein distance between two strings."""
-    if len(a) < len(b):
-        return _levenshtein(b, a)
-    if len(b) == 0:
-        return len(a)
-    prev = list(range(len(b) + 1))
-    for i, ca in enumerate(a):
-        curr = [i + 1]
-        for j, cb in enumerate(b):
-            cost = 0 if ca == cb else 1
-            curr.append(min(curr[j] + 1, prev[j + 1] + 1, prev[j] + cost))
-        prev = curr
-    return prev[-1]
+    """Compute Levenshtein distance using python-Levenshtein (C extension)."""
+    from Levenshtein import distance
+    return distance(a, b)
 
 
 def _titles_match(a: str, b: str) -> bool:
@@ -2271,18 +2343,56 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
+async def require_auth(request: Request) -> str:
+    """Verify caller identity for all API endpoints (except webhooks).
+
+    Accepts either:
+    - X-Goog-Authenticated-User-Email header (from IAP/IAM)
+    - Authorization: Bearer <API_KEY> header (for CLI clients using STARK_SIGNALS_API_KEY)
+
+    In local dev (GCP_PROJECT unset), returns 'dev@evinced.com'.
+    """
+    from stark_signals.config import get_settings
+
+    settings = get_settings()
+    if not settings.gcp_project:
+        return "dev@evinced.com"
+
+    # Check IAP header
+    email = request.headers.get("X-Goog-Authenticated-User-Email", "")
+    if email:
+        if email.startswith("accounts.google.com:"):
+            email = email.split(":", 1)[1]
+        return email
+
+    # Check API key
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer ") and settings.api_key:
+        import hmac
+        token = auth_header[7:]
+        if hmac.compare_digest(token, settings.api_key):
+            return "api-key-client"
+
+    raise HTTPException(401, "Authentication required")
+
+
 async def require_admin(request: Request) -> str:
     """Verify the caller has admin role. Returns the user email.
 
-    In production (IAP), the X-Goog-Authenticated-User-Email header contains
-    the authenticated user. For local dev, defaults to 'dev@evinced.com'.
+    In production, the X-Goog-Authenticated-User-Email header is set by IAP/IAM.
+    For local dev (GCP_PROJECT unset), defaults to 'dev@evinced.com'.
+    In production, missing header → 403 (no anonymous admin access).
     """
+    from stark_signals.config import get_settings
+
     email = request.headers.get("X-Goog-Authenticated-User-Email", "")
     if email.startswith("accounts.google.com:"):
         email = email.split(":", 1)[1]
     if not email:
+        settings = get_settings()
+        if settings.gcp_project:
+            raise HTTPException(403, "Authentication required")
         email = "dev@evinced.com"
-    # TODO: Check stark-admins GitHub team membership for production
     return email
 ```
 
@@ -2300,6 +2410,15 @@ from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+
+# ── Error response ─────────────────────────────────────────────────────
+
+class ErrorResponse(BaseModel):
+    """Standard error response shape for all API errors."""
+    error: str
+    detail: str | None = None
+    status_code: int
 
 
 # ── Ingest schemas ─────────────────────────────────────────────────────
@@ -2374,6 +2493,8 @@ class TournamentImplIn(BaseModel):
     test_skip_count: int = 0
     cross_review_score: float = 0.0
     cross_review_findings: int = 0
+    cross_review_critical: int = 0
+    cross_review_high: int = 0
     acceptance_passed: bool = False
     selected: bool = False
     disqualified: bool = False
@@ -2662,7 +2783,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -2689,6 +2810,15 @@ app = FastAPI(
 
 settings = get_settings()
 
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.detail, "detail": None, "status_code": exc.status_code},
+    )
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if not settings.gcp_project else ["https://signals.evinced.net"],
@@ -2712,7 +2842,20 @@ app.include_router(webhooks_router, prefix="/api/v1/webhooks", tags=["webhooks"]
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": __version__}
+    """Health check — verifies database connectivity."""
+    from sqlalchemy import text
+    from stark_signals.db import get_async_session
+
+    try:
+        async for session in get_async_session():
+            await session.execute(text("SELECT 1"))
+            break
+        return {"status": "ok", "version": __version__}
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "version": __version__, "error": str(e)},
+        )
 
 
 # Serve static frontend assets if they exist
@@ -4208,32 +4351,37 @@ async def _handle_issues(payload: dict, db: AsyncSession) -> Response:
         review_runs = result.scalars().all()
 
         for rr in review_runs:
-            idem_key = f"silver:review_run:{rr.id}:{issue_number}"
+            # Emit per-agent signals (not agent='all') so recalibration can
+            # attribute regressions to specific agents. Get agents from the
+            # review run's agent_versions dict.
+            agents = list(rr.agent_versions.keys()) if rr.agent_versions else ["claude", "codex", "gemini"]
+            for agent_name in agents:
+                idem_key = f"silver:review_run:{rr.id}:{issue_number}:{agent_name}"
 
-            existing = await db.execute(
-                select(Signal).where(Signal.idempotency_key == idem_key)
-            )
-            if existing.scalar_one_or_none():
-                continue
+                existing = await db.execute(
+                    select(Signal).where(Signal.idempotency_key == idem_key)
+                )
+                if existing.scalar_one_or_none():
+                    continue
 
-            signal = Signal(
-                idempotency_key=idem_key,
-                signal_type=SignalType.REGRESSION.value,
-                signal_tier=SignalTier.SILVER.value,
-                source_type="review_run",
-                source_id=rr.id,
-                agent="all",  # affects all agents that reviewed this PR
-                domain=domain,
-                original_value="approved",
-                corrected_value="regression",
-                weight_delta=-0.03,
-                context={
-                    "issue_number": issue_number,
-                    "pr_number": pr_num,
-                    "repo": repo,
-                },
-            )
-            db.add(signal)
+                signal = Signal(
+                    idempotency_key=idem_key,
+                    signal_type=SignalType.REGRESSION.value,
+                    signal_tier=SignalTier.SILVER.value,
+                    source_type="review_run",
+                    source_id=rr.id,
+                    agent=agent_name,
+                    domain=domain,
+                    original_value="approved",
+                    corrected_value="regression",
+                    weight_delta=-0.03,
+                    context={
+                        "issue_number": issue_number,
+                        "pr_number": pr_num,
+                        "repo": repo,
+                    },
+                )
+                db.add(signal)
             logger.info(
                 "webhook.silver_signal",
                 review_run_id=str(rr.id),
@@ -4272,31 +4420,33 @@ async def _handle_push(payload: dict, db: AsyncSession) -> Response:
             review_runs = result.scalars().all()
 
             for rr in review_runs:
-                idem_key = f"silver:review_run:{rr.id}:revert:{commit.get('id', '')[:12]}"
-                existing = await db.execute(
-                    select(Signal).where(Signal.idempotency_key == idem_key)
-                )
-                if existing.scalar_one_or_none():
-                    continue
+                agents = list(rr.agent_versions.keys()) if rr.agent_versions else ["claude", "codex", "gemini"]
+                for agent_name in agents:
+                    idem_key = f"silver:review_run:{rr.id}:revert:{commit.get('id', '')[:12]}:{agent_name}"
+                    existing = await db.execute(
+                        select(Signal).where(Signal.idempotency_key == idem_key)
+                    )
+                    if existing.scalar_one_or_none():
+                        continue
 
-                signal = Signal(
-                    idempotency_key=idem_key,
-                    signal_type=SignalType.REGRESSION.value,
-                    signal_tier=SignalTier.SILVER.value,
-                    source_type="review_run",
-                    source_id=rr.id,
-                    agent="all",
-                    domain=None,
-                    original_value="approved",
-                    corrected_value="reverted",
-                    weight_delta=-0.05,
-                    context={
-                        "pr_number": pr_num,
-                        "revert_commit": commit.get("id"),
-                        "repo": repo,
-                    },
-                )
-                db.add(signal)
+                    signal = Signal(
+                        idempotency_key=idem_key,
+                        signal_type=SignalType.REGRESSION.value,
+                        signal_tier=SignalTier.SILVER.value,
+                        source_type="review_run",
+                        source_id=rr.id,
+                        agent=agent_name,
+                        domain=None,
+                        original_value="approved",
+                        corrected_value="reverted",
+                        weight_delta=-0.05,
+                        context={
+                            "pr_number": pr_num,
+                            "revert_commit": commit.get("id"),
+                            "repo": repo,
+                        },
+                    )
+                    db.add(signal)
                 logger.info(
                     "webhook.revert_signal",
                     review_run_id=str(rr.id),
@@ -4449,7 +4599,9 @@ Module-level function library, same pattern as github_app.py / github_projects.p
 All writes go through the stark-signals Cloud Run API. If unreachable, events are
 spooled to ~/.cache/stark-signals/pending.jsonl and flushed on next successful call.
 
-Auth: gcloud auth print-identity-token (user's Google identity).
+Auth: First tries STARK_SIGNALS_API_KEY env var (simple bearer token for CLI use),
+falls back to gcloud auth print-identity-token (Google identity for IAP).
+Requires: `pip install requests` (already in stark-skills scripts/.venv).
 
 Usage:
     import signal_client
@@ -4503,7 +4655,11 @@ DEFAULT_WEIGHTS: dict[str, dict[str, float]] = {
 # ── Auth ───────────────────────────────────────────────────────────────
 
 def get_auth_token(service_url: str) -> str | None:
-    """Get identity token via gcloud for the target service."""
+    """Get auth token. Prefers STARK_SIGNALS_API_KEY env var, falls back to gcloud identity token."""
+    import os
+    api_key = os.environ.get("STARK_SIGNALS_API_KEY")
+    if api_key:
+        return api_key
     try:
         result = subprocess.run(
             ["gcloud", "auth", "print-identity-token", f"--audiences={service_url}"],
@@ -6251,18 +6407,29 @@ git commit -m "feat: enhance Overview page with charts (winner distribution, fin
 
 ### Tasks 21-25: Remaining dashboard pages
 
-Tasks 21-25 follow the same pattern. Each creates a page component with:
-- react-query data fetching
-- Recharts visualizations
-- Tables with sorting/filtering
+> **Note:** These tasks are intentionally light on implementation detail. Each follows the identical pattern established in Task 20 (react-query + Recharts + Tailwind tables). Full specs will be written when Phase 2 begins, after Phase 1 is validated. If Phase 1 runs over, these tasks are candidates for deferral.
 
-**Task 21:** Agent Detail — weight history line chart, domain heatmap, precision/recall over time
-**Task 22:** Tournaments — list with filters, detail view with side-by-side comparison
-**Task 23:** Reviews — finding classification breakdown, noise rate trends
-**Task 24:** Signals — ground truth list, pending proposals with approve/reject buttons
-**Task 25:** Settings page (optional, Phase 3)
+**Task 21:** Agent Detail (`frontend/src/pages/AgentDetail.tsx`)
+- API: `GET /api/v1/agents/{name}/weights`, `GET /api/v1/agents/{name}/accuracy`
+- Charts: weight history LineChart (x=effective_from, y=weight, one line per domain), precision/recall bar chart
+- Acceptance: selecting an agent from leaderboard navigates to this page
 
-Each task creates 1 file, fetches from the corresponding API endpoint, and commits independently. The implementation pattern is identical to Task 20 — react-query + Recharts + Tailwind tables.
+**Task 22:** Tournaments (`frontend/src/pages/Tournaments.tsx`)
+- API: `GET /api/v1/tournaments`, `GET /api/v1/tournaments/{id}`
+- Table: sortable by date, winner, score. Detail view shows side-by-side implementation comparison
+- Acceptance: tournament list loads with pagination, detail shows all implementations
+
+**Task 23:** Reviews (`frontend/src/pages/Reviews.tsx`)
+- API: `GET /api/v1/reviews`, `GET /api/v1/reviews/{id}`
+- Charts: classification breakdown PieChart (fix/noise/FP/needs_human_review), noise rate trend
+- Acceptance: review list with repo filter, detail shows all findings with consensus data
+
+**Task 24:** Signals (`frontend/src/pages/Signals.tsx`)
+- API: `GET /api/v1/signals`, `GET /api/v1/weights/proposals`, `POST /api/v1/weights/proposals/{id}/approve|reject`
+- Table: signal list filterable by tier/type/agent. Proposals section with approve/reject buttons (requires admin)
+- Acceptance: approve button calls API and updates proposal status in-place
+
+**Task 25:** Settings page — deferred to Phase 3 (optional)
 
 ---
 
@@ -6987,6 +7154,18 @@ git commit -m "docs: add stark-phase-execute-tournament to CLAUDE.md skills list
 
 **Acceptance criteria:**
 1. Skill listed in CLAUDE.md skills table
+
+---
+
+## CI/CD
+
+**Not in scope for this plan.** CI/CD for stark-signals should be set up as a follow-up after Phase 1 tasks are committed. Minimum viable pipeline:
+
+1. **GitHub Actions** — on PR: lint (ruff), type-check, run pytest against docker-compose postgres
+2. **Deploy** — on merge to main: build Docker image, push to Artifact Registry, deploy to Cloud Run
+3. **Migrations** — run `alembic upgrade head` as a pre-deploy step in Cloud Build
+
+This is a prerequisite for Phase 2 — tournament and dashboard development require a working deploy pipeline.
 
 ---
 
