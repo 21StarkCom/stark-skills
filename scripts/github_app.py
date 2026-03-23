@@ -342,10 +342,25 @@ def issue_list(repo: str, state: str = "open") -> list[dict]:
     return [i for i in items if "pull_request" not in i]
 
 
-def issue_create(repo: str, *, title: str, body: str = "", labels: list[str] | None = None) -> dict:
+def issue_create(
+    repo: str,
+    *,
+    title: str,
+    body: str = "",
+    labels: list[str] | None = None,
+    issue_type: str | None = None,
+) -> dict:
+    """Create a GitHub issue.
+
+    Args:
+        issue_type: Built-in GitHub Issue Type name (Bug, Feature, Task).
+                    This sets the native Type field, NOT a label.
+    """
     payload: dict[str, Any] = {"title": title, "body": body}
     if labels:
         payload["labels"] = labels
+    if issue_type:
+        payload["type"] = issue_type
     return api_post(f"/repos/{repo}/issues", payload)
 
 
