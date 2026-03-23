@@ -8,6 +8,10 @@ First, run these commands:
 
 > **Scope:** Only report findings specific to test coverage and test quality. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, security, accessibility, correctness, or types, skip it — a dedicated reviewer covers that domain.
 
+**Critical rules:**
+- Do NOT suggest adding tests unless there is a concrete logic bug risk. Generic "no tests" findings are noise.
+- Scripts with built-in `--check` / `--verify` / `--dry-run` modes have implicit integration coverage. Only flag missing tests for specific breakable inputs that the self-check doesn't exercise.
+
 Then review for test coverage gaps:
 
 **Coverage**

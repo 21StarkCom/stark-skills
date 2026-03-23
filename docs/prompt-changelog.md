@@ -2,6 +2,28 @@
 
 Tracks improvements to review prompts based on stark-review assessments.
 
+## 2026-03-23 — Fix Gemini CLI dispatch + noise reduction
+
+**Source:** PR #56 in GetEvinced/infra-ai-platform
+**Assessment:** All 6 Gemini agents failed with cli_error — Vertex AI auth needed GOOGLE_CLOUD_LOCATION=global. Architecture domain flagged deliberate zero-dep trade-offs and editor configs. Test-coverage domain flagged scripts with built-in --check mode.
+
+### Changes Made
+
+| File | Change | Reason |
+|------|--------|--------|
+| `scripts/multi_review.py` | Added `GOOGLE_CLOUD_LOCATION=global` to Gemini subprocess env | Vertex AI defaults to us-central1 where model isn't available |
+| `scripts/multi_review.py` | Added `_get_gemini_api_key()` + fallback retry with API key on Vertex AI failure | Resilience — fallback to API key auth from macOS Keychain |
+| `scripts/plan_review_dispatch.py` | Same two fixes as multi_review.py | Same Gemini dispatch pattern |
+| `global/prompts/*/01-architecture.md` | Added "Do NOT Flag" for zero-dep regex parsing and editor configs | False positives on deliberate design trade-offs |
+| `global/prompts/*/06-test-coverage.md` | Added rule: scripts with `--check`/`--verify` modes have implicit coverage | False positive on generator with built-in validation |
+
+### Validation
+- [x] Python compiles (both orchestrators)
+- [x] Gemini API key stored in macOS Keychain (`GEMINI_API_KEY`)
+- [x] Prompt markdown structure preserved
+
+---
+
 ## 2026-03-20 — Noise reduction: test-coverage, type-safety, correctness
 
 **Source:** PR #18 in GetEvinced/infra-sentinel (4 review rounds), plus assessments from 6 other repos

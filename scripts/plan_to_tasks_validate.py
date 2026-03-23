@@ -323,7 +323,7 @@ def _run_validation_agent(
                 src = os.path.join(real_gemini_dir, auth_file)
                 if os.path.exists(src):
                     shutil.copy2(src, os.path.join(gemini_dir, auth_file))
-            env = {**os.environ, "GEMINI_CLI_HOME": gemini_home}
+            env = {**os.environ, "GEMINI_CLI_HOME": gemini_home, "GOOGLE_CLOUD_LOCATION": "global"}
             try:
                 proc = subprocess.run(
                     [

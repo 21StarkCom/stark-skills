@@ -121,10 +121,11 @@ class TestModelFlags:
         assert "json" in cmd
         assert "--approval-mode" in cmd
         assert "plan" in cmd
-        # Gemini uses GEMINI_CLI_HOME env var for isolation
+        # Gemini uses GEMINI_CLI_HOME env var for isolation + GOOGLE_CLOUD_LOCATION for Vertex AI
         call_kwargs = mock_run.call_args[1]
         assert "env" in call_kwargs
         assert "GEMINI_CLI_HOME" in call_kwargs["env"]
+        assert call_kwargs["env"].get("GOOGLE_CLOUD_LOCATION") == "global"
 
     @patch("multi_review.subprocess.run")
     def test_gemini_temp_dir_seeded(self, mock_run):
@@ -229,11 +230,26 @@ class TestCLIEndToEnd:
     @pytest.mark.e2e
     @pytest.mark.skipif(not shutil.which("gemini"), reason="gemini CLI not installed")
     def test_gemini_json_output_e2e(self, tmp_path):
-        """gemini -o json --yolo returns a JSON envelope with 'response' key."""
+        """gemini -o json returns a JSON envelope with 'response' key."""
         import tempfile
+        import json as _json
         gemini_home = tempfile.mkdtemp(prefix="gemini-test-")
-        os.makedirs(os.path.join(gemini_home, ".gemini"), exist_ok=True)
-        env = {**os.environ, "GEMINI_CLI_HOME": gemini_home}
+        gemini_dir = os.path.join(gemini_home, ".gemini")
+        os.makedirs(gemini_dir, exist_ok=True)
+        # Copy auth files from real home (same pattern as multi_review.py)
+        real_gemini = os.environ.get("GEMINI_CLI_HOME", os.path.expanduser("~"))
+        real_gemini_dir = os.path.join(real_gemini, ".gemini")
+        for auth_file in ("settings.json", "oauth_creds.json", "google_accounts.json", "installation_id"):
+            src = os.path.join(real_gemini_dir, auth_file)
+            if os.path.exists(src):
+                shutil.copy2(src, os.path.join(gemini_dir, auth_file))
+        with open(os.path.join(gemini_dir, "projects.json"), "w") as f:
+            _json.dump({"projects": {os.getcwd(): "test"}}, f)
+        env = {
+            **os.environ,
+            "GEMINI_CLI_HOME": gemini_home,
+            "GOOGLE_CLOUD_LOCATION": "global",
+        }
         result = subprocess.run(
             ["gemini", "-p", "Return exactly: []",
              "-o", "json", "--approval-mode", "plan"],
