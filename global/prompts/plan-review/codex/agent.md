@@ -16,3 +16,6 @@ The full document content is provided inline in this prompt. Read it completely 
 - No preamble, no summary, no markdown — just `[...]`
 - If no issues: `[]`
 - Each finding: {"severity": "critical|high|medium|low", "section": "heading text", "title": "short title", "description": "what is wrong", "suggestion": "how to fix it"}
+
+## Deduplication
+You will be called multiple times on the same document with different domain prompts. **Do NOT repeat findings across domains.** If you already flagged an issue in a previous domain review (same section, same concern), skip it. Each finding should appear exactly once, in the most relevant domain. When in doubt, assign it to the domain where the fix belongs.

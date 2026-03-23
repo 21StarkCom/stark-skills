@@ -520,7 +520,27 @@ def dispatch_plan_review(
     for r in results:
         for f in r.findings:
             severity_counts[f.severity] = severity_counts.get(f.severity, 0) + 1
-            all_findings.append(asdict(f))
+            fd = asdict(f)
+            fd["_agent"] = r.agent  # tag for cross-domain dedup
+            all_findings.append(fd)
+
+    # Cross-agent dedup: remove findings with identical (section, title) from
+    # the same agent across different domains.  Keep the first occurrence
+    # (domain order is deterministic).
+    pre_dedup = len(all_findings)
+    seen_keys: set[tuple[str, str, str]] = set()
+    deduped_findings: list[dict[str, Any]] = []
+    for f in all_findings:
+        key = (f.get("section", ""), f.get("title", ""), f.get("_agent", ""))
+        if key not in seen_keys:
+            seen_keys.add(key)
+            deduped_findings.append(f)
+    all_findings = deduped_findings
+
+    # Recount after dedup
+    severity_counts = {}
+    for f in all_findings:
+        severity_counts[f.get("severity", "?")] = severity_counts.get(f.get("severity", "?"), 0) + 1
 
     # Serialize results
     serialized_results = []

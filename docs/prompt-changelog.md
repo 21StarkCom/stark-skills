@@ -48,3 +48,23 @@ Tracks improvements to review prompts based on stark-review assessments.
 - [x] Prompt syntax OK
 - [x] Python compiles
 - [x] No config changes needed
+
+## 2026-03-23 — Plan review noise reduction
+
+**Source:** infra-ai-platform plan reviews (registry spec: 5.7% S/N, docs rebuild: 3.9% S/N)
+**Assessment:** ~100 findings/round noise floor driven by scope false positives, security misunderstanding of terraform_remote_state, and cross-domain duplication
+
+### Changes Made
+
+| File | Change | Reason |
+|------|--------|--------|
+| `*/05-scope.md` (all 3 agents) | Added "Before You Begin" section: check Non-Goals, respect explicit scope, understand roadmaps | Agents repeatedly flagged items listed in Non-Goals as scope creep |
+| `*/03-security.md` (all 3 agents) | Added "Infrastructure-as-Code Context" for remote_state, labels, empty maps | Codex flagged terraform_remote_state outputs as public API exposure |
+| `*/agent.md` (all 3 agents) | Added "Deduplication" instruction: don't repeat findings across domains | Same agent raised identical finding in 3+ domains (~30/round) |
+| `scripts/plan_review_dispatch.py` | Added post-dispatch cross-domain dedup by (section, title, agent) | Backup dedup in case agent-level instruction isn't followed |
+
+### Expected Impact
+- Scope noise: ~40% reduction (Non-Goals and explicit scope findings eliminated)
+- Security noise: ~20% reduction (remote_state and label findings eliminated)
+- Cross-domain duplication: ~30% reduction (dedup instruction + orchestrator filter)
+- Target: noise floor drops from ~100/round to ~40-50/round
