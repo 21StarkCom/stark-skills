@@ -50,7 +50,7 @@ APPS: dict[str, dict[str, str]] = {
     },
     "stark-codex": {
         "app_id": "3066834",
-        "installation_id": "115650994",
+        "installation_id": "115648800",  # GetEvinced org — add repos via GitHub App settings
         "keychain_service": "STARK_CODEX_PRIVATE_KEY",
     },
     "stark-gemini": {

@@ -5,3 +5,5 @@ __pycache__/
 skill/*-workspace/
 .worktrees/
 .superpowers/
+.analysis-parsed/
+.analysis-raw-data/
