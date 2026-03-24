@@ -64,8 +64,13 @@ Resolve plan slug from argument:
 
 - If the argument is a file path (contains `/` or ends in `.md`):
   - Store as `PLAN_FILE` for potential use in 0.3
-  - Extract slug from filename: strip directory, `.md` extension, and known suffixes (`-design`, `-spec`, `-plan`). **Keep the date prefix** — this matches `/stark-plan-to-tasks` slug derivation.
+  - Extract slug from filename using the **same algorithm as `/stark-plan-to-tasks`** (§slug-derivation):
+    1. Strip directory and `.md` extension
+    2. Strip known suffixes: remove trailing `-design`, `-spec`, or `-plan` (only the final suffix, e.g., `api-design-plan` → `api-design`)
+    3. Keep the date prefix
+    4. If slug exceeds 50 characters, truncate to 47 and append a 3-character hash suffix (first 3 chars of MD5 of full slug)
   - Example: `docs/superpowers/plans/2026-03-23-stark-signals.md` → `SLUG=2026-03-23-stark-signals`
+  - **MUST match `/stark-plan-to-tasks`** — if you change this, change both skills.
 - Otherwise: treat as slug directly (`SLUG=$1`)
 
 ---
@@ -119,25 +124,31 @@ gh api "/repos/${ORG_REPO}/issues?labels=plan:${SLUG}&state=open&sort=created&di
 
 Parse remaining issues into ordered task list. Extract from labels: story points (`sp:N`), risk (`risk:*`), type (`type:*`).
 
+Store the **raw issue count** (before filtering) as `raw_issue_count`.
+
 If `--start-from` is set, skip tasks before that issue number.
 
-If no tasks found → **auto-decompose the plan** (see 0.3 below). If still no tasks after decomposition → stop: "No open task issues with label `plan:{SLUG}` and no plan file found to decompose."
+If no tasks found after filtering:
+- If `raw_issue_count > 0` → issues exist but were all filtered out (tracking issues, `--start-from`). This is a normal end-of-work state, NOT a missing decomposition. Stop: "All {raw_issue_count} issues with label `plan:{SLUG}` were filtered out (tracking issues or --start-from). Nothing to execute."
+- If `raw_issue_count == 0` → no issues exist at all → **auto-decompose the plan** (see 0.3 below). If still no tasks after decomposition → stop: "Decomposition ran but produced no issues."
 
 ### 0.3 Auto-decompose plan (if no tasks exist)
 
 When no GitHub issues with `plan:{SLUG}` are found, the plan hasn't been decomposed yet. Automatically run `/stark-plan-to-tasks` before proceeding.
 
-**If `--dry-run`:** report that `/stark-plan-to-tasks` would be invoked, show the plan file path, but do NOT run it (it creates real GitHub issues). Stop with: "Dry run: would invoke /stark-plan-to-tasks on {PLAN_FILE}. Run without --dry-run to decompose and execute."
-
-Otherwise:
-
-1. **Locate the plan file.** If `PLAN_FILE` was set during slug resolution (argument was a file path), use it directly. Otherwise, search `docs/` recursively:
+1. **Locate the plan file** (always, before dry-run check). If `PLAN_FILE` was set during slug resolution (argument was a file path), use it directly. Otherwise, search `docs/` recursively:
 
    ```bash
-   PLAN_FILE=$(find docs/ -name "*${SLUG}*" -name "*.md" ! -name "*.review.md" 2>/dev/null | head -1)
+   PLAN_FILE=$(find docs/ -name "*${SLUG}*" -name "*.md" ! -name "*.review.md" 2>/dev/null | sort | head -1)
    ```
 
    If no plan file found → stop: "No issues with label `plan:{SLUG}` and no plan file matching `*{SLUG}*.md` in docs/."
+
+   Log which file was selected: `[HH:MM:SS]   Plan file: ${PLAN_FILE}`
+
+**If `--dry-run`:** report that `/stark-plan-to-tasks` would be invoked, show the resolved plan file path, but do NOT run it (it creates real GitHub issues). Stop with: "Dry run: would invoke /stark-plan-to-tasks on {PLAN_FILE}. Run without --dry-run to decompose and execute."
+
+Otherwise:
 
 2. **Run `/stark-plan-to-tasks`:**
 
@@ -146,6 +157,8 @@ Otherwise:
    ```
    Invoke Skill: stark-plan-to-tasks ${PLAN_FILE}
    ```
+
+   If `--repo` was passed, the plan-to-tasks skill auto-detects the repo from `git remote` in the current directory. Ensure you're in the correct repo directory before invoking. If `--repo` targets a different repo than the current directory, warn and abort — cross-repo auto-decomposition is not supported.
 
    This decomposes the plan into phased GitHub issues with `plan:{SLUG}` labels. It runs autonomously (3 LLM passes: quality gate → decomposition → validation).
 

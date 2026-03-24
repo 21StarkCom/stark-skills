@@ -637,12 +637,11 @@ FROM node:22-alpine AS frontend-build
 WORKDIR /app/frontend
 COPY . /tmp/build-context
 RUN if [ -f /tmp/build-context/frontend/package.json ]; then \
-      cp /tmp/build-context/frontend/package.json /tmp/build-context/frontend/package-lock.json ./ && \
+      cp -r /tmp/build-context/frontend/. ./ && \
       npm ci && \
-      cp -r /tmp/build-context/frontend/src /tmp/build-context/frontend/index.html /tmp/build-context/frontend/vite.config.ts ./ 2>/dev/null || true && \
       npm run build; \
     else \
-      mkdir -p dist && echo '<!doctype html><html><body>Dashboard available after Phase 2</body></html>' > dist/index.html; \
+      mkdir -p dist && echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>stark-signals dashboard</title></head><body><main>Dashboard available after Phase 2</main></body></html>' > dist/index.html; \
     fi && rm -rf /tmp/build-context
 
 # ── Python backend ─────────────────────────────────────────────────────
