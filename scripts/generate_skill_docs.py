@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html.parser
 import json
 import os
 import re
@@ -30,7 +31,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 SKILL_DIR = ROOT / "skill"
@@ -110,3 +111,421 @@ def discover_skills(skill_dir: Path, filter_name: str | None = None) -> list[Pat
             continue
         skills.append(d)
     return skills
+
+
+# ── HTML sanitization & validation ─────────────────────────────────────
+
+
+_DANGEROUS_TAGS = frozenset({"script", "iframe", "object", "embed", "meta"})
+_DESIGN_SYSTEM_CLASSES = frozenset({
+    "node-phase", "node-decision", "node-action", "node-input",
+    "node-output", "node-error", "node-loop", "edge-label",
+    "skill-flow", "skill-header", "phase-group",
+})
+
+
+class _Sanitizer(html.parser.HTMLParser):
+    """HTMLParser subclass that strips dangerous tags and event handlers."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self._out: list[str] = []
+        self._skip_depth: int = 0  # depth inside a stripped tag (script)
+        self._skip_tag: str | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag_lower = tag.lower()
+        if tag_lower in _DANGEROUS_TAGS:
+            if tag_lower == "script":
+                self._skip_depth += 1
+                self._skip_tag = "script"
+            return
+        if self._skip_depth > 0:
+            return
+        safe_attrs = [
+            (k, v) for k, v in attrs if not k.lower().startswith("on")
+        ]
+        attr_str = ""
+        for k, v in safe_attrs:
+            if v is None:
+                attr_str += f" {k}"
+            else:
+                attr_str += f' {k}="{v}"'
+        self._out.append(f"<{tag}{attr_str}>")
+
+    def handle_endtag(self, tag: str) -> None:
+        tag_lower = tag.lower()
+        if tag_lower == "script" and self._skip_depth > 0:
+            self._skip_depth -= 1
+            if self._skip_depth == 0:
+                self._skip_tag = None
+            return
+        if tag_lower in _DANGEROUS_TAGS:
+            return
+        if self._skip_depth > 0:
+            return
+        self._out.append(f"</{tag}>")
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth > 0:
+            return
+        self._out.append(data)
+
+    def handle_comment(self, data: str) -> None:
+        if self._skip_depth > 0:
+            return
+        self._out.append(f"<!--{data}-->")
+
+    def handle_entityref(self, name: str) -> None:
+        if self._skip_depth > 0:
+            return
+        self._out.append(f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        if self._skip_depth > 0:
+            return
+        self._out.append(f"&#{name};")
+
+    def handle_decl(self, decl: str) -> None:
+        if self._skip_depth > 0:
+            return
+        self._out.append(f"<!{decl}>")
+
+    def get_output(self) -> str:
+        return "".join(self._out)
+
+
+def sanitize_html(html_str: str) -> str:
+    """Strip dangerous tags, event handlers, and CSS injection vectors."""
+    sanitizer = _Sanitizer()
+    sanitizer.feed(html_str)
+    result = sanitizer.get_output()
+    # Post-process: strip CSS url() and @import
+    result = re.sub(r"url\s*\([^)]*\)", "url()", result, flags=re.IGNORECASE)
+    result = re.sub(r"@import\s+[^;]+;?", "", result, flags=re.IGNORECASE)
+    return result
+
+
+def validate_html(html_str: str) -> bool:
+    """Validate HTML for safety and design-system compliance."""
+    # Must contain <html and </html>
+    if not re.search(r"<html[\s>]", html_str, re.IGNORECASE):
+        return False
+    if not re.search(r"</html>", html_str, re.IGNORECASE):
+        return False
+
+    # Strip comments before checking attribute URLs (comments are allowed to have URLs)
+    no_comments = re.sub(r"<!--.*?-->", "", html_str, flags=re.DOTALL)
+
+    # Reject external/dangerous URLs in src, href, action attributes
+    dangerous_url_pattern = re.compile(
+        r'''(?:src|href|action)\s*=\s*["']?\s*(?:https?://|//|data:|javascript:|file:)''',
+        re.IGNORECASE,
+    )
+    if dangerous_url_pattern.search(no_comments):
+        return False
+
+    # Must use at least one design system class
+    for cls in _DESIGN_SYSTEM_CLASSES:
+        if cls in html_str:
+            return True
+    return False
+
+
+# ── VizResult dataclass ────────────────────────────────────────────────
+
+
+@dataclass
+class VizResult:
+    """Result from a single LLM visualization sub-agent."""
+    agent: str
+    skill: str
+    audience: str
+    html: str = ""
+    mermaid: str = ""
+    doc_content: dict[str, Any] = field(default_factory=dict)
+    alt_text: str = ""
+    error: str = ""
+    duration_s: float = 0.0
+    api_key_fallback: bool = False
+
+
+# ── Prompt builder ─────────────────────────────────────────────────────
+
+
+_css_cache: str | None = None
+
+
+def _load_css() -> str:
+    """Lazy-load the design-system.css file."""
+    global _css_cache
+    if _css_cache is None:
+        css_path = ROOT / "docs" / "skills" / "_css" / "design-system.css"
+        _css_cache = css_path.read_text()
+    return _css_cache
+
+
+def build_generation_prompt(skill: SkillData, audience: str, css: str) -> str:
+    """Build prompt asking LLM to generate visualization artifacts.
+
+    Returns a prompt that requests:
+    - A standalone HTML page using the provided CSS
+    - A Mermaid diagram in ```mermaid block
+    - Structured doc content as JSON
+    - Descriptive alt text for PNG screenshot
+    """
+    audience_desc = {
+        "usage": "end-user focused: how to invoke the skill, inputs, outputs, common workflows",
+        "internals": "contributor/developer focused: internal architecture, data flow, extension points",
+    }.get(audience, audience)
+
+    return (
+        f"Generate a standalone HTML page visualizing the skill **{skill.name}**.\n\n"
+        f"## Audience\n\n"
+        f"Target audience: **{audience}** — {audience_desc}\n\n"
+        f"## Skill metadata\n\n"
+        f"- Name: {skill.name}\n"
+        f"- Description: {skill.description}\n"
+        f"- Argument hint: {skill.argument_hint}\n"
+        f"- Complexity: {skill.complexity} ({skill.line_count} lines)\n\n"
+        f"## Skill content\n\n"
+        f"```markdown\n{skill.raw_md}\n```\n\n"
+        f"## CSS Design System\n\n"
+        f"Use the following CSS inline in a `<style>` tag. You may extend it but do NOT "
+        f"link external stylesheets or load external resources.\n\n"
+        f"```css\n{css}\n```\n\n"
+        f"## Required outputs\n\n"
+        f"Return ALL of the following in your response:\n\n"
+        f"1. **standalone HTML page** — Complete `<html>...</html>` document with the CSS "
+        f"inlined in a `<style>` tag. Use design-system classes (node-phase, node-decision, "
+        f"node-action, etc.). No external resources.\n\n"
+        f"2. **Mermaid diagram** — A mermaid flowchart in a fenced code block:\n"
+        f"````\n```mermaid\ngraph TD\n  A[Start] --> B[End]\n```\n````\n\n"
+        f"3. **Doc content JSON** — Structured content as a JSON code block:\n"
+        f"```json\n{{\n"
+        f'  "summary": "one-paragraph summary",\n'
+        f'  "key_features": ["feature1", "feature2"],\n'
+        f'  "usage_examples": ["example1"]\n'
+        f"}}\n```\n\n"
+        f"4. **Alt text** — A descriptive alt text line for a PNG screenshot of the HTML, "
+        f"prefixed with `Alt text: `\n"
+    )
+
+
+# ── LLM sub-agent dispatch ────────────────────────────────────────────
+
+
+PYTHON = sys.executable
+GITHUB_APP = str(SCRIPTS_DIR / "github_app.py")
+CODEX_REASONING_CONFIG = 'model_reasoning_effort="high"'
+
+_gemini_api_key_cache: str | None | bool = None  # None=not tried, False=not found
+
+
+def _get_gemini_api_key() -> str | None:
+    """Retrieve Gemini API key from macOS Keychain (cached)."""
+    global _gemini_api_key_cache
+    if _gemini_api_key_cache is not None:
+        return _gemini_api_key_cache if _gemini_api_key_cache else None
+    try:
+        result = subprocess.run(
+            ["security", "find-generic-password", "-s", "GEMINI_API_KEY", "-w"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            _gemini_api_key_cache = result.stdout.strip()
+            return _gemini_api_key_cache
+    except Exception:
+        pass
+    _gemini_api_key_cache = False
+    return None
+
+
+def _parse_viz_response(raw: str) -> dict[str, Any]:
+    """Parse LLM response to extract HTML, mermaid, doc_content JSON, and alt_text."""
+    result: dict[str, Any] = {"html": "", "mermaid": "", "doc_content": {}, "alt_text": ""}
+
+    # Extract HTML: look for <html>...</html>
+    html_match = re.search(r"(<html[\s\S]*?</html>)", raw, re.IGNORECASE)
+    if html_match:
+        result["html"] = html_match.group(1)
+
+    # Extract mermaid block
+    mermaid_match = re.search(r"```mermaid\s*\n([\s\S]*?)```", raw)
+    if mermaid_match:
+        result["mermaid"] = mermaid_match.group(1).strip()
+
+    # Extract JSON doc content
+    json_match = re.search(r"```json\s*\n([\s\S]*?)```", raw)
+    if json_match:
+        try:
+            result["doc_content"] = json.loads(json_match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # Extract alt text
+    alt_match = re.search(r"Alt text:\s*(.+)", raw)
+    if alt_match:
+        result["alt_text"] = alt_match.group(1).strip()
+
+    return result
+
+
+def _run_viz_agent(agent: str, skill: SkillData, audience: str) -> VizResult:
+    """Run one LLM CLI to generate a skill visualization.
+
+    Mirrors dispatch patterns from scripts/multi_review.py.
+    """
+    css = _load_css()
+    prompt = build_generation_prompt(skill, audience, css)
+    t0 = time.monotonic()
+
+    stdin_input: str | None = None
+    gemini_home: str | None = None
+    used_api_key_fallback = False
+
+    if agent == "claude":
+        cmd = [
+            "claude",
+            "-p", "-",
+            "--output-format", "text",
+            "--model", "claude-opus-4-6",
+        ]
+        stdin_input = prompt
+
+    elif agent == "codex":
+        cmd = [
+            "codex", "exec",
+            "-c", CODEX_REASONING_CONFIG,
+            "--ephemeral", "--json",
+            "--full-auto",
+            "-",
+        ]
+        stdin_input = prompt
+
+    elif agent == "gemini":
+        gemini_home = tempfile.mkdtemp(prefix="gemini-viz-")
+        gemini_dir = os.path.join(gemini_home, ".gemini")
+        os.makedirs(gemini_dir, exist_ok=True)
+        real_gemini = os.environ.get("GEMINI_CLI_HOME", os.path.expanduser("~"))
+        real_gemini_dir = os.path.join(real_gemini, ".gemini")
+        for auth_file in ("settings.json", "oauth_creds.json", "google_accounts.json", "installation_id"):
+            src = os.path.join(real_gemini_dir, auth_file)
+            if os.path.exists(src):
+                shutil.copy2(src, os.path.join(gemini_dir, auth_file))
+        cwd = str(ROOT)
+        with open(os.path.join(gemini_dir, "projects.json"), "w") as f:
+            json.dump({"projects": {cwd: "viz"}}, f)
+        cmd = [
+            "gemini",
+            "-p", prompt,
+            "-o", "json",
+            "--approval-mode", "plan",
+        ]
+        stdin_input = None
+
+    else:
+        return VizResult(
+            agent=agent, skill=skill.name, audience=audience,
+            error=f"Unknown agent: {agent}",
+        )
+
+    run_kwargs: dict[str, Any] = {
+        "capture_output": True, "text": True,
+        "timeout": 900, "cwd": str(ROOT),
+    }
+    if stdin_input is not None:
+        run_kwargs["input"] = stdin_input
+    if gemini_home:
+        run_kwargs["env"] = {
+            **os.environ,
+            "GEMINI_CLI_HOME": gemini_home,
+            "GOOGLE_CLOUD_LOCATION": "global",
+        }
+
+    try:
+        proc = subprocess.run(cmd, **run_kwargs)
+        raw_output = proc.stdout or ""
+
+        if proc.returncode != 0:
+            # Gemini API key fallback
+            if agent == "gemini" and not used_api_key_fallback:
+                api_key = _get_gemini_api_key()
+                if api_key:
+                    used_api_key_fallback = True
+                    run_kwargs.setdefault("env", {**os.environ})
+                    run_kwargs["env"]["GEMINI_API_KEY"] = api_key
+                    proc = subprocess.run(cmd, **run_kwargs)
+                    raw_output = proc.stdout or ""
+
+            if proc.returncode != 0:
+                duration = time.monotonic() - t0
+                return VizResult(
+                    agent=agent, skill=skill.name, audience=audience,
+                    error=f"CLI exit {proc.returncode}: {proc.stderr[:500]}",
+                    duration_s=duration, api_key_fallback=used_api_key_fallback,
+                )
+
+        # For codex, extract text from JSONL
+        if agent == "codex":
+            text_parts = []
+            for line in raw_output.splitlines():
+                try:
+                    obj = json.loads(line)
+                    if obj.get("type") == "message" and "content" in obj:
+                        for block in obj["content"]:
+                            if block.get("type") == "output_text":
+                                text_parts.append(block.get("text", ""))
+                except json.JSONDecodeError:
+                    continue
+            if text_parts:
+                raw_output = "\n".join(text_parts)
+
+        # For gemini, extract text from JSON response
+        if agent == "gemini":
+            try:
+                gobj = json.loads(raw_output)
+                if isinstance(gobj, list):
+                    text_parts = []
+                    for item in gobj:
+                        if isinstance(item, dict) and "response" in item:
+                            text_parts.append(item["response"])
+                    if text_parts:
+                        raw_output = "\n".join(text_parts)
+                elif isinstance(gobj, dict) and "response" in gobj:
+                    raw_output = gobj["response"]
+            except json.JSONDecodeError:
+                pass
+
+        parsed = _parse_viz_response(raw_output)
+        duration = time.monotonic() - t0
+
+        return VizResult(
+            agent=agent,
+            skill=skill.name,
+            audience=audience,
+            html=parsed["html"],
+            mermaid=parsed["mermaid"],
+            doc_content=parsed["doc_content"],
+            alt_text=parsed["alt_text"],
+            duration_s=duration,
+            api_key_fallback=used_api_key_fallback,
+        )
+
+    except subprocess.TimeoutExpired:
+        duration = time.monotonic() - t0
+        return VizResult(
+            agent=agent, skill=skill.name, audience=audience,
+            error="Timeout (900s)", duration_s=duration,
+            api_key_fallback=used_api_key_fallback,
+        )
+    except Exception as e:
+        duration = time.monotonic() - t0
+        return VizResult(
+            agent=agent, skill=skill.name, audience=audience,
+            error=str(e), duration_s=duration,
+            api_key_fallback=used_api_key_fallback,
+        )
+    finally:
+        if gemini_home and os.path.isdir(gemini_home):
+            shutil.rmtree(gemini_home, ignore_errors=True)
