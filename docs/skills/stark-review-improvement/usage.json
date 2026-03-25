@@ -1,0 +1,19 @@
+{
+  "doc_content": {
+    "summary": "The stark-review-improvement skill closes the feedback loop on the Stark code review system. It automatically reads a prompt improvement assessment from the conversation context or run history, categorizes necessary changes, and makes surgical edits to agent prompts, orchestration scripts, and configuration files after getting user approval. It ensures safety by validating syntax, showing diffs, and keeping an automated changelog.",
+    "key_features": [
+      "Automatic extraction of prompt improvement action items from context or history",
+      "Categorization of fixes into prompt-edits, orchestrator-edits, and config-edits",
+      "Surgical, targeted file modification that preserves existing formatting and functionality",
+      "Automated validation (Markdown syntax, Python compilation, JSON validity)",
+      "Built-in user approval checkpoints and diff review before committing",
+      "Automatic maintenance of the prompt-changelog.md file"
+    ],
+    "usage_examples": [
+      "/stark-review-improvement",
+      "improve review prompts",
+      "fix review prompts based on the assessment in this conversation"
+    ]
+  },
+  "alt_text": "Visualization of the stark-review-improvement skill showing the workflow from extracting an assessment, confirming changes with the user, applying targeted edits to prompts and configurations, to validating and committing the improvements."
+}

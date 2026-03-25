@@ -1,0 +1,4 @@
+{
+  "doc_content": {},
+  "alt_text": "A clean internal architecture diagram for the `stark-init-docs` skill showing a top-down workflow from invocation and mode selection into four branches: template scaffolding, backfill analysis, upgrade migration, and safe cleanup; color-coded boxes distinguish phases, decisions, outputs, failures, and external inputs, with supporting tables for mode matrix, extension points, and observability metrics.\"}}"
+}

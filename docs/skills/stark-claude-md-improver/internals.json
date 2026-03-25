@@ -1,0 +1,18 @@
+{
+  "doc_content": {
+    "summary": "Analyzes and suggests improvements for CLAUDE.md files across a project's hierarchy, evaluating them on structure, completeness, accuracy, effectiveness, and hierarchy optimization.",
+    "key_features": [
+      "Hierarchical discovery of CLAUDE.md files and memory objects",
+      "Five-dimensional heuristic analysis tailored for AI-agent consumption",
+      "Actionable suggestions with auto-application capabilities",
+      "Comprehensive observability and metrics tracking per dimension"
+    ],
+    "usage_examples": [
+      "stark-claude-md-improver",
+      "stark-claude-md-improver ./docs/CLAUDE.md",
+      "audit claude.md",
+      "improve claude.md"
+    ]
+  },
+  "alt_text": "Internal architecture diagram for the stark-claude-md-improver skill showing the discovery, multi-dimensional analysis, user approval, and observability flows."
+}

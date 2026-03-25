@@ -1,0 +1,20 @@
+{
+  "doc_content": {
+    "summary": "Extracts durable knowledge from specifications, plans, and review files into long-term project documentation. Operates in two passes: first extracting structured knowledge from inputs into JSON, then strategically routing it to the appropriate output files like ADRs, retrospectives, reference documents, and glossaries.",
+    "key_features": [
+      "Two-pass LLM extraction and routing completed natively in a single session",
+      "Automatically generates and updates ADRs, Retrospectives, Glossaries, and Learning Logs",
+      "Smart duplicate detection for architectural decisions and learning log observations",
+      "Batch processing mode to run across entire specification directories",
+      "Maintains execution history for idempotency with `--force` override support",
+      "Auto-commits generated documentation locally unless restricted by dirty trees or flags"
+    ],
+    "usage_examples": [
+      "/stark-extract-docs docs/superpowers/specs/2026-03-19-rename-project-design.md",
+      "/stark-extract-docs docs/superpowers/specs/2026-03-19-rename-project-design.md --dry-run",
+      "/stark-extract-docs --batch docs/superpowers/specs/",
+      "/stark-extract-docs docs/specs/auth-design.md --force --include-low"
+    ]
+  },
+  "alt_text": "A documentation page visualizing the stark-extract-docs skill, showing the CLI usage, available flags, extraction categories mapped to their documentation outputs, and the two-pass execution workflow."
+}

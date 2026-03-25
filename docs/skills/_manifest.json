@@ -6,18 +6,18 @@
   "skills": {
     "stark-claude-md-improver": {
       "hash": "452fa73fb2698971",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
+      "usage_quality": "eval_fallback",
+      "internals_quality": "degraded"
     },
     "stark-extract-docs": {
       "hash": "5f4c8db4ef260ec2",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
+      "usage_quality": "eval_fallback",
+      "internals_quality": "eval_fallback"
     },
     "stark-init-docs": {
       "hash": "f6829ed4ebf3e57d",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
+      "usage_quality": "eval_fallback",
+      "internals_quality": "eval_fallback"
     },
     "stark-metrics": {
       "hash": "2801e956c280196e",
@@ -26,78 +26,78 @@
     },
     "stark-onboard-project": {
       "hash": "7245391bfd50f0a6",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
+      "usage_quality": "eval_fallback",
+      "internals_quality": "eval_fallback"
     },
     "stark-phase-execute": {
       "hash": "f4e1736676ede72b",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
+      "usage_quality": "degraded",
+      "internals_quality": "eval_fallback"
     },
     "stark-plan-to-tasks": {
       "hash": "3e3382dcf363810b",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
+      "usage_quality": "eval_fallback",
+      "internals_quality": "eval_fallback"
     },
     "stark-pr-flow": {
       "hash": "f14694f7debe26d0",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
+      "usage_quality": "eval_fallback",
+      "internals_quality": "eval_fallback"
     },
     "stark-pr-status": {
       "hash": "6d361899b5cd5982",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
+      "usage_quality": "eval_fallback",
+      "internals_quality": "eval_fallback"
     },
     "stark-release": {
       "hash": "0f430b808dfdadbc",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
+      "usage_quality": "eval_fallback",
+      "internals_quality": "eval_fallback"
     },
     "stark-rename-project": {
       "hash": "f6de79d76c54a900",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
+      "usage_quality": "eval_fallback",
+      "internals_quality": "eval_fallback"
     },
     "stark-review": {
       "hash": "99147f9c0ada47b8",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
+      "usage_quality": "eval_fallback",
+      "internals_quality": "eval_fallback"
     },
     "stark-review-deployment-plan": {
       "hash": "68b857b9ebab90bd",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
+      "usage_quality": "eval_fallback",
+      "internals_quality": "eval_fallback"
     },
     "stark-review-improvement": {
       "hash": "0acf97fb0630ca5f",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
+      "usage_quality": "eval_fallback",
+      "internals_quality": "eval_fallback"
     },
     "stark-review-plan": {
       "hash": "f0d2e84889b3ddcb",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
+      "usage_quality": "eval_fallback",
+      "internals_quality": "eval_fallback"
     },
     "stark-session": {
       "hash": "ade617cdb99fcf76",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
+      "usage_quality": "eval_fallback",
+      "internals_quality": "eval_fallback"
     },
     "stark-session-insights": {
       "hash": "db4caab76d3de9d4",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
+      "usage_quality": "degraded",
+      "internals_quality": "degraded"
     },
     "stark-skill-analytics": {
       "hash": "b0f7d7761b506240",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
+      "usage_quality": "eval_fallback",
+      "internals_quality": "eval_fallback"
     },
     "stark-update-deps": {
       "hash": "e2654f1808d306ee",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
+      "usage_quality": "eval_fallback",
+      "internals_quality": "eval_fallback"
     }
   }
 }

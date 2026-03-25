@@ -1,0 +1,26 @@
+graph TD
+    Start((Start)) --> FindAssessment[Phase 1: Extract Assessment]
+    FindAssessment -->|Context or History| ParseItems[Parse into Action Items]
+    FindAssessment -.->|Not Found| Error[Throw Error]
+    
+    ParseItems --> Classify[Classify: Prompt, Orchestrator, Config, No-Action]
+    Classify --> Confirm{Confirm with User}
+    
+    Confirm -- User Approves --> ApplyEdits[Phase 2: Apply Changes]
+    ApplyEdits --> EditPrompt[/Prompt Edits .md/]
+    ApplyEdits --> EditScript[/Orchestrator Edits .py/]
+    ApplyEdits --> EditConfig[/Config Edits .json/]
+    
+    EditPrompt --> Validate[Phase 3: Validate]
+    EditScript --> Validate
+    EditConfig --> Validate
+    
+    Validate -->|Syntax, Compile, JSON, Diff| LogLearning[Phase 4: Log Learning]
+    
+    LogLearning --> AppendChangelog[Append to CHANGELOG.md]
+    LogLearning --> CopyHistory[Copy assessment to history]
+    
+    AppendChangelog --> Commit[Phase 5: Commit Local Changes]
+    CopyHistory --> Commit
+    
+    Commit --> End((End))

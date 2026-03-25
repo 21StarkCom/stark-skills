@@ -1,0 +1,19 @@
+{
+  "doc_content": {
+    "summary": "stark-extract-docs utilizes a sophisticated two-pass architecture to extract durable knowledge from transient development artifacts (specs, plans, reviews) and route them into permanent project documentation. Running entirely within the current session, it enforces a structural intermediate JSON layer to ensure deterministic formatting and routing of ADRs, retrospectives, and reference documents while employing hashing to prevent redundant executions.",
+    "key_features": [
+      "Two-pass extraction decoupling LLM structuring (JSON) from deterministic markdown generation",
+      "SHA-256 hash-based skip logic comparing input artifacts against local historical execution records",
+      "Automatic multi-artifact discovery mapping specs to their corresponding plans and review files",
+      "Smart routing of 8 distinct extraction categories into 5 different documentation types",
+      "Batch execution mode with automated cross-spec ADR deduplication",
+      "Automated local Git commits and missing directory provisioning"
+    ],
+    "usage_examples": [
+      "/stark-extract-docs docs/specs/2026-03-20-stark-metrics-design.md",
+      "/stark-extract-docs --batch docs/specs/ --include-low",
+      "/stark-extract-docs docs/specs/my-spec.md --force --no-commit"
+    ]
+  },
+  "alt_text": "Architecture diagram and data flow visualization for the stark-extract-docs skill, detailing the two-pass process from raw artifacts to structured intermediate JSON, through the routing engine, and into generated Markdown documents with corresponding skip logic and state persistence."
+}

@@ -1,0 +1,28 @@
+graph TD
+    Start([User Invokes /stark-review]) --> P1[Phase 1: Setup Worktree & Detect Mode]
+    P1 --> Cond{Mode?}
+    
+    Cond -- "Fork / No Tests\n(Review-Only)" --> RunAgents[Dispatch 18 Sub-agents]
+    RunAgents --> P3
+    
+    Cond -- "Full Mode" --> P2[Phase 2: Review-Fix Loop]
+    P2 --> LoopStart[Dispatch 18 Sub-agents]
+    LoopStart --> Classify[Classify: Fix / Noise / FP]
+    Classify --> ApplyFix[Edit Code & Fix Findings]
+    ApplyFix --> BuildTest[Build & Run Tests]
+    BuildTest --> CommitPush[Commit & Push changes]
+    
+    CommitPush --> LoopCond{Stop Check?}
+    LoopCond -- "Clean / Max Rounds / No Fixes" --> P3[Phase 3: Final Summary]
+    LoopCond -- "Has more fixes\n< Max Rounds" --> LoopStart
+    
+    P3 --> P4[Phase 4: Post to PR & Create Bug Issues]
+    P4 --> P5[Phase 5: Cleanup Worktree]
+    P5 --> End([Skill Complete])
+
+    classDef phase fill:#1e40af,stroke:#1e3a8a,color:#fff,font-weight:bold;
+    classDef decision fill:#7c3aed,stroke:#5b21b6,color:#fff;
+    classDef output fill:#f59e0b,stroke:#b45309,color:#1a1a1a;
+    class P1,P2,P5 phase;
+    class LoopCond,Cond,Classify,ApplyFix,BuildTest,CommitPush decision;
+    class P3,P4 output;

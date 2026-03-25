@@ -1,0 +1,31 @@
+graph TD
+    A[Start: /stark-skill-analytics] --> B{Parse history.jsonl}
+    B -->|Extract| C[Skill Invocations & Arguments]
+    B -->|Extract| D[Timestamps & Projects]
+    
+    C --> E[Compute Usage Stats]
+    D --> E
+    
+    F[code-review/history/] --> G{Parse Run History}
+    G -->|Extract| H[Durations & Outcomes]
+    G -->|Extract| I[Timeouts & Agent Data]
+    
+    H --> J[Compute Quality Stats]
+    I --> J
+    
+    E --> K[Cross-Reference Analytics]
+    J --> K
+    L[Local CLAUDE.md] -->|Registered Skills| K
+    
+    K --> M{Format Argument?}
+    M -->|--format table| N[Output Rankings Table Only]
+    M -->|--format full| O{Skill Argument?}
+    
+    O -->|--skill <name>| P[Generate Single-Skill Report]
+    O -->|None| Q[Generate Comprehensive Report]
+    
+    N --> R[Save Markdown & Print to Terminal]
+    P --> R
+    Q --> R
+    
+    R --> S[End]

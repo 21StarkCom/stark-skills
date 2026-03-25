@@ -1,0 +1,1 @@
+A usage-oriented visualization for stark-phase-execute showing invocation with a plan slug or file, environment validation, task discovery or auto-decomposition, a repeated task loop with PR review rounds, then regression, release, deploy, and dashboard outputs.

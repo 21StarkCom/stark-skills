@@ -1,0 +1,365 @@
+<html lang="en">
+<head>
+
+
+<title>stark-plan-to-tasks — Usage Visualization</title>
+<style>
+/*
+ * Stark Skills — Shared Design System CSS
+ *
+ * Foundation styles for LLM-generated HTML skill visualizations.
+ * LLMs embed this inline and may extend with additional styles.
+ * All colors pass WCAG AA 4.5:1 contrast ratio.
+ *
+ * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+ */
+
+/* === Reset & Base === */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+
+/* === Header === */
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
+
+/* === Container === */
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+/* === Section Title === */
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+/* === Node Types === */
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 4px; }
+.node-desc { font-size: 10px; opacity: 0.9; }
+
+.node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+.node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+.node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+.node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
+.node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
+
+/* === Flow Layout === */
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: center;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 200px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 460px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 200px; display: flex;
+  align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 10px; color: #555; max-width: 180px; line-height: 1.4;
+}
+.annotation strong { color: #222; }
+code { background: #f1f5f9; padding: 2px 4px; border-radius: 3px; font-family: monospace; font-size: 11px; color: #0f172a; }
+
+/* === Arrows === */
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
+
+/* === Cards === */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; margin-bottom: 8px; }
+.card p:last-child { margin-bottom: 0; }
+.card ul { margin-left: 16px; font-size: 11px; margin-bottom: 8px; }
+.card li { margin-bottom: 4px; }
+
+.card-blue   { background: #ffffff; border-left: 4px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ffffff; border-left: 4px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #ffffff; border-left: 4px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #ffffff; border-left: 4px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #ffffff; border-left: 4px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #ffffff; border-left: 4px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
+
+/* === Data Tables === */
+.data-table {
+  width: 100%; max-width: 100%; margin: 16px 0;
+  border-collapse: collapse; font-size: 11px;
+  background: #ffffff; border-radius: 8px; overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+.data-table th {
+  background: #f8fafc; padding: 10px 12px; text-align: left;
+  font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;
+}
+.data-table td {
+  padding: 10px 12px; border-bottom: 1px solid #f1f5f9; color: #334155;
+}
+
+/* === Tags === */
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
+
+/* === Footer === */
+.footer {
+  text-align: center; padding: 30px 20px;
+  font-size: 11px; color: #94a3b8; border-top: 1px solid #e2e8f0; margin-top: 40px;
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>stark-plan-to-tasks</h1>
+  <div class="sub">Decompose specs into phased GitHub issues and extract architectural knowledge.</div>
+  <div class="scope">Audience: Usage</div>
+</div>
+
+<div class="container">
+  
+  <div class="card-grid">
+    <div class="card card-dark">
+      <h3>Invocation</h3>
+      <p>Invoke via natural language or explicitly via CLI:</p>
+      <code>/stark-plan-to-tasks &lt;path-to-spec&gt; [options]</code>
+      <br><br>
+      <p><strong>Natural language:</strong> <em>"break down this plan", "create issues from spec", "plan to tasks"</em></p>
+    </div>
+    <div class="card card-blue">
+      <h3>Options</h3>
+      <ul>
+        <li><code>--dry-run</code> : Run all 3 LLM passes, validate, preview the output to a temporary markdown file, but <strong>stop before modifying any repo files or creating issues</strong>.</li>
+        <li><code>--cleanup &lt;slug&gt;</code> : Find and close obsolete issues labeled with a specific plan slug.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 class="section-title">The User Journey (End-to-End Workflow)</h2>
+  <div class="flow">
+    
+    <!-- Step 1 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation">User provides a `.md` plan file. System authenticates.</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-config">
+          <div class="node-title">1. Setup & Ingestion</div>
+          <div class="node-desc">Reads plan, detects target GitHub repository</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+    
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+    
+    <!-- Step 2 -->
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-phase">
+          <div class="node-title">2. Plan Quality Gate (LLM Pass 1)</div>
+          <div class="node-desc">Checks for missing decisions, vague paths, completeness</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Checklist Failure:</strong> Skill pauses and asks user to clarify missing details in the plan file.</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+    
+    <!-- Step 3 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation">Plan broken down into logical phases and scoped tasks.</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-decision">
+          <div class="node-title">3. Decomposition (LLM Pass 2)</div>
+          <div class="node-desc">Generates JSON phases, tasks, story points, constraints</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 4 -->
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-phase">
+          <div class="node-title">4. Validation (LLM Pass 3)</div>
+          <div class="node-desc">Adversarial agent checks dependencies, coverage, sizing</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+         <div class="annotation">Ensures no orphans, no circular dependencies, proper sizing.</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 5 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+         <div class="annotation"><strong>Output Artifacts:</strong><br></br>- Labels created<br></br>- Phase Issues created<br></br>- Task Issues created</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-output">
+          <div class="node-title">5. GitHub Issue Creation</div>
+          <div class="node-desc">Auth as user, create issues, link dependencies, add to GH Projects</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 6 -->
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-decision">
+          <div class="node-title">6. Knowledge Extraction</div>
+          <div class="node-desc">Extracts schemas, API contracts, ADRs into docs/ directory</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+         <div class="annotation"><strong>Cleanup:</strong> Deletes the original plan.md file and performs a local git commit.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <h2 class="section-title">What Gets Generated? (Outputs)</h2>
+  
+  <div class="card-grid">
+    <div class="card card-green">
+      <h3>GitHub Issues & Labels</h3>
+      <p>Creates Phase tracking issues and deeply detailed Task issues. Auto-provisions required labels:</p>
+      <ul>
+        <li><strong>Sizing:</strong> <code>sp:1</code> to <code>sp:13</code> (Fibonacci)</li>
+        <li><strong>Risk:</strong> <code>risk:low</code>, <code>risk:med</code>, <code>risk:high</code></li>
+        <li><strong>Confidence:</strong> <code>confidence:low</code> to <code>high</code></li>
+        <li><strong>Traceability:</strong> <code>plan:slug</code></li>
+      </ul>
+      <p>Uses native GH Types (Bug, Feature, Task).</p>
+    </div>
+    <div class="card card-purple">
+      <h3>GitHub Project Integration</h3>
+      <p>Automatically maps tasks to fields (if <code>.github/project-config.json</code> is present):</p>
+      <ul>
+        <li><strong>Status:</strong> Backlog / Ready for Agent</li>
+        <li><strong>Phase:</strong> Matches decomposition</li>
+        <li><strong>AI Suitability:</strong> Autonomous / Assisted / Human-led</li>
+        <li><strong>Priority:</strong> Derived from risk</li>
+      </ul>
+    </div>
+    <div class="card card-amber">
+      <h3>Living Documentation</h3>
+      <p>Deletes the transient plan file and persists the architectural decisions locally. Performs a local commit with:</p>
+      <ul>
+        <li><code>docs/decisions.md</code> (Tracking record)</li>
+        <li><code>docs/adr/*</code> (Architectural decisions)</li>
+        <li><code>docs/data-model.md</code> (Schemas)</li>
+        <li><code>docs/api.md</code> (API Contracts)</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 class="section-title">Issue Classifications</h2>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Classification</th>
+        <th>Values</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>GitHub Issue Type</strong></td>
+        <td><code>Feature</code>, <code>Task</code>, <code>Bug</code></td>
+        <td>Feature = new capability. Task = refactoring/infra/docs. Bug = fixing explicit defects.</td>
+      </tr>
+      <tr>
+        <td><strong>AI Suitability</strong></td>
+        <td><code>Autonomous</code>, <code>Assisted</code>, <code>Human-led</code></td>
+        <td>Autonomous = AI can do it 100%. Assisted = Needs guidance. Human-led = Needs PM/UX input.</td>
+      </tr>
+      <tr>
+        <td><strong>Story Points</strong></td>
+        <td><code>1, 2, 3, 5, 8, 13</code></td>
+        <td>Fibonacci scale based on complexity and unknowns.</td>
+      </tr>
+      <tr>
+        <td><strong>Risk & Confidence</strong></td>
+        <td><code>Low</code>, <code>Medium</code>, <code>High</code></td>
+        <td>Evaluates technical risk and the LLM's confidence that the task is fully specified.</td>
+      </tr>
+    </tbody>
+  </table>
+
+</div>
+
+<div class="footer">
+  Stark Skills Visualizer • stark-plan-to-tasks • Usage Overview
+</div>
+
+</body>
+</html>

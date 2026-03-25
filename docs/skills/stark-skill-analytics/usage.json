@@ -1,0 +1,18 @@
+{
+  "doc_content": {
+    "summary": "Analyzes skill usage patterns and quality metrics across all Claude Code sessions to produce adoption curves, usage rankings, quality signals, and actionable recommendations.",
+    "key_features": [
+      "Usage rankings and 30-day adoption trends",
+      "Detection of common workflow sequences across sessions",
+      "Quality signal analysis (timeouts, failure rates, empty results)",
+      "Cross-referencing invoked skills against registered skills in CLAUDE.md",
+      "Automated recommendations (Promote, Fix, Remove, Combine)"
+    ],
+    "usage_examples": [
+      "/stark-skill-analytics",
+      "/stark-skill-analytics --format table",
+      "/stark-skill-analytics --skill stark-review"
+    ]
+  },
+  "alt_text": "A user-focused HTML visualization documenting the stark-skill-analytics skill. It includes an overview, a visual execution flow mapping data extraction from history files to cross-referenced reporting, a table explaining CLI arguments, and a grid highlighting key report capabilities like Usage Rankings, Quality Signals, Workflow Sequences, and Actionable Recommendations."
+}

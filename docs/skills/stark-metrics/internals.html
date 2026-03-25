@@ -1,358 +1,314 @@
 <html lang="en">
 <head>
+  
+  <title>stark-metrics Internal Architecture</title>
+  <style>
+    /*
+     * Stark Skills — Shared Design System CSS
+     *
+     * Foundation styles for LLM-generated HTML skill visualizations.
+     * LLMs embed this inline and may extend with additional styles.
+     * All colors pass WCAG AA 4.5:1 contrast ratio.
+     *
+     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+     */
 
+    /* === Reset & Base === */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #fafafa;
+      color: #1a1a1a;
+      line-height: 1.5;
+    }
 
-<title>stark-metrics Internal Architecture</title>
-<style>
-/*
- * Stark Skills — Shared Design System CSS
- *
- * Foundation styles for LLM-generated HTML skill visualizations.
- * LLMs embed this inline and may extend with additional styles.
- * All colors pass WCAG AA 4.5:1 contrast ratio.
- *
- * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
- */
+    /* === Header === */
+    .header { text-align: center; padding: 36px 20px 16px; }
+    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+    .header .scope {
+      display: inline-block; font-size: 10px; font-weight: 600;
+      background: #eff6ff; color: #1e40af;
+      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+    }
 
-/* === Reset & Base === */
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-  background: #fafafa;
-  color: #1a1a1a;
-  line-height: 1.5;
-}
+    /* === Container === */
+    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
 
-/* === Header === */
-.header { text-align: center; padding: 36px 20px 16px; }
-.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
-.header .sub { font-size: 12px; color: #666; margin-top: 4px; max-width: 600px; margin-left: auto; margin-right: auto; }
-.header .scope {
-  display: inline-block; font-size: 10px; font-weight: 600;
-  background: #eff6ff; color: #1e40af;
-  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
-}
+    /* === Section Title === */
+    .section-title {
+      font-size: 14px; font-weight: 700; color: #666;
+      text-transform: uppercase; letter-spacing: 1px;
+      margin: 32px 0 16px; padding-bottom: 6px;
+      border-bottom: 2px solid #e5e7eb;
+    }
 
-/* === Container === */
-.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+    /* === Node Types === */
+    .node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+    .node-desc { font-size: 10px; opacity: 0.8; }
 
-/* === Section Title === */
-.section-title {
-  font-size: 14px; font-weight: 700; color: #666;
-  text-transform: uppercase; letter-spacing: 1px;
-  margin: 32px 0 16px; padding-bottom: 6px;
-  border-bottom: 2px solid #e5e7eb;
-}
+    .node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+    .node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+    .node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+    .node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
+    .node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
 
-/* === Node Types === */
-.node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
-.node-desc { font-size: 10px; opacity: 0.9; }
+    /* === Flow Layout === */
+    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+    .flow-step {
+      display: flex; align-items: stretch;
+      width: 100%; max-width: 860px; min-height: 76px;
+    }
+    .flow-lane-left {
+      width: 180px; display: flex;
+      align-items: center; justify-content: flex-end;
+      padding-right: 18px;
+    }
+    .flow-lane-center {
+      width: 500px; display: flex;
+      align-items: center; justify-content: center;
+    }
+    .flow-lane-right {
+      width: 180px; display: flex;
+      align-items: center; padding-left: 18px;
+    }
+    .annotation {
+      font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+    }
+    .annotation strong { color: #444; }
 
-.node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
-.node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
-.node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
-.node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
-.node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
-.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
+    /* === Arrows === */
+    .arrow-down {
+      width: 2px; height: 20px; background: #cbd5e1;
+      margin: 0 auto; position: relative;
+    }
+    .arrow-down::after {
+      content: ''; position: absolute; bottom: -4px; left: -4px;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid #cbd5e1;
+    }
+    .arrow-container {
+      display: flex; justify-content: center;
+      width: 100%; max-width: 860px;
+    }
+    .arrow-container .flow-lane-center {
+      display: flex; justify-content: center;
+    }
 
-/* === Flow Layout === */
-.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
-.flow-step {
-  display: flex; align-items: stretch;
-  width: 100%; max-width: 860px; min-height: 76px;
-}
-.flow-lane-left {
-  width: 180px; display: flex; flex-direction: column;
-  align-items: flex-end; justify-content: center;
-  padding-right: 18px; text-align: right;
-}
-.flow-lane-center {
-  width: 500px; display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-}
-.flow-lane-right {
-  width: 180px; display: flex; flex-direction: column;
-  align-items: flex-start; justify-content: center; padding-left: 18px;
-}
-.annotation {
-  font-size: 10px; color: #666; max-width: 160px; line-height: 1.4;
-}
-.annotation strong { color: #444; }
+    /* === Cards === */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px; margin-top: 16px;
+    }
+    .card { padding: 16px; border-radius: 8px; }
+    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+    .card p  { font-size: 11px; line-height: 1.6; }
 
-/* === Arrows === */
-.arrow-down {
-  width: 2px; height: 20px; background: #cbd5e1;
-  margin: 0 auto; position: relative;
-}
-.arrow-down::after {
-  content: ''; position: absolute; bottom: -4px; left: -4px;
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
-  border-top: 6px solid #cbd5e1;
-}
-.arrow-container {
-  display: flex; justify-content: center;
-  width: 100%; max-width: 860px;
-}
-.arrow-container .flow-lane-center {
-  display: flex; justify-content: center;
-}
+    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+    .card-blue h3 { color: #1e40af; }
+    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+    .card-green h3 { color: #059669; }
+    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+    .card-purple h3 { color: #7c3aed; }
+    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+    .card-amber h3 { color: #92400e; }
+    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+    .card-dark h3 { color: #333333; }
+    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+    .card-red h3 { color: #dc2626; }
 
-/* === Cards === */
-.card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 16px; margin-top: 16px;
-}
-.card { padding: 16px; border-radius: 8px; }
-.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
-.card p  { font-size: 11px; line-height: 1.6; }
+    /* === Data Tables === */
+    .data-table {
+      width: 100%; max-width: 860px; margin: 16px auto;
+      border-collapse: collapse; font-size: 11px;
+    }
+    .data-table th {
+      background: #f3f4f6; padding: 8px 12px; text-align: left;
+      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+    }
+    .data-table td {
+      padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+    }
 
-.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
-.card-blue h3 { color: #1e40af; }
-.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
-.card-green h3 { color: #059669; }
-.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
-.card-purple h3 { color: #7c3aed; }
-.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
-.card-amber h3 { color: #92400e; }
-.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
-.card-dark h3 { color: #333333; }
-.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
-.card-red h3 { color: #dc2626; }
+    /* === Tags === */
+    .tag {
+      display: inline-block; font-size: 9px; font-weight: 600;
+      padding: 2px 8px; border-radius: 3px;
+    }
+    .tag-phase    { background: #dbeafe; color: #1e40af; }
+    .tag-decision { background: #ede9fe; color: #5b21b6; }
+    .tag-failure  { background: #fee2e2; color: #991b1b; }
+    .tag-config   { background: #d1fae5; color: #065f46; }
+    .tag-output   { background: #fef3c7; color: #92400e; }
+    .tag-external { background: #f3f4f6; color: #666666; }
 
-/* === Data Tables === */
-.data-table {
-  width: 100%; max-width: 860px; margin: 16px auto;
-  border-collapse: collapse; font-size: 11px; background: #fff;
-  border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-}
-.data-table th {
-  background: #f3f4f6; padding: 10px 14px; text-align: left;
-  font-weight: 600; color: #4b5563; border-bottom: 2px solid #e5e7eb;
-}
-.data-table td {
-  padding: 10px 14px; border-bottom: 1px solid #f3f4f6; color: #374151;
-}
+    /* === Legend === */
+    .legend {
+      display: flex; gap: 16px; justify-content: center;
+      margin: 16px 0 24px; flex-wrap: wrap;
+    }
+    .legend-item {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 10px; color: #666;
+    }
+    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
 
-/* === Tags === */
-.tag {
-  display: inline-block; font-size: 9px; font-weight: 600;
-  padding: 2px 8px; border-radius: 3px;
-}
-.tag-phase    { background: #dbeafe; color: #1e40af; }
-.tag-decision { background: #ede9fe; color: #5b21b6; }
-.tag-failure  { background: #fee2e2; color: #991b1b; }
-.tag-config   { background: #d1fae5; color: #065f46; }
-.tag-output   { background: #fef3c7; color: #92400e; }
-.tag-external { background: #f3f4f6; color: #666666; }
+    /* === Summary Grid === */
+    .summary-grid {
+      display: grid; grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px; margin-top: 16px;
+    }
+    .summary-card { padding: 16px; border-radius: 8px; }
+    .summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+    .summary-card p  { font-size: 11px; line-height: 1.5; }
 
-/* === Legend === */
-.legend {
-  display: flex; gap: 16px; justify-content: center;
-  margin: 16px 0 24px; flex-wrap: wrap;
-}
-.legend-item {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 10px; color: #666;
-}
-.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+    /* === Winner Badge === */
+    .winner-badge {
+      display: inline-block; font-size: 12px; color: #555555;
+      font-weight: 600; padding: 2px 10px; border-radius: 4px;
+      background: #f9fafb; border: 1px solid #d1d5db;
+    }
 
-/* === Summary Grid === */
-.summary-grid {
-  display: grid; grid-template-columns: 1fr 1fr 1fr;
-  gap: 16px; margin-top: 16px;
-}
-.summary-card { padding: 16px; border-radius: 8px; background: #fff; border: 1px solid #e5e7eb;}
-.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; color: #111827; }
-.summary-card p  { font-size: 11px; line-height: 1.5; color: #4b5563; }
-
-/* === Footer === */
-.footer {
-  text-align: center; padding: 20px;
-  font-size: 10px; color: #999;
-}
-</style>
+    /* === Footer === */
+    .footer {
+      text-align: center; padding: 20px;
+      font-size: 10px; color: #999;
+    }
+  </style>
 </head>
 <body>
 
-<div class="header">
-  <h1>stark-metrics</h1>
-  <div class="sub">Aggregate performance metrics across all stark skill runs. Agent scorecards, finding quality, duration trends, prompt improvement impact, and actionable recommendations.</div>
-  <div class="scope">INTERNAL ARCHITECTURE</div>
-</div>
-
-<div class="container">
-  
-  <div class="legend">
-    <div class="legend-item"><div class="legend-dot" style="background: #1e40af;"></div> Execution Phase</div>
-    <div class="legend-item"><div class="legend-dot" style="background: #047857;"></div> Input / Config</div>
-    <div class="legend-item"><div class="legend-dot" style="background: #f59e0b;"></div> Output</div>
-    <div class="legend-item"><div class="legend-dot" style="background: #7c3aed;"></div> Logic Decision</div>
-    <div class="legend-item"><div class="legend-dot" style="background: #dc2626;"></div> Failure State</div>
-    <div class="legend-item"><div class="legend-dot" style="background: #e5e7eb; border: 1px dashed #9ca3af;"></div> External / Storage</div>
+  <div class="header">
+    <h1>stark-metrics</h1>
+    <div class="sub">Aggregate performance metrics, trend analysis, and actionable insights</div>
+    <div class="scope">Internal Architecture & Data Flow</div>
   </div>
 
-  <h2 class="section-title">Execution Pipeline</h2>
-  <div class="flow">
+  <div class="container">
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#1e40af"></div> Execution Phase</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#7c3aed"></div> Interactive / Decision Logic</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#e5e7eb; border: 1px dashed #9ca3af"></div> Local Storage / Ext Dependency</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#dc2626"></div> Error Handlers</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> Output & Telemetry</div>
+    </div>
+
+    <h2 class="section-title">Execution Flow</h2>
+    <div class="flow">
+      
+      <!-- Step 1: Initialization -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation" style="text-align:right">Inputs:<br></br><strong>--repo, --skill, --since, --json</strong></div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase" style="width: 260px;">
+            <div class="node-title">CLI Initialization</div>
+            <div class="node-desc">Parse arguments & invoke python runtime</div>
+          </div>
+        </div>
+        <div class="flow-lane-right"></div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Step 2: Python Backend -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="node node-external" style="width: 160px;">
+            <div class="node-title">history/</div>
+            <div class="node-desc">Reads ~/.claude/code-review/history/*.json</div>
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase" style="width: 260px;">
+            <div class="node-title">metrics.py Engine</div>
+            <div class="node-desc">Data normalizer, aggregator, and report generator</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+           <div class="node node-failure" style="width: 160px;">
+            <div class="node-title">Early Exits</div>
+            <div class="node-desc">Exit 1: No Data<br></br>Exit 2: Arg Error</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Step 3: Output Formatting -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation" style="text-align:right">Skip corrupt JSON files;<br></br>Continue gracefully.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision" style="width: 260px;">
+            <div class="node-title">Output Router</div>
+            <div class="node-desc">Evaluate --json flag presence</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+           <div class="node node-output" style="width: 160px;">
+            <div class="node-title">Raw Output</div>
+            <div class="node-desc">Stdout stream of pre-formatted text or JSON</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Step 4: Interactive Mode -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+           <div class="node node-phase" style="width: 160px;">
+            <div class="node-title">Action Triggers</div>
+            <div class="node-desc">Invoke /stark-review-improvement or config updates</div>
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision" style="width: 260px;">
+            <div class="node-title">Interactive Analysis (Non-JSON)</div>
+            <div class="node-desc">Prompt user for recommendations & flag Meta-Observations (Wins/Urgent)</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-output" style="width: 160px;">
+            <div class="node-title">Observability Logs</div>
+            <div class="node-desc">Timing, filters applied, recommendations count</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <h2 class="section-title">Architecture Components</h2>
+    <div class="card-grid">
+      <div class="card card-blue">
+        <h3>Python Processing Layer (<span style="font-family:monospace; font-size:10px">metrics.py</span>)</h3>
+        <p>A decoupled backend responsible for data ingestion. It robustly handles legacy or corrupted JSON files via schema normalization and gracefully skipping unparseable records. It outputs terminal-ready text or structured JSON based on CLI flags.</p>
+      </div>
+      <div class="card card-purple">
+        <h3>Interactive Shell Wrapper</h3>
+        <p>The bash layer acting as the entry point. It not only pipes arguments to the python script but also analyzes the string output to drive an interactive terminal loop (Phase 2), prompting users to take direct action on generated recommendations.</p>
+      </div>
+      <div class="card card-green">
+        <h3>Meta-Observation Engine</h3>
+        <p>A lightweight analysis step in the wrapper (Phase 3) that cross-references current data with previous states to flag critical insights. It detects system-wide improvements ("wins" like lower FP rates) or regressions (climbing agent failure rates).</p>
+      </div>
+      <div class="card card-amber">
+        <h3>Custom Telemetry Schema</h3>
+        <p>Adheres to the Skill Observability Protocol. Custom fields include <code>records_loaded</code> (by type), <code>filters_applied</code> (repo, skill, date), <code>sections_generated</code>, and <code>recommendations_count</code> to track usage patterns internally.</p>
+      </div>
+    </div>
     
-    <!-- Input Arguments -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="annotation"><strong>Invocation</strong><br></br>Passed by User / System</div>
-      </div>
-      <div class="flow-lane-center">
-        <div class="node node-config">
-          <div class="node-title">Input Parameters</div>
-          <div class="node-desc">[--repo REPO] [--skill SKILL] [--since DATE] [--json]</div>
-        </div>
-      </div>
-      <div class="flow-lane-right"></div>
-    </div>
-
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Phase 1 -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="annotation"><strong>metrics.py Execution</strong><br></br>Reads from ~/.claude/code-review/history/</div>
-      </div>
-      <div class="flow-lane-center">
-        <div class="node node-phase">
-          <div class="node-title">Phase 1: Run Script</div>
-          <div class="node-desc">$PYTHON $SCRIPTS/metrics.py $ARGUMENTS</div>
-        </div>
-      </div>
-      <div class="flow-lane-right">
-        <div class="node node-failure" style="padding: 6px; margin-bottom: 4px;">
-          <div class="node-title" style="font-size: 10px;">Exit 1: No Data</div>
-        </div>
-        <div class="node node-failure" style="padding: 6px;">
-          <div class="node-title" style="font-size: 10px;">Exit 2: Arg Error</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Phase 2 -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="annotation"><strong>Stdout Stream</strong><br></br>Terminal formatting</div>
-      </div>
-      <div class="flow-lane-center">
-        <div class="node node-output">
-          <div class="node-title">Phase 2: Present Results</div>
-          <div class="node-desc">Print generated scorecard and metric reports</div>
-        </div>
-      </div>
-      <div class="flow-lane-right"></div>
-    </div>
-
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Interactive Decision -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="annotation"><strong>Interactive Prompt</strong><br></br>Bypassed if --json flag is true</div>
-      </div>
-      <div class="flow-lane-center">
-        <div class="node node-decision">
-          <div class="node-title">Act on Recommendations?</div>
-          <div class="node-desc">If items found, prompt user to resolve (1..N)</div>
-        </div>
-      </div>
-      <div class="flow-lane-right">
-        <div class="annotation"><strong>Triggers:</strong><br></br>- /stark-review-improvement<br></br>- Edit config</div>
-      </div>
-    </div>
-
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Phase 3 -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="annotation"><strong>Post-Analysis</strong><br></br>Agent observes own outputs</div>
-      </div>
-      <div class="flow-lane-center">
-        <div class="node node-phase">
-          <div class="node-title">Phase 3: Improvement Flags</div>
-          <div class="node-desc">Evaluate meta-observations and historical trends</div>
-        </div>
-      </div>
-      <div class="flow-lane-right">
-        <div class="annotation"><strong>Flags generated:</strong><br></br>- First time tip<br></br>- FP rate improvement<br></br>- Agent failure spikes</div>
-      </div>
-    </div>
-
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Observability -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="annotation"><strong>Telemetry Protocol</strong><br></br>Adheres to observability.md</div>
-      </div>
-      <div class="flow-lane-center">
-        <div class="node node-external">
-          <div class="node-title">Emit Skill Observability</div>
-          <div class="node-desc">Record timings, filters, and generated payload metrics</div>
-        </div>
-      </div>
-      <div class="flow-lane-right"></div>
-    </div>
-
-  </div>
-
-  <h2 class="section-title">Telemetry & Metadata Collected</h2>
-  <div class="summary-grid">
-    <div class="summary-card">
-      <h3>History Ingestion</h3>
-      <p>Tracks count of records loaded categorized by specific skill type (e.g., stark-review, stark-plan).</p>
-    </div>
-    <div class="summary-card">
-      <h3>Context Variables</h3>
-      <p>Records state of applied filters: <code>--repo</code>, <code>--skill</code>, and bounding <code>--since</code> date constraints.</p>
-    </div>
-    <div class="summary-card">
-      <h3>Report Yield</h3>
-      <p>Monitors section count in final report and total aggregate number of actionable recommendations identified.</p>
+    <div class="footer">
+      Internal Design Visualization · stark-metrics · Component Architecture
     </div>
   </div>
-
-  <h2 class="section-title">Failure Modes & Recoveries</h2>
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th width="30%">Failure Condition</th>
-        <th width="70%">System Response & Recovery Prompt</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td><strong>No history directory</strong><br><span class="tag tag-failure">System State</span></td>
-        <td>Agent intervenes: "No history found. Run /stark-review to generate data." Graceful exit without throwing unhandled exceptions.</td>
-      </tr>
-      <tr>
-        <td><strong>No matching records</strong><br><span class="tag tag-failure">Filter Edge-case</span></td>
-        <td>Agent advises: "No records match filters. Try broader criteria." Retains session context.</td>
-      </tr>
-      <tr>
-        <td><strong>Corrupt JSON in history</strong><br><span class="tag tag-external">Data Integrity</span></td>
-        <td>Script emits warning on <code>stderr</code>, automatically skips the corrupted payload file, and continues processing remainder.</td>
-      </tr>
-      <tr>
-        <td><strong>Script not found</strong><br><span class="tag tag-failure">Installation Error</span></td>
-        <td>Agent aborts execution and directs user: "Run install.sh to set up stark-skills".</td>
-      </tr>
-    </tbody>
-  </table>
-
-</div>
-
-<div class="footer">
-  stark-metrics | Internal Visualization | Adapted for CI/CD Observability Context
-</div>
 
 </body>
 </html>

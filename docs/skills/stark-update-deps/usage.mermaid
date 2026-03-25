@@ -1,0 +1,15 @@
+graph TD
+  A([Trigger: "update dependencies"]) --> B[Phase 1: Discovery]
+  B --> C[Phase 2: Research & Parallel WebSearch]
+  C --> D{Phase 3: Compatibility Analysis}
+  
+  D -->|Safe / Review| E[Phase 4: Update Files]
+  D -->|Blocked / Skip| F[Leave Unchanged]
+  
+  E --> G{Phase 5: Strict Verification}
+  G -->|Found on Registry| H[Phase 6: Final Report]
+  G -->|Hallucination / Not Found| I[Revert / Re-Search]
+  I --> G
+  F --> H
+  
+  H --> J([End Process])

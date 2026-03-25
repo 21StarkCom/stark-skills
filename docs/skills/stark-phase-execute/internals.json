@@ -1,0 +1,19 @@
+{
+  "doc_content": {
+    "summary": "Stark-phase-execute is the autonomous execution engine for complete development phases. It processes a plan slug, automatically decomposes it into tasks if necessary, and executes each task through an end-to-end lifecycle: subagent implementation, PR creation, isolated multi-agent review with autonomous fix rounds, and merging. It concludes with regression testing, releasing, deploying, and generating an observability dashboard with prompt improvement heuristics.",
+    "key_features": [
+      "Full Autonomy: Overrides user-confirmation gates in all downstream sub-workflows.",
+      "Auto-Decomposition: Gracefully falls back to invoking /stark-plan-to-tasks if no GH issues exist.",
+      "Worktree Isolation: Runs review loops in detached git worktrees to protect primary repository state.",
+      "Multi-Agent Feedback Loop: Automatically classifies, fixes, and re-tests review findings up to a configurable max rounds limit.",
+      "Dual Authentication: Seamlessly swaps between User PAT for core ops and App Bot Tokens for annotations.",
+      "Observability & Tuning: Detects false positive rates and execution bottlenecks to recommend prompt tunings."
+    ],
+    "usage_examples": [
+      "stark-phase-execute 2026-03-25-feature-api",
+      "stark-phase-execute docs/plans/2026-03-25-feature-api.md --dry-run",
+      "stark-phase-execute new-auth --skip-deploy --rounds 5"
+    ]
+  },
+  "alt_text": "Architectural flow diagram of the stark-phase-execute skill showing the autonomous pipeline from phase initialization, through a task-by-task implementation and multi-agent review loop, ending with regression testing, deployment, and observability dashboard generation."
+}

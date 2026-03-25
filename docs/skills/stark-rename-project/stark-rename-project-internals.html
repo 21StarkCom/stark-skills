@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>stark-rename-project — Internal Architecture</title>
+<style>
+/* === Reset & Base === */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+
+/* === Header === */
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
+
+/* === Container === */
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+/* === Section Title === */
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+/* === Node Types === */
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
+
+.node-phase    { background: #1e40af; color: #ffffff; }
+.node-decision { background: #7c3aed; color: #ffffff; }
+.node-failure  { background: #dc2626; color: #ffffff; }
+.node-config   { background: #047857; color: #ffffff; }
+.node-output   { background: #f59e0b; color: #1a1a1a; }
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
+
+/* === Flow Layout === */
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 180px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 180px; display: flex;
+  align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
+
+/* === Arrows === */
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
+
+/* === Cards === */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
+
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
+
+/* === Data Tables === */
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
+
+/* === Tags === */
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
+
+/* === Legend === */
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+/* === Summary Grid === */
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
+
+/* === Footer === */
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
+
+/* === Extension: Idempotency / Resume Badges === */
+.idempotent-badge {
+  display: inline-block; font-size: 8px; font-weight: 700;
+  padding: 1px 6px; border-radius: 3px; margin-left: 6px;
+  background: #d1fae5; color: #065f46; vertical-align: middle;
+}
+.resume-badge {
+  display: inline-block; font-size: 8px; font-weight: 700;
+  padding: 1px 6px; border-radius: 3px; margin-left: 6px;
+  background: #dbeafe; color: #1e40af; vertical-align: middle;
+}
+.dryrun-badge {
+  display: inline-block; font-size: 8px; font-weight: 700;
+  padding: 1px 6px; border-radius: 3px; margin-left: 6px;
+  background: #fef3c7; color: #92400e; vertical-align: middle;
+}
+.phase-header {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* === Extension: Pattern Scope Indicator === */
+.pattern-scope {
+  display: inline-block; font-size: 8px; font-weight: 600;
+  padding: 1px 6px; border-radius: 3px;
+}
+.scope-auto { background: #d1fae5; color: #065f46; }
+.scope-restricted { background: #fef3c7; color: #92400e; }
+.scope-excluded { background: #fee2e2; color: #991b1b; }
+
+/* === Extension: Dependency Lines === */
+.dep-connector {
+  width: 100%; max-width: 860px; display: flex; align-items: center;
+  justify-content: center; padding: 4px 0;
+}
+.dep-line {
+  height: 1px; flex: 1; max-width: 200px;
+  border-top: 1px dashed #9ca3af;
+}
+.dep-label {
+  font-size: 8px; color: #9ca3af; padding: 0 8px; white-space: nowrap;
+}
+
+/* === Extension: Auth context === */
+.auth-context {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 9px; padding: 2px 8px; border-radius: 3px;
+  background: #fef3c7; color: #92400e; margin-top: 4px;
+}
+
+/* === Extension: Code snippets === */
+.code-inline {
+  font-family: 'SF Mono', Consolas, monospace; font-size: 10px;
+  background: rgba(0,0,0,0.06); padding: 1px 4px; border-radius: 2px;
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>stark-rename-project</h1>
+  <div class="sub">Internal Architecture &mdash; 8-phase resumable rename pipeline with idempotent state machine</div>
+  <div class="scope">INTERNALS &mdash; contributor / developer focused</div>
+</div>
+
+<div class="container">
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#1e40af"></div> Phase</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed"></div> Decision</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#047857"></div> Config / State</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> Output / Artifact</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e5e7eb; border: 1px dashed #9ca3af"></div> External Dep</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#dc2626"></div> Failure / Error</div>
+  </div>
+
+  <!-- ============================================ -->
+  <!-- SECTION: MAIN EXECUTION FLOW                 -->
+  <!-- ============================================ -->
+  <div class="section-title">Execution Flow</div>
+
+  <div class="flow">
+
+    <!-- Entry: Argument Parsing -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Trigger:</strong> /stark-rename-project &lt;old&gt; &lt;new&gt; [--dry-run]</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-config" style="width:380px">
+          <div class="node-title">Phase 1a: Parse &amp; Validate Arguments</div>
+          <div class="node-desc">Regex: <span class="code-inline">^[A-Za-z0-9._-]+$</span> &bull; Reject path separators, spaces, metacharacters &bull; Set DRY_RUN flag</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Constants:</strong> SCRIPTS=~/.claude/code-review/scripts, PYTHON=$SCRIPTS/.venv/bin/python3</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 1b: Repo Root -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Derived state:</strong> REPO_ROOT, LOCAL_DIR, PARENT, HAS_UNINSTALL</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-config" style="width:380px">
+          <div class="node-title">Phase 1b: Establish Repo Root</div>
+          <div class="node-desc">git rev-parse --show-toplevel &bull; Check install.sh exists + supports --uninstall</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Fallback:</strong> WARN if install.sh missing &mdash; symlink management becomes manual</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 1c: Resume Detection -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Key insight:</strong> Compares remote URL vs local dir name to detect partial completion</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width:380px">
+          <div class="phase-header">
+            <div class="node-title">Phase 1c: Resumable State Detection</div>
+            <span class="resume-badge">RESUMABLE</span>
+          </div>
+          <div class="node-desc">Remote=new + Local=old &rarr; resume Phase 3 &bull; Remote=old + Local=new &rarr; resume Phase 2 &bull; Both=new &rarr; Phase 3b</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>State machine:</strong> 3 resume entry points prevent re-executing completed phases</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 1d-f: Validation Suite -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Auth:</strong> stark-claude[bot] token via github_app.py for API calls</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px">
+          <div class="node-title">Phase 1d-f: Validation Suite</div>
+          <div class="node-desc">Parse remote (SSH/HTTPS) &rarr; match OLD_NAME &bull; Clean worktree check &bull; No collision on NEW_NAME &bull; Admin permission pre-flight</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Extension point:</strong> Remote URL parsing handles SSH + HTTPS, extracts HOST, ORG, REPO &mdash; no hardcoded values</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Decision: Case-only rename -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Edge case:</strong> macOS HFS+ is case-insensitive; dir existence check gives false positive</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width:380px">
+          <div class="node-title">Case-Only Rename?</div>
+          <div class="node-desc">If old/new differ only in case &rarr; skip local existence check, use two-step mv via temp name</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Temp name:</strong> ${OLD_NAME}-rename-temp-$$ (PID-scoped to avoid collisions)</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 2: GitHub Rename -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Idempotency:</strong> GET /repos/ORG/NEW_NAME &mdash; compare repo ID + exact name before PATCH</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px">
+          <div class="phase-header">
+            <div class="node-title">Phase 2: Rename on GitHub</div>
+            <span class="idempotent-badge">IDEMPOTENT</span>
+            <span class="dryrun-badge">DRY-RUN GATE</span>
+          </div>
+          <div class="node-desc">PATCH /repos/ORG/OLD_NAME {name: NEW_NAME} &bull; Update git remote URLs (fetch + push) &bull; Perl \Q..\E literal replace</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Side effect:</strong> GitHub creates redirect from old URL &mdash; breaks if old name is reused later</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 2 Error Handling -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>HTTP error map:</strong> 403=no admin, 404=repo not found, 422=name taken, 5xx=retry</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-failure" style="width:380px">
+          <div class="node-title">GitHub API Error Handling</div>
+          <div class="node-desc">Each HTTP status &rarr; specific actionable error message &bull; Verify response name matches NEW_NAME</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Recovery:</strong> Resumable state detection (Phase 1c) allows re-run after transient failures</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 3a: Local Rename -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Critical:</strong> All subsequent paths must use $PARENT/$NEW_NAME &mdash; cwd is invalidated by mv</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px">
+          <div class="phase-header">
+            <div class="node-title">Phase 3a: Local Directory Rename</div>
+            <span class="idempotent-badge">IDEMPOTENT</span>
+            <span class="dryrun-badge">DRY-RUN GATE</span>
+          </div>
+          <div class="node-desc">mv $PARENT/$OLD &rarr; $PARENT/$NEW &bull; cd into new path immediately &bull; Case-only: two-step via temp</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Idempotency:</strong> Skip if NEW exists and OLD does not</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 3b: Uninstall Symlinks -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Order matters:</strong> Must uninstall BEFORE Phase 4 modifies install.sh targets</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px">
+          <div class="node-title">Phase 3b: Uninstall Old Symlinks</div>
+          <div class="node-desc">install.sh --uninstall (preferred) &bull; Fallback: find all symlinks under ~/.claude + ~/git/Evinced/.code-review resolving to old path</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Safety:</strong> Uses python3 os.path.realpath (not readlink -f &mdash; unavailable on macOS) &bull; Only deletes symlinks, never data</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 4: Update References -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>File discovery:</strong> git grep -Il "" (tracked text files only, skips binary)</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px">
+          <div class="phase-header">
+            <div class="node-title">Phase 4: Update References (Self)</div>
+            <span class="dryrun-badge">DRY-RUN GATE</span>
+          </div>
+          <div class="node-desc">5 replacement patterns (most-specific-first) &bull; Perl \Q..\E literal matching &bull; Exclusion rules for skill identity</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Validation:</strong> bash -n install.sh after modifications &bull; Track every modified file</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 5: Sibling Repos -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Discovery:</strong> All dirs under $PARENT with .git/ whose origin matches same HOST + ORG</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px">
+          <div class="phase-header">
+            <div class="node-title">Phase 5: Update References (Siblings)</div>
+            <span class="dryrun-badge">DRY-RUN GATE</span>
+          </div>
+          <div class="node-desc">Pre-flight clean worktree check per repo &bull; Same 5 patterns + exclusions as Phase 4 &bull; Auto-commit per repo</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Safety:</strong> git add specific files (not -am) &bull; Skip repos with uncommitted changes &bull; Array quoting for paths</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 6: Reinstall -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Depends on:</strong> Phase 3b (uninstall) + Phase 4 (updated install.sh)</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px">
+          <div class="phase-header">
+            <div class="node-title">Phase 6: Reinstall Symlinks</div>
+            <span class="dryrun-badge">DRY-RUN GATE</span>
+          </div>
+          <div class="node-desc">cd $PARENT/$NEW_NAME &bull; ./install.sh &bull; Report actionable error if install fails</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Extension point:</strong> install.sh is the single source of truth for symlink targets</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 7: Verify -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Checks:</strong> Remote connectivity, stale symlinks, residual references, CI/CD files</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px">
+          <div class="node-title">Phase 7: Verification</div>
+          <div class="node-desc">git ls-remote origin &bull; Scan ~/.claude for stale symlinks &bull; Grep all 5 patterns with exclusion rules &bull; Report .github/workflows/ matches</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>False-positive filter:</strong> Same exclusion rules as Phase 4 applied to residual scan</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 8: Summary -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Observability:</strong> Follows Skill Observability Protocol for timing + metrics</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-output" style="width:380px">
+          <div class="node-title">Phase 8: Summary Report</div>
+          <div class="node-desc">Files changed per repo &bull; Pass/fail verification &bull; Residual refs &bull; CI/CD warnings &bull; Skipped siblings &bull; cd command</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Metrics:</strong> API duration, file counts, symlinks removed/created, checks passed/failed</div>
+      </div>
+    </div>
+
+  </div><!-- /flow -->
+
+  <!-- ============================================ -->
+  <!-- SECTION: REPLACEMENT PATTERN ENGINE           -->
+  <!-- ============================================ -->
+  <div class="section-title">Replacement Pattern Engine</div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Pattern</th>
+        <th>Example Match</th>
+        <th>Scope</th>
+        <th>Method</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>1</td>
+        <td><span class="code-inline">$PARENT/$OLD_NAME</span></td>
+        <td>~/git/Evinced/stark-review</td>
+        <td><span class="pattern-scope scope-auto">ALL TEXT FILES</span></td>
+        <td>Perl \Q..\E literal</td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td><span class="code-inline">$ORG/$OLD_NAME</span></td>
+        <td>GetEvinced/stark-review</td>
+        <td><span class="pattern-scope scope-auto">ALL TEXT FILES</span></td>
+        <td>Perl \Q..\E literal</td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td><span class="code-inline">$HOST:$ORG/$OLD_NAME</span></td>
+        <td>github.com:GetEvinced/stark-review</td>
+        <td><span class="pattern-scope scope-auto">ALL TEXT FILES</span></td>
+        <td>Perl \Q..\E literal</td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td><span class="code-inline">$HOST/$ORG/$OLD_NAME</span></td>
+        <td>github.com/GetEvinced/stark-review</td>
+        <td><span class="pattern-scope scope-auto">ALL TEXT FILES</span></td>
+        <td>Perl \Q..\E literal</td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td>Bare <span class="code-inline">$OLD_NAME</span> with boundaries</td>
+        <td>stark-review (not stark-review-improvement)</td>
+        <td><span class="pattern-scope scope-restricted">*.md, *.json, *.sh ONLY</span></td>
+        <td>Perl lookaround: (?&lt;![A-Za-z0-9._-])..(?![A-Za-z0-9._-])</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p style="font-size:10px; color:#666; text-align:center; margin-top:8px;">Patterns applied most-specific-first to prevent double-replacement. All use Perl literal matching (not sed) to handle dots/hyphens safely.</p>
+
+  <!-- ============================================ -->
+  <!-- SECTION: EXCLUSION RULES                     -->
+  <!-- ============================================ -->
+  <div class="section-title">Exclusion Rules</div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Excluded Pattern</th>
+        <th>Reason</th>
+        <th>Example Preserved</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="code-inline">/{old-name}</span> (slash-prefixed)</td>
+        <td>Skill invocation command identity</td>
+        <td>/stark-review</td>
+      </tr>
+      <tr>
+        <td><span class="code-inline">name: '{old-name}'</span> in frontmatter</td>
+        <td>Skill YAML identity</td>
+        <td>name: stark-review</td>
+      </tr>
+      <tr>
+        <td><span class="code-inline">~/.claude/skills/{old-name}/</span></td>
+        <td>Installed skill paths (skill identity)</td>
+        <td>~/.claude/skills/stark-review/</td>
+      </tr>
+      <tr>
+        <td>GitHub App names</td>
+        <td>Separate identity from project name</td>
+        <td>stark-claude, stark-codex, stark-gemini</td>
+      </tr>
+      <tr>
+        <td>Historical doc filenames</td>
+        <td>Content updated, not filenames</td>
+        <td>2026-03-16-stark-review-skill-design.md</td>
+      </tr>
+      <tr>
+        <td><span class="code-inline">~/.claude/code-review/</span></td>
+        <td>Install location, not project name</td>
+        <td>~/.claude/code-review/scripts/</td>
+      </tr>
+      <tr>
+        <td><span class="code-inline">.github/workflows/*.yml</span></td>
+        <td>CI/CD scanned + reported, not auto-modified</td>
+        <td>deploy.yml referencing old name</td>
+      </tr>
+      <tr>
+        <td><span class="code-inline">.git/</span> directory</td>
+        <td>Git internals must never be modified</td>
+        <td>.git/config, .git/objects/*</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ============================================ -->
+  <!-- SECTION: RESUMABLE STATE MACHINE             -->
+  <!-- ============================================ -->
+  <div class="section-title">Resumable State Machine</div>
+
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>State A: Remote=new, Local=old</h3>
+      <p>GitHub rename succeeded but local rename did not. Resume from <strong>Phase 3</strong> (local directory rename). The remote URL already points to the new name.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>State B: Remote=old, Local=new</h3>
+      <p>Local rename happened but GitHub rename did not. Resume from <strong>Phase 2</strong> (GitHub API rename). This is unusual but possible if the skill was interrupted between directory operations.</p>
+    </div>
+    <div class="card card-green">
+      <h3>State C: Both=new</h3>
+      <p>Both renames completed but symlinks may be stale. Resume from <strong>Phase 3b</strong> (symlink cleanup + reinstall). Fast path for interrupted post-rename cleanup.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>No Match: Fresh Run</h3>
+      <p>Neither resume state detected. Execute the full pipeline from Phase 1d (standard validation) through Phase 8 (summary).</p>
+    </div>
+  </div>
+
+  <!-- ============================================ -->
+  <!-- SECTION: DATA FLOW                           -->
+  <!-- ============================================ -->
+  <div class="section-title">Data Flow &amp; Derived State</div>
+
+  <div class="card-grid">
+    <div class="card card-amber">
+      <h3>Input State (Phase 1)</h3>
+      <p>
+        <strong>User args:</strong> OLD_NAME, NEW_NAME, DRY_RUN<br>
+        <strong>Git-derived:</strong> REPO_ROOT, PARENT, LOCAL_DIR, REMOTE_URL<br>
+        <strong>Parsed remote:</strong> HOST, ORG, REPO<br>
+        <strong>Feature flags:</strong> HAS_UNINSTALL, CURRENT_REPO_ID
+      </p>
+    </div>
+    <div class="card card-blue">
+      <h3>Mutation Points</h3>
+      <p>
+        <strong>Phase 2:</strong> GitHub repo name (API PATCH)<br>
+        <strong>Phase 2b:</strong> Git remote URLs (local .git/config)<br>
+        <strong>Phase 3a:</strong> Directory path on filesystem<br>
+        <strong>Phase 3b:</strong> Symlinks under ~/.claude/<br>
+        <strong>Phase 4-5:</strong> Text file contents (tracked files only)<br>
+        <strong>Phase 6:</strong> New symlinks via install.sh
+      </p>
+    </div>
+    <div class="card card-green">
+      <h3>External Dependencies</h3>
+      <p>
+        <strong>GitHub API:</strong> Rename, permission check, collision check<br>
+        <strong>github_app.py:</strong> JWT &rarr; installation token for stark-claude[bot]<br>
+        <strong>install.sh:</strong> Symlink creation/removal<br>
+        <strong>Perl:</strong> Literal string replacement (\Q..\E)<br>
+        <strong>python3:</strong> os.path.realpath for symlink resolution
+      </p>
+    </div>
+  </div>
+
+  <!-- ============================================ -->
+  <!-- SECTION: EXTENSION POINTS                    -->
+  <!-- ============================================ -->
+  <div class="section-title">Extension Points</div>
+
+  <div class="card-grid">
+    <div class="card card-purple">
+      <h3>Adding Replacement Patterns</h3>
+      <p>New patterns go in Phase 4a (deterministic) or 4b (heuristic). Deterministic patterns are applied to all tracked text files; heuristic patterns need a file-type restriction. Always add most-specific patterns first to prevent double-replacement.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>Adding Exclusion Rules</h3>
+      <p>New exclusions go in Phase 4c. Must be applied consistently in Phase 4, Phase 5, and Phase 7 (verification). If a pattern should be excluded only in certain file types, document the scope explicitly.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>Sibling Repo Discovery</h3>
+      <p>Phase 5a discovers siblings by scanning $PARENT for .git/ directories matching the same HOST + ORG. To support additional discovery strategies (e.g., GitHub API for all org repos), extend the discovery loop without changing the per-repo replacement logic.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>Symlink Install Locations</h3>
+      <p>Phase 3b fallback scans ~/.claude and ~/git/Evinced/.code-review. Additional install destinations require adding paths to the fallback scan list. The install.sh --uninstall path handles this automatically.</p>
+    </div>
+  </div>
+
+  <!-- ============================================ -->
+  <!-- SECTION: KNOWN PITFALLS                      -->
+  <!-- ============================================ -->
+  <div class="section-title">Known Pitfalls &amp; Mitigations</div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Pitfall</th>
+        <th>Impact</th>
+        <th>Mitigation</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Using <span class="code-inline">\b</span> word boundaries</td>
+        <td>Hyphens/dots are word boundaries &mdash; matches inside longer names</td>
+        <td>Custom lookaround: <span class="code-inline">(?&lt;![A-Za-z0-9._-])..(?![A-Za-z0-9._-])</span></td>
+      </tr>
+      <tr>
+        <td>Using sed for replacements</td>
+        <td><span class="code-inline">.</span> is a regex wildcard &mdash; foo.bar matches fooXbar</td>
+        <td>Perl <span class="code-inline">\Q..\E</span> for literal string matching</td>
+      </tr>
+      <tr>
+        <td>Using <span class="code-inline">readlink -f</span></td>
+        <td>Not available on macOS</td>
+        <td>python3 -c "import os; print(os.path.realpath(...))"</td>
+      </tr>
+      <tr>
+        <td>Modifying files before uninstalling symlinks</td>
+        <td>install.sh targets change, --uninstall can't find old paths</td>
+        <td>Strict ordering: uninstall (3b) before modify (4)</td>
+      </tr>
+      <tr>
+        <td>Forgetting to cd after mv</td>
+        <td>All subsequent commands operate from invalid cwd</td>
+        <td>Immediate cd $PARENT/$NEW_NAME after mv</td>
+      </tr>
+      <tr>
+        <td><span class="code-inline">git commit -am</span> in siblings</td>
+        <td>Sweeps unrelated changes into rename commit</td>
+        <td>git add specific files &mdash; array quoting: <span class="code-inline">"${files[@]}"</span></td>
+      </tr>
+      <tr>
+        <td>Hardcoding GetEvinced or github.com</td>
+        <td>Breaks for other orgs/hosts</td>
+        <td>All values parsed from <span class="code-inline">git remote get-url origin</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ============================================ -->
+  <!-- SECTION: OBSERVABILITY METRICS               -->
+  <!-- ============================================ -->
+  <div class="section-title">Observability Metrics</div>
+
+  <div class="summary-grid">
+    <div class="summary-card card-blue">
+      <h3>GitHub API</h3>
+      <p>PATCH duration (ms), HTTP status, idempotent skip count, permission pre-flight result</p>
+    </div>
+    <div class="summary-card card-green">
+      <h3>File Modifications</h3>
+      <p>Files modified in renamed project, files modified per sibling repo, patterns matched per file</p>
+    </div>
+    <div class="summary-card card-amber">
+      <h3>Symlink Lifecycle</h3>
+      <p>Symlinks removed (old), symlinks created (new), stale symlinks detected in verification</p>
+    </div>
+    <div class="summary-card card-purple">
+      <h3>Verification</h3>
+      <p>Checks passed/failed, residual references found, CI/CD files flagged</p>
+    </div>
+    <div class="summary-card card-dark">
+      <h3>Siblings</h3>
+      <p>Repos discovered, repos modified, repos skipped (dirty worktree), commits created</p>
+    </div>
+    <div class="summary-card card-red">
+      <h3>Errors &amp; Recovery</h3>
+      <p>Resume state detected, phases skipped via idempotency, dry-run gates hit</p>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<div class="footer">
+  stark-rename-project &mdash; Internal Architecture &mdash; Generated 2026-03-25
+</div>
+
+</body>
+</html>

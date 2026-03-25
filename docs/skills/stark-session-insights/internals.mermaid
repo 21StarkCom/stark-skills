@@ -1,0 +1,21 @@
+graph TD
+  history[~/.claude/history.jsonl] --> load[Phase 1: Load & Parse]
+  load --> group[Group by Project & Format Slug]
+  group --> filter[Filter via --project]
+  filter --> skip{Skip if current & no --refresh?}
+  skip -- Yes --> done[Skip Project]
+  skip -- No --> analyze[Phase 2: Inline Python Analysis]
+  
+  analyze --> stats[Usage Metrics & Action Words]
+  analyze --> time[Temporal & Rhythm Analysis]
+  analyze --> session[Session Typing & Corrections]
+  analyze --> narrative[Narrative Synthesis]
+  
+  stats --> gen[Phase 3: Generate Markdown]
+  time --> gen
+  session --> gen
+  narrative --> gen
+  
+  gen --> write[Phase 4: Write Outputs]
+  write --> out1[sessions/slug.md]
+  write --> out2[sessions/index.md]

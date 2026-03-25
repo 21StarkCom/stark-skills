@@ -1,0 +1,19 @@
+{
+  "doc_content": {
+    "summary": "Analyzes Claude Code session history (~/.claude/history.jsonl) to extract usage patterns, skill invocations, action frequencies, and user corrections, synthesizing this data into actionable per-project markdown reports.",
+    "key_features": [
+      "Parses local ~/.claude/history.jsonl and segments contexts by project path",
+      "Implements inline Python heuristics for session duration and boundary detection",
+      "Categorizes sessions dynamically (Build, Review, Debug, Architecture, Maintenance)",
+      "Identifies friction points by isolating user correction/frustration prompts",
+      "Generates a bespoke narrative synthesis and specific recommendations based on extracted metrics",
+      "Avoids redundant processing with hash/count-based cache skipping"
+    ],
+    "usage_examples": [
+      "/stark-session-insights",
+      "/stark-session-insights --project infra-pulse",
+      "/stark-session-insights --refresh"
+    ]
+  },
+  "alt_text": "An architectural flow diagram of the stark-session-insights skill showing the data pipeline from reading Claude's history.jsonl through parsing, inline Python analysis phases like action patterns and session shape, to writing localized markdown insight files."
+}

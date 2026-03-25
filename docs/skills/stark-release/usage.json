@@ -1,0 +1,17 @@
+{
+  "doc_content": {
+    "summary": "Automates the release process by analyzing unreleased changelog entries, auto-detecting semantic version bumps, updating runtime versions, and publishing Git tags and GitHub Releases on behalf of the user.",
+    "key_features": [
+      "Pre-flight validation for a clean main branch",
+      "Auto-detection of semantic version bump type (patch/minor/major) from changelog sections",
+      "Updates runtime version in __init__.py and moves [Unreleased] changelog entries to a newly versioned section",
+      "Creates annotated git tags and publishes GitHub releases securely using the user's native Personal Access Token"
+    ],
+    "usage_examples": [
+      "/stark-release",
+      "/stark-release minor",
+      "Please cut a new release based on the latest merged changes."
+    ]
+  },
+  "alt_text": "A documentation page titled 'stark-release - Skill Visualization' showing a flowchart of the release management process including pre-flight checks, changelog review, file updates, and GitHub release creation, alongside rules and failure modes."
+}

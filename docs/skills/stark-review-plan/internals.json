@@ -1,0 +1,4 @@
+{
+  "doc_content": {},
+  "alt_text": "A clean internal architecture diagram for the `stark-review-plan` skill showing a top-to-bottom workflow from input validation and PR detection into a 21-sub-agent dispatch matrix, classification and plan-fixing loop, failure-aware branching, final review, summary generation, and artifact persistence, with supporting tables for data flow, extension points, and operational outputs.\"}}"
+}

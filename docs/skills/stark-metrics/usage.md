@@ -6,24 +6,35 @@ Aggregate performance metrics across all stark skill runs. Agent scorecards, fin
 
 ```mermaid
 graph TD
-  A[User invokes /stark-metrics] --> B[Parse Arguments: --repo, --skill, --since, --json]
-  B --> C[Execute metrics.py]
-  C --> D{Check Exit Code}
-  D -->|Exit 1| E[Error: No history found]
-  D -->|Exit 2| F[Error: Argument error]
-  D -->|Exit 0| G[Print Formatted Terminal Output]
-  G --> H{Is --json flag set?}
-  H -->|Yes| I[End Skill]
-  H -->|No| J{Recommendations Found?}
-  J -->|Yes| K[Prompt user to act: e.g., /stark-review-improvement]
-  J -->|No| L[Process Meta-Observations]
-  K --> L
-  L --> M[Flag First-Time Usage]
-  L --> N[Flag Improvements e.g., lower FP rate]
-  L --> O[Flag Urgent Failures e.g., climbing error rate]
+    A([User Input: /stark-metrics or 'show metrics']) --> B{Parse Flags}
+    B -->|--repo, --skill, --since| C[Execute metrics.py script]
+    
+    C --> D{Exit Code}
+    D -->|1: No Data| E[Error: Run /stark-review to generate data]
+    D -->|2: Arg Error| F[Error: Show Argument Usage]
+    
+    D -->|0: Success| G[Present Formatted Terminal Report]
+    
+    G --> H{Used --json?}
+    H -->|Yes| Z([End])
+    
+    H -->|No| I{Has Recommendations?}
+    I -->|Yes| J[Interactive Prompt: 'Want to act on any?']
+    J -->|User selects action| K[Invoke Skill / Edit Config]
+    K --> L[Show Meta-Observations]
+    
+    I -->|No| L
+    L --> Z([End])
+    
+    style A fill:#047857,stroke:#fff,stroke-width:2px,color:#fff
+    style C fill:#1e40af,stroke:#fff,stroke-width:2px,color:#fff
+    style G fill:#f59e0b,stroke:#fff,stroke-width:2px,color:#000
+    style J fill:#7c3aed,stroke:#fff,stroke-width:2px,color:#fff
+    style E fill:#dc2626,stroke:#fff,stroke-width:2px,color:#fff
+    style F fill:#dc2626,stroke:#fff,stroke-width:2px,color:#fff
 ```
 
-![A flowchart and usage guide for the stark-metrics skill showing the execution of metrics.py, terminal output presentation, recommendation handling, and meta-observation checks.](usage.png)
+![Usage visualization for the stark-metrics skill showing the invocation arguments, execution flow, interactive recommendation handling, and common failure modes.](usage.png)
 
 ## When to Use
 

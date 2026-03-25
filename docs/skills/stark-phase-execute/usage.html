@@ -1,0 +1,359 @@
+<html lang="en">
+<head>
+
+
+<title>stark-phase-execute - Usage</title>
+<style>
+/*
+ * Stark Skills — Shared Design System CSS
+ *
+ * Foundation styles for LLM-generated HTML skill visualizations.
+ * LLMs embed this inline and may extend with additional styles.
+ * All colors pass WCAG AA 4.5:1 contrast ratio.
+ *
+ * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+ */
+
+/* === Reset & Base === */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+
+/* === Header === */
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
+
+/* === Container === */
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+/* === Section Title === */
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+/* === Node Types === */
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
+
+.node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+.node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+.node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+.node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
+.node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
+
+/* === Flow Layout === */
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 250px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px; text-align: right;
+}
+.flow-lane-center {
+  width: 360px; display: flex;
+  align-items: center; justify-content: center; flex-direction: column;
+}
+.flow-lane-right {
+  width: 250px; display: flex;
+  align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 11px; color: #666; max-width: 200px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
+
+/* === Arrows === */
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
+
+/* === Cards === */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; }
+.card p  { font-size: 11px; line-height: 1.6; color: #444; }
+.card ul { margin-left: 16px; font-size: 11px; color: #444; margin-top: 4px; }
+.card li { margin-bottom: 4px; }
+.card code { background: rgba(0,0,0,0.05); padding: 2px 4px; border-radius: 3px; font-family: monospace; }
+
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
+
+/* === Data Tables === */
+.data-table {
+  width: 100%; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+  background: white; border-radius: 8px; overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.data-table th {
+  background: #f3f4f6; padding: 10px 12px; text-align: left;
+  font-weight: 600; color: #444; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 10px 12px; border-bottom: 1px solid #f3f4f6; color: #555;
+}
+.data-table tr:last-child td { border-bottom: none; }
+
+/* === Tags === */
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
+
+/* === Legend === */
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+/* === Footer === */
+.footer {
+  text-align: center; padding: 30px 20px 20px;
+  font-size: 10px; color: #999; border-top: 1px solid #eee; margin-top: 40px;
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>stark-phase-execute</h1>
+  <div class="sub">Autonomously execute all tasks in a development phase end-to-end. Zero user intervention.</div>
+  <div class="scope">Usage Guide</div>
+</div>
+
+<div class="container">
+
+  <div class="section-title">CLI Invocation</div>
+  <div class="card card-dark">
+    <h3>Command Syntax</h3>
+    <p style="font-family: monospace; font-size: 13px; margin-bottom: 8px;">
+      /stark-phase-execute &lt;plan-slug-or-path&gt; [options]
+    </p>
+    <table class="data-table">
+      <tr><th>Argument</th><th>Default</th><th>Description</th></tr>
+      <tr><td><code>&lt;plan-slug-or-path&gt;</code></td><td><em>Required</em></td><td>Plan slug (e.g., <code>2026-03-23-stark-signals</code>) or a direct path to a plan <code>.md</code> file.</td></tr>
+      <tr><td><code>--dry-run</code></td><td>Off</td><td>Walks the plan, shows what would happen (including task fetch & breakdown), but executes nothing.</td></tr>
+      <tr><td><code>--skip-deploy</code> / <code>--skip-release</code></td><td>Off</td><td>Skips post-execution deployment or version bump/release.</td></tr>
+      <tr><td><code>--start-from &lt;N&gt;</code></td><td>1st issue</td><td>Resume execution from a specific issue number (skips previous ones).</td></tr>
+      <tr><td><code>--rounds &lt;N&gt;</code></td><td>3</td><td>Max fix/review rounds per PR for the multi-agent reviewer.</td></tr>
+    </table>
+  </div>
+
+  <div class="section-title">End-to-End Autonomous Workflow</div>
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot node-phase"></div> Main Execution Phase</div>
+    <div class="legend-item"><div class="legend-dot node-decision"></div> Logic / Decision Point</div>
+    <div class="legend-item"><div class="legend-dot node-output"></div> Artifacts / Outcomes</div>
+    <div class="legend-item"><div class="legend-dot node-config"></div> Auto-Triggered Skill</div>
+  </div>
+
+  <div class="flow">
+    <!-- Step 1 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>1. Initialize</strong><br>Checks git status, tool availability, and GitHub auth.</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase">
+          <div class="node-title">Fetch Phase Tasks</div>
+          <div class="node-desc">Queries Project Board or GitHub Issues via `plan:{SLUG}`</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+
+    <!-- Arrow -->
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 2 -->
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-decision">
+          <div class="node-title">Tasks Exist?</div>
+          <div class="node-desc">Filters out tracking issues. Checks task count.</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation" style="margin-left: 10px;">
+          <strong>If 0 tasks found:</strong><br>
+          Automatically delegates to <code>/stark-plan-to-tasks</code> to decompose the plan file into issues, then re-fetches.
+        </div>
+      </div>
+    </div>
+
+    <!-- Arrow -->
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 3 (Task Loop) -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>2. Task Loop</strong><br>Iterates over every open task matching the phase. Merges sequentially.</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="border: 2px solid #93c5fd;">
+          <div class="node-title">Autonomous Task Loop</div>
+          <div class="node-desc">Implement → Push PR → Review & Fix → Merge</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+
+    <!-- Arrow -->
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 4 (Regression) -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>3. Quality Gate</strong><br>Detects and runs project test command (pytest, npm test, etc.)</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase">
+          <div class="node-title">Regression Testing</div>
+          <div class="node-desc">Full suite execution against updated `main` branch</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+
+    <!-- Arrow -->
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 5 (Release) -->
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-config">
+          <div class="node-title">Release & Deploy</div>
+          <div class="node-desc">Auto-updates CHANGELOG and invokes <code>/stark-release</code></div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation" style="margin-left: 10px;">
+          <strong>Version Bump</strong><br>
+          Calculates major/minor/patch based on GitHub Issue labels (Feature/Bug/Task).
+        </div>
+      </div>
+    </div>
+
+    <!-- Arrow -->
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 6 (Final) -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>4. Finalization</strong><br>Produces summary reports and updates internal memory state.</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-output">
+          <div class="node-title">Dashboard & Housekeeping</div>
+          <div class="node-desc">Prints stats, updates project docs, checks prompt metrics</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+  </div>
+
+  <div class="section-title">Deep Dive: The Autonomous Task Loop</div>
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>1. Implementation Subagent</h3>
+      <p>A fresh branch is cut off <code>main</code> for each issue. An internal subagent explores the workspace, reads the issue requirements, writes the code, runs local tests, and creates semantic commits (e.g., <code>feat(scope): description (#NUM)</code>).</p>
+    </div>
+    <div class="card card-purple">
+      <h3>2. Multi-Agent Review Loop</h3>
+      <p>Creates PR and immediately spawns a multi-agent review team via an isolated git worktree. Findings are classified by severity. The skill autonomously fixes <code>fix</code>-level findings, pushes the updates, and repeats up to <code>--rounds</code> times.</p>
+    </div>
+    <div class="card card-green">
+      <h3>3. Autonomous Merge</h3>
+      <p>Once the multi-agent review passes (0 findings or only ignored noise), it waits for GitHub CI checks. If CI passes, it instantly squash-merges into <code>main</code> and cleans up branches. No human approval gates.</p>
+    </div>
+  </div>
+
+  <div class="section-title">Outputs & Dashboards</div>
+  <div class="card-grid">
+    <div class="card card-amber">
+      <h3>Terminal Dashboard</h3>
+      <p>Once the entire phase completes, the terminal will render a full scorecard including:</p>
+      <ul>
+        <li><strong>Task Summary Table:</strong> Time taken, PR link, review finding counts per issue.</li>
+        <li><strong>Agent Scorecard:</strong> How Claude, Codex, and Gemini performed (accuracy, noise rate, unique findings).</li>
+        <li><strong>Release Details:</strong> CHANGELOG entries added, bump level, deploy status.</li>
+      </ul>
+    </div>
+    <div class="card card-dark">
+      <h3>Housekeeping & Feedback</h3>
+      <p>The system constantly learns from execution:</p>
+      <ul>
+        <li><strong>Project Memory:</strong> Automatically records decisions and major structural changes.</li>
+        <li><strong>Prompt Improvements:</strong> Analyzes review loop metrics. If an agent had >20% false positive rate or missed obvious bugs, it suggests running <code>/stark-review-improvement</code>.</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  Skill Metadata: stark-phase-execute | Complexity: Complex (707 lines) | Autonomy: Level 5 (Full)
+</div>
+
+</body>
+</html>
