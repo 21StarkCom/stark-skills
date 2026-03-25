@@ -4,7 +4,10 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from generate_skill_docs import parse_skill_md, SkillData, discover_skills
+from generate_skill_docs import (
+    parse_skill_md, SkillData, discover_skills,
+    validate_html, sanitize_html, build_generation_prompt, VizResult,
+)
 
 FIXTURE = Path(__file__).parent.parent / "skill" / "stark-session" / "SKILL.md"
 
@@ -81,3 +84,82 @@ def test_discover_skills_filter_nonexistent():
     skill_dir = Path(__file__).parent.parent / "skill"
     skills = discover_skills(skill_dir, filter_name="nonexistent")
     assert len(skills) == 0
+
+
+# ── HTML validation & sanitization tests ───────────────────────────────
+
+
+def test_validate_html_valid():
+    html = '<html><body><div class="node-phase">Phase 1</div></body></html>'
+    assert validate_html(html) is True
+
+
+def test_sanitize_strips_scripts():
+    html = '<html><body><script>alert("xss")</script><div class="node-phase">ok</div></body></html>'
+    cleaned = sanitize_html(html)
+    assert "<script>" not in cleaned
+    assert "node-phase" in cleaned
+
+
+def test_sanitize_strips_event_handlers():
+    html = '<html><body><img onerror="alert(1)" class="node-phase"></body></html>'
+    cleaned = sanitize_html(html)
+    assert "onerror" not in cleaned
+
+
+def test_sanitize_strips_dangerous_tags():
+    html = '<html><body><iframe srcdoc="bad"></iframe><object data="x"></object><embed src="y"><meta http-equiv="refresh"><div class="node-phase">ok</div></body></html>'
+    cleaned = sanitize_html(html)
+    assert "<iframe" not in cleaned
+    assert "<object" not in cleaned
+    assert "<embed" not in cleaned
+    assert "<meta" not in cleaned
+
+
+def test_validate_html_rejects_no_html_tag():
+    assert validate_html("just some text") is False
+
+
+def test_validate_html_rejects_external_urls_in_attributes():
+    html = '<html><body><link href="https://fonts.googleapis.com/css" rel="stylesheet"><div class="node-phase"></div></body></html>'
+    assert validate_html(html) is False
+
+
+def test_validate_html_allows_urls_in_comments():
+    html = '<html><body><!-- based on https://example.com --><div class="node-phase">ok</div></body></html>'
+    assert validate_html(html) is True
+
+
+def test_validate_html_rejects_protocol_relative_urls():
+    html = '<html><body><link href="//fonts.google.com/css" rel="stylesheet"><div class="node-phase"></div></body></html>'
+    assert validate_html(html) is False
+
+
+def test_validate_html_rejects_data_uris_in_attributes():
+    html = '<html><body><img src="data:text/html,<script>alert(1)</script>"><div class="node-phase"></div></body></html>'
+    assert validate_html(html) is False
+
+
+def test_validate_html_rejects_javascript_urls():
+    html = '<html><body><a href="javascript:alert(1)">x</a><div class="node-phase"></div></body></html>'
+    assert validate_html(html) is False
+
+
+def test_build_generation_prompt():
+    FIXTURE = Path(__file__).parent.parent / "skill" / "stark-session" / "SKILL.md"
+    data = parse_skill_md(FIXTURE)
+    css = "body { color: black; }"
+    prompt = build_generation_prompt(data, audience="usage", css=css)
+    assert "usage" in prompt.lower()
+    assert "standalone HTML" in prompt
+    assert data.name in prompt
+    assert "mermaid" in prompt.lower()
+
+
+def test_build_generation_prompt_internals():
+    FIXTURE = Path(__file__).parent.parent / "skill" / "stark-session" / "SKILL.md"
+    data = parse_skill_md(FIXTURE)
+    css = "body { color: black; }"
+    prompt = build_generation_prompt(data, audience="internals", css=css)
+    assert "internals" in prompt.lower() or "contributor" in prompt.lower()
+    assert "mermaid" in prompt.lower()
