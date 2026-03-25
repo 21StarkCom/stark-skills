@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `generate_skill_docs.py` — multi-LLM documentation generator with visualization competition (#59, #60, #61, #62, #63, #64, #65, #66)
+- `/stark-generate-docs` skill for ongoing doc maintenance (#69)
+- Skill documentation for all 20 skills — Mermaid diagrams, HTML visualizations, PNG screenshots (#67, #68)
+- Routing guide with Mermaid decision trees for skill discovery (#66)
+- Git LFS tracking for skill documentation PNGs (#58)
+- Shared CSS design system for HTML visualizations (#58)
+
+### Changed
+- `CLAUDE.md` — added `/stark-generate-docs` to skills tables (#70)
+
 ## [v0.2.0] - 2026-03-22
 
 ### Added
