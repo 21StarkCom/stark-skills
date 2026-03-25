@@ -5,35 +5,10 @@ Rename a project locally and on GitHub, update all references in sibling repos, 
 ## Architecture
 
 ```mermaid
-graph TD
-  A[Start / Validate Args] --> B{Detect Resumable State}
-  B -->|Resume P3| G
-  B -->|Resume P2| E
-  B -->|Resume P3b| H
-  B -->|No Resume| C[Pre-flight Checks]
 
-  C --> D{Dry Run?}
-  D -->|Yes| DRY[Skip to Summaries]
-  D -->|No| E[Phase 2: GitHub Rename API]
-  
-  E --> F[Update Git Remotes via Perl]
-  F --> G[Phase 3a: mv Local Directory]
-  G --> H[Phase 3b: Uninstall Old Symlinks]
-  H --> I[Phase 4: Update Internal Ref Patterns]
-  
-  I --> J{Errors in install.sh?}
-  J -->|Yes| ERR[Halt Execution]
-  J -->|No| K[Phase 5: Find Sibling Repos]
-  
-  K --> L[Update Sibling Ref Patterns]
-  L --> M[Auto-commit Specific Files]
-  M --> N[Phase 6: Reinstall Symlinks via install.sh]
-  
-  N --> O[Phase 7: Verify Links, Remotes, Residuals]
-  O --> P[Phase 8: Summary Report]
 ```
 
-![A technical HTML visualization containing an execution flow diagram, data patterns grid, and resumable state table mapping out the stark-rename-project skill's internal architecture.](internals.png)
+![Internal architecture visualization for the stark-rename-project skill, showing an eight-phase rename pipeline from validation and resumable state detection through GitHub rename, local directory move, symlink cleanup, reference rewrites in the main and sibling repos, symlink reinstall, verification, and final summary; side panels call out deterministic vs heuristic replacement rules, failure gates, resume states, extension points, and operator-facing outputs."}}](internals.png)
 
 ## Phases
 

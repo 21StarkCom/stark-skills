@@ -1,9 +1,9 @@
 <html lang="en">
 <head>
-
-
-<title>stark-plan-to-tasks — Usage Visualization</title>
-<style>
+  
+  
+  <title>stark-plan-to-tasks — Usage Visualization</title>
+  <style>
 /*
  * Stark Skills — Shared Design System CSS
  *
@@ -45,9 +45,9 @@ body {
 }
 
 /* === Node Types === */
-.node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-.node-title { font-size: 12px; font-weight: 700; margin-bottom: 4px; }
-.node-desc { font-size: 10px; opacity: 0.9; }
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
 
 .node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
 .node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
@@ -59,27 +59,25 @@ body {
 /* === Flow Layout === */
 .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
 .flow-step {
-  display: flex; align-items: center;
+  display: flex; align-items: stretch;
   width: 100%; max-width: 860px; min-height: 76px;
 }
 .flow-lane-left {
-  width: 200px; display: flex;
+  width: 180px; display: flex;
   align-items: center; justify-content: flex-end;
   padding-right: 18px;
 }
 .flow-lane-center {
-  width: 460px; display: flex;
+  width: 500px; display: flex;
   align-items: center; justify-content: center;
 }
 .flow-lane-right {
-  width: 200px; display: flex;
-  align-items: center; padding-left: 18px;
+  width: 180px; display: flex; align-items: center; padding-left: 18px;
 }
 .annotation {
-  font-size: 10px; color: #555; max-width: 180px; line-height: 1.4;
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
 }
-.annotation strong { color: #222; }
-code { background: #f1f5f9; padding: 2px 4px; border-radius: 3px; font-family: monospace; font-size: 11px; color: #0f172a; }
+.annotation strong { color: #444; }
 
 /* === Arrows === */
 .arrow-down {
@@ -106,39 +104,34 @@ code { background: #f1f5f9; padding: 2px 4px; border-radius: 3px; font-family: m
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 16px; margin-top: 16px;
 }
-.card { padding: 16px; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+.card { padding: 16px; border-radius: 8px; }
 .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
-.card p  { font-size: 11px; line-height: 1.6; margin-bottom: 8px; }
-.card p:last-child { margin-bottom: 0; }
-.card ul { margin-left: 16px; font-size: 11px; margin-bottom: 8px; }
-.card li { margin-bottom: 4px; }
+.card p  { font-size: 11px; line-height: 1.6; }
 
-.card-blue   { background: #ffffff; border-left: 4px solid #1e40af; }
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
 .card-blue h3 { color: #1e40af; }
-.card-green  { background: #ffffff; border-left: 4px solid #059669; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
 .card-green h3 { color: #059669; }
-.card-purple { background: #ffffff; border-left: 4px solid #7c3aed; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
 .card-purple h3 { color: #7c3aed; }
-.card-amber  { background: #ffffff; border-left: 4px solid #f59e0b; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
 .card-amber h3 { color: #92400e; }
-.card-dark   { background: #ffffff; border-left: 4px solid #333333; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
 .card-dark h3 { color: #333333; }
-.card-red    { background: #ffffff; border-left: 4px solid #dc2626; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
 .card-red h3 { color: #dc2626; }
 
 /* === Data Tables === */
 .data-table {
-  width: 100%; max-width: 100%; margin: 16px 0;
+  width: 100%; max-width: 860px; margin: 16px auto;
   border-collapse: collapse; font-size: 11px;
-  background: #ffffff; border-radius: 8px; overflow: hidden;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 }
 .data-table th {
-  background: #f8fafc; padding: 10px 12px; text-align: left;
-  font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
 }
 .data-table td {
-  padding: 10px 12px; border-bottom: 1px solid #f1f5f9; color: #334155;
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
 }
 
 /* === Tags === */
@@ -153,213 +146,553 @@ code { background: #f1f5f9; padding: 2px 4px; border-radius: 3px; font-family: m
 .tag-output   { background: #fef3c7; color: #92400e; }
 .tag-external { background: #f3f4f6; color: #666666; }
 
+/* === Legend === */
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+/* === Summary Grid === */
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
+
+/* === Winner Badge === */
+.winner-badge {
+  display: inline-block; font-size: 12px; color: #555555;
+  font-weight: 600; padding: 2px 10px; border-radius: 4px;
+  background: #f9fafb; border: 1px solid #d1d5db;
+}
+
 /* === Footer === */
 .footer {
-  text-align: center; padding: 30px 20px;
-  font-size: 11px; color: #94a3b8; border-top: 1px solid #e2e8f0; margin-top: 40px;
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
 }
-</style>
+
+/* === Extensions === */
+.hero-panel {
+  background: linear-gradient(135deg, #eff6ff 0%, #ffffff 45%, #f5f3ff 100%);
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  padding: 22px;
+  box-shadow: 0 8px 24px rgba(30, 64, 175, 0.07);
+}
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1.3fr 0.9fr;
+  gap: 18px;
+  align-items: stretch;
+}
+.lead {
+  font-size: 13px;
+  color: #374151;
+  max-width: 60ch;
+}
+.metric-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-top: 16px;
+}
+.metric {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 12px;
+}
+.metric strong {
+  display: block;
+  font-size: 18px;
+  color: #111827;
+}
+.metric span {
+  display: block;
+  font-size: 10px;
+  color: #6b7280;
+  margin-top: 3px;
+}
+.callout-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.command-box, .mini-panel {
+  background: #111827;
+  color: #f9fafb;
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.command-box h3, .mini-panel h3 {
+  font-size: 11px;
+  color: #93c5fd;
+  margin-bottom: 8px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.command-box code, .mini-panel code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.mini-panel {
+  background: #0f172a;
+}
+.badge-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.kbd {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+}
+.list {
+  margin-top: 8px;
+  padding-left: 16px;
+}
+.list li {
+  font-size: 11px;
+  margin: 4px 0;
+}
+.dual-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.pill-line {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.note {
+  font-size: 10px;
+  color: #6b7280;
+  margin-top: 8px;
+}
+.emphasis {
+  color: #1e40af;
+  font-weight: 700;
+}
+.phase-band {
+  display: inline-block;
+  margin-bottom: 10px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: #1e40af;
+  background: #dbeafe;
+  padding: 4px 8px;
+  border-radius: 999px;
+}
+@media (max-width: 860px) {
+  .hero-grid, .dual-grid, .summary-grid, .metric-strip { grid-template-columns: 1fr; }
+  .flow-step { flex-direction: column; min-height: auto; gap: 8px; margin-bottom: 10px; }
+  .flow-lane-left, .flow-lane-center, .flow-lane-right {
+    width: 100%; justify-content: center; padding: 0;
+  }
+  .annotation { max-width: none; text-align: center; }
+}
+  </style>
 </head>
 <body>
+  <div class="header">
+    <h1>stark-plan-to-tasks</h1>
+    <div class="sub">Turn a markdown spec into phased GitHub issues, validate the breakdown, extract durable knowledge, then remove the plan.</div>
+    <div class="scope">USAGE VIEW · complex skill · 3 LLM passes + GitHub workflow</div>
+  </div>
 
-<div class="header">
-  <h1>stark-plan-to-tasks</h1>
-  <div class="sub">Decompose specs into phased GitHub issues and extract architectural knowledge.</div>
-  <div class="scope">Audience: Usage</div>
-</div>
+  <div class="container">
+    <section class="hero-panel">
+      <div class="hero-grid">
+        <div>
+          <div class="phase-band">What users invoke</div>
+          <p class="lead">
+            This skill is for the moment when a design doc is done and you want execution-ready work items. It reads one <span class="emphasis">`.md` plan</span>, blocks on missing detail, decomposes it into <span class="emphasis">phases + task issues</span>, labels and types each issue, optionally previews everything in dry-run mode, then enriches project docs and deletes the source plan.
+          </p>
+          <div class="badge-row">
+            <span class="tag tag-phase">quality gate first</span>
+            <span class="tag tag-decision">3 validation cycles max</span>
+            <span class="tag tag-output">issue preview in dry run</span>
+            <span class="tag tag-config">uses stark-claude app auth for validation</span>
+            <span class="tag tag-external">uses user gh auth for issue creation</span>
+          </div>
+          <div class="metric-strip">
+            <div class="metric">
+              <strong>7</strong>
+              <span>major phases in the workflow</span>
+            </div>
+            <div class="metric">
+              <strong>3</strong>
+              <span>LLM passes: gate, decompose, validate</span>
+            </div>
+            <div class="metric">
+              <strong>6</strong>
+              <span>story point sizes: 1, 2, 3, 5, 8, 13</span>
+            </div>
+            <div class="metric">
+              <strong>2</strong>
+              <span>auth modes: bot for checks, user for issue creation</span>
+            </div>
+          </div>
+        </div>
 
-<div class="container">
-  
-  <div class="card-grid">
+        <div class="callout-stack">
+          <div class="command-box">
+            <h3>Quick Start</h3>
+            <code>/stark-plan-to-tasks docs/2026-03-18-widget-system-design.md</code>
+          </div>
+          <div class="mini-panel">
+            <h3>Argument Hint</h3>
+            <code>&lt;path-to-spec&gt; [--dry-run] [--cleanup &lt;slug&gt;]</code>
+          </div>
+          <div class="mini-panel">
+            <h3>Typical Outcome</h3>
+            <code>phase tracking issues
+task issues with type + labels
+optional project field updates
+doc enrichment
+plan file deleted after success</code>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="section-title">Workflow Legend</div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-dot" style="background:#1e40af"></span>workflow step</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#7c3aed"></span>decision / branch</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#047857"></span>setup / config / auth</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#f59e0b"></span>output / artifact</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#dc2626"></span>hard stop / failure</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#e5e7eb; border:1px dashed #9ca3af"></span>external system</div>
+    </div>
+
+    <div class="section-title">End-to-End Flow</div>
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Input</strong><br></br>One markdown spec path. Optional <span class="kbd">--dry-run</span> or <span class="kbd">--cleanup</span>.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-config">
+            <div class="node-title">1. Setup & Detection</div>
+            <div class="node-desc">read plan, detect repo, verify gh, app auth, labels, docs tree, rerun mode</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-external">
+            <div class="node-title">GitHub + git checkout</div>
+            <div class="node-desc">repo identity must be confirmed</div>
+          </div>
+        </div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Gate</strong><br></br>No LLM work happens until setup passes.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">2. Plan Quality Gate</div>
+            <div class="node-desc">check completeness, file paths, decisions, dependencies, acceptance criteria, constraints</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-decision">
+            <div class="node-title">Pass?</div>
+            <div class="node-desc">up to 3 edit / revalidate rounds</div>
+          </div>
+        </div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="node node-failure">
+            <div class="node-title">Stop</div>
+            <div class="node-desc">plan too vague after 3 rounds</div>
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">3. Decomposition</div>
+            <div class="node-desc">identify phases, then tasks per phase with type, story points, risk, confidence, AI suitability</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Artifact</strong><br></br>Breakdown JSON written to a locked temp file.</div>
+        </div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Validation</strong><br></br>Separate agent checks coverage, overlap, self-containment, sizing, dependencies.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">4. Pass 3 Validation</div>
+            <div class="node-desc">re-dispatch after fixes, max 2 fix iterations, halt if not converged</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-output">
+            <div class="node-title">Dry Run Output</div>
+            <div class="node-desc">preview markdown in /tmp, no issues or file changes</div>
+          </div>
+        </div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Auth switch</strong><br></br>Unset <span class="kbd">GH_TOKEN</span> so issues are created as the user.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">5. Create Issues</div>
+            <div class="node-desc">create phase issues, create tasks, patch dependency links, update phase checklists</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-output">
+            <div class="node-title">GitHub Outputs</div>
+            <div class="node-desc">labels, typed issues, manifest, optional project field updates</div>
+          </div>
+        </div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Safety check</strong><br></br>Warn on dirty working tree before docs are touched.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">6. Knowledge Extraction</div>
+            <div class="node-desc">append architectural knowledge to docs, write decision record, commit specific files, remove plan</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-external">
+            <div class="node-title">docs/ tree</div>
+            <div class="node-desc">created or extended as needed</div>
+          </div>
+        </div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Terminal summary</strong><br></br>counts, story points, risk/confidence distributions, phase links, metrics log</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-output">
+            <div class="node-title">7. Summary & Cleanup</div>
+            <div class="node-desc">final report, temp cleanup, JSONL metrics persistence</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-failure">
+            <div class="node-title">Protected Failures</div>
+            <div class="node-desc">partial state tracked; unsafe creation stops are explicit</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">Invocation Modes</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Mode</th>
+          <th>When to use it</th>
+          <th>Main effect</th>
+          <th>Stops before</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="tag tag-phase">standard</span></td>
+          <td>Ready to turn an approved plan into executable work</td>
+          <td>Creates issues, enriches docs, deletes plan, commits local doc extraction</td>
+          <td>Only on validation or setup failures</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-output">--dry-run</span></td>
+          <td>Want to inspect issue bodies and labels first</td>
+          <td>Runs all three passes and writes a preview markdown file in <span class="kbd">/tmp</span></td>
+          <td>Issue creation and file modification</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-decision">--cleanup &lt;slug&gt;</span></td>
+          <td>Need to find old issues tied to a previous plan slug</td>
+          <td>Lists issues with <span class="kbd">plan:{slug}</span> and offers to close them</td>
+          <td>New decomposition work</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="section-title">What You Must Provide</div>
+    <div class="card-grid">
+      <div class="card card-blue">
+        <h3>Input File</h3>
+        <p>The first argument is required, must exist, must be non-empty, and must end in <span class="kbd">.md</span>. The skill reads the full plan and treats it as the source of truth.</p>
+      </div>
+      <div class="card card-green">
+        <h3>GitHub Access</h3>
+        <p><span class="kbd">gh</span> must be installed. The <span class="kbd">stark-claude</span> GitHub App must be installed on the target repo with write access for checks, labels, and project mutations.</p>
+      </div>
+      <div class="card card-purple">
+        <h3>Validation Agent</h3>
+        <p>Configured validation CLIs such as <span class="kbd">codex</span> must exist in <span class="kbd">PATH</span>. Missing agents fail early before decomposition continues.</p>
+      </div>
+      <div class="card card-amber">
+        <h3>Plan Quality</h3>
+        <p>The plan must already answer concrete implementation questions. This skill will not invent architecture or fill in vague sections.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Issue Payload Shape</div>
+    <div class="dual-grid">
+      <div class="card card-dark">
+        <h3>Per Task Fields</h3>
+        <ul class="list">
+          <li><strong>Identity:</strong> stable <span class="kbd">task_id</span>, title, phase</li>
+          <li><strong>Context:</strong> what, why, where, how</li>
+          <li><strong>Done signal:</strong> up to 5 acceptance criteria</li>
+          <li><strong>Risk model:</strong> story points, risk, confidence</li>
+          <li><strong>Execution hint:</strong> AI suitability + review hints</li>
+          <li><strong>Links:</strong> dependency task IDs, then patched GitHub issue numbers</li>
+        </ul>
+      </div>
+      <div class="card card-dark">
+        <h3>GitHub Issue Outcome</h3>
+        <ul class="list">
+          <li>Native issue type: <span class="kbd">Task</span>, <span class="kbd">Bug</span>, or <span class="kbd">Feature</span></li>
+          <li>Labels: story points, risk, confidence, traceability, metadata</li>
+          <li>Phase tracking issue created first for checklist anchoring</li>
+          <li>Run manifest stored in the breakdown temp file for resumability</li>
+          <li>Optional GitHub Project fields populated after creation</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-title">Common User Workflows</div>
+    <div class="summary-grid">
+      <div class="summary-card card-blue">
+        <h3>1. Preview First</h3>
+        <p>Run with <span class="kbd">--dry-run</span> when the plan is probably good but you want to inspect sizing, labels, and issue wording before any GitHub mutation.</p>
+      </div>
+      <div class="summary-card card-purple">
+        <h3>2. Rerun an Updated Plan</h3>
+        <p>If issues already exist for the derived plan slug, the skill stops and asks whether to skip, update existing issues, or create a fresh parallel set.</p>
+      </div>
+      <div class="summary-card card-green">
+        <h3>3. Clean Up Older Runs</h3>
+        <p>Use <span class="kbd">--cleanup &lt;slug&gt;</span> to find traceable issues by <span class="kbd">plan:{slug}</span> and close them with a standard cleanup comment.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Guardrails That Matter To Users</div>
+    <div class="card-grid">
+      <div class="card card-red">
+        <h3>No Silent Progress on Bad Plans</h3>
+        <p>Weak plans stop at the quality gate after at most three user revision rounds. The skill refuses to invent missing implementation detail.</p>
+      </div>
+      <div class="card card-red">
+        <h3>No Issue Creation on Failed Validation</h3>
+        <p>If validation cannot converge after two fix iterations, issue creation is blocked. Remaining problems are surfaced instead of producing shaky tickets.</p>
+      </div>
+      <div class="card card-amber">
+        <h3>Creation Is Resume-Friendly</h3>
+        <p>Partial issue creation is tracked in a manifest so a rerun can skip already-created task issues instead of duplicating everything blindly.</p>
+      </div>
+      <div class="card card-blue">
+        <h3>Plan Deletion Happens Late</h3>
+        <p>The plan is only removed after successful issue creation and doc enrichment. If the commit fails, the plan is intentionally not deleted.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Arguments</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Argument</th>
+          <th>Required</th>
+          <th>Meaning</th>
+          <th>User expectation</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="kbd">&lt;path-to-spec&gt;</span></td>
+          <td>Yes</td>
+          <td>Markdown plan or design doc to decompose</td>
+          <td>Must point to a readable non-empty <span class="kbd">.md</span> file</td>
+        </tr>
+        <tr>
+          <td><span class="kbd">--dry-run</span></td>
+          <td>No</td>
+          <td>Preview generated issues and run validation without mutating repo or docs</td>
+          <td>Outputs preview markdown under <span class="kbd">/tmp/stark-plan-to-tasks-preview-{slug}.md</span></td>
+        </tr>
+        <tr>
+          <td><span class="kbd">--cleanup &lt;slug&gt;</span></td>
+          <td>No</td>
+          <td>Find issues previously tied to a plan slug and offer cleanup</td>
+          <td>Useful when replacing an older decomposition run</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="section-title">Outputs You See</div>
+    <div class="card-grid">
+      <div class="card card-amber">
+        <h3>In GitHub</h3>
+        <p>Phase tracking issues, task issues, labels, dependency links, and possibly project field updates if <span class="kbd">.github/project-config.json</span> exists.</p>
+      </div>
+      <div class="card card-green">
+        <h3>In Your Repo</h3>
+        <p>Appended or newly created docs under <span class="kbd">docs/</span>, a decision record entry, and a local commit that adds only the touched documentation files plus the removed plan.</p>
+      </div>
+      <div class="card card-purple">
+        <h3>In Temp and Logs</h3>
+        <p>Breakdown JSON, validation envelope, optional preview markdown, and a JSONL observability record with durations, counts, and distributions.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Fast Mental Model</div>
     <div class="card card-dark">
-      <h3>Invocation</h3>
-      <p>Invoke via natural language or explicitly via CLI:</p>
-      <code>/stark-plan-to-tasks &lt;path-to-spec&gt; [options]</code>
-      <br><br>
-      <p><strong>Natural language:</strong> <em>"break down this plan", "create issues from spec", "plan to tasks"</em></p>
-    </div>
-    <div class="card card-blue">
-      <h3>Options</h3>
-      <ul>
-        <li><code>--dry-run</code> : Run all 3 LLM passes, validate, preview the output to a temporary markdown file, but <strong>stop before modifying any repo files or creating issues</strong>.</li>
-        <li><code>--cleanup &lt;slug&gt;</code> : Find and close obsolete issues labeled with a specific plan slug.</li>
-      </ul>
+      <h3>The skill behaves like a controlled funnel</h3>
+      <p>It narrows a single approved plan into a validated execution graph. Every stage either strengthens confidence or aborts with a concrete reason. For end users, the key choice is simple: preview with <span class="kbd">--dry-run</span> if you are unsure, or run normally when the plan is already implementation-grade.</p>
+      <div class="pill-line">
+        <span class="winner-badge">Best for approved specs</span>
+        <span class="winner-badge">Not for brainstorming</span>
+        <span class="winner-badge">Best when repo + gh auth are already healthy</span>
+      </div>
+      <div class="note">Native GitHub Issue Types are used for Task, Bug, and Feature. The skill explicitly avoids creating type labels like <span class="kbd">type:task</span>.</div>
     </div>
   </div>
 
-  <h2 class="section-title">The User Journey (End-to-End Workflow)</h2>
-  <div class="flow">
-    
-    <!-- Step 1 -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="annotation">User provides a `.md` plan file. System authenticates.</div>
-      </div>
-      <div class="flow-lane-center">
-        <div class="node node-config">
-          <div class="node-title">1. Setup & Ingestion</div>
-          <div class="node-desc">Reads plan, detects target GitHub repository</div>
-        </div>
-      </div>
-      <div class="flow-lane-right"></div>
-    </div>
-    
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-    
-    <!-- Step 2 -->
-    <div class="flow-step">
-      <div class="flow-lane-left"></div>
-      <div class="flow-lane-center">
-        <div class="node node-phase">
-          <div class="node-title">2. Plan Quality Gate (LLM Pass 1)</div>
-          <div class="node-desc">Checks for missing decisions, vague paths, completeness</div>
-        </div>
-      </div>
-      <div class="flow-lane-right">
-        <div class="annotation"><strong>Checklist Failure:</strong> Skill pauses and asks user to clarify missing details in the plan file.</div>
-      </div>
-    </div>
-
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-    
-    <!-- Step 3 -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="annotation">Plan broken down into logical phases and scoped tasks.</div>
-      </div>
-      <div class="flow-lane-center">
-        <div class="node node-decision">
-          <div class="node-title">3. Decomposition (LLM Pass 2)</div>
-          <div class="node-desc">Generates JSON phases, tasks, story points, constraints</div>
-        </div>
-      </div>
-      <div class="flow-lane-right"></div>
-    </div>
-
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Step 4 -->
-    <div class="flow-step">
-      <div class="flow-lane-left"></div>
-      <div class="flow-lane-center">
-        <div class="node node-phase">
-          <div class="node-title">4. Validation (LLM Pass 3)</div>
-          <div class="node-desc">Adversarial agent checks dependencies, coverage, sizing</div>
-        </div>
-      </div>
-      <div class="flow-lane-right">
-         <div class="annotation">Ensures no orphans, no circular dependencies, proper sizing.</div>
-      </div>
-    </div>
-
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Step 5 -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-         <div class="annotation"><strong>Output Artifacts:</strong><br></br>- Labels created<br></br>- Phase Issues created<br></br>- Task Issues created</div>
-      </div>
-      <div class="flow-lane-center">
-        <div class="node node-output">
-          <div class="node-title">5. GitHub Issue Creation</div>
-          <div class="node-desc">Auth as user, create issues, link dependencies, add to GH Projects</div>
-        </div>
-      </div>
-      <div class="flow-lane-right"></div>
-    </div>
-
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Step 6 -->
-    <div class="flow-step">
-      <div class="flow-lane-left"></div>
-      <div class="flow-lane-center">
-        <div class="node node-decision">
-          <div class="node-title">6. Knowledge Extraction</div>
-          <div class="node-desc">Extracts schemas, API contracts, ADRs into docs/ directory</div>
-        </div>
-      </div>
-      <div class="flow-lane-right">
-         <div class="annotation"><strong>Cleanup:</strong> Deletes the original plan.md file and performs a local git commit.</div>
-      </div>
-    </div>
-
-  </div>
-
-  <h2 class="section-title">What Gets Generated? (Outputs)</h2>
-  
-  <div class="card-grid">
-    <div class="card card-green">
-      <h3>GitHub Issues & Labels</h3>
-      <p>Creates Phase tracking issues and deeply detailed Task issues. Auto-provisions required labels:</p>
-      <ul>
-        <li><strong>Sizing:</strong> <code>sp:1</code> to <code>sp:13</code> (Fibonacci)</li>
-        <li><strong>Risk:</strong> <code>risk:low</code>, <code>risk:med</code>, <code>risk:high</code></li>
-        <li><strong>Confidence:</strong> <code>confidence:low</code> to <code>high</code></li>
-        <li><strong>Traceability:</strong> <code>plan:slug</code></li>
-      </ul>
-      <p>Uses native GH Types (Bug, Feature, Task).</p>
-    </div>
-    <div class="card card-purple">
-      <h3>GitHub Project Integration</h3>
-      <p>Automatically maps tasks to fields (if <code>.github/project-config.json</code> is present):</p>
-      <ul>
-        <li><strong>Status:</strong> Backlog / Ready for Agent</li>
-        <li><strong>Phase:</strong> Matches decomposition</li>
-        <li><strong>AI Suitability:</strong> Autonomous / Assisted / Human-led</li>
-        <li><strong>Priority:</strong> Derived from risk</li>
-      </ul>
-    </div>
-    <div class="card card-amber">
-      <h3>Living Documentation</h3>
-      <p>Deletes the transient plan file and persists the architectural decisions locally. Performs a local commit with:</p>
-      <ul>
-        <li><code>docs/decisions.md</code> (Tracking record)</li>
-        <li><code>docs/adr/*</code> (Architectural decisions)</li>
-        <li><code>docs/data-model.md</code> (Schemas)</li>
-        <li><code>docs/api.md</code> (API Contracts)</li>
-      </ul>
-    </div>
-  </div>
-
-  <h2 class="section-title">Issue Classifications</h2>
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th>Classification</th>
-        <th>Values</th>
-        <th>Description</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td><strong>GitHub Issue Type</strong></td>
-        <td><code>Feature</code>, <code>Task</code>, <code>Bug</code></td>
-        <td>Feature = new capability. Task = refactoring/infra/docs. Bug = fixing explicit defects.</td>
-      </tr>
-      <tr>
-        <td><strong>AI Suitability</strong></td>
-        <td><code>Autonomous</code>, <code>Assisted</code>, <code>Human-led</code></td>
-        <td>Autonomous = AI can do it 100%. Assisted = Needs guidance. Human-led = Needs PM/UX input.</td>
-      </tr>
-      <tr>
-        <td><strong>Story Points</strong></td>
-        <td><code>1, 2, 3, 5, 8, 13</code></td>
-        <td>Fibonacci scale based on complexity and unknowns.</td>
-      </tr>
-      <tr>
-        <td><strong>Risk & Confidence</strong></td>
-        <td><code>Low</code>, <code>Medium</code>, <code>High</code></td>
-        <td>Evaluates technical risk and the LLM's confidence that the task is fully specified.</td>
-      </tr>
-    </tbody>
-  </table>
-
-</div>
-
-<div class="footer">
-  Stark Skills Visualizer • stark-plan-to-tasks • Usage Overview
-</div>
-
+  <div class="footer"><div class="winner-badge">Visualization by Codex · Score: 8.5/10 · Generated from SKILL.md</div></div>
 </body>
 </html>

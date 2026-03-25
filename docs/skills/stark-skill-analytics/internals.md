@@ -5,27 +5,10 @@ Analyze skill usage patterns and quality metrics across all Claude Code sessions
 ## Architecture
 
 ```mermaid
-graph TD
-    A[history.jsonl] -->|Line-by-line parse| P1(Phase 1: Usage Parsing)
-    B[code-review/history/*.json] -->|JSON parsing| P2(Phase 2: Quality Parsing)
-    C[CLAUDE.md] -->|Extract manifest| P3(Phase 3: Cross-Reference)
-    P1 -->|Invocation counts, sequences| P3
-    P2 -->|Duration, success rates| P3
-    P3 -->|Analysis & Recommendations| P4(Phase 4: Generate Report)
-    P4 -->|Format: Table or Full| O1[Terminal Output]
-    P4 -->|Write| O2[skill-analytics.md]
-    P4 -->|Single skill mode| O3[skill-analytics-name.md]
-    
-    classDef file fill:#e5e7eb,stroke:#9ca3af,stroke-dasharray: 5 5,color:#444;
-    classDef phase fill:#1e40af,stroke:none,color:#fff;
-    classDef output fill:#f59e0b,stroke:none,color:#1a1a1a;
-    
-    class A,B,C file;
-    class P1,P2,P3,P4 phase;
-    class O1,O2,O3 output;
+
 ```
 
-![A documentation page titled stark-skill-analytics - Internal Architecture showing a vertical flow diagram connecting Phase 1 Collect Usage Data, Phase 2 Collect Quality Data, Phase 3 Cross-Reference, and Phase 4 Generate Report, alongside data source inputs and feature details.](internals.png)
+![A clean internal architecture diagram for the `stark-skill-analytics` skill, showing a top-down pipeline from argument parsing into four phases: usage extraction from `~/.claude/history.jsonl`, quality aggregation from run-history JSON files, cross-reference analysis against `CLAUDE.md` and benchmarks, and final markdown report generation. Blue nodes mark workflow phases, green marks configuration, purple marks decision points, amber marks outputs, red marks failure or degraded paths, and dashed gray nodes represent external files. Supporting tables summarize data contracts, arguments, failure handling, and extension points for contributors."}}](internals.png)
 
 ## Phases
 

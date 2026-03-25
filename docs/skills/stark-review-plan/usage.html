@@ -4,400 +4,347 @@
   
   <title>stark-review-plan — Usage Visualization</title>
   <style>
-    /*
-     * Stark Skills — Shared Design System CSS
-     *
-     * Foundation styles for LLM-generated HTML skill visualizations.
-     * LLMs embed this inline and may extend with additional styles.
-     * All colors pass WCAG AA 4.5:1 contrast ratio.
-     *
-     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
-     */
+/*
+ * Stark Skills — Shared Design System CSS
+ *
+ * Foundation styles for LLM-generated HTML skill visualizations.
+ * LLMs embed this inline and may extend with additional styles.
+ * All colors pass WCAG AA 4.5:1 contrast ratio.
+ *
+ * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+ */
 
-    /* === Reset & Base === */
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #fafafa;
-      color: #1a1a1a;
-      line-height: 1.5;
-    }
+/* === Reset & Base === */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
 
-    /* === Header === */
-    .header { text-align: center; padding: 36px 20px 16px; }
-    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
-    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
-    .header .scope {
-      display: inline-block; font-size: 10px; font-weight: 600;
-      background: #eff6ff; color: #1e40af;
-      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
-    }
+/* === Header === */
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
 
-    /* === Container === */
-    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+/* === Container === */
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
 
-    /* === Section Title === */
-    .section-title {
-      font-size: 14px; font-weight: 700; color: #666;
-      text-transform: uppercase; letter-spacing: 1px;
-      margin: 32px 0 16px; padding-bottom: 6px;
-      border-bottom: 2px solid #e5e7eb;
-    }
+/* === Section Title === */
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
 
-    /* === Node Types === */
-    .node { border-radius: 8px; padding: 12px 16px; text-align: center; }
-    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
-    .node-desc { font-size: 10px; opacity: 0.8; }
+/* === Node Types === */
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
 
-    .node-phase    { background: #1e40af; color: #ffffff; }
-    .node-decision { background: #7c3aed; color: #ffffff; }
-    .node-failure  { background: #dc2626; color: #ffffff; }
-    .node-config   { background: #047857; color: #ffffff; }
-    .node-output   { background: #f59e0b; color: #1a1a1a; }
-    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
+.node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+.node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+.node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+.node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
+.node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
 
-    /* === Flow Layout === */
-    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
-    .flow-step {
-      display: flex; align-items: stretch;
-      width: 100%; max-width: 860px; min-height: 76px;
-    }
-    .flow-lane-left {
-      width: 180px; display: flex;
-      align-items: center; justify-content: flex-end;
-      padding-right: 18px;
-    }
-    .flow-lane-center {
-      width: 500px; display: flex;
-      align-items: center; justify-content: center;
-    }
-    .flow-lane-right {
-      width: 180px; display: flex; align-items: center; padding-left: 18px;
-    }
-    .annotation {
-      font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
-    }
-    .annotation strong { color: #444; }
+/* === Flow Layout === */
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 180px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 180px; display: flex; align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
 
-    /* === Arrows === */
-    .arrow-down {
-      width: 2px; height: 20px; background: #cbd5e1;
-      margin: 0 auto; position: relative;
-    }
-    .arrow-down::after {
-      content: ''; position: absolute; bottom: -4px; left: -4px;
-      border-left: 5px solid transparent;
-      border-right: 5px solid transparent;
-      border-top: 6px solid #cbd5e1;
-    }
-    .arrow-container {
-      display: flex; justify-content: center;
-      width: 100%; max-width: 860px;
-    }
-    .arrow-container .flow-lane-center {
-      display: flex; justify-content: center;
-    }
+/* === Arrows === */
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
 
-    /* === Cards === */
-    .card-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 16px; margin-top: 16px;
-    }
-    .card { padding: 16px; border-radius: 8px; }
-    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
-    .card p  { font-size: 11px; line-height: 1.6; }
+/* === Cards === */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
 
-    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
-    .card-blue h3 { color: #1e40af; }
-    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
-    .card-green h3 { color: #059669; }
-    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
-    .card-purple h3 { color: #7c3aed; }
-    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
-    .card-amber h3 { color: #92400e; }
-    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
-    .card-dark h3 { color: #333333; }
-    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
-    .card-red h3 { color: #dc2626; }
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
 
-    /* === Data Tables === */
-    .data-table {
-      width: 100%; max-width: 860px; margin: 16px auto;
-      border-collapse: collapse; font-size: 11px;
-    }
-    .data-table th {
-      background: #f3f4f6; padding: 8px 12px; text-align: left;
-      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
-    }
-    .data-table td {
-      padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
-      vertical-align: top;
-    }
+/* === Data Tables === */
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
 
-    /* === Tags === */
-    .tag {
-      display: inline-block; font-size: 9px; font-weight: 600;
-      padding: 2px 8px; border-radius: 3px;
-    }
-    .tag-phase    { background: #dbeafe; color: #1e40af; }
-    .tag-decision { background: #ede9fe; color: #5b21b6; }
-    .tag-failure  { background: #fee2e2; color: #991b1b; }
-    .tag-config   { background: #d1fae5; color: #065f46; }
-    .tag-output   { background: #fef3c7; color: #92400e; }
-    .tag-external { background: #f3f4f6; color: #666666; }
+/* === Tags === */
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
 
-    /* === Legend === */
-    .legend {
-      display: flex; gap: 16px; justify-content: center;
-      margin: 16px 0 24px; flex-wrap: wrap;
-    }
-    .legend-item {
-      display: flex; align-items: center; gap: 6px;
-      font-size: 10px; color: #666;
-    }
-    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+/* === Legend === */
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
 
-    /* === Summary Grid === */
-    .summary-grid {
-      display: grid; grid-template-columns: 1fr 1fr 1fr;
-      gap: 16px; margin-top: 16px;
-    }
-    .summary-card { padding: 16px; border-radius: 8px; }
-    .summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
-    .summary-card p  { font-size: 11px; line-height: 1.5; }
+/* === Summary Grid === */
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
 
-    /* === Winner Badge === */
-    .winner-badge {
-      display: inline-block; font-size: 12px; color: #555555;
-      font-weight: 600; padding: 2px 10px; border-radius: 4px;
-      background: #f9fafb; border: 1px solid #d1d5db;
-    }
+/* === Winner Badge === */
+.winner-badge {
+  display: inline-block; font-size: 12px; color: #555555;
+  font-weight: 600; padding: 2px 10px; border-radius: 4px;
+  background: #f9fafb; border: 1px solid #d1d5db;
+}
 
-    /* === Footer === */
-    .footer {
-      text-align: center; padding: 20px;
-      font-size: 10px; color: #999;
-    }
+/* === Footer === */
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
 
-    /* === Extensions === */
-    .hero-grid {
-      display: grid;
-      grid-template-columns: 1.3fr 1fr;
-      gap: 16px;
-      margin-top: 18px;
-    }
-    .node-action {
-      background: #0f766e;
-      color: #ffffff;
-    }
-    .mini-list {
-      margin-top: 8px;
-      padding-left: 16px;
-      font-size: 11px;
-      color: #333;
-    }
-    .mini-list li { margin: 5px 0; }
-    .code-chip {
-      display: inline-block;
-      background: #111827;
-      color: #f9fafb;
-      border-radius: 6px;
-      padding: 8px 10px;
-      font-size: 11px;
-      line-height: 1.4;
-      margin-top: 8px;
-      word-break: break-word;
-    }
-    .pill-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 10px;
-    }
-    .pill {
-      font-size: 10px;
-      font-weight: 600;
-      border-radius: 999px;
-      padding: 5px 10px;
-      background: #f3f4f6;
-      color: #374151;
-    }
-    .callout {
-      max-width: 860px;
-      margin: 18px auto 0;
-      padding: 14px 16px;
-      border-radius: 8px;
-      background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
-      border: 1px solid #dbeafe;
-      font-size: 11px;
-      color: #1f2937;
-    }
-    .metrics-strip {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 12px;
-      margin-top: 16px;
-    }
-    .metric {
-      background: #ffffff;
-      border: 1px solid #e5e7eb;
-      border-radius: 8px;
-      padding: 14px;
-      text-align: center;
-    }
-    .metric .num {
-      font-size: 18px;
-      font-weight: 700;
-      color: #1e40af;
-    }
-    .metric .label {
-      font-size: 10px;
-      color: #666;
-      text-transform: uppercase;
-      letter-spacing: 0.7px;
-      margin-top: 4px;
-    }
-    .two-col {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
-      margin-top: 16px;
-    }
-    .workflow-box {
-      background: #fff;
-      border: 1px solid #e5e7eb;
-      border-radius: 8px;
-      padding: 16px;
-    }
-    .workflow-box h3 {
-      font-size: 13px;
-      margin-bottom: 8px;
-    }
-    .workflow-box ol {
-      padding-left: 18px;
-      font-size: 11px;
-      color: #333;
-    }
-    .workflow-box li { margin: 6px 0; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-    .center-note {
-      text-align: center;
-      font-size: 11px;
-      color: #666;
-      margin-top: 8px;
-    }
-
-    @media (max-width: 920px) {
-      .hero-grid,
-      .summary-grid,
-      .two-col,
-      .metrics-strip {
-        grid-template-columns: 1fr;
-      }
-      .flow-step {
-        flex-direction: column;
-        min-height: auto;
-        gap: 8px;
-        margin: 8px 0;
-      }
-      .flow-lane-left,
-      .flow-lane-center,
-      .flow-lane-right {
-        width: 100%;
-        padding: 0;
-        justify-content: center;
-      }
-      .annotation {
-        max-width: 100%;
-        text-align: center;
-      }
-    }
+/* === Extensions === */
+.hero-strip {
+  max-width: 860px;
+  margin: 18px auto 0;
+  padding: 16px 18px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #eff6ff 0%, #f5f3ff 52%, #ecfdf5 100%);
+  border: 1px solid #dbeafe;
+}
+.hero-strip p {
+  font-size: 12px;
+  color: #334155;
+}
+.kpi {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1a1a1a;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+.kpi-sub {
+  font-size: 10px;
+  color: #666;
+}
+.inline-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: #f3f4f6;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.callout {
+  max-width: 860px;
+  margin: 16px auto 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  font-size: 11px;
+  color: #7c2d12;
+}
+.small-list {
+  margin-top: 8px;
+  padding-left: 16px;
+}
+.small-list li {
+  margin: 4px 0;
+  font-size: 11px;
+  color: #374151;
+}
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (max-width: 900px) {
+  .summary-grid { grid-template-columns: 1fr; }
+  .flow-step {
+    flex-direction: column;
+    min-height: auto;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .flow-lane-left,
+  .flow-lane-center,
+  .flow-lane-right {
+    width: 100%;
+    justify-content: center;
+    padding: 0;
+  }
+  .annotation {
+    max-width: none;
+    text-align: center;
+  }
+}
   </style>
 </head>
 <body>
   <div class="header">
     <h1>stark-review-plan</h1>
-    <div class="sub">Multi-agent design document review with autonomous fix loops, final validation, and persisted review artifacts.</div>
-    <div class="scope">USAGE VIEW • how to invoke, what happens, what you get back</div>
+    <div class="sub">Multi-agent design document review for plans and specs, with optional autonomous fix rounds.</div>
+    <div class="scope">USAGE VIEW</div>
   </div>
 
   <div class="container">
-    <div class="hero-grid">
-      <div class=""card" card-blue">
-        <h3>When To Use It</h3>
-        <p>Use this skill when you want a plan or spec stress-tested before implementation. It dispatches 21 reviewers in parallel: 3 LLMs across 7 review domains, classifies real issues vs noise, applies fixes for up to N rounds, then runs a final review-only pass.</p>
-        <div class="pill-row">
-          <span class="pill">"review this plan"</span>
-          <span class="pill">"review this spec"</span>
-          <span class="pill">"review design doc"</span>
-          <span class="pill">/stark-review-plan</span>
-        </div>
-        <div class=""code-chip" mono">/stark-review-plan &lt;path&gt; [--rounds N] [--dry-run] [--force]</div>
-      </div>
+    <div class="hero-strip">
+      <p><strong>What it does:</strong> You point the skill at a markdown plan or spec, and it runs <span class="winner-badge">21 reviewers in parallel</span> across <strong>3 LLMs × 7 domains</strong>. It can classify findings, patch the plan for several rounds, run one final review-only pass, then produce a terminal summary, a <span class="inline-code">.review.md</span> file, PR comments, and history artifacts.</p>
+    </div>
 
-      <div class=""card" card-green">
-        <h3>What You Provide</h3>
-        <ul class="mini-list">
-          <li><span class="mono">&lt;path&gt;</span> to a markdown plan or design doc</li>
-          <li>Optional <span class="mono">--rounds N</span> to cap fix cycles</li>
-          <li>Optional <span class="mono">--dry-run</span> for review only</li>
-          <li>Optional <span class="mono">--force</span> to bypass dirty-file protection</li>
-        </ul>
-        <h3 style="margin-top:12px;">What You Get</h3>
-        <ul class="mini-list">
-          <li>Terminal summary with issue/noise counts</li>
-          <li><span class="mono">.review.md</span> file beside the plan</li>
-          <li>Round history and metrics</li>
-          <li>Optional PR comments per agent and orchestrator</li>
-        </ul>
+    <div class="section-title">At a Glance</div>
+    <div class="summary-grid">
+      <div class="summary-card card-green">
+        <div class="kpi">1 command</div>
+        <h3>How to invoke</h3>
+        <p><span class="inline-code">/stark-review-plan &lt;path&gt;</span><br></br>Add <span class="inline-code">--rounds N</span>, <span class="inline-code">--dry-run</span>, or <span class="inline-code">--force</span> as needed.</p>
+      </div>
+      <div class="summary-card card-blue">
+        <div class="kpi">21</div>
+        <h3>Parallel reviewers</h3>
+        <p>Claude, Codex, and Gemini each review the plan across seven specialized domains, then the orchestrator merges and classifies the results.</p>
+      </div>
+      <div class="summary-card card-amber">
+        <div class="kpi">4 outputs</div>
+        <h3>What you receive</h3>
+        <p>Console summary, optional review file, optional PR comments per bot identity, and saved review history for later analysis.</p>
       </div>
     </div>
 
-    <div class="section-title">At A Glance</div>
-    <div class="metrics-strip">
-      <div class="metric">
-        <div class="num">21</div>
-        <div class="label">Parallel Reviewers</div>
-      </div>
-      <div class="metric">
-        <div class="num">3×7</div>
-        <div class="label">Models × Domains</div>
-      </div>
-      <div class="metric">
-        <div class="num">3</div>
-        <div class="label">Default Fix Rounds</div>
-      </div>
-      <div class="metric">
-        <div class="num">1</div>
-        <div class="label">Final Review Pass</div>
-      </div>
-    </div>
+    <div class="section-title">Inputs and Arguments</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Argument</th>
+          <th>Required</th>
+          <th>What the user controls</th>
+          <th>Typical use</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="mono">&lt;path&gt;</span></td>
+          <td>Yes</td>
+          <td>Target markdown design doc or plan file</td>
+          <td>Review a spec such as <span class="mono">docs/specs/payment-plan.md</span></td>
+        </tr>
+        <tr>
+          <td><span class="mono">--rounds N</span></td>
+          <td>No</td>
+          <td>Maximum fix cycles before the final review-only pass</td>
+          <td>Increase when a complex plan needs more than 3 repair rounds</td>
+        </tr>
+        <tr>
+          <td><span class="mono">--dry-run</span></td>
+          <td>No</td>
+          <td>Review only, with no edits, no PR posting, and no review file</td>
+          <td>Preview findings before allowing changes</td>
+        </tr>
+        <tr>
+          <td><span class="mono">--force</span></td>
+          <td>No</td>
+          <td>Allows review to proceed even when the plan file has uncommitted changes</td>
+          <td>Use when you deliberately want to review a dirty working copy</td>
+        </tr>
+      </tbody>
+    </table>
 
-    <div class="section-title">Legend</div>
+    <div class="section-title">Workflow</div>
     <div class="legend">
-      <div class="legend-item"><span class="legend-dot" style="background:#1e40af;"></span> Workflow phase</div>
-      <div class="legend-item"><span class="legend-dot" style="background:#7c3aed;"></span> Decision point</div>
-      <div class="legend-item"><span class="legend-dot" style="background:#0f766e;"></span> User-visible action</div>
-      <div class="legend-item"><span class="legend-dot" style="background:#f59e0b;"></span> Output artifact</div>
-      <div class="legend-item"><span class="legend-dot" style="background:#dc2626;"></span> Failure path</div>
-      <div class="legend-item"><span class="legend-dot" style="background:#047857;"></span> Configuration / flags</div>
+      <div class="legend-item"><span class="legend-dot node-config"></span>Invocation / config</div>
+      <div class="legend-item"><span class="legend-dot node-phase"></span>Execution phase</div>
+      <div class="legend-item"><span class="legend-dot node-decision"></span>Decision</div>
+      <div class="legend-item"><span class="legend-dot node-output"></span>User-visible output</div>
+      <div class="legend-item"><span class="legend-dot node-failure"></span>Failure path</div>
+      <div class="legend-item"><span class="legend-dot node-external"></span>External dependency</div>
     </div>
 
-    <div class="section-title">User Workflow</div>
     <div class="flow">
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation"><strong>Start here</strong><br></br>Pass a markdown plan path. The skill validates the file before anything else happens.</div>
+          <div class="annotation"><strong>Start</strong><br></br>User says “review this plan” or runs the slash command.</div>
         </div>
         <div class="flow-lane-center">
-          <div class=""node" node-action" style=""width:" 100%;">
-            <div class="node-title">Invoke Skill</div>
-            <div class=""node-desc" mono">/stark-review-plan docs/spec.md --rounds 2</div>
+          <div class="node node-config">
+            <div class="node-title">Invoke skill</div>
+            <div class="node-desc">/stark-review-plan &lt;path&gt; [--rounds N] [--dry-run] [--force]</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="annotation"><span class=""tag" tag-config">Required</span><br></br><span class="mono">&lt;path&gt;</span></div>
+          <div class="annotation"><strong>Input</strong><br></br>A readable markdown file path is mandatory.</div>
         </div>
       </div>
 
@@ -405,16 +352,19 @@
 
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation">Checks file existence, readability, dirty state, and stores original content for final diff.</div>
+          <div class="annotation"><strong>Phase 1</strong><br></br>Validate path, search candidates for partial names, snapshot original content.</div>
         </div>
         <div class="flow-lane-center">
-          <div class=""node" node-phase" style=""width:" 100%;">
-            <div class="node-title">Phase 1: Setup</div>
-            <div class="node-desc">Validate input, detect PR context, read config, prepare auth if needed</div>
+          <div class="node node-phase">
+            <div class="node-title">Setup and validation</div>
+            <div class="node-desc">Check file, dirty state, PR context, auth, and max rounds</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="annotation"><span class=""tag" tag-config">Optional</span><br></br><span class="mono">--force</span> bypasses dirty-file stop</div>
+          <div class="node node-external">
+            <div class="node-title">GitHub / gh / app auth</div>
+            <div class="node-desc">Only needed for PR posting</div>
+          </div>
         </div>
       </div>
 
@@ -422,16 +372,19 @@
 
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation">A dry run never edits the plan, never writes a review file, and skips PR posting.</div>
+          <div class="annotation"><strong>Guardrail</strong><br></br>Dirty file without <span class="mono">--force</span> stops the run.</div>
         </div>
         <div class="flow-lane-center">
-          <div class=""node" node-decision" style=""width:" 100%;">
-            <div class="node-title">Dry Run?</div>
-            <div class="node-desc">Decide whether to review only or enter the full review-fix loop</div>
+          <div class="node node-decision">
+            <div class="node-title">Can review continue?</div>
+            <div class="node-desc">Valid file and acceptable working tree state</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="annotation"><span class=""tag" tag-config">Flag</span><br></br><span class="mono">--dry-run</span></div>
+          <div class="node node-failure">
+            <div class="node-title">Abort early</div>
+            <div class="node-desc">Usage error, missing file, or dirty plan without force</div>
+          </div>
         </div>
       </div>
 
@@ -439,16 +392,16 @@
 
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation">Dispatches 21 sub-agents in parallel and parses structured JSON findings.</div>
+          <div class="annotation"><strong>Phase 2a</strong><br></br>Round tasks appear in the progress spinner.</div>
         </div>
         <div class="flow-lane-center">
-          <div class=""node" node-phase" style=""width:" 100%;">
-            <div class="node-title">Phase 2: Review-Fix Loop</div>
-            <div class="node-desc">Per round: dispatch, classify, fix real issues, persist progress, stop early if clean</div>
+          <div class="node node-phase">
+            <div class="node-title">Dispatch 21 sub-agents</div>
+            <div class="node-desc">3 LLMs × 7 domains in parallel via plan_review_dispatch.py</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="annotation"><span class=""tag" tag-external">External</span><br></br>Claude, Codex, Gemini CLIs</div>
+          <div class="annotation"><strong>Required logs</strong><br></br>Timestamped phase lines and 5-minute checkpoints for long runs.</div>
         </div>
       </div>
 
@@ -456,16 +409,16 @@
 
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation">Findings are labeled <span class="mono">fix</span>, <span class="mono">recurring</span>, <span class="mono">false_positive</span>, <span class="mono">noise</span>, or <span class="mono">ignored</span>.</div>
+          <div class="annotation"><strong>Phase 2b–2c</strong><br></br>Real issues become fixes; low-confidence or irrelevant findings become noise, false positives, or ignored.</div>
         </div>
         <div class="flow-lane-center">
-          <div class=""node" node-action" style=""width:" 100%;">
-            <div class="node-title">Classify And Apply Fixes</div>
-            <div class="node-desc">Only real issues drive plan edits; subjective or contradicted findings are tracked as noise</div>
+          <div class="node node-phase">
+            <div class="node-title">Classify findings and edit the plan</div>
+            <div class="node-desc">Fix recurring and high-severity issues directly in the file</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="annotation"><span class=""tag" tag-phase">Cross-check</span><br></br>2+ matching agents => high confidence</div>
+          <div class="annotation"><strong>Examples</strong><br></br>Add missing sections, clarify requirements, add rollback paths, remove contradictions.</div>
         </div>
       </div>
 
@@ -473,16 +426,16 @@
 
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation">If all agents fail, the run becomes a dispatch failure rather than a “clean” review.</div>
+          <div class="annotation"><strong>Loop control</strong><br></br>Repeat until no actionable findings remain or max rounds is hit.</div>
         </div>
         <div class="flow-lane-center">
-          <div class=""node" node-decision" style=""width:" 100%;">
-            <div class="node-title">Healthy Dispatch And Issues Remaining?</div>
-            <div class="node-desc">Continue fixing, warn on low coverage, or short-circuit into diagnostics/final review</div>
+          <div class="node node-decision">
+            <div class="node-title">Another fix round needed?</div>
+            <div class="node-desc">Continue when fix or recurring findings remain</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="annotation"><span class=""tag" tag-failure">Guardrail</span><br></br>0 succeeded => diagnostic path</div>
+          <div class="annotation"><strong>Dry run</strong><br></br>Skips fixing entirely and jumps to summary after one dispatch.</div>
         </div>
       </div>
 
@@ -490,16 +443,16 @@
 
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation">After fixes finish, one extra dispatch captures the final unresolved state.</div>
+          <div class="annotation"><strong>Health check</strong><br></br>A total dispatch failure is treated as infrastructure failure, not a clean plan.</div>
         </div>
         <div class="flow-lane-center">
-          <div class=""node" node-phase" style=""width:" 100%;">
-            <div class="node-title">Phase 3: Final Review</div>
-            <div class="node-desc">Review-only round with no edits; skipped if the dispatch layer itself failed</div>
+          <div class="node node-failure">
+            <div class="node-title">Dispatch failure path</div>
+            <div class="node-desc">Run CLI diagnostics, skip final re-dispatch, summarize errors</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="annotation"><span class=""tag" tag-phase">Outcome</span><br></br>Clean plan or unresolved issues table</div>
+          <div class="annotation"><strong>Low coverage</strong><br></br>If fewer than half succeed, warn that results may be incomplete.</div>
         </div>
       </div>
 
@@ -507,16 +460,16 @@
 
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation">The summary separates real issues from noise and includes misalignment analysis.</div>
+          <div class="annotation"><strong>Phase 3</strong><br></br>Only runs if dispatch health is good enough.</div>
         </div>
         <div class="flow-lane-center">
-          <div class=""node" node-output" style=""width:" 100%;">
-            <div class="node-title">Phase 4: Consolidated Summary</div>
-            <div class="node-desc">Headline counts, all findings, fixed vs recurring, unresolved, diff, metrics, improvement flags</div>
+          <div class="node node-phase">
+            <div class="node-title">Final review-only round</div>
+            <div class="node-desc">One last dispatch reports unresolved findings without applying fixes</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="annotation"><span class=""tag" tag-output">Visible to user</span><br></br>Terminal-first report</div>
+          <div class="annotation"><strong>Meaning</strong><br></br>Zero actionable findings here means the plan is clean at the chosen threshold.</div>
         </div>
       </div>
 
@@ -524,16 +477,16 @@
 
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation">Writes review artifacts locally and optionally posts raw findings and summary to GitHub PR comments.</div>
+          <div class="annotation"><strong>Phase 4</strong><br></br>Counts issues separately from noise and ignored findings.</div>
         </div>
         <div class="flow-lane-center">
-          <div class=""node" node-output" style=""width:" 100%;">
-            <div class="node-title">Phase 5: Output And Persist</div>
-            <div class="node-desc">Print summary, write .review.md, save history, post PR comments when available</div>
+          <div class="node node-output">
+            <div class="node-title">Generate consolidated summary</div>
+            <div class="node-desc">Headline counts, findings table, recurring issues, noise analysis, diff, metrics</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="annotation"><span class=""tag" tag-output">Artifacts</span><br></br><span class="mono">.review.md</span>, <span class="mono">rounds.json</span>, <span class="mono">summary.md</span></div>
+          <div class="annotation"><strong>Required extras</strong><br></br>Misalignment analysis, prompt improvement assessment, and improvement flags.</div>
         </div>
       </div>
 
@@ -541,154 +494,132 @@
 
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation">If dispatch health collapses, the summary pivots into diagnostics and recommendations.</div>
+          <div class="annotation"><strong>Phase 5</strong><br></br>Persistence depends on dry-run and PR context.</div>
         </div>
         <div class="flow-lane-center">
-          <div class=""node" node-failure" style=""width:" 100%;">
-            <div class="node-title">Dispatch Failure Path</div>
-            <div class="node-desc">Shows failing agent/domain rows, CLI availability, single-agent probe, and likely root cause</div>
+          <div class="node node-output">
+            <div class="node-title">Write results</div>
+            <div class="node-desc">Terminal summary, optional .review.md, PR comments, history files</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="annotation"><span class=""tag" tag-failure">Not “clean”</span><br></br>Infrastructure failure is surfaced explicitly</div>
+          <div class="node node-external">
+            <div class="node-title">Saved artifacts</div>
+            <div class="node-desc">summary.md, rounds.json, per-agent PR comments</div>
+          </div>
         </div>
       </div>
     </div>
 
     <div class="callout">
-      This skill is designed for long-running reviews. It emits task-based progress, timestamped phase logs, 5-minute checkpoints, per-round timing, end-of-run metrics, and improvement flags such as bottlenecks, low coverage, or excessive agent failure rates.
-    </div>
-
-    <div class="section-title">Invocation Cheatsheet</div>
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Command</th>
-          <th>Use Case</th>
-          <th>Behavior</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td class="mono">/stark-review-plan docs/spec.md</td>
-          <td>Default full review</td>
-          <td>Runs setup, up to 3 fix rounds, final review, summary, and persistence.</td>
-        </tr>
-        <tr>
-          <td class="mono">/stark-review-plan docs/spec.md --rounds 1</td>
-          <td>Fast single-cycle pass</td>
-          <td>Useful when you want one fix round plus one final review.</td>
-        </tr>
-        <tr>
-          <td class="mono">/stark-review-plan docs/spec.md --dry-run</td>
-          <td>Audit without edits</td>
-          <td>Runs review only, skips file changes, PR posting, and review artifact creation.</td>
-        </tr>
-        <tr>
-          <td class="mono">/stark-review-plan docs/spec.md --force</td>
-          <td>Dirty working copy</td>
-          <td>Allows execution even when the plan has uncommitted changes.</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <div class="section-title">Inputs And Outputs</div>
-    <div class="summary-grid">
-      <div class=""summary-card" card-green">
-        <h3>Inputs</h3>
-        <p>Markdown plan path, optional round limit, and execution-mode flags. The skill also inspects git state, PR context, local CLIs, and internal review config.</p>
-      </div>
-      <div class=""summary-card" card-purple">
-        <h3>Decision Logic</h3>
-        <p>It distinguishes real issues from false positives, tracks recurring findings across rounds, and treats zero successful agents as a dispatch failure instead of a clean review.</p>
-      </div>
-      <div class=""summary-card" card-amber">
-        <h3>Outputs</h3>
-        <p>Consolidated review summary, per-round history, change diff, optional per-agent PR comments, and observability metrics that make long runs understandable while they are still in progress.</p>
-      </div>
+      <strong>End-user expectation:</strong> this skill is not just a one-pass reviewer. In the normal path it behaves like an orchestrated review-and-repair workflow, then leaves behind both human-readable and machine-usable artifacts for later learning.
     </div>
 
     <div class="section-title">Common Workflows</div>
-    <div class="two-col">
-      <div class="workflow-box">
-        <h3>1. Tighten A New Spec Before Implementation</h3>
-        <ol>
-          <li>Run the skill on the draft markdown plan.</li>
-          <li>Let the loop fix missing edge cases, rollback gaps, and contradictions.</li>
-          <li>Read the final unresolved section to decide what still needs human judgment.</li>
-        </ol>
+    <div class="card-grid">
+      <div class="card card-blue">
+        <h3>Basic review with fixes</h3>
+        <p>Run <span class="inline-code">/stark-review-plan docs/specs/auth.md</span> when you want the skill to review the plan, patch the document through up to three rounds, and then give you a final unresolved-issues summary.</p>
       </div>
-      <div class="workflow-box">
-        <h3>2. Compare Review Signal Without Editing</h3>
-        <ol>
-          <li>Run with <span class="mono">--dry-run</span>.</li>
-          <li>Inspect issue vs noise counts and misalignment analysis.</li>
-          <li>Use the result to decide whether prompt tuning or plan edits are more valuable.</li>
-        </ol>
+      <div class="card card-purple">
+        <h3>Preview findings without edits</h3>
+        <p>Run <span class="inline-code">/stark-review-plan docs/specs/auth.md --dry-run</span> when you want signal only. This skips file edits, skips PR posting, and does not write the sidecar review file.</p>
       </div>
-      <div class="workflow-box">
-        <h3>3. Review A Plan Already Attached To A PR</h3>
-        <ol>
-          <li>Run on a branch with an open PR.</li>
-          <li>The skill authenticates a GitHub app if possible.</li>
-          <li>Each agent posts raw findings, then the orchestrator posts the classified summary.</li>
-        </ol>
+      <div class="card card-green">
+        <h3>Review an in-progress draft</h3>
+        <p>Run <span class="inline-code">/stark-review-plan docs/specs/auth.md --force</span> if the plan is not committed yet but you still want the workflow to proceed on the current working copy.</p>
       </div>
-      <div class="workflow-box">
-        <h3>4. Diagnose Broken Dispatch</h3>
-        <ol>
-          <li>If all sub-agents fail, the run switches to diagnostics.</li>
-          <li>CLI availability and a single-agent probe are executed.</li>
-          <li>The summary recommends likely fixes such as auth, installation, or network remediation.</li>
-        </ol>
+      <div class="card card-amber">
+        <h3>Allow more repair cycles</h3>
+        <p>Run <span class="inline-code">/stark-review-plan docs/specs/auth.md --rounds 5</span> when the spec is broad or immature and likely needs more than the default three fix rounds before the final pass.</p>
       </div>
     </div>
 
-    <div class="section-title">Artifacts Produced</div>
+    <div class="section-title">What the Skill Produces</div>
+    <div class="card-grid">
+      <div class="card card-amber">
+        <h3>Terminal summary</h3>
+        <p>Always prints a consolidated markdown summary. In the healthy path this includes counts, findings table, fixed and unresolved items, noise analysis, diff summary, prompt-assessment guidance, metrics, and improvement flags.</p>
+      </div>
+      <div class="card card-green">
+        <h3>Sidecar review file</h3>
+        <p>When not in dry-run mode, writes a peer file such as <span class="inline-code">design.review.md</span> next to the reviewed plan so the review record lives beside the source document.</p>
+      </div>
+      <div class="card card-purple">
+        <h3>PR comments by bot identity</h3>
+        <p>If a PR is detected and auth succeeds, each agent family posts its raw findings under its own bot account, then the orchestrator posts the classified summary.</p>
+      </div>
+      <div class="card card-dark">
+        <h3>History for recovery and analysis</h3>
+        <p>Creates review history under the plan-review history directory, including <span class="inline-code">rounds.json</span>, <span class="inline-code">summary.md</span>, and temporary in-progress state for crash recovery.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Observability You Will See</div>
+    <div class="card-grid">
+      <div class="card card-blue">
+        <h3>Task-based progress</h3>
+        <p>Five top-level tasks are created up front for setup, review-fix loop, final review, summary, and output. Additional round-specific child tasks appear dynamically as each dispatch and classify+fix segment starts.</p>
+      </div>
+      <div class="card card-green">
+        <h3>Timestamped logs</h3>
+        <p>Every phase transition and important round event prints with a wall-clock timestamp, so long runs remain traceable without guessing where the workflow is stuck.</p>
+      </div>
+      <div class="card card-amber">
+        <h3>Five-minute checkpoints</h3>
+        <p>For long-running reviews, the skill must emit elapsed-time checkpoints with current phase, round, and partial sub-agent completion numbers.</p>
+      </div>
+      <div class="card card-red">
+        <h3>Metrics and flags</h3>
+        <p>The end of the run includes phase timing, issue and noise counts, agent success numbers, rounds used, and automated warnings such as bottlenecks or high agent failure rates.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Troubleshooting</div>
+    <div class="card-grid">
+      <div class="card card-red">
+        <h3>“Usage: /stark-review-plan &lt;path&gt;”</h3>
+        <p>The path argument is required. If you only passed a partial filename, the skill may search for close matches under <span class="inline-code">docs/</span> and ask you to pick one.</p>
+      </div>
+      <div class="card card-red">
+        <h3>Dirty plan blocked the run</h3>
+        <p>The skill aborts when the plan file has uncommitted changes unless you explicitly pass <span class="inline-code">--force</span>. This protects against accidental edits to a draft you did not mean to mutate.</p>
+      </div>
+      <div class="card card-red">
+        <h3>Zero successful sub-agents</h3>
+        <p>This is handled as a dispatch failure, not as “no issues found.” Expect CLI availability checks, a single-agent probe, and a failure summary that points at auth, installation, or network problems.</p>
+      </div>
+      <div class="card card-dark">
+        <h3>Low coverage warning</h3>
+        <p>If fewer than half of the sub-agents succeed, the review still continues, but you should treat the output as partial and investigate the failed agent family before trusting a clean result.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Best Fit</div>
     <table class="data-table">
       <thead>
         <tr>
-          <th>Artifact</th>
-          <th>Where It Appears</th>
-          <th>What It Contains</th>
+          <th>Use this skill when…</th>
+          <th>Avoid relying on it when…</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td class="mono">terminal summary</td>
-          <td>stdout</td>
-          <td>Headline counts, findings tables, misalignment analysis, metrics, and improvement flags.</td>
+          <td>You want an orchestrated review of a plan/spec with multiple reviewer perspectives and an optional self-healing loop.</td>
+          <td>You only need a quick manual read or a single reviewer opinion.</td>
         </tr>
         <tr>
-          <td class="mono">{plan-name}.review.md</td>
-          <td>Beside the plan file</td>
-          <td>Human-readable review output. Skipped in <span class="mono">--dry-run</span>.</td>
+          <td>You care about tracking noise separately from real issues and want an audit trail of what changed across rounds.</td>
+          <td>The target file is not markdown or you do not want the source plan edited.</td>
         </tr>
         <tr>
-          <td class="mono">rounds.json</td>
-          <td>History directory</td>
-          <td>All rounds, classifications, outcomes, and crash-recovery details.</td>
-        </tr>
-        <tr>
-          <td class="mono">summary.md</td>
-          <td>History directory</td>
-          <td>Persisted version of the final summary, matching PR comment content.</td>
-        </tr>
-        <tr>
-          <td class="mono">PR comments</td>
-          <td>GitHub pull request</td>
-          <td>Per-agent raw findings plus orchestrator summary when PR context and auth are available.</td>
+          <td>You want PR-native review artifacts under multiple bot identities for later analysis.</td>
+          <td>The CLI tools or GitHub app credentials are unavailable and you need guaranteed end-to-end posting.</td>
         </tr>
       </tbody>
     </table>
-
-    <div class="center-note">
-      <span class="winner-badge">Best fit for end users who need plan review outcomes, not implementation internals</span>
-    </div>
   </div>
 
-  <div class="footer">
-    stark-review-plan • multi-agent plan review visualization • standalone HTML
-  </div>
+  <div class="footer"><div class="winner-badge">Visualization by Codex · Score: 8.5/10 · Generated from SKILL.md</div></div>
 </body>
 </html>

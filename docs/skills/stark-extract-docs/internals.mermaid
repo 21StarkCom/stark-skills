@@ -1,35 +1,48 @@
 graph TD
-    subgraph "Phase 1: Setup"
-        A1[Spec] --> B{Artifact Resolver}
-        A2[Plan] --> B
-        A3[Reviews] --> B
-        B --> C{Skip Logic Check}
-        C -- Hashes Match --> Z[Exit Cleanly]
-        C -- Missing/Force --> D[Input Files]
-    end
+    A["Phase 1: Setup"] --> B{"Already\nprocessed?"}
+    B -->|"Yes & no --force"| Z["Exit cleanly"]
+    B -->|"No / --force"| C["Phase 2: Pass 1\nKnowledge Extraction"]
 
-    subgraph "Phase 2: Pass 1 (Extraction)"
-        D --> E[LLM Knowledge Extraction]
-        E --> F{Schema & Confidence Validation}
-        F -- Invalid --> E
-        F -- Valid --> G[Structured JSON Extraction]
-    end
+    C --> D{"plan-to-tasks\noverlap?"}
+    D -->|"Yes"| E["Extract 3 categories:\nevolution, defended, agent_signal"]
+    D -->|"No"| F["Extract all 8 categories"]
 
-    subgraph "Phase 3 & 4: Routing & Write"
-        G --> H[Routing Engine]
-        H --> I1(ADRs)
-        H --> I2(Retrospectives)
-        H --> I3(Reference Docs)
-        H --> I4(Glossary/Log)
-        
-        I1 --> J[File System Write]
-        I2 --> J
-        I3 --> J
-        I4 --> J
-    end
+    E --> G["Validate JSON schema"]
+    F --> G
+    G -->|"Invalid"| H["Retry once with error"]
+    H -->|"Still invalid"| I["Fail"]
+    G -->|"Valid"| J["Filter by confidence"]
 
-    subgraph "Post-Processing"
-        J --> K[Git Stage & Commit]
-        J --> L[Persist Metrics JSON]
-        L --> M((End))
-    end
+    J --> K{"--dry-run?"}
+    K -->|"Yes"| L["Print JSON, exit"]
+    K -->|"No"| M["Phase 3: Pass 2\nRouting & Generation"]
+
+    M --> N["Route: decision → ADR"]
+    M --> O["Route: evolution → Retrospective"]
+    M --> P["Route: glossary → Glossary append"]
+    M --> Q["Route: integration → Reference doc"]
+    M --> R["Route: agent_signal → Retro + Log"]
+    M --> S["Route: constraint → ADR or constraints.md"]
+
+    N & O & P & Q & R & S --> T["Phase 4: Preview & Write"]
+    T --> U{"--no-commit?"}
+    U -->|"Yes"| V["Files written, skip commit"]
+    U -->|"No"| W{"Dirty tree?"}
+    W -->|"Yes"| X["Warn, skip commit"]
+    W -->|"No"| Y["Commit target repo\n+ source repo separately"]
+
+    T --> BA{"--batch?"}
+    BA -->|"Yes"| BB["Phase 5: Cross-spec\nADR dedup"]
+    BA -->|"No"| BC["Phase 6-7:\nSummary & History"]
+    BB --> BC
+
+    style A fill:#1e40af,color:#fff
+    style C fill:#1e40af,color:#fff
+    style M fill:#1e40af,color:#fff
+    style T fill:#f59e0b,color:#1a1a1a
+    style B fill:#7c3aed,color:#fff
+    style K fill:#7c3aed,color:#fff
+    style D fill:#7c3aed,color:#fff
+    style BA fill:#7c3aed,color:#fff
+    style I fill:#dc2626,color:#fff
+    style BC fill:#047857,color:#fff

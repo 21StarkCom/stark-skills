@@ -5,24 +5,10 @@ Audit and update all dependency versions across a project to their latest stable
 ## Workflow Overview
 
 ```mermaid
-graph TD
-  A([Trigger: "update dependencies"]) --> B[Phase 1: Discovery]
-  B --> C[Phase 2: Research & Parallel WebSearch]
-  C --> D{Phase 3: Compatibility Analysis}
-  
-  D -->|Safe / Review| E[Phase 4: Update Files]
-  D -->|Blocked / Skip| F[Leave Unchanged]
-  
-  E --> G{Phase 5: Strict Verification}
-  G -->|Found on Registry| H[Phase 6: Final Report]
-  G -->|Hallucination / Not Found| I[Revert / Re-Search]
-  I --> G
-  F --> H
-  
-  H --> J([End Process])
+
 ```
 
-![Visual workflow of the stark-update-deps skill showing the 6-phase process from discovery and research to compatibility analysis, updating, critical verification against web sources, and final reporting.](usage.png)
+![A clean single-page workflow diagram for the `stark-update-deps` skill, showing how a user invokes it with phrases like “update dependencies,” then moves through Discovery, Research, Compatibility Analysis, Update, Verification, and Final Report. Blue nodes represent workflow phases, a green node marks invocation, a purple node marks classification into Safe, Review, Blocked, and Skip, a red node shows the revert path for unverified versions, and an amber node shows the final output. Supporting tables explain scanned inputs and produced outputs, while cards highlight common workflows such as routine refreshes, major upgrade triage, and Docker tag verification."}}](usage.png)
 
 ## When to Use
 

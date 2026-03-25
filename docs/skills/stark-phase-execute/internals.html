@@ -1,442 +1,797 @@
 <html lang="en">
 <head>
-  
-  
-  <title>stark-phase-execute - Internal Architecture</title>
-  <style>
-    /*
-     * Stark Skills — Shared Design System CSS
-     *
-     * Foundation styles for LLM-generated HTML skill visualizations.
-     * LLMs embed this inline and may extend with additional styles.
-     * All colors pass WCAG AA 4.5:1 contrast ratio.
-     *
-     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
-     */
 
-    /* === Reset & Base === */
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #fafafa;
-      color: #1a1a1a;
-      line-height: 1.5;
-    }
 
-    /* === Header === */
-    .header { text-align: center; padding: 36px 20px 16px; }
-    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
-    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
-    .header .scope {
-      display: inline-block; font-size: 10px; font-weight: 600;
-      background: #eff6ff; color: #1e40af;
-      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
-    }
+<title>stark-phase-execute — Internals</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
+.node-phase    { background: #1e40af; color: #ffffff; }
+.node-decision { background: #7c3aed; color: #ffffff; }
+.node-failure  { background: #dc2626; color: #ffffff; }
+.node-config   { background: #047857; color: #ffffff; }
+.node-output   { background: #f59e0b; color: #1a1a1a; }
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 180px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 180px; display: flex;
+  align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
 
-    /* === Container === */
-    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
-
-    /* === Section Title === */
-    .section-title {
-      font-size: 14px; font-weight: 700; color: #666;
-      text-transform: uppercase; letter-spacing: 1px;
-      margin: 32px 0 16px; padding-bottom: 6px;
-      border-bottom: 2px solid #e5e7eb;
-    }
-
-    /* === Node Types === */
-    .node { border-radius: 8px; padding: 12px 16px; text-align: center; }
-    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
-    .node-desc { font-size: 10px; opacity: 0.8; }
-
-    .node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
-    .node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
-    .node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
-    .node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
-    .node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
-    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
-
-    /* === Flow Layout === */
-    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
-    .flow-step {
-      display: flex; align-items: stretch;
-      width: 100%; max-width: 860px; min-height: 76px;
-    }
-    .flow-lane-left {
-      width: 180px; display: flex;
-      align-items: center; justify-content: flex-end;
-      padding-right: 18px;
-    }
-    .flow-lane-center {
-      width: 500px; display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-    }
-    .flow-lane-right {
-      width: 180px; display: flex;
-      align-items: center; padding-left: 18px;
-    }
-    .annotation {
-      font-size: 9px; color: #666; max-width: 160px; line-height: 1.4; text-align: right;
-    }
-    .flow-lane-right .annotation { text-align: left; }
-    .annotation strong { color: #444; }
-
-    /* === Arrows === */
-    .arrow-down {
-      width: 2px; height: 20px; background: #cbd5e1;
-      margin: 0 auto; position: relative;
-    }
-    .arrow-down::after {
-      content: ''; position: absolute; bottom: -4px; left: -4px;
-      border-left: 5px solid transparent;
-      border-right: 5px solid transparent;
-      border-top: 6px solid #cbd5e1;
-    }
-    .arrow-container {
-      display: flex; justify-content: center;
-      width: 100%; max-width: 860px;
-    }
-    .arrow-container .flow-lane-center {
-      display: flex; justify-content: center;
-    }
-
-    /* === Cards === */
-    .card-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 16px; margin-top: 16px;
-    }
-    .card { padding: 16px; border-radius: 8px; }
-    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
-    .card p  { font-size: 11px; line-height: 1.6; }
-    .card code { font-family: monospace; background: rgba(0,0,0,0.05); padding: 2px 4px; border-radius: 3px; }
-
-    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
-    .card-blue h3 { color: #1e40af; }
-    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
-    .card-green h3 { color: #059669; }
-    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
-    .card-purple h3 { color: #7c3aed; }
-    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
-    .card-amber h3 { color: #92400e; }
-    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
-    .card-dark h3 { color: #333333; }
-    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
-    .card-red h3 { color: #dc2626; }
-
-    /* === Data Tables === */
-    .data-table {
-      width: 100%; max-width: 860px; margin: 16px auto;
-      border-collapse: collapse; font-size: 11px;
-    }
-    .data-table th {
-      background: #f3f4f6; padding: 8px 12px; text-align: left;
-      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
-    }
-    .data-table td {
-      padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
-    }
-
-    /* === Tags === */
-    .tag {
-      display: inline-block; font-size: 9px; font-weight: 600;
-      padding: 2px 8px; border-radius: 3px;
-    }
-    .tag-phase    { background: #dbeafe; color: #1e40af; }
-    .tag-decision { background: #ede9fe; color: #5b21b6; }
-    .tag-failure  { background: #fee2e2; color: #991b1b; }
-    .tag-config   { background: #d1fae5; color: #065f46; }
-    .tag-output   { background: #fef3c7; color: #92400e; }
-    .tag-external { background: #f3f4f6; color: #666666; }
-
-    /* === Legend === */
-    .legend {
-      display: flex; gap: 16px; justify-content: center;
-      margin: 16px 0 24px; flex-wrap: wrap;
-    }
-    .legend-item {
-      display: flex; align-items: center; gap: 6px;
-      font-size: 10px; color: #666;
-    }
-    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
-
-    /* === Footer === */
-    .footer {
-      text-align: center; padding: 20px;
-      font-size: 10px; color: #999;
-    }
-  </style>
+/* === Extension: Task Loop Detail === */
+.loop-container {
+  border: 2px solid #1e40af; border-radius: 12px;
+  padding: 20px 16px; margin: 16px auto; max-width: 780px;
+  background: #f8faff; position: relative;
+}
+.loop-label {
+  position: absolute; top: -10px; left: 24px;
+  background: #1e40af; color: #fff; font-size: 10px; font-weight: 700;
+  padding: 2px 10px; border-radius: 4px;
+}
+.loop-inner { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.review-loop {
+  border: 2px dashed #7c3aed; border-radius: 10px;
+  padding: 16px 12px; margin: 8px 0; max-width: 600px; width: 100%;
+  background: #faf8ff; position: relative;
+}
+.review-loop-label {
+  position: absolute; top: -10px; left: 20px;
+  background: #7c3aed; color: #fff; font-size: 9px; font-weight: 700;
+  padding: 2px 8px; border-radius: 4px;
+}
+.mini-flow { display: flex; flex-direction: column; align-items: center; gap: 0; }
+.mini-node { border-radius: 6px; padding: 8px 14px; text-align: center; min-width: 200px; }
+.mini-arrow { width: 2px; height: 14px; background: #cbd5e1; margin: 0 auto; position: relative; }
+.mini-arrow::after {
+  content: ''; position: absolute; bottom: -3px; left: -3px;
+  border-left: 4px solid transparent; border-right: 4px solid transparent;
+  border-top: 5px solid #cbd5e1;
+}
+.branch-row { display: flex; gap: 12px; align-items: center; justify-content: center; margin: 6px 0; }
+.branch-arrow {
+  font-size: 10px; color: #7c3aed; font-weight: 600;
+}
+.auth-badge {
+  display: inline-block; font-size: 8px; font-weight: 700;
+  padding: 1px 6px; border-radius: 3px; margin-left: 4px;
+}
+.auth-user { background: #dbeafe; color: #1e40af; }
+.auth-bot  { background: #fef3c7; color: #92400e; }
+.phase-header {
+  font-size: 11px; font-weight: 700; color: #1e40af;
+  margin: 12px 0 4px; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.observability-strip {
+  background: #f3f4f6; border-radius: 6px; padding: 10px 14px;
+  margin: 12px auto; max-width: 780px; font-size: 10px; color: #555;
+  border-left: 3px solid #333;
+}
+.observability-strip strong { color: #333; }
+</style>
 </head>
 <body>
 
-  <div class="header">
-    <h1>stark-phase-execute</h1>
-    <div class="sub">Autonomous execution engine for development phases</div>
-    <div class="scope">Audience: Internals</div>
+<div class="header">
+  <h1>stark-phase-execute</h1>
+  <div class="sub">Autonomous phase execution engine — internal architecture &amp; data flow</div>
+  <div class="scope">INTERNALS — contributor/developer focused</div>
+</div>
+
+<div class="container">
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#1e40af;"></div> Phase / Step</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed;"></div> Decision</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#047857;"></div> Config</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b;"></div> Output</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#dc2626;"></div> Failure</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e5e7eb; border:1px dashed #9ca3af;"></div> External</div>
+    <div class="legend-item"><span class="auth-badge auth-user">USER PAT</span> gh native auth</div>
+    <div class="legend-item"><span class="auth-badge auth-bot">BOT TOKEN</span> stark-claude[bot]</div>
   </div>
 
-  <div class="container">
-    <div class="legend">
-      <div class="legend-item"><div class="legend-dot node-phase"></div> Main Phase / Action</div>
-      <div class="legend-item"><div class="legend-dot node-decision"></div> Logic Branch</div>
-      <div class="legend-item"><div class="legend-dot node-output"></div> Artifact / Side Effect</div>
-      <div class="legend-item"><div class="legend-dot node-external"></div> External System</div>
-      <div class="legend-item"><div class="legend-dot node-config"></div> Sub-Skill Invocation</div>
-    </div>
+  <!-- ========== PHASE 0 ========== -->
+  <div class="section-title">Phase 0 — Initialize</div>
 
-    <h2 class="section-title">Execution Pipeline (End-to-End)</h2>
-
-    <div class="flow">
-      <!-- Initialization -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation"><strong>Prerequisites</strong><br>Check <code>gh auth</code>, clean git tree, active main branch.</div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-phase" style="width: 100%;">
-            <div class="node-title">Phase 0: Initialize</div>
-            <div class="node-desc">Validate Environment & Context</div>
-          </div>
-        </div>
-        <div class="flow-lane-right"></div>
+  <div class="flow">
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Input:</strong> plan slug or file path + CLI flags</div>
       </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Fetch Tasks -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="node node-external">
-            <div class="node-title">GitHub API</div>
-            <div class="node-desc">Project V2 or Issues</div>
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-decision" style="width: 100%;">
-            <div class="node-title">Fetch Plan Tasks</div>
-            <div class="node-desc">Query issues by Project Board or <code>plan:{SLUG}</code> label. Filter out parent tracking issues.</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">Extract count. Check if zero before proceeding.</div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px;">
+          <div class="node-title">0.1 Validate Environment</div>
+          <div class="node-desc">git main clean · gh/claude/codex/gemini in PATH · bot token OK</div>
         </div>
       </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Auto-Decompose -->
-      <div class="flow-step">
-        <div class="flow-lane-left"></div>
-        <div class="flow-lane-center">
-          <div class="node node-config" style="width: 100%;">
-            <div class="node-title">[Conditional] Auto-Decompose</div>
-            <div class="node-desc">If 0 tasks exist, auto-invoke <code>/stark-plan-to-tasks {PLAN_FILE}</code> then re-fetch.</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="node node-output">
-            <div class="node-title">observability.json</div>
-            <div class="node-desc">Initialize Phase Log</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Task Loop Start -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation"><strong>Loop Iteration</strong><br>For each validated task. Skip if <code>--start-from</code> excluded.</div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-phase" style="width: 100%; border: 2px dashed #ffffff; background: #2563eb;">
-            <div class="node-title">Phase 1: Task Loop</div>
-            <div class="node-desc">Execute sequential tasks (merge to main before next)</div>
-          </div>
-        </div>
-        <div class="flow-lane-right"></div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Implement -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="node node-external">
-            <div class="node-title">Agent Prompt</div>
-            <div class="node-desc">Implement issue body.<br>Must commit locally.</div>
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-phase" style="width: 90%;">
-            <div class="node-title">1.1 - 1.2 Implement</div>
-            <div class="node-desc">Create <code>phase/{SLUG}/issue-{N}</code> branch. Spawn Subagent to read, code, test, and commit.</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">If ambiguous, mark blocked in GH Projects and skip.</div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Push & PR -->
-      <div class="flow-step">
-        <div class="flow-lane-left"></div>
-        <div class="flow-lane-center">
-          <div class="node node-phase" style="width: 90%;">
-            <div class="node-title">1.3 Create Pull Request</div>
-            <div class="node-desc">Push to remote. Auto-generate PR body and publish immediately (No Drafts).</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="node node-output">
-            <div class="node-title">GitHub PR</div>
-            <div class="node-desc">Head: task branch<br>Base: main</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Review Loop -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="node node-config">
-            <div class="node-title">multi_review.py</div>
-            <div class="node-desc">18 sub-agents analyze PR in parallel.</div>
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-decision" style="width: 90%;">
-            <div class="node-title">1.4 Multi-Agent Review Loop</div>
-            <div class="node-desc">Checkout isolated Worktree. Fetch findings.<br>Filter false positives -> Fix -> Test -> Commit.<br>Loop up to <code>MAX_ROUNDS</code>.</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="node node-output">
-            <div class="node-title">Git Worktree</div>
-            <div class="node-desc">/tmp/review-{REPO}-pr{N}</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Merge -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation"><strong>Error Handling</strong><br>If CI fails, bypass with <code>--admin</code> and flag observability log.</div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-phase" style="width: 90%;">
-            <div class="node-title">1.5 - 1.7 Merge & Finalize</div>
-            <div class="node-desc">Squash Merge. Clean worktree/branches. Assert GH Issue is closed. Update phase observability.</div>
-          </div>
-        </div>
-        <div class="flow-lane-right"></div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Regression, Release, Deploy -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="node node-config">
-            <div class="node-title">/stark-release</div>
-            <div class="node-desc">Handles custom bump rules per repo config.</div>
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-phase" style="width: 100%;">
-            <div class="node-title">Phase 2 - 3: Final Validation & Release</div>
-            <div class="node-desc">Regression Test Suite ➔ Update CHANGELOG ➔ Execute Version Bump ➔ Deploy Command</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">Skip Release/Deploy if <code>--skip-release</code> / <code>--skip-deploy</code> used.</div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Housekeeping -->
-      <div class="flow-step">
-        <div class="flow-lane-left"></div>
-        <div class="flow-lane-center">
-          <div class="node node-phase" style="width: 100%;">
-            <div class="node-title">Phase 4 - 5: Dashboard & Housekeeping</div>
-            <div class="node-desc">Print Summary Table ➔ Update Project Memory ➔ Update Architecture Docs ➔ Detect Prompt Improvements</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="node node-output">
-            <div class="node-title">Final Payload</div>
-            <div class="node-desc">Updated Observability Log & Agent Scorecard</div>
-          </div>
-        </div>
-      </div>
-    </div> <!-- .flow -->
-
-    <h2 class="section-title">Architectural Highlights</h2>
-
-    <div class="card-grid">
-      <div class="card card-purple">
-        <h3>1. Total Autonomy</h3>
-        <p>This skill explicitly overrides all user-confirmation gates in all sub-workflows. There are no "wait for approval" or "are you sure?" prompts. It forces CI bypasses if needed via <code>--admin</code> merge and delegates to <code>/stark-release</code> which natively respects autonomous invocation.</p>
-      </div>
-      <div class="card card-blue">
-        <h3>2. Worktree Isolation</h3>
-        <p>Review loops occur in a detached worktree (<code>/tmp/review-{REPO}-pr{N}</code>) rather than corrupting the primary repository state. The skill calculates merge bases, runs multi_review.py, applies fixes, and commits back to the origin PR branch cleanly.</p>
-      </div>
-      <div class="card card-green">
-        <h3>3. Auto-Decomposition Fallback</h3>
-        <p>If executed before issues exist, the skill will actively scan <code>docs/</code> for the target <code>PLAN_FILE</code>, execute <code>/stark-plan-to-tasks</code> dynamically, and then re-fetch the newly generated GitHub issues to begin the task loop.</p>
-      </div>
-      <div class="card card-dark">
-        <h3>4. Dual Auth Strategy</h3>
-        <p>Uses explicit token swaps: <code>export GH_TOKEN=...</code> (bot token via Python auth script) for GH Project manipulations and posting review comments, but resets to <code>unset GH_TOKEN</code> (User PAT via CLI) for issue reading, PR creation, and merges.</p>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Fails:</strong> stop immediately, report broken env</div>
       </div>
     </div>
 
-    <h2 class="section-title">Observability & Diagnostics</h2>
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Signal Detected</th>
-          <th>Threshold</th>
-          <th>Action Taken / Logged</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>False Positive Rate</td>
-          <td>&gt; 20% for any given agent</td>
-          <td>Flag: Tune <code>global/prompts/{agent}/{domain}.md</code></td>
-        </tr>
-        <tr>
-          <td>Recurring Finding Type</td>
-          <td>3+ occurrences across tasks</td>
-          <td>Flag: Architecture prompt needs clarification for the phase</td>
-        </tr>
-        <tr>
-          <td>Agent Accuracy Gap</td>
-          <td>Agent misses 2+ issues others find</td>
-          <td>Flag: Prompt weak in specific domain area</td>
-        </tr>
-        <tr>
-          <td>Time Bottleneck</td>
-          <td>Single phase &gt; 70% of total time</td>
-          <td>Flag: Highlight inefficiency in dashboard summary</td>
-        </tr>
-      </tbody>
-    </table>
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Slug resolution:</strong> file path → strip dir/ext/suffixes; else literal slug</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width:380px;">
+          <div class="node-title">0.2 Fetch Plan Tasks</div>
+          <div class="node-desc">project-config.json? → GitHub Projects V2 query<br></br>fallback → gh api issues?labels=plan:{SLUG}</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Filter:</strong> drop phase tracking issues (no <code>## What</code>). Keep only implementable tasks.</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Condition:</strong> raw_issue_count == 0</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width:380px;">
+          <div class="node-title">0.3 Auto-Decompose?</div>
+          <div class="node-desc">No issues → invoke /stark-plan-to-tasks on plan file<br></br>--dry-run stops here with report</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Delegates to:</strong> /stark-plan-to-tasks (3 LLM passes). Then re-fetches.</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Creates:</strong> parent + child TodoWrite tasks</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-output" style="width:380px;">
+          <div class="node-title">0.4 Phase Briefing + 0.5 Observability Log</div>
+          <div class="node-desc">Print task table · init phase-{SLUG}-{timestamp}.json</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Log path:</strong> ~/.claude/code-review/history/{ORG}/{REPO}/</div>
+      </div>
+    </div>
   </div>
 
-  <div class="footer">
-    Generated via Gemini CLI • Context: stark-skills project internal documentation
+  <!-- ========== PHASE 1 ========== -->
+  <div class="section-title">Phase 1 — Task Loop (sequential, each merges to main)</div>
+
+  <div class="loop-container">
+    <div class="loop-label">FOR EACH TASK ISSUE</div>
+    <div class="loop-inner">
+
+      <!-- 1.1 -->
+      <div class="mini-flow">
+        <div class="mini-node node-phase">
+          <div class="node-title">1.1 Session Start</div>
+          <div class="node-desc">git checkout main · pull · branch phase/{SLUG}/issue-{N}-{title}</div>
+        </div>
+        <div style="font-size:9px;color:#666;margin:4px 0;">
+          Project config? → <span class="auth-badge auth-bot">BOT</span> check_spec_completeness · transition → Agent Working · set Agent=Claude
+        </div>
+        <div class="mini-arrow"></div>
+      </div>
+
+      <!-- 1.2 -->
+      <div class="mini-flow">
+        <div class="mini-node node-phase">
+          <div class="node-title">1.2 Implement (Subagent)</div>
+          <div class="node-desc">Agent tool, foreground — read issue, explore code, implement, test, commit</div>
+        </div>
+        <div style="font-size:9px;color:#666;margin:4px 0;">
+          Ambiguity detected? → <span class="auth-badge auth-bot">BOT</span> transition → Blocked · skip task
+        </div>
+        <div class="mini-arrow"></div>
+      </div>
+
+      <!-- 1.3 -->
+      <div class="mini-flow">
+        <div class="mini-node node-phase">
+          <div class="node-title">1.3 Push &amp; Create PR <span class="auth-badge auth-user">USER PAT</span></div>
+          <div class="node-desc">git push -u · gh pr create (non-draft) · body via temp file</div>
+        </div>
+        <div class="mini-arrow"></div>
+      </div>
+
+      <!-- 1.4 Review Loop -->
+      <div class="review-loop">
+        <div class="review-loop-label">REVIEW LOOP — up to N rounds</div>
+        <div class="mini-flow">
+          <div style="font-size:9px;color:#555;margin-bottom:6px;">
+            <strong>Worktree isolation:</strong> git worktree add /tmp/review-{REPO}-pr{N}
+          </div>
+          <div class="mini-node node-external" style="min-width:340px;">
+            <div class="node-title">multi_review.py --pr N --json-only --dry-run</div>
+            <div class="node-desc">3 LLMs × N domains → structured JSON findings (one round)</div>
+          </div>
+          <div class="mini-arrow"></div>
+          <div class="mini-node node-decision" style="min-width:340px;">
+            <div class="node-title">Classify Findings</div>
+            <div class="node-desc">fix (sev ≥ medium + exists) · false_positive · noise · ignored</div>
+          </div>
+          <div class="mini-arrow"></div>
+
+          <div class="branch-row">
+            <div class="mini-node node-config" style="padding:6px 10px;min-width:auto;">
+              <div class="node-desc">0 fix findings → STOP</div>
+            </div>
+            <span class="branch-arrow">or</span>
+            <div class="mini-node node-phase" style="padding:6px 10px;min-width:auto;">
+              <div class="node-desc">Fix → Test → Commit → Push</div>
+            </div>
+            <span class="branch-arrow">or</span>
+            <div class="mini-node node-failure" style="padding:6px 10px;min-width:auto;">
+              <div class="node-desc">round ≥ MAX → STOP</div>
+            </div>
+          </div>
+
+          <div style="font-size:9px;color:#555;margin-top:8px;">
+            After loop: <span class="auth-badge auth-bot">BOT</span> post consolidated review via pr_review() · clean up worktree
+          </div>
+        </div>
+      </div>
+
+      <div class="mini-arrow"></div>
+
+      <!-- 1.5 Merge -->
+      <div class="mini-flow">
+        <div class="mini-node node-phase">
+          <div class="node-title">1.5 Merge <span class="auth-badge auth-user">USER PAT</span></div>
+          <div class="node-desc">gh pr checks --watch · gh pr merge --squash --admin --delete-branch</div>
+        </div>
+        <div style="font-size:9px;color:#666;margin:4px 0;">
+          CI fails → merge anyway with --admin, flag ci_bypassed:true
+        </div>
+        <div class="mini-arrow"></div>
+      </div>
+
+      <!-- 1.6-1.7 -->
+      <div class="mini-flow">
+        <div class="branch-row">
+          <div class="mini-node node-phase" style="padding:8px 12px;min-width:auto;">
+            <div class="node-title">1.6 Close Issue</div>
+            <div class="node-desc">Verify auto-close · fallback explicit</div>
+          </div>
+          <div class="mini-node node-output" style="padding:8px 12px;min-width:auto;">
+            <div class="node-title">1.7 Log Task Result</div>
+            <div class="node-desc">Append to observability JSON</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 1.8 Error handling -->
+      <div class="observability-strip" style="margin-top:10px;">
+        <strong>1.8 Error Handling:</strong> Any step fails → log error · set status=failed · cleanup branches/worktrees · <strong>continue to next task</strong> (never block)
+      </div>
+
+    </div>
   </div>
+
+  <!-- ========== PHASE 2-5 ========== -->
+  <div class="section-title">Phases 2–5 — Post-Loop Pipeline</div>
+
+  <div class="flow">
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Detect:</strong> test command from config hierarchy or package manifest</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px;">
+          <div class="node-title">Phase 2: Regression Testing</div>
+          <div class="node-desc">Full test suite on main after all merges. Log pass/fail/skip counts.</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Failures:</strong> logged but don't block. Dashboard surfaces them.</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Skip if:</strong> --skip-release flag</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px;">
+          <div class="node-title">Phase 3: Release &amp; Deploy</div>
+          <div class="node-desc">3.1 Update CHANGELOG (by issue type) → 3.2 /stark-release {bump} → 3.3 deploy_command</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Bump logic:</strong> Feature→minor · Bug/Task→patch · Breaking→major. Delegates to /stark-release.</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-output" style="width:380px;">
+          <div class="node-title">Phase 4: Dashboard</div>
+          <div class="node-desc">Task summary table · aggregate stats · agent scorecard · failed task details</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Output:</strong> formatted terminal tables + metrics block per observability protocol</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px;">
+          <div class="node-title">Phase 5: Housekeeping</div>
+          <div class="node-desc">5.1 Save memory · 5.2 Update docs · 5.3 Prompt improvement detection</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Thresholds:</strong> FP&gt;20% · same finding 3× · agent miss 2× · unparseable output</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== AUTH SPLIT ========== -->
+  <div class="section-title">Auth Token Architecture</div>
+
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>User PAT (gh native auth)</h3>
+      <p>
+        <strong>Used for:</strong> creating PRs, merging PRs, creating/closing issues, reading issues, merge operations.<br></br>
+        <strong>Activated by:</strong> <code>unset GH_TOKEN</code> — lets gh fall back to native auth.<br></br>
+        <strong>Shows as:</strong> Aryeh (the user), not a bot.
+      </p>
+    </div>
+    <div class="card card-amber">
+      <h3>Bot Token (stark-claude[bot])</h3>
+      <p>
+        <strong>Used for:</strong> posting review comments, GitHub Projects V2 mutations (status transitions, field updates).<br></br>
+        <strong>Activated by:</strong> <code>export GH_TOKEN=$($PYTHON github_app.py --app stark-claude token)</code><br></br>
+        <strong>Key source:</strong> macOS Keychain (STARK_CLAUDE_PRIVATE_KEY, base64 PEM). Cached 1hr at ~/.cache/github-app-token.json.
+      </p>
+    </div>
+    <div class="card card-red">
+      <h3>Critical Rule</h3>
+      <p>
+        Never create PRs or merge with bot token. Never post reviews with user PAT.
+        The auth split is enforced by explicit <code>unset GH_TOKEN</code> / <code>export GH_TOKEN=...</code> around each operation.
+        Failure to unset causes PRs to appear as bot, breaking attribution.
+      </p>
+    </div>
+  </div>
+
+  <!-- ========== TASK FETCH STRATEGY ========== -->
+  <div class="section-title">Task Fetching Strategy</div>
+
+  <div class="card-grid">
+    <div class="card card-green">
+      <h3>Project-Based (Preferred)</h3>
+      <p>
+        Reads <code>.github/project-config.json</code> → queries GitHub Projects V2 API for items with Status=<em>Ready for Agent</em> and AI Suitability ∈ {Autonomous, Assisted}.
+        Uses <code>github_projects.get_items()</code> via bot token. Falls back to label-based if no config or no items.
+      </p>
+    </div>
+    <div class="card card-dark">
+      <h3>Label-Based (Fallback)</h3>
+      <p>
+        Queries <code>gh api /repos/{ORG_REPO}/issues?labels=plan:{SLUG}&amp;state=open</code> via user PAT.
+        Filters out phase tracking issues (body starts with task checklist, no <code>## What</code> section).
+        Extracts sp:N, risk:*, type:* from labels.
+      </p>
+    </div>
+    <div class="card card-purple">
+      <h3>Auto-Decompose (Zero Issues)</h3>
+      <p>
+        If raw_issue_count == 0: locate plan file (argument path or <code>find docs/ -name "*{SLUG}*"</code>), invoke <code>/stark-plan-to-tasks</code> (3 LLM passes), re-fetch.
+        If raw_issue_count &gt; 0 but all filtered: normal end state, not a decomposition trigger.
+      </p>
+    </div>
+  </div>
+
+  <!-- ========== REVIEW ARCHITECTURE ========== -->
+  <div class="section-title">Review Round Architecture</div>
+
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>Worktree Isolation</h3>
+      <p>
+        Each PR review runs in <code>/tmp/review-{REPO}-pr{N}</code>. Created via <code>git worktree add</code> from FETCH_HEAD.
+        Merge base computed against origin/main. All fixes applied in worktree, pushed to original branch.
+        Cleaned up after loop: <code>git worktree remove</code> + <code>git branch -D</code>.
+      </p>
+    </div>
+    <div class="card card-purple">
+      <h3>Round Loop Ownership</h3>
+      <p>
+        <strong>This skill manages the round loop</strong>, not multi_review.py.
+        multi_review.py runs one round (18 sub-agents: 3 LLMs × 6 domains) and returns JSON.
+        Flags: <code>--json-only</code> (structured output) + <code>--dry-run</code> (don't post to GitHub).
+        The skill classifies findings, fixes, retests, and loops.
+      </p>
+    </div>
+    <div class="card card-dark">
+      <h3>Finding Classification</h3>
+      <p>
+        Each finding inspected at file:line in worktree.<br></br>
+        <strong>fix:</strong> severity ≥ medium AND issue exists in code<br></br>
+        <strong>false_positive:</strong> described problem doesn't exist<br></br>
+        <strong>noise:</strong> subjective/style, or 1 agent contradicted by other 2<br></br>
+        <strong>ignored:</strong> below fix threshold (low severity)
+      </p>
+    </div>
+  </div>
+
+  <!-- ========== DATA FLOW TABLE ========== -->
+  <div class="section-title">Key Data Flows</div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Data</th>
+        <th>Source</th>
+        <th>Sink</th>
+        <th>Format</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Plan slug</td>
+        <td>CLI argument</td>
+        <td>GitHub label query, branch names, log file name</td>
+        <td>String (derived from path or literal)</td>
+      </tr>
+      <tr>
+        <td>Task list</td>
+        <td>GitHub Projects V2 or Issues API</td>
+        <td>Phase 1 loop, briefing, dashboard</td>
+        <td>Array of {number, title, labels, body}</td>
+      </tr>
+      <tr>
+        <td>Implementation diff</td>
+        <td>Subagent (Agent tool)</td>
+        <td>PR body, review worktree</td>
+        <td>Git commits on feature branch</td>
+      </tr>
+      <tr>
+        <td>Review findings</td>
+        <td>multi_review.py JSON output</td>
+        <td>Classification → fix loop → PR comment → observability log</td>
+        <td>JSON array of {file, line, severity, agent, body}</td>
+      </tr>
+      <tr>
+        <td>Observability log</td>
+        <td>All phases</td>
+        <td>Dashboard, /stark-metrics, prompt improvement</td>
+        <td>JSON at history/{ORG}/{REPO}/phase-{SLUG}-{ts}.json</td>
+      </tr>
+      <tr>
+        <td>PR body</td>
+        <td>Generated by skill</td>
+        <td>gh pr create (via temp file)</td>
+        <td>Markdown (never shell-interpolated)</td>
+      </tr>
+      <tr>
+        <td>CHANGELOG entries</td>
+        <td>Merged task metadata</td>
+        <td>CHANGELOG.md → /stark-release</td>
+        <td>Keep a Changelog format (Added/Fixed/Changed)</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ========== EXTENSION POINTS ========== -->
+  <div class="section-title">Extension Points</div>
+
+  <div class="card-grid">
+    <div class="card card-green">
+      <h3>Config Hierarchy</h3>
+      <p>
+        <code>.code-review/config.json</code> (repo) → <code>~/.claude/code-review/config.json</code> (global).
+        Controls: test_command, deploy_command, max review rounds.
+        Repos with custom /stark-release overrides get their workflows respected.
+      </p>
+    </div>
+    <div class="card card-blue">
+      <h3>Project Integration</h3>
+      <p>
+        <code>.github/project-config.json</code> enables GitHub Projects V2 integration.
+        Adds: spec completeness gates, status transitions (Ready for Agent → Agent Working → Blocked),
+        AI Suitability filtering. project-pr-sync Action handles post-merge transitions.
+      </p>
+    </div>
+    <div class="card card-purple">
+      <h3>Skill Delegation</h3>
+      <p>
+        Delegates to: <code>/stark-plan-to-tasks</code> (decomposition), <code>/stark-release</code> (versioning), <code>/stark-review-improvement</code> (prompt tuning).
+        Each sub-skill respects its own repo-level overrides. The phase executor is an orchestrator, not a monolith.
+      </p>
+    </div>
+    <div class="card card-amber">
+      <h3>Observability Protocol</h3>
+      <p>
+        Follows <code>standards/observability.md</code>. TodoWrite for task progress. 5-minute checkpoints.
+        Improvement flags: phase &gt;70% of total time, task fail &gt;30%, agent fail &gt;20%, 0-finding review rounds.
+        Log file consumed by /stark-metrics for cross-phase analytics.
+      </p>
+    </div>
+  </div>
+
+  <!-- ========== FAILURE MODES ========== -->
+  <div class="section-title">Failure Mode Matrix</div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Failure</th>
+        <th>Detection</th>
+        <th>Recovery</th>
+        <th>Severity</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Dirty working tree</td>
+        <td>git status --porcelain</td>
+        <td>Auto-stash, log warning</td>
+        <td><span class="tag tag-config">low</span></td>
+      </tr>
+      <tr>
+        <td>No changes from implementation</td>
+        <td>git diff --stat HEAD empty</td>
+        <td>Log as skipped, continue</td>
+        <td><span class="tag tag-config">low</span></td>
+      </tr>
+      <tr>
+        <td>PR creation fails</td>
+        <td>gh pr create exit code</td>
+        <td>Retry once after push; log and continue</td>
+        <td><span class="tag tag-decision">medium</span></td>
+      </tr>
+      <tr>
+        <td>multi_review.py fails</td>
+        <td>Process exit code / empty JSON</td>
+        <td>Log agent failures, proceed with available findings</td>
+        <td><span class="tag tag-decision">medium</span></td>
+      </tr>
+      <tr>
+        <td>CI fails before merge</td>
+        <td>gh pr checks --fail-level all</td>
+        <td>Merge with --admin, flag ci_bypassed:true</td>
+        <td><span class="tag tag-failure">high</span></td>
+      </tr>
+      <tr>
+        <td>Merge conflict</td>
+        <td>git merge/rebase failure</td>
+        <td>Rebase on main, resolve, re-push, retry</td>
+        <td><span class="tag tag-failure">high</span></td>
+      </tr>
+      <tr>
+        <td>Worktree already exists</td>
+        <td>git worktree add failure</td>
+        <td>Reuse existing: cd /tmp/review-*</td>
+        <td><span class="tag tag-config">low</span></td>
+      </tr>
+      <tr>
+        <td>GitHub API rate limit</td>
+        <td>HTTP 429</td>
+        <td>Wait 60s, retry once; log and continue</td>
+        <td><span class="tag tag-decision">medium</span></td>
+      </tr>
+      <tr>
+        <td>Subagent timeout</td>
+        <td>Agent tool timeout</td>
+        <td>Log timeout, skip task, continue</td>
+        <td><span class="tag tag-decision">medium</span></td>
+      </tr>
+      <tr>
+        <td>Release fails</td>
+        <td>/stark-release error</td>
+        <td>Log and skip deploy</td>
+        <td><span class="tag tag-decision">medium</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ========== CLI FLAGS ========== -->
+  <div class="section-title">CLI Arguments &amp; Constants</div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Argument</th>
+        <th>Default</th>
+        <th>Effect</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>&lt;plan-slug&gt;</code></td>
+        <td>required</td>
+        <td>Matches <code>plan:{SLUG}</code> label. File paths auto-resolve to slug.</td>
+      </tr>
+      <tr>
+        <td><code>--dry-run</code></td>
+        <td>off</td>
+        <td>Walk plan, show tasks, verify tooling. No branches/PRs/changes. Stops before /stark-plan-to-tasks if needed.</td>
+      </tr>
+      <tr>
+        <td><code>--skip-deploy</code></td>
+        <td>off</td>
+        <td>Skip deploy_command in Phase 3.3</td>
+      </tr>
+      <tr>
+        <td><code>--skip-release</code></td>
+        <td>off</td>
+        <td>Skip all of Phase 3 (CHANGELOG, version bump, deploy)</td>
+      </tr>
+      <tr>
+        <td><code>--start-from N</code></td>
+        <td>1st issue</td>
+        <td>Resume from specific issue number (skip earlier tasks)</td>
+      </tr>
+      <tr>
+        <td><code>--rounds N</code></td>
+        <td>3</td>
+        <td>Max review-fix rounds per PR</td>
+      </tr>
+      <tr>
+        <td><code>--repo ORG/REPO</code></td>
+        <td>auto-detect</td>
+        <td>Override repo detection from git remote</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="summary-grid" style="margin-top:24px;">
+    <div class="summary-card" style="background:#eff6ff;border-radius:8px;">
+      <h3 style="color:#1e40af;">SCRIPTS</h3>
+      <p><code>~/.claude/code-review/scripts</code></p>
+    </div>
+    <div class="summary-card" style="background:#ecfdf5;border-radius:8px;">
+      <h3 style="color:#059669;">PYTHON</h3>
+      <p><code>$SCRIPTS/.venv/bin/python3</code></p>
+    </div>
+    <div class="summary-card" style="background:#fef3c7;border-radius:8px;">
+      <h3 style="color:#92400e;">HISTORY</h3>
+      <p><code>~/.claude/code-review/history</code></p>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer"><div class="winner-badge">Visualization by Claude · Score: 8.4/10 · Generated from SKILL.md</div></div>
 
 </body>
 </html>

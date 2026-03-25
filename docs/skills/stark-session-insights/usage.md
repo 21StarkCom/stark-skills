@@ -5,34 +5,10 @@ Analyze Claude Code session history to extract usage patterns, skill invocations
 ## Workflow Overview
 
 ```mermaid
-graph TD
-    A[User invokes /stark-session-insights] --> B{Arguments provided?}
-    B -->|--project <name>| C[Filter target projects]
-    B -->|No arguments| D[Target all projects]
-    
-    C --> E[Load ~/.claude/history.jsonl]
-    D --> E
-    
-    E --> F[Group entries by Project Slug]
-    
-    F --> G{--refresh used?}
-    G -->|No| H{Does <slug>.md exist and match entry count?}
-    H -->|Yes| I[Skip unchanged project]
-    H -->|No| J[Run Data Analysis]
-    G -->|Yes| J
-    
-    J --> K[Calculate Stats, Trends, & Session Shapes]
-    K --> L[Extract Corrections & Frustrations]
-    L --> M[Generate Narrative & Recommendations]
-    
-    M --> N[Write ~/.claude/code-review/insights/sessions/<slug>.md]
-    I --> O[Update index.md]
-    N --> O
-    
-    O --> P[Print execution summary to user]
+
 ```
 
-![A usage-focused dashboard visualizing the stark-session-insights skill. It displays invocation commands, an execution flow diagram showing the parsing of history.jsonl into project insights, and feature cards detailing extracted metrics like work rhythms, skill usage, and AI-synthesized workflow corrections.](usage.png)
+![A clean single-page infographic for the `stark-session-insights` skill showing a centered header, usage badges, KPI cards, a vertical workflow diagram from invocation to markdown outputs, argument and output tables, cards for metrics and edge cases, and a recommended command callout for generating per-project Claude Code session insight reports."}}](usage.png)
 
 ## When to Use
 

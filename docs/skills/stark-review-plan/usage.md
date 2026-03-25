@@ -8,7 +8,7 @@ Multi-agent design document review using 3 LLMs × 7 domains with autonomous fix
 
 ```
 
-![A clean light-themed infographic for the `stark-review-plan` skill showing a top command bar, summary cards for inputs and outputs, a vertical workflow from invocation through setup, dry-run decision, review-fix loop, final review, summary, and persisted artifacts, plus tables for command examples and generated files."}}](usage.png)
+![A clean single-page diagram for the stark-review-plan skill showing a usage-focused flow from command invocation, setup, validation, and PR detection into a 21-agent review-fix loop, a dispatch-failure branch, a final review round, consolidated summary generation, and output artifacts like a .review.md file, PR comments, and saved history, with cards explaining arguments, common workflows, outputs, observability, and troubleshooting."}}](usage.png)
 
 ## When to Use
 

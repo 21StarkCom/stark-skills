@@ -1,20 +1,9 @@
-<html lang="en">
+<html>
 <head>
 
 
-<title>stark-release | Internal Architecture</title>
+<title>stark-release — Internals</title>
 <style>
-/*
- * Stark Skills — Shared Design System CSS
- *
- * Foundation styles for LLM-generated HTML skill visualizations.
- * LLMs embed this inline and may extend with additional styles.
- * All colors pass WCAG AA 4.5:1 contrast ratio.
- *
- * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
- */
-
-/* === Reset & Base === */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
   font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -22,8 +11,6 @@ body {
   color: #1a1a1a;
   line-height: 1.5;
 }
-
-/* === Header === */
 .header { text-align: center; padding: 36px 20px 16px; }
 .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
 .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
@@ -32,58 +19,46 @@ body {
   background: #eff6ff; color: #1e40af;
   padding: 3px 10px; border-radius: 4px; margin-top: 8px;
 }
-
-/* === Container === */
 .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
-
-/* === Section Title === */
 .section-title {
   font-size: 14px; font-weight: 700; color: #666;
   text-transform: uppercase; letter-spacing: 1px;
   margin: 32px 0 16px; padding-bottom: 6px;
   border-bottom: 2px solid #e5e7eb;
 }
-
-/* === Node Types === */
-.node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
 .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
 .node-desc { font-size: 10px; opacity: 0.8; }
-
-.node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
-.node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
-.node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
-.node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
-.node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
-.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
-
-/* === Flow Layout === */
+.node-phase    { background: #1e40af; color: #ffffff; }
+.node-decision { background: #7c3aed; color: #ffffff; }
+.node-failure  { background: #dc2626; color: #ffffff; }
+.node-config   { background: #047857; color: #ffffff; }
+.node-output   { background: #f59e0b; color: #1a1a1a; }
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
 .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
 .flow-step {
-  display: flex; align-items: center;
+  display: flex; align-items: stretch;
   width: 100%; max-width: 860px; min-height: 76px;
 }
 .flow-lane-left {
-  width: 250px; display: flex;
+  width: 180px; display: flex;
   align-items: center; justify-content: flex-end;
-  padding-right: 18px; text-align: right;
+  padding-right: 18px;
 }
 .flow-lane-center {
-  width: 360px; display: flex;
+  width: 500px; display: flex;
   align-items: center; justify-content: center;
 }
 .flow-lane-right {
-  width: 250px; display: flex;
-  align-items: center; padding-left: 18px; text-align: left;
+  width: 180px; display: flex;
+  align-items: center; padding-left: 18px;
 }
 .annotation {
-  font-size: 10px; color: #666; max-width: 220px; line-height: 1.4;
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
 }
 .annotation strong { color: #444; }
-code { font-family: monospace; background: rgba(0,0,0,0.05); padding: 1px 4px; border-radius: 3px; font-size: 9px; }
-
-/* === Arrows === */
 .arrow-down {
-  width: 2px; height: 24px; background: #cbd5e1;
+  width: 2px; height: 20px; background: #cbd5e1;
   margin: 0 auto; position: relative;
 }
 .arrow-down::after {
@@ -99,19 +74,14 @@ code { font-family: monospace; background: rgba(0,0,0,0.05); padding: 1px 4px; b
 .arrow-container .flow-lane-center {
   display: flex; justify-content: center;
 }
-
-/* === Cards === */
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 16px; margin-top: 16px;
 }
-.card { padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+.card { padding: 16px; border-radius: 8px; }
 .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
-.card p  { font-size: 11px; line-height: 1.6; color: #444;}
-.card ul { margin-left: 16px; font-size: 11px; line-height: 1.6; color: #444; margin-top: 6px; }
-.card li { margin-bottom: 4px; }
-
+.card p  { font-size: 11px; line-height: 1.6; }
 .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
 .card-blue h3 { color: #1e40af; }
 .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
@@ -120,28 +90,21 @@ code { font-family: monospace; background: rgba(0,0,0,0.05); padding: 1px 4px; b
 .card-purple h3 { color: #7c3aed; }
 .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
 .card-amber h3 { color: #92400e; }
-.card-dark   { background: #ffffff; border: 1px solid #e5e7eb; border-left: 3px solid #333333; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
 .card-dark h3 { color: #333333; }
 .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
 .card-red h3 { color: #dc2626; }
-
-/* === Data Tables === */
 .data-table {
   width: 100%; max-width: 860px; margin: 16px auto;
   border-collapse: collapse; font-size: 11px;
-  background: white; border-radius: 8px; overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 .data-table th {
-  background: #f3f4f6; padding: 10px 12px; text-align: left;
-  font-weight: 600; color: #4b5563; border-bottom: 2px solid #e5e7eb;
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
 }
 .data-table td {
-  padding: 10px 12px; border-bottom: 1px solid #f3f4f6; color: #4b5563;
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
 }
-.data-table tr:last-child td { border-bottom: none; }
-
-/* === Tags === */
 .tag {
   display: inline-block; font-size: 9px; font-weight: 600;
   padding: 2px 8px; border-radius: 3px;
@@ -152,22 +115,35 @@ code { font-family: monospace; background: rgba(0,0,0,0.05); padding: 1px 4px; b
 .tag-config   { background: #d1fae5; color: #065f46; }
 .tag-output   { background: #fef3c7; color: #92400e; }
 .tag-external { background: #f3f4f6; color: #666666; }
-
-/* === Legend === */
 .legend {
   display: flex; gap: 16px; justify-content: center;
-  margin: 16px 0 32px; flex-wrap: wrap;
+  margin: 16px 0 24px; flex-wrap: wrap;
 }
 .legend-item {
   display: flex; align-items: center; gap: 6px;
   font-size: 10px; color: #666;
 }
 .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
-
-/* === Footer === */
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
 .footer {
-  text-align: center; padding: 40px 20px 20px;
+  text-align: center; padding: 20px;
   font-size: 10px; color: #999;
+}
+.branch-connector {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; max-width: 860px; margin: 4px 0;
+}
+.branch-line {
+  height: 2px; flex: 1; background: #cbd5e1;
+}
+.branch-label {
+  font-size: 9px; color: #7c3aed; font-weight: 600; white-space: nowrap;
 }
 </style>
 </head>
@@ -175,268 +151,460 @@ code { font-family: monospace; background: rgba(0,0,0,0.05); padding: 1px 4px; b
 
 <div class="header">
   <h1>stark-release</h1>
-  <div class="sub">Automated Release Management & Version Bumping workflow</div>
-  <div class="scope">INTERNAL ARCHITECTURE & DATA FLOW</div>
+  <div class="sub">Cut a new release — CHANGELOG review, version bump, git tag, GitHub Release</div>
+  <div class="scope">INTERNALS — Architecture &amp; Data Flow</div>
 </div>
 
 <div class="container">
 
+  <!-- Legend -->
   <div class="legend">
-    <div class="legend-item"><div class="legend-dot node-phase"></div> Git/Workflow Operation</div>
-    <div class="legend-item"><div class="legend-dot node-decision"></div> Logic/Decision Point</div>
-    <div class="legend-item"><div class="legend-dot node-output"></div> File Mutation/Artifact</div>
-    <div class="legend-item"><div class="legend-dot node-external"></div> External API/CLI</div>
-    <div class="legend-item"><div class="legend-dot node-failure"></div> Failure Mode</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#1e40af;"></div> Workflow Phase</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed;"></div> Decision Point</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#047857;"></div> Config / Input</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b;"></div> Output / Artifact</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#dc2626;"></div> Failure / Abort</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e5e7eb;"></div> External Dependency</div>
   </div>
 
-  <h2 class="section-title">Release Pipeline Execution Flow</h2>
-  
+  <!-- ============ RELEASE PIPELINE FLOW ============ -->
+  <div class="section-title">Release Pipeline Flow</div>
+
   <div class="flow">
-    <!-- Step 1 -->
+
+    <!-- Step 1: Pre-flight -->
     <div class="flow-step">
       <div class="flow-lane-left">
-        <div class="annotation">
-          <strong>Git Validation</strong><br>
-          Must be on <code>main</code> branch with clean working tree. Pulls latest.
-        </div>
+        <div class="annotation"><strong>Auth:</strong> unset GH_TOKEN so all operations use user's native PAT</div>
       </div>
       <div class="flow-lane-center">
-        <div class="node node-phase">
-          <div class="node-title">1. Pre-flight Checks</div>
-          <div class="node-desc">git checkout, pull --rebase, status</div>
+        <div class="node node-phase" style="width:400px;">
+          <div class="node-title">Step 1: Pre-flight</div>
+          <div class="node-desc">git checkout main &amp;&amp; git pull --rebase &amp;&amp; git status --porcelain</div>
         </div>
       </div>
       <div class="flow-lane-right">
-        <div class="node node-failure" style="padding: 6px; margin-left: 10px; width: auto; font-size: 9px;">
-          Abort if dirty tree or wrong branch
-        </div>
+        <div class="annotation"><strong>Guard:</strong> Must be on main, clean working tree</div>
       </div>
     </div>
-    
+
     <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-    
-    <!-- Step 2 -->
+
+    <!-- Decision: clean tree? -->
     <div class="flow-step">
       <div class="flow-lane-left">
-        <div class="annotation">
-          <strong>Query Tag History</strong><br>
-          <code>git tag --sort=-v:refname</code>
-        </div>
+        <div class="annotation"><strong>Check:</strong> git status --porcelain output must be empty string</div>
       </div>
       <div class="flow-lane-center">
-        <div class="node node-config">
-          <div class="node-title">2. Determine Current Version</div>
-          <div class="node-desc">Parse tag to major.minor.patch</div>
+        <div class="node node-decision" style="width:400px;">
+          <div class="node-title">Clean working tree?</div>
+          <div class="node-desc">Dirty tree or wrong branch → abort with guidance</div>
         </div>
       </div>
       <div class="flow-lane-right">
-        <div class="annotation">
-          <strong>Baseline Fallback:</strong><br>
-          If no tags exist, default to <code>0.1.0</code>.
-        </div>
-      </div>
-    </div>
-    
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-    
-    <!-- Step 3 -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="annotation">
-          <strong>Parse Markdown</strong><br>
-          Extract <code>## [Unreleased]</code> section. Format changes for user output.
-        </div>
-      </div>
-      <div class="flow-lane-center">
-        <div class="node node-decision">
-          <div class="node-title">3. Review Unreleased Changes</div>
-          <div class="node-desc">Read CHANGELOG.md</div>
-        </div>
-      </div>
-      <div class="flow-lane-right">
-        <div class="node node-failure" style="padding: 6px; margin-left: 10px; width: auto; font-size: 9px;">
-          Abort if missing/empty Unreleased
+        <div class="node node-failure" style="width:160px;">
+          <div class="node-title">Abort</div>
+          <div class="node-desc">Stash or commit first</div>
         </div>
       </div>
     </div>
 
     <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-    <!-- Step 4 -->
+    <!-- Step 2: Determine current version -->
     <div class="flow-step">
       <div class="flow-lane-left">
-        <div class="annotation">
-          <strong>Auto-detect Rule:</strong><br>
-          Fixed = <code>patch</code><br>
-          Added = <code>minor</code><br>
-          Breaking = <code>major</code>
-        </div>
+        <div class="annotation"><strong>Source of truth:</strong> git tags, not pyproject.toml</div>
       </div>
       <div class="flow-lane-center">
-        <div class="node node-decision">
-          <div class="node-title">4. Calculate Next Version</div>
-          <div class="node-desc">Resolve semantic bump type</div>
+        <div class="node node-phase" style="width:400px;">
+          <div class="node-title">Step 2: Determine Current Version</div>
+          <div class="node-desc">git tag --sort=-v:refname | head -1 → parse major.minor.patch</div>
         </div>
       </div>
       <div class="flow-lane-right">
-        <div class="annotation">
-          <strong>Input Override:</strong><br>
-          Uses optional arg <code>[patch|minor|major]</code>
+        <div class="annotation"><strong>Fallback:</strong> No tags → baseline 0.1.0 from pyproject.toml</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 3: Review unreleased changes -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Input:</strong> CHANGELOG.md [Unreleased] section</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:400px;">
+          <div class="node-title">Step 3: Review Unreleased Changes</div>
+          <div class="node-desc">Extract [Unreleased] section, categorize Fixed/Added/Changed</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="node node-failure" style="width:160px;">
+          <div class="node-title">Abort</div>
+          <div class="node-desc">No CHANGELOG or empty [Unreleased]</div>
         </div>
       </div>
     </div>
 
     <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-    <!-- Step 5 & 6 -->
+    <!-- Step 4: Determine bump type -->
     <div class="flow-step">
       <div class="flow-lane-left">
-        <div class="annotation">
-          <strong>1.</strong> Bump <code>__version__</code> in <code>__init__.py</code><br>
-          <strong>2.</strong> Shift <code>[Unreleased]</code> to <code>[vX.Y.Z]</code> section.
+        <div class="node node-config" style="width:160px;">
+          <div class="node-title">$ARGUMENTS</div>
+          <div class="node-desc">patch | minor | major</div>
         </div>
       </div>
       <div class="flow-lane-center">
-        <div class="node node-output">
-          <div class="node-title">5 & 6. Mutate Repository State</div>
-          <div class="node-desc">Update Runtime version & Changelog</div>
+        <div class="node node-decision" style="width:400px;">
+          <div class="node-title">Step 4: Determine Bump Type</div>
+          <div class="node-desc">Explicit arg → use it. Otherwise: Fixed→patch, Added→minor, Breaking→major</div>
         </div>
       </div>
       <div class="flow-lane-right">
-        <div class="annotation">
-          <strong>Git Commit:</strong><br>
-          <code>git commit -m "release: vX.Y.Z"</code>
+        <div class="annotation"><strong>Auto-select:</strong> No confirmation needed — proceeds automatically</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 5: Bump __version__ -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>File:</strong> src/infra_pulse/__init__.py</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:400px;">
+          <div class="node-title">Step 5: Bump __version__</div>
+          <div class="node-desc">Update runtime version string in __init__.py (NOT pyproject.toml)</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Warning:</strong> pyproject.toml stays static at 0.1.0</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 6: Update CHANGELOG -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Pattern:</strong> Move entries from [Unreleased] to [vX.Y.Z] - date</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:400px;">
+          <div class="node-title">Step 6: Update CHANGELOG + Commit</div>
+          <div class="node-desc">git add CHANGELOG.md __init__.py &amp;&amp; git commit -m "release: vX.Y.Z"</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="node node-output" style="width:160px;">
+          <div class="node-title">Release Commit</div>
+          <div class="node-desc">Contains both file changes</div>
         </div>
       </div>
     </div>
 
     <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-    <!-- Step 7 & 8 -->
+    <!-- Step 7: Create tag -->
     <div class="flow-step">
       <div class="flow-lane-left">
-        <div class="annotation">
-          <strong>Git Operations</strong><br>
-          Annotated tag contains full change notes. Push updates tracking branch.
-        </div>
+        <div class="annotation"><strong>Order matters:</strong> Commit first, THEN tag (tag points to release commit)</div>
       </div>
       <div class="flow-lane-center">
-        <div class="node node-phase">
-          <div class="node-title">7 & 8. Create Tag & Push</div>
-          <div class="node-desc">git tag -a & git push origin</div>
+        <div class="node node-phase" style="width:400px;">
+          <div class="node-title">Step 7: Create Annotated Tag</div>
+          <div class="node-desc">git tag -a vX.Y.Z -m "Release vX.Y.Z\n\nChanges: ..."</div>
         </div>
       </div>
       <div class="flow-lane-right">
-        <div class="node node-failure" style="padding: 6px; margin-left: 10px; width: auto; font-size: 9px;">
-          Tag exists / Push fails
+        <div class="node node-output" style="width:160px;">
+          <div class="node-title">Git Tag</div>
+          <div class="node-desc">vX.Y.Z (annotated)</div>
         </div>
       </div>
     </div>
 
     <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-    <!-- Step 9 & 10 -->
+    <!-- Step 8: Push -->
     <div class="flow-step">
       <div class="flow-lane-left">
-        <div class="annotation">
-          <strong>Authentication:</strong><br>
-          Uses user's PAT to create GitHub Release as themselves.
+        <div class="node node-external" style="width:160px;">
+          <div class="node-title">GitHub Remote</div>
+          <div class="node-desc">origin/main</div>
         </div>
       </div>
       <div class="flow-lane-center">
-        <div class="node node-external">
-          <div class="node-title">9 & 10. Publish GitHub Release</div>
-          <div class="node-desc">gh release create & Print Summary</div>
+        <div class="node node-phase" style="width:400px;">
+          <div class="node-title">Step 8: Push Branch + Tag</div>
+          <div class="node-desc">git push origin main &amp;&amp; git push origin vX.Y.Z</div>
         </div>
       </div>
       <div class="flow-lane-right">
-        <div class="node node-failure" style="padding: 6px; margin-left: 10px; width: auto; font-size: 9px;">
-          <code>gh</code> auth failure
+        <div class="annotation"><strong>Recovery:</strong> If push fails → git pull --rebase, retry</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 9: GitHub Release -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="node node-external" style="width:160px;">
+          <div class="node-title">gh CLI</div>
+          <div class="node-desc">User's native PAT auth</div>
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:400px;">
+          <div class="node-title">Step 9: Create GitHub Release</div>
+          <div class="node-desc">gh release create vX.Y.Z --title --notes (always, no confirmation)</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="node node-output" style="width:160px;">
+          <div class="node-title">GitHub Release</div>
+          <div class="node-desc">With CHANGELOG notes</div>
         </div>
       </div>
     </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 10: Summary -->
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-output" style="width:400px;">
+          <div class="node-title">Step 10: Release Summary</div>
+          <div class="node-desc">Version, tag, previous, change counts, GH Release URL, commit hash</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+
   </div>
 
-  <h2 class="section-title">Design Principles & Rules</h2>
-  
+  <!-- ============ VERSION RESOLUTION ============ -->
+  <div class="section-title">Version Resolution Logic</div>
+
   <div class="card-grid">
-    <div class="card card-blue">
+    <div class="card card-green">
       <h3>Version Source of Truth</h3>
-      <p><strong>Git Tags</strong> dictate the official version. <code>pyproject.toml</code> remains static at <code>0.1.0</code> to avoid trivial conflicts. <code>src/infra_pulse/__init__.py</code> serves as the runtime mirror that MUST be bumped so the deployed app correctly reflects the tag.</p>
+      <p>Git tags (semver format <code>vX.Y.Z</code>) are the canonical version. The <code>pyproject.toml</code> static <code>version = "0.1.0"</code> is never modified. Runtime version lives in <code>src/infra_pulse/__init__.py</code> as <code>__version__</code> and MUST match the tag.</p>
     </div>
-    
     <div class="card card-purple">
-      <h3>Changelog Integrity</h3>
-      <p>The system requires developers to maintain standard <code>## [Unreleased]</code> sections in <code>CHANGELOG.md</code> using <code>### Fixed</code>, <code>### Added</code>, and <code>### Changed</code> markers. This powers automated semantic bumping without requiring human prompts.</p>
+      <h3>Bump Auto-Selection</h3>
+      <p>When no explicit argument is provided, the skill inspects CHANGELOG categories:<br>
+      Only <code>### Fixed</code> → <strong>patch</strong><br>
+      Has <code>### Added</code> → <strong>minor</strong><br>
+      Has <code>### Changed</code> with breaking changes → <strong>major</strong><br>
+      No user confirmation required — proceeds automatically.</p>
     </div>
-    
-    <div class="card card-amber">
-      <h3>Fail-Closed Executions</h3>
-      <p>The skill refuses to run if uncommitted changes exist, if not on <code>main</code>, if the CHANGELOG is missing, or if the Unreleased block is empty. This prevents accidental partial releases or empty tags.</p>
+    <div class="card card-blue">
+      <h3>Tag Parsing</h3>
+      <p><code>git tag --sort=-v:refname | head -1</code> retrieves the most recent semver tag. Parsed into major, minor, patch integers. If no tags exist, falls back to baseline <code>0.1.0</code>. Tag collision (version already taken) triggers an error suggesting the next available version.</p>
     </div>
   </div>
 
-  <h2 class="section-title">Failure Modes & Recovery</h2>
-  
+  <!-- ============ AUTH MODEL ============ -->
+  <div class="section-title">Authentication Model</div>
+
+  <div class="card-grid">
+    <div class="card card-dark">
+      <h3>User's PAT (Exclusive)</h3>
+      <p>All release operations — commits, tags, pushes, and GitHub Releases — use the user's personal access token via native <code>gh</code> auth. <code>GH_TOKEN</code> is explicitly unset at the start to prevent bot tokens from being used. This ensures releases show the user as the actor, not a bot.</p>
+    </div>
+    <div class="card card-red">
+      <h3>No Bot Tokens</h3>
+      <p>Unlike <code>/stark-review</code> which uses stark-claude[bot] for review comments, the release skill never touches bot credentials. The <code>unset GH_TOKEN</code> at pre-flight is a critical guard — without it, a stale bot token from a prior review could cause releases to appear as bot-authored.</p>
+    </div>
+  </div>
+
+  <!-- ============ DATA FLOW TABLE ============ -->
+  <div class="section-title">Data Flow &amp; Artifacts</div>
+
   <table class="data-table">
     <thead>
       <tr>
-        <th style="width: 25%">Failure State</th>
-        <th style="width: 25%">Detection Phase</th>
-        <th style="width: 50%">Recovery / Action taken</th>
+        <th>Step</th>
+        <th>Reads</th>
+        <th>Writes</th>
+        <th>Side Effects</th>
       </tr>
     </thead>
     <tbody>
       <tr>
-        <td><strong>Not on main branch</strong></td>
-        <td>1. Pre-flight</td>
-        <td>Abort. Prompt user to <code>git checkout main</code>.</td>
+        <td><span class="tag tag-phase">Pre-flight</span></td>
+        <td>git status, current branch</td>
+        <td>—</td>
+        <td>git checkout main, git pull --rebase</td>
       </tr>
       <tr>
-        <td><strong>Dirty working tree</strong></td>
-        <td>1. Pre-flight</td>
-        <td>Abort. Prompt user to stash or commit changes first.</td>
+        <td><span class="tag tag-phase">Current Version</span></td>
+        <td>git tags (sorted semver)</td>
+        <td>$CURRENT_VERSION</td>
+        <td>—</td>
       </tr>
       <tr>
-        <td><strong>No CHANGELOG.md / Empty</strong></td>
-        <td>3. Review Changes</td>
-        <td>Abort. Nothing to release. Instruct user to run <code>/fix-bug</code> or add logs.</td>
+        <td><span class="tag tag-phase">Review Changes</span></td>
+        <td>CHANGELOG.md [Unreleased]</td>
+        <td>Change categories in memory</td>
+        <td>—</td>
       </tr>
       <tr>
-        <td><strong>Tag already exists</strong></td>
-        <td>7. Create Tag</td>
-        <td>Error out. Suggest next logical version.</td>
+        <td><span class="tag tag-decision">Bump Type</span></td>
+        <td>$ARGUMENTS, change categories</td>
+        <td>$NEXT_VERSION</td>
+        <td>—</td>
       </tr>
       <tr>
-        <td><strong>Push fails</strong></td>
-        <td>8. Push</td>
-        <td>Attempt <code>git pull --rebase origin main</code> and retry push.</td>
+        <td><span class="tag tag-phase">Bump __version__</span></td>
+        <td>src/infra_pulse/__init__.py</td>
+        <td>src/infra_pulse/__init__.py</td>
+        <td>File edit</td>
       </tr>
       <tr>
-        <td><strong>gh auth fails</strong></td>
-        <td>9. GH Release</td>
-        <td>Verify via <code>gh auth status</code>. Fails if user PAT is inactive.</td>
+        <td><span class="tag tag-phase">Update CHANGELOG</span></td>
+        <td>CHANGELOG.md</td>
+        <td>CHANGELOG.md</td>
+        <td>git commit (both files)</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-output">Create Tag</span></td>
+        <td>$NEXT_VERSION, change list</td>
+        <td>Annotated git tag</td>
+        <td>Local tag created</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-external">Push</span></td>
+        <td>—</td>
+        <td>—</td>
+        <td>git push main + tag to origin</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-output">GitHub Release</span></td>
+        <td>CHANGELOG content for version</td>
+        <td>—</td>
+        <td>gh release create</td>
       </tr>
     </tbody>
   </table>
 
-  <h2 class="section-title">Observability Events</h2>
-  <div class="card card-dark">
-    <h3>Skill Observability Protocol (<span class="tag tag-config">~/.claude/code-review/standards/observability.md</span>)</h3>
-    <p style="margin-bottom: 8px;">The skill emits standard checkpoints and timing data plus domain-specific tags:</p>
-    <ul>
-      <li><strong>Version Metadata:</strong> Previous version, new version, bump type (<code>patch</code> | <code>minor</code> | <code>major</code>).</li>
-      <li><strong>Changelog Analytics:</strong> Count of entries categorized by <code>Fixed</code>, <code>Added</code>, <code>Changed</code>.</li>
-      <li><strong>Artifact Creation:</strong> Booleans for tag created (yes/no) and GH release created (yes/no).</li>
-      <li><strong>Latency:</strong> Measure total <code>git push</code> duration to monitor remote delays.</li>
-    </ul>
+  <!-- ============ FAILURE MODES ============ -->
+  <div class="section-title">Failure Modes &amp; Recovery</div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Failure</th>
+        <th>Detection</th>
+        <th>Recovery</th>
+        <th>Severity</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Not on main branch</td>
+        <td>git branch --show-current</td>
+        <td>Prompt user to checkout main</td>
+        <td><span class="tag tag-failure">Abort</span></td>
+      </tr>
+      <tr>
+        <td>Dirty working tree</td>
+        <td>git status --porcelain non-empty</td>
+        <td>Prompt to stash or commit</td>
+        <td><span class="tag tag-failure">Abort</span></td>
+      </tr>
+      <tr>
+        <td>No CHANGELOG.md</td>
+        <td>File not found</td>
+        <td>Abort — nothing to release</td>
+        <td><span class="tag tag-failure">Abort</span></td>
+      </tr>
+      <tr>
+        <td>Empty [Unreleased]</td>
+        <td>Section exists but no entries</td>
+        <td>Abort — nothing to release</td>
+        <td><span class="tag tag-failure">Abort</span></td>
+      </tr>
+      <tr>
+        <td>Tag already exists</td>
+        <td>git tag -a fails</td>
+        <td>Error — suggest next available version</td>
+        <td><span class="tag tag-decision">Recoverable</span></td>
+      </tr>
+      <tr>
+        <td>Push rejected</td>
+        <td>git push fails (diverged)</td>
+        <td>git pull --rebase origin main, retry push</td>
+        <td><span class="tag tag-decision">Recoverable</span></td>
+      </tr>
+      <tr>
+        <td>gh auth fails</td>
+        <td>gh release create returns error</td>
+        <td>Verify gh auth status — user's PAT must be active</td>
+        <td><span class="tag tag-decision">Recoverable</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ============ EXTENSION POINTS ============ -->
+  <div class="section-title">Extension Points</div>
+
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>Version File Location</h3>
+      <p>Currently hardcoded to <code>src/infra_pulse/__init__.py</code>. To adapt for other projects: change the file path and the regex pattern used to find/replace <code>__version__</code>. Could be generalized to read from a config field specifying the version file path.</p>
+    </div>
+    <div class="card card-green">
+      <h3>Dynamic Versioning</h3>
+      <p>The skill notes that <code>pyproject.toml</code> is static. To enable dynamic versioning, add <code>setuptools-scm</code> which reads version from git tags at build time. This would eliminate the need for Step 5 entirely — the tag itself becomes the only version artifact.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>CHANGELOG Format</h3>
+      <p>Expects Keep a Changelog format with <code>## [Unreleased]</code> heading and <code>### Fixed/Added/Changed</code> subsections. The bump auto-selection logic is tightly coupled to these category names. Adding new categories (e.g., <code>### Deprecated</code>, <code>### Removed</code>) requires updating the bump heuristic.</p>
+    </div>
+    <div class="card card-amber">
+      <h3>Observability Protocol</h3>
+      <p>The skill follows the Skill Observability Protocol at <code>~/.claude/code-review/standards/observability.md</code>. Custom metrics include: version diff (prev → new), bump type, CHANGELOG entry counts by category, tag/release creation booleans, and push duration. These can be extended or piped to external dashboards.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>Post-Release Hooks</h3>
+      <p>Currently ends at summary output. Natural extension points: trigger CI/CD deploy pipelines, notify Slack channels, update version badges, run smoke tests against the tagged release, or create follow-up issues for the next cycle.</p>
+    </div>
+    <div class="card card-red">
+      <h3>Multi-Package Support</h3>
+      <p>The skill assumes a single-package repo with one CHANGELOG and one version file. For monorepos, each package would need its own CHANGELOG parsing, independent version bumps, and scoped tags (e.g., <code>pkg-a/v1.2.3</code>).</p>
+    </div>
+  </div>
+
+  <!-- ============ CRITICAL ORDERING ============ -->
+  <div class="section-title">Critical Ordering Constraints</div>
+
+  <div class="summary-grid">
+    <div class="summary-card card-red">
+      <h3>Commit Before Tag</h3>
+      <p>The tag must point to the commit that contains the updated CHANGELOG and __version__. Creating the tag first would point it at the wrong commit.</p>
+    </div>
+    <div class="summary-card card-amber">
+      <h3>Unset GH_TOKEN First</h3>
+      <p>Must happen at pre-flight before any git/gh operations. A stale bot token from /stark-review could silently cause releases to appear bot-authored.</p>
+    </div>
+    <div class="summary-card card-blue">
+      <h3>Push Both Separately</h3>
+      <p>Branch push and tag push are separate commands. Both must succeed. Tag push after branch push ensures remote has the commit the tag references.</p>
+    </div>
   </div>
 
 </div>
 
-<div class="footer">
-  stark-release visualization internally generated | Evinced Internal Arch
-</div>
+<div class="footer"><div class="winner-badge">Visualization by Claude · Score: 8.4/10 · Generated from SKILL.md</div></div>
 
 </body>
 </html>

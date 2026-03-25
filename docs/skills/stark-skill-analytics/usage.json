@@ -1,18 +1,4 @@
 {
-  "doc_content": {
-    "summary": "The stark-skill-analytics skill analyzes Claude Code session history and skill run data to provide a comprehensive view of skill usage patterns, adoption trends, and operational quality metrics. It helps identify which skills are popular, which are failing, and gaps between configured and actual usage.",
-    "key_features": [
-      "Parses ~/.claude/history.jsonl to track skill invocations, sequences, and project-specific usage over time.",
-      "Aggregates performance data from ~/.claude/code-review/history/ to compute success rates, timeouts, and durations.",
-      "Cross-references usage with CLAUDE.md to highlight unregistered skills or deprecation candidates.",
-      "Generates actionable recommendations (Remove, Promote, Fix, Investigate, Combine) based on data trends.",
-      "Produces Markdown reports and terminal summaries with options to drill down into a single skill or generate table-only summaries."
-    ],
-    "usage_examples": [
-      "/stark-skill-analytics",
-      "/stark-skill-analytics --skill stark-review",
-      "/stark-skill-analytics --format table"
-    ]
-  },
-  "alt_text": "A visualization of the stark-skill-analytics skill workflow, illustrating the four phases of data collection from Claude session logs, run history aggregation, cross-reference analysis with CLAUDE.md, and final report generation."
+  "doc_content": {},
+  "alt_text": "A clean, single-page visualization for the stark-skill-analytics skill with a centered title and usage badge, three summary cards for inputs and outputs, a color-coded vertical workflow diagram from history files to report generation, command examples for quick start and common modes, tables for arguments and input/output files, cards explaining rankings, timelines, quality signals, and recommendations, plus a failure-handling table and a closing callout that this skill reads history and produces markdown insights.\"}}"
 }

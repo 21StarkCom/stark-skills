@@ -1,17 +1,4 @@
 {
-  "doc_content": {
-    "summary": "The stark-metrics skill acts as a data pipeline and interactive analysis tool. It ingests run history from local JSON files, processes them via a robust Python backend (metrics.py), and orchestrates an interactive bash layer that prompts users to resolve identified issues and highlights system-wide trends.",
-    "key_features": [
-      "Python-based data aggregation with graceful degradation on corrupted history files",
-      "Dynamic output routing between terminal-native formatting and structured JSON",
-      "Interactive bash wrapper driving an actionable recommendation engine",
-      "Meta-observation heuristics for identifying 'wins' (e.g., lower FP rates) and 'urgent' regressions",
-      "Comprehensive custom observability telemetry including filter metrics and record counts"
-    ],
-    "usage_examples": [
-      "Extending `metrics.py` to ingest new JSON payload structures from future stark skills",
-      "Adding new conditional logic to the shell wrapper to prompt specific follow-up skills based on new recommendation types"
-    ]
-  },
-  "alt_text": "Architectural flow diagram and internal components of the stark-metrics skill, showing data ingestion from history files, Python script processing, interactive output handling, and observability telemetry."
+  "doc_content": {},
+  "alt_text": "Internal architecture diagram for the stark-metrics skill showing a top-down operator pipeline: invocation with repo, skill, since, and json flags flows into Phase 1 where metrics.py runs from a fixed Python virtualenv and reads review history from ~/.claude/code-review/history/. A decision node branches to failure handling for no history, argument errors, or missing installation. The success path continues through normalization of mixed record formats, filter application, and report generation for scorecards, finding quality, duration trends, prompt-change impact, and recommendations. A second decision asks whether recommendations exist and routes to follow-up actions like /stark-review-improvement or config edits. The page also includes cards for execution boundary, extension seams, output contract, operational risk, observability requirements, internal interfaces, and a table of recovery paths for common failures.\"}}"
 }

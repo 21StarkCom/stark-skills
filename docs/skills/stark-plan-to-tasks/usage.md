@@ -5,24 +5,10 @@ Decompose a spec/design document into phased GitHub issues with story points, ri
 ## Workflow Overview
 
 ```mermaid
-graph TD
-    A[Start: User invokes skill with plan.md] --> B{Pass 1: Plan Quality Gate}
-    B -- "Gaps found" --> C[Prompt user to clarify plan]
-    C --> B
-    B -- "Approved" --> D[Pass 2: Decompose into Phases & Tasks]
-    D --> E{Pass 3: Validate Breakdown}
-    E -- "Dependency / Coverage errors" --> D
-    E -- "Valid" --> F{Is --dry-run?}
-    F -- Yes --> G[Output preview to /tmp and exit]
-    F -- No --> H[Create Phase Tracking Issues in GitHub]
-    H --> I[Create Task Issues, link Dependencies]
-    I --> J[Sync Issues to GitHub Projects]
-    J --> K[Pass 4: Extract ADRs/Schemas to docs/]
-    K --> L[Delete plan.md, Local Git Commit]
-    L --> M[End: Print Summary]
+
 ```
 
-![A visualization of the stark-plan-to-tasks skill, detailing its usage workflow from taking a markdown plan through a quality gate, decomposition, validation, GitHub issue creation, and finally knowledge extraction and git commits.](usage.png)
+![A clean single-page infographic for the stark-plan-to-tasks skill showing a blue-purple workflow from setup and repo detection, through plan quality gate, decomposition, validation, GitHub issue creation, project integration, and documentation extraction, with side cards for required inputs, invocation modes, issue fields, safeguards, arguments, and outputs."}}](usage.png)
 
 ## When to Use
 

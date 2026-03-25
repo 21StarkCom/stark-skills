@@ -8,7 +8,7 @@ Scaffold dev docs structure into any repo. Modes: --template (empty skeleton), -
 
 ```
 
-![A clean internal architecture diagram for the `stark-init-docs` skill showing a top-down workflow from invocation and mode selection into four branches: template scaffolding, backfill analysis, upgrade migration, and safe cleanup; color-coded boxes distinguish phases, decisions, outputs, failures, and external inputs, with supporting tables for mode matrix, extension points, and observability metrics."}}](internals.png)
+![A light-themed internal architecture diagram for the stark-init-docs skill, showing a top-down workflow from invocation and precondition checks into mode resolution, then branching responsibilities for template, backfill, upgrade, and clean. Blue phase nodes mark execution stages, purple nodes mark decision gates like no-arg prompting and clean confirmation, green nodes mark mode/config blocks, gray boxes show external dependencies such as git, templates, gh, and repo manifests, and amber boxes show outputs like docs/, mkdocs navigation, generated ADRs, specs, guides, and observability metrics. Below the main flow are a four-column mode matrix, a data-flow table mapping repo inputs to generated artifacts, internals cards describing control plane and extension points, and risk cards highlighting missing templates, classification drift, and history-quality dependence."}}](internals.png)
 
 ## Phases
 

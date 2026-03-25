@@ -1,7 +1,8 @@
 <html lang="en">
 <head>
   
-  <title>stark-rename-project | Skill Visualization</title>
+  
+  <title>stark-rename-project — Usage Visualization</title>
   <style>
     /*
      * Stark Skills — Shared Design System CSS
@@ -44,39 +45,38 @@
     }
 
     /* === Node Types === */
-    .node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; }
+    .node { border-radius: 8px; padding: 12px 16px; text-align: center; }
     .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
-    .node-desc { font-size: 10px; opacity: 0.9; }
+    .node-desc { font-size: 10px; opacity: 0.8; }
 
-    .node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
-    .node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
-    .node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
-    .node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
-    .node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
-    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
-    .node-action   { background: #ffffff; color: #1e40af; border: 2px solid #1e40af; } /* Outlined - user action */
+    .node-phase    { background: #1e40af; color: #ffffff; }
+    .node-decision { background: #7c3aed; color: #ffffff; }
+    .node-failure  { background: #dc2626; color: #ffffff; }
+    .node-config   { background: #047857; color: #ffffff; }
+    .node-output   { background: #f59e0b; color: #1a1a1a; }
+    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
 
     /* === Flow Layout === */
     .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
     .flow-step {
-      display: flex; align-items: center;
-      width: 100%; max-width: 860px; min-height: 60px;
+      display: flex; align-items: stretch;
+      width: 100%; max-width: 860px; min-height: 76px;
     }
     .flow-lane-left {
-      width: 250px; display: flex;
+      width: 180px; display: flex;
       align-items: center; justify-content: flex-end;
-      padding-right: 18px; text-align: right;
+      padding-right: 18px;
     }
     .flow-lane-center {
-      width: 360px; display: flex;
+      width: 500px; display: flex;
       align-items: center; justify-content: center;
     }
     .flow-lane-right {
-      width: 250px; display: flex;
-      align-items: center; padding-left: 18px; text-align: left;
+      width: 180px; display: flex;
+      align-items: center; padding-left: 18px;
     }
     .annotation {
-      font-size: 10px; color: #666; max-width: 200px; line-height: 1.4;
+      font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
     }
     .annotation strong { color: #444; }
 
@@ -107,9 +107,7 @@
     }
     .card { padding: 16px; border-radius: 8px; }
     .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
-    .card p  { font-size: 11px; line-height: 1.6; margin-bottom: 8px; }
-    .card ul { padding-left: 16px; font-size: 11px; line-height: 1.5; margin-bottom: 8px; }
-    .card li { margin-bottom: 4px; }
+    .card p  { font-size: 11px; line-height: 1.6; }
 
     .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
     .card-blue h3 { color: #1e40af; }
@@ -126,7 +124,7 @@
 
     /* === Data Tables === */
     .data-table {
-      width: 100%; margin: 16px auto;
+      width: 100%; max-width: 860px; margin: 16px auto;
       border-collapse: collapse; font-size: 11px;
     }
     .data-table th {
@@ -134,17 +132,13 @@
       font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
     }
     .data-table td {
-      padding: 8px 12px; border-bottom: 1px solid #f3f4f6; vertical-align: top;
-    }
-    .code-span {
-      background: #e5e7eb; color: #dc2626; padding: 2px 4px;
-      border-radius: 3px; font-family: monospace; font-size: 10px;
+      padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
     }
 
     /* === Tags === */
     .tag {
       display: inline-block; font-size: 9px; font-weight: 600;
-      padding: 2px 8px; border-radius: 3px; margin-right: 4px; margin-bottom: 4px;
+      padding: 2px 8px; border-radius: 3px;
     }
     .tag-phase    { background: #dbeafe; color: #1e40af; }
     .tag-decision { background: #ede9fe; color: #5b21b6; }
@@ -164,262 +158,559 @@
     }
     .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
 
+    /* === Summary Grid === */
+    .summary-grid {
+      display: grid; grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px; margin-top: 16px;
+    }
+    .summary-card { padding: 16px; border-radius: 8px; }
+    .summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+    .summary-card p  { font-size: 11px; line-height: 1.5; }
+
+    /* === Winner Badge === */
+    .winner-badge {
+      display: inline-block; font-size: 12px; color: #555555;
+      font-weight: 600; padding: 2px 10px; border-radius: 4px;
+      background: #f9fafb; border: 1px solid #d1d5db;
+    }
+
     /* === Footer === */
     .footer {
       text-align: center; padding: 20px;
       font-size: 10px; color: #999;
     }
+
+    /* === Extensions === */
+    .hero {
+      background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 55%, #ecfdf5 100%);
+      border: 1px solid #dbeafe;
+      border-radius: 12px;
+      padding: 20px;
+      margin-top: 8px;
+    }
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 16px;
+      align-items: stretch;
+    }
+    .hero-copy p {
+      font-size: 12px;
+      color: #374151;
+      margin-top: 10px;
+      max-width: 60ch;
+    }
+    .pill-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+    .pill {
+      font-size: 10px;
+      font-weight: 600;
+      color: #374151;
+      background: rgba(255,255,255,0.8);
+      border: 1px solid #d1d5db;
+      border-radius: 999px;
+      padding: 5px 10px;
+    }
+    .snippet {
+      background: #111827;
+      color: #f9fafb;
+      border-radius: 10px;
+      padding: 14px;
+      font-size: 11px;
+      line-height: 1.6;
+      overflow-x: auto;
+      white-space: pre-wrap;
+    }
+    .mini-list {
+      margin-top: 8px;
+      font-size: 11px;
+      color: #374151;
+    }
+    .mini-list div + div { margin-top: 6px; }
+    .summary-card.blue { background: #eff6ff; border-top: 3px solid #1e40af; }
+    .summary-card.green { background: #ecfdf5; border-top: 3px solid #059669; }
+    .summary-card.amber { background: #fef3c7; border-top: 3px solid #d97706; }
+    .callout {
+      border-radius: 8px;
+      padding: 14px 16px;
+      font-size: 11px;
+      line-height: 1.6;
+      margin-top: 14px;
+    }
+    .callout code, .card code, .summary-card code, td code, p code, li code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: rgba(17, 24, 39, 0.06);
+      padding: 1px 4px;
+      border-radius: 4px;
+    }
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 16px;
+    }
+    .steps-list {
+      margin-top: 8px;
+      font-size: 11px;
+      color: #374151;
+    }
+    .steps-list div + div { margin-top: 8px; }
+    .note {
+      margin-top: 8px;
+      font-size: 10px;
+      color: #6b7280;
+    }
+    @media (max-width: 860px) {
+      .hero-grid,
+      .summary-grid,
+      .two-col { grid-template-columns: 1fr; }
+      .flow-step {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        min-height: auto;
+        margin-bottom: 10px;
+      }
+      .flow-lane-left,
+      .flow-lane-center,
+      .flow-lane-right {
+        width: 100%;
+        justify-content: center;
+        padding: 0;
+      }
+      .annotation {
+        max-width: none;
+        text-align: center;
+      }
+    }
   </style>
 </head>
 <body>
-
   <div class="header">
     <h1>stark-rename-project</h1>
-    <div class="sub">Renames a project locally and on GitHub, updates sibling repos, and manages symlinks.</div>
-    <div class="scope">USAGE GUIDE & WORKFLOW</div>
+    <div class="sub">Rename a local repo and its GitHub repo together, propagate the change into sibling repos, and rebuild symlinks safely.</div>
+    <div class="scope">USAGE VIEW • complex skill • <code>&lt;old-name&gt; &lt;new-name&gt; [--dry-run]</code></div>
   </div>
 
   <div class="container">
+    <div class="hero">
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <span class="winner-badge">End-user Workflow</span>
+          <p>This skill is for controlled repo renames, not just a folder rename. It validates the current repo, renames the GitHub repository, rewrites local references, updates sibling repos under the same parent directory, removes stale symlinks, reinstalls fresh ones, and then verifies what still needs manual review.</p>
+          <div class="pill-row">
+            <div class="pill">Supports resume after partial completion</div>
+            <div class="pill">Includes <code>--dry-run</code> preview mode</div>
+            <div class="pill">Skips dirty sibling repos</div>
+            <div class="pill">Reports CI/CD files instead of editing them</div>
+          </div>
+        </div>
+        <div>
+          <div class="snippet">/stark-rename-project stark-review stark-skills
+
+Optional preview:
+  /stark-rename-project stark-review stark-skills --dry-run
+
+Best used when:
+  • local directory still matches the old repo name
+  • origin remote points to GitHub
+  • worktree is clean
+  • install.sh exists or symlink cleanup is understood</div>
+        </div>
+      </div>
+    </div>
+
     <div class="legend">
-      <div class="legend-item"><div class="legend-dot node-action"></div>User Invocation</div>
-      <div class="legend-item"><div class="legend-dot node-phase"></div>Execution Phase</div>
-      <div class="legend-item"><div class="legend-dot node-decision"></div>Decision / Check</div>
-      <div class="legend-item"><div class="legend-dot node-output"></div>Output / Notification</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#1e40af"></span>Workflow phase</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#7c3aed"></span>Decision / branch</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#047857"></span>Required config / checks</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#f59e0b"></span>User-visible output</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#dc2626"></span>Failure / stop</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#e5e7eb"></span>External dependency</div>
     </div>
 
-    <h2 class="section-title">Execution Workflow</h2>
-
-    <div class="flow">
-      <!-- Step 0 -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation">Run from repo root directory. Ensure all changes are committed first.</div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-action">
-            <div class="node-title">/stark-rename-project</div>
-            <div class="node-desc">&lt;old-name&gt; &lt;new-name&gt; [--dry-run]</div>
-          </div>
-        </div>
-        <div class="flow-lane-right"></div>
+    <div class="section-title">At A Glance</div>
+    <div class="summary-grid">
+      <div class="summary-card blue">
+        <h3>Inputs</h3>
+        <p><code>&lt;old-name&gt;</code>, <code>&lt;new-name&gt;</code>, optional <code>--dry-run</code>. Names must be safe repo names with no spaces, separators, or shell metacharacters.</p>
       </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Step 1 -->
-      <div class="flow-step">
-        <div class="flow-lane-left"></div>
-        <div class="flow-lane-center">
-          <div class="node node-decision">
-            <div class="node-title">Dry Run Flag?</div>
-            <div class="node-desc">Checks if --dry-run was passed</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">If <strong>true</strong>, safely previews all changes and symlink impacts without executing.</div>
-        </div>
+      <div class="summary-card green">
+        <h3>Main Outputs</h3>
+        <p>Renamed GitHub repo, updated <code>origin</code> URLs, renamed local directory, rewritten text references, sibling repo commits, refreshed symlinks, and a final verification summary.</p>
       </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Step 2 -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation">Validates uncommitted changes, existing folders, GitHub App permissions, & resumable state.</div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-phase">
-            <div class="node-title">1. Validation & Pre-flight</div>
-            <div class="node-desc">Checks repo readiness & name conflicts</div>
-          </div>
-        </div>
-        <div class="flow-lane-right"></div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Step 3 -->
-      <div class="flow-step">
-        <div class="flow-lane-left"></div>
-        <div class="flow-lane-center">
-          <div class="node node-phase">
-            <div class="node-title">2. GitHub Rename</div>
-            <div class="node-desc">PATCH to GH API + Update Git remotes</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">Updates <strong>origin</strong> fetch/push URLs with Perl literal replacements.</div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Step 4 -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation">Moves local directory safely. Uninstalls old symlinks <strong>before</strong> modifying project files.</div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-phase">
-            <div class="node-title">3. Local Rename & Clean</div>
-            <div class="node-desc">Rename folder & remove stale symlinks</div>
-          </div>
-        </div>
-        <div class="flow-lane-right"></div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Step 5 -->
-      <div class="flow-step">
-        <div class="flow-lane-left"></div>
-        <div class="flow-lane-center">
-          <div class="node node-phase">
-            <div class="node-title">4. Update Target Repo</div>
-            <div class="node-desc">Replace references in renamed project</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">Updates URLs, paths, and identifiers. Ignores <strong>.github/workflows</strong> & binaries.</div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Step 6 -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation">Discovers siblings with same GH org. Skips dirty repos. Auto-commits changes.</div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-phase">
-            <div class="node-title">5. Update Sibling Repos</div>
-            <div class="node-desc">Propagate renames to related repos</div>
-          </div>
-        </div>
-        <div class="flow-lane-right"></div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Step 7 -->
-      <div class="flow-step">
-        <div class="flow-lane-left"></div>
-        <div class="flow-lane-center">
-          <div class="node node-phase">
-            <div class="node-title">6. Reinstall Symlinks</div>
-            <div class="node-desc">Runs ./install.sh in new directory</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">Restores integrations and bindings to the new project path.</div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Step 8 -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation">Grep for residuals. Checks remote reachability and symlink resolution.</div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-phase">
-            <div class="node-title">7. Verification</div>
-            <div class="node-desc">Post-rename integrity checks</div>
-          </div>
-        </div>
-        <div class="flow-lane-right"></div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Step 9 -->
-      <div class="flow-step">
-        <div class="flow-lane-left"></div>
-        <div class="flow-lane-center">
-          <div class="node node-output">
-            <div class="node-title">8. Summary Report</div>
-            <div class="node-desc">Outputs results, warnings & next steps</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">Displays manual review tasks (e.g. CI/CD updates, webhook adjustments).</div>
-        </div>
+      <div class="summary-card amber">
+        <h3>Manual Follow-Up</h3>
+        <p>Review reported CI/CD workflow files and any external integrations such as webhooks, Slack, Jira, or anything keyed to the old repo name.</p>
       </div>
     </div>
 
-    <h2 class="section-title">Key Operational Highlights</h2>
+    <div class="section-title">Quick Start</div>
     <div class="card-grid">
       <div class="card card-blue">
-        <h3>Idempotency & Auto-Resume</h3>
-        <p>If a rename fails midway, re-running the skill will pick up where it left off. It detects the current state by comparing the local directory name against the GitHub remote origin name.</p>
-        <span class="tag tag-config">Phase 2 Resume</span>
-        <span class="tag tag-config">Phase 3 Resume</span>
+        <h3>Standard rename</h3>
+        <p>Invoke the skill with the current repo name and the desired new name. The skill renames GitHub first, then updates local state and related repos.</p>
+        <p class="note"><code>/stark-rename-project stark-review stark-skills</code></p>
       </div>
       <div class="card card-green">
-        <h3>Safe Dry-Run Mode</h3>
-        <p>Pass the <span class="code-span">--dry-run</span> flag to simulate the exact changes. It will list API requests, directories affected, references that would change across sibling repos, and old symlinks to be pruned.</p>
+        <h3>Preview first</h3>
+        <p>Use <code>--dry-run</code> to see what would be renamed, which symlinks would be removed, and which repos or files would be touched before any change is executed.</p>
+        <p class="note"><code>/stark-rename-project stark-review stark-skills --dry-run</code></p>
       </div>
       <div class="card card-purple">
-        <h3>Exclusion Rules</h3>
-        <p>The skill intelligently avoids renaming items that share the project's name but serve different functions:</p>
-        <ul>
-          <li>Skill commands (e.g., <span class="code-span">/{old-name}</span>)</li>
-          <li>Historical markdown filenames</li>
-          <li>Installed paths under <span class="code-span">~/.claude/</span></li>
-          <li>GitHub Apps & Frontmatter definitions</li>
-        </ul>
-      </div>
-      <div class="card card-amber">
-        <h3>Manual Post-Task Actions</h3>
-        <p>Some external systems cannot be automatically updated. Review the final output for warnings about:</p>
-        <ul>
-          <li><span class="code-span">.github/workflows/*.yml</span> files</li>
-          <li>External webhooks or Jira links</li>
-          <li>Repos outside the current parent folder</li>
-        </ul>
+        <h3>Resume a partial rename</h3>
+        <p>If GitHub and local state disagree, the skill detects the state and resumes from the right phase instead of blindly restarting from the beginning.</p>
+        <p class="note">Examples: GitHub already renamed but local dir still old, or local dir already renamed but remote still old.</p>
       </div>
     </div>
 
-    <h2 class="section-title">Common Regex & Replacement Safety</h2>
+    <div class="section-title">Workflow</div>
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Entry</strong><br></br>User provides old and new names plus optional preview flag.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-config">
+            <div class="node-title">1. Parse Inputs</div>
+            <div class="node-desc">Validate names, detect <code>--dry-run</code>, require both arguments</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">Rejects unsafe names, missing args, spaces, separators, or shell metacharacters.</div>
+        </div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">Finds repo root, parent directory, <code>install.sh</code>, and uninstall support.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-config">
+            <div class="node-title">2. Establish Context</div>
+            <div class="node-desc">Repo root, parent dir, sibling repo zone, symlink strategy</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">Uses the current repo as the source of truth, not a nested subdirectory.</div>
+        </div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Decision</strong><br></br>Checks remote URL and local directory names for resumable states.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision">
+            <div class="node-title">3. Resume Detection</div>
+            <div class="node-desc">Continue from GitHub rename, local rename, or symlink cleanup if partially completed</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">Avoids duplicate work when a previous run stopped midway.</div>
+        </div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">Confirms clean worktree, parses remote host/org/repo, verifies GitHub admin permission, checks name availability.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-config">
+            <div class="node-title">4. Pre-flight Validation</div>
+            <div class="node-desc">Safety checks before any rename happens</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">Stops early if the repo is dirty or the target name already belongs to a different GitHub repo.</div>
+        </div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Dry run branch</strong><br></br>Reports planned GitHub rename instead of executing it.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">5. Rename On GitHub</div>
+            <div class="node-desc">PATCH repo name, verify returned name, then rewrite fetch/push URLs</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">Uses GitHub redirect behavior, but warns that redirects break if the old repo name is later reused.</div>
+        </div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">Handles case-only renames via a temporary directory name when needed.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">6. Rename Local Directory</div>
+            <div class="node-desc">Move repo folder and switch working path to the new absolute location</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">All later paths must use the new absolute location.</div>
+        </div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">Runs uninstall before file edits so old install targets can still be found.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">7. Remove Old Symlinks</div>
+            <div class="node-desc">Use <code>install.sh --uninstall</code> or exact-target fallback cleanup</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">Deletes only symlinks whose resolved targets point to the old repo path.</div>
+        </div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">Tracked text files only. Workflow files are scanned and reported, not auto-modified.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">8. Rewrite References In Renamed Repo</div>
+            <div class="node-desc">Update absolute paths, org/repo refs, clone URLs, and limited bare-name matches</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">Protects skill IDs, invocation names, GitHub App names, workflow files, and historical filenames.</div>
+        </div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Decision</strong><br></br>Each sibling repo is checked for same host/org and clean status before edits.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision">
+            <div class="node-title">9. Update Sibling Repos</div>
+            <div class="node-desc">Modify matching repos under the same parent directory and auto-commit changed files</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">Dirty sibling repos are skipped and listed in the summary instead of being force-modified.</div>
+        </div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">Runs from the new repo location after references have been updated.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">10. Reinstall Symlinks</div>
+            <div class="node-desc">Execute <code>install.sh</code> to recreate symlinks for the renamed project</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">If install fails, the summary tells the user where to rerun it manually.</div>
+        </div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">Checks remote connectivity, stale symlinks, residual references, and workflow files needing manual review.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-output">
+            <div class="node-title">11. Verify + Summarize</div>
+            <div class="node-desc">Changed files, skipped repos, residual refs, CI/CD review list, final <code>cd</code> target</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">This is the user-facing deliverable after the rename finishes.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">Arguments</div>
     <table class="data-table">
       <thead>
         <tr>
-          <th>Pattern / Approach</th>
-          <th>Why it's used</th>
-          <th>Risk Prevented</th>
+          <th>Argument</th>
+          <th>Required</th>
+          <th>Meaning</th>
+          <th>Example</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td>Perl Literal Matching (<span class="code-span">\Q...\E</span>)</td>
-          <td>Safely matches exact repo URLs.</td>
-          <td>Prevents <span class="code-span">sed</span> from interpreting periods (e.g. <span class="code-span">foo.bar</span>) as wildcards.</td>
+          <td><code>&lt;old-name&gt;</code></td>
+          <td>Yes</td>
+          <td>Current local directory and GitHub repo name</td>
+          <td><code>stark-review</code></td>
         </tr>
         <tr>
-          <td>Custom Lookarounds (<span class="code-span">(?&lt;![...])...(?![...])</span>)</td>
-          <td>Boundary checks for repo names with hyphens.</td>
-          <td>Prevents matching substrings (e.g., matching <span class="code-span">stark-review</span> inside <span class="code-span">stark-review-plan</span>). Standard <span class="code-span">\b</span> breaks on hyphens.</td>
+          <td><code>&lt;new-name&gt;</code></td>
+          <td>Yes</td>
+          <td>Target repo name to use locally and on GitHub</td>
+          <td><code>stark-skills</code></td>
         </tr>
         <tr>
-          <td>Uninstall Symlinks <i>Before</i> Code Mod</td>
-          <td>Preserves the original target mapping needed by <span class="code-span">install.sh --uninstall</span>.</td>
-          <td>Prevents orphaned symlinks that point nowhere after <span class="code-span">install.sh</span> is updated with the new name.</td>
-        </tr>
-        <tr>
-          <td>Git Arrays (<span class="code-span">"${files[@]}"</span>)</td>
-          <td>Properly quotes spaces when auto-committing siblings.</td>
-          <td>Prevents shell injection and crashes on repos with spaces in their filenames.</td>
+          <td><code>--dry-run</code></td>
+          <td>No</td>
+          <td>Preview planned changes without applying them</td>
+          <td><code>--dry-run</code></td>
         </tr>
       </tbody>
     </table>
 
-  </div>
+    <div class="section-title">What You Need Before Running It</div>
+    <div class="card-grid">
+      <div class="card card-green">
+        <h3>Repository state</h3>
+        <p>The current repo should have a clean git worktree, a valid <code>origin</code> remote, and ideally be launched from somewhere inside the repo so the skill can resolve the repo root.</p>
+      </div>
+      <div class="card card-blue">
+        <h3>GitHub access</h3>
+        <p>The GitHub App token flow must work, and the app must have <code>Administration:write</code> on the repo. The skill explicitly checks admin permission before attempting the GitHub rename.</p>
+      </div>
+      <div class="card card-dark">
+        <h3>Symlink support</h3>
+        <p><code>install.sh</code> should exist and preferably support <code>--uninstall</code>. If it does not, the skill falls back to removing only symlinks that resolve to the old repo path.</p>
+      </div>
+    </div>
 
-  <div class="footer">
-    Visualization for stark-rename-project • Generated by Gemini
-  </div>
+    <div class="section-title">Common Workflows</div>
+    <div class="two-col">
+      <div class="card card-purple">
+        <h3>1. Safe preview before touching anything</h3>
+        <div class="steps-list">
+          <div><span class="tag tag-decision">Preview</span> Run with <code>--dry-run</code>.</div>
+          <div><span class="tag tag-output">See</span> GitHub rename target, local path rename, symlink removals, and sibling repo impact.</div>
+          <div><span class="tag tag-phase">Then</span> Re-run without <code>--dry-run</code> once the plan looks correct.</div>
+        </div>
+      </div>
+      <div class="card card-blue">
+        <h3>2. Standard full rename</h3>
+        <div class="steps-list">
+          <div><span class="tag tag-config">Check</span> Clean worktree and correct repo names.</div>
+          <div><span class="tag tag-phase">Run</span> Rename on GitHub first, then local folder and references.</div>
+          <div><span class="tag tag-output">Finish</span> Inspect the final summary for skipped repos and manual CI/CD follow-up.</div>
+        </div>
+      </div>
+      <div class="card card-green">
+        <h3>3. Resume after an interrupted run</h3>
+        <div class="steps-list">
+          <div><span class="tag tag-decision">Detect</span> Remote and local names disagree.</div>
+          <div><span class="tag tag-phase">Resume</span> The skill jumps to the right phase instead of restarting.</div>
+          <div><span class="tag tag-output">Validate</span> Use the summary to confirm the resumed path completed cleanly.</div>
+        </div>
+      </div>
+      <div class="card card-amber">
+        <h3>4. Case-only rename</h3>
+        <div class="steps-list">
+          <div><span class="tag tag-config">Use case</span> Example: <code>stark-Skills</code> to <code>stark-skills</code>.</div>
+          <div><span class="tag tag-phase">Handling</span> The local rename uses a temporary intermediate directory name.</div>
+          <div><span class="tag tag-output">Result</span> Works safely on case-insensitive filesystems.</div>
+        </div>
+      </div>
+    </div>
 
+    <div class="section-title">Outputs You Should Expect</div>
+    <div class="card-grid">
+      <div class="card card-amber">
+        <h3>Final summary</h3>
+        <p>Lists every changed file grouped by repo, reports verification pass/fail checks, identifies residual old-name references that need manual review, and prints the final <code>cd</code> command for the new repo location.</p>
+      </div>
+      <div class="card card-green">
+        <h3>Sibling repo commits</h3>
+        <p>Each clean sibling repo that needs updates gets a focused commit: <code>chore: update references from old-name to new-name</code>. Dirty sibling repos are skipped instead of folded into accidental commits.</p>
+      </div>
+      <div class="card card-dark">
+        <h3>Manual review queue</h3>
+        <p>Workflow files in <code>.github/workflows/</code> are only scanned, never auto-edited. Those hits appear in the summary so you can decide whether CI/CD identifiers should change.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Stop Conditions And Common Failures</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Condition</th>
+          <th>What happens</th>
+          <th>User action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Missing arguments or invalid names</td>
+          <td>The skill exits before any change.</td>
+          <td>Provide both names and keep them to safe repo characters only.</td>
+        </tr>
+        <tr>
+          <td>Uncommitted changes in the current repo</td>
+          <td>The skill refuses to proceed.</td>
+          <td>Commit or stash first, then rerun.</td>
+        </tr>
+        <tr>
+          <td>No GitHub admin permission</td>
+          <td>GitHub rename phase stops.</td>
+          <td>Grant <code>Administration:write</code> to the GitHub App.</td>
+        </tr>
+        <tr>
+          <td>Target repo name already exists on GitHub</td>
+          <td>Rename is blocked to avoid collisions.</td>
+          <td>Choose a different target name or resolve the existing repo first.</td>
+        </tr>
+        <tr>
+          <td>Dirty sibling repos</td>
+          <td>Those repos are skipped, not modified.</td>
+          <td>Clean them and rerun if you want references updated there too.</td>
+        </tr>
+        <tr>
+          <td><code>install.sh</code> missing or failing</td>
+          <td>Symlink recreation is incomplete.</td>
+          <td>Fix the script and rerun it manually from the new repo path.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="section-title">External Dependencies</div>
+    <div class="card-grid">
+      <div class="card card-dark">
+        <h3>GitHub API</h3>
+        <p>The rename is not purely local. The skill calls GitHub to rename the repository and confirm permission, availability, and exact final name.</p>
+      </div>
+      <div class="card card-dark">
+        <h3>Sibling repos under the same parent</h3>
+        <p>The skill discovers peer repos by scanning the parent directory and only updates those whose remotes point to the same host and org.</p>
+      </div>
+      <div class="card card-dark">
+        <h3>Symlink install locations</h3>
+        <p>Cleanup and reinstall can touch symlinks under common install destinations such as <code>~/.claude</code> and related code-review paths.</p>
+      </div>
+    </div>
+
+    <div class="section-title">What This Skill Will Not Do</div>
+    <div class="callout card-red">
+      It does not rename skill invocation names, does not auto-edit CI/CD workflow files, does not update repos outside the parent directory, does not rename GitHub Apps, does not modify untracked or binary files, and does not fix external integrations like webhooks, Slack, or Jira automatically.
+    </div>
+
+    <div class="footer"><div class="winner-badge">Visualization by Codex · Score: 7.7/10 · Generated from SKILL.md</div></div>
+  </div>
 </body>
 </html>

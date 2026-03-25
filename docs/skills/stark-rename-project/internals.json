@@ -1,17 +1,4 @@
 {
-  "doc_content": {
-    "summary": "The stark-rename-project skill performs a highly resilient, cross-repository project rename. It handles the GitHub API remote rename, safely updates git configurations, locally renames the project directory (including case-insensitive OS fallbacks), cleans up and reinstalls systemic symlinks, and performs deterministic and heuristically bound regex replacements within the renamed project and across sibling repositories. It features execution checkpoints to resume interrupted processes.",
-    "key_features": [
-      "Resumable state detection comparing local and remote state",
-      "Perl-based literal regex replacement strictly isolating URL/repo boundaries",
-      "Lookaround-based heuristic boundaries preventing substring false positives",
-      "Orchestrated cross-repo auto-committing for sibling repos sharing origins",
-      "Strict phase-ordering ensuring symlinks are dropped before install.sh modifications"
-    ],
-    "usage_examples": [
-      "/stark-rename-project stark-review stark-skills",
-      "/stark-rename-project old-name new-name --dry-run"
-    ]
-  },
-  "alt_text": "A technical HTML visualization containing an execution flow diagram, data patterns grid, and resumable state table mapping out the stark-rename-project skill's internal architecture."
+  "doc_content": {},
+  "alt_text": "Internal architecture visualization for the stark-rename-project skill, showing an eight-phase rename pipeline from validation and resumable state detection through GitHub rename, local directory move, symlink cleanup, reference rewrites in the main and sibling repos, symlink reinstall, verification, and final summary; side panels call out deterministic vs heuristic replacement rules, failure gates, resume states, extension points, and operator-facing outputs.\"}}"
 }

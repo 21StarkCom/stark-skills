@@ -1,13 +1,41 @@
 graph TD
-    A[Start: Invocation] --> B{Context holds Assessment?};
-    B -- Yes --> C[Extract Action Items];
-    B -- No --> B2[Search ~/.claude/code-review/history];
-    B2 --> C;
-    C --> D[Classify Actions: Prompt, Script, Config];
-    D --> E((User Confirmation));
-    E -- Approves Actions --> F[Apply Targeted Changes];
-    F --> G[Run Automated Validation];
-    G --> H[Show Git Diff to User];
-    H --> I[Append to prompt-changelog.md];
-    I --> J[Git Commit];
-    J --> K[End];
+    A["Invoke /stark-review-improvement"] --> B{"Assessment in\nconversation context?"}
+    B -->|Yes| D["Parse action items\nfrom assessment table"]
+    B -->|No| C{"Check latest\nhistory directory"}
+    C -->|Found| D
+    C -->|Not found| E["Error: Run\n/stark-review first"]
+    D --> F["Classify actions:\nprompt / orchestrator / config / no-action"]
+    F --> G["Present numbered list\nto user for approval"]
+    G --> H{"User selects\nitems to apply"}
+    H --> I["Apply prompt edits\nglobal/prompts/{agent}/*.md"]
+    H --> J["Apply orchestrator edits\nscripts/multi_review.py"]
+    H --> K["Apply config edits\nconfig.json"]
+    I --> L["Validate: markdown syntax,\nPython compile, JSON check"]
+    J --> L
+    K --> L
+    L --> M{"All checks pass?"}
+    M -->|No| N["Fix validation errors"]
+    N --> L
+    M -->|Yes| O["Show git diff\nfor user review"]
+    O --> P["Log to\nprompt-changelog.md"]
+    P --> Q["Archive assessment\nto history"]
+    Q --> R["Git commit\n(no push)"]
+
+    style A fill:#1e40af,color:#fff
+    style B fill:#7c3aed,color:#fff
+    style C fill:#7c3aed,color:#fff
+    style D fill:#1e40af,color:#fff
+    style E fill:#dc2626,color:#fff
+    style F fill:#1e40af,color:#fff
+    style G fill:#7c3aed,color:#fff
+    style H fill:#7c3aed,color:#fff
+    style I fill:#047857,color:#fff
+    style J fill:#047857,color:#fff
+    style K fill:#047857,color:#fff
+    style L fill:#1e40af,color:#fff
+    style M fill:#7c3aed,color:#fff
+    style N fill:#dc2626,color:#fff
+    style O fill:#1e40af,color:#fff
+    style P fill:#f59e0b,color:#1a1a1a
+    style Q fill:#f59e0b,color:#1a1a1a
+    style R fill:#f59e0b,color:#1a1a1a

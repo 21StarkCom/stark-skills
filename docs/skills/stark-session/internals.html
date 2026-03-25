@@ -2,7 +2,7 @@
 <head>
 
 
-<title>stark-session Internals</title>
+<title>stark-session skill visualization</title>
 <style>
 /*
  * Stark Skills — Shared Design System CSS
@@ -45,44 +45,43 @@ body {
 }
 
 /* === Node Types === */
-.node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
 .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
-.node-desc { font-size: 10px; opacity: 0.9; }
+.node-desc { font-size: 10px; opacity: 0.8; }
 
 .node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
 .node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
 .node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
 .node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
 .node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
-.node-external { background: #e5e7eb; color: #333333; border: 1px dashed #9ca3af; } /* Gray — external deps */
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
 
 /* === Flow Layout === */
-.flow { display: flex; flex-direction: column; gap: 0; align-items: center; margin-bottom: 32px; }
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
 .flow-step {
   display: flex; align-items: stretch;
   width: 100%; max-width: 860px; min-height: 76px;
 }
 .flow-lane-left {
-  width: 250px; display: flex;
+  width: 180px; display: flex;
   align-items: center; justify-content: flex-end;
-  padding-right: 24px; text-align: right;
+  padding-right: 18px;
 }
 .flow-lane-center {
-  width: 360px; display: flex;
+  width: 500px; display: flex;
   align-items: center; justify-content: center;
 }
 .flow-lane-right {
-  width: 250px; display: flex;
-  align-items: center; padding-left: 24px; text-align: left;
+  width: 180px; display: flex; align-items: center; padding-left: 18px;
 }
 .annotation {
-  font-size: 10px; color: #555; max-width: 200px; line-height: 1.4;
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
 }
-.annotation strong { color: #222; }
+.annotation strong { color: #444; }
 
 /* === Arrows === */
 .arrow-down {
-  width: 2px; height: 24px; background: #cbd5e1;
+  width: 2px; height: 20px; background: #cbd5e1;
   margin: 0 auto; position: relative;
 }
 .arrow-down::after {
@@ -96,19 +95,18 @@ body {
   width: 100%; max-width: 860px;
 }
 .arrow-container .flow-lane-center {
-  display: flex; justify-content: center; width: 360px;
+  display: flex; justify-content: center;
 }
 
 /* === Cards === */
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 16px; margin-top: 16px; margin-bottom: 24px;
+  gap: 16px; margin-top: 16px;
 }
-.card { padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+.card { padding: 16px; border-radius: 8px; }
 .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
 .card p  { font-size: 11px; line-height: 1.6; }
-.card code { font-family: monospace; background: rgba(0,0,0,0.05); padding: 2px 4px; border-radius: 3px; font-size: 10px; }
 
 .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
 .card-blue h3 { color: #1e40af; }
@@ -125,32 +123,28 @@ body {
 
 /* === Data Tables === */
 .data-table {
-  width: 100%; max-width: 860px; margin: 16px auto 32px;
-  border-collapse: collapse; font-size: 11px; background: #fff;
-  border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
 }
 .data-table th {
-  background: #f3f4f6; padding: 10px 14px; text-align: left;
-  font-weight: 600; color: #444; border-bottom: 2px solid #e5e7eb;
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
 }
 .data-table td {
-  padding: 10px 14px; border-bottom: 1px solid #f3f4f6; color: #333;
-}
-.data-table code {
-  font-family: monospace; background: #f3f4f6; padding: 2px 4px; border-radius: 3px;
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
 }
 
 /* === Tags === */
 .tag {
   display: inline-block; font-size: 9px; font-weight: 600;
-  padding: 2px 8px; border-radius: 3px; margin-right: 4px; margin-bottom: 4px;
+  padding: 2px 8px; border-radius: 3px;
 }
 .tag-phase    { background: #dbeafe; color: #1e40af; }
 .tag-decision { background: #ede9fe; color: #5b21b6; }
 .tag-failure  { background: #fee2e2; color: #991b1b; }
 .tag-config   { background: #d1fae5; color: #065f46; }
 .tag-output   { background: #fef3c7; color: #92400e; }
-.tag-external { background: #f3f4f6; color: #555555; }
+.tag-external { background: #f3f4f6; color: #666666; }
 
 /* === Legend === */
 .legend {
@@ -163,278 +157,469 @@ body {
 }
 .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
 
+/* === Summary Grid === */
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
+
+/* === Winner Badge === */
+.winner-badge {
+  display: inline-block; font-size: 12px; color: #555555;
+  font-weight: 600; padding: 2px 10px; border-radius: 4px;
+  background: #f9fafb; border: 1px solid #d1d5db;
+}
+
 /* === Footer === */
 .footer {
   text-align: center; padding: 20px;
-  font-size: 10px; color: #999; border-top: 1px solid #eee; margin-top: 40px;
+  font-size: 10px; color: #999;
+}
+
+/* === Extensions === */
+.hero-strip {
+  max-width: 860px;
+  margin: 0 auto 18px;
+  background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 45%, #ecfdf5 100%);
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  padding: 18px 20px;
+}
+.hero-strip p {
+  font-size: 12px;
+  color: #334155;
+}
+.mode-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+.mode-panel {
+  border-radius: 10px;
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+}
+.mode-panel h3 {
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+.mini-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.kv {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 10px;
+  font-size: 11px;
+  padding: 7px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+.kv:last-child { border-bottom: 0; }
+.kv strong { color: #334155; }
+.band {
+  max-width: 860px;
+  margin: 16px auto 0;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+}
+.band p {
+  font-size: 11px;
+  color: #475569;
+}
+.meter {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-top: 16px;
+}
+.meter .card {
+  text-align: center;
+}
+.meter-value {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+.callout-row {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+.path-chip {
+  display: inline-block;
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 10px;
+  margin: 3px 6px 0 0;
+}
+@media (max-width: 860px) {
+  .summary-grid, .mode-grid, .callout-row, .meter { grid-template-columns: 1fr; }
+  .flow-step { min-height: 92px; }
+  .flow-lane-left, .flow-lane-right { width: 120px; }
+  .flow-lane-center { width: auto; flex: 1; }
 }
 </style>
 </head>
 <body>
-
-<div class="header">
-  <h1>stark-session</h1>
-  <div class="sub">Session lifecycle management: boot routines, state hydration, and wind-down automation.</div>
-  <div class="scope">Architecture & Internal Data Flow</div>
-</div>
-
-<div class="container">
-  
-  <div class="legend">
-    <div class="legend-item"><div class="legend-dot node-phase"></div> Core Phase</div>
-    <div class="legend-item"><div class="legend-dot node-config"></div> Configuration</div>
-    <div class="legend-item"><div class="legend-dot node-external"></div> External Data / System Interaction</div>
-    <div class="legend-item"><div class="legend-dot node-decision"></div> Interaction / Decision</div>
-    <div class="legend-item"><div class="legend-dot node-output"></div> Final Output</div>
+  <div class="header">
+    <h1>stark-session</h1>
+    <div class="sub">Session lifecycle orchestrator for internal contributors: context intake, git and PR state, health checks, documentation commits, project updates, and push/merge handoff.</div>
+    <div class="scope">INTERNALS • architecture • data flow • extension points</div>
   </div>
 
-  <div class="section-title">Configuration Hierarchy</div>
-  <p style="font-size: 11px; color: #666; margin-bottom: 12px;">Configuration objects are deeply merged via `.code-review/config.json`. Later layers override previous layers. If `session.test_command` is null, falls back to top-level `test_command`.</p>
-  <div class="card-grid">
-    <div class="card card-dark">
-      <h3>1. Global</h3>
-      <p><code>~/.claude/code-review/config.json</code></p>
-      <p style="margin-top: 8px; color: #666;">Base developer preferences, personal defaults for PR merge strategy, devlog paths.</p>
+  <div class="container">
+    <div class="hero-strip">
+      <p><strong>Intent:</strong> one skill, two execution modes. <strong>Start</strong> builds an operator briefing from repo, memory, config, git, project board, and health signals. <strong>End</strong> drives closeout automation with guarded test/build, optional PR merge, docs commit, project metadata updates, and push logic. The design is fail-soft: nearly every integration can degrade without blocking the rest of the session.</p>
     </div>
-    <div class="card card-blue">
-      <h3>2. Organization</h3>
-      <p>Walk parent directories from repo root.</p>
-      <p style="margin-top: 8px; color: #666;">Shared settings for a specific GitHub organization or workspace cluster (e.g., <code>stark-skills</code> level configs).</p>
+
+    <div class="legend">
+      <div class="legend-item"><span class="legend-dot" style="background:#1e40af;"></span>Phase</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#7c3aed;"></span>Decision</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#047857;"></span>Config</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#f59e0b;"></span>Output</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#dc2626;"></span>Failure / warning</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#e5e7eb; border:1px dashed #9ca3af;"></span>External dependency</div>
     </div>
-    <div class="card card-green">
-      <h3>3. Repository</h3>
-      <p><code>&lt;repo_root&gt;/.code-review/config.json</code></p>
-      <p style="margin-top: 8px; color: #666;">Project-specific commands (<code>health_checks</code>, <code>test_command</code>) and documentation directory definitions.</p>
+
+    <div class="section-title">Execution Topology</div>
+
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Inputs</strong><br></br>User says “session start”, “session end”, “catch me up”, or invokes <code>/stark-session</code>.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision" style="width:100%;">
+            <div class="node-title">Mode Dispatch</div>
+            <div class="node-desc">Default = start, explicit argument can switch to end</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><span class="tag tag-decision">arg-hint [start|end]</span></div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Config hierarchy</strong><br></br>Global → org parents → repo root, later layers override earlier.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-config" style="width:100%;">
+            <div class="node-title">Load Session Config</div>
+            <div class="node-desc">Merge <code>session</code> blocks from <code>.code-review/config.json</code>; inherit top-level <code>test_command</code> fallback</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">
+            <span class="path-chip">~/.claude/code-review/config.json</span>
+            <span class="path-chip">parent/.code-review/config.json</span>
+            <span class="path-chip">repo/.code-review/config.json</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Shared context</strong><br></br>Reads local guidance, memory, and repo metadata before mode-specific actions.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-external" style="width:100%;">
+            <div class="node-title">Context Sources</div>
+            <div class="node-desc">CLAUDE.md chain, memory files, git CLI, gh CLI, project config, local skills, observability protocol</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><span class="tag tag-external">non-fatal integrations</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mode-grid">
+      <div class="mode-panel">
+        <h3><span class="tag tag-phase">Start mode</span> briefing pipeline</h3>
+        <div class="flow">
+          <div class="flow-step">
+            <div class="flow-lane-left"><div class="annotation">Silent read</div></div>
+            <div class="flow-lane-center">
+              <div class="node node-phase" style="width:100%;">
+                <div class="node-title">Phase 1: Gather Context</div>
+                <div class="node-desc">Internalize CLAUDE.md, memories, and config; never dump raw files</div>
+              </div>
+            </div>
+            <div class="flow-lane-right"><div class="annotation">No direct output yet</div></div>
+          </div>
+          <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+          <div class="flow-step">
+            <div class="flow-lane-left"><div class="annotation">Git + PR state</div></div>
+            <div class="flow-lane-center">
+              <div class="node node-phase" style="width:100%;">
+                <div class="node-title">Phase 2: Inspect Branch State</div>
+                <div class="node-desc">Branch, status, recent commits, stash, ahead commits, open PRs, current PR checks</div>
+              </div>
+            </div>
+            <div class="flow-lane-right"><div class="annotation">Project board section is conditional</div></div>
+          </div>
+          <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+          <div class="flow-step">
+            <div class="flow-lane-left"><div class="annotation">Configured commands</div></div>
+            <div class="flow-lane-center">
+              <div class="node node-phase" style="width:100%;">
+                <div class="node-title">Phase 3: Health Checks</div>
+                <div class="node-desc">Run each configured command, capture failures, never block</div>
+              </div>
+            </div>
+            <div class="flow-lane-right"><div class="annotation"><span class="tag tag-config">session.health_checks</span></div></div>
+          </div>
+          <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+          <div class="flow-step">
+            <div class="flow-lane-left"><div class="annotation">Local capability map</div></div>
+            <div class="flow-lane-center">
+              <div class="node node-phase" style="width:100%;">
+                <div class="node-title">Phase 4: Discover Skills</div>
+                <div class="node-desc">Enumerate user and repo skills for the briefing footer</div>
+              </div>
+            </div>
+            <div class="flow-lane-right"><div class="annotation">Supports extension discoverability</div></div>
+          </div>
+          <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+          <div class="flow-step">
+            <div class="flow-lane-left"><div class="annotation">Operator-facing summary</div></div>
+            <div class="flow-lane-center">
+              <div class="node node-output" style="width:100%;">
+                <div class="node-title">Phase 5: Concise Briefing</div>
+                <div class="node-desc">Branch, PRs, health, skills, recent work, memory, then ask “What are we working on?”</div>
+              </div>
+            </div>
+            <div class="flow-lane-right"><div class="annotation">Empty sections are condensed or omitted</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mode-panel">
+        <h3><span class="tag tag-phase">End mode</span> closeout pipeline</h3>
+        <div class="flow">
+          <div class="flow-step">
+            <div class="flow-lane-left"><div class="annotation">Guarded execution</div></div>
+            <div class="flow-lane-center">
+              <div class="node node-phase" style="width:100%;">
+                <div class="node-title">Phase 1: Test and Build</div>
+                <div class="node-desc">Resolve test command, run tests and optional build, warn on failure, ask to proceed</div>
+              </div>
+            </div>
+            <div class="flow-lane-right"><div class="annotation">Failure is interactive, not fatal</div></div>
+          </div>
+          <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+          <div class="flow-step">
+            <div class="flow-lane-left"><div class="annotation">gh + user PAT</div></div>
+            <div class="flow-lane-center">
+              <div class="node node-phase" style="width:100%;">
+                <div class="node-title">Phase 2: Merge Open PRs</div>
+                <div class="node-desc">List PRs on current branch, offer merge using configured strategy, skip on auth failure</div>
+              </div>
+            </div>
+            <div class="flow-lane-right"><div class="annotation"><span class="tag tag-config">session.pr_merge_strategy</span></div></div>
+          </div>
+          <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+          <div class="flow-step">
+            <div class="flow-lane-left"><div class="annotation">Docs-only staging</div></div>
+            <div class="flow-lane-center">
+              <div class="node node-phase" style="width:100%;">
+                <div class="node-title">Phase 3: Commit Docs</div>
+                <div class="node-desc">Stage configured paths, optionally append devlog entry, skip commit if staged diff is empty</div>
+              </div>
+            </div>
+            <div class="flow-lane-right"><div class="annotation">Commit message uses prompted session summary</div></div>
+          </div>
+          <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+          <div class="flow-step">
+            <div class="flow-lane-left"><div class="annotation">Project hygiene</div></div>
+            <div class="flow-lane-center">
+              <div class="node node-phase" style="width:100%;">
+                <div class="node-title">Phase 4: Update Project Fields</div>
+                <div class="node-desc">Promote Documentation State to Drafted when docs changed; preserve Reviewed and Complete</div>
+              </div>
+            </div>
+            <div class="flow-lane-right"><div class="annotation">Artifact-link verification for riskier issues</div></div>
+          </div>
+          <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+          <div class="flow-step">
+            <div class="flow-lane-left"><div class="annotation">Remote branch logic</div></div>
+            <div class="flow-lane-center">
+              <div class="node node-phase" style="width:100%;">
+                <div class="node-title">Phase 5: Push</div>
+                <div class="node-desc">Push tracked branches directly; ask before pushing untracked non-main branches</div>
+              </div>
+            </div>
+            <div class="flow-lane-right"><div class="annotation">Push errors require explicit user choice</div></div>
+          </div>
+          <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+          <div class="flow-step">
+            <div class="flow-lane-left"><div class="annotation">Final operator report</div></div>
+            <div class="flow-lane-center">
+              <div class="node node-output" style="width:100%;">
+                <div class="node-title">Phase 6: Session Summary</div>
+                <div class="node-desc">Emit test/build, merged PRs, docs commit count, project updates, and push result</div>
+              </div>
+            </div>
+            <div class="flow-lane-right"><div class="annotation">Ends with “Session complete.”</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">Architecture Notes</div>
+    <div class="card-grid">
+      <div class="card card-green">
+        <h3>Config as policy layer</h3>
+        <p>The skill behavior is mostly data-driven. Start mode health checks, end mode test/build commands, doc staging paths, devlog location, and merge strategy all come from the merged <code>session</code> config. This makes repo-level customization the main extension surface without editing the skill body.</p>
+      </div>
+      <div class="card card-blue">
+        <h3>Fail-soft orchestration</h3>
+        <p>Missing config, missing memory, <code>gh</code> auth problems, missing project config, or project API failures do not abort execution. The skill intentionally degrades from full automation to partial automation while preserving a useful operator briefing or closeout summary.</p>
+      </div>
+      <div class="card card-purple">
+        <h3>Human checkpoint model</h3>
+        <p>The skill inserts decisions only where state mutation risk is meaningful: proceeding after test/build failure, skipping failed PR merges, supplying the devlog/commit summary, and authorizing pushes for untracked branches. That keeps automation fast while still preserving operator control.</p>
+      </div>
+      <div class="card card-amber">
+        <h3>Output compression rule</h3>
+        <p>Most inputs are verbose, but output is intentionally compact. Raw CLAUDE guidance, memory files, git details, and project data are distilled into a briefing or summary. This keeps the skill aligned with session management instead of turning into a document dump.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Config Surface</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Key</th>
+          <th>Default</th>
+          <th>Consumed In</th>
+          <th>Effect</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>session.health_checks</code></td>
+          <td><code>[]</code></td>
+          <td>Start / Phase 3</td>
+          <td>Commands run during startup; failures are reported but never block the briefing.</td>
+        </tr>
+        <tr>
+          <td><code>session.build_command</code></td>
+          <td><code>null</code></td>
+          <td>End / Phase 1</td>
+          <td>Optional build run after tests; failure triggers “Proceed anyway?” checkpoint.</td>
+        </tr>
+        <tr>
+          <td><code>session.test_command</code></td>
+          <td><code>null</code></td>
+          <td>End / Phase 1</td>
+          <td>Primary test command. If unset, the skill falls back to top-level <code>test_command</code>.</td>
+        </tr>
+        <tr>
+          <td><code>session.doc_paths</code></td>
+          <td><code>["docs/", "CLAUDE.md"]</code></td>
+          <td>End / Phase 3</td>
+          <td>Paths staged before session-doc commit.</td>
+        </tr>
+        <tr>
+          <td><code>session.devlog_path</code></td>
+          <td><code>null</code></td>
+          <td>End / Phase 3</td>
+          <td>When present, adds a dated devlog entry using the user-provided one-line summary.</td>
+        </tr>
+        <tr>
+          <td><code>session.pr_merge_strategy</code></td>
+          <td><code>"squash"</code></td>
+          <td>End / Phase 2</td>
+          <td>Controls the flag passed to <code>gh pr merge</code>: squash, merge, or rebase.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="section-title">External Integrations And Extension Points</div>
+    <div class="callout-row">
+      <div class="card card-dark">
+        <h3>Integration map</h3>
+        <div class="kv"><strong>Git CLI</strong><span>Branch state, cleanliness, recent commits, stash, ahead-of-main analysis, staged diff stats, push.</span></div>
+        <div class="kv"><strong>gh CLI</strong><span>Open PR discovery, current PR status checks, auth validation, interactive merges using the user PAT.</span></div>
+        <div class="kv"><strong>Project board API</strong><span>Optional read for board briefing in start mode and optional field updates in end mode when <code>.github/project-config.json</code> exists.</span></div>
+        <div class="kv"><strong>Memory files</strong><span>Project-specific historical context loaded from user memory directories and compressed into briefing memory notes.</span></div>
+        <div class="kv"><strong>Skill registry</strong><span>Local and user skill directories are scanned so the session briefing can advertise available follow-on tools.</span></div>
+      </div>
+      <div class="card card-purple">
+        <h3>Best places to modify behavior</h3>
+        <p><span class="winner-badge">Lowest-friction extension path</span></p>
+        <div class="mini-list">
+          <span class="tag tag-config">edit session config</span>
+          <span class="tag tag-config">add health checks</span>
+          <span class="tag tag-config">change doc paths</span>
+          <span class="tag tag-config">set devlog path</span>
+          <span class="tag tag-config">switch merge strategy</span>
+        </div>
+        <p style="margin-top:10px; font-size:11px;">Skill-body edits are mainly needed when adding new phases, changing the briefing template, introducing new project field rules, or altering prompt checkpoints. Most repo-specific behavior should stay in config and project metadata rather than in code.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Observability And Failure Model</div>
+    <div class="meter">
+      <div class="card card-blue">
+        <div class="meter-value">4</div>
+        <p>start-mode timings<br></br>context, git, health checks, briefing</p>
+      </div>
+      <div class="card card-green">
+        <div class="meter-value">7</div>
+        <p>end-mode metrics<br></br>tests, build, merges, docs, project, push</p>
+      </div>
+      <div class="card card-red">
+        <div class="meter-value">0</div>
+        <p>hard blockers by design<br></br>warnings dominate over aborts</p>
+      </div>
+      <div class="card card-amber">
+        <div class="meter-value">2</div>
+        <p>critical human approvals<br></br>proceed-anyway and push/merge checkpoints</p>
+      </div>
+    </div>
+
+    <div class="band">
+      <p><strong>Failure posture:</strong> the skill avoids dead ends. Missing <code>CLAUDE.md</code> becomes an onboarding suggestion, no memory files become “no previous session context,” failing health checks stay informational, <code>gh</code> auth failures suppress PR operations, project config absence disables board features, and push or merge failures turn into explicit operator choices. The only behavior it refuses is unsafe automation without a checkpoint.</p>
+    </div>
+
+    <div class="summary-grid">
+      <div class="summary-card card-blue">
+        <h3>Start mode output</h3>
+        <p>A condensed operational briefing with branch and PR posture, health signals, locally available skills, and memory-derived context so the next user turn can immediately resume work.</p>
+      </div>
+      <div class="summary-card card-green">
+        <h3>End mode output</h3>
+        <p>A closure report describing test/build outcome, merged PRs, docs commit activity, project field adjustments, and remote push status.</p>
+      </div>
+      <div class="summary-card card-red">
+        <h3>Guardrails</h3>
+        <p>Never dump CLAUDE.md, never use <code>git status -uall</code>, never commit empty staged sets, never push untracked branches without asking, and never switch to GitHub App bots for session operations.</p>
+      </div>
     </div>
   </div>
 
-  <div class="section-title">Start Mode Execution Flow</div>
-  <div class="flow">
-    <!-- Phase 1 -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="annotation">Reads <code>CLAUDE.md</code> up tree, memory directories, and config stack. <br><strong>INTERNALIZE ONLY.</strong></div>
-      </div>
-      <div class="flow-lane-center">
-        <div class="node node-config">
-          <div class="node-title">Phase 1: Gather Context</div>
-          <div class="node-desc">Load context silently</div>
-        </div>
-      </div>
-      <div class="flow-lane-right"></div>
-    </div>
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Phase 2 -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="node node-external">
-          <div class="node-title">GitHub Project Sync</div>
-          <div class="node-desc">Uses <code>github_app.py</code> token</div>
-        </div>
-      </div>
-      <div class="flow-lane-center">
-        <div class="node node-phase">
-          <div class="node-title">Phase 2: Git & Env State</div>
-          <div class="node-desc"><code>git status</code>, <code>gh pr list</code>, query GH boards</div>
-        </div>
-      </div>
-      <div class="flow-lane-right">
-        <div class="annotation">Queries <code>.github/project-config.json</code> if exists.</div>
-      </div>
-    </div>
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Phase 3 & 4 -->
-    <div class="flow-step">
-      <div class="flow-lane-left"></div>
-      <div class="flow-lane-center">
-        <div class="node node-phase">
-          <div class="node-title">Phase 3 & 4: Health & Skills</div>
-          <div class="node-desc">Run <code>health_checks</code> commands, find skills</div>
-        </div>
-      </div>
-      <div class="flow-lane-right">
-        <div class="annotation">Non-fatal checks. Captures stdout/stderr for display.</div>
-      </div>
-    </div>
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Phase 5 -->
-    <div class="flow-step">
-      <div class="flow-lane-left"></div>
-      <div class="flow-lane-center">
-        <div class="node node-output">
-          <div class="node-title">Phase 5: Session Briefing</div>
-          <div class="node-desc">Console: Concise boot summary</div>
-        </div>
-      </div>
-      <div class="flow-lane-right">
-        <div class="annotation">Prompts user: <br><strong>"What are we working on?"</strong></div>
-      </div>
-    </div>
-  </div>
-
-  <div class="section-title">End Mode Execution Flow</div>
-  <div class="flow">
-    <!-- Phase 1 -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="annotation">Uses top-level fallback if <code>session.test_command</code> is null.</div>
-      </div>
-      <div class="flow-lane-center">
-        <div class="node node-phase">
-          <div class="node-title">Phase 1: Test & Build</div>
-          <div class="node-desc">Run <code>test_command</code> and <code>build_command</code></div>
-        </div>
-      </div>
-      <div class="flow-lane-right">
-        <div class="node node-decision">
-          <div class="node-title">On Failure</div>
-          <div class="node-desc">Warn user: "Proceed anyway?"</div>
-        </div>
-      </div>
-    </div>
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Phase 2 -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="annotation">Requires <strong>User PAT</strong> via <code>gh</code> cli, not app bots.</div>
-      </div>
-      <div class="flow-lane-center">
-        <div class="node node-external">
-          <div class="node-title">Phase 2: Merge PRs</div>
-          <div class="node-desc"><code>gh pr merge --&lt;strategy&gt;</code></div>
-        </div>
-      </div>
-      <div class="flow-lane-right"></div>
-    </div>
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Phase 3 -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="node node-decision">
-          <div class="node-title">User Input</div>
-          <div class="node-desc">Prompt: Commit Message</div>
-        </div>
-      </div>
-      <div class="flow-lane-center">
-        <div class="node node-phase">
-          <div class="node-title">Phase 3: Commit Docs</div>
-          <div class="node-desc">Add <code>doc_paths</code>, optional devlog append, commit</div>
-        </div>
-      </div>
-      <div class="flow-lane-right">
-        <div class="annotation">Skips if <code>git diff --cached</code> is empty.</div>
-      </div>
-    </div>
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Phase 4 & 5 -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="annotation">Updates Document State to "Drafted".</div>
-      </div>
-      <div class="flow-lane-center">
-        <div class="node node-external">
-          <div class="node-title">Phase 4 & 5: Project & Push</div>
-          <div class="node-desc">Project board updates, <code>git push</code></div>
-        </div>
-      </div>
-      <div class="flow-lane-right"></div>
-    </div>
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Phase 6 -->
-    <div class="flow-step">
-      <div class="flow-lane-left"></div>
-      <div class="flow-lane-center">
-        <div class="node node-output">
-          <div class="node-title">Phase 6: Summary</div>
-          <div class="node-desc">Console: Wind-down report</div>
-        </div>
-      </div>
-      <div class="flow-lane-right"></div>
-    </div>
-  </div>
-
-  <div class="section-title">Configuration Properties Reference</div>
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th>Key</th>
-        <th>Default</th>
-        <th>Description</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td><code>health_checks</code></td>
-        <td><code>[]</code></td>
-        <td>Commands to run during Phase 3 of Start Mode. Captured and reported cleanly. Non-blocking.</td>
-      </tr>
-      <tr>
-        <td><code>build_command</code></td>
-        <td><code>null</code></td>
-        <td>Command run during end routine (post-tests).</td>
-      </tr>
-      <tr>
-        <td><code>test_command</code></td>
-        <td><code>null</code></td>
-        <td>Command to run tests. Falls back to root-level config <code>test_command</code> if null.</td>
-      </tr>
-      <tr>
-        <td><code>doc_paths</code></td>
-        <td><code>["docs/", "CLAUDE.md"]</code></td>
-        <td>Paths to automatically stage and commit on session end.</td>
-      </tr>
-      <tr>
-        <td><code>devlog_path</code></td>
-        <td><code>null</code></td>
-        <td>Directory to generate daily devlog entries (<code>YYYY-MM-DD.md</code>) on session end.</td>
-      </tr>
-      <tr>
-        <td><code>pr_merge_strategy</code></td>
-        <td><code>"squash"</code></td>
-        <td>Strategy passed to <code>gh pr merge</code>. Options: <code>squash</code>, <code>merge</code>, <code>rebase</code>.</td>
-      </tr>
-    </tbody>
-  </table>
-
-  <div class="section-title">Failure Modes & Recovery</div>
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th>Failure Condition</th>
-        <th>System Reaction / Recovery</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td>Missing <code>CLAUDE.md</code></td>
-        <td>Note in briefing, gently suggest invoking <code>/stark-onboard-project</code>.</td>
-      </tr>
-      <tr>
-        <td><code>gh</code> CLI Authentication Fails</td>
-        <td>Skip PR sections and external data queries; display local git state only.</td>
-      </tr>
-      <tr>
-        <td>Test, Build, or PR Merge Fails</td>
-        <td>Report specific error to user and explicitly prompt: <em>"Skip/Proceed anyway?"</em></td>
-      </tr>
-      <tr>
-        <td>GitHub Project API Fails / No Config</td>
-        <td>Log warning internally. Skip fields section silently. <strong>Never block the pipeline.</strong></td>
-      </tr>
-    </tbody>
-  </table>
-
-  <div class="footer">
-    stark-session internals visualization &bull; Designed for Internal Engineering Documentation
-  </div>
-
-</div>
+  <div class="footer"><div class="winner-badge">Visualization by Codex · Score: 8.8/10 · Generated from SKILL.md</div></div>
 </body>
 </html>

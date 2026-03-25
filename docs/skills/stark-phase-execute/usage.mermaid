@@ -1,26 +1,56 @@
 graph TD
-  Start([Run stark-phase-execute]) --> Fetch[Fetch Plan Tasks via GitHub/Project API]
-  Fetch --> Check{Tasks Exist?}
-  Check -- No --> Decompose[Auto-Run /stark-plan-to-tasks] --> Fetch
-  Check -- Yes --> LoopStart((Start Task Loop))
-  
-  LoopStart --> Subagent[Spawn Implementation Subagent]
-  Subagent --> CreatePR[Push Branch & Create PR]
-  
-  CreatePR --> Review[Multi-Agent Code Review]
-  Review --> Findings{Actionable Findings?}
-  Findings -- Yes --> Fix[Auto-Fix Findings] --> Review
-  Findings -- No --> Merge[Squash Merge to main]
-  
-  Merge --> MoreTasks{More Phase Tasks?}
-  MoreTasks -- Yes --> LoopStart
-  MoreTasks -- No --> Regression[Run Full Regression Suite]
-  
-  Regression --> Changelog[Update CHANGELOG.md]
-  Changelog --> Release[Auto-Run /stark-release]
-  Release --> Deploy[Run Deploy Command]
-  Deploy --> Housekeeping[Generate Dashboard & Update Memory]
-  Housekeeping --> End([Phase Execution Complete])
-  
-  classDef loop fill:#eff6ff,stroke:#1e40af,stroke-width:2px;
-  class Subagent,CreatePR,Review,Findings,Fix,Merge loop;
+    A["Invoke /stark-phase-execute &lt;slug&gt;"] --> B["Phase 0: Initialize"]
+    B --> C{"Issues exist for<br>plan:{slug}?"}
+    C -->|No| D["Auto-run /stark-plan-to-tasks"]
+    D --> E["Re-fetch issues"]
+    C -->|Yes| E
+    E --> F{"Tasks found<br>after filtering?"}
+    F -->|No| G["Stop: nothing to execute"]
+    F -->|Yes| H["Phase Briefing + Observability Log"]
+    H --> I["Phase 1: Task Loop"]
+
+    subgraph TaskLoop["For each task (sequential)"]
+        I --> J["1.1 Branch & Session Start"]
+        J --> K["1.2 Implement (subagent)"]
+        K --> L["1.3 Push & Create PR"]
+        L --> M["1.4 Multi-Agent Review"]
+        M --> N{"Actionable<br>findings?"}
+        N -->|Yes| O["Fix findings in worktree"]
+        O --> P{"Max rounds<br>reached?"}
+        P -->|No| M
+        P -->|Yes| Q["Post review summary"]
+        N -->|No| Q
+        Q --> R["1.5 Squash Merge"]
+        R --> S["1.6 Close Issue + Log"]
+    end
+
+    S --> T{"More tasks?"}
+    T -->|Yes| I
+    T -->|No| U["Phase 2: Regression Tests"]
+    U --> V{"--skip-release?"}
+    V -->|No| W["Phase 3: CHANGELOG + Release + Deploy"]
+    V -->|Yes| X["Phase 4: Dashboard"]
+    W --> X
+    X --> Y["Phase 5: Housekeeping"]
+    Y --> Z["Done"]
+
+    K -.->|"failure"| ERR["Log error, cleanup, continue"]
+    ERR --> T
+
+    style A fill:#1e40af,color:#fff
+    style B fill:#1e40af,color:#fff
+    style C fill:#7c3aed,color:#fff
+    style D fill:#e5e7eb,color:#666
+    style F fill:#7c3aed,color:#fff
+    style G fill:#dc2626,color:#fff
+    style H fill:#f59e0b,color:#1a1a1a
+    style N fill:#7c3aed,color:#fff
+    style P fill:#7c3aed,color:#fff
+    style T fill:#7c3aed,color:#fff
+    style V fill:#7c3aed,color:#fff
+    style U fill:#047857,color:#fff
+    style W fill:#f59e0b,color:#1a1a1a
+    style X fill:#f59e0b,color:#1a1a1a
+    style Y fill:#047857,color:#fff
+    style Z fill:#1e40af,color:#fff
+    style ERR fill:#dc2626,color:#fff

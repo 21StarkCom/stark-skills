@@ -1,21 +1,37 @@
 graph TD
-  Start([User Command: /stark-generate-docs]) --> Args{Arguments provided?}
-  
-  Args -->|--skill or --all| Gen[Phase 2: Generate Docs]
-  Args -->|None or --check| Check[Phase 1: Run --check Script]
+    A["/stark-generate-docs invoked"] --> B{"--skill or --all?"}
+    B -->|yes| D["Phase 2: Generate"]
+    B -->|no| C["Phase 1: Detect Changes<br/>generate_skill_docs.py --check"]
+    C --> C1{"Stale skills found?"}
+    C1 -->|"exit 0"| DONE["All docs up to date ✓"]
+    C1 -->|"exit 1 + list"| C2{"--check only?"}
+    C2 -->|yes| REPORT["Report stale list"]
+    C2 -->|no| D
 
-  Check --> CheckResult{Exit Code?}
-  CheckResult -->|0| UpToDate[Done: All docs up to date]
-  CheckResult -->|1| Stale[Capture stale skill names]
-  
-  Stale --> Gen
+    D --> D1["Per skill × audience:<br/>3 LLMs generate independently"]
+    D1 --> D2["Tournament: score & pick winner"]
+    D2 --> D3["Write .html .md .json .mermaid"]
+    D3 --> D4{"Playwright available?"}
+    D4 -->|yes| D5["Screenshot → .png"]
+    D4 -->|no| D6["Warn: skip .png"]
+    D5 --> E
+    D6 --> E
 
-  Gen --> |scripts/generate_skill_docs.py| Generate[Multi-LLM Generation & Viz]
-  Generate --> Commit[Phase 3: git add & git commit]
-  Commit --> Summary[Phase 4: Output Summary Report]
+    E["Phase 3: git add + commit<br/>docs/skills/"] --> F["Phase 4: Summary Report<br/>winners, scores, file counts"]
 
-  Generate -.-> Fail1[Failure: LLM Calls]
-  Fail1 -.->|Recovery| Cont1[Report & Continue]
-  
-  Generate -.-> Fail2[Failure: Playwright Missing]
-  Fail2 -.->|Recovery| Cont2[Skip Screenshots, Warn]
+    style A fill:#047857,color:#fff
+    style B fill:#7c3aed,color:#fff
+    style C fill:#1e40af,color:#fff
+    style C1 fill:#7c3aed,color:#fff
+    style C2 fill:#7c3aed,color:#fff
+    style D fill:#1e40af,color:#fff
+    style D1 fill:#e5e7eb,color:#666
+    style D2 fill:#7c3aed,color:#fff
+    style D3 fill:#f59e0b,color:#1a1a1a
+    style D4 fill:#7c3aed,color:#fff
+    style D5 fill:#f59e0b,color:#1a1a1a
+    style D6 fill:#dc2626,color:#fff
+    style E fill:#1e40af,color:#fff
+    style F fill:#f59e0b,color:#1a1a1a
+    style DONE fill:#047857,color:#fff
+    style REPORT fill:#f59e0b,color:#1a1a1a

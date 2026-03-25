@@ -1,27 +1,11 @@
 graph TD
-    A([User Input: /stark-metrics or 'show metrics']) --> B{Parse Flags}
-    B -->|--repo, --skill, --since| C[Execute metrics.py script]
-    
-    C --> D{Exit Code}
-    D -->|1: No Data| E[Error: Run /stark-review to generate data]
-    D -->|2: Arg Error| F[Error: Show Argument Usage]
-    
-    D -->|0: Success| G[Present Formatted Terminal Report]
-    
-    G --> H{Used --json?}
-    H -->|Yes| Z([End])
-    
-    H -->|No| I{Has Recommendations?}
-    I -->|Yes| J[Interactive Prompt: 'Want to act on any?']
-    J -->|User selects action| K[Invoke Skill / Edit Config]
-    K --> L[Show Meta-Observations]
-    
-    I -->|No| L
-    L --> Z([End])
-    
-    style A fill:#047857,stroke:#fff,stroke-width:2px,color:#fff
-    style C fill:#1e40af,stroke:#fff,stroke-width:2px,color:#fff
-    style G fill:#f59e0b,stroke:#fff,stroke-width:2px,color:#000
-    style J fill:#7c3aed,stroke:#fff,stroke-width:2px,color:#fff
-    style E fill:#dc2626,stroke:#fff,stroke-width:2px,color:#fff
-    style F fill:#dc2626,stroke:#fff,stroke-width:2px,color:#fff
+    A["/stark-metrics [flags]"] --> B["Read history data<br>~/.claude/code-review/history/"]
+    B --> C["Run metrics.py<br>with --repo, --skill, --since, --json"]
+    C --> D{Script exit code?}
+    D -->|Exit 0| E["Present report:<br>scorecards, quality, trends"]
+    D -->|Exit 1| F["No history — run /stark-review first"]
+    D -->|Exit 2| G["Argument error — show usage"]
+    E --> H["Highlight recommendations<br>(numbered, actionable)"]
+    H --> I{User picks a recommendation?}
+    I -->|Yes| J["Invoke /stark-review-improvement<br>or edit config"]
+    I -->|No| K["Check improvement flags:<br>first run tips, FP wins, failure alerts"]

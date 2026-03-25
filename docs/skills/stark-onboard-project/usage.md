@@ -8,7 +8,7 @@ Bootstrap a new project end-to-end — initializes git, creates a GitHub repo in
 
 ```
 
-![A clean usage-focused diagram for the `stark-onboard-project` skill showing a five-phase onboarding flow from git initialization to GitHub repo creation, GitHub App connection, Claude Code setup, and final summary, alongside cards for trigger phrases, inputs and outputs, common workflows, user decisions, and recovery steps for authentication or scope failures."}}](usage.png)
+![A clean single-page workflow diagram for the skill “stark-onboard-project,” showing a top hero summary, invocation details, a five-phase vertical flow from choosing a project directory through git initialization, GitHub repo creation, Stark app connection, CLAUDE.md generation, and final onboarding summary, plus tables for inputs and outputs, cards for common workflows and failure recovery, and highlighted next steps such as starting a Stark session and initializing docs."}}](usage.png)
 
 ## When to Use
 

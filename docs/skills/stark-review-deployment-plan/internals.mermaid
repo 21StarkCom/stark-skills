@@ -1,0 +1,58 @@
+graph TD
+    A[Plan Input] --> B{Input Type?}
+    B -->|Inline text| C[Pass 1: Full Read]
+    B -->|File path| R1[Read Tool] --> C
+    B -->|URL| R2[WebFetch Tool] --> C
+    B -->|None provided| ASK[Ask User for Plan] --> A
+
+    C --> D[Pass 2: Contradiction Scan]
+    D --> E[Pass 3: Cross-Check]
+    E --> F{Repo Scripts Accessible?}
+    F -->|Yes| G[Validate Against Scripts & Config]
+    F -->|No| H[Mark Checks as DEFERRED]
+    G --> I[Pass 4: Vector Evaluation A-J]
+    H --> I
+
+    I --> VA[A: Partial-Failure Trap]
+    I --> VB[B: Imperative Idempotency]
+    I --> VC[C: Blank-Slate IaC]
+    I --> VD[D: Dependency Sequencing]
+    I --> VE[E: Reality Drift]
+    I --> VF[F: Command Contract]
+    I --> VG[G: Pre-Cutover Gate]
+    I --> VH[H: API Prerequisite Matrix]
+    I --> VI[I: Identity Lifecycle]
+    I --> VJ[J: Evidence Strictness]
+
+    VA --> FPG[False-Positive Guard]
+    VB --> FPG
+    VC --> FPG
+    VD --> FPG
+    VE --> FPG
+    VF --> FPG
+    VG --> FPG
+    VH --> FPG
+    VI --> FPG
+    VJ --> FPG
+
+    FPG --> OUT[Report Assembly]
+    OUT --> S1[1. Findings: High→Med→Low]
+    OUT --> S2[2. Dependency Violations Table]
+    OUT --> S3[3. Ownership & Drift Table]
+    OUT --> S4[4. API Prerequisite Matrix]
+    OUT --> S5[5. Coverage Matrix A-J]
+    S1 --> CLOSE[Remaining blockers: N]
+    S2 --> CLOSE
+    S3 --> CLOSE
+    S4 --> CLOSE
+    S5 --> CLOSE
+
+    style A fill:#047857,color:#fff
+    style C fill:#1e40af,color:#fff
+    style D fill:#1e40af,color:#fff
+    style E fill:#1e40af,color:#fff
+    style I fill:#1e40af,color:#fff
+    style FPG fill:#7c3aed,color:#fff
+    style OUT fill:#f59e0b,color:#1a1a1a
+    style ASK fill:#dc2626,color:#fff
+    style CLOSE fill:#f59e0b,color:#1a1a1a

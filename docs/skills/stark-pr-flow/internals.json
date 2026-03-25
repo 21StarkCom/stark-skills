@@ -1,18 +1,4 @@
 {
-  "doc_content": {
-    "summary": "An end-to-end pull request workflow automation for GetEvinced repositories that handles pushing, PR creation, AI-driven self-review, and squash-merging. It utilizes a dual-authentication architecture, relying on the user's PAT for PR lifecycle operations while securely injecting an ephemeral bot token for posting code reviews natively as the CI bot.",
-    "key_features": [
-      "Automated branch pushing with automatic conflict resolution fallbacks via rebase",
-      "AI-assisted PR title and conventional-commits-compliant body generation based on git diffs",
-      "Dual-auth system strictly isolating user operations from bot-issued code reviews to prevent privilege escalation",
-      "Advisory documentation state checking via project-config.json and internal GraphQL hooks",
-      "Interactive explicit user approval gate prior to executing an admin-bypassed squash-merge"
-    ],
-    "usage_examples": [
-      "open PR",
-      "ship it",
-      "stark-pr-flow \"feat: add new retry logic\" draft"
-    ]
-  },
-  "alt_text": "Internal architecture visualization of the stark-pr-flow skill showing the dual-auth GitHub workflow, transitioning from branch prerequisites and PR generation using the user's PAT, through bot-authenticated automated code reviews, to a final user approval gate for administrative squash merging."
+  "doc_content": {},
+  "alt_text": "A clean internal architecture diagram for the stark-pr-flow skill showing a vertical PR workflow from prerequisites through push, diff analysis, PR creation, bot-based self-review, a hard stop for manual approval, an advisory documentation-state check, and final squash-admin merge with branch cleanup. Blue phase nodes form the main path, purple nodes mark approval decisions, green nodes mark configuration and auth boundaries, amber highlights the stop-and-summary output, and red annotations call out abort and recovery paths like dirty worktrees, main-branch misuse, diverged pushes, auth failures, and merge conflicts.\"}}"
 }

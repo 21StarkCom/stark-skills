@@ -1,18 +1,15 @@
 {
   "doc_content": {
-    "summary": "The stark-pr-flow skill automates the end-to-end pull request lifecycle for GetEvinced repositories, handling branch pushing, AI-generated PR descriptions, automated self-reviews via stark-claude, and squash-merging upon user approval.",
-    "key_features": [
-      "Automated PR title and body generation from commit history and diffs.",
-      "Automatic self-review posting using the stark-claude bot with inline comments.",
-      "Safe execution with a built-in stop for explicit user approval before merging.",
-      "Advisory documentation state checks to ensure compliance before merge.",
-      "Automated branch cleanup and main synchronization after a successful squash merge."
+    "prerequisites": "Must have `gh` CLI authenticated with a personal access token. Must have `stark-claude` GitHub App installed on the repo (for bot reviews). Python venv at `~/git/Evinced/scripts/.venv/` with PyJWT, requests, and cryptography installed. Must be on a feature branch (not main) with a clean working tree.",
+    "quick_start": "`/stark-pr-flow` \u2014 pushes the current branch, creates a PR with auto-generated title and body, posts a self-review via stark-claude[bot], presents a summary, and waits for your approval to squash-merge.",
+    "common_patterns": "**Ship current work:** `/stark-pr-flow` \u2014 fully automatic, generates title from commits.\n\n**Custom title:** `/stark-pr-flow feat: add webhook retry logic` \u2014 overrides the auto-generated title.\n\n**Draft PR for early feedback:** `/stark-pr-flow draft` \u2014 creates as draft, self-review still posts.",
+    "troubleshooting": "**\"Not on a feature branch\"** \u2014 You're on main. Create a branch first with `git checkout -b feat/my-change`.\n\n**\"Dirty working tree\"** \u2014 Commit or stash uncommitted changes before running.\n\n**gh auth failure** \u2014 Run `gh auth status` to check. If expired, run `gh auth login`.\n\n**Bot review not posting** \u2014 Re-run with fresh bot token. Check that `~/git/Evinced/scripts/.venv/bin/python3` has required deps (PyJWT, requests, cryptography).\n\n**Push diverged** \u2014 The skill auto-rebases on main. If conflicts arise, resolve them manually and the skill retries.",
+    "related_skills": [
+      "stark-review",
+      "stark-session",
+      "stark-release"
     ],
-    "usage_examples": [
-      "stark-pr-flow",
-      "stark-pr-flow draft",
-      "stark-pr-flow Fix login timeout issue"
-    ]
+    "arguments_table": "| Argument | Required | Description |\n|----------|----------|-------------|\n| `<title>` | No | Override the auto-generated PR title |\n| `\"draft\"` | No | Create PR as draft (default: non-draft) |"
   },
-  "alt_text": "A workflow visualization of the stark-pr-flow skill showing the step-by-step process of pushing a branch, creating a PR, running a bot self-review, pausing for user approval, and finally merging and cleaning up."
+  "alt_text": "Flowchart visualization of the stark-pr-flow skill showing a six-step end-to-end PR workflow: preflight checks for branch and auth validation, pushing the branch to GitHub, analyzing changes to generate a PR title and body, creating the PR via gh CLI with the user's PAT, posting a self code review via the stark-claude bot, presenting a summary and waiting for user approval at a decision gate, then squash-merging with admin bypass and cleaning up the branch. Side annotations explain the auth split between user PAT and bot token, failure recovery paths for diverged pushes and merge conflicts, and cards describing quick start examples, key behaviors, and a failure recovery table."
 }

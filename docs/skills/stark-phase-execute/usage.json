@@ -1,18 +1,18 @@
 {
   "doc_content": {
-    "summary": "stark-phase-execute is a fully autonomous execution engine that takes a development plan and implements it end-to-end. It automatically fetches (or decomposes) tasks, runs an implementation loop for each issue including semantic commits, PR creation, multi-agent review with autonomous fix rounds, and immediate merging. Post-execution, it handles regression testing, semantic versioning, deployment, and performance logging without any user intervention.",
-    "key_features": [
-      "Zero-intervention task implementation loop (checkout -> implement -> test -> commit).",
-      "Auto-decomposition of .md plans into GitHub issues if no tasks currently exist.",
-      "Integrated multi-agent PR review process with autonomous, isolated fix rounds.",
-      "Automatic end-of-phase regression testing, CHANGELOG generation, and semantic release.",
-      "Post-execution dashboard highlighting success rates, agent scorecards, and prompt improvement flags."
+    "prerequisites": "Claude Code with full permissions (`--dangerouslySkipPermissions` or equivalent). CLI tools in PATH: `gh`, `claude`, `codex`, `gemini`. Active `gh auth` PAT. GitHub Apps (stark-claude, stark-codex, stark-gemini) installed on the target repo. Clean working tree on `main` branch.",
+    "quick_start": "/stark-phase-execute observability-v2",
+    "common_patterns": "**Preview before running:** `/stark-phase-execute my-plan --dry-run` \u2014 shows task list, planned branches, review config, and release plan without making changes.\n\n**Resume after failure:** `/stark-phase-execute my-plan --start-from 47` \u2014 skips already-merged tasks and resumes from issue #47.\n\n**Plan file to full execution:** `/stark-phase-execute docs/plans/2026-03-auth-rewrite.md` \u2014 auto-derives slug from filename, decomposes into issues if needed, then executes all tasks end-to-end.",
+    "troubleshooting": "**\"No issues with label plan:{slug}\"** \u2014 Either the slug doesn't match (check exact label on GitHub) or issues haven't been created yet. Pass the plan file path instead and the skill will auto-run `/stark-plan-to-tasks`.\n\n**\"All issues filtered out\"** \u2014 Issues exist but are all phase tracking issues or below the `--start-from` threshold. This is normal if all tasks are already done.\n\n**CI bypassed warnings** \u2014 The skill merges with `--admin` even when CI fails. Check the observability log for `ci_bypassed: true` entries and verify those PRs manually.\n\n**Review agent failures** \u2014 If one of the 3 LLMs is down, the skill proceeds with findings from the working agents. Check the agent scorecard in the dashboard for gaps.",
+    "related_skills": [
+      "stark-plan-to-tasks",
+      "stark-review",
+      "stark-release",
+      "stark-pr-flow",
+      "stark-review-improvement",
+      "stark-metrics"
     ],
-    "usage_examples": [
-      "stark-phase-execute 2026-03-23-stark-signals",
-      "stark-phase-execute docs/superpowers/plans/2026-03-23-stark-signals.md --dry-run",
-      "stark-phase-execute current-plan-slug --start-from 3 --skip-deploy"
-    ]
+    "arguments_table": "| Argument | Default | Description |\n|----------|---------|-------------|\n| `<plan-slug-or-path>` | **required** | Plan slug (matches `plan:{slug}` label) or path to plan `.md` file |\n| `--dry-run` | off | Preview execution without making changes |\n| `--skip-deploy` | off | Skip deployment after release |\n| `--skip-release` | off | Skip version bump and release |\n| `--start-from <N>` | 1st issue | Resume from a specific issue number |\n| `--rounds <N>` | 3 | Max review-fix rounds per PR |\n| `--repo ORG/REPO` | auto-detect | Override repo detection from git remote |"
   },
-  "alt_text": "A user-focused flowchart and UI visualization of the stark-phase-execute workflow, detailing the autonomous lifecycle from initialization and task fetching to the implementation subagent loop, multi-agent review, merging, release, and final dashboard generation."
+  "alt_text": "Usage guide for the stark-phase-execute skill showing a vertical workflow diagram with six phases (Initialize, Task Loop, Regression Testing, Release & Deploy, Dashboard, Housekeeping), invocation examples using plan slugs and file paths, an arguments table with seven flags including dry-run and start-from, six output cards (Merged PRs, Review Comments, Release, Observability Log, Dashboard, Improvement Flags), common usage patterns with terminal command examples, a sample terminal output showing timestamped task execution with success and failure indicators, a failure handling table listing eight failure modes and their automatic recovery behaviors, and six related skill cards linking to plan-to-tasks, review, release, pr-flow, review-improvement, and metrics skills."
 }

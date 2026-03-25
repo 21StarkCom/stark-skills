@@ -5,20 +5,10 @@ Rename a project locally and on GitHub, update all references in sibling repos, 
 ## Workflow Overview
 
 ```mermaid
-graph TD
-  A[Invoke /stark-rename-project] --> B{Dry Run?}
-  B -- Yes --> C[Preview Changes & Exit]
-  B -- No --> D[Phase 1: Validate & Pre-flight]
-  D --> E[Phase 2: Rename on GitHub]
-  E --> F[Phase 3: Local Rename & Clean Symlinks]
-  F --> G[Phase 4: Update Project References]
-  G --> H[Phase 5: Update Sibling Repos]
-  H --> I[Phase 6: Reinstall Symlinks]
-  I --> J[Phase 7: Verify]
-  J --> K[Phase 8: Summary Report]
+
 ```
 
-![A visual workflow diagram and usage guide for the stark-rename-project skill, showing the 8-phase process from validation to summary report, including dry-run paths, artifact updates, and safety checks.](usage.png)
+![A clean, single-page usage guide for the `stark-rename-project` skill with a blue-green hero summary, argument table, a vertical workflow diagram from input validation through GitHub rename, local rename, sibling repo updates, symlink reinstall, and verification, plus cards for prerequisites, common workflows, outputs, failure conditions, external dependencies, and limitations."}}](usage.png)
 
 ## When to Use
 

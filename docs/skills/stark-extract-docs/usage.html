@@ -1,19 +1,9 @@
-<html lang="en">
+<html>
 <head>
 
-<title>Skill Visualization: stark-extract-docs</title>
-<style>
-/*
- * Stark Skills — Shared Design System CSS
- *
- * Foundation styles for LLM-generated HTML skill visualizations.
- * LLMs embed this inline and may extend with additional styles.
- * All colors pass WCAG AA 4.5:1 contrast ratio.
- *
- * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
- */
 
-/* === Reset & Base === */
+<title>stark-extract-docs — Usage Guide</title>
+<style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
   font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -21,8 +11,6 @@ body {
   color: #1a1a1a;
   line-height: 1.5;
 }
-
-/* === Header === */
 .header { text-align: center; padding: 36px 20px 16px; }
 .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
 .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
@@ -31,55 +19,44 @@ body {
   background: #eff6ff; color: #1e40af;
   padding: 3px 10px; border-radius: 4px; margin-top: 8px;
 }
-
-/* === Container === */
 .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
-
-/* === Section Title === */
 .section-title {
   font-size: 14px; font-weight: 700; color: #666;
   text-transform: uppercase; letter-spacing: 1px;
   margin: 32px 0 16px; padding-bottom: 6px;
   border-bottom: 2px solid #e5e7eb;
 }
-
-/* === Node Types === */
 .node { border-radius: 8px; padding: 12px 16px; text-align: center; }
 .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
 .node-desc { font-size: 10px; opacity: 0.8; }
-
-.node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
-.node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
-.node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
-.node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
-.node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
-.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
-
-/* === Flow Layout === */
+.node-phase    { background: #1e40af; color: #ffffff; }
+.node-decision { background: #7c3aed; color: #ffffff; }
+.node-failure  { background: #dc2626; color: #ffffff; }
+.node-config   { background: #047857; color: #ffffff; }
+.node-output   { background: #f59e0b; color: #1a1a1a; }
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
 .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
 .flow-step {
   display: flex; align-items: stretch;
   width: 100%; max-width: 860px; min-height: 76px;
 }
 .flow-lane-left {
-  width: 220px; display: flex;
+  width: 180px; display: flex;
   align-items: center; justify-content: flex-end;
   padding-right: 18px;
 }
 .flow-lane-center {
-  width: 420px; display: flex;
+  width: 500px; display: flex;
   align-items: center; justify-content: center;
 }
 .flow-lane-right {
-  width: 220px; display: flex;
+  width: 180px; display: flex;
   align-items: center; padding-left: 18px;
 }
 .annotation {
-  font-size: 10px; color: #666; max-width: 180px; line-height: 1.4;
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
 }
 .annotation strong { color: #444; }
-
-/* === Arrows === */
 .arrow-down {
   width: 2px; height: 20px; background: #cbd5e1;
   margin: 0 auto; position: relative;
@@ -97,8 +74,6 @@ body {
 .arrow-container .flow-lane-center {
   display: flex; justify-content: center;
 }
-
-/* === Cards === */
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -107,7 +82,6 @@ body {
 .card { padding: 16px; border-radius: 8px; }
 .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
 .card p  { font-size: 11px; line-height: 1.6; }
-
 .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
 .card-blue h3 { color: #1e40af; }
 .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
@@ -120,11 +94,9 @@ body {
 .card-dark h3 { color: #333333; }
 .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
 .card-red h3 { color: #dc2626; }
-
-/* === Data Tables === */
 .data-table {
   width: 100%; max-width: 860px; margin: 16px auto;
-  border-collapse: collapse; font-size: 12px;
+  border-collapse: collapse; font-size: 11px;
 }
 .data-table th {
   background: #f3f4f6; padding: 8px 12px; text-align: left;
@@ -133,10 +105,8 @@ body {
 .data-table td {
   padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
 }
-
-/* === Tags === */
 .tag {
-  display: inline-block; font-size: 10px; font-weight: 600;
+  display: inline-block; font-size: 9px; font-weight: 600;
   padding: 2px 8px; border-radius: 3px;
 }
 .tag-phase    { background: #dbeafe; color: #1e40af; }
@@ -145,11 +115,71 @@ body {
 .tag-config   { background: #d1fae5; color: #065f46; }
 .tag-output   { background: #fef3c7; color: #92400e; }
 .tag-external { background: #f3f4f6; color: #666666; }
-
-/* === Footer === */
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
 .footer {
   text-align: center; padding: 20px;
-  font-size: 10px; color: #999; margin-top: 40px;
+  font-size: 10px; color: #999;
+}
+
+/* === Custom extensions === */
+.invocation-box {
+  background: #1a1a1a; color: #e5e7eb; border-radius: 8px;
+  padding: 16px 20px; font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px; margin: 12px auto; max-width: 660px;
+  line-height: 1.7;
+}
+.invocation-box .prompt { color: #60a5fa; }
+.invocation-box .flag { color: #34d399; }
+.invocation-box .arg { color: #fbbf24; }
+.invocation-box .comment { color: #6b7280; }
+
+.category-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 10px; margin-top: 16px;
+}
+.category-chip {
+  border-radius: 6px; padding: 10px 12px; text-align: center;
+  font-size: 10px; font-weight: 600;
+}
+
+.output-row {
+  display: flex; gap: 12px; align-items: center;
+  padding: 10px 0; border-bottom: 1px solid #f3f4f6;
+}
+.output-row:last-child { border-bottom: none; }
+.output-icon {
+  width: 36px; height: 36px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; flex-shrink: 0;
+}
+.output-detail { flex: 1; }
+.output-detail strong { font-size: 12px; display: block; margin-bottom: 2px; }
+.output-detail span { font-size: 10px; color: #666; }
+
+.edge-case-list { list-style: none; padding: 0; }
+.edge-case-list li {
+  padding: 8px 12px; font-size: 11px; border-left: 3px solid #e5e7eb;
+  margin-bottom: 6px; background: #fafafa;
+}
+.edge-case-list li strong { color: #444; }
+
+.routing-arrow {
+  display: inline-block; color: #9ca3af; margin: 0 6px; font-size: 12px;
 }
 </style>
 </head>
@@ -157,206 +187,339 @@ body {
 
 <div class="header">
   <h1>stark-extract-docs</h1>
-  <div class="sub">Extract durable knowledge from specs, plans, and review files into long-term project documentation.</div>
-  <div class="scope">Complexity: Complex (660 lines)</div>
+  <div class="sub">Extract durable knowledge from specs, plans, and reviews into project documentation</div>
+  <div class="scope">USAGE GUIDE</div>
 </div>
 
 <div class="container">
 
-  <!-- Usage Section -->
-  <div class="section-title">CLI Usage &amp; Arguments</div>
-  <div class="card-grid">
-    <div class="card card-dark">
-      <h3>Standard Execution</h3>
-      <p><code>/stark-extract-docs &lt;path-to-spec&gt;</code></p>
-      <p>Processes a single spec document. Automatically locates the associated plan and review artifacts in the same directory structure.</p>
-    </div>
-    <div class="card card-dark">
-      <h3>Batch Processing</h3>
-      <p><code>/stark-extract-docs --batch &lt;dir&gt;</code></p>
-      <p>Iterates sequentially through all <code>*-design.md</code> files in the provided directory. Handles cross-spec ADR deduplication at the end.</p>
-    </div>
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#1e40af;"></div> Phase</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed;"></div> Decision</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#047857;"></div> Config / Input</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b;"></div> Output</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#dc2626;"></div> Failure</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e5e7eb;"></div> External</div>
   </div>
 
-  <div class="card-grid">
-    <div class="card card-blue">
-      <h3><code>--dry-run</code></h3>
-      <p>Runs Pass 1 only. Displays extracted knowledge in a formatted JSON structure without writing any files or commits.</p>
-    </div>
-    <div class="card card-amber">
-      <h3><code>--force</code></h3>
-      <p>Bypasses history-based skip logic. Reprocesses the spec and overwrites outputs, clearing previous learning log / glossary entries.</p>
-    </div>
-    <div class="card card-green">
-      <h3><code>--no-commit</code></h3>
-      <p>Generates and writes all documentation files locally but skips staging and committing to Git.</p>
-    </div>
+  <!-- Quick Start -->
+  <div class="section-title">Quick Start</div>
+  <div class="invocation-box">
+    <span class="comment"># Extract knowledge from a single spec</span><br>
+    <span class="prompt">/stark-extract-docs</span> <span class="arg">docs/specs/2026-03-19-auth-redesign-design.md</span><br><br>
+    <span class="comment"># Preview without writing files</span><br>
+    <span class="prompt">/stark-extract-docs</span> <span class="arg">docs/specs/2026-03-19-auth-redesign-design.md</span> <span class="flag">--dry-run</span><br><br>
+    <span class="comment"># Process all specs in a directory</span><br>
+    <span class="prompt">/stark-extract-docs</span> <span class="flag">--batch</span> <span class="arg">docs/specs/</span><br><br>
+    <span class="comment"># Re-extract with low-confidence items, write to specific repo</span><br>
+    <span class="prompt">/stark-extract-docs</span> <span class="arg">docs/specs/2026-03-19-auth-redesign-design.md</span> <span class="flag">--force --include-low --target-repo</span> <span class="arg">~/git/Evinced/widget-system</span>
   </div>
 
-  <!-- Workflow Section -->
-  <div class="section-title">Two-Pass Extraction Workflow</div>
-  
-  <div class="flow">
-    <!-- Step 1 -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="annotation" style="text-align: right;">
-          <strong>Inputs</strong><br>
-          Spec, Plan, Spec Review, and Plan Review
-        </div>
-      </div>
-      <div class="flow-lane-center">
-        <div class="node node-config" style="width: 100%;">
-          <div class="node-title">Phase 1: Setup &amp; Validation</div>
-          <div class="node-desc">Locate artifacts, check skip logic, detect target repo</div>
-        </div>
-      </div>
-      <div class="flow-lane-right">
-        <div class="annotation">
-          <strong>Validation</strong><br>
-          Skipped if hashes match history (unless --force)
-        </div>
-      </div>
-    </div>
-    
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-    
-    <!-- Step 2 -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="annotation" style="text-align: right;">
-          <strong>Pass 1</strong><br>
-          Filter 8 categories by confidence score
-        </div>
-      </div>
-      <div class="flow-lane-center">
-        <div class="node node-phase" style="width: 100%;">
-          <div class="node-title">Phase 2: Knowledge Extraction</div>
-          <div class="node-desc">Extract raw context into structured JSON</div>
-        </div>
-      </div>
-      <div class="flow-lane-right">
-        <div class="annotation">
-          <strong>Validation</strong><br>
-          Verify schema &amp; JSON required fields
-        </div>
-      </div>
-    </div>
-
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Step 3 -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="annotation" style="text-align: right;">
-          <strong>Pass 2</strong><br>
-          Map structured content to markdown targets
-        </div>
-      </div>
-      <div class="flow-lane-center">
-        <div class="node node-phase" style="width: 100%;">
-          <div class="node-title">Phase 3: Routing &amp; Generation</div>
-          <div class="node-desc">Format docs, handle deduplication, assign numbers</div>
-        </div>
-      </div>
-      <div class="flow-lane-right"></div>
-    </div>
-
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Step 4 -->
-    <div class="flow-step">
-      <div class="flow-lane-left"></div>
-      <div class="flow-lane-center">
-        <div class="node node-config" style="width: 100%;">
-          <div class="node-title">Phase 4: Write &amp; Commit</div>
-          <div class="node-desc">Create dirs, append/write files, local git commit</div>
-        </div>
-      </div>
-      <div class="flow-lane-right">
-        <div class="annotation">
-          <strong>Outputs Generated</strong><br>
-          ADRs, Retros, Glossary, Log, Reference
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Routing Table Section -->
-  <div class="section-title">Knowledge Routing Logic</div>
+  <!-- Arguments -->
+  <div class="section-title">Arguments &amp; Flags</div>
   <table class="data-table">
     <thead>
-      <tr>
-        <th>Extracted Category</th>
-        <th>Source Artifact</th>
-        <th>Target Output Document</th>
-        <th>Formatting Strategy</th>
-      </tr>
+      <tr><th>Argument</th><th>Required</th><th>Description</th></tr>
     </thead>
     <tbody>
-      <tr>
-        <td><span class="tag tag-decision">decision</span></td>
-        <td>Spec</td>
-        <td><strong>ADR</strong> (<code>docs/adr/NNNN-*.md</code>)</td>
-        <td>Expanded to Context, Decision, Alternatives, Consequences</td>
-      </tr>
-      <tr>
-        <td><span class="tag tag-decision">decision_defended</span></td>
-        <td>Review</td>
-        <td><strong>ADR</strong> + <strong>Retrospective</strong></td>
-        <td>Adds reviewer challenge context to the ADR</td>
-      </tr>
-      <tr>
-        <td><span class="tag tag-decision">constraint</span></td>
-        <td>Spec</td>
-        <td><strong>ADR</strong> (if alternatives) OR <strong>Reference</strong></td>
-        <td>New ADR if alternatives debated; otherwise appended to constraints.md</td>
-      </tr>
-      <tr>
-        <td><span class="tag tag-phase">integration</span> / <span class="tag tag-phase">data_model</span></td>
-        <td>Spec</td>
-        <td><strong>Reference Docs</strong></td>
-        <td>Appended to dedicated component or entity reference files</td>
-      </tr>
-      <tr>
-        <td><span class="tag tag-output">evolution</span></td>
-        <td>Review</td>
-        <td><strong>Retrospective</strong></td>
-        <td>Grouped into "Design Evolution" round-by-round tables</td>
-      </tr>
-      <tr>
-        <td><span class="tag tag-output">agent_signal</span></td>
-        <td>Review</td>
-        <td><strong>Retro</strong> + <strong>Learning Log</strong></td>
-        <td>Added to Retrospective tables &amp; appended to shared learning-log.md</td>
-      </tr>
-      <tr>
-        <td><span class="tag tag-config">glossary</span></td>
-        <td>Spec</td>
-        <td><strong>Glossary</strong> (<code>docs/glossary.md</code>)</td>
-        <td>Deduped and appended as formatted terms</td>
-      </tr>
+      <tr><td><code>&lt;path-to-spec&gt;</code></td><td><span class="tag tag-failure">required*</span></td><td>Path to a spec/design <code>.md</code> file (* unless <code>--batch</code> is used)</td></tr>
+      <tr><td><code>--batch &lt;dir&gt;</code></td><td><span class="tag tag-external">optional</span></td><td>Process all <code>*-design.md</code> files in a directory sequentially</td></tr>
+      <tr><td><code>--dry-run</code></td><td><span class="tag tag-external">optional</span></td><td>Extract and show intermediate JSON, don't write any files</td></tr>
+      <tr><td><code>--no-commit</code></td><td><span class="tag tag-external">optional</span></td><td>Write files but skip the git commit step</td></tr>
+      <tr><td><code>--force</code></td><td><span class="tag tag-external">optional</span></td><td>Re-extract even if this spec was already processed (overwrites previous outputs)</td></tr>
+      <tr><td><code>--include-low</code></td><td><span class="tag tag-external">optional</span></td><td>Include low-confidence extractions (normally filtered out)</td></tr>
+      <tr><td><code>--target-repo &lt;path&gt;</code></td><td><span class="tag tag-external">optional</span></td><td>Override automatic target repo detection with a local path</td></tr>
     </tbody>
   </table>
 
-  <!-- Output Generation Details -->
-  <div class="section-title">Notable Edge Cases &amp; Safety</div>
+  <!-- Workflow -->
+  <div class="section-title">Workflow</div>
+  <div class="flow">
+
+    <!-- Step 1: Input -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>You provide:</strong> a spec file path or a batch directory</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-config" style="width:380px;">
+          <div class="node-title">Validate Input &amp; Find Artifacts</div>
+          <div class="node-desc">Reads spec, locates associated plan + review files by naming convention</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Auto-detected:</strong> spec, plan, spec review, plan review</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 2: Skip check -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Uses:</strong> SHA-256 hashes of all inputs</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width:380px;">
+          <div class="node-title">Already Processed?</div>
+          <div class="node-desc">Compares input hashes against history file — skip if unchanged, unless --force</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>--force</strong> bypasses this check entirely</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 3: Target Repo -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Priority:</strong> --target-repo &gt; spec content &gt; git remote</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px;">
+          <div class="node-title">Detect Target Repository</div>
+          <div class="node-desc">Resolves where ADRs and reference docs should be written</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Note:</strong> Target can differ from the source repo</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 4: Pass 1 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Pass 1:</strong> reads all artifacts, extracts structured knowledge</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px;">
+          <div class="node-title">Knowledge Extraction (8 Categories)</div>
+          <div class="node-desc">Produces JSON with decisions, constraints, integrations, glossary, evolution, agent signals</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>--dry-run</strong> stops here and prints the JSON</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 5: Pass 2 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Pass 2:</strong> routes each extraction to the right doc type</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px;">
+          <div class="node-title">Routing &amp; Document Generation</div>
+          <div class="node-desc">Creates ADRs, retrospectives, reference docs, glossary entries, learning log</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Dedup:</strong> checks existing ADRs, glossary terms, log entries</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 6: Write -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Preview first:</strong> lists all files before writing</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-output" style="width:380px;">
+          <div class="node-title">Write Files &amp; Commit</div>
+          <div class="node-desc">Creates/updates docs, stages specific files, commits locally</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>--no-commit</strong> writes files but skips git commit</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Extraction Categories -->
+  <div class="section-title">8 Extraction Categories</div>
+  <div class="category-grid">
+    <div class="category-chip" style="background:#dbeafe; color:#1e40af;">decision<br><span style="font-weight:400; font-size:9px;">Architecture choices</span></div>
+    <div class="category-chip" style="background:#ede9fe; color:#5b21b6;">decision_defended<br><span style="font-weight:400; font-size:9px;">Challenged &amp; held</span></div>
+    <div class="category-chip" style="background:#d1fae5; color:#065f46;">constraint<br><span style="font-weight:400; font-size:9px;">Boundaries &amp; limits</span></div>
+    <div class="category-chip" style="background:#fef3c7; color:#92400e;">integration<br><span style="font-weight:400; font-size:9px;">API contracts</span></div>
+    <div class="category-chip" style="background:#e0e7ff; color:#3730a3;">data_model<br><span style="font-weight:400; font-size:9px;">Schemas &amp; entities</span></div>
+    <div class="category-chip" style="background:#fce7f3; color:#9d174d;">evolution<br><span style="font-weight:400; font-size:9px;">Review-round changes</span></div>
+    <div class="category-chip" style="background:#fee2e2; color:#991b1b;">agent_signal<br><span style="font-weight:400; font-size:9px;">Agent behavior patterns</span></div>
+    <div class="category-chip" style="background:#f3f4f6; color:#374151;">glossary<br><span style="font-weight:400; font-size:9px;">Domain term definitions</span></div>
+  </div>
+
+  <!-- Routing Map -->
+  <div class="section-title">Category → Output Routing</div>
+  <table class="data-table">
+    <thead>
+      <tr><th>Category</th><th>Output Type</th><th>Location</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><span class="tag tag-phase">decision</span></td><td>ADR</td><td><code>{target}/docs/adr/NNNN-slug.md</code></td></tr>
+      <tr><td><span class="tag tag-decision">decision_defended</span></td><td>ADR + Retrospective</td><td><code>{target}/docs/adr/</code> + <code>{source}/docs/retrospectives/</code></td></tr>
+      <tr><td><span class="tag tag-config">constraint</span> <span style="font-size:9px;">(with alternatives)</span></td><td>ADR</td><td><code>{target}/docs/adr/NNNN-slug.md</code></td></tr>
+      <tr><td><span class="tag tag-config">constraint</span> <span style="font-size:9px;">(no alternatives)</span></td><td>Reference</td><td><code>{target}/docs/reference/constraints.md</code></td></tr>
+      <tr><td><span class="tag tag-output">integration</span></td><td>Reference</td><td><code>{target}/docs/reference/component-slug.md</code></td></tr>
+      <tr><td><span class="tag tag-phase">data_model</span></td><td>Reference</td><td><code>{target}/docs/reference/entity-slug.md</code></td></tr>
+      <tr><td><span class="tag tag-failure">evolution</span></td><td>Retrospective</td><td><code>{source}/docs/retrospectives/YYYY-MM-DD-name.md</code></td></tr>
+      <tr><td><span class="tag tag-failure">agent_signal</span></td><td>Retro + Learning Log</td><td><code>{source}/docs/retrospectives/</code> + <code>learning-log.md</code></td></tr>
+      <tr><td><span class="tag tag-external">glossary</span></td><td>Glossary</td><td><code>{target}/docs/glossary.md</code></td></tr>
+    </tbody>
+  </table>
+
+  <!-- Common Patterns -->
+  <div class="section-title">Common Patterns</div>
   <div class="card-grid">
+    <div class="card card-blue">
+      <h3>Single Spec Extraction</h3>
+      <p>The most common use: point at one design spec and let the skill find its associated plan and review files automatically by naming convention. ADRs go to the target repo, retrospectives stay in the source repo.</p>
+      <div class="invocation-box" style="margin-top:10px; font-size:11px;">
+        <span class="prompt">/stark-extract-docs</span> <span class="arg">docs/specs/2026-03-19-auth-redesign-design.md</span>
+      </div>
+    </div>
     <div class="card card-purple">
-      <h3>Target Repo Detection</h3>
-      <p>Resolves the target repo by analyzing the spec text for <code>org/repo</code> strings, then searches siblings and <code>~/git/</code>. If cross-repo writes are detected, retrospectives stay in the source repo while ADRs are routed to the target repo.</p>
+      <h3>Dry Run Preview</h3>
+      <p>See what knowledge would be extracted without writing anything. Outputs the intermediate JSON showing all extractions, their categories, confidence levels, and evidence — useful for verifying before committing.</p>
+      <div class="invocation-box" style="margin-top:10px; font-size:11px;">
+        <span class="prompt">/stark-extract-docs</span> <span class="arg">docs/specs/my-spec-design.md</span> <span class="flag">--dry-run</span>
+      </div>
+    </div>
+    <div class="card card-green">
+      <h3>Batch Processing</h3>
+      <p>Process all design specs in a directory sequentially. Includes cross-spec ADR deduplication — if two specs produced overlapping decisions, the more detailed one is kept and the duplicate removed.</p>
+      <div class="invocation-box" style="margin-top:10px; font-size:11px;">
+        <span class="prompt">/stark-extract-docs</span> <span class="flag">--batch</span> <span class="arg">docs/specs/</span>
+      </div>
     </div>
     <div class="card card-amber">
-      <h3>Confidence Filtering</h3>
-      <p>Extractions marked <code>low</code> confidence are skipped unless <code>--include-low</code> is passed. <code>medium</code> confidence extractions are included but flagged with an inline HTML comment <code>&lt;!-- needs review --&gt;</code>.</p>
+      <h3>Cross-Repo Extraction</h3>
+      <p>When a spec in repo A describes architecture for repo B, use <code>--target-repo</code> to send ADRs and reference docs to B while retrospectives stay in A. The skill auto-detects org/repo references too.</p>
+      <div class="invocation-box" style="margin-top:10px; font-size:11px;">
+        <span class="prompt">/stark-extract-docs</span> <span class="arg">docs/specs/my-spec-design.md</span> <span class="flag">--target-repo</span> <span class="arg">~/git/Evinced/other-repo</span>
+      </div>
+    </div>
+    <div class="card card-dark">
+      <h3>Force Re-Extraction</h3>
+      <p>Overwrite a previous extraction run. The skill tracks what it created last time and replaces ADRs at the same numbers, swaps learning log entries, and refreshes glossary terms in place.</p>
+      <div class="invocation-box" style="margin-top:10px; font-size:11px;">
+        <span class="prompt">/stark-extract-docs</span> <span class="arg">docs/specs/my-spec-design.md</span> <span class="flag">--force</span>
+      </div>
     </div>
     <div class="card card-red">
-      <h3>Commit Safety</h3>
-      <p>Checks <code>git status</code> before committing. If the target repository has a dirty working tree (uncommitted changes), it will skip the automated commit phase and instruct the user to verify and commit manually.</p>
+      <h3>Include Low-Confidence</h3>
+      <p>By default, low-confidence extractions are filtered out and medium-confidence ones get a <code>&lt;!-- needs review --&gt;</code> marker. Use <code>--include-low</code> to keep everything.</p>
+      <div class="invocation-box" style="margin-top:10px; font-size:11px;">
+        <span class="prompt">/stark-extract-docs</span> <span class="arg">docs/specs/my-spec-design.md</span> <span class="flag">--include-low</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Outputs -->
+  <div class="section-title">What Gets Created</div>
+  <div style="max-width:660px; margin:0 auto;">
+    <div class="output-row">
+      <div class="output-icon" style="background:#dbeafe; color:#1e40af;">📋</div>
+      <div class="output-detail">
+        <strong>Architecture Decision Records (ADRs)</strong>
+        <span>Numbered markdown files in <code>docs/adr/</code> with context, decision, alternatives, and consequences</span>
+      </div>
+    </div>
+    <div class="output-row">
+      <div class="output-icon" style="background:#fce7f3; color:#9d174d;">🔄</div>
+      <div class="output-detail">
+        <strong>Review Retrospective</strong>
+        <span>Design evolution table, decisions defended, agent performance, and prompt improvement candidates</span>
+      </div>
+    </div>
+    <div class="output-row">
+      <div class="output-icon" style="background:#fef3c7; color:#92400e;">📖</div>
+      <div class="output-detail">
+        <strong>Reference Docs</strong>
+        <span>Integration specs, data models, and constraints in <code>docs/reference/</code></span>
+      </div>
+    </div>
+    <div class="output-row">
+      <div class="output-icon" style="background:#d1fae5; color:#065f46;">📝</div>
+      <div class="output-detail">
+        <strong>Learning Log</strong>
+        <span>Qualitative observations appended to <code>docs/retrospectives/learning-log.md</code></span>
+      </div>
+    </div>
+    <div class="output-row">
+      <div class="output-icon" style="background:#f3f4f6; color:#374151;">📚</div>
+      <div class="output-detail">
+        <strong>Glossary</strong>
+        <span>Domain terms appended to <code>docs/glossary.md</code></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Artifact Naming Convention -->
+  <div class="section-title">Artifact Discovery Convention</div>
+  <div class="card card-blue" style="max-width:660px; margin:12px auto;">
+    <h3>How the Skill Finds Related Files</h3>
+    <p>Given a spec at <code>docs/specs/2026-03-19-foo-design.md</code>, the skill auto-discovers:</p>
+    <table class="data-table" style="margin-top:10px;">
+      <tbody>
+        <tr><td style="width:120px;"><strong>Plan</strong></td><td><code>docs/plans/2026-03-19-foo.md</code></td></tr>
+        <tr><td><strong>Spec review</strong></td><td><code>docs/specs/2026-03-19-foo-design.review.md</code></td></tr>
+        <tr><td><strong>Plan review</strong></td><td><code>docs/plans/2026-03-19-foo.review.md</code></td></tr>
+      </tbody>
+    </table>
+    <p style="margin-top:8px;">Missing artifacts are fine — the skill extracts from whatever is available. More artifacts = richer extractions.</p>
+  </div>
+
+  <!-- Edge Cases / Troubleshooting -->
+  <div class="section-title">Edge Cases &amp; Troubleshooting</div>
+  <div class="card-grid">
+    <div class="card card-red">
+      <h3>Spec Already Processed</h3>
+      <p>The skill tracks input hashes. If nothing changed since the last run, it exits cleanly. Use <code>--force</code> to re-extract anyway — previous outputs are overwritten at the same file paths.</p>
+    </div>
+    <div class="card card-amber">
+      <h3>Target Repo Not Found</h3>
+      <p>The skill checks sibling directories and <code>~/git/{org}/{repo}</code>. If neither exists, it errors with a clone suggestion. Use <code>--target-repo &lt;path&gt;</code> to point at the right location.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>Dirty Target Tree</h3>
+      <p>If the target repo has uncommitted changes, files are still written but the commit step is skipped with a warning. Commit your existing changes first, or use <code>--no-commit</code>.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>No Extractable Knowledge</h3>
+      <p>If the spec is too thin for any extractions, the skill exits cleanly — not an error. Consider adding more architectural detail, constraints, or a review file for richer results.</p>
+    </div>
+  </div>
+
+  <!-- Summary -->
+  <div class="section-title">At a Glance</div>
+  <div class="summary-grid">
+    <div class="summary-card" style="background:#eff6ff; border-left:3px solid #1e40af;">
+      <h3 style="color:#1e40af;">Two-Pass Architecture</h3>
+      <p>Pass 1 extracts knowledge into structured JSON. Pass 2 routes it to the right document types and locations. Dry-run shows Pass 1 output only.</p>
+    </div>
+    <div class="summary-card" style="background:#ecfdf5; border-left:3px solid #059669;">
+      <h3 style="color:#059669;">Idempotent &amp; Safe</h3>
+      <p>Hash-based skip logic prevents re-processing. Deduplication against existing ADRs, glossary terms, and log entries. Never modifies source specs.</p>
+    </div>
+    <div class="summary-card" style="background:#f5f3ff; border-left:3px solid #7c3aed;">
+      <h3 style="color:#7c3aed;">Cross-Repo Aware</h3>
+      <p>ADRs and reference docs go to the target repo. Retrospectives and learning logs stay in the source repo. Separate commits for each.</p>
     </div>
   </div>
 
 </div>
-<div class="footer">Stark Skills • stark-extract-docs Visualizer Output</div>
+
+<div class="footer"><div class="winner-badge">Visualization by Claude · Score: 8.4/10 · Generated from SKILL.md</div></div>
+
 </body>
 </html>

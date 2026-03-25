@@ -1,339 +1,537 @@
 <html lang="en">
 <head>
-  
-  
-  <title>stark-review - Skill Visualization</title>
-  <style>
-    /*
-     * Stark Skills — Shared Design System CSS
-     *
-     * Foundation styles for LLM-generated HTML skill visualizations.
-     * LLMs embed this inline and may extend with additional styles.
-     * All colors pass WCAG AA 4.5:1 contrast ratio.
-     *
-     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
-     */
 
-    /* === Reset & Base === */
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #fafafa;
-      color: #1a1a1a;
-      line-height: 1.5;
-    }
 
-    /* === Header === */
-    .header { text-align: center; padding: 36px 20px 16px; }
-    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
-    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
-    .header .scope {
-      display: inline-block; font-size: 10px; font-weight: 600;
-      background: #eff6ff; color: #1e40af;
-      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
-    }
+<title>stark-review — Usage Guide</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
+.node-phase    { background: #1e40af; color: #ffffff; }
+.node-decision { background: #7c3aed; color: #ffffff; }
+.node-failure  { background: #dc2626; color: #ffffff; }
+.node-config   { background: #047857; color: #ffffff; }
+.node-output   { background: #f59e0b; color: #1a1a1a; }
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 180px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 180px; display: flex;
+  align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
 
-    /* === Container === */
-    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+/* === Quick Start === */
+.quickstart {
+  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
+  padding: 20px; margin: 16px 0; font-family: 'SF Mono', 'Fira Code', monospace;
+}
+.quickstart code {
+  display: block; font-size: 13px; color: #1e40af; margin: 4px 0;
+}
+.quickstart .comment { color: #94a3b8; font-size: 11px; }
 
-    /* === Section Title === */
-    .section-title {
-      font-size: 14px; font-weight: 700; color: #666;
-      text-transform: uppercase; letter-spacing: 1px;
-      margin: 32px 0 16px; padding-bottom: 6px;
-      border-bottom: 2px solid #e5e7eb;
-    }
+/* === Loop indicator === */
+.loop-bracket {
+  border: 2px dashed #7c3aed; border-radius: 12px; padding: 8px;
+  margin: 8px 0; position: relative;
+}
+.loop-label {
+  position: absolute; top: -10px; left: 20px; background: #fafafa;
+  padding: 0 8px; font-size: 10px; font-weight: 700; color: #7c3aed;
+}
 
-    /* === Node Types === */
-    .node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; }
-    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
-    .node-desc { font-size: 10px; opacity: 0.8; }
+/* === Classification badge row === */
+.badge-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; justify-content: center; }
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; font-weight: 600; padding: 3px 10px; border-radius: 12px;
+}
+.badge-fix { background: #dbeafe; color: #1e40af; }
+.badge-recurring { background: #fef3c7; color: #92400e; }
+.badge-fp { background: #fee2e2; color: #991b1b; }
+.badge-noise { background: #f3f4f6; color: #666; }
+.badge-ignored { background: #f9fafb; color: #9ca3af; }
 
-    .node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
-    .node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
-    .node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
-    .node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
-    .node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
-    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
+/* === Parallel agents === */
+.parallel-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;
+  margin: 12px 0; max-width: 500px;
+}
+.agent-box {
+  border-radius: 6px; padding: 8px 10px; text-align: center;
+  font-size: 10px; font-weight: 600;
+}
+.agent-claude { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
+.agent-codex { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+.agent-gemini { background: #f5f3ff; color: #7c3aed; border: 1px solid #ddd6fe; }
 
-    /* === Flow Layout === */
-    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
-    .flow-step {
-      display: flex; align-items: stretch;
-      width: 100%; max-width: 860px; min-height: 76px;
-    }
-    .flow-lane-left {
-      width: 250px; display: flex;
-      align-items: center; justify-content: flex-end;
-      padding-right: 18px; text-align: right;
-    }
-    .flow-lane-center {
-      width: 360px; display: flex;
-      align-items: center; justify-content: center;
-    }
-    .flow-lane-right {
-      width: 250px; display: flex;
-      align-items: center; padding-left: 18px; text-align: left;
-    }
-    .annotation {
-      font-size: 10px; color: #555; max-width: 200px; line-height: 1.4;
-    }
-    .annotation strong { color: #222; }
-
-    /* === Arrows === */
-    .arrow-down {
-      width: 2px; height: 20px; background: #cbd5e1;
-      margin: 0 auto; position: relative;
-    }
-    .arrow-down::after {
-      content: ''; position: absolute; bottom: -4px; left: -4px;
-      border-left: 5px solid transparent;
-      border-right: 5px solid transparent;
-      border-top: 6px solid #cbd5e1;
-    }
-    .arrow-container {
-      display: flex; justify-content: center;
-      width: 100%; max-width: 860px;
-    }
-    .arrow-container .flow-lane-center {
-      display: flex; justify-content: center;
-    }
-
-    /* === Cards === */
-    .card-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 16px; margin-top: 16px;
-    }
-    .card { padding: 16px; border-radius: 8px; }
-    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
-    .card p  { font-size: 11px; line-height: 1.6; }
-    .card code { background: rgba(0,0,0,0.05); padding: 2px 4px; border-radius: 3px; font-family: monospace; }
-
-    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
-    .card-blue h3 { color: #1e40af; }
-    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
-    .card-green h3 { color: #059669; }
-    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
-    .card-purple h3 { color: #7c3aed; }
-    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
-    .card-amber h3 { color: #92400e; }
-    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
-    .card-dark h3 { color: #333333; }
-    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
-    .card-red h3 { color: #dc2626; }
-
-    /* === Data Tables === */
-    .data-table {
-      width: 100%; max-width: 860px; margin: 16px auto;
-      border-collapse: collapse; font-size: 11px;
-    }
-    .data-table th {
-      background: #f3f4f6; padding: 8px 12px; text-align: left;
-      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
-    }
-    .data-table td {
-      padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
-    }
-
-    /* === Tags === */
-    .tag {
-      display: inline-block; font-size: 9px; font-weight: 600;
-      padding: 2px 8px; border-radius: 3px; margin-right: 4px; margin-bottom: 4px;
-    }
-    .tag-phase    { background: #dbeafe; color: #1e40af; }
-    .tag-decision { background: #ede9fe; color: #5b21b6; }
-    .tag-failure  { background: #fee2e2; color: #991b1b; }
-    .tag-config   { background: #d1fae5; color: #065f46; }
-    .tag-output   { background: #fef3c7; color: #92400e; }
-    .tag-external { background: #f3f4f6; color: #666666; }
-
-    /* === Legend === */
-    .legend {
-      display: flex; gap: 16px; justify-content: center;
-      margin: 16px 0 24px; flex-wrap: wrap;
-    }
-    .legend-item {
-      display: flex; align-items: center; gap: 6px;
-      font-size: 10px; color: #666;
-    }
-    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
-
-    /* === Footer === */
-    .footer {
-      text-align: center; padding: 20px;
-      font-size: 10px; color: #999;
-    }
-  </style>
+/* === Mode indicator === */
+.mode-strip {
+  display: flex; gap: 0; border-radius: 6px; overflow: hidden; margin: 12px auto; max-width: 400px;
+}
+.mode-strip div {
+  flex: 1; padding: 6px 12px; text-align: center; font-size: 10px; font-weight: 600;
+}
+.mode-full { background: #1e40af; color: #fff; }
+.mode-review-only { background: #e5e7eb; color: #666; }
+</style>
 </head>
 <body>
 
-  <div class="header">
-    <h1>stark-review</h1>
-    <div class="sub">Multi-agent PR code review using 3 LLMs × N domains with autonomous fix loop.</div>
-    <div class="scope">COMPLEX SKILL • USER USAGE</div>
+<div class="header">
+  <h1>stark-review</h1>
+  <div class="sub">Multi-agent PR code review &mdash; 3 LLMs &times; 6 domains with autonomous fix loop</div>
+  <div class="scope">USAGE GUIDE</div>
+</div>
+
+<div class="container">
+
+  <!-- Quick Start -->
+  <div class="section-title">Quick Start</div>
+  <div class="quickstart">
+    <span class="comment"># Review current branch's PR</span>
+    <code>/stark-review</code>
+    <br>
+    <span class="comment"># Review a specific PR</span>
+    <code>/stark-review 91</code>
+    <br>
+    <span class="comment"># Dry run — review only, no fixes, no GitHub posting</span>
+    <code>/stark-review 91 --dry-run</code>
+    <br>
+    <span class="comment"># Limit fix rounds</span>
+    <code>/stark-review 91 --rounds 2</code>
   </div>
 
-  <div class="container">
-    
-    <div class="legend">
-      <div class="legend-item"><div class="legend-dot node-phase"></div> Main Workflow</div>
-      <div class="legend-item"><div class="legend-dot node-decision"></div> Autonomous Loop</div>
-      <div class="legend-item"><div class="legend-dot node-output"></div> Generated Outputs</div>
-      <div class="legend-item"><div class="legend-dot node-external"></div> GitHub Integrations</div>
+  <!-- Arguments -->
+  <div class="section-title">Arguments</div>
+  <table class="data-table">
+    <thead>
+      <tr><th>Argument</th><th>Required</th><th>Default</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>&lt;number&gt;</code></td>
+        <td><span class="tag tag-decision">auto-detect</span></td>
+        <td>Current branch PR</td>
+        <td>PR number to review. Auto-detected from branch; prompts if ambiguous.</td>
+      </tr>
+      <tr>
+        <td><code>--rounds N</code></td>
+        <td>No</td>
+        <td>3</td>
+        <td>Maximum fix-review cycles before stopping.</td>
+      </tr>
+      <tr>
+        <td><code>--repo ORG/REPO</code></td>
+        <td>No</td>
+        <td>From git remote</td>
+        <td>Override repository detection.</td>
+      </tr>
+      <tr>
+        <td><code>--dry-run</code></td>
+        <td>No</td>
+        <td>Off</td>
+        <td>Review only — no fixes, no GitHub posting, no bug issues.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Operating Modes -->
+  <div class="section-title">Operating Modes</div>
+  <div class="mode-strip">
+    <div class="mode-full">Full Mode</div>
+    <div class="mode-review-only">Review-Only</div>
+  </div>
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>Full Mode</h3>
+      <p>Review + autonomous fix loop + build/test validation. Activated when <code>test_command</code> is configured and PR is not from a fork. Commits fixes and pushes to PR branch.</p>
     </div>
+    <div class="card card-dark">
+      <h3>Review-Only Mode</h3>
+      <p>Single review pass, no fixes applied. Triggered by: fork PRs, missing <code>test_command</code> config, or <code>--dry-run</code> flag. Findings posted as comments only.</p>
+    </div>
+  </div>
 
-    <div class="section-title">Execution Workflow</div>
-    
-    <div class="flow">
-      <!-- Phase 1 -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation"><strong>Prep</strong><br>Authenticate, fetch PR metadata, and detect full vs. dry-run mode.</div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-phase">
-            <div class="node-title">Phase 1: Setup</div>
-            <div class="node-desc">Create isolated worktree & capture test baseline</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">Forks & missing test commands fallback to <strong>Review-only mode</strong> automatically.</div>
+  <!-- Workflow -->
+  <div class="section-title">Workflow</div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#1e40af;"></div> Phase</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed;"></div> Decision</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#047857;"></div> Config</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b;"></div> Output</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#dc2626;"></div> Failure</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e5e7eb;"></div> External</div>
+  </div>
+
+  <div class="flow">
+
+    <!-- Phase 1: Setup -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Phase 1</strong><br>Auth, PR metadata, worktree isolation</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:400px;">
+          <div class="node-title">Setup</div>
+          <div class="node-desc">Detect repo &rarr; authenticate stark-claude &rarr; fetch PR metadata &rarr; push local changes &rarr; create worktree &rarr; rebase</div>
         </div>
       </div>
-      
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Phase 2 Loop -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation"><strong>18 Parallel Sub-agents</strong><br>(Claude, Codex, Gemini) × 6 domains. Finds regressions against baseline.</div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-decision">
-            <div class="node-title">Phase 2: Review-Fix Loop</div>
-            <div class="node-desc">Iterates until clean, max rounds, or no actionable fixes</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">
-            <span class="tag tag-decision">Classify</span>
-            <span class="tag tag-decision">Fix Code</span>
-            <span class="tag tag-decision">Test</span>
-            <span class="tag tag-decision">Push</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Phase 3 -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation"><strong>Data Synthesis</strong><br>Filters out subjective noise and analyzes root causes of false positives.</div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-output">
-            <div class="node-title">Phase 3: Final Summary</div>
-            <div class="node-desc">Generate PR metrics, misalignment analysis & prompt targets</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">Focuses on actionable S/N ratio over raw finding volume.</div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Phase 4 -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation"><strong>Issue Tracking</strong><br>Unresolved High/Critical issues become GitHub Bug issues automatically.</div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-external">
-            <div class="node-title">Phase 4: Post & Persist</div>
-            <div class="node-desc">Post summary comment to PR & create tickets</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">Updates GitHub Project item <em>Review Rounds</em> tracking field.</div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Phase 5 -->
-      <div class="flow-step">
-        <div class="flow-lane-left"></div>
-        <div class="flow-lane-center">
-          <div class="node node-phase">
-            <div class="node-title">Phase 5: Cleanup</div>
-            <div class="node-desc">Remove temporary worktree and branches</div>
-          </div>
-        </div>
-        <div class="flow-lane-right"></div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Inputs:</strong> git remote, PR number or branch</div>
       </div>
     </div>
 
-    <div class="section-title">Usage & Configuration</div>
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-    <div class="card-grid">
-      <div class="card card-dark">
-        <h3>How to Invoke</h3>
-        <p>Use conversational triggers like <em>"stark review"</em>, <em>"review this PR with all agents"</em>, or the explicit CLI slash command.</p>
-        <p style="margin-top: 8px;"><code>/stark-review [PR_NUMBER]</code></p>
-        <p style="margin-top: 8px;"><em>Note: If PR number is omitted, the skill detects it automatically from your current branch.</em></p>
+    <!-- Mode decision -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Fork PR?</strong> No test_command? &rarr; review-only</div>
       </div>
-
-      <div class="card card-green">
-        <h3>Arguments</h3>
-        <p><strong><code>--rounds N</code></strong><br>Max fix-review cycles (default: 3).</p>
-        <p><strong><code>--dry-run</code></strong><br>Review only. No code fixes, no PR comments.</p>
-        <p><strong><code>--repo ORG/REPO</code></strong><br>Explicitly override automatic repo detection.</p>
-      </div>
-
-      <div class="card card-purple">
-        <h3>Finding Classifications</h3>
-        <p>Not all LLM feedback is actionable. The skill categorizes findings to filter noise:</p>
-        <div style="margin-top: 8px;">
-          <span class="tag tag-failure">Fix</span> Real issues ≥ medium severity.<br>
-          <span class="tag tag-failure">Recurring</span> Found across multiple rounds.<br>
-          <span class="tag tag-external">False Positive</span> Problem doesn't exist.<br>
-          <span class="tag tag-external">Noise</span> Subjective style or disagreed upon by peers.
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width:400px;">
+          <div class="node-title">Determine Mode</div>
+          <div class="node-desc">Full mode (review + fix loop) or review-only?</div>
         </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Config:</strong> <code>.code-review/config.json</code></div>
       </div>
     </div>
 
-    <div class="section-title">Observability & Outputs</div>
-    
-    <div class="card-grid">
-      <div class="card card-blue">
-        <h3>Live Terminal Feedback</h3>
-        <p>Long-running reviews provide continuous visibility:</p>
-        <ul style="margin-left: 16px; font-size: 11px; margin-top: 8px;">
-          <li>Real-time task spinners mapped to phases.</li>
-          <li>Timestamped log lines per event.</li>
-          <li>5-minute checkpoint updates for long cycles.</li>
-        </ul>
-      </div>
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-      <div class="card card-amber">
-        <h3>PR Comment Output</h3>
-        <p>The orchestrator bot posts a clean summary outlining:</p>
-        <ul style="margin-left: 16px; font-size: 11px; margin-top: 8px;">
-          <li><strong>Signal-to-noise ratio</strong> (Issues vs Noise).</li>
-          <li>Table of fixed and recurring findings.</li>
-          <li><strong>Misalignment Analysis</strong> showing root causes for false positives (missing context, prompt tuning, etc).</li>
-        </ul>
+    <!-- Phase 2: Review dispatch -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Phase 2</strong><br>Up to N rounds (default 3)</div>
       </div>
+      <div class="flow-lane-center">
+        <div style="width:460px;">
+          <div class="loop-bracket">
+            <div class="loop-label">REVIEW-FIX LOOP</div>
+            <div class="node node-phase" style="margin-bottom:10px;">
+              <div class="node-title">Dispatch Sub-Agents</div>
+              <div class="node-desc">3 LLMs &times; 6 domains = 18 parallel reviews via multi_review.py</div>
+            </div>
+            <div class="parallel-grid" style="margin:0 auto;">
+              <div class="agent-box agent-claude">Claude<br><span style="font-weight:400;font-size:9px;">6 domains</span></div>
+              <div class="agent-box agent-codex">Codex<br><span style="font-weight:400;font-size:9px;">6 domains</span></div>
+              <div class="agent-box agent-gemini">Gemini<br><span style="font-weight:400;font-size:9px;">6 domains</span></div>
+            </div>
+            <div style="display:flex;justify-content:center;"><div class="arrow-down" style="margin:8px auto;"></div></div>
+            <div class="node node-decision" style="margin-bottom:10px;">
+              <div class="node-title">Classify Findings</div>
+              <div class="node-desc">fix | recurring | false_positive | noise | ignored</div>
+            </div>
+            <div class="badge-row">
+              <span class="badge badge-fix">fix</span>
+              <span class="badge badge-recurring">recurring</span>
+              <span class="badge badge-fp">false positive</span>
+              <span class="badge badge-noise">noise</span>
+              <span class="badge badge-ignored">ignored</span>
+            </div>
+            <div style="display:flex;justify-content:center;"><div class="arrow-down" style="margin:8px auto;"></div></div>
+            <div class="node node-phase" style="margin-bottom:10px;">
+              <div class="node-title">Fix &rarr; Build &rarr; Test &rarr; Commit &rarr; Push</div>
+              <div class="node-desc">Address fix/recurring findings, validate with build + test, push to PR branch</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Stop when:</strong> 0 fixable findings, all noise/FP, or max rounds reached</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 3: Summary -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Phase 3</strong><br>Headline counts, findings table, noise analysis</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-output" style="width:400px;">
+          <div class="node-title">Generate Summary</div>
+          <div class="node-desc">Issues found | Noise | Signal-to-noise | Misalignment analysis | Prompt improvement assessment</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Includes:</strong> per-finding classification + actionable recommendations</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 4: Post -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Phase 4</strong><br>GitHub API calls under bot identities</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:400px;">
+          <div class="node-title">Post &amp; Persist</div>
+          <div class="node-desc">Post raw findings (per bot) &rarr; post summary &rarr; create bug issues (critical/high) &rarr; save history</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Outputs:</strong> PR comments, bug issues, history JSON</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 5: Cleanup -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Phase 5</strong><br>Best-effort, non-blocking</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-external" style="width:400px;">
+          <div class="node-title">Cleanup</div>
+          <div class="node-desc">Remove worktree &amp; temp branch. Crashed sessions auto-recovered on next run.</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
     </div>
 
   </div>
 
-  <div class="footer">
-    stark-review module • multi-agent code review orchestration
+  <!-- Outputs -->
+  <div class="section-title">What You Get</div>
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>PR Comments</h3>
+      <p>Per-agent raw findings posted under stark-claude, stark-codex, and stark-gemini bot identities. Plus a unified orchestrator summary with classifications.</p>
+    </div>
+    <div class="card card-green">
+      <h3>Automated Fixes</h3>
+      <p>Code fixes committed and pushed directly to the PR branch (full mode). Each round commits with message <code>fix: address review findings (round N)</code>.</p>
+    </div>
+    <div class="card card-amber">
+      <h3>Bug Issues</h3>
+      <p>Critical/high severity unresolved findings become GitHub Issues with <code>stark-review</code> label. Max 5 per run, deduplicated against existing issues.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>Review History</h3>
+      <p>Persisted to <code>~/.claude/code-review/history/{org}/{repo}/{pr}/</code> &mdash; summary.md, rounds.json (with timing), and prompt-assessment.md.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>Noise Analysis</h3>
+      <p>Misalignment root causes identified with concrete improvement actions: CLAUDE.md additions, config changes, prompt tuning targets.</p>
+    </div>
+    <div class="card card-red">
+      <h3>Metrics &amp; Flags</h3>
+      <p>Duration breakdown by phase/round, agent success rates, and improvement flags (bottlenecks, high failure rates, diminishing returns).</p>
+    </div>
   </div>
+
+  <!-- Finding Classification -->
+  <div class="section-title">Finding Classification</div>
+  <table class="data-table">
+    <thead>
+      <tr><th>Status</th><th>Criteria</th><th>Action</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="badge badge-fix">fix</span></td>
+        <td>Severity &ge; medium AND issue exists in code</td>
+        <td>Automatically fixed in worktree</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-recurring">recurring</span></td>
+        <td>Same file &plusmn;5 lines + same domain across rounds</td>
+        <td>Re-attempted fix with higher priority</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-fp">false positive</span></td>
+        <td>Described problem doesn't exist in the code</td>
+        <td>Counted as noise, drives prompt improvement</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-noise">noise</span></td>
+        <td>Subjective/style, or single-agent contradicted by other 2</td>
+        <td>Counted as noise, drives prompt improvement</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-ignored">ignored</span></td>
+        <td>Below fix_threshold (low severity)</td>
+        <td>Listed for completeness, not evaluated</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Common Workflows -->
+  <div class="section-title">Common Workflows</div>
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>Standard PR Review</h3>
+      <p>Push your branch, then run <code>/stark-review</code>. The skill auto-detects the PR, dispatches 18 sub-agents, fixes what it can, and posts the summary to GitHub.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>Pre-Merge Quality Gate</h3>
+      <p>Run <code>/stark-review --rounds 1</code> for a single review pass. Check the summary for critical/high findings before merging. Combine with <code>/stark-pr-flow</code> for the full workflow.</p>
+    </div>
+    <div class="card card-green">
+      <h3>Dry Run for Local Feedback</h3>
+      <p>Use <code>/stark-review --dry-run</code> to get review feedback without posting to GitHub or making fixes. Good for checking code quality before opening a PR.</p>
+    </div>
+  </div>
+
+  <!-- Observability -->
+  <div class="section-title">Observability</div>
+  <div class="summary-grid">
+    <div class="summary-card card-blue">
+      <h3>Progress Spinner</h3>
+      <p>Task-based progress tracking shows current phase and round in the Claude Code UI.</p>
+    </div>
+    <div class="summary-card card-dark">
+      <h3>Timestamped Logs</h3>
+      <p>Every phase transition and key event logged with <code>[HH:MM:SS]</code> timestamps. 5-minute checkpoints for long runs.</p>
+    </div>
+    <div class="summary-card card-amber">
+      <h3>End Metrics</h3>
+      <p>Duration breakdown, issue/noise counts, agent stats, round summary, and improvement flags printed at completion.</p>
+    </div>
+  </div>
+
+  <!-- Related Skills -->
+  <div class="section-title">Related Skills</div>
+  <table class="data-table">
+    <thead>
+      <tr><th>Skill</th><th>Relationship</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>/stark-pr-flow</code></td><td>End-to-end PR workflow that includes stark-review as a step</td></tr>
+      <tr><td><code>/stark-review-improvement</code></td><td>Uses prompt assessment output to improve review prompts</td></tr>
+      <tr><td><code>/stark-review-plan</code></td><td>Similar multi-agent approach for design docs instead of PRs</td></tr>
+      <tr><td><code>/stark-metrics</code></td><td>Aggregates performance data from review history files</td></tr>
+      <tr><td><code>/stark-pr-status</code></td><td>PR analytics dashboard combining GitHub data with review history</td></tr>
+    </tbody>
+  </table>
+
+</div>
+
+<div class="footer"><div class="winner-badge">Visualization by Claude · Score: 8.2/10 · Generated from SKILL.md</div></div>
 
 </body>
 </html>

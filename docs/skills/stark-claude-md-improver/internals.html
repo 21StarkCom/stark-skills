@@ -1,347 +1,443 @@
-<html lang="en">
+<html>
 <head>
-  
-  
-  <title>stark-claude-md-improver - Internal Architecture</title>
-  <style>
-    /*
-     * Stark Skills — Shared Design System CSS
-     *
-     * Foundation styles for LLM-generated HTML skill visualizations.
-     * LLMs embed this inline and may extend with additional styles.
-     * All colors pass WCAG AA 4.5:1 contrast ratio.
-     *
-     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
-     */
 
-    /* === Reset & Base === */
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #fafafa;
-      color: #1a1a1a;
-      line-height: 1.5;
-    }
 
-    /* === Header === */
-    .header { text-align: center; padding: 36px 20px 16px; }
-    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
-    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
-    .header .scope {
-      display: inline-block; font-size: 10px; font-weight: 600;
-      background: #eff6ff; color: #1e40af;
-      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
-    }
-
-    /* === Container === */
-    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
-
-    /* === Section Title === */
-    .section-title {
-      font-size: 14px; font-weight: 700; color: #666;
-      text-transform: uppercase; letter-spacing: 1px;
-      margin: 32px 0 16px; padding-bottom: 6px;
-      border-bottom: 2px solid #e5e7eb;
-    }
-
-    /* === Node Types === */
-    .node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; max-width: 260px; }
-    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
-    .node-desc { font-size: 10px; opacity: 0.8; }
-
-    .node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
-    .node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
-    .node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
-    .node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
-    .node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
-    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
-
-    /* === Flow Layout === */
-    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
-    .flow-step {
-      display: flex; align-items: stretch;
-      width: 100%; max-width: 860px; min-height: 76px;
-    }
-    .flow-lane-left {
-      width: 250px; display: flex;
-      align-items: center; justify-content: flex-end;
-      padding-right: 18px; text-align: right;
-    }
-    .flow-lane-center {
-      width: 360px; display: flex;
-      align-items: center; justify-content: center;
-    }
-    .flow-lane-right {
-      width: 250px; display: flex;
-      align-items: center; padding-left: 18px; text-align: left;
-    }
-    .annotation {
-      font-size: 9px; color: #666; max-width: 180px; line-height: 1.4;
-    }
-    .annotation strong { color: #444; }
-
-    /* === Arrows === */
-    .arrow-down {
-      width: 2px; height: 20px; background: #cbd5e1;
-      margin: 0 auto; position: relative;
-    }
-    .arrow-down::after {
-      content: ''; position: absolute; bottom: -4px; left: -4px;
-      border-left: 5px solid transparent;
-      border-right: 5px solid transparent;
-      border-top: 6px solid #cbd5e1;
-    }
-    .arrow-container {
-      display: flex; justify-content: center;
-      width: 100%; max-width: 860px;
-    }
-    .arrow-container .flow-lane-center {
-      display: flex; justify-content: center;
-    }
-
-    /* === Cards === */
-    .card-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 16px; margin-top: 16px;
-    }
-    .card { padding: 16px; border-radius: 8px; }
-    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
-    .card p  { font-size: 11px; line-height: 1.6; }
-    .card ul { margin-left: 16px; font-size: 11px; margin-top: 4px; }
-
-    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
-    .card-blue h3 { color: #1e40af; }
-    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
-    .card-green h3 { color: #059669; }
-    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
-    .card-purple h3 { color: #7c3aed; }
-    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
-    .card-amber h3 { color: #92400e; }
-    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
-    .card-dark h3 { color: #333333; }
-    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
-    .card-red h3 { color: #dc2626; }
-
-    /* === Data Tables === */
-    .data-table {
-      width: 100%; max-width: 860px; margin: 16px auto;
-      border-collapse: collapse; font-size: 11px;
-    }
-    .data-table th {
-      background: #f3f4f6; padding: 8px 12px; text-align: left;
-      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
-    }
-    .data-table td {
-      padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
-    }
-
-    /* === Tags === */
-    .tag {
-      display: inline-block; font-size: 9px; font-weight: 600;
-      padding: 2px 8px; border-radius: 3px;
-    }
-    .tag-phase    { background: #dbeafe; color: #1e40af; }
-    .tag-decision { background: #ede9fe; color: #5b21b6; }
-    .tag-failure  { background: #fee2e2; color: #991b1b; }
-    .tag-config   { background: #d1fae5; color: #065f46; }
-    .tag-output   { background: #fef3c7; color: #92400e; }
-    .tag-external { background: #f3f4f6; color: #666666; }
-
-    /* === Legend === */
-    .legend {
-      display: flex; gap: 16px; justify-content: center;
-      margin: 16px 0 24px; flex-wrap: wrap;
-    }
-    .legend-item {
-      display: flex; align-items: center; gap: 6px;
-      font-size: 10px; color: #666;
-    }
-    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
-
-    /* === Footer === */
-    .footer {
-      text-align: center; padding: 20px;
-      font-size: 10px; color: #999;
-    }
-  </style>
+<title>stark-claude-md-improver — Internals</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
+.node-phase    { background: #1e40af; color: #ffffff; }
+.node-decision { background: #7c3aed; color: #ffffff; }
+.node-failure  { background: #dc2626; color: #ffffff; }
+.node-config   { background: #047857; color: #ffffff; }
+.node-output   { background: #f59e0b; color: #1a1a1a; }
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 180px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 180px; display: flex;
+  align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
+.dimension-bar { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.dimension-label { font-size: 10px; width: 140px; text-align: right; color: #555; }
+.dimension-track { flex: 1; height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; }
+.dimension-fill { height: 100%; border-radius: 4px; }
+.branch-container { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin: 8px 0; }
+.branch-node { min-width: 140px; }
+</style>
 </head>
 <body>
 
-  <div class="header">
-    <h1>stark-claude-md-improver</h1>
-    <div class="sub">Internal Architecture & Execution Flow</div>
-    <div class="scope">Complexity: Simple</div>
+<div class="header">
+  <h1>stark-claude-md-improver</h1>
+  <div class="sub">Analyze and improve CLAUDE.md files for completeness, accuracy, and effectiveness</div>
+  <div class="scope">INTERNALS — Architecture &amp; Data Flow</div>
+</div>
+
+<div class="container">
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#1e40af;"></div> Phase</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed;"></div> Decision</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#047857;"></div> Config / Input</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b;"></div> Output</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#dc2626;"></div> Failure</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e5e7eb;"></div> External</div>
   </div>
 
-  <div class="container">
-    <div class="legend">
-      <div class="legend-item"><div class="legend-dot node-output"></div> Trigger / Artifact</div>
-      <div class="legend-item"><div class="legend-dot node-phase"></div> Processing Phase</div>
-      <div class="legend-item"><div class="legend-dot node-decision"></div> Decision Point</div>
-      <div class="legend-item"><div class="legend-dot node-config"></div> Execution / Mutation</div>
-      <div class="legend-item"><div class="legend-dot node-external"></div> Telemetry / External</div>
+  <!-- === MAIN FLOW === -->
+  <div class="section-title">Execution Flow</div>
+  <div class="flow">
+
+    <!-- Step 1: Discovery -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Input:</strong> Optional path arg or auto-discover from project hierarchy</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:400px;">
+          <div class="node-title">1. Discovery</div>
+          <div class="node-desc">Walk hierarchy: ~/CLAUDE.md → org/CLAUDE.md → project/CLAUDE.md → subdirs</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Also reads:</strong> .claude/projects/*/memory/ files for context</div>
+      </div>
     </div>
 
-    <h2 class="section-title">Execution Flow</h2>
-    
-    <div class="flow">
-      <!-- Step 1 -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation">
-            <strong>Activation</strong><br>
-            Triggered by explicit command or vague request (e.g. "audit claude.md").
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-output">
-            <div class="node-title">Skill Invocation</div>
-            <div class="node-desc">[path] optional</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 2: Read All -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Tool:</strong> Read tool on each discovered file path</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:400px;">
+          <div class="node-title">2. Full Read</div>
+          <div class="node-desc">Read every CLAUDE.md + memory file to build complete context picture</div>
         </div>
       </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Step 2 -->
-      <div class="flow-step">
-        <div class="flow-lane-left"></div>
-        <div class="flow-lane-center">
-          <div class="node node-phase">
-            <div class="node-title">1. Discovery Phase</div>
-            <div class="node-desc">Locate hierarchy & memory</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">
-            <strong>Target Resolution</strong><br>
-            Finds all CLAUDE.md files (home &rarr; org &rarr; project &rarr; subdirs) + `.claude/projects/*/memory/`
-          </div>
-        </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Data:</strong> File contents, line numbers, hierarchy level</div>
       </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Step 3 -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation">
-            <strong>Evaluation Loop</strong><br>
-            Iterates over each resolved file and scores it across 5 critical dimensions.
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-phase">
-            <div class="node-title">2. Analysis Phase</div>
-            <div class="node-desc">5-Dimensional Heuristic Check</div>
-          </div>
-        </div>
-        <div class="flow-lane-right"></div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Step 4 -->
-      <div class="flow-step">
-        <div class="flow-lane-left"></div>
-        <div class="flow-lane-center">
-          <div class="node node-decision">
-            <div class="node-title">3. Output & User Confirmation</div>
-            <div class="node-desc">Present findings, prompt to apply</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">
-            <strong>Interactive Hand-off</strong><br>
-            Outputs scores, issues, additions, removals. Asks: <em>"Want me to apply these improvements?"</em>
-          </div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Step 5 -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation">
-            <strong>Mutation (If Yes)</strong><br>
-            Directly modifies files in the hierarchy based on the generated plan.
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-config">
-            <div class="node-title">4. Apply Modifications</div>
-            <div class="node-desc">File I/O operations</div>
-          </div>
-        </div>
-        <div class="flow-lane-right"></div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Step 6 -->
-      <div class="flow-step">
-        <div class="flow-lane-left"></div>
-        <div class="flow-lane-center">
-          <div class="node node-external">
-            <div class="node-title">5. Observability Emisson</div>
-            <div class="node-desc">Record metrics & checkpoints</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">
-            <strong>Telemetry</strong><br>
-            Reports counts, per-file 1-5 scores, and mutation states via standards/observability.md protocol.
-          </div>
-        </div>
-      </div>
-
     </div>
 
-    <h2 class="section-title">Internal Logic & Heuristics</h2>
-    <div class="card-grid">
-      <div class="card card-blue">
-        <h3>5 Analysis Dimensions</h3>
-        <p>The skill evaluates documentation quality against these vectors:</p>
-        <ul>
-          <li><strong>Structure & Clarity:</strong> Scannability, header logic, redundancy.</li>
-          <li><strong>Completeness:</strong> Tech stack, architecture, workflows, don'ts.</li>
-          <li><strong>Accuracy & Freshness:</strong> Valid paths, existing commands, current versions.</li>
-          <li><strong>Effectiveness for AI:</strong> Actionable instructions vs descriptive text.</li>
-          <li><strong>Hierarchy Optimization:</strong> Right-sizing info to home, org, or project levels.</li>
-        </ul>
-      </div>
-      
-      <div class="card card-amber">
-        <h3>Output Data Structure</h3>
-        <p>The generated report maps findings strictly by file path and includes:</p>
-        <ul>
-          <li>1-5 Score per dimension</li>
-          <li>Line-referenced issues</li>
-          <li>Drafted additions/removals</li>
-          <li>Hierarchy refactoring suggestions</li>
-        </ul>
-      </div>
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-      <div class="card card-purple">
-        <h3>Skill-Specific Observability</h3>
-        <p>Adheres to standard protocols plus explicit metrics:</p>
-        <ul>
-          <li>Count of files discovered/analyzed</li>
-          <li>Matrix of per-file dimension scores</li>
-          <li>Suggested mutation counts (adds/removes/moves)</li>
-          <li>Actual applied mutation count</li>
-        </ul>
+    <!-- Step 3: Cross-reference -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Reads:</strong> package.json, file tree, git log, build scripts</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-external" style="width:400px;">
+          <div class="node-title">3. Project State Cross-Reference</div>
+          <div class="node-desc">Verify claims against actual codebase: paths, commands, versions, URLs</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Checks:</strong> File existence, build commands, env vars, deps</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 4: Multi-Dimension Analysis -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>5 dimensions</strong> scored independently per file</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width:400px;">
+          <div class="node-title">4. Multi-Dimension Analysis</div>
+          <div class="node-desc">Score each file on Structure, Completeness, Accuracy, AI Effectiveness, Hierarchy</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Scale:</strong> 1–5 per dimension, with concrete evidence</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 5: Report -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Format:</strong> Per-file findings with file:line references</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-output" style="width:400px;">
+          <div class="node-title">5. Findings Report</div>
+          <div class="node-desc">Issues, suggested additions (with draft text), removals, moves across hierarchy</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Includes:</strong> Draft text for every suggested addition</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 6: User Approval Gate -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Prompt:</strong> "Want me to apply these improvements?"</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width:400px;">
+          <div class="node-title">6. User Approval Gate</div>
+          <div class="node-desc">Present report → ask user → apply edits or stop</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>If no:</strong> Skill ends with report only</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 7: Apply -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Tool:</strong> Edit tool per change, preserving existing style</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:400px;">
+          <div class="node-title">7. Apply Changes</div>
+          <div class="node-desc">Edit CLAUDE.md files directly — additions, removals, moves between levels</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Rule:</strong> Match existing tone/style of each file</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Observability -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Protocol:</strong> Skill Observability Protocol</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-config" style="width:400px;">
+          <div class="node-title">8. Metrics Emission</div>
+          <div class="node-desc">Files analyzed, per-file scores, issues/additions/removals/moves counts, changes applied</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Sink:</strong> ~/.claude/code-review/ observability layer</div>
       </div>
     </div>
 
   </div>
 
-  <div class="footer">
-    stark-claude-md-improver &bull; Internal Architecture Documentation &bull; Generated Visualization
+  <!-- === ANALYSIS DIMENSIONS === -->
+  <div class="section-title">Analysis Dimensions (scored 1–5 per file)</div>
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>1. Structure &amp; Clarity</h3>
+      <p>Logical organization, scannable headers, no redundancy across hierarchy levels. Each level should add specificity, not repeat parent info.</p>
+    </div>
+    <div class="card card-green">
+      <h3>2. Completeness</h3>
+      <p>Checks for: project overview, tech stack, architecture, key files, dev workflow, env vars, conventions, gotchas, don'ts. Only flags genuinely missing sections.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>3. Accuracy &amp; Freshness</h3>
+      <p>Cross-references with actual project state. Flags: missing files, stale versions, broken URLs, non-functional build commands, dead key-file paths.</p>
+    </div>
+    <div class="card card-amber">
+      <h3>4. AI Effectiveness</h3>
+      <p>Actionability: "Use X" beats "We typically use X". Specificity: concrete naming rules over "best practices". Checks for conflicting or implicit instructions.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>5. Hierarchy Optimization</h3>
+      <p>Right content at right level: personal prefs in ~/CLAUDE.md, org config in org/CLAUDE.md, project specifics in project/CLAUDE.md. Suggests promotions/demotions.</p>
+    </div>
   </div>
+
+  <!-- === HIERARCHY LEVELS === -->
+  <div class="section-title">CLAUDE.md Hierarchy &amp; Discovery Order</div>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Level</th>
+        <th>Path Pattern</th>
+        <th>Typical Content</th>
+        <th>Priority</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="tag tag-config">HOME</span></td>
+        <td>~/CLAUDE.md</td>
+        <td>Personal preferences, communication style, global don'ts</td>
+        <td>Lowest (broadest scope)</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-phase">ORG</span></td>
+        <td>~/git/Org/CLAUDE.md</td>
+        <td>Org tooling, auth patterns, team conventions</td>
+        <td>Medium</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-decision">PROJECT</span></td>
+        <td>./CLAUDE.md</td>
+        <td>Project layout, commands, key files, architecture</td>
+        <td>Highest (most specific)</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-external">SUBDIR</span></td>
+        <td>./subdir/CLAUDE.md</td>
+        <td>Module-specific conventions, scoped overrides</td>
+        <td>Scoped override</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-output">MEMORY</span></td>
+        <td>.claude/projects/*/memory/</td>
+        <td>Learned preferences, feedback, project context</td>
+        <td>Supplementary context</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- === OUTPUT STRUCTURE === -->
+  <div class="section-title">Output Report Structure</div>
+  <div class="card-grid">
+    <div class="card card-red">
+      <h3>Issues Found</h3>
+      <p>Concrete problems with file:line references. Stale paths, broken commands, conflicting instructions, redundant content across levels.</p>
+    </div>
+    <div class="card card-green">
+      <h3>Suggested Additions</h3>
+      <p>Missing content that would genuinely help AI effectiveness. Includes full draft text written in the existing file's style and tone.</p>
+    </div>
+    <div class="card card-amber">
+      <h3>Suggested Removals</h3>
+      <p>Redundant or outdated content. Items duplicated from parent CLAUDE.md levels, references to removed features, stale version numbers.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>Suggested Moves</h3>
+      <p>Content at the wrong hierarchy level. Personal prefs in project file → promote to ~/CLAUDE.md. Org-wide patterns in project → promote to org.</p>
+    </div>
+  </div>
+
+  <!-- === EXTENSION POINTS === -->
+  <div class="section-title">Extension Points</div>
+  <div class="summary-grid">
+    <div class="summary-card card-blue">
+      <h3>Add Analysis Dimensions</h3>
+      <p>The 5 dimensions are defined inline in the skill prompt. Add a new ### heading under "Analysis Dimensions" with evaluation criteria. Update the scoring table in Output section.</p>
+    </div>
+    <div class="summary-card card-green">
+      <h3>Completeness Checklist</h3>
+      <p>The list of sections checked (project overview, tech stack, etc.) is in dimension 2. Add or remove items to change what's flagged as missing.</p>
+    </div>
+    <div class="summary-card card-purple">
+      <h3>Observability Metrics</h3>
+      <p>Custom metrics listed at end of skill. Emitted via the Skill Observability Protocol at ~/.claude/code-review/standards/observability.md. Add new metric keys as needed.</p>
+    </div>
+  </div>
+
+  <!-- === DESIGN RULES === -->
+  <div class="section-title">Design Rules &amp; Constraints</div>
+  <table class="data-table">
+    <thead>
+      <tr><th>Rule</th><th>Rationale</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Don't add sections just for completeness</td><td>CLAUDE.md should be lean — unnecessary sections add noise for the AI</td></tr>
+      <tr><td>Match existing style and tone</td><td>Consistency matters; jarring style shifts break the flow</td></tr>
+      <tr><td>Don't duplicate referenced docs</td><td>If a spec exists, reference it — don't inline its content</td></tr>
+      <tr><td>No README-style content</td><td>CLAUDE.md is AI instruction, not human documentation</td></tr>
+      <tr><td>Prefer concise over verbose</td><td>More words ≠ better instructions; AI responds better to direct commands</td></tr>
+      <tr><td>User approval before edits</td><td>Destructive changes to instruction files require explicit consent</td></tr>
+    </tbody>
+  </table>
+
+</div>
+
+<div class="footer"><div class="winner-badge">Visualization by Claude · Score: 8.8/10 · Generated from SKILL.md</div></div>
+
 </body>
 </html>

@@ -1,24 +1,29 @@
 graph TD
-    A[Start: 'stark-pr-flow'] --> PreReq{Check Pre-reqs}
-    PreReq -- "On main / Dirty tree" --> Fail[Abort]
-    PreReq -- "Feature branch & Clean" --> B[Step 1: Push Branch]
-    
-    B --> C[Step 2: Analyze Git Log & Diff]
-    C --> D[Step 3: Create PR]
-    
-    D -.-> D1(Artifact: PR Created)
-    
-    D --> E[Step 4: Bot Self-Review]
-    E -.-> E1(Artifact: Review Comment on PR)
-    
-    E --> F[Step 5: Present Summary]
-    F --> DocCheck{Advisory Doc Check}
-    DocCheck -- "Incomplete docs" --> Warn(Show Warning)
-    DocCheck -- "Docs okay" --> Wait
-    Warn --> Wait{Wait for User Approval}
-    
-    Wait -- "Approve ('yes', 'ship it')" --> G[Step 6: Squash Merge]
-    Wait -- "Reject" --> H[Abort / Leave Open]
-    
-    G --> I[Clean Up: Sync main & Delete Branch]
-    I --> J[End]
+    A["Preflight Checks\n(branch, clean tree, auth)"] -->|Pass| B["Step 1: Push Branch\ngit push -u origin"]
+    A -->|On main / dirty tree| X["Abort"]
+    B -->|Push fails| R["Rebase on main\nResolve conflicts"]
+    R --> B
+    B -->|Success| C["Step 2: Analyze Changes\nGenerate title + body from diff"]
+    C --> D["Step 3: Create PR\ngh pr create (user PAT)"]
+    D --> E["Step 4: Self Code Review\nPost via stark-claude bot"]
+    E --> F["Step 5: Present Summary\nSTOP — Wait for approval"]
+    F -->|Approve| G{"Doc State Check\n(advisory)"}
+    F -->|Request changes| H["Revise & re-push"]
+    F -->|Reject| I["Close PR"]
+    H --> E
+    G --> J["Step 6: Merge & Clean Up\nSquash-merge --admin"]
+    J --> K["Delete branch\nPull main"]
+
+    style A fill:#047857,color:#fff
+    style B fill:#1e40af,color:#fff
+    style C fill:#1e40af,color:#fff
+    style D fill:#1e40af,color:#fff
+    style E fill:#1e40af,color:#fff
+    style F fill:#f59e0b,color:#1a1a1a
+    style G fill:#7c3aed,color:#fff
+    style H fill:#1e40af,color:#fff
+    style I fill:#dc2626,color:#fff
+    style J fill:#1e40af,color:#fff
+    style K fill:#047857,color:#fff
+    style X fill:#dc2626,color:#fff
+    style R fill:#dc2626,color:#fff
