@@ -397,3 +397,24 @@ def test_check_staleness_internals_needs_review(tmp_path):
                "skills": {"test-skill": {"hash": "abc123", "usage_quality": "ok", "internals_quality": "needs-human-review"}}}
     stale = check_staleness(manifest_path, current)
     assert "test-skill" in stale
+
+
+# ── main() orchestrator tests ──────────────────────────────────────────
+
+
+def test_main_check_mode_stale(tmp_path, monkeypatch):
+    from generate_skill_docs import main
+    monkeypatch.setattr(sys, "argv", ["prog", "--check", "-o", str(tmp_path)])
+    assert main() == 1
+
+
+def test_main_check_mode_clean(tmp_path, monkeypatch):
+    from generate_skill_docs import main, compute_manifest, SKILL_DIR, SCRIPT_VERSION
+    css_path = tmp_path / "_css" / "design-system.css"
+    css_path.parent.mkdir(parents=True)
+    css_path.write_text("body {}")
+    manifest = compute_manifest(SKILL_DIR, css_path, SCRIPT_VERSION)
+    manifest_path = tmp_path / "_manifest.json"
+    manifest_path.write_text(json.dumps(manifest))
+    monkeypatch.setattr(sys, "argv", ["prog", "--check", "-o", str(tmp_path)])
+    assert main() == 0
