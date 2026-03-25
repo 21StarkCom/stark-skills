@@ -1,0 +1,18 @@
+{
+  "doc_content": {
+    "summary": "The stark-metrics skill aggregates cross-run performance metrics for all stark skills by parsing local JSON history files. It produces actionable tuning reports for operators, visualizing agent scorecards, finding quality, duration trends, and prompt improvement impact.",
+    "key_features": [
+      "Normalizes multiple data formats from local history files",
+      "Generates human-readable terminal reports and actionable operator recommendations",
+      "Supports JSON output for programmatic downstream usage",
+      "Analyzes meta-observations to detect upward trend failures or prompt engineering wins"
+    ],
+    "usage_examples": [
+      "/stark-metrics",
+      "/stark-metrics --repo evvinced/stark-skills",
+      "/stark-metrics --skill stark-review --since 2026-03-01",
+      "/stark-metrics --json"
+    ]
+  },
+  "alt_text": "A flowchart and usage guide for the stark-metrics skill showing the execution of metrics.py, terminal output presentation, recommendation handling, and meta-observation checks."
+}

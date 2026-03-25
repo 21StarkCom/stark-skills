@@ -1,0 +1,52 @@
+# stark-metrics — Internals
+
+Aggregate performance metrics across all stark skill runs. Agent scorecards, finding quality, duration trends, prompt improvement impact, and actionable recommendations. Use when the user says "show metrics", "how are reviews performing", "agent stats", "review quality", or invokes /stark-metrics.
+
+## Architecture
+
+```mermaid
+graph TD
+  Start([User Invokes /stark-metrics]) --> ParseArgs[Parse Arguments: --repo, --skill, --since, --json]
+  ParseArgs --> RunScript[Phase 1: Run metrics.py]
+  
+  RunScript -->|Exit 1: No History| Fail1((Exit 1))
+  Fail1 --> AdviseHistory[Advise: Run /stark-review first]
+  
+  RunScript -->|Exit 2: Arg Error| Fail2((Exit 2))
+  Fail2 --> ShowUsage[Show Usage]
+  
+  RunScript -->|Exit 0: Success| Present[Phase 2: Present Results]
+
+  Present --> IsJson{Is --json flag set?}
+  IsJson -->|Yes| Meta[Phase 3: Improvement Flags]
+  IsJson -->|No| HasRecs{Has Recommendations?}
+
+  HasRecs -->|No| Meta
+  HasRecs -->|Yes| PromptUser[Prompt: Act on recommendations?]
+
+  PromptUser -->|Choose Action| Invoke[Invoke /stark-review-improvement or edit config]
+  PromptUser -->|Skip| Meta
+  Invoke --> Meta
+
+  Meta --> DetectSpikes[Flag Failure Spikes / FP Drops]
+  DetectSpikes --> Obs[Log Observability Metrics]
+  Obs --> End([End Execution])
+```
+
+![Technical flowchart and architecture diagram for the stark-metrics skill, detailing Phase 1 script execution, Phase 2 result presentation with interactive recommendations, and Phase 3 improvement flag processing, alongside observability metrics and failure mode handling.`](internals.png)
+
+## Phases
+
+*See SKILL.md*
+
+## Config
+
+*No config*
+
+## Failure Modes
+
+*See SKILL.md*
+
+## How to Modify This Skill
+
+Edit `skill/stark-metrics/SKILL.md`, then run `/stark-generate-docs --skill stark-metrics` to regenerate documentation.
