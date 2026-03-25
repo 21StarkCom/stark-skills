@@ -37,6 +37,18 @@ Each use case differs in: what the prompt asks for, what the output format is, h
 - GUI or web dashboard (terminal + JSONL audit is enough)
 - Training or fine-tuning based on tournament results (that's a different system)
 
+## Success Criteria
+
+1. **Extraction doesn't break existing tests** — all 45 `generate_skill_docs.py` tests pass after refactor
+2. **Parity with current system** — visual strategy produces identical results to the hardcoded `generate_skill_docs.py` tournament logic
+3. **3+ strategies work end-to-end** — visual, semantic, and test strategies each complete a tournament with valid audit output
+4. **Config-driven** — a new tournament can be defined entirely via YAML, no Python changes needed
+5. **Adoption by generate_skill_docs.py** — inline tournament code replaced by `Tournament` import, net code reduction >150 lines
+
+## MVP Boundary
+
+Phase 1 (extract tournament module) and Phase 2 (semantic strategy) constitute the MVP. The visual strategy comes for free from extraction. Test strategy, custom strategy, CLI config, and the skill definition are incremental additions built on a working foundation.
+
 ---
 
 ## Architecture
@@ -77,11 +89,11 @@ Each use case differs in: what the prompt asks for, what the output format is, h
 
 **Tournament Config** — defines the competition: prompt template, competitors, evaluation strategy, output format expectations, scoring factors and weights.
 
-**Competitor Dispatch** — parallel execution via ThreadPoolExecutor. Each competitor is an (agent, prompt) pair. Reuses the CLI dispatch patterns from `multi_review.py` and `generate_skill_docs.py`.
+**Competitor Dispatch** — parallel execution via ThreadPoolExecutor. Each competitor is an (agent, prompt) pair. Reuses the CLI dispatch patterns from `multi_review.py` and `generate_skill_docs.py`. If a competitor fails and `retries > 0`, it is retried; otherwise it is disqualified. If all competitors fail, the tournament fails with an error. If only one competitor survives, it wins by default with `quality_flag="degraded"` in the audit record.
 
 **Output Collector** — parses raw LLM output into structured artifacts. Pluggable parsers for different output types (HTML, code, markdown, JSON).
 
-**Evaluator** — judges the collected outputs. Multiple strategies:
+**Evaluator** — judges the collected outputs. If evaluation itself fails (judge model error, malformed response, timeout), the tournament falls back to **first-valid selection**: the first competitor whose output passed validation wins, with `quality_flag="eval_failed"` in the audit record. This matches the implicit behavior of `generate_skill_docs.py` today when evaluation is unavailable. Multiple strategies:
 - `visual` — screenshot artifacts, send PNGs to Claude via Anthropic SDK, score on visual factors
 - `semantic` — send text artifacts to Claude, score on content quality factors
 - `test` — run code artifacts through a test suite, score on pass rate + code quality
@@ -95,7 +107,7 @@ Each use case differs in: what the prompt asks for, what the output format is, h
 
 ```yaml
 # tournament.yaml
-schema_version: 1
+schema_version: 1  # validated at load time; invalid config → error before any dispatch
 
 # What to generate
 prompt_template: |
@@ -106,7 +118,10 @@ prompt_template: |
 
   Output the function in a ```python code block.
 
-# Variables injected into prompt_template
+# Variables injected into prompt_template via str.format().
+# Literal braces in prompts (e.g. JSON examples, code snippets) MUST be
+# doubled: {{ and }}. Alternatively, store brace-heavy content in a
+# variable rather than inlining it in the template.
 variables:
   task_description: "parses CSV files with configurable delimiters"
   requirements: |
@@ -129,7 +144,7 @@ competitors:
 # How to evaluate
 evaluation:
   strategy: semantic        # visual | semantic | test | custom
-  judge: claude-sonnet-4-6  # model for judging (sonnet for cost efficiency)
+  judge: claude-sonnet-4-6  # model for judging — must differ from competitor models to avoid self-evaluation bias
 
   # Scoring factors (strategy-specific)
   factors:
@@ -255,6 +270,23 @@ For domain-specific evaluation:
 
 ## Python API
 
+### `TournamentResult` contract
+
+```python
+@dataclass
+class TournamentResult:
+    winner: str                              # competitor ID
+    winner_score: float                      # weighted average
+    scores: dict[str, dict[str, float]]      # competitor → {factor: score}
+    artifacts: dict[str, str]                 # competitor → raw output
+    audit: dict                              # full JSONL-ready audit record
+    quality_flag: str = "normal"             # "normal" | "degraded" (single survivor)
+```
+
+`TournamentConfig` is defined by the YAML schema above — `TournamentConfig.from_yaml()` deserializes and validates it. The programmatic constructor accepts the same fields as keyword arguments.
+
+### Usage
+
 ```python
 from tournament import Tournament, TournamentConfig
 
@@ -371,6 +403,8 @@ competitors:
 
 All three use Claude, but with different prompt wrappings. The judge evaluates which prompt style produces better output for the given task. This is directly useful for tuning review prompts (`/stark-review-improvement`).
 
+**Bias note:** When all competitors use the same model as the judge (prompt variant tournaments), self-evaluation bias is a known limitation. The judge may favor outputs that match its own style. Mitigations: use a different model as judge when possible, or run the tournament with multiple judge models and compare. For cross-model tournaments, the default judge (claude-sonnet-4-6) differs from the default competitor model (claude-opus-4-6), avoiding the issue.
+
 ---
 
 ## Audit Trail
@@ -429,7 +463,7 @@ def select_winner(scores: dict[str, dict[str, float]], weights: dict[str, float]
         weighted_avgs[competitor] = total / weight_sum if weight_sum else 0.0
 
     max_score = max(weighted_avgs.values())
-    tied = [c for c, s in weighted_avgs.items() if s == max_score]
+    tied = [c for c, s in weighted_avgs.items() if abs(s - max_score) < 0.01]
 
     if len(tied) == 1:
         return tied[0], max_score
@@ -438,7 +472,7 @@ def select_winner(scores: dict[str, dict[str, float]], weights: dict[str, float]
     primary_factor = max(weights, key=weights.get)
     primary_scores = {c: scores[c].get(primary_factor, 0) for c in tied}
     max_primary = max(primary_scores.values())
-    primary_tied = [c for c, s in primary_scores.items() if s == max_primary]
+    primary_tied = [c for c, s in primary_scores.items() if abs(s - max_primary) < 0.01]
 
     if len(primary_tied) == 1:
         return primary_tied[0], max_score
@@ -496,13 +530,25 @@ After extraction, `generate_skill_docs.py` imports from `tournament.py` instead 
 
 ---
 
+## Security Considerations
+
+**Prompt content injection** — `prompt_template`, `variables`, and `prompt_override` values are user-provided strings that get interpolated into prompts. All prompt content is passed to CLI agents via stdin or tempfile, never interpolated into shell commands. This is the same pattern used by `multi_review.py` and prevents shell injection.
+
+**Test strategy: LLM-generated code execution** — The `test` evaluation strategy runs LLM-generated code through a user-provided test file. The test file itself is trusted (user-authored), but the implementation code is LLM-generated and untrusted. Tests run in a subprocess with a timeout. Network access restriction via sandbox is desirable but not guaranteed across platforms — note this risk explicitly in the test strategy docs. The timeout prevents infinite loops; the subprocess boundary prevents the parent process from being affected.
+
+**Custom strategy: dynamic import** — `eval_script` must be an absolute path within the repository (validated at load time via `os.path.realpath()` to resolve symlinks before checking the repo boundary). No remote URLs or relative path traversal. The script is loaded via `importlib.util.spec_from_file_location`, not `exec()` or `eval()`.
+
+**Config validation** — Tournament config (YAML or inline) is validated against the schema at load time. Invalid config produces an error before any competitor dispatch. The `schema_version` field enables forward-compatible schema evolution.
+
+---
+
 ## Migration
 
 ### Phase 1: Extract tournament module
 
-Create `scripts/tournament.py` with the generalized tournament engine. Extract shared functions from `generate_skill_docs.py`. Both old and new code work — `generate_skill_docs.py` imports from `tournament.py`.
+Create `scripts/tournament.py` with the generalized tournament engine. Extract shared functions from `generate_skill_docs.py`. Both old and new code work — `generate_skill_docs.py` imports from `tournament.py`. All 45 existing tests must pass after extraction. Rollback is a one-line revert of the import change — the tournament module is purely additive.
 
-### Phase 2: Add evaluation strategies
+### Phase 2: Add evaluation strategies *(end of MVP)*
 
 The visual strategy exists (extracted from generate_skill_docs.py). Add semantic and test strategies.
 
