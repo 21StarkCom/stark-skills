@@ -34,6 +34,30 @@ Additionally, the current system reviews every domain with equal intensity regar
 - Changing the fix loop mechanism — both skills use the same review-fix-review cycle
 - Building a new questionnaire UI — the interaction happens in the terminal via Claude Code's standard conversation flow
 
+## Data Handling Note
+
+Design specs and plans are sent to external LLM APIs (Claude, Codex, Gemini) for review. This is the same data flow as `/stark-review` and `/stark-review-plan` today. No new data exposure is introduced. Teams handling sensitive content (e.g., security architecture for auth systems) should be aware that spec content is transmitted to these APIs. Standard API data handling policies of each provider apply.
+
+---
+
+## MVP Scope
+
+### v1 (this spec)
+
+- Skill separation (`/stark-review-design` + narrowed `/stark-review-plan`)
+- Content-based domain activation via regex signal scanning
+- Priority questionnaire: **simplified** — core questions (Q1-Q2) always asked; conditional questions asked based on activated domains. No adaptive question generation beyond the fixed question bank defined here.
+- Challenge mechanism: up to 3 challenges based on the fixed rule table
+- `--priorities` flag for CI/headless mode
+- Priority record as repo sidecar file
+
+### v2 (future)
+
+- Adaptive question generation (questions generated dynamically based on spec content, not just domain activation)
+- Cross-review questionnaire learning (pre-fill from user history)
+- Priority record analytics (override-to-incident correlation)
+- Extension points for custom signal maps and domain plugins
+
 ---
 
 ## Architecture
@@ -168,6 +192,26 @@ Scanning spec... detected signals:
 
 After the content scan, the skill asks 4-6 multiple-choice questions. The questions are adaptive — they're generated based on which domains were activated.
 
+#### CI / Headless Mode
+
+For non-interactive environments (CI pipelines, scripted reviews), the questionnaire can be bypassed with a `--priorities` flag pointing to a YAML file:
+
+```bash
+/stark-review-design --spec path/to/spec.md --priorities path/to/priorities.yaml
+```
+
+The priorities file uses the same schema as the `answers` section of the priority record:
+
+```yaml
+optimization_target: correctness
+resilience: mission-critical
+security_posture: high
+consumers: internal-teams
+data_sensitivity: large-scale-sensitive
+```
+
+When `--priorities` is provided, the content scan still runs (to activate conditional domains), but the questionnaire and challenge steps are skipped. The priority record logs `source: file` instead of `source: interactive`.
+
 #### Core questions (always asked)
 
 ```
@@ -266,6 +310,8 @@ If the user picks (c), they must provide a reason. The skill evaluates the reaso
 
 Maximum: 3 challenges per questionnaire. Don't interrogate the user — this should feel like a quick calibration, not a compliance form.
 
+**Determinism note:** Challenge evaluation (deciding whether a user's override reason is "valid" vs. "weak") uses a fixed prompt with `temperature=0` to ensure consistent classification across runs. The evaluation prompt includes 3-4 examples of valid and weak justifications to anchor the LLM's judgment.
+
 ### Priority → Review Intensity Mapping
 
 User answers map to review intensity per domain:
@@ -313,16 +359,83 @@ CONSUMERS_MAP = {
     "own-team":       {"api-contracts": "standard", "existing-impact": "light"},
     "nobody":         {"api-contracts": "light", "existing-impact": "skip"},
 }
+
+# Data sensitivity answer → data-arch + security intensity
+DATA_SENSITIVITY_MAP = {
+    "large-scale-sensitive":     {"data-arch": "deep", "security": "deep", "scalability": "deep"},
+    "large-scale-non-sensitive": {"data-arch": "deep", "scalability": "deep"},
+    "small-scale-sensitive":     {"data-arch": "standard", "security": "deep"},
+    "small-scale-non-sensitive": {"data-arch": "standard"},
+}
+
+# Dependency count answer → existing-impact intensity
+DEPENDENCY_COUNT_MAP = {
+    "many":  {"existing-impact": "deep"},
+    "some":  {"existing-impact": "standard"},
+    "one":   {"existing-impact": "light"},
+    "none":  {"existing-impact": "skip"},
+}
 ```
 
-The final intensity per domain is the **maximum** of all applicable mappings. If content scan activates a domain but no answer boosts it, default is `standard`.
+#### Conflict Resolution
+
+When multiple mappings set different intensities for the same domain, the **maximum wins** (`deep` > `standard` > `light` > `skip`). The intensity hierarchy is:
+
+```python
+INTENSITY_ORDER = {"skip": 0, "light": 1, "standard": 2, "deep": 3}
+
+def resolve_intensity(mappings: list[str]) -> str:
+    """Given a list of intensity values from different mappings, return the highest."""
+    return max(mappings, key=lambda x: INTENSITY_ORDER[x])
+```
+
+If a content scan activates a domain but no answer boosts it, the default intensity is `standard`.
 
 ### Priority Record Artifact
 
-After questionnaire + challenges, the skill writes a priority record:
+After questionnaire + challenges, the skill writes a priority record.
+
+#### Schema
 
 ```yaml
-# Stored alongside the review artifact
+# Priority Record Schema v1
+schema_version: 1  # REQUIRED — bump on breaking changes
+
+# Required fields
+priority_record:
+  spec_file: string          # path to the reviewed spec
+  spec_hash: string          # SHA-256 of spec file at review time (for staleness detection)
+  timestamp: string          # ISO 8601
+  source: enum[interactive, file]  # REQUIRED — how priorities were provided
+  answers:                   # user responses (keys match question IDs)
+    optimization_target: string   # REQUIRED
+    resilience: string            # REQUIRED
+    security_posture: string      # present if security domain activated
+    consumers: string             # present if api-contracts domain activated
+    data_sensitivity: string      # present if data-arch domain activated
+    dependency_count: string      # present if existing-impact domain activated
+  active_domains:            # REQUIRED — map of domain_id → intensity
+    string: enum[deep, standard, light, skip]
+  content_signals:           # REQUIRED — map of domain_id → matched strings
+    string: list[string]
+
+# Optional fields
+  challenges: list           # present only if challenges were issued
+    - domain: string
+      initial: string
+      signal: string
+      resolution: enum[accepted, upgraded, forced]
+      reason: string
+  skipped_domains: list[string]  # domains not activated
+  overrides: list            # present only if user forced past challenges
+    - domain: string
+      reason: string
+```
+
+#### Example
+
+```yaml
+schema_version: 1
 priority_record:
   spec_file: docs/specs/my-feature-design.md
   timestamp: 2026-03-25T10:30:00Z
@@ -364,6 +477,10 @@ This record is:
 1. Printed as a summary before the review starts (user confirms)
 2. Stored in the `.review.md` artifact
 3. Passed to `/stark-review-plan` as input (so the plan review inherits design priorities)
+
+### Definition of "Approved Design"
+
+A design is considered **approved** when it has completed a `/stark-review-design` cycle with all HIGH and CRITICAL findings resolved (fixed or explicitly dismissed with justification in the fix loop). The review artifact (`.review.md`) records this outcome. Concretely, a design is approved when the final review iteration produces zero open HIGH/CRITICAL findings and the priority record exists on disk. There is no separate approval gate — completing the review loop *is* the approval. For designs reviewed outside this system (e.g., via manual team review), the author can create a priority record manually or use option (b)/(c) when `/stark-review-plan` prompts for it.
 
 ---
 
@@ -416,15 +533,23 @@ The plan review inherits the design review's priority record:
 
 ### Design-Plan Traceability Check
 
-The most important automated check. The skill:
+The most important automated check. This is **LLM-powered** (not regex extraction) — each sub-agent receives both the design doc and the plan, and is prompted to identify coverage gaps.
 
-1. Extracts all **components** from the design (section headers, named systems, APIs, data models)
-2. Extracts all **tasks** from the plan
-3. Builds a traceability matrix
-4. Flags:
+#### Approach
+
+The traceability check runs as part of the `design-traceability` domain prompt. The prompt instructs the LLM to:
+
+1. **Identify design elements**: Read the design doc and list all named components, APIs, data models, NFRs, and architectural decisions.
+2. **Identify plan tasks**: Read the plan and list all implementation tasks with their scope descriptions.
+3. **Build a traceability matrix**: For each design element, identify which plan task(s) cover it. For each plan task, identify which design element(s) it implements.
+4. **Flag gaps**:
    - Design elements with no corresponding task → "This component from the design has no implementation task"
    - Plan tasks with no design element → "This task doesn't trace to anything in the approved design — is it scope creep?"
    - Non-functional requirements from the design with no dedicated task → "The design specifies SLO targets but no performance testing task exists"
+
+#### Limitations
+
+This is best-effort semantic matching, not formal verification. The LLM may miss implicit coverage (e.g., a task named "implement auth service" covers multiple design components) or produce false positives on loosely-named tasks. The traceability output should be treated as a **review aid requiring human verification**, not a gate. Authors can dismiss false positives with a brief justification in the fix loop.
 
 ---
 
@@ -530,6 +655,18 @@ Each domain prompt follows the structure:
 {structured output format — same as current system}
 ```
 
+### Prompt Authoring Strategy
+
+The full matrix is 3 agents x 12 design domains + 3 agents x 10 plan domains = 66 prompt files. This is managed through a generation + validation pipeline, not manual authoring:
+
+1. **Generate from domain descriptions.** Each domain's table entry (checklist, anti-patterns, what-to-skip) serves as a seed. A generation script produces agent-specific prompt variants, adapting tone and structure to each LLM's strengths (Claude: nuanced reasoning, Codex: code-centric analysis, Gemini: breadth scanning).
+
+2. **Validate with test reviews.** Maintain 3-5 reference specs (covering different system types: API service, data pipeline, CLI tool, infrastructure change) with known issues. Each prompt variant is tested against these references. A prompt passes if it catches the seeded issues without >20% false positive rate.
+
+3. **Incremental rollout.** Start with Claude-only prompts for all domains (12 + 10 = 22 files). Add Codex and Gemini variants one domain at a time, validating each. This reduces the initial effort from 66 files to 22.
+
+4. **Reuse existing code-review prompts** as structural templates. The `design/` and `plan/` prompts follow the same format — only the checklist content and anti-patterns differ.
+
 ---
 
 ## `multi_review.py` Changes
@@ -569,29 +706,77 @@ multi_review.py --review-type plan --plan path/to/plan.md \
   --domains-json '{"design-traceability": "deep", ...}'
 ```
 
+#### `--domains-json` Schema
+
+The `--domains-json` flag accepts a JSON object mapping domain IDs to intensity levels:
+
+```jsonschema
+{
+  "type": "object",
+  "additionalProperties": false,
+  "patternProperties": {
+    "^[a-z][a-z0-9-]+$": {
+      "type": "string",
+      "enum": ["deep", "standard", "light", "skip"]
+    }
+  }
+}
+```
+
+Valid domain IDs depend on `--review-type`:
+- `design`: `problem-fit`, `architecture`, `tradeoffs`, `failure-modes`, `maintainability`, `api-contracts`, `data-arch`, `security`, `scalability`, `observability`, `operations`, `existing-impact`
+- `plan`: `design-traceability`, `decomposition`, `phasing`, `dependency-graph`, `acceptance-criteria`, `risk-mitigation`, `rollback`, `integration-points`, `nfr-coverage`, `resource-deps`
+- `code`: (existing domains, unchanged)
+
+Unknown domain IDs are rejected with an error. Omitted domains default to `skip`.
+
 ---
 
 ## Migration
+
+### MVP Boundary
+
+Phases 1-3 constitute the MVP. After Phase 3, `/stark-review-design` is fully usable as a standalone skill — the skill split is delivered because `/stark-review-design` is net-new and `/stark-review-plan` continues unchanged. The split is "complete" in the sense that design review is separated; Phase 4 then narrows the existing plan review to remove the design-domain overlap. Each phase is independently deployable and rollback-safe.
 
 ### Phase 1: Add new prompt directories + domain prompts
 
 Create `global/prompts/{agent}/design/` and `global/prompts/{agent}/plan/` with all domain prompts. The current `global/prompts/{agent}/` (code review) moves to `global/prompts/{agent}/code/` with backward-compat symlinks.
 
+**Rollback:** Delete new directories, remove symlinks. Zero impact on existing behavior.
+
 ### Phase 2: Update `multi_review.py`
 
 Add `--review-type`, `--domains-json`, and intensity-aware prompt loading. Backward compatible — omitting `--review-type` defaults to `code` (current behavior).
 
+**Rollback:** Revert the `multi_review.py` changes. New flags are additive; old invocations are unaffected.
+
 ### Phase 3: Build `/stark-review-design` skill
 
-New skill with questionnaire, content scan, challenge mechanism, priority record output.
+New skill with questionnaire, content scan, challenge mechanism, priority record output. This is a net-new skill — no existing behavior is modified.
+
+**Rollback:** Delete the skill file. No other skills are affected.
+
+**--- MVP complete here. Validate with real reviews before proceeding. ---**
 
 ### Phase 4: Narrow `/stark-review-plan` skill
 
 Remove design-review domains from the plan review. Add plan-specific domains. Add design-plan traceability check. Add priority record loading.
 
+**Rollback:** Restore previous `/stark-review-plan` SKILL.md from git. Priority record loading is additive (degrades gracefully if no record exists).
+
 ### Phase 5: Update lifecycle and docs
 
 Update README lifecycle diagram, skill docs, routing guide.
+
+**Rollback:** Revert doc changes. No functional impact.
+
+### Staged Rollout Criteria
+
+Each phase gates on the previous:
+- **Phase 1 → 2:** All prompt files pass lint (valid markdown, correct frontmatter). No regressions in existing `/stark-review` runs.
+- **Phase 2 → 3:** `multi_review.py` passes existing test suite. Manual smoke test: `--review-type code` (default) produces identical output to pre-change behavior.
+- **Phase 3 → MVP gate:** Run `/stark-review-design` on 3 real specs (one API-heavy, one data-heavy, one simple). Validate: questionnaire completes in <60s, domain activation matches expectations, no crash/hang. Collect qualitative feedback before proceeding.
+- **Phase 4:** Only after ≥5 successful `/stark-review-design` runs in production use. The narrowed `/stark-review-plan` is validated by running it on a plan whose design was reviewed in Phase 3.
 
 ---
 
@@ -615,14 +800,19 @@ Update README lifecycle diagram, skill docs, routing guide.
 
 ---
 
-## Open Questions
+## Open Questions — Proposed Resolutions
 
-1. **Should the plan review auto-fail if no approved design exists?** Or should it degrade gracefully to a general plan review without traceability checks?
+1. **Should the plan review auto-fail if no approved design exists?**
+   **Proposed: Degrade gracefully.** The plan review runs without traceability checks but emits a warning: "No approved design found — traceability domain disabled. Run `/stark-review-design` first for full coverage." This avoids blocking teams that review plans independently.
 
-2. **How does `/stark-review-deployment-plan` relate?** It's currently a separate skill focused on infra/migration. Options: (a) keep it separate for adversarial SRE review, (b) fold it into `/stark-review-plan` as activated domains, (c) make it a "profile" that pre-sets priorities for operational concerns.
+2. **How does `/stark-review-deployment-plan` relate?**
+   **Proposed: (a) Keep it separate.** The adversarial SRE review is a distinct persona and audience. Folding it in would dilute both skills. The `operations` and `rollback` domains in `/stark-review-plan` cover execution-level deployment concerns; `/stark-review-deployment-plan` covers adversarial "what could go wrong in production" scenarios. No overlap if domain scopes are respected.
 
-3. **Should priority records be stored in the repo or in review history?** Repo (as YAML frontmatter or sidecar file) makes them visible to all reviewers. History (in `~/.claude/code-review/history/`) keeps them as metadata.
+3. **Should priority records be stored in the repo or in review history?**
+   **Proposed: Repo sidecar file.** Store as `{spec-name}.priorities.yaml` next to the spec. This makes priorities visible in PRs, reviewable by the team, and diffable when priorities change. History storage is a secondary copy for analytics.
 
-4. **How do we handle design changes after plan approval?** If the design is modified after the plan was reviewed, should the plan review be invalidated? Should the plan skill detect spec-hash changes?
+4. **How do we handle design changes after plan approval?**
+   **Proposed: Hash-based staleness detection.** The priority record stores a `spec_hash` (SHA-256 of the spec file at review time). When `/stark-review-plan` loads a priority record, it compares the hash. If stale, it warns: "Design spec has changed since the priority record was created. Re-run `/stark-review-design` or proceed with potentially outdated priorities." It does not auto-invalidate — the user decides.
 
-5. **Should the questionnaire adapt across reviews?** If the user reviews 10 specs and always picks "correctness" + "mission-critical", should the skill pre-fill those answers? Or does that defeat the purpose of forcing deliberate thought each time?
+5. **Should the questionnaire adapt across reviews?**
+   **Proposed: No pre-filling in v1.** The value of the questionnaire is forcing deliberate thought per spec. Pre-filling undermines that. Revisit in v2 if user feedback indicates the questionnaire feels repetitive — at that point, offer "same as last time" as an explicit option the user must confirm.
