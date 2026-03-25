@@ -1,9 +1,9 @@
 <html lang="en">
 <head>
-
-
-<title>stark-onboard-project | Internal Visualization</title>
-<style>
+  
+  
+  <title>stark-onboard-project — Internal Skill Visualization</title>
+  <style>
 /*
  * Stark Skills — Shared Design System CSS
  *
@@ -66,7 +66,6 @@ body {
   width: 180px; display: flex;
   align-items: center; justify-content: flex-end;
   padding-right: 18px;
-  text-align: right;
 }
 .flow-lane-center {
   width: 500px; display: flex;
@@ -75,7 +74,6 @@ body {
 .flow-lane-right {
   width: 180px; display: flex;
   align-items: center; padding-left: 18px;
-  text-align: left;
 }
 .annotation {
   font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
@@ -181,207 +179,431 @@ body {
   text-align: center; padding: 20px;
   font-size: 10px; color: #999;
 }
-</style>
+
+/* === Extensions === */
+.hero-panel {
+  max-width: 860px;
+  margin: 0 auto 20px;
+  background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 55%, #ecfdf5 100%);
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  padding: 20px;
+}
+.hero-panel p { font-size: 12px; color: #334155; max-width: 760px; margin: 8px auto 0; text-align: center; }
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  max-width: 860px;
+  margin: 18px auto 0;
+}
+.kpi {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 14px;
+  text-align: center;
+}
+.kpi .num { font-size: 22px; font-weight: 700; color: #1e40af; }
+.kpi .lbl { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.8px; }
+.inline-tags { margin-top: 10px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.mini-note {
+  max-width: 860px; margin: 12px auto 0;
+  font-size: 11px; color: #475569; text-align: center;
+}
+.code-line {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: #334155;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: inline-block;
+}
+@media (max-width: 900px) {
+  .flow-step { flex-direction: column; align-items: center; min-height: auto; gap: 8px; margin-bottom: 8px; }
+  .flow-lane-left, .flow-lane-center, .flow-lane-right {
+    width: 100%; justify-content: center; padding: 0;
+  }
+  .annotation { max-width: 100%; text-align: center; }
+  .summary-grid, .kpi-strip { grid-template-columns: 1fr; }
+}
+  </style>
 </head>
 <body>
-
-<div class="header">
-  <h1>stark-onboard-project</h1>
-  <div class="sub">End-to-end project initialization, GitHub orchestration, and Claude Code bootstrapping</div>
-  <div class="scope">TARGET: INTERNALS</div>
-</div>
-
-<div class="container">
-  
-  <div class="legend">
-    <div class="legend-item"><div class="legend-dot node-phase"></div> Main Phase</div>
-    <div class="legend-item"><div class="legend-dot node-decision"></div> Decision / Check</div>
-    <div class="legend-item"><div class="legend-dot node-output"></div> Artifact Output</div>
-    <div class="legend-item"><div class="legend-dot node-external"></div> External Integration</div>
-    <div class="legend-item"><div class="legend-dot node-failure"></div> Failure Mode</div>
+  <div class="header">
+    <h1>stark-onboard-project</h1>
+    <div class="sub">Internal skill map for contributor onboarding flow, system boundaries, idempotent checkpoints, and repo/app wiring</div>
+    <div class="scope">internals · architecture · data flow · extension points</div>
   </div>
 
-  <h2 class="section-title">Execution Flow & Idempotency Pipeline</h2>
-  <div class="flow">
-    
-    <!-- Step 1: Git -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="node node-decision" style="width: 140px; margin-left: auto;">
-          <div class="node-title">git rev-parse</div>
-          <div class="node-desc">Skip if initialized</div>
-        </div>
+  <div class="container">
+    <div class="hero-panel">
+      <div class="winner-badge">End-to-end bootstrap pipeline</div>
+      <p>This skill orchestrates a five-phase project bootstrap: local git state, remote GitHub provisioning, GitHub App access, Claude Code scaffolding, and final status reporting. Its core design goal is safe re-entry: each phase checks current state first, then either skips or executes.</p>
+      <div class="inline-tags">
+        <span class="tag tag-phase">5 phases</span>
+        <span class="tag tag-decision">skip-or-run gates</span>
+        <span class="tag tag-external">GitHub + gh + org settings</span>
+        <span class="tag tag-config">ARGUMENTS defaults to cwd</span>
+        <span class="tag tag-output">repo + CODEOWNERS + CLAUDE.md</span>
       </div>
-      <div class="flow-lane-center">
-        <div class="node node-phase" style="width: 220px;">
-          <div class="node-title">1. Git Initialization</div>
-          <div class="node-desc">git init &amp; baseline ignore logic</div>
+      <div class="kpi-strip">
+        <div class="kpi">
+          <div class="num">3</div>
+          <div class="lbl">GitHub Apps</div>
         </div>
-      </div>
-      <div class="flow-lane-right">
-        <div class="node node-output" style="width: 140px;">
-          <div class="node-title">.gitignore</div>
-          <div class="node-desc">Auto-tailored commit</div>
+        <div class="kpi">
+          <div class="num">2</div>
+          <div class="lbl">User Confirmations</div>
         </div>
-      </div>
-    </div>
-    
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-    
-    <!-- Step 2: GitHub -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="node node-decision" style="width: 140px; margin-left: auto;">
-          <div class="node-title">Check Remote</div>
-          <div class="node-desc">Skip if remote exists</div>
+        <div class="kpi">
+          <div class="num">1</div>
+          <div class="lbl">Project Directory Root</div>
         </div>
-      </div>
-      <div class="flow-lane-center">
-        <div class="node node-phase" style="width: 220px;">
-          <div class="node-title">2. GitHub Repository</div>
-          <div class="node-desc">gh repo create &amp; topic assignment</div>
-        </div>
-      </div>
-      <div class="flow-lane-right">
-        <div class="node node-output" style="width: 140px;">
-          <div class="node-title">CODEOWNERS</div>
-          <div class="node-desc">Generated via API auth</div>
+        <div class="kpi">
+          <div class="num">376</div>
+          <div class="lbl">Skill Lines</div>
         </div>
       </div>
     </div>
 
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+    <div class="section-title">Legend</div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-dot" style="background:#1e40af"></span>Phase</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#7c3aed"></span>Decision / idempotency gate</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#047857"></span>Config / mutable input</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#f59e0b"></span>Artifact / output</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#dc2626"></span>Failure / manual recovery</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#e5e7eb"></span>External dependency</div>
+    </div>
 
-    <!-- Step 3: Apps -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="node node-external" style="width: 140px; margin-left: auto;">
-          <div class="node-title">gh api</div>
-          <div class="node-desc">PUT /user/installations/</div>
+    <div class="section-title">Workflow</div>
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Entry context</strong><br>Invoked by phrases like “onboard project”, “create repo”, or by landing in a directory without git and without <span class="code-line">CLAUDE.md</span>.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-config" style="width:100%;">
+            <div class="node-title">Bootstrap Context</div>
+            <div class="node-desc">Resolve PROJECT_DIR, scripts path, Python venv, GitHub app helper</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Defaults</strong><br><span class="code-line">PROJECT_DIR="${ARGUMENTS:-$(pwd)}"</span></div>
         </div>
       </div>
-      <div class="flow-lane-center">
-        <div class="node node-phase" style="width: 220px;">
-          <div class="node-title">3. GitHub Apps</div>
-          <div class="node-desc">Link claude, codex, gemini</div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Idempotency gate</strong><br>Inspect repo state before changing anything.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision" style="width:100%;">
+            <div class="node-title">Phase 1 Gate</div>
+            <div class="node-desc">Is this already a git repo?</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Check</strong><br><span class="code-line">git rev-parse --git-dir</span></div>
         </div>
       </div>
-      <div class="flow-lane-right">
-        <div class="node node-config" style="width: 140px;">
-          <div class="node-title">github_app.py</div>
-          <div class="node-desc">JWT Token checks</div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>If no</strong><br>Initialize git, synthesize a project-type-aware ignore file, create initial commit if needed.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase" style="width:100%;">
+            <div class="node-title">Phase 1: Git Initialization</div>
+            <div class="node-desc">git init → create .gitignore if missing → commit once</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Outputs</strong><br>Local repo baseline with language-sensitive ignore rules.</div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Idempotency gate</strong><br>Remote origin decides whether repo provisioning is needed.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision" style="width:100%;">
+            <div class="node-title">Phase 2 Gate</div>
+            <div class="node-desc">Does origin already exist?</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Check</strong><br><span class="code-line">git remote get-url origin</span></div>
+        </div>
+      </div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>User-controlled config</strong><br>Explicit confirmation required before provisioning remote repo.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase" style="width:100%;">
+            <div class="node-title">Phase 2: GitHub Repository</div>
+            <div class="node-desc">Ask org/name/visibility/description → create repo → set topics → add CODEOWNERS → verify</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>External systems</strong><br><span class="tag tag-external">gh CLI</span> <span class="tag tag-external">GitHub API</span> <span class="tag tag-config">GH_TOKEN from stark-codex</span></div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Cross-system wiring</strong><br>Repo ID is looked up once, then mapped into each app installation.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase" style="width:100%;">
+            <div class="node-title">Phase 3: Connect GitHub Apps</div>
+            <div class="node-desc">Check access for stark-claude, stark-codex, stark-gemini; add repo if missing; verify all three</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Critical dependency</strong><br>Requires installation IDs and user token scope for installation management.</div>
+        </div>
+      </div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Failure branch</strong><br>403 or missing scopes cannot be silently bypassed.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-failure" style="width:100%;">
+            <div class="node-title">Manual Recovery Path</div>
+            <div class="node-desc">Refresh gh scope with read:user or add repos through org installation settings</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Org-only behavior</strong><br>If org is not <span class="code-line">GetEvinced</span>, app connection is skipped entirely.</div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Idempotency gate</strong><br>Existing Claude guidance file blocks overwrite.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision" style="width:100%;">
+            <div class="node-title">Phase 4 Gate</div>
+            <div class="node-desc">Does CLAUDE.md already exist?</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Policy</strong><br>Never overwrite; defer to improver skill instead.</div>
+        </div>
+      </div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Detection pass</strong><br>Infer language, framework, and test/build tools from repo indicators.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase" style="width:100%;">
+            <div class="node-title">Phase 4: Claude Code Setup</div>
+            <div class="node-desc">Scan project → ask for confirmation → generate CLAUDE.md → create .claude/ → optionally gitignore it</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Second confirmation</strong><br>User must approve generated understanding before file creation.</div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Final aggregation</strong><br>Summarize executed vs skipped phases and per-app status.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-output" style="width:100%;">
+            <div class="node-title">Phase 5: Summary</div>
+            <div class="node-desc">Emit project URL, status matrix, next steps, and observability metrics</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Observability</strong><br>Track skipped/executed phases, connected app count, CLAUDE generation state, total time.</div>
         </div>
       </div>
     </div>
 
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Step 4: Claude Setup -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="node node-decision" style="width: 140px; margin-left: auto;">
-          <div class="node-title">Project Scanner</div>
-          <div class="node-desc">Detect language/framework</div>
-        </div>
+    <div class="section-title">Architecture Notes</div>
+    <div class="card-grid">
+      <div class="card card-blue">
+        <h3>Control Plane</h3>
+        <p>The skill acts as a deterministic coordinator around local filesystem state, git metadata, GitHub repository APIs, GitHub App installations, and Claude-specific scaffolding. Its state machine is linear, but each phase begins with a read-only checkpoint so retries converge instead of duplicating work.</p>
       </div>
-      <div class="flow-lane-center">
-        <div class="node node-phase" style="width: 220px;">
-          <div class="node-title">4. Claude Code Setup</div>
-          <div class="node-desc">Scaffold agent environment</div>
-        </div>
+      <div class="card card-green">
+        <h3>Data Flow</h3>
+        <p>Inputs flow from the working directory, user confirmations, and GitHub identity. Derived values include repo name, project type, authenticated GitHub username, repo ID, and app installation visibility. Those values then feed artifact creation: <span class="code-line">.gitignore</span>, <span class="code-line">.github/CODEOWNERS</span>, <span class="code-line">CLAUDE.md</span>, and <span class="code-line">.claude/</span>.</p>
       </div>
-      <div class="flow-lane-right">
-        <div class="node node-output" style="width: 140px;">
-          <div class="node-title">CLAUDE.md</div>
-          <div class="node-desc">&amp; .claude/ directory</div>
-        </div>
+      <div class="card card-purple">
+        <h3>Extension Points</h3>
+        <p>Repo defaults can be changed by altering org/visibility prompts, project-type detection heuristics, topic assignment, GitHub App list, or CLAUDE template generation. The cleanest hooks are the phase gates, since they isolate behavior by concern: local repo, remote repo, app access, and Claude bootstrap.</p>
+      </div>
+      <div class="card card-amber">
+        <h3>Artifacts</h3>
+        <p>Expected outputs are a git repository, GitHub remote, compliance topics, CODEOWNERS ownership mapping, three app connections, a generated CLAUDE guide, and a private or shared <span class="code-line">.claude/</span> directory depending on user preference.</p>
+      </div>
+      <div class="card card-dark">
+        <h3>Idempotency Strategy</h3>
+        <p>The skill uses existence checks instead of optimistic writes. Existing git repos, remotes, CODEOWNERS, and CLAUDE files are treated as authoritative. This makes it safe to re-run after partial failures, especially when external setup completes asynchronously or manually.</p>
+      </div>
+      <div class="card card-red">
+        <h3>Operational Risks</h3>
+        <p>The most fragile segment is GitHub App connection, because it depends on token scope and org installation permissions that may sit outside normal repository admin rights. The skill explicitly surfaces this boundary and provides manual fallback URLs instead of masking access failures.</p>
       </div>
     </div>
 
+    <div class="section-title">Config And External Interfaces</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Surface</th>
+          <th>Type</th>
+          <th>Default / Source</th>
+          <th>Why It Matters</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>PROJECT_DIR</td>
+          <td><span class="tag tag-config">argument</span></td>
+          <td>ARGUMENTS or current working directory</td>
+          <td>Scopes all file discovery, git init, and CLAUDE generation.</td>
+        </tr>
+        <tr>
+          <td>Org</td>
+          <td><span class="tag tag-config">prompted</span></td>
+          <td><span class="code-line">GetEvinced</span> preferred</td>
+          <td>Controls repo destination and whether GitHub App wiring is applicable.</td>
+        </tr>
+        <tr>
+          <td>Name</td>
+          <td><span class="tag tag-config">prompted</span></td>
+          <td>Directory basename</td>
+          <td>Used across repo creation, origin URL, app access checks, and summary output.</td>
+        </tr>
+        <tr>
+          <td>Visibility</td>
+          <td><span class="tag tag-config">prompted</span></td>
+          <td>private</td>
+          <td>Affects <span class="code-line">gh repo create</span> and security posture.</td>
+        </tr>
+        <tr>
+          <td>Description</td>
+          <td><span class="tag tag-config">prompted</span></td>
+          <td>optional</td>
+          <td>Passed only during repo creation.</td>
+        </tr>
+        <tr>
+          <td>Python Runtime</td>
+          <td><span class="tag tag-external">external</span></td>
+          <td><span class="code-line">~/git/Evinced/scripts/.venv/bin/python3</span></td>
+          <td>Mandatory because system Python lacks required dependencies.</td>
+        </tr>
+        <tr>
+          <td>GitHub App Helper</td>
+          <td><span class="tag tag-external">external</span></td>
+          <td><span class="code-line">github_app.py</span></td>
+          <td>Provides per-app tokens and installation IDs.</td>
+        </tr>
+        <tr>
+          <td>gh Auth Scope</td>
+          <td><span class="tag tag-external">external</span></td>
+          <td>Must include <span class="code-line">read:user</span> for app management</td>
+          <td>Needed to add repo access to existing org installations.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="section-title">Failure Modes</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Failure</th>
+          <th>Detection</th>
+          <th>Recovery</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Already a git repo</td>
+          <td>git metadata exists</td>
+          <td>Skip Phase 1 and continue with remote setup.</td>
+        </tr>
+        <tr>
+          <td>Remote repo already exists</td>
+          <td>origin present or repo creation reports conflict</td>
+          <td>Add remote, push current branch, continue.</td>
+        </tr>
+        <tr>
+          <td>CODEOWNERS already exists</td>
+          <td><span class="code-line">.github/CODEOWNERS</span> found</td>
+          <td>Skip overwrite; preserve repository ownership policy.</td>
+        </tr>
+        <tr>
+          <td>CLAUDE.md already exists</td>
+          <td>file present in project root</td>
+          <td>Skip generation; redirect user to improver skill.</td>
+        </tr>
+        <tr>
+          <td>gh not authenticated</td>
+          <td>GitHub commands fail before repo/app operations</td>
+          <td>User must run <span class="code-line">gh auth login</span>.</td>
+        </tr>
+        <tr>
+          <td>GitHub App scope missing</td>
+          <td>403 / installation-management failure</td>
+          <td>Refresh auth with <span class="code-line">gh auth refresh -h github.com -s read:user</span> or use org settings UI.</td>
+        </tr>
+        <tr>
+          <td>Non-GetEvinced org</td>
+          <td>Org differs from required installation host</td>
+          <td>Skip app wiring; continue with local and repo setup only.</td>
+        </tr>
+        <tr>
+          <td>No language detected</td>
+          <td>No known manifests or framework markers</td>
+          <td>Ask user to specify before generating CLAUDE.md.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="section-title">Internals Summary</div>
+    <div class="summary-grid">
+      <div class="summary-card card-blue">
+        <h3>Primary Contract</h3>
+        <p>Turn an empty or partially initialized directory into a repo that is usable by both humans and automation, without clobbering prior work.</p>
+      </div>
+      <div class="summary-card card-green">
+        <h3>Best Modification Surface</h3>
+        <p>Adjust the per-phase checkpoints and prompts first. Those boundaries keep changes localized and preserve safe retries.</p>
+      </div>
+      <div class="summary-card card-purple">
+        <h3>Most Sensitive Boundary</h3>
+        <p>GitHub App installation management sits outside ordinary repo CRUD and is the highest-friction part of the flow.</p>
+      </div>
+    </div>
+
+    <div class="mini-note">Internal takeaway: this skill is less a script than a resumable provisioning protocol. Its architecture is dominated by state detection, explicit confirmations, and cross-tool coordination rather than complex branching logic.</div>
   </div>
 
-  <h2 class="section-title">Architecture Deep Dive</h2>
-  <div class="card-grid">
-    <div class="card card-purple">
-      <h3>Idempotency & State Checks</h3>
-      <p>Every phase evaluates the existing state before mutating. It ensures safe re-runs without overwriting data.</p>
-      <ul style="margin-left: 14px; margin-top: 6px; font-size: 11px;">
-        <li><strong>Git:</strong> Skips init if <code>.git/</code> is valid.</li>
-        <li><strong>GitHub:</strong> Skips repo creation if <code>origin</code> exists.</li>
-        <li><strong>CODEOWNERS:</strong> Won't overwrite existing rules.</li>
-        <li><strong>CLAUDE.md:</strong> Defers to <code>stark-claude-md-improver</code> if file exists.</li>
-      </ul>
-    </div>
-    <div class="card card-dark">
-      <h3>GitHub App Interop (Python Script)</h3>
-      <p>Integrating with org-installed GitHub Apps relies heavily on <code>$SCRIPTS_DIR/github_app.py</code> execution.</p>
-      <p style="margin-top:6px;">Validates app token access to repositories using short-lived installation tokens. Links new repos to fixed installation IDs via authenticated user REST API calls.</p>
-    </div>
-    <div class="card card-green">
-      <h3>Project Auto-Detection Logic</h3>
-      <p>Scans the working tree dynamically to determine the ecosystem, reducing manual input for standard scaffolds.</p>
-      <ul style="margin-left: 14px; margin-top: 6px; font-size: 11px;">
-        <li><strong>Node/JS:</strong> Looks for <code>package.json</code>, Next configs.</li>
-        <li><strong>Python:</strong> Looks for <code>pyproject.toml</code>, <code>requirements.txt</code>.</li>
-        <li><strong>Go/Rust/Java:</strong> Looks for standard build manifests.</li>
-      </ul>
-    </div>
-  </div>
-
-  <h2 class="section-title">Failure Modes & Recoveries</h2>
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th width="30%">Failure Condition</th>
-        <th width="20%">Node / Subsystem</th>
-        <th width="50%">Recovery Strategy</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td><strong>GitHub repo creation fails (exists)</strong></td>
-        <td><span class="tag tag-external">gh cli</span></td>
-        <td>Catch error, gracefully add remote <code>git remote add origin ...</code> and push upstream.</td>
-      </tr>
-      <tr>
-        <td><strong>App API requires scope</strong></td>
-        <td><span class="tag tag-failure">403 Forbidden</span></td>
-        <td>Inform user to run <code>gh auth refresh -s read:user</code> or provide exact URL for manual Org settings intervention.</td>
-      </tr>
-      <tr>
-        <td><strong>No language detected</strong></td>
-        <td><span class="tag tag-decision">Project Scan</span></td>
-        <td>Gracefully fallback to prompting the user for Language, Framework, and Test runner.</td>
-      </tr>
-      <tr>
-        <td><strong>CLAUDE.md already exists</strong></td>
-        <td><span class="tag tag-decision">State Check</span></td>
-        <td>Log notice and explicitly route user to <code>/stark-claude-md-improver</code>. Do not truncate existing instructions.</td>
-      </tr>
-    </tbody>
-  </table>
-
-  <h2 class="section-title">Observability & Metrics</h2>
-  <div class="summary-grid">
-    <div class="summary-card card-blue">
-      <h3>Phase Execution Tracking</h3>
-      <p>Records binary states for each phase: executed vs. skipped (due to idempotency).</p>
-    </div>
-    <div class="summary-card card-blue">
-      <h3>GitHub App Telemetry</h3>
-      <p>Tracks connected count (0-3) and logs per-app status (stark-claude, stark-codex, stark-gemini) upon skill exit.</p>
-    </div>
-    <div class="summary-card card-blue">
-      <h3>Performance Metrics</h3>
-      <p>Follows standard Observability Protocol. Captures total onboarding duration and CLAUDE.md generation origin.</p>
-    </div>
-  </div>
-
-</div>
-
-<div class="footer">
-  &copy; 2026 Evinced Inc. Internal Viz System — stark-onboard-project
-</div>
-
+  <div class="footer"><div class="winner-badge">Visualization by Codex · Score: 8.4/10 · Generated from SKILL.md</div></div>
 </body>
 </html>

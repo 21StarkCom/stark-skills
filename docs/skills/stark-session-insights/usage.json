@@ -1,17 +1,4 @@
 {
-  "doc_content": {
-    "summary": "The stark-session-insights skill analyzes Claude Code session history (~/.claude/history.jsonl) to extract usage patterns, action frequencies, and user corrections. It processes this data locally to generate detailed, per-project markdown reports featuring activity rhythms, skill evolution, categorized pain points, and synthesized prose narratives highlighting how the user works and where friction occurs.",
-    "key_features": [
-      "Per-project workflow and cadence analysis (hourly, weekly, session shape)",
-      "Extraction of user corrections ('no', 'stop', 'wrong') to identify friction points",
-      "Generates human-readable narratives and actionable recommendations from historical data",
-      "Tracks command (/stark-*) usage and shifting habits over time"
-    ],
-    "usage_examples": [
-      "/stark-session-insights",
-      "/stark-session-insights --project infra-pulse",
-      "/stark-session-insights --refresh"
-    ]
-  },
-  "alt_text": "A usage-focused dashboard visualizing the stark-session-insights skill. It displays invocation commands, an execution flow diagram showing the parsing of history.jsonl into project insights, and feature cards detailing extracted metrics like work rhythms, skill usage, and AI-synthesized workflow corrections."
+  "doc_content": {},
+  "alt_text": "A clean single-page infographic for the `stark-session-insights` skill showing a centered header, usage badges, KPI cards, a vertical workflow diagram from invocation to markdown outputs, argument and output tables, cards for metrics and edge cases, and a recommended command callout for generating per-project Claude Code session insight reports.\"}}"
 }

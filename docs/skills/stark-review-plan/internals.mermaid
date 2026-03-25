@@ -1,0 +1,67 @@
+graph TD
+    START(["/stark-review-plan &lt;path&gt;"]) --> P1["Phase 1: Setup"]
+    P1 --> V1{"File exists?"}
+    V1 -->|No| FUZZY["Fuzzy search docs/"]
+    FUZZY --> ABORT1([Abort])
+    V1 -->|Yes| V2{"Uncommitted changes?"}
+    V2 -->|Yes, no --force| ABORT2([Abort])
+    V2 -->|No / --force| PR{"PR detected?"}
+    PR -->|Yes| AUTH["Authenticate GitHub Apps"]
+    PR -->|No| DRYCHECK
+    AUTH --> DRYCHECK{"--dry-run?"}
+    DRYCHECK -->|Yes| DISPATCH_DRY["Dispatch 21 sub-agents (1 round)"]
+    DISPATCH_DRY --> CLASSIFY_DRY["Classify findings"]
+    CLASSIFY_DRY --> P4
+    DRYCHECK -->|No| LOOP["Phase 2: Review-Fix Loop"]
+
+    subgraph LOOP_BOX ["Review-Fix Loop (rounds 1..N)"]
+        DISPATCH["2a: Dispatch 21 sub-agents"]
+        CLASSIFY["2b: Classify findings"]
+        HEALTH{"Dispatch health?"}
+        FIX["2c: Fix plan"]
+        EARLY{"0 fix/recurring?"}
+        DISPATCH --> CLASSIFY
+        CLASSIFY --> HEALTH
+        HEALTH -->|0 succeeded| DISPATCH_FAIL([Dispatch Failure → Phase 4])
+        HEALTH -->|"&lt;50%"| WARN_LOW["Warn low coverage"]
+        HEALTH -->|healthy| FIX
+        WARN_LOW --> FIX
+        FIX --> EARLY
+        EARLY -->|Yes| P3
+        EARLY -->|No, more rounds| DISPATCH
+    end
+
+    LOOP --> DISPATCH
+
+    P3["Phase 3: Final Review (round N+1, no fixes)"]
+    EARLY -->|"Last round"| P3
+    P3 --> P4
+
+    P4["Phase 4: Summary Generation"]
+    P4 --> P5["Phase 5: Output & Persist"]
+
+    P5 --> OUT_TERM["Terminal summary"]
+    P5 --> OUT_FILE[".review.md file"]
+    P5 --> OUT_PR["PR comments (3 bot identities)"]
+    P5 --> OUT_HIST["History: rounds.json + summary.md"]
+    P5 --> DONE([Complete])
+
+    style START fill:#1e40af,color:#fff
+    style DONE fill:#047857,color:#fff
+    style ABORT1 fill:#dc2626,color:#fff
+    style ABORT2 fill:#dc2626,color:#fff
+    style DISPATCH_FAIL fill:#dc2626,color:#fff
+    style HEALTH fill:#7c3aed,color:#fff
+    style DRYCHECK fill:#7c3aed,color:#fff
+    style V1 fill:#7c3aed,color:#fff
+    style V2 fill:#7c3aed,color:#fff
+    style PR fill:#7c3aed,color:#fff
+    style EARLY fill:#7c3aed,color:#fff
+    style P1 fill:#1e40af,color:#fff
+    style P3 fill:#1e40af,color:#fff
+    style P4 fill:#1e40af,color:#fff
+    style P5 fill:#f59e0b,color:#1a1a1a
+    style OUT_TERM fill:#f59e0b,color:#1a1a1a
+    style OUT_FILE fill:#f59e0b,color:#1a1a1a
+    style OUT_PR fill:#f59e0b,color:#1a1a1a
+    style OUT_HIST fill:#f59e0b,color:#1a1a1a

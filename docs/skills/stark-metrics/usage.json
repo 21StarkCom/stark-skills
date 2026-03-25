@@ -1,18 +1,16 @@
 {
   "doc_content": {
-    "summary": "Aggregates performance metrics across all stark skill runs, generating agent scorecards, trend analysis, and actionable recommendations based on code review history.",
-    "key_features": [
-      "Cross-run metric aggregation and trend tracking",
-      "Interactive recommendation prompts for continuous improvement",
-      "Meta-observations for tracking prompt efficacy and failure rates",
-      "JSON output support for programmatic analysis"
+    "prerequisites": "stark-skills installed via `install.sh` (metrics.py and its venv must be at `~/.claude/code-review/scripts/`). At least one prior `/stark-review` run so history data exists in `~/.claude/code-review/history/`.",
+    "quick_start": "/stark-metrics",
+    "common_patterns": "**Weekly check-in:** `/stark-metrics --since 2026-03-18` \u2014 review the past week's trends.\n\n**After prompt tuning:** `/stark-metrics --skill stark-review` \u2014 verify false positive rates dropped after running `/stark-review-improvement`.\n\n**Repo deep-dive with JSON:** `/stark-metrics --repo my-service --json` \u2014 pipe structured output into dashboards or scripts.",
+    "troubleshooting": "**\"No history found\"** \u2014 No review runs exist yet. Run `/stark-review` on a PR first.\n\n**\"No records match filters\"** \u2014 Your `--repo`, `--skill`, or `--since` filters are too narrow. Broaden them.\n\n**Corrupt JSON warnings on stderr** \u2014 A history file is malformed. The script skips it and continues. Check stderr for the filename.\n\n**\"Script not found\"** \u2014 Run `install.sh` from the stark-skills repo to set up symlinks.",
+    "related_skills": [
+      "stark-review",
+      "stark-review-improvement",
+      "stark-skill-analytics",
+      "stark-pr-status"
     ],
-    "usage_examples": [
-      "show metrics",
-      "/stark-metrics --since 2026-03-01",
-      "/stark-metrics --repo Evinced/stark-skills --json",
-      "/stark-metrics --skill stark-review"
-    ]
+    "arguments_table": "| Flag | Type | Default | Description |\n|------|------|---------|-------------|\n| `--repo REPO` | string | all repos | Filter metrics to a specific repository |\n| `--skill SKILL` | string | all skills | Filter to a specific skill (e.g. stark-review) |\n| `--since DATE` | date (YYYY-MM-DD) | all time | Only include runs after this date |\n| `--json` | flag | off | Output machine-readable JSON instead of terminal format |"
   },
-  "alt_text": "Usage visualization for the stark-metrics skill showing the invocation arguments, execution flow, interactive recommendation handling, and common failure modes."
+  "alt_text": "A usage guide for the stark-metrics skill showing a top-to-bottom workflow: invoke with optional flags, read history data, run metrics.py, check exit code (with failure branches for no data and bad arguments), present results with agent scorecards and recommendations, then check improvement flags. Below the flow are cards describing six report sections (agent scorecards, finding quality, duration trends, prompt improvement impact, recommendations, failure alerts), three common usage patterns (weekly check-in, after prompt tuning, repo deep-dive), a troubleshooting table, and links to four related skills."
 }

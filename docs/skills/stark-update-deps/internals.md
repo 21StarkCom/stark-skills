@@ -5,58 +5,10 @@ Audit and update all dependency versions across a project to their latest stable
 ## Architecture
 
 ```mermaid
-graph TD
-  Start([Trigger: update deps]) --> Disc[Phase 1: Discovery]
-  
-  Disc -->|Extract manifests| Inv[(Inventory Table)]
-  Inv --> Res[Phase 2: Research]
-  
-  subgraph Parallel Lookups
-    Res --> S1[PyPI Search]
-    Res --> S2[npm Search]
-    Res --> S3[Docker Hub Check]
-    Res --> S4[Go/Rust Registries]
-  end
-  
-  S1 --> Comp[Phase 3: Compatibility Analysis]
-  S2 --> Comp
-  S3 --> Comp
-  S4 --> Comp
-  
-  Comp -->|Evaluate Cross-Compat & Codemods| Dec{Decision Matrix}
-  
-  Dec -->|Major Bump/Risk| Rev[Category: Review]
-  Dec -->|Safe Minor/Patch| Safe[Category: Safe]
-  Dec -->|Conflict/Missing| Blk[Category: Blocked]
-  
-  Rev --> Update[Phase 4: Update In-Place]
-  Safe --> Update
-  Blk -->|Skip| Rep
-  
-  Update -->|Modify Files| Ver[Phase 5: CRITICAL Verification]
-  
-  subgraph Anti-Hallucination Loop
-    Ver -->|Re-Read Files| Extr[Extract New Tags]
-    Extr -->|Explicit Search| Val{Exists on Registry?}
-    Val -->|Yes| Conf[Mark Confirmed]
-    Val -->|No| Fix[Revert/Search Alt]
-    Fix --> Ver
-  end
-  
-  Conf --> Rep[Phase 6: Report Generation]
-  
-  Rep -->|Export Metrics & CLI Output| End([End Process])
 
-  classDef phase fill:#1e40af,stroke:#1e3a8a,color:#fff,stroke-width:2px;
-  classDef decision fill:#7c3aed,stroke:#5b21b6,color:#fff;
-  classDef critical fill:#0f172a,stroke:#ef4444,stroke-width:3px,color:#fff;
-  
-  class Disc,Res,Comp,Update,Rep phase;
-  class Dec,Val decision;
-  class Ver critical;
 ```
 
-![`Architecture flow diagram and feature breakdown for the stark-update-deps skill, highlighting its six-phase process: Discovery, Research, Compatibility Analysis, Update, Verification (anti-hallucination), and Reporting.`](internals.png)
+![A clean internal architecture page for the stark-update-deps skill showing a vertical execution spine from discovery through reporting, with blue phase nodes, purple decision nodes, amber output nodes, a red recovery path, and a gray external registries node. Surrounding tables and cards explain the normalized dependency inventory, decision matrix states, internal policies like LTS preference and Docker tag skepticism, extension points for new manifest parsers and registry adapters, and failure-mode recovery rules."}}](internals.png)
 
 ## Phases
 

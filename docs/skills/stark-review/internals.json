@@ -1,19 +1,4 @@
 {
-  "doc_content": {
-    "summary": "Multi-agent PR code review skill orchestrating 3 LLMs (Claude, Codex, Gemini) across 6 domains with an autonomous fix-and-test loop. Executes in isolated Git worktrees, classifies findings to filter out noise, autonomously repairs actionable issues while verifying against test baselines, and generates detailed diagnostics for prompt tuning.",
-    "key_features": [
-      "Parallel multi-agent dispatch via subprocess (18 sub-agents total)",
-      "Isolated execution in local git worktrees to protect operator state",
-      "Autonomous fix-build-test loop with baseline regression checking",
-      "Advanced noise classification and misalignment root-cause analysis",
-      "Automated bug issue creation for critical unresolved findings",
-      "Strict observability protocols with checkpointing and task synchronization"
-    ],
-    "usage_examples": [
-      "/stark-review",
-      "/stark-review 124 --rounds 5",
-      "/stark-review 124 --dry-run"
-    ]
-  },
-  "alt_text": "Architecture and data flow visualization of the stark-review skill showing the multi-agent PR review process, including setup, the autonomous review-fix loop across 3 LLMs in isolated worktrees, noise classification, summary generation, and GitHub issue creation phases."
+  "doc_content": {},
+  "alt_text": "A clean internal architecture page for the skill \\\"stark-review\\\" showing a top summary strip with control-plane stats, a vertical workflow diagram from invocation through setup, auth gating, worktree isolation, parallel 18-agent review rounds, classification and fixing, summary generation, posting, and cleanup, followed by tables for runtime contracts and decision gates, cards for observability, failure recovery, and extension points, all color-coded by phase, decision, config, output, failure, and external dependency.\"}}"
 }

@@ -5,26 +5,10 @@ Bootstrap a new project end-to-end — initializes git, creates a GitHub repo in
 ## Architecture
 
 ```mermaid
-graph TD
-    Start([Start stark-onboard-project]) --> CheckGit{Is Git Initialized?}
-    CheckGit -- No --> InitGit[git init & initial commit]
-    CheckGit -- Yes --> CheckGH{Remote Exists?}
-    InitGit --> CheckGH
-    CheckGH -- No --> PromptDetails[Prompt user for Repo details]
-    PromptDetails --> CreateRepo[gh repo create]
-    CreateRepo --> AddCodeowners[Create CODEOWNERS]
-    CheckGH -- Yes --> CheckApps{Are Apps Connected?}
-    AddCodeowners --> CheckApps
-    CheckApps -- No --> LinkApps[Link stark-claude, codex, gemini apps]
-    LinkApps --> CheckClaude{CLAUDE.md exists?}
-    CheckApps -- Yes --> CheckClaude
-    CheckClaude -- No --> ScanProject[Scan project deps & generate CLAUDE.md]
-    ScanProject --> MkdirClaude[Create .claude/ directory]
-    CheckClaude -- Yes --> Finish([End Summary])
-    MkdirClaude --> Finish
+
 ```
 
-![A technical flowchart and architecture visualization for the stark-onboard-project skill, detailing git initialization, GitHub repository creation, GitHub App connections, and Claude Code bootstrapping, with failure modes and observability metrics.](internals.png)
+![A clean internal architecture diagram for the stark-onboard-project skill, showing a vertical workflow from bootstrap context through five phases: git initialization, GitHub repository creation, GitHub App connection, Claude Code setup, and final summary. Blue nodes mark workflow phases, purple nodes mark decision gates like “already a git repo?” and “CLAUDE.md exists?”, amber marks final outputs, red highlights manual recovery for GitHub App scope failures, and gray annotations explain external dependencies such as gh CLI, GitHub APIs, org installation settings, and the Python helper scripts. Supporting sections below summarize architecture notes, configuration surfaces, failure modes, and extension points for modifying the skill safely."}}](internals.png)
 
 ## Phases
 

@@ -1,794 +1,658 @@
-<html lang="en">
+<html>
 <head>
-  
-  
-  <title>stark-review-plan — Internal Architecture Visualization</title>
-  <style>
-    /*
-     * Stark Skills — Shared Design System CSS
-     *
-     * Foundation styles for LLM-generated HTML skill visualizations.
-     * LLMs embed this inline and may extend with additional styles.
-     * All colors pass WCAG AA 4.5:1 contrast ratio.
-     *
-     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
-     */
 
-    /* === Reset & Base === */
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #fafafa;
-      color: #1a1a1a;
-      line-height: 1.5;
-    }
 
-    /* === Header === */
-    .header { text-align: center; padding: 36px 20px 16px; }
-    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
-    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
-    .header .scope {
-      display: inline-block; font-size: 10px; font-weight: 600;
-      background: #eff6ff; color: #1e40af;
-      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
-    }
+<title>stark-review-plan — Internals</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
+.node-phase    { background: #1e40af; color: #ffffff; }
+.node-decision { background: #7c3aed; color: #ffffff; }
+.node-failure  { background: #dc2626; color: #ffffff; }
+.node-config   { background: #047857; color: #ffffff; }
+.node-output   { background: #f59e0b; color: #1a1a1a; }
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 180px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 180px; display: flex;
+  align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
 
-    /* === Container === */
-    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
-
-    /* === Section Title === */
-    .section-title {
-      font-size: 14px; font-weight: 700; color: #666;
-      text-transform: uppercase; letter-spacing: 1px;
-      margin: 32px 0 16px; padding-bottom: 6px;
-      border-bottom: 2px solid #e5e7eb;
-    }
-
-    /* === Node Types === */
-    .node { border-radius: 8px; padding: 12px 16px; text-align: center; }
-    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
-    .node-desc { font-size: 10px; opacity: 0.8; }
-
-    .node-phase    { background: #1e40af; color: #ffffff; }
-    .node-decision { background: #7c3aed; color: #ffffff; }
-    .node-failure  { background: #dc2626; color: #ffffff; }
-    .node-config   { background: #047857; color: #ffffff; }
-    .node-output   { background: #f59e0b; color: #1a1a1a; }
-    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
-
-    /* === Flow Layout === */
-    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
-    .flow-step {
-      display: flex; align-items: stretch;
-      width: 100%; max-width: 860px; min-height: 76px;
-    }
-    .flow-lane-left {
-      width: 180px; display: flex;
-      align-items: center; justify-content: flex-end;
-      padding-right: 18px;
-    }
-    .flow-lane-center {
-      width: 500px; display: flex;
-      align-items: center; justify-content: center;
-    }
-    .flow-lane-right {
-      width: 180px; display: flex;
-      align-items: center; padding-left: 18px;
-    }
-    .annotation {
-      font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
-    }
-    .annotation strong { color: #444; }
-
-    /* === Arrows === */
-    .arrow-down {
-      width: 2px; height: 20px; background: #cbd5e1;
-      margin: 0 auto; position: relative;
-    }
-    .arrow-down::after {
-      content: ''; position: absolute; bottom: -4px; left: -4px;
-      border-left: 5px solid transparent;
-      border-right: 5px solid transparent;
-      border-top: 6px solid #cbd5e1;
-    }
-    .arrow-container {
-      display: flex; justify-content: center;
-      width: 100%; max-width: 860px;
-    }
-    .arrow-container .flow-lane-center {
-      display: flex; justify-content: center;
-    }
-
-    /* === Cards === */
-    .card-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 16px; margin-top: 16px;
-    }
-    .card { padding: 16px; border-radius: 8px; }
-    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
-    .card p  { font-size: 11px; line-height: 1.6; }
-
-    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
-    .card-blue h3 { color: #1e40af; }
-    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
-    .card-green h3 { color: #059669; }
-    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
-    .card-purple h3 { color: #7c3aed; }
-    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
-    .card-amber h3 { color: #92400e; }
-    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
-    .card-dark h3 { color: #333333; }
-    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
-    .card-red h3 { color: #dc2626; }
-
-    /* === Data Tables === */
-    .data-table {
-      width: 100%; max-width: 860px; margin: 16px auto;
-      border-collapse: collapse; font-size: 11px;
-    }
-    .data-table th {
-      background: #f3f4f6; padding: 8px 12px; text-align: left;
-      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
-    }
-    .data-table td {
-      padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
-      vertical-align: top;
-    }
-
-    /* === Tags === */
-    .tag {
-      display: inline-block; font-size: 9px; font-weight: 600;
-      padding: 2px 8px; border-radius: 3px;
-    }
-    .tag-phase    { background: #dbeafe; color: #1e40af; }
-    .tag-decision { background: #ede9fe; color: #5b21b6; }
-    .tag-failure  { background: #fee2e2; color: #991b1b; }
-    .tag-config   { background: #d1fae5; color: #065f46; }
-    .tag-output   { background: #fef3c7; color: #92400e; }
-    .tag-external { background: #f3f4f6; color: #666666; }
-
-    /* === Legend === */
-    .legend {
-      display: flex; gap: 16px; justify-content: center;
-      margin: 16px 0 24px; flex-wrap: wrap;
-    }
-    .legend-item {
-      display: flex; align-items: center; gap: 6px;
-      font-size: 10px; color: #666;
-    }
-    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
-
-    /* === Summary Grid === */
-    .summary-grid {
-      display: grid; grid-template-columns: 1fr 1fr 1fr;
-      gap: 16px; margin-top: 16px;
-    }
-    .summary-card { padding: 16px; border-radius: 8px; }
-    .summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
-    .summary-card p  { font-size: 11px; line-height: 1.5; }
-
-    /* === Winner Badge === */
-    .winner-badge {
-      display: inline-block; font-size: 12px; color: #555555;
-      font-weight: 600; padding: 2px 10px; border-radius: 4px;
-      background: #f9fafb; border: 1px solid #d1d5db;
-    }
-
-    /* === Footer === */
-    .footer {
-      text-align: center; padding: 20px;
-      font-size: 10px; color: #999;
-    }
-
-    /* === Extensions === */
-    .meta-strip {
-      display: flex;
-      justify-content: center;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-top: 14px;
-    }
-    .meta-pill {
-      font-size: 10px;
-      font-weight: 600;
-      padding: 4px 10px;
-      border-radius: 999px;
-      background: #ffffff;
-      border: 1px solid #dbe3ee;
-      color: #475569;
-    }
-    .hero-panel {
-      background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 55%, #ecfdf5 100%);
-      border: 1px solid #dbeafe;
-      border-radius: 12px;
-      padding: 18px;
-      margin-top: 10px;
-    }
-    .hero-grid {
-      display: grid;
-      grid-template-columns: 1.4fr 1fr;
-      gap: 16px;
-      align-items: stretch;
-    }
-    .hero-copy p {
-      font-size: 12px;
-      color: #334155;
-      line-height: 1.7;
-    }
-    .stat-stack {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-    }
-    .stat {
-      background: rgba(255,255,255,0.78);
-      border: 1px solid #e5e7eb;
-      border-radius: 10px;
-      padding: 14px;
-      text-align: left;
-    }
-    .stat .k {
-      font-size: 20px;
-      font-weight: 800;
-      color: #0f172a;
-    }
-    .stat .v {
-      font-size: 10px;
-      color: #64748b;
-      margin-top: 4px;
-    }
-    .band {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 12px;
-      margin-top: 16px;
-    }
-    .band .node {
-      min-height: 88px;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-    }
-    .mini-note {
-      font-size: 10px;
-      color: #64748b;
-      margin-top: 8px;
-    }
-    .domain-grid {
-      display: grid;
-      grid-template-columns: repeat(7, 1fr);
-      gap: 10px;
-      margin-top: 16px;
-    }
-    .domain {
-      background: #ffffff;
-      border: 1px solid #e5e7eb;
-      border-radius: 8px;
-      padding: 12px 10px;
-      text-align: center;
-      font-size: 10px;
-      color: #334155;
-    }
-    .domain strong {
-      display: block;
-      font-size: 11px;
-      color: #111827;
-      margin-bottom: 4px;
-    }
-    .matrix-banner {
-      margin-top: 18px;
-      background: #0f172a;
-      color: #ffffff;
-      border-radius: 10px;
-      padding: 14px 16px;
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-    .matrix-banner .label {
-      font-size: 12px;
-      font-weight: 700;
-    }
-    .matrix-banner .detail {
-      font-size: 11px;
-      color: #cbd5e1;
-    }
-    .callout {
-      margin: 20px auto 0;
-      max-width: 860px;
-      background: #fff7ed;
-      border: 1px solid #fed7aa;
-      border-radius: 10px;
-      padding: 14px 16px;
-      font-size: 11px;
-      color: #9a3412;
-    }
-    .callout strong { color: #7c2d12; }
-    @media (max-width: 900px) {
-      .hero-grid, .summary-grid, .band, .domain-grid { grid-template-columns: 1fr; }
-      .flow-step {
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 8px;
-        min-height: auto;
-        margin-bottom: 10px;
-      }
-      .flow-lane-left,
-      .flow-lane-center,
-      .flow-lane-right {
-        width: 100%;
-        padding: 0;
-        justify-content: center;
-      }
-      .annotation { max-width: 100%; text-align: center; }
-    }
-  </style>
+/* === Extensions === */
+.loop-indicator {
+  border: 2px dashed #7c3aed;
+  border-radius: 12px;
+  padding: 16px 8px;
+  margin: 8px 0;
+  position: relative;
+}
+.loop-label {
+  position: absolute; top: -10px; left: 24px;
+  background: #f5f3ff; color: #7c3aed;
+  font-size: 9px; font-weight: 700;
+  padding: 2px 8px; border-radius: 3px;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.dispatch-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px; margin-top: 8px;
+}
+.dispatch-cell {
+  border-radius: 6px; padding: 8px 10px;
+  text-align: center; font-size: 10px; font-weight: 600;
+}
+.dispatch-claude { background: #dbeafe; color: #1e40af; }
+.dispatch-codex  { background: #d1fae5; color: #065f46; }
+.dispatch-gemini { background: #fef3c7; color: #92400e; }
+.domain-list {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  justify-content: center; margin-top: 6px;
+}
+.domain-tag {
+  font-size: 8px; background: #f3f4f6; color: #666;
+  padding: 2px 6px; border-radius: 3px;
+}
+.finding-class {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 1px 6px; border-radius: 3px; margin: 1px;
+}
+.fc-fix { background: #fee2e2; color: #991b1b; }
+.fc-recurring { background: #fef3c7; color: #92400e; }
+.fc-fp { background: #f3f4f6; color: #666; }
+.fc-noise { background: #ede9fe; color: #5b21b6; }
+.fc-ignored { background: #e5e7eb; color: #888; }
+.arch-box {
+  border: 1px solid #e5e7eb; border-radius: 8px;
+  padding: 14px; margin: 8px 0; background: #fff;
+}
+.arch-box h4 { font-size: 11px; font-weight: 700; color: #444; margin-bottom: 6px; }
+.arch-box p, .arch-box li { font-size: 10px; color: #555; line-height: 1.5; }
+.arch-box ul { padding-left: 16px; }
+.file-ref { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 9px; color: #1e40af; background: #eff6ff; padding: 1px 4px; border-radius: 2px; }
+</style>
 </head>
 <body>
-  <div class="header">
-    <h1>stark-review-plan</h1>
-    <div class="sub">Multi-agent design document review with autonomous fix loop, PR reporting, and dispatch diagnostics</div>
-    <div class="scope">INTERNALS · ARCHITECTURE / DATA FLOW / EXTENSION POINTS</div>
-    <div class="meta-strip">
-      <div class="meta-pill">Complexity: medium</div>
-      <div class="meta-pill">Scale: 3 LLMs × 7 domains = 21 sub-agents</div>
-      <div class="meta-pill">Interface: <code>&lt;path&gt; [--rounds N] [--dry-run] [--force]</code></div>
-      <div class="meta-pill">Artifacts: summary, review file, PR comments, history</div>
+
+<div class="header">
+  <h1>stark-review-plan</h1>
+  <div class="sub">Multi-agent design document review &mdash; 3 LLMs &times; 7 domains with autonomous fix loop</div>
+  <div class="scope">INTERNALS &mdash; Architecture &amp; Data Flow</div>
+</div>
+
+<div class="container">
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#1e40af;"></div> Phase</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed;"></div> Decision</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#047857;"></div> Config</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b;"></div> Output</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#dc2626;"></div> Failure</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e5e7eb;"></div> External</div>
+  </div>
+
+  <!-- ============ ARCHITECTURE OVERVIEW ============ -->
+  <div class="section-title">Architecture Overview</div>
+
+  <div class="summary-grid">
+    <div class="summary-card card-blue">
+      <h3>Orchestration Layer</h3>
+      <p>The skill acts as an orchestrator, calling <span class="file-ref">plan_review_dispatch.py</span> which spawns 3 CLI agents (Claude, Codex, Gemini) via <code>subprocess.run</code> with <code>ThreadPoolExecutor</code>. Each agent reviews 7 domains = 21 parallel sub-agents per round.</p>
+    </div>
+    <div class="summary-card card-purple">
+      <h3>Review-Fix Loop</h3>
+      <p>Up to N rounds (default 3). Each round: dispatch &rarr; classify findings &rarr; fix plan. Early termination when zero actionable findings. Final review-only round validates fixes.</p>
+    </div>
+    <div class="summary-card card-green">
+      <h3>Config Hierarchy</h3>
+      <p>Global <span class="file-ref">~/.claude/code-review/config.json</span> &rarr; Org <span class="file-ref">.code-review/config.json</span> &rarr; CLI args. <code>max_rounds</code>, <code>fix_threshold</code>, <code>disabled_domains</code>, timeout.</p>
     </div>
   </div>
 
-  <div class="container">
-    <div class="hero-panel">
-      <div class="hero-grid">
-        <div class="hero-copy">
-          <p>
-            <strong>stark-review-plan</strong> is an orchestration skill for reviewing plans and specs as operational systems rather than static text.
-            It validates a target markdown file, fans out parallel domain reviews across Claude, Codex, and Gemini, classifies the returned findings into fixable signal versus noise,
-            edits the plan across bounded fix rounds, then performs a final review-only pass before persisting structured history and optionally posting every agent’s raw output back to GitHub.
-          </p>
-          <div class="mini-note">
-            Internal emphasis: dispatch mechanics, classification rules, observability, persistence, and prompt-tuning feedback loops.
-          </div>
-        </div>
-        <div class="stat-stack">
-          <div class="stat">
-            <div class="k">21</div>
-            <div class="v">parallel sub-agents per dispatch round</div>
-          </div>
-          <div class="stat">
-            <div class="k">N + 1</div>
-            <div class="v">fix rounds plus one final review round</div>
-          </div>
-          <div class="stat">
-            <div class="k">4</div>
-            <div class="v">finding outcomes that shape control flow: fix, recurring, false positive, noise</div>
-          </div>
-          <div class="stat">
-            <div class="k">5</div>
-            <div class="v">major phases with required task and timestamp telemetry</div>
-          </div>
+  <!-- ============ MAIN FLOW ============ -->
+  <div class="section-title">Execution Flow</div>
+
+  <div class="flow">
+
+    <!-- Phase 1: Setup -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Inputs:</strong> &lt;path&gt;, --rounds, --dry-run, --force</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:420px;">
+          <div class="node-title">Phase 1: Setup</div>
+          <div class="node-desc">Validate path &bull; Check uncommitted changes &bull; Detect PR &bull; Authenticate &bull; Read config</div>
         </div>
       </div>
-
-      <div class="matrix-banner">
-        <div>
-          <div class="label">Dispatch Matrix</div>
-          <div class="detail">Claude / Codex / Gemini execute in parallel across seven review domains, returning structured JSON findings for orchestration.</div>
-        </div>
-        <div class="winner-badge">Review-Fix Loop With Failure-Aware Short-Circuiting</div>
-      </div>
-
-      <div class="domain-grid">
-        <div class="domain"><strong>Domain 1</strong>Specialized review prompt</div>
-        <div class="domain"><strong>Domain 2</strong>Specialized review prompt</div>
-        <div class="domain"><strong>Domain 3</strong>Specialized review prompt</div>
-        <div class="domain"><strong>Domain 4</strong>Specialized review prompt</div>
-        <div class="domain"><strong>Domain 5</strong>Specialized review prompt</div>
-        <div class="domain"><strong>Domain 6</strong>Specialized review prompt</div>
-        <div class="domain"><strong>Domain 7</strong>Specialized review prompt</div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Stores:</strong> original_content, pr_number, GH_TOKEN, max_rounds</div>
       </div>
     </div>
 
-    <div class="section-title">Legend</div>
-    <div class="legend">
-      <div class="legend-item"><span class="legend-dot" style="background:#1e40af;"></span>Workflow phase</div>
-      <div class="legend-item"><span class="legend-dot" style="background:#7c3aed;"></span>Decision / branch</div>
-      <div class="legend-item"><span class="legend-dot" style="background:#dc2626;"></span>Failure path</div>
-      <div class="legend-item"><span class="legend-dot" style="background:#047857;"></span>Config / rules</div>
-      <div class="legend-item"><span class="legend-dot" style="background:#f59e0b;"></span>Artifact / output</div>
-      <div class="legend-item"><span class="legend-dot" style=""background:#e5e7eb;" border:1px dashed #9ca3af;"></span>External dependency</div>
-    </div>
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-    <div class="section-title">End-To-End Flow</div>
-    <div class="flow">
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation">
-            <strong>Inputs</strong><br></br>
-            path argument, optional rounds override, dry-run mode, force flag
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class=""node" node-config">
-            <div class="node-title">Entry Contract</div>
-            <div class="node-desc">Parse args, set max_rounds, locate scripts and python runtime</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">
-            <strong>Constants</strong><br></br>
-            <code>~/.claude/code-review/scripts</code><br></br>
-            <code>plan_review_dispatch.py</code><br></br>
-            <code>github_app.py</code>
-          </div>
+    <!-- Decision: path exists? -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Fuzzy search:</strong> <code>find docs/ -name "*path*"</code> if no separator in path</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width:340px;">
+          <div class="node-title">File exists &amp; readable?</div>
+          <div class="node-desc">Also checks git diff for uncommitted changes (unless --force)</div>
         </div>
       </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class=""node" node-external">
-            <div class="node-title">Git + Filesystem</div>
-            <div class="node-desc">file exists, readable, uncommitted-change gate</div>
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class=""node" node-phase">
-            <div class="node-title">Phase 1: Setup</div>
-            <div class="node-desc">Validate plan, read original content, detect PR context, auth if needed</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">
-            <strong>Side effects</strong><br></br>
-            stores original file snapshot for final diff and review summary
-          </div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class=""node" node-external">
-            <div class="node-title">PR Context</div>
-            <div class="node-desc">optional <code>gh pr view</code> + GitHub App token</div>
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class=""node" node-decision">
-            <div class="node-title">Dry Run?</div>
-            <div class="node-desc">Yes: one review-only cycle. No: enter bounded fix loop.</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">
-            <strong>Branching</strong><br></br>
-            <code>--dry-run</code> skips edits, review file, and PR posting
-          </div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class=""node" node-external">
-            <div class="node-title">Claude CLI</div>
-            <div class="node-desc">stdin prompt, text output</div>
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class=""node" node-phase">
-            <div class="node-title">Phase 2a: Dispatch 21 Sub-Agents</div>
-            <div class="node-desc">Run parallel review matrix and capture JSON stdout</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class=""node" node-external">
-            <div class="node-title">Codex + Gemini CLIs</div>
-            <div class="node-desc">ephemeral JSON file output and JSON envelope output</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation">
-            <strong>Structured result</strong><br></br>
-            <code>results[].findings[]</code>, per-agent errors, summary coverage
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class=""node" node-config">
-            <div class="node-title">Phase 2b: Classification Engine</div>
-            <div class="node-desc">Map findings to fix, recurring, false positive, noise, or ignored</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">
-            <strong>Confidence rule</strong><br></br>
-            same concern + same section from 2+ agents => high confidence
-          </div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation">
-            <strong>Fixable classes</strong><br></br>
-            <span class=""tag" tag-config">fix</span>
-            <span class=""tag" tag-config">recurring</span>
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class=""node" node-phase">
-            <div class="node-title">Phase 2c: Edit Plan In Place</div>
-            <div class="node-desc">Add missing detail, clarify ambiguity, resolve contradictions, trim scope</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">
-            <strong>Loop memory</strong><br></br>
-            compare against prior rounds to detect recurring issues and crash recovery state
-          </div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class=""node" node-failure">
-            <div class="node-title">Dispatch Failure Path</div>
-            <div class="node-desc">0/N succeeded, run CLI diagnostics and skip re-dispatch</div>
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class=""node" node-decision">
-            <div class="node-title">Terminate Or Continue?</div>
-            <div class="node-desc">healthy clean round -> final review, low coverage -> warn, failure -> failure summary</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">
-            <strong>Guardrails</strong><br></br>
-            do not treat all-agent failure as a clean plan; diagnose the dispatch layer instead
-          </div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation">
-            <strong>Review-only pass</strong><br></br>
-            no edits applied in final round
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class=""node" node-phase">
-            <div class="node-title">Phase 3: Final Review</div>
-            <div class="node-desc">One more dispatch to measure final unresolved signal</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">
-            <strong>Skip condition</strong><br></br>
-            bypassed entirely when Phase 2 ended in dispatch failure
-          </div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class=""node" node-output">
-            <div class="node-title">Classified Summary</div>
-            <div class="node-desc">counts, findings table, recurring issues, misalignment, diff</div>
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class=""node" node-phase">
-            <div class="node-title">Phase 4: Summary</div>
-            <div class="node-desc">Consolidate signal, noise, improvement flags, metrics, and prompt recommendations</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class=""node" node-output">
-            <div class="node-title">Prompt Feedback</div>
-            <div class="node-desc">global vs repo-level prompt tuning recommendations only</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class=""node" node-output">
-            <div class="node-title">Review File</div>
-            <div class="node-desc"><code>{plan-name}.review.md</code></div>
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class=""node" node-phase">
-            <div class="node-title">Phase 5: Output & Persist</div>
-            <div class="node-desc">Print summary, write artifacts, post agent comments to PR, save history</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class=""node" node-output">
-            <div class="node-title">History Store</div>
-            <div class="node-desc"><code>rounds.json</code>, <code>summary.md</code>, cleanup temp state</div>
-          </div>
-        </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Abort if:</strong> not found, uncommitted without --force</div>
       </div>
     </div>
 
-    <div class="callout">
-      <strong>Critical invariant:</strong> every agent’s raw findings are preserved independently in GitHub when a PR exists. The orchestrator summary is not the sole record; raw reviewer output is part of the long-term learning surface.
-    </div>
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-    <div class="section-title">Architecture Layers</div>
-    <div class="band">
-      <div class=""node" node-config">
-        <div class="node-title">Control Layer</div>
-        <div class="node-desc">argument parsing, round bounds, branching, exit conditions</div>
+    <!-- Decision: dry-run? -->
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width:300px;">
+          <div class="node-title">--dry-run?</div>
+          <div class="node-desc">Yes &rarr; single dispatch, no fixes, skip to Phase 4</div>
+        </div>
       </div>
-      <div class=""node" node-phase">
-        <div class="node-title">Execution Layer</div>
-        <div class="node-desc">dispatch script, per-agent CLI invocation, parallel fan-out/fan-in</div>
-      </div>
-      <div class=""node" node-decision">
-        <div class="node-title">Reasoning Layer</div>
-        <div class="node-desc">finding classification, confidence aggregation, recurring detection</div>
-      </div>
-      <div class=""node" node-output">
-        <div class="node-title">Persistence Layer</div>
-        <div class="node-desc">review file, PR comments, history snapshots, metrics and logs</div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Dry-run path:</strong> 1 dispatch &rarr; classify &rarr; summary only</div>
       </div>
     </div>
 
-    <div class="section-title">Internal Data Flow</div>
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Stage</th>
-          <th>Primary Data</th>
-          <th>Producer</th>
-          <th>Consumer</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><span class=""tag" tag-config">Input</span></td>
-          <td>target path, flags, original_content, max_rounds</td>
-          <td>skill entrypoint</td>
-          <td>setup checks, summary diff generation</td>
-        </tr>
-        <tr>
-          <td><span class=""tag" tag-phase">Dispatch</span></td>
-          <td>plan text + domain prompt + round metadata</td>
-          <td>orchestrator</td>
-          <td>Claude, Codex, Gemini CLI workers</td>
-        </tr>
-        <tr>
-          <td><span class=""tag" tag-output">Fan-in JSON</span></td>
-          <td>results, findings, stderr, succeeded counts, failure metadata</td>
-          <td><code>plan_review_dispatch.py</code></td>
-          <td>classification engine, diagnostics, metrics</td>
-        </tr>
-        <tr>
-          <td><span class=""tag" tag-decision">Classification</span></td>
-          <td>status labels, confidence level, prior-round correlation</td>
-          <td>orchestrator logic</td>
-          <td>edit loop, summary sections, prompt assessment</td>
-        </tr>
-        <tr>
-          <td><span class=""tag" tag-output">Persistence</span></td>
-          <td>summary.md, rounds.json, PR comments, review.md</td>
-          <td>output phase</td>
-          <td>contributors, future review analysis, prompt tuning</td>
-        </tr>
-      </tbody>
-    </table>
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-    <div class="section-title">Key Behaviors</div>
-    <div class="card-grid">
-      <div class=""card" card-blue">
-        <h3>Failure-Aware Cleanliness</h3>
-        <p>A round with zero successful sub-agents is explicitly treated as infrastructure failure, not plan quality. The skill runs CLI diagnostics and avoids wasting time on a final re-dispatch that would fail identically.</p>
+    <!-- Phase 2: Review-Fix Loop -->
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="loop-indicator" style="width:480px;">
+          <div class="loop-label">Loop: round 1..max_rounds</div>
+
+          <div class="node node-phase" style="width:100%; margin-top:8px;">
+            <div class="node-title">Phase 2a: Dispatch Sub-Agents</div>
+            <div class="node-desc">plan_review_dispatch.py &rarr; 21 parallel sub-agents (3 &times; 7)</div>
+          </div>
+
+          <div style="display:flex; justify-content:center; margin: 6px 0;">
+            <div class="arrow-down" style="height:14px;"></div>
+          </div>
+
+          <div class="node node-phase" style="width:100%;">
+            <div class="node-title">Phase 2b: Classify Findings</div>
+            <div class="node-desc">fix | recurring | false_positive | noise | ignored</div>
+          </div>
+
+          <div style="display:flex; justify-content:center; margin: 6px 0;">
+            <div class="arrow-down" style="height:14px;"></div>
+          </div>
+
+          <div class="node node-decision" style="width:100%;">
+            <div class="node-title">Dispatch Health Check</div>
+            <div class="node-desc">0 succeeded &rarr; dispatch failure (abort loop) &bull; &lt;50% &rarr; low coverage warning</div>
+          </div>
+
+          <div style="display:flex; justify-content:center; margin: 6px 0;">
+            <div class="arrow-down" style="height:14px;"></div>
+          </div>
+
+          <div class="node node-phase" style="width:100%;">
+            <div class="node-title">Phase 2c: Fix Plan</div>
+            <div class="node-desc">Edit plan file: add sections, clarify requirements, fix contradictions</div>
+          </div>
+
+          <div style="display:flex; justify-content:center; margin: 6px 0;">
+            <div class="arrow-down" style="height:14px;"></div>
+          </div>
+
+          <div class="node node-decision" style="width:100%;">
+            <div class="node-title">Early Termination?</div>
+            <div class="node-desc">0 fix/recurring findings &rarr; skip remaining rounds, go to Phase 3</div>
+          </div>
+        </div>
       </div>
-      <div class=""card" card-green">
-        <h3>Signal Separation</h3>
-        <p>Headline counts exclude noise. Fixes and recurring issues represent real defects, while false positives and stylistic noise are preserved for learning but not inflated into issue totals.</p>
-      </div>
-      <div class=""card" card-purple">
-        <h3>Cross-Agent Confidence</h3>
-        <p>The same concern raised by multiple models against the same section increases confidence. This reduces overfitting to one model’s quirks while still allowing minority findings to be tracked as noise or ignored signal.</p>
-      </div>
-      <div class=""card" card-amber">
-        <h3>Autonomous Improvement Loop</h3>
-        <p>The skill edits the plan directly between rounds, then evaluates whether residual issues remain. This makes the workflow a bounded repair system rather than a one-shot static reviewer.</p>
-      </div>
-      <div class=""card" card-dark">
-        <h3>Observability Contract</h3>
-        <p>Task-based progress, timestamped phase transitions, 5-minute checkpoints, end-of-run metrics, and improvement flags are mandatory outputs. Long-running reviews are expected to be inspectable while in progress.</p>
-      </div>
-      <div class=""card" card-red">
-        <h3>GitHub As Durable Memory</h3>
-        <p>Per-agent raw findings are posted under each bot identity when a PR exists. This preserves reviewer-specific output for later prompt tuning and failure analysis beyond the consolidated orchestrator summary.</p>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Per round:</strong> in-progress.json persisted for crash recovery<br><br><strong>Cross-ref:</strong> 2+ agents same section = high_confidence</div>
       </div>
     </div>
 
-    <div class="section-title">Extension Points</div>
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Extension Point</th>
-          <th>Current Mechanism</th>
-          <th>What Can Change Safely</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>Review domains</td>
-          <td>Seven specialized prompt categories per model</td>
-          <td>Add or disable domains through prompt/config changes without altering summary schema</td>
-        </tr>
-        <tr>
-          <td>Model backends</td>
-          <td>Claude, Codex, Gemini CLI contracts inside dispatch script</td>
-          <td>Swap flags, versions, or backends as long as JSON fan-in remains structurally compatible</td>
-        </tr>
-        <tr>
-          <td>Fix threshold</td>
-          <td>Severity gating distinguishes fix-worthy findings from ignored ones</td>
-          <td>Raise or lower default threshold to tune aggressiveness</td>
-        </tr>
-        <tr>
-          <td>Prompt tuning scope</td>
-          <td>Global vs repo-specific recommendation table</td>
-          <td>Route systematic false positives to central prompts or repo overlays</td>
-        </tr>
-        <tr>
-          <td>Persistence strategy</td>
-          <td>sidecar review file plus history directory</td>
-          <td>Expand artifact set if downstream analytics need more normalized round data</td>
-        </tr>
-      </tbody>
-    </table>
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-    <div class="section-title">Operational Outputs</div>
-    <div class="summary-grid">
-      <div class=""summary-card" card-blue">
-        <h3>Terminal</h3>
-        <p>Phase logs, round timings, checkpoint messages, consolidated markdown summary, metrics block, and improvement flags.</p>
+    <!-- Phase 3: Final Review -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Skipped if:</strong> dispatch failure in Phase 2</div>
       </div>
-      <div class=""summary-card" card-amber">
-        <h3>Filesystem</h3>
-        <p>Updated plan, sibling <code>.review.md</code> file, crash-recovery temp state, persisted review history for later inspection.</p>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:420px;">
+          <div class="node-title">Phase 3: Final Review</div>
+          <div class="node-desc">One more dispatch (round N+1) &mdash; review only, no fixes. Validates remaining state.</div>
+        </div>
       </div>
-      <div class=""summary-card" card-green">
-        <h3>GitHub</h3>
-        <p>Per-agent raw review comments and orchestrator summary comment under bot identities when PR context and auth are available.</p>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Result:</strong> 0 findings = clean &bull; findings remain = unresolved</div>
       </div>
     </div>
 
-    <div class="footer">
-      stark-review-plan visualization · contributor-facing architecture map for dispatch, classification, observability, and persistence
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 4: Summary -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Sections:</strong> headline counts, findings table, fixed, recurring, unresolved, noise, misalignment, diff, prompt assessment</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:420px;">
+          <div class="node-title">Phase 4: Summary Generation</div>
+          <div class="node-desc">Consolidated markdown: findings, classifications, diff, signal-to-noise, prompt improvement recommendations</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Dispatch failure:</strong> alternate template with error table + diagnostics</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 5: Output -->
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-output" style="width:420px;">
+          <div class="node-title">Phase 5: Output &amp; Persist</div>
+          <div class="node-desc">Terminal &bull; .review.md file &bull; PR comments (3 bot identities) &bull; History JSON</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Each bot posts its own raw findings:</strong> stark-claude, stark-codex, stark-gemini</div>
+      </div>
     </div>
   </div>
+
+  <!-- ============ DISPATCH ARCHITECTURE ============ -->
+  <div class="section-title">Dispatch Architecture</div>
+
+  <div class="arch-box">
+    <h4>Sub-Agent Dispatch Matrix (21 agents per round)</h4>
+    <div class="dispatch-grid">
+      <div class="dispatch-cell dispatch-claude">Claude (Opus)<br><span style="font-size:8px;">claude -p - --output-format text</span></div>
+      <div class="dispatch-cell dispatch-codex">Codex<br><span style="font-size:8px;">codex exec -c ... --ephemeral --json</span></div>
+      <div class="dispatch-cell dispatch-gemini">Gemini (2.5 Pro)<br><span style="font-size:8px;">gemini --model gemini-2.5-pro -p</span></div>
+    </div>
+    <div class="domain-list" style="margin-top:10px;">
+      <div class="domain-tag">Domain 1</div>
+      <div class="domain-tag">Domain 2</div>
+      <div class="domain-tag">Domain 3</div>
+      <div class="domain-tag">Domain 4</div>
+      <div class="domain-tag">Domain 5</div>
+      <div class="domain-tag">Domain 6</div>
+      <div class="domain-tag">Domain 7</div>
+    </div>
+    <p style="margin-top:8px;">Each agent &times; domain pair runs as a subprocess via <span class="file-ref">plan_review_dispatch.py</span> using <code>ThreadPoolExecutor</code>. Timeout: 300s per sub-agent. Prompts sourced from <span class="file-ref">global/prompts/plan-review/{agent}/{domain}.md</span>.</p>
+  </div>
+
+  <div class="arch-box">
+    <h4>CLI Invocation Details</h4>
+    <table class="data-table">
+      <tr><th>Agent</th><th>Command Pattern</th><th>I/O</th><th>Error Signals</th></tr>
+      <tr>
+        <td><span class="tag tag-phase">Claude</span></td>
+        <td><code>claude -p - --output-format text --model claude-opus-4-6</code></td>
+        <td>stdin &rarr; stdout</td>
+        <td>non-zero exit = cli_error, empty stdout = empty_output</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-config">Codex</span></td>
+        <td><code>codex exec -c ... --ephemeral --json -o &lt;tmpfile&gt; -</code></td>
+        <td>stdin &rarr; -o file</td>
+        <td>non-zero exit = cli_error, empty file = empty_output</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-output">Gemini</span></td>
+        <td><code>gemini --model gemini-2.5-pro -p &lt;instr&gt; -o json</code></td>
+        <td>stdin (plan) &rarr; JSON envelope</td>
+        <td>non-zero exit = cli_error, missing response key = empty_output</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ============ FINDING CLASSIFICATION ============ -->
+  <div class="section-title">Finding Classification Pipeline</div>
+
+  <div class="card-grid">
+    <div class="card card-red">
+      <h3>fix <span class="finding-class fc-fix">ACTION</span></h3>
+      <p>Severity &ge; fix_threshold (default: medium) AND the issue genuinely exists in the plan. These get applied as edits in Phase 2c.</p>
+    </div>
+    <div class="card card-amber">
+      <h3>recurring <span class="finding-class fc-recurring">ESCALATED</span></h3>
+      <p>Same section + same domain flagged in a prior round that was supposedly fixed. Indicates incomplete or ineffective fix. Gets priority attention.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>false_positive <span class="finding-class fc-fp">NOISE</span></h3>
+      <p>Described problem doesn't exist in the plan or is already addressed elsewhere. Counted as noise, not issues.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>noise <span class="finding-class fc-noise">NOISE</span></h3>
+      <p>Subjective, stylistic, or single-agent finding contradicted by the other 2 agents. Filtered out of issue counts.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>ignored <span class="finding-class fc-ignored">BELOW THRESHOLD</span></h3>
+      <p>Below fix_threshold (e.g., low severity when threshold is medium). Reported but not acted on.</p>
+    </div>
+    <div class="card card-blue">
+      <h3>high_confidence <span class="tag tag-phase">SIGNAL</span></h3>
+      <p>Cross-reference boost: 2+ agents flagging the same section with the same concern. Applied as a modifier on top of classification.</p>
+    </div>
+  </div>
+
+  <!-- ============ DATA FLOW ============ -->
+  <div class="section-title">Data Flow &amp; State</div>
+
+  <table class="data-table">
+    <tr><th>Artifact</th><th>Location</th><th>Lifecycle</th><th>Purpose</th></tr>
+    <tr>
+      <td><span class="tag tag-config">Config</span></td>
+      <td><span class="file-ref">~/.claude/code-review/config.json</span></td>
+      <td>Read at startup</td>
+      <td>max_rounds, fix_threshold, disabled_domains, timeout</td>
+    </tr>
+    <tr>
+      <td><span class="tag tag-phase">Plan prompts</span></td>
+      <td><span class="file-ref">global/prompts/plan-review/{agent}/{domain}.md</span></td>
+      <td>Read per dispatch</td>
+      <td>Domain-specific review instructions per LLM</td>
+    </tr>
+    <tr>
+      <td><span class="tag tag-output">Dispatch JSON</span></td>
+      <td>stdout from plan_review_dispatch.py</td>
+      <td>Ephemeral (per round)</td>
+      <td>Structured results: findings[], summary{succeeded, total_sub_agents}</td>
+    </tr>
+    <tr>
+      <td><span class="tag tag-decision">in-progress.json</span></td>
+      <td><span class="file-ref">~/.claude/code-review/history/plan-reviews/{name}/</span></td>
+      <td>Written per round, deleted on completion</td>
+      <td>Crash recovery — stores current round data</td>
+    </tr>
+    <tr>
+      <td><span class="tag tag-output">rounds.json</span></td>
+      <td><span class="file-ref">~/.claude/code-review/history/plan-reviews/{name}/</span></td>
+      <td>Written at end</td>
+      <td>All rounds: findings, classifications, outcomes</td>
+    </tr>
+    <tr>
+      <td><span class="tag tag-output">summary.md</span></td>
+      <td><span class="file-ref">~/.claude/code-review/history/plan-reviews/{name}/</span></td>
+      <td>Written at end</td>
+      <td>Human-readable summary (mirrors PR comment)</td>
+    </tr>
+    <tr>
+      <td><span class="tag tag-output">.review.md</span></td>
+      <td>Adjacent to plan file</td>
+      <td>Written at end (not in --dry-run)</td>
+      <td>Persistent review artifact in repo</td>
+    </tr>
+  </table>
+
+  <!-- ============ PR POSTING ============ -->
+  <div class="section-title">PR Comment Architecture</div>
+
+  <div class="arch-box">
+    <h4>Multi-Identity Posting</h4>
+    <p>Each of the 3 GitHub Apps posts its own raw findings under its bot identity. The orchestrator summary posts under stark-claude[bot].</p>
+    <table class="data-table" style="margin-top:8px;">
+      <tr><th>Bot</th><th>Posts</th><th>Auth</th></tr>
+      <tr>
+        <td><span class="dispatch-cell dispatch-claude" style="display:inline-block; padding:2px 8px;">stark-claude[bot]</span></td>
+        <td>Claude's raw findings + orchestrator summary</td>
+        <td><span class="file-ref">github_app.py --app stark-claude token</span></td>
+      </tr>
+      <tr>
+        <td><span class="dispatch-cell dispatch-codex" style="display:inline-block; padding:2px 8px;">stark-codex[bot]</span></td>
+        <td>Codex's raw findings</td>
+        <td><span class="file-ref">github_app.py --app stark-codex token</span></td>
+      </tr>
+      <tr>
+        <td><span class="dispatch-cell dispatch-gemini" style="display:inline-block; padding:2px 8px;">stark-gemini[bot]</span></td>
+        <td>Gemini's raw findings</td>
+        <td><span class="file-ref">github_app.py --app stark-gemini token</span></td>
+      </tr>
+    </table>
+    <p style="margin-top:8px;">If an agent returned 0 findings or failed, a short status comment is still posted under its identity. Posting failure for one agent does not block the others.</p>
+  </div>
+
+  <!-- ============ FAILURE MODES ============ -->
+  <div class="section-title">Failure Modes &amp; Recovery</div>
+
+  <div class="card-grid">
+    <div class="card card-red">
+      <h3>Total Dispatch Failure</h3>
+      <p><strong>Trigger:</strong> summary.succeeded == 0<br><strong>Response:</strong> Run diagnostics (which claude/codex/gemini, single-agent probe). Skip remaining rounds + Phase 3. Generate dispatch-failure summary template. Do NOT treat as clean plan.</p>
+    </div>
+    <div class="card card-amber">
+      <h3>Low Coverage</h3>
+      <p><strong>Trigger:</strong> succeeded/total &lt; 50%<br><strong>Response:</strong> Warn "Low coverage — only N/M sub-agents succeeded. Results may be incomplete." Continue normally with available results.</p>
+    </div>
+    <div class="card card-red">
+      <h3>Auth Failure</h3>
+      <p><strong>Trigger:</strong> github_app.py token fails when PR exists<br><strong>Response:</strong> Warn "Could not authenticate, skipping PR posting." Skill continues — review still runs, just no PR comments.</p>
+    </div>
+    <div class="card card-amber">
+      <h3>Crash Mid-Round</h3>
+      <p><strong>Trigger:</strong> Process dies during Phase 2<br><strong>Response:</strong> in-progress.json persisted per round enables manual recovery. Re-run will start fresh but history is preserved.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>PR Comment Failure</h3>
+      <p><strong>Trigger:</strong> One bot's posting fails<br><strong>Response:</strong> Warn and continue. Other bots still post. Terminal output always available as fallback.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>Uncommitted Changes</h3>
+      <p><strong>Trigger:</strong> git diff shows changes without --force<br><strong>Response:</strong> Abort with message. User must commit/stash or pass --force.</p>
+    </div>
+  </div>
+
+  <!-- ============ EXTENSION POINTS ============ -->
+  <div class="section-title">Extension Points</div>
+
+  <div class="card-grid">
+    <div class="card card-green">
+      <h3>Adding a Domain</h3>
+      <p>Create <span class="file-ref">global/prompts/plan-review/{agent}/NN-domain.md</span> for each agent (claude, codex, gemini). The dispatch script auto-discovers domains from filenames. Domain ID is derived from filename slug.</p>
+    </div>
+    <div class="card card-green">
+      <h3>Disabling Domains</h3>
+      <p>Set <code>disabled_domains: ["domain-slug"]</code> in repo-level <span class="file-ref">.code-review/config.json</span>. The dispatch script filters these out before spawning sub-agents.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>Tuning fix_threshold</h3>
+      <p>Config key <code>plan_review.fix_threshold</code> controls minimum severity for auto-fix. Values: low, medium (default), high. Higher = fewer auto-fixes, more left as unresolved.</p>
+    </div>
+    <div class="card card-blue">
+      <h3>Custom Agent CLI Flags</h3>
+      <p>Edit <span class="file-ref">scripts/plan_review_dispatch.py</span> to modify CLI invocation per agent. Each agent's flags are in separate code paths. Smoke tests in <span class="file-ref">test_plan_review_dispatch.py::TestCLIFlagsSmoke</span> verify flag compatibility.</p>
+    </div>
+    <div class="card card-blue">
+      <h3>Repo-Level Prompt Overrides</h3>
+      <p>Place overrides in <span class="file-ref">{repo}/.code-review/plan-prompts/{agent}/{domain}.md</span>. These take precedence over global prompts for that repo only.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>Prompt Improvement Loop</h3>
+      <p>Phase 4i generates a Prompt Improvement Assessment with recommended changes (global vs repo level). Use <code>/stark-review-improvement</code> to act on these recommendations.</p>
+    </div>
+  </div>
+
+  <!-- ============ OBSERVABILITY ============ -->
+  <div class="section-title">Observability Contract</div>
+
+  <table class="data-table">
+    <tr><th>Mechanism</th><th>When</th><th>Purpose</th></tr>
+    <tr>
+      <td><span class="tag tag-phase">Task progress</span></td>
+      <td>Phase transitions + per-round child tasks</td>
+      <td>Spinner/status bar in terminal</td>
+    </tr>
+    <tr>
+      <td><span class="tag tag-config">Timestamped logs</span></td>
+      <td>Every phase transition, dispatch completion, classification summary</td>
+      <td>Human-readable timeline in terminal</td>
+    </tr>
+    <tr>
+      <td><span class="tag tag-decision">5-min checkpoints</span></td>
+      <td>Every 5 minutes for runs &gt; 5 min</td>
+      <td>Prevent stale-looking output during long dispatches</td>
+    </tr>
+    <tr>
+      <td><span class="tag tag-output">Metrics block</span></td>
+      <td>End of run</td>
+      <td>Duration breakdown, issue counts, agent stats, round count</td>
+    </tr>
+    <tr>
+      <td><span class="tag tag-failure">Improvement flags</span></td>
+      <td>End of run</td>
+      <td>Bottleneck detection: phase &gt;70% total, agent failure &gt;20%, 0-finding rounds, low coverage</td>
+    </tr>
+  </table>
+
+  <!-- ============ KEY FILES ============ -->
+  <div class="section-title">Key File Map</div>
+
+  <table class="data-table">
+    <tr><th>File</th><th>Role</th></tr>
+    <tr><td><span class="file-ref">skill/stark-review-plan/SKILL.md</span></td><td>Skill definition (this document's source)</td></tr>
+    <tr><td><span class="file-ref">scripts/plan_review_dispatch.py</span></td><td>Orchestrator: spawns 3&times;7 sub-agents via ThreadPoolExecutor</td></tr>
+    <tr><td><span class="file-ref">scripts/github_app.py</span></td><td>Multi-app GitHub auth (stark-claude, stark-codex, stark-gemini)</td></tr>
+    <tr><td><span class="file-ref">global/prompts/plan-review/{agent}/{domain}.md</span></td><td>Per-agent &times; per-domain review prompts</td></tr>
+    <tr><td><span class="file-ref">global/config.json</span></td><td>Default config: max_rounds, fix_threshold, timeout</td></tr>
+    <tr><td><span class="file-ref">scripts/test_plan_review_dispatch.py</span></td><td>Smoke tests for CLI flag compatibility</td></tr>
+  </table>
+
+</div>
+
+<div class="footer"><div class="winner-badge">Visualization by Claude · Score: 8.4/10 · Generated from SKILL.md</div></div>
+
 </body>
 </html>

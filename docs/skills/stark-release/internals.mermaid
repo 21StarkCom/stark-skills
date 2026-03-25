@@ -1,30 +1,29 @@
 graph TD
-  Start([Start Release Command]) --> PreFlight{On clean main branch?}
-  
-  PreFlight -->|No| Abort1[Abort: Prompt user to checkout main/commit]
-  PreFlight -->|Yes| GitTag[Get Latest Git Tag]
-  
-  GitTag --> ParseCL[Parse CHANGELOG.md]
-  
-  ParseCL --> HasChanges{Has Unreleased changes?}
-  HasChanges -->|No| Abort2[Abort: Nothing to release]
-  
-  HasChanges -->|Yes| BumpDecision{Argument provided?}
-  
-  BumpDecision -->|Yes| UseArg[Use Provided Bump: patch/minor/major]
-  BumpDecision -->|No| AutoCalc[Auto-calculate: Add=minor, Fix=patch]
-  
-  UseArg --> CalcNext[Calculate Next Version vX.Y.Z]
-  AutoCalc --> CalcNext
-  
-  CalcNext --> MutateInit[Update src/infra_pulse/__init__.py]
-  MutateInit --> MutateCL[Move Unreleased to versioned section in CHANGELOG]
-  
-  MutateCL --> Commit[git commit both files]
-  Commit --> Tag[git tag -a vX.Y.Z]
-  
-  Tag --> Push[git push origin main & tag]
-  Push -->|Fails| Rebase[git pull --rebase & retry]
-  Push -->|Success| GHRelease[gh release create vX.Y.Z]
-  
-  GHRelease --> Summary([Print Success Summary])
+    A["/stark-release [patch|minor|major]"] --> B["Pre-flight: checkout main, pull, check clean"]
+    B --> C{"Clean working tree?"}
+    C -- No --> D["Abort: stash or commit first"]
+    C -- Yes --> E["Get current version from git tags"]
+    E --> F["Read CHANGELOG.md [Unreleased]"]
+    F --> G{"Has unreleased entries?"}
+    G -- No --> H["Abort: nothing to release"]
+    G -- Yes --> I{"Bump type provided?"}
+    I -- Yes --> J["Use explicit bump type"]
+    I -- No --> K["Auto-select: Fixed→patch, Added→minor, Breaking→major"]
+    J --> L["Calculate NEXT_VERSION"]
+    K --> L
+    L --> M["Update __version__ in __init__.py"]
+    M --> N["Move [Unreleased] to [vX.Y.Z] in CHANGELOG"]
+    N --> O["git commit -m 'release: vX.Y.Z'"]
+    O --> P["git tag -a vX.Y.Z"]
+    P --> Q["git push origin main"]
+    Q --> R["git push origin vX.Y.Z"]
+    R --> S["gh release create vX.Y.Z"]
+    S --> T["Print release summary"]
+
+    style A fill:#047857,color:#fff
+    style C fill:#7c3aed,color:#fff
+    style D fill:#dc2626,color:#fff
+    style G fill:#7c3aed,color:#fff
+    style H fill:#dc2626,color:#fff
+    style I fill:#7c3aed,color:#fff
+    style T fill:#f59e0b,color:#1a1a1a

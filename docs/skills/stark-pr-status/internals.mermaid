@@ -1,0 +1,43 @@
+graph TD
+    A["Invoke /stark-pr-status"] --> B["Parse Arguments"]
+    B --> C["Run pr_status.py via scripts venv"]
+    C --> D{"Exit Code?"}
+    D -->|"0 — Success"| E{"Single PR or All?"}
+    D -->|"1 — No repo"| F["Error: run from git repo or use --repo"]
+    D -->|"2 — Not found"| G["Error: PR #N not found"]
+    D -->|"3 — API error"| H["Error: check credentials / rate limit"]
+    E -->|"PR number given"| I["Detailed Single-PR Dashboard"]
+    E -->|"No number / --all"| J["Summary Table (all PRs)"]
+    I --> K["Phase 3: Pattern Detection"]
+    J --> K
+    K --> L{"Stale PR? (open >7d, no reviews)"}
+    K --> M{"High noise ratio?"}
+    K --> N{"Ready to merge? (approved + CI green)"}
+    L -->|"Yes"| O["Suggest /stark-review"]
+    M -->|"Yes"| P["Suggest /stark-review-improvement"]
+    N -->|"Yes"| Q["Suggest /stark-pr-flow"]
+
+    subgraph "Data Sources"
+        S1["GitHub REST API"] --> C
+        S2["stark-review History (JSONL)"] --> C
+    end
+
+    style A fill:#1e40af,color:#fff
+    style B fill:#047857,color:#fff
+    style C fill:#1e40af,color:#fff
+    style D fill:#7c3aed,color:#fff
+    style E fill:#7c3aed,color:#fff
+    style F fill:#dc2626,color:#fff
+    style G fill:#dc2626,color:#fff
+    style H fill:#dc2626,color:#fff
+    style I fill:#f59e0b,color:#1a1a1a
+    style J fill:#f59e0b,color:#1a1a1a
+    style K fill:#1e40af,color:#fff
+    style L fill:#7c3aed,color:#fff
+    style M fill:#7c3aed,color:#fff
+    style N fill:#7c3aed,color:#fff
+    style O fill:#047857,color:#fff
+    style P fill:#047857,color:#fff
+    style Q fill:#047857,color:#fff
+    style S1 fill:#e5e7eb,color:#666,stroke-dasharray: 5 5
+    style S2 fill:#e5e7eb,color:#666,stroke-dasharray: 5 5

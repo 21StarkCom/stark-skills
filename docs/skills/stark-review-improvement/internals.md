@@ -5,35 +5,10 @@ Improve stark-skills prompts based on the Prompt Improvement Assessment from a c
 ## Architecture
 
 ```mermaid
-graph TD
-    Start((Start)) --> FindAssessment[Phase 1: Extract Assessment]
-    FindAssessment -->|Context or History| ParseItems[Parse into Action Items]
-    FindAssessment -.->|Not Found| Error[Throw Error]
-    
-    ParseItems --> Classify[Classify: Prompt, Orchestrator, Config, No-Action]
-    Classify --> Confirm{Confirm with User}
-    
-    Confirm -- User Approves --> ApplyEdits[Phase 2: Apply Changes]
-    ApplyEdits --> EditPrompt[/Prompt Edits .md/]
-    ApplyEdits --> EditScript[/Orchestrator Edits .py/]
-    ApplyEdits --> EditConfig[/Config Edits .json/]
-    
-    EditPrompt --> Validate[Phase 3: Validate]
-    EditScript --> Validate
-    EditConfig --> Validate
-    
-    Validate -->|Syntax, Compile, JSON, Diff| LogLearning[Phase 4: Log Learning]
-    
-    LogLearning --> AppendChangelog[Append to CHANGELOG.md]
-    LogLearning --> CopyHistory[Copy assessment to history]
-    
-    AppendChangelog --> Commit[Phase 5: Commit Local Changes]
-    CopyHistory --> Commit
-    
-    Commit --> End((End))
+
 ```
 
-![A visualization diagram and architectural breakdown for the stark-review-improvement skill, showing a 5-phase execution flow from extracting assessments to parsing actions, applying minimal edits to prompts/scripts/config, validating syntax, logging to a changelog, and generating a local commit.](internals.png)
+![A clean internal architecture page titled “stark-review-improvement” showing a vertical workflow from assessment extraction through user approval, targeted prompt or orchestrator edits, validation, changelog logging, and local commit. Blue nodes mark workflow phases, purple nodes mark decisions, green nodes mark editable system layers, amber nodes mark outputs, gray nodes show external inputs like conversation context and history files, and a red node shows the failure path when no assessment is found. Below the flow are tables and cards explaining write targets, data-source resolution order, mutation boundaries, extension points, and failure safeguards for the prompt-improvement loop."}}](internals.png)
 
 ## Phases
 

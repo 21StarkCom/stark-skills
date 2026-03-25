@@ -1,19 +1,4 @@
 {
-  "doc_content": {
-    "summary": "Improves stark-skills prompts based on a Prompt Improvement Assessment from a completed /stark-review run. It parses the assessment, classifies required actions into prompt edits, orchestrator fixes, or config updates, and applies surgical, backward-compatible changes. Finally, it validates the changes, logs the learning into a changelog, and creates a local git commit.",
-    "key_features": [
-      "Extracts prompt assessment matrices from conversational context or history logs.",
-      "Categorizes fixes into `prompt-edit`, `orchestrator-edit`, and `config-edit`.",
-      "Performs minimal, targeted surgical modifications to Markdown prompts, Python orchestrators, and JSON configuration files.",
-      "Runs built-in validation (markdown parsing, python compilation checking, json validation) and requests user diff review.",
-      "Automatically tracks learnings in `docs/prompt-changelog.md` and generates structured local commits."
-    ],
-    "usage_examples": [
-      "improve review prompts",
-      "start review improvement",
-      "fix review prompts",
-      "/stark-review-improvement"
-    ]
-  },
-  "alt_text": "A visualization diagram and architectural breakdown for the stark-review-improvement skill, showing a 5-phase execution flow from extracting assessments to parsing actions, applying minimal edits to prompts/scripts/config, validating syntax, logging to a changelog, and generating a local commit."
+  "doc_content": {},
+  "alt_text": "A clean internal architecture page titled \u201cstark-review-improvement\u201d showing a vertical workflow from assessment extraction through user approval, targeted prompt or orchestrator edits, validation, changelog logging, and local commit. Blue nodes mark workflow phases, purple nodes mark decisions, green nodes mark editable system layers, amber nodes mark outputs, gray nodes show external inputs like conversation context and history files, and a red node shows the failure path when no assessment is found. Below the flow are tables and cards explaining write targets, data-source resolution order, mutation boundaries, extension points, and failure safeguards for the prompt-improvement loop.\"}}"
 }

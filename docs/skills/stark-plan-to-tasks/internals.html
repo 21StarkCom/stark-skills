@@ -1,419 +1,765 @@
 <html lang="en">
 <head>
   
-  <title>stark-plan-to-tasks Internal Architecture</title>
+  
+  <title>stark-plan-to-tasks — Internal Workflow Visualization</title>
   <style>
-    /*
-     * Stark Skills — Shared Design System CSS
-     *
-     * Foundation styles for LLM-generated HTML skill visualizations.
-     * LLMs embed this inline and may extend with additional styles.
-     * All colors pass WCAG AA 4.5:1 contrast ratio.
-     *
-     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
-     */
+/*
+ * Stark Skills — Shared Design System CSS
+ *
+ * Foundation styles for LLM-generated HTML skill visualizations.
+ * LLMs embed this inline and may extend with additional styles.
+ * All colors pass WCAG AA 4.5:1 contrast ratio.
+ *
+ * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+ */
 
-    /* === Reset & Base === */
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #fafafa;
-      color: #1a1a1a;
-      line-height: 1.5;
-    }
+/* === Reset & Base === */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
 
-    /* === Header === */
-    .header { text-align: center; padding: 36px 20px 16px; }
-    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
-    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
-    .header .scope {
-      display: inline-block; font-size: 10px; font-weight: 600;
-      background: #eff6ff; color: #1e40af;
-      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
-    }
+/* === Header === */
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
 
-    /* === Container === */
-    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+/* === Container === */
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
 
-    /* === Section Title === */
-    .section-title {
-      font-size: 14px; font-weight: 700; color: #666;
-      text-transform: uppercase; letter-spacing: 1px;
-      margin: 32px 0 16px; padding-bottom: 6px;
-      border-bottom: 2px solid #e5e7eb;
-    }
+/* === Section Title === */
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
 
-    /* === Node Types === */
-    .node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; }
-    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
-    .node-desc { font-size: 10px; opacity: 0.8; }
+/* === Node Types === */
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
 
-    .node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
-    .node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
-    .node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
-    .node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
-    .node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
-    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
+.node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+.node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+.node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+.node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
+.node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
 
-    /* === Flow Layout === */
-    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
-    .flow-step {
-      display: flex; align-items: center;
-      width: 100%; max-width: 860px; min-height: 76px;
-    }
-    .flow-lane-left {
-      width: 250px; display: flex;
-      align-items: center; justify-content: flex-end;
-      padding-right: 18px; text-align: right;
-    }
-    .flow-lane-center {
-      width: 360px; display: flex;
-      align-items: center; justify-content: center;
-    }
-    .flow-lane-right {
-      width: 250px; display: flex;
-      align-items: center; padding-left: 18px; text-align: left;
-    }
-    .annotation {
-      font-size: 9px; color: #666; max-width: 220px; line-height: 1.4;
-    }
-    .annotation strong { color: #444; }
+/* === Flow Layout === */
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 180px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 180px; display: flex;
+  align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
 
-    /* === Arrows === */
-    .arrow-down {
-      width: 2px; height: 20px; background: #cbd5e1;
-      margin: 0 auto; position: relative;
-    }
-    .arrow-down::after {
-      content: ''; position: absolute; bottom: -4px; left: -4px;
-      border-left: 5px solid transparent;
-      border-right: 5px solid transparent;
-      border-top: 6px solid #cbd5e1;
-    }
-    .arrow-container {
-      display: flex; justify-content: center;
-      width: 100%; max-width: 860px;
-    }
-    .arrow-container .flow-lane-center {
-      display: flex; justify-content: center;
-    }
+/* === Arrows === */
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
 
-    /* === Cards === */
-    .card-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 16px; margin-top: 16px;
-    }
-    .card { padding: 16px; border-radius: 8px; }
-    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
-    .card p  { font-size: 11px; line-height: 1.6; }
+/* === Cards === */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
 
-    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
-    .card-blue h3 { color: #1e40af; }
-    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
-    .card-green h3 { color: #059669; }
-    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
-    .card-purple h3 { color: #7c3aed; }
-    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
-    .card-amber h3 { color: #92400e; }
-    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
-    .card-dark h3 { color: #333333; }
-    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
-    .card-red h3 { color: #dc2626; }
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
 
-    /* === Data Tables === */
-    .data-table {
-      width: 100%; max-width: 860px; margin: 16px auto;
-      border-collapse: collapse; font-size: 11px;
-    }
-    .data-table th {
-      background: #f3f4f6; padding: 8px 12px; text-align: left;
-      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
-    }
-    .data-table td {
-      padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
-    }
+/* === Data Tables === */
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
 
-    /* === Tags === */
-    .tag {
-      display: inline-block; font-size: 9px; font-weight: 600;
-      padding: 2px 8px; border-radius: 3px;
-    }
-    .tag-phase    { background: #dbeafe; color: #1e40af; }
-    .tag-decision { background: #ede9fe; color: #5b21b6; }
-    .tag-failure  { background: #fee2e2; color: #991b1b; }
-    .tag-config   { background: #d1fae5; color: #065f46; }
-    .tag-output   { background: #fef3c7; color: #92400e; }
-    .tag-external { background: #f3f4f6; color: #666666; }
+/* === Tags === */
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
 
-    /* === Legend === */
-    .legend {
-      display: flex; gap: 16px; justify-content: center;
-      margin: 16px 0 24px; flex-wrap: wrap;
-    }
-    .legend-item {
-      display: flex; align-items: center; gap: 6px;
-      font-size: 10px; color: #666;
-    }
-    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+/* === Legend === */
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
 
-    /* === Summary Grid === */
-    .summary-grid {
-      display: grid; grid-template-columns: 1fr 1fr 1fr;
-      gap: 16px; margin-top: 16px;
-    }
-    .summary-card { padding: 16px; border-radius: 8px; }
-    .summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
-    .summary-card p  { font-size: 11px; line-height: 1.5; }
+/* === Summary Grid === */
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
 
-    /* === Footer === */
-    .footer {
-      text-align: center; padding: 20px;
-      font-size: 10px; color: #999;
-    }
+/* === Winner Badge === */
+.winner-badge {
+  display: inline-block; font-size: 12px; color: #555555;
+  font-weight: 600; padding: 2px 10px; border-radius: 4px;
+  background: #f9fafb; border: 1px solid #d1d5db;
+}
+
+/* === Footer === */
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
+
+/* === Extensions === */
+.hero-strip {
+  max-width: 860px;
+  margin: 0 auto 10px;
+  background: linear-gradient(135deg, #eff6ff 0%, #f5f3ff 52%, #ecfdf5 100%);
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  padding: 16px 18px;
+}
+.hero-strip p {
+  font-size: 12px;
+  color: #374151;
+}
+.pill-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 12px;
+}
+.pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  color: #374151;
+}
+.stack-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 16px;
+}
+.band {
+  max-width: 860px;
+  margin: 18px auto 0;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.band .summary-card {
+  border: 1px solid #e5e7eb;
+}
+.kpi {
+  font-size: 20px;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+.kpi-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: #6b7280;
+}
+.mini-list {
+  margin-top: 8px;
+  padding-left: 16px;
+}
+.mini-list li {
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+.route-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-top: 16px;
+}
+.route-box {
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  padding: 14px;
+}
+.route-box h4 {
+  font-size: 12px;
+  margin-bottom: 8px;
+  color: #111827;
+}
+.route-box p {
+  font-size: 11px;
+  color: #4b5563;
+}
+.code-chip {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 10px;
+  background: #111827;
+  color: #f9fafb;
+  padding: 3px 7px;
+  border-radius: 4px;
+}
+.note-row {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+  margin-top: 16px;
+}
+.note-row .card {
+  flex: 1;
+}
+@media (max-width: 900px) {
+  .flow-step { max-width: 100%; }
+  .flow-lane-left, .flow-lane-right { width: 120px; }
+  .flow-lane-center { width: auto; flex: 1; }
+  .summary-grid, .band, .route-grid, .stack-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .flow-step {
+    display: block;
+    min-height: auto;
+    margin-bottom: 12px;
+  }
+  .flow-lane-left, .flow-lane-center, .flow-lane-right {
+    width: 100%;
+    padding: 0;
+    justify-content: center;
+    text-align: center;
+    margin-bottom: 8px;
+  }
+  .annotation {
+    max-width: none;
+  }
+}
   </style>
 </head>
 <body>
-
   <div class="header">
     <h1>stark-plan-to-tasks</h1>
-    <div class="sub">Internal Architecture & Data Flow</div>
-    <div class="scope">Complexity: 685 lines</div>
+    <div class="sub">Spec-to-issues orchestration with validation, rerun safety, doc extraction, and GitHub project integration</div>
+    <div class="scope">INTERNALS · architecture, control flow, artifacts, extension points</div>
   </div>
 
   <div class="container">
+    <div class="hero-strip">
+      <p>
+        This skill is effectively a stateful workflow engine wrapped in a markdown skill: it validates a spec,
+        decomposes it into phased issue payloads, adversarially re-checks that breakdown with external agents,
+        then mutates GitHub and the local repo only after integrity gates pass.
+      </p>
+      <div class="pill-row">
+        <div class="pill">3 LLM passes</div>
+        <div class="pill">2 auth modes</div>
+        <div class="pill">manifest-backed reruns</div>
+        <div class="pill">optional dry-run</div>
+        <div class="pill">local docs enrichment</div>
+      </div>
+    </div>
+
     <div class="legend">
-      <div class="legend-item"><div class="legend-dot node-phase"></div> Main Workflow Steps</div>
-      <div class="legend-item"><div class="legend-dot node-decision"></div> LLM & Validation Passes</div>
-      <div class="legend-item"><div class="legend-dot node-config"></div> Environment / Auth Check</div>
-      <div class="legend-item"><div class="legend-dot node-output"></div> System Outputs / State</div>
-      <div class="legend-item"><div class="legend-dot node-external"></div> External Dependencies</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#1e40af"></span>Workflow phase</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#7c3aed"></span>Decision / loop</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#047857"></span>Config / inputs</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#f59e0b"></span>Artifacts / outputs</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#dc2626"></span>Abort / failure</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#e5e7eb; border:1px dashed #9ca3af"></span>External system</div>
     </div>
 
-    <h2 class="section-title">Execution Pipeline</h2>
+    <div class="section-title">Execution Spine</div>
     <div class="flow">
-
-      <!-- Phase 1 -->
       <div class="flow-step">
         <div class="flow-lane-left">
           <div class="annotation">
-            <strong>Inputs</strong><br>
-            <code>&lt;path-to-spec&gt;</code><br>
-            Frontmatter scan / Git remote
+            <strong>Inputs</strong><br></br>
+            plan markdown, optional <span class="tag tag-config">--dry-run</span> and <span class="tag tag-config">--cleanup</span>
           </div>
         </div>
         <div class="flow-lane-center">
           <div class="node node-config">
-            <div class="node-title">1. Setup & Pre-flight Checks</div>
-            <div class="node-desc">Target repo detection, gh CLI validation</div>
+            <div class="node-title">Phase 1 · Setup &amp; Detection</div>
+            <div class="node-desc">file checks, repo inference, gh/app auth, validation agent presence, rerun mode, docs tree, labels</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="annotation">
-            <strong>State Generated</strong><br>
-            <code>PLAN_CONTENT</code>, <code>ORG_REPO</code><br>
-            <code>PLAN_SLUG</code>, <code>DOCS_TREE</code>
-          </div>
-        </div>
-      </div>
-      
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- App Auth -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="node node-external">
-            <div class="node-title">Keychain</div>
-            <div class="node-desc">STARK_CLAUDE_PRIVATE_KEY</div>
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-config">
-            <div class="node-title">App Auth & Rerun Detection</div>
-            <div class="node-desc">github_app.py token -> Probe GH permissions</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="annotation">
-            <strong>Checks</strong><br>
-            <code>gh api /repos/{O}/{R}</code><br>
-            Check existing <code>plan:{SLUG}</code>
+          <div class="node node-failure" style="width:100%;">
+            <div class="node-title">Abort Early</div>
+            <div class="node-desc">missing file, bad extension, auth failure, no repo access, missing CLI</div>
           </div>
         </div>
       </div>
 
       <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-      <!-- Phase 2 -->
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation">
-            <strong>Pass 1 Checklist</strong><br>
-            Completeness, Explicit Dependencies, Concrete File Paths
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-decision">
-            <div class="node-title">2. Plan Quality Gate (LLM 1)</div>
-            <div class="node-desc">Evaluates plan against robustness rules</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="node node-failure">
-            <div class="node-title">Loop/Abort</div>
-            <div class="node-desc">Max 3 cycles for missing info</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Phase 3 -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation">
-            <strong>Guardrails</strong><br>
-            Max 5 A.C., Max 4 Files<br>Max 500 words per Task
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-decision">
-            <div class="node-title">3. Decomposition (LLM 2)</div>
-            <div class="node-desc">Extract Phases & Tasks, AI Suitability</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="node node-output">
-            <div class="node-title">/tmp/.../breakdown.json</div>
-            <div class="node-desc">Phases, Tasks, Schema V1</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Phase 4 -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="node node-external">
-            <div class="node-title">plan_to_tasks_validate.py</div>
-            <div class="node-desc">Dispatches to codex/gemini</div>
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-decision">
-            <div class="node-title">4. Validation (LLM 3)</div>
-            <div class="node-desc">Adversarial checks (Coverage, Sizing, Dups)</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="node node-failure">
-            <div class="node-title">Loop/Abort</div>
-            <div class="node-desc">Max 2 cycles for fixable deps</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Phase 5 -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation">
-            <strong>Native Auth <code>unset GH_TOKEN</code></strong><br>
-            (Issues created by user)<br><br>
-            <strong>Bot Auth <code>GH_TOKEN=...</code></strong><br>
-            (Add to Project Boards)
+          <div class="node node-external" style="width:100%;">
+            <div class="node-title">Current Checkout</div>
+            <div class="node-desc">git remote, docs tree, dirty working tree</div>
           </div>
         </div>
         <div class="flow-lane-center">
           <div class="node node-phase">
-            <div class="node-title">5. GitHub Issue Creation</div>
-            <div class="node-desc">4-Pass Creation -> Dependencies -> Projects Integration</div>
+            <div class="node-title">Phase 2 · Quality Gate (Pass 1)</div>
+            <div class="node-desc">evaluate completeness, paths, dependencies, boundaries, criteria, edge cases, security/perf</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="node node-output">
-            <div class="node-title">Issues & Labels</div>
-            <div class="node-desc">Types, Story Points, Risk mapped</div>
+          <div class="node node-decision" style="width:100%;">
+            <div class="node-title">Up to 3 Rounds</div>
+            <div class="node-desc">user edits plan, skill re-reads disk, re-validates, never auto-fixes</div>
           </div>
         </div>
       </div>
 
       <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-      <!-- Phase 6 -->
       <div class="flow-step">
         <div class="flow-lane-left">
           <div class="annotation">
-            <strong>Routing</strong><br>
-            docs/adr, docs/data, docs/api, docs/constraints.md
+            <strong>Internal contract</strong><br></br>
+            no architecture debate, no scope expansion, no inferred implementation detail
           </div>
         </div>
         <div class="flow-lane-center">
-          <div class="node node-decision">
-            <div class="node-title">6. Knowledge Extraction (LLM 4)</div>
-            <div class="node-desc">Extract context from plan & append to docs tree</div>
+          <div class="node node-phase">
+            <div class="node-title">Phase 3 · Decomposition (Pass 2)</div>
+            <div class="node-desc">identify phases first, then tasks per phase, then schema validation + dependency checks + plan hash</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="node node-output">
-            <div class="node-title">docs/decisions.md</div>
-            <div class="node-desc">Local Git Commit; Plan Deleted</div>
+          <div class="node node-output" style="width:100%;">
+            <div class="node-title">Breakdown JSON</div>
+            <div class="node-desc">tmp file, chmod 600, phases + tasks + metrics + manifest seed</div>
           </div>
         </div>
       </div>
 
       <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-      <!-- Phase 7 -->
       <div class="flow-step">
-        <div class="flow-lane-left"></div>
+        <div class="flow-lane-left">
+          <div class="node node-external" style="width:100%;">
+            <div class="node-title">Validation Agents</div>
+            <div class="node-desc">default codex; configurable union of findings if multiple agents disagree</div>
+          </div>
+        </div>
         <div class="flow-lane-center">
           <div class="node node-phase">
-            <div class="node-title">7. Summary & Metrics</div>
-            <div class="node-desc">Print results, log observability</div>
+            <div class="node-title">Phase 4 · Validation (Pass 3)</div>
+            <div class="node-desc">hash check, envelope build, separate-agent adversarial review, fix loops, dry-run preview exit</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="node node-output">
-            <div class="node-title">stark-plan-to-tasks.jsonl</div>
-            <div class="node-desc">Duration, SP, Gap Metrics</div>
+          <div class="node node-decision" style="width:100%;">
+            <div class="node-title">Max 2 Fix Iterations</div>
+            <div class="node-desc">fix local detail issues or loop back to decomposition for structural flaws</div>
           </div>
         </div>
       </div>
 
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <strong>Auth switch</strong><br></br>
+            unset bot token so created issues belong to the user, not <code>stark-claude[bot]</code>
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Phase 5 · Issue Creation</div>
+            <div class="node-desc">ensure labels, create phase issues, create task issues, patch dependencies, patch phase checklists</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-output" style="width:100%;">
+            <div class="node-title">Run Manifest</div>
+            <div class="node-desc">task_id → issue_number → phase_id for resume and rerun safety</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="node node-config" style="width:100%;">
+            <div class="node-title">Optional Project Step</div>
+            <div class="node-desc">activated only when <code>.github/project-config.json</code> exists</div>
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Phase 5.1 · Project Integration</div>
+            <div class="node-desc">switch back to app token, add issues to project, set fields like Status, Risk, AI Suitability, Priority</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-failure" style="width:100%;">
+            <div class="node-title">Best-Effort Only</div>
+            <div class="node-desc">GraphQL/project failures warn and continue; issue creation remains authoritative</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="node node-external" style="width:100%;">
+            <div class="node-title">Repo Docs Tree</div>
+            <div class="node-desc">route architectural knowledge into docs or create fallback files</div>
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Phase 6 · Knowledge Extraction</div>
+            <div class="node-desc">append-only enrichment, decisions ledger update, delete plan, targeted git add/git rm, local-only commit</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-failure" style="width:100%;">
+            <div class="node-title">Commit Guard</div>
+            <div class="node-desc">dirty tree warning, commit failure preserves plan and leaves changes unstaged</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <strong>Observability</strong><br></br>
+            task create/update events, timestamped logs, 5-minute checkpoints
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-output">
+            <div class="node-title">Phase 7 · Summary &amp; Metrics</div>
+            <div class="node-desc">phase links, counts, distributions, cleanup temp files, append JSONL metrics record</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-output" style="width:100%;">
+            <div class="node-title">Terminal + JSONL</div>
+            <div class="node-desc">human summary plus machine-readable longitudinal telemetry</div>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <h2 class="section-title">Core Abstractions & Extension Points</h2>
-    
+    <div class="band">
+      <div class="summary-card card-blue">
+        <div class="kpi">7</div>
+        <div class="kpi-label">Phases</div>
+        <p>Ordered pipeline with explicit abort points before mutation.</p>
+      </div>
+      <div class="summary-card card-purple">
+        <div class="kpi">3</div>
+        <div class="kpi-label">LLM Passes</div>
+        <p>Gate, decompose, adversarial validate.</p>
+      </div>
+      <div class="summary-card card-green">
+        <div class="kpi">2</div>
+        <div class="kpi-label">Auth Contexts</div>
+        <p>Bot token for probing/project fields, user auth for visible issue authorship.</p>
+      </div>
+      <div class="summary-card card-amber">
+        <div class="kpi">1</div>
+        <div class="kpi-label">Source Of Truth</div>
+        <p>The plan becomes issues plus enriched docs, then is removed.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Core Artifacts &amp; State Transitions</div>
     <div class="card-grid">
-      <div class="card card-purple">
-        <h3>Multi-Agent Validation Envelope</h3>
-        <p>The output of Pass 2 is serialized into a <code>breakdown.json</code> alongside the original <code>PLAN_CONTENT</code>. This JSON envelope is dispatched via <code>$SCRIPTS/plan_to_tasks_validate.py</code> to independent LLM binaries (e.g., codex, gemini) acting as adversarial reviewers ensuring coverage and dependency sanity.</p>
-      </div>
-
       <div class="card card-blue">
-        <h3>GitHub Type & Label Taxonomy</h3>
-        <p>Issues are labeled dimensionally (Story Points, Risk, Confidence) but also map directly to native GitHub Issue Types (<code>Feature</code>, <code>Task</code>, <code>Bug</code>) using <code>--field type="..."</code> rather than falling back to type labels.</p>
+        <h3>Plan File as Mutable Input</h3>
+        <p>The spec markdown is read repeatedly, not cached blindly. Pass 1 can force up to three user-edit cycles, and Pass 4 re-hashes the file before validation dispatch so decomposition cannot drift from the current plan.</p>
       </div>
-
-      <div class="card card-green">
-        <h3>Dual Auth Boundary</h3>
-        <p>The skill uses the <strong>stark-claude GitHub App</strong> for setup, reading, and Project GraphQL queries, but explicitly unsets <code>GH_TOKEN</code> during the issue creation pass to ensure the issues are correctly attributed to the <strong>human user's native CLI auth</strong>.</p>
-      </div>
-
       <div class="card card-amber">
-        <h3>Automated Knowledge Retention</h3>
-        <p>Before deleting the plan, Pass 4 automatically sorts unstructured architectural decisions, data models, and constraints into the repository's <code>docs/</code> tree natively, preventing knowledge silos in temporary PRs or deleted markdown files.</p>
+        <h3>Breakdown JSON as Durable Work Packet</h3>
+        <p>A temp JSON file with <code>schema_version</code>, <code>plan_hash</code>, phases, tasks, and later a <code>_manifest</code>. This is the handoff boundary between decomposition, validation, issue creation, and rerun recovery.</p>
+      </div>
+      <div class="card card-purple">
+        <h3>Validation Envelope</h3>
+        <p>The skill packages raw plan markdown, breakdown JSON, and the plan hash into a single envelope so the external validation agent can assess completeness, overlap, dependency integrity, and sizing without hidden context.</p>
+      </div>
+      <div class="card card-green">
+        <h3>Run Manifest Enables Idempotency</h3>
+        <p>Every created issue appends <code>{task_id, issue_number, phase_id}</code>. On rerun, the skill cross-references existing issues and the manifest so partial runs can resume instead of duplicating work.</p>
+      </div>
+      <div class="card card-dark">
+        <h3>Docs Tree as Routing Map</h3>
+        <p>The local <code>docs/</code> tree is not just documentation output; it acts as a content router. Architectural decisions, data models, APIs, constraints, and glossary terms each pick append destinations or create fallback files.</p>
+      </div>
+      <div class="card card-red">
+        <h3>Plan Deletion is Late-Bound</h3>
+        <p>Deletion is intentionally deferred until issues exist and enrichment succeeds. If commit fails, the plan stays, avoiding the worst failure mode: losing source intent without durable downstream artifacts.</p>
       </div>
     </div>
 
-  </div>
-  
-  <div class="footer">
-    stark-plan-to-tasks internal visualization · Rendered by Gemini CLI
-  </div>
+    <div class="section-title">Config, Defaults, and Extension Points</div>
+    <div class="route-grid">
+      <div class="route-box">
+        <h4>Validation Agent Stack</h4>
+        <p>Reads <code>validation_agents</code> from global → org → repo config, defaulting to <code>["codex"]</code>. Each configured binary must exist in PATH before any LLM pass begins.</p>
+        <span class="code-chip">default: ["codex"]</span>
+      </div>
+      <div class="route-box">
+        <h4>Project Integration Toggle</h4>
+        <p>Presence of <code>.github/project-config.json</code> opt-ins the entire GitHub Project phase. Without it, project mutations are skipped cleanly and the core issue workflow remains unchanged.</p>
+        <span class="code-chip">extension point: repo-level opt-in</span>
+      </div>
+      <div class="route-box">
+        <h4>Docs Routing Heuristics</h4>
+        <p>Knowledge extraction checks well-known doc locations first, then creates fallback files such as <code>docs/api.md</code> or sequential ADR entries when no natural home exists.</p>
+        <span class="code-chip">append-only, never merge/replace</span>
+      </div>
+    </div>
 
+    <div class="note-row">
+      <div class="card card-green">
+        <h3>Native GitHub Issue Type Mapping</h3>
+        <p><code>feature</code>, <code>task</code>, and <code>bug</code> map to org-level GitHub Issue Types via <code>--field type=...</code>. The skill explicitly forbids creating synthetic <code>type:*</code> labels, which keeps it aligned with the org's canonical issue taxonomy.</p>
+      </div>
+      <div class="card card-purple">
+        <h3>Prompt-Embedded Validator Contract</h3>
+        <p>The separate-agent validator is forced into a strict JSON output schema and a fixed checklist. That makes agent outputs parseable, retryable, and comparable across providers rather than conversational and brittle.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Data Flow Table</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Stage</th>
+          <th>Reads</th>
+          <th>Writes / Mutates</th>
+          <th>Developer-Relevant Constraint</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Setup</td>
+          <td>plan file, git remotes, config hierarchy, labels, docs tree</td>
+          <td>none</td>
+          <td>All hard failures happen here to avoid costly partial side effects.</td>
+        </tr>
+        <tr>
+          <td>Pass 1</td>
+          <td>plan markdown from disk</td>
+          <td>gap report only</td>
+          <td>No auto-rewriting; human remains source of truth for design changes.</td>
+        </tr>
+        <tr>
+          <td>Pass 2</td>
+          <td>approved plan markdown</td>
+          <td>breakdown JSON temp file</td>
+          <td>Schema validation retries once, then halts.</td>
+        </tr>
+        <tr>
+          <td>Pass 3</td>
+          <td>plan hash + breakdown + validator output</td>
+          <td>revised breakdown or dry-run preview</td>
+          <td>Structural issues bounce back to decomposition, not patch-only repair.</td>
+        </tr>
+        <tr>
+          <td>Issue creation</td>
+          <td>breakdown JSON, existing labels, rerun state</td>
+          <td>labels, issues, patch updates, manifest entries</td>
+          <td>Uses body files and <code>gh api --field</code> to avoid shell injection from LLM text.</td>
+        </tr>
+        <tr>
+          <td>Enrichment</td>
+          <td>plan, docs tree, git status</td>
+          <td>docs, decisions log, local commit, plan deletion</td>
+          <td>Append-only docs policy prevents destructive merge behavior.</td>
+        </tr>
+        <tr>
+          <td>Summary</td>
+          <td>manifest, counters, distributions</td>
+          <td>terminal summary, JSONL metrics, temp cleanup</td>
+          <td>Metrics give the skill a longitudinal operational trail.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="section-title">Critical Control Logic</div>
+    <div class="stack-grid">
+      <div class="card card-dark">
+        <h3>Why This Skill Is Operationally Heavy</h3>
+        <p>It mixes three risk domains that are usually isolated: LLM generation, GitHub mutation, and local repo mutation. The design compensates with repeated integrity checks, explicit human checkpoints, temp-file contracts, and late execution of destructive actions.</p>
+        <ul class="mini-list">
+          <li>Repo detection is repeated and compared against the current checkout.</li>
+          <li>Pass boundaries are explicit and backed by disk artifacts, not ephemeral memory.</li>
+          <li>Mutation order is carefully staged: issue bodies first use placeholders, then a patch pass resolves dependency numbers.</li>
+          <li>Project integration is additive and non-blocking.</li>
+          <li>Knowledge extraction is downstream from issue creation, never upstream.</li>
+        </ul>
+      </div>
+      <div class="card card-red">
+        <h3>Failure Semantics</h3>
+        <p>The workflow is intentionally asymmetric: early phases fail hard, late phases fail soft where possible.</p>
+        <ul class="mini-list">
+          <li>Setup/auth/repo access: hard stop.</li>
+          <li>Quality gate and validation non-convergence: hard stop.</li>
+          <li>Project field mutation: warn and continue.</li>
+          <li>Commit failure after enrichment: preserve plan and leave changes unstaged.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-title">Representative Failure Modes</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Failure</th>
+          <th>Detection Point</th>
+          <th>Recovery / Outcome</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Plan missing, empty, or not <code>.md</code></td>
+          <td>Phase 1.1</td>
+          <td>Abort before any LLM or GitHub work.</td>
+        </tr>
+        <tr>
+          <td>Repo cannot be inferred or mismatches checkout</td>
+          <td>Phase 1.2</td>
+          <td>Ask user or warn and require explicit confirmation.</td>
+        </tr>
+        <tr>
+          <td>stark-claude auth or repo write access missing</td>
+          <td>Phase 1.4 / 1.5</td>
+          <td>Abort; nothing else is safe to continue.</td>
+        </tr>
+        <tr>
+          <td>Configured validator binary missing</td>
+          <td>Phase 1.6</td>
+          <td>Abort with named missing agent.</td>
+        </tr>
+        <tr>
+          <td>Malformed decomposition / validation JSON</td>
+          <td>Phase 3 / 4</td>
+          <td>Retry once with stronger prompt, then halt.</td>
+        </tr>
+        <tr>
+          <td>API rate limit or partial issue creation</td>
+          <td>Phase 5</td>
+          <td>Manifest preserves partial state; rerun can skip completed issues.</td>
+        </tr>
+        <tr>
+          <td>Plan changed after decomposition</td>
+          <td>Phase 4 integrity check</td>
+          <td>Re-run decomposition before validating stale output.</td>
+        </tr>
+        <tr>
+          <td>Dirty tree or commit hook failure during enrichment</td>
+          <td>Phase 6</td>
+          <td>Warn, preserve plan, leave enrichment changes for manual review.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="section-title">What Contributors Would Change</div>
+    <div class="card-grid">
+      <div class="card card-blue">
+        <h3>Change Breakdown Granularity</h3>
+        <p>Adjust the task schema constraints and sizing guardrails if you want larger or smaller issues. The decomposition pass and validation pass must stay in sync or the validator will reject the new task shape.</p>
+      </div>
+      <div class="card card-green">
+        <h3>Add New Validation Agents</h3>
+        <p>Extend <code>validation_agents</code> and the normalization logic in the validator wrapper. The rest of the skill already supports multi-agent union semantics for findings.</p>
+      </div>
+      <div class="card card-purple">
+        <h3>Reroute Knowledge Extraction</h3>
+        <p>Modify the docs routing matrix and ADR fallback behavior if your repo uses a different documentation topology. The append-only rule is the safety invariant worth preserving.</p>
+      </div>
+      <div class="card card-amber">
+        <h3>Evolve Project Fields</h3>
+        <p>Project integration is the cleanest extension seam: field names and value derivation live after issue creation, and failures there do not compromise the main workflow.</p>
+      </div>
+    </div>
+
+    <div class="footer"><div class="winner-badge">Visualization by Codex · Score: 8.5/10 · Generated from SKILL.md</div></div>
+  </div>
 </body>
 </html>

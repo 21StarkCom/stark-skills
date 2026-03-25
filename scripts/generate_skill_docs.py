@@ -281,6 +281,24 @@ def build_generation_prompt(skill: SkillData, audience: str, css: str) -> str:
         "internals": "contributor/developer focused: internal architecture, data flow, extension points",
     }.get(audience, audience)
 
+    # Audience-specific doc content keys
+    if audience == "usage":
+        doc_keys_spec = (
+            '  "prerequisites": "what must be installed/configured before using this skill",\n'
+            '  "quick_start": "simplest invocation example",\n'
+            '  "common_patterns": "2-3 common usage patterns as markdown",\n'
+            '  "troubleshooting": "common issues and how to fix them",\n'
+            '  "related_skills": ["skill-name-1", "skill-name-2"],\n'
+            '  "arguments_table": "markdown table of arguments if any"'
+        )
+    else:
+        doc_keys_spec = (
+            '  "phase_walkthrough": "step-by-step description of each phase",\n'
+            '  "config_schema": "config options and their defaults",\n'
+            '  "failure_modes": "what can go wrong and how it recovers",\n'
+            '  "how_to_modify": "how to change this skill behavior"'
+        )
+
     return (
         f"Generate a standalone HTML page visualizing the skill **{skill.name}**.\n\n"
         f"## Audience\n\n"
@@ -296,21 +314,30 @@ def build_generation_prompt(skill: SkillData, audience: str, css: str) -> str:
         f"Use the following CSS inline in a `<style>` tag. You may extend it but do NOT "
         f"link external stylesheets or load external resources.\n\n"
         f"```css\n{css}\n```\n\n"
+        f"## CRITICAL RULES\n\n"
+        f"- Output the raw HTML directly — do NOT wrap it in a JSON string or code block.\n"
+        f"- Do NOT escape the HTML (no \\n, no \\\"). Just output the literal HTML.\n"
+        f"- Do NOT run shell commands or search files. Generate the content from the skill "
+        f"description above.\n"
+        f"- You MUST include all 4 outputs below. Missing any is a failure.\n\n"
         f"## Required outputs\n\n"
         f"Return ALL of the following in your response:\n\n"
-        f"1. **standalone HTML page** — Complete `<html>...</html>` document with the CSS "
-        f"inlined in a `<style>` tag. Use design-system classes (node-phase, node-decision, "
-        f"node-action, etc.). No external resources.\n\n"
-        f"2. **Mermaid diagram** — A mermaid flowchart in a fenced code block:\n"
-        f"````\n```mermaid\ngraph TD\n  A[Start] --> B[End]\n```\n````\n\n"
-        f"3. **Doc content JSON** — Structured content as a JSON code block:\n"
-        f"```json\n{{\n"
-        f'  "summary": "one-paragraph summary",\n'
-        f'  "key_features": ["feature1", "feature2"],\n'
-        f'  "usage_examples": ["example1"]\n'
-        f"}}\n```\n\n"
-        f"4. **Alt text** — A descriptive alt text line for a PNG screenshot of the HTML, "
-        f"prefixed with `Alt text: `\n"
+        f"### 1. Standalone HTML page\n\n"
+        f"Complete `<html>...</html>` document with the CSS inlined in a `<style>` tag. "
+        f"Use design-system classes (node-phase, node-decision, node-config, node-output, "
+        f"node-failure, node-external, flow, card-*, data-table, legend, etc.). "
+        f"No external resources. Include a `<div class=\"footer\">placeholder</div>` at the end.\n\n"
+        f"### 2. Mermaid diagram (REQUIRED)\n\n"
+        f"A mermaid flowchart showing the skill's workflow. Output it in a fenced code block:\n\n"
+        f"````\n```mermaid\ngraph TD\n    A[Step 1] --> B[Step 2]\n    B --> C[Step 3]\n```\n````\n\n"
+        f"This MUST be present — it gets embedded in the markdown documentation.\n\n"
+        f"### 3. Doc content JSON\n\n"
+        f"Structured content for markdown doc sections. Output as a JSON code block with "
+        f"EXACTLY these keys:\n\n"
+        f"```json\n{{\n{doc_keys_spec}\n}}\n```\n\n"
+        f"### 4. Alt text\n\n"
+        f"A descriptive alt text for a PNG screenshot of the HTML. "
+        f"Prefix with exactly `Alt text: `\n"
     )
 
 
@@ -369,22 +396,43 @@ def _parse_viz_response(raw: str) -> dict[str, Any]:
     result: dict[str, Any] = {"html": "", "mermaid": "", "doc_content": {}, "alt_text": ""}
 
     # Extract HTML: look for <html>...</html>
-    html_match = re.search(r"(<html[\s\S]*?</html>)", raw, re.IGNORECASE)
-    if html_match:
-        result["html"] = _unescape_json_string(html_match.group(1))
+    # Try inside ```html code block first (some LLMs wrap it)
+    html_block = re.search(r"```html\s*\n([\s\S]*?)```", raw)
+    if html_block and "<html" in html_block.group(1).lower():
+        result["html"] = _unescape_json_string(html_block.group(1))
+    else:
+        html_match = re.search(r"(<html[\s\S]*?</html>)", raw, re.IGNORECASE)
+        if html_match:
+            result["html"] = _unescape_json_string(html_match.group(1))
 
-    # Extract mermaid block
+    # Extract mermaid block — try multiple patterns
+    # Pattern 1: ```mermaid\n...\n```
     mermaid_match = re.search(r"```mermaid\s*\n([\s\S]*?)```", raw)
     if mermaid_match:
         result["mermaid"] = mermaid_match.group(1).strip()
+    else:
+        # Pattern 2: ````mermaid (4 backticks)
+        mermaid_match = re.search(r"````mermaid\s*\n([\s\S]*?)````", raw)
+        if mermaid_match:
+            result["mermaid"] = mermaid_match.group(1).strip()
+        else:
+            # Pattern 3: mermaid inside the HTML (some LLMs put it there)
+            if result["html"]:
+                mermaid_in_html = re.search(r"graph\s+(?:TD|LR|TB|BT)\s*\n[\s\S]*?(?=\n\s*```|\n\s*<)", result["html"])
+                # Don't use this — it would extract from within the HTML
 
-    # Extract JSON doc content
-    json_match = re.search(r"```json\s*\n([\s\S]*?)```", raw)
-    if json_match:
-        try:
-            result["doc_content"] = json.loads(json_match.group(1))
-        except json.JSONDecodeError:
-            pass
+    # Extract JSON doc content — find the last ```json block (first might be inside HTML examples)
+    json_matches = list(re.finditer(r"```json\s*\n([\s\S]*?)```", raw))
+    if json_matches:
+        # Use the last JSON block (the one after the HTML, not inside it)
+        for jm in reversed(json_matches):
+            try:
+                parsed = json.loads(jm.group(1))
+                if isinstance(parsed, dict):
+                    result["doc_content"] = parsed
+                    break
+            except json.JSONDecodeError:
+                continue
 
     # Extract alt text
     alt_match = re.search(r"Alt text:\s*(.+)", raw)
@@ -683,59 +731,75 @@ def select_winner(agent_scores: dict[str, float], accuracy_scores: dict[str, flo
 
 
 def run_evaluation(skill: SkillData, audience: str, candidate_pngs: dict[str, Path]) -> dict[str, Any]:
-    """Run Claude to evaluate candidate PNGs. Returns dict with winner, scores, quality_flag."""
-    prompt = build_evaluation_prompt(skill.name, audience, len(candidate_pngs))
+    """Run Claude to evaluate candidate PNGs via Anthropic SDK.
 
-    # Build claude command with image inputs
-    cmd = ["claude", "-p", "-", "--output-format", "text", "--model", "claude-opus-4-6"]
-    for agent_name, png_path in candidate_pngs.items():
-        cmd.extend(["--image", str(png_path)])
-
-    # Add agent labels to prompt
-    labeled_prompt = prompt + "\n\n## Candidates\n\n"
-    for i, agent_name in enumerate(candidate_pngs.keys(), 1):
-        labeled_prompt += f"- Image {i}: **{agent_name}**\n"
+    Uses the SDK directly (not the CLI) because Claude CLI doesn't support
+    image inputs. Sends PNG screenshots as base64 image content blocks.
+    """
+    import base64
 
     try:
-        proc = subprocess.run(
-            cmd, input=labeled_prompt,
-            capture_output=True, text=True, timeout=120,
+        import anthropic
+    except ImportError:
+        return {"winner": None, "winner_score": 0, "scores": {}, "quality_flag": "error",
+                "error": "anthropic SDK not installed"}
+
+    prompt_text = build_evaluation_prompt(skill.name, audience, len(candidate_pngs))
+
+    # Build message content with images
+    content: list[dict[str, Any]] = []
+    agent_order: list[str] = []
+    for agent_name, png_path in candidate_pngs.items():
+        agent_order.append(agent_name)
+        png_data = base64.standard_b64encode(png_path.read_bytes()).decode("ascii")
+        content.append({"type": "text", "text": f"\n## Candidate: {agent_name}\n"})
+        content.append({
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/png", "data": png_data},
+        })
+    content.append({"type": "text", "text": f"\n\n{prompt_text}"})
+
+    try:
+        client = anthropic.Anthropic()
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2048,
+            messages=[{"role": "user", "content": content}],
         )
-        if proc.returncode != 0:
-            return {"winner": None, "winner_score": 0, "scores": {}, "quality_flag": "error",
-                    "error": f"CLI exit {proc.returncode}"}
-
-        raw = proc.stdout or ""
-        scores_list = parse_evaluation_scores(raw)
-        if not scores_list:
-            return {"winner": None, "winner_score": 0, "scores": {}, "quality_flag": "parse_error"}
-
-        agent_weighted: dict[str, float] = {}
-        accuracy_map: dict[str, float] = {}
-        all_scores: dict[str, dict] = {}
-        for entry in scores_list:
-            agent_name = entry.get("agent", "")
-            factor_scores = {k: v for k, v in entry.items() if k in FACTOR_WEIGHTS}
-            avg = compute_weighted_average(factor_scores, FACTOR_WEIGHTS)
-            agent_weighted[agent_name] = avg
-            accuracy_map[agent_name] = factor_scores.get("accuracy", 0)
-            all_scores[agent_name] = factor_scores
-
-        winner = select_winner(agent_weighted, accuracy_map)
-        winner_score = agent_weighted.get(winner, 0)
-        quality_flag = "good" if winner_score >= 7.0 else "acceptable" if winner_score >= 5.0 else "poor"
-
-        return {
-            "winner": winner,
-            "winner_score": round(winner_score, 2),
-            "scores": all_scores,
-            "quality_flag": quality_flag,
-        }
-
-    except subprocess.TimeoutExpired:
-        return {"winner": None, "winner_score": 0, "scores": {}, "quality_flag": "timeout"}
+        raw = response.content[0].text if response.content else ""
     except Exception as e:
-        return {"winner": None, "winner_score": 0, "scores": {}, "quality_flag": "error", "error": str(e)}
+        return {"winner": None, "winner_score": 0, "scores": {}, "quality_flag": "error",
+                "error": str(e)[:200]}
+
+    scores_list = parse_evaluation_scores(raw)
+    if not scores_list:
+        return {"winner": None, "winner_score": 0, "scores": {}, "quality_flag": "parse_error",
+                "raw": raw[:500]}
+
+    agent_weighted: dict[str, float] = {}
+    accuracy_map: dict[str, float] = {}
+    all_scores: dict[str, dict] = {}
+    for entry in scores_list:
+        agent_name = entry.get("agent", "")
+        factor_scores = {k: v for k, v in entry.items() if k in FACTOR_WEIGHTS}
+        avg = compute_weighted_average(factor_scores, FACTOR_WEIGHTS)
+        agent_weighted[agent_name] = avg
+        accuracy_map[agent_name] = factor_scores.get("accuracy", 0)
+        all_scores[agent_name] = factor_scores
+
+    if not agent_weighted:
+        return {"winner": None, "winner_score": 0, "scores": all_scores, "quality_flag": "no_valid_scores"}
+
+    winner = select_winner(agent_weighted, accuracy_map)
+    winner_score = agent_weighted.get(winner, 0)
+    quality_flag = "good" if winner_score >= 7.0 else "acceptable" if winner_score >= 5.0 else "poor"
+
+    return {
+        "winner": winner,
+        "winner_score": round(winner_score, 2),
+        "scores": all_scores,
+        "quality_flag": quality_flag,
+    }
 
 
 # ── Winner stamping & audit trail ─────────────────────────────────────

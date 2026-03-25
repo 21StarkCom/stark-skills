@@ -1,18 +1,15 @@
 {
   "doc_content": {
-    "summary": "The stark-claude-md-improver skill automatically audits and enhances CLAUDE.md instruction files across a project's hierarchy, evaluating them for clarity, completeness, accuracy, and AI effectiveness before interactively applying improvements.",
-    "key_features": [
-      "Hierarchical file discovery (home, org, project, subdirectories)",
-      "Rigorous 5-dimension evaluation with 1-5 scoring",
-      "Cross-referencing with actual project state to identify stale content",
-      "Interactive reporting and direct application of optimizations",
-      "Observability tracking of metrics and scores"
+    "prerequisites": "No special prerequisites. Works in any project with at least one CLAUDE.md file. The skill auto-discovers CLAUDE.md files across the hierarchy (home, org, project, subdirectories).",
+    "quick_start": "/stark-claude-md-improver",
+    "common_patterns": "**Audit all CLAUDE.md files in a project:**\n`/stark-claude-md-improver` \u2014 discovers and analyzes the full hierarchy.\n\n**Target a specific file:**\n`/stark-claude-md-improver ~/git/myproject/CLAUDE.md` \u2014 analyzes only that file.\n\n**After onboarding a new project:**\nRun after `/stark-onboard-project` to verify the generated CLAUDE.md is complete and effective.",
+    "troubleshooting": "**No CLAUDE.md files found:** Ensure you're in a project directory or provide an explicit path. The skill searches ~ \u2192 org \u2192 project \u2192 subdirs.\n\n**Stale references flagged:** The skill cross-references actual file paths and commands. If it flags something as missing, verify the file exists \u2014 it may have been renamed or moved.\n\n**Low accuracy score:** Usually means build commands or file paths in CLAUDE.md are outdated. Update them to match current project state.",
+    "related_skills": [
+      "stark-onboard-project",
+      "stark-session",
+      "stark-init-docs"
     ],
-    "usage_examples": [
-      "improve claude.md",
-      "review claude.md",
-      "audit claude.md /path/to/specific/CLAUDE.md"
-    ]
+    "arguments_table": "| Argument | Required | Description |\n|----------|----------|-------------|\n| `[path]` | No | Path to a specific CLAUDE.md file. If omitted, auto-discovers all CLAUDE.md files in the project hierarchy. |"
   },
-  "alt_text": "A workflow visualization of the stark-claude-md-improver skill showing the 5-step process of discovery, dimensional analysis, report generation, interactive user prompting, and file modification."
+  "alt_text": "Usage diagram for stark-claude-md-improver skill showing a vertical workflow: invoke the skill with an optional path, discover CLAUDE.md files across the hierarchy, analyze each file across five dimensions (structure, completeness, accuracy, AI effectiveness, hierarchy optimization), generate a report with scores and suggestions, then optionally apply changes. Includes cards describing each analysis dimension, a table of report output sections, invocation triggers, and key rules about not over-adding content."
 }

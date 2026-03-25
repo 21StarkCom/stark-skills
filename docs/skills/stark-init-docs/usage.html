@@ -2,361 +2,581 @@
 <head>
   
   
-  <title>stark-init-docs - Skill Visualization</title>
+  <title>stark-init-docs</title>
   <style>
-    /*
-     * Stark Skills — Shared Design System CSS
-     *
-     * Foundation styles for LLM-generated HTML skill visualizations.
-     * LLMs embed this inline and may extend with additional styles.
-     * All colors pass WCAG AA 4.5:1 contrast ratio.
-     *
-     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
-     */
+/*
+ * Stark Skills — Shared Design System CSS
+ *
+ * Foundation styles for LLM-generated HTML skill visualizations.
+ * LLMs embed this inline and may extend with additional styles.
+ * All colors pass WCAG AA 4.5:1 contrast ratio.
+ *
+ * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+ */
 
-    /* === Reset & Base === */
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #fafafa;
-      color: #1a1a1a;
-      line-height: 1.5;
-    }
+/* === Reset & Base === */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
 
-    /* === Header === */
-    .header { text-align: center; padding: 36px 20px 16px; }
-    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
-    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
-    .header .scope {
-      display: inline-block; font-size: 10px; font-weight: 600;
-      background: #eff6ff; color: #1e40af;
-      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
-    }
+/* === Header === */
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
 
-    /* === Container === */
-    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+/* === Container === */
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
 
-    /* === Section Title === */
-    .section-title {
-      font-size: 14px; font-weight: 700; color: #666;
-      text-transform: uppercase; letter-spacing: 1px;
-      margin: 32px 0 16px; padding-bottom: 6px;
-      border-bottom: 2px solid #e5e7eb;
-    }
+/* === Section Title === */
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
 
-    /* === Node Types === */
-    .node { border-radius: 8px; padding: 12px 16px; text-align: center; }
-    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
-    .node-desc { font-size: 10px; opacity: 0.8; }
+/* === Node Types === */
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
 
-    .node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
-    .node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
-    .node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
-    .node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
-    .node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
-    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
+.node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+.node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+.node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+.node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
+.node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
 
-    /* === Flow Layout === */
-    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
-    .flow-step {
-      display: flex; align-items: stretch;
-      width: 100%; max-width: 860px; min-height: 76px;
-    }
-    .flow-lane-left {
-      width: 180px; display: flex;
-      align-items: center; justify-content: flex-end;
-      padding-right: 18px;
-    }
-    .flow-lane-center {
-      width: 500px; display: flex;
-      align-items: center; justify-content: center;
-    }
-    .flow-lane-right {
-      width: 180px; display: flex;
-      align-items: center; padding-left: 18px;
-    }
-    .annotation {
-      font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
-    }
-    .annotation strong { color: #444; }
+/* === Flow Layout === */
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 180px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 180px; display: flex; align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
 
-    /* === Arrows === */
-    .arrow-down {
-      width: 2px; height: 20px; background: #cbd5e1;
-      margin: 0 auto; position: relative;
-    }
-    .arrow-down::after {
-      content: ''; position: absolute; bottom: -4px; left: -4px;
-      border-left: 5px solid transparent;
-      border-right: 5px solid transparent;
-      border-top: 6px solid #cbd5e1;
-    }
-    .arrow-container {
-      display: flex; justify-content: center;
-      width: 100%; max-width: 860px;
-    }
-    .arrow-container .flow-lane-center {
-      display: flex; justify-content: center;
-    }
+/* === Arrows === */
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
 
-    /* === Cards === */
-    .card-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 16px; margin-top: 16px;
-    }
-    .card { padding: 16px; border-radius: 8px; }
-    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
-    .card p  { font-size: 11px; line-height: 1.6; }
+/* === Cards === */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
 
-    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
-    .card-blue h3 { color: #1e40af; }
-    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
-    .card-green h3 { color: #059669; }
-    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
-    .card-purple h3 { color: #7c3aed; }
-    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
-    .card-amber h3 { color: #92400e; }
-    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
-    .card-dark h3 { color: #333333; }
-    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
-    .card-red h3 { color: #dc2626; }
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
 
-    /* === Data Tables === */
-    .data-table {
-      width: 100%; max-width: 860px; margin: 16px auto;
-      border-collapse: collapse; font-size: 11px;
-    }
-    .data-table th {
-      background: #f3f4f6; padding: 8px 12px; text-align: left;
-      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
-    }
-    .data-table td {
-      padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
-    }
+/* === Data Tables === */
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
 
-    /* === Tags === */
-    .tag {
-      display: inline-block; font-size: 9px; font-weight: 600;
-      padding: 2px 8px; border-radius: 3px;
-    }
-    .tag-phase    { background: #dbeafe; color: #1e40af; }
-    .tag-decision { background: #ede9fe; color: #5b21b6; }
-    .tag-failure  { background: #fee2e2; color: #991b1b; }
-    .tag-config   { background: #d1fae5; color: #065f46; }
-    .tag-output   { background: #fef3c7; color: #92400e; }
-    .tag-external { background: #f3f4f6; color: #666666; }
+/* === Tags === */
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
 
-    /* === Legend === */
-    .legend {
-      display: flex; gap: 16px; justify-content: center;
-      margin: 16px 0 24px; flex-wrap: wrap;
-    }
-    .legend-item {
-      display: flex; align-items: center; gap: 6px;
-      font-size: 10px; color: #666;
-    }
-    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+/* === Legend === */
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
 
-    /* === Summary Grid === */
-    .summary-grid {
-      display: grid; grid-template-columns: 1fr 1fr 1fr;
-      gap: 16px; margin-top: 16px;
-    }
-    .summary-card { padding: 16px; border-radius: 8px; }
-    .summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
-    .summary-card p  { font-size: 11px; line-height: 1.5; }
+/* === Summary Grid === */
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
 
-    /* === Footer === */
-    .footer {
-      text-align: center; padding: 20px;
-      font-size: 10px; color: #999;
-    }
+/* === Winner Badge === */
+.winner-badge {
+  display: inline-block; font-size: 12px; color: #555555;
+  font-weight: 600; padding: 2px 10px; border-radius: 4px;
+  background: #f9fafb; border: 1px solid #d1d5db;
+}
+
+/* === Footer === */
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
+
+/* === Extensions === */
+.hero-note {
+  max-width: 720px;
+  margin: 12px auto 0;
+  font-size: 12px;
+  color: #4b5563;
+}
+.code-pill, .file-pill {
+  display: inline-block;
+  margin: 4px 6px 0 0;
+  padding: 4px 8px;
+  font-size: 10px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #e5e7eb;
+}
+.mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.mode-card {
+  border-radius: 10px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+}
+.mode-card h3 {
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+.mode-card p {
+  font-size: 11px;
+  color: #4b5563;
+  margin-bottom: 10px;
+}
+.mode-card ul {
+  padding-left: 16px;
+}
+.mode-card li {
+  font-size: 11px;
+  color: #374151;
+  margin: 4px 0;
+}
+.inline-note {
+  font-size: 10px;
+  color: #6b7280;
+  margin-top: 8px;
+}
+.mini-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.callout {
+  max-width: 860px;
+  margin: 12px auto 0;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 11px;
+  color: #374151;
+}
+.callout strong {
+  color: #111827;
+}
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+.strip .node {
+  flex: 1 1 190px;
+}
+.list {
+  margin-top: 8px;
+  padding-left: 16px;
+}
+.list li {
+  font-size: 11px;
+  color: #374151;
+  margin: 5px 0;
+}
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: #f3f4f6;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+@media (max-width: 900px) {
+  .summary-grid { grid-template-columns: 1fr; }
+  .mode-grid { grid-template-columns: 1fr; }
+  .flow-step { flex-direction: column; min-height: auto; margin-bottom: 8px; }
+  .flow-lane-left, .flow-lane-center, .flow-lane-right {
+    width: 100%;
+    justify-content: center;
+    padding: 0;
+  }
+  .annotation {
+    max-width: none;
+    text-align: center;
+    margin: 8px 0;
+  }
+}
   </style>
 </head>
 <body>
-
   <div class="header">
+    <div class="scope">usage</div>
     <h1>stark-init-docs</h1>
-    <div class="sub">Scaffold a standardized developer documentation structure into any repository.</div>
-    <div class="scope">USAGE</div>
+    <div class="sub">Scaffold, backfill, upgrade, or clean a standardized developer-docs layout in any Git repository</div>
+    <div class="hero-note">
+      Best for repos that need a predictable <code>docs/</code> structure, generated onboarding guides, ADRs, PR-backed specs, or a safe way to retire the scaffold later.
+    </div>
   </div>
 
   <div class="container">
-    
-    <div class="section-title">Invocation & Modes</div>
-    <p style="font-size: 12px; text-align: center; margin-bottom: 16px;">
-      Invoke via <code>/stark-init-docs [--template] [--backfill] [--upgrade] [--clean]</code><br>
-      Modes are fully combinable (e.g., <code>--upgrade --backfill</code>).
-    </p>
-
-    <div class="card-grid">
-      <div class="card card-blue">
-        <h3>--template</h3>
-        <p>Creates an empty docs skeleton. Adds standard directories (specs, adr, guides, reference, etc.), <code>mkdocs.yml</code>, PR templates, and <code>CODEOWNERS</code>. <strong>Safe & Idempotent.</strong></p>
+    <div class="summary-grid">
+      <div class="summary-card card-blue">
+        <h3>How You Invoke It</h3>
+        <p>Use <code>/stark-init-docs</code> with one or more flags. If you pass nothing, the skill prints the available modes and waits for your choice before changing the repo.</p>
       </div>
-      <div class="card card-purple">
-        <h3>--upgrade</h3>
-        <p>Migrates existing scattered Markdown docs into the standard layout. Automatically classifies content (spec, guide, adr), moves files, and updates broken internal links.</p>
+      <div class="summary-card card-green">
+        <h3>What You Provide</h3>
+        <p>A Git repo, access to the template directory, and optionally <code>gh</code> for merged PR history. The skill reads existing docs, repo configs, and commit history to decide what to generate.</p>
       </div>
-      <div class="card card-green">
-        <h3>--backfill</h3>
-        <p>Generates rich docs from history. Analyzes Git logs, merged PRs, and config files (<code>package.json</code>, etc.) to generate ADRs, stub specs, and getting-started guides.</p>
-      </div>
-      <div class="card card-red">
-        <h3>--clean</h3>
-        <p>Safely removes skeleton template files and empty directories. <strong>Preserves</strong> user-generated content, actual markdown files, and existing READMEs.</p>
+      <div class="summary-card card-amber">
+        <h3>What You Get</h3>
+        <p>Standardized directories, MkDocs config, CODEOWNERS, generated guides, conservative ADRs, spec stubs for major merged features, or a cleanup pass that preserves user content.</p>
       </div>
     </div>
 
-    <div class="section-title">Execution Workflow (Combined Execution)</div>
-    
+    <div class="section-title">At A Glance</div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-dot" style="background:#1e40af;"></span>Workflow phase</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#7c3aed;"></span>Decision / prompt</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#047857;"></span>Repo config / mode behavior</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#f59e0b;"></span>Artifacts / results</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#dc2626;"></span>Safety / failure case</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#e5e7eb;"></span>External dependency</div>
+    </div>
+    <div style="text-align:center;">
+      <span class="winner-badge">Most common flow: <code>--upgrade --backfill</code> for an existing repo, or <code>--template</code> for a new one</span>
+    </div>
+
+    <div class="section-title">Invocation Flow</div>
     <div class="flow">
-      <!-- Step 1 -->
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation">User runs CLI command</div>
+          <div class="annotation"><strong>Input</strong><br></br>Optional flags: <code>--template</code>, <code>--backfill</code>, <code>--upgrade</code>, <code>--clean</code></div>
         </div>
         <div class="flow-lane-center">
-          <div class="node node-config" style="width: 100%;">
-            <div class="node-title">Initialize Command</div>
-            <div class="node-desc">Parse arguments. If none provided, prompt user to select a mode.</div>
+          <div class="node node-external" style="width:100%; max-width:360px;">
+            <div class="node-title">Invoke The Skill</div>
+            <div class="node-desc"><code>/stark-init-docs [flags]</code></div>
           </div>
         </div>
-        <div class="flow-lane-right"></div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Trigger phrases</strong><br></br>“init docs”, “setup docs”, “scaffold docs”</div>
+        </div>
       </div>
 
       <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-      <!-- Step 2 -->
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation"><strong>If --upgrade</strong><br>Runs first to centralize existing docs</div>
+          <div class="annotation"><strong>No-arg behavior</strong><br></br>No file changes yet</div>
         </div>
         <div class="flow-lane-center">
-          <div class="node node-decision" style="width: 100%;">
-            <div class="node-title">Migration Scan & Move</div>
-            <div class="node-desc">Find scattered .md files → Classify (spec, adr, guide, etc.) → Move to docs/ → Fix internal links</div>
+          <div class="node node-decision" style="width:100%; max-width:360px;">
+            <div class="node-title">Any Mode Flags Passed?</div>
+            <div class="node-desc">If not, print the four modes and ask which one to run</div>
           </div>
         </div>
-        <div class="flow-lane-right"></div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Combinable</strong><br></br><code>--upgrade --backfill</code> is a first-class path</div>
+        </div>
       </div>
 
       <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-      <!-- Step 3 -->
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation"><strong>If --template</strong><br>Or implicitly via upgrade/backfill</div>
+          <div class="annotation"><strong>Template-first rules</strong><br></br><code>--backfill</code> always runs <code>--template</code> first</div>
         </div>
         <div class="flow-lane-center">
-          <div class="node node-phase" style="width: 100%;">
-            <div class="node-title">Scaffold Skeleton</div>
-            <div class="node-desc">mkdir -p docs/{specs,plans,adr,guides,reference,architecture}<br>Copy mkdocs.yml, PR templates, .doc-staleness.yml, CODEOWNERS</div>
+          <div class="node node-phase" style="width:100%; max-width:360px;">
+            <div class="node-title">Execute One Or More Modes</div>
+            <div class="node-desc">Template, backfill, upgrade, or clean</div>
           </div>
         </div>
-        <div class="flow-lane-right"></div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Gap fill rule</strong><br></br><code>--upgrade</code> runs <code>--template</code> later to create anything still missing</div>
+        </div>
       </div>
 
       <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-      <!-- Step 4 -->
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation"><strong>If --backfill</strong><br>Generates AI content</div>
+          <div class="annotation"><strong>External reads</strong><br></br>Git history, repo configs, and optional GitHub PR metadata</div>
         </div>
         <div class="flow-lane-center">
-          <div class="node node-phase" style="width: 100%; background: #059669;">
-            <div class="node-title">Generate Content</div>
-            <div class="node-desc">Fetch git log / PRs → Analyze package.json, Dockerfile, etc. → Generate ADRs, Stub Specs, and Guides → Wire mkdocs.yml</div>
+          <div class="node node-config" style="width:100%; max-width:360px;">
+            <div class="node-title">Apply Mode-Specific Logic</div>
+            <div class="node-desc">Create, infer, migrate, or safely remove scaffold assets</div>
           </div>
         </div>
-        <div class="flow-lane-right"></div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Safety gate</strong><br></br><code>--clean</code> requires explicit confirmation before deletion</div>
+        </div>
       </div>
 
       <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-      <!-- Step 5 -->
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation"><strong>If --clean</strong><br>Must be confirmed by user</div>
+          <div class="annotation"><strong>Idempotent</strong><br></br>Existing files are skipped, empty commits are avoided</div>
         </div>
         <div class="flow-lane-center">
-          <div class="node node-failure" style="width: 100%;">
-            <div class="node-title">Cleanup Skeleton</div>
-            <div class="node-desc">Remove empty dirs and generic templates (preserves user content)</div>
+          <div class="node node-output" style="width:100%; max-width:360px;">
+            <div class="node-title">Repo Ends In A Stable Docs State</div>
+            <div class="node-desc">Scaffolded, enriched, standardized, or cleaned without deleting user docs</div>
           </div>
         </div>
-        <div class="flow-lane-right"></div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Step 6 -->
-      <div class="flow-step">
-        <div class="flow-lane-left"></div>
-        <div class="flow-lane-center">
-          <div class="node node-output" style="width: 100%;">
-            <div class="node-title">Commit Changes</div>
-            <div class="node-desc">git add & git commit (Skipped if no changes detected)</div>
-          </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Metrics emitted</strong><br></br>Executed modes, created/skipped/moved/deleted files, generated ADR/spec/guide counts, updated links</div>
         </div>
-        <div class="flow-lane-right"></div>
       </div>
     </div>
 
-    <div class="section-title">Standardized Directory Structure (Output)</div>
+    <div class="section-title">Mode Guide</div>
+    <div class="mode-grid">
+      <div class="mode-card">
+        <div class="tag tag-phase">Template</div>
+        <h3><code>--template</code></h3>
+        <p>Bootstrap the standard doc skeleton without overwriting existing files.</p>
+        <ul>
+          <li>Creates <code>docs/specs</code>, <code>plans</code>, <code>adr</code>, <code>guides</code>, <code>reference</code>, and <code>architecture</code></li>
+          <li>Copies templates into <code>mkdocs.yml</code>, <code>docs/index.md</code>, PR template, staleness config, and ADR template</li>
+          <li>Creates <code>.github/CODEOWNERS</code> only when no CODEOWNERS file exists</li>
+          <li>Commits only if something was actually added</li>
+        </ul>
+        <div class="mini-stack">
+          <span class="file-pill">docs/index.md</span>
+          <span class="file-pill">mkdocs.yml</span>
+          <span class="file-pill">.doc-staleness.yml</span>
+          <span class="file-pill">docs/adr/0000-template.md</span>
+        </div>
+      </div>
+
+      <div class="mode-card">
+        <div class="tag tag-config">Backfill</div>
+        <h3><code>--backfill</code></h3>
+        <p>Generate useful docs from the repo itself, using actual history and config instead of placeholders.</p>
+        <ul>
+          <li>Runs <code>--template</code> first</li>
+          <li>Reads commit history, tries merged PR history through <code>gh</code>, and inspects language/build/deploy files</li>
+          <li>Generates conservative ADRs, up to 10 meaningful feature specs, and setup/development/deployment guides</li>
+          <li>Updates <code>mkdocs.yml</code> nav to include generated content</li>
+        </ul>
+        <div class="inline-note">If <code>gh</code> is missing or fails, the skill warns and continues with commits and codebase analysis only.</div>
+      </div>
+
+      <div class="mode-card">
+        <div class="tag tag-decision">Upgrade</div>
+        <h3><code>--upgrade</code></h3>
+        <p>Move scattered Markdown into a standard layout and fix the repo around it.</p>
+        <ul>
+          <li>Scans tracked Markdown outside <code>docs/</code> while excluding common noise like <code>node_modules</code> and root <code>README.md</code></li>
+          <li>Classifies each file as spec, ADR, guide, reference, or architecture</li>
+          <li>Moves files with <code>git mv</code>, resolves naming collisions, then updates internal links and image paths</li>
+          <li>Refreshes MkDocs nav and runs <code>--template</code> afterward to fill missing pieces</li>
+        </ul>
+      </div>
+
+      <div class="mode-card">
+        <div class="tag tag-failure">Clean</div>
+        <h3><code>--clean</code></h3>
+        <p>Remove only scaffold assets, not authored documentation.</p>
+        <ul>
+          <li>Always asks for confirmation before deleting anything</li>
+          <li>Deletes template files such as <code>mkdocs.yml</code>, <code>.doc-staleness.yml</code>, PR template, and the ADR template</li>
+          <li>Deletes generated <code>.github/CODEOWNERS</code> only when it still looks template-owned</li>
+          <li>Removes empty directories, then commits only if files were actually removed</li>
+        </ul>
+        <div class="inline-note">Never deletes user-authored docs, <code>README.md</code>, <code>CHANGELOG.md</code>, or files with meaningful later history.</div>
+      </div>
+    </div>
+
+    <div class="section-title">Inputs And Outputs</div>
     <table class="data-table">
       <thead>
         <tr>
-          <th>Directory / File Path</th>
-          <th>Description</th>
-          <th>Populated By</th>
+          <th>What the skill looks at</th>
+          <th>Why it matters</th>
+          <th>What it can produce</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td><code>docs/adr/</code></td>
-          <td>Architecture Decision Records (e.g., tech stack choices)</td>
-          <td><span class="tag tag-config">--template</span> <span class="tag tag-phase">--backfill</span></td>
+          <td>Git repo state and existing files</td>
+          <td>Determines whether template files should be skipped and whether commits should be created</td>
+          <td>Idempotent scaffold with no empty commit</td>
         </tr>
         <tr>
-          <td><code>docs/specs/</code></td>
-          <td>Feature specifications, requirements, and PR stubs</td>
-          <td><span class="tag tag-config">--template</span> <span class="tag tag-phase">--backfill</span></td>
+          <td>Commit history and earliest technology commits</td>
+          <td>Used to date accepted ADRs and infer significant project choices</td>
+          <td>Numbered ADRs in <code>docs/adr/</code></td>
         </tr>
         <tr>
-          <td><code>docs/guides/</code></td>
-          <td>Getting started, development, and deployment runbooks</td>
-          <td><span class="tag tag-config">--template</span> <span class="tag tag-phase">--backfill</span></td>
+          <td>Merged PRs via <code>gh</code> (optional)</td>
+          <td>Finds significant features worth documenting as specs</td>
+          <td>Up to 10 implemented feature specs in <code>docs/specs/</code></td>
         </tr>
         <tr>
-          <td><code>docs/plans/</code> & <code>docs/reference/</code></td>
-          <td>Execution plans, API docs, data dictionaries, and glossaries</td>
-          <td><span class="tag tag-config">--template</span> <span class="tag tag-decision">--upgrade</span></td>
+          <td><code>package.json</code>, <code>pyproject.toml</code>, <code>go.mod</code>, <code>Cargo.toml</code>, CI files, Docker files</td>
+          <td>Extracts real setup, test, and deploy commands</td>
+          <td>Getting Started, Development, and optional Deployment guides</td>
         </tr>
         <tr>
-          <td><code>mkdocs.yml</code></td>
-          <td>Navigation and structural configuration for static site generation</td>
-          <td><span class="tag tag-config">--template</span> <span class="tag tag-phase">--backfill</span></td>
-        </tr>
-        <tr>
-          <td><code>.github/pull_request_template.md</code></td>
-          <td>Standardized pull request descriptions</td>
-          <td><span class="tag tag-config">--template</span></td>
-        </tr>
-        <tr>
-          <td><code>.doc-staleness.yml</code></td>
-          <td>Configuration for document freshness monitoring workflows</td>
-          <td><span class="tag tag-config">--template</span></td>
+          <td>Markdown files outside <code>docs/</code></td>
+          <td>Upgrade mode reclassifies and relocates scattered documentation</td>
+          <td>Normalized folder layout plus rewritten internal links</td>
         </tr>
       </tbody>
     </table>
 
+    <div class="section-title">Common Workflows</div>
+    <div class="card-grid">
+      <div class="card card-blue">
+        <h3>New repo, no docs yet</h3>
+        <p>Run <code>/stark-init-docs --template</code>. This is the lowest-risk path when you only need the folder structure, base config, and starter templates without inferred content.</p>
+      </div>
+      <div class="card card-green">
+        <h3>Existing repo, docs are scattered or missing</h3>
+        <p>Run <code>/stark-init-docs --upgrade --backfill</code>. First standardize old Markdown into the right folders, then generate missing ADRs, specs, and guides from the repo’s real history.</p>
+      </div>
+      <div class="card card-amber">
+        <h3>Repo already standardized, now enrich it</h3>
+        <p>Run <code>/stark-init-docs --backfill</code>. This is useful when the folder structure exists but you still want generated onboarding and architecture docs wired into MkDocs navigation.</p>
+      </div>
+      <div class="card card-red">
+        <h3>Remove the scaffold safely</h3>
+        <p>Run <code>/stark-init-docs --clean</code> and confirm when prompted. The mode is designed to leave real docs in place and only strip the scaffold’s template-owned assets.</p>
+      </div>
+    </div>
+
+    <div class="section-title">What Gets Created Or Preserved</div>
+    <div class="strip">
+      <div class="node node-output">
+        <div class="node-title">Skeleton Directories</div>
+        <div class="node-desc"><code>docs/specs</code>, <code>plans</code>, <code>adr</code>, <code>guides</code>, <code>reference</code>, <code>architecture</code></div>
+      </div>
+      <div class="node node-output">
+        <div class="node-title">Repository Config</div>
+        <div class="node-desc"><code>mkdocs.yml</code>, <code>.doc-staleness.yml</code>, PR template, optional CODEOWNERS</div>
+      </div>
+      <div class="node node-output">
+        <div class="node-title">Backfilled Content</div>
+        <div class="node-desc">Accepted ADRs, implemented feature specs, setup and dev guides, optional deployment guide</div>
+      </div>
+      <div class="node node-failure">
+        <div class="node-title">Never Deleted</div>
+        <div class="node-desc">User docs, <code>README.md</code>, <code>CHANGELOG.md</code>, <code>CONTRIBUTING.md</code>, meaningful authored content</div>
+      </div>
+    </div>
+
+    <div class="section-title">Guardrails And Failure Cases</div>
+    <div class="card-grid">
+      <div class="card card-red">
+        <h3>Templates directory missing</h3>
+        <p>The skill stops with: templates not found at <code>~/.claude/code-review/standards/templates/</code>. Install the template set first.</p>
+      </div>
+      <div class="card card-red">
+        <h3>Not in a Git repository</h3>
+        <p>The skill errors immediately. All four modes assume Git is present because they read history, move files through Git, and create commits.</p>
+      </div>
+      <div class="card card-dark">
+        <h3>PR history unavailable</h3>
+        <p>Backfill still works. It warns that PR history could not be fetched and falls back to commit history plus codebase analysis.</p>
+      </div>
+      <div class="card card-purple">
+        <h3>Observability output</h3>
+        <p>Expect metrics on executed modes, files created/skipped/moved/deleted, generated ADR/spec/guide counts, and internal links updated during upgrade.</p>
+      </div>
+    </div>
+
+    <div class="callout">
+      <strong>Practical rule of thumb:</strong> choose <code>--template</code> when you want structure only, <code>--backfill</code> when the repo can explain itself, <code>--upgrade</code> when docs are scattered, and <code>--clean</code> only when you explicitly want the scaffold gone but not the authored content.
+    </div>
   </div>
 
-  <div class="footer">
-    Stark Skills System • Auto-generated visualization
-  </div>
+  <div class="footer"><div class="winner-badge">Visualization by Codex · Score: 8.4/10 · Generated from SKILL.md</div></div>
 </body>
 </html>

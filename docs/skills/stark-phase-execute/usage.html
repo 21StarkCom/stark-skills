@@ -2,19 +2,8 @@
 <head>
 
 
-<title>stark-phase-execute - Usage</title>
+<title>stark-phase-execute — Usage</title>
 <style>
-/*
- * Stark Skills — Shared Design System CSS
- *
- * Foundation styles for LLM-generated HTML skill visualizations.
- * LLMs embed this inline and may extend with additional styles.
- * All colors pass WCAG AA 4.5:1 contrast ratio.
- *
- * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
- */
-
-/* === Reset & Base === */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
   font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -22,8 +11,6 @@ body {
   color: #1a1a1a;
   line-height: 1.5;
 }
-
-/* === Header === */
 .header { text-align: center; padding: 36px 20px 16px; }
 .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
 .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
@@ -32,55 +19,44 @@ body {
   background: #eff6ff; color: #1e40af;
   padding: 3px 10px; border-radius: 4px; margin-top: 8px;
 }
-
-/* === Container === */
 .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
-
-/* === Section Title === */
 .section-title {
   font-size: 14px; font-weight: 700; color: #666;
   text-transform: uppercase; letter-spacing: 1px;
   margin: 32px 0 16px; padding-bottom: 6px;
   border-bottom: 2px solid #e5e7eb;
 }
-
-/* === Node Types === */
-.node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
 .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
 .node-desc { font-size: 10px; opacity: 0.8; }
-
-.node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
-.node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
-.node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
-.node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
-.node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
-.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
-
-/* === Flow Layout === */
+.node-phase    { background: #1e40af; color: #ffffff; }
+.node-decision { background: #7c3aed; color: #ffffff; }
+.node-failure  { background: #dc2626; color: #ffffff; }
+.node-config   { background: #047857; color: #ffffff; }
+.node-output   { background: #f59e0b; color: #1a1a1a; }
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
 .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
 .flow-step {
   display: flex; align-items: stretch;
   width: 100%; max-width: 860px; min-height: 76px;
 }
 .flow-lane-left {
-  width: 250px; display: flex;
+  width: 180px; display: flex;
   align-items: center; justify-content: flex-end;
-  padding-right: 18px; text-align: right;
+  padding-right: 18px;
 }
 .flow-lane-center {
-  width: 360px; display: flex;
-  align-items: center; justify-content: center; flex-direction: column;
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
 }
 .flow-lane-right {
-  width: 250px; display: flex;
+  width: 180px; display: flex;
   align-items: center; padding-left: 18px;
 }
 .annotation {
-  font-size: 11px; color: #666; max-width: 200px; line-height: 1.4;
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
 }
 .annotation strong { color: #444; }
-
-/* === Arrows === */
 .arrow-down {
   width: 2px; height: 20px; background: #cbd5e1;
   margin: 0 auto; position: relative;
@@ -98,20 +74,14 @@ body {
 .arrow-container .flow-lane-center {
   display: flex; justify-content: center;
 }
-
-/* === Cards === */
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 16px; margin-top: 16px;
 }
-.card { padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; }
-.card p  { font-size: 11px; line-height: 1.6; color: #444; }
-.card ul { margin-left: 16px; font-size: 11px; color: #444; margin-top: 4px; }
-.card li { margin-bottom: 4px; }
-.card code { background: rgba(0,0,0,0.05); padding: 2px 4px; border-radius: 3px; font-family: monospace; }
-
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
 .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
 .card-blue h3 { color: #1e40af; }
 .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
@@ -124,24 +94,17 @@ body {
 .card-dark h3 { color: #333333; }
 .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
 .card-red h3 { color: #dc2626; }
-
-/* === Data Tables === */
 .data-table {
-  width: 100%; margin: 16px auto;
+  width: 100%; max-width: 860px; margin: 16px auto;
   border-collapse: collapse; font-size: 11px;
-  background: white; border-radius: 8px; overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 .data-table th {
-  background: #f3f4f6; padding: 10px 12px; text-align: left;
-  font-weight: 600; color: #444; border-bottom: 2px solid #e5e7eb;
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
 }
 .data-table td {
-  padding: 10px 12px; border-bottom: 1px solid #f3f4f6; color: #555;
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
 }
-.data-table tr:last-child td { border-bottom: none; }
-
-/* === Tags === */
 .tag {
   display: inline-block; font-size: 9px; font-weight: 600;
   padding: 2px 8px; border-radius: 3px;
@@ -152,8 +115,6 @@ body {
 .tag-config   { background: #d1fae5; color: #065f46; }
 .tag-output   { background: #fef3c7; color: #92400e; }
 .tag-external { background: #f3f4f6; color: #666666; }
-
-/* === Legend === */
 .legend {
   display: flex; gap: 16px; justify-content: center;
   margin: 16px 0 24px; flex-wrap: wrap;
@@ -163,197 +124,478 @@ body {
   font-size: 10px; color: #666;
 }
 .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
-
-/* === Footer === */
-.footer {
-  text-align: center; padding: 30px 20px 20px;
-  font-size: 10px; color: #999; border-top: 1px solid #eee; margin-top: 40px;
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
 }
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
+
+/* === Extended: Invocation Box === */
+.invoke-box {
+  background: #1a1a1a; color: #e2e8f0; border-radius: 8px;
+  padding: 16px 20px; font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 13px; margin: 16px auto; max-width: 860px;
+  position: relative;
+}
+.invoke-box .prompt { color: #94a3b8; }
+.invoke-box .cmd { color: #60a5fa; }
+.invoke-box .arg { color: #34d399; }
+.invoke-box .flag { color: #fbbf24; }
+
+/* === Extended: Phase Badge === */
+.phase-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 700; color: #fff;
+  background: #1e40af; padding: 4px 12px; border-radius: 12px;
+  margin-bottom: 4px;
+}
+.phase-badge.green { background: #059669; }
+.phase-badge.purple { background: #7c3aed; }
+.phase-badge.amber { background: #d97706; color: #1a1a1a; }
+.phase-badge.red { background: #dc2626; }
+.phase-badge.dark { background: #374151; }
+
+/* === Extended: Loop indicator === */
+.loop-indicator {
+  border: 2px dashed #7c3aed; border-radius: 12px;
+  padding: 16px; margin: 8px 0; position: relative;
+}
+.loop-label {
+  position: absolute; top: -10px; left: 20px;
+  background: #fafafa; padding: 0 8px;
+  font-size: 10px; font-weight: 700; color: #7c3aed;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+
+/* === Extended: Output example === */
+.output-example {
+  background: #1a1a1a; color: #a3e635; border-radius: 8px;
+  padding: 14px 18px; font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 10px; line-height: 1.7; margin: 12px auto;
+  max-width: 860px; overflow-x: auto;
+}
+.output-example .ts { color: #94a3b8; }
+.output-example .ok { color: #4ade80; }
+.output-example .err { color: #f87171; }
+.output-example .info { color: #60a5fa; }
+.output-example .warn { color: #fbbf24; }
 </style>
 </head>
 <body>
 
 <div class="header">
-  <h1>stark-phase-execute</h1>
-  <div class="sub">Autonomously execute all tasks in a development phase end-to-end. Zero user intervention.</div>
-  <div class="scope">Usage Guide</div>
+  <h1>/stark-phase-execute</h1>
+  <div class="sub">Autonomous phase execution engine — implement, review, merge, release. Zero intervention.</div>
+  <div class="scope">USAGE GUIDE</div>
 </div>
 
 <div class="container">
 
-  <div class="section-title">CLI Invocation</div>
-  <div class="card card-dark">
-    <h3>Command Syntax</h3>
-    <p style="font-family: monospace; font-size: 13px; margin-bottom: 8px;">
-      /stark-phase-execute &lt;plan-slug-or-path&gt; [options]
-    </p>
-    <table class="data-table">
-      <tr><th>Argument</th><th>Default</th><th>Description</th></tr>
-      <tr><td><code>&lt;plan-slug-or-path&gt;</code></td><td><em>Required</em></td><td>Plan slug (e.g., <code>2026-03-23-stark-signals</code>) or a direct path to a plan <code>.md</code> file.</td></tr>
-      <tr><td><code>--dry-run</code></td><td>Off</td><td>Walks the plan, shows what would happen (including task fetch & breakdown), but executes nothing.</td></tr>
-      <tr><td><code>--skip-deploy</code> / <code>--skip-release</code></td><td>Off</td><td>Skips post-execution deployment or version bump/release.</td></tr>
-      <tr><td><code>--start-from &lt;N&gt;</code></td><td>1st issue</td><td>Resume execution from a specific issue number (skips previous ones).</td></tr>
-      <tr><td><code>--rounds &lt;N&gt;</code></td><td>3</td><td>Max fix/review rounds per PR for the multi-agent reviewer.</td></tr>
-    </table>
+  <!-- Quick Start -->
+  <div class="section-title">Quick Start</div>
+  <div class="invoke-box">
+    <span class="prompt">$</span> <span class="cmd">/stark-phase-execute</span> <span class="arg">observability-v2</span>
+  </div>
+  <p style="font-size:11px; color:#666; text-align:center; margin-top:8px;">
+    That's it. The skill fetches all GitHub issues labeled <code>plan:observability-v2</code>, then implements, reviews, and merges each one autonomously.
+  </p>
+
+  <!-- Invocation Patterns -->
+  <div class="section-title">How to Invoke</div>
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>By Plan Slug</h3>
+      <p>Use the slug from <code>/stark-plan-to-tasks</code>. Matches the <code>plan:{slug}</code> label on GitHub issues.</p>
+      <div class="invoke-box" style="margin:10px 0 0; font-size:11px; padding:10px 14px;">
+        <span class="cmd">/stark-phase-execute</span> <span class="arg">2026-03-api-redesign</span>
+      </div>
+    </div>
+    <div class="card card-green">
+      <h3>By Plan File Path</h3>
+      <p>Pass a path to the plan file. The slug is auto-derived from the filename. If issues don't exist yet, <code>/stark-plan-to-tasks</code> runs automatically.</p>
+      <div class="invoke-box" style="margin:10px 0 0; font-size:11px; padding:10px 14px;">
+        <span class="cmd">/stark-phase-execute</span> <span class="arg">docs/plans/2026-03-api-redesign.md</span>
+      </div>
+    </div>
+    <div class="card card-purple">
+      <h3>Natural Language</h3>
+      <p>The skill triggers on phrases like "execute phase", "run the plan", "autopilot", or "implement this phase".</p>
+      <div class="invoke-box" style="margin:10px 0 0; font-size:11px; padding:10px 14px; color:#a78bfa;">
+        "execute the observability-v2 phase"
+      </div>
+    </div>
   </div>
 
-  <div class="section-title">End-to-End Autonomous Workflow</div>
+  <!-- Arguments -->
+  <div class="section-title">Arguments &amp; Flags</div>
+  <table class="data-table">
+    <thead>
+      <tr><th>Argument</th><th>Default</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>&lt;plan-slug-or-path&gt;</code></td>
+        <td><span class="tag tag-failure">required</span></td>
+        <td>Plan slug (matches <code>plan:{slug}</code> label) or path to a plan <code>.md</code> file</td>
+      </tr>
+      <tr>
+        <td><code>--dry-run</code></td>
+        <td>off</td>
+        <td>Preview what would happen without creating branches, PRs, or changes</td>
+      </tr>
+      <tr>
+        <td><code>--skip-deploy</code></td>
+        <td>off</td>
+        <td>Skip deployment after release</td>
+      </tr>
+      <tr>
+        <td><code>--skip-release</code></td>
+        <td>off</td>
+        <td>Skip version bump, CHANGELOG update, and release creation</td>
+      </tr>
+      <tr>
+        <td><code>--start-from &lt;N&gt;</code></td>
+        <td>1st issue</td>
+        <td>Resume execution from a specific GitHub issue number</td>
+      </tr>
+      <tr>
+        <td><code>--rounds &lt;N&gt;</code></td>
+        <td>3</td>
+        <td>Max review-fix rounds per PR (more rounds = more thorough but slower)</td>
+      </tr>
+      <tr>
+        <td><code>--repo ORG/REPO</code></td>
+        <td>auto-detect</td>
+        <td>Override repo detection from <code>git remote</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Workflow -->
+  <div class="section-title">Execution Flow</div>
+
   <div class="legend">
-    <div class="legend-item"><div class="legend-dot node-phase"></div> Main Execution Phase</div>
-    <div class="legend-item"><div class="legend-dot node-decision"></div> Logic / Decision Point</div>
-    <div class="legend-item"><div class="legend-dot node-output"></div> Artifacts / Outcomes</div>
-    <div class="legend-item"><div class="legend-dot node-config"></div> Auto-Triggered Skill</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#1e40af;"></div> Phase</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed;"></div> Decision</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#047857;"></div> Config</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b;"></div> Output</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#dc2626;"></div> Failure</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e5e7eb;"></div> External</div>
   </div>
 
   <div class="flow">
-    <!-- Step 1 -->
+    <!-- Phase 0 -->
     <div class="flow-step">
       <div class="flow-lane-left">
-        <div class="annotation"><strong>1. Initialize</strong><br>Checks git status, tool availability, and GitHub auth.</div>
+        <div class="annotation"><strong>Phase 0</strong><br>Validates env, fetches issues, creates observability log</div>
       </div>
       <div class="flow-lane-center">
-        <div class="node node-phase">
-          <div class="node-title">Fetch Phase Tasks</div>
-          <div class="node-desc">Queries Project Board or GitHub Issues via `plan:{SLUG}`</div>
-        </div>
-      </div>
-      <div class="flow-lane-right"></div>
-    </div>
-
-    <!-- Arrow -->
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Step 2 -->
-    <div class="flow-step">
-      <div class="flow-lane-left"></div>
-      <div class="flow-lane-center">
-        <div class="node node-decision">
-          <div class="node-title">Tasks Exist?</div>
-          <div class="node-desc">Filters out tracking issues. Checks task count.</div>
+        <div class="node node-phase" style="width:400px;">
+          <div class="node-title">Initialize</div>
+          <div class="node-desc">Validate environment &bull; Fetch plan tasks &bull; Phase briefing</div>
         </div>
       </div>
       <div class="flow-lane-right">
-        <div class="annotation" style="margin-left: 10px;">
-          <strong>If 0 tasks found:</strong><br>
-          Automatically delegates to <code>/stark-plan-to-tasks</code> to decompose the plan file into issues, then re-fetches.
-        </div>
+        <div class="annotation"><strong>Inputs:</strong> plan slug, git repo, GitHub issues</div>
       </div>
     </div>
 
-    <!-- Arrow -->
     <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-    <!-- Step 3 (Task Loop) -->
+    <!-- Decision: issues exist? -->
     <div class="flow-step">
       <div class="flow-lane-left">
-        <div class="annotation"><strong>2. Task Loop</strong><br>Iterates over every open task matching the phase. Merges sequentially.</div>
+        <div class="annotation">If no issues found with <code>plan:{slug}</code> label</div>
       </div>
       <div class="flow-lane-center">
-        <div class="node node-phase" style="border: 2px solid #93c5fd;">
-          <div class="node-title">Autonomous Task Loop</div>
-          <div class="node-desc">Implement → Push PR → Review & Fix → Merge</div>
+        <div class="node node-decision" style="width:400px;">
+          <div class="node-title">Issues exist?</div>
+          <div class="node-desc">Yes → proceed &bull; No → auto-run /stark-plan-to-tasks first</div>
         </div>
       </div>
-      <div class="flow-lane-right"></div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Auto-decompose:</strong> plan file → phased GitHub issues</div>
+      </div>
     </div>
 
-    <!-- Arrow -->
     <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-    <!-- Step 4 (Regression) -->
+    <!-- Task Loop -->
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="loop-indicator" style="width:420px;">
+          <div class="loop-label">For each task (sequential)</div>
+          <div style="display:flex; flex-direction:column; gap:8px; padding-top:6px;">
+            <div class="node node-phase" style="padding:8px 12px;">
+              <div class="node-title">1.1 Branch &amp; Session Start</div>
+              <div class="node-desc">Checkout main → create feature branch</div>
+            </div>
+            <div class="node node-phase" style="padding:8px 12px;">
+              <div class="node-title">1.2 Implement</div>
+              <div class="node-desc">Subagent reads issue, writes code, runs tests, commits</div>
+            </div>
+            <div class="node node-phase" style="padding:8px 12px;">
+              <div class="node-title">1.3 Push &amp; Create PR</div>
+              <div class="node-desc">Push branch → gh pr create (not draft)</div>
+            </div>
+            <div class="node node-decision" style="padding:8px 12px;">
+              <div class="node-title">1.4 Multi-Agent Review (up to N rounds)</div>
+              <div class="node-desc">3 LLMs × 6 domains → classify → fix → repeat</div>
+            </div>
+            <div class="node node-phase" style="padding:8px 12px;">
+              <div class="node-title">1.5 Squash Merge</div>
+              <div class="node-desc">gh pr merge --squash --admin --delete-branch</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>On failure:</strong> log error, clean up branch, continue to next task</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 2 -->
     <div class="flow-step">
       <div class="flow-lane-left">
-        <div class="annotation"><strong>3. Quality Gate</strong><br>Detects and runs project test command (pytest, npm test, etc.)</div>
+        <div class="annotation"><strong>Phase 2</strong><br>Full test suite on main after all merges</div>
       </div>
       <div class="flow-lane-center">
-        <div class="node node-phase">
+        <div class="node node-config" style="width:400px;">
           <div class="node-title">Regression Testing</div>
-          <div class="node-desc">Full suite execution against updated `main` branch</div>
+          <div class="node-desc">Auto-detect test command &bull; Run full suite &bull; Log pass/fail counts</div>
         </div>
       </div>
       <div class="flow-lane-right"></div>
     </div>
 
-    <!-- Arrow -->
     <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-    <!-- Step 5 (Release) -->
+    <!-- Phase 3 -->
     <div class="flow-step">
-      <div class="flow-lane-left"></div>
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Phase 3</strong><br>Skippable with <code>--skip-release</code> / <code>--skip-deploy</code></div>
+      </div>
       <div class="flow-lane-center">
-        <div class="node node-config">
-          <div class="node-title">Release & Deploy</div>
-          <div class="node-desc">Auto-updates CHANGELOG and invokes <code>/stark-release</code></div>
+        <div class="node node-output" style="width:400px;">
+          <div class="node-title">Release &amp; Deploy</div>
+          <div class="node-desc">CHANGELOG → version bump → git tag → GitHub Release → deploy</div>
         </div>
       </div>
       <div class="flow-lane-right">
-        <div class="annotation" style="margin-left: 10px;">
-          <strong>Version Bump</strong><br>
-          Calculates major/minor/patch based on GitHub Issue labels (Feature/Bug/Task).
-        </div>
+        <div class="annotation"><strong>Bump logic:</strong> Feature → minor, Bug/Task → patch</div>
       </div>
     </div>
 
-    <!-- Arrow -->
     <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-    <!-- Step 6 (Final) -->
+    <!-- Phase 4 -->
     <div class="flow-step">
       <div class="flow-lane-left">
-        <div class="annotation"><strong>4. Finalization</strong><br>Produces summary reports and updates internal memory state.</div>
+        <div class="annotation"><strong>Phase 4</strong><br>Task table, agent scorecard, failure details</div>
       </div>
       <div class="flow-lane-center">
-        <div class="node node-output">
-          <div class="node-title">Dashboard & Housekeeping</div>
-          <div class="node-desc">Prints stats, updates project docs, checks prompt metrics</div>
+        <div class="node node-output" style="width:400px;">
+          <div class="node-title">Dashboard</div>
+          <div class="node-desc">Summary table &bull; Aggregate stats &bull; Agent scorecard &bull; Failed tasks</div>
         </div>
       </div>
       <div class="flow-lane-right"></div>
     </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 5 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Phase 5</strong><br>Memory, docs, prompt tuning signals</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-config" style="width:400px;">
+          <div class="node-title">Housekeeping</div>
+          <div class="node-desc">Update memory &bull; Update docs &bull; Detect prompt improvement opportunities</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation">Suggests <code>/stark-review-improvement</code> if thresholds exceeded</div>
+      </div>
+    </div>
   </div>
 
-  <div class="section-title">Deep Dive: The Autonomous Task Loop</div>
-  <div class="card-grid">
-    <div class="card card-blue">
-      <h3>1. Implementation Subagent</h3>
-      <p>A fresh branch is cut off <code>main</code> for each issue. An internal subagent explores the workspace, reads the issue requirements, writes the code, runs local tests, and creates semantic commits (e.g., <code>feat(scope): description (#NUM)</code>).</p>
-    </div>
-    <div class="card card-purple">
-      <h3>2. Multi-Agent Review Loop</h3>
-      <p>Creates PR and immediately spawns a multi-agent review team via an isolated git worktree. Findings are classified by severity. The skill autonomously fixes <code>fix</code>-level findings, pushes the updates, and repeats up to <code>--rounds</code> times.</p>
-    </div>
-    <div class="card card-green">
-      <h3>3. Autonomous Merge</h3>
-      <p>Once the multi-agent review passes (0 findings or only ignored noise), it waits for GitHub CI checks. If CI passes, it instantly squash-merges into <code>main</code> and cleans up branches. No human approval gates.</p>
-    </div>
-  </div>
-
-  <div class="section-title">Outputs & Dashboards</div>
+  <!-- What It Produces -->
+  <div class="section-title">Outputs</div>
   <div class="card-grid">
     <div class="card card-amber">
-      <h3>Terminal Dashboard</h3>
-      <p>Once the entire phase completes, the terminal will render a full scorecard including:</p>
-      <ul>
-        <li><strong>Task Summary Table:</strong> Time taken, PR link, review finding counts per issue.</li>
-        <li><strong>Agent Scorecard:</strong> How Claude, Codex, and Gemini performed (accuracy, noise rate, unique findings).</li>
-        <li><strong>Release Details:</strong> CHANGELOG entries added, bump level, deploy status.</li>
-      </ul>
+      <h3>Merged PRs</h3>
+      <p>One squash-merged PR per task issue, each closing its GitHub issue automatically via <code>Closes #N</code>.</p>
+    </div>
+    <div class="card card-blue">
+      <h3>Review Comments</h3>
+      <p>Multi-agent review findings posted on each PR via <code>stark-claude[bot]</code>. Findings classified as fix, noise, or false positive.</p>
+    </div>
+    <div class="card card-green">
+      <h3>Release</h3>
+      <p>CHANGELOG entries, semantic version bump, git tag, and GitHub Release with notes. Delegates to <code>/stark-release</code>.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>Observability Log</h3>
+      <p>JSON file in <code>~/.claude/code-review/history/{org}/{repo}/</code> with per-task timing, findings, and agent stats.</p>
     </div>
     <div class="card card-dark">
-      <h3>Housekeeping & Feedback</h3>
-      <p>The system constantly learns from execution:</p>
-      <ul>
-        <li><strong>Project Memory:</strong> Automatically records decisions and major structural changes.</li>
-        <li><strong>Prompt Improvements:</strong> Analyzes review loop metrics. If an agent had >20% false positive rate or missed obvious bugs, it suggests running <code>/stark-review-improvement</code>.</li>
-      </ul>
+      <h3>Dashboard</h3>
+      <p>Terminal summary with task table, aggregate stats, agent scorecard, and improvement flags.</p>
+    </div>
+    <div class="card card-red">
+      <h3>Improvement Flags</h3>
+      <p>Signals for prompt tuning: high FP rates, repeated finding types, agent blind spots, unparseable output.</p>
+    </div>
+  </div>
+
+  <!-- Common Patterns -->
+  <div class="section-title">Common Usage Patterns</div>
+
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>Preview Before Running</h3>
+      <p>See what would happen without making changes. Shows task list, branches, review config, and release plan.</p>
+      <div class="invoke-box" style="margin:10px 0 0; font-size:11px; padding:10px 14px;">
+        <span class="cmd">/stark-phase-execute</span> <span class="arg">my-plan</span> <span class="flag">--dry-run</span>
+      </div>
+    </div>
+    <div class="card card-green">
+      <h3>Resume After Failure</h3>
+      <p>Skip already-merged tasks and resume from a specific issue number.</p>
+      <div class="invoke-box" style="margin:10px 0 0; font-size:11px; padding:10px 14px;">
+        <span class="cmd">/stark-phase-execute</span> <span class="arg">my-plan</span> <span class="flag">--start-from 47</span>
+      </div>
+    </div>
+    <div class="card card-purple">
+      <h3>Plan File → Full Execution</h3>
+      <p>Pass a plan file directly. If issues don't exist yet, <code>/stark-plan-to-tasks</code> runs first, then execution begins.</p>
+      <div class="invoke-box" style="margin:10px 0 0; font-size:11px; padding:10px 14px;">
+        <span class="cmd">/stark-phase-execute</span> <span class="arg">docs/plans/2026-03-auth-rewrite.md</span>
+      </div>
+    </div>
+    <div class="card card-amber">
+      <h3>Skip Release Step</h3>
+      <p>Execute tasks and reviews but don't bump version or deploy. Useful for WIP phases.</p>
+      <div class="invoke-box" style="margin:10px 0 0; font-size:11px; padding:10px 14px;">
+        <span class="cmd">/stark-phase-execute</span> <span class="arg">my-plan</span> <span class="flag">--skip-release</span>
+      </div>
+    </div>
+    <div class="card card-dark">
+      <h3>More Review Rounds</h3>
+      <p>Increase review thoroughness for high-risk phases (default is 3).</p>
+      <div class="invoke-box" style="margin:10px 0 0; font-size:11px; padding:10px 14px;">
+        <span class="cmd">/stark-phase-execute</span> <span class="arg">my-plan</span> <span class="flag">--rounds 5</span>
+      </div>
+    </div>
+    <div class="card card-red">
+      <h3>Cross-Repo Execution</h3>
+      <p>Target a different repo than the current working directory.</p>
+      <div class="invoke-box" style="margin:10px 0 0; font-size:11px; padding:10px 14px;">
+        <span class="cmd">/stark-phase-execute</span> <span class="arg">my-plan</span> <span class="flag">--repo GetEvinced/infra-pulse</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Example Output -->
+  <div class="section-title">Example Terminal Output</div>
+  <div class="output-example">
+<span class="ts">[09:15:00]</span> <span class="info">=== stark-phase-execute: observability-v2 ===</span>
+<span class="ts">[09:15:02]</span>   Phase 0: Initialize (3 tasks, repo: GetEvinced/infra-pulse)
+<span class="ts">[09:15:05]</span>   <span class="info">▸ Task #42: Add retry logic to API client</span>
+<span class="ts">[09:15:05]</span>     Branch: phase/observability-v2/issue-42-add-retry-logic
+<span class="ts">[09:17:30]</span>     Implementation complete (2m 25s)
+<span class="ts">[09:17:35]</span>     PR #57 created
+<span class="ts">[09:18:00]</span>     Review round 1: 8 findings (2 high, 4 medium, 2 low)
+<span class="ts">[09:19:15]</span>     Review round 2: 0 actionable — clean
+<span class="ts">[09:19:20]</span>     <span class="ok">✓ Merged PR #57 (4m 15s)</span>
+<span class="ts">[09:19:22]</span>   <span class="info">▸ Task #43: Instrument request tracing</span>
+<span class="ts">[09:24:00]</span>     <span class="ok">✓ Merged PR #58 (4m 38s)</span>
+<span class="ts">[09:24:05]</span>   <span class="info">▸ Task #44: Add health check endpoint</span>
+<span class="ts">[09:27:25]</span>     <span class="err">✗ Task #44 failed: test suite regression</span>
+<span class="ts">[09:27:30]</span>   Phase 2: Regression — <span class="ok">140/142 tests passing</span>
+<span class="ts">[09:28:00]</span>   Phase 3: CHANGELOG updated (2 added)
+<span class="ts">[09:28:15]</span>   Phase 3: <span class="ok">Release v1.4.0 (minor)</span>
+<span class="ts">[09:29:00]</span> <span class="info">=== Phase complete: 2/3 tasks merged, 1 failed ===</span>
+  </div>
+
+  <!-- Prerequisites -->
+  <div class="section-title">Prerequisites</div>
+  <div class="summary-grid">
+    <div class="summary-card card-blue">
+      <h3>CLI Tools in PATH</h3>
+      <p><code>gh</code>, <code>claude</code>, <code>codex</code>, <code>gemini</code> must all be installed and accessible.</p>
+    </div>
+    <div class="summary-card card-green">
+      <h3>GitHub Auth</h3>
+      <p><code>gh auth status</code> must show an active PAT. GitHub Apps (stark-claude, stark-codex, stark-gemini) installed on the target repo.</p>
+    </div>
+    <div class="summary-card card-purple">
+      <h3>Clean Working Tree</h3>
+      <p>Must be on <code>main</code> with no uncommitted changes. The skill validates this at startup.</p>
+    </div>
+  </div>
+
+  <!-- Failure Handling -->
+  <div class="section-title">Failure Handling</div>
+  <table class="data-table">
+    <thead>
+      <tr><th>Failure</th><th>Behavior</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Task implementation produces no changes</td><td>Logged as skipped, moves to next task</td></tr>
+      <tr><td>PR creation fails</td><td>Retries once after re-push; if still fails, logs and continues</td></tr>
+      <tr><td>CI checks fail before merge</td><td>Merges anyway with <code>--admin</code>, flags <code>ci_bypassed</code> in log</td></tr>
+      <tr><td>Multi-agent review dispatch fails</td><td>Proceeds with available findings from working agents</td></tr>
+      <tr><td>Merge conflict</td><td>Rebases on main, resolves, re-pushes, retries merge</td></tr>
+      <tr><td>Test suite fails (regression)</td><td>Logs failures, continues to release/dashboard</td></tr>
+      <tr><td>Release fails</td><td>Logs error, skips deploy</td></tr>
+      <tr><td>Any unrecoverable error</td><td>Cleans up branch/worktree, logs full error, continues to next task</td></tr>
+    </tbody>
+  </table>
+
+  <!-- Related Skills -->
+  <div class="section-title">Related Skills</div>
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>/stark-plan-to-tasks</h3>
+      <p>Decompose a plan into GitHub issues. Called automatically by phase-execute if issues don't exist yet.</p>
+    </div>
+    <div class="card card-green">
+      <h3>/stark-review</h3>
+      <p>Multi-agent PR review. Phase-execute runs this internally for each PR it creates.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>/stark-release</h3>
+      <p>Version bump, tag, and GitHub Release. Delegated to during Phase 3.</p>
+    </div>
+    <div class="card card-amber">
+      <h3>/stark-pr-flow</h3>
+      <p>Single-PR workflow. Phase-execute is the multi-task equivalent.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>/stark-review-improvement</h3>
+      <p>Tune review prompts. Suggested by phase-execute when improvement thresholds are exceeded.</p>
+    </div>
+    <div class="card card-red">
+      <h3>/stark-metrics</h3>
+      <p>Aggregate review performance data. Phase-execute generates the raw data it analyzes.</p>
     </div>
   </div>
 
 </div>
 
-<div class="footer">
-  Skill Metadata: stark-phase-execute | Complexity: Complex (707 lines) | Autonomy: Level 5 (Full)
-</div>
+<div class="footer"><div class="winner-badge">Visualization by Claude · Score: 8.4/10 · Generated from SKILL.md</div></div>
 
 </body>
 </html>

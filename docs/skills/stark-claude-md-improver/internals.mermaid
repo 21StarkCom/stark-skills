@@ -1,20 +1,47 @@
 graph TD
-    Trigger([Skill Invoked<br>stark-claude-md-improver]) --> Discovery[1. Discovery<br>Find CLAUDE.md files & Memory]
-    Discovery --> Analysis[2. Analysis<br>Evaluate 5 Dimensions]
-    
-    subgraph Analysis Engine
-        Analysis --> D1[Structure & Clarity]
-        Analysis --> D2[Completeness]
-        Analysis --> D3[Accuracy & Freshness]
-        Analysis --> D4[Effectiveness for AI]
-        Analysis --> D5[Hierarchy Optimization]
-    end
-    
-    D1 & D2 & D3 & D4 & D5 --> Report[3. Output Report<br>Present Scores & Findings]
-    Report --> Decision{User Approves<br>Changes?}
-    
-    Decision -- Yes --> Apply[4. Apply Modifications<br>Direct File Mutation]
-    Decision -- No --> Telemetry
-    
-    Apply --> Telemetry[5. Emit Observability Metrics<br>Record Scores & Actions]
-    Telemetry --> End([Completion])
+    A[Invoke /stark-claude-md-improver] --> B{Path argument provided?}
+    B -->|Yes| C[Read specified CLAUDE.md]
+    B -->|No| D[Auto-discover hierarchy]
+    D --> D1[~/CLAUDE.md]
+    D --> D2[org/CLAUDE.md]
+    D --> D3[project/CLAUDE.md]
+    D --> D4[subdir/CLAUDE.md files]
+    D1 --> E[Read all files + memory]
+    D2 --> E
+    D3 --> E
+    D4 --> E
+    C --> E
+    E --> F[Cross-reference project state]
+    F --> F1[Check file paths exist]
+    F --> F2[Verify build commands]
+    F --> F3[Validate versions/URLs]
+    F1 --> G[Multi-Dimension Analysis]
+    F2 --> G
+    F3 --> G
+    G --> G1[Structure & Clarity 1-5]
+    G --> G2[Completeness 1-5]
+    G --> G3[Accuracy & Freshness 1-5]
+    G --> G4[AI Effectiveness 1-5]
+    G --> G5[Hierarchy Optimization 1-5]
+    G1 --> H[Generate Findings Report]
+    G2 --> H
+    G3 --> H
+    G4 --> H
+    G5 --> H
+    H --> I{User approves changes?}
+    I -->|Yes| J[Apply edits via Edit tool]
+    I -->|No| K[End with report only]
+    J --> L[Emit observability metrics]
+    K --> L
+
+    style A fill:#1e40af,color:#fff
+    style B fill:#7c3aed,color:#fff
+    style D fill:#1e40af,color:#fff
+    style E fill:#1e40af,color:#fff
+    style F fill:#e5e7eb,color:#666
+    style G fill:#7c3aed,color:#fff
+    style H fill:#f59e0b,color:#1a1a1a
+    style I fill:#7c3aed,color:#fff
+    style J fill:#1e40af,color:#fff
+    style K fill:#dc2626,color:#fff
+    style L fill:#047857,color:#fff

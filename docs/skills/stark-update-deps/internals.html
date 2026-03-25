@@ -1,9 +1,9 @@
 <html lang="en">
 <head>
-
-
-<title>stark-update-deps Architecture</title>
-<style>
+  
+  
+  <title>stark-update-deps — Skill Visualization</title>
+  <style>
 /*
  * Stark Skills — Shared Design System CSS
  *
@@ -45,17 +45,16 @@ body {
 }
 
 /* === Node Types === */
-.node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; }
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
 .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
 .node-desc { font-size: 10px; opacity: 0.8; }
 
-.node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
-.node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
-.node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
-.node-config   { background: #047857; color: #ffffff; }   /* Green — config/states */
-.node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
-.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
-.node-action   { background: #0284c7; color: #ffffff; }   /* Light Blue - internal actions */
+.node-phase    { background: #1e40af; color: #ffffff; }
+.node-decision { background: #7c3aed; color: #ffffff; }
+.node-failure  { background: #dc2626; color: #ffffff; }
+.node-config   { background: #047857; color: #ffffff; }
+.node-output   { background: #f59e0b; color: #1a1a1a; }
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
 
 /* === Flow Layout === */
 .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
@@ -64,20 +63,20 @@ body {
   width: 100%; max-width: 860px; min-height: 76px;
 }
 .flow-lane-left {
-  width: 220px; display: flex;
+  width: 180px; display: flex;
   align-items: center; justify-content: flex-end;
   padding-right: 18px;
 }
 .flow-lane-center {
-  width: 420px; display: flex;
-  align-items: center; justify-content: center; flex-direction: column; gap: 8px;
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
 }
 .flow-lane-right {
-  width: 220px; display: flex;
+  width: 180px; display: flex;
   align-items: center; padding-left: 18px;
 }
 .annotation {
-  font-size: 9px; color: #666; max-width: 180px; line-height: 1.4;
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
 }
 .annotation strong { color: #444; }
 
@@ -97,7 +96,7 @@ body {
   width: 100%; max-width: 860px;
 }
 .arrow-container .flow-lane-center {
-  display: flex; justify-content: center; flex-direction: row;
+  display: flex; justify-content: center;
 }
 
 /* === Cards === */
@@ -123,6 +122,31 @@ body {
 .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
 .card-red h3 { color: #dc2626; }
 
+/* === Data Tables === */
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
+
+/* === Tags === */
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
+
 /* === Legend === */
 .legend {
   display: flex; gap: 16px; justify-content: center;
@@ -134,201 +158,441 @@ body {
 }
 .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
 
-/* === Tags === */
-.tag {
-  display: inline-block; font-size: 9px; font-weight: 600;
-  padding: 2px 8px; border-radius: 3px;
+/* === Summary Grid === */
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
 }
-.tag-phase    { background: #dbeafe; color: #1e40af; }
-</style>
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
+
+/* === Winner Badge === */
+.winner-badge {
+  display: inline-block; font-size: 12px; color: #555555;
+  font-weight: 600; padding: 2px 10px; border-radius: 4px;
+  background: #f9fafb; border: 1px solid #d1d5db;
+}
+
+/* === Footer === */
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
+
+/* === Extensions === */
+.hero-note {
+  max-width: 760px;
+  margin: 14px auto 0;
+  font-size: 12px;
+  color: #475569;
+}
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin: 18px 0 8px;
+}
+.kpi {
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 14px;
+}
+.kpi .num {
+  font-size: 22px;
+  font-weight: 700;
+  color: #111827;
+}
+.kpi .lbl {
+  font-size: 10px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.branch-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+.branch-card {
+  border-radius: 10px;
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+.branch-card h3 {
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.branch-card p, .branch-card li {
+  font-size: 11px;
+  color: #475569;
+}
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.small-note {
+  font-size: 10px;
+  color: #64748b;
+  margin-top: 8px;
+}
+.pathway {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 18px;
+}
+@media (max-width: 900px) {
+  .summary-grid, .branch-grid, .kpi-strip { grid-template-columns: 1fr 1fr; }
+  .flow-step { flex-direction: column; min-height: auto; gap: 8px; margin-bottom: 8px; }
+  .flow-lane-left, .flow-lane-center, .flow-lane-right {
+    width: 100%; justify-content: center; padding: 0;
+  }
+  .annotation { max-width: 100%; text-align: center; }
+}
+@media (max-width: 560px) {
+  .summary-grid, .branch-grid, .kpi-strip { grid-template-columns: 1fr; }
+}
+  </style>
 </head>
 <body>
-
-<div class="header">
-  <h1>stark-update-deps</h1>
-  <div class="sub">Dependency Version Updater — Internal Execution Flow</div>
-  <div class="scope">Audience: Internals & Architecture</div>
-</div>
-
-<div class="container">
-  <div class="legend">
-    <div class="legend-item"><div class="legend-dot node-phase"></div> Phase Engine</div>
-    <div class="legend-item"><div class="legend-dot node-action"></div> Internal Action</div>
-    <div class="legend-item"><div class="legend-dot node-decision"></div> Logic/Decision</div>
-    <div class="legend-item"><div class="legend-dot node-config"></div> State/Data</div>
-    <div class="legend-item"><div class="legend-dot node-output"></div> Artifact/Report</div>
-    <div class="legend-item"><div class="legend-dot node-failure"></div> Failure/Fallback</div>
+  <div class="header">
+    <h1>stark-update-deps</h1>
+    <div class="sub">Audit every manifest, research current stable releases, update safely, then re-verify exact versions against official registries.</div>
+    <div class="scope">INTERNALS · architecture, data flow, extension points</div>
+    <p class="hero-note">
+      This skill is a guarded dependency-upgrade pipeline, not a blind version bump. Its core contract is:
+      discovery → registry-backed research → compatibility triage → in-place edits → exact-version verification → explicit report.
+    </p>
   </div>
 
-  <h2 class="section-title">Execution Pipeline & Data Flow</h2>
-  
-  <div class="flow">
-    <!-- Phase 1: Discovery -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="annotation" style="text-align: right;">
-          <strong>Inputs:</strong> Glob matching `package.json`, `pyproject.toml`, `Dockerfile`, `go.mod`, etc.
-        </div>
+  <div class="container">
+    <div class="legend">
+      <div class="legend-item"><span class="legend-dot" style="background:#1e40af"></span>Phase</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#7c3aed"></span>Decision</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#047857"></span>Policy / Config</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#f59e0b"></span>Artifact / Output</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#dc2626"></span>Failure / Recovery</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#e5e7eb;border:1px dashed #9ca3af"></span>External Registry</div>
+    </div>
+
+    <div class="kpi-strip">
+      <div class="kpi">
+        <div class="num">6</div>
+        <div class="lbl">Execution Phases</div>
       </div>
-      <div class="flow-lane-center">
-        <div class="node node-phase">
-          <div class="node-title">Phase 1: Discovery</div>
-          <div class="node-desc">Find manifests & extract versions</div>
-        </div>
+      <div class="kpi">
+        <div class="num">4</div>
+        <div class="lbl">Decision States</div>
       </div>
-      <div class="flow-lane-right">
-        <div class="node node-config">
-          <div class="node-title">Dep Inventory Table</div>
-          <div class="node-desc">Ecosystem, File, Version state</div>
+      <div class="kpi">
+        <div class="num">8+</div>
+        <div class="lbl">Manifest Families</div>
+      </div>
+      <div class="kpi">
+        <div class="num">100%</div>
+        <div class="lbl">Updated Versions Re-verified</div>
+      </div>
+    </div>
+
+    <div class="section-title">Execution Spine</div>
+    <div class="pathway">
+      <div class="flow">
+        <div class="flow-step">
+          <div class="flow-lane-left">
+            <div class="annotation"><strong>Inputs</strong><br></br>Monorepo root, subprojects, CI configs, infra files, docs with pinned snippets</div>
+          </div>
+          <div class="flow-lane-center">
+            <div class="node node-phase">
+              <div class="node-title">Phase 1 · Discovery</div>
+              <div class="node-desc">Glob manifests and extract every versioned dependency</div>
+            </div>
+          </div>
+          <div class="flow-lane-right">
+            <div class="annotation"><strong>Invariant</strong><br></br>All ecosystems are scanned in one pass, not just root-level manifests</div>
+          </div>
+        </div>
+
+        <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+        <div class="flow-step">
+          <div class="flow-lane-left">
+            <div class="annotation"><strong>Artifact</strong><br></br>Inventory table: dependency, current version, file, line, ecosystem</div>
+          </div>
+          <div class="flow-lane-center">
+            <div class="node node-output">
+              <div class="node-title">Normalized Dependency Inventory</div>
+              <div class="node-desc">Single internal data model for cross-file reasoning</div>
+            </div>
+          </div>
+          <div class="flow-lane-right">
+            <div class="annotation"><strong>Extension Point</strong><br></br>New manifest parsers can feed the same inventory contract</div>
+          </div>
+        </div>
+
+        <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+        <div class="flow-step">
+          <div class="flow-lane-left">
+            <div class="node node-external">
+              <div class="node-title">Official Sources</div>
+              <div class="node-desc">PyPI, npm, Docker Hub, GitHub releases, pkg.go.dev</div>
+            </div>
+          </div>
+          <div class="flow-lane-center">
+            <div class="node node-phase">
+              <div class="node-title">Phase 2 · Research</div>
+              <div class="node-desc">Batch WebSearch by ecosystem and capture latest stable metadata</div>
+            </div>
+          </div>
+          <div class="flow-lane-right">
+            <div class="annotation"><strong>Policy</strong><br></br>Prefer stable and LTS runtimes over merely newest releases</div>
+          </div>
+        </div>
+
+        <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+        <div class="flow-step">
+          <div class="flow-lane-left">
+            <div class="annotation"><strong>Metadata Captured</strong><br></br>Release date, support matrix, peer/runtime constraints, migration notes</div>
+          </div>
+          <div class="flow-lane-center">
+            <div class="node node-decision">
+              <div class="node-title">Phase 3 · Compatibility Analysis</div>
+              <div class="node-desc">Classify each candidate as Safe, Review, Blocked, or Skip</div>
+            </div>
+          </div>
+          <div class="flow-lane-right">
+            <div class="annotation"><strong>Risk Filter</strong><br></br>Major bumps, peer conflicts, missing Docker tags, dropped runtime support</div>
+          </div>
+        </div>
+
+        <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+        <div class="flow-step">
+          <div class="flow-lane-left">
+            <div class="annotation"><strong>Update Rules</strong><br></br>Preserve constraint style: <span class="mono">^</span>, <span class="mono">~</span>, <span class="mono">&gt;=</span>, exact pins</div>
+          </div>
+          <div class="flow-lane-center">
+            <div class="node node-phase">
+              <div class="node-title">Phase 4 · Update</div>
+              <div class="node-desc">Apply Safe updates now; bump Review items with notes where comments are supported</div>
+            </div>
+          </div>
+          <div class="flow-lane-right">
+            <div class="annotation"><strong>Constraint</strong><br></br>Lock files are not edited directly; regeneration is deferred to the user</div>
+          </div>
+        </div>
+
+        <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+        <div class="flow-step">
+          <div class="flow-lane-left">
+            <div class="annotation"><strong>Critical Check</strong><br></br>Re-read modified files and search each exact updated version again</div>
+          </div>
+          <div class="flow-lane-center">
+            <div class="node node-phase">
+              <div class="node-title">Phase 5 · Verification</div>
+              <div class="node-desc">Exact-version registry confirmation with explicit evidence per item</div>
+            </div>
+          </div>
+          <div class="flow-lane-right">
+            <div class="annotation"><strong>Why This Exists</strong><br></br>Prevents plausible but fabricated versions or Docker tags from surviving</div>
+          </div>
+        </div>
+
+        <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+        <div class="flow-step">
+          <div class="flow-lane-left">
+            <div class="annotation"><strong>If Verification Fails</strong><br></br>Broaden search, pick nearest valid tag/version, or revert to original</div>
+          </div>
+          <div class="flow-lane-center">
+            <div class="node node-decision">
+              <div class="node-title">Exact Version Confirmed?</div>
+              <div class="node-desc">Fresh search must prove the updated version actually exists</div>
+            </div>
+          </div>
+          <div class="flow-lane-right">
+            <div class="node node-failure">
+              <div class="node-title">Recovery Path</div>
+              <div class="node-desc">Fix, re-verify, or revert and flag user-visible blocker</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+        <div class="flow-step">
+          <div class="flow-lane-left">
+            <div class="annotation"><strong>Observability</strong><br></br>Timings, checkpoints, dependency counts, search counts, verification metrics</div>
+          </div>
+          <div class="flow-lane-center">
+            <div class="node node-output">
+              <div class="node-title">Phase 6 · Report</div>
+              <div class="node-desc">Updated / skipped / blocked / major-bump summary with verification evidence</div>
+            </div>
+          </div>
+          <div class="flow-lane-right">
+            <div class="annotation"><strong>Primary Outcome</strong><br></br>Trustworthy dependency state plus concrete follow-up actions</div>
+          </div>
         </div>
       </div>
     </div>
 
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+    <div class="section-title">Data Contracts</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Contract</th>
+          <th>Produced By</th>
+          <th>Consumed By</th>
+          <th>Purpose</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Dependency Inventory</td>
+          <td>Discovery</td>
+          <td>Research, Consistency checks</td>
+          <td>Canonical list of every versioned dependency across all files</td>
+        </tr>
+        <tr>
+          <td>Registry Research Record</td>
+          <td>Research</td>
+          <td>Compatibility Analysis</td>
+          <td>Latest stable version, release date, runtime support, tag existence, changelog clues</td>
+        </tr>
+        <tr>
+          <td>Decision Matrix</td>
+          <td>Compatibility Analysis</td>
+          <td>Update phase, Final report</td>
+          <td>Maps each dependency to Safe, Review, Blocked, or Skip</td>
+        </tr>
+        <tr>
+          <td>Modified Version Set</td>
+          <td>Update</td>
+          <td>Verification</td>
+          <td>Exact list of versions that must be proven real post-edit</td>
+        </tr>
+        <tr>
+          <td>Verification Evidence</td>
+          <td>Verification</td>
+          <td>Final report</td>
+          <td>Explicit per-item proof that updated versions exist on official sources</td>
+        </tr>
+      </tbody>
+    </table>
 
-    <!-- Phase 2: Research -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="node node-action">
-          <div class="node-title">Parallel WebSearch</div>
-          <div class="node-desc">Batch by ecosystem (PyPI, npm, Docker Hub)</div>
-        </div>
+    <div class="section-title">Decision Surface</div>
+    <div class="branch-grid">
+      <div class="branch-card">
+        <h3><span class="tag tag-config">Safe</span></h3>
+        <p>Patch or minor update, no known breaking changes, runtime support preserved, and exact version confirmed on an official registry.</p>
       </div>
-      <div class="flow-lane-center">
-        <div class="node node-phase">
-          <div class="node-title">Phase 2: Research</div>
-          <div class="node-desc">Look up latest stable & LTS releases</div>
-        </div>
+      <div class="branch-card">
+        <h3><span class="tag tag-decision">Review</span></h3>
+        <p>Usually a major bump. Version may be valid, but migration work, codemods, or API changes are likely. The skill surfaces concrete migration commands when available.</p>
       </div>
-      <div class="flow-lane-right">
-        <div class="annotation">
-          <strong>LTS Preference:</strong> Defaults to Active LTS over absolute latest (e.g., Node 22 vs 23).
-        </div>
+      <div class="branch-card">
+        <h3><span class="tag tag-failure">Blocked</span></h3>
+        <p>Conflict with project runtime, peer dependency mismatch, unsupported latest release, or Docker/software version mismatch where the image tag does not actually exist.</p>
       </div>
     </div>
 
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Phase 3: Compatibility -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="annotation" style="text-align: right;">
-          <strong>Codemod Discovery:</strong> Searches for breaking change docs and migration tools.
-        </div>
+    <div class="section-title">Internal Policies</div>
+    <div class="card-grid">
+      <div class="card card-green">
+        <h3>Registry Truth Over Guesswork</h3>
+        <p>Every candidate version is sourced from official registries or release pages. The skill assumes hallucination risk is real and adds a mandatory second verification pass after edits.</p>
       </div>
-      <div class="flow-lane-center">
-        <div class="node node-phase">
-          <div class="node-title">Phase 3: Compatibility Analysis</div>
-          <div class="node-desc">Cross-dep constraint checking</div>
-        </div>
-        <div class="node node-decision" style="width: 80%;">
-          <div class="node-title">Decision Matrix</div>
-          <div class="node-desc">Categorize: Safe | Review | Blocked</div>
-        </div>
+      <div class="card card-blue">
+        <h3>LTS-Biased Runtime Selection</h3>
+        <p>Node and other runtime base images prioritize Active LTS and broad ecosystem compatibility instead of simply selecting the numerically newest release.</p>
       </div>
-      <div class="flow-lane-right">
-        <div class="node node-config">
-          <div class="node-title">Update Plan</div>
-          <div class="node-desc">Version bump targets generated</div>
-        </div>
+      <div class="card card-purple">
+        <h3>Constraint-Style Preservation</h3>
+        <p>Manifest syntax is respected. Existing range semantics remain intact so the upgrade changes the intended minimum or target version, not the package management strategy.</p>
+      </div>
+      <div class="card card-red">
+        <h3>Docker Tag Skepticism</h3>
+        <p>Docker tags are treated as a separate truth source. A software release does not imply a matching Docker Hub tag, especially for database images and CUDA variants.</p>
       </div>
     </div>
 
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Phase 4: Update -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="node node-external">
-          <div class="node-title">Local Workspace</div>
-          <div class="node-desc">File writes/regex replacement</div>
-        </div>
+    <div class="section-title">Extension Points</div>
+    <div class="summary-grid">
+      <div class="summary-card card-dark">
+        <h3>New Manifest Parsers</h3>
+        <p>Add support for another ecosystem by emitting the same inventory record shape: package identifier, current version, file location, and ecosystem label.</p>
       </div>
-      <div class="flow-lane-center">
-        <div class="node node-phase">
-          <div class="node-title">Phase 4: Update in Place</div>
-          <div class="node-desc">Apply "Safe" / "Review" updates directly</div>
-        </div>
+      <div class="summary-card card-amber">
+        <h3>Additional Registry Adapters</h3>
+        <p>Private registries or internal package indexes can slot into the research phase as new official-source providers as long as they return stable version and evidence metadata.</p>
       </div>
-      <div class="flow-lane-right">
-        <div class="annotation">
-          <strong>Rule Engine:</strong> Respects `>=` vs `==` vs `^` bounds per ecosystem config formats.
-        </div>
+      <div class="summary-card card-blue">
+        <h3>Stricter Policy Gates</h3>
+        <p>Teams can tighten the decision matrix with extra blocked conditions, such as minimum test coverage, changelog review requirements, or allowlists for major upgrades.</p>
       </div>
     </div>
 
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+    <div class="section-title">Failure Modes And Recovery</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Failure Mode</th>
+          <th>Detection Point</th>
+          <th>Recovery</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Fabricated or nonexistent package version</td>
+          <td>Verification exact-version search</td>
+          <td>Search again broadly, replace with confirmed latest stable, then re-verify</td>
+        </tr>
+        <tr>
+          <td>Docker tag does not exist</td>
+          <td>Research or verification against Docker Hub</td>
+          <td>Select closest valid published tag or revert original image reference</td>
+        </tr>
+        <tr>
+          <td>Major upgrade breaks runtime support</td>
+          <td>Compatibility analysis</td>
+          <td>Mark Blocked or Review, keep current version, surface migration path</td>
+        </tr>
+        <tr>
+          <td>Cross-file version drift</td>
+          <td>Consistency check after update</td>
+          <td>Align duplicate dependency references across manifests and docs</td>
+        </tr>
+        <tr>
+          <td>Private package not found publicly</td>
+          <td>Research phase</td>
+          <td>Skip and report as private/unverified instead of inventing a public version</td>
+        </tr>
+      </tbody>
+    </table>
 
-    <!-- Phase 5: Verification -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="node node-failure">
-          <div class="node-title">Revert/Fix Route</div>
-          <div class="node-desc">If search fails, fallback & alert</div>
-        </div>
+    <div class="section-title">Why Internals Should Care</div>
+    <div class="card-grid">
+      <div class="card card-blue">
+        <h3>Single-Pass Multi-Ecosystem Audit</h3>
+        <p>The skill operates like a repository-wide dependency control plane. Python, Node, Docker, Go, Rust, Java, Ruby, .NET, CI, infra, and docs all feed one evaluation path.</p>
       </div>
-      <div class="flow-lane-center">
-        <div class="node node-phase" style="background: #0f172a; border: 2px solid #ef4444;">
-          <div class="node-title">Phase 5: Verification (CRITICAL)</div>
-          <div class="node-desc">Anti-Hallucination Re-Check Loop</div>
-        </div>
-        <div class="node node-action" style="width: 90%;">
-          <div class="node-title">Strict WebSearch Validation</div>
-          <div class="node-desc">1 search per modified version tag</div>
-        </div>
+      <div class="card card-green">
+        <h3>Evidence-Carrying Updates</h3>
+        <p>The final report is not just a diff summary. It carries the proof needed to trust each changed version and calls out where human review is still required.</p>
       </div>
-      <div class="flow-lane-right">
-        <div class="annotation">
-          <strong>Docker Tags:</strong> Specifically verifies <code>site:hub.docker.com</code> to catch missing GPU/OS tags.
-        </div>
+      <div class="card card-amber">
+        <h3>Operationally Useful Output</h3>
+        <p>Major bumps are translated into action items like migration guides and codemods, turning a version audit into a workable change plan for follow-up implementation.</p>
       </div>
     </div>
 
-    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-    <!-- Phase 6: Report -->
-    <div class="flow-step">
-      <div class="flow-lane-left">
-        <div class="annotation" style="text-align: right;">
-          <strong>Observability:</strong> Metrics on dependencies scanned, search counts, and failed checks.
-        </div>
-      </div>
-      <div class="flow-lane-center">
-        <div class="node node-phase">
-          <div class="node-title">Phase 6: Reporting</div>
-          <div class="node-desc">Compile summary & migration items</div>
-        </div>
-      </div>
-      <div class="flow-lane-right">
-        <div class="node node-output">
-          <div class="node-title">Explicit Report List</div>
-          <div class="node-desc">Markdown checklist of confirmed tags</div>
-        </div>
-      </div>
-    </div>
+    <div class="footer"><div class="winner-badge">Visualization by Codex · Score: 9.2/10 · Generated from SKILL.md</div></div>
   </div>
-
-  <h2 class="section-title">Architectural Features & Constraints</h2>
-  <div class="card-grid">
-    <div class="card card-red">
-      <h3>Anti-Hallucination Loop</h3>
-      <p>LLMs confidently generate fabricated versions (e.g. non-existent CUDA tags). The <strong>Phase 5 Verification Loop</strong> reads the mutated files, extracts the <em>new</em> strings, and issues explicit WebSearch queries to registries (PyPI, npm, DockerHub) to mathematically prove the tag's existence before passing.</p>
-    </div>
-    <div class="card card-blue">
-      <h3>Ecosystem Parallelization</h3>
-      <p>Research searches are dynamically batched to minimize turn latency. Lookups are grouped by ecosystem (4-6 per turn), prioritizing core frameworks, then SDKs, then dev tools, ensuring multi-turn wait times are kept linearly low despite O(n) dependency scales.</p>
-    </div>
-    <div class="card card-green">
-      <h3>LTS & Semantic Safety</h3>
-      <p>The research phase is biased against bleeding-edge releases for base runtimes. Node versions default to Active LTS; Python relies on broad library compat metrics. Dependency bounds (<code>^</code> vs <code>>=</code>) are strictly preserved during in-place file modifications.</p>
-    </div>
-    <div class="card card-purple">
-      <h3>Actionable Major Bumps</h3>
-      <p>The Compatibility Analysis phase isn't just a diff—it actively searches for official migration commands (e.g. <code>npx @tailwindcss/upgrade</code>) and embeds them into the "Review" category items to accelerate the implementing agent's next steps.</p>
-    </div>
-  </div>
-
-</div>
-
 </body>
 </html>

@@ -6,36 +6,51 @@ Multi-agent PR code review using 3 LLMs × N domains with autonomous fix loop. U
 
 ```mermaid
 graph TD
-    Start([User Invokes /stark-review]) --> P1[Phase 1: Setup Worktree & Detect Mode]
-    P1 --> Cond{Mode?}
-    
-    Cond -- "Fork / No Tests\n(Review-Only)" --> RunAgents[Dispatch 18 Sub-agents]
-    RunAgents --> P3
-    
-    Cond -- "Full Mode" --> P2[Phase 2: Review-Fix Loop]
-    P2 --> LoopStart[Dispatch 18 Sub-agents]
-    LoopStart --> Classify[Classify: Fix / Noise / FP]
-    Classify --> ApplyFix[Edit Code & Fix Findings]
-    ApplyFix --> BuildTest[Build & Run Tests]
-    BuildTest --> CommitPush[Commit & Push changes]
-    
-    CommitPush --> LoopCond{Stop Check?}
-    LoopCond -- "Clean / Max Rounds / No Fixes" --> P3[Phase 3: Final Summary]
-    LoopCond -- "Has more fixes\n< Max Rounds" --> LoopStart
-    
-    P3 --> P4[Phase 4: Post to PR & Create Bug Issues]
-    P4 --> P5[Phase 5: Cleanup Worktree]
-    P5 --> End([Skill Complete])
+    A["/stark-review [PR] [--rounds N] [--dry-run]"] --> B["Phase 1: Setup"]
+    B --> B1["Detect repo from git remote"]
+    B1 --> B2["Authenticate stark-claude bot"]
+    B2 --> B3["Fetch PR metadata"]
+    B3 --> B4["Push local changes"]
+    B4 --> B5["Create isolated worktree"]
+    B5 --> B6["Rebase over base branch"]
+    B6 --> C{"Determine Mode"}
+    C -->|"Fork PR / no test_command / --dry-run"| D["Review-Only Mode"]
+    C -->|"Same repo + test_command configured"| E["Full Mode"]
+    D --> F["Run review once (18 sub-agents)"]
+    F --> G["Phase 3: Generate Summary"]
+    E --> H["Capture baseline test failures"]
+    H --> I["Phase 2: Review-Fix Loop"]
+    I --> J["Dispatch 18 sub-agents\n(3 LLMs × 6 domains)"]
+    J --> K["Classify findings\nfix | recurring | FP | noise | ignored"]
+    K --> L["Fix code in worktree"]
+    L --> M["Build & Test"]
+    M --> N{"New regressions?"}
+    N -->|"Yes"| L
+    N -->|"No"| O["Commit + Push"]
+    O --> P{"Stop check"}
+    P -->|"0 fixable / max rounds"| G
+    P -->|"More to fix"| J
+    G --> Q["Phase 4: Post & Persist"]
+    Q --> Q1["Post per-agent raw findings"]
+    Q1 --> Q2["Post orchestrator summary"]
+    Q2 --> Q3{"Critical/high unresolved?"}
+    Q3 -->|"Yes"| Q4["Create bug issues (max 5)"]
+    Q3 -->|"No"| Q5["Save history + metrics"]
+    Q4 --> Q5
+    Q5 --> R["Phase 5: Cleanup worktree"]
 
-    classDef phase fill:#1e40af,stroke:#1e3a8a,color:#fff,font-weight:bold;
-    classDef decision fill:#7c3aed,stroke:#5b21b6,color:#fff;
-    classDef output fill:#f59e0b,stroke:#b45309,color:#1a1a1a;
-    class P1,P2,P5 phase;
-    class LoopCond,Cond,Classify,ApplyFix,BuildTest,CommitPush decision;
-    class P3,P4 output;
+    style A fill:#1e40af,color:#fff
+    style C fill:#7c3aed,color:#fff
+    style D fill:#e5e7eb,color:#666
+    style E fill:#047857,color:#fff
+    style G fill:#f59e0b,color:#1a1a1a
+    style N fill:#7c3aed,color:#fff
+    style P fill:#7c3aed,color:#fff
+    style Q3 fill:#7c3aed,color:#fff
+    style R fill:#e5e7eb,color:#666
 ```
 
-![Architecture and workflow diagram for the stark-review skill showing the multi-agent code review process, including setup, the autonomous review-fix loop, summary generation, and GitHub posting.](usage.png)
+![Usage guide for the stark-review skill showing a vertical workflow diagram with five phases: Setup (auth, PR metadata, worktree creation), Review-Fix Loop (18 parallel sub-agents across 3 LLMs and 6 domains with finding classification into fix, recurring, false positive, noise, and ignored categories), Summary generation, Post and Persist (PR comments, bug issues, history), and Cleanup. Includes quick start commands, argument reference table, operating mode comparison (full vs review-only), six output cards (PR comments, automated fixes, bug issues, review history, noise analysis, metrics), finding classification table, common workflow patterns, and related skills.](usage.png)
 
 ## When to Use
 

@@ -5,40 +5,10 @@ Session management — start and end modes. Start: loads context, git state, hea
 ## Architecture
 
 ```mermaid
-graph TD
-  Invoke([User invokes /stark-session]) --> ParseArgs{Argument?}
-  
-  ParseArgs -->|start / none| StartInit[START MODE: Init]
-  ParseArgs -->|end| EndInit[END MODE: Init]
 
-  subgraph Start Mode Flow
-    StartInit --> GatherContext[1. Gather Context<br>CLAUDE.md, Memory, Config]
-    GatherContext --> GitState[2. Analyze Git State<br>Branch, status, PRs, GH Board]
-    GitState --> HealthCheck[3. Health Checks<br>Run config.health_checks]
-    HealthCheck --> FindSkills[4. Find Skills<br>Scan .claude/skills/]
-    FindSkills --> Briefing[5. Print Briefing<br>Ask 'What are we working on?']
-  end
-
-  subgraph End Mode Flow
-    EndInit --> RunTests[1. Test & Build<br>Run config commands]
-    RunTests --> MergePRs[2. Merge PRs<br>gh pr merge strategy]
-    MergePRs --> CommitDocs[3. Commit Docs<br>Stage docs/, write devlog]
-    CommitDocs --> UpdateProject[4. Update Project Board<br>Doc State -> Drafted]
-    UpdateProject --> GitPush[5. Push<br>git push upstream]
-    GitPush --> Summary[6. Print Summary<br>Metrics & outputs]
-  end
-
-  Briefing --> Done([Session Active])
-  Summary --> Complete([Session Closed])
-  
-  RunTests -.->|Fail| AskProceed1{Proceed?}
-  AskProceed1 -.->|Yes| MergePRs
-  
-  MergePRs -.->|Fail| AskProceed2{Skip?}
-  AskProceed2 -.->|Yes| CommitDocs
 ```
 
-![An HTML dashboard visualizing the internals of the stark-session engineering skill, including start/end mode execution flowcharts, config hierarchy mapping, parameter tables, and failure recovery protocols.](internals.png)
+![Internal architecture diagram for the stark-session skill showing a central mode dispatch that splits into start mode and end mode. The start side flows through config loading, silent context gathering, git and PR inspection, optional project board read, health checks, skill discovery, and a concise operator briefing. The end side flows through tests and optional build, conditional proceed-anyway decision, optional PR merges through gh, docs staging and optional devlog commit, optional project field updates, push logic, and a final session summary. Supporting cards explain config hierarchy, fail-soft behavior, human checkpoints, extension points, external integrations, observability metrics, and guardrails."}}](internals.png)
 
 ## Phases
 

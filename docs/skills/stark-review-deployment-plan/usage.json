@@ -1,18 +1,16 @@
 {
   "doc_content": {
-    "summary": "The stark-review-deployment-plan skill acts as a Principal Cloud Architect and SRE to perform an adversarial review of infrastructure, migration, and deployment plans. It identifies material flaws prioritized by blast radius rather than focusing on stylistic choices, operating with strict evidence-based criteria across four analytical passes.",
-    "key_features": [
-      "Evaluates plans against 10 critical failure vectors including split-brain scenarios, idempotency, and drift.",
-      "Categorizes findings into High, Medium, and Low severities based on execution blocking and data loss risks.",
-      "Forces structured output formats including dependency tables, drift tables, and full vector coverage matrices.",
-      "Demands concrete failure scenarios and explicit technical fixes for every finding.",
-      "Enforces strict evidence rules: passing a vector requires concrete evidence, while unverified external scripts result in a DEFERRED status."
+    "prerequisites": "No special installation required. The skill is available globally via `/stark-review-deployment-plan`. For cross-checking against repo scripts (Pass 3), be in a directory with the relevant repo checked out.",
+    "quick_start": "/stark-review-deployment-plan docs/migration-plan.md",
+    "common_patterns": "**Pre-execution gate:** Run the review before any cutover. The closing line reports the exact blocker count \u2014 zero means safe to proceed.\n\n**Iterative refinement:** Fix High findings, re-run on the updated plan. Repeat until `Remaining blockers: 0`.\n\n**Combined review:** Use `/stark-review-plan` for design-level feedback first, then `/stark-review-deployment-plan` for infrastructure-specific adversarial analysis.",
+    "troubleshooting": "**All vectors DEFERRED:** The skill couldn't access repo scripts for cross-checking. Run from within the relevant repo directory, or provide file paths explicitly.\n\n**No findings reported:** The plan passed all 10 vectors with evidence. This is a valid outcome \u2014 not an error.\n\n**UNCERTAIN markers in findings:** The skill wasn't confident about specific CLI/API behavior. Verify those commands manually before proceeding.",
+    "related_skills": [
+      "stark-review-plan",
+      "stark-review",
+      "stark-pr-flow",
+      "stark-extract-docs"
     ],
-    "usage_examples": [
-      "/stark-review-deployment-plan docs/plans/2026-03-20-database-migration.md",
-      "Can you review this deployment plan and poke holes in it? [inline markdown]",
-      "Audit my infrastructure cutover document to make sure there are no partial-failure traps."
-    ]
+    "arguments_table": "| Argument | Required | Description |\n|----------|----------|-------------|\n| `<path>` | Yes* | File path to the deployment/migration/infrastructure plan |\n| `<URL>` | Yes* | URL to fetch the plan from |\n| `<inline>` | Yes* | Paste the plan content directly |\n\n\\* One of path, URL, or inline text is required. If omitted, the skill prompts for input."
   },
-  "alt_text": "A visualization of the stark-review-deployment-plan skill showing its invocation methods, the 4-pass adversarial review workflow, the 10 specific failure vectors evaluated, and the strict 5-part tabular output structure generated."
+  "alt_text": "Usage guide for the stark-review-deployment-plan skill showing a vertical flow diagram with four review passes (Full Read, Contradiction Scan, Cross-Check with decision diamond for repo accessibility, and Vector Evaluation across 10 failure vectors), followed by a structured output of findings, dependency violations, ownership and drift, API prerequisite matrix, and coverage matrix. Includes cards for invocation methods (slash command, inline plan, natural language), a grid of 10 labeled failure vectors (A through J), output structure table, severity and confidence rubrics in colored summary cards, and common workflow patterns."
 }

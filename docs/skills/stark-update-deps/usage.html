@@ -2,397 +2,633 @@
 <head>
   
   
-  <title>stark-update-deps Visualization</title>
+  <title>stark-update-deps — Usage Visualization</title>
   <style>
-    /*
-     * Stark Skills — Shared Design System CSS
-     *
-     * Foundation styles for LLM-generated HTML skill visualizations.
-     * LLMs embed this inline and may extend with additional styles.
-     * All colors pass WCAG AA 4.5:1 contrast ratio.
-     *
-     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
-     */
+/*
+ * Stark Skills — Shared Design System CSS
+ *
+ * Foundation styles for LLM-generated HTML skill visualizations.
+ * LLMs embed this inline and may extend with additional styles.
+ * All colors pass WCAG AA 4.5:1 contrast ratio.
+ *
+ * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+ */
 
-    /* === Reset & Base === */
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #fafafa;
-      color: #1a1a1a;
-      line-height: 1.5;
-    }
+/* === Reset & Base === */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
 
-    /* === Header === */
-    .header { text-align: center; padding: 36px 20px 16px; }
-    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
-    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
-    .header .scope {
-      display: inline-block; font-size: 10px; font-weight: 600;
-      background: #eff6ff; color: #1e40af;
-      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
-    }
+/* === Header === */
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
 
-    /* === Container === */
-    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+/* === Container === */
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
 
-    /* === Section Title === */
-    .section-title {
-      font-size: 14px; font-weight: 700; color: #666;
-      text-transform: uppercase; letter-spacing: 1px;
-      margin: 32px 0 16px; padding-bottom: 6px;
-      border-bottom: 2px solid #e5e7eb;
-    }
+/* === Section Title === */
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
 
-    /* === Node Types === */
-    .node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; }
-    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
-    .node-desc { font-size: 10px; opacity: 0.8; }
+/* === Node Types === */
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
 
-    .node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
-    .node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
-    .node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
-    .node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
-    .node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
-    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
+.node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+.node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+.node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+.node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
+.node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
 
-    /* === Flow Layout === */
-    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
-    .flow-step {
-      display: flex; align-items: stretch;
-      width: 100%; max-width: 860px; min-height: 76px;
-    }
-    .flow-lane-left {
-      width: 220px; display: flex;
-      align-items: center; justify-content: flex-end;
-      padding-right: 18px; text-align: right;
-    }
-    .flow-lane-center {
-      width: 420px; display: flex;
-      align-items: center; justify-content: center;
-    }
-    .flow-lane-right {
-      width: 220px; display: flex;
-      align-items: center; padding-left: 18px; text-align: left;
-    }
-    .annotation {
-      font-size: 9px; color: #666; max-width: 180px; line-height: 1.4;
-    }
-    .annotation strong { color: #444; }
+/* === Flow Layout === */
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 180px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 180px; display: flex;
+  align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
 
-    /* === Arrows === */
-    .arrow-down {
-      width: 2px; height: 20px; background: #cbd5e1;
-      margin: 0 auto; position: relative;
-    }
-    .arrow-down::after {
-      content: ''; position: absolute; bottom: -4px; left: -4px;
-      border-left: 5px solid transparent;
-      border-right: 5px solid transparent;
-      border-top: 6px solid #cbd5e1;
-    }
-    .arrow-container {
-      display: flex; justify-content: center;
-      width: 100%; max-width: 860px;
-    }
-    .arrow-container .flow-lane-center {
-      display: flex; justify-content: center;
-    }
+/* === Arrows === */
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
 
-    /* === Cards === */
-    .card-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 16px; margin-top: 16px;
-    }
-    .card { padding: 16px; border-radius: 8px; }
-    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
-    .card p  { font-size: 11px; line-height: 1.6; }
+/* === Cards === */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
 
-    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
-    .card-blue h3 { color: #1e40af; }
-    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
-    .card-green h3 { color: #059669; }
-    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
-    .card-purple h3 { color: #7c3aed; }
-    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
-    .card-amber h3 { color: #92400e; }
-    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
-    .card-dark h3 { color: #333333; }
-    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
-    .card-red h3 { color: #dc2626; }
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
 
-    /* === Data Tables === */
-    .data-table {
-      width: 100%; max-width: 860px; margin: 16px auto;
-      border-collapse: collapse; font-size: 11px; background: #fff;
-      border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;
-    }
-    .data-table th {
-      background: #f3f4f6; padding: 10px 14px; text-align: left;
-      font-weight: 600; color: #444; border-bottom: 2px solid #e5e7eb;
-    }
-    .data-table td {
-      padding: 10px 14px; border-bottom: 1px solid #f3f4f6; color: #1a1a1a;
-    }
-    .data-table tr:last-child td { border-bottom: none; }
+/* === Data Tables === */
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
 
-    /* === Preformatted Text (Code) === */
-    pre {
-      background: #1e293b; color: #f8fafc; padding: 16px; border-radius: 8px;
-      font-size: 11px; overflow-x: auto; line-height: 1.5; font-family: 'Consolas', monospace;
-    }
-    code { font-family: 'Consolas', monospace; font-size: 10px; background: #f1f5f9; padding: 2px 4px; border-radius: 3px; color: #0f172a; }
+/* === Tags === */
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
 
-    /* === Tags === */
-    .tag {
-      display: inline-block; font-size: 9px; font-weight: 600;
-      padding: 2px 8px; border-radius: 3px;
-    }
-    .tag-phase    { background: #dbeafe; color: #1e40af; }
-    .tag-decision { background: #ede9fe; color: #5b21b6; }
-    .tag-failure  { background: #fee2e2; color: #991b1b; }
-    .tag-config   { background: #d1fae5; color: #065f46; }
-    .tag-output   { background: #fef3c7; color: #92400e; }
-    .tag-external { background: #f3f4f6; color: #666666; }
+/* === Legend === */
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
 
-    /* === Legend === */
-    .legend {
-      display: flex; gap: 16px; justify-content: center;
-      margin: 16px 0 24px; flex-wrap: wrap;
-    }
-    .legend-item {
-      display: flex; align-items: center; gap: 6px;
-      font-size: 10px; color: #666;
-    }
-    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+/* === Summary Grid === */
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
 
-    /* === Footer === */
-    .footer {
-      text-align: center; padding: 20px;
-      font-size: 10px; color: #999;
-    }
+/* === Winner Badge === */
+.winner-badge {
+  display: inline-block; font-size: 12px; color: #555555;
+  font-weight: 600; padding: 2px 10px; border-radius: 4px;
+  background: #f9fafb; border: 1px solid #d1d5db;
+}
+
+/* === Footer === */
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
+
+/* === Extensions === */
+body {
+  background:
+    radial-gradient(circle at top left, rgba(30,64,175,0.08), transparent 32%),
+    radial-gradient(circle at top right, rgba(4,120,87,0.08), transparent 28%),
+    #fafafa;
+}
+.hero {
+  max-width: 860px;
+  margin: 0 auto 20px;
+  padding: 22px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #ffffff 0%, #f8fbff 55%, #f3faf7 100%);
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.06);
+}
+.hero-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.hero-copy h2 {
+  font-size: 20px;
+  margin-bottom: 8px;
+  color: #111827;
+}
+.hero-copy p {
+  font-size: 12px;
+  color: #4b5563;
+  max-width: 640px;
+}
+.pill-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #111827;
+  color: #ffffff;
+}
+.pill.alt { background: #1e40af; }
+.pill.soft {
+  background: #eef2ff;
+  color: #4338ca;
+}
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 16px;
+  margin-top: 18px;
+}
+.hero-panel {
+  padding: 14px;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+}
+.hero-panel h3 {
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+.hero-panel p, .hero-panel li {
+  font-size: 11px;
+  color: #4b5563;
+}
+.hero-panel ul {
+  padding-left: 16px;
+}
+.command-list {
+  display: grid;
+  gap: 8px;
+}
+.command {
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #f8fafc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+.inline-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: #f3f4f6;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.note-strip {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #9a3412;
+  font-size: 11px;
+}
+.status-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.status-chip {
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 4px 8px;
+}
+.safe { background: #dcfce7; color: #166534; }
+.review { background: #ede9fe; color: #5b21b6; }
+.blocked { background: #fee2e2; color: #991b1b; }
+.skip { background: #f3f4f6; color: #4b5563; }
+.center-note {
+  max-width: 860px;
+  margin: 14px auto 0;
+  font-size: 11px;
+  color: #4b5563;
+}
+@media (max-width: 900px) {
+  .summary-grid, .hero-grid { grid-template-columns: 1fr; }
+  .flow-step {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    min-height: auto;
+    margin-bottom: 8px;
+  }
+  .flow-lane-left, .flow-lane-center, .flow-lane-right {
+    width: 100%;
+    padding: 0;
+    justify-content: center;
+  }
+  .annotation { max-width: none; text-align: center; }
+}
   </style>
 </head>
 <body>
-
   <div class="header">
     <h1>stark-update-deps</h1>
-    <div class="sub">Dependency Version Updater</div>
-    <div class="scope">Usage Guide</div>
+    <div class="sub">Standalone usage view for a dependency auditing and upgrade skill</div>
+    <div class="scope">Audience: usage</div>
   </div>
 
   <div class="container">
-    <div class="section-title">Overview</div>
-    <div class="card-grid">
-      <div class="card card-blue">
-        <h3>What it does</h3>
-        <p>Systematically audits every versioned dependency in a project, looks up current stable releases on official sources, identifies breaking changes, updates versions in-place, and rigorously verifies the result against web sources to prevent hallucinations.</p>
+    <div class="hero">
+      <div class="hero-top">
+        <div class="hero-copy">
+          <h2>Update dependency manifests, verify every version, and leave a clear report.</h2>
+          <p>This skill auto-discovers dependency files across a repo, researches current stable releases on official registries, applies safe upgrades in place, flags risky major bumps, and re-checks every changed version before it finishes.</p>
+          <div class="pill-row">
+            <span class="pill">No args</span>
+            <span class="pill alt">Auto-discovers manifests</span>
+            <span class="pill soft">Verification-first workflow</span>
+          </div>
+        </div>
+        <div class="winner-badge">Medium complexity • 6 phases + report</div>
       </div>
-      <div class="card card-green">
-        <h3>How to trigger</h3>
-        <p>Say: <em>"update dependencies"</em>, <em>"check for outdated packages"</em>, <em>"upgrade versions"</em>, or <em>"are my deps current?"</em></p>
-      </div>
-      <div class="card card-purple">
-        <h3>Key Value</h3>
-        <p><strong>Verification Phase:</strong> LLMs often hallucinate versions confidently. This skill verifies every single updated tag against live registries (PyPI, npm, Docker Hub) before finalizing the update.</p>
+
+      <div class="hero-grid">
+        <div class="hero-panel">
+          <h3>How users invoke it</h3>
+          <div class="command-list">
+            <div class="command">update dependencies</div>
+            <div class="command">check for outdated packages</div>
+            <div class="command">upgrade versions across this project</div>
+            <div class="command">are my deps current?</div>
+            <div class="command">stark-update-deps</div>
+          </div>
+        </div>
+        <div class="hero-panel">
+          <h3>What users get back</h3>
+          <ul>
+            <li>Updated manifest files for safe or review-worthy upgrades.</li>
+            <li>A decision summary: <span class="inline-code">Safe</span>, <span class="inline-code">Review</span>, <span class="inline-code">Blocked</span>, <span class="inline-code">Skip</span>.</li>
+            <li>Explicit verification evidence for each changed version.</li>
+            <li>Action items for major-version migrations and lockfile regeneration.</li>
+          </ul>
+        </div>
       </div>
     </div>
 
-    <div class="section-title">Execution Workflow</div>
+    <div class="note-strip">
+      Critical behavior: the skill does not trust plausible version numbers. It verifies exact package versions and Docker tags against official sources before leaving them in place.
+    </div>
+
+    <div class="section-title">At A Glance</div>
+    <div class="summary-grid">
+      <div class="summary-card card-green">
+        <h3>Inputs</h3>
+        <p>No explicit arguments. The skill scans the repository for dependency manifests, CI files, infra files, and docs that pin versions.</p>
+      </div>
+      <div class="summary-card card-blue">
+        <h3>Research Sources</h3>
+        <p>PyPI, npm, Docker Hub, pkg.go.dev, GitHub releases, and other official ecosystem sources discovered through web search.</p>
+      </div>
+      <div class="summary-card card-amber">
+        <h3>Primary Outputs</h3>
+        <p>Updated version references, a categorized upgrade matrix, verification evidence, and follow-up tasks for lockfiles or migration work.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Legend</div>
     <div class="legend">
-      <div class="legend-item"><div class="legend-dot" style="background:#1e40af"></div> Standard Phase</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#7c3aed"></div> Analysis / Check</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> Final Output</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#1e40af;"></span>Workflow phase</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#7c3aed;"></span>Decision point</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#047857;"></span>User input / configuration</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#f59e0b;"></span>User-visible output</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#dc2626;"></span>Failure or revert path</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#e5e7eb; border:1px dashed #9ca3af;"></span>External registry</div>
     </div>
 
+    <div class="section-title">Workflow</div>
     <div class="flow">
-      <!-- Step 1 -->
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation">Scans whole project<br><strong>(no args required)</strong></div>
+          <div class="annotation"><strong>Trigger phrases</strong><br></br>Natural-language requests like “update dependencies” or naming the skill directly.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-config">
+            <div class="node-title">Invoke Skill</div>
+            <div class="node-desc">No args • repo-wide auto-discovery</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>User intent</strong><br></br>Bring packages and base images up to date without guessing.</div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Scans</strong><br></br>Python, Node, Docker, Go, Rust, Java, Ruby, .NET, CI, infra, docs.</div>
         </div>
         <div class="flow-lane-center">
           <div class="node node-phase">
             <div class="node-title">1. Discovery</div>
-            <div class="node-desc">Auto-locates all dependency manifests and extracts current versions</div>
+            <div class="node-desc">Build dependency inventory with file and ecosystem context</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="annotation">Output: <strong>Dependency Inventory</strong><br>(grouped by ecosystem)</div>
+          <div class="node node-external">
+            <div class="node-title">Manifest Files</div>
+            <div class="node-desc">package.json, pyproject.toml, Dockerfile, go.mod, more</div>
+          </div>
         </div>
       </div>
 
       <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-      <!-- Step 2 -->
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation">Parallel WebSearches<br>Prefers <strong>Active LTS</strong> releases</div>
+          <div class="annotation"><strong>Batched lookups</strong><br></br>Grouped by ecosystem to reduce search round trips.</div>
         </div>
         <div class="flow-lane-center">
           <div class="node node-phase">
             <div class="node-title">2. Research</div>
-            <div class="node-desc">Looks up latest stable releases and release dates across registries</div>
+            <div class="node-desc">Find latest stable releases, release dates, constraints, changelogs</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="annotation">Data: PyPI, npmjs, Docker Hub, pkg.go.dev</div>
+          <div class="node node-external">
+            <div class="node-title">Official Registries</div>
+            <div class="node-desc">PyPI • npm • Docker Hub • GitHub releases • pkg.go.dev</div>
+          </div>
         </div>
       </div>
 
       <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-      <!-- Step 3 -->
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation">Checks <strong>Major Jumps</strong><br>Finds Codemod commands</div>
+          <div class="annotation"><strong>Checks</strong><br></br>Major jumps, runtime support, peer deps, Docker tag existence, conflicts.</div>
         </div>
         <div class="flow-lane-center">
           <div class="node node-decision">
             <div class="node-title">3. Compatibility Analysis</div>
-            <div class="node-desc">Categorizes updates (Safe, Review, Blocked, Skip) and flags breaking changes</div>
+            <div class="node-desc">Classify each dependency before editing files</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="annotation">Output: <strong>Decision Matrix</strong></div>
+          <div class="status-row">
+            <span class="status-chip safe">Safe</span>
+            <span class="status-chip review">Review</span>
+            <span class="status-chip blocked">Blocked</span>
+            <span class="status-chip skip">Skip</span>
+          </div>
         </div>
       </div>
 
       <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-      <!-- Step 4 -->
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation">Preserves constraint styles<br>(e.g. <code>^1.2.0</code> or <code>>=3.8</code>)</div>
+          <div class="annotation"><strong>Edit rules</strong><br></br>Preserve range style, do not touch lockfiles directly, keep versions consistent across files.</div>
         </div>
         <div class="flow-lane-center">
           <div class="node node-phase">
             <div class="node-title">4. Update</div>
-            <div class="node-desc">Applies safe updates in-place directly to files and markdown documentation</div>
+            <div class="node-desc">Apply safe updates and review-worthy bumps in place</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="annotation">Artifacts: Modified <strong>Project Files</strong></div>
+          <div class="annotation"><strong>Special care</strong><br></br>Docker tags must exist on Docker Hub, not just in release notes.</div>
         </div>
       </div>
 
       <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-      <!-- Step 5 -->
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation"><strong>CRITICAL SAFEGUARD</strong><br>Prevents Hallucinations</div>
+          <div class="annotation"><strong>Critical step</strong><br></br>Re-scan modified files and confirm every changed version exactly.</div>
         </div>
         <div class="flow-lane-center">
-          <div class="node node-decision" style="background: #047857;"> <!-- Using config color to stand out as validation -->
+          <div class="node node-phase">
             <div class="node-title">5. Verification</div>
-            <div class="node-desc">Re-scans modified files and re-verifies exact updated version strings via WebSearch</div>
+            <div class="node-desc">Exact version and Docker tag confirmation on official sources</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="annotation">Fails on missing Docker tags or fabricated numbers</div>
+          <div class="node node-failure">
+            <div class="node-title">If Not Confirmed</div>
+            <div class="node-desc">Search again, fix, re-verify, or revert and flag</div>
+          </div>
         </div>
       </div>
 
       <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-      <!-- Step 6 -->
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation">Actionable next steps for<br>the developer</div>
+          <div class="annotation"><strong>Report includes</strong><br></br>Counts, files modified, major bump actions, explicit evidence list.</div>
         </div>
         <div class="flow-lane-center">
           <div class="node node-output">
             <div class="node-title">6. Final Report</div>
-            <div class="node-desc">Presents explicit per-item verification list and migration warnings</div>
+            <div class="node-desc">Updated / skipped / blocked summary plus next steps</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="annotation"><strong>Summary Terminal Output</strong></div>
+          <div class="annotation"><strong>User follow-up</strong><br></br>Regenerate lockfiles, run tests, and handle migration tasks where needed.</div>
         </div>
       </div>
     </div>
 
-    <div class="section-title">Supported Ecosystems</div>
+    <div class="center-note">
+      The dominant user-facing pattern is: ask once, let the skill scan everything, then review the report for any major-version migrations or blocked upgrades before regenerating lockfiles.
+    </div>
+
+    <div class="section-title">Inputs It Understands</div>
     <table class="data-table">
       <thead>
         <tr>
-          <th>Ecosystem</th>
-          <th>Scanned Manifests</th>
-          <th>Registry Source</th>
+          <th>Input Type</th>
+          <th>What The Skill Uses</th>
+          <th>Why It Matters</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td><strong>Python</strong></td>
-          <td><code>pyproject.toml</code>, <code>requirements*.txt</code>, <code>setup.py</code>, <code>Pipfile</code>, <code>poetry.lock</code></td>
-          <td>PyPI (pypi.org)</td>
+          <td>User request</td>
+          <td>Natural language like “upgrade versions” or “are my deps current?”</td>
+          <td>Decides to run with no explicit arguments.</td>
         </tr>
         <tr>
-          <td><strong>Node.js</strong></td>
-          <td><code>package.json</code>, <code>package-lock.json</code>, <code>yarn.lock</code>, <code>pnpm-lock.yaml</code></td>
-          <td>npm (npmjs.com)</td>
+          <td>Repository files</td>
+          <td>Dependency manifests, CI configs, infra files, version-pinned docs</td>
+          <td>Creates a complete inventory instead of updating one ecosystem in isolation.</td>
         </tr>
         <tr>
-          <td><strong>Docker / Infra</strong></td>
-          <td><code>Dockerfile*</code>, <code>docker-compose*.yml</code></td>
-          <td>Docker Hub</td>
-        </tr>
-        <tr>
-          <td><strong>Go</strong></td>
-          <td><code>go.mod</code>, <code>go.sum</code></td>
-          <td>pkg.go.dev</td>
-        </tr>
-        <tr>
-          <td><strong>Rust</strong></td>
-          <td><code>Cargo.toml</code>, <code>Cargo.lock</code></td>
-          <td>crates.io / GitHub</td>
-        </tr>
-        <tr>
-          <td><strong>Documentation</strong></td>
-          <td><code>*.md</code> (embedded code blocks referencing versions)</td>
-          <td>N/A (Matches primary files)</td>
+          <td>Official release sources</td>
+          <td>PyPI, npm, Docker Hub, GitHub releases, pkg.go.dev</td>
+          <td>Prevents hallucinated versions and invalid Docker tags.</td>
         </tr>
       </tbody>
     </table>
 
-    <div class="section-title">Output Example</div>
-    <div class="card card-dark" style="margin-bottom: 20px;">
-      <pre>Dependency Update Report
-════════════════════════
+    <div class="section-title">Outputs Users Review</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Output</th>
+          <th>Shape</th>
+          <th>User Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Updated manifests</td>
+          <td>In-place version edits preserving original constraint style</td>
+          <td>Inspect diffs and regenerate lockfiles with the package manager.</td>
+        </tr>
+        <tr>
+          <td>Decision matrix</td>
+          <td>Safe / Review / Blocked / Skip categories</td>
+          <td>Focus on risky upgrades first.</td>
+        </tr>
+        <tr>
+          <td>Verification evidence</td>
+          <td>Per-dependency confirmation with exact version and source</td>
+          <td>Trust only versions that were explicitly confirmed.</td>
+        </tr>
+        <tr>
+          <td>Migration actions</td>
+          <td>Codemod commands or guide references for major bumps</td>
+          <td>Apply code changes after version updates land.</td>
+        </tr>
+      </tbody>
+    </table>
 
-Updated: 3 packages
-Skipped: 12 (already current)
-Blocked: 0 (compatibility issues)
-Major bumps: 2 (may need code changes)
-
-| Dependency | Old | New | Status | Notes |
-|------------|-----|-----|--------|-------|
-| fastapi    | 0.115.0 | 0.135.1 | Updated | |
-| openai     | 1.57.0  | 2.29.0  | Updated (major) | New client API |
-| tailwindcss| 3.3.0   | 4.2.0   | Updated (major) | CSS-first config |
-
-Files modified:
-- pyproject.toml
-- package.json
-
-Action items for major bumps:
-1. openai 1.x → 2.x: Check migration guide, API client changes
-2. tailwindcss 3.x → 4.x: Run `npx @tailwindcss/upgrade`
-
-Verification: All 3 updated versions confirmed on official registries.
-Verified:
-- [x] fastapi 0.135.1 — confirmed on PyPI (released 2026-03-01)
-- [x] openai 2.29.0 — confirmed on PyPI
-- [x] tailwindcss 4.2.0 — confirmed on npmjs</pre>
+    <div class="section-title">Common User Workflows</div>
+    <div class="card-grid">
+      <div class="card card-blue">
+        <h3>Routine Dependency Refresh</h3>
+        <p>Use when you want the project brought up to current stable versions across all ecosystems in one pass. The skill auto-discovers manifests, applies safe bumps, and leaves a concise report of what changed.</p>
+      </div>
+      <div class="card card-purple">
+        <h3>Major Upgrade Triage</h3>
+        <p>Use when you expect big version jumps. The skill separates safe upgrades from review-worthy ones, surfaces breaking-change risk, and points to migration guides or codemods when available.</p>
+      </div>
+      <div class="card card-amber">
+        <h3>Docker Tag Sanity Check</h3>
+        <p>Use when base images or service images may be stale. The skill verifies exact image tags on Docker Hub so you do not end up with nonexistent tags that break builds later.</p>
+      </div>
     </div>
 
-  </div>
+    <div class="section-title">Guardrails And Caveats</div>
+    <div class="card-grid">
+      <div class="card card-red">
+        <h3>Unverified Versions Are Not Left In Place</h3>
+        <p>If an updated version cannot be confirmed after fresh searches, the skill fixes it to a confirmed version or reverts it and flags the issue for the user.</p>
+      </div>
+      <div class="card card-dark">
+        <h3>Lockfiles Are Deliberately Not Edited</h3>
+        <p>The skill updates manifest intent, not generated lock state. Users should run the appropriate install command afterward to regenerate lockfiles consistently.</p>
+      </div>
+      <div class="card card-green">
+        <h3>LTS Preference For Runtimes</h3>
+        <p>For language runtimes and base images, the skill prefers stable LTS-style targets over bleeding-edge releases when ecosystem compatibility is likely to matter.</p>
+      </div>
+    </div>
 
-  <div class="footer">
-    Stark Skills Visualizer • stark-update-deps
+    <div class="footer"><div class="winner-badge">Visualization by Codex · Score: 8.9/10 · Generated from SKILL.md</div></div>
   </div>
-
 </body>
 </html>

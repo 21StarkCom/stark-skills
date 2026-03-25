@@ -2,359 +2,312 @@
 <head>
   
   
-  <title>stark-init-docs — Internal Architecture Visualization</title>
+  <title>stark-init-docs Skill Visualization</title>
   <style>
-    /*
-     * Stark Skills — Shared Design System CSS
-     *
-     * Foundation styles for LLM-generated HTML skill visualizations.
-     * LLMs embed this inline and may extend with additional styles.
-     * All colors pass WCAG AA 4.5:1 contrast ratio.
-     *
-     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
-     */
+/*
+ * Stark Skills — Shared Design System CSS
+ *
+ * Foundation styles for LLM-generated HTML skill visualizations.
+ * LLMs embed this inline and may extend with additional styles.
+ * All colors pass WCAG AA 4.5:1 contrast ratio.
+ *
+ * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+ */
 
-    /* === Reset & Base === */
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #fafafa;
-      color: #1a1a1a;
-      line-height: 1.5;
-    }
+/* === Reset & Base === */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
 
-    /* === Header === */
-    .header { text-align: center; padding: 36px 20px 16px; }
-    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
-    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
-    .header .scope {
-      display: inline-block; font-size: 10px; font-weight: 600;
-      background: #eff6ff; color: #1e40af;
-      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
-    }
+/* === Header === */
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
 
-    /* === Container === */
-    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+/* === Container === */
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
 
-    /* === Section Title === */
-    .section-title {
-      font-size: 14px; font-weight: 700; color: #666;
-      text-transform: uppercase; letter-spacing: 1px;
-      margin: 32px 0 16px; padding-bottom: 6px;
-      border-bottom: 2px solid #e5e7eb;
-    }
+/* === Section Title === */
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
 
-    /* === Node Types === */
-    .node { border-radius: 8px; padding: 12px 16px; text-align: center; }
-    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
-    .node-desc { font-size: 10px; opacity: 0.8; }
+/* === Node Types === */
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
 
-    .node-phase    { background: #1e40af; color: #ffffff; }
-    .node-decision { background: #7c3aed; color: #ffffff; }
-    .node-failure  { background: #dc2626; color: #ffffff; }
-    .node-config   { background: #047857; color: #ffffff; }
-    .node-output   { background: #f59e0b; color: #1a1a1a; }
-    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
+.node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+.node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+.node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+.node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
+.node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
 
-    /* === Flow Layout === */
-    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
-    .flow-step {
-      display: flex; align-items: stretch;
-      width: 100%; max-width: 860px; min-height: 76px;
-    }
-    .flow-lane-left {
-      width: 180px; display: flex;
-      align-items: center; justify-content: flex-end;
-      padding-right: 18px;
-    }
-    .flow-lane-center {
-      width: 500px; display: flex;
-      align-items: center; justify-content: center;
-    }
-    .flow-lane-right {
-      width: 180px; display: flex;
-      align-items: center; padding-left: 18px;
-    }
-    .annotation {
-      font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
-    }
-    .annotation strong { color: #444; }
+/* === Flow Layout === */
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 180px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 180px; display: flex;
+  align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
 
-    /* === Arrows === */
-    .arrow-down {
-      width: 2px; height: 20px; background: #cbd5e1;
-      margin: 0 auto; position: relative;
-    }
-    .arrow-down::after {
-      content: ''; position: absolute; bottom: -4px; left: -4px;
-      border-left: 5px solid transparent;
-      border-right: 5px solid transparent;
-      border-top: 6px solid #cbd5e1;
-    }
-    .arrow-container {
-      display: flex; justify-content: center;
-      width: 100%; max-width: 860px;
-    }
-    .arrow-container .flow-lane-center {
-      display: flex; justify-content: center;
-    }
+/* === Arrows === */
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
 
-    /* === Cards === */
-    .card-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 16px; margin-top: 16px;
-    }
-    .card { padding: 16px; border-radius: 8px; }
-    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
-    .card p  { font-size: 11px; line-height: 1.6; }
+/* === Cards === */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
 
-    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
-    .card-blue h3 { color: #1e40af; }
-    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
-    .card-green h3 { color: #059669; }
-    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
-    .card-purple h3 { color: #7c3aed; }
-    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
-    .card-amber h3 { color: #92400e; }
-    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
-    .card-dark h3 { color: #333333; }
-    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
-    .card-red h3 { color: #dc2626; }
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
 
-    /* === Data Tables === */
-    .data-table {
-      width: 100%; max-width: 860px; margin: 16px auto;
-      border-collapse: collapse; font-size: 11px;
-    }
-    .data-table th {
-      background: #f3f4f6; padding: 8px 12px; text-align: left;
-      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
-    }
-    .data-table td {
-      padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
-    }
+/* === Data Tables === */
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
 
-    /* === Tags === */
-    .tag {
-      display: inline-block; font-size: 9px; font-weight: 600;
-      padding: 2px 8px; border-radius: 3px;
-    }
-    .tag-phase    { background: #dbeafe; color: #1e40af; }
-    .tag-decision { background: #ede9fe; color: #5b21b6; }
-    .tag-failure  { background: #fee2e2; color: #991b1b; }
-    .tag-config   { background: #d1fae5; color: #065f46; }
-    .tag-output   { background: #fef3c7; color: #92400e; }
-    .tag-external { background: #f3f4f6; color: #666666; }
+/* === Tags === */
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
 
-    /* === Legend === */
-    .legend {
-      display: flex; gap: 16px; justify-content: center;
-      margin: 16px 0 24px; flex-wrap: wrap;
-    }
-    .legend-item {
-      display: flex; align-items: center; gap: 6px;
-      font-size: 10px; color: #666;
-    }
-    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+/* === Legend === */
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
 
-    /* === Summary Grid === */
-    .summary-grid {
-      display: grid; grid-template-columns: 1fr 1fr 1fr;
-      gap: 16px; margin-top: 16px;
-    }
-    .summary-card { padding: 16px; border-radius: 8px; }
-    .summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
-    .summary-card p  { font-size: 11px; line-height: 1.5; }
+/* === Summary Grid === */
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
 
-    /* === Winner Badge === */
-    .winner-badge {
-      display: inline-block; font-size: 12px; color: #555555;
-      font-weight: 600; padding: 2px 10px; border-radius: 4px;
-      background: #f9fafb; border: 1px solid #d1d5db;
-    }
+/* === Winner Badge === */
+.winner-badge {
+  display: inline-block; font-size: 12px; color: #555555;
+  font-weight: 600; padding: 2px 10px; border-radius: 4px;
+  background: #f9fafb; border: 1px solid #d1d5db;
+}
 
-    /* === Footer === */
-    .footer {
-      text-align: center; padding: 20px;
-      font-size: 10px; color: #999;
-    }
+/* === Footer === */
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
 
-    /* === Extensions === */
-    .hero-panel {
-      background: linear-gradient(135deg, #ffffff 0%, #f6f9ff 55%, #eefbf5 100%);
-      border: 1px solid #e5e7eb;
-      border-radius: 12px;
-      padding: 20px;
-      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
-    }
-    .hero-grid {
-      display: grid;
-      grid-template-columns: 1.4fr 1fr;
-      gap: 16px;
-      align-items: stretch;
-    }
-    .hero-copy p {
-      font-size: 12px;
-      color: #475569;
-      margin-top: 10px;
-      max-width: 60ch;
-    }
-    .hero-metrics {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
-    .metric {
-      background: #ffffff;
-      border: 1px solid #e5e7eb;
-      border-radius: 10px;
-      padding: 12px;
-    }
-    .metric .k {
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: #64748b;
-    }
-    .metric .v {
-      margin-top: 4px;
-      font-size: 18px;
-      font-weight: 700;
-      color: #0f172a;
-    }
-    .mini-cluster {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 14px;
-    }
-    .mini-node {
-      min-width: 118px;
-      padding: 10px 12px;
-    }
-    .list {
-      margin-top: 8px;
-      font-size: 11px;
-      color: #475569;
-    }
-    .list div + div { margin-top: 6px; }
-    .mono {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 10px;
-    }
-    .rail-note {
-      background: #fff;
-      border: 1px solid #e5e7eb;
-      border-radius: 8px;
-      padding: 10px 12px;
-      font-size: 11px;
-      color: #475569;
-      margin: 14px auto 0;
-      max-width: 860px;
-    }
-    @media (max-width: 860px) {
-      .hero-grid,
-      .summary-grid { grid-template-columns: 1fr; }
-      .flow-step {
-        flex-direction: column;
-        min-height: auto;
-        gap: 10px;
-        margin-bottom: 14px;
-      }
-      .flow-lane-left,
-      .flow-lane-center,
-      .flow-lane-right {
-        width: 100%;
-        justify-content: center;
-        padding: 0;
-      }
-      .annotation { max-width: none; text-align: center; }
-    }
+/* === Extensions === */
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.hero-panel {
+  max-width: 860px; margin: 18px auto 0; padding: 18px 20px;
+  background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 55%, #ecfdf5 100%);
+  border: 1px solid #dbeafe; border-radius: 12px;
+}
+.hero-panel p { font-size: 12px; color: #334155; }
+.mode-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 12px; margin-top: 16px;
+}
+.mode-box {
+  border-radius: 10px; padding: 14px;
+  background: #ffffff; border: 1px solid #e5e7eb;
+}
+.mode-box h3 { font-size: 12px; margin-bottom: 6px; }
+.mode-box p { font-size: 10px; color: #475569; }
+.dual-panel {
+  display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 16px; margin-top: 16px;
+}
+.stack {
+  display: grid; gap: 12px;
+}
+.callout {
+  padding: 14px 16px; border-radius: 10px; background: #fff;
+  border: 1px solid #e5e7eb;
+}
+.callout h3 { font-size: 12px; margin-bottom: 6px; }
+.callout p { font-size: 11px; color: #475569; }
+.pipeline-strip {
+  display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px;
+}
+.pipeline-chip {
+  padding: 7px 10px; border-radius: 999px; font-size: 10px; font-weight: 700;
+  background: #f3f4f6; color: #374151;
+}
+.note-list {
+  margin-top: 8px; display: grid; gap: 6px;
+}
+.note-list div {
+  font-size: 11px; color: #475569; padding-left: 12px; position: relative;
+}
+.note-list div::before {
+  content: "•"; position: absolute; left: 0; color: #64748b;
+}
+@media (max-width: 860px) {
+  .flow-step { flex-direction: column; min-height: auto; gap: 8px; margin-bottom: 10px; }
+  .flow-lane-left, .flow-lane-center, .flow-lane-right {
+    width: 100%; justify-content: center; padding: 0;
+  }
+  .mode-grid, .dual-panel, .summary-grid { grid-template-columns: 1fr; }
+}
   </style>
 </head>
 <body>
   <div class="header">
     <h1>stark-init-docs</h1>
-    <div class="sub">Repo documentation scaffold and migration skill</div>
-    <div class="scope">INTERNALS · architecture · data flow · extension points</div>
+    <div class="sub">Scaffold and evolve a standardized developer-docs system inside any repository</div>
+    <div class="scope">INTERNALS • architecture, data flow, extension points</div>
   </div>
 
   <div class="container">
-    <section class="hero-panel">
-      <div class="hero-grid">
-        <div class="hero-copy">
-          <span class="winner-badge">Medium complexity · ~325 lines</span>
-          <p>
-            This skill is an orchestration layer over repository introspection, template materialization,
-            content synthesis, migration, and safe cleanup. Its core design principle is idempotent
-            filesystem mutation: each mode builds or rewrites documentation state without guessing beyond
-            evidence from git history, repo config, and explicit user confirmation.
-          </p>
-          <div class="mini-cluster">
-            <div class=""node" node-phase mini-node">
-              <div class="node-title">template</div>
-              <div class="node-desc">seed docs skeleton</div>
-            </div>
-            <div class=""node" node-config mini-node">
-              <div class="node-title">backfill</div>
-              <div class="node-desc">derive docs from evidence</div>
-            </div>
-            <div class=""node" node-decision mini-node">
-              <div class="node-title">upgrade</div>
-              <div class="node-desc">reclassify and relocate</div>
-            </div>
-            <div class=""node" node-output mini-node">
-              <div class="node-title">clean</div>
-              <div class="node-desc">remove scaffold only</div>
-            </div>
-          </div>
-        </div>
-        <div class="hero-metrics">
-          <div class="metric">
-            <div class="k">Inputs</div>
-            <div class="v">Git + repo files</div>
-          </div>
-          <div class="metric">
-            <div class="k">Output Surface</div>
-            <div class="v">docs/ + mkdocs</div>
-          </div>
-          <div class="metric">
-            <div class="k">Safety Gates</div>
-            <div class="v">Idempotency, confirm, skip</div>
-          </div>
-          <div class="metric">
-            <div class="k">Observability</div>
-            <div class="v">Modes, counts, timings</div>
-          </div>
-        </div>
+    <div class="hero-panel">
+      <p>
+        This skill is a repo mutation orchestrator with four composable modes:
+        <span class="mono">--template</span>,
+        <span class="mono">--backfill</span>,
+        <span class="mono">--upgrade</span>,
+        <span class="mono">--clean</span>.
+        Internally, everything centers on idempotent filesystem writes, git-aware safety checks, optional GitHub PR enrichment, and post-run observability metrics.
+      </p>
+      <div class="pipeline-strip">
+        <div class="pipeline-chip">Entry: slash command or natural language</div>
+        <div class="pipeline-chip">Dispatch: parse flags / prompt if empty</div>
+        <div class="pipeline-chip">Execution: repo + template + git ops</div>
+        <div class="pipeline-chip">Artifacts: docs tree + mkdocs nav + commits</div>
       </div>
-    </section>
-
-    <div class="section-title">Execution Flow</div>
-    <div class="legend">
-      <div class="legend-item"><span class="legend-dot" style="background:#1e40af;"></span>Phase</div>
-      <div class="legend-item"><span class="legend-dot" style="background:#7c3aed;"></span>Decision</div>
-      <div class="legend-item"><span class="legend-dot" style="background:#047857;"></span>Config / analysis</div>
-      <div class="legend-item"><span class="legend-dot" style="background:#f59e0b;"></span>Output / mutation</div>
-      <div class="legend-item"><span class="legend-dot" style="background:#dc2626;"></span>Failure / guardrail</div>
-      <div class="legend-item"><span class="legend-dot" style=""background:#e5e7eb;" border:1px dashed #9ca3af;"></span>External dependency</div>
     </div>
 
+    <div class="section-title">Legend</div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-dot" style="background:#1e40af"></span>Workflow phase</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#7c3aed"></span>Decision gate</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#047857"></span>Config / mode</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#f59e0b"></span>Generated artifact</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#dc2626"></span>Failure / stop</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#e5e7eb; border:1px dashed #9ca3af"></span>External dependency</div>
+    </div>
+
+    <div class="section-title">Execution Flow</div>
     <div class="flow">
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation"><strong>Entry point</strong><br></br>User invokes <span class="mono">/stark-init-docs</span> or asks to init/setup/scaffold docs.</div>
+          <div class="annotation"><strong>Triggers</strong><br></br>“init docs”, “setup docs”, “scaffold docs”, or <span class="mono">/stark-init-docs</span></div>
         </div>
         <div class="flow-lane-center">
-          <div class=""node" node-phase" style=""width:" 100%;">
-            <div class="node-title">Invocation + Repository Preconditions</div>
-            <div class="node-desc">Verify git repo, resolve repo name, locate template directory</div>
+          <div class="node node-phase">
+            <div class="node-title">1. Entry + Intent Match</div>
+            <div class="node-desc">Skill invoked with optional mode flags</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class=""node" node-failure" style=""width:" 100%;">
-            <div class="node-title">Hard Stop</div>
+          <div class="node node-config">
+            <div class="node-title">Arguments</div>
+            <div class="node-desc mono">--template --backfill --upgrade --clean</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="node node-external">
+            <div class="node-title">Git Repo</div>
+            <div class="node-desc">required execution context</div>
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision">
+            <div class="node-title">2. Preconditions</div>
+            <div class="node-desc">Repo present? Templates installed? Flags provided?</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-failure">
+            <div class="node-title">Stop Early</div>
             <div class="node-desc">Not a git repo or templates missing</div>
           </div>
         </div>
@@ -364,16 +317,16 @@
 
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation"><strong>No-arg mode</strong><br></br>Enumerates four modes and waits for user selection.</div>
+          <div class="annotation"><strong>No-arg path</strong><br></br>Print four modes and wait for user choice</div>
         </div>
         <div class="flow-lane-center">
-          <div class=""node" node-decision" style=""width:" 100%;">
-            <div class="node-title">Mode Resolution</div>
-            <div class="node-desc">template · backfill · upgrade · clean, with combinable flags</div>
+          <div class="node node-decision">
+            <div class="node-title">3. Mode Resolution</div>
+            <div class="node-desc">Prompt if empty, otherwise compose one or more modes</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="annotation"><strong>Composable branch</strong><br></br><span class=""tag" tag-decision">upgrade + backfill</span> is explicitly supported.</div>
+          <div class="annotation"><strong>Composition</strong><br></br><span class="mono">--upgrade --backfill</span> is valid and ordered</div>
         </div>
       </div>
 
@@ -381,44 +334,21 @@
 
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class=""node" node-external" style=""width:" 100%;">
-            <div class="node-title">Template Source</div>
-            <div class="node-desc">~/.claude/.../templates/</div>
+          <div class="node node-config">
+            <div class="node-title">Template Mode</div>
+            <div class="node-desc">dirs, templates, CODEOWNERS, commit</div>
           </div>
         </div>
         <div class="flow-lane-center">
-          <div class=""node" node-phase" style=""width:" 100%;">
-            <div class="node-title">Template Pipeline</div>
-            <div class="node-desc">Create docs directories, copy templates, substitute repo name, synthesize CODEOWNERS</div>
+          <div class="node node-phase">
+            <div class="node-title">4. Shared Execution Core</div>
+            <div class="node-desc">Idempotent file ops, git-aware writes, logging, metrics</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class=""node" node-output" style=""width:" 100%;">
-            <div class="node-title">Scaffold Artifacts</div>
-            <div class="node-desc">docs/, mkdocs.yml, PR template, staleness config</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class=""node" node-external" style=""width:" 100%;">
-            <div class="node-title">Evidence Inputs</div>
-            <div class="node-desc">git log, gh PRs, package manifests, CI, Docker, Makefiles</div>
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class=""node" node-config" style=""width:" 100%;">
-            <div class="node-title">Backfill Analyzer</div>
-            <div class="node-desc">Infer major technologies, significant PRs, runnable commands, deployment signals</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class=""node" node-failure" style=""width:" 100%;">
-            <div class="node-title">Soft Degradation</div>
-            <div class="node-desc">If gh fails, continue from commits and codebase only</div>
+          <div class="node node-config">
+            <div class="node-title">Backfill / Upgrade / Clean</div>
+            <div class="node-desc">specialized branches on top of the same core</div>
           </div>
         </div>
       </div>
@@ -427,16 +357,16 @@
 
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation"><strong>Conservative synthesis</strong><br></br>Only major technology choices become ADRs.</div>
+          <div class="annotation"><strong>Backfill inputs</strong><br></br>git log, merged PRs via <span class="mono">gh</span>, package manifests, CI, Docker</div>
         </div>
         <div class="flow-lane-center">
-          <div class=""node" node-output" style=""width:" 100%;">
-            <div class="node-title">Generated Documentation</div>
-            <div class="node-desc">ADRs, feature spec stubs, getting-started/development/deployment guides, mkdocs nav wiring</div>
+          <div class="node node-phase">
+            <div class="node-title">5. Repository Analysis</div>
+            <div class="node-desc">Infer tech choices, feature history, developer workflows</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class="annotation"><strong>Bounded generation</strong><br></br>At most 10 significant PR specs, no speculative ADRs.</div>
+          <div class="annotation"><strong>Upgrade inputs</strong><br></br>Scan scattered Markdown, classify, move, relink</div>
         </div>
       </div>
 
@@ -444,38 +374,21 @@
 
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation"><strong>Upgrade branch</strong><br></br>Scans markdown outside <span class="mono">docs/</span>, excludes repo-root README and common non-doc files.</div>
+          <div class="node node-decision">
+            <div class="node-title">Conservative ADR Filter</div>
+            <div class="node-desc">Only major technologies and evident infra</div>
+          </div>
         </div>
         <div class="flow-lane-center">
-          <div class=""node" node-decision" style=""width:" 100%;">
-            <div class="node-title">Classification + Migration</div>
-            <div class="node-desc">spec · adr · guide · reference · architecture, then git mv + internal link rewrites</div>
+          <div class="node node-phase">
+            <div class="node-title">6. Generate or Migrate Content</div>
+            <div class="node-desc">ADRs, specs, guides, nav updates, link rewrites, cleanup</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class=""node" node-output" style=""width:" 100%;">
-            <div class="node-title">Normalized Layout</div>
-            <div class="node-desc">Scattered markdown converges into a standard docs information architecture</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="annotation"><strong>Clean branch</strong><br></br>Explicit confirmation required before any scaffold removal.</div>
-        </div>
-        <div class="flow-lane-center">
-          <div class=""node" node-decision" style=""width:" 100%;">
-            <div class="node-title">Safe Cleanup</div>
-            <div class="node-desc">Delete templates and empty dirs only; preserve user-authored docs and meaningful history</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class=""node" node-failure" style=""width:" 100%;">
-            <div class="node-title">Protection Rules</div>
-            <div class="node-desc">Never delete docs content, README, CHANGELOG, CONTRIBUTING, or modified files</div>
+          <div class="node node-decision">
+            <div class="node-title">Clean Confirmation</div>
+            <div class="node-desc">Explicit y/n gate before deleting scaffold files</div>
           </div>
         </div>
       </div>
@@ -484,177 +397,159 @@
 
       <div class="flow-step">
         <div class="flow-lane-left">
-          <div class="annotation"><strong>Mutation policy</strong><br></br>Commits only when there is an actual staged delta.</div>
+          <div class="annotation"><strong>Safety rule</strong><br></br>Skip commit if no files changed</div>
         </div>
         <div class="flow-lane-center">
-          <div class=""node" node-phase" style=""width:" 100%;">
-            <div class="node-title">Commit + Observability</div>
-            <div class="node-desc">Stage changes, write mode-specific commit message, emit metrics for counts and generated artifacts</div>
+          <div class="node node-output">
+            <div class="node-title">7. Materialized Outputs</div>
+            <div class="node-desc">docs tree, mkdocs nav, repo metadata, optional git commit</div>
           </div>
         </div>
         <div class="flow-lane-right">
-          <div class=""node" node-output" style=""width:" 100%;">
-            <div class="node-title">Operational Telemetry</div>
-            <div class="node-desc">Modes executed, created/skipped/moved/deleted, ADR/spec/guide totals, link updates</div>
+          <div class="node node-output">
+            <div class="node-title">Observability</div>
+            <div class="node-desc">timing, checkpoints, counts by mode and artifact type</div>
           </div>
         </div>
       </div>
-    </div>
-
-    <div class="rail-note">
-      Internal model: <strong>template</strong> is the primitive, <strong>backfill</strong> depends on it,
-      <strong>upgrade</strong> rehomes existing state then fills gaps, and <strong>clean</strong> is the inverse path
-      guarded by confirmation and provenance checks.
     </div>
 
     <div class="section-title">Mode Matrix</div>
+    <div class="mode-grid">
+      <div class="mode-box">
+        <h3><span class="tag tag-config">Template</span></h3>
+        <p>Creates <span class="mono">docs/{specs,plans,adr,guides,reference,architecture}</span>, copies standard templates, fills repo-name placeholders, generates CODEOWNERS if absent, then commits only if files changed.</p>
+      </div>
+      <div class="mode-box">
+        <h3><span class="tag tag-config">Backfill</span></h3>
+        <p>Runs template first, mines history and repo config, generates conservative ADRs, stub specs from significant merged PRs, developer guides from actual commands, then rewires <span class="mono">mkdocs.yml</span>.</p>
+      </div>
+      <div class="mode-box">
+        <h3><span class="tag tag-config">Upgrade</span></h3>
+        <p>Finds Markdown outside <span class="mono">docs/</span>, classifies it into spec/adr/guide/reference/architecture, moves files with <span class="mono">git mv</span>, repairs internal links, updates nav, then fills structural gaps via template.</p>
+      </div>
+      <div class="mode-box">
+        <h3><span class="tag tag-config">Clean</span></h3>
+        <p>Requires explicit confirmation, removes only scaffold artifacts and empty directories, preserves user-generated docs and meaningful history, then skips commit if there is nothing to remove.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Data Flow and Artifacts</div>
     <table class="data-table">
       <thead>
         <tr>
-          <th>Mode</th>
-          <th>Primary Inputs</th>
-          <th>Core Logic</th>
-          <th>Outputs</th>
-          <th>Risk Controls</th>
+          <th>Input Source</th>
+          <th>Interpreter</th>
+          <th>Rule</th>
+          <th>Output</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td><span class=""tag" tag-phase">--template</span></td>
-          <td>Repo root, templates dir, git user</td>
-          <td>Create directories, copy defaults, substitute placeholders, generate CODEOWNERS if absent</td>
-          <td>Scaffold files and initial docs structure</td>
-          <td>Idempotent skip-on-exists, no empty commit</td>
+          <td><span class="tag tag-external">Template files</span> <span class="mono">~/.claude/.../templates/</span></td>
+          <td>Placeholder substitution</td>
+          <td>Skip existing destinations</td>
+          <td><span class="tag tag-output">mkdocs.yml</span> <span class="tag tag-output">docs/index.md</span> <span class="tag tag-output">ADR template</span></td>
         </tr>
         <tr>
-          <td><span class=""tag" tag-config">--backfill</span></td>
-          <td>Template output, git history, gh PRs, manifests, CI, Docker</td>
-          <td>Infer architecture choices, filter significant PRs, synthesize guides from actual commands</td>
-          <td>ADRs, spec stubs, guides, nav wiring</td>
-          <td>Conservative heuristics, gh fallback, bounded PR count</td>
+          <td><span class="tag tag-external">git log</span> and earliest-introduction dates</td>
+          <td>Technology detector</td>
+          <td>Major choices only, no speculative ADRs</td>
+          <td><span class="tag tag-output">Numbered ADRs</span></td>
         </tr>
         <tr>
-          <td><span class=""tag" tag-decision">--upgrade</span></td>
-          <td>Tracked markdown files outside docs/</td>
-          <td>Classify documents, move with git, rewrite internal links, update nav</td>
-          <td>Standardized layout under docs/</td>
-          <td>Exclusions list, conflict skip, README stays put</td>
+          <td><span class="tag tag-external">gh pr list</span> if available</td>
+          <td>Significance filter</td>
+          <td>Ignore trivial bugfix/deps/chore PRs</td>
+          <td><span class="tag tag-output">Stub specs</span> capped at 10</td>
         </tr>
         <tr>
-          <td><span class=""tag" tag-output">--clean</span></td>
-          <td>Existing scaffold files and doc tree</td>
-          <td>Confirm intent, remove template files, prune empty dirs, preserve authored content</td>
-          <td>Reduced scaffold footprint</td>
-          <td>Explicit confirmation, provenance checks, preserve meaningful history</td>
+          <td><span class="tag tag-external">package.json / Makefile / CI / Docker</span></td>
+          <td>Workflow synthesizer</td>
+          <td>Use actual repo commands, no placeholders</td>
+          <td><span class="tag tag-output">Getting started</span> <span class="tag tag-output">Development</span> <span class="tag tag-output">Deployment guide</span></td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-external">Markdown outside docs/</span></td>
+          <td>Classifier + mover</td>
+          <td>Preserve README, CHANGELOG, LICENSE, CONTRIBUTING</td>
+          <td><span class="tag tag-output">Standardized doc layout</span> + fixed links</td>
         </tr>
       </tbody>
     </table>
 
-    <div class="section-title">Internal Architecture Notes</div>
+    <div class="section-title">Internals View</div>
+    <div class="dual-panel">
+      <div class="stack">
+        <div class="card card-blue">
+          <h3>Control Plane</h3>
+          <p>The skill is effectively a mode dispatcher wrapped around a shared mutation engine. The engine enforces idempotency, preserves existing user content, and treats git state as the source of truth for both safety and commit creation.</p>
+        </div>
+        <div class="card card-purple">
+          <h3>Decision Boundaries</h3>
+          <p>There are three hard gates: missing repo/templates cause immediate failure, no-arg invocation pauses for user selection, and clean mode pauses for explicit confirmation before destructive scaffold removal.</p>
+        </div>
+        <div class="card card-green">
+          <h3>Extension Points</h3>
+          <p>Add new analyzers in the backfill file-scan stage, extend the document classifier signal table, or broaden <span class="mono">mkdocs.yml</span> nav generation. The safest customization surface is rule tables, not ad hoc file mutation logic.</p>
+        </div>
+      </div>
+      <div class="stack">
+        <div class="callout">
+          <h3>Observed Metrics</h3>
+          <div class="note-list">
+            <div>Mode set executed: template / backfill / upgrade / clean</div>
+            <div>Files created, skipped, moved, deleted</div>
+            <div>ADRs generated, specs generated, guides generated</div>
+            <div>Internal links updated during upgrade</div>
+            <div>Timing and checkpoints from the observability protocol</div>
+          </div>
+        </div>
+        <div class="callout">
+          <h3>Safety Invariants</h3>
+          <div class="note-list">
+            <div>Never overwrite existing scaffold files during template creation</div>
+            <div>Never delete user-generated docs during clean</div>
+            <div>Skip empty commits across all modes</div>
+            <div>Continue backfill without PR data if <span class="mono">gh</span> is unavailable</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">Operational Risks</div>
     <div class="card-grid">
-      <div class=""card" card-blue">
-        <h3>Data Flow Contract</h3>
-        <p>
-          Evidence flows from filesystem and VCS into a narrow generation layer. The skill does not invent
-          architecture: it extracts repository facts, applies classification heuristics, then writes
-          documentation artifacts and navigation metadata.
-        </p>
+      <div class="card card-red">
+        <h3>Template Source Missing</h3>
+        <p>The skill is tightly coupled to a specific template directory. If that path is absent, execution halts immediately. This is the highest-friction dependency because every generation path eventually relies on scaffold assets.</p>
       </div>
-      <div class=""card" card-green">
-        <h3>Idempotent Mutation Strategy</h3>
-        <p>
-          Every branch uses skip semantics or guarded deletion. Existing destinations short-circuit writes,
-          commits are omitted when empty, and cleanup removes only scaffold-owned files or empty directories.
-        </p>
+      <div class="card card-amber">
+        <h3>Classification Drift</h3>
+        <p>Upgrade mode uses heuristic content signals. Misclassification falls back to <span class="mono">reference</span>, which is safe for preservation but can weaken doc discoverability until manually corrected.</p>
       </div>
-      <div class=""card" card-purple">
-        <h3>Decision Surfaces</h3>
-        <p>
-          The main decision points are mode selection, document classification during upgrade, technology
-          significance during ADR generation, and cleanup authorization. Each one narrows potentially risky mutations.
-        </p>
-      </div>
-      <div class=""card" card-amber">
-        <h3>Artifact Topology</h3>
-        <p>
-          The skill centralizes documentation into <span class="mono">docs/specs</span>, <span class="mono">docs/plans</span>,
-          <span class="mono">docs/adr</span>, <span class="mono">docs/guides</span>, <span class="mono">docs/reference</span>,
-          and <span class="mono">docs/architecture</span>, with <span class="mono">mkdocs.yml</span> as the indexable nav root.
-        </p>
-      </div>
-      <div class=""card" card-dark">
-        <h3>Extension Points</h3>
-        <p>
-          Internals can extend template sources, add new manifest analyzers, improve PR significance scoring,
-          expand markdown classification rules, or enrich nav generation without changing the mode contract.
-        </p>
-      </div>
-      <div class=""card" card-red">
-        <h3>Failure Semantics</h3>
-        <p>
-          Template absence and non-git execution are hard failures. Missing GitHub CLI is a soft failure.
-          File move conflicts during upgrade are warnings. The design prefers degraded output over aborted runs
-          when safe continuation is possible.
-        </p>
+      <div class="card card-dark">
+        <h3>History Quality Dependency</h3>
+        <p>Backfill output quality depends on commit hygiene, PR titles, and discoverable config files. The skill is conservative by design, so weak repository metadata yields fewer ADRs and thinner generated specs.</p>
       </div>
     </div>
 
-    <div class="section-title">Extension Map</div>
+    <div class="section-title">Contributor Summary</div>
     <div class="summary-grid">
-      <div class=""summary-card" card-green">
-        <h3>Analyzer Plug-ins</h3>
-        <p>
-          Add parsers for new ecosystems such as Bazel, Terraform, Helm, or monorepo workspace files to deepen
-          backfill accuracy while preserving the conservative ADR policy.
-        </p>
+      <div class="summary-card card-blue">
+        <h3>Primary Responsibility</h3>
+        <p>Normalize documentation structure across repositories while preserving existing content and fitting within git-native workflows.</p>
       </div>
-      <div class=""summary-card" card-purple">
-        <h3>Classification Heuristics</h3>
-        <p>
-          Upgrade mode can evolve from keyword matching into richer structural parsing, frontmatter support,
-          or ML-assisted classification as long as uncertain cases still default to reference.
-        </p>
+      <div class="summary-card card-green">
+        <h3>Best Internal Abstraction</h3>
+        <p>Treat each mode as a policy layer over one shared engine: inspect, decide, mutate, wire nav, commit, report metrics.</p>
       </div>
-      <div class=""summary-card" card-amber">
-        <h3>Ownership + Provenance</h3>
-        <p>
-          Cleanup safety improves if generated files carry explicit markers or frontmatter signatures. That reduces
-          ambiguity around whether a CODEOWNERS or config file originated from this skill.
-        </p>
+      <div class="summary-card card-purple">
+        <h3>Most Important Rule</h3>
+        <p><span class="winner-badge">Idempotency over aggression</span><br></br>Existing files are skipped, meaningful docs are preserved, and destructive work requires confirmation.</p>
       </div>
     </div>
-
-    <div class="section-title">Observable Metrics</div>
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Metric</th>
-          <th>Why it matters internally</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>Modes executed</td>
-          <td>Shows actual orchestration path, especially combined runs like upgrade + backfill.</td>
-        </tr>
-        <tr>
-          <td>Files created / skipped / moved / deleted</td>
-          <td>Quantifies mutation surface and verifies idempotency behavior across repeated runs.</td>
-        </tr>
-        <tr>
-          <td>ADRs / specs / guides generated</td>
-          <td>Measures synthesis depth and whether repo evidence produced useful documentation output.</td>
-        </tr>
-        <tr>
-          <td>Internal links updated</td>
-          <td>Critical integrity check for upgrade mode because relocation without link repair breaks navigability.</td>
-        </tr>
-      </tbody>
-    </table>
   </div>
 
-  <div class="footer">
-    stark-init-docs visualized for internal contributors: orchestrator, evidence pipeline, guarded mutation model.
-  </div>
+  <div class="footer"><div class="winner-badge">Visualization by Codex · Score: 8.8/10 · Generated from SKILL.md</div></div>
 </body>
 </html>

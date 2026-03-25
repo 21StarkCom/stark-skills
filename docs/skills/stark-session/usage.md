@@ -5,31 +5,10 @@ Session management — start and end modes. Start: loads context, git state, hea
 ## Workflow Overview
 
 ```mermaid
-graph TD
-  subgraph Start Mode
-    StartCMD([/stark-session start]) --> LoadContext[Internalize CLAUDE.md & Config]
-    LoadContext --> GitState[Gather Git & PR State]
-    GitState --> ProjBoard[Check Project Board]
-    ProjBoard --> HealthChecks[Run Health Checks]
-    HealthChecks --> Briefing[/Display Concise Briefing/]
-    Briefing --> PromptStart{{Ask: What are we working on?}}
-  end
 
-  subgraph End Mode
-    EndCMD([/stark-session end]) --> RunTests[Run Tests & Build]
-    RunTests -->|Fails| AskProceed{{Ask: Proceed anyway?}}
-    AskProceed -->|Yes| MergePR[Merge Open PRs]
-    RunTests -->|Passes| MergePR
-    MergePR --> CommitDocs[Stage Docs & Devlog]
-    CommitDocs --> PromptMsg{{Ask: Commit Summary?}}
-    PromptMsg --> Commit[git commit]
-    Commit --> UpdateProj[Update Project Field to Drafted]
-    UpdateProj --> Push[Git Push]
-    Push --> Summary[/Display Session Summary/]
-  end
 ```
 
-![A visualization of the stark-session skill, showing two main workflows: Start Mode for gathering context and presenting a briefing, and End Mode for running tests, merging PRs, committing docs, and pushing code.](usage.png)
+![A clean single-page infographic for the stark-session skill with a centered header, command pills for `/stark-session`, `/stark-session start`, and `/stark-session end`, followed by usage summary cards. The middle of the page shows two vertical workflow diagrams: Start Mode in blue and green nodes for gathering context, inspecting git and PR state, running health checks, listing skills, and producing a briefing; End Mode with blue, purple, and amber nodes for tests and build, proceed-anyway decision, PR merges, docs commit, project field updates, push decision, and final session summary. Lower sections include config hierarchy cards, a table of session config keys and defaults, common workflow cards, a failure-handling table, and output cards, all in a neutral light theme with subtle blue-green background gradients."}}](usage.png)
 
 ## When to Use
 

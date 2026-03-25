@@ -1,10 +1,39 @@
 graph TD
-    Start([User triggers stark-claude-md-improver]) --> Discover[1. Discover CLAUDE.md & memory files]
-    Discover --> Analyze[2. Analyze against 5 dimensions]
-    Analyze --> Score[3. Generate scores, issues, and suggestions]
-    Score --> Prompt{4. Ask: Apply improvements?}
-    Prompt -- Yes --> Apply[5. Apply edits directly to files]
-    Prompt -- No --> Skip[Skip modifications]
-    Apply --> Metrics[Log Observability Metrics]
-    Skip --> Metrics
-    Metrics --> Finish([End])
+    A["Invoke /stark-claude-md-improver [path]"] --> B{Path provided?}
+    B -->|Yes| C[Read specified CLAUDE.md]
+    B -->|No| D["Auto-discover: ~ → org → project → subdirs"]
+    D --> E[Read all discovered CLAUDE.md files]
+    C --> F[Read memory files for context]
+    E --> F
+    F --> G["Analyze: Structure & Clarity"]
+    F --> H["Analyze: Completeness"]
+    F --> I["Analyze: Accuracy & Freshness"]
+    F --> J["Analyze: Effectiveness for AI"]
+    F --> K["Analyze: Hierarchy Optimization"]
+    G --> L[Generate Report]
+    H --> L
+    I --> L
+    J --> L
+    K --> L
+    L --> M["Present: scores, issues, additions, removals, moves"]
+    M --> N{Apply changes?}
+    N -->|Yes| O[Edit CLAUDE.md files directly]
+    N -->|No| P[Done — report for reference]
+    O --> P
+
+    style A fill:#047857,color:#fff
+    style B fill:#7c3aed,color:#fff
+    style N fill:#7c3aed,color:#fff
+    style C fill:#1e40af,color:#fff
+    style D fill:#1e40af,color:#fff
+    style E fill:#1e40af,color:#fff
+    style F fill:#1e40af,color:#fff
+    style G fill:#1e40af,color:#fff
+    style H fill:#1e40af,color:#fff
+    style I fill:#1e40af,color:#fff
+    style J fill:#1e40af,color:#fff
+    style K fill:#1e40af,color:#fff
+    style L fill:#f59e0b,color:#1a1a1a
+    style M fill:#f59e0b,color:#1a1a1a
+    style O fill:#1e40af,color:#fff
+    style P fill:#e5e7eb,color:#666

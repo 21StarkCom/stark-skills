@@ -5,45 +5,10 @@ Aggregate performance metrics across all stark skill runs. Agent scorecards, fin
 ## Architecture
 
 ```mermaid
-graph TD
-  A[Start /stark-metrics] --> B{Parse Arguments}
-  B -->|--repo, --skill, etc| C[Execute Python Backend]
-  
-  subgraph Python Engine [metrics.py]
-    C --> D[(~/.claude/code-review/history/)]
-    D --> E{Valid JSON?}
-    E -- No --> F[Warn stderr & Skip]
-    E -- Yes --> G[Normalize & Aggregate]
-    G --> H[Apply Filters]
-    H --> I[Generate Report Strings/JSON]
-  end
 
-  C -- Exit 1 --> J[Error: Prompt /stark-review]
-  C -- Exit 2 --> K[Error: Show Usage]
-  
-  I --> L{--json flag?}
-  L -- Yes --> M[Print stdout directly]
-  L -- No --> N[Print Terminal Report]
-  
-  N --> O{Actionable Recommendations?}
-  O -- Yes --> P[Prompt User]
-  P -- User Selects --> Q[Run /stark-review-improvement]
-  O -- No --> R[Evaluate Trends]
-  
-  R --> S{Meta-Observations}
-  S -- First Run --> T[Tip: Run periodically]
-  S -- Lower FP Rate --> U[Flag: Win]
-  S -- High Failures --> V[Flag: Urgent]
-  
-  M --> W[Emit Observability Logs]
-  Q --> W
-  T --> W
-  U --> W
-  V --> W
-  W --> X[End]
 ```
 
-![Architectural flow diagram and internal components of the stark-metrics skill, showing data ingestion from history files, Python script processing, interactive output handling, and observability telemetry.](internals.png)
+![Internal architecture diagram for the stark-metrics skill showing a top-down operator pipeline: invocation with repo, skill, since, and json flags flows into Phase 1 where metrics.py runs from a fixed Python virtualenv and reads review history from ~/.claude/code-review/history/. A decision node branches to failure handling for no history, argument errors, or missing installation. The success path continues through normalization of mixed record formats, filter application, and report generation for scorecards, finding quality, duration trends, prompt-change impact, and recommendations. A second decision asks whether recommendations exist and routes to follow-up actions like /stark-review-improvement or config edits. The page also includes cards for execution boundary, extension seams, output contract, operational risk, observability requirements, internal interfaces, and a table of recovery paths for common failures."}}](internals.png)
 
 ## Phases
 

@@ -1,44 +1,70 @@
 graph TD
-    A[Start: stark-phase-execute] --> B[Phase 0: Check Env & Git State]
-    B --> C{Fetch Tasks <br> Project V2 / Labels}
-    
-    C -->|0 Tasks Found| D[Locate PLAN_FILE in docs/]
-    D --> E[Run /stark-plan-to-tasks]
-    E --> C
-    
-    C -->|> 0 Tasks Found| F[Phase 1: Task Loop Starts]
-    
-    F --> G[Git Checkout & Pull Main]
-    G --> H[Create task branch]
-    H --> I[Subagent: Implement Issue Body]
-    I --> J[Git Push & Create PR]
-    
-    J --> K[Setup Review Worktree]
-    K --> L[multi_review.py --dry-run]
-    L --> M{Findings >= Medium?}
-    
-    M -->|Yes| N[Fix Findings & Test]
-    N --> O[Commit & Push]
-    O --> P{Rounds < MAX?}
-    P -->|Yes| L
-    
-    M -->|No Findings| Q[Teardown Worktree]
-    P -->|No| Q
-    
-    Q --> R[Post Review Summary to PR]
-    R --> S[Squash Merge PR]
-    S --> T[Close GitHub Issue]
-    
-    T --> U{More Tasks?}
-    U -->|Yes| F
-    
-    U -->|No| V[Phase 2: Regression Tests]
-    V --> W[Phase 3: Update CHANGELOG & /stark-release]
-    W --> X[Deploy App]
-    X --> Y[Phase 4 & 5: Dashboard, Memory & Docs]
-    Y --> Z[End]
+    START(["/stark-phase-execute &lt;slug&gt;"]) --> VALIDATE["0.1 Validate Environment<br/>main clean · tools in PATH · bot token"]
+    VALIDATE -->|fail| ABORT["STOP: broken environment"]
+    VALIDATE -->|pass| RESOLVE["Resolve slug<br/>(file path → strip suffixes, or literal)"]
+    RESOLVE --> FETCH{"0.2 Fetch Tasks<br/>project-config.json?"}
+    FETCH -->|yes| PROJV2["GitHub Projects V2 query<br/>Status=Ready for Agent<br/>AI Suitability ∈ Autonomous,Assisted"]
+    FETCH -->|no| LABELS["gh api issues?labels=plan:SLUG<br/>filter out tracking issues"]
+    PROJV2 --> TASKS_CHECK{"Tasks found?"}
+    LABELS --> TASKS_CHECK
+    TASKS_CHECK -->|"raw=0"| DECOMPOSE["0.3 Auto-Decompose<br/>invoke /stark-plan-to-tasks"]
+    TASKS_CHECK -->|"raw>0, all filtered"| DONE_EARLY["STOP: all filtered<br/>(tracking issues / --start-from)"]
+    TASKS_CHECK -->|tasks found| BRIEFING
+    DECOMPOSE --> REFETCH["Re-fetch tasks"]
+    REFETCH --> BRIEFING["0.4 Phase Briefing<br/>0.5 Init observability log"]
 
-    style A fill:#1e40af,color:#fff
-    style Z fill:#047857,color:#fff
-    style E fill:#047857,color:#fff
-    style L fill:#7c3aed,color:#fff
+    BRIEFING --> LOOP_START{"Next task?"}
+    LOOP_START -->|yes| SESSION["1.1 Session Start<br/>checkout main · pull · branch"]
+    LOOP_START -->|no tasks left| REGRESSION
+
+    SESSION --> IMPLEMENT["1.2 Implement (Subagent)<br/>read issue · code · test · commit"]
+    IMPLEMENT -->|no changes| SKIP_TASK["Log skipped · continue"]
+    IMPLEMENT -->|ambiguous| BLOCK["Set Blocked · skip"]
+    IMPLEMENT -->|success| PUSH["1.3 Push &amp; Create PR<br/>(USER PAT, non-draft)"]
+
+    SKIP_TASK --> LOOP_START
+    BLOCK --> LOOP_START
+
+    PUSH --> REVIEW_INIT["Create review worktree<br/>/tmp/review-REPO-prN"]
+    REVIEW_INIT --> REVIEW_ROUND{"Review round ≤ N?"}
+    REVIEW_ROUND -->|yes| DISPATCH["multi_review.py<br/>--json-only --dry-run"]
+    DISPATCH --> CLASSIFY["Classify findings<br/>fix / FP / noise / ignored"]
+    CLASSIFY -->|0 fix| REVIEW_DONE
+    CLASSIFY -->|has fixes| FIX["Fix findings · test · commit · push"]
+    FIX --> REVIEW_ROUND
+    REVIEW_ROUND -->|"round > MAX"| REVIEW_DONE
+
+    REVIEW_DONE["Post review summary<br/>(BOT TOKEN)<br/>Clean up worktree"]
+    REVIEW_DONE --> MERGE["1.5 Merge<br/>gh pr merge --squash --admin<br/>(USER PAT)"]
+    MERGE --> CLOSE["1.6 Close Issue<br/>1.7 Log Task Result"]
+    CLOSE --> LOOP_START
+
+    MERGE -->|fail| ERROR["1.8 Error Handler<br/>log · cleanup · continue"]
+    ERROR --> LOOP_START
+
+    REGRESSION["Phase 2: Regression Testing<br/>full test suite on main"]
+    REGRESSION --> RELEASE_CHECK{"--skip-release?"}
+    RELEASE_CHECK -->|yes| DASHBOARD
+    RELEASE_CHECK -->|no| CHANGELOG["3.1 Update CHANGELOG<br/>(by issue type)"]
+    CHANGELOG --> RELEASE["3.2 /stark-release<br/>(bump: minor/patch/major)"]
+    RELEASE --> DEPLOY_CHECK{"--skip-deploy?"}
+    DEPLOY_CHECK -->|yes| DASHBOARD
+    DEPLOY_CHECK -->|no| DEPLOY["3.3 Deploy<br/>deploy_command from config"]
+    DEPLOY --> DASHBOARD
+
+    DASHBOARD["Phase 4: Dashboard<br/>task table · stats · agent scorecard"]
+    DASHBOARD --> HOUSEKEEPING["Phase 5: Housekeeping<br/>memory · docs · prompt improvement"]
+    HOUSEKEEPING --> COMPLETE(["Phase complete"])
+
+    style START fill:#1e40af,color:#fff
+    style COMPLETE fill:#047857,color:#fff
+    style ABORT fill:#dc2626,color:#fff
+    style DONE_EARLY fill:#f59e0b,color:#1a1a1a
+    style ERROR fill:#dc2626,color:#fff
+    style DECOMPOSE fill:#7c3aed,color:#fff
+    style REVIEW_ROUND fill:#7c3aed,color:#fff
+    style FETCH fill:#7c3aed,color:#fff
+    style TASKS_CHECK fill:#7c3aed,color:#fff
+    style RELEASE_CHECK fill:#7c3aed,color:#fff
+    style DEPLOY_CHECK fill:#7c3aed,color:#fff
+    style CLASSIFY fill:#7c3aed,color:#fff

@@ -5,49 +5,10 @@ Scaffold dev docs structure into any repo. Modes: --template (empty skeleton), -
 ## Workflow Overview
 
 ```mermaid
-graph TD
-    A([User Input: /stark-init-docs]) --> B{Are arguments provided?}
-    B -- No --> C[/Prompt user for mode/]
-    B -- Yes --> D
-    C --> D{Evaluate Modes}
-    
-    D --> E{Is --upgrade flag set?}
-    E -- Yes --> F[Scan existing Markdown]
-    F --> G[Classify into spec/adr/guide/ref]
-    G --> H[Move to docs/ & Fix internal links]
-    H --> I
-    E -- No --> I{Is --template implicitly or explicitly needed?}
-    
-    I -- Yes --> J[Create docs/ directories]
-    J --> K[Copy mkdocs.yml & templates]
-    K --> L[Generate CODEOWNERS]
-    L --> M
-    I -- No --> M
-    
-    M{Is --backfill flag set?}
-    M -- Yes --> N[Gather git log & PR history]
-    N --> O[Analyze package/build files]
-    O --> P[Generate ADRs for tech choices]
-    P --> Q[Generate Stub Specs from PRs]
-    Q --> R[Generate Guides]
-    R --> S[Update mkdocs.yml navigation]
-    S --> T
-    M -- No --> T
-    
-    T{Is --clean flag set?}
-    T -- Yes --> U[/Prompt for confirmation/]
-    U --> V[Delete skeleton files & empty dirs]
-    V --> W[Preserve user-generated content]
-    W --> X
-    T -- No --> X
-    
-    X{Are there any changes?}
-    X -- Yes --> Y[Commit changes]
-    Y --> Z([End])
-    X -- No --> Z
+
 ```
 
-![Visualization of the stark-init-docs skill showing the four operational modes (template, backfill, upgrade, clean), their execution workflows, and generated documentation artifacts.](usage.png)
+![A light-themed documentation infographic for the skill stark-init-docs, with a centered header labeled usage, a summary row explaining invocation, inputs, and outputs, a vertical workflow showing invocation, no-arg prompting, mode selection, mode-specific processing, and final repo state, followed by four mode cards for template, backfill, upgrade, and clean, a table of repo inputs versus generated artifacts, cards for common workflows, a strip of created versus preserved files, and guardrail cards for missing templates, missing git repo, unavailable PR history, and observability metrics."}}](usage.png)
 
 ## When to Use
 

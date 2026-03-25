@@ -1,19 +1,16 @@
 {
   "doc_content": {
-    "summary": "The stark-review-improvement skill closes the feedback loop on the Stark code review system. It automatically reads a prompt improvement assessment from the conversation context or run history, categorizes necessary changes, and makes surgical edits to agent prompts, orchestration scripts, and configuration files after getting user approval. It ensures safety by validating syntax, showing diffs, and keeping an automated changelog.",
-    "key_features": [
-      "Automatic extraction of prompt improvement action items from context or history",
-      "Categorization of fixes into prompt-edits, orchestrator-edits, and config-edits",
-      "Surgical, targeted file modification that preserves existing formatting and functionality",
-      "Automated validation (Markdown syntax, Python compilation, JSON validity)",
-      "Built-in user approval checkpoints and diff review before committing",
-      "Automatic maintenance of the prompt-changelog.md file"
+    "prerequisites": "A completed `/stark-review` run that produced a Prompt Improvement Assessment. The stark-skills repo must be cloned at `~/git/Evinced/stark-skills/`. No additional installation needed beyond the standard stark-skills setup.",
+    "quick_start": "Run `/stark-review 42` on a PR, then in the same session run `/stark-review-improvement`. The skill reads the assessment from context, proposes changes, and lets you approve before committing.",
+    "common_patterns": "**After a review session:** Run `/stark-review` then `/stark-review-improvement` in the same conversation to immediately act on assessment findings.\n\n**From history:** In a new session, run `/stark-review-improvement` \u2014 it automatically finds the most recent assessment from `~/.claude/code-review/history/`.\n\n**Selective application:** When presented with action items, choose specific ones (e.g., \"apply 1, 3, 5\") to skip changes you disagree with or want to handle manually.",
+    "troubleshooting": "**\"No prompt improvement assessment found\"** \u2014 You need to run `/stark-review` first. The improvement skill requires an assessment to work from.\n\n**Validation failures after edits** \u2014 The skill runs syntax checks automatically. If a check fails, it will fix the issue and re-validate before showing you the diff.\n\n**Changes seem too broad** \u2014 The skill is constrained to minimal, targeted edits. If a proposed change looks like a rewrite, reject it during the confirmation step and ask for a narrower fix.",
+    "related_skills": [
+      "stark-review",
+      "stark-pr-flow",
+      "stark-metrics",
+      "stark-generate-docs"
     ],
-    "usage_examples": [
-      "/stark-review-improvement",
-      "improve review prompts",
-      "fix review prompts based on the assessment in this conversation"
-    ]
+    "arguments_table": "| Argument | Required | Description |\n|----------|----------|-------------|\n| *(none)* | \u2014 | Reads assessment automatically from conversation context or latest history file |"
   },
-  "alt_text": "Visualization of the stark-review-improvement skill showing the workflow from extracting an assessment, confirming changes with the user, applying targeted edits to prompts and configurations, to validating and committing the improvements."
+  "alt_text": "Usage guide for the stark-review-improvement skill showing a five-phase vertical workflow: Extract Assessment from conversation context or history files, classify action items into prompt/orchestrator/config categories with user confirmation, apply targeted edits across three parallel tracks (prompt files, multi_review.py, config.json), validate all changes with syntax checks, then log to prompt-changelog.md and git commit. Includes invocation methods table, three common workflow steps (run review, improve prompts, verify and ship), output summary cards for modified prompts, changelog, and git commit, and safety constraints emphasizing minimal edits, backward compatibility, and user review before commit."
 }

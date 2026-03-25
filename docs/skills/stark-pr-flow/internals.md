@@ -5,43 +5,10 @@ End-to-end PR workflow for GetEvinced repos — push, create PR, post self-revie
 ## Architecture
 
 ```mermaid
-graph TD
-    subgraph Initialization ["Pre-flight Checks"]
-        A[Check Branch != main] --> B[Check Clean Working Tree]
-    end
-    
-    B --> C[git push -u origin BRANCH]
-    C -. diverged .-> D[fetch & rebase origin/main]
-    D --> C
-    
-    C --> E[Analyze Changes via git diff]
-    E --> F[Generate Title & PR Body]
-    
-    subgraph PR_Creation ["PR Creation (User PAT Auth)"]
-        F --> G[gh pr create]
-        G --> H(Capture PR_NUM)
-    end
-    
-    subgraph Bot_Review ["Code Review (Bot App Token)"]
-        I[github_app.py GET Token] --> J[stark_claude.py Diff Review]
-        H --> J
-        J --> K[Post Comment as stark-claude bot]
-    end
-    
-    subgraph Approval_Gate ["Evaluation & Approval"]
-        K --> L[Advisory: Check Docs State via GraphQL]
-        L --> M{Present Summary: Await Explicit Approval}
-    end
-    
-    M -- "Approved" --> N[gh pr merge --squash --admin]
-    M -- "Rejected" --> O[Leave PR Open / Close]
-    M -- "Changes Req" --> P[User Applies Changes -> Loop]
-    
-    N --> Q[git checkout main & pull]
-    Q --> R[Delete branch local & remote]
+
 ```
 
-![Internal architecture visualization of the stark-pr-flow skill showing the dual-auth GitHub workflow, transitioning from branch prerequisites and PR generation using the user's PAT, through bot-authenticated automated code reviews, to a final user approval gate for administrative squash merging.](internals.png)
+![A clean internal architecture diagram for the stark-pr-flow skill showing a vertical PR workflow from prerequisites through push, diff analysis, PR creation, bot-based self-review, a hard stop for manual approval, an advisory documentation-state check, and final squash-admin merge with branch cleanup. Blue phase nodes form the main path, purple nodes mark approval decisions, green nodes mark configuration and auth boundaries, amber highlights the stop-and-summary output, and red annotations call out abort and recovery paths like dirty worktrees, main-branch misuse, diverged pushes, auth failures, and merge conflicts."}}](internals.png)
 
 ## Phases
 

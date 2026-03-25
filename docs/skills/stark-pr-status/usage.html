@@ -1,357 +1,434 @@
 <html lang="en">
 <head>
-  
-  
-  <title>stark-pr-status - Skill Visualization</title>
-  <style>
-    /*
-     * Stark Skills — Shared Design System CSS
-     *
-     * Foundation styles for LLM-generated HTML skill visualizations.
-     * LLMs embed this inline and may extend with additional styles.
-     * All colors pass WCAG AA 4.5:1 contrast ratio.
-     *
-     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
-     */
 
-    /* === Reset & Base === */
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #fafafa;
-      color: #1a1a1a;
-      line-height: 1.5;
-    }
 
-    /* === Header === */
-    .header { text-align: center; padding: 36px 20px 16px; }
-    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
-    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
-    .header .scope {
-      display: inline-block; font-size: 10px; font-weight: 600;
-      background: #eff6ff; color: #1e40af;
-      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
-    }
-
-    /* === Container === */
-    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
-
-    /* === Section Title === */
-    .section-title {
-      font-size: 14px; font-weight: 700; color: #666;
-      text-transform: uppercase; letter-spacing: 1px;
-      margin: 32px 0 16px; padding-bottom: 6px;
-      border-bottom: 2px solid #e5e7eb;
-    }
-
-    /* === Node Types === */
-    .node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
-    .node-desc { font-size: 10px; opacity: 0.9; }
-
-    .node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
-    .node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
-    .node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
-    .node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
-    .node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
-    .node-external { background: #e5e7eb; color: #333333; border: 1px dashed #9ca3af; } /* Gray — external deps */
-    .node-input    { background: #111827; color: #ffffff; }   /* Dark — User Input */
-
-    /* === Flow Layout === */
-    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
-    .flow-step {
-      display: flex; align-items: stretch;
-      width: 100%; max-width: 860px; min-height: 76px;
-    }
-    .flow-lane-left {
-      width: 250px; display: flex;
-      align-items: center; justify-content: flex-end;
-      padding-right: 18px; text-align: right;
-    }
-    .flow-lane-center {
-      width: 360px; display: flex;
-      align-items: center; justify-content: center;
-    }
-    .flow-lane-right {
-      width: 250px; display: flex;
-      align-items: center; padding-left: 18px; text-align: left;
-    }
-    .annotation {
-      font-size: 10px; color: #555; max-width: 220px; line-height: 1.4;
-    }
-    .annotation strong { color: #222; }
-
-    /* === Arrows === */
-    .arrow-down {
-      width: 2px; height: 20px; background: #cbd5e1;
-      margin: 0 auto; position: relative;
-    }
-    .arrow-down::after {
-      content: ''; position: absolute; bottom: -4px; left: -4px;
-      border-left: 5px solid transparent;
-      border-right: 5px solid transparent;
-      border-top: 6px solid #cbd5e1;
-    }
-    .arrow-container {
-      display: flex; justify-content: center;
-      width: 100%; max-width: 860px;
-    }
-    .arrow-container .flow-lane-center {
-      display: flex; justify-content: center;
-    }
-
-    /* === Cards === */
-    .card-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 16px; margin-top: 16px;
-    }
-    .card { padding: 16px; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
-    .card p  { font-size: 11px; line-height: 1.6; color: #444; }
-    .card ul { margin-left: 16px; font-size: 11px; line-height: 1.6; color: #444; }
-    .card li { margin-bottom: 4px; }
-    .card code { font-family: monospace; background: rgba(0,0,0,0.05); padding: 2px 4px; border-radius: 3px; font-size: 10px; }
-
-    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
-    .card-blue h3 { color: #1e40af; }
-    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
-    .card-green h3 { color: #059669; }
-    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
-    .card-purple h3 { color: #7c3aed; }
-    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
-    .card-amber h3 { color: #92400e; }
-    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
-    .card-dark h3 { color: #333333; }
-    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
-    .card-red h3 { color: #dc2626; }
-
-    /* === Data Tables === */
-    .data-table {
-      width: 100%; max-width: 860px; margin: 16px auto;
-      border-collapse: collapse; font-size: 11px;
-    }
-    .data-table th {
-      background: #f3f4f6; padding: 8px 12px; text-align: left;
-      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
-    }
-    .data-table td {
-      padding: 8px 12px; border-bottom: 1px solid #f3f4f6; color: #444;
-    }
-
-    /* === Tags === */
-    .tag {
-      display: inline-block; font-size: 9px; font-weight: 600;
-      padding: 2px 8px; border-radius: 3px; margin-right: 4px; margin-bottom: 4px;
-    }
-    .tag-phase    { background: #dbeafe; color: #1e40af; }
-    .tag-decision { background: #ede9fe; color: #5b21b6; }
-    .tag-failure  { background: #fee2e2; color: #991b1b; }
-    .tag-config   { background: #d1fae5; color: #065f46; }
-    .tag-output   { background: #fef3c7; color: #92400e; }
-    .tag-external { background: #f3f4f6; color: #444444; }
-
-    /* === Legend === */
-    .legend {
-      display: flex; gap: 16px; justify-content: center;
-      margin: 16px 0 24px; flex-wrap: wrap;
-    }
-    .legend-item {
-      display: flex; align-items: center; gap: 6px;
-      font-size: 10px; color: #666;
-    }
-    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
-
-    /* === Footer === */
-    .footer {
-      text-align: center; padding: 20px;
-      font-size: 10px; color: #999;
-      margin-top: 40px; border-top: 1px solid #eee;
-    }
-  </style>
+<title>stark-pr-status — Usage Guide</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
+.node-phase    { background: #1e40af; color: #ffffff; }
+.node-decision { background: #7c3aed; color: #ffffff; }
+.node-failure  { background: #dc2626; color: #ffffff; }
+.node-config   { background: #047857; color: #ffffff; }
+.node-output   { background: #f59e0b; color: #1a1a1a; }
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 180px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 180px; display: flex;
+  align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
+.invoke-box {
+  background: #1a1a1a; color: #e5e7eb; border-radius: 8px;
+  padding: 14px 18px; font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px; margin: 12px 0; overflow-x: auto;
+}
+.invoke-box .prompt { color: #60a5fa; }
+.invoke-box .comment { color: #6b7280; }
+.output-sample {
+  background: #111827; color: #d1d5db; border-radius: 8px;
+  padding: 14px 18px; font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px; margin: 12px 0; overflow-x: auto; line-height: 1.6;
+}
+.output-sample .heading { color: #60a5fa; font-weight: 700; }
+.output-sample .stat { color: #34d399; }
+.output-sample .warn { color: #fbbf24; }
+.output-sample .dim { color: #6b7280; }
+</style>
 </head>
 <body>
 
-  <div class="header">
-    <h1>stark-pr-status</h1>
-    <div class="sub">PR analytics dashboard — reviews, findings, signal-vs-noise, and cycle times.</div>
-    <div class="scope">Usage Guide</div>
+<div class="header">
+  <h1>stark-pr-status</h1>
+  <div class="sub">PR analytics dashboard — review rounds, findings, participants, and outcomes</div>
+  <div class="scope">USAGE GUIDE</div>
+</div>
+
+<div class="container">
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#1e40af;"></div> Workflow Phase</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed;"></div> Decision Point</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#047857;"></div> Configuration</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b;"></div> Output</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#dc2626;"></div> Error State</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e5e7eb;"></div> External Dep</div>
   </div>
 
-  <div class="container">
-
-    <div class="legend">
-      <div class="legend-item"><div class="legend-dot node-input"></div> User Input</div>
-      <div class="legend-item"><div class="legend-dot node-phase"></div> Execution Phase</div>
-      <div class="legend-item"><div class="legend-dot node-external"></div> Data Source</div>
-      <div class="legend-item"><div class="legend-dot node-output"></div> Output / Artifact</div>
-      <div class="legend-item"><div class="legend-dot node-decision"></div> Suggestion Logic</div>
+  <!-- Quick Start -->
+  <div class="section-title">Quick Start</div>
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>Single PR Dashboard</h3>
+      <div class="invoke-box">
+        <span class="prompt">/stark-pr-status</span> 42
+      </div>
+      <p>Full lifecycle view of PR #42: reviews, findings, participants, timeline, and signal analysis.</p>
     </div>
+    <div class="card card-green">
+      <h3>All PRs Summary</h3>
+      <div class="invoke-box">
+        <span class="prompt">/stark-pr-status</span> --all
+      </div>
+      <p>Summary table of all PRs in the current repo. Add <code>--state open</code> to filter.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>Cross-Repo Query</h3>
+      <div class="invoke-box">
+        <span class="prompt">/stark-pr-status</span> --repo GetEvinced/platform --state merged --limit 10
+      </div>
+      <p>Query a specific repo regardless of your current directory.</p>
+    </div>
+  </div>
 
-    <div class="section-title">Execution Workflow</div>
-    
-    <div class="flow">
-      <!-- Input -->
-      <div class="flow-step">
-        <div class="flow-lane-left annotation">
-          <strong>Invocation</strong><br>
-          Run via conversational prompt ("how is this PR doing") or CLI command.
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-input">
-            <div class="node-title">/stark-pr-status</div>
-            <div class="node-desc">[PR_NUMBER | --all] [--repo] [--state]</div>
-          </div>
-        </div>
-        <div class="flow-lane-right annotation">
-          <strong>Default:</strong> All PRs<br>
-          <strong>Specific:</strong> Single PR dashboard
+  <!-- Workflow -->
+  <div class="section-title">Workflow</div>
+  <div class="flow">
+
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>You invoke:</strong> /stark-pr-status with optional PR number or flags</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:340px;">
+          <div class="node-title">Phase 1: Run pr_status.py</div>
+          <div class="node-desc">Executes the analytics script with your arguments</div>
         </div>
       </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Phase 1: Script Execution -->
-      <div class="flow-step">
-        <div class="flow-lane-left">
-          <div class="node node-external">
-            <div class="node-title">GitHub API</div>
-            <div class="node-desc">PR metadata, reviews, status</div>
-          </div>
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-phase">
-            <div class="node-title">Phase 1: Fetch Analytics</div>
-            <div class="node-desc">Run scripts/pr_status.py</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <div class="node node-external">
-            <div class="node-title">Local History</div>
-            <div class="node-desc">stark-review history DB</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Phase 2: Results Presentation -->
-      <div class="flow-step">
-        <div class="flow-lane-left annotation">
-          <strong>All PRs Mode</strong><br>Summary table of key stats across repository.
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-output">
-            <div class="node-title">Phase 2: Present Results</div>
-            <div class="node-desc">Pre-formatted terminal output</div>
-          </div>
-        </div>
-        <div class="flow-lane-right annotation">
-          <strong>Single PR Mode</strong><br>Header, review rounds, findings, timeline, and participants.
-        </div>
-      </div>
-
-      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
-
-      <!-- Phase 3: Actionable Suggestions -->
-      <div class="flow-step">
-        <div class="flow-lane-left annotation">
-          Analyze results for actionable patterns (stagnation, noise, readiness).
-        </div>
-        <div class="flow-lane-center">
-          <div class="node node-decision">
-            <div class="node-title">Phase 3: Actionable Suggestions</div>
-            <div class="node-desc">Recommend next steps</div>
-          </div>
-        </div>
-        <div class="flow-lane-right">
-          <!-- Empty lane -->
-        </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Script:</strong> ~/.claude/code-review/scripts/pr_status.py</div>
       </div>
     </div>
 
-    <div class="section-title">Input Arguments & Flags</div>
-    <div class="card-grid">
-      <div class="card card-dark">
-        <h3>Target Arguments</h3>
-        <ul>
-          <li><code>PR_NUMBER</code>: Specific PR (e.g., <code>15</code>)</li>
-          <li><code>--all</code>: All PRs (default if no number)</li>
-          <li><code>--repo org/name</code>: Override repo detection</li>
-        </ul>
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Data sources:</strong> GitHub API + stark-review history files</div>
       </div>
-      <div class="card card-dark">
-        <h3>Filtering & Format</h3>
-        <ul>
-          <li><code>--state</code>: <code>open</code>, <code>closed</code>, <code>merged</code>, <code>all</code> (default: all)</li>
-          <li><code>--limit N</code>: Max PRs to show (default: 20)</li>
-          <li><code>--json</code>: Machine-readable JSON output</li>
-        </ul>
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width:340px;">
+          <div class="node-title">Single PR or All PRs?</div>
+          <div class="node-desc">Number given → single PR detail &nbsp;|&nbsp; No number → summary table</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Filters:</strong> --state, --limit, --repo narrow results</div>
       </div>
     </div>
 
-    <div class="section-title">Dashboard Output Features (Single PR)</div>
-    <div class="card-grid">
-      <div class="card card-blue">
-        <h3>Header & Timeline</h3>
-        <p>Title, status, author, dates, time-to-merge, and key events in chronological order.</p>
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div style="display:flex; gap:16px;">
+          <div class="node node-output" style="width:160px;">
+            <div class="node-title">Single PR</div>
+            <div class="node-desc">Full dashboard with timeline</div>
+          </div>
+          <div class="node node-output" style="width:160px;">
+            <div class="node-title">All PRs</div>
+            <div class="node-desc">Summary table with stats</div>
+          </div>
+        </div>
       </div>
-      <div class="card card-amber">
-        <h3>Review Rounds</h3>
-        <p>Count of review cycles, findings per round, and the improvement delta over time.</p>
-      </div>
-      <div class="card card-purple">
-        <h3>Findings Analysis</h3>
-        <p>Breakdown by severity. Analysis of outcome: fix vs. noise vs. false-positive vs. ignored.</p>
-      </div>
-      <div class="card card-green">
-        <h3>Participants & Signal</h3>
-        <p>Humans + bots with action counts. Identifies most impactful finding and biggest noise source.</p>
-      </div>
+      <div class="flow-lane-right"></div>
     </div>
 
-    <div class="section-title">Actionable Suggestions Logic</div>
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Condition Detected</th>
-          <th>Suggested Action / Routing</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>PR open > 7 days with no reviews</td>
-          <td>Suggest invoking <strong><span class="tag tag-phase">/stark-review</span></strong></td>
-        </tr>
-        <tr>
-          <td>PR has a high noise ratio (false positives/ignored)</td>
-          <td>Suggest invoking <strong><span class="tag tag-phase">/stark-review-improvement</span></strong></td>
-        </tr>
-        <tr>
-          <td>PR is ready to merge (Approved, CI green)</td>
-          <td>Suggest invoking <strong><span class="tag tag-phase">/stark-pr-flow</span></strong> to finalize</td>
-        </tr>
-      </tbody>
-    </table>
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-    <div class="section-title">Failure Modes & Recovery</div>
-    <div class="card-grid">
-      <div class="card card-red">
-        <h3>Missing Context</h3>
-        <p><strong>No repo detected:</strong> Prompt user to run from a git repo or provide <code>--repo org/name</code>.</p>
-        <p><strong>PR not found:</strong> Notify user that PR #N was not found in the current repository.</p>
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Auto-detected:</strong> stale PRs, noise, ready-to-merge</div>
       </div>
-      <div class="card card-red">
-        <h3>API & Data Issues</h3>
-        <p><strong>Auth/API Failure:</strong> Suggest running <code>install.sh</code> or checking GitHub App credentials. If rate limited, wait a few minutes.</p>
-        <p><strong>No local history:</strong> Show GitHub data only and note "No stark-review history".</p>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:340px;">
+          <div class="node-title">Phase 3: Actionable Suggestions</div>
+          <div class="node-desc">Recommends next steps based on PR patterns</div>
+        </div>
       </div>
-    </div>
-
-    <div class="footer">
-      Generated for stark-pr-status — PR Analytics Dashboard
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>May suggest:</strong> /stark-review, /stark-review-improvement, /stark-pr-flow</div>
+      </div>
     </div>
 
   </div>
+
+  <!-- Arguments -->
+  <div class="section-title">Arguments &amp; Flags</div>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Argument</th>
+        <th>Type</th>
+        <th>Default</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>PR_NUMBER</code></td>
+        <td>positional</td>
+        <td>—</td>
+        <td>Show full dashboard for a single PR</td>
+      </tr>
+      <tr>
+        <td><code>--all</code></td>
+        <td>flag</td>
+        <td>implied</td>
+        <td>Show summary of all PRs (default when no number)</td>
+      </tr>
+      <tr>
+        <td><code>--repo ORG/NAME</code></td>
+        <td>option</td>
+        <td>auto-detect</td>
+        <td>Override repository (e.g., GetEvinced/platform)</td>
+      </tr>
+      <tr>
+        <td><code>--state STATE</code></td>
+        <td>option</td>
+        <td>all</td>
+        <td>Filter: <span class="tag tag-config">open</span> <span class="tag tag-phase">closed</span> <span class="tag tag-decision">merged</span> <span class="tag tag-external">all</span></td>
+      </tr>
+      <tr>
+        <td><code>--limit N</code></td>
+        <td>option</td>
+        <td>20</td>
+        <td>Maximum PRs to show in all-PRs mode</td>
+      </tr>
+      <tr>
+        <td><code>--json</code></td>
+        <td>flag</td>
+        <td>off</td>
+        <td>Machine-readable JSON output</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Single PR Output -->
+  <div class="section-title">Single PR Output</div>
+  <div class="output-sample">
+    <span class="heading">PR #42 — Add retry logic to webhook dispatcher</span><br>
+    <span class="dim">Status:</span> <span class="stat">merged</span> &nbsp; <span class="dim">Author:</span> aryeh &nbsp; <span class="dim">Created:</span> 2026-03-18 &nbsp; <span class="dim">Merged:</span> 2026-03-20<br>
+    <span class="dim">Time to merge:</span> <span class="stat">2d 4h</span><br><br>
+    <span class="heading">Review Rounds</span><br>
+    <span class="dim">Round 1:</span> 12 findings &nbsp; <span class="dim">Round 2:</span> 3 findings &nbsp; <span class="stat">↓ 75% improvement</span><br><br>
+    <span class="heading">Findings by Severity</span><br>
+    <span class="warn">critical: 1</span> &nbsp; high: 4 &nbsp; medium: 5 &nbsp; low: 5<br>
+    <span class="dim">Fixed:</span> 10 &nbsp; <span class="dim">Noise:</span> 3 &nbsp; <span class="dim">FP:</span> 1 &nbsp; <span class="dim">Ignored:</span> 1<br><br>
+    <span class="heading">Participants</span><br>
+    aryeh (author) &nbsp; stark-claude[bot] (12 comments) &nbsp; stark-codex[bot] (8 comments)<br><br>
+    <span class="heading">Most Impactful Finding</span><br>
+    <span class="stat">stark-claude → architecture:</span> "Missing idempotency key on retry — duplicate deliveries possible"
+  </div>
+
+  <!-- Common Patterns -->
+  <div class="section-title">Common Patterns</div>
+  <div class="card-grid">
+    <div class="card card-amber">
+      <h3>Check Stale PRs</h3>
+      <div class="invoke-box">
+        <span class="prompt">/stark-pr-status</span> --state open
+      </div>
+      <p>Find PRs that are open and may need attention. The skill flags PRs open &gt;7 days with no reviews and suggests running <code>/stark-review</code>.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>Review Quality Check</h3>
+      <div class="invoke-box">
+        <span class="prompt">/stark-pr-status</span> 15
+      </div>
+      <p>Inspect signal-vs-noise ratio on a specific PR. High noise? The skill suggests <code>/stark-review-improvement</code> to tune prompts.</p>
+    </div>
+    <div class="card card-blue">
+      <h3>JSON for Scripting</h3>
+      <div class="invoke-box">
+        <span class="prompt">/stark-pr-status</span> --all --state merged --json
+      </div>
+      <p>Machine-readable output for piping into dashboards, scripts, or further analysis.</p>
+    </div>
+    <div class="card card-green">
+      <h3>Ready to Merge?</h3>
+      <div class="invoke-box">
+        <span class="prompt">/stark-pr-status</span> 28
+      </div>
+      <p>If the PR is approved with green CI, the skill suggests <code>/stark-pr-flow</code> to ship it.</p>
+    </div>
+  </div>
+
+  <!-- Error Handling -->
+  <div class="section-title">Error Handling</div>
+  <div class="card-grid">
+    <div class="card card-red">
+      <h3>Exit 1 — No Repo Detected</h3>
+      <p>Not in a git repo. Run from a repo directory or use <code>--repo org/name</code> to specify explicitly.</p>
+    </div>
+    <div class="card card-red">
+      <h3>Exit 2 — PR Not Found</h3>
+      <p>The PR number doesn't exist in the detected repo. Double-check the number or use <code>--repo</code> if you're targeting a different repo.</p>
+    </div>
+    <div class="card card-red">
+      <h3>Exit 3 — GitHub API Error</h3>
+      <p>Auth failure or rate limiting. Run <code>install.sh</code> to verify credentials, or wait a few minutes if rate-limited.</p>
+    </div>
+    <div class="card card-amber">
+      <h3>No Review History</h3>
+      <p>GitHub data is shown but stark-review history is missing. Not an error — the PR may not have been reviewed with <code>/stark-review</code> yet.</p>
+    </div>
+  </div>
+
+  <!-- Data Sources -->
+  <div class="section-title">Data Sources</div>
+  <div class="summary-grid">
+    <div class="summary-card" style="background:#eff6ff; border-left:3px solid #1e40af;">
+      <h3 style="color:#1e40af;">GitHub API</h3>
+      <p>PR metadata, review comments, CI status, participants, timeline events, merge status.</p>
+    </div>
+    <div class="summary-card" style="background:#ecfdf5; border-left:3px solid #059669;">
+      <h3 style="color:#059669;">stark-review History</h3>
+      <p>Finding severity, domain classification, fix/noise/FP outcomes, review round counts, improvement deltas.</p>
+    </div>
+    <div class="summary-card" style="background:#f5f3ff; border-left:3px solid #7c3aed;">
+      <h3 style="color:#7c3aed;">Combined Analysis</h3>
+      <p>Signal-vs-noise ratio, most impactful findings, suggestion engine for next actions.</p>
+    </div>
+  </div>
+
+  <!-- Related Skills -->
+  <div class="section-title">Related Skills</div>
+  <table class="data-table">
+    <thead>
+      <tr><th>Skill</th><th>Relationship</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>/stark-review</code></td><td>Generates the review data that pr-status analyzes. Suggested for unreviewed PRs.</td></tr>
+      <tr><td><code>/stark-pr-flow</code></td><td>End-to-end PR workflow. Suggested when PR is approved and CI is green.</td></tr>
+      <tr><td><code>/stark-review-improvement</code></td><td>Tunes review prompts. Suggested when noise ratio is high.</td></tr>
+      <tr><td><code>/stark-metrics</code></td><td>Aggregate metrics across all skills. pr-status focuses on individual PRs.</td></tr>
+    </tbody>
+  </table>
+
+</div>
+
+<div class="footer"><div class="winner-badge">Visualization by Claude · Score: 8.6/10 · Generated from SKILL.md</div></div>
+
 </body>
 </html>
