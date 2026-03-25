@@ -1,0 +1,370 @@
+<html lang="en">
+<head>
+  
+  
+  <title>stark-generate-docs - Internal Architecture</title>
+  <style>
+    /*
+     * Stark Skills — Shared Design System CSS
+     *
+     * Foundation styles for LLM-generated HTML skill visualizations.
+     * LLMs embed this inline and may extend with additional styles.
+     * All colors pass WCAG AA 4.5:1 contrast ratio.
+     *
+     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+     */
+
+    /* === Reset & Base === */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #fafafa;
+      color: #1a1a1a;
+      line-height: 1.5;
+    }
+
+    /* === Header === */
+    .header { text-align: center; padding: 36px 20px 16px; }
+    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+    .header .scope {
+      display: inline-block; font-size: 10px; font-weight: 600;
+      background: #eff6ff; color: #1e40af;
+      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+    }
+
+    /* === Container === */
+    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+    /* === Section Title === */
+    .section-title {
+      font-size: 14px; font-weight: 700; color: #666;
+      text-transform: uppercase; letter-spacing: 1px;
+      margin: 32px 0 16px; padding-bottom: 6px;
+      border-bottom: 2px solid #e5e7eb;
+    }
+
+    /* === Node Types === */
+    .node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+    .node-desc { font-size: 10px; opacity: 0.8; }
+
+    .node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+    .node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+    .node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+    .node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
+    .node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
+
+    /* === Flow Layout === */
+    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+    .flow-step {
+      display: flex; align-items: stretch;
+      width: 100%; max-width: 860px; min-height: 76px;
+    }
+    .flow-lane-left {
+      width: 180px; display: flex;
+      align-items: center; justify-content: flex-end;
+      padding-right: 18px;
+    }
+    .flow-lane-center {
+      width: 500px; display: flex;
+      align-items: center; justify-content: center;
+    }
+    .flow-lane-right {
+      width: 180px; display: flex;
+      align-items: center; padding-left: 18px;
+    }
+    .annotation {
+      font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+    }
+    .annotation strong { color: #444; }
+
+    /* === Arrows === */
+    .arrow-down {
+      width: 2px; height: 20px; background: #cbd5e1;
+      margin: 0 auto; position: relative;
+    }
+    .arrow-down::after {
+      content: ''; position: absolute; bottom: -4px; left: -4px;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid #cbd5e1;
+    }
+    .arrow-container {
+      display: flex; justify-content: center;
+      width: 100%; max-width: 860px;
+    }
+    .arrow-container .flow-lane-center {
+      display: flex; justify-content: center;
+    }
+
+    /* === Cards === */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px; margin-top: 16px;
+    }
+    .card { padding: 16px; border-radius: 8px; }
+    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+    .card p  { font-size: 11px; line-height: 1.6; }
+
+    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+    .card-blue h3 { color: #1e40af; }
+    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+    .card-green h3 { color: #059669; }
+    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+    .card-purple h3 { color: #7c3aed; }
+    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+    .card-amber h3 { color: #92400e; }
+    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+    .card-dark h3 { color: #333333; }
+    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+    .card-red h3 { color: #dc2626; }
+
+    /* === Data Tables === */
+    .data-table {
+      width: 100%; max-width: 860px; margin: 16px auto;
+      border-collapse: collapse; font-size: 11px;
+    }
+    .data-table th {
+      background: #f3f4f6; padding: 8px 12px; text-align: left;
+      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+    }
+    .data-table td {
+      padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+    }
+
+    /* === Tags === */
+    .tag {
+      display: inline-block; font-size: 9px; font-weight: 600;
+      padding: 2px 8px; border-radius: 3px;
+    }
+    .tag-phase    { background: #dbeafe; color: #1e40af; }
+    .tag-decision { background: #ede9fe; color: #5b21b6; }
+    .tag-failure  { background: #fee2e2; color: #991b1b; }
+    .tag-config   { background: #d1fae5; color: #065f46; }
+    .tag-output   { background: #fef3c7; color: #92400e; }
+    .tag-external { background: #f3f4f6; color: #666666; }
+
+    /* === Legend === */
+    .legend {
+      display: flex; gap: 16px; justify-content: center;
+      margin: 16px 0 24px; flex-wrap: wrap;
+    }
+    .legend-item {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 10px; color: #666;
+    }
+    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+    /* === Summary Grid === */
+    .summary-grid {
+      display: grid; grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px; margin-top: 16px;
+    }
+    .summary-card { padding: 16px; border-radius: 8px; }
+    .summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+    .summary-card p  { font-size: 11px; line-height: 1.5; }
+
+    /* === Winner Badge === */
+    .winner-badge {
+      display: inline-block; font-size: 12px; color: #555555;
+      font-weight: 600; padding: 2px 10px; border-radius: 4px;
+      background: #f9fafb; border: 1px solid #d1d5db;
+    }
+
+    /* === Footer === */
+    .footer {
+      text-align: center; padding: 20px;
+      font-size: 10px; color: #999;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>stark-generate-docs</h1>
+    <div class="sub">Internal Architecture & Workflow Logic</div>
+    <div class="scope">Skill Execution Internals</div>
+  </div>
+
+  <div class="container">
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot node-config"></div> Input / Config</div>
+      <div class="legend-item"><div class="legend-dot node-decision"></div> Decision Point</div>
+      <div class="legend-item"><div class="legend-dot node-phase"></div> Main Phase</div>
+      <div class="legend-item"><div class="legend-dot node-external"></div> External Script</div>
+      <div class="legend-item"><div class="legend-dot node-output"></div> Output / Artifact</div>
+      <div class="legend-item"><div class="legend-dot node-failure"></div> Failure / Exit</div>
+    </div>
+
+    <div class="section-title">Execution Workflow</div>
+    <div class="flow">
+      
+      <!-- Input -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation" style="text-align: right;">User invoke or <br>proactive trigger</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-config" style="width: 80%;">
+            <div class="node-title">Invoke stark-generate-docs</div>
+            <div class="node-desc">Args: [--skill &lt;name&gt;] [--all] [--check] [--force]</div>
+          </div>
+        </div>
+        <div class="flow-lane-right"></div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 1: Detect Changes (Decision) -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation" style="text-align: right;">Is scope explicitly<br>defined by user?</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision" style="width: 80%;">
+            <div class="node-title">Phase 1: Detect Scope</div>
+            <div class="node-desc">Check if --skill or --all flag is present</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Yes:</strong> Skip detection, proceed directly to Generation.</div>
+        </div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 1: Detection Script -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation" style="text-align: right;"><strong>No Explicit Scope:</strong><br>Run check mode</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-external" style="width: 80%;">
+            <div class="node-title">Run Check Script</div>
+            <div class="node-desc">python scripts/generate_skill_docs.py --check</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">
+            <span class="tag tag-failure">Exit 0:</span> All docs up to date. Stop.<br>
+            <span class="tag tag-phase">Exit 1:</span> Capture stale skill names.
+          </div>
+        </div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 2: Generate -->
+      <div class="flow-step">
+        <div class="flow-lane-left"></div>
+        <div class="flow-lane-center">
+          <div class="node node-phase" style="width: 80%;">
+            <div class="node-title">Phase 2: Generate</div>
+            <div class="node-desc">Report progress per skill targeted</div>
+          </div>
+        </div>
+        <div class="flow-lane-right"></div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Generation Execution -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation" style="text-align: right;">Triggers multi-LLM<br>visualization competition</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-external" style="width: 80%;">
+            <div class="node-title">Run Generator Script</div>
+            <div class="node-desc">python scripts/generate_skill_docs.py [--skill &lt;name&gt; | --force]</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">Generates HTML, Mermaid diagrams, JSON structure</div>
+        </div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 3: Commit -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation" style="text-align: right;">Automatically persists<br>docs via git</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase" style="width: 80%;">
+            <div class="node-title">Phase 3: Commit</div>
+            <div class="node-desc">git add docs/skills/ && git commit -m "docs: update..."</div>
+          </div>
+        </div>
+        <div class="flow-lane-right"></div>
+      </div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 4: Summary -->
+      <div class="flow-step">
+        <div class="flow-lane-left"></div>
+        <div class="flow-lane-center">
+          <div class="node node-output" style="width: 80%;">
+            <div class="node-title">Phase 4: Summary Output</div>
+            <div class="node-desc">Report updated skills, LLM winners, scores, file counts</div>
+          </div>
+        </div>
+        <div class="flow-lane-right"></div>
+      </div>
+
+    </div>
+
+    <div class="section-title">Failure Modes & Recoveries</div>
+    <div class="card-grid">
+      <div class="card card-red">
+        <h3><span class="tag tag-failure">Failure</span> LLM calls fail</h3>
+        <p><strong>Impact:</strong> Specific visualizations fail to generate.</p>
+        <p><strong>Recovery:</strong> Report which LLM failed and continue processing the remaining skills or alternative models.</p>
+      </div>
+      <div class="card card-amber">
+        <h3><span class="tag tag-failure">Failure</span> Playwright missing</h3>
+        <p><strong>Impact:</strong> Cannot generate screenshot visualizations.</p>
+        <p><strong>Recovery:</strong> Skip screenshot generation entirely and output a warning to the user.</p>
+      </div>
+      <div class="card card-dark">
+        <h3><span class="tag tag-failure">Failure</span> No changes detected</h3>
+        <p><strong>Impact:</strong> User requests generation but all docs are synchronized.</p>
+        <p><strong>Recovery:</strong> Safely exit script with "all up to date" report. User can override with <code>--force</code>.</p>
+      </div>
+    </div>
+
+    <div class="section-title">CLI Arguments</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width: 25%;">Argument / Flag</th>
+          <th style="width: 75%;">Behavior & Purpose</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>(No args)</strong></td>
+          <td>Regenerate docs for skills that have changed <code>SKILL.md</code> files.</td>
+        </tr>
+        <tr>
+          <td><strong>--skill &lt;name&gt;</strong></td>
+          <td>Regenerate documentation for one specific skill explicitly. Skips detection.</td>
+        </tr>
+        <tr>
+          <td><strong>--all</strong></td>
+          <td>Regenerate all skill documentations (alias for <code>--force</code>).</td>
+        </tr>
+        <tr>
+          <td><strong>--check</strong></td>
+          <td>Check if any documentation is stale relative to its <code>SKILL.md</code>. Returns exit status without generating.</td>
+        </tr>
+      </tbody>
+    </table>
+
+  </div>
+
+  <div class="footer">
+    Generated via stark-generate-docs • Internal Platform Architecture
+  </div>
+
+</body>
+</html>

@@ -14,10 +14,10 @@ graph TD
     A -->|Improve review prompts| E[stark-review-improvement]
 ```
 
-- **[`/stark-review`](stark-review/usage.md)** — Multi-agent PR code review using 3 LLMs × N domains with autonomous fix loop. Use when the user says "stark review", "review this PR with all agents", "multi-agent review", or invokes /stark-review. Also triggers on `/stark-review` or `/stark-review <number>`.
-- **[`/stark-review-plan`](stark-review-plan/usage.md)** — Multi-agent design document review using 3 LLMs × 7 domains with autonomous fix loop. Use when the user says "review this plan", "review this spec", "review design doc", or invokes /stark-review-plan. Also triggers on `/stark-review-plan <path>`.
-- **[`/stark-review-deployment-plan`](stark-review-deployment-plan/usage.md)** — Adversarial infrastructure and deployment plan review from a Principal Cloud Architect + SRE perspective. Finds material flaws prioritized by blast radius across 10 failure vectors (partial-failure traps, idempotency, IaC completeness, dependency sequencing, drift, command validation, cutover gates, API prerequisites, identity lifecycle, evidence strictness). Use when the user says "review deployment plan", "review infra plan", "review migration plan", "audit deployment", "review infrastructure", "check my deployment", "review this plan", or any variation involving reviewing/auditing cloud infrastructure, migration, or deployment documents. Also triggers on `/stark-review-deployment-plan`. Proactively use this skill whenever the user shares an infrastructure or migration plan and wants feedback, even casually like "does this plan look right" or "poke holes in this".
-- **[`/stark-review-improvement`](stark-review-improvement/usage.md)** — Improve stark-skills prompts based on the Prompt Improvement Assessment from a completed /stark-review run. Reads the assessment from conversation context (or history files), edits the relevant prompt files in ~/git/Evinced/stark-skills/, patches multi_review.py if needed, and logs the learning. Use when the user says "improve review prompts", "start review improvement", "fix review prompts", or invokes /stark-review-improvement.
+- **`/stark-review`** — *(not installed)*
+- **`/stark-review-plan`** — *(not installed)*
+- **`/stark-review-deployment-plan`** — *(not installed)*
+- **`/stark-review-improvement`** — *(not installed)*
 
 ## PR & Shipping
 
@@ -29,8 +29,8 @@ graph TD
     A -->|Cut a versioned release| C[stark-release]
 ```
 
-- **[`/stark-pr-flow`](stark-pr-flow/usage.md)** — End-to-end PR workflow for GetEvinced repos — push, create PR, post self-review via stark-claude bot, present summary, and squash-merge with --admin on approval. Use when the user says "open PR", "create PR", "merge this", "ship it", or "stark-pr-flow".
-- **[`/stark-release`](stark-release/usage.md)** — Cut a new release — reviews unreleased CHANGELOG entries, bumps version (patch/minor/major), creates git tag, and optionally creates a GitHub Release with notes. Use when the user says "release", "cut a version", "tag a release", "bump version", or invokes /stark-release.
+- **`/stark-pr-flow`** — *(not installed)*
+- **`/stark-release`** — *(not installed)*
 
 ## Planning
 
@@ -42,8 +42,8 @@ graph TD
     A -->|Execute a phase end-to-end| C[stark-phase-execute]
 ```
 
-- **[`/stark-plan-to-tasks`](stark-plan-to-tasks/usage.md)** — Decompose a spec/design document into phased GitHub issues with story points, risk, and confidence labels. Extracts domain knowledge to project docs and deletes the plan. Use when the user says "plan to tasks", "decompose plan", "break down this plan", "create issues from spec", "create tasks from plan", or invokes /stark-plan-to-tasks.
-- **[`/stark-phase-execute`](stark-phase-execute/usage.md)** — Autonomously execute all tasks in a development phase end-to-end — for each task: session start, implement, PR, multi-agent review with fix rounds, merge, session end. Then regression tests, version bump, deploy, dashboard, memory/docs update, and prompt improvement detection. Zero user intervention after trigger. If no GitHub issues exist for the plan slug, automatically runs /stark-plan-to-tasks first to decompose the plan into issues, then executes them. Use when the user says "execute phase", "run phase", "stark-phase-execute", "execute these tasks", "implement this phase", "run the plan", "autopilot", or any variation of wanting to autonomously execute a set of planned GitHub issues. Also triggers on `/stark-phase-execute`. Proactively suggest this skill when the user has just run `/stark-plan-to-tasks` and has open phase issues, OR when a plan file exists but hasn't been decomposed yet.
+- **`/stark-plan-to-tasks`** — *(not installed)*
+- **`/stark-phase-execute`** — *(not installed)*
 
 ## Session
 
@@ -55,8 +55,8 @@ graph TD
     A -->|Analyze past session patterns| C[stark-session-insights]
 ```
 
-- **[`/stark-session`](stark-session/usage.md)** — Session management — start and end modes. Start: loads context, git state, health checks, briefing. End: runs tests, merges PRs, commits docs, pushes. Config via .code-review/config.json hierarchy. Use when the user says "session start", "session end", "start session", "end session", "what was I working on", "catch me up", or invokes /stark-session.
-- **[`/stark-session-insights`](stark-session-insights/usage.md)** — Analyze Claude Code session history to extract usage patterns, skill invocations, action frequencies, corrections, and preferences — grouped by project. Reads ~/.claude/history.jsonl and generates per-project insight files. Use when the user says "session insights", "analyze sessions", "usage patterns", "what do I do most", or invokes /stark-session-insights.
+- **`/stark-session`** — *(not installed)*
+- **`/stark-session-insights`** — *(not installed)*
 
 ## Documentation
 
@@ -70,10 +70,10 @@ graph TD
     A -->|Improve CLAUDE.md| E[stark-claude-md-improver]
 ```
 
-- **[`/stark-init-docs`](stark-init-docs/usage.md)** — Scaffold dev docs structure into any repo. Modes: --template (empty skeleton), --backfill (generate from git history), --upgrade (migrate existing docs), --clean (remove skeleton). Use when the user says "init docs", "setup docs", "scaffold docs", or invokes /stark-init-docs.
-- **[`/stark-extract-docs`](stark-extract-docs/usage.md)** — Extract durable knowledge from specs, plans, and reviews into project documentation — ADRs, retrospectives, reference docs, glossary, and a learning log. Use when the user says "extract docs", "generate ADRs", "extract knowledge", "create retrospective", "docs from spec", or invokes /stark-extract-docs.
-- **`/stark-generate-docs`** — *(not installed)*
-- **[`/stark-claude-md-improver`](stark-claude-md-improver/usage.md)** — Analyze and improve CLAUDE.md files for completeness, accuracy, and effectiveness. Use when the user says "improve claude.md", "review claude.md", "audit claude.md", "update claude.md", or "stark-claude-md-improver".
+- **`/stark-init-docs`** — *(not installed)*
+- **`/stark-extract-docs`** — *(not installed)*
+- **[`/stark-generate-docs`](stark-generate-docs/usage.md)** — Generate or update skill documentation with multi-LLM visualizations. Detects which SKILL.md files changed, regenerates docs for those skills, and commits the results. Use when the user says "generate docs", "update skill docs", "regenerate viz", or invokes /stark-generate-docs. Proactively use when a SKILL.md has been modified in the current session.
+- **`/stark-claude-md-improver`** — *(not installed)*
 
 ## Project Management
 
@@ -86,9 +86,9 @@ graph TD
     A -->|Audit & update deps| D[stark-update-deps]
 ```
 
-- **[`/stark-onboard-project`](stark-onboard-project/usage.md)** — Bootstrap a new project end-to-end — initializes git, creates a GitHub repo in GetEvinced org, connects all 3 GitHub Apps (stark-claude, stark-codex, stark-gemini), then sets up Claude Code (CLAUDE.md, .claude/ directory, memory). Use when the user says "onboard project", "setup claude", "bootstrap claude", "init project", "create repo", "new project", or "stark-onboard-project". Also use when starting work in a directory that has no git repo and no CLAUDE.md.
-- **[`/stark-rename-project`](stark-rename-project/usage.md)** — Rename a project locally and on GitHub, update all references in sibling repos, and reinstall symlinks. Use when the user says "rename project", "rename repo", "rename this to", or invokes /stark-rename-project.
-- **[`/stark-update-deps`](stark-update-deps/usage.md)** — Audit and update all dependency versions across a project to their latest stable releases. Scans pyproject.toml, package.json, requirements.txt, Dockerfile, docker-compose.yml, go.mod, Cargo.toml, and any other dependency manifest. Looks up each dependency on official sources (PyPI, npm, Docker Hub, GitHub releases) via WebSearch, checks for compatibility blockers and breaking changes, updates versions in-place, then re-verifies every updated version to ensure accuracy. Use when the user says "update dependencies", "check for outdated packages", "upgrade versions", "are my deps current", "stark-update-deps", or any variation of wanting to bring project dependencies up to date. Also use proactively when you notice stale or outdated versions during other work.
+- **`/stark-onboard-project`** — *(not installed)*
+- **`/stark-rename-project`** — *(not installed)*
+- **`/stark-update-deps`** — *(not installed)*
 
 ## Analytics
 
@@ -101,6 +101,6 @@ graph TD
     A -->|PR analytics dashboard| D[stark-pr-status]
 ```
 
-- **[`/stark-metrics`](stark-metrics/usage.md)** — Aggregate performance metrics across all stark skill runs. Agent scorecards, finding quality, duration trends, prompt improvement impact, and actionable recommendations. Use when the user says "show metrics", "how are reviews performing", "agent stats", "review quality", or invokes /stark-metrics.
-- **[`/stark-skill-analytics`](stark-skill-analytics/usage.md)** — Analyze skill usage patterns and quality metrics across all Claude Code sessions. Reads ~/.claude/history.jsonl and skill run history files to produce adoption curves, usage rankings, quality signals, and recommendations. Use when the user says "skill analytics", "skill usage", "which skills are used", "adoption metrics", or invokes /stark-skill-analytics.
-- **[`/stark-pr-status`](stark-pr-status/usage.md)** — PR analytics dashboard — review rounds, findings by severity, signal-vs-noise, time-to-merge, participants, and most impactful comments. Combines GitHub API data with stark-review history. Use when the user says "PR status", "show PR stats", "how is this PR doing", "PR dashboard", "what happened on PR 15", or invokes /stark-pr-status. Also use when the user asks about review cycles, merge times, or finding quality for specific PRs.
+- **`/stark-metrics`** — *(not installed)*
+- **`/stark-skill-analytics`** — *(not installed)*
+- **`/stark-pr-status`** — *(not installed)*

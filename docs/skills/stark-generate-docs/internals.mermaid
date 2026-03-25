@@ -1,0 +1,21 @@
+graph TD
+  Start([User Command: /stark-generate-docs]) --> Args{Arguments provided?}
+  
+  Args -->|--skill or --all| Gen[Phase 2: Generate Docs]
+  Args -->|None or --check| Check[Phase 1: Run --check Script]
+
+  Check --> CheckResult{Exit Code?}
+  CheckResult -->|0| UpToDate[Done: All docs up to date]
+  CheckResult -->|1| Stale[Capture stale skill names]
+  
+  Stale --> Gen
+
+  Gen --> |scripts/generate_skill_docs.py| Generate[Multi-LLM Generation & Viz]
+  Generate --> Commit[Phase 3: git add & git commit]
+  Commit --> Summary[Phase 4: Output Summary Report]
+
+  Generate -.-> Fail1[Failure: LLM Calls]
+  Fail1 -.->|Recovery| Cont1[Report & Continue]
+  
+  Generate -.-> Fail2[Failure: Playwright Missing]
+  Fail2 -.->|Recovery| Cont2[Skip Screenshots, Warn]
