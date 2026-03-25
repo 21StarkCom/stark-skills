@@ -777,6 +777,108 @@ def generate_internals_markdown(skill: SkillData, mermaid_diagram: str, doc_cont
     return "\n".join(lines)
 
 
+DOMAIN_MAP: dict[str, list[str]] = {
+    "Code Review": [
+        "stark-review", "stark-review-plan", "stark-review-deployment-plan",
+        "stark-review-improvement",
+    ],
+    "PR & Shipping": ["stark-pr-flow", "stark-release"],
+    "Planning": ["stark-plan-to-tasks", "stark-phase-execute"],
+    "Session": ["stark-session", "stark-session-insights"],
+    "Documentation": [
+        "stark-init-docs", "stark-extract-docs", "stark-generate-docs",
+        "stark-claude-md-improver",
+    ],
+    "Project Management": [
+        "stark-onboard-project", "stark-rename-project", "stark-update-deps",
+    ],
+    "Analytics": ["stark-metrics", "stark-skill-analytics", "stark-pr-status"],
+}
+
+# Decision-tree templates per domain. Each node uses the skill name as ID.
+_DECISION_TREES: dict[str, str] = {
+    "Code Review": """\
+graph TD
+    A{What are you reviewing?} -->|PR code| B[stark-review]
+    A -->|Design doc / plan| C[stark-review-plan]
+    A -->|Infra / deployment plan| D[stark-review-deployment-plan]
+    A -->|Improve review prompts| E[stark-review-improvement]""",
+
+    "PR & Shipping": """\
+graph TD
+    A{What do you need?} -->|Push + create + review + merge| B[stark-pr-flow]
+    A -->|Cut a versioned release| C[stark-release]""",
+
+    "Planning": """\
+graph TD
+    A{Starting or continuing?} -->|Break plan into issues| B[stark-plan-to-tasks]
+    A -->|Execute a phase end-to-end| C[stark-phase-execute]""",
+
+    "Session": """\
+graph TD
+    A{Session lifecycle} -->|Start or end a work session| B[stark-session]
+    A -->|Analyze past session patterns| C[stark-session-insights]""",
+
+    "Documentation": """\
+graph TD
+    A{What kind of docs?} -->|Scaffold docs structure| B[stark-init-docs]
+    A -->|Extract knowledge from specs| C[stark-extract-docs]
+    A -->|Generate skill HTML/MD docs| D[stark-generate-docs]
+    A -->|Improve CLAUDE.md| E[stark-claude-md-improver]""",
+
+    "Project Management": """\
+graph TD
+    A{Project task?} -->|Bootstrap new project| B[stark-onboard-project]
+    A -->|Rename project + refs| C[stark-rename-project]
+    A -->|Audit & update deps| D[stark-update-deps]""",
+
+    "Analytics": """\
+graph TD
+    A{What metrics?} -->|Review performance| B[stark-metrics]
+    A -->|Skill usage & adoption| C[stark-skill-analytics]
+    A -->|PR analytics dashboard| D[stark-pr-status]""",
+}
+
+
+def generate_routing_guide(skills: list[SkillData]) -> str:
+    """Generate a task-oriented routing guide with Mermaid decision trees per domain."""
+    skill_map: dict[str, SkillData] = {s.name: s for s in skills}
+    lines = [
+        "# Skill Routing Guide", "",
+        "Which skill should I use? Follow the decision trees below.", "",
+    ]
+
+    for domain, skill_names in DOMAIN_MAP.items():
+        lines += [f"## {domain}", "", "### I want to...", ""]
+
+        # Mermaid decision tree
+        tree = _DECISION_TREES.get(domain)
+        if tree:
+            lines += ["```mermaid", tree, "```", ""]
+
+        # Skill descriptions with links
+        for sname in skill_names:
+            sd = skill_map.get(sname)
+            if sd:
+                desc = sd.description or "See SKILL.md"
+                lines.append(f"- **[`/{sname}`]({sname}/usage.md)** — {desc}")
+            else:
+                lines.append(f"- **`/{sname}`** — *(not installed)*")
+        lines.append("")
+
+    # Catch any skills not in a domain
+    all_domain_skills = {s for names in DOMAIN_MAP.values() for s in names}
+    uncategorized = [s for s in skills if s.name not in all_domain_skills]
+    if uncategorized:
+        lines += ["## Other Skills", ""]
+        for sd in sorted(uncategorized, key=lambda s: s.name):
+            desc = sd.description or "See SKILL.md"
+            lines.append(f"- **[`/{sd.name}`]({sd.name}/usage.md)** — {desc}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def generate_index_markdown(skills: list[SkillData]) -> str:
     """Generate index.md listing all skills with links to usage and internals docs."""
     lines = [
@@ -1103,11 +1205,15 @@ def main() -> int:
 
             print(f"  DONE  {skill_name}/{audience}.md")
 
-    # ── 8. Generate index.md ──────────────────────────────────────────
+    # ── 8. Generate index.md & README.md routing guide ─────────────────
     all_skill_data = [skill_data_map[d.name] for d in target_dirs if d.name in skill_data_map]
     index_md = generate_index_markdown(all_skill_data)
     (out_dir / "index.md").write_text(index_md)
     print(f"  DONE  index.md ({len(all_skill_data)} skills)")
+
+    routing_md = generate_routing_guide(all_skill_data)
+    (out_dir / "README.md").write_text(routing_md)
+    print(f"  DONE  README.md (routing guide)")
 
     # ── 9. Update manifest with quality flags ─────────────────────────
     # Start from current manifest and merge in quality flags
