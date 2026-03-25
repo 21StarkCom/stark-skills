@@ -14,6 +14,7 @@ from generate_skill_docs import (
     compute_weighted_average, select_winner, FACTOR_WEIGHTS,
     stamp_winner_html, write_audit_entry,
     generate_usage_markdown, generate_internals_markdown, generate_index_markdown,
+    generate_routing_guide,
     compute_manifest, check_staleness,
 )
 
@@ -397,6 +398,19 @@ def test_check_staleness_internals_needs_review(tmp_path):
                "skills": {"test-skill": {"hash": "abc123", "usage_quality": "ok", "internals_quality": "needs-human-review"}}}
     stale = check_staleness(manifest_path, current)
     assert "test-skill" in stale
+
+
+# ── Routing guide tests ────────────────────────────────────────────────
+
+
+def test_generate_routing_guide():
+    skill_dir = Path(__file__).parent.parent / "skill"
+    skills = [parse_skill_md(s / "SKILL.md") for s in discover_skills(skill_dir)]
+    md = generate_routing_guide(skills)
+    for s in skills:
+        assert s.name in md, f"{s.name} missing from routing guide"
+    assert "```mermaid" in md
+    assert "graph TD" in md or "graph LR" in md
 
 
 # ── main() orchestrator tests ──────────────────────────────────────────
