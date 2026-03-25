@@ -1,0 +1,18 @@
+{
+  "doc_content": {
+    "summary": "The stark-pr-flow skill automates the end-to-end pull request lifecycle for GetEvinced repositories, handling branch pushing, AI-generated PR descriptions, automated self-reviews via stark-claude, and squash-merging upon user approval.",
+    "key_features": [
+      "Automated PR title and body generation from commit history and diffs.",
+      "Automatic self-review posting using the stark-claude bot with inline comments.",
+      "Safe execution with a built-in stop for explicit user approval before merging.",
+      "Advisory documentation state checks to ensure compliance before merge.",
+      "Automated branch cleanup and main synchronization after a successful squash merge."
+    ],
+    "usage_examples": [
+      "stark-pr-flow",
+      "stark-pr-flow draft",
+      "stark-pr-flow Fix login timeout issue"
+    ]
+  },
+  "alt_text": "A workflow visualization of the stark-pr-flow skill showing the step-by-step process of pushing a branch, creating a PR, running a bot self-review, pausing for user approval, and finally merging and cleaning up."
+}

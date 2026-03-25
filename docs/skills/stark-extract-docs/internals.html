@@ -1,0 +1,372 @@
+<html lang="en">
+<head>
+  
+  
+  <title>stark-extract-docs — Internal Architecture</title>
+  <style>
+    /*
+     * Stark Skills — Shared Design System CSS
+     *
+     * Foundation styles for LLM-generated HTML skill visualizations.
+     * LLMs embed this inline and may extend with additional styles.
+     * All colors pass WCAG AA 4.5:1 contrast ratio.
+     *
+     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+     */
+
+    /* === Reset & Base === */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #fafafa;
+      color: #1a1a1a;
+      line-height: 1.5;
+    }
+
+    /* === Header === */
+    .header { text-align: center; padding: 36px 20px 16px; }
+    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+    .header .scope {
+      display: inline-block; font-size: 10px; font-weight: 600;
+      background: #eff6ff; color: #1e40af;
+      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+    }
+
+    /* === Container === */
+    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+    /* === Section Title === */
+    .section-title {
+      font-size: 14px; font-weight: 700; color: #666;
+      text-transform: uppercase; letter-spacing: 1px;
+      margin: 32px 0 16px; padding-bottom: 6px;
+      border-bottom: 2px solid #e5e7eb;
+    }
+
+    /* === Node Types === */
+    .node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+    .node-desc { font-size: 10px; opacity: 0.9; }
+
+    .node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+    .node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+    .node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+    .node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
+    .node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; box-shadow: none; } /* Gray — external deps */
+
+    /* === Flow Layout === */
+    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; margin-top: 24px; }
+    .flow-step {
+      display: flex; align-items: stretch;
+      width: 100%; max-width: 860px; min-height: 76px;
+    }
+    .flow-lane-left {
+      width: 250px; display: flex; flex-direction: column;
+      align-items: flex-end; justify-content: center;
+      padding-right: 18px; text-align: right;
+    }
+    .flow-lane-center {
+      width: 360px; display: flex;
+      align-items: center; justify-content: center;
+    }
+    .flow-lane-right {
+      width: 250px; display: flex; flex-direction: column;
+      align-items: flex-start; justify-content: center; padding-left: 18px; text-align: left;
+    }
+    .annotation {
+      font-size: 10px; color: #666; max-width: 200px; line-height: 1.4;
+    }
+    .annotation strong { color: #444; }
+
+    /* === Arrows === */
+    .arrow-down {
+      width: 2px; height: 24px; background: #cbd5e1;
+      margin: 0 auto; position: relative;
+    }
+    .arrow-down::after {
+      content: ''; position: absolute; bottom: -4px; left: -4px;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid #cbd5e1;
+    }
+    .arrow-container {
+      display: flex; justify-content: center;
+      width: 100%; max-width: 860px;
+    }
+    .arrow-container .flow-lane-center {
+      display: flex; justify-content: center;
+    }
+
+    /* === Cards === */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px; margin-top: 16px;
+    }
+    .card { padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+    .card p  { font-size: 11px; line-height: 1.6; margin-bottom: 8px; }
+
+    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+    .card-blue h3 { color: #1e40af; }
+    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+    .card-green h3 { color: #059669; }
+    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+    .card-purple h3 { color: #7c3aed; }
+    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+    .card-amber h3 { color: #92400e; }
+    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+    .card-dark h3 { color: #333333; }
+    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+    .card-red h3 { color: #dc2626; }
+
+    /* === Data Tables === */
+    .data-table {
+      width: 100%; max-width: 860px; margin: 16px auto;
+      border-collapse: collapse; font-size: 11px;
+      background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-radius: 6px; overflow: hidden;
+    }
+    .data-table th {
+      background: #f3f4f6; padding: 10px 12px; text-align: left;
+      font-weight: 600; color: #4b5563; border-bottom: 2px solid #e5e7eb;
+    }
+    .data-table td {
+      padding: 10px 12px; border-bottom: 1px solid #f3f4f6; color: #374151;
+    }
+    .data-table tr:last-child td { border-bottom: none; }
+
+    /* === Tags === */
+    .tag {
+      display: inline-block; font-size: 9px; font-weight: 600;
+      padding: 2px 8px; border-radius: 3px; margin-right: 4px; margin-bottom: 4px;
+    }
+    .tag-phase    { background: #dbeafe; color: #1e40af; }
+    .tag-decision { background: #ede9fe; color: #5b21b6; }
+    .tag-failure  { background: #fee2e2; color: #991b1b; }
+    .tag-config   { background: #d1fae5; color: #065f46; }
+    .tag-output   { background: #fef3c7; color: #92400e; }
+    .tag-external { background: #f3f4f6; color: #666666; }
+
+    /* === Legend === */
+    .legend {
+      display: flex; gap: 16px; justify-content: center;
+      margin: 16px 0 24px; flex-wrap: wrap;
+    }
+    .legend-item {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 10px; color: #666;
+    }
+    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+    /* === Footer === */
+    .footer {
+      text-align: center; padding: 20px;
+      font-size: 10px; color: #999;
+    }
+
+    code { background: rgba(0,0,0,0.05); padding: 2px 4px; border-radius: 3px; font-family: monospace; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>stark-extract-docs</h1>
+    <div class="sub">Two-Pass Knowledge Extraction Architecture</div>
+    <div class="scope">Target Audience: Internals</div>
+  </div>
+
+  <div class="container">
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background: #1e40af;"></div> Phase / Action</div>
+      <div class="legend-item"><div class="legend-dot" style="background: #7c3aed;"></div> Decision / Validation</div>
+      <div class="legend-item"><div class="legend-dot" style="background: #047857;"></div> Config / State</div>
+      <div class="legend-item"><div class="legend-dot" style="background: #f59e0b;"></div> Artifact Output</div>
+      <div class="legend-item"><div class="legend-dot" style="background: #e5e7eb;"></div> External</div>
+    </div>
+
+    <div class="section-title">Core Execution Flow</div>
+    
+    <div class="flow">
+      <!-- Setup Phase -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Inputs:</strong><br>Spec, Plan, Code Reviews<br><code>--batch</code> or <code>&lt;path&gt;</code></div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Phase 1: Setup</div>
+            <div class="node-desc">Validate input, detect repo, locate related artifacts.</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-config" style="padding: 6px 10px;">
+            <div class="node-title">Skip Logic</div>
+            <div class="node-desc">Hash check against <code>~/.claude/code-review/history/</code></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Pass 1 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>LLM Processing</strong><br>8 extraction categories,<br>Filtered by <code>confidence</code></div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Phase 2: Pass 1 (Extraction)</div>
+            <div class="node-desc">Read artifacts, extract structured knowledge into JSON format.</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-decision" style="padding: 6px 10px;">
+            <div class="node-title">Schema Validation</div>
+            <div class="node-desc">Retry once if malformed</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Pass 2 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Routing Engine</strong><br>Maps categories to specific document types & paths.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Phase 3: Pass 2 (Routing)</div>
+            <div class="node-desc">Determine targets and generate formatted markdown files.</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-output" style="padding: 6px 10px;">
+            <div class="node-title">Memory State</div>
+            <div class="node-desc">Drafts of ADRs, Retros, Ref Docs, Glossary, Log</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Preview & Write -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">Creates necessary directories, writes files to disk.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Phase 4: Preview & Write</div>
+            <div class="node-desc">Print summary to terminal, write out artifacts, handle Git.</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-external" style="padding: 6px 10px;">
+            <div class="node-title">Git Commit</div>
+            <div class="node-desc">Auto-commit unless <code>--no-commit</code></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Summary & Metrics -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><code>extract-docs/{repo}/{slug}.json</code></div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-config">
+            <div class="node-title">Phase 6 & 7: Summary & Metrics</div>
+            <div class="node-desc">Print final stats, log phase timings, persist execution history.</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">Knowledge Extraction Routing</div>
+    
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th>Extraction Source</th>
+          <th>Routed To (Target)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="tag tag-phase">decision</span></td>
+          <td>Spec (Architecture/Tech Choices)</td>
+          <td><code>docs/adr/NNNN-&lt;slug&gt;.md</code></td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-phase">decision_defended</span></td>
+          <td>Review (Intentional Design Choices)</td>
+          <td>ADR <strong>and</strong> Retrospective (Table)</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-phase">constraint</span></td>
+          <td>Spec (Non-Goals/Boundaries)</td>
+          <td>ADR (if alternatives) <strong>or</strong> <code>constraints.md</code> (append)</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-phase">integration</span></td>
+          <td>Spec (API contracts/Data flow)</td>
+          <td><code>docs/reference/&lt;slug&gt;.md</code></td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-phase">data_model</span></td>
+          <td>Spec (Schema/Entities)</td>
+          <td><code>docs/reference/&lt;slug&gt;.md</code></td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-phase">evolution</span></td>
+          <td>Review (Fixed Across Rounds)</td>
+          <td><code>docs/retrospectives/YYYY-MM-DD-&lt;slug&gt;.md</code></td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-phase">agent_signal</span></td>
+          <td>Review (Agent Failure Patterns)</td>
+          <td>Retrospective <strong>and</strong> <code>learning-log.md</code></td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-phase">glossary</span></td>
+          <td>Spec (Domain terms)</td>
+          <td><code>docs/glossary.md</code> (append)</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="section-title">Architecture Highlights</div>
+
+    <div class="card-grid">
+      <div class="card card-blue">
+        <h3>Two-Pass Architecture</h3>
+        <p>Maintains a strict separation of concerns. <strong>Pass 1</strong> uses the LLM to read raw text and structure it logically into an intermediate JSON schema. <strong>Pass 2</strong> acts as a routing engine, applying deterministic rules to deduplicate and place that JSON content into exact markdown files.</p>
+      </div>
+
+      <div class="card card-green">
+        <h3>Skip & Force Logic</h3>
+        <p>Before running expensive extractions, it computes SHA-256 hashes of all input files (Spec, Plan, Reviews). It compares these against <code>~/.claude/code-review/history/.../&lt;slug&gt;.json</code>. If all hashes match, extraction is bypassed cleanly unless <code>--force</code> is invoked.</p>
+      </div>
+
+      <div class="card card-purple">
+        <h3>Batch Deduplication</h3>
+        <p>When running <code>--batch &lt;dir&gt;</code>, the system iteratively extracts specs, preserving the ADR number counter. At the end of the batch run, it runs a cross-spec duplicate check on all generated ADRs, keeping the most detailed version and discarding overlaps without renumbering.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="footer">
+    Generated for stark-extract-docs • Internal Developer Documentation
+  </div>
+
+</body>
+</html>

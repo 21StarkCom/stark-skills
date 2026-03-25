@@ -1,0 +1,442 @@
+<html lang="en">
+<head>
+
+
+<title>stark-release | Internal Architecture</title>
+<style>
+/*
+ * Stark Skills — Shared Design System CSS
+ *
+ * Foundation styles for LLM-generated HTML skill visualizations.
+ * LLMs embed this inline and may extend with additional styles.
+ * All colors pass WCAG AA 4.5:1 contrast ratio.
+ *
+ * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+ */
+
+/* === Reset & Base === */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+
+/* === Header === */
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
+
+/* === Container === */
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+/* === Section Title === */
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+/* === Node Types === */
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
+
+.node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+.node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+.node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+.node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
+.node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
+
+/* === Flow Layout === */
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: center;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 250px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px; text-align: right;
+}
+.flow-lane-center {
+  width: 360px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 250px; display: flex;
+  align-items: center; padding-left: 18px; text-align: left;
+}
+.annotation {
+  font-size: 10px; color: #666; max-width: 220px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
+code { font-family: monospace; background: rgba(0,0,0,0.05); padding: 1px 4px; border-radius: 3px; font-size: 9px; }
+
+/* === Arrows === */
+.arrow-down {
+  width: 2px; height: 24px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
+
+/* === Cards === */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; color: #444;}
+.card ul { margin-left: 16px; font-size: 11px; line-height: 1.6; color: #444; margin-top: 6px; }
+.card li { margin-bottom: 4px; }
+
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #ffffff; border: 1px solid #e5e7eb; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
+
+/* === Data Tables === */
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+  background: white; border-radius: 8px; overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.data-table th {
+  background: #f3f4f6; padding: 10px 12px; text-align: left;
+  font-weight: 600; color: #4b5563; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 10px 12px; border-bottom: 1px solid #f3f4f6; color: #4b5563;
+}
+.data-table tr:last-child td { border-bottom: none; }
+
+/* === Tags === */
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
+
+/* === Legend === */
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 32px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+/* === Footer === */
+.footer {
+  text-align: center; padding: 40px 20px 20px;
+  font-size: 10px; color: #999;
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>stark-release</h1>
+  <div class="sub">Automated Release Management & Version Bumping workflow</div>
+  <div class="scope">INTERNAL ARCHITECTURE & DATA FLOW</div>
+</div>
+
+<div class="container">
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot node-phase"></div> Git/Workflow Operation</div>
+    <div class="legend-item"><div class="legend-dot node-decision"></div> Logic/Decision Point</div>
+    <div class="legend-item"><div class="legend-dot node-output"></div> File Mutation/Artifact</div>
+    <div class="legend-item"><div class="legend-dot node-external"></div> External API/CLI</div>
+    <div class="legend-item"><div class="legend-dot node-failure"></div> Failure Mode</div>
+  </div>
+
+  <h2 class="section-title">Release Pipeline Execution Flow</h2>
+  
+  <div class="flow">
+    <!-- Step 1 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation">
+          <strong>Git Validation</strong><br>
+          Must be on <code>main</code> branch with clean working tree. Pulls latest.
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase">
+          <div class="node-title">1. Pre-flight Checks</div>
+          <div class="node-desc">git checkout, pull --rebase, status</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="node node-failure" style="padding: 6px; margin-left: 10px; width: auto; font-size: 9px;">
+          Abort if dirty tree or wrong branch
+        </div>
+      </div>
+    </div>
+    
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+    
+    <!-- Step 2 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation">
+          <strong>Query Tag History</strong><br>
+          <code>git tag --sort=-v:refname</code>
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-config">
+          <div class="node-title">2. Determine Current Version</div>
+          <div class="node-desc">Parse tag to major.minor.patch</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation">
+          <strong>Baseline Fallback:</strong><br>
+          If no tags exist, default to <code>0.1.0</code>.
+        </div>
+      </div>
+    </div>
+    
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+    
+    <!-- Step 3 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation">
+          <strong>Parse Markdown</strong><br>
+          Extract <code>## [Unreleased]</code> section. Format changes for user output.
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-decision">
+          <div class="node-title">3. Review Unreleased Changes</div>
+          <div class="node-desc">Read CHANGELOG.md</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="node node-failure" style="padding: 6px; margin-left: 10px; width: auto; font-size: 9px;">
+          Abort if missing/empty Unreleased
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 4 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation">
+          <strong>Auto-detect Rule:</strong><br>
+          Fixed = <code>patch</code><br>
+          Added = <code>minor</code><br>
+          Breaking = <code>major</code>
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-decision">
+          <div class="node-title">4. Calculate Next Version</div>
+          <div class="node-desc">Resolve semantic bump type</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation">
+          <strong>Input Override:</strong><br>
+          Uses optional arg <code>[patch|minor|major]</code>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 5 & 6 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation">
+          <strong>1.</strong> Bump <code>__version__</code> in <code>__init__.py</code><br>
+          <strong>2.</strong> Shift <code>[Unreleased]</code> to <code>[vX.Y.Z]</code> section.
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-output">
+          <div class="node-title">5 & 6. Mutate Repository State</div>
+          <div class="node-desc">Update Runtime version & Changelog</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation">
+          <strong>Git Commit:</strong><br>
+          <code>git commit -m "release: vX.Y.Z"</code>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 7 & 8 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation">
+          <strong>Git Operations</strong><br>
+          Annotated tag contains full change notes. Push updates tracking branch.
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase">
+          <div class="node-title">7 & 8. Create Tag & Push</div>
+          <div class="node-desc">git tag -a & git push origin</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="node node-failure" style="padding: 6px; margin-left: 10px; width: auto; font-size: 9px;">
+          Tag exists / Push fails
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 9 & 10 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation">
+          <strong>Authentication:</strong><br>
+          Uses user's PAT to create GitHub Release as themselves.
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-external">
+          <div class="node-title">9 & 10. Publish GitHub Release</div>
+          <div class="node-desc">gh release create & Print Summary</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="node node-failure" style="padding: 6px; margin-left: 10px; width: auto; font-size: 9px;">
+          <code>gh</code> auth failure
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="section-title">Design Principles & Rules</h2>
+  
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>Version Source of Truth</h3>
+      <p><strong>Git Tags</strong> dictate the official version. <code>pyproject.toml</code> remains static at <code>0.1.0</code> to avoid trivial conflicts. <code>src/infra_pulse/__init__.py</code> serves as the runtime mirror that MUST be bumped so the deployed app correctly reflects the tag.</p>
+    </div>
+    
+    <div class="card card-purple">
+      <h3>Changelog Integrity</h3>
+      <p>The system requires developers to maintain standard <code>## [Unreleased]</code> sections in <code>CHANGELOG.md</code> using <code>### Fixed</code>, <code>### Added</code>, and <code>### Changed</code> markers. This powers automated semantic bumping without requiring human prompts.</p>
+    </div>
+    
+    <div class="card card-amber">
+      <h3>Fail-Closed Executions</h3>
+      <p>The skill refuses to run if uncommitted changes exist, if not on <code>main</code>, if the CHANGELOG is missing, or if the Unreleased block is empty. This prevents accidental partial releases or empty tags.</p>
+    </div>
+  </div>
+
+  <h2 class="section-title">Failure Modes & Recovery</h2>
+  
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th style="width: 25%">Failure State</th>
+        <th style="width: 25%">Detection Phase</th>
+        <th style="width: 50%">Recovery / Action taken</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Not on main branch</strong></td>
+        <td>1. Pre-flight</td>
+        <td>Abort. Prompt user to <code>git checkout main</code>.</td>
+      </tr>
+      <tr>
+        <td><strong>Dirty working tree</strong></td>
+        <td>1. Pre-flight</td>
+        <td>Abort. Prompt user to stash or commit changes first.</td>
+      </tr>
+      <tr>
+        <td><strong>No CHANGELOG.md / Empty</strong></td>
+        <td>3. Review Changes</td>
+        <td>Abort. Nothing to release. Instruct user to run <code>/fix-bug</code> or add logs.</td>
+      </tr>
+      <tr>
+        <td><strong>Tag already exists</strong></td>
+        <td>7. Create Tag</td>
+        <td>Error out. Suggest next logical version.</td>
+      </tr>
+      <tr>
+        <td><strong>Push fails</strong></td>
+        <td>8. Push</td>
+        <td>Attempt <code>git pull --rebase origin main</code> and retry push.</td>
+      </tr>
+      <tr>
+        <td><strong>gh auth fails</strong></td>
+        <td>9. GH Release</td>
+        <td>Verify via <code>gh auth status</code>. Fails if user PAT is inactive.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-title">Observability Events</h2>
+  <div class="card card-dark">
+    <h3>Skill Observability Protocol (<span class="tag tag-config">~/.claude/code-review/standards/observability.md</span>)</h3>
+    <p style="margin-bottom: 8px;">The skill emits standard checkpoints and timing data plus domain-specific tags:</p>
+    <ul>
+      <li><strong>Version Metadata:</strong> Previous version, new version, bump type (<code>patch</code> | <code>minor</code> | <code>major</code>).</li>
+      <li><strong>Changelog Analytics:</strong> Count of entries categorized by <code>Fixed</code>, <code>Added</code>, <code>Changed</code>.</li>
+      <li><strong>Artifact Creation:</strong> Booleans for tag created (yes/no) and GH release created (yes/no).</li>
+      <li><strong>Latency:</strong> Measure total <code>git push</code> duration to monitor remote delays.</li>
+    </ul>
+  </div>
+
+</div>
+
+<div class="footer">
+  stark-release visualization internally generated | Evinced Internal Arch
+</div>
+
+</body>
+</html>

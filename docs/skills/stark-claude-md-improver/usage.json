@@ -1,0 +1,18 @@
+{
+  "doc_content": {
+    "summary": "The stark-claude-md-improver skill automatically audits and enhances CLAUDE.md instruction files across a project's hierarchy, evaluating them for clarity, completeness, accuracy, and AI effectiveness before interactively applying improvements.",
+    "key_features": [
+      "Hierarchical file discovery (home, org, project, subdirectories)",
+      "Rigorous 5-dimension evaluation with 1-5 scoring",
+      "Cross-referencing with actual project state to identify stale content",
+      "Interactive reporting and direct application of optimizations",
+      "Observability tracking of metrics and scores"
+    ],
+    "usage_examples": [
+      "improve claude.md",
+      "review claude.md",
+      "audit claude.md /path/to/specific/CLAUDE.md"
+    ]
+  },
+  "alt_text": "A workflow visualization of the stark-claude-md-improver skill showing the 5-step process of discovery, dimensional analysis, report generation, interactive user prompting, and file modification."
+}

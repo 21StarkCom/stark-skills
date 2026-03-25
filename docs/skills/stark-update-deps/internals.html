@@ -1,0 +1,334 @@
+<html lang="en">
+<head>
+
+
+<title>stark-update-deps Architecture</title>
+<style>
+/*
+ * Stark Skills — Shared Design System CSS
+ *
+ * Foundation styles for LLM-generated HTML skill visualizations.
+ * LLMs embed this inline and may extend with additional styles.
+ * All colors pass WCAG AA 4.5:1 contrast ratio.
+ *
+ * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+ */
+
+/* === Reset & Base === */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+
+/* === Header === */
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
+
+/* === Container === */
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+/* === Section Title === */
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+/* === Node Types === */
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
+
+.node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+.node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+.node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+.node-config   { background: #047857; color: #ffffff; }   /* Green — config/states */
+.node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
+.node-action   { background: #0284c7; color: #ffffff; }   /* Light Blue - internal actions */
+
+/* === Flow Layout === */
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 220px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 420px; display: flex;
+  align-items: center; justify-content: center; flex-direction: column; gap: 8px;
+}
+.flow-lane-right {
+  width: 220px; display: flex;
+  align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 9px; color: #666; max-width: 180px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
+
+/* === Arrows === */
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center; flex-direction: row;
+}
+
+/* === Cards === */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
+
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
+
+/* === Legend === */
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+/* === Tags === */
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>stark-update-deps</h1>
+  <div class="sub">Dependency Version Updater — Internal Execution Flow</div>
+  <div class="scope">Audience: Internals & Architecture</div>
+</div>
+
+<div class="container">
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot node-phase"></div> Phase Engine</div>
+    <div class="legend-item"><div class="legend-dot node-action"></div> Internal Action</div>
+    <div class="legend-item"><div class="legend-dot node-decision"></div> Logic/Decision</div>
+    <div class="legend-item"><div class="legend-dot node-config"></div> State/Data</div>
+    <div class="legend-item"><div class="legend-dot node-output"></div> Artifact/Report</div>
+    <div class="legend-item"><div class="legend-dot node-failure"></div> Failure/Fallback</div>
+  </div>
+
+  <h2 class="section-title">Execution Pipeline & Data Flow</h2>
+  
+  <div class="flow">
+    <!-- Phase 1: Discovery -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation" style="text-align: right;">
+          <strong>Inputs:</strong> Glob matching `package.json`, `pyproject.toml`, `Dockerfile`, `go.mod`, etc.
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase">
+          <div class="node-title">Phase 1: Discovery</div>
+          <div class="node-desc">Find manifests & extract versions</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="node node-config">
+          <div class="node-title">Dep Inventory Table</div>
+          <div class="node-desc">Ecosystem, File, Version state</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 2: Research -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="node node-action">
+          <div class="node-title">Parallel WebSearch</div>
+          <div class="node-desc">Batch by ecosystem (PyPI, npm, Docker Hub)</div>
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase">
+          <div class="node-title">Phase 2: Research</div>
+          <div class="node-desc">Look up latest stable & LTS releases</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation">
+          <strong>LTS Preference:</strong> Defaults to Active LTS over absolute latest (e.g., Node 22 vs 23).
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 3: Compatibility -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation" style="text-align: right;">
+          <strong>Codemod Discovery:</strong> Searches for breaking change docs and migration tools.
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase">
+          <div class="node-title">Phase 3: Compatibility Analysis</div>
+          <div class="node-desc">Cross-dep constraint checking</div>
+        </div>
+        <div class="node node-decision" style="width: 80%;">
+          <div class="node-title">Decision Matrix</div>
+          <div class="node-desc">Categorize: Safe | Review | Blocked</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="node node-config">
+          <div class="node-title">Update Plan</div>
+          <div class="node-desc">Version bump targets generated</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 4: Update -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="node node-external">
+          <div class="node-title">Local Workspace</div>
+          <div class="node-desc">File writes/regex replacement</div>
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase">
+          <div class="node-title">Phase 4: Update in Place</div>
+          <div class="node-desc">Apply "Safe" / "Review" updates directly</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation">
+          <strong>Rule Engine:</strong> Respects `>=` vs `==` vs `^` bounds per ecosystem config formats.
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 5: Verification -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="node node-failure">
+          <div class="node-title">Revert/Fix Route</div>
+          <div class="node-desc">If search fails, fallback & alert</div>
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="background: #0f172a; border: 2px solid #ef4444;">
+          <div class="node-title">Phase 5: Verification (CRITICAL)</div>
+          <div class="node-desc">Anti-Hallucination Re-Check Loop</div>
+        </div>
+        <div class="node node-action" style="width: 90%;">
+          <div class="node-title">Strict WebSearch Validation</div>
+          <div class="node-desc">1 search per modified version tag</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation">
+          <strong>Docker Tags:</strong> Specifically verifies <code>site:hub.docker.com</code> to catch missing GPU/OS tags.
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 6: Report -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation" style="text-align: right;">
+          <strong>Observability:</strong> Metrics on dependencies scanned, search counts, and failed checks.
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase">
+          <div class="node-title">Phase 6: Reporting</div>
+          <div class="node-desc">Compile summary & migration items</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="node node-output">
+          <div class="node-title">Explicit Report List</div>
+          <div class="node-desc">Markdown checklist of confirmed tags</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="section-title">Architectural Features & Constraints</h2>
+  <div class="card-grid">
+    <div class="card card-red">
+      <h3>Anti-Hallucination Loop</h3>
+      <p>LLMs confidently generate fabricated versions (e.g. non-existent CUDA tags). The <strong>Phase 5 Verification Loop</strong> reads the mutated files, extracts the <em>new</em> strings, and issues explicit WebSearch queries to registries (PyPI, npm, DockerHub) to mathematically prove the tag's existence before passing.</p>
+    </div>
+    <div class="card card-blue">
+      <h3>Ecosystem Parallelization</h3>
+      <p>Research searches are dynamically batched to minimize turn latency. Lookups are grouped by ecosystem (4-6 per turn), prioritizing core frameworks, then SDKs, then dev tools, ensuring multi-turn wait times are kept linearly low despite O(n) dependency scales.</p>
+    </div>
+    <div class="card card-green">
+      <h3>LTS & Semantic Safety</h3>
+      <p>The research phase is biased against bleeding-edge releases for base runtimes. Node versions default to Active LTS; Python relies on broad library compat metrics. Dependency bounds (<code>^</code> vs <code>>=</code>) are strictly preserved during in-place file modifications.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>Actionable Major Bumps</h3>
+      <p>The Compatibility Analysis phase isn't just a diff—it actively searches for official migration commands (e.g. <code>npx @tailwindcss/upgrade</code>) and embeds them into the "Review" category items to accelerate the implementing agent's next steps.</p>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

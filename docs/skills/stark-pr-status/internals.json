@@ -1,0 +1,4 @@
+{
+  "doc_content": {},
+  "alt_text": "A polished internal architecture page for the `stark-pr-status` skill with a large title, a legend of colored node types, summary cards explaining purpose and data blend, a vertical flow diagram from CLI entry through repo detection, GitHub and history ingestion, lifecycle normalization, output branching, and suggestion heuristics, followed by data-contract tables, failure-mode cards, and observability and extension-point notes.\"}}"
+}

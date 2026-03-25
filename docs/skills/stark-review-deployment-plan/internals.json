@@ -1,0 +1,4 @@
+{
+  "doc_content": {},
+  "alt_text": "A clean internal architecture page for the \u201cstark-review-deployment-plan\u201d skill, showing a vertical review pipeline from plan ingestion through four analysis passes, an evidence gate that routes missing proof to FAIL or DEFERRED, structured output artifacts, ten failure-vector cards, contributor extension points, and observability tables for durations, severity counts, and remaining blockers.\"}}"
+}

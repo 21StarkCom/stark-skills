@@ -1,0 +1,18 @@
+{
+  "doc_content": {
+    "summary": "Scaffold a standardized developer documentation structure into any repository with four combinable modes. Automatically provisions templates, migrates scattered markdown files, generates initial documentation from git history, and wires up static site generation.",
+    "key_features": [
+      "Idempotent template scaffolding (--template) creates standard directories, mkdocs.yml, and PR templates",
+      "Intelligent backfilling (--backfill) analyzes git history, PRs, and config files to auto-generate ADRs, specs, and guides",
+      "Automated migration (--upgrade) finds scattered repository markdown, classifies it, moves it to the central docs folder, and fixes broken links",
+      "Safe cleanup (--clean) removes boilerplate skeletons without touching user-generated content"
+    ],
+    "usage_examples": [
+      "/stark-init-docs",
+      "/stark-init-docs --template",
+      "/stark-init-docs --upgrade --backfill",
+      "/stark-init-docs --clean"
+    ]
+  },
+  "alt_text": "Visualization of the stark-init-docs skill showing the four operational modes (template, backfill, upgrade, clean), their execution workflows, and generated documentation artifacts."
+}

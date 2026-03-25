@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>stark-skill-analytics — Usage Guide</title>
+<style>
+/* === Reset & Base === */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+
+/* === Header === */
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
+
+/* === Container === */
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+/* === Section Title === */
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+/* === Node Types === */
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
+
+.node-phase    { background: #1e40af; color: #ffffff; }
+.node-decision { background: #7c3aed; color: #ffffff; }
+.node-failure  { background: #dc2626; color: #ffffff; }
+.node-config   { background: #047857; color: #ffffff; }
+.node-output   { background: #f59e0b; color: #1a1a1a; }
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
+
+/* === Flow Layout === */
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 180px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 180px; display: flex;
+  align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
+
+/* === Arrows === */
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
+
+/* === Cards === */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
+
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
+
+/* === Data Tables === */
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
+
+/* === Tags === */
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
+
+/* === Legend === */
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+/* === Summary Grid === */
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
+
+/* === Footer === */
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
+
+/* === Skill-specific extensions === */
+.invoke-box {
+  background: #1a1a1a; color: #e5e7eb; border-radius: 8px;
+  padding: 14px 20px; font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px; margin: 12px auto; max-width: 600px;
+  position: relative;
+}
+.invoke-box .prompt { color: #22d3ee; }
+.invoke-box .cmd { color: #fbbf24; }
+.invoke-box .flag { color: #a78bfa; }
+.invoke-box .comment { color: #6b7280; font-style: italic; }
+.output-sample {
+  background: #111827; color: #d1d5db; border-radius: 8px;
+  padding: 16px 20px; font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px; line-height: 1.7; margin: 12px auto; max-width: 700px;
+  overflow-x: auto; white-space: pre;
+}
+.output-sample .heading { color: #60a5fa; font-weight: 700; }
+.output-sample .good { color: #34d399; }
+.output-sample .warn { color: #fbbf24; }
+.output-sample .num { color: #c084fc; }
+.workflow-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: #1e40af; color: #fff; font-size: 11px; font-weight: 700;
+  margin-right: 6px; flex-shrink: 0;
+}
+.data-source {
+  display: flex; align-items: center; gap: 10px;
+  background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;
+  padding: 10px 14px; margin: 6px 0; font-size: 11px;
+}
+.data-source .icon { font-size: 14px; flex-shrink: 0; }
+.data-source code { background: #e5e7eb; padding: 1px 5px; border-radius: 3px; font-size: 10px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>/stark-skill-analytics</h1>
+  <div class="sub">Analyze skill usage patterns and quality metrics across all Claude Code sessions</div>
+  <div class="scope">AUDIENCE: USAGE</div>
+</div>
+
+<div class="container">
+
+  <!-- Quick Start -->
+  <div class="section-title">Quick Start</div>
+  <div class="invoke-box">
+    <span class="prompt">/</span><span class="cmd">stark-skill-analytics</span>
+  </div>
+  <p style="text-align:center; font-size:11px; color:#666; margin-top:8px;">
+    No arguments required. Produces a full analytics report across all skills and projects.
+  </p>
+
+  <!-- Invocation Options -->
+  <div class="section-title">Invocation Options</div>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Flag</th>
+        <th>Description</th>
+        <th>Example</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code style="font-size:11px;">--skill NAME</code></td>
+        <td>Deep-dive report for a single skill</td>
+        <td><span class="tag tag-config">--skill stark-review</span></td>
+      </tr>
+      <tr>
+        <td><code style="font-size:11px;">--format table</code></td>
+        <td>Summary rankings table only (no per-skill details)</td>
+        <td><span class="tag tag-config">--format table</span></td>
+      </tr>
+      <tr>
+        <td><code style="font-size:11px;">--format full</code></td>
+        <td>Full report with per-skill breakdown (default)</td>
+        <td><span class="tag tag-config">--format full</span></td>
+      </tr>
+      <tr>
+        <td><code style="font-size:11px;">(no args)</code></td>
+        <td>Full report across all skills</td>
+        <td><span class="tag tag-phase">/stark-skill-analytics</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div style="margin-top:16px;">
+    <div class="invoke-box">
+      <span class="comment"># Deep-dive into a specific skill</span><br>
+      <span class="prompt">/</span><span class="cmd">stark-skill-analytics</span> <span class="flag">--skill stark-review</span>
+    </div>
+    <div class="invoke-box" style="margin-top:8px;">
+      <span class="comment"># Quick summary table only</span><br>
+      <span class="prompt">/</span><span class="cmd">stark-skill-analytics</span> <span class="flag">--format table</span>
+    </div>
+  </div>
+
+  <!-- Data Sources -->
+  <div class="section-title">Data Sources</div>
+  <div style="max-width:700px; margin:0 auto;">
+    <div class="data-source">
+      <div class="icon">1</div>
+      <div><strong>Session history</strong> &mdash; <code>~/.claude/history.jsonl</code><br>Every slash-command invocation with timestamp, project, and session ID</div>
+    </div>
+    <div class="data-source">
+      <div class="icon">2</div>
+      <div><strong>Run history</strong> &mdash; <code>~/.claude/code-review/history/</code><br>Per-run JSON files with duration, status, output counts, and agent results</div>
+    </div>
+    <div class="data-source">
+      <div class="icon">3</div>
+      <div><strong>Benchmarks</strong> &mdash; <code>~/.claude/code-review/scripts/benchmarks/</code><br>Codex benchmark pass/fail rates and performance trends</div>
+    </div>
+    <div class="data-source">
+      <div class="icon">4</div>
+      <div><strong>CLAUDE.md</strong> &mdash; current repo<br>Registered skill list for discovery analysis (used vs. unregistered)</div>
+    </div>
+  </div>
+
+  <!-- Report Sections -->
+  <div class="section-title">What You Get</div>
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>Usage Rankings</h3>
+      <p>All skills ranked by invocation count with project spread, first/last used dates, and 30-day trend (rising, stable, declining, new).</p>
+    </div>
+    <div class="card card-purple">
+      <h3>Adoption Timeline</h3>
+      <p>Chronological view of when each skill was first adopted, grouped by month. See how your skill repertoire grew over time.</p>
+    </div>
+    <div class="card card-green">
+      <h3>Quality Signals</h3>
+      <p>Cross-referenced usage + run data: timeout rates, failure rates, empty results, and quality degradation trends per skill.</p>
+    </div>
+    <div class="card card-amber">
+      <h3>Skill Sequences</h3>
+      <p>Top 10 most common consecutive skill pairs within sessions. Reveals natural workflows like <code>/stark-review</code> followed by <code>/stark-review-improvement</code>.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>Discovery</h3>
+      <p>Skills used but not registered in CLAUDE.md, and registered skills never invoked. Keep your skill catalog accurate.</p>
+    </div>
+    <div class="card card-red">
+      <h3>Recommendations</h3>
+      <p>Actionable advice: remove dead skills, fix high-error skills, promote underused gems, and combine frequent sequences into workflows.</p>
+    </div>
+  </div>
+
+  <!-- Sample Output -->
+  <div class="section-title">Sample Output</div>
+  <div class="output-sample"><span class="heading">Skill Analytics Report</span>
+<span class="heading">Generated:</span> 2026-03-25 14:30
+<span class="heading">Data range:</span> 2025-11-01 to 2026-03-25
+<span class="heading">Total skill invocations:</span> <span class="num">487</span>  Unique skills: <span class="num">14</span>  Sessions: <span class="num">203</span>
+
+<span class="heading">Usage Rankings</span>
+  Rank  Skill                        Invocations  Projects  Trend
+  <span class="num"> 1</span>    /stark-review                <span class="num">142</span>          <span class="num">8</span>         <span class="good">stable</span>
+  <span class="num"> 2</span>    /stark-session               <span class="num"> 89</span>          <span class="num">6</span>         <span class="good">stable</span>
+  <span class="num"> 3</span>    /stark-pr-flow               <span class="num"> 67</span>          <span class="num">5</span>         <span class="good">rising</span>
+  <span class="num"> 4</span>    /stark-extract-docs          <span class="num"> 42</span>          <span class="num">3</span>         <span class="good">rising</span>
+  <span class="num"> 5</span>    /stark-plan-to-tasks         <span class="num"> 31</span>          <span class="num">4</span>         <span class="good">stable</span>
+
+<span class="heading">Quality Signals</span>
+  <span class="warn">!</span> /stark-review         codex timeout rate <span class="warn">22%</span> (above 20% threshold)
+  <span class="good">+</span> /stark-extract-docs   <span class="good">98% success</span>, avg <span class="num">12</span> extractions/run
+  <span class="good">+</span> /stark-plan-to-tasks  <span class="good">95% success</span>, avg <span class="num">8</span> issues/run
+
+<span class="heading">Recommendations</span>
+  <span class="warn">1.</span> Fix /stark-review — codex agent 22% timeout, investigate failures
+  <span class="warn">2.</span> Remove /stark-init-docs — registered but not invoked in 90 days
+  <span class="warn">3.</span> Combine /stark-review + /stark-review-improvement — paired in 68% of sessions</div>
+
+  <!-- Single-Skill Deep Dive -->
+  <div class="section-title">Single-Skill Deep Dive</div>
+  <p style="font-size:11px; color:#666; margin-bottom:12px;">
+    Use <code>--skill NAME</code> to get a focused report for one skill:
+  </p>
+  <div class="invoke-box">
+    <span class="prompt">/</span><span class="cmd">stark-skill-analytics</span> <span class="flag">--skill stark-review</span>
+  </div>
+  <div class="output-sample"><span class="heading">Skill Analytics: /stark-review</span>
+
+<span class="heading">Usage</span>
+  Total invocations: <span class="num">142</span>
+  Quick: <span class="num">23</span> (16%)  |  Parameterized: <span class="num">119</span> (84%)
+  Projects: stark-skills (<span class="num">48</span>), widget-system (<span class="num">32</span>), core-platform (<span class="num">28</span>), ...
+  Trend: <span class="good">stable</span>
+
+<span class="heading">Usage Over Time</span>
+  2025-11  <span class="num">12</span> invocations  <span class="num">2</span> projects
+  2025-12  <span class="num">18</span> invocations  <span class="num">3</span> projects
+  2026-01  <span class="num">24</span> invocations  <span class="num">5</span> projects
+  2026-02  <span class="num">38</span> invocations  <span class="num">7</span> projects
+  2026-03  <span class="num">50</span> invocations  <span class="num">8</span> projects
+
+<span class="heading">Quality</span>
+  Runs: <span class="num">142</span>  Avg duration: <span class="num">3.1m</span>  Success: <span class="good">94%</span>
+  Agent success: claude <span class="good">98%</span>  codex <span class="warn">78%</span>  gemini <span class="good">95%</span>
+  Avg findings/round: <span class="num">11.3</span>
+
+<span class="heading">Common Sequences</span>
+  /stark-review -> /stark-review-improvement  (<span class="num">12</span>x)
+  /stark-session -> /stark-review             (<span class="num">9</span>x)
+  /stark-review -> /stark-pr-flow             (<span class="num">7</span>x)
+
+<span class="heading">Arguments Analysis</span>
+  PR number (e.g., "42", "67"):  <span class="num">84%</span> of parameterized
+  No args (current branch):      <span class="num">16%</span></div>
+
+  <!-- Common Workflows -->
+  <div class="section-title">Common Workflows</div>
+  <div class="flow">
+
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Weekly check</strong><br>Which skills am I using?</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:340px;">
+          <div class="node-title"><span class="workflow-num">1</span> /stark-skill-analytics</div>
+          <div class="node-desc">Full report across all skills and projects</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width:340px;">
+          <div class="node-title"><span class="workflow-num">2</span> Review Recommendations</div>
+          <div class="node-desc">Dead skills to remove? Failing skills to fix?</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Actionable</strong><br>Each recommendation names the skill to run</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Act on findings</strong><br>Fix or tune the flagged skill</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-config" style="width:340px;">
+          <div class="node-title"><span class="workflow-num">3</span> /stark-review-improvement</div>
+          <div class="node-desc">Fix prompts for high-error or high-timeout skills</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-output" style="width:340px;">
+          <div class="node-title"><span class="workflow-num">4</span> Re-run analytics</div>
+          <div class="node-desc">Verify improvements after prompt changes</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Feedback loop</strong><br>Compare before/after quality signals</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Comparison with stark-metrics -->
+  <div class="section-title">stark-skill-analytics vs stark-metrics</div>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Dimension</th>
+        <th>/stark-skill-analytics</th>
+        <th>/stark-metrics</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Focus</strong></td>
+        <td>Which skills are used, how often, by whom</td>
+        <td>Agent performance: findings, FP rates, durations</td>
+      </tr>
+      <tr>
+        <td><strong>Primary data</strong></td>
+        <td><code>history.jsonl</code> (invocations)</td>
+        <td><code>history/</code> (run results)</td>
+      </tr>
+      <tr>
+        <td><strong>Key output</strong></td>
+        <td>Usage rankings, adoption timeline, sequences</td>
+        <td>Agent scorecards, finding quality, prompt impact</td>
+      </tr>
+      <tr>
+        <td><strong>Use when</strong></td>
+        <td>"Which skills should I promote or retire?"</td>
+        <td>"Are my review agents improving?"</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Output Location -->
+  <div class="section-title">Output</div>
+  <div class="summary-grid">
+    <div class="summary-card" style="background:#eff6ff; border-left:3px solid #1e40af;">
+      <h3 style="color:#1e40af;">Report File</h3>
+      <p>Saved to <code>~/.claude/code-review/insights/skills/skill-analytics.md</code> (or <code>skill-analytics-{name}.md</code> for single-skill)</p>
+    </div>
+    <div class="summary-card" style="background:#ecfdf5; border-left:3px solid #059669;">
+      <h3 style="color:#059669;">Terminal Output</h3>
+      <p>Full report printed to terminal with timestamped log lines and a final metrics block</p>
+    </div>
+    <div class="summary-card" style="background:#f5f3ff; border-left:3px solid #7c3aed;">
+      <h3 style="color:#7c3aed;">Read-Only</h3>
+      <p>This skill never modifies history files, skill configs, or invokes other skills</p>
+    </div>
+  </div>
+
+  <!-- Legend -->
+  <div class="section-title">Legend</div>
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#1e40af;"></div> Workflow phase</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed;"></div> Decision point</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#047857;"></div> Config / action</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b;"></div> Output / artifact</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#dc2626;"></div> Failure / alert</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e5e7eb;"></div> External dependency</div>
+  </div>
+
+</div>
+
+<div class="footer">
+  stark-skills / stark-skill-analytics &mdash; Usage Guide &mdash; Generated 2026-03-25
+</div>
+
+</body>
+</html>

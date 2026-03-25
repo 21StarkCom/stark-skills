@@ -1,26 +1,36 @@
 graph TD
-  Start([User Invokes /stark-metrics]) --> ParseArgs[Parse Arguments: --repo, --skill, --since, --json]
-  ParseArgs --> RunScript[Phase 1: Run metrics.py]
+  A[Start /stark-metrics] --> B{Parse Arguments}
+  B -->|--repo, --skill, etc| C[Execute Python Backend]
   
-  RunScript -->|Exit 1: No History| Fail1((Exit 1))
-  Fail1 --> AdviseHistory[Advise: Run /stark-review first]
+  subgraph Python Engine [metrics.py]
+    C --> D[(~/.claude/code-review/history/)]
+    D --> E{Valid JSON?}
+    E -- No --> F[Warn stderr & Skip]
+    E -- Yes --> G[Normalize & Aggregate]
+    G --> H[Apply Filters]
+    H --> I[Generate Report Strings/JSON]
+  end
+
+  C -- Exit 1 --> J[Error: Prompt /stark-review]
+  C -- Exit 2 --> K[Error: Show Usage]
   
-  RunScript -->|Exit 2: Arg Error| Fail2((Exit 2))
-  Fail2 --> ShowUsage[Show Usage]
+  I --> L{--json flag?}
+  L -- Yes --> M[Print stdout directly]
+  L -- No --> N[Print Terminal Report]
   
-  RunScript -->|Exit 0: Success| Present[Phase 2: Present Results]
-
-  Present --> IsJson{Is --json flag set?}
-  IsJson -->|Yes| Meta[Phase 3: Improvement Flags]
-  IsJson -->|No| HasRecs{Has Recommendations?}
-
-  HasRecs -->|No| Meta
-  HasRecs -->|Yes| PromptUser[Prompt: Act on recommendations?]
-
-  PromptUser -->|Choose Action| Invoke[Invoke /stark-review-improvement or edit config]
-  PromptUser -->|Skip| Meta
-  Invoke --> Meta
-
-  Meta --> DetectSpikes[Flag Failure Spikes / FP Drops]
-  DetectSpikes --> Obs[Log Observability Metrics]
-  Obs --> End([End Execution])
+  N --> O{Actionable Recommendations?}
+  O -- Yes --> P[Prompt User]
+  P -- User Selects --> Q[Run /stark-review-improvement]
+  O -- No --> R[Evaluate Trends]
+  
+  R --> S{Meta-Observations}
+  S -- First Run --> T[Tip: Run periodically]
+  S -- Lower FP Rate --> U[Flag: Win]
+  S -- High Failures --> V[Flag: Urgent]
+  
+  M --> W[Emit Observability Logs]
+  Q --> W
+  T --> W
+  U --> W
+  V --> W
+  W --> X[End]

@@ -1,0 +1,26 @@
+graph TD
+  Start([Run stark-phase-execute]) --> Fetch[Fetch Plan Tasks via GitHub/Project API]
+  Fetch --> Check{Tasks Exist?}
+  Check -- No --> Decompose[Auto-Run /stark-plan-to-tasks] --> Fetch
+  Check -- Yes --> LoopStart((Start Task Loop))
+  
+  LoopStart --> Subagent[Spawn Implementation Subagent]
+  Subagent --> CreatePR[Push Branch & Create PR]
+  
+  CreatePR --> Review[Multi-Agent Code Review]
+  Review --> Findings{Actionable Findings?}
+  Findings -- Yes --> Fix[Auto-Fix Findings] --> Review
+  Findings -- No --> Merge[Squash Merge to main]
+  
+  Merge --> MoreTasks{More Phase Tasks?}
+  MoreTasks -- Yes --> LoopStart
+  MoreTasks -- No --> Regression[Run Full Regression Suite]
+  
+  Regression --> Changelog[Update CHANGELOG.md]
+  Changelog --> Release[Auto-Run /stark-release]
+  Release --> Deploy[Run Deploy Command]
+  Deploy --> Housekeeping[Generate Dashboard & Update Memory]
+  Housekeeping --> End([Phase Execution Complete])
+  
+  classDef loop fill:#eff6ff,stroke:#1e40af,stroke-width:2px;
+  class Subagent,CreatePR,Review,Findings,Fix,Merge loop;

@@ -1,0 +1,30 @@
+graph TD
+  Start([Start Release Command]) --> PreFlight{On clean main branch?}
+  
+  PreFlight -->|No| Abort1[Abort: Prompt user to checkout main/commit]
+  PreFlight -->|Yes| GitTag[Get Latest Git Tag]
+  
+  GitTag --> ParseCL[Parse CHANGELOG.md]
+  
+  ParseCL --> HasChanges{Has Unreleased changes?}
+  HasChanges -->|No| Abort2[Abort: Nothing to release]
+  
+  HasChanges -->|Yes| BumpDecision{Argument provided?}
+  
+  BumpDecision -->|Yes| UseArg[Use Provided Bump: patch/minor/major]
+  BumpDecision -->|No| AutoCalc[Auto-calculate: Add=minor, Fix=patch]
+  
+  UseArg --> CalcNext[Calculate Next Version vX.Y.Z]
+  AutoCalc --> CalcNext
+  
+  CalcNext --> MutateInit[Update src/infra_pulse/__init__.py]
+  MutateInit --> MutateCL[Move Unreleased to versioned section in CHANGELOG]
+  
+  MutateCL --> Commit[git commit both files]
+  Commit --> Tag[git tag -a vX.Y.Z]
+  
+  Tag --> Push[git push origin main & tag]
+  Push -->|Fails| Rebase[git pull --rebase & retry]
+  Push -->|Success| GHRelease[gh release create vX.Y.Z]
+  
+  GHRelease --> Summary([Print Success Summary])

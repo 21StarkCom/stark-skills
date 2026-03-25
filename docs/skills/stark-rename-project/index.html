@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>stark-rename-project — Skill Documentation</title>
+<style>
+/* === Reset & Base === */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+
+/* === Header === */
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
+
+/* === Container === */
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+/* === Section Title === */
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+/* === Node Types === */
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
+
+.node-phase    { background: #1e40af; color: #ffffff; }
+.node-decision { background: #7c3aed; color: #ffffff; }
+.node-failure  { background: #dc2626; color: #ffffff; }
+.node-config   { background: #047857; color: #ffffff; }
+.node-output   { background: #f59e0b; color: #1a1a1a; }
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
+
+/* === Flow Layout === */
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 180px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 180px; display: flex;
+  align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
+
+/* === Arrows === */
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
+
+/* === Cards === */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
+
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
+
+/* === Data Tables === */
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
+
+/* === Tags === */
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
+
+/* === Legend === */
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+/* === Summary Grid === */
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
+
+/* === Footer === */
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
+
+/* === Skill-specific extensions === */
+.invocation-box {
+  background: #1a1a1a; color: #e5e7eb; border-radius: 8px;
+  padding: 16px 20px; font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 13px; margin: 16px auto; max-width: 660px;
+  text-align: center;
+}
+.invocation-box .cmd { color: #93c5fd; }
+.invocation-box .arg { color: #86efac; }
+.invocation-box .flag { color: #fbbf24; }
+
+.input-output-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+
+.checklist { list-style: none; padding: 0; }
+.checklist li {
+  font-size: 11px; padding: 6px 0; border-bottom: 1px solid #f3f4f6;
+  display: flex; align-items: flex-start; gap: 8px;
+}
+.checklist li::before {
+  content: '✓'; font-weight: 700; color: #059669; flex-shrink: 0;
+}
+
+.warn-list { list-style: none; padding: 0; }
+.warn-list li {
+  font-size: 11px; padding: 6px 0; border-bottom: 1px solid #f3f4f6;
+  display: flex; align-items: flex-start; gap: 8px;
+}
+.warn-list li::before {
+  content: '⚠'; flex-shrink: 0;
+}
+
+.phase-badge {
+  display: inline-block; font-size: 9px; font-weight: 700;
+  padding: 2px 8px; border-radius: 3px; margin-right: 4px;
+  background: #dbeafe; color: #1e40af;
+}
+
+.example-block {
+  background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 6px;
+  padding: 14px 16px; margin: 8px 0; font-size: 11px;
+}
+.example-block .scenario { font-weight: 600; color: #444; margin-bottom: 4px; }
+.example-block code {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  background: #1a1a1a; color: #e5e7eb; padding: 2px 6px;
+  border-radius: 3px; font-size: 10px;
+}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <h1>/stark-rename-project</h1>
+  <div class="sub">Rename a project locally and on GitHub, propagate across sibling repos, reinstall symlinks</div>
+  <div class="scope">COMPLEXITY: COMPLEX &middot; 416 LINES &middot; 8 PHASES</div>
+</div>
+
+<div class="container">
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#1e40af"></div> Phase</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed"></div> Decision</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#047857"></div> Config / Input</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> Output</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#dc2626"></div> Failure</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e5e7eb; border:1px dashed #9ca3af"></div> External</div>
+  </div>
+
+  <!-- ========== INVOCATION ========== -->
+  <div class="section-title">How to Invoke</div>
+
+  <div class="invocation-box">
+    <span class="cmd">/stark-rename-project</span>
+    <span class="arg">&lt;old-name&gt;</span>
+    <span class="arg">&lt;new-name&gt;</span>
+    <span class="flag">[--dry-run]</span>
+  </div>
+
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>Trigger Phrases</h3>
+      <p>"rename project", "rename repo", "rename this to", or invoke directly with <code>/stark-rename-project</code></p>
+    </div>
+    <div class="card card-green">
+      <h3>Prerequisites</h3>
+      <p>Clean working tree (no uncommitted changes). GitHub App admin permissions on the repo. <code>install.sh</code> present for symlink management.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>Dry Run</h3>
+      <p>Pass <code>--dry-run</code> to preview all changes without executing. Every phase respects the dry-run gate and prints what it would do instead.</p>
+    </div>
+  </div>
+
+  <!-- ========== INPUTS / OUTPUTS ========== -->
+  <div class="section-title">Inputs &amp; Outputs</div>
+
+  <div class="input-output-grid">
+    <div class="card card-dark">
+      <h3>Inputs</h3>
+      <ul class="checklist">
+        <li><strong>old-name</strong> — current project/repo name (e.g. <code>stark-review</code>)</li>
+        <li><strong>new-name</strong> — desired new name (e.g. <code>stark-skills</code>)</li>
+        <li><strong>--dry-run</strong> — optional flag to preview without executing</li>
+        <li>Names must match <code>^[A-Za-z0-9._-]+$</code></li>
+      </ul>
+    </div>
+    <div class="card card-amber">
+      <h3>Outputs</h3>
+      <ul class="checklist">
+        <li>Renamed GitHub repo with redirect from old URL</li>
+        <li>Renamed local directory</li>
+        <li>Updated references across project and sibling repos</li>
+        <li>Reinstalled symlinks pointing to new path</li>
+        <li>Auto-commits in sibling repos</li>
+        <li>Verification report with residual references</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ========== WORKFLOW FLOW ========== -->
+  <div class="section-title">Workflow</div>
+
+  <div class="flow">
+    <!-- Phase 1: Validate -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>User runs:</strong><br><code>/stark-rename-project old new</code></div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px">
+          <div class="node-title"><span class="phase-badge">1</span> Validate</div>
+          <div class="node-desc">Parse args, check prereqs, detect resume state, verify permissions</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Checks:</strong> clean worktree, admin perms, name availability</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Decision: Resume? -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Resumable:</strong> detects partial prior runs via remote URL + local dir name</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width:380px">
+          <div class="node-title">Previous Run Detected?</div>
+          <div class="node-desc">Checks remote URL vs local dir to resume from correct phase</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Idempotent:</strong> each phase checks if already done before acting</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 2: GitHub Rename -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>API:</strong> PATCH <code>/repos/:org/:old</code> via stark-claude bot token</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-external" style="width:380px">
+          <div class="node-title"><span class="phase-badge">2</span> Rename on GitHub</div>
+          <div class="node-desc">PATCH API call, update git remote URLs, verify response</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Note:</strong> GitHub creates a redirect from old URL to new</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 3: Local Rename -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Case-only:</strong> uses temp name for safe rename on case-insensitive FS</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px">
+          <div class="node-title"><span class="phase-badge">3</span> Local Rename + Symlink Cleanup</div>
+          <div class="node-desc">Rename directory, uninstall old symlinks before modifying files</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Critical:</strong> uninstall symlinks BEFORE file edits</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 4: Update Refs -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>4 deterministic</strong> patterns + <strong>1 heuristic</strong> (bare name in .md/.json/.sh)</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px">
+          <div class="node-title"><span class="phase-badge">4</span> Update References in Project</div>
+          <div class="node-desc">Find-and-replace across tracked text files with exclusion rules</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Excludes:</strong> skill paths, frontmatter, GitHub App names, CI files</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 5: Sibling Repos -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Scope:</strong> sibling dirs under same parent with same org/host</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px">
+          <div class="node-title"><span class="phase-badge">5</span> Update Sibling Repos</div>
+          <div class="node-desc">Same replacement patterns, auto-commit per repo, skip dirty worktrees</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Auto-commit:</strong> <code>chore: update references from X to Y</code></div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 6: Reinstall -->
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-config" style="width:380px">
+          <div class="node-title"><span class="phase-badge">6</span> Reinstall Symlinks</div>
+          <div class="node-desc">Run install.sh from new location to recreate all symlinks</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 7: Verify -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Checks:</strong> remote connectivity, stale symlinks, residual refs</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width:380px">
+          <div class="node-title"><span class="phase-badge">7</span> Verify</div>
+          <div class="node-desc">git ls-remote, symlink audit, residual reference scan, CI file scan</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 8: Summary -->
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-output" style="width:380px">
+          <div class="node-title"><span class="phase-badge">8</span> Summary Report</div>
+          <div class="node-desc">Files changed per repo, verification results, residual refs, cd command</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+  </div>
+
+  <!-- ========== USAGE EXAMPLES ========== -->
+  <div class="section-title">Usage Examples</div>
+
+  <div class="card-grid">
+    <div class="card card-blue" style="grid-column: 1 / -1;">
+      <h3>Standard Rename</h3>
+      <div class="example-block">
+        <div class="scenario">Rename stark-review to stark-skills</div>
+        <code>/stark-rename-project stark-review stark-skills</code>
+        <p style="margin-top:8px">Renames the repo on GitHub, renames the local directory, updates all references in the project and sibling repos, reinstalls symlinks, and prints a verification report.</p>
+      </div>
+    </div>
+    <div class="card card-purple">
+      <h3>Preview with Dry Run</h3>
+      <div class="example-block">
+        <div class="scenario">See what would change without doing it</div>
+        <code>/stark-rename-project old-name new-name --dry-run</code>
+        <p style="margin-top:8px">Every phase prints what it would do instead of executing. Useful to audit before committing to the rename.</p>
+      </div>
+    </div>
+    <div class="card card-green">
+      <h3>Resume After Failure</h3>
+      <div class="example-block">
+        <div class="scenario">Network failure mid-rename</div>
+        <code>/stark-rename-project old-name new-name</code>
+        <p style="margin-top:8px">Auto-detects partial state by comparing the remote URL to the local directory name. Resumes from the correct phase — no manual cleanup needed.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== REPLACEMENT PATTERNS ========== -->
+  <div class="section-title">What Gets Replaced</div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th style="width:50px">#</th>
+        <th>Pattern</th>
+        <th>Scope</th>
+        <th>Example</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="tag tag-phase">1</span></td>
+        <td>Absolute path</td>
+        <td>All tracked text files</td>
+        <td><code>/Users/x/git/Evinced/old</code> → <code>.../new</code></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-phase">2</span></td>
+        <td>Org/repo</td>
+        <td>All tracked text files</td>
+        <td><code>GetEvinced/old</code> → <code>GetEvinced/new</code></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-phase">3</span></td>
+        <td>SSH URL</td>
+        <td>All tracked text files</td>
+        <td><code>github.com:GetEvinced/old</code> → <code>...new</code></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-phase">4</span></td>
+        <td>HTTPS URL</td>
+        <td>All tracked text files</td>
+        <td><code>github.com/GetEvinced/old</code> → <code>...new</code></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-decision">5</span></td>
+        <td>Bare name (heuristic)</td>
+        <td>*.md, *.json, *.sh only</td>
+        <td><code>old-name</code> with repo-name boundaries</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ========== EXCLUSIONS ========== -->
+  <div class="section-title">What Is NOT Changed</div>
+
+  <div class="card-grid">
+    <div class="card card-red">
+      <h3>Protected References</h3>
+      <ul class="warn-list">
+        <li>Skill invocation names (e.g. <code>/stark-review</code>)</li>
+        <li>Skill frontmatter <code>name:</code> fields</li>
+        <li>Installed skill paths (<code>~/.claude/skills/stark-review/</code>)</li>
+        <li>GitHub App names (<code>stark-claude</code>, <code>stark-codex</code>, <code>stark-gemini</code>)</li>
+        <li>CI/CD workflow files (scanned and reported, not modified)</li>
+        <li>Historical document filenames</li>
+        <li>Binary and untracked files</li>
+      </ul>
+    </div>
+    <div class="card card-dark">
+      <h3>Out of Scope</h3>
+      <ul class="warn-list">
+        <li>Repos outside the parent directory</li>
+        <li>GitHub Actions / CI pipeline updates</li>
+        <li>External webhooks, Slack, or Jira integrations</li>
+        <li>GitHub App renaming or credential changes</li>
+        <li>Skill command renaming</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ========== SAFETY ========== -->
+  <div class="section-title">Safety Features</div>
+
+  <div class="summary-grid">
+    <div class="summary-card card-green">
+      <h3>Idempotent</h3>
+      <p>Every phase checks if its work is already done before acting. Safe to re-run after interruption.</p>
+    </div>
+    <div class="summary-card card-purple">
+      <h3>Resumable</h3>
+      <p>Detects partial completion by comparing remote URL to local dir name. Picks up from the right phase.</p>
+    </div>
+    <div class="summary-card card-blue">
+      <h3>Literal Matching</h3>
+      <p>Uses Perl <code>\Q...\E</code> for all replacements — no regex wildcards, no accidental matches on dots or hyphens.</p>
+    </div>
+    <div class="summary-card card-amber">
+      <h3>Dry Run</h3>
+      <p>Every phase respects <code>--dry-run</code>. Preview the full impact before committing to changes.</p>
+    </div>
+    <div class="summary-card card-dark">
+      <h3>Dirty Worktree Guard</h3>
+      <p>Refuses to proceed if the repo has uncommitted changes. Skips sibling repos with dirty worktrees.</p>
+    </div>
+    <div class="summary-card card-red">
+      <h3>Syntax Validation</h3>
+      <p>Runs <code>bash -n install.sh</code> after modifications to catch syntax errors before they cause problems.</p>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  stark-skills &middot; stark-rename-project &middot; Generated 2026-03-25
+</div>
+
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "doc_content": {
+    "summary": "Core session management skill that coordinates startup context hydration and automated wind-down operations. It handles reading background documentation, running sanity health checks, aggregating project/PR state, executing automated test/build commands, committing routine documentation updates, and synchronizing state with GitHub Projects.",
+    "key_features": [
+      "Hierarchical configuration overrides via .code-review/config.json",
+      "Automated Git and GitHub Project state aggregation on start",
+      "Non-blocking, configurable health checks",
+      "Guided teardown with automated PR merging via configurable strategies",
+      "Automated documentation staging, devlog generation, and cross-repo project board sync"
+    ],
+    "usage_examples": [
+      "/stark-session start",
+      "/stark-session end",
+      "catch me up",
+      "what was I working on"
+    ]
+  },
+  "alt_text": "An HTML dashboard visualizing the internals of the stark-session engineering skill, including start/end mode execution flowcharts, config hierarchy mapping, parameter tables, and failure recovery protocols."
+}

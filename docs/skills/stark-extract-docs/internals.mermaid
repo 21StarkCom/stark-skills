@@ -1,0 +1,35 @@
+graph TD
+    subgraph "Phase 1: Setup"
+        A1[Spec] --> B{Artifact Resolver}
+        A2[Plan] --> B
+        A3[Reviews] --> B
+        B --> C{Skip Logic Check}
+        C -- Hashes Match --> Z[Exit Cleanly]
+        C -- Missing/Force --> D[Input Files]
+    end
+
+    subgraph "Phase 2: Pass 1 (Extraction)"
+        D --> E[LLM Knowledge Extraction]
+        E --> F{Schema & Confidence Validation}
+        F -- Invalid --> E
+        F -- Valid --> G[Structured JSON Extraction]
+    end
+
+    subgraph "Phase 3 & 4: Routing & Write"
+        G --> H[Routing Engine]
+        H --> I1(ADRs)
+        H --> I2(Retrospectives)
+        H --> I3(Reference Docs)
+        H --> I4(Glossary/Log)
+        
+        I1 --> J[File System Write]
+        I2 --> J
+        I3 --> J
+        I4 --> J
+    end
+
+    subgraph "Post-Processing"
+        J --> K[Git Stage & Commit]
+        J --> L[Persist Metrics JSON]
+        L --> M((End))
+    end

@@ -1,0 +1,24 @@
+graph TD
+    A[Start: 'stark-pr-flow'] --> PreReq{Check Pre-reqs}
+    PreReq -- "On main / Dirty tree" --> Fail[Abort]
+    PreReq -- "Feature branch & Clean" --> B[Step 1: Push Branch]
+    
+    B --> C[Step 2: Analyze Git Log & Diff]
+    C --> D[Step 3: Create PR]
+    
+    D -.-> D1(Artifact: PR Created)
+    
+    D --> E[Step 4: Bot Self-Review]
+    E -.-> E1(Artifact: Review Comment on PR)
+    
+    E --> F[Step 5: Present Summary]
+    F --> DocCheck{Advisory Doc Check}
+    DocCheck -- "Incomplete docs" --> Warn(Show Warning)
+    DocCheck -- "Docs okay" --> Wait
+    Warn --> Wait{Wait for User Approval}
+    
+    Wait -- "Approve ('yes', 'ship it')" --> G[Step 6: Squash Merge]
+    Wait -- "Reject" --> H[Abort / Leave Open]
+    
+    G --> I[Clean Up: Sync main & Delete Branch]
+    I --> J[End]

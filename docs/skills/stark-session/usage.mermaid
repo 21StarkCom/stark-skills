@@ -1,0 +1,22 @@
+graph TD
+  subgraph Start Mode
+    StartCMD([/stark-session start]) --> LoadContext[Internalize CLAUDE.md & Config]
+    LoadContext --> GitState[Gather Git & PR State]
+    GitState --> ProjBoard[Check Project Board]
+    ProjBoard --> HealthChecks[Run Health Checks]
+    HealthChecks --> Briefing[/Display Concise Briefing/]
+    Briefing --> PromptStart{{Ask: What are we working on?}}
+  end
+
+  subgraph End Mode
+    EndCMD([/stark-session end]) --> RunTests[Run Tests & Build]
+    RunTests -->|Fails| AskProceed{{Ask: Proceed anyway?}}
+    AskProceed -->|Yes| MergePR[Merge Open PRs]
+    RunTests -->|Passes| MergePR
+    MergePR --> CommitDocs[Stage Docs & Devlog]
+    CommitDocs --> PromptMsg{{Ask: Commit Summary?}}
+    PromptMsg --> Commit[git commit]
+    Commit --> UpdateProj[Update Project Field to Drafted]
+    UpdateProj --> Push[Git Push]
+    Push --> Summary[/Display Session Summary/]
+  end

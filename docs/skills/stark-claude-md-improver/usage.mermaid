@@ -1,0 +1,10 @@
+graph TD
+    Start([User triggers stark-claude-md-improver]) --> Discover[1. Discover CLAUDE.md & memory files]
+    Discover --> Analyze[2. Analyze against 5 dimensions]
+    Analyze --> Score[3. Generate scores, issues, and suggestions]
+    Score --> Prompt{4. Ask: Apply improvements?}
+    Prompt -- Yes --> Apply[5. Apply edits directly to files]
+    Prompt -- No --> Skip[Skip modifications]
+    Apply --> Metrics[Log Observability Metrics]
+    Skip --> Metrics
+    Metrics --> Finish([End])

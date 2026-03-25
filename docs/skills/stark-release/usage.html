@@ -1,0 +1,389 @@
+<html lang="en">
+<head>
+  
+  <title>stark-release - Skill Visualization</title>
+  <style>
+    /*
+     * Stark Skills — Shared Design System CSS
+     *
+     * Foundation styles for LLM-generated HTML skill visualizations.
+     * LLMs embed this inline and may extend with additional styles.
+     * All colors pass WCAG AA 4.5:1 contrast ratio.
+     *
+     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+     */
+
+    /* === Reset & Base === */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #fafafa;
+      color: #1a1a1a;
+      line-height: 1.5;
+    }
+
+    /* === Header === */
+    .header { text-align: center; padding: 36px 20px 16px; }
+    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+    .header .scope {
+      display: inline-block; font-size: 10px; font-weight: 600;
+      background: #eff6ff; color: #1e40af;
+      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+    }
+
+    /* === Container === */
+    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+    /* === Section Title === */
+    .section-title {
+      font-size: 14px; font-weight: 700; color: #666;
+      text-transform: uppercase; letter-spacing: 1px;
+      margin: 32px 0 16px; padding-bottom: 6px;
+      border-bottom: 2px solid #e5e7eb;
+    }
+
+    /* === Node Types === */
+    .node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; }
+    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+    .node-desc { font-size: 10px; opacity: 0.9; }
+
+    .node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+    .node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+    .node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+    .node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
+    .node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
+
+    /* === Flow Layout === */
+    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+    .flow-step {
+      display: flex; align-items: center;
+      width: 100%; max-width: 860px; min-height: 76px;
+    }
+    .flow-lane-left {
+      width: 200px; display: flex; flex-direction: column;
+      align-items: flex-end; justify-content: center;
+      padding-right: 18px; text-align: right;
+    }
+    .flow-lane-center {
+      width: 460px; display: flex;
+      align-items: center; justify-content: center;
+    }
+    .flow-lane-right {
+      width: 200px; display: flex; flex-direction: column;
+      align-items: flex-start; justify-content: center;
+      padding-left: 18px; text-align: left;
+    }
+    .annotation {
+      font-size: 10px; color: #555; max-width: 180px; line-height: 1.4;
+    }
+    .annotation strong { color: #222; }
+
+    /* === Arrows === */
+    .arrow-down {
+      width: 2px; height: 24px; background: #cbd5e1;
+      margin: 0 auto; position: relative;
+    }
+    .arrow-down::after {
+      content: ''; position: absolute; bottom: -4px; left: -4px;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid #cbd5e1;
+    }
+    .arrow-container {
+      display: flex; justify-content: center;
+      width: 100%; max-width: 860px;
+    }
+    .arrow-container .flow-lane-center {
+      display: flex; justify-content: center;
+    }
+
+    /* === Cards === */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px; margin-top: 16px;
+    }
+    .card { padding: 16px; border-radius: 8px; }
+    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+    .card p  { font-size: 11px; line-height: 1.6; }
+
+    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+    .card-blue h3 { color: #1e40af; }
+    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+    .card-green h3 { color: #059669; }
+    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+    .card-purple h3 { color: #7c3aed; }
+    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+    .card-amber h3 { color: #92400e; }
+    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+    .card-dark h3 { color: #333333; }
+    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+    .card-red h3 { color: #dc2626; }
+
+    /* === Data Tables === */
+    .data-table {
+      width: 100%; max-width: 860px; margin: 16px auto;
+      border-collapse: collapse; font-size: 11px;
+    }
+    .data-table th {
+      background: #f3f4f6; padding: 8px 12px; text-align: left;
+      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+    }
+    .data-table td {
+      padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+    }
+    .data-table code {
+      background: #e5e7eb; padding: 2px 4px; border-radius: 3px; font-family: monospace;
+    }
+
+    /* === Tags === */
+    .tag {
+      display: inline-block; font-size: 9px; font-weight: 600;
+      padding: 2px 8px; border-radius: 3px;
+    }
+    .tag-phase    { background: #dbeafe; color: #1e40af; }
+    .tag-decision { background: #ede9fe; color: #5b21b6; }
+    .tag-failure  { background: #fee2e2; color: #991b1b; }
+    .tag-config   { background: #d1fae5; color: #065f46; }
+    .tag-output   { background: #fef3c7; color: #92400e; }
+    .tag-external { background: #f3f4f6; color: #666666; }
+
+    /* === Legend === */
+    .legend {
+      display: flex; gap: 16px; justify-content: center;
+      margin: 16px 0 24px; flex-wrap: wrap;
+    }
+    .legend-item {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 10px; color: #666;
+    }
+    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+    /* === Footer === */
+    .footer {
+      text-align: center; padding: 20px;
+      font-size: 10px; color: #999;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>stark-release</h1>
+    <div class="sub">Cut a new release — reviews changes, bumps version, creates git tag, and publishes a GitHub Release.</div>
+    <div class="scope">USAGE WORKFLOW</div>
+  </div>
+
+  <div class="container">
+
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot node-config"></div> Trigger / Input</div>
+      <div class="legend-item"><div class="legend-dot node-phase"></div> Action Phase</div>
+      <div class="legend-item"><div class="legend-dot node-decision"></div> Decision / Validation</div>
+      <div class="legend-item"><div class="legend-dot node-failure"></div> Failure State</div>
+      <div class="legend-item"><div class="legend-dot node-output"></div> Final Output</div>
+    </div>
+
+    <h2 class="section-title">Execution Flow</h2>
+
+    <div class="flow">
+      <!-- Step 1: Trigger -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">"release", "cut a version", or</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-config">
+            <div class="node-title">/stark-release [arg]</div>
+            <div class="node-desc">Argument: patch | minor | major (Optional)</div>
+          </div>
+        </div>
+        <div class="flow-lane-right"></div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Step 2: Preflight -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="node node-failure" style="padding: 8px; margin-bottom: 4px;">
+            <div class="node-title" style="font-size:10px;">Abort</div>
+          </div>
+          <div class="annotation">If dirty or not on main branch.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision">
+            <div class="node-title">Pre-flight Checks</div>
+            <div class="node-desc">Verify clean main branch & get current tag.</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">Baseline is <strong>0.1.0</strong> if no tags exist.</div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Step 3: Changelog Review -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="node node-failure" style="padding: 8px; margin-bottom: 4px;">
+            <div class="node-title" style="font-size:10px;">Abort</div>
+          </div>
+          <div class="annotation">If missing or [Unreleased] is empty.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision">
+            <div class="node-title">Review Unreleased Changes</div>
+            <div class="node-desc">Read ## [Unreleased] from CHANGELOG.md</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+           <div class="annotation">Analyzes <strong>Fixed / Added / Changed</strong> entries.</div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Step 4: Determine Bump -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">Uses argument if provided.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Determine Bump Type</div>
+            <div class="node-desc">Auto-select next semantic version.</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">
+            <strong>Fixed:</strong> patch<br>
+            <strong>Added:</strong> minor<br>
+            <strong>Changed:</strong> major
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Step 5: Update Files -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><code>__init__.py</code> = Runtime v-bump.<br><code>CHANGELOG</code> = Move to new header.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Update Source Files & Commit</div>
+            <div class="node-desc">Bump __init__.py, update CHANGELOG.md, and git commit.</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-external" style="padding: 6px;">
+            <div class="node-desc">git commit</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Step 6: Tag & Push -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="node node-external" style="padding: 6px; margin-bottom: 4px;">
+            <div class="node-desc">git tag & push</div>
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Create Tag & Push</div>
+            <div class="node-desc">Tag commit with version and push to origin main.</div>
+          </div>
+        </div>
+        <div class="flow-lane-right"></div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Step 7: GitHub Release -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+           <div class="annotation">Uses User PAT (native <code>gh</code> auth). <strong>Do not</strong> set GH_TOKEN.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-output">
+            <div class="node-title">Publish GitHub Release</div>
+            <div class="node-desc">gh release create vX.Y.Z (with formatted notes)</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+           <div class="node node-external" style="padding: 6px;">
+            <div class="node-desc">gh cli</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h2 class="section-title">Important Rules & Conventions</h2>
+    <div class="card-grid">
+      <div class="card card-blue">
+        <h3>Version Source of Truth</h3>
+        <p><strong>Git tags</strong> are the primary source of truth. The fallback baseline is <code>0.1.0</code> if no tags exist. The static version in <code>pyproject.toml</code> is <strong>ignored</strong> and never bumped.</p>
+      </div>
+      <div class="card card-purple">
+        <h3>Runtime Version Check</h3>
+        <p>The system <strong>must</strong> bump <code>src/infra_pulse/__init__.py</code> alongside the Git tag. If skipped, the deployed application will display an outdated version to end users.</p>
+      </div>
+      <div class="card card-dark">
+        <h3>GitHub Authentication</h3>
+        <p>Releases must appear as authored by the user, not a bot. Ensure <code>unset GH_TOKEN</code> is run so the native <code>gh</code> CLI uses the user's active Personal Access Token (PAT).</p>
+      </div>
+      <div class="card card-amber">
+        <h3>Changelog Hygiene</h3>
+        <p>Never release an empty <code>[Unreleased]</code> section. All items must be moved into the new versioned section, leaving an empty <code>## [Unreleased]</code> header for future PRs.</p>
+      </div>
+    </div>
+
+    <h2 class="section-title">Common Failure Modes & Recovery</h2>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width: 30%">Failure Mode</th>
+          <th>Description</th>
+          <th style="width: 40%">Recovery Strategy</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Not on <code>main</code> branch</strong></td>
+          <td>Skill triggered on a feature branch.</td>
+          <td>Prompt user to run <code>git checkout main && git pull</code>.</td>
+        </tr>
+        <tr>
+          <td><strong>Dirty Working Tree</strong></td>
+          <td>Uncommitted changes present in the workspace.</td>
+          <td>Abort process. Prompt user to stash or commit changes first.</td>
+        </tr>
+        <tr>
+          <td><strong>Missing / Empty Changelog</strong></td>
+          <td><code>CHANGELOG.md</code> is missing or has no <code>[Unreleased]</code> items.</td>
+          <td>Abort process. Inform user there is nothing to release. Prompt to run <code>/fix-bug</code> or manually add entries.</td>
+        </tr>
+        <tr>
+          <td><strong>Tag Already Exists</strong></td>
+          <td>The calculated <code>$NEXT_VERSION</code> is already tagged in Git.</td>
+          <td>Error state. Advise the user that the version is taken and suggest an explicit bump.</td>
+        </tr>
+      </tbody>
+    </table>
+
+  </div>
+
+  <div class="footer">
+    Generated via Stark Skills Documentation • Design System CSS Applied
+  </div>
+
+</body>
+</html>

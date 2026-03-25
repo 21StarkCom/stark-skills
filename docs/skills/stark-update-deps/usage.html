@@ -1,0 +1,398 @@
+<html lang="en">
+<head>
+  
+  
+  <title>stark-update-deps Visualization</title>
+  <style>
+    /*
+     * Stark Skills — Shared Design System CSS
+     *
+     * Foundation styles for LLM-generated HTML skill visualizations.
+     * LLMs embed this inline and may extend with additional styles.
+     * All colors pass WCAG AA 4.5:1 contrast ratio.
+     *
+     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+     */
+
+    /* === Reset & Base === */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #fafafa;
+      color: #1a1a1a;
+      line-height: 1.5;
+    }
+
+    /* === Header === */
+    .header { text-align: center; padding: 36px 20px 16px; }
+    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+    .header .scope {
+      display: inline-block; font-size: 10px; font-weight: 600;
+      background: #eff6ff; color: #1e40af;
+      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+    }
+
+    /* === Container === */
+    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+    /* === Section Title === */
+    .section-title {
+      font-size: 14px; font-weight: 700; color: #666;
+      text-transform: uppercase; letter-spacing: 1px;
+      margin: 32px 0 16px; padding-bottom: 6px;
+      border-bottom: 2px solid #e5e7eb;
+    }
+
+    /* === Node Types === */
+    .node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; }
+    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+    .node-desc { font-size: 10px; opacity: 0.8; }
+
+    .node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+    .node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+    .node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+    .node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
+    .node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
+
+    /* === Flow Layout === */
+    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+    .flow-step {
+      display: flex; align-items: stretch;
+      width: 100%; max-width: 860px; min-height: 76px;
+    }
+    .flow-lane-left {
+      width: 220px; display: flex;
+      align-items: center; justify-content: flex-end;
+      padding-right: 18px; text-align: right;
+    }
+    .flow-lane-center {
+      width: 420px; display: flex;
+      align-items: center; justify-content: center;
+    }
+    .flow-lane-right {
+      width: 220px; display: flex;
+      align-items: center; padding-left: 18px; text-align: left;
+    }
+    .annotation {
+      font-size: 9px; color: #666; max-width: 180px; line-height: 1.4;
+    }
+    .annotation strong { color: #444; }
+
+    /* === Arrows === */
+    .arrow-down {
+      width: 2px; height: 20px; background: #cbd5e1;
+      margin: 0 auto; position: relative;
+    }
+    .arrow-down::after {
+      content: ''; position: absolute; bottom: -4px; left: -4px;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid #cbd5e1;
+    }
+    .arrow-container {
+      display: flex; justify-content: center;
+      width: 100%; max-width: 860px;
+    }
+    .arrow-container .flow-lane-center {
+      display: flex; justify-content: center;
+    }
+
+    /* === Cards === */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px; margin-top: 16px;
+    }
+    .card { padding: 16px; border-radius: 8px; }
+    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+    .card p  { font-size: 11px; line-height: 1.6; }
+
+    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+    .card-blue h3 { color: #1e40af; }
+    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+    .card-green h3 { color: #059669; }
+    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+    .card-purple h3 { color: #7c3aed; }
+    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+    .card-amber h3 { color: #92400e; }
+    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+    .card-dark h3 { color: #333333; }
+    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+    .card-red h3 { color: #dc2626; }
+
+    /* === Data Tables === */
+    .data-table {
+      width: 100%; max-width: 860px; margin: 16px auto;
+      border-collapse: collapse; font-size: 11px; background: #fff;
+      border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;
+    }
+    .data-table th {
+      background: #f3f4f6; padding: 10px 14px; text-align: left;
+      font-weight: 600; color: #444; border-bottom: 2px solid #e5e7eb;
+    }
+    .data-table td {
+      padding: 10px 14px; border-bottom: 1px solid #f3f4f6; color: #1a1a1a;
+    }
+    .data-table tr:last-child td { border-bottom: none; }
+
+    /* === Preformatted Text (Code) === */
+    pre {
+      background: #1e293b; color: #f8fafc; padding: 16px; border-radius: 8px;
+      font-size: 11px; overflow-x: auto; line-height: 1.5; font-family: 'Consolas', monospace;
+    }
+    code { font-family: 'Consolas', monospace; font-size: 10px; background: #f1f5f9; padding: 2px 4px; border-radius: 3px; color: #0f172a; }
+
+    /* === Tags === */
+    .tag {
+      display: inline-block; font-size: 9px; font-weight: 600;
+      padding: 2px 8px; border-radius: 3px;
+    }
+    .tag-phase    { background: #dbeafe; color: #1e40af; }
+    .tag-decision { background: #ede9fe; color: #5b21b6; }
+    .tag-failure  { background: #fee2e2; color: #991b1b; }
+    .tag-config   { background: #d1fae5; color: #065f46; }
+    .tag-output   { background: #fef3c7; color: #92400e; }
+    .tag-external { background: #f3f4f6; color: #666666; }
+
+    /* === Legend === */
+    .legend {
+      display: flex; gap: 16px; justify-content: center;
+      margin: 16px 0 24px; flex-wrap: wrap;
+    }
+    .legend-item {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 10px; color: #666;
+    }
+    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+    /* === Footer === */
+    .footer {
+      text-align: center; padding: 20px;
+      font-size: 10px; color: #999;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>stark-update-deps</h1>
+    <div class="sub">Dependency Version Updater</div>
+    <div class="scope">Usage Guide</div>
+  </div>
+
+  <div class="container">
+    <div class="section-title">Overview</div>
+    <div class="card-grid">
+      <div class="card card-blue">
+        <h3>What it does</h3>
+        <p>Systematically audits every versioned dependency in a project, looks up current stable releases on official sources, identifies breaking changes, updates versions in-place, and rigorously verifies the result against web sources to prevent hallucinations.</p>
+      </div>
+      <div class="card card-green">
+        <h3>How to trigger</h3>
+        <p>Say: <em>"update dependencies"</em>, <em>"check for outdated packages"</em>, <em>"upgrade versions"</em>, or <em>"are my deps current?"</em></p>
+      </div>
+      <div class="card card-purple">
+        <h3>Key Value</h3>
+        <p><strong>Verification Phase:</strong> LLMs often hallucinate versions confidently. This skill verifies every single updated tag against live registries (PyPI, npm, Docker Hub) before finalizing the update.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Execution Workflow</div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#1e40af"></div> Standard Phase</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#7c3aed"></div> Analysis / Check</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> Final Output</div>
+    </div>
+
+    <div class="flow">
+      <!-- Step 1 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">Scans whole project<br><strong>(no args required)</strong></div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">1. Discovery</div>
+            <div class="node-desc">Auto-locates all dependency manifests and extracts current versions</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">Output: <strong>Dependency Inventory</strong><br>(grouped by ecosystem)</div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Step 2 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">Parallel WebSearches<br>Prefers <strong>Active LTS</strong> releases</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">2. Research</div>
+            <div class="node-desc">Looks up latest stable releases and release dates across registries</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">Data: PyPI, npmjs, Docker Hub, pkg.go.dev</div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Step 3 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">Checks <strong>Major Jumps</strong><br>Finds Codemod commands</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision">
+            <div class="node-title">3. Compatibility Analysis</div>
+            <div class="node-desc">Categorizes updates (Safe, Review, Blocked, Skip) and flags breaking changes</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">Output: <strong>Decision Matrix</strong></div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Step 4 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">Preserves constraint styles<br>(e.g. <code>^1.2.0</code> or <code>>=3.8</code>)</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">4. Update</div>
+            <div class="node-desc">Applies safe updates in-place directly to files and markdown documentation</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">Artifacts: Modified <strong>Project Files</strong></div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Step 5 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>CRITICAL SAFEGUARD</strong><br>Prevents Hallucinations</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision" style="background: #047857;"> <!-- Using config color to stand out as validation -->
+            <div class="node-title">5. Verification</div>
+            <div class="node-desc">Re-scans modified files and re-verifies exact updated version strings via WebSearch</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">Fails on missing Docker tags or fabricated numbers</div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Step 6 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">Actionable next steps for<br>the developer</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-output">
+            <div class="node-title">6. Final Report</div>
+            <div class="node-desc">Presents explicit per-item verification list and migration warnings</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Summary Terminal Output</strong></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">Supported Ecosystems</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Ecosystem</th>
+          <th>Scanned Manifests</th>
+          <th>Registry Source</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Python</strong></td>
+          <td><code>pyproject.toml</code>, <code>requirements*.txt</code>, <code>setup.py</code>, <code>Pipfile</code>, <code>poetry.lock</code></td>
+          <td>PyPI (pypi.org)</td>
+        </tr>
+        <tr>
+          <td><strong>Node.js</strong></td>
+          <td><code>package.json</code>, <code>package-lock.json</code>, <code>yarn.lock</code>, <code>pnpm-lock.yaml</code></td>
+          <td>npm (npmjs.com)</td>
+        </tr>
+        <tr>
+          <td><strong>Docker / Infra</strong></td>
+          <td><code>Dockerfile*</code>, <code>docker-compose*.yml</code></td>
+          <td>Docker Hub</td>
+        </tr>
+        <tr>
+          <td><strong>Go</strong></td>
+          <td><code>go.mod</code>, <code>go.sum</code></td>
+          <td>pkg.go.dev</td>
+        </tr>
+        <tr>
+          <td><strong>Rust</strong></td>
+          <td><code>Cargo.toml</code>, <code>Cargo.lock</code></td>
+          <td>crates.io / GitHub</td>
+        </tr>
+        <tr>
+          <td><strong>Documentation</strong></td>
+          <td><code>*.md</code> (embedded code blocks referencing versions)</td>
+          <td>N/A (Matches primary files)</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="section-title">Output Example</div>
+    <div class="card card-dark" style="margin-bottom: 20px;">
+      <pre>Dependency Update Report
+════════════════════════
+
+Updated: 3 packages
+Skipped: 12 (already current)
+Blocked: 0 (compatibility issues)
+Major bumps: 2 (may need code changes)
+
+| Dependency | Old | New | Status | Notes |
+|------------|-----|-----|--------|-------|
+| fastapi    | 0.115.0 | 0.135.1 | Updated | |
+| openai     | 1.57.0  | 2.29.0  | Updated (major) | New client API |
+| tailwindcss| 3.3.0   | 4.2.0   | Updated (major) | CSS-first config |
+
+Files modified:
+- pyproject.toml
+- package.json
+
+Action items for major bumps:
+1. openai 1.x → 2.x: Check migration guide, API client changes
+2. tailwindcss 3.x → 4.x: Run `npx @tailwindcss/upgrade`
+
+Verification: All 3 updated versions confirmed on official registries.
+Verified:
+- [x] fastapi 0.135.1 — confirmed on PyPI (released 2026-03-01)
+- [x] openai 2.29.0 — confirmed on PyPI
+- [x] tailwindcss 4.2.0 — confirmed on npmjs</pre>
+    </div>
+
+  </div>
+
+  <div class="footer">
+    Stark Skills Visualizer • stark-update-deps
+  </div>
+
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "doc_content": {
+    "summary": "stark-plan-to-tasks is a high-level orchestration skill that takes a technical design document and autonomously transforms it into an actionable, tracked, and thoroughly planned project. It uses multiple LLM passes to validate the plan, decompose it into properly sized task issues with risk/confidence labels, extracts architectural knowledge to living documentation, and manages GitHub project integration.",
+    "key_features": [
+      "Adversarial validation: Employs a multi-agent check system to ensure task breakdowns have no circular dependencies and 100% requirement coverage.",
+      "Automated GitHub Issue Creation: Creates phase tracking issues and links dependent tasks to them using proper GitHub issue types and custom metadata labels.",
+      "GitHub Projects Integration: Automatically updates organizational project boards with fields like Status, Story Points, AI Suitability, and Priority.",
+      "Doc Enrichment & Cleanup: Transmutes transient plan files into living documentation (ADRs, schemas, glossaries) via local git commits, removing the original plan to avoid stale artifacts."
+    ],
+    "usage_examples": [
+      "/stark-plan-to-tasks docs/plans/2026-03-25-widget-system.md",
+      "Please break down this plan docs/plans/2026-03-25-widget-system.md into GitHub tasks.",
+      "/stark-plan-to-tasks docs/plans/2026-03-25-widget-system.md --dry-run"
+    ]
+  },
+  "alt_text": "A visualization of the stark-plan-to-tasks skill, detailing its usage workflow from taking a markdown plan through a quality gate, decomposition, validation, GitHub issue creation, and finally knowledge extraction and git commits."
+}
