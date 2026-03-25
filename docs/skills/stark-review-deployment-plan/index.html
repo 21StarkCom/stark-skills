@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>stark-review-deployment-plan — Skill Documentation</title>
+<style>
+/* === Reset & Base === */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+
+/* === Header === */
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
+
+/* === Container === */
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+/* === Section Title === */
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+/* === Node Types === */
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
+
+.node-phase    { background: #1e40af; color: #ffffff; }
+.node-decision { background: #7c3aed; color: #ffffff; }
+.node-failure  { background: #dc2626; color: #ffffff; }
+.node-config   { background: #047857; color: #ffffff; }
+.node-output   { background: #f59e0b; color: #1a1a1a; }
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
+
+/* === Flow Layout === */
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 180px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 180px; display: flex;
+  align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
+
+/* === Arrows === */
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
+
+/* === Cards === */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
+
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
+
+/* === Data Tables === */
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
+
+/* === Tags === */
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
+
+/* === Legend === */
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+/* === Summary Grid === */
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
+
+/* === Footer === */
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
+
+/* === Skill-specific === */
+.invoke-box {
+  background: #1a1a1a; color: #e5e7eb; border-radius: 8px;
+  padding: 14px 20px; font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px; margin: 12px 0; position: relative;
+}
+.invoke-box .prompt { color: #60a5fa; }
+.invoke-box .cmd { color: #34d399; }
+.invoke-box .arg { color: #fbbf24; }
+
+.vector-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px; margin-top: 16px;
+}
+.vector-card {
+  padding: 12px 14px; border-radius: 6px;
+  background: #fff; border: 1px solid #e5e7eb;
+}
+.vector-card .vector-id {
+  font-size: 10px; font-weight: 700; color: #7c3aed;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.vector-card .vector-name {
+  font-size: 12px; font-weight: 600; color: #1a1a1a; margin: 4px 0 2px;
+}
+.vector-card .vector-desc {
+  font-size: 10px; color: #666; line-height: 1.4;
+}
+
+.output-section {
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+  padding: 14px 18px; margin: 8px 0;
+}
+.output-section h4 {
+  font-size: 11px; font-weight: 700; color: #1e40af; margin-bottom: 4px;
+}
+.output-section p {
+  font-size: 10px; color: #555; line-height: 1.5;
+}
+
+.severity-badge {
+  display: inline-block; font-size: 9px; font-weight: 700;
+  padding: 2px 8px; border-radius: 3px;
+}
+.sev-high { background: #fee2e2; color: #991b1b; }
+.sev-medium { background: #fef3c7; color: #92400e; }
+.sev-low { background: #dbeafe; color: #1e40af; }
+
+.trigger-list {
+  list-style: none; padding: 0; margin: 8px 0;
+}
+.trigger-list li {
+  font-size: 11px; padding: 6px 12px;
+  border-left: 2px solid #e5e7eb;
+  margin-bottom: 4px; color: #444;
+}
+.trigger-list li code {
+  background: #f3f4f6; padding: 1px 5px; border-radius: 3px;
+  font-size: 10px; font-family: 'SF Mono', 'Fira Code', monospace;
+}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <h1>/stark-review-deployment-plan</h1>
+  <div class="sub">Adversarial infrastructure &amp; deployment plan review</div>
+  <div class="scope">USAGE GUIDE</div>
+</div>
+
+<div class="container">
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#1e40af;"></div> Workflow Phase</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed;"></div> Decision Point</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#047857;"></div> Input / Config</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b;"></div> Output</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#dc2626;"></div> Failure / Risk</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e5e7eb;"></div> External</div>
+  </div>
+
+  <!-- Quick Start -->
+  <div class="section-title">Quick Start</div>
+  <div class="summary-grid">
+    <div class="summary-card card-blue">
+      <h3>Invoke</h3>
+      <p>Type <code>/stark-review-deployment-plan</code> followed by a file path, URL, or paste inline.</p>
+    </div>
+    <div class="summary-card card-green">
+      <h3>What It Does</h3>
+      <p>Runs a 4-pass adversarial review across 10 failure vectors, producing findings ranked by blast radius.</p>
+    </div>
+    <div class="summary-card card-purple">
+      <h3>What You Get</h3>
+      <p>Structured report: findings, dependency table, drift table, API matrix, and coverage matrix.</p>
+    </div>
+  </div>
+
+  <!-- Invocation Examples -->
+  <div class="section-title">How to Invoke</div>
+  <div class="invoke-box">
+    <span class="prompt">&gt;</span> <span class="cmd">/stark-review-deployment-plan</span> <span class="arg">docs/migration-plan.md</span>
+  </div>
+  <div class="invoke-box">
+    <span class="prompt">&gt;</span> <span class="cmd">/stark-review-deployment-plan</span> <span class="arg">https://confluence.example.com/deploy-plan</span>
+  </div>
+  <div class="invoke-box">
+    <span class="prompt">&gt;</span> <span class="cmd">"review this deployment plan"</span> <span style="color:#888;">— then paste the plan inline</span>
+  </div>
+
+  <!-- Natural Language Triggers -->
+  <div class="section-title">Trigger Phrases</div>
+  <p style="font-size:11px; color:#555; margin-bottom:8px;">The skill activates automatically when you say any of these (or similar):</p>
+  <ul class="trigger-list">
+    <li><code>"review deployment plan"</code> — direct invocation</li>
+    <li><code>"review infra plan"</code> / <code>"review migration plan"</code></li>
+    <li><code>"audit deployment"</code> / <code>"review infrastructure"</code></li>
+    <li><code>"check my deployment"</code> / <code>"review this plan"</code></li>
+    <li><code>"does this plan look right?"</code> / <code>"poke holes in this"</code></li>
+  </ul>
+
+  <!-- Workflow Flow Diagram -->
+  <div class="section-title">Review Workflow</div>
+  <div class="flow">
+
+    <!-- Step 1: Input -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>You provide:</strong> file path, URL, or pasted text</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-config" style="width:340px;">
+          <div class="node-title">Plan Input</div>
+          <div class="node-desc">File path &bull; URL &bull; Inline paste</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Formats:</strong> Markdown, Confluence, plain text, any doc</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 2: Pass 1 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Pass 1</strong></div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:340px;">
+          <div class="node-title">Full Read</div>
+          <div class="node-desc">End-to-end comprehension of the plan</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 3: Pass 2 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Pass 2</strong></div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:340px;">
+          <div class="node-title">Contradiction Scan</div>
+          <div class="node-desc">Hidden assumptions &bull; Missing gates &bull; Internal conflicts</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 4: Pass 3 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Pass 3</strong></div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width:340px;">
+          <div class="node-title">Cross-Check</div>
+          <div class="node-desc">Verify against repo scripts &amp; runtime config (if accessible)</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>If not accessible:</strong> checks marked DEFERRED</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 5: Pass 4 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Pass 4</strong></div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-failure" style="width:340px;">
+          <div class="node-title">Vector Evaluation</div>
+          <div class="node-desc">All 10 failure vectors evaluated &bull; PASS / FAIL / DEFERRED</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>High findings</strong> always completed first</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 6: Output -->
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-output" style="width:340px;">
+          <div class="node-title">Structured Report</div>
+          <div class="node-desc">Findings &bull; Tables &bull; Coverage Matrix &bull; Blocker Count</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+  </div>
+
+  <!-- 10 Failure Vectors -->
+  <div class="section-title">10 Failure Vectors Evaluated</div>
+  <div class="vector-grid">
+    <div class="vector-card">
+      <div class="vector-id">A</div>
+      <div class="vector-name">Partial-Failure Trap</div>
+      <div class="vector-desc">Dual-write cutovers: simulates A-succeeds/B-fails and vice versa. Requires anti-split-brain gate.</div>
+    </div>
+    <div class="vector-card">
+      <div class="vector-id">B</div>
+      <div class="vector-name">Imperative Idempotency</div>
+      <div class="vector-desc">Identifies non-idempotent CI/CD commands (create, deploy, execute) that aren't upsert-safe.</div>
+    </div>
+    <div class="vector-card">
+      <div class="vector-id">C</div>
+      <div class="vector-name">Blank-Slate IaC Completeness</div>
+      <div class="vector-desc">Assumes empty project: checks APIs enabled in IaC, flags hidden pre-existing assumptions.</div>
+    </div>
+    <div class="vector-card">
+      <div class="vector-id">D</div>
+      <div class="vector-name">Dependency Sequencing</div>
+      <div class="vector-desc">Cross-boundary infra + runtime dependency ordering. Catches phase-order breakages.</div>
+    </div>
+    <div class="vector-card">
+      <div class="vector-id">E</div>
+      <div class="vector-name">Reality Drift</div>
+      <div class="vector-desc">Non-IaC resources: authoritative owner, drift correction or detection + manual remediation.</div>
+    </div>
+    <div class="vector-card">
+      <div class="vector-id">F</div>
+      <div class="vector-name">Command Contract Validation</div>
+      <div class="vector-desc">Validates CLI/API flags and usage. Marks UNCERTAIN if behavior can't be confirmed.</div>
+    </div>
+    <div class="vector-card">
+      <div class="vector-id">G</div>
+      <div class="vector-name">Pre-Cutover Gate</div>
+      <div class="vector-desc">Dual-write migrations must have explicit final delta sync or write freeze before read cutover.</div>
+    </div>
+    <div class="vector-card">
+      <div class="vector-id">H</div>
+      <div class="vector-name">API Prerequisite Matrix</div>
+      <div class="vector-desc">Maps each phase to required cloud APIs. Fails if any API is implied but undeclared in IaC.</div>
+    </div>
+    <div class="vector-card">
+      <div class="vector-id">I</div>
+      <div class="vector-name">Runtime Identity Lifecycle</div>
+      <div class="vector-desc">Every runtime identity needs explicit creation, IAM bindings, and deploy-time attachment.</div>
+    </div>
+    <div class="vector-card">
+      <div class="vector-id">J</div>
+      <div class="vector-name">Evidence Strictness</div>
+      <div class="vector-desc">No pass-by-omission. Every vector requires concrete evidence. Missing = FAIL or DEFERRED.</div>
+    </div>
+  </div>
+
+  <!-- Output Structure -->
+  <div class="section-title">Output Structure</div>
+  <p style="font-size:11px; color:#555; margin-bottom:12px;">The review produces five structured sections, always in this order:</p>
+
+  <div class="output-section">
+    <h4>1. Findings (High → Medium → Low)</h4>
+    <p>Each finding includes: <span class="severity-badge sev-high">Severity</span> location, concrete failure scenario, why the plan fails, exact technical fix, and confidence level.</p>
+  </div>
+  <div class="output-section">
+    <h4>2. Dependency Violations Table</h4>
+    <p>Prerequisite → dependent step mapping. Shows what breaks if a dependency is missing and the fix.</p>
+  </div>
+  <div class="output-section">
+    <h4>3. Ownership &amp; Drift Table</h4>
+    <p>Every resource in the plan: owner, drift risk, and correction/detection mechanism.</p>
+  </div>
+  <div class="output-section">
+    <h4>4. API Prerequisite Matrix</h4>
+    <p>Capability/phase → required API/service → explicitly enabled in IaC? → evidence → status.</p>
+  </div>
+  <div class="output-section">
+    <h4>5. Coverage Matrix</h4>
+    <p>Vectors A–J, each marked <span class="tag tag-config">PASS</span> <span class="tag tag-failure">FAIL</span> or <span class="tag tag-external">DEFERRED</span> with one-line evidence.</p>
+  </div>
+
+  <p style="font-size:11px; color:#555; margin-top:12px;">The report always ends with: <code style="background:#f3f4f6; padding:2px 6px; border-radius:3px;">Remaining blockers before execution: &lt;count&gt;</code></p>
+
+  <!-- Severity Rubric -->
+  <div class="section-title">Severity &amp; Confidence</div>
+  <div class="card-grid">
+    <div class="card card-red">
+      <h3>Severity Levels</h3>
+      <p>
+        <span class="severity-badge sev-high">HIGH</span> Execution blocker, data loss, security break, guaranteed drift<br>
+        <span class="severity-badge sev-medium">MEDIUM</span> Likely operational issue with workaround<br>
+        <span class="severity-badge sev-low">LOW</span> Non-blocking improvement
+      </p>
+    </div>
+    <div class="card card-purple">
+      <h3>Confidence Levels</h3>
+      <p>
+        <strong>High</strong> — Verifiable from document text alone<br>
+        <strong>Medium</strong> — Requires runtime/external system assumption<br>
+        <strong>Low</strong> — Uncertain about underlying API/tool behavior
+      </p>
+    </div>
+  </div>
+
+  <!-- Common Workflows -->
+  <div class="section-title">Common Workflows</div>
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>Pre-Execution Gate</h3>
+      <p>Run before executing any migration or deployment plan. Fix all High-severity findings before proceeding. Use the blocker count as your go/no-go signal.</p>
+    </div>
+    <div class="card card-green">
+      <h3>Plan Iteration</h3>
+      <p>After receiving findings, update the plan and re-run the review. Each pass should reduce the blocker count toward zero.</p>
+    </div>
+    <div class="card card-amber">
+      <h3>Casual Sanity Check</h3>
+      <p>Paste a plan and say "does this look right?" or "poke holes in this" — the skill activates automatically and gives a full adversarial review.</p>
+    </div>
+  </div>
+
+  <!-- Input Formats -->
+  <div class="section-title">Accepted Inputs</div>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Input Method</th>
+        <th>Example</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>File path</td>
+        <td><code>/stark-review-deployment-plan docs/deploy.md</code></td>
+        <td>Reads the file from disk</td>
+      </tr>
+      <tr>
+        <td>URL</td>
+        <td><code>/stark-review-deployment-plan https://...</code></td>
+        <td>Fetches the document via web</td>
+      </tr>
+      <tr>
+        <td>Inline paste</td>
+        <td>Invoke the command, then paste the plan text</td>
+        <td>Works for quick reviews of short plans</td>
+      </tr>
+      <tr>
+        <td>Natural language</td>
+        <td>"review this deployment plan" + plan content</td>
+        <td>Auto-triggers without slash command</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Quality Guarantees -->
+  <div class="section-title">Quality Guarantees</div>
+  <div class="card-grid">
+    <div class="card card-dark">
+      <h3>No Fabrication</h3>
+      <p>Never fabricates command behavior or documentation URLs. Marks uncertain items as UNCERTAIN.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>No False Positives</h3>
+      <p>No stylistic preferences or theoretical edge cases. Every High finding includes a concrete production failure sequence.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>Full Coverage</h3>
+      <p>All 10 vectors are always evaluated. No pass-by-omission — missing evidence is explicitly marked FAIL or DEFERRED.</p>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  stark-skills &bull; stark-review-deployment-plan &bull; Usage Guide &bull; Generated 2026-03-25
+</div>
+
+</body>
+</html>

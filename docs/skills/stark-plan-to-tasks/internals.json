@@ -1,0 +1,18 @@
+{
+  "doc_content": {
+    "summary": "A highly-orchestrated multi-agent pipeline that transforms unstructured architectural markdown specs into a fully linked dependency graph of GitHub issues, extracts valuable domain knowledge to the repository's documentation tree, and seamlessly integrates with GitHub Projects.",
+    "key_features": [
+      "Three-pass adversarial LLM pipeline (Evaluate -> Decompose -> Validate)",
+      "Automated sizing guardrails preventing monolithic issue creation",
+      "Dual-auth execution mapping issue authorship to the user while using app tokens for automation",
+      "Dependency graph generation utilizing native GitHub `#NNN` mentions",
+      "Automated zero-loss knowledge extraction into docs/decisions.md and domain-specific markdown files"
+    ],
+    "usage_examples": [
+      "stark-plan-to-tasks path/to/plan.md",
+      "stark-plan-to-tasks path/to/plan.md --dry-run",
+      "stark-plan-to-tasks --cleanup 2026-03-18-design"
+    ]
+  },
+  "alt_text": "A vertical flowchart visualizing the 7-phase architecture of the stark-plan-to-tasks skill, detailing its multi-agent validation passes, GitHub dual-auth strategy, and automated documentation extraction workflow."
+}

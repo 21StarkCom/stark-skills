@@ -1,0 +1,387 @@
+<html lang="en">
+<head>
+
+
+<title>stark-onboard-project | Internal Visualization</title>
+<style>
+/*
+ * Stark Skills — Shared Design System CSS
+ *
+ * Foundation styles for LLM-generated HTML skill visualizations.
+ * LLMs embed this inline and may extend with additional styles.
+ * All colors pass WCAG AA 4.5:1 contrast ratio.
+ *
+ * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+ */
+
+/* === Reset & Base === */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+
+/* === Header === */
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
+
+/* === Container === */
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+/* === Section Title === */
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+/* === Node Types === */
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
+
+.node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+.node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+.node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+.node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
+.node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
+
+/* === Flow Layout === */
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 180px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+  text-align: right;
+}
+.flow-lane-center {
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 180px; display: flex;
+  align-items: center; padding-left: 18px;
+  text-align: left;
+}
+.annotation {
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
+
+/* === Arrows === */
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
+
+/* === Cards === */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
+
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
+
+/* === Data Tables === */
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
+
+/* === Tags === */
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
+
+/* === Legend === */
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+/* === Summary Grid === */
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
+
+/* === Winner Badge === */
+.winner-badge {
+  display: inline-block; font-size: 12px; color: #555555;
+  font-weight: 600; padding: 2px 10px; border-radius: 4px;
+  background: #f9fafb; border: 1px solid #d1d5db;
+}
+
+/* === Footer === */
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>stark-onboard-project</h1>
+  <div class="sub">End-to-end project initialization, GitHub orchestration, and Claude Code bootstrapping</div>
+  <div class="scope">TARGET: INTERNALS</div>
+</div>
+
+<div class="container">
+  
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot node-phase"></div> Main Phase</div>
+    <div class="legend-item"><div class="legend-dot node-decision"></div> Decision / Check</div>
+    <div class="legend-item"><div class="legend-dot node-output"></div> Artifact Output</div>
+    <div class="legend-item"><div class="legend-dot node-external"></div> External Integration</div>
+    <div class="legend-item"><div class="legend-dot node-failure"></div> Failure Mode</div>
+  </div>
+
+  <h2 class="section-title">Execution Flow & Idempotency Pipeline</h2>
+  <div class="flow">
+    
+    <!-- Step 1: Git -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="node node-decision" style="width: 140px; margin-left: auto;">
+          <div class="node-title">git rev-parse</div>
+          <div class="node-desc">Skip if initialized</div>
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width: 220px;">
+          <div class="node-title">1. Git Initialization</div>
+          <div class="node-desc">git init &amp; baseline ignore logic</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="node node-output" style="width: 140px;">
+          <div class="node-title">.gitignore</div>
+          <div class="node-desc">Auto-tailored commit</div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+    
+    <!-- Step 2: GitHub -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="node node-decision" style="width: 140px; margin-left: auto;">
+          <div class="node-title">Check Remote</div>
+          <div class="node-desc">Skip if remote exists</div>
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width: 220px;">
+          <div class="node-title">2. GitHub Repository</div>
+          <div class="node-desc">gh repo create &amp; topic assignment</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="node node-output" style="width: 140px;">
+          <div class="node-title">CODEOWNERS</div>
+          <div class="node-desc">Generated via API auth</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 3: Apps -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="node node-external" style="width: 140px; margin-left: auto;">
+          <div class="node-title">gh api</div>
+          <div class="node-desc">PUT /user/installations/</div>
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width: 220px;">
+          <div class="node-title">3. GitHub Apps</div>
+          <div class="node-desc">Link claude, codex, gemini</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="node node-config" style="width: 140px;">
+          <div class="node-title">github_app.py</div>
+          <div class="node-desc">JWT Token checks</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step 4: Claude Setup -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="node node-decision" style="width: 140px; margin-left: auto;">
+          <div class="node-title">Project Scanner</div>
+          <div class="node-desc">Detect language/framework</div>
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width: 220px;">
+          <div class="node-title">4. Claude Code Setup</div>
+          <div class="node-desc">Scaffold agent environment</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="node node-output" style="width: 140px;">
+          <div class="node-title">CLAUDE.md</div>
+          <div class="node-desc">&amp; .claude/ directory</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <h2 class="section-title">Architecture Deep Dive</h2>
+  <div class="card-grid">
+    <div class="card card-purple">
+      <h3>Idempotency & State Checks</h3>
+      <p>Every phase evaluates the existing state before mutating. It ensures safe re-runs without overwriting data.</p>
+      <ul style="margin-left: 14px; margin-top: 6px; font-size: 11px;">
+        <li><strong>Git:</strong> Skips init if <code>.git/</code> is valid.</li>
+        <li><strong>GitHub:</strong> Skips repo creation if <code>origin</code> exists.</li>
+        <li><strong>CODEOWNERS:</strong> Won't overwrite existing rules.</li>
+        <li><strong>CLAUDE.md:</strong> Defers to <code>stark-claude-md-improver</code> if file exists.</li>
+      </ul>
+    </div>
+    <div class="card card-dark">
+      <h3>GitHub App Interop (Python Script)</h3>
+      <p>Integrating with org-installed GitHub Apps relies heavily on <code>$SCRIPTS_DIR/github_app.py</code> execution.</p>
+      <p style="margin-top:6px;">Validates app token access to repositories using short-lived installation tokens. Links new repos to fixed installation IDs via authenticated user REST API calls.</p>
+    </div>
+    <div class="card card-green">
+      <h3>Project Auto-Detection Logic</h3>
+      <p>Scans the working tree dynamically to determine the ecosystem, reducing manual input for standard scaffolds.</p>
+      <ul style="margin-left: 14px; margin-top: 6px; font-size: 11px;">
+        <li><strong>Node/JS:</strong> Looks for <code>package.json</code>, Next configs.</li>
+        <li><strong>Python:</strong> Looks for <code>pyproject.toml</code>, <code>requirements.txt</code>.</li>
+        <li><strong>Go/Rust/Java:</strong> Looks for standard build manifests.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 class="section-title">Failure Modes & Recoveries</h2>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th width="30%">Failure Condition</th>
+        <th width="20%">Node / Subsystem</th>
+        <th width="50%">Recovery Strategy</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>GitHub repo creation fails (exists)</strong></td>
+        <td><span class="tag tag-external">gh cli</span></td>
+        <td>Catch error, gracefully add remote <code>git remote add origin ...</code> and push upstream.</td>
+      </tr>
+      <tr>
+        <td><strong>App API requires scope</strong></td>
+        <td><span class="tag tag-failure">403 Forbidden</span></td>
+        <td>Inform user to run <code>gh auth refresh -s read:user</code> or provide exact URL for manual Org settings intervention.</td>
+      </tr>
+      <tr>
+        <td><strong>No language detected</strong></td>
+        <td><span class="tag tag-decision">Project Scan</span></td>
+        <td>Gracefully fallback to prompting the user for Language, Framework, and Test runner.</td>
+      </tr>
+      <tr>
+        <td><strong>CLAUDE.md already exists</strong></td>
+        <td><span class="tag tag-decision">State Check</span></td>
+        <td>Log notice and explicitly route user to <code>/stark-claude-md-improver</code>. Do not truncate existing instructions.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-title">Observability & Metrics</h2>
+  <div class="summary-grid">
+    <div class="summary-card card-blue">
+      <h3>Phase Execution Tracking</h3>
+      <p>Records binary states for each phase: executed vs. skipped (due to idempotency).</p>
+    </div>
+    <div class="summary-card card-blue">
+      <h3>GitHub App Telemetry</h3>
+      <p>Tracks connected count (0-3) and logs per-app status (stark-claude, stark-codex, stark-gemini) upon skill exit.</p>
+    </div>
+    <div class="summary-card card-blue">
+      <h3>Performance Metrics</h3>
+      <p>Follows standard Observability Protocol. Captures total onboarding duration and CLAUDE.md generation origin.</p>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  &copy; 2026 Evinced Inc. Internal Viz System — stark-onboard-project
+</div>
+
+</body>
+</html>

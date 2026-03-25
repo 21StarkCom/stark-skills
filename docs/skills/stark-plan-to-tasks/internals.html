@@ -1,0 +1,419 @@
+<html lang="en">
+<head>
+  
+  <title>stark-plan-to-tasks Internal Architecture</title>
+  <style>
+    /*
+     * Stark Skills — Shared Design System CSS
+     *
+     * Foundation styles for LLM-generated HTML skill visualizations.
+     * LLMs embed this inline and may extend with additional styles.
+     * All colors pass WCAG AA 4.5:1 contrast ratio.
+     *
+     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+     */
+
+    /* === Reset & Base === */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #fafafa;
+      color: #1a1a1a;
+      line-height: 1.5;
+    }
+
+    /* === Header === */
+    .header { text-align: center; padding: 36px 20px 16px; }
+    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+    .header .scope {
+      display: inline-block; font-size: 10px; font-weight: 600;
+      background: #eff6ff; color: #1e40af;
+      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+    }
+
+    /* === Container === */
+    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+    /* === Section Title === */
+    .section-title {
+      font-size: 14px; font-weight: 700; color: #666;
+      text-transform: uppercase; letter-spacing: 1px;
+      margin: 32px 0 16px; padding-bottom: 6px;
+      border-bottom: 2px solid #e5e7eb;
+    }
+
+    /* === Node Types === */
+    .node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; }
+    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+    .node-desc { font-size: 10px; opacity: 0.8; }
+
+    .node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+    .node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+    .node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+    .node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
+    .node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
+
+    /* === Flow Layout === */
+    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+    .flow-step {
+      display: flex; align-items: center;
+      width: 100%; max-width: 860px; min-height: 76px;
+    }
+    .flow-lane-left {
+      width: 250px; display: flex;
+      align-items: center; justify-content: flex-end;
+      padding-right: 18px; text-align: right;
+    }
+    .flow-lane-center {
+      width: 360px; display: flex;
+      align-items: center; justify-content: center;
+    }
+    .flow-lane-right {
+      width: 250px; display: flex;
+      align-items: center; padding-left: 18px; text-align: left;
+    }
+    .annotation {
+      font-size: 9px; color: #666; max-width: 220px; line-height: 1.4;
+    }
+    .annotation strong { color: #444; }
+
+    /* === Arrows === */
+    .arrow-down {
+      width: 2px; height: 20px; background: #cbd5e1;
+      margin: 0 auto; position: relative;
+    }
+    .arrow-down::after {
+      content: ''; position: absolute; bottom: -4px; left: -4px;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid #cbd5e1;
+    }
+    .arrow-container {
+      display: flex; justify-content: center;
+      width: 100%; max-width: 860px;
+    }
+    .arrow-container .flow-lane-center {
+      display: flex; justify-content: center;
+    }
+
+    /* === Cards === */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px; margin-top: 16px;
+    }
+    .card { padding: 16px; border-radius: 8px; }
+    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+    .card p  { font-size: 11px; line-height: 1.6; }
+
+    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+    .card-blue h3 { color: #1e40af; }
+    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+    .card-green h3 { color: #059669; }
+    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+    .card-purple h3 { color: #7c3aed; }
+    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+    .card-amber h3 { color: #92400e; }
+    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+    .card-dark h3 { color: #333333; }
+    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+    .card-red h3 { color: #dc2626; }
+
+    /* === Data Tables === */
+    .data-table {
+      width: 100%; max-width: 860px; margin: 16px auto;
+      border-collapse: collapse; font-size: 11px;
+    }
+    .data-table th {
+      background: #f3f4f6; padding: 8px 12px; text-align: left;
+      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+    }
+    .data-table td {
+      padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+    }
+
+    /* === Tags === */
+    .tag {
+      display: inline-block; font-size: 9px; font-weight: 600;
+      padding: 2px 8px; border-radius: 3px;
+    }
+    .tag-phase    { background: #dbeafe; color: #1e40af; }
+    .tag-decision { background: #ede9fe; color: #5b21b6; }
+    .tag-failure  { background: #fee2e2; color: #991b1b; }
+    .tag-config   { background: #d1fae5; color: #065f46; }
+    .tag-output   { background: #fef3c7; color: #92400e; }
+    .tag-external { background: #f3f4f6; color: #666666; }
+
+    /* === Legend === */
+    .legend {
+      display: flex; gap: 16px; justify-content: center;
+      margin: 16px 0 24px; flex-wrap: wrap;
+    }
+    .legend-item {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 10px; color: #666;
+    }
+    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+    /* === Summary Grid === */
+    .summary-grid {
+      display: grid; grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px; margin-top: 16px;
+    }
+    .summary-card { padding: 16px; border-radius: 8px; }
+    .summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+    .summary-card p  { font-size: 11px; line-height: 1.5; }
+
+    /* === Footer === */
+    .footer {
+      text-align: center; padding: 20px;
+      font-size: 10px; color: #999;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>stark-plan-to-tasks</h1>
+    <div class="sub">Internal Architecture & Data Flow</div>
+    <div class="scope">Complexity: 685 lines</div>
+  </div>
+
+  <div class="container">
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot node-phase"></div> Main Workflow Steps</div>
+      <div class="legend-item"><div class="legend-dot node-decision"></div> LLM & Validation Passes</div>
+      <div class="legend-item"><div class="legend-dot node-config"></div> Environment / Auth Check</div>
+      <div class="legend-item"><div class="legend-dot node-output"></div> System Outputs / State</div>
+      <div class="legend-item"><div class="legend-dot node-external"></div> External Dependencies</div>
+    </div>
+
+    <h2 class="section-title">Execution Pipeline</h2>
+    <div class="flow">
+
+      <!-- Phase 1 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <strong>Inputs</strong><br>
+            <code>&lt;path-to-spec&gt;</code><br>
+            Frontmatter scan / Git remote
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-config">
+            <div class="node-title">1. Setup & Pre-flight Checks</div>
+            <div class="node-desc">Target repo detection, gh CLI validation</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">
+            <strong>State Generated</strong><br>
+            <code>PLAN_CONTENT</code>, <code>ORG_REPO</code><br>
+            <code>PLAN_SLUG</code>, <code>DOCS_TREE</code>
+          </div>
+        </div>
+      </div>
+      
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- App Auth -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="node node-external">
+            <div class="node-title">Keychain</div>
+            <div class="node-desc">STARK_CLAUDE_PRIVATE_KEY</div>
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-config">
+            <div class="node-title">App Auth & Rerun Detection</div>
+            <div class="node-desc">github_app.py token -> Probe GH permissions</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">
+            <strong>Checks</strong><br>
+            <code>gh api /repos/{O}/{R}</code><br>
+            Check existing <code>plan:{SLUG}</code>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 2 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <strong>Pass 1 Checklist</strong><br>
+            Completeness, Explicit Dependencies, Concrete File Paths
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision">
+            <div class="node-title">2. Plan Quality Gate (LLM 1)</div>
+            <div class="node-desc">Evaluates plan against robustness rules</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-failure">
+            <div class="node-title">Loop/Abort</div>
+            <div class="node-desc">Max 3 cycles for missing info</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 3 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <strong>Guardrails</strong><br>
+            Max 5 A.C., Max 4 Files<br>Max 500 words per Task
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision">
+            <div class="node-title">3. Decomposition (LLM 2)</div>
+            <div class="node-desc">Extract Phases & Tasks, AI Suitability</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-output">
+            <div class="node-title">/tmp/.../breakdown.json</div>
+            <div class="node-desc">Phases, Tasks, Schema V1</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 4 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="node node-external">
+            <div class="node-title">plan_to_tasks_validate.py</div>
+            <div class="node-desc">Dispatches to codex/gemini</div>
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision">
+            <div class="node-title">4. Validation (LLM 3)</div>
+            <div class="node-desc">Adversarial checks (Coverage, Sizing, Dups)</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-failure">
+            <div class="node-title">Loop/Abort</div>
+            <div class="node-desc">Max 2 cycles for fixable deps</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 5 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <strong>Native Auth <code>unset GH_TOKEN</code></strong><br>
+            (Issues created by user)<br><br>
+            <strong>Bot Auth <code>GH_TOKEN=...</code></strong><br>
+            (Add to Project Boards)
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">5. GitHub Issue Creation</div>
+            <div class="node-desc">4-Pass Creation -> Dependencies -> Projects Integration</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-output">
+            <div class="node-title">Issues & Labels</div>
+            <div class="node-desc">Types, Story Points, Risk mapped</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 6 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <strong>Routing</strong><br>
+            docs/adr, docs/data, docs/api, docs/constraints.md
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision">
+            <div class="node-title">6. Knowledge Extraction (LLM 4)</div>
+            <div class="node-desc">Extract context from plan & append to docs tree</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-output">
+            <div class="node-title">docs/decisions.md</div>
+            <div class="node-desc">Local Git Commit; Plan Deleted</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 7 -->
+      <div class="flow-step">
+        <div class="flow-lane-left"></div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">7. Summary & Metrics</div>
+            <div class="node-desc">Print results, log observability</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-output">
+            <div class="node-title">stark-plan-to-tasks.jsonl</div>
+            <div class="node-desc">Duration, SP, Gap Metrics</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <h2 class="section-title">Core Abstractions & Extension Points</h2>
+    
+    <div class="card-grid">
+      <div class="card card-purple">
+        <h3>Multi-Agent Validation Envelope</h3>
+        <p>The output of Pass 2 is serialized into a <code>breakdown.json</code> alongside the original <code>PLAN_CONTENT</code>. This JSON envelope is dispatched via <code>$SCRIPTS/plan_to_tasks_validate.py</code> to independent LLM binaries (e.g., codex, gemini) acting as adversarial reviewers ensuring coverage and dependency sanity.</p>
+      </div>
+
+      <div class="card card-blue">
+        <h3>GitHub Type & Label Taxonomy</h3>
+        <p>Issues are labeled dimensionally (Story Points, Risk, Confidence) but also map directly to native GitHub Issue Types (<code>Feature</code>, <code>Task</code>, <code>Bug</code>) using <code>--field type="..."</code> rather than falling back to type labels.</p>
+      </div>
+
+      <div class="card card-green">
+        <h3>Dual Auth Boundary</h3>
+        <p>The skill uses the <strong>stark-claude GitHub App</strong> for setup, reading, and Project GraphQL queries, but explicitly unsets <code>GH_TOKEN</code> during the issue creation pass to ensure the issues are correctly attributed to the <strong>human user's native CLI auth</strong>.</p>
+      </div>
+
+      <div class="card card-amber">
+        <h3>Automated Knowledge Retention</h3>
+        <p>Before deleting the plan, Pass 4 automatically sorts unstructured architectural decisions, data models, and constraints into the repository's <code>docs/</code> tree natively, preventing knowledge silos in temporary PRs or deleted markdown files.</p>
+      </div>
+    </div>
+
+  </div>
+  
+  <div class="footer">
+    stark-plan-to-tasks internal visualization · Rendered by Gemini CLI
+  </div>
+
+</body>
+</html>

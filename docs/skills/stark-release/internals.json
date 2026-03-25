@@ -1,0 +1,19 @@
+{
+  "doc_content": {
+    "summary": "Automated release management workflow that calculates semantic version bumps based on changelog entries, updates runtime version constants, migrates unreleased changes to versioned log sections, and securely generates git tags and GitHub Releases using the user's PAT.",
+    "key_features": [
+      "Pre-flight workspace validation (clean main branch enforcement)",
+      "Git-tag driven version source-of-truth detection with 0.1.0 fallback",
+      "Automated semantic version calculation based on Fixed/Added/Changed keywords",
+      "Atomic multi-file mutation for CHANGELOG and python __init__.py version constants",
+      "Integrated GitHub Release creation natively bound to the developer's credentials"
+    ],
+    "usage_examples": [
+      "/stark-release",
+      "release a minor version",
+      "cut a release",
+      "bump version"
+    ]
+  },
+  "alt_text": "Internal architecture visualization for the stark-release skill showing the 10-step sequence from git pre-flight validation, semantic version calculation, file mutations, to GitHub release creation, alongside failure modes and observability metrics."
+}

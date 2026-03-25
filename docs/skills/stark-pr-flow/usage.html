@@ -1,0 +1,372 @@
+<html lang="en">
+<head>
+  
+  <title>stark-pr-flow - Skill Usage Visualization</title>
+  <style>
+    /*
+     * Stark Skills — Shared Design System CSS
+     *
+     * Foundation styles for LLM-generated HTML skill visualizations.
+     * LLMs embed this inline and may extend with additional styles.
+     * All colors pass WCAG AA 4.5:1 contrast ratio.
+     *
+     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+     */
+
+    /* === Reset & Base === */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #fafafa;
+      color: #1a1a1a;
+      line-height: 1.5;
+    }
+
+    /* === Header === */
+    .header { text-align: center; padding: 36px 20px 16px; }
+    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+    .header .scope {
+      display: inline-block; font-size: 10px; font-weight: 600;
+      background: #eff6ff; color: #1e40af;
+      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+    }
+
+    /* === Container === */
+    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+    /* === Section Title === */
+    .section-title {
+      font-size: 14px; font-weight: 700; color: #666;
+      text-transform: uppercase; letter-spacing: 1px;
+      margin: 32px 0 16px; padding-bottom: 6px;
+      border-bottom: 2px solid #e5e7eb;
+    }
+
+    /* === Node Types === */
+    .node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+    .node-desc { font-size: 10px; opacity: 0.9; }
+
+    .node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+    .node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+    .node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+    .node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
+    .node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+    .node-external { background: #e5e7eb; color: #1a1a1a; border: 1px dashed #9ca3af; } /* Gray — external deps */
+
+    /* === Flow Layout === */
+    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+    .flow-step {
+      display: flex; align-items: stretch;
+      width: 100%; max-width: 860px; min-height: 76px;
+    }
+    .flow-lane-left {
+      width: 250px; display: flex;
+      align-items: center; justify-content: flex-end;
+      padding-right: 18px;
+    }
+    .flow-lane-center {
+      width: 360px; display: flex;
+      align-items: center; justify-content: center;
+    }
+    .flow-lane-right {
+      width: 250px; display: flex;
+      align-items: center; padding-left: 18px;
+    }
+    .annotation {
+      font-size: 10px; color: #555; max-width: 200px; line-height: 1.4;
+      background: #ffffff; padding: 8px; border-radius: 6px; border: 1px solid #e5e7eb;
+    }
+    .annotation strong { color: #1a1a1a; display: block; margin-bottom: 2px; }
+
+    /* === Arrows === */
+    .arrow-down {
+      width: 2px; height: 24px; background: #cbd5e1;
+      margin: 0 auto; position: relative;
+    }
+    .arrow-down::after {
+      content: ''; position: absolute; bottom: -4px; left: -4px;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid #cbd5e1;
+    }
+    .arrow-container {
+      display: flex; justify-content: center;
+      width: 100%; max-width: 860px;
+    }
+    .arrow-container .flow-lane-center {
+      display: flex; justify-content: center; height: 24px;
+    }
+
+    /* === Cards === */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px; margin-top: 16px;
+    }
+    .card { padding: 16px; border-radius: 8px; }
+    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+    .card p  { font-size: 11px; line-height: 1.6; }
+    .card code { background: rgba(0,0,0,0.05); padding: 2px 4px; border-radius: 3px; font-family: monospace; }
+
+    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+    .card-blue h3 { color: #1e40af; }
+    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+    .card-green h3 { color: #059669; }
+    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+    .card-purple h3 { color: #7c3aed; }
+    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+    .card-amber h3 { color: #92400e; }
+    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+    .card-dark h3 { color: #333333; }
+    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+    .card-red h3 { color: #dc2626; }
+
+    /* === Data Tables === */
+    .data-table {
+      width: 100%; max-width: 860px; margin: 16px auto;
+      border-collapse: collapse; font-size: 11px;
+    }
+    .data-table th {
+      background: #f3f4f6; padding: 8px 12px; text-align: left;
+      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+    }
+    .data-table td {
+      padding: 8px 12px; border-bottom: 1px solid #e5e7eb; background: #ffffff;
+    }
+
+    /* === Tags === */
+    .tag {
+      display: inline-block; font-size: 9px; font-weight: 600;
+      padding: 2px 8px; border-radius: 3px;
+    }
+    .tag-phase    { background: #dbeafe; color: #1e40af; }
+    .tag-decision { background: #ede9fe; color: #5b21b6; }
+    .tag-failure  { background: #fee2e2; color: #991b1b; }
+    .tag-config   { background: #d1fae5; color: #065f46; }
+    .tag-output   { background: #fef3c7; color: #92400e; }
+    .tag-external { background: #f3f4f6; color: #666666; }
+
+    /* === Legend === */
+    .legend {
+      display: flex; gap: 16px; justify-content: center;
+      margin: 16px 0 24px; flex-wrap: wrap;
+    }
+    .legend-item {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 10px; color: #666;
+    }
+    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+    /* === Footer === */
+    .footer {
+      text-align: center; padding: 20px;
+      font-size: 10px; color: #999; border-top: 1px solid #e5e7eb; margin-top: 40px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>stark-pr-flow</h1>
+    <div class="sub">End-to-end PR workflow for GetEvinced repos: push -> PR -> self-review -> merge.</div>
+    <div class="scope">Target Audience: End User (Usage)</div>
+  </div>
+
+  <div class="container">
+    
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot node-config"></div> Input / Setup</div>
+      <div class="legend-item"><div class="legend-dot node-phase"></div> Workflow Phase</div>
+      <div class="legend-item"><div class="legend-dot node-decision"></div> Decision Point</div>
+      <div class="legend-item"><div class="legend-dot node-output"></div> Output / Artifact</div>
+      <div class="legend-item"><div class="legend-dot node-failure"></div> Failure Mode</div>
+    </div>
+
+    <!-- Usage Details -->
+    <h2 class="section-title">How to Invoke</h2>
+    <div class="card-grid">
+      <div class="card card-blue">
+        <h3>Trigger Phrases</h3>
+        <p>"open PR", "create PR", "merge this", "ship it", or simply "stark-pr-flow".</p>
+      </div>
+      <div class="card card-green">
+        <h3>Arguments (Optional)</h3>
+        <p><strong><code>&lt;title override&gt;</code></strong>: Specify a custom PR title.<br>
+        <strong><code>draft</code></strong>: Include the exact word to create the PR as a draft.</p>
+      </div>
+      <div class="card card-dark">
+        <h3>Prerequisites</h3>
+        <p>You must be on a <strong>feature branch</strong> (not <code>main</code>) with a clean working tree (no uncommitted changes).</p>
+      </div>
+    </div>
+
+    <!-- Workflow Visualization -->
+    <h2 class="section-title">Execution Flow</h2>
+    <div class="flow">
+      
+      <!-- Input -->
+      <div class="flow-step">
+        <div class="flow-lane-left"></div>
+        <div class="flow-lane-center">
+          <div class="node node-config">
+            <div class="node-title">Start Command</div>
+            <div class="node-desc">Triggered with optional args (title, draft)</div>
+          </div>
+        </div>
+        <div class="flow-lane-right"></div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Step 1 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <strong>Check Pre-reqs</strong>
+            Aborts if on `main` or if working tree is dirty.
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Step 1: Prepare Branch</div>
+            <div class="node-desc">git push -u origin $BRANCH</div>
+          </div>
+        </div>
+        <div class="flow-lane-right"></div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Step 2 & 3 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <strong>Analyze Changes</strong>
+            Generates conventional PR title & summary based on commits and diff.
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Step 2 & 3: Create PR</div>
+            <div class="node-desc">gh pr create (with PAT)</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">
+            <strong>Artifact</strong>
+            Creates Pull Request (Draft only if requested).
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Step 4 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <strong>Bot Auth</strong>
+            Uses BOT_TOKEN to post review as stark-claude[bot].
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Step 4: Self Code Review</div>
+            <div class="node-desc">Analyzes diff and posts structured findings via stark_claude.py</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-output">
+            <div class="node-title">Review Comment</div>
+            <div class="node-desc">Issues, Notes, & Inline Comments</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Step 5: Stop & Wait -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <strong>Advisory Check</strong>
+            Warns if issue doc state is "Not Started" or "Drafted".
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision">
+            <div class="node-title">Step 5: Present Summary — STOP</div>
+            <div class="node-desc">Wait for explicit user approval to merge</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">
+            <strong>User Input Required</strong>
+            e.g., "yes", "merge it", "reject"
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Step 6 -->
+      <div class="flow-step">
+        <div class="flow-lane-left"></div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Step 6: Merge & Clean Up</div>
+            <div class="node-desc">gh pr merge --squash --admin</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">
+            <strong>Cleanup</strong>
+            Checks out main, pulls, deletes local/remote feature branch.
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Failure Modes -->
+    <h2 class="section-title">Common Failure Modes & Recovery</h2>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Failure State</th>
+          <th>System Behavior / Recovery</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="tag tag-failure">Pre-req Fail</span> On main / Dirty tree</td>
+          <td>Aborts immediately. Prompts user to create a branch, or commit/stash changes first.</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-failure">Git</span> Push diverged</td>
+          <td>Aborts. User must <code>git pull --rebase origin main</code>, resolve conflicts, then push.</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-failure">Auth</span> <code>gh</code> auth fails for PR</td>
+          <td>Verify <code>gh auth status</code>. The user's Personal Access Token must be active for PR operations.</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-failure">CI/CD</span> PR checks failing</td>
+          <td>Shows check status to user. Asks whether to force-merge with <code>--admin</code> or wait/fix first.</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-decision">Rejection</span> User rejects PR</td>
+          <td>Leaves PR open for revisions, or closes it based on user instruction. Does not merge.</td>
+        </tr>
+      </tbody>
+    </table>
+
+  </div>
+
+  <div class="footer">
+    Visualization generated for the Gemini CLI stark-pr-flow skill.
+  </div>
+</body>
+</html>

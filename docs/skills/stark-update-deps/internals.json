@@ -1,0 +1,19 @@
+{
+  "doc_content": {
+    "summary": "The stark-update-deps skill systematically audits and updates project dependencies across multiple ecosystems (Python, Node, Docker, Go, Rust). Crucially, it employs a strict post-update verification loop to combat LLM version hallucination\u2014requiring empirical proof from package registries and Docker Hub that exact target tags exist before finalizing the update.",
+    "key_features": [
+      "Multi-ecosystem dependency discovery via AST/regex across manifests (pyproject.toml, package.json, Dockerfile, etc.)",
+      "Turn-optimized batched WebSearch parallelization, grouped by ecosystem domains",
+      "Active LTS and semantic stability bias for base runtimes (Node, Python)",
+      "Actionable major-bump analysis that proactively discovers CLI codemod tools",
+      "Strict Anti-Hallucination loop that re-scans mutated files and searches exact tags on DockerHub/PyPI to verify existence"
+    ],
+    "usage_examples": [
+      "update dependencies",
+      "check for outdated packages",
+      "are my deps current",
+      "stark-update-deps"
+    ]
+  },
+  "alt_text": "`Architecture flow diagram and feature breakdown for the stark-update-deps skill, highlighting its six-phase process: Discovery, Research, Compatibility Analysis, Update, Verification (anti-hallucination), and Reporting.`"
+}

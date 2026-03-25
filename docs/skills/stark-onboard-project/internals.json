@@ -1,0 +1,16 @@
+{
+  "doc_content": {
+    "summary": "End-to-end project bootstrapping skill that automates git initialization, GitHub repository creation in the GetEvinced org, GitHub App connections, and Claude Code environment setup.",
+    "key_features": [
+      "Idempotent execution phases allowing safe re-runs and partial setups",
+      "Automated project type detection for tailored .gitignore and CLAUDE.md files",
+      "Integration with github_app.py for JWT-based GitHub App token management",
+      "Automatic CODEOWNERS generation and standardized repo topic assignment"
+    ],
+    "usage_examples": [
+      "stark-onboard-project",
+      "stark-onboard-project /path/to/my/project"
+    ]
+  },
+  "alt_text": "A technical flowchart and architecture visualization for the stark-onboard-project skill, detailing git initialization, GitHub repository creation, GitHub App connections, and Claude Code bootstrapping, with failure modes and observability metrics."
+}

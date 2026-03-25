@@ -1,0 +1,407 @@
+<html lang="en">
+<head>
+  
+  <title>Skill Visualization: stark-review-improvement (Internals)</title>
+  <style>
+    /*
+     * Stark Skills — Shared Design System CSS
+     *
+     * Foundation styles for LLM-generated HTML skill visualizations.
+     * LLMs embed this inline and may extend with additional styles.
+     * All colors pass WCAG AA 4.5:1 contrast ratio.
+     *
+     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+     */
+
+    /* === Reset & Base === */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #fafafa;
+      color: #1a1a1a;
+      line-height: 1.5;
+    }
+
+    /* === Header === */
+    .header { text-align: center; padding: 36px 20px 16px; }
+    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+    .header .scope {
+      display: inline-block; font-size: 10px; font-weight: 600;
+      background: #eff6ff; color: #1e40af;
+      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+    }
+
+    /* === Container === */
+    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+    /* === Section Title === */
+    .section-title {
+      font-size: 14px; font-weight: 700; color: #666;
+      text-transform: uppercase; letter-spacing: 1px;
+      margin: 32px 0 16px; padding-bottom: 6px;
+      border-bottom: 2px solid #e5e7eb;
+    }
+
+    /* === Node Types === */
+    .node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; }
+    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+    .node-desc { font-size: 10px; opacity: 0.8; }
+
+    .node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+    .node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+    .node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+    .node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
+    .node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
+
+    /* === Flow Layout === */
+    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+    .flow-step {
+      display: flex; align-items: stretch;
+      width: 100%; max-width: 860px; min-height: 76px;
+    }
+    .flow-lane-left {
+      width: 180px; display: flex;
+      align-items: center; justify-content: flex-end;
+      padding-right: 18px;
+    }
+    .flow-lane-center {
+      width: 500px; display: flex;
+      align-items: center; justify-content: center; flex-direction: column;
+    }
+    .flow-lane-right {
+      width: 180px; display: flex;
+      align-items: center; padding-left: 18px;
+    }
+    .annotation {
+      font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+    }
+    .annotation strong { color: #444; }
+
+    /* === Arrows === */
+    .arrow-down {
+      width: 2px; height: 20px; background: #cbd5e1;
+      margin: 0 auto; position: relative;
+    }
+    .arrow-down::after {
+      content: ''; position: absolute; bottom: -4px; left: -4px;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid #cbd5e1;
+    }
+    .arrow-container {
+      display: flex; justify-content: center;
+      width: 100%; max-width: 860px;
+    }
+    .arrow-container .flow-lane-center {
+      display: flex; justify-content: center;
+    }
+
+    /* === Cards === */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px; margin-top: 16px;
+    }
+    .card { padding: 16px; border-radius: 8px; }
+    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+    .card p  { font-size: 11px; line-height: 1.6; }
+
+    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+    .card-blue h3 { color: #1e40af; }
+    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+    .card-green h3 { color: #059669; }
+    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+    .card-purple h3 { color: #7c3aed; }
+    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+    .card-amber h3 { color: #92400e; }
+    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+    .card-dark h3 { color: #333333; }
+    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+    .card-red h3 { color: #dc2626; }
+
+    /* === Data Tables === */
+    .data-table {
+      width: 100%; max-width: 860px; margin: 16px auto;
+      border-collapse: collapse; font-size: 11px;
+    }
+    .data-table th {
+      background: #f3f4f6; padding: 8px 12px; text-align: left;
+      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+    }
+    .data-table td {
+      padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+    }
+
+    /* === Tags === */
+    .tag {
+      display: inline-block; font-size: 9px; font-weight: 600;
+      padding: 2px 8px; border-radius: 3px;
+    }
+    .tag-phase    { background: #dbeafe; color: #1e40af; }
+    .tag-decision { background: #ede9fe; color: #5b21b6; }
+    .tag-failure  { background: #fee2e2; color: #991b1b; }
+    .tag-config   { background: #d1fae5; color: #065f46; }
+    .tag-output   { background: #fef3c7; color: #92400e; }
+    .tag-external { background: #f3f4f6; color: #666666; }
+
+    /* === Legend === */
+    .legend {
+      display: flex; gap: 16px; justify-content: center;
+      margin: 16px 0 24px; flex-wrap: wrap;
+    }
+    .legend-item {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 10px; color: #666;
+    }
+    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+    /* === Summary Grid === */
+    .summary-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px; margin-top: 16px;
+    }
+    .summary-card { padding: 16px; border-radius: 8px; background: #ffffff; border: 1px solid #e5e7eb;}
+    .summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; color: #1f2937; }
+    .summary-card p  { font-size: 11px; line-height: 1.5; color: #4b5563;}
+    .summary-card code { font-size: 10px; background: #f3f4f6; padding: 2px 4px; border-radius: 3px; color: #ef4444; }
+
+    /* === Footer === */
+    .footer {
+      text-align: center; padding: 20px;
+      font-size: 10px; color: #999;
+    }
+    
+    .code-block {
+      background: #1e293b; color: #e2e8f0; font-family: monospace;
+      font-size: 11px; padding: 12px; border-radius: 6px; overflow-x: auto;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>stark-review-improvement</h1>
+    <div class="sub">Internals Architecture & Data Flow</div>
+    <div class="scope">Complexity: Medium (192 lines)</div>
+    <p class="sub" style="margin-top: 12px; max-width: 600px; margin-left: auto; margin-right: auto;">
+      Closes the feedback loop on stark-skills: reads prompt improvement assessments, makes targeted edits to prompt/orchestrator files, and commits changelog entries.
+    </p>
+  </div>
+
+  <div class="container">
+    
+    <!-- Environment Context -->
+    <h2 class="section-title">Environment Constants</h2>
+    <div class="summary-grid">
+      <div class="summary-card">
+        <h3>Repository & Config</h3>
+        <p><code>STARK_REPO</code>: ~/git/Evinced/stark-skills</p>
+        <p><code>CONFIG</code>: $STARK_REPO/global/config.json</p>
+        <p><code>ORG_CONFIG</code>: $STARK_REPO/org/evinced/config.json</p>
+      </div>
+      <div class="summary-card">
+        <h3>Target Sources</h3>
+        <p><code>PROMPTS</code>: $STARK_REPO/global/prompts</p>
+        <p><code>SCRIPTS</code>: $STARK_REPO/scripts</p>
+      </div>
+      <div class="summary-card">
+        <h3>Tracking & Logs</h3>
+        <p><code>HISTORY</code>: ~/.claude/code-review/history</p>
+        <p><code>CHANGELOG</code>: $STARK_REPO/docs/prompt-changelog.md</p>
+      </div>
+    </div>
+
+    <!-- Data Flow Diagram -->
+    <h2 class="section-title">Execution Flow (Internals)</h2>
+    
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot node-phase"></div> Phase / Action</div>
+      <div class="legend-item"><div class="legend-dot node-decision"></div> Decision Point</div>
+      <div class="legend-item"><div class="legend-dot node-output"></div> Artifact Generation</div>
+      <div class="legend-item"><div class="legend-dot node-failure"></div> Error State</div>
+    </div>
+
+    <div class="flow">
+      <!-- Phase 1.1 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">Look in <strong>Context</strong> or fallback to <strong>~/.claude/code-review/history</strong></div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Phase 1: Extract Assessment</div>
+            <div class="node-desc">Locate 'Prompt Improvement Assessment' from context or prompt-assessment.md</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-failure" style="padding: 8px;">
+            <div class="node-desc">Error if missing</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 1.2 & 1.3 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">Classify: <code>prompt-edit</code>, <code>orchestrator-edit</code>, <code>config-edit</code>, or <code>no-action</code></div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision">
+            <div class="node-title">Parse Action Items & Confirm</div>
+            <div class="node-desc">Present numbered list of proposed changes to user. Await approval.</div>
+          </div>
+        </div>
+        <div class="flow-lane-right"></div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 2 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">For each approved action item (in order)</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Phase 2: Apply Targeted Changes</div>
+            <div class="node-desc">Apply edits depending on classification</div>
+          </div>
+        </div>
+        <div class="flow-lane-right"></div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 3 -->
+      <div class="flow-step">
+        <div class="flow-lane-left"></div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Phase 3: Validate Updates</div>
+            <div class="node-desc">Check markdown, compile multi_review.py, parse JSON config, show git diff</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+           <div class="annotation">Ensure edits didn't break functionality or schemas.</div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 4 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">Create/Append markdown table. Copy assessment file if new.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-output">
+            <div class="node-title">Phase 4: Log the Learning</div>
+            <div class="node-desc">Write to $STARK_REPO/docs/prompt-changelog.md & History</div>
+          </div>
+        </div>
+        <div class="flow-lane-right"></div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 5 -->
+      <div class="flow-step">
+        <div class="flow-lane-left"></div>
+        <div class="flow-lane-center">
+          <div class="node node-phase" style="background: #047857;">
+            <div class="node-title">Phase 5: Commit (Local Only)</div>
+            <div class="node-desc">git add -A && git commit -m "...". DO NOT push automatically.</div>
+          </div>
+        </div>
+        <div class="flow-lane-right"></div>
+      </div>
+    </div>
+
+    <!-- Targeted Edit Types Details -->
+    <h2 class="section-title">Edit Implementations</h2>
+    <div class="card-grid">
+      <div class="card card-blue">
+        <h3>Prompt Edits</h3>
+        <p><strong>Target:</strong> <code>$PROMPTS/{agent}/*.md</code></p>
+        <p><strong>Rules:</strong> Minimal changes. Retain headings and structure. If adding exclusions, add to the existing matching section rather than creating new sections. <code>agent.md</code> handles diff scoping; domain prompts handle domain logic.</p>
+      </div>
+      <div class="card card-purple">
+        <h3>Orchestrator Edits</h3>
+        <p><strong>Target:</strong> <code>$SCRIPTS/multi_review.py</code></p>
+        <p><strong>Rules:</strong> Surgical edits only (e.g., injecting variables like <code>{base}</code> or fixing deduplication). Requires adding tests if logic changes. Must maintain backward compatibility.</p>
+      </div>
+      <div class="card card-green">
+        <h3>Config Edits</h3>
+        <p><strong>Target:</strong> <code>config.json</code> (Global/Org)</p>
+        <p><strong>Rules:</strong> Add new fields (e.g., <code>disabled_paths</code>) with empty/null defaults. Document inline or in README. Ensure global schema supports the organization overrides.</p>
+      </div>
+    </div>
+
+    <!-- Common Fixes Mapping -->
+    <h2 class="section-title">Common Issue Mapping</h2>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Observed Issue</th>
+          <th>Edit Target</th>
+          <th>Required Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Agent reviews entire codebase instead of diff</td>
+          <td><span class="tag tag-phase">prompt-edit</span> <code>agent.md</code></td>
+          <td>Replace hardcoded <code>main</code> with <code>&lt;base&gt;</code> in "How You Receive Context".</td>
+        </tr>
+        <tr>
+          <td>Agent reviews managed/generated files</td>
+          <td><span class="tag tag-phase">prompt-edit</span> Domain prompt</td>
+          <td>Add "Skip files in: {path patterns}" to top instructions.</td>
+        </tr>
+        <tr>
+          <td>Agent doesn't receive `base` reference</td>
+          <td><span class="tag tag-decision">orchestrator-edit</span> <code>multi_review.py</code></td>
+          <td>Inject <code>{base}</code> into prompt string in <code>_run_subagent()</code>.</td>
+        </tr>
+        <tr>
+          <td>Cross-domain duplicate findings</td>
+          <td><span class="tag tag-decision">orchestrator-edit</span> <code>multi_review.py</code></td>
+          <td>Add cross-agent dedup by file+line proximity after <code>_parse_findings()</code>.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- Strict Constraints & Observability -->
+    <h2 class="section-title">Engine Constraints & Observability</h2>
+    <div class="summary-grid">
+      <div class="summary-card">
+        <h3>Core Constraints</h3>
+        <p>1. <strong>Never</strong> rewrite entire files; targeted surgical edits only.</p>
+        <p>2. <strong>Never</strong> remove instructions; add constraints instead.</p>
+        <p>3. <strong>One concern per edit.</strong> Do not bundle unrelated improvements.</p>
+        <p>4. <strong>Diff Review Required:</strong> Show git diffs prior to finalizing local commit.</p>
+      </div>
+      <div class="summary-card">
+        <h3>Skill Metrics (Observability)</h3>
+        <p>Standard timing and checkpoint tracking from <code>observability.md</code>, plus:</p>
+        <ul style="font-size: 11px; margin-left: 16px; margin-top: 8px; color: #4b5563;">
+          <li><strong>Action items:</strong> total parsed, approved, applied (by category).</li>
+          <li><strong>Validation:</strong> syntax checks passed vs failed.</li>
+          <li><strong>Files modified:</strong> count by type (prompt, orchestrator, config).</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="footer">
+    Generated via Gemini CLI • stark-review-improvement Internals Visualization
+  </div>
+
+</body>
+</html>

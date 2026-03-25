@@ -1,0 +1,19 @@
+{
+  "doc_content": {
+    "summary": "stark-review is a complex orchestration skill that performs parallel, multi-agent code reviews on Pull Requests. It dispatches 18 specialized agents (3 LLMs across 6 domains), aggregates and classifies their findings to filter out noise, and runs an autonomous loop to fix code, run regression tests, and push commits. It finalizes by posting a high-signal summary to the PR and auto-creating GitHub tickets for unfixed severe issues.",
+    "key_features": [
+      "Parallel multi-agent dispatch (Claude, Codex, Gemini via 6 domain prompts).",
+      "Autonomous fix-test-push loop (up to a configurable number of rounds).",
+      "Sophisticated noise filtering and finding classification (Fix vs False Positive).",
+      "Detailed observability with 5-minute checkpoints and per-phase metrics.",
+      "Automatic generation of GitHub Bug Issues for unresolved high-severity findings."
+    ],
+    "usage_examples": [
+      "/stark-review",
+      "/stark-review 104",
+      "/stark-review 104 --rounds 5",
+      "/stark-review --dry-run"
+    ]
+  },
+  "alt_text": "Architecture and workflow diagram for the stark-review skill showing the multi-agent code review process, including setup, the autonomous review-fix loop, summary generation, and GitHub posting."
+}

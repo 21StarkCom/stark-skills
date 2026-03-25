@@ -1,0 +1,18 @@
+{
+  "doc_content": {
+    "summary": "stark-phase-execute is a fully autonomous execution engine that takes a development plan and implements it end-to-end. It automatically fetches (or decomposes) tasks, runs an implementation loop for each issue including semantic commits, PR creation, multi-agent review with autonomous fix rounds, and immediate merging. Post-execution, it handles regression testing, semantic versioning, deployment, and performance logging without any user intervention.",
+    "key_features": [
+      "Zero-intervention task implementation loop (checkout -> implement -> test -> commit).",
+      "Auto-decomposition of .md plans into GitHub issues if no tasks currently exist.",
+      "Integrated multi-agent PR review process with autonomous, isolated fix rounds.",
+      "Automatic end-of-phase regression testing, CHANGELOG generation, and semantic release.",
+      "Post-execution dashboard highlighting success rates, agent scorecards, and prompt improvement flags."
+    ],
+    "usage_examples": [
+      "stark-phase-execute 2026-03-23-stark-signals",
+      "stark-phase-execute docs/superpowers/plans/2026-03-23-stark-signals.md --dry-run",
+      "stark-phase-execute current-plan-slug --start-from 3 --skip-deploy"
+    ]
+  },
+  "alt_text": "A user-focused flowchart and UI visualization of the stark-phase-execute workflow, detailing the autonomous lifecycle from initialization and task fetching to the implementation subagent loop, multi-agent review, merging, release, and final dashboard generation."
+}

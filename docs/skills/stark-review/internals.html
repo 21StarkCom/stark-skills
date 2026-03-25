@@ -1,0 +1,478 @@
+<html lang="en">
+<head>
+  
+  
+  <title>stark-review - Internals Visualization</title>
+  <style>
+/*
+ * Stark Skills — Shared Design System CSS
+ *
+ * Foundation styles for LLM-generated HTML skill visualizations.
+ * LLMs embed this inline and may extend with additional styles.
+ * All colors pass WCAG AA 4.5:1 contrast ratio.
+ *
+ * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+ */
+
+/* === Reset & Base === */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+
+/* === Header === */
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
+
+/* === Container === */
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+/* === Section Title === */
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+/* === Node Types === */
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
+
+.node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+.node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+.node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+.node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
+.node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
+
+/* === Flow Layout === */
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 180px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px; text-align: right;
+}
+.flow-lane-center {
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 180px; display: flex;
+  align-items: center; padding-left: 18px; text-align: left;
+}
+.annotation {
+  font-size: 10px; color: #666; max-width: 160px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
+
+/* === Arrows === */
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
+
+/* === Cards === */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
+
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
+
+/* === Data Tables === */
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
+
+/* === Tags === */
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
+
+/* === Legend === */
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+/* === Summary Grid === */
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
+
+/* === Winner Badge === */
+.winner-badge {
+  display: inline-block; font-size: 12px; color: #555555;
+  font-weight: 600; padding: 2px 10px; border-radius: 4px;
+  background: #f9fafb; border: 1px solid #d1d5db;
+}
+
+/* === Footer === */
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>stark-review</h1>
+  <div class="sub">Multi-agent PR code review using 3 LLMs × N domains with autonomous fix loop</div>
+  <div class="scope">INTERNALS &amp; ARCHITECTURE</div>
+</div>
+
+<div class="container">
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot node-phase"></div> Main Phase / Flow</div>
+    <div class="legend-item"><div class="legend-dot node-decision"></div> Logic / Classification</div>
+    <div class="legend-item"><div class="legend-dot node-external"></div> External Script / API</div>
+    <div class="legend-item"><div class="legend-dot node-config"></div> Local Config</div>
+    <div class="legend-item"><div class="legend-dot node-output"></div> Artifact / Output</div>
+    <div class="legend-item"><div class="legend-dot node-failure"></div> Fallback / Warning</div>
+  </div>
+
+  <h2 class="section-title">Execution Workflow</h2>
+  
+  <div class="flow">
+    <!-- Setup Phase -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation">Checks <strong>--repo</strong> or git remotes. Uses GitHub API to fetch PR context.</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width: 100%;">
+          <div class="node-title">Phase 1: Setup & Environment</div>
+          <div class="node-desc">Fetch metadata, sync commits, determine mode</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="node node-external">
+          <div class="node-title">github_app.py token</div>
+          <div class="node-desc">Auth as stark-claude</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="node node-config">
+          <div class="node-title">.code-review/config.json</div>
+          <div class="node-desc">test_command check</div>
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width: 100%;">
+          <div class="node-title">Determine Execution Mode</div>
+          <div class="node-desc">Forked PR or No test_command = Review-only. Otherwise Full Mode.</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation">If <strong>auth_failed</strong>: degrade to local git diffs. Skip API fetching.</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><code>git worktree add /tmp/review-{slug}-pr{id}</code> to protect original working dir.</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width: 100%;">
+          <div class="node-title">Isolated Worktree & Baseline</div>
+          <div class="node-desc">Rebase PR over base. Capture test failure baseline.</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="node node-failure">
+          <div class="node-title">Rebase Conflict</div>
+          <div class="node-desc">Abort & Review un-rebased</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Review Loop Phase -->
+    <div class="flow-step" style="margin-top: 10px; margin-bottom: 10px;">
+      <div class="flow-lane-center" style="width: 100%; max-width: 860px; border: 2px dashed #1e40af; border-radius: 8px; padding: 20px; flex-direction: column;">
+        
+        <div style="font-size: 12px; font-weight: 700; color: #1e40af; margin-bottom: 16px; text-transform: uppercase;">Phase 2: Review-Fix Loop (Max N Rounds)</div>
+
+        <div class="flow" style="width: 100%;">
+          <div class="flow-step" style="min-height: 60px;">
+            <div class="flow-lane-left">
+              <div class="annotation"><strong>18 sub-agents</strong> running in parallel. Posts raw findings automatically.</div>
+            </div>
+            <div class="flow-lane-center">
+              <div class="node node-external" style="width: 100%;">
+                <div class="node-title">multi_review.py --json-only --post-raw</div>
+                <div class="node-desc">Dispatches Claude, Codex, Gemini × 6 Domains</div>
+              </div>
+            </div>
+            <div class="flow-lane-right">
+              <div class="node node-output">
+                <div class="node-title">JSON Results</div>
+                <div class="node-desc">rounds[0].results[]</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+          <div class="flow-step" style="min-height: 60px;">
+            <div class="flow-lane-left">
+              <div class="annotation">Cross-reference agents. 2+ flagging same file = <strong>high_confidence</strong>.</div>
+            </div>
+            <div class="flow-lane-center">
+              <div class="node node-decision" style="width: 100%;">
+                <div class="node-title">Classify Findings</div>
+                <div class="node-desc">Categorize as: fix, recurring, false_positive, noise, ignored</div>
+              </div>
+            </div>
+            <div class="flow-lane-right"></div>
+          </div>
+
+          <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+          <div class="flow-step" style="min-height: 60px;">
+            <div class="flow-lane-left"></div>
+            <div class="flow-lane-center">
+              <div class="node node-phase" style="width: 100%; background: #0369a1;">
+                <div class="node-title">Apply Fixes</div>
+                <div class="node-desc">Edit worktree code for 'fix' & 'recurring' findings</div>
+              </div>
+            </div>
+            <div class="flow-lane-right"></div>
+          </div>
+
+          <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+          <div class="flow-step" style="min-height: 60px;">
+            <div class="flow-lane-left">
+              <div class="annotation">If new failures introduced, retry fix up to 3 times.</div>
+            </div>
+            <div class="flow-lane-center">
+              <div class="node node-decision" style="width: 100%; background: #0369a1;">
+                <div class="node-title">Build & Test Validation</div>
+                <div class="node-desc">Compare against baseline_failures</div>
+              </div>
+            </div>
+            <div class="flow-lane-right">
+              <div class="node node-failure">
+                <div class="node-title">Regression Check</div>
+                <div class="node-desc">Re-compile & run test suite</div>
+              </div>
+            </div>
+          </div>
+
+        </div> <!-- End internal loop flow -->
+
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 3 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation">Separates actionable issues from noise. Generates prompt diagnostics.</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width: 100%;">
+          <div class="node-title">Phase 3: Final Summary generation</div>
+          <div class="node-desc">Analyze misalignment, prompt quality, summarize counts</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+         <div class="node node-output">
+          <div class="node-title">Markdown Summary</div>
+          <div class="node-desc">Headline counts + tables</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 4 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation">Uses user's native GH auth for Bug Issues. Uses App auth for comments.</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width: 100%;">
+          <div class="node-title">Phase 4: Post & Persist</div>
+          <div class="node-desc">Post orchestrator summary to PR. Create GH Issues.</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="node node-external" style="margin-bottom: 5px;">
+          <div class="node-title">gh api /issues</div>
+          <div class="node-desc">stark-review labels</div>
+        </div>
+        <div class="node node-external">
+          <div class="node-title">github_projects.py</div>
+          <div class="node-desc">Inc Review Rounds</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+    
+    <!-- Phase 5 -->
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width: 100%; background: #4b5563;">
+          <div class="node-title">Phase 5: Cleanup</div>
+          <div class="node-desc">git worktree remove, git branch -D</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+
+  </div>
+
+  <h2 class="section-title">Component Architecture</h2>
+  
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>Orchestrator Skill</h3>
+      <p>The primary stark-review skill sequence that handles git isolation, state management, round logic, and post-processing.</p>
+      <p style="margin-top: 8px;"><strong>Observability:</strong> Forces structured Task creation, timestamped log lines, and 5-min checkpoints directly to Claude Code output.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>multi_review.py</h3>
+      <p>Python dispatcher handling parallel execution. Dispatches 3 agents via subprocess. Sub-agents run isolated prompts on local diffs.</p>
+      <p style="margin-top: 8px;"><strong>Flags:</strong> <code>claude -p -</code>, <code>codex exec review --json</code>, <code>gemini -p &lt;prompt&gt; -o json</code></p>
+    </div>
+    <div class="card card-purple">
+      <h3>Classification Logic</h3>
+      <p>Categorizes raw JSON findings dynamically against the checked-out branch code.</p>
+      <ul style="padding-left: 16px; margin-top: 4px; font-size: 11px; line-height: 1.6;">
+        <li><span class="tag tag-failure">fix</span> Target severity >= threshold AND exists</li>
+        <li><span class="tag tag-output">recurring</span> Survives multiple rounds</li>
+        <li><span class="tag tag-external">false_positive</span> Code pattern doesn't exist</li>
+        <li><span class="tag tag-external">noise</span> Subjetive/Style/Contradicted</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 class="section-title">Artifacts & Data Persistence</h2>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Path / Key</th>
+        <th>Type</th>
+        <th>Purpose / Contents</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>~/.claude/code-review/history/{org}/{repo}/{pr}/rounds.json</code></td>
+        <td><span class="tag tag-output">JSON Log</span></td>
+        <td>All rounds, findings, outcomes. Includes per-phase <code>timing</code> data (total_duration_s, dispatch_s, build_test_s) for metric extraction.</td>
+      </tr>
+      <tr>
+        <td><code>prompt-assessment.md</code></td>
+        <td><span class="tag tag-output">Markdown</span></td>
+        <td>Stored recommendations for improving agent prompts based on false positive frequency across the run.</td>
+      </tr>
+      <tr>
+        <td><code>.code-review/config.json</code></td>
+        <td><span class="tag tag-config">Workspace Config</span></td>
+        <td>Checks for <code>test_command</code> and <code>build_command</code>. Can define <code>disabled_domains</code> and <code>severity_overrides</code>.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-title">Misalignment & Noise Analysis</h2>
+  <div class="card card-amber">
+    <h3>Root Cause Resolution Loop</h3>
+    <p>A major design goal of stark-review is to <strong>shrink noise over time</strong> rather than just ignoring it. In Phase 3, false positives are analyzed against these root causes, accompanied by actionable recommendations.</p>
+    <div style="display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap;">
+      <span class="winner-badge">Missing context in CLAUDE.md</span>
+      <span class="winner-badge">Missing context in PR body</span>
+      <span class="winner-badge">Overly aggressive prompt</span>
+      <span class="winner-badge">Stack/framework mismatch</span>
+      <span class="winner-badge">Spec/design not referenced</span>
+    </div>
+  </div>
+
+</div>
+<div class="footer">
+  stark-review internals documentation • Generated for engineering audiences
+</div>
+</body>
+</html>

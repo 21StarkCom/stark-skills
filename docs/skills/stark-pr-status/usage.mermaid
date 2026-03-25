@@ -1,0 +1,18 @@
+graph TD
+    User([User Request / stark-pr-status]) --> Input{Has PR Number?}
+    Input -- Yes --> S1[Single PR Mode]
+    Input -- No --> S2[All PRs Mode]
+    
+    S1 --> Script[Run scripts/pr_status.py]
+    S2 --> Script
+    
+    API[(GitHub API)] -.-> Script
+    Hist[(stark-review History)] -.-> Script
+    
+    Script --> Output[Format Terminal Output]
+    
+    Output --> Logic{Check PR States}
+    Logic -- >7 days, 0 reviews --> Sug1[Suggest /stark-review]
+    Logic -- High noise ratio --> Sug2[Suggest /stark-review-improvement]
+    Logic -- Ready (Approved/Green) --> Sug3[Suggest /stark-pr-flow]
+    Logic -- Otherwise --> Done([Complete])

@@ -1,0 +1,18 @@
+{
+  "doc_content": {
+    "summary": "The stark-pr-status skill generates a comprehensive PR analytics dashboard by combining real-time GitHub API data with local stark-review history. It visualizes review rounds, findings by severity, signal-vs-noise ratios, and cycle times, and provides actionable suggestions based on PR health.",
+    "key_features": [
+      "Single PR detailed dashboard (timeline, participants, finding severity, noise analysis)",
+      "Repository-wide PR summary across open, closed, or merged states",
+      "Integrates GitHub metadata with historical AI review data",
+      "Actionable smart routing to other stark skills based on PR condition (e.g., stagnant PRs, noisy reviews)"
+    ],
+    "usage_examples": [
+      "/stark-pr-status",
+      "/stark-pr-status 42",
+      "/stark-pr-status --all --state open",
+      "/stark-pr-status 15 --json"
+    ]
+  },
+  "alt_text": "A visualization of the stark-pr-status skill workflow, showing inputs, script execution pulling from GitHub API and local history, output rendering modes, and smart suggestions routing based on PR conditions."
+}

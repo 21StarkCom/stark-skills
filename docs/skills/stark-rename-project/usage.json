@@ -1,0 +1,17 @@
+{
+  "doc_content": {
+    "summary": "The stark-rename-project skill safely renames a repository locally and on GitHub, automatically updating git remotes, reinstalling symlinks, and propagating the name change across all related sibling repositories in the same parent directory.",
+    "key_features": [
+      "Safe GitHub and local directory renaming",
+      "Automated reference updating across sibling repositories with auto-commit",
+      "Dry-run mode for previewing changes",
+      "Built-in idempotency and auto-resume capabilities",
+      "Intelligent regex and literal string replacement with safety exclusions"
+    ],
+    "usage_examples": [
+      "/stark-rename-project stark-review stark-skills",
+      "/stark-rename-project stark-review stark-skills --dry-run"
+    ]
+  },
+  "alt_text": "A visual workflow diagram and usage guide for the stark-rename-project skill, showing the 8-phase process from validation to summary report, including dry-run paths, artifact updates, and safety checks."
+}

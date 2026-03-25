@@ -1,0 +1,18 @@
+{
+  "doc_content": {
+    "summary": "The stark-session skill provides session lifecycle management to streamline daily workflows. It bootstraps a coding session with a tailored briefing based on git, PR state, and health checks, and reliably wraps up work by running tests, merging PRs, committing documentation, and pushing code.",
+    "key_features": [
+      "Silent initialization of project context, guidelines, and memory",
+      "Automated reporting of clean/dirty git state and open PRs via a concise briefing",
+      "Non-blocking health checks, tests, and builds run at start and end of sessions",
+      "Interactive PR merging and automated document staging (with devlog integration) on session end",
+      "Graceful failure handling that prefers prompting the user over blocking execution"
+    ],
+    "usage_examples": [
+      "/stark-session",
+      "/stark-session start",
+      "/stark-session end"
+    ]
+  },
+  "alt_text": "A visualization of the stark-session skill, showing two main workflows: Start Mode for gathering context and presenting a briefing, and End Mode for running tests, merging PRs, committing docs, and pushing code."
+}

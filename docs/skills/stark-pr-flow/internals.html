@@ -1,0 +1,421 @@
+<html lang="en">
+<head>
+  
+  <title>stark-pr-flow | Internal Architecture</title>
+  <style>
+    /*
+     * Stark Skills — Shared Design System CSS
+     *
+     * Foundation styles for LLM-generated HTML skill visualizations.
+     * LLMs embed this inline and may extend with additional styles.
+     * All colors pass WCAG AA 4.5:1 contrast ratio.
+     *
+     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+     */
+
+    /* === Reset & Base === */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #fafafa;
+      color: #1a1a1a;
+      line-height: 1.5;
+    }
+
+    /* === Header === */
+    .header { text-align: center; padding: 36px 20px 16px; }
+    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+    .header .scope {
+      display: inline-block; font-size: 10px; font-weight: 600;
+      background: #eff6ff; color: #1e40af;
+      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+    }
+
+    /* === Container === */
+    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+    /* === Section Title === */
+    .section-title {
+      font-size: 14px; font-weight: 700; color: #666;
+      text-transform: uppercase; letter-spacing: 1px;
+      margin: 32px 0 16px; padding-bottom: 6px;
+      border-bottom: 2px solid #e5e7eb;
+    }
+
+    /* === Node Types === */
+    .node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; }
+    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+    .node-desc { font-size: 10px; opacity: 0.9; }
+
+    .node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+    .node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+    .node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+    .node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
+    .node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+    .node-external { background: #e5e7eb; color: #444444; border: 1px dashed #9ca3af; } /* Gray — external deps */
+
+    /* === Flow Layout === */
+    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+    .flow-step {
+      display: flex; align-items: stretch;
+      width: 100%; max-width: 860px; min-height: 76px;
+    }
+    .flow-lane-left {
+      width: 220px; display: flex; flex-direction: column;
+      align-items: flex-end; justify-content: center;
+      padding-right: 18px; text-align: right;
+    }
+    .flow-lane-center {
+      width: 420px; display: flex;
+      align-items: center; justify-content: center;
+      position: relative;
+    }
+    .flow-lane-right {
+      width: 220px; display: flex; flex-direction: column;
+      align-items: flex-start; justify-content: center;
+      padding-left: 18px; text-align: left;
+    }
+    .annotation {
+      font-size: 10px; color: #555; max-width: 180px; line-height: 1.4;
+    }
+    .annotation strong { color: #333; }
+    
+    .code-snippet {
+      font-family: monospace; background: rgba(0,0,0,0.05); padding: 2px 4px; border-radius: 3px;
+    }
+
+    /* === Arrows === */
+    .arrow-down {
+      width: 2px; height: 20px; background: #cbd5e1;
+      margin: 0 auto; position: relative;
+    }
+    .arrow-down::after {
+      content: ''; position: absolute; bottom: -4px; left: -4px;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid #cbd5e1;
+    }
+    .arrow-container {
+      display: flex; justify-content: center;
+      width: 100%; max-width: 860px;
+    }
+    .arrow-container .flow-lane-center {
+      display: flex; justify-content: center;
+    }
+
+    /* === Cards === */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px; margin-top: 16px;
+    }
+    .card { padding: 16px; border-radius: 8px; }
+    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+    .card p, .card ul { font-size: 11px; line-height: 1.6; }
+    .card ul { padding-left: 16px; margin-top: 4px; }
+
+    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+    .card-blue h3 { color: #1e40af; }
+    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+    .card-green h3 { color: #059669; }
+    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+    .card-purple h3 { color: #7c3aed; }
+    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+    .card-amber h3 { color: #92400e; }
+    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+    .card-dark h3 { color: #333333; }
+    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+    .card-red h3 { color: #dc2626; }
+
+    /* === Data Tables === */
+    .data-table {
+      width: 100%; max-width: 860px; margin: 16px auto;
+      border-collapse: collapse; font-size: 11px;
+    }
+    .data-table th {
+      background: #f3f4f6; padding: 8px 12px; text-align: left;
+      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+    }
+    .data-table td {
+      padding: 8px 12px; border-bottom: 1px solid #f3f4f6; vertical-align: top;
+    }
+    .data-table tr:hover { background: #fafafa; }
+
+    /* === Tags === */
+    .tag {
+      display: inline-block; font-size: 9px; font-weight: 600;
+      padding: 2px 8px; border-radius: 3px; margin: 2px;
+    }
+    .tag-phase    { background: #dbeafe; color: #1e40af; }
+    .tag-decision { background: #ede9fe; color: #5b21b6; }
+    .tag-failure  { background: #fee2e2; color: #991b1b; }
+    .tag-config   { background: #d1fae5; color: #065f46; }
+    .tag-output   { background: #fef3c7; color: #92400e; }
+    .tag-external { background: #f3f4f6; color: #666666; }
+
+    /* === Legend === */
+    .legend {
+      display: flex; gap: 16px; justify-content: center;
+      margin: 16px 0 24px; flex-wrap: wrap;
+    }
+    .legend-item {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 10px; color: #666;
+    }
+    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+    /* === Footer === */
+    .footer {
+      text-align: center; padding: 30px 20px 20px;
+      font-size: 10px; color: #999; border-top: 1px solid #eee; margin-top: 40px;
+    }
+  </style>
+</head>
+<body>
+
+  <header class="header">
+    <h1>stark-pr-flow Architecture</h1>
+    <div class="sub">End-to-end pull request automation with dual-auth code reviews</div>
+    <div class="scope">Internal Data Flow & Architecture Focus</div>
+  </header>
+
+  <div class="container">
+    
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot node-phase"></div> Workflow Execution</div>
+      <div class="legend-item"><div class="legend-dot node-decision"></div> Validations & Gates</div>
+      <div class="legend-item"><div class="legend-dot node-config"></div> Auth Context</div>
+      <div class="legend-item"><div class="legend-dot node-output"></div> Artifacts Generated</div>
+      <div class="legend-item"><div class="legend-dot node-external"></div> Git / Remote APIs</div>
+      <div class="legend-item"><div class="legend-dot node-failure"></div> Fallback / Error</div>
+    </div>
+
+    <h2 class="section-title">Execution Pipeline</h2>
+    <div class="flow">
+      
+      <!-- Flow Step 1: Pre-reqs -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">Requires <strong>feature branch</strong><br>and <strong>clean working tree</strong>.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision">
+            <div class="node-title">Prerequisite Checks</div>
+            <div class="node-desc">Branch != main, working tree clean</div>
+          </div>
+        </div>
+        <div class="flow-lane-right"></div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Flow Step 2: Push -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">Resolves diverged branches automatically via <code>fetch & rebase</code>.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-external">
+            <div class="node-title">Prepare Branch</div>
+            <div class="node-desc">git push -u origin $BRANCH</div>
+          </div>
+        </div>
+        <div class="flow-lane-right"></div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Flow Step 3: Analysis -->
+      <div class="flow-step">
+        <div class="flow-lane-left"></div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Analyze Changes</div>
+            <div class="node-desc">git log & git diff main...$BRANCH</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-output">
+            <div class="node-title">Generated Content</div>
+            <div class="node-desc">Title & MD PR Body</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Flow Step 4: PR Creation -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="node node-config">
+            <div class="node-title">User Native Auth</div>
+            <div class="node-desc">unset GH_TOKEN (Uses PAT)</div>
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Create PR</div>
+            <div class="node-desc">gh pr create (with optional --draft)</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">Captures <strong>$PR_NUM</strong></div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Flow Step 5: Bot Review -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="node node-config">
+            <div class="node-title">Bot Auth Payload</div>
+            <div class="node-desc">via github_app.py token</div>
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Self Code Review</div>
+            <div class="node-desc">Execute scripts/stark_claude.py</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-output">
+            <div class="node-title">PR Comment</div>
+            <div class="node-desc">Posted by stark-claude[bot]</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Flow Step 6: Documentation Check -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">Queries <code>project-config.json</code><br>Uses Bot Token</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision">
+            <div class="node-title">Docs State Check (Advisory)</div>
+            <div class="node-desc">Warns if Docs are Not Started/Drafted</div>
+          </div>
+        </div>
+        <div class="flow-lane-right"></div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Flow Step 7: Approval Gate -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>CRITICAL STOP:</strong><br>Wait for explicit user approval to merge.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision">
+            <div class="node-title">Present Summary & Wait</div>
+            <div class="node-desc">User Input Required</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-failure">
+            <div class="node-title">Reject / Changes</div>
+            <div class="node-desc">Halt or Loop Flow</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Flow Step 8: Merge -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="node node-config">
+            <div class="node-title">User Native Auth</div>
+            <div class="node-desc">unset GH_TOKEN (Uses PAT)</div>
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-external">
+            <div class="node-title">Squash & Merge</div>
+            <div class="node-desc">gh pr merge --squash --admin</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">Post-merge: checkout main, pull, delete remote & local branch.</div>
+        </div>
+      </div>
+
+    </div>
+
+    <h2 class="section-title">Architectural Principles</h2>
+    <div class="card-grid">
+      <div class="card card-purple">
+        <h3>Dual-Auth Boundaries</h3>
+        <p>The workflow intentionally splits authentication modes to prevent bot permission escalation:</p>
+        <ul>
+          <li><strong>User PAT:</strong> Creating PRs, merging PRs (bypasses branch protections).</li>
+          <li><strong>Bot Token:</strong> Scoped exclusively to reading code diffs, querying project state, and posting PR comments natively as <code>stark-claude[bot]</code>.</li>
+        </ul>
+      </div>
+      <div class="card card-blue">
+        <h3>Extension & Hook Points</h3>
+        <p>Key areas intended for internal developers to modify or extend:</p>
+        <ul>
+          <li><strong>stark_claude.py:</strong> The diff analysis and inline-commenting engine.</li>
+          <li><strong>github_projects.py:</strong> Advisory check validations against custom org-level project properties (e.g., Documentation State).</li>
+        </ul>
+      </div>
+      <div class="card card-dark">
+        <h3>Observability Contract</h3>
+        <p>Complies with <code>observability.md</code>, generating telemetry metrics for:</p>
+        <ul>
+          <li>Push duration and conflict hit rate.</li>
+          <li>PR creation and auto-generation token usage.</li>
+          <li>Self-review execution duration.</li>
+          <li>Admin bypass telemetry via <code>--admin</code> merge strategy.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h2 class="section-title">Failure Modes & Recovery Matrix</h2>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Failure Condition</th>
+          <th>Detection Mechanism</th>
+          <th>Automated Recovery / Manual Action Required</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="tag tag-failure">Dirty Tree / Main Branch</span></td>
+          <td>Pre-flight checks using <code>git status</code> and <code>git branch</code></td>
+          <td><strong>Abort execution.</strong> Requires user to commit, stash, or branch out.</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-failure">Git Push Diverged</span></td>
+          <td>Exit code from <code>git push -u origin</code></td>
+          <td><strong>Automated recovery:</strong> Execute <code>git fetch && git rebase origin/main</code>. Requires manual conflict resolution if rebase fails.</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-failure">GH Auth Failure</span></td>
+          <td>Exit code from <code>gh pr create</code></td>
+          <td>Verify <code>gh auth status</code>. Ensure user's PAT is active, abort if token is invalid.</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-failure">Bot Script Failure</span></td>
+          <td>Exception in Python virtual environment</td>
+          <td>Check dependencies (PyJWT, requests, cryptography). Ensure execution path uses <code>scripts/.venv/bin/python3</code>.</td>
+        </tr>
+      </tbody>
+    </table>
+
+  </div>
+
+  <footer class="footer">
+    Generated via Gemini CLI • Stark Skills Internal Architecture Documentation
+  </footer>
+
+</body>
+</html>

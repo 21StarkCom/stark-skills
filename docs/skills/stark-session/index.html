@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>stark-session — Internal Architecture</title>
+<style>
+/* === Reset & Base === */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+
+/* === Header === */
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
+
+/* === Container === */
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+/* === Section Title === */
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+/* === Node Types === */
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
+
+.node-phase    { background: #1e40af; color: #ffffff; }
+.node-decision { background: #7c3aed; color: #ffffff; }
+.node-failure  { background: #dc2626; color: #ffffff; }
+.node-config   { background: #047857; color: #ffffff; }
+.node-output   { background: #f59e0b; color: #1a1a1a; }
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
+
+/* === Flow Layout === */
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 180px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 180px; display: flex;
+  align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
+
+/* === Arrows === */
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
+
+/* === Cards === */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
+.card ul { font-size: 11px; line-height: 1.6; margin-left: 14px; }
+.card li { margin-bottom: 2px; }
+.card code { font-size: 10px; background: rgba(0,0,0,0.06); padding: 1px 4px; border-radius: 3px; }
+
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
+
+/* === Data Tables === */
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
+
+/* === Tags === */
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
+
+/* === Legend === */
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+/* === Summary Grid === */
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
+
+/* === Footer === */
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
+
+/* === Extension: Mode Toggle === */
+.mode-tabs {
+  display: flex; justify-content: center; gap: 8px; margin: 24px 0 8px;
+}
+.mode-tab {
+  font-size: 12px; font-weight: 600; padding: 6px 20px;
+  border-radius: 6px; cursor: pointer; border: 2px solid #e5e7eb;
+  background: #fff; color: #666; transition: all 0.15s;
+}
+.mode-tab.active { border-color: #1e40af; background: #eff6ff; color: #1e40af; }
+.mode-tab:hover:not(.active) { border-color: #cbd5e1; }
+
+.mode-section { display: none; }
+.mode-section.active { display: block; }
+
+/* === Extension: Config Cascade === */
+.cascade {
+  display: flex; align-items: center; justify-content: center;
+  gap: 0; margin: 16px 0;
+}
+.cascade-level {
+  padding: 10px 16px; border-radius: 6px; text-align: center;
+  font-size: 11px; min-width: 140px;
+}
+.cascade-arrow {
+  font-size: 16px; color: #cbd5e1; padding: 0 6px;
+}
+.cascade-global { background: #f3f4f6; border: 1px solid #d1d5db; color: #333; }
+.cascade-org { background: #eff6ff; border: 1px solid #93c5fd; color: #1e40af; }
+.cascade-repo { background: #dbeafe; border: 1px solid #3b82f6; color: #1e3a8a; font-weight: 600; }
+
+/* === Extension: Data Source Badges === */
+.source-badge {
+  display: inline-block; font-size: 8px; font-weight: 700;
+  padding: 1px 5px; border-radius: 2px; margin-left: 4px;
+  vertical-align: middle; text-transform: uppercase;
+}
+.source-git { background: #fef3c7; color: #92400e; }
+.source-gh  { background: #dbeafe; color: #1e40af; }
+.source-fs  { background: #d1fae5; color: #065f46; }
+.source-cfg { background: #ede9fe; color: #5b21b6; }
+
+/* === Extension: Metric Pill === */
+.metric-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 9px; padding: 2px 8px; border-radius: 10px;
+  background: #f3f4f6; color: #555; margin: 2px;
+}
+.metric-pill .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+}
+.dot-time { background: #3b82f6; }
+.dot-count { background: #059669; }
+.dot-bool { background: #f59e0b; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>stark-session</h1>
+  <div class="sub">Session lifecycle management — start (context + briefing) and end (test + merge + push)</div>
+  <div class="scope">INTERNALS &mdash; Architecture &amp; Data Flow</div>
+</div>
+
+<div class="container">
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#1e40af"></div> Phase</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed"></div> Decision</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#047857"></div> Config</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> Output</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e5e7eb; border:1px dashed #9ca3af"></div> External</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#dc2626"></div> Failure</div>
+  </div>
+
+  <!-- Config Cascade -->
+  <div class="section-title">Config Resolution Order</div>
+  <div class="cascade">
+    <div class="cascade-level cascade-global">
+      <strong>Global</strong><br>
+      <code style="font-size:9px">~/.claude/code-review/config.json</code>
+    </div>
+    <div class="cascade-arrow">&rarr;</div>
+    <div class="cascade-level cascade-org">
+      <strong>Org</strong><br>
+      <code style="font-size:9px">../parent/.code-review/config.json</code>
+    </div>
+    <div class="cascade-arrow">&rarr;</div>
+    <div class="cascade-level cascade-repo">
+      <strong>Repo</strong> (wins)<br>
+      <code style="font-size:9px">.code-review/config.json</code>
+    </div>
+  </div>
+  <p style="text-align:center;font-size:10px;color:#888;margin-top:4px">
+    Later levels override earlier. Only the <code>session</code> block is merged.
+    <code>test_command</code> falls back to top-level if <code>session.test_command</code> is null.
+  </p>
+
+  <!-- Config Keys -->
+  <table class="data-table" style="margin-top:16px">
+    <thead>
+      <tr><th>Key</th><th>Default</th><th>Used In</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>health_checks</code></td><td><code>[]</code></td><td><span class="tag tag-phase">start</span></td><td>Array of shell commands, each run independently</td></tr>
+      <tr><td><code>build_command</code></td><td><code>null</code></td><td><span class="tag tag-phase">end</span></td><td>Runs after test_command in end mode</td></tr>
+      <tr><td><code>test_command</code></td><td><code>null</code></td><td><span class="tag tag-phase">end</span></td><td>Fallback: top-level <code>test_command</code></td></tr>
+      <tr><td><code>doc_paths</code></td><td><code>["docs/", "CLAUDE.md"]</code></td><td><span class="tag tag-phase">end</span></td><td>Staged via <code>git add</code></td></tr>
+      <tr><td><code>devlog_path</code></td><td><code>null</code></td><td><span class="tag tag-phase">end</span></td><td>Enables devlog entry creation at <code>&lt;path&gt;/YYYY-MM-DD.md</code></td></tr>
+      <tr><td><code>pr_merge_strategy</code></td><td><code>"squash"</code></td><td><span class="tag tag-phase">end</span></td><td>Passed to <code>gh pr merge --&lt;strategy&gt;</code></td></tr>
+    </tbody>
+  </table>
+
+  <!-- Mode Toggle -->
+  <div class="mode-tabs">
+    <div class="mode-tab active" onclick="switchMode('start')">Start Mode</div>
+    <div class="mode-tab" onclick="switchMode('end')">End Mode</div>
+  </div>
+
+  <!-- ======================== START MODE ======================== -->
+  <div id="mode-start" class="mode-section active">
+    <div class="section-title">Start Mode &mdash; Data Flow</div>
+
+    <div class="flow">
+      <!-- Phase 1: Gather Context -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <strong>Data sources</strong><br>
+            <span class="source-badge source-fs">FS</span> CLAUDE.md chain<br>
+            <span class="source-badge source-fs">FS</span> Memory files<br>
+            <span class="source-badge source-cfg">CFG</span> Config hierarchy
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase" style="width:100%">
+            <div class="node-title">Phase 1 &mdash; Gather Context (silent)</div>
+            <div class="node-desc">Read CLAUDE.md chain (cwd&rarr;~), memory files, config hierarchy. Internalize, don't display.</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">
+            <span class="metric-pill"><span class="dot dot-time"></span> context_load_ms</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 2: Git State -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <strong>Commands</strong><br>
+            <span class="source-badge source-git">GIT</span> branch, status, log, stash<br>
+            <span class="source-badge source-gh">GH</span> pr list, pr view
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase" style="width:100%">
+            <div class="node-title">Phase 2 &mdash; Git State</div>
+            <div class="node-desc">Current branch, working tree, recent commits, stash list, open PRs. Feature branch: log divergence from main.</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">
+            <span class="metric-pill"><span class="dot dot-time"></span> git_state_ms</span><br>
+            <strong>Fallback:</strong> if <code>gh</code> fails, skip PR info
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Decision: Project board -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <span class="source-badge source-fs">FS</span> .github/project-config.json<br>
+            <span class="source-badge source-gh">GH</span> GitHub Projects V2 API
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision" style="width:100%">
+            <div class="node-title">Project Board Context?</div>
+            <div class="node-desc">If project-config.json exists: query in-flight (Agent Working), Needs Clarification, Blocked items via bot token. Skip silently if missing.</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">
+            <strong>Auth:</strong> stark-claude bot token<br>
+            <code>unset GH_TOKEN</code> after
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 3: Health Checks -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <span class="source-badge source-cfg">CFG</span> session.health_checks[]<br>
+            Each command run independently
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase" style="width:100%">
+            <div class="node-title">Phase 3 &mdash; Health Checks</div>
+            <div class="node-desc">Run each command from config. Capture stdout/stderr on failure. Report pass/fail in briefing. Non-fatal, never blocking.</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">
+            <span class="metric-pill"><span class="dot dot-time"></span> per-check duration</span><br>
+            <span class="metric-pill"><span class="dot dot-bool"></span> pass/fail</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 4: Available Skills -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <span class="source-badge source-fs">FS</span> ~/.claude/skills/*/SKILL.md<br>
+            <span class="source-badge source-fs">FS</span> .claude/skills/*/SKILL.md
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase" style="width:100%">
+            <div class="node-title">Phase 4 &mdash; Available Skills</div>
+            <div class="node-desc">List global and repo-local skills by scanning SKILL.md paths. Extract names from directory structure.</div>
+          </div>
+        </div>
+        <div class="flow-lane-right"></div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 5: Briefing -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <strong>Aggregates all prior phases</strong><br>
+            Condenses empty sections
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-output" style="width:100%">
+            <div class="node-title">Phase 5 &mdash; Briefing Output</div>
+            <div class="node-desc">Branch, PRs, health status, skills, recent activity, memory context. Ends with "What are we working on?"</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">
+            <span class="metric-pill"><span class="dot dot-time"></span> total_briefing_ms</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================== END MODE ======================== -->
+  <div id="mode-end" class="mode-section">
+    <div class="section-title">End Mode &mdash; Data Flow</div>
+
+    <div class="flow">
+      <!-- Phase 1: Tests -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <span class="source-badge source-cfg">CFG</span> session.test_command<br>
+            <span class="source-badge source-cfg">CFG</span> session.build_command<br>
+            Fallback: top-level test_command
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase" style="width:100%">
+            <div class="node-title">Phase 1 &mdash; Run Tests</div>
+            <div class="node-desc">Execute test_command, then build_command if set. On failure: warn and ask "Proceed anyway?"</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">
+            <span class="metric-pill"><span class="dot dot-time"></span> test_duration_ms</span>
+            <span class="metric-pill"><span class="dot dot-bool"></span> pass/fail</span><br>
+            <span class="metric-pill"><span class="dot dot-time"></span> build_duration_ms</span>
+            <span class="metric-pill"><span class="dot dot-bool"></span> pass/fail</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Decision: Test failure -->
+      <div class="flow-step">
+        <div class="flow-lane-left"></div>
+        <div class="flow-lane-center">
+          <div class="node node-decision" style="width:100%">
+            <div class="node-title">Tests/Build Passed?</div>
+            <div class="node-desc">If failed &rarr; warn + "Proceed anyway?" prompt. Never blocks autonomously.</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><span class="tag tag-failure">user gate</span></div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 2: Merge PRs -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <span class="source-badge source-gh">GH</span> gh pr list --head &lt;branch&gt;<br>
+            <span class="source-badge source-cfg">CFG</span> pr_merge_strategy<br>
+            <strong>Auth:</strong> user PAT (not bot)
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase" style="width:100%">
+            <div class="node-title">Phase 2 &mdash; Merge Open PRs</div>
+            <div class="node-desc">Check gh auth. List PRs for current branch. Offer to merge each via configured strategy. On failure: "Skip this PR?"</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">
+            <span class="metric-pill"><span class="dot dot-count"></span> prs_merged</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 3: Commit Docs -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <span class="source-badge source-cfg">CFG</span> session.doc_paths[]<br>
+            <span class="source-badge source-cfg">CFG</span> session.devlog_path<br>
+            <span class="source-badge source-git">GIT</span> git add, diff, commit
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase" style="width:100%">
+            <div class="node-title">Phase 3 &mdash; Commit Docs</div>
+            <div class="node-desc">Stage doc_paths. If devlog_path set: prompt for summary, create YYYY-MM-DD.md entry. Skip commit if nothing staged.</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">
+            <span class="metric-pill"><span class="dot dot-count"></span> docs_committed</span><br>
+            Commit msg: <code>docs: session update — &lt;summary&gt;</code>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 4: Project Field Updates -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <span class="source-badge source-fs">FS</span> .github/project-config.json<br>
+            <span class="source-badge source-git">GIT</span> git log (issue extraction)<br>
+            <span class="source-badge source-gh">GH</span> Projects V2 API
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision" style="width:100%">
+            <div class="node-title">Phase 4 &mdash; Project Field Updates</div>
+            <div class="node-desc">Extract issue numbers from commits. If docs modified for an issue, update Documentation State &rarr; Drafted (unless manually set to Reviewed/Complete). Skip if no project config.</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">
+            <span class="metric-pill"><span class="dot dot-count"></span> issues_updated</span><br>
+            <strong>Guard:</strong> never override Reviewed/Complete
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 5: Push -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation">
+            <strong>Logic:</strong><br>
+            Has upstream? &rarr; push<br>
+            On main + ahead? &rarr; push<br>
+            Else &rarr; ask user
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision" style="width:100%">
+            <div class="node-title">Phase 5 &mdash; Push</div>
+            <div class="node-desc">Auto-push if tracked branch or on main. Otherwise ask "Push to origin?" On failure: report error, ask how to proceed.</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">
+            <span class="tag tag-decision">user gate</span> for untracked branches
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- Phase 6: Summary -->
+      <div class="flow-step">
+        <div class="flow-lane-left"></div>
+        <div class="flow-lane-center">
+          <div class="node node-output" style="width:100%">
+            <div class="node-title">Phase 6 &mdash; Summary Output</div>
+            <div class="node-desc">Tests, PRs merged, docs committed, project fields updated, push result. "Session complete."</div>
+          </div>
+        </div>
+        <div class="flow-lane-right"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Extension Points -->
+  <div class="section-title">Extension Points</div>
+  <div class="card-grid">
+    <div class="card card-green">
+      <h3>Config Hierarchy</h3>
+      <p>Add new keys to the <code>session</code> block at any level (global/org/repo). Later levels override earlier. The merge is shallow — add new fields freely without breaking existing installs.</p>
+    </div>
+    <div class="card card-blue">
+      <h3>Health Checks</h3>
+      <p>Array of arbitrary shell commands. Each runs independently, captures stdout/stderr. Add project-specific checks (DB connectivity, service health, env validation) at any config level.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>Project Board Integration</h3>
+      <p>Gated on <code>.github/project-config.json</code>. Start mode queries item statuses; end mode updates Documentation State. Extend by adding new field update rules in the end-mode logic.</p>
+    </div>
+    <div class="card card-amber">
+      <h3>Devlog System</h3>
+      <p>When <code>devlog_path</code> is set, end mode creates daily entries (<code>YYYY-MM-DD.md</code>). The user provides the summary; the skill creates the file and stages it. Extend to support templates or structured formats.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>Observability Protocol</h3>
+      <p>Every phase emits timing metrics via the Skill Observability Protocol. Start: context_load_ms, git_state_ms, per-health-check duration. End: test/build duration, PR/doc/project counts, push result.</p>
+    </div>
+    <div class="card card-red">
+      <h3>Failure Recovery</h3>
+      <p>Every failure is non-blocking. Pattern: detect &rarr; warn &rarr; offer to continue. No phase gates on prior phase success. Extend by adding new failure handlers following the same pattern.</p>
+    </div>
+  </div>
+
+  <!-- Auth Model -->
+  <div class="section-title">Auth Model</div>
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>User PAT (via gh CLI)</h3>
+      <p>Used for all mutating operations: PR merge, git push, issue creation. Must show as user action, not bot. <code>unset GH_TOKEN</code> before these operations.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>Bot Token (stark-claude)</h3>
+      <p>Used only for read-only project board queries in start mode. Set via <code>export GH_TOKEN=$(github_app.py token)</code>. Always <code>unset GH_TOKEN</code> after query block.</p>
+    </div>
+  </div>
+
+  <!-- Failure Modes -->
+  <div class="section-title">Failure Modes &amp; Recovery</div>
+  <table class="data-table">
+    <thead>
+      <tr><th>Failure</th><th>Severity</th><th>Recovery</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>No CLAUDE.md</td><td><span class="tag tag-config">info</span></td><td>Note in briefing, suggest <code>/stark-onboard-project</code></td></tr>
+      <tr><td>No memory files</td><td><span class="tag tag-config">info</span></td><td>"No previous session context" — not an error</td></tr>
+      <tr><td><code>gh</code> auth fails</td><td><span class="tag tag-decision">warn</span></td><td>Skip PR sections, show git state only</td></tr>
+      <tr><td>Not a git repo</td><td><span class="tag tag-decision">warn</span></td><td>Skip git and PR sections entirely</td></tr>
+      <tr><td>Health check fails</td><td><span class="tag tag-decision">warn</span></td><td>Report with stderr, continue to next check</td></tr>
+      <tr><td>Test/build fails</td><td><span class="tag tag-failure">gate</span></td><td>Warn user, ask "Proceed anyway?"</td></tr>
+      <tr><td>PR merge fails</td><td><span class="tag tag-failure">gate</span></td><td>Report error, offer to skip PR</td></tr>
+      <tr><td>Push fails</td><td><span class="tag tag-failure">gate</span></td><td>Report error, ask how to proceed</td></tr>
+      <tr><td>Project config missing</td><td><span class="tag tag-config">info</span></td><td>Skip project board/field sections silently</td></tr>
+      <tr><td>Project API call fails</td><td><span class="tag tag-decision">warn</span></td><td>Log warning, continue — never block</td></tr>
+    </tbody>
+  </table>
+
+  <!-- Observability Metrics -->
+  <div class="section-title">Observability Metrics</div>
+  <div class="summary-grid">
+    <div class="summary-card" style="background:#eff6ff; border-radius:8px;">
+      <h3 style="color:#1e40af">Start Mode</h3>
+      <p>
+        <span class="metric-pill"><span class="dot dot-time"></span> context_load_ms</span>
+        <span class="metric-pill"><span class="dot dot-time"></span> git_state_ms</span>
+        <span class="metric-pill"><span class="dot dot-time"></span> health_check_N_ms</span>
+        <span class="metric-pill"><span class="dot dot-bool"></span> health_check_N_pass</span>
+        <span class="metric-pill"><span class="dot dot-time"></span> total_briefing_ms</span>
+      </p>
+    </div>
+    <div class="summary-card" style="background:#ecfdf5; border-radius:8px;">
+      <h3 style="color:#059669">End Mode</h3>
+      <p>
+        <span class="metric-pill"><span class="dot dot-time"></span> test_duration_ms</span>
+        <span class="metric-pill"><span class="dot dot-bool"></span> test_pass</span>
+        <span class="metric-pill"><span class="dot dot-time"></span> build_duration_ms</span>
+        <span class="metric-pill"><span class="dot dot-bool"></span> build_pass</span>
+        <span class="metric-pill"><span class="dot dot-count"></span> prs_merged</span>
+        <span class="metric-pill"><span class="dot dot-count"></span> docs_committed</span>
+        <span class="metric-pill"><span class="dot dot-count"></span> project_fields_updated</span>
+        <span class="metric-pill"><span class="dot dot-bool"></span> push_result</span>
+      </p>
+    </div>
+    <div class="summary-card" style="background:#f5f3ff; border-radius:8px;">
+      <h3 style="color:#7c3aed">Data Sources</h3>
+      <p>
+        <span class="source-badge source-fs">FS</span> Filesystem reads<br>
+        <span class="source-badge source-git">GIT</span> Git commands<br>
+        <span class="source-badge source-gh">GH</span> GitHub CLI / API<br>
+        <span class="source-badge source-cfg">CFG</span> Config hierarchy
+      </p>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  stark-session &middot; internals view &middot; generated 2026-03-25
+</div>
+
+<script>
+function switchMode(mode) {
+  document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.mode-section').forEach(s => s.classList.remove('active'));
+  document.querySelector('#mode-' + mode).classList.add('active');
+  event.target.classList.add('active');
+}
+</script>
+</body>
+</html>

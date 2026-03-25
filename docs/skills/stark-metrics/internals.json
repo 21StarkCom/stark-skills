@@ -1,17 +1,17 @@
 {
   "doc_content": {
-    "summary": "Aggregates performance metrics across stark skill runs by processing history data, presenting scorecards, trends, and prompt improvement impacts.",
+    "summary": "The stark-metrics skill acts as a data pipeline and interactive analysis tool. It ingests run history from local JSON files, processes them via a robust Python backend (metrics.py), and orchestrates an interactive bash layer that prompts users to resolve identified issues and highlights system-wide trends.",
     "key_features": [
-      "Parses cross-run history data into normalized formats.",
-      "Generates interactive operator tuning reports with actionable recommendations.",
-      "Detects and flags meta-observations like prompt improvements or urgent failure spikes.",
-      "Supports flexible filtering by repo, skill, and date constraints."
+      "Python-based data aggregation with graceful degradation on corrupted history files",
+      "Dynamic output routing between terminal-native formatting and structured JSON",
+      "Interactive bash wrapper driving an actionable recommendation engine",
+      "Meta-observation heuristics for identifying 'wins' (e.g., lower FP rates) and 'urgent' regressions",
+      "Comprehensive custom observability telemetry including filter metrics and record counts"
     ],
     "usage_examples": [
-      "/stark-metrics",
-      "/stark-metrics --since 2026-03-01",
-      "/stark-metrics --skill stark-review --repo Evinced/stark-skills --json"
+      "Extending `metrics.py` to ingest new JSON payload structures from future stark skills",
+      "Adding new conditional logic to the shell wrapper to prompt specific follow-up skills based on new recommendation types"
     ]
   },
-  "alt_text": "Technical flowchart and architecture diagram for the stark-metrics skill, detailing Phase 1 script execution, Phase 2 result presentation with interactive recommendations, and Phase 3 improvement flag processing, alongside observability metrics and failure mode handling.`"
+  "alt_text": "Architectural flow diagram and internal components of the stark-metrics skill, showing data ingestion from history files, Python script processing, interactive output handling, and observability telemetry."
 }

@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>stark-session-insights — Skill Documentation</title>
+<style>
+/* === Reset & Base === */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+
+/* === Header === */
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
+
+/* === Container === */
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+/* === Section Title === */
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+/* === Node Types === */
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
+
+.node-phase    { background: #1e40af; color: #ffffff; }
+.node-decision { background: #7c3aed; color: #ffffff; }
+.node-failure  { background: #dc2626; color: #ffffff; }
+.node-config   { background: #047857; color: #ffffff; }
+.node-output   { background: #f59e0b; color: #1a1a1a; }
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
+
+/* === Flow Layout === */
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 180px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 180px; display: flex;
+  align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
+
+/* === Arrows === */
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
+
+/* === Cards === */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
+
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
+
+/* === Data Tables === */
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
+
+/* === Tags === */
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
+
+/* === Legend === */
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+/* === Summary Grid === */
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
+
+/* === Footer === */
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
+
+/* === Custom: Invocation Box === */
+.invoke-box {
+  background: #1a1a1a; color: #e2e8f0; border-radius: 8px;
+  padding: 14px 20px; font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 13px; margin: 12px 0; position: relative;
+}
+.invoke-box .prompt { color: #94a3b8; }
+.invoke-box .cmd { color: #60a5fa; font-weight: 600; }
+.invoke-box .arg { color: #a78bfa; }
+.invoke-box .flag { color: #34d399; }
+
+/* === Custom: Output Preview === */
+.output-preview {
+  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
+  padding: 16px; font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 10px; line-height: 1.7; color: #475569;
+  overflow-x: auto; margin: 12px 0;
+}
+.output-preview .hl { color: #1e40af; font-weight: 600; }
+.output-preview .num { color: #059669; }
+.output-preview .dim { color: #94a3b8; }
+.output-preview .bar { color: #f59e0b; }
+
+/* === Custom: Analysis Badge Grid === */
+.analysis-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px; margin-top: 12px;
+}
+.analysis-badge {
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 6px;
+  padding: 10px 14px; display: flex; align-items: center; gap: 10px;
+}
+.analysis-badge .badge-icon {
+  width: 32px; height: 32px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; flex-shrink: 0;
+}
+.analysis-badge .badge-text { font-size: 10px; line-height: 1.4; }
+.analysis-badge .badge-text strong { font-size: 11px; display: block; margin-bottom: 1px; }
+
+/* === Custom: Workflow Step Number === */
+.step-num {
+  width: 24px; height: 24px; border-radius: 50%;
+  background: #1e40af; color: #fff; font-size: 11px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>/stark-session-insights</h1>
+  <div class="sub">Analyze Claude Code session history &mdash; usage patterns, skill invocations, corrections, and preferences per project</div>
+  <div class="scope">AUDIENCE: USAGE &middot; COMPLEXITY: MEDIUM (368 LINES)</div>
+</div>
+
+<div class="container">
+
+  <!-- ===== INVOCATION ===== -->
+  <div class="section-title">How to Invoke</div>
+
+  <div class="invoke-box">
+    <span class="prompt">$</span> <span class="cmd">/stark-session-insights</span>
+    <span class="dim">&nbsp;&nbsp;&nbsp;# analyze all projects</span>
+  </div>
+  <div class="invoke-box">
+    <span class="prompt">$</span> <span class="cmd">/stark-session-insights</span> <span class="flag">--project</span> <span class="arg">infra-pulse</span>
+    <span class="dim">&nbsp;&nbsp;&nbsp;# single project (partial match)</span>
+  </div>
+  <div class="invoke-box">
+    <span class="prompt">$</span> <span class="cmd">/stark-session-insights</span> <span class="flag">--refresh</span>
+    <span class="dim">&nbsp;&nbsp;&nbsp;# force regenerate even if current</span>
+  </div>
+  <div class="invoke-box">
+    <span class="prompt">$</span> <span class="cmd">/stark-session-insights</span> <span class="flag">--project</span> <span class="arg">stark</span> <span class="flag">--refresh</span>
+    <span class="dim">&nbsp;&nbsp;&nbsp;# combine flags</span>
+  </div>
+
+  <p style="font-size: 11px; color: #666; margin-top: 8px;">
+    Also triggered by: <span class="tag tag-phase">session insights</span>
+    <span class="tag tag-phase">analyze sessions</span>
+    <span class="tag tag-phase">usage patterns</span>
+    <span class="tag tag-phase">what do I do most</span>
+  </p>
+
+  <!-- ===== INPUTS & OUTPUTS ===== -->
+  <div class="section-title">Inputs &amp; Outputs</div>
+
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>Input: Session History</h3>
+      <p><strong>~/.claude/history.jsonl</strong><br>
+      One JSON object per line. Fields: <code>display</code> (prompt text), <code>timestamp</code> (epoch ms), <code>project</code> (absolute path), <code>sessionId</code>.<br><br>
+      The skill reads this file but <strong>never modifies or deletes it</strong>.</p>
+    </div>
+    <div class="card card-green">
+      <h3>Output: Per-Project Insights</h3>
+      <p><strong>~/.claude/code-review/insights/sessions/{slug}.md</strong><br>
+      One markdown file per project. Slug derived from path: <code>Evinced/infra-pulse</code> &rarr; <code>evinced--infra-pulse</code>.<br><br>
+      Contains all 15 analysis sections plus narrative synthesis.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>Output: Summary Index</h3>
+      <p><strong>~/.claude/code-review/insights/sessions/index.md</strong><br>
+      Cross-project overview table: prompt counts, sessions, days active, date ranges, top action per project. Updated on each run.</p>
+    </div>
+  </div>
+
+  <!-- ===== WORKFLOW FLOW ===== -->
+  <div class="section-title">Workflow</div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#1e40af"></div> Phase</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed"></div> Decision</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#047857"></div> Config</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> Output</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#dc2626"></div> Error</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e5e7eb"></div> External</div>
+  </div>
+
+  <div class="flow">
+    <!-- Step 1: Load -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Phase 1</strong><br>Load &amp; Parse</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-external" style="width:380px">
+          <div class="node-title">Read ~/.claude/history.jsonl</div>
+          <div class="node-desc">Parse JSONL &mdash; skip malformed lines with warning count</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-left"></div><div class="flow-lane-center"><div class="arrow-down"></div></div><div class="flow-lane-right"></div></div>
+
+    <!-- Decision: file exists? -->
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width:380px">
+          <div class="node-title">History file exists &amp; non-empty?</div>
+          <div class="node-desc">If missing or empty &rarr; abort with error</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><span class="tag tag-failure">Abort</span> "No history file found"</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-left"></div><div class="flow-lane-center"><div class="arrow-down"></div></div><div class="flow-lane-right"></div></div>
+
+    <!-- Group by project -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>--project</strong> flag filters here (partial match)</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px">
+          <div class="node-title">Group Entries by Project</div>
+          <div class="node-desc">Derive short name from last 2 path segments &mdash; filter if --project given</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-left"></div><div class="flow-lane-center"><div class="arrow-down"></div></div><div class="flow-lane-right"></div></div>
+
+    <!-- Skip check -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>--refresh</strong> bypasses this check</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width:380px">
+          <div class="node-title">Insights File Current?</div>
+          <div class="node-desc">Compare entry count in header comment vs. current count</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><span class="tag tag-config">Skip</span> "Insights are current (N entries)"</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-left"></div><div class="flow-lane-center"><div class="arrow-down"></div></div><div class="flow-lane-right"></div></div>
+
+    <!-- Phase 2: Analysis -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Phase 2</strong><br>Analysis (15 dimensions)</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px">
+          <div class="node-title">Run All Analyses</div>
+          <div class="node-desc">Inline Python &mdash; stats, skills, actions, hours, corrections, narrative &hellip;</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-left"></div><div class="flow-lane-center"><div class="arrow-down"></div></div><div class="flow-lane-right"></div></div>
+
+    <!-- Phase 3: Generate -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Phase 3</strong><br>Generate Output</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-config" style="width:380px">
+          <div class="node-title">Write Markdown Files</div>
+          <div class="node-desc">Per-project {slug}.md + index.md &rarr; insights/sessions/</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-left"></div><div class="flow-lane-center"><div class="arrow-down"></div></div><div class="flow-lane-right"></div></div>
+
+    <!-- Output -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Phase 4</strong><br>Report</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-output" style="width:380px">
+          <div class="node-title">Print Summary</div>
+          <div class="node-desc">Projects processed, skipped, files written</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+  </div>
+
+  <!-- ===== ANALYSIS DIMENSIONS ===== -->
+  <div class="section-title">15 Analysis Dimensions</div>
+
+  <div class="analysis-grid">
+    <div class="analysis-badge">
+      <div class="badge-icon" style="background:#dbeafe; color:#1e40af;">1</div>
+      <div class="badge-text"><strong>Basic Stats</strong>Prompts, dates, sessions, avg length</div>
+    </div>
+    <div class="analysis-badge">
+      <div class="badge-icon" style="background:#ede9fe; color:#5b21b6;">2</div>
+      <div class="badge-text"><strong>Skill Invocations</strong>/stark-* and / commands, top 15</div>
+    </div>
+    <div class="analysis-badge">
+      <div class="badge-icon" style="background:#dbeafe; color:#1e40af;">3</div>
+      <div class="badge-text"><strong>Action Words</strong>40 verbs, frequency ranked, top 20</div>
+    </div>
+    <div class="analysis-badge">
+      <div class="badge-icon" style="background:#fef3c7; color:#92400e;">4</div>
+      <div class="badge-text"><strong>Activity by Hour</strong>Block-char bar chart, local time</div>
+    </div>
+    <div class="analysis-badge">
+      <div class="badge-icon" style="background:#dbeafe; color:#1e40af;">5</div>
+      <div class="badge-text"><strong>Prompt Length</strong>Short/Medium/Long distribution</div>
+    </div>
+    <div class="analysis-badge">
+      <div class="badge-icon" style="background:#d1fae5; color:#065f46;">6</div>
+      <div class="badge-text"><strong>Short Responses</strong>yes/no/go/lgtm/done frequency</div>
+    </div>
+    <div class="analysis-badge">
+      <div class="badge-icon" style="background:#fee2e2; color:#991b1b;">7</div>
+      <div class="badge-text"><strong>Corrections</strong>"no", "don't", "wrong", "undo"</div>
+    </div>
+    <div class="analysis-badge">
+      <div class="badge-icon" style="background:#ede9fe; color:#5b21b6;">8</div>
+      <div class="badge-text"><strong>Key Requirements</strong>Long prompts (&gt;200 chars), top 15</div>
+    </div>
+    <div class="analysis-badge">
+      <div class="badge-icon" style="background:#dbeafe; color:#1e40af;">9</div>
+      <div class="badge-text"><strong>Day of Week</strong>Work rhythm: weekday vs weekend</div>
+    </div>
+    <div class="analysis-badge">
+      <div class="badge-icon" style="background:#fef3c7; color:#92400e;">10</div>
+      <div class="badge-text"><strong>Weekly Trends</strong>Volume by ISO week + trend label</div>
+    </div>
+    <div class="analysis-badge">
+      <div class="badge-icon" style="background:#d1fae5; color:#065f46;">11</div>
+      <div class="badge-text"><strong>Skill Evolution</strong>First-half vs second-half diffs</div>
+    </div>
+    <div class="analysis-badge">
+      <div class="badge-icon" style="background:#ede9fe; color:#5b21b6;">12</div>
+      <div class="badge-text"><strong>Session Shape</strong>Start/end patterns, session types</div>
+    </div>
+    <div class="analysis-badge">
+      <div class="badge-icon" style="background:#fee2e2; color:#991b1b;">13</div>
+      <div class="badge-text"><strong>Correction Categories</strong>Data/UX/Process/Frustration</div>
+    </div>
+    <div class="analysis-badge">
+      <div class="badge-icon" style="background:#1e40af; color:#fff;">14</div>
+      <div class="badge-text"><strong>Narrative Synthesis</strong>3&ndash;5 paragraph prose interpretation</div>
+    </div>
+    <div class="analysis-badge">
+      <div class="badge-icon" style="background:#047857; color:#fff;">15</div>
+      <div class="badge-text"><strong>Recommendations</strong>3&ndash;5 actionable items from data</div>
+    </div>
+  </div>
+
+  <!-- ===== OUTPUT PREVIEW ===== -->
+  <div class="section-title">Sample Output</div>
+
+  <div class="output-preview">
+<span class="hl"># Session Insights &mdash; Evinced/infra-pulse</span>
+
+<strong>Period:</strong> 2026-01-15 &rarr; 2026-03-20
+<strong>Prompts:</strong> <span class="num">847</span> across <span class="num">62</span> sessions (<span class="num">38</span> days)
+
+<span class="hl">## Activity Profile</span>
+- Prompts/day: <span class="num">22.3</span>
+- Peak hours: 10:00 (<span class="num">98</span>), 14:00 (<span class="num">87</span>), 21:00 (<span class="num">73</span>)
+- Avg session: <span class="num">34</span> minutes (2&ndash;142 range)
+
+<span class="hl">## Hourly Distribution</span>
+<span class="dim">08:</span> <span class="bar">██████</span> (42)
+<span class="dim">09:</span> <span class="bar">██████████</span> (71)
+<span class="dim">10:</span> <span class="bar">██████████████</span> (98)
+<span class="dim">11:</span> <span class="bar">█████████</span> (65)
+<span class="dim">...</span>
+<span class="dim">21:</span> <span class="bar">██████████</span> (73)
+
+<span class="hl">## Skill Usage</span>
+| Skill              | Count |
+| /stark-review      |  <span class="num">31</span>  |
+| /stark-session     |  <span class="num">24</span>  |
+| /stark-pr-flow     |  <span class="num">18</span>  |
+| /commit            |  <span class="num">12</span>  |
+
+<span class="hl">## Narrative</span>
+<span class="dim">A prose synthesis interpreting all metrics into a coherent project story...</span>
+  </div>
+
+  <!-- ===== COMMON WORKFLOWS ===== -->
+  <div class="section-title">Common Workflows</div>
+
+  <div class="card-grid">
+    <div class="card card-dark">
+      <h3>Quick Check: All Projects</h3>
+      <p>Run <code>/stark-session-insights</code> with no flags. Processes every project in your history. Skips any project whose insights are already current (entry count matches). Takes 1&ndash;3 minutes depending on history size.</p>
+    </div>
+    <div class="card card-blue">
+      <h3>Deep Dive: Single Project</h3>
+      <p>Run <code>/stark-session-insights --project infra-pulse</code> to focus on one repo. Partial match works &mdash; "stark" matches "Evinced/stark-skills". Useful when investigating how you used Claude on a specific effort.</p>
+    </div>
+    <div class="card card-green">
+      <h3>Force Refresh</h3>
+      <p>Run <code>/stark-session-insights --refresh</code> to regenerate all insight files even if they appear current. Use after history.jsonl has been edited or if a previous run was interrupted.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>After a Sprint</h3>
+      <p>At sprint end, run insights to see which skills you leaned on, what corrections recurred, and whether your work rhythm changed. The narrative synthesis and recommendations section turns raw data into an actionable retrospective.</p>
+    </div>
+    <div class="card card-amber">
+      <h3>Feed Into Memory</h3>
+      <p>Corrections detected by the skill (Section 2.7 &amp; 2.13) are the most valuable signals. Review them and save recurring patterns as <code>feedback</code> memories so Claude avoids the same mistakes in future sessions.</p>
+    </div>
+    <div class="card card-red">
+      <h3>Spot Burnout Signals</h3>
+      <p>The hourly distribution and weekly trends reveal sustainability issues. Late-night spikes, 7-day weeks, or escalating frustration markers in the correction categories are early warnings the recommendations section will flag.</p>
+    </div>
+  </div>
+
+  <!-- ===== FLAGS REFERENCE ===== -->
+  <div class="section-title">Flag Reference</div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Flag</th>
+        <th>Type</th>
+        <th>Default</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>--project &lt;name&gt;</code></td>
+        <td>string</td>
+        <td>all projects</td>
+        <td>Case-insensitive partial match on project path. Errors if no match found.</td>
+      </tr>
+      <tr>
+        <td><code>--refresh</code></td>
+        <td>boolean</td>
+        <td>false</td>
+        <td>Regenerate insight files even if entry count hasn't changed since last run.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ===== KEY CONSTANTS ===== -->
+  <div class="section-title">Key Constants</div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Constant</th>
+        <th>Value</th>
+        <th>Purpose</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>HISTORY_FILE</code></td>
+        <td>~/.claude/history.jsonl</td>
+        <td>Source data &mdash; one JSONL entry per user prompt</td>
+      </tr>
+      <tr>
+        <td><code>OUTPUT_DIR</code></td>
+        <td>~/.claude/code-review/insights/sessions/</td>
+        <td>Where per-project .md files and index.md are written</td>
+      </tr>
+      <tr>
+        <td><code>SESSION_GAP</code></td>
+        <td>30 minutes</td>
+        <td>Threshold for detecting session boundaries when sessionId is missing</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ===== SAFETY ===== -->
+  <div class="section-title">Safety &amp; Limits</div>
+
+  <div class="summary-grid">
+    <div class="summary-card card-green">
+      <h3>Read-Only Input</h3>
+      <p>Never modifies or deletes history.jsonl. All output goes to a separate directory.</p>
+    </div>
+    <div class="summary-card card-blue">
+      <h3>Local Only</h3>
+      <p>No data sent externally. No GitHub issues, PRs, or API calls. All files stay on disk.</p>
+    </div>
+    <div class="summary-card card-purple">
+      <h3>Idempotent</h3>
+      <p>Re-running with same data produces identical output. Skips current files unless --refresh.</p>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  stark-skills &middot; stark-session-insights &middot; generated 2026-03-25
+</div>
+
+</body>
+</html>

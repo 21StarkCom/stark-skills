@@ -1,0 +1,18 @@
+{
+  "doc_content": {
+    "summary": "Systematically audits and updates all dependency versions across a project to their latest stable releases, categorizing risks like major version bumps. It includes a critical post-update web search verification loop to eliminate AI hallucinations (especially common with Docker tags), guaranteeing all updated versions exist on official registries.",
+    "key_features": [
+      "Multi-ecosystem auto-discovery (Python, Node, Docker, Go, Rust)",
+      "Prefers Active LTS versions over bleeding-edge releases to ensure stability",
+      "Provides actionable migration commands/codemods for major version bumps",
+      "Rigorous verification phase ensuring every modified version string actually exists on the official registry"
+    ],
+    "usage_examples": [
+      "update dependencies",
+      "check for outdated packages",
+      "upgrade versions",
+      "are my deps current?"
+    ]
+  },
+  "alt_text": "Visual workflow of the stark-update-deps skill showing the 6-phase process from discovery and research to compatibility analysis, updating, critical verification against web sources, and final reporting."
+}
