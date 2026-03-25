@@ -1,1 +1,738 @@
-<html lang="\"en\"">\n<head>\n  \n  \n  <title>stark-pr-status | Internal Skill Architecture</title>\n  <style>\n    /*\n     * Stark Skills — Shared Design System CSS\n     *\n     * Foundation styles for LLM-generated HTML skill visualizations.\n     * LLMs embed this inline and may extend with additional styles.\n     * All colors pass WCAG AA 4.5:1 contrast ratio.\n     *\n     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.\n     */\n\n    /* === Reset & Base === */\n    * { margin: 0; padding: 0; box-sizing: border-box; }\n    body {\n      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;\n      background: #fafafa;\n      color: #1a1a1a;\n      line-height: 1.5;\n    }\n\n    /* === Header === */\n    .header { text-align: center; padding: 36px 20px 16px; }\n    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }\n    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }\n    .header .scope {\n      display: inline-block; font-size: 10px; font-weight: 600;\n      background: #eff6ff; color: #1e40af;\n      padding: 3px 10px; border-radius: 4px; margin-top: 8px;\n    }\n\n    /* === Container === */\n    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }\n\n    /* === Section Title === */\n    .section-title {\n      font-size: 14px; font-weight: 700; color: #666;\n      text-transform: uppercase; letter-spacing: 1px;\n      margin: 32px 0 16px; padding-bottom: 6px;\n      border-bottom: 2px solid #e5e7eb;\n    }\n\n    /* === Node Types === */\n    .node { border-radius: 8px; padding: 12px 16px; text-align: center; }\n    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }\n    .node-desc { font-size: 10px; opacity: 0.8; }\n\n    .node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */\n    .node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */\n    .node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */\n    .node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */\n    .node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */\n    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */\n\n    /* === Flow Layout === */\n    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }\n    .flow-step {\n      display: flex; align-items: stretch;\n      width: 100%; max-width: 860px; min-height: 76px;\n    }\n    .flow-lane-left {\n      width: 180px; display: flex;\n      align-items: center; justify-content: flex-end;\n      padding-right: 18px;\n    }\n    .flow-lane-center {\n      width: 500px; display: flex;\n      align-items: center; justify-content: center;\n    }\n    .flow-lane-right {\n      width: 180px; display: flex;\n      align-items: center; padding-left: 18px;\n    }\n    .annotation {\n      font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;\n    }\n    .annotation strong { color: #444; }\n\n    /* === Arrows === */\n    .arrow-down {\n      width: 2px; height: 20px; background: #cbd5e1;\n      margin: 0 auto; position: relative;\n    }\n    .arrow-down::after {\n      content: ''; position: absolute; bottom: -4px; left: -4px;\n      border-left: 5px solid transparent;\n      border-right: 5px solid transparent;\n      border-top: 6px solid #cbd5e1;\n    }\n    .arrow-container {\n      display: flex; justify-content: center;\n      width: 100%; max-width: 860px;\n    }\n    .arrow-container .flow-lane-center {\n      display: flex; justify-content: center;\n    }\n\n    /* === Cards === */\n    .card-grid {\n      display: grid;\n      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));\n      gap: 16px; margin-top: 16px;\n    }\n    .card { padding: 16px; border-radius: 8px; }\n    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }\n    .card p  { font-size: 11px; line-height: 1.6; }\n\n    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }\n    .card-blue h3 { color: #1e40af; }\n    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }\n    .card-green h3 { color: #059669; }\n    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }\n    .card-purple h3 { color: #7c3aed; }\n    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }\n    .card-amber h3 { color: #92400e; }\n    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }\n    .card-dark h3 { color: #333333; }\n    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }\n    .card-red h3 { color: #dc2626; }\n\n    /* === Data Tables === */\n    .data-table {\n      width: 100%; max-width: 860px; margin: 16px auto;\n      border-collapse: collapse; font-size: 11px;\n    }\n    .data-table th {\n      background: #f3f4f6; padding: 8px 12px; text-align: left;\n      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;\n    }\n    .data-table td {\n      padding: 8px 12px; border-bottom: 1px solid #f3f4f6;\n    }\n\n    /* === Tags === */\n    .tag {\n      display: inline-block; font-size: 9px; font-weight: 600;\n      padding: 2px 8px; border-radius: 3px;\n    }\n    .tag-phase    { background: #dbeafe; color: #1e40af; }\n    .tag-decision { background: #ede9fe; color: #5b21b6; }\n    .tag-failure  { background: #fee2e2; color: #991b1b; }\n    .tag-config   { background: #d1fae5; color: #065f46; }\n    .tag-output   { background: #fef3c7; color: #92400e; }\n    .tag-external { background: #f3f4f6; color: #666666; }\n\n    /* === Legend === */\n    .legend {\n      display: flex; gap: 16px; justify-content: center;\n      margin: 16px 0 24px; flex-wrap: wrap;\n    }\n    .legend-item {\n      display: flex; align-items: center; gap: 6px;\n      font-size: 10px; color: #666;\n    }\n    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }\n\n    /* === Summary Grid === */\n    .summary-grid {\n      display: grid; grid-template-columns: 1fr 1fr 1fr;\n      gap: 16px; margin-top: 16px;\n    }\n    .summary-card { padding: 16px; border-radius: 8px; }\n    .summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }\n    .summary-card p  { font-size: 11px; line-height: 1.5; }\n\n    /* === Winner Badge === */\n    .winner-badge {\n      display: inline-block; font-size: 12px; color: #555555;\n      font-weight: 600; padding: 2px 10px; border-radius: 4px;\n      background: #f9fafb; border: 1px solid #d1d5db;\n    }\n\n    /* === Footer === */\n    .footer {\n      text-align: center; padding: 20px;\n      font-size: 10px; color: #999;\n    }\n\n    /* === Extensions === */\n    body {\n      background:\n        radial-gradient(circle at top left, rgba(30, 64, 175, 0.10), transparent 28%),\n        radial-gradient(circle at top right, rgba(245, 158, 11, 0.12), transparent 24%),\n        linear-gradient(180deg, #f8fafc 0%, #fafaf9 100%);\n    }\n    .header h1 { font-size: 30px; letter-spacing: -0.02em; }\n    .header .sub {\n      max-width: 720px;\n      margin: 8px auto 0;\n      font-size: 13px;\n      line-height: 1.7;\n    }\n    .panel {\n      background: rgba(255, 255, 255, 0.9);\n      border: 1px solid #e5e7eb;\n      border-radius: 16px;\n      padding: 24px;\n      margin-top: 20px;\n      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);\n      backdrop-filter: blur(6px);\n    }\n    .node-action { background: #0f766e; color: #ffffff; }\n    .tag-action { background: #ccfbf1; color: #115e59; }\n    .card-teal  { background: #ecfeff; border-left: 3px solid #0f766e; }\n    .card-teal h3 { color: #0f766e; }\n    .flow .node { width: 100%; box-shadow: 0 8px 18px rgba(15, 23, 42, 0.07); }\n    .data-table tr:nth-child(even) td { background: #fbfcfe; }\n    code, .mono {\n      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;\n      background: #eef2ff;\n      border-radius: 4px;\n      padding: 2px 6px;\n      font-size: 10px;\n    }\n    .terminal {\n      margin-top: 16px;\n      padding: 16px 18px;\n      border-radius: 12px;\n      background: #0f172a;\n      color: #e2e8f0;\n      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;\n      font-size: 11px;\n      line-height: 1.8;\n      overflow-x: auto;\n      border: 1px solid #1e293b;\n    }\n    .terminal strong { color: #7dd3fc; }\n    .pill-row {\n      display: flex;\n      gap: 8px;\n      flex-wrap: wrap;\n      margin-top: 10px;\n    }\n    .metric-note {\n      font-size: 10px;\n      color: #64748b;\n      margin-top: 8px;\n    }\n    .legend-dot.dot-phase { background: #1e40af; }\n    .legend-dot.dot-decision { background: #7c3aed; }\n    .legend-dot.dot-action { background: #0f766e; }\n    .legend-dot.dot-failure { background: #dc2626; }\n    .legend-dot.dot-output { background: #f59e0b; }\n    .legend-dot.dot-external {\n      background: #e5e7eb;\n      border: 1px dashed #9ca3af;\n    }\n    @media (max-width: 900px) {\n      .summary-grid { grid-template-columns: 1fr; }\n      .flow-step {\n        flex-direction: column;\n        gap: 12px;\n        min-height: 0;\n        margin-bottom: 12px;\n      }\n      .flow-lane-left,\n      .flow-lane-center,\n      .flow-lane-right {\n        width: 100%;\n        justify-content: center;\n        padding: 0;\n      }\n      .annotation {\n        max-width: none;\n        text-align: center;\n      }\n    }\n    @media (max-width: 640px) {\n      .container { padding: 0 14px 32px; }\n      .panel { padding: 18px; }\n      .header { padding: 28px 14px 12px; }\n      .header h1 { font-size: 25px; }\n    }\n  </style>\n</head>\n<body>\n  <header class="\"header\"">\n    <h1>stark-pr-status</h1>\n    <div class="\"sub\"">\n      Internal PR analytics skill that joins GitHub review metadata with stark-review history,\n      then projects a terminal-first dashboard for review rounds, severity mix, signal-vs-noise,\n      participants, merge timing, and follow-up actions.\n    </div>\n    <div class="\"scope\"">internals / architecture + data flow + extension points</div>\n  </header>\n\n  <main class="\"container\"">\n    <section class="\"panel\"">\n      <div class="\"legend\"">\n        <div class="\"legend-item\""><span class="\"legend-dot" dot-config\"></span>Config</div>\n        <div class="\"legend-item\""><span class="\"legend-dot" dot-phase\"></span>Workflow phase</div>\n        <div class="\"legend-item\""><span class="\"legend-dot" dot-decision\"></span>Decision</div>\n        <div class="\"legend-item\""><span class="\"legend-dot" dot-action\"></span>Heuristic action</div>\n        <div class="\"legend-item\""><span class="\"legend-dot" dot-output\"></span>Output</div>\n        <div class="\"legend-item\""><span class="\"legend-dot" dot-failure\"></span>Failure</div>\n        <div class="\"legend-item\""><span class="\"legend-dot" dot-external\"></span>External dependency</div>\n      </div>\n\n      <div class="\"summary-grid\"">\n        <div class="\"summary-card" card-blue\">\n          <h3>Primary Job</h3>\n          <p>\n            Explain what happened on a PR, not just its current state. The skill reconstructs review\n            rounds, severity distribution, outcome quality, participant behavior, and merge timing.\n          </p>\n          <div class="\"pill-row\"">\n            <span class="\"tag" tag-phase\">review rounds</span>\n            <span class="\"tag" tag-phase\">severity mix</span>\n            <span class="\"tag" tag-phase\">time-to-merge</span>\n          </div>\n        </div>\n\n        <div class="\"summary-card" card-green\">\n          <h3>Data Blend</h3>\n          <p>\n            GitHub provides canonical PR, review, and participant events. stark-review history adds\n            findings, noise classification, and historical review signal that GitHub alone does not expose.\n          </p>\n          <div class="\"pill-row\"">\n            <span class="\"tag" tag-external\">github-only</span>\n            <span class="\"tag" tag-external\">history-only</span>\n            <span class="\"tag" tag-config\">both</span>\n          </div>\n        </div>\n\n        <div class="\"summary-card" card-amber\">\n          <h3>Presenter Contract</h3>\n          <p>\n            The Python script owns formatting. Single-PR mode emits a rich dashboard; all-PR mode emits a\n            compact table; <code>--json</code> exposes a machine-readable variant for downstream consumers.\n          </p>\n          <div style="\"margin-top:" 8px;\"><span class="\"winner-badge\"">terminal-first skill</span></div>\n        </div>\n      </div>\n    </section>\n\n    <section class="\"panel\"">\n      <h2 class="\"section-title\"">Runtime Contract</h2>\n      <div class="\"card-grid\"">\n        <div class="\"card" card-dark\">\n          <h3>Invocation Surface</h3>\n          <p>\n            Entry point is <code>pr_status.py</code> with positional PR selection or <code>--all</code>.\n            Repo detection defaults to the current git checkout unless <code>--repo org/name</code> is supplied.\n          </p>\n        </div>\n        <div class="\"card" card-purple\">\n          <h3>Mode Switches</h3>\n          <p>\n            <code>--state open|closed|merged|all</code> constrains the PR set, <code>--limit N</code> caps\n            fleet summaries, and <code>--json</code> bypasses human-oriented rendering for structured output.\n          </p>\n        </div>\n        <div class="\"card" card-teal\">\n          <h3>Post-Analysis Heuristics</h3>\n          <p>\n            After rendering, the skill inspects stale PRs, high-noise patterns, and merge-ready conditions\n            to suggest adjacent skills such as <code>/stark-review</code>, <code>/stark-review-improvement</code>,\n            and <code>/stark-pr-flow</code>.\n          </p>\n        </div>\n      </div>\n\n      <div class="\"terminal\"">\n<strong>Constants</strong>\nSCRIPTS = ~/.claude/code-review/scripts\nPYTHON  = $SCRIPTS/.venv/bin/python3\n\n<strong>Run</strong>\n$PYTHON $SCRIPTS/pr_status.py [PR_NUMBER | --all] [--repo REPO] [--state STATE] [--json]\n\n<strong>Examples</strong>\n$PYTHON $SCRIPTS/pr_status.py 15\n$PYTHON $SCRIPTS/pr_status.py --all --state open --limit 20\n$PYTHON $SCRIPTS/pr_status.py --pr 42 --repo org/name --json\n      </div>\n    </section>\n\n    <section class="\"panel\"">\n      <h2 class="\"section-title\"">Execution Flow</h2>\n\n      <div class="\"flow\"">\n        <div class="\"flow-step\"">\n          <div class="\"flow-lane-left\"">\n            <div class="\"annotation\"">\n              <strong>Input surface</strong><br></br>\n              PR number, <code>--all</code>, repo override, state filter, JSON flag, limit.\n            </div>\n          </div>\n          <div class="\"flow-lane-center\"">\n            <div class="\"node" node-config\">\n              <div class="\"node-title\"">CLI Entry + Flags</div>\n              <div class="\"node-desc\"">Normalize arguments and establish request scope</div>\n            </div>\n          </div>\n          <div class="\"flow-lane-right\"">\n            <div class="\"annotation\"">\n              <strong>Default behavior</strong><br></br>\n              No PR number means all PRs in current repo across all states.\n            </div>\n          </div>\n        </div>\n\n        <div class="\"arrow-container\""><div class="\"flow-lane-center\""><div class="\"arrow-down\""></div></div></div>\n\n        <div class="\"flow-step\"">\n          <div class="\"flow-lane-left\"">\n            <div class="\"annotation\"">\n              <strong>Repo discovery</strong><br></br>\n              Resolve from git checkout unless <code>--repo</code> is explicit.\n            </div>\n          </div>\n          <div class="\"flow-lane-center\"">\n            <div class="\"node" node-decision\">\n              <div class="\"node-title\"">Repo Context Available?</div>\n              <div class="\"node-desc\"">Required before any GitHub query can be issued</div>\n            </div>\n          </div>\n          <div class="\"flow-lane-right\"">\n            <div class="\"node" node-failure\">\n              <div class="\"node-title\"">Exit 1</div>\n              <div class="\"node-desc\"">No repo detected</div>\n            </div>\n          </div>\n        </div>\n\n        <div class="\"arrow-container\""><div class="\"flow-lane-center\""><div class="\"arrow-down\""></div></div></div>\n\n        <div class="\"flow-step\"">\n          <div class="\"flow-lane-left\"">\n            <div class="\"node" node-external\">\n              <div class="\"node-title\"">GitHub API</div>\n              <div class="\"node-desc\"">PR metadata, reviews, dates, participants</div>\n            </div>\n          </div>\n          <div class="\"flow-lane-center\"">\n            <div class="\"node" node-phase\">\n              <div class="\"node-title\"">Collect Raw Evidence</div>\n              <div class="\"node-desc\"">Load PR records plus review-side signals from both sources</div>\n            </div>\n          </div>\n          <div class="\"flow-lane-right\"">\n            <div class="\"node" node-external\">\n              <div class="\"node-title\"">stark-review History</div>\n              <div class="\"node-desc\"">Findings, outcomes, historical review traces</div>\n            </div>\n          </div>\n        </div>\n\n        <div class="\"arrow-container\""><div class="\"flow-lane-center\""><div class="\"arrow-down\""></div></div></div>\n\n        <div class="\"flow-step\"">\n          <div class="\"flow-lane-left\"">\n            <div class="\"annotation\"">\n              <strong>Metrics derived</strong><br></br>\n              Review rounds, severity counts, outcome mix, participant actions, merge latency.\n            </div>\n          </div>\n          <div class="\"flow-lane-center\"">\n            <div class="\"node" node-phase\">\n              <div class="\"node-title\"">Normalize Lifecycle Model</div>\n              <div class="\"node-desc\"">Merge GitHub chronology with findings history into one PR-centric schema</div>\n            </div>\n          </div>\n          <div class="\"flow-lane-right\"">\n            <div class="\"annotation\"">\n              <strong>Fallback</strong><br></br>\n              Missing history is allowed; emit GitHub-only analytics with an explicit note.\n            </div>\n          </div>\n        </div>\n\n        <div class="\"arrow-container\""><div class="\"flow-lane-center\""><div class="\"arrow-down\""></div></div></div>\n\n        <div class="\"flow-step\"">\n          <div class="\"flow-lane-left\"">\n            <div class="\"annotation\"">\n              <strong>Detail mode</strong><br></br>\n              Positional PR number or <code>--pr N</code>.\n            </div>\n          </div>\n          <div class="\"flow-lane-center\"">\n            <div class="\"node" node-decision\">\n              <div class="\"node-title\"">Single PR Or Fleet Summary?</div>\n              <div class="\"node-desc\"">Choose dashboard depth and output shape</div>\n            </div>\n          </div>\n          <div class="\"flow-lane-right\"">\n            <div class="\"annotation\"">\n              <strong>Summary mode</strong><br></br>\n              All PRs, optionally filtered by state and capped by limit.\n            </div>\n          </div>\n        </div>\n\n        <div class="\"arrow-container\""><div class="\"flow-lane-center\""><div class="\"arrow-down\""></div></div></div>\n\n        <div class="\"flow-step\"">\n          <div class="\"flow-lane-left\"">\n            <div class="\"node" node-output\">\n              <div class="\"node-title\"">Single-PR Dashboard</div>\n              <div class="\"node-desc\"">Header, rounds, findings, participants, timeline</div>\n            </div>\n          </div>\n          <div class="\"flow-lane-center\"">\n            <div class="\"node" node-phase\">\n              <div class="\"node-title\"">Render Script Output</div>\n              <div class="\"node-desc\"">Python presenter formats terminal-ready content directly</div>\n            </div>\n          </div>\n          <div class="\"flow-lane-right\"">\n            <div class="\"node" node-output\">\n              <div class="\"node-title\"">All-PR Table / JSON</div>\n              <div class="\"node-desc\"">Compact summary rows or structured payload</div>\n            </div>\n          </div>\n        </div>\n\n        <div class="\"arrow-container\""><div class="\"flow-lane-center\""><div class="\"arrow-down\""></div></div></div>\n\n        <div class="\"flow-step\"">\n          <div class="\"flow-lane-left\"">\n            <div class="\"annotation\"">\n              <strong>Examples</strong><br></br>\n              Open &gt; 7 days without review, high noise ratio, or approved + CI green.\n            </div>\n          </div>\n          <div class="\"flow-lane-center\"">\n            <div class="\"node" node-action\">\n              <div class="\"node-title\"">Suggestion Heuristics</div>\n              <div class="\"node-desc\"">Recommend next skill based on PR health and review quality patterns</div>\n            </div>\n          </div>\n          <div class="\"flow-lane-right\"">\n            <div class="\"annotation\"">\n              <strong>Follow-up actions</strong><br></br>\n              <code>/stark-review</code>, <code>/stark-review-improvement</code>, <code>/stark-pr-flow</code>\n            </div>\n          </div>\n        </div>\n\n        <div class="\"arrow-container\""><div class="\"flow-lane-center\""><div class="\"arrow-down\""></div></div></div>\n\n        <div class="\"flow-step\"">\n          <div class="\"flow-lane-left\"">\n            <div class="\"node" node-output\">\n              <div class="\"node-title\"">Terminal Output</div>\n              <div class="\"node-desc\"">Preformatted human-readable response</div>\n            </div>\n          </div>\n          <div class="\"flow-lane-center\"">\n            <div class="\"node" node-output\">\n              <div class="\"node-title\"">Delivery Contract</div>\n              <div class="\"node-desc\"">Return script output directly; avoid reformatting in the skill layer</div>\n            </div>\n          </div>\n          <div class="\"flow-lane-right\"">\n            <div class="\"node" node-output\">\n              <div class="\"node-title\"">JSON Output</div>\n              <div class="\"node-desc\"">Machine-readable path for tooling and automation</div>\n            </div>\n          </div>\n        </div>\n      </div>\n    </section>\n\n    <section class="\"panel\"">\n      <h2 class="\"section-title\"">Data Contracts</h2>\n      <table class="\"data-table\"">\n        <thead>\n          <tr>\n            <th>Stage</th>\n            <th>Consumes</th>\n            <th>Emits</th>\n            <th>Contributor Notes</th>\n          </tr>\n        </thead>\n        <tbody>\n          <tr>\n            <td>Argument Parsing</td>\n            <td>CLI args, cwd</td>\n            <td>PR selector, repo target, output mode</td>\n            <td>Keep flags orthogonal so automation can layer filters without changing presenter logic.</td>\n          </tr>\n          <tr>\n            <td>Repo Resolution</td>\n            <td>git context or <code>--repo</code></td>\n            <td>Canonical <span class="\"mono\"">org/name</span></td>\n            <td>Hard fail only when neither local checkout nor explicit repo is available.</td>\n          </tr>\n          <tr>\n            <td>GitHub Collector</td>\n            <td>Repo, PR filters, auth</td>\n            <td>PR metadata, reviews, timestamps, actors</td>\n            <td>Exit 3 indicates API/auth/rate-limit class failures that block canonical PR state.</td>\n          </tr>\n          <tr>\n            <td>History Collector</td>\n            <td>PR identity</td>\n            <td>Findings, outcomes, noise labels</td>\n            <td>Absence is non-fatal; annotate the dashboard as GitHub-only.</td>\n          </tr>\n          <tr>\n            <td>Lifecycle Aggregator</td>\n            <td>GitHub events + history</td>\n            <td>Rounds, severity totals, signal ratio, merge duration, impactful comments</td>\n            <td>Best place to add new analytics because both output modes depend on this shared shape.</td>\n          </tr>\n          <tr>\n            <td>Presenter</td>\n            <td>Normalized PR model</td>\n            <td>Single PR dashboard, all-PR table, or JSON</td>\n            <td>The skill spec says to print script output directly; formatting belongs here, not in wrapper code.</td>\n          </tr>\n          <tr>\n            <td>Suggestion Engine</td>\n            <td>Rendered result + heuristics</td>\n            <td>Next-step commands</td>\n            <td>Extension point for workflow policy without disturbing data collection or aggregation.</td>\n          </tr>\n        </tbody>\n      </table>\n      <div class="\"metric-note\"">\n        Core single-PR fields: header, status, author, dates, time-to-merge, review rounds, severity/outcome breakdown,\n        participants, signal analysis, and chronological timeline.\n      </div>\n    </section>\n\n    <section class="\"panel\"">\n      <h2 class="\"section-title\"">Failure Modes And Recovery</h2>\n      <div class="\"card-grid\"">\n        <div class="\"card" card-red\">\n          <h3>No Repo Detected</h3>\n          <p>\n            Exit 1. Triggered when the current directory is not a git repo and no <code>--repo</code> override exists.\n            Recovery is explicit: run from a repo or pass <code>--repo org/name</code>.\n          </p>\n        </div>\n        <div class="\"card" card-red\">\n          <h3>PR Not Found</h3>\n          <p>\n            Exit 2. Single-PR lookups fail fast when the requested PR number does not exist in the selected repo.\n            The UI should preserve the repo context in the error text.\n          </p>\n        </div>\n        <div class="\"card" card-red\">\n          <h3>GitHub API Failure</h3>\n          <p>\n            Exit 3. Covers auth failures, upstream API issues, and rate limiting. GitHub state is canonical, so the\n            skill cannot safely reconstruct the dashboard without it.\n          </p>\n        </div>\n        <div class="\"card" card-amber\">\n          <h3>No History For PR</h3>\n          <p>\n            Non-fatal. The skill still shows GitHub-derived review activity and clearly notes that stark-review history\n            is unavailable, preventing silent gaps in analytics quality.\n          </p>\n        </div>\n      </div>\n    </section>\n\n    <section class="\"panel\"">\n      <h2 class="\"section-title\"">Observability And Extension Points</h2>\n      <div class="\"card-grid\"">\n        <div class="\"card" card-blue\">\n          <h3>Observability Protocol</h3>\n          <p>\n            Emit the shared Skill Observability Protocol and add skill-specific counters for PRs analyzed, GitHub API calls,\n            history records loaded, and whether the result was sourced from GitHub, history, or both.\n          </p>\n        </div>\n        <div class="\"card" card-green\">\n          <h3>Analytics Extension Point</h3>\n          <p>\n            New metrics should land in the lifecycle aggregator first. That keeps single-PR dashboards, fleet summaries,\n            and JSON output aligned instead of duplicating business logic across presenters.\n          </p>\n        </div>\n        <div class="\"card" card-purple\">\n          <h3>Presenter Extension Point</h3>\n          <p>\n            If you need richer automation, extend <code>--json</code> rather than scraping terminal output.\n            The terminal contract remains stable because the script already owns preformatted display text.\n          </p>\n        </div>\n        <div class="\"card" card-teal\">\n          <h3>Workflow Extension Point</h3>\n          <p>\n            Heuristic suggestions are intentionally isolated. Add org-specific rules for stale reviews, reviewer load,\n            or CI gating without touching collection or normalization logic.\n          </p>\n        </div>\n      </div>\n\n      <table class="\"data-table\"">\n        <thead>\n          <tr>\n            <th>Metric</th>\n            <th>Why It Exists</th>\n            <th>Likely Source</th>\n          </tr>\n        </thead>\n        <tbody>\n          <tr>\n            <td>PRs analyzed</td>\n            <td>Explains summary-size scope and script cost.</td>\n            <td>Argument parser + target resolver</td>\n          </tr>\n          <tr>\n            <td>GitHub API calls</td>\n            <td>Useful for latency tuning and rate-limit debugging.</td>\n            <td>GitHub collector</td>\n          </tr>\n          <tr>\n            <td>History records loaded</td>\n            <td>Shows whether finding-based analytics were meaningfully populated.</td>\n            <td>History collector</td>\n          </tr>\n          <tr>\n            <td>Data source mode</td>\n            <td>Makes GitHub-only fallback visible instead of implicit.</td>\n            <td>Lifecycle aggregator</td>\n          </tr>\n        </tbody>\n      </table>\n    </section>\n\n    <footer class="\"footer\"">\n      stark-pr-status is a thin skill wrapper over a Python analytics script: the real architecture is collector → normalizer → presenter, with post-render workflow suggestions layered on top.\n    </footer>\n  </main>\n</body>\n</html>
+<html lang="en">
+<head>
+  
+  
+  <title>stark-pr-status | Internal Skill Architecture</title>
+  <style>
+    /*
+     * Stark Skills — Shared Design System CSS
+     *
+     * Foundation styles for LLM-generated HTML skill visualizations.
+     * LLMs embed this inline and may extend with additional styles.
+     * All colors pass WCAG AA 4.5:1 contrast ratio.
+     *
+     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+     */
+
+    /* === Reset & Base === */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #fafafa;
+      color: #1a1a1a;
+      line-height: 1.5;
+    }
+
+    /* === Header === */
+    .header { text-align: center; padding: 36px 20px 16px; }
+    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+    .header .scope {
+      display: inline-block; font-size: 10px; font-weight: 600;
+      background: #eff6ff; color: #1e40af;
+      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+    }
+
+    /* === Container === */
+    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+    /* === Section Title === */
+    .section-title {
+      font-size: 14px; font-weight: 700; color: #666;
+      text-transform: uppercase; letter-spacing: 1px;
+      margin: 32px 0 16px; padding-bottom: 6px;
+      border-bottom: 2px solid #e5e7eb;
+    }
+
+    /* === Node Types === */
+    .node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+    .node-desc { font-size: 10px; opacity: 0.8; }
+
+    .node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+    .node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+    .node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+    .node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
+    .node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; } /* Gray — external deps */
+
+    /* === Flow Layout === */
+    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+    .flow-step {
+      display: flex; align-items: stretch;
+      width: 100%; max-width: 860px; min-height: 76px;
+    }
+    .flow-lane-left {
+      width: 180px; display: flex;
+      align-items: center; justify-content: flex-end;
+      padding-right: 18px;
+    }
+    .flow-lane-center {
+      width: 500px; display: flex;
+      align-items: center; justify-content: center;
+    }
+    .flow-lane-right {
+      width: 180px; display: flex;
+      align-items: center; padding-left: 18px;
+    }
+    .annotation {
+      font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+    }
+    .annotation strong { color: #444; }
+
+    /* === Arrows === */
+    .arrow-down {
+      width: 2px; height: 20px; background: #cbd5e1;
+      margin: 0 auto; position: relative;
+    }
+    .arrow-down::after {
+      content: ''; position: absolute; bottom: -4px; left: -4px;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid #cbd5e1;
+    }
+    .arrow-container {
+      display: flex; justify-content: center;
+      width: 100%; max-width: 860px;
+    }
+    .arrow-container .flow-lane-center {
+      display: flex; justify-content: center;
+    }
+
+    /* === Cards === */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px; margin-top: 16px;
+    }
+    .card { padding: 16px; border-radius: 8px; }
+    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+    .card p  { font-size: 11px; line-height: 1.6; }
+
+    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+    .card-blue h3 { color: #1e40af; }
+    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+    .card-green h3 { color: #059669; }
+    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+    .card-purple h3 { color: #7c3aed; }
+    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+    .card-amber h3 { color: #92400e; }
+    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+    .card-dark h3 { color: #333333; }
+    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+    .card-red h3 { color: #dc2626; }
+
+    /* === Data Tables === */
+    .data-table {
+      width: 100%; max-width: 860px; margin: 16px auto;
+      border-collapse: collapse; font-size: 11px;
+    }
+    .data-table th {
+      background: #f3f4f6; padding: 8px 12px; text-align: left;
+      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+    }
+    .data-table td {
+      padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+    }
+
+    /* === Tags === */
+    .tag {
+      display: inline-block; font-size: 9px; font-weight: 600;
+      padding: 2px 8px; border-radius: 3px;
+    }
+    .tag-phase    { background: #dbeafe; color: #1e40af; }
+    .tag-decision { background: #ede9fe; color: #5b21b6; }
+    .tag-failure  { background: #fee2e2; color: #991b1b; }
+    .tag-config   { background: #d1fae5; color: #065f46; }
+    .tag-output   { background: #fef3c7; color: #92400e; }
+    .tag-external { background: #f3f4f6; color: #666666; }
+
+    /* === Legend === */
+    .legend {
+      display: flex; gap: 16px; justify-content: center;
+      margin: 16px 0 24px; flex-wrap: wrap;
+    }
+    .legend-item {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 10px; color: #666;
+    }
+    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+    /* === Summary Grid === */
+    .summary-grid {
+      display: grid; grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px; margin-top: 16px;
+    }
+    .summary-card { padding: 16px; border-radius: 8px; }
+    .summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+    .summary-card p  { font-size: 11px; line-height: 1.5; }
+
+    /* === Winner Badge === */
+    .winner-badge {
+      display: inline-block; font-size: 12px; color: #555555;
+      font-weight: 600; padding: 2px 10px; border-radius: 4px;
+      background: #f9fafb; border: 1px solid #d1d5db;
+    }
+
+    /* === Footer === */
+    .footer {
+      text-align: center; padding: 20px;
+      font-size: 10px; color: #999;
+    }
+
+    /* === Extensions === */
+    body {
+      background:
+        radial-gradient(circle at top left, rgba(30, 64, 175, 0.10), transparent 28%),
+        radial-gradient(circle at top right, rgba(245, 158, 11, 0.12), transparent 24%),
+        linear-gradient(180deg, #f8fafc 0%, #fafaf9 100%);
+    }
+    .header h1 { font-size: 30px; letter-spacing: -0.02em; }
+    .header .sub {
+      max-width: 720px;
+      margin: 8px auto 0;
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    .panel {
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+      padding: 24px;
+      margin-top: 20px;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
+      backdrop-filter: blur(6px);
+    }
+    .node-action { background: #0f766e; color: #ffffff; }
+    .tag-action { background: #ccfbf1; color: #115e59; }
+    .card-teal  { background: #ecfeff; border-left: 3px solid #0f766e; }
+    .card-teal h3 { color: #0f766e; }
+    .flow .node { width: 100%; box-shadow: 0 8px 18px rgba(15, 23, 42, 0.07); }
+    .data-table tr:nth-child(even) td { background: #fbfcfe; }
+    code, .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: #eef2ff;
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 10px;
+    }
+    .terminal {
+      margin-top: 16px;
+      padding: 16px 18px;
+      border-radius: 12px;
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.8;
+      overflow-x: auto;
+      border: 1px solid #1e293b;
+    }
+    .terminal strong { color: #7dd3fc; }
+    .pill-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .metric-note {
+      font-size: 10px;
+      color: #64748b;
+      margin-top: 8px;
+    }
+    .legend-dot.dot-phase { background: #1e40af; }
+    .legend-dot.dot-decision { background: #7c3aed; }
+    .legend-dot.dot-action { background: #0f766e; }
+    .legend-dot.dot-failure { background: #dc2626; }
+    .legend-dot.dot-output { background: #f59e0b; }
+    .legend-dot.dot-external {
+      background: #e5e7eb;
+      border: 1px dashed #9ca3af;
+    }
+    @media (max-width: 900px) {
+      .summary-grid { grid-template-columns: 1fr; }
+      .flow-step {
+        flex-direction: column;
+        gap: 12px;
+        min-height: 0;
+        margin-bottom: 12px;
+      }
+      .flow-lane-left,
+      .flow-lane-center,
+      .flow-lane-right {
+        width: 100%;
+        justify-content: center;
+        padding: 0;
+      }
+      .annotation {
+        max-width: none;
+        text-align: center;
+      }
+    }
+    @media (max-width: 640px) {
+      .container { padding: 0 14px 32px; }
+      .panel { padding: 18px; }
+      .header { padding: 28px 14px 12px; }
+      .header h1 { font-size: 25px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <h1>stark-pr-status</h1>
+    <div class="sub">
+      Internal PR analytics skill that joins GitHub review metadata with stark-review history,
+      then projects a terminal-first dashboard for review rounds, severity mix, signal-vs-noise,
+      participants, merge timing, and follow-up actions.
+    </div>
+    <div class="scope">internals / architecture + data flow + extension points</div>
+  </header>
+
+  <main class="container">
+    <section class="panel">
+      <div class="legend">
+        <div class="legend-item"><span class=""legend-dot" dot-config"></span>Config</div>
+        <div class="legend-item"><span class=""legend-dot" dot-phase"></span>Workflow phase</div>
+        <div class="legend-item"><span class=""legend-dot" dot-decision"></span>Decision</div>
+        <div class="legend-item"><span class=""legend-dot" dot-action"></span>Heuristic action</div>
+        <div class="legend-item"><span class=""legend-dot" dot-output"></span>Output</div>
+        <div class="legend-item"><span class=""legend-dot" dot-failure"></span>Failure</div>
+        <div class="legend-item"><span class=""legend-dot" dot-external"></span>External dependency</div>
+      </div>
+
+      <div class="summary-grid">
+        <div class=""summary-card" card-blue">
+          <h3>Primary Job</h3>
+          <p>
+            Explain what happened on a PR, not just its current state. The skill reconstructs review
+            rounds, severity distribution, outcome quality, participant behavior, and merge timing.
+          </p>
+          <div class="pill-row">
+            <span class=""tag" tag-phase">review rounds</span>
+            <span class=""tag" tag-phase">severity mix</span>
+            <span class=""tag" tag-phase">time-to-merge</span>
+          </div>
+        </div>
+
+        <div class=""summary-card" card-green">
+          <h3>Data Blend</h3>
+          <p>
+            GitHub provides canonical PR, review, and participant events. stark-review history adds
+            findings, noise classification, and historical review signal that GitHub alone does not expose.
+          </p>
+          <div class="pill-row">
+            <span class=""tag" tag-external">github-only</span>
+            <span class=""tag" tag-external">history-only</span>
+            <span class=""tag" tag-config">both</span>
+          </div>
+        </div>
+
+        <div class=""summary-card" card-amber">
+          <h3>Presenter Contract</h3>
+          <p>
+            The Python script owns formatting. Single-PR mode emits a rich dashboard; all-PR mode emits a
+            compact table; <code>--json</code> exposes a machine-readable variant for downstream consumers.
+          </p>
+          <div style=""margin-top:" 8px;"><span class="winner-badge">terminal-first skill</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 class="section-title">Runtime Contract</h2>
+      <div class="card-grid">
+        <div class=""card" card-dark">
+          <h3>Invocation Surface</h3>
+          <p>
+            Entry point is <code>pr_status.py</code> with positional PR selection or <code>--all</code>.
+            Repo detection defaults to the current git checkout unless <code>--repo org/name</code> is supplied.
+          </p>
+        </div>
+        <div class=""card" card-purple">
+          <h3>Mode Switches</h3>
+          <p>
+            <code>--state open|closed|merged|all</code> constrains the PR set, <code>--limit N</code> caps
+            fleet summaries, and <code>--json</code> bypasses human-oriented rendering for structured output.
+          </p>
+        </div>
+        <div class=""card" card-teal">
+          <h3>Post-Analysis Heuristics</h3>
+          <p>
+            After rendering, the skill inspects stale PRs, high-noise patterns, and merge-ready conditions
+            to suggest adjacent skills such as <code>/stark-review</code>, <code>/stark-review-improvement</code>,
+            and <code>/stark-pr-flow</code>.
+          </p>
+        </div>
+      </div>
+
+      <div class="terminal">
+<strong>Constants</strong>
+SCRIPTS = ~/.claude/code-review/scripts
+PYTHON  = $SCRIPTS/.venv/bin/python3
+
+<strong>Run</strong>
+$PYTHON $SCRIPTS/pr_status.py [PR_NUMBER | --all] [--repo REPO] [--state STATE] [--json]
+
+<strong>Examples</strong>
+$PYTHON $SCRIPTS/pr_status.py 15
+$PYTHON $SCRIPTS/pr_status.py --all --state open --limit 20
+$PYTHON $SCRIPTS/pr_status.py --pr 42 --repo org/name --json
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 class="section-title">Execution Flow</h2>
+
+      <div class="flow">
+        <div class="flow-step">
+          <div class="flow-lane-left">
+            <div class="annotation">
+              <strong>Input surface</strong><br></br>
+              PR number, <code>--all</code>, repo override, state filter, JSON flag, limit.
+            </div>
+          </div>
+          <div class="flow-lane-center">
+            <div class=""node" node-config">
+              <div class="node-title">CLI Entry + Flags</div>
+              <div class="node-desc">Normalize arguments and establish request scope</div>
+            </div>
+          </div>
+          <div class="flow-lane-right">
+            <div class="annotation">
+              <strong>Default behavior</strong><br></br>
+              No PR number means all PRs in current repo across all states.
+            </div>
+          </div>
+        </div>
+
+        <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+        <div class="flow-step">
+          <div class="flow-lane-left">
+            <div class="annotation">
+              <strong>Repo discovery</strong><br></br>
+              Resolve from git checkout unless <code>--repo</code> is explicit.
+            </div>
+          </div>
+          <div class="flow-lane-center">
+            <div class=""node" node-decision">
+              <div class="node-title">Repo Context Available?</div>
+              <div class="node-desc">Required before any GitHub query can be issued</div>
+            </div>
+          </div>
+          <div class="flow-lane-right">
+            <div class=""node" node-failure">
+              <div class="node-title">Exit 1</div>
+              <div class="node-desc">No repo detected</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+        <div class="flow-step">
+          <div class="flow-lane-left">
+            <div class=""node" node-external">
+              <div class="node-title">GitHub API</div>
+              <div class="node-desc">PR metadata, reviews, dates, participants</div>
+            </div>
+          </div>
+          <div class="flow-lane-center">
+            <div class=""node" node-phase">
+              <div class="node-title">Collect Raw Evidence</div>
+              <div class="node-desc">Load PR records plus review-side signals from both sources</div>
+            </div>
+          </div>
+          <div class="flow-lane-right">
+            <div class=""node" node-external">
+              <div class="node-title">stark-review History</div>
+              <div class="node-desc">Findings, outcomes, historical review traces</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+        <div class="flow-step">
+          <div class="flow-lane-left">
+            <div class="annotation">
+              <strong>Metrics derived</strong><br></br>
+              Review rounds, severity counts, outcome mix, participant actions, merge latency.
+            </div>
+          </div>
+          <div class="flow-lane-center">
+            <div class=""node" node-phase">
+              <div class="node-title">Normalize Lifecycle Model</div>
+              <div class="node-desc">Merge GitHub chronology with findings history into one PR-centric schema</div>
+            </div>
+          </div>
+          <div class="flow-lane-right">
+            <div class="annotation">
+              <strong>Fallback</strong><br></br>
+              Missing history is allowed; emit GitHub-only analytics with an explicit note.
+            </div>
+          </div>
+        </div>
+
+        <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+        <div class="flow-step">
+          <div class="flow-lane-left">
+            <div class="annotation">
+              <strong>Detail mode</strong><br></br>
+              Positional PR number or <code>--pr N</code>.
+            </div>
+          </div>
+          <div class="flow-lane-center">
+            <div class=""node" node-decision">
+              <div class="node-title">Single PR Or Fleet Summary?</div>
+              <div class="node-desc">Choose dashboard depth and output shape</div>
+            </div>
+          </div>
+          <div class="flow-lane-right">
+            <div class="annotation">
+              <strong>Summary mode</strong><br></br>
+              All PRs, optionally filtered by state and capped by limit.
+            </div>
+          </div>
+        </div>
+
+        <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+        <div class="flow-step">
+          <div class="flow-lane-left">
+            <div class=""node" node-output">
+              <div class="node-title">Single-PR Dashboard</div>
+              <div class="node-desc">Header, rounds, findings, participants, timeline</div>
+            </div>
+          </div>
+          <div class="flow-lane-center">
+            <div class=""node" node-phase">
+              <div class="node-title">Render Script Output</div>
+              <div class="node-desc">Python presenter formats terminal-ready content directly</div>
+            </div>
+          </div>
+          <div class="flow-lane-right">
+            <div class=""node" node-output">
+              <div class="node-title">All-PR Table / JSON</div>
+              <div class="node-desc">Compact summary rows or structured payload</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+        <div class="flow-step">
+          <div class="flow-lane-left">
+            <div class="annotation">
+              <strong>Examples</strong><br></br>
+              Open &gt; 7 days without review, high noise ratio, or approved + CI green.
+            </div>
+          </div>
+          <div class="flow-lane-center">
+            <div class=""node" node-action">
+              <div class="node-title">Suggestion Heuristics</div>
+              <div class="node-desc">Recommend next skill based on PR health and review quality patterns</div>
+            </div>
+          </div>
+          <div class="flow-lane-right">
+            <div class="annotation">
+              <strong>Follow-up actions</strong><br></br>
+              <code>/stark-review</code>, <code>/stark-review-improvement</code>, <code>/stark-pr-flow</code>
+            </div>
+          </div>
+        </div>
+
+        <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+        <div class="flow-step">
+          <div class="flow-lane-left">
+            <div class=""node" node-output">
+              <div class="node-title">Terminal Output</div>
+              <div class="node-desc">Preformatted human-readable response</div>
+            </div>
+          </div>
+          <div class="flow-lane-center">
+            <div class=""node" node-output">
+              <div class="node-title">Delivery Contract</div>
+              <div class="node-desc">Return script output directly; avoid reformatting in the skill layer</div>
+            </div>
+          </div>
+          <div class="flow-lane-right">
+            <div class=""node" node-output">
+              <div class="node-title">JSON Output</div>
+              <div class="node-desc">Machine-readable path for tooling and automation</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 class="section-title">Data Contracts</h2>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Stage</th>
+            <th>Consumes</th>
+            <th>Emits</th>
+            <th>Contributor Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Argument Parsing</td>
+            <td>CLI args, cwd</td>
+            <td>PR selector, repo target, output mode</td>
+            <td>Keep flags orthogonal so automation can layer filters without changing presenter logic.</td>
+          </tr>
+          <tr>
+            <td>Repo Resolution</td>
+            <td>git context or <code>--repo</code></td>
+            <td>Canonical <span class="mono">org/name</span></td>
+            <td>Hard fail only when neither local checkout nor explicit repo is available.</td>
+          </tr>
+          <tr>
+            <td>GitHub Collector</td>
+            <td>Repo, PR filters, auth</td>
+            <td>PR metadata, reviews, timestamps, actors</td>
+            <td>Exit 3 indicates API/auth/rate-limit class failures that block canonical PR state.</td>
+          </tr>
+          <tr>
+            <td>History Collector</td>
+            <td>PR identity</td>
+            <td>Findings, outcomes, noise labels</td>
+            <td>Absence is non-fatal; annotate the dashboard as GitHub-only.</td>
+          </tr>
+          <tr>
+            <td>Lifecycle Aggregator</td>
+            <td>GitHub events + history</td>
+            <td>Rounds, severity totals, signal ratio, merge duration, impactful comments</td>
+            <td>Best place to add new analytics because both output modes depend on this shared shape.</td>
+          </tr>
+          <tr>
+            <td>Presenter</td>
+            <td>Normalized PR model</td>
+            <td>Single PR dashboard, all-PR table, or JSON</td>
+            <td>The skill spec says to print script output directly; formatting belongs here, not in wrapper code.</td>
+          </tr>
+          <tr>
+            <td>Suggestion Engine</td>
+            <td>Rendered result + heuristics</td>
+            <td>Next-step commands</td>
+            <td>Extension point for workflow policy without disturbing data collection or aggregation.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="metric-note">
+        Core single-PR fields: header, status, author, dates, time-to-merge, review rounds, severity/outcome breakdown,
+        participants, signal analysis, and chronological timeline.
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 class="section-title">Failure Modes And Recovery</h2>
+      <div class="card-grid">
+        <div class=""card" card-red">
+          <h3>No Repo Detected</h3>
+          <p>
+            Exit 1. Triggered when the current directory is not a git repo and no <code>--repo</code> override exists.
+            Recovery is explicit: run from a repo or pass <code>--repo org/name</code>.
+          </p>
+        </div>
+        <div class=""card" card-red">
+          <h3>PR Not Found</h3>
+          <p>
+            Exit 2. Single-PR lookups fail fast when the requested PR number does not exist in the selected repo.
+            The UI should preserve the repo context in the error text.
+          </p>
+        </div>
+        <div class=""card" card-red">
+          <h3>GitHub API Failure</h3>
+          <p>
+            Exit 3. Covers auth failures, upstream API issues, and rate limiting. GitHub state is canonical, so the
+            skill cannot safely reconstruct the dashboard without it.
+          </p>
+        </div>
+        <div class=""card" card-amber">
+          <h3>No History For PR</h3>
+          <p>
+            Non-fatal. The skill still shows GitHub-derived review activity and clearly notes that stark-review history
+            is unavailable, preventing silent gaps in analytics quality.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 class="section-title">Observability And Extension Points</h2>
+      <div class="card-grid">
+        <div class=""card" card-blue">
+          <h3>Observability Protocol</h3>
+          <p>
+            Emit the shared Skill Observability Protocol and add skill-specific counters for PRs analyzed, GitHub API calls,
+            history records loaded, and whether the result was sourced from GitHub, history, or both.
+          </p>
+        </div>
+        <div class=""card" card-green">
+          <h3>Analytics Extension Point</h3>
+          <p>
+            New metrics should land in the lifecycle aggregator first. That keeps single-PR dashboards, fleet summaries,
+            and JSON output aligned instead of duplicating business logic across presenters.
+          </p>
+        </div>
+        <div class=""card" card-purple">
+          <h3>Presenter Extension Point</h3>
+          <p>
+            If you need richer automation, extend <code>--json</code> rather than scraping terminal output.
+            The terminal contract remains stable because the script already owns preformatted display text.
+          </p>
+        </div>
+        <div class=""card" card-teal">
+          <h3>Workflow Extension Point</h3>
+          <p>
+            Heuristic suggestions are intentionally isolated. Add org-specific rules for stale reviews, reviewer load,
+            or CI gating without touching collection or normalization logic.
+          </p>
+        </div>
+      </div>
+
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th>Why It Exists</th>
+            <th>Likely Source</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>PRs analyzed</td>
+            <td>Explains summary-size scope and script cost.</td>
+            <td>Argument parser + target resolver</td>
+          </tr>
+          <tr>
+            <td>GitHub API calls</td>
+            <td>Useful for latency tuning and rate-limit debugging.</td>
+            <td>GitHub collector</td>
+          </tr>
+          <tr>
+            <td>History records loaded</td>
+            <td>Shows whether finding-based analytics were meaningfully populated.</td>
+            <td>History collector</td>
+          </tr>
+          <tr>
+            <td>Data source mode</td>
+            <td>Makes GitHub-only fallback visible instead of implicit.</td>
+            <td>Lifecycle aggregator</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <footer class="footer">
+      stark-pr-status is a thin skill wrapper over a Python analytics script: the real architecture is collector → normalizer → presenter, with post-render workflow suggestions layered on top.
+    </footer>
+  </main>
+</body>
+</html>

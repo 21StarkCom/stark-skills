@@ -1,1 +1,545 @@
-<html lang="\"en\"">\n<head>\n  \n  \n  <title>stark-generate-docs — Usage Visualization</title>\n  <style>\n    /*\n     * Stark Skills — Shared Design System CSS\n     *\n     * Foundation styles for LLM-generated HTML skill visualizations.\n     * LLMs embed this inline and may extend with additional styles.\n     * All colors pass WCAG AA 4.5:1 contrast ratio.\n     *\n     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.\n     */\n\n    /* === Reset & Base === */\n    * { margin: 0; padding: 0; box-sizing: border-box; }\n    body {\n      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;\n      background: #fafafa;\n      color: #1a1a1a;\n      line-height: 1.5;\n    }\n\n    /* === Header === */\n    .header { text-align: center; padding: 36px 20px 16px; }\n    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }\n    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }\n    .header .scope {\n      display: inline-block; font-size: 10px; font-weight: 600;\n      background: #eff6ff; color: #1e40af;\n      padding: 3px 10px; border-radius: 4px; margin-top: 8px;\n    }\n\n    /* === Container === */\n    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }\n\n    /* === Section Title === */\n    .section-title {\n      font-size: 14px; font-weight: 700; color: #666;\n      text-transform: uppercase; letter-spacing: 1px;\n      margin: 32px 0 16px; padding-bottom: 6px;\n      border-bottom: 2px solid #e5e7eb;\n    }\n\n    /* === Node Types === */\n    .node { border-radius: 8px; padding: 12px 16px; text-align: center; }\n    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }\n    .node-desc { font-size: 10px; opacity: 0.8; }\n\n    .node-phase    { background: #1e40af; color: #ffffff; }\n    .node-decision { background: #7c3aed; color: #ffffff; }\n    .node-failure  { background: #dc2626; color: #ffffff; }\n    .node-config   { background: #047857; color: #ffffff; }\n    .node-output   { background: #f59e0b; color: #1a1a1a; }\n    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }\n\n    /* === Flow Layout === */\n    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }\n    .flow-step {\n      display: flex; align-items: stretch;\n      width: 100%; max-width: 860px; min-height: 76px;\n    }\n    .flow-lane-left {\n      width: 180px; display: flex;\n      align-items: center; justify-content: flex-end;\n      padding-right: 18px;\n    }\n    .flow-lane-center {\n      width: 500px; display: flex;\n      align-items: center; justify-content: center;\n    }\n    .flow-lane-right {\n      width: 180px; display: flex; align-items: center; padding-left: 18px;\n    }\n    .annotation {\n      font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;\n    }\n    .annotation strong { color: #444; }\n\n    /* === Arrows === */\n    .arrow-down {\n      width: 2px; height: 20px; background: #cbd5e1;\n      margin: 0 auto; position: relative;\n    }\n    .arrow-down::after {\n      content: ''; position: absolute; bottom: -4px; left: -4px;\n      border-left: 5px solid transparent;\n      border-right: 5px solid transparent;\n      border-top: 6px solid #cbd5e1;\n    }\n    .arrow-container {\n      display: flex; justify-content: center;\n      width: 100%; max-width: 860px;\n    }\n    .arrow-container .flow-lane-center {\n      display: flex; justify-content: center;\n    }\n\n    /* === Cards === */\n    .card-grid {\n      display: grid;\n      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));\n      gap: 16px; margin-top: 16px;\n    }\n    .card { padding: 16px; border-radius: 8px; }\n    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }\n    .card p  { font-size: 11px; line-height: 1.6; }\n\n    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }\n    .card-blue h3 { color: #1e40af; }\n    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }\n    .card-green h3 { color: #059669; }\n    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }\n    .card-purple h3 { color: #7c3aed; }\n    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }\n    .card-amber h3 { color: #92400e; }\n    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }\n    .card-dark h3 { color: #333333; }\n    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }\n    .card-red h3 { color: #dc2626; }\n\n    /* === Data Tables === */\n    .data-table {\n      width: 100%; max-width: 860px; margin: 16px auto;\n      border-collapse: collapse; font-size: 11px;\n    }\n    .data-table th {\n      background: #f3f4f6; padding: 8px 12px; text-align: left;\n      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;\n    }\n    .data-table td {\n      padding: 8px 12px; border-bottom: 1px solid #f3f4f6;\n      vertical-align: top;\n    }\n\n    /* === Tags === */\n    .tag {\n      display: inline-block; font-size: 9px; font-weight: 600;\n      padding: 2px 8px; border-radius: 3px;\n    }\n    .tag-phase    { background: #dbeafe; color: #1e40af; }\n    .tag-decision { background: #ede9fe; color: #5b21b6; }\n    .tag-failure  { background: #fee2e2; color: #991b1b; }\n    .tag-config   { background: #d1fae5; color: #065f46; }\n    .tag-output   { background: #fef3c7; color: #92400e; }\n    .tag-external { background: #f3f4f6; color: #666666; }\n\n    /* === Legend === */\n    .legend {\n      display: flex; gap: 16px; justify-content: center;\n      margin: 16px 0 24px; flex-wrap: wrap;\n    }\n    .legend-item {\n      display: flex; align-items: center; gap: 6px;\n      font-size: 10px; color: #666;\n    }\n    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }\n\n    /* === Summary Grid === */\n    .summary-grid {\n      display: grid; grid-template-columns: 1fr 1fr 1fr;\n      gap: 16px; margin-top: 16px;\n    }\n    .summary-card { padding: 16px; border-radius: 8px; }\n    .summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }\n    .summary-card p  { font-size: 11px; line-height: 1.5; }\n\n    /* === Winner Badge === */\n    .winner-badge {\n      display: inline-block; font-size: 12px; color: #555555;\n      font-weight: 600; padding: 2px 10px; border-radius: 4px;\n      background: #f9fafb; border: 1px solid #d1d5db;\n    }\n\n    /* === Footer === */\n    .footer {\n      text-align: center; padding: 20px;\n      font-size: 10px; color: #999;\n    }\n\n    /* === Extensions === */\n    .hero-note {\n      max-width: 760px;\n      margin: 10px auto 0;\n      font-size: 13px;\n      color: #444;\n    }\n    .code-pill {\n      display: inline-block;\n      background: #111827;\n      color: #f9fafb;\n      border-radius: 6px;\n      padding: 5px 9px;\n      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;\n      font-size: 11px;\n      margin: 4px 6px 0 0;\n    }\n    .mini-list {\n      margin-top: 10px;\n      font-size: 11px;\n      color: #333;\n    }\n    .mini-list div + div { margin-top: 6px; }\n    .summary-card.card-blue,\n    .summary-card.card-green,\n    .summary-card.card-amber { border-radius: 8px; }\n    .outputs-strip {\n      display: grid;\n      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));\n      gap: 16px;\n      margin-top: 16px;\n    }\n    .output-box {\n      background: #fff;\n      border: 1px solid #e5e7eb;\n      border-top: 4px solid #f59e0b;\n      border-radius: 8px;\n      padding: 14px;\n    }\n    .output-box h3 {\n      font-size: 12px;\n      margin-bottom: 6px;\n      color: #92400e;\n    }\n    .output-box p {\n      font-size: 11px;\n      color: #444;\n    }\n    .table-code {\n      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;\n      background: #f8fafc;\n      border: 1px solid #e5e7eb;\n      border-radius: 4px;\n      padding: 1px 5px;\n      display: inline-block;\n    }\n    @media (max-width: 900px) {\n      .flow-step {\n        flex-direction: column;\n        min-height: auto;\n        gap: 8px;\n        margin-bottom: 8px;\n      }\n      .flow-lane-left,\n      .flow-lane-center,\n      .flow-lane-right {\n        width: 100%;\n        justify-content: center;\n        padding: 0;\n      }\n      .annotation {\n        max-width: 100%;\n        text-align: center;\n      }\n      .summary-grid {\n        grid-template-columns: 1fr;\n      }\n    }\n  </style>\n</head>\n<body>\n  <div class="\"header\"">\n    <h1>stark-generate-docs</h1>\n    <div class="\"sub\"">Generate or refresh skill documentation from changed <span class="\"table-code\"">SKILL.md</span> files, then commit the updated docs.</div>\n    <div class="\"scope\"">USAGE VIEW</div>\n    <p class="\"hero-note\"">\n      This skill is for end users who want a fast way to regenerate skill docs, target one skill, check for stale docs without changing files, or force a full refresh.\n    </p>\n  </div>\n\n  <div class="\"container\"">\n    <div class="\"legend\"">\n      <div class="\"legend-item\""><span class="\"legend-dot\"" style="\"background:#1e40af;\""></span>Workflow phase</div>\n      <div class="\"legend-item\""><span class="\"legend-dot\"" style="\"background:#7c3aed;\""></span>Decision</div>\n      <div class="\"legend-item\""><span class="\"legend-dot\"" style="\"background:#047857;\""></span>Inputs / flags</div>\n      <div class="\"legend-item\""><span class="\"legend-dot\"" style="\"background:#f59e0b;\""></span>Outputs</div>\n      <div class="\"legend-item\""><span class="\"legend-dot\"" style="\"background:#dc2626;\""></span>Failure / warning</div>\n      <div class="\"legend-item\""><span class="\"legend-dot\"" style="\"background:#e5e7eb;" border:1px dashed #9ca3af;\"></span>External tool</div>\n    </div>\n\n    <div class="\"section-title\"">Quick Start</div>\n    <div class="\"card-grid\"">\n      <div class="\"card" card-blue\">\n        <h3>Default Invocation</h3>\n        <p>Run <span class="\"table-code\"">/stark-generate-docs</span> to regenerate docs only for skills whose <span class="\"table-code\"">SKILL.md</span> files are stale or changed.</p>\n      </div>\n      <div class="\"card" card-green\">\n        <h3>Target One Skill</h3>\n        <p>Run <span class="\"table-code\"">/stark-generate-docs --skill &lt;name&gt;</span> when you know exactly which skill needs refreshed docs.</p>\n      </div>\n      <div class="\"card" card-purple\">\n        <h3>Safety Check</h3>\n        <p>Run <span class="\"table-code\"">/stark-generate-docs --check</span> to detect stale docs without generating files or committing anything.</p>\n      </div>\n      <div class="\"card" card-amber\">\n        <h3>Force Full Refresh</h3>\n        <p>Run <span class="\"table-code\"">/stark-generate-docs --all</span> or <span class="\"table-code\"">--force</span> to rebuild documentation for every skill.</p>\n      </div>\n    </div>\n\n    <div class="\"section-title\"">Workflow</div>\n    <div class="\"flow\"">\n      <div class="\"flow-step\"">\n        <div class="\"flow-lane-left\"">\n          <div class="\"annotation\""><strong>User input:</strong> choose default mode, one skill, check-only, or full refresh.</div>\n        </div>\n        <div class="\"flow-lane-center\"">\n          <div class="\"node" node-config\">\n            <div class="\"node-title\"">Invocation</div>\n            <div class="\"node-desc\"">/stark-generate-docs [--skill &lt;name&gt;] [--all] [--check] [--force]</div>\n          </div>\n        </div>\n        <div class="\"flow-lane-right\"">\n          <div class="\"annotation\""><strong>Hint:</strong> use proactively after editing a skill's <span class="\"table-code\"">SKILL.md</span>.</div>\n        </div>\n      </div>\n\n      <div class="\"arrow-container\""><div class="\"flow-lane-center\""><div class="\"arrow-down\""></div></div></div>\n\n      <div class="\"flow-step\"">\n        <div class="\"flow-lane-left\"">\n          <div class="\"annotation\""><strong>Branch:</strong> skip detection if <span class="\"table-code\"">--skill</span> or <span class="\"table-code\"">--all</span> was supplied.</div>\n        </div>\n        <div class="\"flow-lane-center\"">\n          <div class="\"node" node-decision\">\n            <div class="\"node-title\"">Need Change Detection?</div>\n            <div class="\"node-desc\"">Only required in default mode</div>\n          </div>\n        </div>\n        <div class="\"flow-lane-right\"">\n          <div class="\"annotation\""><strong>Decision outcome:</strong> detect stale skills or jump straight to generation.</div>\n        </div>\n      </div>\n\n      <div class="\"arrow-container\""><div class="\"flow-lane-center\""><div class="\"arrow-down\""></div></div></div>\n\n      <div class="\"flow-step\"">\n        <div class="\"flow-lane-left\"">\n          <div class="\"annotation\""><span class="\"tag" tag-external\">external</span> Python generator script performs stale-doc detection.</div>\n        </div>\n        <div class="\"flow-lane-center\"">\n          <div class="\"node" node-external\">\n            <div class="\"node-title\"">Check Staleness</div>\n            <div class="\"node-desc\"">python scripts/generate_skill_docs.py --check</div>\n          </div>\n        </div>\n        <div class="\"flow-lane-right\"">\n          <div class="\"annotation\""><strong>Exit 0:</strong> all docs current. <strong>Exit 1:</strong> collect stale skill names.</div>\n        </div>\n      </div>\n\n      <div class="\"arrow-container\""><div class="\"flow-lane-center\""><div class="\"arrow-down\""></div></div></div>\n\n      <div class="\"flow-step\"">\n        <div class="\"flow-lane-left\"">\n          <div class="\"annotation\""><strong>If check-only:</strong> stop after reporting whether docs are stale.</div>\n        </div>\n        <div class="\"flow-lane-center\"">\n          <div class="\"node" node-decision\">\n            <div class="\"node-title\"">Generate Now?</div>\n            <div class="\"node-desc\"">No for --check, yes for all other generation modes</div>\n          </div>\n        </div>\n        <div class="\"flow-lane-right\"">\n          <div class="\"annotation\""><strong>Main user workflow:</strong> most runs continue into regeneration.</div>\n        </div>\n      </div>\n\n      <div class="\"arrow-container\""><div class="\"flow-lane-center\""><div class="\"arrow-down\""></div></div></div>\n\n      <div class="\"flow-step\"">\n        <div class="\"flow-lane-left\"">\n          <div class="\"annotation\""><strong>Inputs:</strong> one skill name, stale skill list, or force-all.</div>\n        </div>\n        <div class="\"flow-lane-center\"">\n          <div class="\"node" node-phase\">\n            <div class="\"node-title\"">Generate Docs</div>\n            <div class="\"node-desc\"">python scripts/generate_skill_docs.py [--skill &lt;name&gt; | --force]</div>\n          </div>\n        </div>\n        <div class="\"flow-lane-right\"">\n          <div class="\"annotation\""><strong>During run:</strong> report progress per skill and continue past partial LLM failures.</div>\n        </div>\n      </div>\n\n      <div class="\"arrow-container\""><div class="\"flow-lane-center\""><div class="\"arrow-down\""></div></div></div>\n\n      <div class="\"flow-step\"">\n        <div class="\"flow-lane-left\"">\n          <div class="\"annotation\""><span class="\"tag" tag-output\">artifact</span> updated files land under <span class="\"table-code\"">docs/skills/</span>.</div>\n        </div>\n        <div class="\"flow-lane-center\"">\n          <div class="\"node" node-output\">\n            <div class="\"node-title\"">Updated Documentation</div>\n            <div class="\"node-desc\"">Visualizations, winners, scores, file counts</div>\n          </div>\n        </div>\n        <div class="\"flow-lane-right\"">\n          <div class="\"annotation\""><strong>Typical output:</strong> refreshed HTML and related generated assets.</div>\n        </div>\n      </div>\n\n      <div class="\"arrow-container\""><div class="\"flow-lane-center\""><div class="\"arrow-down\""></div></div></div>\n\n      <div class="\"flow-step\"">\n        <div class="\"flow-lane-left\"">\n          <div class="\"annotation\""><span class="\"tag" tag-external\">external</span> Git stages and commits generated doc changes.</div>\n        </div>\n        <div class="\"flow-lane-center\"">\n          <div class="\"node" node-phase\">\n            <div class="\"node-title\"">Commit Results</div>\n            <div class="\"node-desc\"">git add docs/skills/ && git commit -m \"docs: update skill documentation\"</div>\n          </div>\n        </div>\n        <div class="\"flow-lane-right\"">\n          <div class="\"annotation\""><strong>Commit message:</strong> includes the updated skill list.</div>\n        </div>\n      </div>\n\n      <div class="\"arrow-container\""><div class="\"flow-lane-center\""><div class="\"arrow-down\""></div></div></div>\n\n      <div class="\"flow-step\"">\n        <div class="\"flow-lane-left\"">\n          <div class="\"annotation\""><strong>Final user-facing report:</strong> what changed and whether any warnings occurred.</div>\n        </div>\n        <div class="\"flow-lane-center\"">\n          <div class="\"node" node-output\">\n            <div class="\"node-title\"">Summary</div>\n            <div class="\"node-desc\"">Updated skills, winners, scores, file counts</div>\n          </div>\n        </div>\n        <div class="\"flow-lane-right\"">\n          <div class="\"annotation\""><strong>Stop condition:</strong> all up to date, or docs refreshed and committed.</div>\n        </div>\n      </div>\n    </div>\n\n    <div class="\"section-title\"">Common Commands</div>\n    <table class="\"data-table\"">\n      <thead>\n        <tr>\n          <th>Command</th>\n          <th>When to Use It</th>\n          <th>Expected Result</th>\n        </tr>\n      </thead>\n      <tbody>\n        <tr>\n          <td><span class="\"table-code\"">/stark-generate-docs</span></td>\n          <td>Normal workflow after editing one or more <span class="\"table-code\"">SKILL.md</span> files.</td>\n          <td>Only stale skill docs are regenerated and committed.</td>\n        </tr>\n        <tr>\n          <td><span class="\"table-code\"">/stark-generate-docs --skill stark-generate-docs</span></td>\n          <td>You want to refresh docs for exactly one named skill.</td>\n          <td>That skill's docs are rebuilt without scanning the rest.</td>\n        </tr>\n        <tr>\n          <td><span class="\"table-code\"">/stark-generate-docs --check</span></td>\n          <td>You need a non-destructive stale-doc check in CI or before generating.</td>\n          <td>Reports up-to-date vs stale; no docs or commits are created.</td>\n        </tr>\n        <tr>\n          <td><span class="\"table-code\"">/stark-generate-docs --all</span></td>\n          <td>You want a full refresh across the skill catalog.</td>\n          <td>All skill docs are regenerated, equivalent to <span class="\"table-code\"">--force</span>.</td>\n        </tr>\n      </tbody>\n    </table>\n\n    <div class="\"section-title\"">Inputs And Outputs</div>\n    <div class="\"summary-grid\"">\n      <div class="\"summary-card" card-blue\">\n        <h3>Inputs</h3>\n        <p>Command flags, skill names, repo state, and which <span class="\"table-code\"">SKILL.md</span> files changed.</p>\n        <div class="\"mini-list\"">\n          <div><span class="\"tag" tag-config\">flag</span> <span class="\"table-code\"">--skill &lt;name&gt;</span></div>\n          <div><span class="\"tag" tag-config\">flag</span> <span class="\"table-code\"">--all</span> / <span class="\"table-code\"">--force</span></div>\n          <div><span class="\"tag" tag-config\">flag</span> <span class="\"table-code\"">--check</span></div>\n        </div>\n      </div>\n      <div class="\"summary-card" card-green\">\n        <h3>Behavior</h3>\n        <p>Detect stale docs when needed, regenerate selected skills, and continue even if some LLM steps fail.</p>\n        <div class="\"mini-list\"">\n          <div><span class="\"tag" tag-phase\">phase</span> Detect changes</div>\n          <div><span class="\"tag" tag-phase\">phase</span> Generate docs</div>\n          <div><span class="\"tag" tag-phase\">phase</span> Commit results</div>\n        </div>\n      </div>\n      <div class="\"summary-card" card-amber\">\n        <h3>Outputs</h3>\n        <p>Updated documentation files, a git commit, and a final status report with winners, scores, and file counts.</p>\n        <div class="\"mini-list\"">\n          <div><span class="\"winner-badge\"">Winners + scores</span></div>\n          <div><span class="\"tag" tag-output\">artifact</span> <span class="\"table-code\"">docs/skills/</span></div>\n          <div><span class="\"tag" tag-output\">report</span> updated skill list</div>\n        </div>\n      </div>\n    </div>\n\n    <div class="\"section-title\"">Failure Modes</div>\n    <div class="\"card-grid\"">\n      <div class="\"card" card-red\">\n        <h3>LLM Calls Fail</h3>\n        <p>Generation should report which model calls failed and continue processing remaining work instead of aborting the entire run.</p>\n      </div>\n      <div class="\"card" card-dark\">\n        <h3>Playwright Missing</h3>\n        <p>Screenshot generation is skipped. The user still gets docs, but with a warning about missing screenshots.</p>\n      </div>\n      <div class="\"card" card-green\">\n        <h3>No Changes Found</h3>\n        <p>If the check exits cleanly, report that all skill docs are up to date and stop without generating new files.</p>\n      </div>\n    </div>\n\n    <div class="\"section-title\"">Typical User Journey</div>\n    <div class="\"outputs-strip\"">\n      <div class="\"output-box\"">\n        <h3>1. Edit a Skill</h3>\n        <p>You update a <span class="\"table-code\"">SKILL.md</span> file and want docs to match the latest instructions.</p>\n      </div>\n      <div class="\"output-box\"">\n        <h3>2. Run the Skill</h3>\n        <p>Use the default command to auto-detect which skill docs are stale, or target one skill explicitly.</p>\n      </div>\n      <div class="\"output-box\"">\n        <h3>3. Review Summary</h3>\n        <p>Read the final report to see what changed, which visualization won, and how many files were updated.</p>\n      </div>\n      <div class="\"output-box\"">\n        <h3>4. Keep Moving</h3>\n        <p>Because the skill commits results, the docs update can slot directly into your normal repo workflow.</p>\n      </div>\n    </div>\n  </div>\n\n  <div class="\"footer\"">\n    stark-generate-docs usage visualization • end-user focused • standalone HTML with inline CSS only\n  </div>\n</body>\n</html>
+<html lang="en">
+<head>
+  
+  
+  <title>stark-generate-docs — Usage Visualization</title>
+  <style>
+    /*
+     * Stark Skills — Shared Design System CSS
+     *
+     * Foundation styles for LLM-generated HTML skill visualizations.
+     * LLMs embed this inline and may extend with additional styles.
+     * All colors pass WCAG AA 4.5:1 contrast ratio.
+     *
+     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+     */
+
+    /* === Reset & Base === */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #fafafa;
+      color: #1a1a1a;
+      line-height: 1.5;
+    }
+
+    /* === Header === */
+    .header { text-align: center; padding: 36px 20px 16px; }
+    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+    .header .scope {
+      display: inline-block; font-size: 10px; font-weight: 600;
+      background: #eff6ff; color: #1e40af;
+      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+    }
+
+    /* === Container === */
+    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+    /* === Section Title === */
+    .section-title {
+      font-size: 14px; font-weight: 700; color: #666;
+      text-transform: uppercase; letter-spacing: 1px;
+      margin: 32px 0 16px; padding-bottom: 6px;
+      border-bottom: 2px solid #e5e7eb;
+    }
+
+    /* === Node Types === */
+    .node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+    .node-desc { font-size: 10px; opacity: 0.8; }
+
+    .node-phase    { background: #1e40af; color: #ffffff; }
+    .node-decision { background: #7c3aed; color: #ffffff; }
+    .node-failure  { background: #dc2626; color: #ffffff; }
+    .node-config   { background: #047857; color: #ffffff; }
+    .node-output   { background: #f59e0b; color: #1a1a1a; }
+    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
+
+    /* === Flow Layout === */
+    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+    .flow-step {
+      display: flex; align-items: stretch;
+      width: 100%; max-width: 860px; min-height: 76px;
+    }
+    .flow-lane-left {
+      width: 180px; display: flex;
+      align-items: center; justify-content: flex-end;
+      padding-right: 18px;
+    }
+    .flow-lane-center {
+      width: 500px; display: flex;
+      align-items: center; justify-content: center;
+    }
+    .flow-lane-right {
+      width: 180px; display: flex; align-items: center; padding-left: 18px;
+    }
+    .annotation {
+      font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+    }
+    .annotation strong { color: #444; }
+
+    /* === Arrows === */
+    .arrow-down {
+      width: 2px; height: 20px; background: #cbd5e1;
+      margin: 0 auto; position: relative;
+    }
+    .arrow-down::after {
+      content: ''; position: absolute; bottom: -4px; left: -4px;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid #cbd5e1;
+    }
+    .arrow-container {
+      display: flex; justify-content: center;
+      width: 100%; max-width: 860px;
+    }
+    .arrow-container .flow-lane-center {
+      display: flex; justify-content: center;
+    }
+
+    /* === Cards === */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px; margin-top: 16px;
+    }
+    .card { padding: 16px; border-radius: 8px; }
+    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+    .card p  { font-size: 11px; line-height: 1.6; }
+
+    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+    .card-blue h3 { color: #1e40af; }
+    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+    .card-green h3 { color: #059669; }
+    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+    .card-purple h3 { color: #7c3aed; }
+    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+    .card-amber h3 { color: #92400e; }
+    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+    .card-dark h3 { color: #333333; }
+    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+    .card-red h3 { color: #dc2626; }
+
+    /* === Data Tables === */
+    .data-table {
+      width: 100%; max-width: 860px; margin: 16px auto;
+      border-collapse: collapse; font-size: 11px;
+    }
+    .data-table th {
+      background: #f3f4f6; padding: 8px 12px; text-align: left;
+      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+    }
+    .data-table td {
+      padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+      vertical-align: top;
+    }
+
+    /* === Tags === */
+    .tag {
+      display: inline-block; font-size: 9px; font-weight: 600;
+      padding: 2px 8px; border-radius: 3px;
+    }
+    .tag-phase    { background: #dbeafe; color: #1e40af; }
+    .tag-decision { background: #ede9fe; color: #5b21b6; }
+    .tag-failure  { background: #fee2e2; color: #991b1b; }
+    .tag-config   { background: #d1fae5; color: #065f46; }
+    .tag-output   { background: #fef3c7; color: #92400e; }
+    .tag-external { background: #f3f4f6; color: #666666; }
+
+    /* === Legend === */
+    .legend {
+      display: flex; gap: 16px; justify-content: center;
+      margin: 16px 0 24px; flex-wrap: wrap;
+    }
+    .legend-item {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 10px; color: #666;
+    }
+    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+    /* === Summary Grid === */
+    .summary-grid {
+      display: grid; grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px; margin-top: 16px;
+    }
+    .summary-card { padding: 16px; border-radius: 8px; }
+    .summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+    .summary-card p  { font-size: 11px; line-height: 1.5; }
+
+    /* === Winner Badge === */
+    .winner-badge {
+      display: inline-block; font-size: 12px; color: #555555;
+      font-weight: 600; padding: 2px 10px; border-radius: 4px;
+      background: #f9fafb; border: 1px solid #d1d5db;
+    }
+
+    /* === Footer === */
+    .footer {
+      text-align: center; padding: 20px;
+      font-size: 10px; color: #999;
+    }
+
+    /* === Extensions === */
+    .hero-note {
+      max-width: 760px;
+      margin: 10px auto 0;
+      font-size: 13px;
+      color: #444;
+    }
+    .code-pill {
+      display: inline-block;
+      background: #111827;
+      color: #f9fafb;
+      border-radius: 6px;
+      padding: 5px 9px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      margin: 4px 6px 0 0;
+    }
+    .mini-list {
+      margin-top: 10px;
+      font-size: 11px;
+      color: #333;
+    }
+    .mini-list div + div { margin-top: 6px; }
+    .summary-card.card-blue,
+    .summary-card.card-green,
+    .summary-card.card-amber { border-radius: 8px; }
+    .outputs-strip {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+    .output-box {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-top: 4px solid #f59e0b;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .output-box h3 {
+      font-size: 12px;
+      margin-bottom: 6px;
+      color: #92400e;
+    }
+    .output-box p {
+      font-size: 11px;
+      color: #444;
+    }
+    .table-code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      background: #f8fafc;
+      border: 1px solid #e5e7eb;
+      border-radius: 4px;
+      padding: 1px 5px;
+      display: inline-block;
+    }
+    @media (max-width: 900px) {
+      .flow-step {
+        flex-direction: column;
+        min-height: auto;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .flow-lane-left,
+      .flow-lane-center,
+      .flow-lane-right {
+        width: 100%;
+        justify-content: center;
+        padding: 0;
+      }
+      .annotation {
+        max-width: 100%;
+        text-align: center;
+      }
+      .summary-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>stark-generate-docs</h1>
+    <div class="sub">Generate or refresh skill documentation from changed <span class="table-code">SKILL.md</span> files, then commit the updated docs.</div>
+    <div class="scope">USAGE VIEW</div>
+    <p class="hero-note">
+      This skill is for end users who want a fast way to regenerate skill docs, target one skill, check for stale docs without changing files, or force a full refresh.
+    </p>
+  </div>
+
+  <div class="container">
+    <div class="legend">
+      <div class="legend-item"><span class="legend-dot" style="background:#1e40af;"></span>Workflow phase</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#7c3aed;"></span>Decision</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#047857;"></span>Inputs / flags</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#f59e0b;"></span>Outputs</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#dc2626;"></span>Failure / warning</div>
+      <div class="legend-item"><span class="legend-dot" style=""background:#e5e7eb;" border:1px dashed #9ca3af;"></span>External tool</div>
+    </div>
+
+    <div class="section-title">Quick Start</div>
+    <div class="card-grid">
+      <div class=""card" card-blue">
+        <h3>Default Invocation</h3>
+        <p>Run <span class="table-code">/stark-generate-docs</span> to regenerate docs only for skills whose <span class="table-code">SKILL.md</span> files are stale or changed.</p>
+      </div>
+      <div class=""card" card-green">
+        <h3>Target One Skill</h3>
+        <p>Run <span class="table-code">/stark-generate-docs --skill &lt;name&gt;</span> when you know exactly which skill needs refreshed docs.</p>
+      </div>
+      <div class=""card" card-purple">
+        <h3>Safety Check</h3>
+        <p>Run <span class="table-code">/stark-generate-docs --check</span> to detect stale docs without generating files or committing anything.</p>
+      </div>
+      <div class=""card" card-amber">
+        <h3>Force Full Refresh</h3>
+        <p>Run <span class="table-code">/stark-generate-docs --all</span> or <span class="table-code">--force</span> to rebuild documentation for every skill.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Workflow</div>
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>User input:</strong> choose default mode, one skill, check-only, or full refresh.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class=""node" node-config">
+            <div class="node-title">Invocation</div>
+            <div class="node-desc">/stark-generate-docs [--skill &lt;name&gt;] [--all] [--check] [--force]</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Hint:</strong> use proactively after editing a skill's <span class="table-code">SKILL.md</span>.</div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Branch:</strong> skip detection if <span class="table-code">--skill</span> or <span class="table-code">--all</span> was supplied.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class=""node" node-decision">
+            <div class="node-title">Need Change Detection?</div>
+            <div class="node-desc">Only required in default mode</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Decision outcome:</strong> detect stale skills or jump straight to generation.</div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><span class=""tag" tag-external">external</span> Python generator script performs stale-doc detection.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class=""node" node-external">
+            <div class="node-title">Check Staleness</div>
+            <div class="node-desc">python scripts/generate_skill_docs.py --check</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Exit 0:</strong> all docs current. <strong>Exit 1:</strong> collect stale skill names.</div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>If check-only:</strong> stop after reporting whether docs are stale.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class=""node" node-decision">
+            <div class="node-title">Generate Now?</div>
+            <div class="node-desc">No for --check, yes for all other generation modes</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Main user workflow:</strong> most runs continue into regeneration.</div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Inputs:</strong> one skill name, stale skill list, or force-all.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class=""node" node-phase">
+            <div class="node-title">Generate Docs</div>
+            <div class="node-desc">python scripts/generate_skill_docs.py [--skill &lt;name&gt; | --force]</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>During run:</strong> report progress per skill and continue past partial LLM failures.</div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><span class=""tag" tag-output">artifact</span> updated files land under <span class="table-code">docs/skills/</span>.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class=""node" node-output">
+            <div class="node-title">Updated Documentation</div>
+            <div class="node-desc">Visualizations, winners, scores, file counts</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Typical output:</strong> refreshed HTML and related generated assets.</div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><span class=""tag" tag-external">external</span> Git stages and commits generated doc changes.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class=""node" node-phase">
+            <div class="node-title">Commit Results</div>
+            <div class="node-desc">git add docs/skills/ && git commit -m "docs: update skill documentation"</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Commit message:</strong> includes the updated skill list.</div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Final user-facing report:</strong> what changed and whether any warnings occurred.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class=""node" node-output">
+            <div class="node-title">Summary</div>
+            <div class="node-desc">Updated skills, winners, scores, file counts</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Stop condition:</strong> all up to date, or docs refreshed and committed.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">Common Commands</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Command</th>
+          <th>When to Use It</th>
+          <th>Expected Result</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="table-code">/stark-generate-docs</span></td>
+          <td>Normal workflow after editing one or more <span class="table-code">SKILL.md</span> files.</td>
+          <td>Only stale skill docs are regenerated and committed.</td>
+        </tr>
+        <tr>
+          <td><span class="table-code">/stark-generate-docs --skill stark-generate-docs</span></td>
+          <td>You want to refresh docs for exactly one named skill.</td>
+          <td>That skill's docs are rebuilt without scanning the rest.</td>
+        </tr>
+        <tr>
+          <td><span class="table-code">/stark-generate-docs --check</span></td>
+          <td>You need a non-destructive stale-doc check in CI or before generating.</td>
+          <td>Reports up-to-date vs stale; no docs or commits are created.</td>
+        </tr>
+        <tr>
+          <td><span class="table-code">/stark-generate-docs --all</span></td>
+          <td>You want a full refresh across the skill catalog.</td>
+          <td>All skill docs are regenerated, equivalent to <span class="table-code">--force</span>.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="section-title">Inputs And Outputs</div>
+    <div class="summary-grid">
+      <div class=""summary-card" card-blue">
+        <h3>Inputs</h3>
+        <p>Command flags, skill names, repo state, and which <span class="table-code">SKILL.md</span> files changed.</p>
+        <div class="mini-list">
+          <div><span class=""tag" tag-config">flag</span> <span class="table-code">--skill &lt;name&gt;</span></div>
+          <div><span class=""tag" tag-config">flag</span> <span class="table-code">--all</span> / <span class="table-code">--force</span></div>
+          <div><span class=""tag" tag-config">flag</span> <span class="table-code">--check</span></div>
+        </div>
+      </div>
+      <div class=""summary-card" card-green">
+        <h3>Behavior</h3>
+        <p>Detect stale docs when needed, regenerate selected skills, and continue even if some LLM steps fail.</p>
+        <div class="mini-list">
+          <div><span class=""tag" tag-phase">phase</span> Detect changes</div>
+          <div><span class=""tag" tag-phase">phase</span> Generate docs</div>
+          <div><span class=""tag" tag-phase">phase</span> Commit results</div>
+        </div>
+      </div>
+      <div class=""summary-card" card-amber">
+        <h3>Outputs</h3>
+        <p>Updated documentation files, a git commit, and a final status report with winners, scores, and file counts.</p>
+        <div class="mini-list">
+          <div><span class="winner-badge">Winners + scores</span></div>
+          <div><span class=""tag" tag-output">artifact</span> <span class="table-code">docs/skills/</span></div>
+          <div><span class=""tag" tag-output">report</span> updated skill list</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">Failure Modes</div>
+    <div class="card-grid">
+      <div class=""card" card-red">
+        <h3>LLM Calls Fail</h3>
+        <p>Generation should report which model calls failed and continue processing remaining work instead of aborting the entire run.</p>
+      </div>
+      <div class=""card" card-dark">
+        <h3>Playwright Missing</h3>
+        <p>Screenshot generation is skipped. The user still gets docs, but with a warning about missing screenshots.</p>
+      </div>
+      <div class=""card" card-green">
+        <h3>No Changes Found</h3>
+        <p>If the check exits cleanly, report that all skill docs are up to date and stop without generating new files.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Typical User Journey</div>
+    <div class="outputs-strip">
+      <div class="output-box">
+        <h3>1. Edit a Skill</h3>
+        <p>You update a <span class="table-code">SKILL.md</span> file and want docs to match the latest instructions.</p>
+      </div>
+      <div class="output-box">
+        <h3>2. Run the Skill</h3>
+        <p>Use the default command to auto-detect which skill docs are stale, or target one skill explicitly.</p>
+      </div>
+      <div class="output-box">
+        <h3>3. Review Summary</h3>
+        <p>Read the final report to see what changed, which visualization won, and how many files were updated.</p>
+      </div>
+      <div class="output-box">
+        <h3>4. Keep Moving</h3>
+        <p>Because the skill commits results, the docs update can slot directly into your normal repo workflow.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    stark-generate-docs usage visualization • end-user focused • standalone HTML with inline CSS only
+  </div>
+</body>
+</html>

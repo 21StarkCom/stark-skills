@@ -1,1 +1,634 @@
-<html lang="\"en\"">\n<head>\n  \n  \n  <title>stark-onboard-project — Usage Visualization</title>\n  <style>\n    /*\n     * Stark Skills — Shared Design System CSS\n     *\n     * Foundation styles for LLM-generated HTML skill visualizations.\n     * LLMs embed this inline and may extend with additional styles.\n     * All colors pass WCAG AA 4.5:1 contrast ratio.\n     *\n     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.\n     */\n\n    /* === Reset & Base === */\n    * { margin: 0; padding: 0; box-sizing: border-box; }\n    body {\n      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;\n      background: #fafafa;\n      color: #1a1a1a;\n      line-height: 1.5;\n    }\n\n    /* === Header === */\n    .header { text-align: center; padding: 36px 20px 16px; }\n    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }\n    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }\n    .header .scope {\n      display: inline-block; font-size: 10px; font-weight: 600;\n      background: #eff6ff; color: #1e40af;\n      padding: 3px 10px; border-radius: 4px; margin-top: 8px;\n    }\n\n    /* === Container === */\n    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }\n\n    /* === Section Title === */\n    .section-title {\n      font-size: 14px; font-weight: 700; color: #666;\n      text-transform: uppercase; letter-spacing: 1px;\n      margin: 32px 0 16px; padding-bottom: 6px;\n      border-bottom: 2px solid #e5e7eb;\n    }\n\n    /* === Node Types === */\n    .node { border-radius: 8px; padding: 12px 16px; text-align: center; }\n    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }\n    .node-desc { font-size: 10px; opacity: 0.8; }\n\n    .node-phase    { background: #1e40af; color: #ffffff; }\n    .node-decision { background: #7c3aed; color: #ffffff; }\n    .node-failure  { background: #dc2626; color: #ffffff; }\n    .node-config   { background: #047857; color: #ffffff; }\n    .node-output   { background: #f59e0b; color: #1a1a1a; }\n    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }\n\n    /* === Flow Layout === */\n    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }\n    .flow-step {\n      display: flex; align-items: stretch;\n      width: 100%; max-width: 860px; min-height: 76px;\n    }\n    .flow-lane-left {\n      width: 180px; display: flex;\n      align-items: center; justify-content: flex-end;\n      padding-right: 18px;\n    }\n    .flow-lane-center {\n      width: 500px; display: flex;\n      align-items: center; justify-content: center;\n    }\n    .flow-lane-right {\n      width: 180px; display: flex; align-items: center; padding-left: 18px;\n    }\n    .annotation {\n      font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;\n    }\n    .annotation strong { color: #444; }\n\n    /* === Arrows === */\n    .arrow-down {\n      width: 2px; height: 20px; background: #cbd5e1;\n      margin: 0 auto; position: relative;\n    }\n    .arrow-down::after {\n      content: ''; position: absolute; bottom: -4px; left: -4px;\n      border-left: 5px solid transparent;\n      border-right: 5px solid transparent;\n      border-top: 6px solid #cbd5e1;\n    }\n    .arrow-container {\n      display: flex; justify-content: center;\n      width: 100%; max-width: 860px;\n    }\n    .arrow-container .flow-lane-center {\n      display: flex; justify-content: center;\n    }\n\n    /* === Cards === */\n    .card-grid {\n      display: grid;\n      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));\n      gap: 16px; margin-top: 16px;\n    }\n    .card { padding: 16px; border-radius: 8px; }\n    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }\n    .card p  { font-size: 11px; line-height: 1.6; }\n\n    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }\n    .card-blue h3 { color: #1e40af; }\n    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }\n    .card-green h3 { color: #059669; }\n    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }\n    .card-purple h3 { color: #7c3aed; }\n    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }\n    .card-amber h3 { color: #92400e; }\n    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }\n    .card-dark h3 { color: #333333; }\n    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }\n    .card-red h3 { color: #dc2626; }\n\n    /* === Data Tables === */\n    .data-table {\n      width: 100%; max-width: 860px; margin: 16px auto;\n      border-collapse: collapse; font-size: 11px;\n    }\n    .data-table th {\n      background: #f3f4f6; padding: 8px 12px; text-align: left;\n      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;\n    }\n    .data-table td {\n      padding: 8px 12px; border-bottom: 1px solid #f3f4f6;\n    }\n\n    /* === Tags === */\n    .tag {\n      display: inline-block; font-size: 9px; font-weight: 600;\n      padding: 2px 8px; border-radius: 3px;\n    }\n    .tag-phase    { background: #dbeafe; color: #1e40af; }\n    .tag-decision { background: #ede9fe; color: #5b21b6; }\n    .tag-failure  { background: #fee2e2; color: #991b1b; }\n    .tag-config   { background: #d1fae5; color: #065f46; }\n    .tag-output   { background: #fef3c7; color: #92400e; }\n    .tag-external { background: #f3f4f6; color: #666666; }\n\n    /* === Legend === */\n    .legend {\n      display: flex; gap: 16px; justify-content: center;\n      margin: 16px 0 24px; flex-wrap: wrap;\n    }\n    .legend-item {\n      display: flex; align-items: center; gap: 6px;\n      font-size: 10px; color: #666;\n    }\n    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }\n\n    /* === Summary Grid === */\n    .summary-grid {\n      display: grid; grid-template-columns: 1fr 1fr 1fr;\n      gap: 16px; margin-top: 16px;\n    }\n    .summary-card { padding: 16px; border-radius: 8px; }\n    .summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }\n    .summary-card p  { font-size: 11px; line-height: 1.5; }\n\n    /* === Winner Badge === */\n    .winner-badge {\n      display: inline-block; font-size: 12px; color: #555555;\n      font-weight: 600; padding: 2px 10px; border-radius: 4px;\n      background: #f9fafb; border: 1px solid #d1d5db;\n    }\n\n    /* === Footer === */\n    .footer {\n      text-align: center; padding: 20px;\n      font-size: 10px; color: #999;\n    }\n\n    /* === Extensions === */\n    .hero {\n      background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 45%, #ecfdf5 100%);\n      border: 1px solid #dbeafe;\n      border-radius: 14px;\n      padding: 22px;\n      margin-top: 8px;\n    }\n    .hero p {\n      font-size: 13px;\n      color: #334155;\n      max-width: 760px;\n      margin: 10px auto 0;\n      text-align: center;\n    }\n    .kpi-row {\n      display: grid;\n      grid-template-columns: repeat(4, 1fr);\n      gap: 12px;\n      margin-top: 18px;\n    }\n    .kpi {\n      background: rgba(255,255,255,0.78);\n      border: 1px solid #e5e7eb;\n      border-radius: 10px;\n      padding: 12px;\n      text-align: center;\n    }\n    .kpi .num {\n      font-size: 20px;\n      font-weight: 700;\n      color: #0f172a;\n    }\n    .kpi .lbl {\n      font-size: 10px;\n      color: #64748b;\n      text-transform: uppercase;\n      letter-spacing: 0.08em;\n    }\n    .codebox {\n      background: #0f172a;\n      color: #e2e8f0;\n      border-radius: 10px;\n      padding: 14px 16px;\n      font-size: 12px;\n      line-height: 1.7;\n      overflow-x: auto;\n      margin-top: 10px;\n    }\n    .inline-list {\n      display: flex;\n      flex-wrap: wrap;\n      gap: 8px;\n      margin-top: 10px;\n    }\n    .bullet-list {\n      margin-top: 8px;\n      padding-left: 18px;\n      color: #374151;\n      font-size: 11px;\n    }\n    .bullet-list li + li { margin-top: 6px; }\n    .step-strip {\n      display: grid;\n      grid-template-columns: repeat(5, 1fr);\n      gap: 12px;\n      margin-top: 16px;\n    }\n    .mini {\n      border-radius: 10px;\n      padding: 12px;\n      background: #fff;\n      border: 1px solid #e5e7eb;\n    }\n    .mini h4 {\n      font-size: 11px;\n      margin-bottom: 6px;\n      color: #111827;\n    }\n    .mini p {\n      font-size: 10px;\n      color: #6b7280;\n      line-height: 1.5;\n    }\n    .emphasis {\n      font-weight: 700;\n      color: #111827;\n    }\n    .footer-note {\n      margin-top: 20px;\n      text-align: center;\n      font-size: 11px;\n      color: #6b7280;\n    }\n    @media (max-width: 920px) {\n      .summary-grid, .kpi-row, .step-strip { grid-template-columns: 1fr 1fr; }\n      .flow-step { max-width: 100%; }\n      .flow-lane-left, .flow-lane-right { width: 140px; }\n      .flow-lane-center { width: auto; flex: 1; }\n    }\n    @media (max-width: 680px) {\n      .summary-grid, .kpi-row, .step-strip, .card-grid { grid-template-columns: 1fr; }\n      .flow-step {\n        display: grid;\n        grid-template-columns: 1fr;\n        gap: 8px;\n        padding: 10px 0;\n      }\n      .flow-lane-left, .flow-lane-center, .flow-lane-right {\n        width: 100%;\n        justify-content: center;\n        padding: 0;\n      }\n      .annotation { max-width: none; text-align: center; }\n    }\n  </style>\n</head>\n<body>\n  <div class="\"header\"">\n    <h1>stark-onboard-project</h1>\n    <div class="\"sub\"">Bootstrap a project from empty directory to a fully wired GitHub + Claude Code setup</div>\n    <div class="\"scope\"">USAGE VIEW</div>\n  </div>\n\n  <div class="\"container\"">\n    <div class="\"hero\"">\n      <span class="\"winner-badge\"">Best for first-time project setup</span>\n      <p>\n        This skill walks an end user through the full onboarding path: initialize git, create or connect a GitHub repo in\n        <span class="\"emphasis\"">GetEvinced</span>, grant access to the three Stark GitHub Apps, then generate the local Claude Code scaffolding.\n        It is designed to be <span class="\"emphasis\"">idempotent</span>, so already-completed phases are skipped instead of repeated.\n      </p>\n      <div class="\"kpi-row\"">\n        <div class="\"kpi\"">\n          <div class="\"num\"">5</div>\n          <div class="\"lbl\"">Phases</div>\n        </div>\n        <div class="\"kpi\"">\n          <div class="\"num\"">3</div>\n          <div class="\"lbl\"">GitHub Apps</div>\n        </div>\n        <div class="\"kpi\"">\n          <div class="\"num\"">1</div>\n          <div class="\"lbl\"">Optional Arg</div>\n        </div>\n        <div class="\"kpi\"">\n          <div class="\"num\"">2</div>\n          <div class="\"lbl\"">User Confirmations</div>\n        </div>\n      </div>\n    </div>\n\n    <div class="\"section-title\"">How To Invoke</div>\n    <div class="\"card-grid\"">\n      <div class="\"card" card-blue\">\n        <h3>Trigger Phrases</h3>\n        <p>Use this skill when the user says things like “onboard project”, “setup claude”, “bootstrap claude”, “init project”, “create repo”, or “new project”.</p>\n        <div class="\"inline-list\"">\n          <span class="\"tag" tag-phase\">onboard project</span>\n          <span class="\"tag" tag-phase\">setup claude</span>\n          <span class="\"tag" tag-phase\">create repo</span>\n          <span class="\"tag" tag-phase\">new project</span>\n        </div>\n      </div>\n      <div class="\"card" card-green\">\n        <h3>Argument</h3>\n        <p>The skill accepts an optional path. If omitted, it operates on the current working directory.</p>\n        <div class="\"codebox\"">/stark-onboard-project\n/stark-onboard-project ~/git/my-new-app</div>\n      </div>\n      <div class="\"card" card-purple\">\n        <h3>When It Auto-Applies</h3>\n        <p>It also fits naturally when work starts in a directory that has no git repository and no <strong>CLAUDE.md</strong>.</p>\n      </div>\n    </div>\n\n    <div class="\"section-title\"">End-User Workflow</div>\n    <div class="\"legend\"">\n      <div class="\"legend-item\""><span class="\"legend-dot\"" style="\"background:#1e40af;\""></span>Phase</div>\n      <div class="\"legend-item\""><span class="\"legend-dot\"" style="\"background:#7c3aed;\""></span>User decision</div>\n      <div class="\"legend-item\""><span class="\"legend-dot\"" style="\"background:#047857;\""></span>Configuration</div>\n      <div class="\"legend-item\""><span class="\"legend-dot\"" style="\"background:#f59e0b;\""></span>Output</div>\n      <div class="\"legend-item\""><span class="\"legend-dot\"" style="\"background:#dc2626;\""></span>Failure / fallback</div>\n      <div class="\"legend-item\""><span class="\"legend-dot\"" style="\"background:#e5e7eb;\""></span>External system</div>\n    </div>\n\n    <div class="\"flow\"">\n      <div class="\"flow-step\"">\n        <div class="\"flow-lane-left\"">\n          <div class="\"annotation\""><strong>Start condition</strong><br></br>Empty or partially configured project directory.</div>\n        </div>\n        <div class="\"flow-lane-center\"">\n          <div class="\"node" node-phase\">\n            <div class="\"node-title\"">Phase 1: Git Initialization</div>\n            <div class="\"node-desc\"">Detect repo, create .gitignore, make first commit if needed</div>\n          </div>\n        </div>\n        <div class="\"flow-lane-right\"">\n          <div class="\"node" node-output\">\n            <div class="\"node-title\"">Local Git Ready</div>\n            <div class="\"node-desc\"">Repo initialized or confirmed</div>\n          </div>\n        </div>\n      </div>\n\n      <div class="\"arrow-container\""><div class="\"flow-lane-center\""><div class="\"arrow-down\""></div></div></div>\n\n      <div class="\"flow-step\"">\n        <div class="\"flow-lane-left\"">\n          <div class="\"annotation\""><strong>User input</strong><br></br>Choose org, repo name, visibility, optional description.</div>\n        </div>\n        <div class="\"flow-lane-center\"">\n          <div class="\"node" node-decision\">\n            <div class="\"node-title\"">Repo Creation Confirmation</div>\n            <div class="\"node-desc\"">Skill pauses until the user confirms GitHub repo details</div>\n          </div>\n        </div>\n        <div class="\"flow-lane-right\"">\n          <div class="\"node" node-external\">\n            <div class="\"node-title\"">GitHub / gh CLI</div>\n            <div class="\"node-desc\"">Creates repo, pushes code, sets topics</div>\n          </div>\n        </div>\n      </div>\n\n      <div class="\"arrow-container\""><div class="\"flow-lane-center\""><div class="\"arrow-down\""></div></div></div>\n\n      <div class="\"flow-step\"">\n        <div class="\"flow-lane-left\"">\n          <div class="\"annotation\""><strong>Idempotent skip</strong><br></br>If <code>origin</code> already exists, repo setup is skipped.</div>\n        </div>\n        <div class="\"flow-lane-center\"">\n          <div class="\"node" node-config\">\n            <div class="\"node-title\"">Phase 2: GitHub Repository</div>\n            <div class="\"node-desc\"">Create repo, apply topics, add CODEOWNERS, verify remote</div>\n          </div>\n        </div>\n        <div class="\"flow-lane-right\"">\n          <div class="\"node" node-output\">\n            <div class="\"node-title\"">Remote Connected</div>\n            <div class="\"node-desc\"">Repo URL, topics, CODEOWNERS in place</div>\n          </div>\n        </div>\n      </div>\n\n      <div class="\"arrow-container\""><div class="\"flow-lane-center\""><div class="\"arrow-down\""></div></div></div>\n\n      <div class="\"flow-step\"">\n        <div class="\"flow-lane-left\"">\n          <div class="\"node" node-external\">\n            <div class="\"node-title\"">stark-claude</div>\n            <div class="\"node-desc\"">GitHub App installation</div>\n          </div>\n        </div>\n        <div class="\"flow-lane-center\"">\n          <div class="\"node" node-config\">\n            <div class="\"node-title\"">Phase 3: Connect GitHub Apps</div>\n            <div class="\"node-desc\"">Grant repo access to stark-claude, stark-codex, stark-gemini</div>\n          </div>\n        </div>\n        <div class="\"flow-lane-right\"">\n          <div class="\"node" node-external\">\n            <div class="\"node-title\"">stark-codex + stark-gemini</div>\n            <div class="\"node-desc\"">Verified against installation repositories</div>\n          </div>\n        </div>\n      </div>\n\n      <div class="\"arrow-container\""><div class="\"flow-lane-center\""><div class="\"arrow-down\""></div></div></div>\n\n      <div class="\"flow-step\"">\n        <div class="\"flow-lane-left\"">\n          <div class="\"annotation\""><strong>User input</strong><br></br>Confirm detected language/framework before writing <code>CLAUDE.md</code>.</div>\n        </div>\n        <div class="\"flow-lane-center\"">\n          <div class="\"node" node-decision\">\n            <div class="\"node-title\"">Project Scan Confirmation</div>\n            <div class="\"node-desc\"">Language, framework, test runner, repo target</div>\n          </div>\n        </div>\n        <div class="\"flow-lane-right\"">\n          <div class="\"node" node-output\">\n            <div class="\"node-title\"">CLAUDE.md Plan</div>\n            <div class="\"node-desc\"">Overview and repo-specific guidance prepared</div>\n          </div>\n        </div>\n      </div>\n\n      <div class="\"arrow-container\""><div class="\"flow-lane-center\""><div class="\"arrow-down\""></div></div></div>\n\n      <div class="\"flow-step\"">\n        <div class="\"flow-lane-left\"">\n          <div class="\"annotation\""><strong>Privacy choice</strong><br></br>Ask whether <code>.claude/</code> should be added to <code>.gitignore</code>.</div>\n        </div>\n        <div class="\"flow-lane-center\"">\n          <div class="\"node" node-phase\">\n            <div class="\"node-title\"">Phase 4: Claude Code Setup</div>\n            <div class="\"node-desc\"">Generate CLAUDE.md, create .claude/, decide local-only vs shared</div>\n          </div>\n        </div>\n        <div class="\"flow-lane-right\"">\n          <div class="\"node" node-output\">\n            <div class="\"node-title\"">Claude Workspace Ready</div>\n            <div class="\"node-desc\"">Guidance file and local context directory created</div>\n          </div>\n        </div>\n      </div>\n\n      <div class="\"arrow-container\""><div class="\"flow-lane-center\""><div class="\"arrow-down\""></div></div></div>\n\n      <div class="\"flow-step\"">\n        <div class="\"flow-lane-left\"">\n          <div class="\"annotation\""><strong>Final report</strong><br></br>Shows phase status, per-app verification, and next steps.</div>\n        </div>\n        <div class="\"flow-lane-center\"">\n          <div class="\"node" node-output\">\n            <div class="\"node-title\"">Phase 5: Summary</div>\n            <div class="\"node-desc\"">Project URL, app status, generated artifacts, recommended next actions</div>\n          </div>\n        </div>\n        <div class="\"flow-lane-right\"">\n          <div class="\"node" node-output\">\n            <div class="\"node-title\"">Onboarding Complete</div>\n            <div class="\"node-desc\"">Project ready for /stark-session and follow-on setup</div>\n          </div>\n        </div>\n      </div>\n    </div>\n\n    <div class="\"section-title\"">Inputs And Outputs</div>\n    <table class="\"data-table\"">\n      <thead>\n        <tr>\n          <th>Type</th>\n          <th>What The User Provides</th>\n          <th>What The Skill Produces</th>\n        </tr>\n      </thead>\n      <tbody>\n        <tr>\n          <td><span class="\"tag" tag-config\">Input</span></td>\n          <td>Optional project path, or current directory by default</td>\n          <td>Resolved target directory for onboarding</td>\n        </tr>\n        <tr>\n          <td><span class="\"tag" tag-decision\">Input</span></td>\n          <td>GitHub org, repo name, visibility, description</td>\n          <td>Remote repository and pushed default branch</td>\n        </tr>\n        <tr>\n          <td><span class="\"tag" tag-decision\">Input</span></td>\n          <td>Confirmation of detected language / framework</td>\n          <td>Generated <code>CLAUDE.md</code> tailored to the stack</td>\n        </tr>\n        <tr>\n          <td><span class="\"tag" tag-decision\">Input</span></td>\n          <td>Choice whether to ignore <code>.claude/</code></td>\n          <td>Private or shared Claude local state behavior</td>\n        </tr>\n        <tr>\n          <td><span class="\"tag" tag-output\">Output</span></td>\n          <td>None</td>\n          <td><code>.gitignore</code>, initial commit, <code>.github/CODEOWNERS</code>, GitHub topics, GitHub App access, <code>CLAUDE.md</code>, <code>.claude/</code>, end summary</td>\n        </tr>\n      </tbody>\n    </table>\n\n    <div class="\"section-title\"">Common Workflows</div>\n    <div class="\"step-strip\"">\n      <div class="\"mini\"">\n        <h4>Brand-New Folder</h4>\n        <p>No git repo, no remote, no Claude setup. The skill runs all five phases end to end.</p>\n      </div>\n      <div class="\"mini\"">\n        <h4>Local Repo Only</h4>\n        <p>Git already exists, but there is no GitHub remote. The skill starts at repo creation and continues.</p>\n      </div>\n      <div class="\"mini\"">\n        <h4>Repo Already On GitHub</h4>\n        <p>If <code>origin</code> is present, it skips creation and moves to GitHub App access and Claude setup.</p>\n      </div>\n      <div class="\"mini\"">\n        <h4>Claude Already Present</h4>\n        <p>If <code>CLAUDE.md</code> exists, it will not overwrite it and instead suggests the improver skill.</p>\n      </div>\n      <div class="\"mini\"">\n        <h4>GetEvinced-Only Apps</h4>\n        <p>GitHub App connection is relevant for GetEvinced org repos; other orgs skip that phase.</p>\n      </div>\n    </div>\n\n    <div class="\"section-title\"">User Decisions</div>\n    <div class="\"card-grid\"">\n      <div class="\"card" card-purple\">\n        <h3>Decision 1: Repo Setup</h3>\n        <p>The user confirms or edits the default repo name, chooses <strong>GetEvinced</strong> or <strong>aryeh-evinced</strong>, picks visibility, and optionally adds a description.</p>\n      </div>\n      <div class="\"card" card-purple\">\n        <h3>Decision 2: CLAUDE.md Content</h3>\n        <p>The skill scans the project and presents the inferred language, framework, and test runner before generating guidance.</p>\n      </div>\n      <div class="\"card" card-green\">\n        <h3>Decision 3: Ignore .claude/</h3>\n        <p>Users choose whether local Claude context remains machine-private or becomes part of a team-standardized repo workflow.</p>\n      </div>\n    </div>\n\n    <div class="\"section-title\"">Failure Modes And Recovery</div>\n    <div class="\"card-grid\"">\n      <div class="\"card" card-red\">\n        <h3><code>gh</code> Not Authenticated</h3>\n        <p>Recovery: run <code>gh auth login</code>, then re-run the skill.</p>\n      </div>\n      <div class="\"card" card-red\">\n        <h3>Missing Installation Scope</h3>\n        <p>Recovery: run <code>gh auth refresh -h github.com -s read:user</code> or add repositories manually through the GetEvinced org installation settings.</p>\n      </div>\n      <div class="\"card" card-dark\">\n        <h3>Existing Files</h3>\n        <p><code>CODEOWNERS</code> and <code>CLAUDE.md</code> are not overwritten. Existing work is preserved; the phase is reported as skipped.</p>\n      </div>\n      <div class="\"card" card-amber\">\n        <h3>Repo Already Exists</h3>\n        <p>If GitHub reports the repo already exists, the skill falls back to adding the remote and pushing the local branch.</p>\n      </div>\n    </div>\n\n    <div class="\"section-title\"">Why End Users Use It</div>\n    <div class="\"summary-grid\"">\n      <div class="\"summary-card" card-blue\">\n        <h3>Fast Start</h3>\n        <p>One skill replaces a long checklist of git, GitHub, app access, and local Claude setup steps.</p>\n      </div>\n      <div class="\"summary-card" card-green\">\n        <h3>Safe Re-Runs</h3>\n        <p>Phases are idempotent, so re-running it on a half-configured project usually finishes missing pieces instead of starting over.</p>\n      </div>\n      <div class="\"summary-card" card-amber\">\n        <h3>Concrete Finish Line</h3>\n        <p>The summary tells the user exactly what was initialized, what was skipped, and what to do next.</p>\n      </div>\n    </div>\n\n    <div class="\"footer-note\"">\n      Best used at project inception or when inheriting a directory that is only partially wired.\n    </div>\n  </div>\n\n  <div class="\"footer\"">\n    Standalone visualization for the stark-onboard-project skill\n  </div>\n</body>\n</html>
+<html lang="en">
+<head>
+  
+  
+  <title>stark-onboard-project — Usage Visualization</title>
+  <style>
+    /*
+     * Stark Skills — Shared Design System CSS
+     *
+     * Foundation styles for LLM-generated HTML skill visualizations.
+     * LLMs embed this inline and may extend with additional styles.
+     * All colors pass WCAG AA 4.5:1 contrast ratio.
+     *
+     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+     */
+
+    /* === Reset & Base === */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #fafafa;
+      color: #1a1a1a;
+      line-height: 1.5;
+    }
+
+    /* === Header === */
+    .header { text-align: center; padding: 36px 20px 16px; }
+    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+    .header .scope {
+      display: inline-block; font-size: 10px; font-weight: 600;
+      background: #eff6ff; color: #1e40af;
+      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+    }
+
+    /* === Container === */
+    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+    /* === Section Title === */
+    .section-title {
+      font-size: 14px; font-weight: 700; color: #666;
+      text-transform: uppercase; letter-spacing: 1px;
+      margin: 32px 0 16px; padding-bottom: 6px;
+      border-bottom: 2px solid #e5e7eb;
+    }
+
+    /* === Node Types === */
+    .node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+    .node-desc { font-size: 10px; opacity: 0.8; }
+
+    .node-phase    { background: #1e40af; color: #ffffff; }
+    .node-decision { background: #7c3aed; color: #ffffff; }
+    .node-failure  { background: #dc2626; color: #ffffff; }
+    .node-config   { background: #047857; color: #ffffff; }
+    .node-output   { background: #f59e0b; color: #1a1a1a; }
+    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
+
+    /* === Flow Layout === */
+    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+    .flow-step {
+      display: flex; align-items: stretch;
+      width: 100%; max-width: 860px; min-height: 76px;
+    }
+    .flow-lane-left {
+      width: 180px; display: flex;
+      align-items: center; justify-content: flex-end;
+      padding-right: 18px;
+    }
+    .flow-lane-center {
+      width: 500px; display: flex;
+      align-items: center; justify-content: center;
+    }
+    .flow-lane-right {
+      width: 180px; display: flex; align-items: center; padding-left: 18px;
+    }
+    .annotation {
+      font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+    }
+    .annotation strong { color: #444; }
+
+    /* === Arrows === */
+    .arrow-down {
+      width: 2px; height: 20px; background: #cbd5e1;
+      margin: 0 auto; position: relative;
+    }
+    .arrow-down::after {
+      content: ''; position: absolute; bottom: -4px; left: -4px;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid #cbd5e1;
+    }
+    .arrow-container {
+      display: flex; justify-content: center;
+      width: 100%; max-width: 860px;
+    }
+    .arrow-container .flow-lane-center {
+      display: flex; justify-content: center;
+    }
+
+    /* === Cards === */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px; margin-top: 16px;
+    }
+    .card { padding: 16px; border-radius: 8px; }
+    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+    .card p  { font-size: 11px; line-height: 1.6; }
+
+    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+    .card-blue h3 { color: #1e40af; }
+    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+    .card-green h3 { color: #059669; }
+    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+    .card-purple h3 { color: #7c3aed; }
+    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+    .card-amber h3 { color: #92400e; }
+    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+    .card-dark h3 { color: #333333; }
+    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+    .card-red h3 { color: #dc2626; }
+
+    /* === Data Tables === */
+    .data-table {
+      width: 100%; max-width: 860px; margin: 16px auto;
+      border-collapse: collapse; font-size: 11px;
+    }
+    .data-table th {
+      background: #f3f4f6; padding: 8px 12px; text-align: left;
+      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+    }
+    .data-table td {
+      padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+    }
+
+    /* === Tags === */
+    .tag {
+      display: inline-block; font-size: 9px; font-weight: 600;
+      padding: 2px 8px; border-radius: 3px;
+    }
+    .tag-phase    { background: #dbeafe; color: #1e40af; }
+    .tag-decision { background: #ede9fe; color: #5b21b6; }
+    .tag-failure  { background: #fee2e2; color: #991b1b; }
+    .tag-config   { background: #d1fae5; color: #065f46; }
+    .tag-output   { background: #fef3c7; color: #92400e; }
+    .tag-external { background: #f3f4f6; color: #666666; }
+
+    /* === Legend === */
+    .legend {
+      display: flex; gap: 16px; justify-content: center;
+      margin: 16px 0 24px; flex-wrap: wrap;
+    }
+    .legend-item {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 10px; color: #666;
+    }
+    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+    /* === Summary Grid === */
+    .summary-grid {
+      display: grid; grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px; margin-top: 16px;
+    }
+    .summary-card { padding: 16px; border-radius: 8px; }
+    .summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+    .summary-card p  { font-size: 11px; line-height: 1.5; }
+
+    /* === Winner Badge === */
+    .winner-badge {
+      display: inline-block; font-size: 12px; color: #555555;
+      font-weight: 600; padding: 2px 10px; border-radius: 4px;
+      background: #f9fafb; border: 1px solid #d1d5db;
+    }
+
+    /* === Footer === */
+    .footer {
+      text-align: center; padding: 20px;
+      font-size: 10px; color: #999;
+    }
+
+    /* === Extensions === */
+    .hero {
+      background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 45%, #ecfdf5 100%);
+      border: 1px solid #dbeafe;
+      border-radius: 14px;
+      padding: 22px;
+      margin-top: 8px;
+    }
+    .hero p {
+      font-size: 13px;
+      color: #334155;
+      max-width: 760px;
+      margin: 10px auto 0;
+      text-align: center;
+    }
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .kpi {
+      background: rgba(255,255,255,0.78);
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 12px;
+      text-align: center;
+    }
+    .kpi .num {
+      font-size: 20px;
+      font-weight: 700;
+      color: #0f172a;
+    }
+    .kpi .lbl {
+      font-size: 10px;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .codebox {
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: 10px;
+      padding: 14px 16px;
+      font-size: 12px;
+      line-height: 1.7;
+      overflow-x: auto;
+      margin-top: 10px;
+    }
+    .inline-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .bullet-list {
+      margin-top: 8px;
+      padding-left: 18px;
+      color: #374151;
+      font-size: 11px;
+    }
+    .bullet-list li + li { margin-top: 6px; }
+    .step-strip {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .mini {
+      border-radius: 10px;
+      padding: 12px;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+    }
+    .mini h4 {
+      font-size: 11px;
+      margin-bottom: 6px;
+      color: #111827;
+    }
+    .mini p {
+      font-size: 10px;
+      color: #6b7280;
+      line-height: 1.5;
+    }
+    .emphasis {
+      font-weight: 700;
+      color: #111827;
+    }
+    .footer-note {
+      margin-top: 20px;
+      text-align: center;
+      font-size: 11px;
+      color: #6b7280;
+    }
+    @media (max-width: 920px) {
+      .summary-grid, .kpi-row, .step-strip { grid-template-columns: 1fr 1fr; }
+      .flow-step { max-width: 100%; }
+      .flow-lane-left, .flow-lane-right { width: 140px; }
+      .flow-lane-center { width: auto; flex: 1; }
+    }
+    @media (max-width: 680px) {
+      .summary-grid, .kpi-row, .step-strip, .card-grid { grid-template-columns: 1fr; }
+      .flow-step {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        padding: 10px 0;
+      }
+      .flow-lane-left, .flow-lane-center, .flow-lane-right {
+        width: 100%;
+        justify-content: center;
+        padding: 0;
+      }
+      .annotation { max-width: none; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>stark-onboard-project</h1>
+    <div class="sub">Bootstrap a project from empty directory to a fully wired GitHub + Claude Code setup</div>
+    <div class="scope">USAGE VIEW</div>
+  </div>
+
+  <div class="container">
+    <div class="hero">
+      <span class="winner-badge">Best for first-time project setup</span>
+      <p>
+        This skill walks an end user through the full onboarding path: initialize git, create or connect a GitHub repo in
+        <span class="emphasis">GetEvinced</span>, grant access to the three Stark GitHub Apps, then generate the local Claude Code scaffolding.
+        It is designed to be <span class="emphasis">idempotent</span>, so already-completed phases are skipped instead of repeated.
+      </p>
+      <div class="kpi-row">
+        <div class="kpi">
+          <div class="num">5</div>
+          <div class="lbl">Phases</div>
+        </div>
+        <div class="kpi">
+          <div class="num">3</div>
+          <div class="lbl">GitHub Apps</div>
+        </div>
+        <div class="kpi">
+          <div class="num">1</div>
+          <div class="lbl">Optional Arg</div>
+        </div>
+        <div class="kpi">
+          <div class="num">2</div>
+          <div class="lbl">User Confirmations</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">How To Invoke</div>
+    <div class="card-grid">
+      <div class=""card" card-blue">
+        <h3>Trigger Phrases</h3>
+        <p>Use this skill when the user says things like “onboard project”, “setup claude”, “bootstrap claude”, “init project”, “create repo”, or “new project”.</p>
+        <div class="inline-list">
+          <span class=""tag" tag-phase">onboard project</span>
+          <span class=""tag" tag-phase">setup claude</span>
+          <span class=""tag" tag-phase">create repo</span>
+          <span class=""tag" tag-phase">new project</span>
+        </div>
+      </div>
+      <div class=""card" card-green">
+        <h3>Argument</h3>
+        <p>The skill accepts an optional path. If omitted, it operates on the current working directory.</p>
+        <div class="codebox">/stark-onboard-project
+/stark-onboard-project ~/git/my-new-app</div>
+      </div>
+      <div class=""card" card-purple">
+        <h3>When It Auto-Applies</h3>
+        <p>It also fits naturally when work starts in a directory that has no git repository and no <strong>CLAUDE.md</strong>.</p>
+      </div>
+    </div>
+
+    <div class="section-title">End-User Workflow</div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-dot" style="background:#1e40af;"></span>Phase</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#7c3aed;"></span>User decision</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#047857;"></span>Configuration</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#f59e0b;"></span>Output</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#dc2626;"></span>Failure / fallback</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#e5e7eb;"></span>External system</div>
+    </div>
+
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Start condition</strong><br></br>Empty or partially configured project directory.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class=""node" node-phase">
+            <div class="node-title">Phase 1: Git Initialization</div>
+            <div class="node-desc">Detect repo, create .gitignore, make first commit if needed</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class=""node" node-output">
+            <div class="node-title">Local Git Ready</div>
+            <div class="node-desc">Repo initialized or confirmed</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>User input</strong><br></br>Choose org, repo name, visibility, optional description.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class=""node" node-decision">
+            <div class="node-title">Repo Creation Confirmation</div>
+            <div class="node-desc">Skill pauses until the user confirms GitHub repo details</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class=""node" node-external">
+            <div class="node-title">GitHub / gh CLI</div>
+            <div class="node-desc">Creates repo, pushes code, sets topics</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Idempotent skip</strong><br></br>If <code>origin</code> already exists, repo setup is skipped.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class=""node" node-config">
+            <div class="node-title">Phase 2: GitHub Repository</div>
+            <div class="node-desc">Create repo, apply topics, add CODEOWNERS, verify remote</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class=""node" node-output">
+            <div class="node-title">Remote Connected</div>
+            <div class="node-desc">Repo URL, topics, CODEOWNERS in place</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class=""node" node-external">
+            <div class="node-title">stark-claude</div>
+            <div class="node-desc">GitHub App installation</div>
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class=""node" node-config">
+            <div class="node-title">Phase 3: Connect GitHub Apps</div>
+            <div class="node-desc">Grant repo access to stark-claude, stark-codex, stark-gemini</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class=""node" node-external">
+            <div class="node-title">stark-codex + stark-gemini</div>
+            <div class="node-desc">Verified against installation repositories</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>User input</strong><br></br>Confirm detected language/framework before writing <code>CLAUDE.md</code>.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class=""node" node-decision">
+            <div class="node-title">Project Scan Confirmation</div>
+            <div class="node-desc">Language, framework, test runner, repo target</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class=""node" node-output">
+            <div class="node-title">CLAUDE.md Plan</div>
+            <div class="node-desc">Overview and repo-specific guidance prepared</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Privacy choice</strong><br></br>Ask whether <code>.claude/</code> should be added to <code>.gitignore</code>.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class=""node" node-phase">
+            <div class="node-title">Phase 4: Claude Code Setup</div>
+            <div class="node-desc">Generate CLAUDE.md, create .claude/, decide local-only vs shared</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class=""node" node-output">
+            <div class="node-title">Claude Workspace Ready</div>
+            <div class="node-desc">Guidance file and local context directory created</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Final report</strong><br></br>Shows phase status, per-app verification, and next steps.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class=""node" node-output">
+            <div class="node-title">Phase 5: Summary</div>
+            <div class="node-desc">Project URL, app status, generated artifacts, recommended next actions</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class=""node" node-output">
+            <div class="node-title">Onboarding Complete</div>
+            <div class="node-desc">Project ready for /stark-session and follow-on setup</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">Inputs And Outputs</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>What The User Provides</th>
+          <th>What The Skill Produces</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class=""tag" tag-config">Input</span></td>
+          <td>Optional project path, or current directory by default</td>
+          <td>Resolved target directory for onboarding</td>
+        </tr>
+        <tr>
+          <td><span class=""tag" tag-decision">Input</span></td>
+          <td>GitHub org, repo name, visibility, description</td>
+          <td>Remote repository and pushed default branch</td>
+        </tr>
+        <tr>
+          <td><span class=""tag" tag-decision">Input</span></td>
+          <td>Confirmation of detected language / framework</td>
+          <td>Generated <code>CLAUDE.md</code> tailored to the stack</td>
+        </tr>
+        <tr>
+          <td><span class=""tag" tag-decision">Input</span></td>
+          <td>Choice whether to ignore <code>.claude/</code></td>
+          <td>Private or shared Claude local state behavior</td>
+        </tr>
+        <tr>
+          <td><span class=""tag" tag-output">Output</span></td>
+          <td>None</td>
+          <td><code>.gitignore</code>, initial commit, <code>.github/CODEOWNERS</code>, GitHub topics, GitHub App access, <code>CLAUDE.md</code>, <code>.claude/</code>, end summary</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="section-title">Common Workflows</div>
+    <div class="step-strip">
+      <div class="mini">
+        <h4>Brand-New Folder</h4>
+        <p>No git repo, no remote, no Claude setup. The skill runs all five phases end to end.</p>
+      </div>
+      <div class="mini">
+        <h4>Local Repo Only</h4>
+        <p>Git already exists, but there is no GitHub remote. The skill starts at repo creation and continues.</p>
+      </div>
+      <div class="mini">
+        <h4>Repo Already On GitHub</h4>
+        <p>If <code>origin</code> is present, it skips creation and moves to GitHub App access and Claude setup.</p>
+      </div>
+      <div class="mini">
+        <h4>Claude Already Present</h4>
+        <p>If <code>CLAUDE.md</code> exists, it will not overwrite it and instead suggests the improver skill.</p>
+      </div>
+      <div class="mini">
+        <h4>GetEvinced-Only Apps</h4>
+        <p>GitHub App connection is relevant for GetEvinced org repos; other orgs skip that phase.</p>
+      </div>
+    </div>
+
+    <div class="section-title">User Decisions</div>
+    <div class="card-grid">
+      <div class=""card" card-purple">
+        <h3>Decision 1: Repo Setup</h3>
+        <p>The user confirms or edits the default repo name, chooses <strong>GetEvinced</strong> or <strong>aryeh-evinced</strong>, picks visibility, and optionally adds a description.</p>
+      </div>
+      <div class=""card" card-purple">
+        <h3>Decision 2: CLAUDE.md Content</h3>
+        <p>The skill scans the project and presents the inferred language, framework, and test runner before generating guidance.</p>
+      </div>
+      <div class=""card" card-green">
+        <h3>Decision 3: Ignore .claude/</h3>
+        <p>Users choose whether local Claude context remains machine-private or becomes part of a team-standardized repo workflow.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Failure Modes And Recovery</div>
+    <div class="card-grid">
+      <div class=""card" card-red">
+        <h3><code>gh</code> Not Authenticated</h3>
+        <p>Recovery: run <code>gh auth login</code>, then re-run the skill.</p>
+      </div>
+      <div class=""card" card-red">
+        <h3>Missing Installation Scope</h3>
+        <p>Recovery: run <code>gh auth refresh -h github.com -s read:user</code> or add repositories manually through the GetEvinced org installation settings.</p>
+      </div>
+      <div class=""card" card-dark">
+        <h3>Existing Files</h3>
+        <p><code>CODEOWNERS</code> and <code>CLAUDE.md</code> are not overwritten. Existing work is preserved; the phase is reported as skipped.</p>
+      </div>
+      <div class=""card" card-amber">
+        <h3>Repo Already Exists</h3>
+        <p>If GitHub reports the repo already exists, the skill falls back to adding the remote and pushing the local branch.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Why End Users Use It</div>
+    <div class="summary-grid">
+      <div class=""summary-card" card-blue">
+        <h3>Fast Start</h3>
+        <p>One skill replaces a long checklist of git, GitHub, app access, and local Claude setup steps.</p>
+      </div>
+      <div class=""summary-card" card-green">
+        <h3>Safe Re-Runs</h3>
+        <p>Phases are idempotent, so re-running it on a half-configured project usually finishes missing pieces instead of starting over.</p>
+      </div>
+      <div class=""summary-card" card-amber">
+        <h3>Concrete Finish Line</h3>
+        <p>The summary tells the user exactly what was initialized, what was skipped, and what to do next.</p>
+      </div>
+    </div>
+
+    <div class="footer-note">
+      Best used at project inception or when inheriting a directory that is only partially wired.
+    </div>
+  </div>
+
+  <div class="footer">
+    Standalone visualization for the stark-onboard-project skill
+  </div>
+</body>
+</html>

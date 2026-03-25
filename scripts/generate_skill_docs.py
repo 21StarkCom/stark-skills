@@ -343,6 +343,27 @@ def _get_gemini_api_key() -> str | None:
     return None
 
 
+def _unescape_json_string(s: str) -> str:
+    """Unescape a string that was JSON-encoded by an LLM.
+
+    Some LLMs return HTML wrapped in a JSON string, so literal \\n appears
+    instead of newlines and quotes are backslash-escaped or doubled.
+    """
+    # Detect: if the first 200 chars contain literal \n, unescape
+    if r"\n" not in s[:200]:
+        return s
+    # Unescape JSON string sequences
+    s = s.replace("\\n", "\n")
+    s = s.replace("\\t", "\t")
+    # Handle double-escaped quotes first: \\" → "
+    s = s.replace('\\\\"', '"')
+    # Then single-escaped: \" → "
+    s = s.replace('\\"', '"')
+    # Fix remaining doubled quotes in attributes: ="" → ="
+    s = re.sub(r'=""([^"]*?)""', r'="\1"', s)
+    return s
+
+
 def _parse_viz_response(raw: str) -> dict[str, Any]:
     """Parse LLM response to extract HTML, mermaid, doc_content JSON, and alt_text."""
     result: dict[str, Any] = {"html": "", "mermaid": "", "doc_content": {}, "alt_text": ""}
@@ -350,7 +371,7 @@ def _parse_viz_response(raw: str) -> dict[str, Any]:
     # Extract HTML: look for <html>...</html>
     html_match = re.search(r"(<html[\s\S]*?</html>)", raw, re.IGNORECASE)
     if html_match:
-        result["html"] = html_match.group(1)
+        result["html"] = _unescape_json_string(html_match.group(1))
 
     # Extract mermaid block
     mermaid_match = re.search(r"```mermaid\s*\n([\s\S]*?)```", raw)
