@@ -1,0 +1,17 @@
+{
+  "doc_content": {
+    "summary": "Aggregates performance metrics across stark skill runs by processing history data, presenting scorecards, trends, and prompt improvement impacts.",
+    "key_features": [
+      "Parses cross-run history data into normalized formats.",
+      "Generates interactive operator tuning reports with actionable recommendations.",
+      "Detects and flags meta-observations like prompt improvements or urgent failure spikes.",
+      "Supports flexible filtering by repo, skill, and date constraints."
+    ],
+    "usage_examples": [
+      "/stark-metrics",
+      "/stark-metrics --since 2026-03-01",
+      "/stark-metrics --skill stark-review --repo Evinced/stark-skills --json"
+    ]
+  },
+  "alt_text": "Technical flowchart and architecture diagram for the stark-metrics skill, detailing Phase 1 script execution, Phase 2 result presentation with interactive recommendations, and Phase 3 improvement flag processing, alongside observability metrics and failure mode handling.`"
+}
