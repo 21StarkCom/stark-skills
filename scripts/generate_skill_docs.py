@@ -792,6 +792,40 @@ def generate_index_markdown(skills: list[SkillData]) -> str:
     return "\n".join(lines)
 
 
+def compute_manifest(skill_dir: Path, css_path: Path, script_version: str) -> dict:
+    """Build a manifest of current skill hashes, CSS hash, and script version."""
+    css_hash = hashlib.sha256(css_path.read_bytes()).hexdigest()[:16] if css_path.exists() else "missing"
+    skills = {}
+    for d in sorted(skill_dir.iterdir()):
+        md_file = d / "SKILL.md"
+        if md_file.exists():
+            skills[d.name] = {
+                "hash": hashlib.sha256(md_file.read_bytes()).hexdigest()[:16],
+                "usage_quality": "ok",
+                "internals_quality": "ok",
+            }
+    return {"meta": {"css_hash": css_hash, "script_version": script_version}, "skills": skills}
+
+
+def check_staleness(manifest_path: Path, current: dict) -> list[str]:
+    """Compare stored manifest against current state. Returns list of stale skill names."""
+    if not manifest_path.exists():
+        return list(current["skills"].keys())
+    stored = json.loads(manifest_path.read_text())
+    stale = []
+    if stored.get("meta", {}) != current.get("meta", {}):
+        return list(current["skills"].keys())
+    for name, info in current["skills"].items():
+        stored_info = stored.get("skills", {}).get(name, {})
+        if stored_info.get("hash") != info["hash"]:
+            stale.append(name)
+        elif stored_info.get("usage_quality") == "needs-human-review":
+            stale.append(name)
+        elif stored_info.get("internals_quality") == "needs-human-review":
+            stale.append(name)
+    return stale
+
+
 _audit_lock = threading.Lock()
 
 

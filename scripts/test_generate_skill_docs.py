@@ -14,6 +14,7 @@ from generate_skill_docs import (
     compute_weighted_average, select_winner, FACTOR_WEIGHTS,
     stamp_winner_html, write_audit_entry,
     generate_usage_markdown, generate_internals_markdown, generate_index_markdown,
+    compute_manifest, check_staleness,
 )
 
 FIXTURE = Path(__file__).parent.parent / "skill" / "stark-session" / "SKILL.md"
@@ -323,3 +324,76 @@ def test_generate_index_markdown():
     assert "stark-session" in md
     assert "usage.md" in md
     assert "internals.md" in md
+
+
+# ── Staleness detection tests ──────────────────────────────────────────
+
+
+def test_compute_manifest(tmp_path):
+    skill_dir = tmp_path / "skill" / "test-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Test")
+    css_path = tmp_path / "css" / "design-system.css"
+    css_path.parent.mkdir(parents=True)
+    css_path.write_text("body { color: black; }")
+    manifest = compute_manifest(tmp_path / "skill", css_path, "1.0.0")
+    assert "test-skill" in manifest["skills"]
+    assert "css_hash" in manifest["meta"]
+    assert manifest["meta"]["script_version"] == "1.0.0"
+    assert "usage_quality" in manifest["skills"]["test-skill"]
+    assert "internals_quality" in manifest["skills"]["test-skill"]
+
+
+def test_check_staleness_clean(tmp_path):
+    manifest = {"meta": {"css_hash": "abc", "script_version": "1.0.0"},
+                "skills": {"test-skill": {"hash": "abc123", "usage_quality": "ok", "internals_quality": "ok"}}}
+    manifest_path = tmp_path / "_manifest.json"
+    manifest_path.write_text(json.dumps(manifest))
+    current = {"meta": {"css_hash": "abc", "script_version": "1.0.0"},
+               "skills": {"test-skill": {"hash": "abc123", "usage_quality": "ok", "internals_quality": "ok"}}}
+    stale = check_staleness(manifest_path, current)
+    assert len(stale) == 0
+
+
+def test_check_staleness_skill_changed(tmp_path):
+    manifest = {"meta": {"css_hash": "abc", "script_version": "1.0.0"},
+                "skills": {"test-skill": {"hash": "abc123", "usage_quality": "ok", "internals_quality": "ok"}}}
+    manifest_path = tmp_path / "_manifest.json"
+    manifest_path.write_text(json.dumps(manifest))
+    current = {"meta": {"css_hash": "abc", "script_version": "1.0.0"},
+               "skills": {"test-skill": {"hash": "CHANGED", "usage_quality": "ok", "internals_quality": "ok"}}}
+    stale = check_staleness(manifest_path, current)
+    assert "test-skill" in stale
+
+
+def test_check_staleness_css_changed(tmp_path):
+    manifest = {"meta": {"css_hash": "abc", "script_version": "1.0.0"},
+                "skills": {"test-skill": {"hash": "abc123", "usage_quality": "ok", "internals_quality": "ok"}}}
+    manifest_path = tmp_path / "_manifest.json"
+    manifest_path.write_text(json.dumps(manifest))
+    current = {"meta": {"css_hash": "CHANGED", "script_version": "1.0.0"},
+               "skills": {"test-skill": {"hash": "abc123", "usage_quality": "ok", "internals_quality": "ok"}}}
+    stale = check_staleness(manifest_path, current)
+    assert "test-skill" in stale
+
+
+def test_check_staleness_usage_needs_review(tmp_path):
+    manifest = {"meta": {"css_hash": "abc", "script_version": "1.0.0"},
+                "skills": {"test-skill": {"hash": "abc123", "usage_quality": "needs-human-review", "internals_quality": "ok"}}}
+    manifest_path = tmp_path / "_manifest.json"
+    manifest_path.write_text(json.dumps(manifest))
+    current = {"meta": {"css_hash": "abc", "script_version": "1.0.0"},
+               "skills": {"test-skill": {"hash": "abc123", "usage_quality": "needs-human-review", "internals_quality": "ok"}}}
+    stale = check_staleness(manifest_path, current)
+    assert "test-skill" in stale
+
+
+def test_check_staleness_internals_needs_review(tmp_path):
+    manifest = {"meta": {"css_hash": "abc", "script_version": "1.0.0"},
+                "skills": {"test-skill": {"hash": "abc123", "usage_quality": "ok", "internals_quality": "needs-human-review"}}}
+    manifest_path = tmp_path / "_manifest.json"
+    manifest_path.write_text(json.dumps(manifest))
+    current = {"meta": {"css_hash": "abc", "script_version": "1.0.0"},
+               "skills": {"test-skill": {"hash": "abc123", "usage_quality": "ok", "internals_quality": "needs-human-review"}}}
+    stale = check_staleness(manifest_path, current)
+    assert "test-skill" in stale
