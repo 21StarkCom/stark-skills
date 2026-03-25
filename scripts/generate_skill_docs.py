@@ -837,3 +837,293 @@ def write_audit_entry(audit_path: Path, entry: dict) -> None:
     with _audit_lock:
         with open(audit_path, "a") as f:
             f.write(json.dumps(entry, sort_keys=True) + "\n")
+
+
+# ── CLI argument parser ───────────────────────────────────────────────
+
+
+AUDIENCES = ("usage", "internals")
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        description="Generate skill documentation with multi-LLM visualization competition.",
+    )
+    p.add_argument("--skill", help="Generate docs for a single skill (directory name)")
+    p.add_argument("--check", action="store_true", help="Staleness check only — exit 0 if clean, 1 if stale")
+    p.add_argument("--no-screenshots", action="store_true", help="Skip PNG screenshot generation")
+    p.add_argument("--no-evaluation", action="store_true", help="Skip judge evaluation, use first valid candidate")
+    p.add_argument("--markdown-only", action="store_true", help="Skip LLM calls, regenerate markdown from persisted artifacts")
+    p.add_argument("--dry-run", action="store_true", help="Show what would change without writing anything")
+    p.add_argument("--force", "--all", action="store_true", dest="force", help="Regenerate even if manifest is clean")
+    p.add_argument("-o", "--output-dir", type=Path, default=DEFAULT_OUT, help="Output directory")
+    return p
+
+
+# ── Main orchestrator ─────────────────────────────────────────────────
+
+
+def _load_persisted_artifacts(skill_dir: Path, audience: str) -> tuple[str, str, dict, str]:
+    """Load mermaid, html, doc_content JSON, and alt_text from persisted files."""
+    mermaid = ""
+    doc_content: dict = {}
+    alt_text = ""
+    html_content = ""
+
+    mermaid_path = skill_dir / f"{audience}.mermaid"
+    if mermaid_path.exists():
+        mermaid = mermaid_path.read_text().strip()
+
+    json_path = skill_dir / f"{audience}.json"
+    if json_path.exists():
+        try:
+            data = json.loads(json_path.read_text())
+            doc_content = data.get("doc_content", data)
+            alt_text = data.get("alt_text", "")
+        except json.JSONDecodeError:
+            pass
+
+    html_path = skill_dir / f"{audience}.html"
+    if html_path.exists():
+        html_content = html_path.read_text()
+
+    return mermaid, html_content, doc_content, alt_text
+
+
+def _viz_worker(agent: str, skill_data: SkillData, audience: str) -> VizResult:
+    """Worker function for ThreadPoolExecutor — catches all exceptions."""
+    try:
+        return _run_viz_agent(agent, skill_data, audience)
+    except Exception as e:
+        return VizResult(
+            agent=agent, skill=skill_data.name, audience=audience,
+            error=f"Worker exception: {e}",
+        )
+
+
+def main() -> int:
+    args = _build_arg_parser().parse_args()
+    out_dir: Path = args.output_dir
+    css_path = out_dir / "_css" / "design-system.css"
+    manifest_path = out_dir / "_manifest.json"
+    audit_path = out_dir / "_audit" / "scores.jsonl"
+
+    # ── 1. Discover skills ────────────────────────────────────────────
+    skill_dirs = discover_skills(SKILL_DIR, filter_name=args.skill)
+    if not skill_dirs:
+        print(f"No skills found{' matching ' + args.skill if args.skill else ''}.")
+        return 1 if args.skill else 0
+
+    # ── 2. Compute current manifest & staleness ───────────────────────
+    current_manifest = compute_manifest(SKILL_DIR, css_path, SCRIPT_VERSION)
+    stale_names = check_staleness(manifest_path, current_manifest)
+
+    if args.check:
+        if stale_names:
+            print(f"Stale skills ({len(stale_names)}): {', '.join(sorted(stale_names))}")
+            return 1
+        print("All skills up to date.")
+        return 0
+
+    # ── 3. Filter to stale skills (unless --force) ────────────────────
+    if args.force:
+        target_dirs = skill_dirs
+    else:
+        target_dirs = [d for d in skill_dirs if d.name in stale_names]
+
+    if not target_dirs:
+        print("All skills up to date. Use --force to regenerate.")
+        return 0
+
+    target_names = [d.name for d in target_dirs]
+    print(f"Target skills ({len(target_dirs)}): {', '.join(target_names)}")
+
+    if args.dry_run:
+        print("[dry-run] Would generate docs for:", ", ".join(target_names))
+        return 0
+
+    # ── 4. Parse all target skills ────────────────────────────────────
+    skill_data_map: dict[str, SkillData] = {}
+    for d in target_dirs:
+        skill_data_map[d.name] = parse_skill_md(d / "SKILL.md")
+
+    # ── 5. LLM generation (unless --markdown-only) ────────────────────
+    # Results keyed by "skill:audience" → list[VizResult]
+    results: dict[str, list[VizResult]] = {}
+
+    if not args.markdown_only:
+        # Build flat task list: (agent, skill_data, audience)
+        tasks: list[tuple[str, SkillData, str]] = []
+        for skill_name, sd in skill_data_map.items():
+            for audience in AUDIENCES:
+                for agent in AGENTS:
+                    tasks.append((agent, sd, audience))
+
+        print(f"Dispatching {len(tasks)} LLM calls (MAX_WORKERS={MAX_WORKERS})...")
+
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+            future_map = {}
+            for agent, sd, audience in tasks:
+                fut = pool.submit(_viz_worker, agent, sd, audience)
+                future_map[fut] = (agent, sd.name, audience)
+
+            for fut in as_completed(future_map):
+                agent, skill_name, audience = future_map[fut]
+                vr = fut.result()
+                key = f"{skill_name}:{audience}"
+                results.setdefault(key, []).append(vr)
+                status = "OK" if not vr.error else f"ERR: {vr.error[:60]}"
+                print(f"  [{agent}] {skill_name}/{audience} — {status} ({vr.duration_s:.1f}s)")
+
+    # ── 6. Process candidates per skill×audience ──────────────────────
+    # Track quality flags for manifest update
+    quality_flags: dict[str, dict[str, str]] = {}  # skill → {audience → flag}
+
+    for skill_name, sd in skill_data_map.items():
+        skill_out = out_dir / skill_name
+        skill_out.mkdir(parents=True, exist_ok=True)
+        quality_flags.setdefault(skill_name, {})
+
+        for audience in AUDIENCES:
+            key = f"{skill_name}:{audience}"
+
+            if args.markdown_only:
+                # Load from persisted artifacts
+                mermaid, html_content, doc_content, alt_text = _load_persisted_artifacts(skill_out, audience)
+                has_png = (skill_out / f"{audience}.png").exists()
+            else:
+                candidates = results.get(key, [])
+
+                # Filter to candidates with HTML
+                valid: list[VizResult] = []
+                for vr in candidates:
+                    if vr.error or not vr.html:
+                        if vr.error:
+                            write_audit_entry(audit_path, {
+                                "event": "generation_error", "skill": skill_name,
+                                "audience": audience, "agent": vr.agent, "error": vr.error,
+                            })
+                        continue
+                    # Sanitize
+                    vr.html = sanitize_html(vr.html)
+                    # Validate
+                    if not validate_html(vr.html):
+                        write_audit_entry(audit_path, {
+                            "event": "validation_failed", "skill": skill_name,
+                            "audience": audience, "agent": vr.agent,
+                        })
+                        continue
+                    valid.append(vr)
+
+                if not valid:
+                    print(f"  SKIP  {skill_name}/{audience} — no valid candidates")
+                    quality_flags[skill_name][audience] = "failed"
+                    continue
+
+                # Screenshot valid candidates
+                candidate_pngs: dict[str, Path] = {}
+                if not args.no_screenshots:
+                    for vr in valid:
+                        html_path = skill_out / f"{audience}_{vr.agent}.html"
+                        html_path.write_text(vr.html)
+                        png_path = skill_out / f"{audience}_{vr.agent}.png"
+                        if screenshot_html(html_path, png_path):
+                            candidate_pngs[vr.agent] = png_path
+                        elif png_path.exists():
+                            candidate_pngs[vr.agent] = png_path
+
+                # Evaluate
+                winner_agent: str | None = None
+                winner_score: float = 0.0
+                quality_flag = "ok"
+
+                if len(valid) == 1:
+                    # Single survivor — skip evaluation
+                    winner_agent = valid[0].agent
+                    quality_flag = "degraded"
+                elif args.no_evaluation or not candidate_pngs:
+                    # No evaluation — use first valid
+                    winner_agent = valid[0].agent
+                    quality_flag = "unevaluated"
+                else:
+                    eval_result = run_evaluation(sd, audience, candidate_pngs)
+                    winner_agent = eval_result.get("winner")
+                    winner_score = eval_result.get("winner_score", 0)
+                    quality_flag = eval_result.get("quality_flag", "error")
+                    write_audit_entry(audit_path, {
+                        "event": "evaluation", "skill": skill_name,
+                        "audience": audience, **eval_result,
+                    })
+
+                if not winner_agent:
+                    # Fallback to first valid if evaluation failed to pick
+                    winner_agent = valid[0].agent
+                    quality_flag = "eval_fallback"
+
+                # Find the winning VizResult
+                winner_vr = next(vr for vr in valid if vr.agent == winner_agent)
+
+                # Stamp winner HTML
+                if winner_score > 0:
+                    winner_vr.html = stamp_winner_html(winner_vr.html, winner_agent, winner_score)
+
+                # Persist winning artifacts
+                (skill_out / f"{audience}.html").write_text(winner_vr.html)
+                if winner_vr.mermaid:
+                    (skill_out / f"{audience}.mermaid").write_text(winner_vr.mermaid)
+                persist_json = {"doc_content": winner_vr.doc_content, "alt_text": winner_vr.alt_text}
+                (skill_out / f"{audience}.json").write_text(json.dumps(persist_json, indent=2))
+
+                # Promote winner PNG if we have it
+                winner_png_src = skill_out / f"{audience}_{winner_agent}.png"
+                final_png = skill_out / f"{audience}.png"
+                if winner_png_src.exists():
+                    shutil.copy2(winner_png_src, final_png)
+
+                # Clean up candidate files (keep only winner)
+                for vr in valid:
+                    for suffix in (".html", ".png"):
+                        cand = skill_out / f"{audience}_{vr.agent}{suffix}"
+                        cand.unlink(missing_ok=True)
+
+                # Set up vars for markdown generation
+                mermaid = winner_vr.mermaid
+                doc_content = winner_vr.doc_content
+                alt_text = winner_vr.alt_text
+                has_png = final_png.exists()
+                quality_flags[skill_name][audience] = quality_flag
+
+            # ── 7. Generate markdown ──────────────────────────────────
+            if audience == "usage":
+                md = generate_usage_markdown(sd, mermaid, doc_content, alt_text, has_png)
+                (skill_out / "usage.md").write_text(md)
+            else:
+                md = generate_internals_markdown(sd, mermaid, doc_content, alt_text, has_png)
+                (skill_out / "internals.md").write_text(md)
+
+            print(f"  DONE  {skill_name}/{audience}.md")
+
+    # ── 8. Generate index.md ──────────────────────────────────────────
+    all_skill_data = [skill_data_map[d.name] for d in target_dirs if d.name in skill_data_map]
+    index_md = generate_index_markdown(all_skill_data)
+    (out_dir / "index.md").write_text(index_md)
+    print(f"  DONE  index.md ({len(all_skill_data)} skills)")
+
+    # ── 9. Update manifest with quality flags ─────────────────────────
+    # Start from current manifest and merge in quality flags
+    for skill_name, flags in quality_flags.items():
+        if skill_name in current_manifest["skills"]:
+            for audience, flag in flags.items():
+                qkey = f"{audience}_quality"
+                current_manifest["skills"][skill_name][qkey] = (
+                    "needs-human-review" if flag in ("poor", "failed", "error") else flag
+                )
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(current_manifest, indent=2) + "\n")
+    print(f"  DONE  _manifest.json updated")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
