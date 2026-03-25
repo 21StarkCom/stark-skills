@@ -16,8 +16,8 @@
     },
     "stark-generate-docs": {
       "hash": "646b249ccdc1f725",
-      "usage_quality": "eval_fallback",
-      "internals_quality": "eval_fallback"
+      "usage_quality": "ok",
+      "internals_quality": "ok"
     },
     "stark-init-docs": {
       "hash": "f6829ed4ebf3e57d",
@@ -96,8 +96,8 @@
     },
     "stark-skill-analytics": {
       "hash": "b0f7d7761b506240",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
+      "usage_quality": "eval_fallback",
+      "internals_quality": "eval_fallback"
     },
     "stark-update-deps": {
       "hash": "e2654f1808d306ee",

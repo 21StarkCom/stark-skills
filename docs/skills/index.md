@@ -2,4 +2,4 @@
 
 | Skill | Description | Docs |
 |-------|-------------|------|
-| `/stark-generate-docs` | Generate or update skill documentation with multi-LLM visualizations. Detects which SKILL.md files changed, regenerates docs for those skills, and commits the results. Use when the user says "generate docs", "update skill docs", "regenerate viz", or invokes /stark-generate-docs. Proactively use when a SKILL.md has been modified in the current session. | [usage.md](stark-generate-docs/usage.md) · [internals.md](stark-generate-docs/internals.md) |
+| `/stark-skill-analytics` | Analyze skill usage patterns and quality metrics across all Claude Code sessions. Reads ~/.claude/history.jsonl and skill run history files to produce adoption curves, usage rankings, quality signals, and recommendations. Use when the user says "skill analytics", "skill usage", "which skills are used", "adoption metrics", or invokes /stark-skill-analytics. | [usage.md](stark-skill-analytics/usage.md) · [internals.md](stark-skill-analytics/internals.md) |

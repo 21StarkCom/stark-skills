@@ -2,7 +2,7 @@
 <head>
 
 
-<title>stark-skill-analytics</title>
+<title>stark-skill-analytics - Skill Visualization</title>
 <style>
 /*
  * Stark Skills — Shared Design System CSS
@@ -45,7 +45,7 @@ body {
 }
 
 /* === Node Types === */
-.node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; }
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
 .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
 .node-desc { font-size: 10px; opacity: 0.8; }
 
@@ -63,20 +63,20 @@ body {
   width: 100%; max-width: 860px; min-height: 76px;
 }
 .flow-lane-left {
-  width: 220px; display: flex;
+  width: 180px; display: flex;
   align-items: center; justify-content: flex-end;
   padding-right: 18px;
 }
 .flow-lane-center {
-  width: 420px; display: flex;
+  width: 500px; display: flex;
   align-items: center; justify-content: center;
 }
 .flow-lane-right {
-  width: 220px; display: flex;
+  width: 180px; display: flex;
   align-items: center; padding-left: 18px;
 }
 .annotation {
-  font-size: 9px; color: #666; max-width: 200px; line-height: 1.4;
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
 }
 .annotation strong { color: #444; }
 
@@ -96,7 +96,7 @@ body {
   width: 100%; max-width: 860px;
 }
 .arrow-container .flow-lane-center {
-  display: flex; justify-content: center; width: 420px;
+  display: flex; justify-content: center;
 }
 
 /* === Cards === */
@@ -124,7 +124,7 @@ body {
 
 /* === Data Tables === */
 .data-table {
-  width: 100%; max-width: 860px; margin: 16px 0;
+  width: 100%; max-width: 860px; margin: 16px auto;
   border-collapse: collapse; font-size: 11px;
 }
 .data-table th {
@@ -133,9 +133,6 @@ body {
 }
 .data-table td {
   padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
-}
-.data-table code {
-  background: #e5e7eb; padding: 2px 4px; border-radius: 3px; font-family: monospace;
 }
 
 /* === Tags === */
@@ -161,187 +158,210 @@ body {
 }
 .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
 
+/* === Summary Grid === */
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
+
+/* === Winner Badge === */
+.winner-badge {
+  display: inline-block; font-size: 12px; color: #555555;
+  font-weight: 600; padding: 2px 10px; border-radius: 4px;
+  background: #f9fafb; border: 1px solid #d1d5db;
+}
+
 /* === Footer === */
 .footer {
   text-align: center; padding: 20px;
   font-size: 10px; color: #999;
 }
+
 </style>
 </head>
 <body>
 
 <div class="header">
   <h1>stark-skill-analytics</h1>
-  <div class="sub">Analyze skill usage patterns and quality metrics across all Claude Code sessions.</div>
-  <div class="scope">USAGE WORKFLOW</div>
+  <div class="sub">Analyze skill usage patterns and quality metrics across all Claude Code sessions</div>
+  <div class="scope">Usage Visualization</div>
 </div>
 
 <div class="container">
   
-  <div class="card card-dark" style="max-width: 860px; margin: 0 auto 24px;">
-    <h3>Overview</h3>
-    <p>This skill generates a comprehensive analytics report detailing <strong>which skills are invoked</strong>, <strong>how often</strong>, <strong>by which projects</strong>, and <strong>with what quality</strong>. It aggregates data from global history files and local project repositories to compute adoption curves, usage rankings, error rates, and actionable recommendations.</p>
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot node-phase"></div> Processing Phase</div>
+    <div class="legend-item"><div class="legend-dot node-config"></div> Input Data</div>
+    <div class="legend-item"><div class="legend-dot node-output"></div> Output Report</div>
+    <div class="legend-item"><div class="legend-dot node-external"></div> Analytics Metric</div>
+    <div class="legend-item"><div class="legend-dot node-decision"></div> Argument Trigger</div>
   </div>
 
-  <div class="section-title">Execution Flow</div>
-  
+  <h2 class="section-title">Workflow Overview</h2>
+
   <div class="flow">
-    <!-- Step 1 -->
+    <!-- Initial State / Inputs -->
     <div class="flow-step">
       <div class="flow-lane-left">
-        <div class="node node-external">
+        <div class="annotation">
+          <strong>User Invocation</strong><br>
+          Run via slash command or explicit text intent
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width: 100%;">
+          <div class="node-title">Invoke: /stark-skill-analytics</div>
+          <div class="node-desc">[--skill &lt;name&gt;] [--format table|full]</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+
+    <!-- Arrow Down -->
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 1 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="node node-config" style="width: 100%;">
           <div class="node-title">~/.claude/history.jsonl</div>
-          <div class="node-desc">Raw Global Chat History</div>
+          <div class="node-desc">Raw Claude Session History</div>
         </div>
       </div>
       <div class="flow-lane-center">
-        <div class="node node-phase">
-          <div class="node-title">1. Collect Usage Data</div>
-          <div class="node-desc">Parse inputs & extract invocations</div>
+        <div class="node node-phase" style="width: 100%;">
+          <div class="node-title">Phase 1: Collect Usage Data</div>
+          <div class="node-desc">Extract skill invocations, aggregate by skill, analyze session sequencing.</div>
         </div>
       </div>
       <div class="flow-lane-right">
         <div class="annotation">
-          Extracts: <strong>skill name, arguments, timestamp, project path, sessionId</strong>. Separates quick vs parameterized runs.
+          <strong>Metrics:</strong><br>
+          - Invocation counts<br>
+          - Unique projects<br>
+          - Trend (30d vs prior 30d)
         </div>
       </div>
     </div>
 
-    <!-- Arrow -->
-    <div class="arrow-container">
-      <div class="flow-lane-left"></div>
-      <div class="flow-lane-center"><div class="arrow-down"></div></div>
-      <div class="flow-lane-right"></div>
-    </div>
+    <!-- Arrow Down -->
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-    <!-- Step 2 -->
+    <!-- Phase 2 -->
     <div class="flow-step">
       <div class="flow-lane-left">
-        <div class="node node-external">
-          <div class="node-title">code-review/history/</div>
-          <div class="node-desc">Skill Run Outputs</div>
+        <div class="node node-config" style="width: 100%;">
+          <div class="node-title">~/.claude/code-review/history/</div>
+          <div class="node-desc">Skill Run History JSON Files</div>
         </div>
       </div>
       <div class="flow-lane-center">
-        <div class="node node-phase">
-          <div class="node-title">2. Collect Quality Data</div>
-          <div class="node-desc">Extract durations, successes, timeouts</div>
+        <div class="node node-phase" style="width: 100%;">
+          <div class="node-title">Phase 2: Collect Quality Data</div>
+          <div class="node-desc">Parse phase durations, success rates, output counts, and failure traces.</div>
         </div>
       </div>
       <div class="flow-lane-right">
         <div class="annotation">
-          Computes metrics per-skill type: <strong>avg duration, error rate, empty results, timeout percentages</strong>.
+          <strong>Metrics:</strong><br>
+          - Success/Failure rates<br>
+          - Avg run duration<br>
+          - Agent timeout rates
         </div>
       </div>
     </div>
 
-    <!-- Arrow -->
-    <div class="arrow-container">
-      <div class="flow-lane-left"></div>
-      <div class="flow-lane-center"><div class="arrow-down"></div></div>
-      <div class="flow-lane-right"></div>
-    </div>
+    <!-- Arrow Down -->
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-    <!-- Step 3 -->
+    <!-- Phase 3 -->
     <div class="flow-step">
       <div class="flow-lane-left">
-        <div class="node node-external">
+        <div class="node node-config" style="width: 100%;">
           <div class="node-title">CLAUDE.md</div>
-          <div class="node-desc">Local Repo Skills Config</div>
+          <div class="node-desc">Workspace Reg. Skills</div>
         </div>
       </div>
       <div class="flow-lane-center">
-        <div class="node node-phase">
-          <div class="node-title">3. Cross-Reference Data</div>
-          <div class="node-desc">Correlate usage with quality & config</div>
+        <div class="node node-phase" style="width: 100%;">
+          <div class="node-title">Phase 3: Cross-Reference & Analyze</div>
+          <div class="node-desc">Discover unused/unregistered skills, project affinities, and generate action items.</div>
         </div>
       </div>
       <div class="flow-lane-right">
         <div class="annotation">
-          Calculates: <strong>30-day trends, project affinities, workflow sequences, unused vs unregistered skills</strong>.
+          <strong>Analysis:</strong><br>
+          - Quality drops<br>
+          - Missing config vs actual usage
         </div>
       </div>
     </div>
 
-    <!-- Arrow -->
-    <div class="arrow-container">
-      <div class="flow-lane-left"></div>
-      <div class="flow-lane-center"><div class="arrow-down"></div></div>
-      <div class="flow-lane-right"></div>
-    </div>
+    <!-- Arrow Down -->
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
-    <!-- Step 4 -->
+    <!-- Phase 4 -->
     <div class="flow-step">
       <div class="flow-lane-left">
-        <div class="node node-config">
-          <div class="node-title">CLI Arguments</div>
-          <div class="node-desc">[--skill] [--format]</div>
+        <div class="annotation" style="text-align: right;">
+          Outputs to terminal<br>and saves markdown
         </div>
       </div>
       <div class="flow-lane-center">
-        <div class="node node-output">
-          <div class="node-title">4. Generate Analytics Report</div>
-          <div class="node-desc">Save to disk & print to terminal</div>
+        <div class="node node-output" style="width: 100%;">
+          <div class="node-title">Phase 4: Generate Report</div>
+          <div class="node-desc">~/.claude/code-review/insights/skills/skill-analytics.md</div>
         </div>
       </div>
       <div class="flow-lane-right">
-        <div class="annotation">
-          Writes: <strong>skill-analytics.md</strong> or <strong>skill-analytics-{name}.md</strong> to the insights directory.
+        <div class="node node-external" style="width: 100%;">
+          <div class="node-title">Terminal Output</div>
+          <div class="node-desc">Print results directly</div>
         </div>
       </div>
     </div>
   </div>
 
-  <div class="section-title">Arguments & Inputs</div>
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th>Argument</th>
-        <th>Description</th>
-        <th>Default Behavior (if omitted)</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td><code>--skill &lt;name&gt;</code></td>
-        <td>Generates a deep-dive report focused solely on the specified skill.</td>
-        <td>Generates a full report across all invoked and registered skills.</td>
-      </tr>
-      <tr>
-        <td><code>--format table</code></td>
-        <td>Outputs only the summary rankings table, skipping per-skill details.</td>
-        <td>Outputs the <code>full</code> comprehensive report.</td>
-      </tr>
-    </tbody>
-  </table>
+  <h2 class="section-title">Arguments & Outputs</h2>
 
-  <div class="section-title">Report Content Capabilities</div>
   <div class="card-grid">
-    <div class="card card-blue">
-      <h3>Usage & Adoption Rankings</h3>
-      <p>Tracks invocation counts, unique projects, and 30-day trends (rising, stable, declining, new). Plots chronological adoption timelines to see when skills were first introduced to user workflows.</p>
-    </div>
-    
-    <div class="card card-amber">
-      <h3>Quality Signals</h3>
-      <p>Surfaces skills with high timeout rates (>20%), high failure rates (>10%), or those that frequently return empty results. Breaks down success rates by LLM agent (Claude, Codex, Gemini) where applicable.</p>
-    </div>
-
     <div class="card card-purple">
-      <h3>Workflow Sequences</h3>
-      <p>Identifies consecutive skill pairings within single sessions (e.g., <code>/stark-review</code> followed by <code>/stark-review-improvement</code>) to uncover emergent user workflows that could be automated into compound skills.</p>
+      <h3>--skill &lt;name&gt;</h3>
+      <p>Generates a deep-dive report specifically for the provided skill name (e.g., <code>stark-review</code>). Analyzes detailed usage trends, parameter variations, success/failure rate overtime for that single skill.</p>
     </div>
+    <div class="card card-blue">
+      <h3>--format table | full</h3>
+      <p>Controls output verbosity. <strong>table</strong> skips per-skill breakdowns and prints summary usage rankings. <strong>full</strong> (default) generates the complete adoption, quality signals, and sequence report.</p>
+    </div>
+    <div class="card card-amber">
+      <h3>Output Highlights</h3>
+      <p><strong>Recommendations:</strong> Actionable steps to remove dead skills, promote healthy ones, fix high-failure-rate skills, or combine common sequences.</p>
+    </div>
+  </div>
 
-    <div class="card card-green">
-      <h3>Actionable Recommendations</h3>
-      <p>Automatically suggests actions: <strong>Remove</strong> dead skills, <strong>Promote</strong> underused high-quality skills, <strong>Fix</strong> buggy tools, and <strong>Combine</strong> common sequences.</p>
+  <h2 class="section-title">Metrics Tracked</h2>
+  <div class="summary-grid">
+    <div class="summary-card card-dark">
+      <h3>Usage & Adoption</h3>
+      <p>Tracks how many times a skill is run, the variety of projects using it, 30-day trends (rising, declining, new, stable), and the ratio of parameterized vs. "quick" (argument-less) invocations.</p>
+    </div>
+    <div class="summary-card card-dark">
+      <h3>Quality & Performance</h3>
+      <p>Aggregates agent timeout rates, general error rates, empty result percentages, and total duration metrics to score the health of a given skill implementation.</p>
+    </div>
+    <div class="summary-card card-dark">
+      <h3>Ecosystem Health</h3>
+      <p>Checks the gap between configured skills (<code>CLAUDE.md</code>) and actual usage (<code>history.jsonl</code>) to flag <em>Unregistered but used</em> and <em>Registered but dead</em> skills.</p>
     </div>
   </div>
 
 </div>
 
 <div class="footer">
-  &copy; 2026 Stark Skills | Auto-generated Visualization
+  &copy; 2026 Evinced - stark-skill-analytics viz
 </div>
 
 </body>

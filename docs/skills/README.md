@@ -72,7 +72,7 @@ graph TD
 
 - **`/stark-init-docs`** — *(not installed)*
 - **`/stark-extract-docs`** — *(not installed)*
-- **[`/stark-generate-docs`](stark-generate-docs/usage.md)** — Generate or update skill documentation with multi-LLM visualizations. Detects which SKILL.md files changed, regenerates docs for those skills, and commits the results. Use when the user says "generate docs", "update skill docs", "regenerate viz", or invokes /stark-generate-docs. Proactively use when a SKILL.md has been modified in the current session.
+- **`/stark-generate-docs`** — *(not installed)*
 - **`/stark-claude-md-improver`** — *(not installed)*
 
 ## Project Management
@@ -102,5 +102,5 @@ graph TD
 ```
 
 - **`/stark-metrics`** — *(not installed)*
-- **`/stark-skill-analytics`** — *(not installed)*
+- **[`/stark-skill-analytics`](stark-skill-analytics/usage.md)** — Analyze skill usage patterns and quality metrics across all Claude Code sessions. Reads ~/.claude/history.jsonl and skill run history files to produce adoption curves, usage rankings, quality signals, and recommendations. Use when the user says "skill analytics", "skill usage", "which skills are used", "adoption metrics", or invokes /stark-skill-analytics.
 - **`/stark-pr-status`** — *(not installed)*

@@ -1,4 +1,18 @@
 {
-  "doc_content": {},
-  "alt_text": "Screenshot of an internal architecture page for /stark-skill-analytics showing a blue-purple-green pipeline from input arguments through session-history parsing, quality-history ingestion, cross-reference analysis, and report generation, followed by tables for data model, failure handling, observability, and extension points.\"}}"
+  "doc_content": {
+    "summary": "stark-skill-analytics parses Claude Code session history and skill execution logs to derive adoption trends, success metrics, and actionable recommendations. It operates primarily as a telemetry aggregator, merging volumetric data from history.jsonl with qualitative run data to output comprehensive Markdown reports.",
+    "key_features": [
+      "Line-by-line parsing of large history.jsonl files for performance",
+      "Detection of common skill invocation chains and chained workflows",
+      "Cross-referencing invoked skills against CLAUDE.md registry for ghost skill discovery",
+      "Heuristic-based recommendation engine (Fix, Promote, Remove, Sequence)",
+      "Graceful fallback if quality history files are missing (usage-only mode)"
+    ],
+    "usage_examples": [
+      "/stark-skill-analytics",
+      "/stark-skill-analytics --skill stark-review",
+      "/stark-skill-analytics --format table"
+    ]
+  },
+  "alt_text": "A documentation page titled stark-skill-analytics - Internal Architecture showing a vertical flow diagram connecting Phase 1 Collect Usage Data, Phase 2 Collect Quality Data, Phase 3 Cross-Reference, and Phase 4 Generate Report, alongside data source inputs and feature details."
 }

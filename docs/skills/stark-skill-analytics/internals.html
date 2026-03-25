@@ -1,1 +1,375 @@
-<html|mermaid|node-phase|section-title|summary-grid\" -s .'","aggregated_output":"","exit_code":null,"status":"in_progress"}} {"type":"item.completed","item":{"id":"item_2","type":"command_execution","command":" bin zsh -lc 'rg -n \"stark-skill-analytics|<html|mermaid|node-phase|section-title|summary-grid\" -s .'","aggregated_output":". standards index.md:21:```mermaid\n. claude.md:54:- ` stark-skill-analytics [--skill <name>] [--format table|full]` — analyze skill usage patterns, quality metrics, and adoption trends\n./standards/templates/docs-index.md:11:```mermaid\n./skill/stark-skill-analytics/SKILL.md:2:name: stark-skill-analytics\n./skill/stark-skill-analytics/SKILL.md:8:  \"which skills are used\", \"adoption metrics\", or invokes /stark-skill-analytics.\n./skill/stark-skill-analytics/SKILL.md:12:# stark-skill-analytics\n./scripts/test_generate_skill_docs.py:102:    html = '<html><body><div class="\"node-phase\"">Phase 1</div></body></html>
+<html lang="en">
+<head>
+
+
+<title>stark-skill-analytics - Internal Architecture</title>
+<style>
+/*
+ * Stark Skills — Shared Design System CSS
+ *
+ * Foundation styles for LLM-generated HTML skill visualizations.
+ * LLMs embed this inline and may extend with additional styles.
+ * All colors pass WCAG AA 4.5:1 contrast ratio.
+ */
+
+/* === Reset & Base === */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+
+/* === Header === */
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
+
+/* === Container === */
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+/* === Section Title === */
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+/* === Node Types === */
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; width: 100%; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.9; }
+
+.node-phase    { background: #1e40af; color: #ffffff; }   /* Blue — workflow phases */
+.node-decision { background: #7c3aed; color: #ffffff; }   /* Purple — decision points */
+.node-failure  { background: #dc2626; color: #ffffff; }   /* Red — failure/error states */
+.node-config   { background: #047857; color: #ffffff; }   /* Green — config/settings */
+.node-output   { background: #f59e0b; color: #1a1a1a; }   /* Amber — outputs/artifacts */
+.node-external { background: #e5e7eb; color: #444444; border: 1px dashed #9ca3af; } /* Gray — external deps */
+
+/* === Flow Layout === */
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 900px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 250px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 400px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 250px; display: flex;
+  align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 9px; color: #666; width: 100%; line-height: 1.4;
+  background: #fff; padding: 8px; border-radius: 6px; border: 1px solid #e5e7eb;
+}
+.annotation strong { color: #444; display: block; margin-bottom: 2px; }
+
+/* === Arrows === */
+.arrow-down {
+  width: 2px; height: 24px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 900px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
+
+/* === Cards === */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; color: #444; }
+.card ul { margin-left: 16px; margin-top: 8px; font-size: 11px; color: #444; }
+.card li { margin-bottom: 4px; }
+
+.card-blue   { border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
+
+/* === Data Tables === */
+.data-table {
+  width: 100%; max-width: 900px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px; background: #fff;
+  border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.data-table th {
+  background: #f3f4f6; padding: 10px 12px; text-align: left;
+  font-weight: 600; color: #444; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 10px 12px; border-bottom: 1px solid #f3f4f6; color: #444;
+}
+
+/* === Tags === */
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
+
+/* === Legend === */
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+.bg-blue { background: #1e40af; }
+.bg-amber { background: #f59e0b; }
+.bg-gray { background: #e5e7eb; border: 1px dashed #9ca3af; }
+.bg-green { background: #047857; }
+.bg-red { background: #dc2626; }
+
+/* === Footer === */
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999; margin-top: 40px;
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>stark-skill-analytics</h1>
+  <div class="sub">Analyze skill usage patterns and quality metrics across Claude Code sessions.</div>
+  <div class="scope">INTERNAL ARCHITECTURE & DATA FLOW</div>
+</div>
+
+<div class="container">
+  
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot bg-blue"></div> Core Phase</div>
+    <div class="legend-item"><div class="legend-dot bg-gray"></div> File System Source</div>
+    <div class="legend-item"><div class="legend-dot bg-amber"></div> Generated Artifact</div>
+    <div class="legend-item"><div class="legend-dot bg-green"></div> CLI Arguments</div>
+  </div>
+
+  <h2 class="section-title">Data Pipeline Execution Flow</h2>
+
+  <div class="flow">
+    <!-- Config Input -->
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-config">
+          <div class="node-title">CLI Invocation</div>
+          <div class="node-desc">[--skill &lt;name&gt;] [--format table|full]</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+    
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 1 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="node node-external">
+          <div class="node-title">~/.claude/history.jsonl</div>
+          <div class="node-desc">Raw session invocations</div>
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase">
+          <div class="node-title">Phase 1: Collect Usage Data</div>
+          <div class="node-desc">Parse line-by-line, extract slash commands</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation">
+          <strong>Outputs:</strong>
+          Invocation counts, arguments classification (quick/param), session sequence pairs, project usage.
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 2 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="node node-external">
+          <div class="node-title">.../code-review/history/</div>
+          <div class="node-desc">JSON files per skill type</div>
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase">
+          <div class="node-title">Phase 2: Collect Quality Data</div>
+          <div class="node-desc">Scan dirs, compute run success rates</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation">
+          <strong>Outputs:</strong>
+          Avg duration, success/failure/timeout rates, agent-specific metrics, output summaries.
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 3 -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="node node-external">
+          <div class="node-title">CLAUDE.md</div>
+          <div class="node-desc">Registered skills manifest</div>
+        </div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase">
+          <div class="node-title">Phase 3: Cross-Reference & Analyze</div>
+          <div class="node-desc">Combine Usage + Quality + Registry</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation">
+          <strong>Outputs:</strong>
+          Project affinity, adoption timelines, anomaly detection, actionable recommendations.
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 4 -->
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-phase">
+          <div class="node-title">Phase 4: Generate Report</div>
+          <div class="node-desc">Format markdown and write output</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="node node-output">
+          <div class="node-title">skill-analytics.md</div>
+          <div class="node-desc">Saved to insights/skills/</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="section-title">Analysis Engine Details</h2>
+  
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>1. Extracted Entities</h3>
+      <p>Data points synthesized across sources:</p>
+      <ul>
+        <li><strong>Skill Signature:</strong> Name, arguments, invocation type.</li>
+        <li><strong>Temporal:</strong> first_used, last_used, 30d trend (rising, stable, declining, new).</li>
+        <li><strong>Quality:</strong> Success rate, timeout rate, avg duration.</li>
+        <li><strong>Session Context:</strong> Skill chaining (A -> B).</li>
+      </ul>
+    </div>
+    
+    <div class="card card-purple">
+      <h3>2. Recommendation Heuristics</h3>
+      <p>The engine generates automated advice based on triggers:</p>
+      <ul>
+        <li><strong>Remove:</strong> In CLAUDE.md, but 0 runs in last 60 days.</li>
+        <li><strong>Fix:</strong> Timeout rate > 20% or Failure rate > 10%.</li>
+        <li><strong>Promote:</strong> Underused but 100% success rate across few projects.</li>
+        <li><strong>Sequence:</strong> High occurrence of contiguous skill invocations.</li>
+      </ul>
+    </div>
+    
+    <div class="card card-dark">
+      <h3>3. Technical Constraints</h3>
+      <p>Performance and boundary limits:</p>
+      <ul>
+        <li>Streams <code>history.jsonl</code> line-by-line (O(N) memory).</li>
+        <li>Uses inline Python via bash for aggregation (no external `.py` scripts).</li>
+        <li>Does NOT invoke external APIs or modify configs.</li>
+        <li>Excludes plain prompt text tracking.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 class="section-title">Failure Modes & Fallbacks</h2>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Failure Condition</th>
+        <th>System Response / Recovery</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>history.jsonl</code> doesn't exist or is empty</td>
+        <td><span class="tag tag-failure">Abort</span> Error: "No history.jsonl found." Claude Code session history is strictly required.</td>
+      </tr>
+      <tr>
+        <td><code>history/</code> dir doesn't exist</td>
+        <td><span class="tag tag-config">Graceful Downgrade</span> Skip quality metrics, generate report using usage volume data only.</td>
+      </tr>
+      <tr>
+        <td>Corrupt JSON in history files / jsonl</td>
+        <td><span class="tag tag-external">Skip Line/File</span> Skip malformed entry, increment warning count, continue processing.</td>
+      </tr>
+      <tr>
+        <td>Target <code>--skill &lt;name&gt;</code> not found</td>
+        <td><span class="tag tag-failure">Abort</span> Print: "Skill not found in history. Available: {list}"</td>
+      </tr>
+      <tr>
+        <td><code>insights/skills/</code> dir not writable</td>
+        <td><span class="tag tag-output">Fallback</span> Print full report to terminal, warn about disk save failure.</td>
+      </tr>
+    </tbody>
+  </table>
+
+</div>
+
+<div class="footer">
+  Stark Skills internal documentation &bull; Generated from SKILL.md specification
+</div>
+
+</body>
+</html>

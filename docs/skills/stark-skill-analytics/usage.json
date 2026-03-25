@@ -1,18 +1,18 @@
 {
   "doc_content": {
-    "summary": "Analyzes skill usage patterns and quality metrics across all Claude Code sessions to produce adoption curves, usage rankings, quality signals, and actionable recommendations.",
+    "summary": "The stark-skill-analytics skill analyzes Claude Code session history and skill run data to provide a comprehensive view of skill usage patterns, adoption trends, and operational quality metrics. It helps identify which skills are popular, which are failing, and gaps between configured and actual usage.",
     "key_features": [
-      "Usage rankings and 30-day adoption trends",
-      "Detection of common workflow sequences across sessions",
-      "Quality signal analysis (timeouts, failure rates, empty results)",
-      "Cross-referencing invoked skills against registered skills in CLAUDE.md",
-      "Automated recommendations (Promote, Fix, Remove, Combine)"
+      "Parses ~/.claude/history.jsonl to track skill invocations, sequences, and project-specific usage over time.",
+      "Aggregates performance data from ~/.claude/code-review/history/ to compute success rates, timeouts, and durations.",
+      "Cross-references usage with CLAUDE.md to highlight unregistered skills or deprecation candidates.",
+      "Generates actionable recommendations (Remove, Promote, Fix, Investigate, Combine) based on data trends.",
+      "Produces Markdown reports and terminal summaries with options to drill down into a single skill or generate table-only summaries."
     ],
     "usage_examples": [
       "/stark-skill-analytics",
-      "/stark-skill-analytics --format table",
-      "/stark-skill-analytics --skill stark-review"
+      "/stark-skill-analytics --skill stark-review",
+      "/stark-skill-analytics --format table"
     ]
   },
-  "alt_text": "A user-focused HTML visualization documenting the stark-skill-analytics skill. It includes an overview, a visual execution flow mapping data extraction from history files to cross-referenced reporting, a table explaining CLI arguments, and a grid highlighting key report capabilities like Usage Rankings, Quality Signals, Workflow Sequences, and Actionable Recommendations."
+  "alt_text": "A visualization of the stark-skill-analytics skill workflow, illustrating the four phases of data collection from Claude session logs, run history aggregation, cross-reference analysis with CLAUDE.md, and final report generation."
 }

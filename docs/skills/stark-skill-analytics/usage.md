@@ -6,39 +6,39 @@ Analyze skill usage patterns and quality metrics across all Claude Code sessions
 
 ```mermaid
 graph TD
-    A[Start: /stark-skill-analytics] --> B{Parse history.jsonl}
-    B -->|Extract| C[Skill Invocations & Arguments]
-    B -->|Extract| D[Timestamps & Projects]
+    Start([User Invokes /stark-skill-analytics]) --> ParseArgs{Parse Arguments}
+    ParseArgs --> |"[--skill name]"| FilterSkill[Target Single Skill]
+    ParseArgs --> |"[--format table|full]"| SetFormat[Set Output Format]
     
-    C --> E[Compute Usage Stats]
-    D --> E
+    FilterSkill --> Phase1
+    SetFormat --> Phase1
     
-    F[code-review/history/] --> G{Parse Run History}
-    G -->|Extract| H[Durations & Outcomes]
-    G -->|Extract| I[Timeouts & Agent Data]
+    subgraph Data Collection
+        Phase1[Phase 1: Parse history.jsonl] --> ExtractUsages[Extract Invocations & Sessions]
+        ExtractUsages --> CalcUsage[Compute Usage Stats & Sequences]
+        
+        CalcUsage --> Phase2[Phase 2: Scan run history/]
+        Phase2 --> ParseRuns[Parse Run JSONs]
+        ParseRuns --> CalcQuality[Compute Success, Timeouts & Durations]
+    end
     
-    H --> J[Compute Quality Stats]
-    I --> J
+    subgraph Cross-Reference Analysis
+        CalcQuality --> Phase3[Phase 3: Analyze Data]
+        Phase3 --> ReadConfig[(Read CLAUDE.md)]
+        ReadConfig --> IdentifyGaps[Identify Unregistered / Unused Skills]
+        IdentifyGaps --> GenRecs[Generate Recommendations & Trends]
+    end
     
-    E --> K[Cross-Reference Analytics]
-    J --> K
-    L[Local CLAUDE.md] -->|Registered Skills| K
+    subgraph Report Generation
+        GenRecs --> Phase4[Phase 4: Format Report]
+        Phase4 --> |Full/Table Format| WriteMD[Write MD to /insights/skills/]
+        WriteMD --> TerminalOut>Print Report to Terminal]
+    end
     
-    K --> M{Format Argument?}
-    M -->|--format table| N[Output Rankings Table Only]
-    M -->|--format full| O{Skill Argument?}
-    
-    O -->|--skill <name>| P[Generate Single-Skill Report]
-    O -->|None| Q[Generate Comprehensive Report]
-    
-    N --> R[Save Markdown & Print to Terminal]
-    P --> R
-    Q --> R
-    
-    R --> S[End]
+    TerminalOut --> Finish([End])
 ```
 
-![A user-focused HTML visualization documenting the stark-skill-analytics skill. It includes an overview, a visual execution flow mapping data extraction from history files to cross-referenced reporting, a table explaining CLI arguments, and a grid highlighting key report capabilities like Usage Rankings, Quality Signals, Workflow Sequences, and Actionable Recommendations.](usage.png)
+![A visualization of the stark-skill-analytics skill workflow, illustrating the four phases of data collection from Claude session logs, run history aggregation, cross-reference analysis with CLAUDE.md, and final report generation.](usage.png)
 
 ## When to Use
 
