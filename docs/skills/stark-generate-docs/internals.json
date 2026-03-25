@@ -1,0 +1,18 @@
+{
+  "doc_content": {
+    "summary": "Generates or updates skill documentation using a multi-LLM visualization competition. Automatically detects changed SKILL.md files, runs the documentation regeneration scripts, and automatically commits the resulting artifacts.",
+    "key_features": [
+      "Automatic change detection for SKILL.md files",
+      "Multi-LLM visualization generation for skills",
+      "Auto-commit workflow to streamline updates",
+      "Proactive triggering during active sessions"
+    ],
+    "usage_examples": [
+      "/stark-generate-docs",
+      "/stark-generate-docs --skill stark-metrics",
+      "/stark-generate-docs --all",
+      "/stark-generate-docs --check"
+    ]
+  },
+  "alt_text": "Flowchart illustrating the stark-generate-docs skill internal architecture, showing phases for change detection, multi-LLM documentation generation, git committing, and summary reporting."
+}

@@ -39,3 +39,5 @@
 {"audience": "internals", "error": "CLI exit 1", "event": "evaluation", "quality_flag": "error", "scores": {}, "skill": "stark-skill-analytics", "timestamp": "2026-03-25T06:09:05.984538+00:00", "winner": null, "winner_score": 0}
 {"audience": "usage", "error": "CLI exit 1", "event": "evaluation", "quality_flag": "error", "scores": {}, "skill": "stark-update-deps", "timestamp": "2026-03-25T06:09:08.407188+00:00", "winner": null, "winner_score": 0}
 {"audience": "internals", "error": "CLI exit 1", "event": "evaluation", "quality_flag": "error", "scores": {}, "skill": "stark-update-deps", "timestamp": "2026-03-25T06:09:10.717116+00:00", "winner": null, "winner_score": 0}
+{"audience": "usage", "error": "CLI exit 1", "event": "evaluation", "quality_flag": "error", "scores": {}, "skill": "stark-generate-docs", "timestamp": "2026-03-25T06:14:32.625841+00:00", "winner": null, "winner_score": 0}
+{"audience": "internals", "error": "CLI exit 1", "event": "evaluation", "quality_flag": "error", "scores": {}, "skill": "stark-generate-docs", "timestamp": "2026-03-25T06:14:34.938085+00:00", "winner": null, "winner_score": 0}
