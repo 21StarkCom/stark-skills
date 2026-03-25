@@ -13,6 +13,7 @@ from generate_skill_docs import (
     screenshot_html, build_evaluation_prompt, parse_evaluation_scores,
     compute_weighted_average, select_winner, FACTOR_WEIGHTS,
     stamp_winner_html, write_audit_entry,
+    generate_usage_markdown, generate_internals_markdown, generate_index_markdown,
 )
 
 FIXTURE = Path(__file__).parent.parent / "skill" / "stark-session" / "SKILL.md"
@@ -266,3 +267,59 @@ def test_write_audit_entry(tmp_path):
     write_audit_entry(audit_path, {**entry, "skill": "stark-session"})
     lines = audit_path.read_text().strip().split("\n")
     assert len(lines) == 2
+
+
+# ── Markdown generation tests ─────────────────────────────────────────
+
+
+def test_generate_usage_markdown():
+    data = parse_skill_md(FIXTURE)
+    mermaid = "graph TD\n    A[Start] --> B[End]"
+    doc_content = {"prerequisites": "Requires gh CLI", "troubleshooting": "If auth fails..."}
+    alt_text = "Workflow diagram showing session start and end phases"
+    md = generate_usage_markdown(data, mermaid_diagram=mermaid, doc_content=doc_content,
+                                  alt_text=alt_text, has_png=True)
+    assert "# stark-session" in md
+    assert "```mermaid" in md
+    assert "A[Start] --> B[End]" in md
+    assert f"![{alt_text}](usage.png)" in md
+    assert "## When to Use" in md
+    assert "## Prerequisites" in md
+    assert "Requires gh CLI" in md
+    assert "## Troubleshooting" in md
+    assert "If auth fails" in md
+
+
+def test_generate_usage_markdown_no_png():
+    data = parse_skill_md(FIXTURE)
+    md = generate_usage_markdown(data, mermaid_diagram="graph TD\n  A-->B", doc_content={},
+                                  alt_text="", has_png=False)
+    assert "usage.png" not in md
+    assert "usage.html" in md
+    assert "A-->B" in md
+
+
+def test_generate_internals_markdown():
+    data = parse_skill_md(FIXTURE)
+    mermaid = "graph TD\n    A[Phase 1] --> B[Phase 2]"
+    doc_content = {"how_to_modify": "Edit SKILL.md, run /stark-generate-docs"}
+    alt_text = "Phase flow diagram for stark-session internals"
+    md = generate_internals_markdown(data, mermaid_diagram=mermaid, doc_content=doc_content,
+                                      alt_text=alt_text, has_png=True)
+    assert "# stark-session — Internals" in md
+    assert "```mermaid" in md
+    assert "A[Phase 1] --> B[Phase 2]" in md
+    assert f"![{alt_text}](internals.png)" in md
+    assert "## How to Modify" in md
+    assert "Edit SKILL.md" in md
+
+
+def test_generate_index_markdown():
+    fixture_review = Path(__file__).parent.parent / "skill" / "stark-review" / "SKILL.md"
+    fixture_session = Path(__file__).parent.parent / "skill" / "stark-session" / "SKILL.md"
+    skills = [parse_skill_md(fixture_review), parse_skill_md(fixture_session)]
+    md = generate_index_markdown(skills)
+    assert "stark-review" in md
+    assert "stark-session" in md
+    assert "usage.md" in md
+    assert "internals.md" in md

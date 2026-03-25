@@ -730,6 +730,68 @@ def stamp_winner_html(html: str, winner: str, score: float) -> str:
     )
 
 
+def generate_usage_markdown(skill: SkillData, mermaid_diagram: str, doc_content: dict,
+                            alt_text: str, has_png: bool) -> str:
+    """Generate user-facing usage.md for a skill."""
+    lines = [
+        f"# {skill.name}", "", skill.description, "",
+        "## Workflow Overview", "", "```mermaid", mermaid_diagram, "```", "",
+    ]
+    if has_png:
+        lines += [f"![{alt_text}](usage.png)", ""]
+    else:
+        lines += ["[View detailed visualization](usage.html)", ""]
+    lines += [
+        "## When to Use", "", skill.description, "",
+        "## Prerequisites", "", doc_content.get("prerequisites", "*See SKILL.md*"), "",
+        "## Arguments", "",
+        f"`{skill.argument_hint}`" if skill.argument_hint else "*No arguments*", "",
+        doc_content.get("arguments_table", ""), "",
+        "## Quick Start", "", doc_content.get("quick_start", f"/{skill.name}"), "",
+        "## Common Patterns", "", doc_content.get("common_patterns", ""), "",
+        "## Troubleshooting", "", doc_content.get("troubleshooting", ""), "",
+        "## Related Skills", "",
+        ", ".join(f"`/{s}`" for s in doc_content.get("related_skills", [])), "",
+    ]
+    return "\n".join(lines)
+
+
+def generate_internals_markdown(skill: SkillData, mermaid_diagram: str, doc_content: dict,
+                                 alt_text: str, has_png: bool) -> str:
+    """Generate contributor-facing internals.md for a skill."""
+    lines = [
+        f"# {skill.name} — Internals", "", skill.description, "",
+        "## Architecture", "", "```mermaid", mermaid_diagram, "```", "",
+    ]
+    if has_png:
+        lines += [f"![{alt_text}](internals.png)", ""]
+    else:
+        lines += ["[View detailed visualization](internals.html)", ""]
+    lines += [
+        "## Phases", "", doc_content.get("phase_walkthrough", "*See SKILL.md*"), "",
+        "## Config", "", doc_content.get("config_schema", "*No config*"), "",
+        "## Failure Modes", "", doc_content.get("failure_modes", "*See SKILL.md*"), "",
+        "## How to Modify This Skill", "",
+        doc_content.get("how_to_modify", f"Edit `skill/{skill.name}/SKILL.md`, then run `/stark-generate-docs --skill {skill.name}` to regenerate documentation."), "",
+    ]
+    return "\n".join(lines)
+
+
+def generate_index_markdown(skills: list[SkillData]) -> str:
+    """Generate index.md listing all skills with links to usage and internals docs."""
+    lines = [
+        "# Skill Documentation Index", "",
+        "| Skill | Description | Docs |",
+        "|-------|-------------|------|",
+    ]
+    for skill in sorted(skills, key=lambda s: s.name):
+        usage_link = f"[usage.md]({skill.name}/usage.md)"
+        internals_link = f"[internals.md]({skill.name}/internals.md)"
+        lines.append(f"| `/{skill.name}` | {skill.description} | {usage_link} · {internals_link} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
 _audit_lock = threading.Lock()
 
 
