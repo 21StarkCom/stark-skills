@@ -1,5 +1,8 @@
 """Tests for SKILL.md parser."""
 import json
+import random
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -7,6 +10,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from generate_skill_docs import (
     parse_skill_md, SkillData, discover_skills,
     validate_html, sanitize_html, build_generation_prompt, VizResult,
+    screenshot_html, build_evaluation_prompt, parse_evaluation_scores,
+    compute_weighted_average, select_winner, FACTOR_WEIGHTS,
 )
 
 FIXTURE = Path(__file__).parent.parent / "skill" / "stark-session" / "SKILL.md"
@@ -163,3 +168,75 @@ def test_build_generation_prompt_internals():
     prompt = build_generation_prompt(data, audience="internals", css=css)
     assert "internals" in prompt.lower() or "contributor" in prompt.lower()
     assert "mermaid" in prompt.lower()
+
+
+# ── Screenshot tests ───────────────────────────────────────────────────
+
+
+def test_screenshot_html_creates_png(tmp_path, monkeypatch):
+    html_path = tmp_path / "test.html"
+    html_path.write_text("<html><body><h1>Test</h1></body></html>")
+    png_path = tmp_path / "test.png"
+
+    def mock_run(cmd, **kwargs):
+        out_path = Path(cmd[-1])
+        out_path.write_bytes(b'\x89PNG\r\n\x1a\n' + b'\x00' * 100)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(shutil, "which", lambda x: "/usr/bin/npx")
+    monkeypatch.setattr(subprocess, "run", mock_run)
+    result = screenshot_html(html_path, png_path)
+    assert result is True
+    assert png_path.exists()
+
+
+def test_screenshot_html_skips_when_no_npx(tmp_path, monkeypatch):
+    html_path = tmp_path / "test.html"
+    html_path.write_text("<html><body><h1>Test</h1></body></html>")
+    png_path = tmp_path / "test.png"
+    monkeypatch.setattr(shutil, "which", lambda x: None)
+    result = screenshot_html(html_path, png_path)
+    assert result is False
+    assert not png_path.exists()
+
+
+# ── Evaluation tests ──────────────────────────────────────────────────
+
+
+def test_build_evaluation_prompt():
+    prompt = build_evaluation_prompt(skill_name="stark-session", audience="usage", num_candidates=3)
+    assert "visual_clarity" in prompt
+    assert "accuracy" in prompt
+    assert "audience_fit" in prompt
+    assert "JSON" in prompt
+
+
+def test_parse_evaluation_scores():
+    raw = '{"scores": [{"agent": "claude", "visual_clarity": 8, "completeness": 9, "info_architecture": 7, "accuracy": 9, "design_quality": 7, "audience_fit": 8}, {"agent": "codex", "visual_clarity": 7, "completeness": 8, "info_architecture": 8, "accuracy": 8, "design_quality": 6, "audience_fit": 7}, {"agent": "gemini", "visual_clarity": 9, "completeness": 7, "info_architecture": 8, "accuracy": 7, "design_quality": 8, "audience_fit": 9}]}'
+    scores = parse_evaluation_scores(raw)
+    assert len(scores) == 3
+
+
+def test_compute_weighted_average():
+    scores = {"visual_clarity": 8, "completeness": 9, "info_architecture": 7, "accuracy": 9, "design_quality": 7, "audience_fit": 8}
+    avg = compute_weighted_average(scores, FACTOR_WEIGHTS)
+    assert abs(avg - 8.15) < 0.1
+
+
+def test_select_winner():
+    agent_scores = {"claude": 8.15, "codex": 7.5, "gemini": 8.15}
+    accuracy_scores = {"claude": 9.0, "codex": 8.0, "gemini": 8.5}
+    winner = select_winner(agent_scores, accuracy_scores)
+    assert winner == "claude"
+
+
+def test_select_winner_random_on_full_tie():
+    agent_scores = {"claude": 8.0, "codex": 8.0, "gemini": 8.0}
+    accuracy_scores = {"claude": 8.0, "codex": 8.0, "gemini": 8.0}
+    random.seed(42)
+    winner_a = select_winner(agent_scores, accuracy_scores)
+    random.seed(99)
+    winner_b = select_winner(agent_scores, accuracy_scores)
+    assert winner_a in ("claude", "codex", "gemini")
+    assert winner_b in ("claude", "codex", "gemini")
+    assert not (winner_a == "claude" and winner_b == "claude"), "Tie-breaking appears alphabetical, not random"
