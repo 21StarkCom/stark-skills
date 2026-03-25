@@ -12,6 +12,7 @@ from generate_skill_docs import (
     validate_html, sanitize_html, build_generation_prompt, VizResult,
     screenshot_html, build_evaluation_prompt, parse_evaluation_scores,
     compute_weighted_average, select_winner, FACTOR_WEIGHTS,
+    stamp_winner_html, write_audit_entry,
 )
 
 FIXTURE = Path(__file__).parent.parent / "skill" / "stark-session" / "SKILL.md"
@@ -240,3 +241,28 @@ def test_select_winner_random_on_full_tie():
     assert winner_a in ("claude", "codex", "gemini")
     assert winner_b in ("claude", "codex", "gemini")
     assert not (winner_a == "claude" and winner_b == "claude"), "Tie-breaking appears alphabetical, not random"
+
+
+# ── Winner stamping & audit trail tests ──────────────────────────────
+
+
+def test_stamp_winner_html():
+    html = '<html><body><div class="footer">placeholder</div></body></html>'
+    stamped = stamp_winner_html(html, winner="gemini", score=8.42)
+    assert "Gemini" in stamped
+    assert "8.4" in stamped
+
+
+def test_write_audit_entry(tmp_path):
+    audit_path = tmp_path / "scores.jsonl"
+    entry = {"skill": "stark-review", "audience": "usage", "winner": "claude", "winner_score": 8.25}
+    write_audit_entry(audit_path, entry)
+    lines = audit_path.read_text().strip().split("\n")
+    assert len(lines) == 1
+    parsed = json.loads(lines[0])
+    assert parsed["skill"] == "stark-review"
+    assert "timestamp" in parsed
+
+    write_audit_entry(audit_path, {**entry, "skill": "stark-session"})
+    lines = audit_path.read_text().strip().split("\n")
+    assert len(lines) == 2

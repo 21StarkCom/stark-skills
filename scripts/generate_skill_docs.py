@@ -28,6 +28,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
@@ -714,3 +715,29 @@ def run_evaluation(skill: SkillData, audience: str, candidate_pngs: dict[str, Pa
         return {"winner": None, "winner_score": 0, "scores": {}, "quality_flag": "timeout"}
     except Exception as e:
         return {"winner": None, "winner_score": 0, "scores": {}, "quality_flag": "error", "error": str(e)}
+
+
+# ── Winner stamping & audit trail ─────────────────────────────────────
+
+
+def stamp_winner_html(html: str, winner: str, score: float) -> str:
+    """Replace footer placeholder with winning LLM attribution badge."""
+    badge = f'Visualization by {AGENTS[winner]["label"]} · Score: {score:.1f}/10 · Generated from SKILL.md'
+    return re.sub(
+        r'<div class="footer">.*?</div>',
+        f'<div class="footer"><div class="winner-badge">{badge}</div></div>',
+        html, flags=re.DOTALL,
+    )
+
+
+_audit_lock = threading.Lock()
+
+
+def write_audit_entry(audit_path: Path, entry: dict) -> None:
+    """Thread-safe JSONL append with UTC ISO8601 timestamp."""
+    import datetime
+    entry["timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    audit_path.parent.mkdir(parents=True, exist_ok=True)
+    with _audit_lock:
+        with open(audit_path, "a") as f:
+            f.write(json.dumps(entry, sort_keys=True) + "\n")
