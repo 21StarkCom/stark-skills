@@ -23,6 +23,12 @@ A competitive approach produces 3 independent designs for the same problem. Each
 4. **Full artifact trail** — every question, design, plan, score, and reasoning stored for learning
 5. **Prompt improvement flags** — systematic detection of where the process can improve
 
+## MVP Boundary
+
+**MVP (Phase 1 + Phase 2):** Collaborative brainstorm + design tournament with text-only terminal comparison. This is the minimum shippable unit.
+
+**Incremental additions:** HTML visualization, Phase 3 (plan tournament), edit/merge workflows. These ship after MVP is validated.
+
 ## Non-Goals
 
 - Replacing `/stark-review-design` or `/stark-review-plan` — this skill produces artifacts, those skills validate them
@@ -123,6 +129,8 @@ Round 3 (max — hard stop):
   → After Round 3, brainstorm ends regardless
 ```
 
+**Question response schema:** Each LLM must return questions as `{"questions": ["q1", "q2", ...]}`. Malformed responses get one retry with a stricter prompt emphasizing the JSON format. If the retry also fails, fall back to text extraction (split on newlines, strip numbering/bullets).
+
 ### Question Deduplication
 
 Questions from 3 LLMs will overlap. Deduplication strategy:
@@ -142,6 +150,8 @@ Questions from 3 LLMs will overlap. Deduplication strategy:
    ```
 
 2. Each deduplicated question notes which LLMs originally asked it (for attribution and learning).
+
+**Why Claude as coordinator:** Claude is the most capable at semantic clustering and question merging. If Claude fails, fall back to simple string-similarity deduplication (token overlap, threshold 0.6) — less elegant but deterministic. The deduplication is advisory regardless: the human sees the final question list and can request additions, removals, or rewording before answering.
 
 ### Question Presentation
 
@@ -165,6 +175,8 @@ Your answer:
 ```
 
 Skipped questions are noted in the brief as "author deferred — LLMs should make a reasonable choice and state their assumption."
+
+**Input handling:** User answers are passed to LLMs as part of the prompt body via stdin or tempfile — never shell-interpolated. Same security model as `/stark-review-plan`.
 
 ### Requirements Brief
 
@@ -233,7 +245,7 @@ Output as a single markdown document.
 
 ### Cross-Evaluation
 
-After collecting 3 designs, each LLM evaluates the other 2 (not its own). 6 evaluation pairs total:
+After collecting 3 designs, each LLM evaluates the other 2 (not its own). All 6 evaluation calls are dispatched in parallel (not sequential) to minimize wall time. 6 evaluation pairs total:
 
 ```
 Claude evaluates: Codex's design, Gemini's design
@@ -284,6 +296,8 @@ Return as JSON:
   "weakest_aspect": "what this design does worst"
 }
 ```
+
+**Evaluation response schema:** The JSON format above is required. Malformed responses get one retry with a stricter prompt. If the retry also fails, fall back to text extraction — parse score integers and reasoning strings from the free-text response.
 
 ### Score Aggregation
 
@@ -368,7 +382,7 @@ Single HTML page with 3 designs side-by-side. Layout:
 └──────────────────────────────────────────────────────────────┘
 ```
 
-The HTML uses the shared design-system CSS from `docs/skills/_css/design-system.css` plus arena-specific styles.
+The HTML uses the shared design-system CSS from `docs/skills/_css/design-system.css` plus arena-specific styles. All LLM-generated content (designs, evaluation reasoning, overall impressions) is rendered as escaped text — not raw HTML. Use the same `sanitize_html` pattern from `scripts/generate_skill_docs.py` for any content injected into the HTML visualization.
 
 ### Human Decision
 
@@ -417,7 +431,7 @@ will be scored by the other 2 LLMs.
 {brief from Phase 1}
 
 ## Approved Design
-{chosen design from Phase 2}
+{chosen design from Phase 2, with authorship attribution stripped — presented as "the approved design" without identifying which LLM produced it, to prevent self-favoring bias}
 
 ## Your Task
 Produce a complete implementation plan with these sections:
@@ -483,13 +497,13 @@ Same edit/merge mechanics as Phase 2. Merged plans are coherent single documents
 
 ## Artifact Storage
 
-Every phase produces artifacts stored for learning and traceability.
+Every phase produces artifacts stored for learning and traceability. Artifacts are kept indefinitely by default. Use `--cleanup-days N` to delete arena directories older than N days. There is no automatic cleanup without explicit user action.
 
 ### Directory Structure
 
 ```
 {output_dir}/arena-{timestamp}/
-├── meta.json                    # arena metadata (idea, agents, timestamps)
+├── meta.json                    # arena metadata (idea, agents, timestamps, schema_version: 1)
 ├── phase-1-brainstorm/
 │   ├── idea.md                  # original idea text
 │   ├── questions-raw/
@@ -512,7 +526,7 @@ Every phase produces artifacts stored for learning and traceability.
 │   │   ├── codex-scores-gemini.json
 │   │   ├── gemini-scores-claude.json
 │   │   └── gemini-scores-codex.json
-│   ├── results.json             # aggregated scores, rankings
+│   ├── results.json             # aggregated scores, rankings (schema_version: 1)
 │   ├── comparison.html          # side-by-side visualization
 │   ├── comparison.png           # screenshot of HTML
 │   └── chosen.md                # the design the human picked (or merged)
@@ -525,7 +539,7 @@ Every phase produces artifacts stored for learning and traceability.
 │   │   ├── claude-scores-codex.json
 │   │   ├── ... (same pattern)
 │   │   └── gemini-scores-codex.json
-│   ├── results.json
+│   ├── results.json             # aggregated scores, rankings (schema_version: 1)
 │   ├── comparison.html
 │   ├── comparison.png
 │   └── chosen.md
@@ -561,7 +575,9 @@ Every significant event is appended to `audit.jsonl`:
 
 ## Prompt Improvement Detection
 
-After each arena run, analyze patterns and flag improvement opportunities:
+After each arena run, analyze patterns and flag improvement opportunities. Cross-run analytics (agent win rates, override frequency, evaluator calibration) are computed at read time by scanning `{output_dir}/arena-*/audit.jsonl` across all arena directories. No separate database or aggregation store — the `audit.jsonl` files are the source of truth.
+
+Detection signals:
 
 | Signal | Detection | Action |
 |--------|-----------|--------|
@@ -604,6 +620,10 @@ Flags are:
 | `--max-questions` | 12 | Max deduplicated questions in brainstorm |
 | `--design-factors` | (defaults) | Override design scoring factor weights |
 | `--plan-factors` | (defaults) | Override plan scoring factor weights |
+| `--cleanup-days` | — | Delete arena directories older than N days. No auto-cleanup without explicit user action. |
+| `--timeout` | 300 | Timeout in seconds per LLM call (300s for competitor dispatch, 120s for evaluation calls). |
+
+Factor override format: `--design-factors "architecture_fitness:2.0,completeness:1.5"` (comma-separated `key:weight` pairs). Same format as `/stark-tournament`. `--plan-factors` uses the same syntax.
 
 ---
 
@@ -689,6 +709,7 @@ Improvement flags:       1 (Gemini consistently lowest — check prompt)
 | Human interrupts mid-phase | Save all artifacts collected so far. `--resume` can pick up from the last completed phase. |
 | Question deduplication fails | Fall back: present all raw questions (with duplicates). Less elegant but functional. |
 | LLM returns malformed JSON (questions/evaluations) | Retry once with stricter prompt. If still malformed, use text extraction fallback. |
+| LLM call times out | Default timeout: 300s for competitor dispatch (design/plan generation), 120s for evaluation calls. On timeout, treat as agent failure — continue with remaining agents. Configurable via `--timeout`. |
 
 ---
 
