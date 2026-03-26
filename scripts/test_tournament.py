@@ -1,6 +1,7 @@
 """Tests for tournament.py — extracted tournament engine functions."""
 import json
 import random
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -417,3 +418,39 @@ def test_tournament_test_strategy(mock_dispatch, mock_eval_test):
     assert result.winner_score == 10.0
     assert result.quality_flag == "good"
     mock_eval_test.assert_called_once()
+
+
+# ── CLI tests ──────────────────────────────────────────────────────────
+
+TOURNAMENT_SCRIPT = str(Path(__file__).parent / "tournament.py")
+
+
+def test_cli_help():
+    """Run --help, verify exit 0 and key flags in output."""
+    proc = subprocess.run(
+        [sys.executable, TOURNAMENT_SCRIPT, "--help"],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert proc.returncode == 0
+    for flag in ["--config", "--prompt", "--competitors", "--strategy",
+                 "--factors", "--judge", "--output-dir", "--audit-file",
+                 "--keep-all", "--dry-run", "--json", "--timeout",
+                 "--workers", "--retries", "--variables", "--test-file"]:
+        assert flag in proc.stdout, f"Missing flag {flag} in --help output"
+
+
+def test_cli_dry_run():
+    """Run --dry-run with inline args, verify exit 0 and config output."""
+    proc = subprocess.run(
+        [sys.executable, TOURNAMENT_SCRIPT,
+         "--dry-run", "--prompt", "Write hello world",
+         "--competitors", "claude,codex"],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert proc.returncode == 0
+    config = json.loads(proc.stdout)
+    assert config["prompt_template"] == "Write hello world"
+    assert len(config["competitors"]) == 2
+    assert config["competitors"][0]["id"] == "claude"
+    assert config["competitors"][1]["id"] == "codex"
+    assert config["evaluation"]["strategy"] == "semantic"

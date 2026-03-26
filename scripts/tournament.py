@@ -962,3 +962,165 @@ class Tournament:
                 "quality_flag": result.quality_flag,
                 "scores": result.scores,
             })
+
+
+# ── CLI ────────────────────────────────────────────────────────────────
+
+
+def _parse_key_value_pairs(items: list[str]) -> dict[str, str]:
+    """Parse key=value pairs from argparse nargs list."""
+    result: dict[str, str] = {}
+    for item in items:
+        if "=" not in item:
+            raise ValueError(f"Expected key=value, got: {item}")
+        key, value = item.split("=", 1)
+        result[key] = value
+    return result
+
+
+def main() -> None:
+    """CLI entry point for running tournaments."""
+    import argparse
+    import dataclasses
+
+    parser = argparse.ArgumentParser(
+        prog="tournament",
+        description="Run multi-LLM tournaments with evaluation and winner selection.",
+    )
+
+    # Config source (mutually supportive, not exclusive)
+    parser.add_argument("--config", metavar="PATH",
+                        help="YAML config file path (loads via TournamentConfig.from_yaml)")
+    parser.add_argument("--prompt", metavar="TEXT",
+                        help="Inline prompt text (used when --config is not provided)")
+
+    # Competitor & evaluation
+    parser.add_argument("--competitors", metavar="IDS", default="claude,codex,gemini",
+                        help="Comma-separated competitor IDs (default: claude,codex,gemini)")
+    parser.add_argument("--strategy", choices=["semantic", "visual", "test"],
+                        default="semantic",
+                        help="Evaluation strategy (default: semantic)")
+    parser.add_argument("--factors", nargs="+", metavar="KEY=WEIGHT",
+                        help="Evaluation factors as key=weight pairs (e.g., correctness=2.0)")
+    parser.add_argument("--judge", default="claude-sonnet-4-6",
+                        help="Judge model name (default: claude-sonnet-4-6)")
+    parser.add_argument("--test-file", metavar="PATH",
+                        help="Test file path for test strategy")
+
+    # Output
+    parser.add_argument("--output-dir", metavar="DIR",
+                        help="Directory for output files")
+    parser.add_argument("--audit-file", metavar="PATH",
+                        help="Path to audit JSONL file")
+    parser.add_argument("--keep-all", action="store_true",
+                        help="Keep all competitor outputs, not just winner")
+
+    # Execution
+    parser.add_argument("--timeout", type=int, default=300,
+                        help="Timeout in seconds (default: 300)")
+    parser.add_argument("--workers", type=int, default=6,
+                        help="Max parallel workers (default: 6)")
+    parser.add_argument("--retries", type=int, default=1,
+                        help="Retry count (default: 1)")
+
+    # Template variables
+    parser.add_argument("--variables", nargs="+", metavar="KEY=VALUE",
+                        help="Key=value pairs for prompt template substitution")
+
+    # Mode flags
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Print config and exit without running")
+    parser.add_argument("--json", action="store_true", dest="json_output",
+                        help="Output TournamentResult as JSON")
+
+    args = parser.parse_args()
+
+    # Build config
+    if args.config:
+        config = TournamentConfig.from_yaml(args.config)
+    elif args.prompt:
+        # Parse factors
+        factors = dict(_DEFAULT_FACTORS)
+        if args.factors:
+            factors = {}
+            for pair in args.factors:
+                if "=" not in pair:
+                    parser.error(f"--factors expects key=weight, got: {pair}")
+                key, weight = pair.split("=", 1)
+                try:
+                    factors[key] = {"weight": float(weight)}
+                except ValueError:
+                    parser.error(f"Invalid weight for factor {key}: {weight}")
+
+        # Parse competitor IDs into CompetitorConfig list
+        comp_ids = [c.strip() for c in args.competitors.split(",") if c.strip()]
+        competitors = [{"id": cid, "agent": cid} for cid in comp_ids]
+
+        data: dict[str, Any] = {
+            "prompt_template": args.prompt,
+            "competitors": competitors,
+            "evaluation": {
+                "strategy": args.strategy,
+                "judge": args.judge,
+                "factors": factors,
+            },
+            "execution": {
+                "max_workers": args.workers,
+                "timeout_seconds": args.timeout,
+                "retries": args.retries,
+            },
+            "output": {
+                "output_dir": args.output_dir,
+                "audit_file": args.audit_file,
+                "keep_all": args.keep_all,
+            },
+        }
+
+        if args.test_file:
+            data["evaluation"]["factors"]["_test_file"] = {"path": args.test_file}
+
+        config = TournamentConfig.from_dict(data)
+    else:
+        parser.error("Either --config or --prompt is required")
+
+    # Dry run: print config and exit
+    if args.dry_run:
+        info = {
+            "prompt_template": config.prompt_template,
+            "competitors": [{"id": c.id, "agent": c.agent} for c in config.competitors],
+            "evaluation": {
+                "strategy": config.evaluation.strategy,
+                "judge": config.evaluation.judge,
+                "factors": config.evaluation.factors,
+            },
+            "execution": {
+                "max_workers": config.execution.max_workers,
+                "timeout_seconds": config.execution.timeout_seconds,
+                "retries": config.execution.retries,
+            },
+            "output": {
+                "output_dir": config.output.output_dir,
+                "audit_file": config.output.audit_file,
+                "keep_all": config.output.keep_all,
+            },
+        }
+        print(json.dumps(info, indent=2))
+        sys.exit(0)
+
+    # Run tournament
+    tournament = Tournament(config)
+    result = tournament.run()
+
+    # Output
+    if args.json_output:
+        print(json.dumps(dataclasses.asdict(result), indent=2))
+    else:
+        flag = result.quality_flag
+        if result.winner:
+            print(f"Winner: {result.winner} (score: {result.winner_score}, quality: {flag})")
+        else:
+            print(f"No winner (quality: {flag})")
+
+
+if __name__ == "__main__":
+    main()
