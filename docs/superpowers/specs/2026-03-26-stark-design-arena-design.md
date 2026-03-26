@@ -145,11 +145,24 @@ Questions from 3 LLMs will overlap. Deduplication strategy:
 
 ### Question Presentation
 
-Questions are presented to the human as a numbered list. Each question supports:
+Questions are presented **one at a time** in conversational style, ordered from most fundamental (requirements, constraints) to most specific (implementation preferences). Each question supports:
 
 - **Multiple-choice** — if the question has clear option categories, present them as a/b/c/d
 - **Free text** — if the question is open-ended
 - **Skip** — human can skip a question ("don't care" / "decide for me")
+
+Format per question:
+```
+Question 3/11:
+What consistency model does the system need?
+
+  a) Strong consistency — every read sees the latest write
+  b) Eventual consistency — reads may lag by seconds, that's fine
+  c) Mixed — strong for some data, eventual for others
+  d) Don't care — decide for me
+
+Your answer:
+```
 
 Skipped questions are noted in the brief as "author deferred — LLMs should make a reasonable choice and state their assumption."
 
@@ -372,13 +385,16 @@ Choose:
   a) Accept #1 (Claude's design) → proceed to plan tournament
   b) Accept #2 (Codex's design)
   c) Accept #3 (Gemini's design)
-  d) Merge — take specific sections from different designs (describe what)
-  e) Redo — run the design tournament again with additional guidance
+  d) Edit — pick a design and modify specific sections
+  e) Merge — combine sections from different designs
+  f) Redo — run the design tournament again with additional guidance
 ```
 
-If the human picks (d) merge, the skill asks which sections from which design, then constructs a merged design document for the human to confirm before proceeding.
+If the human picks (d) edit, the skill asks which design and what to change. Claude modifies the design per instructions, human confirms the result.
 
-If the human picks (e), they can provide additional guidance that gets appended to the requirements brief.
+If the human picks (e) merge, the skill asks which sections from which design. Claude produces a coherent merged document — not a mechanical splice. Terminology is aligned, contradictions resolved, the output reads as a single authored document. Human confirms before proceeding.
+
+If the human picks (f), they can provide additional guidance that gets appended to the requirements brief.
 
 ---
 
@@ -456,9 +472,12 @@ Choose:
   a) Accept #1 (Codex's plan) → save and finish
   b) Accept #2 (Claude's plan)
   c) Accept #3 (Gemini's plan)
-  d) Merge — combine elements from different plans
-  e) Redo — additional guidance
+  d) Edit — pick a plan and modify specific parts
+  e) Merge — combine elements from different plans
+  f) Redo — additional guidance
 ```
+
+Same edit/merge mechanics as Phase 2. Merged plans are coherent single documents with aligned task numbering, consistent dependencies, and no contradictions.
 
 ---
 
@@ -687,12 +706,12 @@ Full pipeline: `/stark-design-arena` → `/stark-review-design` → `/stark-revi
 
 ---
 
-## Open Questions
+## Resolved Questions
 
-1. **Should the brainstorm questions be presented all at once or one at a time?** All at once is faster but overwhelming if there are 12 questions. One at a time is conversational but slow. Proposed: present in groups of 3-4, themed by topic.
+1. **Question presentation: one at a time after consolidation.** After deduplication, present questions one by one in conversational style. Order from most fundamental to most specific. This is slower but produces better-quality answers — the human thinks about each question individually instead of rushing through a list.
 
-2. **Should the human be able to edit a design before proceeding?** Currently the choices are: pick one, merge, or redo. What about "I like Claude's design but want to change the data model section"? Proposed: allow in v2, keep v1 simple (pick or merge).
+2. **Human can edit a design before proceeding — yes, in v1.** After choosing a design, the human can say "change the data model section to use X instead." The skill sends Claude the full design + edit instruction, gets back a modified design, human confirms. Same mechanism as merge but simpler. The human decision options become: pick, edit, merge, or redo.
 
-3. **How to handle the merge option?** If the human says "architecture from Claude, data model from Codex, security from Gemini" — do we mechanically splice sections, or ask an LLM to produce a coherent merged design? Proposed: LLM-assisted merge. Send the instructions + relevant sections to Claude, ask it to produce a coherent merged document.
+3. **Merge produces a pixel-perfect final output.** LLM-assisted merge — not mechanical section splicing. Claude receives the merge instructions + all relevant sections and produces a coherent merged document. The merge must resolve contradictions, align terminology, and ensure the output reads as a single authored document — not a Frankenstein. The human reviews and confirms the merged result before it becomes the approved design. Same standard applies to plan merges.
 
-4. **Should arena results feed into agent-specific prompt tuning?** If Gemini consistently loses on `feasibility`, should we automatically strengthen its design prompt's feasibility section? Proposed: flag only in v1, automatic tuning in v2.
+4. **Flag only in v1, automatic prompt tuning in v2.** Automatic tuning needs 20+ arena runs for statistical significance. In v1, the improvement flags (evaluator calibration, agent win rates, human override patterns) are surfaced to the user. In v2, the system can propose specific prompt edits based on accumulated data — but the human still approves before changes are applied.
