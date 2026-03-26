@@ -47,6 +47,7 @@ from tournament import (
     write_audit_entry, screenshot_html,
     unescape_json_string as _unescape_json_string,
     _audit_lock,
+    TournamentResult,
 )
 
 
@@ -657,6 +658,108 @@ def _viz_worker(agent: str, skill_data: SkillData, audience: str) -> VizResult:
         )
 
 
+def _run_skill_tournament(
+    sd: SkillData,
+    audience: str,
+    candidates: list[VizResult],
+    skill_out: Path,
+    audit_path: Path,
+    *,
+    no_screenshots: bool = False,
+    no_evaluation: bool = False,
+) -> TournamentResult:
+    """Run the tournament lifecycle for one skill×audience combination.
+
+    Steps: filter → sanitize → validate → screenshot → evaluate → select winner.
+    Returns a TournamentResult with the winning VizResult in artifacts["winner_vr"].
+    """
+    # Filter to candidates with valid HTML
+    valid: list[VizResult] = []
+    for vr in candidates:
+        if vr.error or not vr.html:
+            if vr.error:
+                write_audit_entry(audit_path, {
+                    "event": "generation_error", "skill": sd.name,
+                    "audience": audience, "agent": vr.agent, "error": vr.error,
+                })
+            continue
+        # Sanitize
+        vr.html = sanitize_html(vr.html)
+        # Validate
+        if not validate_html(vr.html):
+            write_audit_entry(audit_path, {
+                "event": "validation_failed", "skill": sd.name,
+                "audience": audience, "agent": vr.agent,
+            })
+            continue
+        valid.append(vr)
+
+    if not valid:
+        return TournamentResult(
+            winner=None, winner_score=0.0, scores={},
+            artifacts={}, audit={"event": "no_valid_candidates"},
+            quality_flag="failed",
+        )
+
+    # Screenshot valid candidates
+    candidate_pngs: dict[str, Path] = {}
+    if not no_screenshots:
+        for vr in valid:
+            html_path = skill_out / f"{audience}_{vr.agent}.html"
+            html_path.write_text(vr.html)
+            png_path = skill_out / f"{audience}_{vr.agent}.png"
+            if screenshot_html(html_path, png_path):
+                candidate_pngs[vr.agent] = png_path
+            elif png_path.exists():
+                candidate_pngs[vr.agent] = png_path
+
+    # Evaluate and select winner
+    winner_agent: str | None = None
+    winner_score: float = 0.0
+    quality_flag = "ok"
+    all_scores: dict[str, Any] = {}
+
+    if len(valid) == 1:
+        winner_agent = valid[0].agent
+        quality_flag = "degraded"
+    elif no_evaluation or not candidate_pngs:
+        winner_agent = valid[0].agent
+        quality_flag = "unevaluated"
+    else:
+        eval_result = run_evaluation(sd, audience, candidate_pngs)
+        winner_agent = eval_result.get("winner")
+        winner_score = eval_result.get("winner_score", 0)
+        quality_flag = eval_result.get("quality_flag", "error")
+        all_scores = eval_result.get("scores", {})
+        write_audit_entry(audit_path, {
+            "event": "evaluation", "skill": sd.name,
+            "audience": audience, **eval_result,
+        })
+
+    if not winner_agent:
+        winner_agent = valid[0].agent
+        quality_flag = "eval_fallback"
+
+    # Find the winning VizResult
+    winner_vr = next(vr for vr in valid if vr.agent == winner_agent)
+
+    # Stamp winner HTML
+    if winner_score > 0:
+        winner_vr.html = stamp_winner_html(winner_vr.html, winner_agent, winner_score)
+
+    return TournamentResult(
+        winner=winner_agent,
+        winner_score=winner_score,
+        scores=all_scores,
+        artifacts={
+            "winner_vr": winner_vr,
+            "valid": valid,
+            "candidate_pngs": candidate_pngs,
+        },
+        quality_flag=quality_flag,
+    )
+
+
 def main() -> int:
     args = _build_arg_parser().parse_args()
     out_dir: Path = args.output_dir
@@ -750,78 +853,21 @@ def main() -> int:
             else:
                 candidates = results.get(key, [])
 
-                # Filter to candidates with HTML
-                valid: list[VizResult] = []
-                for vr in candidates:
-                    if vr.error or not vr.html:
-                        if vr.error:
-                            write_audit_entry(audit_path, {
-                                "event": "generation_error", "skill": skill_name,
-                                "audience": audience, "agent": vr.agent, "error": vr.error,
-                            })
-                        continue
-                    # Sanitize
-                    vr.html = sanitize_html(vr.html)
-                    # Validate
-                    if not validate_html(vr.html):
-                        write_audit_entry(audit_path, {
-                            "event": "validation_failed", "skill": skill_name,
-                            "audience": audience, "agent": vr.agent,
-                        })
-                        continue
-                    valid.append(vr)
+                # Run tournament: filter, sanitize, validate, screenshot, evaluate
+                t_result = _run_skill_tournament(
+                    sd, audience, candidates, skill_out, audit_path,
+                    no_screenshots=args.no_screenshots,
+                    no_evaluation=args.no_evaluation,
+                )
 
-                if not valid:
+                if t_result.winner is None:
                     print(f"  SKIP  {skill_name}/{audience} — no valid candidates")
-                    quality_flags[skill_name][audience] = "failed"
+                    quality_flags[skill_name][audience] = t_result.quality_flag
                     continue
 
-                # Screenshot valid candidates
-                candidate_pngs: dict[str, Path] = {}
-                if not args.no_screenshots:
-                    for vr in valid:
-                        html_path = skill_out / f"{audience}_{vr.agent}.html"
-                        html_path.write_text(vr.html)
-                        png_path = skill_out / f"{audience}_{vr.agent}.png"
-                        if screenshot_html(html_path, png_path):
-                            candidate_pngs[vr.agent] = png_path
-                        elif png_path.exists():
-                            candidate_pngs[vr.agent] = png_path
-
-                # Evaluate
-                winner_agent: str | None = None
-                winner_score: float = 0.0
-                quality_flag = "ok"
-
-                if len(valid) == 1:
-                    # Single survivor — skip evaluation
-                    winner_agent = valid[0].agent
-                    quality_flag = "degraded"
-                elif args.no_evaluation or not candidate_pngs:
-                    # No evaluation — use first valid
-                    winner_agent = valid[0].agent
-                    quality_flag = "unevaluated"
-                else:
-                    eval_result = run_evaluation(sd, audience, candidate_pngs)
-                    winner_agent = eval_result.get("winner")
-                    winner_score = eval_result.get("winner_score", 0)
-                    quality_flag = eval_result.get("quality_flag", "error")
-                    write_audit_entry(audit_path, {
-                        "event": "evaluation", "skill": skill_name,
-                        "audience": audience, **eval_result,
-                    })
-
-                if not winner_agent:
-                    # Fallback to first valid if evaluation failed to pick
-                    winner_agent = valid[0].agent
-                    quality_flag = "eval_fallback"
-
-                # Find the winning VizResult
-                winner_vr = next(vr for vr in valid if vr.agent == winner_agent)
-
-                # Stamp winner HTML
-                if winner_score > 0:
-                    winner_vr.html = stamp_winner_html(winner_vr.html, winner_agent, winner_score)
+                winner_vr: VizResult = t_result.artifacts["winner_vr"]
+                valid = t_result.artifacts.get("valid", [])
+                candidate_pngs = t_result.artifacts.get("candidate_pngs", {})
 
                 # Persist winning artifacts
                 (skill_out / f"{audience}.html").write_text(winner_vr.html)
@@ -831,7 +877,7 @@ def main() -> int:
                 (skill_out / f"{audience}.json").write_text(json.dumps(persist_json, indent=2))
 
                 # Promote winner PNG if we have it
-                winner_png_src = skill_out / f"{audience}_{winner_agent}.png"
+                winner_png_src = skill_out / f"{audience}_{t_result.winner}.png"
                 final_png = skill_out / f"{audience}.png"
                 if winner_png_src.exists():
                     shutil.copy2(winner_png_src, final_png)
@@ -847,7 +893,7 @@ def main() -> int:
                 doc_content = winner_vr.doc_content
                 alt_text = winner_vr.alt_text
                 has_png = final_png.exists()
-                quality_flags[skill_name][audience] = quality_flag
+                quality_flags[skill_name][audience] = t_result.quality_flag
 
             # ── 7. Generate markdown ──────────────────────────────────
             if audience == "usage":
