@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-03-26
+
 ### Added
 - `scripts/tournament.py` — reusable tournament engine extracted from `generate_skill_docs.py` (#88)
 - `TournamentConfig` and `TournamentResult` dataclasses with YAML config support (#89)
