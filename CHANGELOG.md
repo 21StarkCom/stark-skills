@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `scripts/tournament.py` — reusable tournament engine extracted from `generate_skill_docs.py` (#88)
+- `TournamentConfig` and `TournamentResult` dataclasses with YAML config support (#89)
+- `Tournament` orchestrator class with semantic and visual evaluation strategies (#90)
+- Test evaluation strategy — run LLM-generated code against pytest test suites (#91)
+- Tournament CLI with `--config`, `--prompt`, `--dry-run`, `--json` flags (#92)
+- `/stark-tournament` skill for multi-LLM competition (#93)
+
+### Changed
+- `generate_skill_docs.py` refactored to use Tournament API (#94)
+- Updated CLAUDE.md and README.md with `/stark-tournament` (#95)
+
 ## [v0.3.0] - 2026-03-25
 
 ### Added
