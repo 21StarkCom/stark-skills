@@ -17,3 +17,12 @@
 - **Story Points:** 44 total (14 tasks across 6 phases)
 - **Summary:** Multi-LLM documentation generator for stark-skills. 3 LLMs compete to generate HTML visualizations per skill, Claude judges PNG screenshots, markdown docs include Mermaid diagrams and PNG embeds. Two audience splits per skill (usage guide + internals). Routing guide with Mermaid decision trees. HTML sanitization via html.parser (not regex). Staleness detection with per-audience quality flags. Flat ThreadPoolExecutor (MAX_WORKERS=6).
 - **Knowledge extracted to:** `docs/decisions.md`
+
+## 2026-03-26 — Reusable Tournament Engine (`/stark-tournament`)
+
+- **Date:** 2026-03-26
+- **Status:** Decomposed → issues created
+- **Tracking:** #85, #86, #87
+- **Story Points:** 29 total (9 tasks across 3 phases)
+- **Summary:** Extract the tournament pattern from `generate_skill_docs.py` into a reusable `scripts/tournament.py` module. Adds `TournamentConfig` (YAML + dict), `TournamentResult` (dataclass), `Tournament` (orchestrator class) with visual, semantic, and test evaluation strategies. CLI with argparse, `/stark-tournament` skill. Final step refactors `generate_skill_docs.py` to use the Tournament API. Custom evaluation strategy deferred to v2.
+- **Knowledge extracted to:** `docs/decisions.md`
