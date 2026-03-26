@@ -113,6 +113,7 @@ Understand how the system is performing.
 |-------|-------------|-------------|
 | [`/stark-metrics`](docs/skills/stark-metrics/usage.md) | Agent scorecards, finding quality, duration trends | After a batch of reviews. Shows which agents find real issues vs. noise. |
 | [`/stark-skill-analytics`](docs/skills/stark-skill-analytics/usage.md) | Skill usage patterns and adoption metrics | Periodically. Shows which skills are used, quality trends, recommendations. |
+| `/stark-tournament` | Multi-LLM competition with configurable evaluation | When you need the best output from competing LLMs. Semantic, visual, or test-based evaluation. |
 
 **Best practice:** Check `/stark-metrics` after every phase execution or batch of reviews. If an agent's noise rate exceeds 20%, run `/stark-review-improvement` to tune its prompts.
 
