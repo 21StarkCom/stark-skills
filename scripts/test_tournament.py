@@ -18,6 +18,7 @@ from tournament import (
     CompetitorConfig,
     Tournament,
     evaluate_semantic,
+    evaluate_test,
 )
 
 import pytest
@@ -320,3 +321,99 @@ def test_tournament_single_survivor(mock_dispatch):
     assert result.winner == "claude"
     assert result.quality_flag == "degraded"
     assert result.scores == {}  # evaluation was skipped
+
+
+# ── Test evaluation strategy tests ─────────────────────────────────────
+
+
+def test_evaluate_test_strategy(tmp_path):
+    """Correct implementation scores higher than incorrect one."""
+    # Create a test file that imports from impl and checks add()
+    test_file = tmp_path / "test_impl.py"
+    test_file.write_text(textwrap.dedent("""\
+        from impl import add
+
+        def test_add_positive():
+            assert add(2, 3) == 5
+
+        def test_add_negative():
+            assert add(-1, 1) == 0
+
+        def test_add_zero():
+            assert add(0, 0) == 0
+    """))
+
+    outputs = {
+        "correct": "def add(a, b):\n    return a + b\n",
+        "wrong": "def add(a, b):\n    return a * b\n",
+    }
+
+    results = evaluate_test(outputs, str(test_file), tmp_path / "work")
+
+    assert "correct" in results
+    assert "wrong" in results
+    assert results["correct"]["_pass_rate"] > results["wrong"]["_pass_rate"]
+    assert results["correct"]["_pass_rate"] == 10.0  # 3/3 passed
+
+
+def test_evaluate_test_timeout(tmp_path):
+    """Infinite loop code times out and gets pass_rate=0."""
+    test_file = tmp_path / "test_impl.py"
+    test_file.write_text(textwrap.dedent("""\
+        from impl import compute
+
+        def test_compute():
+            assert compute(1) == 1
+    """))
+
+    outputs = {
+        "looper": "def compute(x):\n    while True:\n        pass\n",
+    }
+
+    results = evaluate_test(outputs, str(test_file), tmp_path / "work", timeout=3)
+
+    assert "looper" in results
+    assert results["looper"]["_pass_rate"] == 0.0
+    assert "_error" in results["looper"]
+
+
+@patch("tournament.evaluate_test")
+@patch("tournament.dispatch_competitor")
+def test_tournament_test_strategy(mock_dispatch, mock_eval_test):
+    """Tournament.run() with strategy='test' uses evaluate_test."""
+    def fake_dispatch(agent, prompt, comp_id):
+        return f"def add(a, b): return a + b  # {comp_id}"
+
+    mock_dispatch.side_effect = fake_dispatch
+
+    mock_eval_test.return_value = {
+        "claude": {"_pass_rate": 10.0},
+        "codex": {"_pass_rate": 6.67},
+    }
+
+    config = TournamentConfig.from_dict({
+        "prompt_template": "Write an add function",
+        "competitors": [
+            {"id": "claude", "agent": "claude"},
+            {"id": "codex", "agent": "codex"},
+        ],
+        "evaluation": {
+            "strategy": "test",
+            "factors": {
+                "correctness": {"weight": 1.0},
+                "_test_file": {"path": "/tmp/test.py"},
+                "_test_timeout": {"weight": 30},
+            },
+        },
+        "output": {
+            "output_dir": "/tmp/tournament-test",
+        },
+    })
+
+    t = Tournament(config)
+    result = t.run()
+
+    assert result.winner == "claude"
+    assert result.winner_score == 10.0
+    assert result.quality_flag == "good"
+    mock_eval_test.assert_called_once()
