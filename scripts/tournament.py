@@ -33,10 +33,11 @@ from typing import Any
 # Re-export for backward compat
 __all__ = [
     "FACTOR_WEIGHTS", "AGENTS", "CODEX_REASONING_CONFIG",
-    "dispatch_competitor", "evaluate_visual", "build_eval_prompt",
+    "dispatch_competitor", "evaluate_visual", "evaluate_semantic",
+    "build_eval_prompt",
     "parse_scores", "compute_weighted_average", "select_winner",
     "write_audit_entry", "screenshot_html", "unescape_json_string",
-    "TournamentConfig", "TournamentResult",
+    "TournamentConfig", "TournamentResult", "Tournament",
     "CompetitorConfig", "EvaluationConfig", "ExecutionConfig", "OutputConfig",
 ]
 
@@ -641,3 +642,225 @@ def evaluate_visual(skill, audience: str, candidate_pngs: dict[str, Path]) -> di
         "scores": all_scores,
         "quality_flag": quality_flag,
     }
+
+
+# ── Semantic evaluation ───────────────────────────────────────────────
+
+
+def evaluate_semantic(
+    prompt: str,
+    outputs: dict[str, str],
+    factors: dict[str, dict[str, float]],
+    judge_model: str = "claude-sonnet-4-6",
+) -> dict[str, dict[str, float]]:
+    """Evaluate text outputs via Anthropic SDK, scoring each competitor on factors.
+
+    Args:
+        prompt: The original prompt given to competitors.
+        outputs: {competitor_id: output_text} mapping.
+        factors: {factor_name: {"weight": float}} — evaluation criteria.
+        judge_model: Model to use as judge.
+
+    Returns:
+        {competitor_id: {factor_name: score}} mapping.
+    """
+    import anthropic
+
+    factor_names = list(factors.keys())
+    factor_list = ", ".join(factor_names)
+
+    # Build labeled text blocks
+    competitor_blocks = []
+    for comp_id, output in outputs.items():
+        competitor_blocks.append(f"## Competitor: {comp_id}\n\n{output}")
+    competitors_text = "\n\n---\n\n".join(competitor_blocks)
+
+    example_factors = ", ".join(f'"{f}": N' for f in factor_names)
+    eval_prompt = (
+        f"You are a judge evaluating {len(outputs)} competitors' responses to a prompt.\n\n"
+        f"## Original prompt\n\n{prompt}\n\n"
+        f"## Competitors\n\n{competitors_text}\n\n"
+        f"## Instructions\n\n"
+        f"Score each competitor on a 1-10 scale for each of these factors: {factor_list}.\n\n"
+        f"Return ONLY valid JSON in this exact format:\n\n"
+        f"```json\n"
+        f'{{"scores": [\n'
+        f'  {{"agent": "<competitor_id>", {example_factors}}},\n'
+        f"  ...\n"
+        f"]}}\n"
+        f"```\n\n"
+        f"Each score must be an integer from 1 to 10. Return JSON only, no commentary."
+    )
+
+    client = anthropic.Anthropic()
+    response = client.messages.create(
+        model=judge_model,
+        max_tokens=2048,
+        messages=[{"role": "user", "content": eval_prompt}],
+    )
+    raw = response.content[0].text if response.content else ""
+
+    scores_list = parse_scores(raw)
+    result: dict[str, dict[str, float]] = {}
+    for entry in scores_list:
+        agent_name = entry.get("agent", "")
+        factor_scores = {k: v for k, v in entry.items() if k in factors}
+        if agent_name and factor_scores:
+            result[agent_name] = factor_scores
+
+    return result
+
+
+# ── Tournament orchestrator ───────────────────────────────────────────
+
+
+class Tournament:
+    """Orchestrates a full tournament: dispatch, evaluate, select winner, audit."""
+
+    def __init__(self, config: TournamentConfig) -> None:
+        self.config = config
+
+    def run(self) -> TournamentResult:
+        """Execute the tournament lifecycle and return the result."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        config = self.config
+        competitors = config.competitors
+
+        # Step 1-2: Dispatch all competitors in parallel
+        outputs: dict[str, str] = {}
+        errors: dict[str, str] = {}
+
+        def _dispatch_one(comp: CompetitorConfig) -> tuple[str, str | None, str | None]:
+            """Dispatch a single competitor, return (id, output, error)."""
+            try:
+                prompt = config.resolve_prompt(comp)
+                result = dispatch_competitor(comp.agent, prompt, comp.id)
+                # dispatch_competitor returns different types depending on context;
+                # for the generic tournament, we treat the return as a string output
+                if isinstance(result, str):
+                    return (comp.id, result if result.strip() else None, None)
+                # If it has an error attribute (like VizResult), handle that
+                if hasattr(result, "error") and result.error:
+                    return (comp.id, None, result.error)
+                # If it has html/doc_content, extract usable output
+                output_text = getattr(result, "html", None) or getattr(result, "doc_content", None) or ""
+                return (comp.id, output_text if output_text.strip() else None, None)
+            except Exception as e:
+                return (comp.id, None, str(e))
+
+        with ThreadPoolExecutor(max_workers=config.execution.max_workers) as executor:
+            futures = {executor.submit(_dispatch_one, c): c for c in competitors}
+            for future in as_completed(futures):
+                comp_id, output, error = future.result()
+                if output:
+                    outputs[comp_id] = output
+                else:
+                    errors[comp_id] = error or "empty output"
+
+        # Step 3-4: All failed
+        if not outputs:
+            return TournamentResult(
+                winner=None,
+                winner_score=0.0,
+                scores={},
+                artifacts={},
+                audit={"errors": errors},
+                quality_flag="all_failed",
+            )
+
+        # Step 5: Single survivor — skip evaluation
+        if len(outputs) == 1:
+            sole_id = next(iter(outputs))
+            result = TournamentResult(
+                winner=sole_id,
+                winner_score=0.0,
+                scores={},
+                artifacts={"outputs": outputs},
+                audit={"errors": errors, "skipped_eval": True},
+                quality_flag="degraded",
+            )
+            self._write_audit(result)
+            return result
+
+        # Step 6: Evaluate via configured strategy
+        try:
+            if config.evaluation.strategy == "visual":
+                # Visual evaluation expects Path objects for PNGs
+                candidate_pngs = {k: Path(v) for k, v in outputs.items()}
+                # Need a skill-like object for evaluate_visual
+                eval_result = evaluate_visual(
+                    type("_Skill", (), {"name": config.prompt_template[:50]})(),
+                    "tournament",
+                    candidate_pngs,
+                )
+                winner = eval_result.get("winner")
+                winner_score = eval_result.get("winner_score", 0.0)
+                all_scores = eval_result.get("scores", {})
+            else:
+                # Semantic evaluation
+                factor_scores = evaluate_semantic(
+                    config.prompt_template,
+                    outputs,
+                    config.evaluation.factors,
+                    config.evaluation.judge,
+                )
+                # Compute weighted averages
+                weights = {f: info["weight"] for f, info in config.evaluation.factors.items()}
+                agent_weighted: dict[str, float] = {}
+                accuracy_map: dict[str, float] = {}
+                for comp_id, scores in factor_scores.items():
+                    agent_weighted[comp_id] = compute_weighted_average(scores, weights)
+                    accuracy_map[comp_id] = scores.get("correctness", scores.get("accuracy", 0))
+
+                if not agent_weighted:
+                    raise ValueError("No valid scores from evaluation")
+
+                winner = select_winner(agent_weighted, accuracy_map)
+                winner_score = agent_weighted.get(winner, 0.0)
+                all_scores = factor_scores
+
+        except Exception:
+            # Step: Eval failure fallback — first valid output
+            first_id = next(iter(outputs))
+            result = TournamentResult(
+                winner=first_id,
+                winner_score=0.0,
+                scores={},
+                artifacts={"outputs": outputs},
+                audit={"errors": errors, "eval_error": True},
+                quality_flag="eval_failed",
+            )
+            self._write_audit(result)
+            return result
+
+        # Step 9: Determine quality flag
+        if winner_score >= 7:
+            quality_flag = "good"
+        elif winner_score >= 5:
+            quality_flag = "acceptable"
+        else:
+            quality_flag = "poor"
+
+        # Step 10: Return result
+        result = TournamentResult(
+            winner=winner,
+            winner_score=round(winner_score, 2),
+            scores=all_scores,
+            artifacts={"outputs": outputs},
+            audit={"errors": errors},
+            quality_flag=quality_flag,
+        )
+        self._write_audit(result)
+        return result
+
+    def _write_audit(self, result: TournamentResult) -> None:
+        """Write audit entry if audit_file is configured."""
+        audit_file = self.config.output.audit_file
+        if audit_file:
+            write_audit_entry(Path(audit_file), {
+                "winner": result.winner,
+                "winner_score": result.winner_score,
+                "quality_flag": result.quality_flag,
+                "scores": result.scores,
+            })

@@ -3,6 +3,7 @@ import json
 import random
 import sys
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent))
 from tournament import (
@@ -15,6 +16,8 @@ from tournament import (
     TournamentConfig,
     TournamentResult,
     CompetitorConfig,
+    Tournament,
+    evaluate_semantic,
 )
 
 import pytest
@@ -220,3 +223,100 @@ def test_tournament_result_structure():
     assert empty.artifacts == {}
     assert empty.audit == {}
     assert empty.quality_flag == "unknown"
+
+
+# ── Tournament orchestrator tests ──────────────────────────────────────
+
+
+def _make_config(**overrides):
+    """Helper to build a TournamentConfig for tests."""
+    defaults = {
+        "prompt_template": "Generate a widget",
+        "competitors": [
+            {"id": "claude", "agent": "claude"},
+            {"id": "codex", "agent": "codex"},
+            {"id": "gemini", "agent": "gemini"},
+        ],
+    }
+    defaults.update(overrides)
+    return TournamentConfig.from_dict(defaults)
+
+
+@patch("tournament.evaluate_semantic")
+@patch("tournament.dispatch_competitor")
+def test_tournament_semantic_mock(mock_dispatch, mock_eval):
+    """Mock dispatch and evaluate_semantic, run Tournament.run(), verify winner."""
+    # dispatch_competitor returns string output for each competitor
+    def fake_dispatch(agent, prompt, comp_id):
+        return f"Output from {comp_id}"
+
+    mock_dispatch.side_effect = fake_dispatch
+
+    # evaluate_semantic returns factor scores
+    mock_eval.return_value = {
+        "claude": {"correctness": 9, "completeness": 8, "quality": 7},
+        "codex": {"correctness": 7, "completeness": 7, "quality": 6},
+        "gemini": {"correctness": 8, "completeness": 9, "quality": 8},
+    }
+
+    config = _make_config()
+    t = Tournament(config)
+    result = t.run()
+
+    assert result.winner is not None
+    assert result.winner in ("claude", "codex", "gemini")
+    assert result.quality_flag in ("good", "acceptable", "poor")
+    assert result.scores  # scores dict should not be empty
+    mock_eval.assert_called_once()
+
+
+@patch("tournament.dispatch_competitor")
+def test_tournament_all_fail(mock_dispatch):
+    """All competitors fail, verify all_failed result."""
+    mock_dispatch.side_effect = Exception("CLI not found")
+
+    config = _make_config()
+    t = Tournament(config)
+    result = t.run()
+
+    assert result.winner is None
+    assert result.quality_flag == "all_failed"
+    assert result.scores == {}
+
+
+@patch("tournament.evaluate_semantic")
+@patch("tournament.dispatch_competitor")
+def test_tournament_eval_failure_fallback(mock_dispatch, mock_eval):
+    """Evaluation raises exception, verify first-valid fallback with eval_failed flag."""
+    def fake_dispatch(agent, prompt, comp_id):
+        return f"Output from {comp_id}"
+
+    mock_dispatch.side_effect = fake_dispatch
+    mock_eval.side_effect = RuntimeError("Judge API down")
+
+    config = _make_config()
+    t = Tournament(config)
+    result = t.run()
+
+    assert result.winner is not None  # falls back to first valid
+    assert result.quality_flag == "eval_failed"
+    assert result.winner_score == 0.0
+
+
+@patch("tournament.dispatch_competitor")
+def test_tournament_single_survivor(mock_dispatch):
+    """Only 1 competitor succeeds, verify degraded flag without evaluation."""
+    def fake_dispatch(agent, prompt, comp_id):
+        if comp_id == "claude":
+            return "Claude output"
+        raise Exception(f"{comp_id} failed")
+
+    mock_dispatch.side_effect = fake_dispatch
+
+    config = _make_config()
+    t = Tournament(config)
+    result = t.run()
+
+    assert result.winner == "claude"
+    assert result.quality_flag == "degraded"
+    assert result.scores == {}  # evaluation was skipped
