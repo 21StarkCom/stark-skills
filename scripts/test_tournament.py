@@ -12,7 +12,13 @@ from tournament import (
     write_audit_entry,
     unescape_json_string,
     FACTOR_WEIGHTS,
+    TournamentConfig,
+    TournamentResult,
+    CompetitorConfig,
 )
+
+import pytest
+import textwrap
 
 
 def test_compute_weighted_average():
@@ -94,3 +100,123 @@ def test_unescape_json_string_passthrough():
     clean = '<html>\n<body>\n<div class="node-phase">Phase 1</div>\n</body>\n</html>'
     result = unescape_json_string(clean)
     assert result == clean
+
+
+# ── TournamentConfig / TournamentResult tests ─────────────────────────
+
+
+def test_tournament_config_from_dict():
+    """Minimal config with just prompt_template, verify defaults."""
+    cfg = TournamentConfig.from_dict({"prompt_template": "Generate {thing}"})
+    assert cfg.prompt_template == "Generate {thing}"
+    assert len(cfg.competitors) == 3
+    assert cfg.evaluation.strategy == "semantic"
+    assert cfg.execution.max_workers == 6
+    assert cfg.execution.timeout_seconds == 300
+    assert cfg.output.keep_all is False
+
+
+def test_tournament_config_from_yaml(tmp_path):
+    """Write YAML to tmp_path, load it, verify fields."""
+    yaml_content = textwrap.dedent("""\
+        schema_version: 1
+        prompt_template: "Build a {component} for {audience}"
+        competitors:
+          - id: claude
+            agent: claude
+          - id: codex
+            agent: codex
+        evaluation:
+          strategy: visual
+          factors:
+            accuracy:
+              weight: 3.0
+        execution:
+          max_workers: 4
+          timeout_seconds: 600
+        output:
+          keep_all: true
+    """)
+    yaml_file = tmp_path / "tournament.yaml"
+    yaml_file.write_text(yaml_content)
+
+    cfg = TournamentConfig.from_yaml(yaml_file)
+    assert cfg.prompt_template == "Build a {component} for {audience}"
+    assert len(cfg.competitors) == 2
+    assert cfg.competitors[0].id == "claude"
+    assert cfg.evaluation.strategy == "visual"
+    assert cfg.evaluation.factors["accuracy"]["weight"] == 3.0
+    assert cfg.execution.max_workers == 4
+    assert cfg.execution.timeout_seconds == 600
+    assert cfg.output.keep_all is True
+
+
+def test_tournament_config_validates_schema_version(tmp_path):
+    """Bad version raises ValueError."""
+    yaml_content = textwrap.dedent("""\
+        schema_version: 99
+        prompt_template: "test"
+    """)
+    yaml_file = tmp_path / "bad.yaml"
+    yaml_file.write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="Unsupported schema_version: 99"):
+        TournamentConfig.from_yaml(yaml_file)
+
+
+def test_tournament_config_defaults():
+    """Verify 3 competitors, semantic strategy, max_workers=6, timeout=300."""
+    cfg = TournamentConfig.from_dict({"prompt_template": "test"})
+    assert [c.id for c in cfg.competitors] == ["claude", "codex", "gemini"]
+    assert cfg.evaluation.strategy == "semantic"
+    assert cfg.evaluation.judge == "claude-sonnet-4-6"
+    assert cfg.execution.max_workers == 6
+    assert cfg.execution.timeout_seconds == 300
+    assert cfg.execution.retries == 1
+    expected_factors = {"correctness", "completeness", "quality"}
+    assert set(cfg.evaluation.factors.keys()) == expected_factors
+
+
+def test_tournament_config_prompt_override():
+    """Verify resolve_prompt handles variable substitution and prompt_override."""
+    cfg = TournamentConfig.from_dict({
+        "prompt_template": "Generate a {component} for {audience}",
+        "competitors": [
+            {"id": "plain", "agent": "claude"},
+            {"id": "wrapped", "agent": "codex",
+             "prompt_override": "Be extra careful.\n{base_prompt}"},
+        ],
+    })
+
+    plain = cfg.competitors[0]
+    wrapped = cfg.competitors[1]
+
+    resolved_plain = cfg.resolve_prompt(plain, component="chart", audience="devs")
+    assert resolved_plain == "Generate a chart for devs"
+
+    resolved_wrapped = cfg.resolve_prompt(wrapped, component="chart", audience="devs")
+    assert resolved_wrapped == "Be extra careful.\nGenerate a chart for devs"
+
+
+def test_tournament_result_structure():
+    """Create a TournamentResult, verify fields."""
+    result = TournamentResult(
+        winner="claude",
+        winner_score=8.5,
+        scores={"claude": {"correctness": 9, "completeness": 8}},
+        artifacts={"claude": "/tmp/out.html"},
+        audit={"rounds": 1},
+        quality_flag="good",
+    )
+    assert result.winner == "claude"
+    assert result.winner_score == 8.5
+    assert "claude" in result.scores
+    assert result.artifacts["claude"] == "/tmp/out.html"
+    assert result.audit["rounds"] == 1
+    assert result.quality_flag == "good"
+
+    # Verify defaults
+    empty = TournamentResult(winner=None, winner_score=0.0, scores={})
+    assert empty.artifacts == {}
+    assert empty.audit == {}
+    assert empty.quality_flag == "unknown"

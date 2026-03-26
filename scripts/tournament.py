@@ -26,6 +26,7 @@ import sys
 import tempfile
 import threading
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +36,158 @@ __all__ = [
     "dispatch_competitor", "evaluate_visual", "build_eval_prompt",
     "parse_scores", "compute_weighted_average", "select_winner",
     "write_audit_entry", "screenshot_html", "unescape_json_string",
+    "TournamentConfig", "TournamentResult",
+    "CompetitorConfig", "EvaluationConfig", "ExecutionConfig", "OutputConfig",
 ]
+
+
+# ── Config & Result dataclasses ───────────────────────────────────────
+
+
+_DEFAULT_FACTORS: dict[str, dict[str, float]] = {
+    "correctness": {"weight": 2.0},
+    "completeness": {"weight": 1.5},
+    "quality": {"weight": 1.0},
+}
+
+_DEFAULT_COMPETITORS: list[dict[str, Any]] = [
+    {"id": "claude", "agent": "claude"},
+    {"id": "codex", "agent": "codex"},
+    {"id": "gemini", "agent": "gemini"},
+]
+
+
+@dataclass
+class CompetitorConfig:
+    """Configuration for a single tournament competitor."""
+    id: str
+    agent: str
+    prompt_override: str | None = None
+
+
+@dataclass
+class EvaluationConfig:
+    """How tournament entries are evaluated."""
+    strategy: str = "semantic"
+    judge: str = "claude-sonnet-4-6"
+    factors: dict[str, dict[str, float]] = field(default_factory=lambda: dict(_DEFAULT_FACTORS))
+
+
+@dataclass
+class ExecutionConfig:
+    """Runtime execution parameters."""
+    max_workers: int = 6
+    timeout_seconds: int = 300
+    retries: int = 1
+
+
+@dataclass
+class OutputConfig:
+    """Where tournament output goes."""
+    output_dir: str | None = None
+    audit_file: str | None = None
+    keep_all: bool = False
+
+
+@dataclass
+class TournamentConfig:
+    """Full tournament configuration, loadable from YAML or dict."""
+    prompt_template: str
+    competitors: list[CompetitorConfig] = field(default_factory=list)
+    evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
+    execution: ExecutionConfig = field(default_factory=ExecutionConfig)
+    output: OutputConfig = field(default_factory=OutputConfig)
+
+    def __post_init__(self) -> None:
+        if not self.competitors:
+            self.competitors = [
+                CompetitorConfig(**c) for c in _DEFAULT_COMPETITORS
+            ]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TournamentConfig:
+        """Create config from a dict, filling defaults for missing fields."""
+        if "prompt_template" not in data:
+            raise ValueError("prompt_template is required")
+
+        competitors_raw = data.get("competitors", [])
+        competitors = [
+            CompetitorConfig(**c) for c in competitors_raw
+        ] if competitors_raw else []
+
+        eval_raw = data.get("evaluation", {})
+        evaluation = EvaluationConfig(
+            strategy=eval_raw.get("strategy", "semantic"),
+            judge=eval_raw.get("judge", "claude-sonnet-4-6"),
+            factors=eval_raw.get("factors", dict(_DEFAULT_FACTORS)),
+        )
+
+        exec_raw = data.get("execution", {})
+        execution = ExecutionConfig(
+            max_workers=exec_raw.get("max_workers", 6),
+            timeout_seconds=exec_raw.get("timeout_seconds", 300),
+            retries=exec_raw.get("retries", 1),
+        )
+
+        out_raw = data.get("output", {})
+        output = OutputConfig(
+            output_dir=out_raw.get("output_dir"),
+            audit_file=out_raw.get("audit_file"),
+            keep_all=out_raw.get("keep_all", False),
+        )
+
+        return cls(
+            prompt_template=data["prompt_template"],
+            competitors=competitors,
+            evaluation=evaluation,
+            execution=execution,
+            output=output,
+        )
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> TournamentConfig:
+        """Load config from a YAML file with schema_version validation."""
+        import yaml
+
+        with open(path) as f:
+            data = yaml.safe_load(f)
+
+        if not isinstance(data, dict):
+            raise ValueError(f"Expected YAML mapping, got {type(data).__name__}")
+
+        schema_version = data.get("schema_version")
+        if schema_version != 1:
+            raise ValueError(
+                f"Unsupported schema_version: {schema_version} (expected 1)"
+            )
+
+        return cls.from_dict(data)
+
+    def resolve_prompt(self, competitor: CompetitorConfig, **variables: str) -> str:
+        """Resolve prompt_template with variable substitution and optional override.
+
+        Variables are substituted into prompt_template via str.format_map().
+        If the competitor has a prompt_override, it is then applied —
+        the override can reference {base_prompt} to wrap the resolved template.
+        """
+        resolved = self.prompt_template.format_map(variables)
+        if competitor.prompt_override:
+            resolved = competitor.prompt_override.format_map(
+                {"base_prompt": resolved, **variables}
+            )
+        return resolved
+
+
+@dataclass
+class TournamentResult:
+    """Outcome of a tournament run."""
+    winner: str | None
+    winner_score: float
+    scores: dict[str, Any]
+    artifacts: dict[str, Any] = field(default_factory=dict)
+    audit: dict[str, Any] = field(default_factory=dict)
+    quality_flag: str = "unknown"
+
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = Path(__file__).parent
