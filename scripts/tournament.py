@@ -39,6 +39,7 @@ __all__ = [
     "write_audit_entry", "screenshot_html", "unescape_json_string",
     "TournamentConfig", "TournamentResult", "Tournament",
     "CompetitorConfig", "EvaluationConfig", "ExecutionConfig", "OutputConfig",
+    "evaluate_test",
 ]
 
 
@@ -711,6 +712,78 @@ def evaluate_semantic(
     return result
 
 
+# ── Test evaluation ────────────────────────────────────────────────────
+
+
+def evaluate_test(
+    outputs: dict[str, str],
+    test_file: str,
+    work_dir: Path,
+    timeout: int = 30,
+) -> dict[str, dict[str, float]]:
+    """Evaluate code outputs by running them against a pytest test file.
+
+    For each competitor:
+    1. Write output code to {work_dir}/{competitor_id}/impl.py
+    2. Run pytest against the test file with PYTHONPATH set to competitor dir
+    3. Parse pass/fail counts from pytest output
+    4. Score: pass_rate = passed / total * 10 (scaled to 0-10)
+
+    Args:
+        outputs: {competitor_id: code_text} mapping.
+        test_file: Path to the pytest test file.
+        work_dir: Working directory for competitor code.
+        timeout: Subprocess timeout in seconds.
+
+    Returns:
+        {competitor_id: {factor_name: score, "_error": str}} mapping.
+        All configured factors receive the same pass_rate score.
+    """
+    test_path = Path(test_file).resolve()
+    results: dict[str, dict[str, float]] = {}
+
+    for comp_id, code in outputs.items():
+        comp_dir = work_dir / comp_id
+        comp_dir.mkdir(parents=True, exist_ok=True)
+        impl_file = comp_dir / "impl.py"
+        impl_file.write_text(code)
+
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "pytest", str(test_path), "-v"],
+                capture_output=True, text=True, timeout=timeout,
+                cwd=str(comp_dir),
+                env={**os.environ, "PYTHONPATH": str(comp_dir)},
+            )
+            stdout = proc.stdout + proc.stderr
+
+            # Parse "X passed" and "X failed" from pytest summary
+            passed = 0
+            failed = 0
+            passed_match = re.search(r"(\d+) passed", stdout)
+            failed_match = re.search(r"(\d+) failed", stdout)
+            if passed_match:
+                passed = int(passed_match.group(1))
+            if failed_match:
+                failed = int(failed_match.group(1))
+
+            total = passed + failed
+            if total > 0:
+                pass_rate = (passed / total) * 10.0
+            else:
+                pass_rate = 0.0
+
+            entry: dict[str, Any] = {"_pass_rate": round(pass_rate, 2)}
+            if proc.returncode != 0 and total == 0:
+                entry["_error"] = stdout[-500:] if len(stdout) > 500 else stdout
+            results[comp_id] = entry
+
+        except subprocess.TimeoutExpired:
+            results[comp_id] = {"_pass_rate": 0.0, "_error": f"timeout ({timeout}s)"}
+
+    return results
+
+
 # ── Tournament orchestrator ───────────────────────────────────────────
 
 
@@ -797,6 +870,31 @@ class Tournament:
                 winner = eval_result.get("winner")
                 winner_score = eval_result.get("winner_score", 0.0)
                 all_scores = eval_result.get("scores", {})
+            elif config.evaluation.strategy == "test":
+                # Test evaluation — run code against pytest suite
+                test_file = config.evaluation.factors.get("_test_file", {}).get("path", "")
+                test_timeout = int(config.evaluation.factors.get("_test_timeout", {}).get("weight", 30))
+                work_dir = Path(config.output.output_dir or tempfile.mkdtemp(prefix="tournament-test-"))
+                test_scores = evaluate_test(outputs, test_file, work_dir, timeout=test_timeout)
+                # Convert pass_rate into factor scores
+                weights = {f: info["weight"] for f, info in config.evaluation.factors.items()
+                           if not f.startswith("_")}
+                agent_weighted: dict[str, float] = {}
+                accuracy_map: dict[str, float] = {}
+                all_scores = {}
+                for comp_id, entry in test_scores.items():
+                    pass_rate = entry.get("_pass_rate", 0.0)
+                    factor_scores = {f: pass_rate for f in weights}
+                    all_scores[comp_id] = factor_scores
+                    agent_weighted[comp_id] = pass_rate
+                    accuracy_map[comp_id] = pass_rate
+
+                if not agent_weighted:
+                    raise ValueError("No valid scores from test evaluation")
+
+                winner = select_winner(agent_weighted, accuracy_map)
+                winner_score = agent_weighted.get(winner, 0.0)
+
             else:
                 # Semantic evaluation
                 factor_scores = evaluate_semantic(
