@@ -948,26 +948,51 @@ def evaluate_review(
     pass2_winner = result2.get("winner", "")
     position_bias = pass1_winner != pass2_winner
 
-    # Merge text scores from both passes (average numeric values; pass1 primary for text)
-    scores: dict[str, dict[str, str]] = {}
+    # Parse text scores from both passes
+    scores1: dict[str, dict[str, str]] = {}
     for entry in result1.get("scores", []):
         reviewer = entry.get("reviewer", "")
         if reviewer in reviews:
-            scores[reviewer] = {k: v for k, v in entry.items() if k != "reviewer"}
+            scores1[reviewer] = {k: v for k, v in entry.items() if k != "reviewer"}
 
-    # Compute numeric scores and weighted averages
+    scores2: dict[str, dict[str, str]] = {}
+    for entry in result2.get("scores", []):
+        reviewer = entry.get("reviewer", "")
+        if reviewer in reviews:
+            scores2[reviewer] = {k: v for k, v in entry.items() if k != "reviewer"}
+
+    # Use pass1 text scores as the canonical text representation
+    scores = scores1
+
+    # Compute numeric scores from both passes and average them
     criteria_weights = {c: info["weight"] for c, info in REVIEW_EVAL_CRITERIA.items()}
-    numeric_scores: dict[str, dict[str, Any]] = {}
-    for comp_id, text_scores in scores.items():
-        num: dict[str, Any] = {}
+
+    def _to_numeric(text_scores: dict[str, str]) -> dict[str, float]:
+        num: dict[str, float] = {}
         for criterion in REVIEW_EVAL_CRITERIA:
             raw_val = text_scores.get(criterion, "")
-            num[criterion] = REVIEW_SCALE_MAP.get(str(raw_val).lower(), 0)
-        num["_weighted_avg"] = compute_weighted_average(
-            {k: float(v) for k, v in num.items() if k != "_weighted_avg"},
+            num[criterion] = float(REVIEW_SCALE_MAP.get(str(raw_val).lower(), 0))
+        return num
+
+    numeric_scores: dict[str, dict[str, Any]] = {}
+    all_comp_ids = set(scores1.keys()) | set(scores2.keys())
+    for comp_id in all_comp_ids:
+        num1 = _to_numeric(scores1.get(comp_id, {}))
+        num2 = _to_numeric(scores2.get(comp_id, {}))
+        # Average scores from both passes when both exist
+        averaged: dict[str, Any] = {}
+        if num1 and num2:
+            for criterion in REVIEW_EVAL_CRITERIA:
+                averaged[criterion] = (num1.get(criterion, 0.0) + num2.get(criterion, 0.0)) / 2.0
+        elif num1:
+            averaged = {k: v for k, v in num1.items()}
+        else:
+            averaged = {k: v for k, v in num2.items()}
+        averaged["_weighted_avg"] = compute_weighted_average(
+            {k: float(v) for k, v in averaged.items() if k != "_weighted_avg"},
             criteria_weights,
         )
-        numeric_scores[comp_id] = num
+        numeric_scores[comp_id] = averaged
 
     # Determine winner
     if position_bias:

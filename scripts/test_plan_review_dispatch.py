@@ -95,7 +95,7 @@ class TestLoadPlanReviewConfig:
         cfg = plan_review_dispatch._load_plan_review_config(
             repo_dir=str(tmp_path),
         )
-        assert cfg["agents"] == ["claude", "codex", "gemini"]
+        assert cfg["agents"] == ["claude", "codex"]
         assert cfg["fix_threshold"] == "medium"
         assert cfg["disabled_domains"] == []
         assert cfg["max_rounds"] == 3
@@ -137,7 +137,7 @@ class TestLoadPlanReviewConfig:
             global_config_dir=str(global_dir),
         )
         assert cfg["max_rounds"] == 5
-        assert cfg["agents"] == ["claude", "codex", "gemini"]  # default preserved
+        assert cfg["agents"] == ["claude", "codex"]  # default preserved
 
 
 class TestSubAgentDispatch:

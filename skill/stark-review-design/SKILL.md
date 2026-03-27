@@ -81,11 +81,12 @@ max_rounds=3
 
 When `--tournament` is passed, skip the normal Phase 2 / Phase 3 loop and run this instead:
 
-Each of the 3 agents (Claude, Codex, Gemini) independently reviews the **entire design document across ALL 10 domains** in a single comprehensive pass. The dispatch combines all domain prompts into one prompt per agent.
+Each of the 3 agents (Claude, Codex, Gemini) independently reviews the **entire design document across ALL 10 domains** in a single comprehensive pass. Tournament mode does NOT use `plan_review_dispatch.py`'s normal per-domain dispatch pattern. Instead, the skill orchestrator:
 
-```bash
-$PYTHON $SCRIPTS/plan_review_dispatch.py --prompts-dir design-review --file "$path" --tournament --timeout 600
-```
+1. Combines all 10 domain prompts into a single comprehensive prompt per agent
+2. Dispatches each agent ONCE with the combined prompt (directly via CLI, not via plan_review_dispatch.py)
+3. Collects 3 full review documents (one per agent)
+4. Calls `evaluate_review()` from `tournament.py` to judge them
 
 The 3 competing reviews are evaluated by `tournament.py`'s `evaluate_review()` function. The judge evaluates on:
 - Coverage — did the agent find issues across all 10 domains?
@@ -94,9 +95,11 @@ The 3 competing reviews are evaluated by `tournament.py`'s `evaluate_review()` f
 - Actionability — are findings specific enough to act on?
 - Specificity — are findings tied to the actual design content?
 
-Position bias control: the judge runs twice with swapped agent order; scores are averaged.
+Position bias control: the judge runs twice with swapped agent order; numeric scores are averaged across both passes.
 
-Output: winner declared, synthesized best-of-all findings, tournament summary posted to PR (if PR detected).
+If the judge detects position bias (winner changes when review order is swapped), the result is a tie. In tie mode, no winner is declared — only the synthesized findings are used. The summary reports "Tournament result: tie (position bias detected)" and lists the synthesized findings.
+
+Output: winner declared (or tie), synthesized best-of-all findings, tournament summary posted to PR (if PR detected).
 
 After tournament output, skip to Phase 4 (summary) and Phase 5 (output & persist). Use `design-reviews/tournament/` as the history subdirectory.
 

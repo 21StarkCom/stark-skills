@@ -160,26 +160,29 @@ Write a temporary `in-progress.json` to `~/.claude/code-review/history/plan-revi
 
 **Only runs when `--tournament` was passed. Replaces Phases 2 and 3.**
 
-Each agent independently reviews the full document across ALL 10 domains in a single comprehensive prompt. No domain splitting — each agent gets one combined prompt.
+Each agent independently reviews the full document across ALL 10 domains in a single comprehensive prompt. No domain splitting — each agent gets one combined prompt. Tournament mode does NOT use `plan_review_dispatch.py`'s normal per-domain dispatch pattern. Instead:
 
 ### 2T.a. Dispatch 3 full-document reviews
 
-```bash
-$PYTHON $SCRIPTS/plan_review_dispatch.py --prompts-dir plan-review --file "$path" --tournament --timeout 600
-```
+1. Combine all 10 domain prompts into a single comprehensive prompt per agent
+2. Dispatch each agent ONCE with the combined prompt (directly via CLI, not via plan_review_dispatch.py)
+3. Collect 3 full review documents (one per agent)
 
 Each agent receives a combined prompt that merges all 10 domain prompts. Output: 3 structured review documents (one per agent).
 
 ### 2T.b. Judge evaluation
 
-```bash
-$PYTHON $SCRIPTS/tournament.py evaluate_review \
-  --reviews claude_review.json codex_review.json gemini_review.json \
-  --file "$path" \
-  --criteria "coverage,severity_accuracy,false_positive_rate,actionability,specificity"
+Call `evaluate_review()` from `tournament.py` (Python API, not CLI):
+
+```python
+from tournament import evaluate_review
+result = evaluate_review(
+    document=plan_content,
+    reviews={"claude": claude_review, "codex": codex_review, "gemini": gemini_review},
+)
 ```
 
-The judge runs twice with swapped order (position bias control). Final score averages both runs.
+The judge runs twice with swapped order (position bias control). Numeric scores are averaged across both passes for more robust scoring.
 
 Evaluation criteria:
 - **Coverage** — what fraction of real issues did the agent find?
@@ -188,10 +191,12 @@ Evaluation criteria:
 - **Actionability** — can an engineer act on each finding without guessing?
 - **Specificity** — does each finding cite exact sections, commands, or line numbers?
 
+If the judge detects position bias (winner changes when review order is swapped), the result is a tie. In tie mode, no winner is declared — only the synthesized findings are used. The summary reports "Tournament result: tie (position bias detected)" and lists the synthesized findings.
+
 ### 2T.c. Synthesize winner
 
-The tournament engine declares a winner and synthesizes best-of-all findings:
-- Winner's full review is the base
+The tournament engine declares a winner (or tie) and synthesizes best-of-all findings:
+- Winner's full review is the base (or all reviews equally in tie mode)
 - Any high-confidence finding from a non-winner that the winner missed is merged in
 - False positives from all reviews are excluded
 
