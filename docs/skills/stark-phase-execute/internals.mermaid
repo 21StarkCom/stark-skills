@@ -1,70 +1,63 @@
 graph TD
-    START(["/stark-phase-execute &lt;slug&gt;"]) --> VALIDATE["0.1 Validate Environment<br/>main clean · tools in PATH · bot token"]
-    VALIDATE -->|fail| ABORT["STOP: broken environment"]
-    VALIDATE -->|pass| RESOLVE["Resolve slug<br/>(file path → strip suffixes, or literal)"]
-    RESOLVE --> FETCH{"0.2 Fetch Tasks<br/>project-config.json?"}
-    FETCH -->|yes| PROJV2["GitHub Projects V2 query<br/>Status=Ready for Agent<br/>AI Suitability ∈ Autonomous,Assisted"]
-    FETCH -->|no| LABELS["gh api issues?labels=plan:SLUG<br/>filter out tracking issues"]
-    PROJV2 --> TASKS_CHECK{"Tasks found?"}
-    LABELS --> TASKS_CHECK
-    TASKS_CHECK -->|"raw=0"| DECOMPOSE["0.3 Auto-Decompose<br/>invoke /stark-plan-to-tasks"]
-    TASKS_CHECK -->|"raw>0, all filtered"| DONE_EARLY["STOP: all filtered<br/>(tracking issues / --start-from)"]
-    TASKS_CHECK -->|tasks found| BRIEFING
-    DECOMPOSE --> REFETCH["Re-fetch tasks"]
-    REFETCH --> BRIEFING["0.4 Phase Briefing<br/>0.5 Init observability log"]
+    START(["/stark-phase-execute slug"]) --> PARSE["Parse args & resolve slug<br/>(file path → strip suffixes, or direct slug)"]
+    PARSE --> VALIDATE["0.1 Validate environment<br/>main branch, clean tree, tools, auth"]
+    VALIDATE --> FETCH{"0.2 Fetch tasks<br/>Project V2 or label:plan:{SLUG}"}
 
+    FETCH -->|"raw_count > 0"| FILTER["Filter out tracking issues<br/>(keep only ## What issues)"]
+    FETCH -->|"raw_count = 0"| DECOMPOSE["0.3 Auto-decompose<br/>Invoke /stark-plan-to-tasks"]
+    DECOMPOSE --> REFETCH["Re-fetch tasks via 0.2"]
+    REFETCH --> FILTER
+
+    FILTER --> BRIEFING["0.4-0.5 Briefing & init log<br/>Print table, create TodoWrite, write JSON"]
     BRIEFING --> LOOP_START{"Next task?"}
-    LOOP_START -->|yes| SESSION["1.1 Session Start<br/>checkout main · pull · branch"]
-    LOOP_START -->|no tasks left| REGRESSION
 
-    SESSION --> IMPLEMENT["1.2 Implement (Subagent)<br/>read issue · code · test · commit"]
-    IMPLEMENT -->|no changes| SKIP_TASK["Log skipped · continue"]
-    IMPLEMENT -->|ambiguous| BLOCK["Set Blocked · skip"]
-    IMPLEMENT -->|success| PUSH["1.3 Push &amp; Create PR<br/>(USER PAT, non-draft)"]
+    LOOP_START -->|"yes"| SESSION["1.1 Session start<br/>Branch from main, claim task (Project V2)"]
+    SESSION --> IMPLEMENT["1.2 Implement<br/>Subagent: read issue → code → test → commit"]
+    IMPLEMENT -->|"no changes"| SKIP["Log skipped"] --> LOG_TASK
+    IMPLEMENT -->|"ambiguous"| BLOCK["Transition to Blocked"] --> LOG_TASK
+    IMPLEMENT -->|"success"| PUSH["1.3 Push & create PR<br/>(USER PAT, no draft, temp file body)"]
 
-    SKIP_TASK --> LOOP_START
-    BLOCK --> LOOP_START
-
-    PUSH --> REVIEW_INIT["Create review worktree<br/>/tmp/review-REPO-prN"]
-    REVIEW_INIT --> REVIEW_ROUND{"Review round ≤ N?"}
-    REVIEW_ROUND -->|yes| DISPATCH["multi_review.py<br/>--json-only --dry-run"]
+    PUSH --> WT_CREATE["Create review worktree<br/>/tmp/review-{REPO}-pr{N}"]
+    WT_CREATE --> REVIEW_ROUND{"1.4 Review round ≤ N?"}
+    REVIEW_ROUND -->|"yes"| DISPATCH["Run multi_review.py<br/>--json-only --dry-run<br/>18 sub-agents (3×6)"]
     DISPATCH --> CLASSIFY["Classify findings<br/>fix / FP / noise / ignored"]
-    CLASSIFY -->|0 fix| REVIEW_DONE
-    CLASSIFY -->|has fixes| FIX["Fix findings · test · commit · push"]
+    CLASSIFY -->|"0 fix findings"| REVIEW_DONE["Review complete"]
+    CLASSIFY -->|"has fix findings"| FIX["Fix in worktree → test → commit → push"]
     FIX --> REVIEW_ROUND
-    REVIEW_ROUND -->|"round > MAX"| REVIEW_DONE
+    REVIEW_ROUND -->|"max rounds"| REVIEW_DONE
 
-    REVIEW_DONE["Post review summary<br/>(BOT TOKEN)<br/>Clean up worktree"]
-    REVIEW_DONE --> MERGE["1.5 Merge<br/>gh pr merge --squash --admin<br/>(USER PAT)"]
-    MERGE --> CLOSE["1.6 Close Issue<br/>1.7 Log Task Result"]
-    CLOSE --> LOOP_START
+    REVIEW_DONE --> POST_REVIEW["Post review summary<br/>(BOT TOKEN via github_app.py)"]
+    POST_REVIEW --> WT_CLEAN["Clean up worktree"]
+    WT_CLEAN --> MERGE["1.5 Merge<br/>--squash --admin --delete-branch<br/>(USER PAT)"]
+    MERGE --> CLOSE["1.6 Verify issue closed"]
+    CLOSE --> LOG_TASK["1.7 Log task result to JSON"]
+    LOG_TASK --> LOOP_START
 
-    MERGE -->|fail| ERROR["1.8 Error Handler<br/>log · cleanup · continue"]
-    ERROR --> LOOP_START
+    LOOP_START -->|"no more tasks"| REGRESSION["Phase 2: Regression tests<br/>Full test suite on main"]
+    REGRESSION --> CHANGELOG["Phase 3.1: Update CHANGELOG<br/>Feature→Added, Bug→Fixed, Task→Changed"]
+    CHANGELOG --> RELEASE["Phase 3.2: /stark-release<br/>minor/patch/major"]
+    RELEASE --> DEPLOY["Phase 3.3: Deploy<br/>(if configured)"]
+    DEPLOY --> DASHBOARD["Phase 4: Dashboard<br/>Task table, stats, agent scorecard"]
+    DASHBOARD --> HOUSEKEEPING["Phase 5: Housekeeping<br/>Memory, docs, prompt improvement flags"]
+    HOUSEKEEPING --> DONE([Phase complete])
 
-    REGRESSION["Phase 2: Regression Testing<br/>full test suite on main"]
-    REGRESSION --> RELEASE_CHECK{"--skip-release?"}
-    RELEASE_CHECK -->|yes| DASHBOARD
-    RELEASE_CHECK -->|no| CHANGELOG["3.1 Update CHANGELOG<br/>(by issue type)"]
-    CHANGELOG --> RELEASE["3.2 /stark-release<br/>(bump: minor/patch/major)"]
-    RELEASE --> DEPLOY_CHECK{"--skip-deploy?"}
-    DEPLOY_CHECK -->|yes| DASHBOARD
-    DEPLOY_CHECK -->|no| DEPLOY["3.3 Deploy<br/>deploy_command from config"]
-    DEPLOY --> DASHBOARD
-
-    DASHBOARD["Phase 4: Dashboard<br/>task table · stats · agent scorecard"]
-    DASHBOARD --> HOUSEKEEPING["Phase 5: Housekeeping<br/>memory · docs · prompt improvement"]
-    HOUSEKEEPING --> COMPLETE(["Phase complete"])
+    IMPLEMENT -.->|"error"| ERR_HANDLER["1.8 Error handler<br/>Log, cleanup branch/worktree, continue"]
+    PUSH -.->|"error"| ERR_HANDLER
+    MERGE -.->|"error"| ERR_HANDLER
+    ERR_HANDLER --> LOG_TASK
 
     style START fill:#1e40af,color:#fff
-    style COMPLETE fill:#047857,color:#fff
-    style ABORT fill:#dc2626,color:#fff
-    style DONE_EARLY fill:#f59e0b,color:#1a1a1a
-    style ERROR fill:#dc2626,color:#fff
-    style DECOMPOSE fill:#7c3aed,color:#fff
-    style REVIEW_ROUND fill:#7c3aed,color:#fff
+    style DONE fill:#1e40af,color:#fff
     style FETCH fill:#7c3aed,color:#fff
-    style TASKS_CHECK fill:#7c3aed,color:#fff
-    style RELEASE_CHECK fill:#7c3aed,color:#fff
-    style DEPLOY_CHECK fill:#7c3aed,color:#fff
+    style LOOP_START fill:#7c3aed,color:#fff
+    style REVIEW_ROUND fill:#7c3aed,color:#fff
     style CLASSIFY fill:#7c3aed,color:#fff
+    style DECOMPOSE fill:#e5e7eb,color:#666
+    style ERR_HANDLER fill:#dc2626,color:#fff
+    style SKIP fill:#dc2626,color:#fff
+    style BLOCK fill:#dc2626,color:#fff
+    style BRIEFING fill:#f59e0b,color:#1a1a1a
+    style LOG_TASK fill:#f59e0b,color:#1a1a1a
+    style DASHBOARD fill:#f59e0b,color:#1a1a1a
+    style VALIDATE fill:#047857,color:#fff
+    style HOUSEKEEPING fill:#047857,color:#fff

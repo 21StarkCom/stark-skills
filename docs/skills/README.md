@@ -55,7 +55,7 @@ graph TD
     A -->|Analyze past session patterns| C[stark-session-insights]
 ```
 
-- **`/stark-session`** — *(not installed)*
+- **[`/stark-session`](stark-session/usage.md)** — Session management — start and end modes. Start: loads context, git state, health checks, briefing. End: runs tests, merges PRs, commits docs, pushes. Config via .code-review/config.json hierarchy. Use when the user says "session start", "session end", "start session", "end session", "what was I working on", "catch me up", or invokes /stark-session.
 - **`/stark-session-insights`** — *(not installed)*
 
 ## Documentation
@@ -104,7 +104,3 @@ graph TD
 - **`/stark-metrics`** — *(not installed)*
 - **`/stark-skill-analytics`** — *(not installed)*
 - **`/stark-pr-status`** — *(not installed)*
-
-## Other Skills
-
-- **[`/stark-design`](stark-design/usage.md)** — Use this skill when the user wants to create a design document, spec, or architecture doc from requirements, a feature description, or a high-level prompt. Triggers whenever someone needs to go from an idea or set of requirements to a formal design. Covers requests like "design this feature", "write a spec for", "create an architecture doc", "I need a design document for", or any variation where input is requirements/prompt and desired output is a design/spec document. Also triggers on `/stark-design <prompt-or-path>`. Works by dispatching 3 independent AI agents to each produce a design, then cross-reviewing all designs to synthesize the best one. This is the natural first step before design review (`/stark-review-design`).

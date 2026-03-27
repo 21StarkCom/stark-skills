@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>stark-pr-status — Usage Guide</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
+.node-phase    { background: #1e40af; color: #ffffff; }
+.node-decision { background: #7c3aed; color: #ffffff; }
+.node-failure  { background: #dc2626; color: #ffffff; }
+.node-config   { background: #047857; color: #ffffff; }
+.node-output   { background: #f59e0b; color: #1a1a1a; }
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 180px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 180px; display: flex;
+  align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
+.invocation-box {
+  background: #1a1a1a; color: #e5e7eb; border-radius: 8px;
+  padding: 16px 20px; font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px; line-height: 1.8; margin: 16px auto;
+  max-width: 860px; overflow-x: auto;
+}
+.invocation-box .prompt { color: #60a5fa; }
+.invocation-box .comment { color: #6b7280; }
+.invocation-box .flag { color: #a78bfa; }
+.invocation-box .value { color: #34d399; }
+.output-section {
+  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
+  padding: 16px 20px; margin: 16px auto; max-width: 860px;
+  font-size: 11px; line-height: 1.7;
+}
+.output-section h4 { font-size: 12px; font-weight: 700; color: #334155; margin-bottom: 8px; }
+.output-section .metric { display: inline-block; min-width: 140px; }
+.output-section .metric-label { color: #64748b; }
+.output-section .metric-value { font-weight: 700; color: #1e40af; }
+.badge-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; font-weight: 600; padding: 3px 10px;
+  border-radius: 12px;
+}
+.badge-blue { background: #dbeafe; color: #1e40af; }
+.badge-green { background: #d1fae5; color: #065f46; }
+.badge-amber { background: #fef3c7; color: #92400e; }
+.badge-red { background: #fee2e2; color: #991b1b; }
+.badge-purple { background: #ede9fe; color: #5b21b6; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>stark-pr-status</h1>
+  <div class="sub">PR Analytics Dashboard — Review rounds, findings, signal-vs-noise, time-to-merge</div>
+  <div class="scope">USAGE GUIDE</div>
+</div>
+
+<div class="container">
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#1e40af"></div> Workflow Phase</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed"></div> Decision Point</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#047857"></div> Configuration</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> Output</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#dc2626"></div> Error State</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e5e7eb; border:1px dashed #9ca3af"></div> External Dep</div>
+  </div>
+
+  <!-- Quick Start -->
+  <div class="section-title">Quick Start</div>
+  <div class="invocation-box">
+    <span class="comment"># Single PR — full dashboard</span><br>
+    <span class="prompt">/stark-pr-status</span> <span class="value">42</span><br><br>
+    <span class="comment"># All PRs in current repo</span><br>
+    <span class="prompt">/stark-pr-status</span><br><br>
+    <span class="comment"># Filtered by state</span><br>
+    <span class="prompt">/stark-pr-status</span> <span class="flag">--state</span> <span class="value">open</span><br><br>
+    <span class="comment"># Specific repo, JSON output</span><br>
+    <span class="prompt">/stark-pr-status</span> <span class="flag">--repo</span> <span class="value">GetEvinced/web-sdk</span> <span class="flag">--json</span>
+  </div>
+
+  <!-- Arguments -->
+  <div class="section-title">Arguments &amp; Flags</div>
+  <table class="data-table">
+    <thead>
+      <tr><th>Argument</th><th>Type</th><th>Default</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>PR_NUMBER</code></td>
+        <td><span class="tag tag-phase">positional</span></td>
+        <td>none</td>
+        <td>Show full dashboard for a single PR</td>
+      </tr>
+      <tr>
+        <td><code>--all</code></td>
+        <td><span class="tag tag-config">flag</span></td>
+        <td>true when no number</td>
+        <td>Show summary table for all PRs</td>
+      </tr>
+      <tr>
+        <td><code>--repo ORG/NAME</code></td>
+        <td><span class="tag tag-config">option</span></td>
+        <td>auto-detect</td>
+        <td>Override repo detection from git remote</td>
+      </tr>
+      <tr>
+        <td><code>--state STATE</code></td>
+        <td><span class="tag tag-decision">option</span></td>
+        <td>all</td>
+        <td>Filter: <code>open</code>, <code>closed</code>, <code>merged</code>, or <code>all</code></td>
+      </tr>
+      <tr>
+        <td><code>--json</code></td>
+        <td><span class="tag tag-output">flag</span></td>
+        <td>off</td>
+        <td>Machine-readable JSON output</td>
+      </tr>
+      <tr>
+        <td><code>--limit N</code></td>
+        <td><span class="tag tag-config">option</span></td>
+        <td>20</td>
+        <td>Max PRs shown in all-PRs mode</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Workflow -->
+  <div class="section-title">Workflow</div>
+  <div class="flow">
+
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Input:</strong> PR number, flags, or nothing (defaults to all)</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:340px">
+          <div class="node-title">Phase 1: Run pr_status.py</div>
+          <div class="node-desc">Execute script with user arguments</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Script:</strong> ~/.claude/code-review/scripts/pr_status.py</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Sources:</strong> GitHub REST API + local stark-review history</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-external" style="width:340px">
+          <div class="node-title">Data Collection</div>
+          <div class="node-desc">GitHub API: PR metadata, reviews, comments, CI status</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Auth:</strong> GitHub App tokens (auto-refreshed)</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width:340px">
+          <div class="node-title">Mode: Single PR or All PRs?</div>
+          <div class="node-desc">Number given = single PR detail; otherwise = summary table</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-output" style="width:340px">
+          <div class="node-title">Phase 2: Present Results</div>
+          <div class="node-desc">Pre-formatted terminal output or JSON</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Patterns:</strong> stale PRs, noisy reviews, merge-ready PRs</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:340px">
+          <div class="node-title">Phase 3: Actionable Suggestions</div>
+          <div class="node-desc">Recommend next skills based on patterns</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Suggests:</strong> /stark-review, /stark-review-improvement, /stark-pr-flow</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Single PR Output -->
+  <div class="section-title">Single PR Output</div>
+  <div class="output-section">
+    <h4>PR #42 — Add user authentication middleware</h4>
+    <div class="badge-row">
+      <span class="badge badge-green">Merged</span>
+      <span class="badge badge-blue">3 review rounds</span>
+      <span class="badge badge-amber">2.4 days to merge</span>
+    </div>
+    <div style="margin-top:12px">
+      <span class="metric"><span class="metric-label">Author:</span> <span class="metric-value">aryeh</span></span>
+      <span class="metric"><span class="metric-label">Reviewers:</span> <span class="metric-value">3 humans, 3 bots</span></span>
+      <span class="metric"><span class="metric-label">Findings:</span> <span class="metric-value">18 total</span></span>
+    </div>
+    <div style="margin-top:12px">
+      <span class="metric"><span class="metric-label">Fixed:</span> <span class="metric-value" style="color:#059669">12</span></span>
+      <span class="metric"><span class="metric-label">Noise:</span> <span class="metric-value" style="color:#92400e">4</span></span>
+      <span class="metric"><span class="metric-label">False Positive:</span> <span class="metric-value" style="color:#dc2626">2</span></span>
+    </div>
+    <div style="margin-top:12px; font-size:10px; color:#64748b">
+      Most impactful: "Missing rate-limit on auth endpoint" (stark-claude, security domain)<br>
+      Timeline: opened Mar 20 &rarr; review round 1 (Mar 20) &rarr; round 2 (Mar 21) &rarr; round 3 (Mar 22) &rarr; merged Mar 22
+    </div>
+  </div>
+
+  <!-- All PRs Output -->
+  <div class="section-title">All PRs Output (Summary Table)</div>
+  <table class="data-table">
+    <thead>
+      <tr><th>PR</th><th>Title</th><th>State</th><th>Reviews</th><th>Findings</th><th>Signal %</th><th>Time</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>#42</td><td>Add auth middleware</td><td><span class="tag tag-config">merged</span></td><td>3</td><td>18</td><td>67%</td><td>2.4d</td></tr>
+      <tr><td>#41</td><td>Fix logging format</td><td><span class="tag tag-config">merged</span></td><td>1</td><td>4</td><td>100%</td><td>0.5d</td></tr>
+      <tr><td>#40</td><td>Upgrade deps to latest</td><td><span class="tag tag-phase">open</span></td><td>0</td><td>0</td><td>—</td><td>8d</td></tr>
+      <tr><td>#39</td><td>Refactor DB layer</td><td><span class="tag tag-decision">closed</span></td><td>2</td><td>11</td><td>73%</td><td>—</td></tr>
+    </tbody>
+  </table>
+
+  <!-- Common Workflows -->
+  <div class="section-title">Common Workflows</div>
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>Check on a specific PR</h3>
+      <p><code>/stark-pr-status 42</code><br><br>
+      Full dashboard for PR #42: review rounds, findings breakdown by severity and outcome, participant list, signal-vs-noise analysis, and chronological timeline.</p>
+    </div>
+    <div class="card card-green">
+      <h3>Triage open PRs</h3>
+      <p><code>/stark-pr-status --state open</code><br><br>
+      Summary table of all open PRs. Quickly spot stale PRs with no reviews, or PRs ready to merge. Skill auto-suggests next actions for each.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>Review quality audit</h3>
+      <p><code>/stark-pr-status --all --state merged</code><br><br>
+      See signal-to-noise ratios across all merged PRs. Identify which domains produce the most actionable findings vs. noise. Feed into /stark-review-improvement.</p>
+    </div>
+    <div class="card card-amber">
+      <h3>Cross-repo dashboard</h3>
+      <p><code>/stark-pr-status --repo GetEvinced/web-sdk --state open</code><br><br>
+      Check PR status in any repo without switching directories. Combine with --json for scripting or piping into other tools.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>Machine-readable export</h3>
+      <p><code>/stark-pr-status --json --limit 50</code><br><br>
+      JSON output for integration with dashboards, CI pipelines, or custom analytics. Each PR includes full metrics payload.</p>
+    </div>
+    <div class="card card-red">
+      <h3>Spot stale reviews</h3>
+      <p><code>/stark-pr-status --state open</code><br><br>
+      PRs open &gt; 7 days with no reviews are flagged. The skill suggests running /stark-review to unblock them.</p>
+    </div>
+  </div>
+
+  <!-- Actionable Suggestions -->
+  <div class="section-title">Automatic Suggestions</div>
+  <div class="summary-grid">
+    <div class="summary-card card-blue">
+      <h3>Stale PR Detected</h3>
+      <p>Open &gt; 7 days, no reviews<br><strong>Suggests:</strong> /stark-review</p>
+    </div>
+    <div class="summary-card card-amber">
+      <h3>High Noise Ratio</h3>
+      <p>Many false positives in findings<br><strong>Suggests:</strong> /stark-review-improvement</p>
+    </div>
+    <div class="summary-card card-green">
+      <h3>Ready to Merge</h3>
+      <p>Approved + CI green<br><strong>Suggests:</strong> /stark-pr-flow</p>
+    </div>
+  </div>
+
+  <!-- Failure Modes -->
+  <div class="section-title">Failure Modes</div>
+  <table class="data-table">
+    <thead>
+      <tr><th>Exit Code</th><th>Cause</th><th>Recovery</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="tag tag-failure">1</span></td>
+        <td>No repo detected</td>
+        <td>Run from a git repo or use <code>--repo org/name</code></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-failure">2</span></td>
+        <td>PR not found</td>
+        <td>Verify PR number exists in the target repo</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-failure">3</span></td>
+        <td>GitHub API error / auth failure</td>
+        <td>Run <code>install.sh</code> or check GitHub App credentials</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-output">—</span></td>
+        <td>No stark-review history for PR</td>
+        <td>GitHub data shown; "No stark-review history" noted</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-failure">—</span></td>
+        <td>Rate limited</td>
+        <td>Wait a few minutes and retry</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Data Sources -->
+  <div class="section-title">Data Sources</div>
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>GitHub API</h3>
+      <p>PR metadata, review comments, review requests, CI check status, merge events, participants. Always available if auth is configured.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>Stark-Review History</h3>
+      <p>Local history from previous /stark-review runs: findings by domain, severity classifications, signal-vs-noise outcomes. Enriches the dashboard when available.</p>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">stark-pr-status &middot; stark-skills &middot; Generated 2026-03-27</div>
+
+</body>
+</html>

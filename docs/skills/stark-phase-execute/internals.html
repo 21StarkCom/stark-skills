@@ -1,8 +1,8 @@
-<html lang="en">
+<html>
 <head>
 
 
-<title>stark-phase-execute — Internals</title>
+<title>stark-phase-execute — Internal Architecture</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -136,96 +136,136 @@ body {
   font-size: 10px; color: #999;
 }
 
-/* === Extension: Task Loop Detail === */
+/* === Extension: Internal Architecture Styles === */
 .loop-container {
-  border: 2px solid #1e40af; border-radius: 12px;
-  padding: 20px 16px; margin: 16px auto; max-width: 780px;
-  background: #f8faff; position: relative;
+  border: 2px solid #7c3aed;
+  border-radius: 12px;
+  padding: 16px 8px;
+  margin: 8px 0;
+  position: relative;
+  background: #faf8ff;
 }
 .loop-label {
-  position: absolute; top: -10px; left: 24px;
-  background: #1e40af; color: #fff; font-size: 10px; font-weight: 700;
-  padding: 2px 10px; border-radius: 4px;
-}
-.loop-inner { display: flex; flex-direction: column; gap: 0; align-items: center; }
-.review-loop {
-  border: 2px dashed #7c3aed; border-radius: 10px;
-  padding: 16px 12px; margin: 8px 0; max-width: 600px; width: 100%;
-  background: #faf8ff; position: relative;
-}
-.review-loop-label {
   position: absolute; top: -10px; left: 20px;
-  background: #7c3aed; color: #fff; font-size: 9px; font-weight: 700;
-  padding: 2px 8px; border-radius: 4px;
+  background: #7c3aed; color: #fff;
+  font-size: 9px; font-weight: 700;
+  padding: 2px 10px; border-radius: 3px;
+  letter-spacing: 0.5px;
 }
-.mini-flow { display: flex; flex-direction: column; align-items: center; gap: 0; }
-.mini-node { border-radius: 6px; padding: 8px 14px; text-align: center; min-width: 200px; }
-.mini-arrow { width: 2px; height: 14px; background: #cbd5e1; margin: 0 auto; position: relative; }
-.mini-arrow::after {
-  content: ''; position: absolute; bottom: -3px; left: -3px;
-  border-left: 4px solid transparent; border-right: 4px solid transparent;
-  border-top: 5px solid #cbd5e1;
+.inner-loop {
+  border: 2px dashed #f59e0b;
+  border-radius: 10px;
+  padding: 12px 8px;
+  margin: 8px 0;
+  position: relative;
+  background: #fffdf5;
 }
-.branch-row { display: flex; gap: 12px; align-items: center; justify-content: center; margin: 6px 0; }
-.branch-arrow {
-  font-size: 10px; color: #7c3aed; font-weight: 600;
+.inner-loop-label {
+  position: absolute; top: -10px; left: 20px;
+  background: #f59e0b; color: #1a1a1a;
+  font-size: 9px; font-weight: 700;
+  padding: 2px 10px; border-radius: 3px;
 }
 .auth-badge {
   display: inline-block; font-size: 8px; font-weight: 700;
   padding: 1px 6px; border-radius: 3px; margin-left: 4px;
 }
 .auth-user { background: #dbeafe; color: #1e40af; }
-.auth-bot  { background: #fef3c7; color: #92400e; }
-.phase-header {
-  font-size: 11px; font-weight: 700; color: #1e40af;
-  margin: 12px 0 4px; text-transform: uppercase; letter-spacing: 0.5px;
+.auth-bot  { background: #fce7f3; color: #9d174d; }
+.mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 10px; }
+.data-flow-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.data-flow-arrow { color: #cbd5e1; font-size: 14px; }
+.ext-point {
+  border: 1px dashed #059669; border-radius: 6px;
+  padding: 6px 10px; font-size: 10px; color: #059669;
+  background: #ecfdf5; margin: 4px 0;
 }
-.observability-strip {
-  background: #f3f4f6; border-radius: 6px; padding: 10px 14px;
-  margin: 12px auto; max-width: 780px; font-size: 10px; color: #555;
-  border-left: 3px solid #333;
+.subagent-box {
+  background: #1e293b; color: #e2e8f0; border-radius: 6px;
+  padding: 8px 12px; font-size: 10px; margin: 4px 0;
 }
-.observability-strip strong { color: #333; }
+.subagent-box strong { color: #93c5fd; }
+.worktree-box {
+  background: #fef9ee; border: 1px solid #fbbf24; border-radius: 6px;
+  padding: 8px 12px; font-size: 10px; margin: 4px 0;
+}
+.phase-num {
+  display: inline-block; width: 22px; height: 22px;
+  background: #1e40af; color: #fff; border-radius: 50%;
+  text-align: center; line-height: 22px; font-size: 10px;
+  font-weight: 700; margin-right: 6px;
+}
+.connector-branch {
+  display: flex; align-items: flex-start; gap: 0;
+}
+.connector-branch .branch-line {
+  width: 2px; background: #cbd5e1; min-height: 40px;
+}
+.connector-branch .branch-arm {
+  width: 30px; height: 2px; background: #cbd5e1; margin-top: 18px;
+}
+.file-ref {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 9px; color: #059669; background: #ecfdf5;
+  padding: 1px 5px; border-radius: 3px;
+}
 </style>
 </head>
 <body>
 
 <div class="header">
   <h1>stark-phase-execute</h1>
-  <div class="sub">Autonomous phase execution engine — internal architecture &amp; data flow</div>
-  <div class="scope">INTERNALS — contributor/developer focused</div>
+  <div class="sub">Autonomous Phase Execution Engine — Internal Architecture &amp; Data Flow</div>
+  <div class="scope">INTERNALS · contributor/developer reference</div>
 </div>
 
 <div class="container">
 
   <!-- Legend -->
   <div class="legend">
-    <div class="legend-item"><div class="legend-dot" style="background:#1e40af;"></div> Phase / Step</div>
-    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed;"></div> Decision</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#1e40af;"></div> Phase</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed;"></div> Decision / Loop</div>
     <div class="legend-item"><div class="legend-dot" style="background:#047857;"></div> Config</div>
-    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b;"></div> Output</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b;"></div> Output / Artifact</div>
     <div class="legend-item"><div class="legend-dot" style="background:#dc2626;"></div> Failure</div>
-    <div class="legend-item"><div class="legend-dot" style="background:#e5e7eb; border:1px dashed #9ca3af;"></div> External</div>
-    <div class="legend-item"><span class="auth-badge auth-user">USER PAT</span> gh native auth</div>
-    <div class="legend-item"><span class="auth-badge auth-bot">BOT TOKEN</span> stark-claude[bot]</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e5e7eb;"></div> External Dep</div>
+    <div class="legend-item"><span class="auth-badge auth-user">USER PAT</span> User auth</div>
+    <div class="legend-item"><span class="auth-badge auth-bot">BOT TOKEN</span> App auth</div>
   </div>
 
-  <!-- ========== PHASE 0 ========== -->
-  <div class="section-title">Phase 0 — Initialize</div>
+  <!-- ═══════════════ PHASE 0 ═══════════════ -->
+  <div class="section-title"><span class="phase-num">0</span> Initialize</div>
 
   <div class="flow">
     <div class="flow-step">
       <div class="flow-lane-left">
-        <div class="annotation"><strong>Input:</strong> plan slug or file path + CLI flags</div>
+        <div class="annotation"><strong>Entry point</strong><br>CLI arg: slug or file path</div>
       </div>
       <div class="flow-lane-center">
-        <div class="node node-phase" style="width:380px;">
+        <div class="node node-phase" style="width:400px;">
+          <div class="node-title">Parse Arguments &amp; Resolve Slug</div>
+          <div class="node-desc">File path → strip dir, ext, known suffixes (-design, -spec, -plan). Direct string → use as slug. Truncate >50 chars w/ MD5 hash.</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><span class="tag tag-config">MUST match</span><br><span class="file-ref">stark-plan-to-tasks</span> slug derivation algorithm</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Env checks</strong><br>gh, claude, codex, gemini in PATH</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-config" style="width:400px;">
           <div class="node-title">0.1 Validate Environment</div>
-          <div class="node-desc">git main clean · gh/claude/codex/gemini in PATH · bot token OK</div>
+          <div class="node-desc">Clean main, tools in PATH, gh auth, GitHub App tokens reachable via <span class="mono">github_app.py</span></div>
         </div>
       </div>
       <div class="flow-lane-right">
-        <div class="annotation"><strong>Fails:</strong> stop immediately, report broken env</div>
+        <div class="annotation"><span class="file-ref">scripts/github_app.py</span><br>Token cached at <span class="mono">~/.cache/github-app-token.json</span></div>
       </div>
     </div>
 
@@ -233,16 +273,20 @@ body {
 
     <div class="flow-step">
       <div class="flow-lane-left">
-        <div class="annotation"><strong>Slug resolution:</strong> file path → strip dir/ext/suffixes; else literal slug</div>
+        <div class="annotation"><strong>Two strategies</strong><br>Project V2 fields → label fallback</div>
       </div>
       <div class="flow-lane-center">
-        <div class="node node-decision" style="width:380px;">
+        <div class="node node-decision" style="width:400px;">
           <div class="node-title">0.2 Fetch Plan Tasks</div>
-          <div class="node-desc">project-config.json? → GitHub Projects V2 query<br></br>fallback → gh api issues?labels=plan:{SLUG}</div>
+          <div class="node-desc">
+            <strong>Path A:</strong> .github/project-config.json → query Project V2 (Status=Ready for Agent, AI Suitability∈{Autonomous,Assisted})<span class="auth-badge auth-bot">BOT</span><br>
+            <strong>Path B:</strong> gh API label:plan:{SLUG}<span class="auth-badge auth-user">USER PAT</span><br>
+            Filter out phase tracking issues (no <span class="mono">## What</span> section)
+          </div>
         </div>
       </div>
       <div class="flow-lane-right">
-        <div class="annotation"><strong>Filter:</strong> drop phase tracking issues (no <code>## What</code>). Keep only implementable tasks.</div>
+        <div class="annotation"><span class="file-ref">scripts/github_projects.py</span><br><span class="tag tag-decision">Decision</span> raw_count=0 → auto-decompose (0.3)</div>
       </div>
     </div>
 
@@ -250,16 +294,16 @@ body {
 
     <div class="flow-step">
       <div class="flow-lane-left">
-        <div class="annotation"><strong>Condition:</strong> raw_issue_count == 0</div>
+        <div class="annotation"><strong>Auto-decompose</strong><br>Only when raw_count=0</div>
       </div>
       <div class="flow-lane-center">
-        <div class="node node-decision" style="width:380px;">
-          <div class="node-title">0.3 Auto-Decompose?</div>
-          <div class="node-desc">No issues → invoke /stark-plan-to-tasks on plan file<br></br>--dry-run stops here with report</div>
+        <div class="node node-external" style="width:400px;">
+          <div class="node-title">0.3 Invoke /stark-plan-to-tasks</div>
+          <div class="node-desc">Locate plan file (explicit path or find docs/*{SLUG}*.md). Invoke skill → 3 LLM passes (quality gate → decomposition → validation). Re-fetch tasks via 0.2.</div>
         </div>
       </div>
       <div class="flow-lane-right">
-        <div class="annotation"><strong>Delegates to:</strong> /stark-plan-to-tasks (3 LLM passes). Then re-fetches.</div>
+        <div class="annotation"><span class="tag tag-failure">dry-run stops here</span><br>Never creates real issues in dry-run mode</div>
       </div>
     </div>
 
@@ -267,150 +311,201 @@ body {
 
     <div class="flow-step">
       <div class="flow-lane-left">
-        <div class="annotation"><strong>Creates:</strong> parent + child TodoWrite tasks</div>
+        <div class="annotation"><strong>Observability</strong><br>JSON log per phase run</div>
       </div>
       <div class="flow-lane-center">
-        <div class="node node-output" style="width:380px;">
-          <div class="node-title">0.4 Phase Briefing + 0.5 Observability Log</div>
-          <div class="node-desc">Print task table · init phase-{SLUG}-{timestamp}.json</div>
+        <div class="node node-output" style="width:400px;">
+          <div class="node-title">0.4–0.5 Briefing &amp; Init Log</div>
+          <div class="node-desc">Print task table, create TodoWrite tasks, write <span class="mono">{HISTORY}/{ORG}/{REPO}/phase-{SLUG}-{ts}.json</span></div>
         </div>
       </div>
       <div class="flow-lane-right">
-        <div class="annotation"><strong>Log path:</strong> ~/.claude/code-review/history/{ORG}/{REPO}/</div>
+        <div class="annotation"><span class="file-ref">~/.claude/code-review/history/</span></div>
       </div>
     </div>
   </div>
 
-  <!-- ========== PHASE 1 ========== -->
-  <div class="section-title">Phase 1 — Task Loop (sequential, each merges to main)</div>
+  <!-- ═══════════════ PHASE 1 ═══════════════ -->
+  <div class="section-title"><span class="phase-num">1</span> Task Loop — Sequential Execution</div>
 
-  <div class="loop-container">
-    <div class="loop-label">FOR EACH TASK ISSUE</div>
-    <div class="loop-inner">
+  <div class="flow">
+    <div class="loop-container">
+      <div class="loop-label">FOR EACH TASK (sequential — each merges before next starts)</div>
 
       <!-- 1.1 -->
-      <div class="mini-flow">
-        <div class="mini-node node-phase">
-          <div class="node-title">1.1 Session Start</div>
-          <div class="node-desc">git checkout main · pull · branch phase/{SLUG}/issue-{N}-{title}</div>
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>1.1 Session Start</strong><br>Branch from latest main</div>
         </div>
-        <div style="font-size:9px;color:#666;margin:4px 0;">
-          Project config? → <span class="auth-badge auth-bot">BOT</span> check_spec_completeness · transition → Agent Working · set Agent=Claude
+        <div class="flow-lane-center">
+          <div class="node node-phase" style="width:420px;">
+            <div class="node-title">Checkout &amp; Branch</div>
+            <div class="node-desc">
+              <span class="mono">git checkout main && git pull --rebase</span><br>
+              <span class="mono">git checkout -b phase/{SLUG}/issue-{N}-{slug}</span><br>
+              If Project V2: validate spec completeness, claim task (Status→Agent Working, Agent→Claude)<span class="auth-badge auth-bot">BOT</span>
+            </div>
+          </div>
         </div>
-        <div class="mini-arrow"></div>
+        <div class="flow-lane-right">
+          <div class="annotation"><span class="tag tag-decision">Gate</span> Spec incomplete → skip task, log reason</div>
+        </div>
       </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
       <!-- 1.2 -->
-      <div class="mini-flow">
-        <div class="mini-node node-phase">
-          <div class="node-title">1.2 Implement (Subagent)</div>
-          <div class="node-desc">Agent tool, foreground — read issue, explore code, implement, test, commit</div>
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>1.2 Implement</strong><br>Delegated to subagent</div>
         </div>
-        <div style="font-size:9px;color:#666;margin:4px 0;">
-          Ambiguity detected? → <span class="auth-badge auth-bot">BOT</span> transition → Blocked · skip task
+        <div class="flow-lane-center">
+          <div class="subagent-box" style="width:420px;">
+            <strong>Agent Tool (foreground)</strong><br>
+            Prompt: read issue → explore codebase → implement → test → commit<br>
+            <span style="color:#fbbf24;">⚠ No push — orchestrator handles that</span><br>
+            On ambiguity + Project V2: transition to Blocked, skip task
+          </div>
         </div>
-        <div class="mini-arrow"></div>
+        <div class="flow-lane-right">
+          <div class="annotation"><span class="tag tag-failure">No changes?</span> → log as skipped, continue</div>
+        </div>
       </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
       <!-- 1.3 -->
-      <div class="mini-flow">
-        <div class="mini-node node-phase">
-          <div class="node-title">1.3 Push &amp; Create PR <span class="auth-badge auth-user">USER PAT</span></div>
-          <div class="node-desc">git push -u · gh pr create (non-draft) · body via temp file</div>
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>1.3 Push &amp; PR</strong><span class="auth-badge auth-user">USER PAT</span></div>
         </div>
-        <div class="mini-arrow"></div>
-      </div>
-
-      <!-- 1.4 Review Loop -->
-      <div class="review-loop">
-        <div class="review-loop-label">REVIEW LOOP — up to N rounds</div>
-        <div class="mini-flow">
-          <div style="font-size:9px;color:#555;margin-bottom:6px;">
-            <strong>Worktree isolation:</strong> git worktree add /tmp/review-{REPO}-pr{N}
-          </div>
-          <div class="mini-node node-external" style="min-width:340px;">
-            <div class="node-title">multi_review.py --pr N --json-only --dry-run</div>
-            <div class="node-desc">3 LLMs × N domains → structured JSON findings (one round)</div>
-          </div>
-          <div class="mini-arrow"></div>
-          <div class="mini-node node-decision" style="min-width:340px;">
-            <div class="node-title">Classify Findings</div>
-            <div class="node-desc">fix (sev ≥ medium + exists) · false_positive · noise · ignored</div>
-          </div>
-          <div class="mini-arrow"></div>
-
-          <div class="branch-row">
-            <div class="mini-node node-config" style="padding:6px 10px;min-width:auto;">
-              <div class="node-desc">0 fix findings → STOP</div>
-            </div>
-            <span class="branch-arrow">or</span>
-            <div class="mini-node node-phase" style="padding:6px 10px;min-width:auto;">
-              <div class="node-desc">Fix → Test → Commit → Push</div>
-            </div>
-            <span class="branch-arrow">or</span>
-            <div class="mini-node node-failure" style="padding:6px 10px;min-width:auto;">
-              <div class="node-desc">round ≥ MAX → STOP</div>
+        <div class="flow-lane-center">
+          <div class="node node-phase" style="width:420px;">
+            <div class="node-title">Create Pull Request</div>
+            <div class="node-desc">
+              <span class="mono">unset GH_TOKEN</span> → push → <span class="mono">gh pr create</span><br>
+              Body via temp file (never interpolate LLM in shell). Includes <span class="mono">Closes #{N}</span>.<br>
+              No draft PRs. No user confirmation.
             </div>
           </div>
-
-          <div style="font-size:9px;color:#555;margin-top:8px;">
-            After loop: <span class="auth-badge auth-bot">BOT</span> post consolidated review via pr_review() · clean up worktree
-          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><span class="tag tag-output">PR #{N}</span><br>PR number parsed from URL</div>
         </div>
       </div>
 
-      <div class="mini-arrow"></div>
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- 1.4 Review loop -->
+      <div class="flow-step">
+        <div class="flow-lane-left"></div>
+        <div class="flow-lane-center">
+          <div class="inner-loop" style="width:440px;">
+            <div class="inner-loop-label">REVIEW LOOP (up to --rounds N, default 3)</div>
+
+            <div class="worktree-box">
+              <strong>Worktree Isolation</strong><br>
+              <span class="mono">git worktree add /tmp/review-{REPO}-pr{N}</span><br>
+              All review + fixes happen here, NOT in the main working tree.
+            </div>
+
+            <div style="margin:8px 0;">
+              <div class="data-flow-row">
+                <span class="node node-external" style="padding:4px 10px;"><span class="node-title" style="margin:0;">multi_review.py</span></span>
+                <span class="data-flow-arrow">→</span>
+                <span class="tag tag-output">JSON findings</span>
+              </div>
+              <div style="font-size:10px; color:#666; margin:4px 0 8px 0;">
+                <span class="mono">--pr N --base $merge_base --json-only --dry-run</span><br>
+                Runs 18 sub-agents (3 LLMs × 6 domains). One round only — loop is managed HERE.
+              </div>
+            </div>
+
+            <div class="node node-decision" style="padding:8px 12px; margin:6px 0;">
+              <div class="node-title">Classify Findings</div>
+              <div class="node-desc">Read file:line in worktree → fix | false_positive | noise | ignored</div>
+            </div>
+
+            <div style="font-size:10px; margin:8px 0;">
+              <span class="tag tag-decision">Stop if:</span> zero fix findings, all FP/noise, or round ≥ max<br>
+              <span class="tag tag-phase">Continue:</span> fix findings in worktree → test → commit → push to PR branch
+            </div>
+
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation">
+            <strong>1.4 Review</strong><br>
+            <span class="file-ref">scripts/multi_review.py</span><br>
+            <span class="auth-badge auth-bot">BOT</span> for posting review summary via <span class="file-ref">github_app.py</span><br>
+            <span class="auth-badge auth-user">USER PAT</span> unset during dispatch
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
       <!-- 1.5 Merge -->
-      <div class="mini-flow">
-        <div class="mini-node node-phase">
-          <div class="node-title">1.5 Merge <span class="auth-badge auth-user">USER PAT</span></div>
-          <div class="node-desc">gh pr checks --watch · gh pr merge --squash --admin --delete-branch</div>
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>1.5 Merge</strong><span class="auth-badge auth-user">USER PAT</span></div>
         </div>
-        <div style="font-size:9px;color:#666;margin:4px 0;">
-          CI fails → merge anyway with --admin, flag ci_bypassed:true
-        </div>
-        <div class="mini-arrow"></div>
-      </div>
-
-      <!-- 1.6-1.7 -->
-      <div class="mini-flow">
-        <div class="branch-row">
-          <div class="mini-node node-phase" style="padding:8px 12px;min-width:auto;">
-            <div class="node-title">1.6 Close Issue</div>
-            <div class="node-desc">Verify auto-close · fallback explicit</div>
-          </div>
-          <div class="mini-node node-output" style="padding:8px 12px;min-width:auto;">
-            <div class="node-title">1.7 Log Task Result</div>
-            <div class="node-desc">Append to observability JSON</div>
+        <div class="flow-lane-center">
+          <div class="node node-phase" style="width:420px;">
+            <div class="node-title">Squash Merge &amp; Cleanup</div>
+            <div class="node-desc">
+              <span class="mono">gh pr merge --squash --admin --delete-branch</span><br>
+              CI fail → merge anyway with --admin, flag <span class="mono">ci_bypassed:true</span><br>
+              Auto-close issue via <span class="mono">Closes #{N}</span>. Verify closure, force-close if needed.
+            </div>
           </div>
         </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><span class="tag tag-config">No approval wait</span><br><span class="mono">git fetch --prune</span> after merge</div>
+        </div>
       </div>
 
-      <!-- 1.8 Error handling -->
-      <div class="observability-strip" style="margin-top:10px;">
-        <strong>1.8 Error Handling:</strong> Any step fails → log error · set status=failed · cleanup branches/worktrees · <strong>continue to next task</strong> (never block)
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <!-- 1.7/1.8 -->
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>1.7–1.8</strong><br>Log result or error</div>
+        </div>
+        <div class="flow-lane-center" style="gap:12px;">
+          <div class="node node-output" style="padding:8px 12px; width:200px;">
+            <div class="node-title">Log Task Result</div>
+            <div class="node-desc">Append to phase JSON</div>
+          </div>
+          <div class="node node-failure" style="padding:8px 12px; width:200px;">
+            <div class="node-title">Error Handler</div>
+            <div class="node-desc">Log, cleanup branch/worktree, continue</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Never block the phase.</strong> Failures logged, next task starts.</div>
+        </div>
       </div>
 
-    </div>
+    </div><!-- end loop-container -->
   </div>
 
-  <!-- ========== PHASE 2-5 ========== -->
-  <div class="section-title">Phases 2–5 — Post-Loop Pipeline</div>
+  <!-- ═══════════════ PHASES 2–5 ═══════════════ -->
+  <div class="section-title"><span class="phase-num">2</span> Post-Loop Phases</div>
 
   <div class="flow">
     <div class="flow-step">
       <div class="flow-lane-left">
-        <div class="annotation"><strong>Detect:</strong> test command from config hierarchy or package manifest</div>
+        <div class="annotation"><strong>Phase 2</strong><br>Detect test cmd from config hierarchy</div>
       </div>
       <div class="flow-lane-center">
-        <div class="node node-phase" style="width:380px;">
-          <div class="node-title">Phase 2: Regression Testing</div>
-          <div class="node-desc">Full test suite on main after all merges. Log pass/fail/skip counts.</div>
+        <div class="node node-phase" style="width:400px;">
+          <div class="node-title">Regression Testing</div>
+          <div class="node-desc">Checkout main → run full test suite. Log pass/fail/skip counts. Failures don't block.</div>
         </div>
       </div>
       <div class="flow-lane-right">
-        <div class="annotation"><strong>Failures:</strong> logged but don't block. Dashboard surfaces them.</div>
+        <div class="annotation"><span class="tag tag-config">Config cascade</span><br>.code-review/config.json → global config → auto-detect</div>
       </div>
     </div>
 
@@ -418,380 +513,236 @@ body {
 
     <div class="flow-step">
       <div class="flow-lane-left">
-        <div class="annotation"><strong>Skip if:</strong> --skip-release flag</div>
+        <div class="annotation"><strong>Phase 3</strong><br><span class="mono">--skip-release</span> skips this</div>
       </div>
       <div class="flow-lane-center">
-        <div class="node node-phase" style="width:380px;">
-          <div class="node-title">Phase 3: Release &amp; Deploy</div>
-          <div class="node-desc">3.1 Update CHANGELOG (by issue type) → 3.2 /stark-release {bump} → 3.3 deploy_command</div>
+        <div class="node node-phase" style="width:400px;">
+          <div class="node-title">CHANGELOG → Release → Deploy</div>
+          <div class="node-desc">
+            3.1: Generate CHANGELOG entries per task type (Feature→Added, Bug→Fixed, Task→Changed)<br>
+            3.2: Determine bump (Feature→minor, Bug/Task→patch, breaking→major) → delegate to <span class="mono">/stark-release</span><br>
+            3.3: Run deploy_command from config (if configured, and not --skip-deploy)
+          </div>
         </div>
       </div>
       <div class="flow-lane-right">
-        <div class="annotation"><strong>Bump logic:</strong> Feature→minor · Bug/Task→patch · Breaking→major. Delegates to /stark-release.</div>
+        <div class="annotation"><span class="tag tag-external">/stark-release</span><br>Respects repo-level overrides<br><span class="ext-point">Extension: deploy_command in config</span></div>
       </div>
     </div>
 
     <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
     <div class="flow-step">
-      <div class="flow-lane-left"></div>
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Phase 4</strong><br>Terminal dashboard</div>
+      </div>
       <div class="flow-lane-center">
-        <div class="node node-output" style="width:380px;">
-          <div class="node-title">Phase 4: Dashboard</div>
-          <div class="node-desc">Task summary table · aggregate stats · agent scorecard · failed task details</div>
+        <div class="node node-output" style="width:400px;">
+          <div class="node-title">Dashboard</div>
+          <div class="node-desc">Task summary table · Aggregate stats · Agent scorecard (findings/fixed/noise/accuracy per agent) · Failed task details</div>
         </div>
       </div>
       <div class="flow-lane-right">
-        <div class="annotation"><strong>Output:</strong> formatted terminal tables + metrics block per observability protocol</div>
+        <div class="annotation">Includes improvement flags: bottleneck phases, high failure rate, agent accuracy drift</div>
       </div>
     </div>
 
     <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
 
     <div class="flow-step">
-      <div class="flow-lane-left"></div>
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Phase 5</strong><br>Self-improvement loop</div>
+      </div>
       <div class="flow-lane-center">
-        <div class="node node-phase" style="width:380px;">
-          <div class="node-title">Phase 5: Housekeeping</div>
-          <div class="node-desc">5.1 Save memory · 5.2 Update docs · 5.3 Prompt improvement detection</div>
+        <div class="node node-config" style="width:400px;">
+          <div class="node-title">Housekeeping</div>
+          <div class="node-desc">
+            5.1: Save project memory (non-obvious decisions, surprises)<br>
+            5.2: Update architecture docs if docs/ exists<br>
+            5.3: Prompt improvement detection — FP rate >20%, recurring findings 3+, agent misses, unparseable output → suggest /stark-review-improvement
+          </div>
         </div>
       </div>
       <div class="flow-lane-right">
-        <div class="annotation"><strong>Thresholds:</strong> FP&gt;20% · same finding 3× · agent miss 2× · unparseable output</div>
+        <div class="annotation"><span class="file-ref">global/prompts/{agent}/{domain}.md</span><br><span class="tag tag-decision">Thresholds trigger flags</span></div>
       </div>
     </div>
   </div>
 
-  <!-- ========== AUTH SPLIT ========== -->
-  <div class="section-title">Auth Token Architecture</div>
+  <!-- ═══════════════ INTERNAL ARCHITECTURE ═══════════════ -->
+  <div class="section-title">Internal Architecture — Data Flow &amp; Auth</div>
 
   <div class="card-grid">
     <div class="card card-blue">
-      <h3>User PAT (gh native auth)</h3>
+      <h3>Auth Split (Critical)</h3>
       <p>
-        <strong>Used for:</strong> creating PRs, merging PRs, creating/closing issues, reading issues, merge operations.<br></br>
-        <strong>Activated by:</strong> <code>unset GH_TOKEN</code> — lets gh fall back to native auth.<br></br>
-        <strong>Shows as:</strong> Aryeh (the user), not a bot.
+        <span class="auth-badge auth-user">USER PAT</span> <strong>unset GH_TOKEN</strong> — PR creation, merge, issue close. Shows Aryeh as actor.<br><br>
+        <span class="auth-badge auth-bot">BOT TOKEN</span> <strong>export GH_TOKEN=$(github_app.py token)</strong> — review comment posting, Project V2 mutations. Shows stark-claude[bot].<br><br>
+        <strong>Rule:</strong> Always unset before PR/merge ops. Only export for review posting &amp; project fields. Never cross the streams.
+      </p>
+    </div>
+    <div class="card card-purple">
+      <h3>Subagent Architecture</h3>
+      <p>
+        <strong>Implementation:</strong> Agent tool (foreground) per task. Prompt includes issue body, branch name, repo root. Subagent commits but never pushes.<br><br>
+        <strong>Review:</strong> multi_review.py dispatches 18 sub-agents (3 LLMs × 6 domains) via ThreadPoolExecutor. Returns JSON. Round loop managed by THIS skill, not multi_review.py.<br><br>
+        <strong>Fix:</strong> Optional subagent for complex fixes inside worktree.
       </p>
     </div>
     <div class="card card-amber">
-      <h3>Bot Token (stark-claude[bot])</h3>
+      <h3>Worktree Isolation</h3>
       <p>
-        <strong>Used for:</strong> posting review comments, GitHub Projects V2 mutations (status transitions, field updates).<br></br>
-        <strong>Activated by:</strong> <code>export GH_TOKEN=$($PYTHON github_app.py --app stark-claude token)</code><br></br>
-        <strong>Key source:</strong> macOS Keychain (STARK_CLAUDE_PRIVATE_KEY, base64 PEM). Cached 1hr at ~/.cache/github-app-token.json.
+        Reviews happen in <span class="mono">/tmp/review-{REPO}-pr{N}</span>, not the main working tree. This prevents review/fix operations from contaminating the orchestrator's git state.<br><br>
+        <strong>Lifecycle:</strong> create → fetch PR head → review → fix → push → remove worktree → delete temp branch.<br><br>
+        <strong>Crash recovery:</strong> If worktree exists from a previous crash, reuse it.
+      </p>
+    </div>
+    <div class="card card-green">
+      <h3>Config Cascade</h3>
+      <p>
+        <strong>Hierarchy:</strong> repo .code-review/config.json → org .code-review/config.json → ~/.claude/code-review/config.json<br><br>
+        <strong>Key fields:</strong> test_command, deploy_command, review domains, agent preambles<br><br>
+        <strong>Project V2:</strong> .github/project-config.json enables project-based task fetching, spec validation, and status transitions.
       </p>
     </div>
     <div class="card card-red">
-      <h3>Critical Rule</h3>
+      <h3>Error Handling Philosophy</h3>
       <p>
-        Never create PRs or merge with bot token. Never post reviews with user PAT.
-        The auth split is enforced by explicit <code>unset GH_TOKEN</code> / <code>export GH_TOKEN=...</code> around each operation.
-        Failure to unset causes PRs to appear as bot, breaking attribution.
-      </p>
-    </div>
-  </div>
-
-  <!-- ========== TASK FETCH STRATEGY ========== -->
-  <div class="section-title">Task Fetching Strategy</div>
-
-  <div class="card-grid">
-    <div class="card card-green">
-      <h3>Project-Based (Preferred)</h3>
-      <p>
-        Reads <code>.github/project-config.json</code> → queries GitHub Projects V2 API for items with Status=<em>Ready for Agent</em> and AI Suitability ∈ {Autonomous, Assisted}.
-        Uses <code>github_projects.get_items()</code> via bot token. Falls back to label-based if no config or no items.
+        <strong>Never block the phase.</strong> Every failure is logged and the next task starts. Merge failures escalate to --admin. CI failures are bypassed (flagged). Branch cleanup happens in the error handler.<br><br>
+        <strong>Rate limits:</strong> wait 60s, retry once, then log and move on.<br>
+        <strong>Subagent timeout:</strong> skip task, continue.
       </p>
     </div>
     <div class="card card-dark">
-      <h3>Label-Based (Fallback)</h3>
+      <h3>Observability</h3>
       <p>
-        Queries <code>gh api /repos/{ORG_REPO}/issues?labels=plan:{SLUG}&amp;state=open</code> via user PAT.
-        Filters out phase tracking issues (body starts with task checklist, no <code>## What</code> section).
-        Extracts sp:N, risk:*, type:* from labels.
-      </p>
-    </div>
-    <div class="card card-purple">
-      <h3>Auto-Decompose (Zero Issues)</h3>
-      <p>
-        If raw_issue_count == 0: locate plan file (argument path or <code>find docs/ -name "*{SLUG}*"</code>), invoke <code>/stark-plan-to-tasks</code> (3 LLM passes), re-fetch.
-        If raw_issue_count &gt; 0 but all filtered: normal end state, not a decomposition trigger.
+        <strong>JSON log:</strong> <span class="mono">~/.claude/code-review/history/{ORG}/{REPO}/phase-{SLUG}-{ts}.json</span><br>
+        Incrementally updated per task. Includes per-task timing, findings by severity/agent, fix rates.<br><br>
+        <strong>Timestamped stdout:</strong> [HH:MM:SS] prefixed logs<br>
+        <strong>5-min checkpoints:</strong> printed at phase transitions after 5min elapsed<br>
+        <strong>TodoWrite tasks:</strong> parent + child per issue, one in_progress at a time
       </p>
     </div>
   </div>
 
-  <!-- ========== REVIEW ARCHITECTURE ========== -->
-  <div class="section-title">Review Round Architecture</div>
-
-  <div class="card-grid">
-    <div class="card card-blue">
-      <h3>Worktree Isolation</h3>
-      <p>
-        Each PR review runs in <code>/tmp/review-{REPO}-pr{N}</code>. Created via <code>git worktree add</code> from FETCH_HEAD.
-        Merge base computed against origin/main. All fixes applied in worktree, pushed to original branch.
-        Cleaned up after loop: <code>git worktree remove</code> + <code>git branch -D</code>.
-      </p>
-    </div>
-    <div class="card card-purple">
-      <h3>Round Loop Ownership</h3>
-      <p>
-        <strong>This skill manages the round loop</strong>, not multi_review.py.
-        multi_review.py runs one round (18 sub-agents: 3 LLMs × 6 domains) and returns JSON.
-        Flags: <code>--json-only</code> (structured output) + <code>--dry-run</code> (don't post to GitHub).
-        The skill classifies findings, fixes, retests, and loops.
-      </p>
-    </div>
-    <div class="card card-dark">
-      <h3>Finding Classification</h3>
-      <p>
-        Each finding inspected at file:line in worktree.<br></br>
-        <strong>fix:</strong> severity ≥ medium AND issue exists in code<br></br>
-        <strong>false_positive:</strong> described problem doesn't exist<br></br>
-        <strong>noise:</strong> subjective/style, or 1 agent contradicted by other 2<br></br>
-        <strong>ignored:</strong> below fix threshold (low severity)
-      </p>
-    </div>
-  </div>
-
-  <!-- ========== DATA FLOW TABLE ========== -->
-  <div class="section-title">Key Data Flows</div>
+  <!-- ═══════════════ EXTENSION POINTS ═══════════════ -->
+  <div class="section-title">Extension Points</div>
 
   <table class="data-table">
     <thead>
       <tr>
-        <th>Data</th>
-        <th>Source</th>
-        <th>Sink</th>
-        <th>Format</th>
+        <th>Extension</th>
+        <th>How to Modify</th>
+        <th>Files</th>
       </tr>
     </thead>
     <tbody>
       <tr>
-        <td>Plan slug</td>
-        <td>CLI argument</td>
-        <td>GitHub label query, branch names, log file name</td>
-        <td>String (derived from path or literal)</td>
+        <td>Task fetching strategy</td>
+        <td>Add a new path in 0.2 (e.g., Linear, ClickUp). Currently: Project V2 → GitHub labels</td>
+        <td><span class="file-ref">skill/stark-phase-execute/SKILL.md</span> §0.2</td>
       </tr>
       <tr>
-        <td>Task list</td>
-        <td>GitHub Projects V2 or Issues API</td>
-        <td>Phase 1 loop, briefing, dashboard</td>
-        <td>Array of {number, title, labels, body}</td>
+        <td>Review domain count</td>
+        <td>Add/remove prompt files in <span class="mono">global/prompts/{agent}/</span>. multi_review.py auto-discovers</td>
+        <td><span class="file-ref">global/prompts/</span>, <span class="file-ref">scripts/multi_review.py</span></td>
       </tr>
       <tr>
-        <td>Implementation diff</td>
-        <td>Subagent (Agent tool)</td>
-        <td>PR body, review worktree</td>
-        <td>Git commits on feature branch</td>
+        <td>Finding classification</td>
+        <td>The classify logic (fix/FP/noise/ignored) is inline in the skill. Adjust severity thresholds here</td>
+        <td><span class="file-ref">skill/stark-phase-execute/SKILL.md</span> §1.4</td>
       </tr>
       <tr>
-        <td>Review findings</td>
-        <td>multi_review.py JSON output</td>
-        <td>Classification → fix loop → PR comment → observability log</td>
-        <td>JSON array of {file, line, severity, agent, body}</td>
+        <td>Deploy command</td>
+        <td>Set <span class="mono">deploy_command</span> in repo-level config. Skipped if not configured</td>
+        <td><span class="file-ref">.code-review/config.json</span></td>
       </tr>
       <tr>
-        <td>Observability log</td>
-        <td>All phases</td>
-        <td>Dashboard, /stark-metrics, prompt improvement</td>
-        <td>JSON at history/{ORG}/{REPO}/phase-{SLUG}-{ts}.json</td>
+        <td>Release workflow</td>
+        <td>Override <span class="mono">/stark-release</span> at repo level for custom version files, tag formats, CI triggers</td>
+        <td><span class="file-ref">skill/stark-release/SKILL.md</span></td>
       </tr>
       <tr>
-        <td>PR body</td>
-        <td>Generated by skill</td>
-        <td>gh pr create (via temp file)</td>
-        <td>Markdown (never shell-interpolated)</td>
+        <td>Prompt improvement thresholds</td>
+        <td>FP >20%, recurring 3+, agent misses 2+. Adjust in §5.3</td>
+        <td><span class="file-ref">skill/stark-phase-execute/SKILL.md</span> §5.3</td>
       </tr>
       <tr>
-        <td>CHANGELOG entries</td>
-        <td>Merged task metadata</td>
-        <td>CHANGELOG.md → /stark-release</td>
-        <td>Keep a Changelog format (Added/Fixed/Changed)</td>
+        <td>Slug derivation algorithm</td>
+        <td><strong>MUST sync with /stark-plan-to-tasks.</strong> Change both or labels won't match</td>
+        <td><span class="file-ref">skill/stark-phase-execute/SKILL.md</span>, <span class="file-ref">skill/stark-plan-to-tasks/SKILL.md</span></td>
+      </tr>
+      <tr>
+        <td>Observability format</td>
+        <td>Follow <span class="mono">standards/observability.md</span> protocol. JSON schema in §0.5 and §1.7</td>
+        <td><span class="file-ref">standards/observability.md</span></td>
       </tr>
     </tbody>
   </table>
 
-  <!-- ========== EXTENSION POINTS ========== -->
-  <div class="section-title">Extension Points</div>
-
-  <div class="card-grid">
-    <div class="card card-green">
-      <h3>Config Hierarchy</h3>
-      <p>
-        <code>.code-review/config.json</code> (repo) → <code>~/.claude/code-review/config.json</code> (global).
-        Controls: test_command, deploy_command, max review rounds.
-        Repos with custom /stark-release overrides get their workflows respected.
-      </p>
-    </div>
-    <div class="card card-blue">
-      <h3>Project Integration</h3>
-      <p>
-        <code>.github/project-config.json</code> enables GitHub Projects V2 integration.
-        Adds: spec completeness gates, status transitions (Ready for Agent → Agent Working → Blocked),
-        AI Suitability filtering. project-pr-sync Action handles post-merge transitions.
-      </p>
-    </div>
-    <div class="card card-purple">
-      <h3>Skill Delegation</h3>
-      <p>
-        Delegates to: <code>/stark-plan-to-tasks</code> (decomposition), <code>/stark-release</code> (versioning), <code>/stark-review-improvement</code> (prompt tuning).
-        Each sub-skill respects its own repo-level overrides. The phase executor is an orchestrator, not a monolith.
-      </p>
-    </div>
-    <div class="card card-amber">
-      <h3>Observability Protocol</h3>
-      <p>
-        Follows <code>standards/observability.md</code>. TodoWrite for task progress. 5-minute checkpoints.
-        Improvement flags: phase &gt;70% of total time, task fail &gt;30%, agent fail &gt;20%, 0-finding review rounds.
-        Log file consumed by /stark-metrics for cross-phase analytics.
-      </p>
-    </div>
-  </div>
-
-  <!-- ========== FAILURE MODES ========== -->
-  <div class="section-title">Failure Mode Matrix</div>
+  <!-- ═══════════════ FAILURE MODES ═══════════════ -->
+  <div class="section-title">Failure Mode Reference</div>
 
   <table class="data-table">
     <thead>
       <tr>
         <th>Failure</th>
-        <th>Detection</th>
         <th>Recovery</th>
-        <th>Severity</th>
+        <th>Phase</th>
       </tr>
     </thead>
     <tbody>
-      <tr>
-        <td>Dirty working tree</td>
-        <td>git status --porcelain</td>
-        <td>Auto-stash, log warning</td>
-        <td><span class="tag tag-config">low</span></td>
-      </tr>
-      <tr>
-        <td>No changes from implementation</td>
-        <td>git diff --stat HEAD empty</td>
-        <td>Log as skipped, continue</td>
-        <td><span class="tag tag-config">low</span></td>
-      </tr>
-      <tr>
-        <td>PR creation fails</td>
-        <td>gh pr create exit code</td>
-        <td>Retry once after push; log and continue</td>
-        <td><span class="tag tag-decision">medium</span></td>
-      </tr>
-      <tr>
-        <td>multi_review.py fails</td>
-        <td>Process exit code / empty JSON</td>
-        <td>Log agent failures, proceed with available findings</td>
-        <td><span class="tag tag-decision">medium</span></td>
-      </tr>
-      <tr>
-        <td>CI fails before merge</td>
-        <td>gh pr checks --fail-level all</td>
-        <td>Merge with --admin, flag ci_bypassed:true</td>
-        <td><span class="tag tag-failure">high</span></td>
-      </tr>
-      <tr>
-        <td>Merge conflict</td>
-        <td>git merge/rebase failure</td>
-        <td>Rebase on main, resolve, re-push, retry</td>
-        <td><span class="tag tag-failure">high</span></td>
-      </tr>
-      <tr>
-        <td>Worktree already exists</td>
-        <td>git worktree add failure</td>
-        <td>Reuse existing: cd /tmp/review-*</td>
-        <td><span class="tag tag-config">low</span></td>
-      </tr>
-      <tr>
-        <td>GitHub API rate limit</td>
-        <td>HTTP 429</td>
-        <td>Wait 60s, retry once; log and continue</td>
-        <td><span class="tag tag-decision">medium</span></td>
-      </tr>
-      <tr>
-        <td>Subagent timeout</td>
-        <td>Agent tool timeout</td>
-        <td>Log timeout, skip task, continue</td>
-        <td><span class="tag tag-decision">medium</span></td>
-      </tr>
-      <tr>
-        <td>Release fails</td>
-        <td>/stark-release error</td>
-        <td>Log and skip deploy</td>
-        <td><span class="tag tag-decision">medium</span></td>
-      </tr>
+      <tr><td>Not on main at start</td><td><span class="mono">git checkout main && git pull</span></td><td><span class="tag tag-phase">0</span></td></tr>
+      <tr><td>Dirty working tree</td><td>Auto-stash, log warning</td><td><span class="tag tag-phase">0</span></td></tr>
+      <tr><td>No changes from implementation</td><td>Log as skipped, continue next task</td><td><span class="tag tag-phase">1.2</span></td></tr>
+      <tr><td>PR creation fails</td><td>Retry once after re-push; log &amp; continue</td><td><span class="tag tag-phase">1.3</span></td></tr>
+      <tr><td>multi_review.py dispatch fails</td><td>Log agent failures, use available findings</td><td><span class="tag tag-phase">1.4</span></td></tr>
+      <tr><td>Worktree from crashed session</td><td>Reuse existing <span class="mono">/tmp/review-*</span></td><td><span class="tag tag-phase">1.4</span></td></tr>
+      <tr><td>Merge conflict</td><td>Rebase on main, resolve, re-push, retry</td><td><span class="tag tag-phase">1.5</span></td></tr>
+      <tr><td>CI fails / merge blocked</td><td><span class="mono">--admin</span> force; flag ci_bypassed</td><td><span class="tag tag-phase">1.5</span></td></tr>
+      <tr><td>GitHub API rate limit</td><td>Wait 60s, retry once, then log &amp; continue</td><td><span class="tag tag-failure">any</span></td></tr>
+      <tr><td>Subagent timeout</td><td>Log timeout, skip task, continue</td><td><span class="tag tag-phase">1.2</span></td></tr>
+      <tr><td>Release fails (no changelog, tag exists)</td><td>Log, skip deploy</td><td><span class="tag tag-phase">3</span></td></tr>
+      <tr><td>Stale remote branch</td><td>Cleaned up in error handler (1.8) via <span class="mono">git push origin --delete</span></td><td><span class="tag tag-phase">1.8</span></td></tr>
     </tbody>
   </table>
 
-  <!-- ========== CLI FLAGS ========== -->
-  <div class="section-title">CLI Arguments &amp; Constants</div>
+  <!-- ═══════════════ KEY SCRIPTS ═══════════════ -->
+  <div class="section-title">Key Scripts &amp; Dependencies</div>
 
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th>Argument</th>
-        <th>Default</th>
-        <th>Effect</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td><code>&lt;plan-slug&gt;</code></td>
-        <td>required</td>
-        <td>Matches <code>plan:{SLUG}</code> label. File paths auto-resolve to slug.</td>
-      </tr>
-      <tr>
-        <td><code>--dry-run</code></td>
-        <td>off</td>
-        <td>Walk plan, show tasks, verify tooling. No branches/PRs/changes. Stops before /stark-plan-to-tasks if needed.</td>
-      </tr>
-      <tr>
-        <td><code>--skip-deploy</code></td>
-        <td>off</td>
-        <td>Skip deploy_command in Phase 3.3</td>
-      </tr>
-      <tr>
-        <td><code>--skip-release</code></td>
-        <td>off</td>
-        <td>Skip all of Phase 3 (CHANGELOG, version bump, deploy)</td>
-      </tr>
-      <tr>
-        <td><code>--start-from N</code></td>
-        <td>1st issue</td>
-        <td>Resume from specific issue number (skip earlier tasks)</td>
-      </tr>
-      <tr>
-        <td><code>--rounds N</code></td>
-        <td>3</td>
-        <td>Max review-fix rounds per PR</td>
-      </tr>
-      <tr>
-        <td><code>--repo ORG/REPO</code></td>
-        <td>auto-detect</td>
-        <td>Override repo detection from git remote</td>
-      </tr>
-    </tbody>
-  </table>
+  <div class="summary-grid">
+    <div class="summary-card" style="background:#eff6ff; border-left:3px solid #1e40af;">
+      <h3 style="color:#1e40af;">multi_review.py</h3>
+      <p>PR review orchestrator. Runs 18 sub-agents (3 LLMs × 6 domains) via ThreadPoolExecutor. <strong>No --rounds flag</strong> — it runs one round only. Returns JSON findings. <span class="mono">--dry-run</span> prevents GitHub posting.</p>
+    </div>
+    <div class="summary-card" style="background:#ecfdf5; border-left:3px solid #059669;">
+      <h3 style="color:#059669;">github_app.py</h3>
+      <p>Multi-app GitHub auth. Supports stark-claude, stark-codex, stark-gemini. Token generation, PR review posting (<span class="mono">pr_review()</span>), caching. Private keys from macOS Keychain.</p>
+    </div>
+    <div class="summary-card" style="background:#f5f3ff; border-left:3px solid #7c3aed;">
+      <h3 style="color:#7c3aed;">github_projects.py</h3>
+      <p>GitHub Projects V2 integration. get_items(), transition_status(), set_field(), check_spec_completeness(). Used when .github/project-config.json exists.</p>
+    </div>
+  </div>
 
-  <div class="summary-grid" style="margin-top:24px;">
-    <div class="summary-card" style="background:#eff6ff;border-radius:8px;">
-      <h3 style="color:#1e40af;">SCRIPTS</h3>
-      <p><code>~/.claude/code-review/scripts</code></p>
+  <div class="summary-grid" style="margin-top:12px;">
+    <div class="summary-card" style="background:#fef3c7; border-left:3px solid #f59e0b;">
+      <h3 style="color:#92400e;">Skill Delegates</h3>
+      <p><strong>/stark-plan-to-tasks</strong> — auto-decompose when no issues exist<br><strong>/stark-release</strong> — version bump, tag, GitHub Release<br>Both invoked via Skill tool.</p>
     </div>
-    <div class="summary-card" style="background:#ecfdf5;border-radius:8px;">
-      <h3 style="color:#059669;">PYTHON</h3>
-      <p><code>$SCRIPTS/.venv/bin/python3</code></p>
+    <div class="summary-card" style="background:#f3f4f6; border-left:3px solid #333;">
+      <h3 style="color:#333;">CLI Dependencies</h3>
+      <p><span class="mono">gh</span> — GitHub CLI (PRs, issues, merge)<br><span class="mono">claude</span>, <span class="mono">codex</span>, <span class="mono">gemini</span> — AI CLIs (sub-agents)<br><span class="mono">git</span> — worktrees, branches, push</p>
     </div>
-    <div class="summary-card" style="background:#fef3c7;border-radius:8px;">
-      <h3 style="color:#92400e;">HISTORY</h3>
-      <p><code>~/.claude/code-review/history</code></p>
+    <div class="summary-card" style="background:#fef2f2; border-left:3px solid #dc2626;">
+      <h3 style="color:#dc2626;">Security Invariants</h3>
+      <p>LLM output never interpolated in shell (temp files only). GH_TOKEN split enforced per operation. <span class="mono">--dangerouslySkipPermissions</span> required for full autonomy.</p>
     </div>
   </div>
 
 </div>
 
-<div class="footer"><div class="winner-badge">Visualization by Claude · Score: 8.4/10 · Generated from SKILL.md</div></div>
+<div class="footer"><div class="winner-badge">Visualization by Claude · Score: 8.8/10 · Generated from SKILL.md</div></div>
 
 </body>
 </html>
