@@ -26,3 +26,12 @@
 - **Story Points:** 29 total (9 tasks across 3 phases)
 - **Summary:** Extract the tournament pattern from `generate_skill_docs.py` into a reusable `scripts/tournament.py` module. Adds `TournamentConfig` (YAML + dict), `TournamentResult` (dataclass), `Tournament` (orchestrator class) with visual, semantic, and test evaluation strategies. CLI with argparse, `/stark-tournament` skill. Final step refactors `generate_skill_docs.py` to use the Tournament API. Custom evaluation strategy deferred to v2.
 - **Knowledge extracted to:** `docs/decisions.md`
+
+## 2026-03-28 — stark-insights: AI CLI Observability System
+
+- **Date:** 2026-03-28
+- **Status:** Decomposed → issues created
+- **Tracking:** GetEvinced/stark-insights#2, #3, #4, #5, #6, #7, #8, #9
+- **Story Points:** 137 total (40 tasks across 8 phases)
+- **Summary:** Local-first, cloud-synced observability for AI CLI interactions. Docker container with FastAPI + MCP server, SQLite write-ahead buffer syncing to Cloud SQL Postgres. Key decisions: write-ahead buffer for all events (not just offline), ADC auth (no SA key files), source-stable dedupe keys, HTTP/SSE MCP transport, monthly partitioned events table, priority-based buffer eviction.
+- **Knowledge extracted to:** Target repo (GetEvinced/stark-insights) — knowledge lives in issue bodies since the project is new.
