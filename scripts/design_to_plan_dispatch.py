@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Design-to-plan dispatch — parallel multi-agent plan generation and cross-review.
+"""Multi-agent generate-and-cross-review dispatch.
 
-Phase 1 (generate): 3 agents each independently produce an implementation plan
-from a design document.
+Generic orchestrator for the 3-generate + 6-cross-review pattern:
+  - Phase 1 (generate): 3 agents each independently produce a document
+  - Phase 2 (cross-review): Each document is reviewed by the other 2 agents
 
-Phase 2 (cross-review): Each plan is reviewed by the other 2 agents (6 dispatches).
-Each reviewer scores the plan on 5 dimensions and provides findings.
+Used by:
+  - /stark-design-to-plan (design doc → implementation plan)
+  - /stark-design (prompt/requirements → design document)
 
-Uses the same CLI dispatch patterns as plan_review_dispatch.py.
+Prompts are loaded from ~/.claude/code-review/prompts/<prompts-dir>/{agent}/
+where prompts-dir is specified via --prompts-dir.
 """
 
 from __future__ import annotations
@@ -75,11 +78,17 @@ def _log_api_key_fallback(agent: str, task: str, reason: str) -> None:
 
 
 SCRIPTS_DIR = Path(__file__).parent
-GLOBAL_PROMPTS_DIR = Path.home() / ".claude" / "code-review" / "prompts" / "design-to-plan"
+DEFAULT_PROMPTS_DIR = "design-to-plan"
 
 AGENTS = ["claude", "codex", "gemini"]
 CODEX_REASONING_CONFIG = 'model_reasoning_effort="high"'
-DEFAULT_TIMEOUT = 600  # Plan generation needs more time than review
+DEFAULT_TIMEOUT = 600  # Generation needs more time than review
+
+
+def _get_prompts_dir(prompts_dir: str | None = None) -> Path:
+    """Return the prompts directory path."""
+    name = prompts_dir or DEFAULT_PROMPTS_DIR
+    return Path.home() / ".claude" / "code-review" / "prompts" / name
 
 
 # ── Data structures ────────────────────────────────────────────────────
@@ -96,25 +105,10 @@ class PlanOutput:
 
 
 @dataclass
-class CrossReviewScore:
-    completeness: int = 0
-    feasibility: int = 0
-    phasing: int = 0
-    risk_coverage: int = 0
-    testability: int = 0
-
-    @property
-    def average(self) -> float:
-        scores = [self.completeness, self.feasibility, self.phasing,
-                  self.risk_coverage, self.testability]
-        return sum(scores) / len(scores) if scores else 0.0
-
-
-@dataclass
 class CrossReviewOutput:
     reviewer: str
     plan_author: str
-    scores: CrossReviewScore = field(default_factory=CrossReviewScore)
+    scores: dict[str, int] = field(default_factory=dict)
     strengths: list[str] = field(default_factory=list)
     weaknesses: list[str] = field(default_factory=list)
     raw_output: str = ""
@@ -122,17 +116,28 @@ class CrossReviewOutput:
     duration_s: float = 0.0
     api_key_fallback: bool = False
 
+    @property
+    def average(self) -> float:
+        vals = [v for v in self.scores.values() if isinstance(v, (int, float))]
+        return sum(vals) / len(vals) if vals else 0.0
+
 
 # ── Prompt loading ─────────────────────────────────────────────────────
 
 
-def _load_prompt(agent: str, filename: str, repo_dir: str | None = None) -> str:
+def _load_prompt(
+    agent: str,
+    filename: str,
+    repo_dir: str | None = None,
+    prompts_dir: str | None = None,
+) -> str:
     """Load a prompt file: repo → global."""
+    prompts_dir_name = prompts_dir or DEFAULT_PROMPTS_DIR
     if repo_dir:
-        repo_path = Path(repo_dir) / ".code-review" / "design-to-plan-prompts" / agent / filename
+        repo_path = Path(repo_dir) / ".code-review" / f"{prompts_dir_name}-prompts" / agent / filename
         if repo_path.exists():
             return repo_path.read_text().strip()
-    global_path = GLOBAL_PROMPTS_DIR / agent / filename
+    global_path = _get_prompts_dir(prompts_dir) / agent / filename
     if global_path.exists():
         return global_path.read_text().strip()
     return ""
@@ -225,7 +230,7 @@ def _build_cmd_and_kwargs(
             if os.path.exists(src):
                 shutil.copy2(src, os.path.join(gemini_dir, auth_file))
         with open(os.path.join(gemini_dir, "projects.json"), "w") as f:
-            json.dump({"projects": {os.getcwd(): "design-to-plan"}}, f)
+            json.dump({"projects": {os.getcwd(): "generate-review"}}, f)
         cmd = [
             "gemini",
             "-p", prompt,
@@ -327,10 +332,11 @@ def generate_plans(
     agents: list[str] | None = None,
     repo_dir: str | None = None,
     timeout: int = DEFAULT_TIMEOUT,
+    prompts_dir: str | None = None,
 ) -> dict[str, Any]:
-    """Dispatch 3 agents to generate implementation plans from a design doc.
+    """Dispatch 3 agents to generate documents from input content.
 
-    Returns structured dict with plan outputs per agent.
+    Returns structured dict with outputs per agent.
     """
     if agents is None:
         agents = list(AGENTS)
@@ -339,13 +345,13 @@ def generate_plans(
     total = len(agents)
 
     print(f"\n{'=' * 60}", file=sys.stderr)
-    print(f"  Phase 1: Generate Plans — {total} agents", file=sys.stderr)
+    print(f"  Phase 1: Generate — {total} agents", file=sys.stderr)
     print(f"{'=' * 60}", file=sys.stderr)
 
     with ThreadPoolExecutor(max_workers=total) as pool:
         futures = {}
         for agent in agents:
-            prompt_text = _load_prompt(agent, "generate.md", repo_dir)
+            prompt_text = _load_prompt(agent, "generate.md", repo_dir, prompts_dir)
             if not prompt_text:
                 prompt_text = (
                     "Read the following design document and produce a detailed, "
@@ -353,10 +359,10 @@ def generate_plans(
                     "risk mitigations, and verification criteria for each phase."
                 )
 
-            full_prompt = f"{prompt_text}\n\n---\n\n# Design Document\n\n{design_content}"
+            full_prompt = f"{prompt_text}\n\n---\n\n# Input Document\n\n{design_content}"
             future = pool.submit(_run_agent, agent, full_prompt, task_label="generate", timeout=timeout)
             futures[future] = agent
-            print(f"  [{agent}] generating plan...", file=sys.stderr)
+            print(f"  [{agent}] generating...", file=sys.stderr)
 
         for future in as_completed(futures):
             agent = futures[future]
@@ -403,16 +409,15 @@ def generate_plans(
 
 REVIEW_OUTPUT_FORMAT = (
     "Output your review as a JSON object with these fields:\n"
-    '{"scores": {"completeness": 1-10, "feasibility": 1-10, "phasing": 1-10, '
-    '"risk_coverage": 1-10, "testability": 1-10}, '
+    '{"scores": {"dimension1": 1-10, "dimension2": 1-10, ...}, '
     '"strengths": ["strength 1", ...], '
     '"weaknesses": ["weakness 1", ...]}\n'
     "Output ONLY the JSON object, no other text."
 )
 
 
-def _parse_cross_review(raw: str) -> tuple[CrossReviewScore, list[str], list[str]]:
-    """Parse cross-review JSON output into scores, strengths, weaknesses."""
+def _parse_cross_review(raw: str) -> tuple[dict[str, int], list[str], list[str]]:
+    """Parse cross-review JSON output into scores dict, strengths, weaknesses."""
     text = raw.strip()
 
     # Strip markdown fences
@@ -431,24 +436,18 @@ def _parse_cross_review(raw: str) -> tuple[CrossReviewScore, list[str], list[str
     start = text.find("{")
     end = text.rfind("}")
     if start == -1 or end == -1:
-        return CrossReviewScore(), [], []
+        return {}, [], []
 
     try:
         data = json.loads(text[start:end + 1])
     except json.JSONDecodeError:
-        return CrossReviewScore(), [], []
+        return {}, [], []
 
     scores_data = data.get("scores", {})
-    score = CrossReviewScore(
-        completeness=int(scores_data.get("completeness", 0)),
-        feasibility=int(scores_data.get("feasibility", 0)),
-        phasing=int(scores_data.get("phasing", 0)),
-        risk_coverage=int(scores_data.get("risk_coverage", 0)),
-        testability=int(scores_data.get("testability", 0)),
-    )
+    scores = {k: int(v) for k, v in scores_data.items() if isinstance(v, (int, float, str))}
     strengths = data.get("strengths", [])
     weaknesses = data.get("weaknesses", [])
-    return score, strengths, weaknesses
+    return scores, strengths, weaknesses
 
 
 def cross_review_plans(
@@ -457,15 +456,17 @@ def cross_review_plans(
     agents: list[str] | None = None,
     repo_dir: str | None = None,
     timeout: int = DEFAULT_TIMEOUT,
+    prompts_dir: str | None = None,
 ) -> dict[str, Any]:
-    """Dispatch 6 cross-reviews: each agent reviews the plans it didn't write.
+    """Dispatch cross-reviews: each agent reviews the documents it didn't write.
 
     Args:
-        design_content: Original design document
-        plans: Dict of {agent_name: plan_content} from Phase 1
+        design_content: Original input document
+        plans: Dict of {agent_name: generated_content} from Phase 1
         agents: List of agent names (default: all 3)
         repo_dir: Repo root for prompt overrides
         timeout: Per-agent timeout in seconds
+        prompts_dir: Prompt directory name (e.g. "design-to-plan", "prompt-to-design")
     """
     if agents is None:
         agents = list(AGENTS)
@@ -487,23 +488,23 @@ def cross_review_plans(
     with ThreadPoolExecutor(max_workers=min(total, 6)) as pool:
         futures = {}
         for reviewer, author in work_items:
-            prompt_text = _load_prompt(reviewer, "cross-review.md", repo_dir)
+            prompt_text = _load_prompt(reviewer, "cross-review.md", repo_dir, prompts_dir)
             if not prompt_text:
                 prompt_text = (
-                    "Review the following implementation plan against the original design document. "
-                    "Score it on 5 dimensions (1-10 each): completeness, feasibility, phasing, "
-                    "risk_coverage, testability. List strengths and weaknesses."
+                    "Review the following document against the original input. "
+                    "Score it on relevant dimensions (1-10 each). "
+                    "List strengths and weaknesses."
                 )
 
             full_prompt = (
                 f"{prompt_text}\n\n{REVIEW_OUTPUT_FORMAT}\n\n"
-                f"---\n\n# Original Design Document\n\n{design_content}\n\n"
-                f"---\n\n# Implementation Plan (by {author})\n\n{plans[author]}"
+                f"---\n\n# Original Input\n\n{design_content}\n\n"
+                f"---\n\n# Generated Document (by {author})\n\n{plans[author]}"
             )
             task_label = f"review-{author}"
             future = pool.submit(_run_agent, reviewer, full_prompt, task_label=task_label, timeout=timeout)
             futures[future] = (reviewer, author)
-            print(f"  [{reviewer}] reviewing {author}'s plan...", file=sys.stderr)
+            print(f"  [{reviewer}] reviewing {author}'s output...", file=sys.stderr)
 
         for future in as_completed(futures):
             reviewer, author = futures[future]
@@ -529,7 +530,7 @@ def cross_review_plans(
                 print(f"  [{reviewer}→{author}] ERROR: {error} [{duration:.1f}s]", file=sys.stderr)
             else:
                 print(
-                    f"  [{reviewer}→{author}] done — avg {review.scores.average:.1f}/10 [{duration:.1f}s]",
+                    f"  [{reviewer}→{author}] done — avg {review.average:.1f}/10 [{duration:.1f}s]",
                     file=sys.stderr,
                 )
 
@@ -537,7 +538,7 @@ def cross_review_plans(
     plan_scores: dict[str, list[float]] = {a: [] for a in plans}
     for r in results:
         if not r.error and r.plan_author in plan_scores:
-            plan_scores[r.plan_author].append(r.scores.average)
+            plan_scores[r.plan_author].append(r.average)
 
     plan_averages = {
         author: sum(scores) / len(scores) if scores else 0.0
@@ -551,7 +552,7 @@ def cross_review_plans(
             {
                 "reviewer": r.reviewer,
                 "plan_author": r.plan_author,
-                "scores": asdict(r.scores),
+                "scores": r.scores,
                 "strengths": r.strengths,
                 "weaknesses": r.weaknesses,
                 "error": r.error,
@@ -574,15 +575,17 @@ def cross_review_plans(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Design-to-plan dispatch")
+    parser = argparse.ArgumentParser(description="Multi-agent generate-and-cross-review dispatch")
     parser.add_argument("--mode", required=True, choices=["generate", "cross-review"],
                         help="Phase to run")
-    parser.add_argument("--design-file", required=True, help="Path to design document")
-    parser.add_argument("--plans-json", help="Path to JSON file with plans (for cross-review mode)")
+    parser.add_argument("--design-file", required=True, help="Path to input document")
+    parser.add_argument("--plans-json", help="Path to JSON file with generated docs (for cross-review mode)")
     parser.add_argument("--agents", help="Comma-separated list of agents")
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
                         help="Per-agent timeout in seconds")
     parser.add_argument("--repo-dir", help="Repository root for prompt overrides")
+    parser.add_argument("--prompts-dir", default=DEFAULT_PROMPTS_DIR,
+                        help=f"Prompt directory name under ~/.claude/code-review/prompts/ (default: {DEFAULT_PROMPTS_DIR})")
     args = parser.parse_args()
 
     agents = args.agents.split(",") if args.agents else None
@@ -594,6 +597,7 @@ def main():
             agents=agents,
             repo_dir=args.repo_dir,
             timeout=args.timeout,
+            prompts_dir=args.prompts_dir,
         )
     elif args.mode == "cross-review":
         if not args.plans_json:
@@ -606,6 +610,7 @@ def main():
             agents=agents,
             repo_dir=args.repo_dir,
             timeout=args.timeout,
+            prompts_dir=args.prompts_dir,
         )
     else:
         print(f"Unknown mode: {args.mode}", file=sys.stderr)
