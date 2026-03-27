@@ -101,7 +101,23 @@ If the judge detects position bias (winner changes when review order is swapped)
 
 Output: winner declared (or tie), synthesized best-of-all findings, tournament summary posted to PR (if PR detected).
 
-After tournament output, skip to Phase 4 (summary) and Phase 5 (output & persist). Use `design-reviews/tournament/` as the history subdirectory.
+### Tournament Fix Pass
+
+After judging, unless `--dry-run` was passed, **fix all synthesized findings** in the design file (same approach as Phase 2c — edit directly). Then commit:
+
+```bash
+git add "$path"
+git commit -m "docs: design review tournament fixes ($fix_count issues addressed)
+
+stark-review-design tournament mode
+Winner: $winner (or tie) | Scores: claude=$X, codex=$Y, gemini=$Z
+Fixed: $fix_count findings across $domain_count domains
+Agents: 3 dispatched, $succeeded succeeded
+
+Co-Authored-By: stark-review-design <noreply@anthropic.com>"
+```
+
+After fixing and committing, proceed to Phase 4 (summary) and Phase 5 (output & persist). Use `design-reviews/tournament/` as the history subdirectory.
 
 ## Phase 2: Review-Fix Loop
 
@@ -141,6 +157,21 @@ Edit the design file directly to address all `fix` and `recurring` findings:
 - Add edge cases, failure modes, rollback strategies
 - Fix contradictions between sections
 - Trim out-of-scope or over-engineered elements
+
+**Commit after fixing.** Every fix round MUST be committed for research traceability:
+
+```bash
+git add "$path"
+git commit -m "docs: design review round $round fixes ($fix_count issues addressed)
+
+stark-review-design fix round $round
+Fixed: $fix_count findings | Recurring: $recurring_count
+Domains: [list of domains with fixes]
+
+Co-Authored-By: stark-review-design <noreply@anthropic.com>"
+```
+
+This creates a per-round commit trail. Researchers can `git log --oneline -- <path>` to see how the design evolved through review rounds, and `git diff <round1>..<round2>` to see what each round changed.
 
 ### 2d. Early termination check
 
@@ -266,6 +297,24 @@ Recommend only — do NOT modify prompts.
 ### 5b. Review file (skipped in --dry-run)
 
 Write `{design-name}.design-review.md` alongside the original design file. If the design is `docs/specs/2026-03-13-auth.md`, the review goes to `docs/specs/2026-03-13-auth.design-review.md`.
+
+### 5b2. Commit review file (skipped in --dry-run)
+
+Commit the review file alongside any previously uncommitted fix commits:
+
+```bash
+git add "{design-name}.design-review.md"
+git commit -m "docs: add design review for {design-name}
+
+stark-review-design complete
+Issues: $total_issues ($fixed fixed, $unresolved unresolved)
+Noise: $noise_count | Signal-to-noise: $signal_pct%
+Mode: {standard|tournament} | Rounds: $rounds
+
+Co-Authored-By: stark-review-design <noreply@anthropic.com>"
+```
+
+This ensures the full review trail — fix commits + review file — is in git history. Researchers can see the complete review lifecycle via `git log`.
 
 ### 5c. Post per-agent raw findings to PR (if PR detected and not --dry-run)
 
