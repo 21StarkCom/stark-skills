@@ -1,0 +1,4 @@
+{
+  "doc_content": {},
+  "alt_text": "Internal architecture diagram for the stark-design-to-plan skill showing a five-phase pipeline from CLI input and setup validation through three-agent plan generation, cross-review scoring, local synthesis, and final output persistence, with callouts for quorum decisions, degraded failure paths, observability requirements, configuration flags, and extension points.\"}}"
+}

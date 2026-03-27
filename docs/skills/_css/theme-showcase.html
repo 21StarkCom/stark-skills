@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stark Skills — Theme &amp; Shape Showcase</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #f1f1f1;
+  color: #1a1a1a;
+  padding: 32px;
+}
+h1 { font-size: 28px; text-align: center; margin-bottom: 8px; }
+.subtitle { text-align: center; color: #666; font-size: 13px; margin-bottom: 40px; }
+
+/* Grid layout */
+.theme-section { margin-bottom: 48px; }
+.theme-label {
+  font-size: 18px; font-weight: 700; margin-bottom: 4px;
+}
+.theme-desc { font-size: 12px; color: #888; margin-bottom: 16px; }
+.shapes-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 16px;
+}
+.shape-col {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.shape-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.5px; padding: 8px 12px;
+  background: #f8f8f8; color: #555; border-bottom: 1px solid #e0e0e0;
+  text-align: center;
+}
+.sample-area { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+
+/* Node base */
+.node { padding: 10px 14px; text-align: center; }
+.node-title { font-size: 11px; font-weight: 700; margin-bottom: 1px; }
+.node-desc { font-size: 9px; opacity: 0.8; }
+
+/* Card base */
+.card { padding: 12px; }
+.card h3 { font-size: 11px; font-weight: 700; margin-bottom: 4px; }
+.card p { font-size: 9px; line-height: 1.5; }
+
+/* Arrow */
+.arrow-down {
+  width: 2px; height: 16px; margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -3px; left: -3px;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+}
+
+/* Tag */
+.tag { display: inline-block; font-size: 8px; font-weight: 600; padding: 2px 6px; }
+
+/* ═══════════════════════════════════════════
+   THEMES — each sets colors on a container
+   ═══════════════════════════════════════════ */
+
+/* --- Current --- */
+.t-current .sample-area { background: #fafafa; }
+.t-current .node-phase    { background: #1e40af; color: #fff; }
+.t-current .node-decision { background: #7c3aed; color: #fff; }
+.t-current .node-failure  { background: #dc2626; color: #fff; }
+.t-current .node-config   { background: #047857; color: #fff; }
+.t-current .node-output   { background: #f59e0b; color: #1a1a1a; }
+.t-current .card-blue     { background: #eff6ff; border-left: 3px solid #1e40af; }
+.t-current .card-blue h3  { color: #1e40af; }
+.t-current .arrow-down    { background: #cbd5e1; }
+.t-current .arrow-down::after { border-top-color: #cbd5e1; }
+.t-current .tag-phase     { background: #dbeafe; color: #1e40af; }
+.t-current .tag-config    { background: #d1fae5; color: #065f46; }
+
+/* --- Dark --- */
+.t-dark .sample-area { background: #0f172a; }
+.t-dark .node-phase    { background: #3b82f6; color: #fff; }
+.t-dark .node-decision { background: #a78bfa; color: #1a1a1a; }
+.t-dark .node-failure  { background: #ef4444; color: #fff; }
+.t-dark .node-config   { background: #10b981; color: #1a1a1a; }
+.t-dark .node-output   { background: #fbbf24; color: #1a1a1a; }
+.t-dark .card-blue     { background: #1e293b; border-left: 3px solid #3b82f6; }
+.t-dark .card-blue h3  { color: #93c5fd; }
+.t-dark .card-blue p   { color: #94a3b8; }
+.t-dark .arrow-down    { background: #475569; }
+.t-dark .arrow-down::after { border-top-color: #475569; }
+.t-dark .tag-phase     { background: #1e3a5f; color: #93c5fd; }
+.t-dark .tag-config    { background: #064e3b; color: #6ee7b7; }
+
+/* --- Blueprint --- */
+.t-blueprint .sample-area { background: #f0f4ff; }
+.t-blueprint .node-phase    { background: #1e3a5f; color: #fff; }
+.t-blueprint .node-decision { background: #2563eb; color: #fff; }
+.t-blueprint .node-failure  { background: #7f1d1d; color: #fff; }
+.t-blueprint .node-config   { background: #3b82f6; color: #fff; }
+.t-blueprint .node-output   { background: #bfdbfe; color: #1e3a5f; border: 1px solid #3b82f6; }
+.t-blueprint .card-blue     { background: #dbeafe; border-left: 3px solid #1e3a5f; }
+.t-blueprint .card-blue h3  { color: #1e3a5f; }
+.t-blueprint .arrow-down    { background: #93b4d4; }
+.t-blueprint .arrow-down::after { border-top-color: #93b4d4; }
+.t-blueprint .tag-phase     { background: #c7d7f0; color: #1e3a5f; }
+.t-blueprint .tag-config    { background: #bfdbfe; color: #1e40af; }
+
+/* --- Terminal --- */
+.t-terminal .sample-area { background: #0a0a0a; }
+.t-terminal .node-phase    { background: #003b00; color: #00ff41; border: 1px solid #00ff41; }
+.t-terminal .node-decision { background: #1a0033; color: #bf5af2; border: 1px solid #bf5af2; }
+.t-terminal .node-failure  { background: #330000; color: #ff4444; border: 1px solid #ff4444; }
+.t-terminal .node-config   { background: #0a0a0a; color: #00ff41; border: 1px dashed #00ff41; }
+.t-terminal .node-output   { background: #1a1a00; color: #ffff00; border: 1px solid #ffff00; }
+.t-terminal .card-blue     { background: #0d1a0d; border-left: 3px solid #00ff41; }
+.t-terminal .card-blue h3  { color: #00ff41; font-family: 'Courier New', monospace; }
+.t-terminal .card-blue p   { color: #00cc33; font-family: 'Courier New', monospace; }
+.t-terminal .node-title, .t-terminal .node-desc { font-family: 'Courier New', monospace; }
+.t-terminal .arrow-down    { background: #00ff41; }
+.t-terminal .arrow-down::after { border-top-color: #00ff41; }
+.t-terminal .tag-phase     { background: #003b00; color: #00ff41; font-family: 'Courier New', monospace; }
+.t-terminal .tag-config    { background: #0a0a0a; color: #00ff41; border: 1px solid #00ff41; font-family: 'Courier New', monospace; }
+
+/* --- Warm Earth --- */
+.t-earth .sample-area { background: #faf8f5; }
+.t-earth .node-phase    { background: #7c4d1e; color: #fff; }
+.t-earth .node-decision { background: #9c5a8a; color: #fff; }
+.t-earth .node-failure  { background: #b83c2b; color: #fff; }
+.t-earth .node-config   { background: #2d6a4f; color: #fff; }
+.t-earth .node-output   { background: #e9c46a; color: #3d2c1e; }
+.t-earth .card-blue     { background: #f5efe7; border-left: 3px solid #7c4d1e; }
+.t-earth .card-blue h3  { color: #7c4d1e; }
+.t-earth .arrow-down    { background: #c4a882; }
+.t-earth .arrow-down::after { border-top-color: #c4a882; }
+.t-earth .tag-phase     { background: #f0e0cc; color: #7c4d1e; }
+.t-earth .tag-config    { background: #d1e7d5; color: #2d6a4f; }
+
+/* --- High Contrast --- */
+.t-hicon .sample-area { background: #ffffff; }
+.t-hicon .node-phase    { background: #000000; color: #fff; }
+.t-hicon .node-decision { background: #6200ea; color: #fff; }
+.t-hicon .node-failure  { background: #d50000; color: #fff; }
+.t-hicon .node-config   { background: #00695c; color: #fff; }
+.t-hicon .node-output   { background: #ff6d00; color: #000; }
+.t-hicon .card-blue     { background: #f5f5f5; border-left: 4px solid #000; }
+.t-hicon .card-blue h3  { color: #000; }
+.t-hicon .arrow-down    { background: #000; }
+.t-hicon .arrow-down::after { border-top-color: #000; }
+.t-hicon .tag-phase     { background: #e0e0e0; color: #000; }
+.t-hicon .tag-config    { background: #b2dfdb; color: #00695c; }
+
+/* ═══════════════════════════════════════════
+   SHAPES — applied as modifiers
+   ═══════════════════════════════════════════ */
+.s-rounded .node   { border-radius: 8px; }
+.s-rounded .card   { border-radius: 8px; }
+.s-rounded .tag    { border-radius: 3px; }
+
+.s-sharp .node     { border-radius: 0; }
+.s-sharp .card     { border-radius: 0; }
+.s-sharp .tag      { border-radius: 0; }
+
+.s-pill .node      { border-radius: 999px; padding: 10px 22px; }
+.s-pill .card      { border-radius: 16px; }
+.s-pill .tag       { border-radius: 999px; }
+
+.s-outlined .node  { background: transparent !important; border-width: 2px; border-style: solid; }
+.s-outlined .t-current .node-phase,
+.t-current.s-outlined .node-phase    { border-color: #1e40af; color: #1e40af; }
+.t-current.s-outlined .node-decision { border-color: #7c3aed; color: #7c3aed; }
+.t-current.s-outlined .node-failure  { border-color: #dc2626; color: #dc2626; }
+.t-current.s-outlined .node-config   { border-color: #047857; color: #047857; }
+.t-current.s-outlined .node-output   { border-color: #f59e0b; color: #92400e; }
+.t-dark.s-outlined .node-phase       { border-color: #3b82f6; color: #3b82f6; }
+.t-dark.s-outlined .node-decision    { border-color: #a78bfa; color: #a78bfa; }
+.t-dark.s-outlined .node-failure     { border-color: #ef4444; color: #ef4444; }
+.t-dark.s-outlined .node-config      { border-color: #10b981; color: #10b981; }
+.t-dark.s-outlined .node-output      { border-color: #fbbf24; color: #fbbf24; }
+.t-blueprint.s-outlined .node-phase    { border-color: #1e3a5f; color: #1e3a5f; }
+.t-blueprint.s-outlined .node-decision { border-color: #2563eb; color: #2563eb; }
+.t-blueprint.s-outlined .node-failure  { border-color: #7f1d1d; color: #7f1d1d; }
+.t-blueprint.s-outlined .node-config   { border-color: #3b82f6; color: #3b82f6; }
+.t-blueprint.s-outlined .node-output   { border-color: #3b82f6; color: #1e3a5f; }
+.t-terminal.s-outlined .node           { background: transparent !important; }
+.t-earth.s-outlined .node-phase    { border-color: #7c4d1e; color: #7c4d1e; }
+.t-earth.s-outlined .node-decision { border-color: #9c5a8a; color: #9c5a8a; }
+.t-earth.s-outlined .node-failure  { border-color: #b83c2b; color: #b83c2b; }
+.t-earth.s-outlined .node-config   { border-color: #2d6a4f; color: #2d6a4f; }
+.t-earth.s-outlined .node-output   { border-color: #e9c46a; color: #92700e; }
+.t-hicon.s-outlined .node-phase    { border-color: #000; color: #000; }
+.t-hicon.s-outlined .node-decision { border-color: #6200ea; color: #6200ea; }
+.t-hicon.s-outlined .node-failure  { border-color: #d50000; color: #d50000; }
+.t-hicon.s-outlined .node-config   { border-color: #00695c; color: #00695c; }
+.t-hicon.s-outlined .node-output   { border-color: #ff6d00; color: #ff6d00; }
+.s-outlined .node  { border-radius: 8px; }
+.s-outlined .card  { border-radius: 8px; }
+.s-outlined .tag   { border-radius: 3px; }
+
+.s-elevated .node  { border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.10); }
+.s-elevated .card  { border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-left: none !important; }
+.s-elevated .tag   { border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+.t-dark .s-elevated .node, .t-dark.s-elevated .node { box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+.t-terminal .s-elevated .node, .t-terminal.s-elevated .node { box-shadow: 0 4px 12px rgba(0,255,65,0.15); }
+</style>
+</head>
+<body>
+
+<h1>Stark Skills — Theme &times; Shape Matrix</h1>
+<p class="subtitle">6 themes &times; 5 shape styles = 30 combinations. Each cell shows: Phase node, Decision node, Failure node, Config node, Output node, arrow, card, and tags.</p>
+
+<script>
+const themes = [
+  { id: 'current',   label: 'Current',        desc: 'Light gray, semantic colors. The default.' },
+  { id: 'dark',      label: 'Dark Mode',       desc: 'Slate background, muted neon accents.' },
+  { id: 'blueprint', label: 'Blueprint',       desc: 'Monochrome blue, technical/architectural.' },
+  { id: 'terminal',  label: 'Terminal',         desc: 'Green-on-black retro. Monospace.' },
+  { id: 'earth',     label: 'Warm Earth',       desc: 'Soft warm palette. Non-technical audiences.' },
+  { id: 'hicon',     label: 'High Contrast',    desc: 'Black/white + bold saturated accents.' },
+];
+const shapes = [
+  { id: 'rounded',  label: 'Rounded' },
+  { id: 'sharp',    label: 'Sharp' },
+  { id: 'pill',     label: 'Pill' },
+  { id: 'outlined', label: 'Outlined' },
+  { id: 'elevated', label: 'Elevated' },
+];
+
+function sampleHTML() {
+  return `
+    <div class="node node-phase"><div class="node-title">Phase</div><div class="node-desc">Parse &amp; Validate</div></div>
+    <div class="arrow-down"></div>
+    <div class="node node-decision"><div class="node-title">Decision</div><div class="node-desc">Strategy check</div></div>
+    <div class="arrow-down"></div>
+    <div class="node node-config"><div class="node-title">Config</div><div class="node-desc">Load settings</div></div>
+    <div class="arrow-down"></div>
+    <div class="node node-output"><div class="node-title">Output</div><div class="node-desc">Write results</div></div>
+    <div class="arrow-down"></div>
+    <div class="node node-failure"><div class="node-title">Failure</div><div class="node-desc">Timeout handler</div></div>
+    <div style="height:10px"></div>
+    <div class="card card-blue"><h3>Sample Card</h3><p>Tournament dispatches N competitors in parallel.</p></div>
+    <div style="height:8px"></div>
+    <div><span class="tag tag-phase">phase</span> <span class="tag tag-config">config</span></div>
+  `;
+}
+
+let html = '';
+for (const theme of themes) {
+  html += `<div class="theme-section">`;
+  html += `<div class="theme-label">${theme.label}</div>`;
+  html += `<div class="theme-desc">${theme.desc}</div>`;
+  html += `<div class="shapes-row">`;
+  for (const shape of shapes) {
+    html += `<div class="shape-col t-${theme.id} s-${shape.id}">`;
+    html += `<div class="shape-label">${shape.label}</div>`;
+    html += `<div class="sample-area">${sampleHTML()}</div>`;
+    html += `</div>`;
+  }
+  html += `</div></div>`;
+}
+document.write(html);
+</script>
+
+</body>
+</html>
