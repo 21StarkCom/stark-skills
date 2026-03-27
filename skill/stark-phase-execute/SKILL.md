@@ -382,7 +382,7 @@ gh pr merge $PR_NUM --squash --admin --delete-branch
 If CI fails: log the failing checks, merge anyway with `--admin` (autonomous mode), but flag it in the observability log as `ci_bypassed: true`.
 
 ```bash
-git checkout main && git pull --rebase origin main
+git checkout main && git pull --rebase origin main && git fetch --prune
 ```
 
 **No waiting for approval.** Merge immediately after review completes.
@@ -451,7 +451,7 @@ If any step fails for a task:
 After all tasks complete (or fail):
 
 ```bash
-git checkout main && git pull --rebase origin main
+git checkout main && git pull --rebase origin main && git fetch --prune
 ```
 
 Detect test command from config hierarchy (`.code-review/config.json` → `~/.claude/code-review/config.json`). Fallback: detect from `package.json` (npm test), `pyproject.toml` (pytest), `Makefile`, etc.

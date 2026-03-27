@@ -55,6 +55,7 @@ Read and internalize — do NOT display any of this content.
 ### Phase 2 — Git state
 
 ```bash
+git fetch --prune   # clean up stale remote-tracking refs
 git branch --show-current
 git status --short  # NEVER use -uall
 git log --oneline -5
