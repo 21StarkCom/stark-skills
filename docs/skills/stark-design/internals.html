@@ -1,0 +1,616 @@
+<html lang="en">
+<head>
+
+
+<title>stark-design — Internals Visualization</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
+.node-phase    { background: #1e40af; color: #ffffff; }
+.node-decision { background: #7c3aed; color: #ffffff; }
+.node-failure  { background: #dc2626; color: #ffffff; }
+.node-config   { background: #047857; color: #ffffff; }
+.node-output   { background: #f59e0b; color: #1a1a1a; }
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 180px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 180px; display: flex;
+  align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
+.winner-badge {
+  display: inline-block; font-size: 12px; color: #555555;
+  font-weight: 600; padding: 2px 10px; border-radius: 4px;
+  background: #f9fafb; border: 1px solid #d1d5db;
+}
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
+
+/* === Extension: Parallel Agents === */
+.parallel-row {
+  display: flex; gap: 12px; justify-content: center;
+  flex-wrap: wrap; margin: 8px 0;
+}
+.parallel-row .node { min-width: 140px; flex: 1; max-width: 200px; }
+.arrow-fan {
+  display: flex; justify-content: center; align-items: center;
+  gap: 0; height: 30px; position: relative; width: 100%; max-width: 500px; margin: 0 auto;
+}
+.arrow-fan-line {
+  width: 2px; height: 30px; background: #cbd5e1; position: relative;
+}
+.arrow-fan-line::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.converge-bar {
+  width: 420px; height: 2px; background: #cbd5e1; margin: 0 auto;
+}
+.cross-matrix {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 6px; max-width: 500px; margin: 8px auto;
+}
+.cross-cell {
+  font-size: 9px; padding: 6px 8px; border-radius: 4px;
+  text-align: center; background: #f5f3ff; color: #5b21b6;
+  border: 1px solid #ede9fe;
+}
+.cross-cell.self { background: #f3f4f6; color: #999; border-color: #e5e7eb; }
+.score-table { max-width: 600px; margin: 12px auto; }
+.pipeline-bar {
+  display: flex; gap: 4px; justify-content: center;
+  margin: 16px 0; flex-wrap: wrap;
+}
+.pipeline-step {
+  font-size: 9px; padding: 4px 10px; border-radius: 4px;
+  font-weight: 600;
+}
+.pipeline-active { background: #1e40af; color: #fff; }
+.pipeline-next { background: #e5e7eb; color: #666; }
+.pipeline-arrow { font-size: 10px; color: #cbd5e1; display: flex; align-items: center; }
+.internal-label {
+  font-size: 10px; color: #999; font-style: italic; text-align: center;
+  margin: 4px 0;
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>stark-design</h1>
+  <div class="sub">Requirements/Prompt → Design Document via 3-Agent Generation + 6-Review Cross-Evaluation</div>
+  <div class="scope">internals — architecture &amp; data flow</div>
+</div>
+
+<div class="container">
+
+  <!-- Pipeline Position -->
+  <div class="pipeline-bar">
+    <span class="pipeline-step pipeline-active">stark-design</span>
+    <span class="pipeline-arrow">→</span>
+    <span class="pipeline-step pipeline-next">stark-review-design</span>
+    <span class="pipeline-arrow">→</span>
+    <span class="pipeline-step pipeline-next">stark-design-to-plan</span>
+    <span class="pipeline-arrow">→</span>
+    <span class="pipeline-step pipeline-next">stark-review-plan</span>
+    <span class="pipeline-arrow">→</span>
+    <span class="pipeline-step pipeline-next">stark-plan-to-tasks</span>
+    <span class="pipeline-arrow">→</span>
+    <span class="pipeline-step pipeline-next">stark-phase-execute</span>
+  </div>
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#1e40af"></div> Phase</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed"></div> Decision</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#047857"></div> Config</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> Output</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#dc2626"></div> Failure</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e5e7eb; border:1px dashed #9ca3af"></div> External</div>
+  </div>
+
+  <!-- ===== MAIN FLOW ===== -->
+  <div class="section-title">Execution Flow</div>
+
+  <div class="flow">
+
+    <!-- Phase 1: Setup -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Input modes:</strong> inline "prompt" string or path to .md file</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px">
+          <div class="node-title">Phase 1: Setup</div>
+          <div class="node-desc">Parse input → detect PR context → authenticate if PR found</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Config:</strong> --agents, --timeout, --dry-run, --output</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Decision: input type -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>No input?</strong> Ask user: "What should the design cover?"</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width:380px">
+          <div class="node-title">Input Type?</div>
+          <div class="node-desc">Inline prompt → write to /tmp/stark-design-$$/requirements.md | File path → read directly</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>File not found?</strong> Search docs/ for candidates via find</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- PR Detection -->
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-config" style="width:380px">
+          <div class="node-title">PR Detection &amp; Auth</div>
+          <div class="node-desc">gh pr view → if PR exists, export GH_TOKEN via github_app.py --app stark-claude</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Optional:</strong> only authenticates if PR is detected for later comment posting</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 2: Generate Designs -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Script:</strong> design_to_plan_dispatch.py --mode generate</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px">
+          <div class="node-title">Phase 2: Generate Designs (3 parallel agents)</div>
+          <div class="node-desc">Each agent independently produces a full design document from requirements</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Prompts:</strong> prompt-to-design/ directory, per-agent variants</div>
+      </div>
+    </div>
+
+    <!-- Fan out to 3 agents -->
+    <div class="internal-label">ThreadPoolExecutor — 3 concurrent sub-agents</div>
+    <div style="max-width:500px; margin:0 auto;">
+      <div class="parallel-row">
+        <div class="node node-external">
+          <div class="node-title">Claude Agent</div>
+          <div class="node-desc">claude CLI sub-agent</div>
+        </div>
+        <div class="node node-external">
+          <div class="node-title">Codex Agent</div>
+          <div class="node-desc">codex CLI sub-agent</div>
+        </div>
+        <div class="node node-external">
+          <div class="node-title">Gemini Agent</div>
+          <div class="node-desc">gemini CLI sub-agent</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Decision: how many succeeded -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>0/3:</strong> abort with dispatch diagnostics</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-decision" style="width:380px">
+          <div class="node-title">Designs Generated?</div>
+          <div class="node-desc">Minimum 2/3 for full cross-review | 1/3 → skip review | 0/3 → abort</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>1/3:</strong> use single design, skip Phase 3, warn user</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 3: Cross-Review -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Script:</strong> design_to_plan_dispatch.py --mode cross-review</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px">
+          <div class="node-title">Phase 3: Cross-Review (6 reviews)</div>
+          <div class="node-desc">Each design reviewed by the other 2 agents → scores, strengths, weaknesses</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Dimensions:</strong> Completeness, Clarity, Feasibility, Extensibility, Security</div>
+      </div>
+    </div>
+
+    <!-- Cross-review matrix -->
+    <div class="internal-label">Review assignment matrix (reviewer → design)</div>
+    <div class="cross-matrix">
+      <div class="cross-cell self">claude→claude (skip)</div>
+      <div class="cross-cell">claude→codex</div>
+      <div class="cross-cell">claude→gemini</div>
+      <div class="cross-cell">codex→claude</div>
+      <div class="cross-cell self">codex→codex (skip)</div>
+      <div class="cross-cell">codex→gemini</div>
+      <div class="cross-cell">gemini→claude</div>
+      <div class="cross-cell">gemini→codex</div>
+      <div class="cross-cell self">gemini→gemini (skip)</div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Scorecard output -->
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-output" style="width:380px">
+          <div class="node-title">Cross-Review Scorecard</div>
+          <div class="node-desc">Averaged scores per dimension → winner selected (tie threshold: 0.5 points)</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Tie?</strong> Top 2 within 0.5 → both fed into synthesis</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 4: Synthesize -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Runs in:</strong> Claude Code orchestrator (main context), not a sub-agent</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px">
+          <div class="node-title">Phase 4: Synthesize</div>
+          <div class="node-desc">Winner as base → merge superior sections from losers → fix flagged weaknesses</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Reads:</strong> winning design + all 6 reviews + original requirements</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 5: Output -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Skipped in:</strong> --dry-run mode (terminal output only)</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:380px">
+          <div class="node-title">Phase 5: Output &amp; Persist</div>
+          <div class="node-desc">Write design file, review summary, PR comment, history, cleanup</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>History:</strong> ~/.claude/code-review/history/prompt-to-design/</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ===== DATA FLOW ===== -->
+  <div class="section-title">Data Flow &amp; Artifacts</div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Artifact</th>
+        <th>Created In</th>
+        <th>Consumed By</th>
+        <th>Location</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="tag tag-config">requirements.md</span></td>
+        <td>Phase 1 (parse)</td>
+        <td>Phase 2 (generate), Phase 4 (synthesize)</td>
+        <td>/tmp/stark-design-$$/ or user-provided path</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-output">agent designs (×3)</span></td>
+        <td>Phase 2 (generate)</td>
+        <td>Phase 3 (cross-review), Phase 4 (synthesize)</td>
+        <td>/tmp/stark-design-$$/{agent}.md</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-phase">plans.json</span></td>
+        <td>Phase 2 (generate)</td>
+        <td>Phase 3 (cross-review dispatch)</td>
+        <td>/tmp/stark-design-$$/plans.json</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-decision">cross-review results (×6)</span></td>
+        <td>Phase 3 (cross-review)</td>
+        <td>Phase 4 (synthesize), Phase 5 (scorecard output)</td>
+        <td>JSON from dispatch script stdout</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-output">final design doc</span></td>
+        <td>Phase 4 (synthesize)</td>
+        <td>Phase 5 (persist), downstream skills</td>
+        <td>docs/specs/YYYY-MM-DD-{slug}-design.md</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-output">review summary</span></td>
+        <td>Phase 5 (output)</td>
+        <td>Developer reference, PR comment</td>
+        <td>{design-name}.design-review.md</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-config">history files</span></td>
+        <td>Phase 5 (persist)</td>
+        <td>stark-metrics, stark-review-improvement</td>
+        <td>~/.claude/code-review/history/prompt-to-design/{slug}/</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ===== SYNTHESIS INTERNALS ===== -->
+  <div class="section-title">Phase 4 Synthesis — Internal Logic</div>
+
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>1. Winner as Base</h3>
+      <p>Start with the highest-scoring design's full structure and content. If a tie (within 0.5 points), both designs are loaded as co-bases.</p>
+    </div>
+    <div class="card card-purple">
+      <h3>2. Merge Superior Sections</h3>
+      <p>For each section where a non-winning design scored higher on a specific dimension (e.g., security, extensibility), incorporate that design's approach into the corresponding section.</p>
+    </div>
+    <div class="card card-green">
+      <h3>3. Address Flagged Weaknesses</h3>
+      <p>Fix issues flagged by cross-reviewers. If both reviewers flagged the same weakness, it's a confirmed problem — don't carry it forward.</p>
+    </div>
+    <div class="card card-amber">
+      <h3>4. Quality Check</h3>
+      <p>Verify: every requirement → design element, no section contradictions, security matches data sensitivity, open questions are genuine unknowns.</p>
+    </div>
+  </div>
+
+  <!-- ===== EXTENSION POINTS ===== -->
+  <div class="section-title">Extension Points</div>
+
+  <div class="card-grid">
+    <div class="card card-dark">
+      <h3>Agent List (--agents)</h3>
+      <p>Default: claude,codex,gemini. Configurable via CLI flag. Adding an agent requires: a CLI binary on PATH, a prompts subdirectory in prompt-to-design/, and a corresponding GitHub App entry in github_app.py for review posting.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>Prompts Directory</h3>
+      <p>Generation and cross-review prompts live in the prompt-to-design/ directory under the prompts path. Each agent has its own variant. Edit these to change what the design documents focus on or how cross-reviews score.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>Scoring Dimensions</h3>
+      <p>Currently: Completeness, Clarity, Feasibility, Extensibility, Security. These are defined in the cross-review prompts — add/remove dimensions by editing the review prompt templates.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>Output Path Logic</h3>
+      <p>Default: docs/specs/YYYY-MM-DD-{slug}-design.md. Override with --output. The slug is derived from the input filename or auto-slugified from the inline prompt. Modify the path logic in Phase 5 of SKILL.md.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>History &amp; Metrics Integration</h3>
+      <p>History written to ~/.claude/code-review/history/prompt-to-design/{slug}/. Files: generate.json, cross-review.json, synthesis.md, summary.md. Consumed by /stark-metrics and /stark-review-improvement for self-improvement loops.</p>
+    </div>
+    <div class="card card-dark">
+      <h3>Downstream Pipeline</h3>
+      <p>Output design doc feeds into /stark-review-design for formal review, then /stark-design-to-plan for implementation planning. The full pipeline is automated by /stark-phase-execute.</p>
+    </div>
+  </div>
+
+  <!-- ===== FAILURE MODES ===== -->
+  <div class="section-title">Failure Modes &amp; Recovery</div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Failure</th>
+        <th>Detection</th>
+        <th>Recovery</th>
+        <th>Severity</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>No prompt and no path</td>
+        <td>Phase 1 input parse</td>
+        <td>Interactive: ask "What should the design cover?"</td>
+        <td><span class="tag tag-config">low</span></td>
+      </tr>
+      <tr>
+        <td>File not found</td>
+        <td>Phase 1 file read</td>
+        <td>Search docs/ for candidates via find</td>
+        <td><span class="tag tag-config">low</span></td>
+      </tr>
+      <tr>
+        <td>0/3 designs generated</td>
+        <td>Phase 2 result count</td>
+        <td>Abort with dispatch diagnostics (stderr, exit codes)</td>
+        <td><span class="tag tag-failure">critical</span></td>
+      </tr>
+      <tr>
+        <td>1/3 designs generated</td>
+        <td>Phase 2 result count</td>
+        <td>Use single design, skip Phase 3, warn user</td>
+        <td><span class="tag tag-decision">degraded</span></td>
+      </tr>
+      <tr>
+        <td>2/3 designs generated</td>
+        <td>Phase 2 result count</td>
+        <td>Cross-review with 2 designs (4 reviews instead of 6)</td>
+        <td><span class="tag tag-decision">degraded</span></td>
+      </tr>
+      <tr>
+        <td>Cross-review parse failure</td>
+        <td>Phase 3 JSON parse</td>
+        <td>Use raw output, attempt manual score extraction</td>
+        <td><span class="tag tag-output">medium</span></td>
+      </tr>
+      <tr>
+        <td>Script not found</td>
+        <td>Phase 2 subprocess</td>
+        <td>"Run install.sh to set up stark-skills"</td>
+        <td><span class="tag tag-failure">blocking</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ===== KEY SCRIPTS ===== -->
+  <div class="section-title">Key Scripts &amp; Dependencies</div>
+
+  <div class="summary-grid">
+    <div class="summary-card card-blue">
+      <h3>design_to_plan_dispatch.py</h3>
+      <p>Orchestrator script. Modes: --mode generate (spawn 3 agents) and --mode cross-review (spawn 6 review agents). Uses ThreadPoolExecutor for parallelism. Returns JSON to stdout.</p>
+    </div>
+    <div class="summary-card card-green">
+      <h3>github_app.py</h3>
+      <p>Multi-app GitHub auth. Generates JWT from macOS Keychain private key, exchanges for installation token. Supports stark-claude, stark-codex, stark-gemini apps. Used only when PR context detected.</p>
+    </div>
+    <div class="summary-card card-purple">
+      <h3>prompt-to-design/</h3>
+      <p>Per-agent prompt templates for both generation and cross-review. Agent preambles in agent.md, domain prompts in NN-domain.md. The prompts directory is the primary extension point.</p>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer"><div class="winner-badge">Visualization by Claude · Score: 8.4/10 · Generated from SKILL.md</div></div>
+
+</body>
+</html>

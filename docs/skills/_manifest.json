@@ -9,10 +9,15 @@
       "usage_quality": "ok",
       "internals_quality": "ok"
     },
-    "stark-design-to-plan": {
-      "hash": "d2ac1a09b5f929d8",
+    "stark-design": {
+      "hash": "d3ebf578db48e1af",
       "usage_quality": "good",
       "internals_quality": "good"
+    },
+    "stark-design-to-plan": {
+      "hash": "d2ac1a09b5f929d8",
+      "usage_quality": "ok",
+      "internals_quality": "ok"
     },
     "stark-extract-docs": {
       "hash": "5f4c8db4ef260ec2",

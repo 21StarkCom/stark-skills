@@ -1,0 +1,66 @@
+# stark-design — Internals
+
+Use this skill when the user wants to create a design document, spec, or architecture doc from requirements, a feature description, or a high-level prompt. Triggers whenever someone needs to go from an idea or set of requirements to a formal design. Covers requests like "design this feature", "write a spec for", "create an architecture doc", "I need a design document for", or any variation where input is requirements/prompt and desired output is a design/spec document. Also triggers on `/stark-design <prompt-or-path>`. Works by dispatching 3 independent AI agents to each produce a design, then cross-reviewing all designs to synthesize the best one. This is the natural first step before design review (`/stark-review-design`).
+
+## Architecture
+
+```mermaid
+graph TD
+    A["Input: prompt string or .md path"] --> B{"Input provided?"}
+    B -- "no" --> B1["Ask: What should the design cover?"]
+    B1 --> B
+    B -- "yes" --> C["Phase 1: Parse input & detect PR"]
+    C --> D{"PR detected?"}
+    D -- "yes" --> E["Authenticate via github_app.py"]
+    D -- "no" --> F
+    E --> F["Phase 2: Dispatch 3 agents in parallel"]
+    F --> F1["Claude generates design"]
+    F --> F2["Codex generates design"]
+    F --> F3["Gemini generates design"]
+    F1 & F2 & F3 --> G{"How many succeeded?"}
+    G -- "0/3" --> G0["ABORT: dispatch diagnostics"]
+    G -- "1/3" --> G1["Use single design, skip cross-review"]
+    G -- "2-3/3" --> H["Phase 3: Cross-review\n6 reviews (each design reviewed by other 2)"]
+    H --> I["Scorecard: avg scores per dimension"]
+    I --> J{"Tie within 0.5?"}
+    J -- "yes" --> K["Both designs as co-base"]
+    J -- "no" --> L["Winner as base"]
+    K & L --> M["Phase 4: Synthesize\nMerge superior sections + fix flagged weaknesses"]
+    G1 --> M
+    M --> N["Quality check:\nrequirements coverage, no contradictions"]
+    N --> O{"--dry-run?"}
+    O -- "yes" --> P["Terminal output only"]
+    O -- "no" --> Q["Phase 5: Write design file"]
+    Q --> R["Write review summary"]
+    R --> S{"PR detected?"}
+    S -- "yes" --> T["Post comment to PR"]
+    S -- "no" --> U["Save history & cleanup"]
+    T --> U
+    P --> U
+
+    style A fill:#047857,color:#fff
+    style G0 fill:#dc2626,color:#fff
+    style F fill:#1e40af,color:#fff
+    style H fill:#1e40af,color:#fff
+    style M fill:#1e40af,color:#fff
+    style Q fill:#f59e0b,color:#1a1a1a
+    style R fill:#f59e0b,color:#1a1a1a
+```
+
+![Internals visualization of the stark-design skill showing a vertical execution flow from input parsing through 5 phases: Setup (parse input, detect PR, authenticate), Generate (3 parallel AI agents — Claude, Codex, Gemini — each producing a design), Cross-Review (6-review matrix where each design is scored by the other 2 agents on 5 dimensions), Synthesize (winner-as-base merging with superior sections from other designs), and Output (write design file, review summary, PR comment, and history). Includes a cross-review assignment matrix, data flow table showing artifact lifecycle, synthesis logic cards, extension point documentation, failure mode table with severity ratings, and key script descriptions. Pipeline position bar at top highlights stark-design as the first step in the 6-stage pipeline.](internals.png)
+
+## Phases
+
+Phase 1 (Setup): Parses input — either an inline quoted prompt or a path to a requirements markdown file. If inline, writes content to /tmp/stark-design-$$/requirements.md. Detects if a PR is open via `gh pr view` and authenticates with github_app.py if so. Phase 2 (Generate): Calls design_to_plan_dispatch.py with --mode generate, which spawns 3 CLI sub-agents (claude, codex, gemini) in parallel via ThreadPoolExecutor. Each agent independently produces a full design document from the requirements using per-agent prompt templates in the prompt-to-design/ directory. Results are collected as JSON; minimum 2/3 must succeed. Phase 3 (Cross-Review): Calls design_to_plan_dispatch.py with --mode cross-review, passing a plans.json containing all generated designs. Each design is reviewed by the other 2 agents (6 reviews total). Reviews score on 5 dimensions: Completeness, Clarity, Feasibility, Extensibility, Security. Scores are averaged and a winner is selected (tie threshold: 0.5 points). Phase 4 (Synthesize): Runs in the main Claude Code orchestrator context (not a sub-agent). Reads the winning design, all 6 cross-reviews, and original requirements. Applies synthesis rules: winner as base, merge sections where non-winners scored higher, fix flagged weaknesses, discard confirmed problems. Runs a quality check verifying requirements coverage and section consistency. Phase 5 (Output): Writes the synthesized design to docs/specs/YYYY-MM-DD-{slug}-design.md (or --output path). Writes a review summary alongside. If PR was detected, posts a comment via stark-claude bot. Saves full history (generate.json, cross-review.json, synthesis.md, summary.md) to ~/.claude/code-review/history/prompt-to-design/{slug}/. Cleans up /tmp/stark-design-$$.
+
+## Config
+
+CLI flags: --agents LIST (default: claude,codex,gemini) — comma-separated agent IDs to use for generation and cross-review. --timeout N (default: 600) — per-agent timeout in seconds for both generation and review phases. --dry-run — generate designs and reviews but skip file writes and PR posting. --output PATH — override the default output path for the design document. --force — suppress dirty-worktree warnings when input is a file. Constants: SCRIPTS=~/.claude/code-review/scripts, PYTHON=$SCRIPTS/.venv/bin/python3. The dispatch script (design_to_plan_dispatch.py) reads prompts from the prompt-to-design/ subdirectory. GitHub App auth uses macOS Keychain entries (STARK_CLAUDE_PRIVATE_KEY etc.) with 1hr cached tokens at ~/.cache/github-app-token.json.
+
+## Failure Modes
+
+No input provided: interactively asks 'What should the design cover?' File not found: searches docs/ for candidates matching partial name. 0/3 designs generated: aborts with dispatch failure diagnostics (stderr output, exit codes from sub-agents). 1/3 designs generated: uses the single design directly, skips Phase 3 cross-review entirely, warns user about degraded quality. 2/3 designs generated: runs cross-review with available designs (4 reviews instead of 6), still produces a valid scorecard. Cross-review JSON parse failure: falls back to raw output, attempts manual score extraction from text. Script not found (design_to_plan_dispatch.py): displays 'Run install.sh to set up stark-skills'. PR auth failure: continues without PR posting, design still generated and saved locally.
+
+## How to Modify This Skill
+
+Add a new agent: (1) Add agent CLI binary to PATH, (2) Create prompts subdirectory in prompt-to-design/{agent}/, (3) Add GitHub App config to github_app.py if review posting is needed, (4) Pass agent ID in --agents flag. Change scoring dimensions: Edit the cross-review prompt templates in prompt-to-design/. Dimensions are defined in the review prompts, not in code. Modify output path logic: Edit Phase 5 in SKILL.md — the path derivation rules are: --output flag > input-file-based path > inline-prompt-slugified path. Change synthesis strategy: Edit Phase 4 in SKILL.md — the synthesis rules (winner-as-base, merge-superior, address-weaknesses) are followed by the orchestrator. Add new history fields: Extend Phase 5e — history files are JSON/markdown written to ~/.claude/code-review/history/prompt-to-design/{slug}/. Adjust tie threshold: Currently 0.5 points, defined in Phase 3 of SKILL.md. Change the prompts: All generation and cross-review prompts are in the prompt-to-design/ directory, organized per-agent. Each agent gets its own variant of each prompt.
