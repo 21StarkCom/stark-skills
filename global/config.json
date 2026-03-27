@@ -24,5 +24,11 @@
     "validation_agents": ["codex", "gemini"],
     "max_quality_gate_rounds": 3,
     "max_validation_iterations": 2
+  },
+  "design_review": {
+    "agents": ["claude", "codex"],
+    "fix_threshold": "medium",
+    "disabled_domains": [],
+    "max_rounds": 3
   }
 }
