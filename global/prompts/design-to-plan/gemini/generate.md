@@ -54,9 +54,16 @@ For each phase:
 ### 6. Rollback Plan
 - Per-phase revert procedure
 
+## Output Rules
+- **Output the entire plan as your text response.** Do NOT write files, create directories, or use any file-writing tools. Your response IS the plan.
+- Do NOT summarize what you did — output the full plan content directly.
+
 ## Guidelines
 - Explicitly mark which phases can execute in parallel vs. which are sequential
 - Front-load risky or uncertain work — don't leave the hardest parts for last
 - Be specific: file paths, function names, data structures from the design
 - Call out design ambiguities that need resolution before implementation
 - Every phase must leave the system deployable, even if incomplete
+- **Infrastructure provisioning** (Terraform, cloud resources, IAM) must be explicit tasks — not implied or deferred to "notes"
+- **Thread auth and security** through all verification examples — don't show curl commands without the auth headers the spec requires
+- **Operational concerns** (monitoring, retention, partition maintenance) must appear as concrete scheduled tasks, not TODO comments

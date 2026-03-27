@@ -60,3 +60,6 @@ For each phase:
 - Be specific about file paths, function names, and data structures where the design provides them
 - Flag any ambiguities in the design that affect implementation choices
 - Do NOT pad with generic advice — every line should be actionable for this specific design
+- **Infrastructure provisioning** (Terraform, cloud resources, IAM, database setup) must be explicit first-class tasks with their own verification steps — never defer to "notes" or assume they happen implicitly
+- **Thread auth and security decisions** through all verification examples — if the design requires auth headers, every curl/test example must include them
+- **Operational concerns** (monitoring setup, retention jobs, partition maintenance, certificate rotation) must appear as concrete scheduled tasks in specific phases, not deferred to "future work" or left as TODO comments
