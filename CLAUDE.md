@@ -53,6 +53,7 @@ All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.claude/skil
 - `/stark-session-insights [--project <name>] [--refresh]` — analyze session history for usage patterns, skill invocations, corrections
 - `/stark-skill-analytics [--skill <name>] [--format table|full]` — analyze skill usage patterns, quality metrics, and adoption trends
 - `/stark-generate-docs [--skill <name>]` — generate/update skill docs with multi-LLM viz
+- `/stark-design-to-plan <path>` — generate implementation plan from design doc (3 agents generate, 6 cross-reviews, synthesized winner)
 - `/stark-tournament "prompt" [--config file.yaml]` — multi-LLM competition with configurable evaluation strategies
 
 ## Conventions
