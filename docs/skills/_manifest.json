@@ -9,6 +9,11 @@
       "usage_quality": "ok",
       "internals_quality": "ok"
     },
+    "stark-design-to-plan": {
+      "hash": "d2ac1a09b5f929d8",
+      "usage_quality": "good",
+      "internals_quality": "good"
+    },
     "stark-extract-docs": {
       "hash": "5f4c8db4ef260ec2",
       "usage_quality": "ok",
@@ -30,7 +35,7 @@
       "internals_quality": "ok"
     },
     "stark-onboard-project": {
-      "hash": "7245391bfd50f0a6",
+      "hash": "0d8158d9e0683c69",
       "usage_quality": "ok",
       "internals_quality": "ok"
     },
@@ -69,13 +74,18 @@
       "usage_quality": "ok",
       "internals_quality": "ok"
     },
+    "stark-review-design": {
+      "hash": "add05559dffc06c8",
+      "usage_quality": "ok",
+      "internals_quality": "ok"
+    },
     "stark-review-improvement": {
       "hash": "0acf97fb0630ca5f",
       "usage_quality": "ok",
       "internals_quality": "ok"
     },
     "stark-review-plan": {
-      "hash": "f0d2e84889b3ddcb",
+      "hash": "02e5f20f0b629176",
       "usage_quality": "ok",
       "internals_quality": "ok"
     },
@@ -96,8 +106,8 @@
     },
     "stark-tournament": {
       "hash": "d9e920a24d6e132c",
-      "usage_quality": "good",
-      "internals_quality": "good"
+      "usage_quality": "ok",
+      "internals_quality": "ok"
     },
     "stark-update-deps": {
       "hash": "e2654f1808d306ee",

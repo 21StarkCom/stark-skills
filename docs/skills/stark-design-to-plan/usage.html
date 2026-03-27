@@ -1,0 +1,777 @@
+<html lang="en">
+<head>
+  
+  
+  <title>stark-design-to-plan</title>
+  <style>
+    /*
+     * Stark Skills — Shared Design System CSS
+     *
+     * Foundation styles for LLM-generated HTML skill visualizations.
+     * LLMs embed this inline and may extend with additional styles.
+     * All colors pass WCAG AA 4.5:1 contrast ratio.
+     *
+     * Adapted from infra-ai-platform/scripts/generate-viz.py DESIGN_CSS.
+     */
+
+    /* === Reset & Base === */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      background:
+        radial-gradient(circle at top left, #eef4ff 0, transparent 34%),
+        radial-gradient(circle at top right, #fef3c7 0, transparent 28%),
+        linear-gradient(180deg, #ffffff 0%, #fafafa 100%);
+      color: #1a1a1a;
+      line-height: 1.5;
+    }
+
+    /* === Header === */
+    .header { text-align: center; padding: 36px 20px 16px; }
+    .header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+    .header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+    .header .scope {
+      display: inline-block; font-size: 10px; font-weight: 600;
+      background: #eff6ff; color: #1e40af;
+      padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+    }
+
+    /* === Container === */
+    .container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+
+    /* === Section Title === */
+    .section-title {
+      font-size: 14px; font-weight: 700; color: #666;
+      text-transform: uppercase; letter-spacing: 1px;
+      margin: 32px 0 16px; padding-bottom: 6px;
+      border-bottom: 2px solid #e5e7eb;
+    }
+
+    /* === Node Types === */
+    .node { border-radius: 8px; padding: 12px 16px; text-align: center; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08); }
+    .node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+    .node-desc { font-size: 10px; opacity: 0.8; }
+
+    .node-phase    { background: #1e40af; color: #ffffff; }
+    .node-decision { background: #7c3aed; color: #ffffff; }
+    .node-failure  { background: #dc2626; color: #ffffff; }
+    .node-config   { background: #047857; color: #ffffff; }
+    .node-output   { background: #f59e0b; color: #1a1a1a; }
+    .node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
+
+    /* === Flow Layout === */
+    .flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+    .flow-step {
+      display: flex; align-items: stretch;
+      width: 100%; max-width: 860px; min-height: 76px;
+    }
+    .flow-lane-left {
+      width: 180px; display: flex;
+      align-items: center; justify-content: flex-end;
+      padding-right: 18px;
+    }
+    .flow-lane-center {
+      width: 500px; display: flex;
+      align-items: center; justify-content: center;
+    }
+    .flow-lane-right {
+      width: 180px; display: flex;
+      align-items: center; padding-left: 18px;
+    }
+    .annotation {
+      font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+    }
+    .annotation strong { color: #444; }
+
+    /* === Arrows === */
+    .arrow-down {
+      width: 2px; height: 20px; background: #cbd5e1;
+      margin: 0 auto; position: relative;
+    }
+    .arrow-down::after {
+      content: ''; position: absolute; bottom: -4px; left: -4px;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid #cbd5e1;
+    }
+    .arrow-container {
+      display: flex; justify-content: center;
+      width: 100%; max-width: 860px;
+    }
+    .arrow-container .flow-lane-center {
+      display: flex; justify-content: center;
+    }
+
+    /* === Cards === */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px; margin-top: 16px;
+    }
+    .card { padding: 16px; border-radius: 8px; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05); }
+    .card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+    .card p  { font-size: 11px; line-height: 1.6; }
+
+    .card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+    .card-blue h3 { color: #1e40af; }
+    .card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+    .card-green h3 { color: #059669; }
+    .card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+    .card-purple h3 { color: #7c3aed; }
+    .card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+    .card-amber h3 { color: #92400e; }
+    .card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+    .card-dark h3 { color: #333333; }
+    .card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+    .card-red h3 { color: #dc2626; }
+
+    /* === Data Tables === */
+    .data-table {
+      width: 100%; max-width: 860px; margin: 16px auto;
+      border-collapse: collapse; font-size: 11px;
+      background: rgba(255, 255, 255, 0.88);
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
+    }
+    .data-table th {
+      background: #f3f4f6; padding: 8px 12px; text-align: left;
+      font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+    }
+    .data-table td {
+      padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+      vertical-align: top;
+    }
+
+    /* === Tags === */
+    .tag {
+      display: inline-block; font-size: 9px; font-weight: 600;
+      padding: 2px 8px; border-radius: 3px;
+    }
+    .tag-phase    { background: #dbeafe; color: #1e40af; }
+    .tag-decision { background: #ede9fe; color: #5b21b6; }
+    .tag-failure  { background: #fee2e2; color: #991b1b; }
+    .tag-config   { background: #d1fae5; color: #065f46; }
+    .tag-output   { background: #fef3c7; color: #92400e; }
+    .tag-external { background: #f3f4f6; color: #666666; }
+
+    /* === Legend === */
+    .legend {
+      display: flex; gap: 16px; justify-content: center;
+      margin: 16px 0 24px; flex-wrap: wrap;
+    }
+    .legend-item {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 10px; color: #666;
+    }
+    .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+    /* === Summary Grid === */
+    .summary-grid {
+      display: grid; grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px; margin-top: 16px;
+    }
+    .summary-card { padding: 16px; border-radius: 8px; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05); }
+    .summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+    .summary-card p  { font-size: 11px; line-height: 1.5; }
+
+    /* === Winner Badge === */
+    .winner-badge {
+      display: inline-block; font-size: 12px; color: #555555;
+      font-weight: 600; padding: 2px 10px; border-radius: 4px;
+      background: #f9fafb; border: 1px solid #d1d5db;
+    }
+
+    /* === Footer === */
+    .footer {
+      text-align: center; padding: 20px;
+      font-size: 10px; color: #999;
+    }
+
+    /* === Extensions === */
+    .hero-strip {
+      max-width: 860px;
+      margin: 0 auto 8px;
+      padding: 14px 18px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 52%, #047857 100%);
+      color: #ffffff;
+      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.14);
+    }
+    .hero-strip p {
+      font-size: 12px;
+      line-height: 1.7;
+      opacity: 0.94;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .command-box {
+      margin-top: 10px;
+      padding: 12px 14px;
+      border-radius: 8px;
+      background: #111827;
+      color: #f9fafb;
+      font-size: 11px;
+      overflow-x: auto;
+    }
+    .mini-list {
+      margin-top: 8px;
+      padding-left: 16px;
+      font-size: 11px;
+      color: #374151;
+    }
+    .mini-list li { margin-bottom: 4px; }
+    .split-note {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 16px;
+      align-items: start;
+    }
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .kpi {
+      background: rgba(255, 255, 255, 0.8);
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 12px;
+      text-align: center;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+    }
+    .kpi strong {
+      display: block;
+      font-size: 20px;
+      color: #111827;
+      margin-bottom: 2px;
+    }
+    .kpi span {
+      font-size: 10px;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .phase-chip-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+    .phase-chip {
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: #ffffff;
+      border: 1px solid #dbeafe;
+      color: #1e3a8a;
+      font-size: 10px;
+      font-weight: 700;
+      box-shadow: 0 6px 18px rgba(30, 64, 175, 0.08);
+    }
+    .artifact-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+      margin-top: 16px;
+    }
+    .artifact {
+      border-radius: 10px;
+      padding: 14px;
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+    }
+    .artifact h4 {
+      font-size: 12px;
+      margin-bottom: 6px;
+      color: #111827;
+    }
+    .artifact p {
+      font-size: 11px;
+      color: #4b5563;
+      line-height: 1.6;
+    }
+    .callout {
+      max-width: 860px;
+      margin: 16px auto 0;
+      border-radius: 10px;
+      padding: 14px 16px;
+      background: #fff7ed;
+      border: 1px solid #fdba74;
+      color: #9a3412;
+      font-size: 11px;
+      line-height: 1.6;
+    }
+    .score-box {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .score-pill {
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 700;
+      background: #f3f4f6;
+      color: #374151;
+      border: 1px solid #e5e7eb;
+    }
+    .subtle {
+      color: #6b7280;
+      font-size: 11px;
+    }
+    @media (max-width: 900px) {
+      .summary-grid,
+      .kpi-row,
+      .split-note {
+        grid-template-columns: 1fr;
+      }
+      .flow-step {
+        flex-direction: column;
+        min-height: auto;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      .flow-lane-left,
+      .flow-lane-center,
+      .flow-lane-right {
+        width: 100%;
+        justify-content: center;
+        padding: 0;
+      }
+      .annotation {
+        max-width: 100%;
+        text-align: center;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="scope">USAGE VIEW</div>
+    <h1>stark-design-to-plan</h1>
+    <div class="sub">Convert a finished design or spec into an execution-ready implementation plan with phases, dependencies, rollback steps, and risk controls.</div>
+  </div>
+
+  <div class="container">
+    <div class="hero-strip">
+      <p>This skill sits in the middle of the Stark workflow: review the design first, then generate competing implementation plans, cross-review them, and synthesize a stronger final plan before sending that plan into plan review.</p>
+      <div class="command-box mono">/stark-design-to-plan &lt;path&gt; [--agents claude,codex,gemini] [--timeout 600] [--dry-run] [--force]</div>
+      <div class="phase-chip-row">
+        <div class="phase-chip">Setup</div>
+        <div class="phase-chip">Generate 3 Plans</div>
+        <div class="phase-chip">Cross-Review</div>
+        <div class="phase-chip">Synthesize</div>
+        <div class="phase-chip">Write Outputs</div>
+      </div>
+    </div>
+
+    <div class="kpi-row">
+      <div class="kpi"><strong>3</strong><span>Plan drafts</span></div>
+      <div class="kpi"><strong>6</strong><span>Cross-reviews</span></div>
+      <div class="kpi"><strong>1</strong><span>Synthesized winner</span></div>
+      <div class="kpi"><strong>5</strong><span>User-visible phases</span></div>
+    </div>
+
+    <div class="summary-grid">
+      <div class="summary-card card-blue">
+        <h3>When to Use It</h3>
+        <p>Use this after a design doc is already written and reviewed. The input is a finished markdown spec. The output is not code, but a phased implementation plan you can execute or review.</p>
+      </div>
+      <div class="summary-card card-green">
+        <h3>What You Provide</h3>
+        <p>A readable design file path, optional agent list, and optional controls for timeout, dry run, or forcing a run when the design file is dirty in Git.</p>
+      </div>
+      <div class="summary-card card-amber">
+        <h3>What You Get Back</h3>
+        <p>A final plan markdown file, a cross-review summary, terminal scorecards and metrics, optional PR posting, and raw history artifacts for auditability.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Legend</div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-dot" style="background:#1e40af;"></span>Workflow phase</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#7c3aed;"></span>Decision point</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#047857;"></span>Config or prerequisite</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#f59e0b;"></span>Output or artifact</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#dc2626;"></span>Failure path</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#e5e7eb; border:1px dashed #9ca3af;"></span>External dependency</div>
+    </div>
+
+    <div class="section-title">Quick Start</div>
+    <div class="card-grid">
+      <div class="card card-dark">
+        <h3>Simplest Invocation</h3>
+        <p class="mono">/stark-design-to-plan docs/specs/2026-03-27-auth-design.md</p>
+        <ul class="mini-list">
+          <li>Validates the file path and checks Git cleanliness.</li>
+          <li>Runs three planning agents in parallel.</li>
+          <li>Writes the synthesized plan next to the design file.</li>
+        </ul>
+      </div>
+      <div class="card card-purple">
+        <h3>Pipeline Position</h3>
+        <p><span class="winner-badge">/stark-review-design → /stark-design-to-plan → /stark-review-plan</span></p>
+        <ul class="mini-list">
+          <li>Review the design first.</li>
+          <li>Generate an implementation plan second.</li>
+          <li>Review the generated plan last.</li>
+        </ul>
+      </div>
+      <div class="card card-green">
+        <h3>Safe Exploration Mode</h3>
+        <p class="mono">/stark-design-to-plan docs/specs/auth-design.md --dry-run</p>
+        <ul class="mini-list">
+          <li>Runs generation and review logic.</li>
+          <li>Skips writing plan and summary files.</li>
+          <li>Useful when tuning agents or timeouts.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-title">Workflow</div>
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="node node-external">
+            <div class="node-title">Design Markdown</div>
+            <div class="node-desc">Required input file</div>
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Phase 1: Setup</div>
+            <div class="node-desc">Validate path, read design, check Git state, detect PR</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-config">
+            <div class="node-title">Optional Auth</div>
+            <div class="node-desc">Only if PR context exists</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="node node-failure">
+            <div class="node-title">Abort or Ask</div>
+            <div class="node-desc">Missing file, dirty file, bad path</div>
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision">
+            <div class="node-title">Input Valid?</div>
+            <div class="node-desc">Search docs/ if partial name, require --force for dirty file</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Typical recovery:</strong> pass a real path, pick a search candidate, or rerun with <span class="mono">--force</span> if you intentionally want to use a modified design.</div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>What happens:</strong> three agents independently propose phases, tasks, dependencies, rollbacks, and risk mitigations.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Phase 2: Generate Plans</div>
+            <div class="node-desc">Dispatch 3 agents in parallel</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-output">
+            <div class="node-title">Temp Plan Files</div>
+            <div class="node-desc">{agent}.md + plans.json</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="node node-failure">
+            <div class="node-title">0 or 1 Success</div>
+            <div class="node-desc">Abort on 0, fallback on 1</div>
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision">
+            <div class="node-title">Enough Plans?</div>
+            <div class="node-desc">2 of 3 is preferred minimum; 1 of 3 skips cross-review</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="annotation"><strong>Fallback logic:</strong> 2 plans means 4 reviews instead of 6. 1 plan means use it directly with a warning.</div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Score dimensions:</strong> completeness, feasibility, phasing, risk, and testability.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Phase 3: Cross-Review</div>
+            <div class="node-desc">Each plan reviewed by the other two agents</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-output">
+            <div class="node-title">Scorecard</div>
+            <div class="node-desc">Averages, strengths, weaknesses, winner</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Improvement flags:</strong> close race under 0.5, weak dimension under 5, parse failures, or slow agents over 5 minutes.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-decision">
+            <div class="node-title">Winner or Tie?</div>
+            <div class="node-desc">Top score wins, close scores may trigger shared synthesis</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-config">
+            <div class="node-title">Human Reading Hint</div>
+            <div class="node-desc">Review synthesis carefully on close races</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="annotation"><strong>Synthesis rule:</strong> start from the winner, merge stronger sections from rivals, fix weaknesses, keep concrete paths and commands.</div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Phase 4: Synthesize</div>
+            <div class="node-desc">Merge best elements into one final plan</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-output">
+            <div class="node-title">Final Plan Draft</div>
+            <div class="node-desc">Quality-checked before output</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+      <div class="flow-step">
+        <div class="flow-lane-left">
+          <div class="node node-external">
+            <div class="node-title">Optional PR Comment</div>
+            <div class="node-desc">Posted only in PR context</div>
+          </div>
+        </div>
+        <div class="flow-lane-center">
+          <div class="node node-phase">
+            <div class="node-title">Phase 5: Output</div>
+            <div class="node-desc">Write files, history, summary, metrics</div>
+          </div>
+        </div>
+        <div class="flow-lane-right">
+          <div class="node node-output">
+            <div class="node-title">Plan + Review Files</div>
+            <div class="node-desc">Alongside the design file</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout">
+      The skill is strongest when the design document is already stable. If the design is still changing, generate the plan only as a dry run or expect the output to become stale quickly.
+    </div>
+
+    <div class="section-title">Arguments</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Argument</th>
+          <th>What It Controls</th>
+          <th>Default</th>
+          <th>Usage Note</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="mono">&lt;path&gt;</td>
+          <td>Design or spec markdown file to convert into a plan</td>
+          <td>Required</td>
+          <td>Best when the file already passed design review</td>
+        </tr>
+        <tr>
+          <td class="mono">--agents claude,codex,gemini</td>
+          <td>Which planning agents participate</td>
+          <td>claude,codex,gemini</td>
+          <td>Use to compare agents or temporarily exclude one</td>
+        </tr>
+        <tr>
+          <td class="mono">--timeout N</td>
+          <td>Per-agent timeout in seconds</td>
+          <td>600</td>
+          <td>Raise it for large designs or slower environments</td>
+        </tr>
+        <tr>
+          <td class="mono">--dry-run</td>
+          <td>Run generation and review without writing outputs</td>
+          <td>Off</td>
+          <td>Useful for rehearsals, debugging, or score comparison</td>
+        </tr>
+        <tr>
+          <td class="mono">--force</td>
+          <td>Proceed even if the design file has uncommitted changes</td>
+          <td>Off</td>
+          <td>Only use if you deliberately want to plan against a dirty working copy</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="section-title">Outputs You Should Expect</div>
+    <div class="artifact-grid">
+      <div class="artifact">
+        <h4>Final plan markdown</h4>
+        <p>If the design ends with <span class="mono">-design.md</span>, the plan becomes <span class="mono">-plan.md</span>. Otherwise the skill appends <span class="mono">.plan.md</span>.</p>
+      </div>
+      <div class="artifact">
+        <h4>Cross-review summary</h4>
+        <p>A sibling file ending in <span class="mono">.d2p-review.md</span> containing the scorecard, strengths, weaknesses, and synthesis decisions.</p>
+      </div>
+      <div class="artifact">
+        <h4>Terminal progress</h4>
+        <p>Task-based progress messages, timestamped phase logs, and a metrics block summarizing duration, review counts, winner, runner-up, and merge notes.</p>
+      </div>
+      <div class="artifact">
+        <h4>History folder</h4>
+        <p>Raw generation JSON, cross-review JSON, synthesis markdown, and summary markdown saved under the design-to-plan history path for traceability.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Common Usage Patterns</div>
+    <div class="card-grid">
+      <div class="card card-blue">
+        <h3>Standard Reviewed Design</h3>
+        <p class="mono">/stark-design-to-plan docs/specs/payments-design.md</p>
+        <p>Use when the design is settled and you want the normal full workflow: three draft plans, cross-review, synthesis, and output files.</p>
+      </div>
+      <div class="card card-purple">
+        <h3>Agent Comparison Run</h3>
+        <p class="mono">/stark-design-to-plan docs/specs/payments-design.md --dry-run --timeout 900</p>
+        <p>Use when you want to inspect plan quality and scorecards without producing final files yet, especially for large or risky designs.</p>
+      </div>
+      <div class="card card-amber">
+        <h3>Dirty Working Copy Override</h3>
+        <p class="mono">/stark-design-to-plan docs/specs/payments-design.md --force</p>
+        <p>Use only when the current uncommitted edits are intentional and the plan should reflect those edits rather than the last commit.</p>
+      </div>
+    </div>
+
+    <div class="section-title">How the Winner Is Chosen</div>
+    <div class="split-note">
+      <div class="card card-green">
+        <h3>Scoring Model</h3>
+        <p>Each plan is scored by the other agents on completeness, feasibility, phasing, risk, and testability. The average score determines the winner. If the top two are within 0.5 points, the skill treats it as a close race and synthesizes more cautiously.</p>
+        <div class="score-box">
+          <span class="score-pill">Completeness</span>
+          <span class="score-pill">Feasibility</span>
+          <span class="score-pill">Phasing</span>
+          <span class="score-pill">Risk</span>
+          <span class="score-pill">Testability</span>
+        </div>
+      </div>
+      <div class="card card-dark">
+        <h3>Synthesis Behavior</h3>
+        <p>The winning plan becomes the base. Better sections from other plans can be merged in, repeated weaknesses are removed, and concrete details such as file paths, commands, and function names are preserved instead of generalized.</p>
+        <p class="subtle">The final synthesis is also quality-checked to ensure every design section maps to plan tasks and every phase includes rollback and verification.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Failure Handling</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Failure</th>
+          <th>What You See</th>
+          <th>What To Do</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>No path provided</td>
+          <td>Usage error immediately</td>
+          <td>Provide a real markdown design path</td>
+        </tr>
+        <tr>
+          <td>File not found</td>
+          <td>Candidate search in <span class="mono">docs/</span> if the name looks partial</td>
+          <td>Pick one of the candidates or pass the full path</td>
+        </tr>
+        <tr>
+          <td>Uncommitted changes</td>
+          <td>Warning and abort unless forced</td>
+          <td>Commit or stash the file, or rerun with <span class="mono">--force</span></td>
+        </tr>
+        <tr>
+          <td>0 of 3 plan generations succeed</td>
+          <td>Dispatch failure diagnostics</td>
+          <td>Fix the environment or rerun after checking scripts and agents</td>
+        </tr>
+        <tr>
+          <td>1 of 3 plan generations succeed</td>
+          <td>Warning, no cross-review</td>
+          <td>Use the single plan or rerun for better comparison quality</td>
+        </tr>
+        <tr>
+          <td>Cross-review parse failure</td>
+          <td>Raw review output fallback</td>
+          <td>Review synthesis carefully; the skill may score manually from raw text</td>
+        </tr>
+        <tr>
+          <td>Script missing</td>
+          <td>Setup error</td>
+          <td>Run installation so the Stark scripts and Python venv exist</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="section-title">Prerequisites</div>
+    <div class="card-grid">
+      <div class="card card-green">
+        <h3>Installed Tooling</h3>
+        <p>The Stark scripts directory and its Python environment must exist. The skill expects the dispatch and GitHub helper scripts to be available from the configured scripts path.</p>
+      </div>
+      <div class="card card-blue">
+        <h3>Repository Context</h3>
+        <p>The design file must be readable from the repo. Git is required for dirty-file checks. GitHub CLI is only needed if the run should post back to a pull request.</p>
+      </div>
+      <div class="card card-red">
+        <h3>Plan Quality Dependency</h3>
+        <p>This skill does not repair a weak design. If the design document is incomplete or contradictory, the final plan will inherit that ambiguity even after synthesis.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer"><div class="winner-badge">Visualization by Codex · Score: 8.4/10 · Generated from SKILL.md</div></div>
+</body>
+</html>

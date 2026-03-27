@@ -107,4 +107,4 @@ graph TD
 
 ## Other Skills
 
-- **[`/stark-tournament`](stark-tournament/usage.md)** — Run multi-LLM tournaments: N competitors on the same task, evaluated by a judge, winner declared. Use when the user says "run a tournament", "compare LLMs", "which model is best for", "compete", or invokes /stark-tournament.
+- **[`/stark-design-to-plan`](stark-design-to-plan/usage.md)** — Use this skill when the user wants to turn a design document, spec, or reviewed architecture doc into a phased implementation plan. Triggers whenever someone has a finished design/spec file and needs it converted into actionable phases, tasks, dependencies, rollback procedures, or risk mitigations. Covers requests like "create a plan from this design", "turn this spec into an implementation plan", "generate phases from my design doc", or any variation where input is a design/spec and desired output is an execution or implementation plan. Also triggers on `/stark-design-to-plan <path>`. Works by dispatching 3 independent AI agents to each produce a plan, then cross-reviewing all plans to synthesize the best one. This is the natural next step after design review (`/stark-review-design`).
