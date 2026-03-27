@@ -334,6 +334,7 @@ CLAUDE.md:   ✓ generated
 
 Next steps:
 - Review CLAUDE.md and adjust
+- If this service uses shared GCP infra: run /onboard-service {name} in infra-ai-platform
 - Start a session with /stark-session start
 - Use /stark-init-docs to scaffold documentation
 ```
