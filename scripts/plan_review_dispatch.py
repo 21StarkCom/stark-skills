@@ -654,6 +654,11 @@ def main():
     parser.add_argument("--repo-dir", help="Repository root for config/prompt overrides")
     parser.add_argument("--agents", help="Comma-separated list of agents")
     parser.add_argument("--disabled-domains", help="Comma-separated domains to skip")
+    parser.add_argument(
+        "--prompts-dir",
+        help="Prompt directory name under ~/.claude/code-review/prompts/ (default: plan-review)",
+        default="plan-review",
+    )
     args = parser.parse_args()
 
     # Load config, merge with CLI overrides
@@ -666,6 +671,10 @@ def main():
     )
     timeout = args.timeout if args.timeout != DEFAULT_TIMEOUT else config.get("timeout", DEFAULT_TIMEOUT)
 
+    global_prompts_dir = str(
+        Path.home() / ".claude" / "code-review" / "prompts" / args.prompts_dir
+    )
+
     plan_content = Path(args.file).read_text()
     result = dispatch_plan_review(
         plan_content=plan_content,
@@ -674,6 +683,7 @@ def main():
         agents=agents,
         disabled_domains=disabled,
         timeout=timeout,
+        global_prompts_dir=global_prompts_dir,
     )
     print(json.dumps(result, indent=2))
 

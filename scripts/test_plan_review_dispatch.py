@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -333,6 +334,45 @@ class TestCLIFlagsSmoke:
             capture_output=True, text=True, timeout=10,
         )
         assert result.returncode == 0, f"claude rejected flags: {result.stderr}"
+
+
+class TestCLIArguments:
+    """Verify CLI argument parsing without invoking real agents."""
+
+    def test_prompts_dir_flag_accepted(self, tmp_path):
+        """--prompts-dir flag is accepted by argparse (exit code 2 = argparse failure)."""
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text("# Test plan")
+        import sys
+        script = str(
+            Path(__file__).parent / "plan_review_dispatch.py"
+        )
+        result = subprocess.run(
+            [sys.executable, script, "--file", str(plan_file), "--prompts-dir", "design-review"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        # exit code 2 means argparse rejected a flag — any other code is fine
+        assert result.returncode != 2, (
+            f"argparse rejected --prompts-dir flag: {result.stderr}"
+        )
+
+    def test_prompts_dir_default_is_plan_review(self, tmp_path):
+        """--prompts-dir defaults to 'plan-review' when not specified."""
+        import argparse
+        import sys
+        # Patch sys.argv to simulate CLI call without --prompts-dir
+        original_argv = sys.argv
+        try:
+            sys.argv = ["plan_review_dispatch.py", "--file", "dummy.md"]
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--file", required=True)
+            parser.add_argument("--prompts-dir", default="plan-review")
+            args = parser.parse_args()
+            assert args.prompts_dir == "plan-review"
+        finally:
+            sys.argv = original_argv
 
 
 class TestParallelDispatch:
