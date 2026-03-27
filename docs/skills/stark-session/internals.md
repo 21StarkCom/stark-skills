@@ -8,7 +8,7 @@ Session management — start and end modes. Start: loads context, git state, hea
 
 ```
 
-![Internal architecture diagram for the stark-session skill showing a central mode dispatch that splits into start mode and end mode. The start side flows through config loading, silent context gathering, git and PR inspection, optional project board read, health checks, skill discovery, and a concise operator briefing. The end side flows through tests and optional build, conditional proceed-anyway decision, optional PR merges through gh, docs staging and optional devlog commit, optional project field updates, push logic, and a final session summary. Supporting cards explain config hierarchy, fail-soft behavior, human checkpoints, extension points, external integrations, observability metrics, and guardrails."}}](internals.png)
+![A clean internal architecture diagram for the “stark-session” skill showing two parallel workflow narratives: Start Mode on top with config resolution, silent context gathering, git and PR inspection, health checks, skill discovery, and a briefing output; and End Mode below with tests/build, optional PR merges, docs/devlog commit, project field updates, push decision logic, and a final session summary. Blue nodes mark phases, green nodes mark config and policy, purple marks decision points, amber marks user-visible outputs, gray callouts mark external systems like git, gh, and project config, and tables below document config hierarchy, session keys, extension points, and failure recovery behavior."}}](internals.png)
 
 ## Phases
 

@@ -11,8 +11,8 @@
     },
     "stark-design": {
       "hash": "d3ebf578db48e1af",
-      "usage_quality": "good",
-      "internals_quality": "good"
+      "usage_quality": "ok",
+      "internals_quality": "ok"
     },
     "stark-design-to-plan": {
       "hash": "d2ac1a09b5f929d8",
@@ -45,7 +45,7 @@
       "internals_quality": "ok"
     },
     "stark-phase-execute": {
-      "hash": "f4e1736676ede72b",
+      "hash": "f0b69bdf76eb9eb0",
       "usage_quality": "ok",
       "internals_quality": "ok"
     },
@@ -95,9 +95,9 @@
       "internals_quality": "ok"
     },
     "stark-session": {
-      "hash": "ade617cdb99fcf76",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
+      "hash": "b057c20d880d040c",
+      "usage_quality": "good",
+      "internals_quality": "good"
     },
     "stark-session-insights": {
       "hash": "db4caab76d3de9d4",

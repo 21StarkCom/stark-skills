@@ -1,56 +1,51 @@
 graph TD
-    A["Invoke /stark-phase-execute &lt;slug&gt;"] --> B["Phase 0: Initialize"]
-    B --> C{"Issues exist for<br>plan:{slug}?"}
-    C -->|No| D["Auto-run /stark-plan-to-tasks"]
-    D --> E["Re-fetch issues"]
-    C -->|Yes| E
-    E --> F{"Tasks found<br>after filtering?"}
-    F -->|No| G["Stop: nothing to execute"]
-    F -->|Yes| H["Phase Briefing + Observability Log"]
-    H --> I["Phase 1: Task Loop"]
+    A["/stark-phase-execute &lt;slug&gt;"] --> B["Phase 0: Initialize"]
+    B --> C{"Tasks with plan:{slug} label?"}
+    C -->|"No issues"| D["/stark-plan-to-tasks auto-decompose"]
+    D --> E["Fetch newly created issues"]
+    C -->|"Issues found"| E
+    E --> F{"--dry-run?"}
+    F -->|"Yes"| G["Print preview & exit"]
+    F -->|"No"| H["Phase 1: Task Loop"]
 
-    subgraph TaskLoop["For each task (sequential)"]
-        I --> J["1.1 Branch & Session Start"]
-        J --> K["1.2 Implement (subagent)"]
-        K --> L["1.3 Push & Create PR"]
-        L --> M["1.4 Multi-Agent Review"]
-        M --> N{"Actionable<br>findings?"}
-        N -->|Yes| O["Fix findings in worktree"]
-        O --> P{"Max rounds<br>reached?"}
-        P -->|No| M
-        P -->|Yes| Q["Post review summary"]
-        N -->|No| Q
-        Q --> R["1.5 Squash Merge"]
-        R --> S["1.6 Close Issue + Log"]
+    subgraph TaskLoop["For Each Task (sequential)"]
+        H --> I["1.1 Create feature branch"]
+        I --> J["1.2 Spawn subagent to implement"]
+        J --> K["1.3 Push & create PR"]
+        K --> L["1.4 Multi-agent review"]
+        L --> M{"Actionable findings?"}
+        M -->|"Yes"| N["Fix findings in worktree"]
+        N --> O{"Max rounds?"}
+        O -->|"No"| L
+        O -->|"Yes"| P["Post review summary"]
+        M -->|"No / all noise"| P
+        P --> Q["1.5 Squash-merge PR"]
+        Q --> R["1.6 Close issue"]
+        R --> S{"More tasks?"}
+        S -->|"Yes"| I
     end
 
-    S --> T{"More tasks?"}
-    T -->|Yes| I
-    T -->|No| U["Phase 2: Regression Tests"]
-    U --> V{"--skip-release?"}
-    V -->|No| W["Phase 3: CHANGELOG + Release + Deploy"]
-    V -->|Yes| X["Phase 4: Dashboard"]
-    W --> X
-    X --> Y["Phase 5: Housekeeping"]
-    Y --> Z["Done"]
+    S -->|"No"| T["Phase 2: Regression tests"]
+    T --> U{"--skip-release?"}
+    U -->|"No"| V["Phase 3: CHANGELOG + /stark-release + deploy"]
+    U -->|"Yes"| W["Phase 4: Dashboard"]
+    V --> W
+    W --> X["Phase 5: Housekeeping"]
+    X --> Y["Done ✓"]
 
-    K -.->|"failure"| ERR["Log error, cleanup, continue"]
-    ERR --> T
-
-    style A fill:#1e40af,color:#fff
+    style A fill:#047857,color:#fff
     style B fill:#1e40af,color:#fff
     style C fill:#7c3aed,color:#fff
-    style D fill:#e5e7eb,color:#666
+    style D fill:#1e40af,color:#fff
     style F fill:#7c3aed,color:#fff
-    style G fill:#dc2626,color:#fff
-    style H fill:#f59e0b,color:#1a1a1a
-    style N fill:#7c3aed,color:#fff
-    style P fill:#7c3aed,color:#fff
-    style T fill:#7c3aed,color:#fff
-    style V fill:#7c3aed,color:#fff
-    style U fill:#047857,color:#fff
+    style G fill:#e5e7eb,color:#666
+    style H fill:#1e40af,color:#fff
+    style M fill:#7c3aed,color:#fff
+    style O fill:#7c3aed,color:#fff
+    style S fill:#7c3aed,color:#fff
+    style T fill:#1e40af,color:#fff
+    style U fill:#7c3aed,color:#fff
+    style V fill:#1e40af,color:#fff
     style W fill:#f59e0b,color:#1a1a1a
-    style X fill:#f59e0b,color:#1a1a1a
+    style X fill:#1e40af,color:#fff
     style Y fill:#047857,color:#fff
-    style Z fill:#1e40af,color:#fff
-    style ERR fill:#dc2626,color:#fff

@@ -6,101 +6,152 @@ Autonomously execute all tasks in a development phase end-to-end — for each ta
 
 ```mermaid
 graph TD
-    START(["/stark-phase-execute &lt;slug&gt;"]) --> VALIDATE["0.1 Validate Environment<br/>main clean · tools in PATH · bot token"]
-    VALIDATE -->|fail| ABORT["STOP: broken environment"]
-    VALIDATE -->|pass| RESOLVE["Resolve slug<br/>(file path → strip suffixes, or literal)"]
-    RESOLVE --> FETCH{"0.2 Fetch Tasks<br/>project-config.json?"}
-    FETCH -->|yes| PROJV2["GitHub Projects V2 query<br/>Status=Ready for Agent<br/>AI Suitability ∈ Autonomous,Assisted"]
-    FETCH -->|no| LABELS["gh api issues?labels=plan:SLUG<br/>filter out tracking issues"]
-    PROJV2 --> TASKS_CHECK{"Tasks found?"}
-    LABELS --> TASKS_CHECK
-    TASKS_CHECK -->|"raw=0"| DECOMPOSE["0.3 Auto-Decompose<br/>invoke /stark-plan-to-tasks"]
-    TASKS_CHECK -->|"raw>0, all filtered"| DONE_EARLY["STOP: all filtered<br/>(tracking issues / --start-from)"]
-    TASKS_CHECK -->|tasks found| BRIEFING
-    DECOMPOSE --> REFETCH["Re-fetch tasks"]
-    REFETCH --> BRIEFING["0.4 Phase Briefing<br/>0.5 Init observability log"]
+    START(["/stark-phase-execute slug"]) --> PARSE["Parse args & resolve slug<br/>(file path → strip suffixes, or direct slug)"]
+    PARSE --> VALIDATE["0.1 Validate environment<br/>main branch, clean tree, tools, auth"]
+    VALIDATE --> FETCH{"0.2 Fetch tasks<br/>Project V2 or label:plan:{SLUG}"}
 
+    FETCH -->|"raw_count > 0"| FILTER["Filter out tracking issues<br/>(keep only ## What issues)"]
+    FETCH -->|"raw_count = 0"| DECOMPOSE["0.3 Auto-decompose<br/>Invoke /stark-plan-to-tasks"]
+    DECOMPOSE --> REFETCH["Re-fetch tasks via 0.2"]
+    REFETCH --> FILTER
+
+    FILTER --> BRIEFING["0.4-0.5 Briefing & init log<br/>Print table, create TodoWrite, write JSON"]
     BRIEFING --> LOOP_START{"Next task?"}
-    LOOP_START -->|yes| SESSION["1.1 Session Start<br/>checkout main · pull · branch"]
-    LOOP_START -->|no tasks left| REGRESSION
 
-    SESSION --> IMPLEMENT["1.2 Implement (Subagent)<br/>read issue · code · test · commit"]
-    IMPLEMENT -->|no changes| SKIP_TASK["Log skipped · continue"]
-    IMPLEMENT -->|ambiguous| BLOCK["Set Blocked · skip"]
-    IMPLEMENT -->|success| PUSH["1.3 Push &amp; Create PR<br/>(USER PAT, non-draft)"]
+    LOOP_START -->|"yes"| SESSION["1.1 Session start<br/>Branch from main, claim task (Project V2)"]
+    SESSION --> IMPLEMENT["1.2 Implement<br/>Subagent: read issue → code → test → commit"]
+    IMPLEMENT -->|"no changes"| SKIP["Log skipped"] --> LOG_TASK
+    IMPLEMENT -->|"ambiguous"| BLOCK["Transition to Blocked"] --> LOG_TASK
+    IMPLEMENT -->|"success"| PUSH["1.3 Push & create PR<br/>(USER PAT, no draft, temp file body)"]
 
-    SKIP_TASK --> LOOP_START
-    BLOCK --> LOOP_START
-
-    PUSH --> REVIEW_INIT["Create review worktree<br/>/tmp/review-REPO-prN"]
-    REVIEW_INIT --> REVIEW_ROUND{"Review round ≤ N?"}
-    REVIEW_ROUND -->|yes| DISPATCH["multi_review.py<br/>--json-only --dry-run"]
+    PUSH --> WT_CREATE["Create review worktree<br/>/tmp/review-{REPO}-pr{N}"]
+    WT_CREATE --> REVIEW_ROUND{"1.4 Review round ≤ N?"}
+    REVIEW_ROUND -->|"yes"| DISPATCH["Run multi_review.py<br/>--json-only --dry-run<br/>18 sub-agents (3×6)"]
     DISPATCH --> CLASSIFY["Classify findings<br/>fix / FP / noise / ignored"]
-    CLASSIFY -->|0 fix| REVIEW_DONE
-    CLASSIFY -->|has fixes| FIX["Fix findings · test · commit · push"]
+    CLASSIFY -->|"0 fix findings"| REVIEW_DONE["Review complete"]
+    CLASSIFY -->|"has fix findings"| FIX["Fix in worktree → test → commit → push"]
     FIX --> REVIEW_ROUND
-    REVIEW_ROUND -->|"round > MAX"| REVIEW_DONE
+    REVIEW_ROUND -->|"max rounds"| REVIEW_DONE
 
-    REVIEW_DONE["Post review summary<br/>(BOT TOKEN)<br/>Clean up worktree"]
-    REVIEW_DONE --> MERGE["1.5 Merge<br/>gh pr merge --squash --admin<br/>(USER PAT)"]
-    MERGE --> CLOSE["1.6 Close Issue<br/>1.7 Log Task Result"]
-    CLOSE --> LOOP_START
+    REVIEW_DONE --> POST_REVIEW["Post review summary<br/>(BOT TOKEN via github_app.py)"]
+    POST_REVIEW --> WT_CLEAN["Clean up worktree"]
+    WT_CLEAN --> MERGE["1.5 Merge<br/>--squash --admin --delete-branch<br/>(USER PAT)"]
+    MERGE --> CLOSE["1.6 Verify issue closed"]
+    CLOSE --> LOG_TASK["1.7 Log task result to JSON"]
+    LOG_TASK --> LOOP_START
 
-    MERGE -->|fail| ERROR["1.8 Error Handler<br/>log · cleanup · continue"]
-    ERROR --> LOOP_START
+    LOOP_START -->|"no more tasks"| REGRESSION["Phase 2: Regression tests<br/>Full test suite on main"]
+    REGRESSION --> CHANGELOG["Phase 3.1: Update CHANGELOG<br/>Feature→Added, Bug→Fixed, Task→Changed"]
+    CHANGELOG --> RELEASE["Phase 3.2: /stark-release<br/>minor/patch/major"]
+    RELEASE --> DEPLOY["Phase 3.3: Deploy<br/>(if configured)"]
+    DEPLOY --> DASHBOARD["Phase 4: Dashboard<br/>Task table, stats, agent scorecard"]
+    DASHBOARD --> HOUSEKEEPING["Phase 5: Housekeeping<br/>Memory, docs, prompt improvement flags"]
+    HOUSEKEEPING --> DONE([Phase complete])
 
-    REGRESSION["Phase 2: Regression Testing<br/>full test suite on main"]
-    REGRESSION --> RELEASE_CHECK{"--skip-release?"}
-    RELEASE_CHECK -->|yes| DASHBOARD
-    RELEASE_CHECK -->|no| CHANGELOG["3.1 Update CHANGELOG<br/>(by issue type)"]
-    CHANGELOG --> RELEASE["3.2 /stark-release<br/>(bump: minor/patch/major)"]
-    RELEASE --> DEPLOY_CHECK{"--skip-deploy?"}
-    DEPLOY_CHECK -->|yes| DASHBOARD
-    DEPLOY_CHECK -->|no| DEPLOY["3.3 Deploy<br/>deploy_command from config"]
-    DEPLOY --> DASHBOARD
-
-    DASHBOARD["Phase 4: Dashboard<br/>task table · stats · agent scorecard"]
-    DASHBOARD --> HOUSEKEEPING["Phase 5: Housekeeping<br/>memory · docs · prompt improvement"]
-    HOUSEKEEPING --> COMPLETE(["Phase complete"])
+    IMPLEMENT -.->|"error"| ERR_HANDLER["1.8 Error handler<br/>Log, cleanup branch/worktree, continue"]
+    PUSH -.->|"error"| ERR_HANDLER
+    MERGE -.->|"error"| ERR_HANDLER
+    ERR_HANDLER --> LOG_TASK
 
     style START fill:#1e40af,color:#fff
-    style COMPLETE fill:#047857,color:#fff
-    style ABORT fill:#dc2626,color:#fff
-    style DONE_EARLY fill:#f59e0b,color:#1a1a1a
-    style ERROR fill:#dc2626,color:#fff
-    style DECOMPOSE fill:#7c3aed,color:#fff
-    style REVIEW_ROUND fill:#7c3aed,color:#fff
+    style DONE fill:#1e40af,color:#fff
     style FETCH fill:#7c3aed,color:#fff
-    style TASKS_CHECK fill:#7c3aed,color:#fff
-    style RELEASE_CHECK fill:#7c3aed,color:#fff
-    style DEPLOY_CHECK fill:#7c3aed,color:#fff
+    style LOOP_START fill:#7c3aed,color:#fff
+    style REVIEW_ROUND fill:#7c3aed,color:#fff
     style CLASSIFY fill:#7c3aed,color:#fff
+    style DECOMPOSE fill:#e5e7eb,color:#666
+    style ERR_HANDLER fill:#dc2626,color:#fff
+    style SKIP fill:#dc2626,color:#fff
+    style BLOCK fill:#dc2626,color:#fff
+    style BRIEFING fill:#f59e0b,color:#1a1a1a
+    style LOG_TASK fill:#f59e0b,color:#1a1a1a
+    style DASHBOARD fill:#f59e0b,color:#1a1a1a
+    style VALIDATE fill:#047857,color:#fff
+    style HOUSEKEEPING fill:#047857,color:#fff
 ```
 
-![Architecture diagram for stark-phase-execute showing a 6-phase pipeline. Phase 0 validates the environment, resolves plan slugs, and fetches tasks via GitHub Projects V2 or label-based API with auto-decomposition fallback. Phase 1 is a sequential task loop where each issue goes through branch creation, subagent implementation, PR creation with user PAT, multi-agent review in isolated worktrees (up to N rounds of 3 LLMs classifying findings as fix/FP/noise), merge with admin override, and issue closure. Phases 2-5 cover regression testing, CHANGELOG update with release delegation to /stark-release, a dashboard with task summary tables and agent scorecards, and housekeeping with memory updates and prompt improvement detection. Cards detail the auth token split (user PAT for PRs/merges, bot token for reviews/project mutations), task fetching strategies, review worktree isolation, and a failure mode matrix showing 10 failure types with automatic recovery actions. Extension points highlight config hierarchy, project integration, skill delegation, and observability protocol.](internals.png)
+![Architecture diagram of the stark-phase-execute skill showing six phases in a vertical flow. Phase 0 (Initialize) covers argument parsing, environment validation, task fetching via GitHub Projects V2 or labels with an auto-decompose fallback to /stark-plan-to-tasks. Phase 1 (Task Loop) is highlighted as a sequential loop processing each task through branch creation, subagent implementation, PR creation with user PAT auth, review in an isolated git worktree using multi_review.py (18 sub-agents across 3 LLMs and 6 domains) with up to N fix rounds, squash merge, and task logging — with error handling that never blocks. Post-loop phases cover regression testing, CHANGELOG generation with release delegation to /stark-release, a dashboard with task summary table and agent scorecard, and housekeeping with memory updates and prompt improvement detection. Six detail cards explain the auth split (user PAT vs bot token), subagent architecture, worktree isolation, config cascade, error handling philosophy, and observability format. Extension points table and failure mode reference table provide developer guidance for modification and recovery.](internals.png)
 
 ## Phases
 
-Phase 0 (Initialize): Validates environment (clean main, tools in PATH, bot token), resolves the plan slug from CLI argument (file path or literal), fetches tasks via GitHub Projects V2 (preferred, queries Status=Ready for Agent with AI Suitability filter) or label-based gh API fallback (plan:{SLUG} label). Filters out phase tracking issues (no ## What section). If zero raw issues exist, auto-invokes /stark-plan-to-tasks to decompose the plan file, then re-fetches. Prints briefing table and initializes the observability JSON log.
+Phase 0 (Initialize): Parse the plan slug from a file path or direct string, validate the environment (clean main, tools in PATH, auth working), fetch tasks via GitHub Projects V2 or label-based API query. If no issues exist, auto-invoke /stark-plan-to-tasks to decompose the plan. Print a briefing table and initialize the observability JSON log.
 
-Phase 1 (Task Loop): Executes each task sequentially — each must merge to main before the next begins. Per task: (1.1) checkout main, pull, create feature branch; if project config exists, validate spec completeness and transition status to Agent Working via bot token. (1.2) Spawn a foreground subagent (Agent tool) to implement the issue — reads issue, explores code, implements, tests, commits. Ambiguous tasks get set to Blocked and skipped. (1.3) Push and create a non-draft PR using user PAT; PR body written via temp file (never shell-interpolated). (1.4) Multi-agent review in an isolated worktree: for up to N rounds, run multi_review.py (--json-only --dry-run) for one round of 3 LLMs × 6 domains, classify findings (fix/FP/noise/ignored), fix actionable ones, test, commit, push. The round loop is managed by this skill, not multi_review.py. After loop, post consolidated review via bot token and clean up worktree. (1.5) Merge via gh pr merge --squash --admin (user PAT); CI failures logged as ci_bypassed but don't block. (1.6) Verify issue auto-closed or close explicitly. (1.7) Append task result to observability JSON. (1.8) On any failure: log, cleanup branches/worktrees, continue to next task.
+Phase 1 (Task Loop): For each task sequentially: checkout main and create a feature branch, optionally claim the task in Project V2 (transition to 'Agent Working'). Spawn a foreground subagent to implement the issue (read, code, test, commit). Push and create a PR using the user's PAT (never draft). Create an isolated worktree for review. Run up to N review rounds — each dispatches multi_review.py (18 sub-agents: 3 LLMs × 6 domains) returning JSON findings, classifies each finding by reading the actual file:line (fix/FP/noise/ignored), fixes actionable findings in the worktree, tests, commits, and pushes. Post the consolidated review via stark-claude[bot]. Clean up the worktree. Squash-merge with --admin and --delete-branch using the user's PAT. Verify issue closure. Log the task result. On any error: log, clean up branch/worktree, continue to next task.
 
-Phase 2 (Regression Testing): Checkout main, pull, detect test command from config hierarchy, run full suite. Log pass/fail/skip. Failures don't block.
+Phase 2 (Regression): Checkout main, run the full test suite (detected from config hierarchy or auto-detected). Log pass/fail/skip counts. Failures don't block.
 
-Phase 3 (Release & Deploy): Update CHANGELOG by issue type (Feature→Added, Bug→Fixed, Task→Changed). Determine version bump (Feature→minor, Bug/Task→patch, breaking→major). Delegate to /stark-release. Run deploy_command if configured. Skippable via --skip-release and --skip-deploy.
+Phase 3 (Release & Deploy): Generate CHANGELOG entries per task type (Feature→Added, Bug→Fixed, Task→Changed). Determine version bump (Feature→minor, Bug/Task→patch, breaking→major). Delegate to /stark-release. Optionally run deploy_command from config. Skippable via --skip-release and --skip-deploy.
 
-Phase 4 (Dashboard): Task summary table, aggregate stats (duration, completion rate, finding counts, fix rate, noise rate), agent scorecard (findings/fixed/noise/unique/accuracy per LLM), failed task details with recovery suggestions.
+Phase 4 (Dashboard): Print task summary table, aggregate stats (tasks completed/failed, findings by severity, fix rate, noise rate), agent scorecard (findings/fixed/noise/accuracy per agent), and failed task details with recovery suggestions.
 
-Phase 5 (Housekeeping): Save project memory summarizing phase execution. Update architecture docs if docs/ exists. Detect prompt improvement opportunities: FP rate >20%, repeated finding types (3+), agent blind spots (2+ misses), unparseable output. Suggest /stark-review-improvement if thresholds exceeded.
+Phase 5 (Housekeeping): Save project memory for non-obvious decisions. Update architecture docs if docs/ exists. Detect prompt improvement signals (FP rate >20%, recurring findings 3+, agent misses 2+, unparseable output) and suggest /stark-review-improvement if thresholds exceeded.
 
 ## Config
 
-Constants: SCRIPTS=~/.claude/code-review/scripts, PYTHON=$SCRIPTS/.venv/bin/python3, HISTORY=~/.claude/code-review/history. Config hierarchy: .code-review/config.json (repo-level) → ~/.claude/code-review/config.json (global). Config fields used: test_command (fallback: detect from package.json/pyproject.toml/Makefile), deploy_command (optional, skip if not set). CLI arguments: <plan-slug> (required, matches plan:{SLUG} label or resolves from file path), --dry-run (walk plan without changes), --skip-deploy, --skip-release, --start-from <N> (resume from issue number), --rounds <N> (default 3, max review-fix rounds per PR), --repo ORG/REPO (override auto-detect). Project integration: .github/project-config.json enables GitHub Projects V2 (project_id, status transitions, AI Suitability filtering, spec completeness gates). Slug derivation from file paths: strip dir + .md extension, strip trailing -design/-spec/-plan suffix, keep date prefix, truncate >50 chars to 47 + 3-char MD5 hash.
+Arguments:
+- <plan-slug> (required): Plan slug matching plan:{SLUG} label, or file path (auto-resolved to slug)
+- --dry-run: Walk plan without executing (no branches, PRs, or changes)
+- --skip-deploy: Skip deployment after release
+- --skip-release: Skip version bump and release entirely
+- --start-from <N>: Resume from a specific issue number
+- --rounds <N> (default: 3): Max review-fix rounds per PR
+- --repo ORG/REPO: Override repo detection from git remote
+
+Config files (cascade: repo → org → global):
+- .code-review/config.json: test_command, deploy_command, review domains
+- .github/project-config.json: project_id for GitHub Projects V2 integration
+- ~/.claude/code-review/config.json: global defaults
+
+Constants:
+- SCRIPTS = ~/.claude/code-review/scripts
+- PYTHON = $SCRIPTS/.venv/bin/python3
+- HISTORY = ~/.claude/code-review/history
+
+Prompt improvement thresholds:
+- False positive rate per agent: >20%
+- Recurring finding type: 3+ occurrences
+- Agent consistently missing issues: 2+ misses
+- Unparseable output: any occurrence
 
 ## Failure Modes
 
-Environment: dirty working tree → auto-stash with warning; not on main → checkout main && pull; missing tools → stop immediately. Implementation: subagent produces no changes → log as skipped, continue; subagent reports ambiguity → set Blocked status via bot, skip task; subagent timeout → log, skip, continue. PR lifecycle: PR creation fails → retry once after push, then log and continue; CI fails before merge → merge with --admin, flag ci_bypassed:true; merge conflict → rebase on main, resolve, re-push, retry; merge fails after retry → log and continue. Review: multi_review.py dispatch fails → proceed with available findings; worktree already exists (crashed session) → reuse existing. Post-loop: test suite fails → log failures, continue to dashboard; release fails (no CHANGELOG, tag exists) → log and skip deploy; GitHub API rate limit → wait 60s, retry once. Critical design principle: NEVER block the phase on a single task failure. Log everything, continue to next task. The dashboard surfaces all failures for human review.
+Never-block philosophy: every failure is logged and execution continues to the next task or phase.
+
+- Not on main / dirty tree: auto-checkout and stash, log warning
+- No implementation changes: log as skipped, continue
+- Ambiguous requirements (with Project V2): transition to Blocked status, post comment, skip
+- PR creation fails: retry once after re-push, then log and continue
+- multi_review.py dispatch fails: log agent-level failures, proceed with available findings
+- Worktree already exists (crashed session): reuse existing worktree
+- Merge conflict: rebase on main, resolve, re-push, retry merge
+- CI fails / merge blocked: force merge with --admin, flag ci_bypassed:true in log
+- GitHub API rate limit: wait 60s, retry once, log and continue
+- Subagent timeout: log timeout, skip task, continue
+- Release fails (no changelog, tag already exists): log and skip deploy
+- Stale remote branch from failed task: cleaned up in error handler via git push origin --delete
+
+All failures recorded in the observability JSON with full error context. Dashboard (Phase 4) surfaces improvement flags: bottleneck phases (>70% of time), high task failure rate (>30%), agent failure rate (>20%), zero-actionable review rounds.
 
 ## How to Modify This Skill
 
-Task fetching: To add a new task source, extend Phase 0.2 — add a new branch alongside project-based and label-based fetching. The task list interface is {number, title, labels, body}. Review rounds: The round loop (Phase 1.4) is owned by this skill, not multi_review.py. To change classification logic, modify the fix/FP/noise/ignored rules. To add review agents, update multi_review.py's agent config. Auth split: All auth switching happens via explicit unset GH_TOKEN / export GH_TOKEN patterns. To add a new bot app, add it to github_app.py and add the keychain entry. Skill delegation: Phase 3 delegates to /stark-release, Phase 0.3 delegates to /stark-plan-to-tasks. To change release behavior, modify the target skill, not this one. Observability: The log schema (Phase 0.5, 1.7) is consumed by /stark-metrics. Extending it requires updating both. Improvement thresholds (Phase 5.3) are hardcoded — to tune them, edit the threshold table in the skill. New phases: Add between existing phases or append before Phase 5. Each phase should follow the pattern: detect config → execute → log results → handle failures gracefully.
+The skill is a single SKILL.md file at skill/stark-phase-execute/SKILL.md. It's a prompt-driven orchestration — there's no compiled code, just instructions the AI follows.
+
+Task fetching: Add a new strategy path in §0.2 alongside Project V2 and label-based. The skill checks for .github/project-config.json first, then falls back to labels.
+
+Review domains: Add/remove markdown prompt files in global/prompts/{claude,codex,gemini}/. multi_review.py auto-discovers domain files by glob pattern.
+
+Finding classification: The fix/FP/noise/ignored logic is inline in §1.4. Adjust severity thresholds or add new categories there.
+
+Review rounds: The round loop is managed in this skill (§1.4), NOT in multi_review.py. multi_review.py has no --rounds flag — it always runs one round of 18 agents.
+
+Release workflow: Phase 3 delegates to /stark-release. To customize version files, tag formats, or CI triggers, override /stark-release at the repo level.
+
+Deploy: Set deploy_command in .code-review/config.json. If not set, deploy is silently skipped.
+
+Slug derivation: The algorithm in the argument parsing section MUST stay in sync with /stark-plan-to-tasks. If you change one, change both, or labels won't match.
+
+Observability: The JSON schema in §0.5 and §1.7 defines the log structure. Follow standards/observability.md for conventions. The 5-minute checkpoint interval is hardcoded in the observability section.
+
+Prompt improvement thresholds: Adjust the table in §5.3 (FP >20%, recurring 3+, agent misses 2+).
+
+Auth split: The USER PAT / BOT TOKEN boundary is a security invariant. Never use bot tokens for PR/merge/issue ops, and never use the user PAT for review comment posting.
