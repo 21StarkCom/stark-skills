@@ -4,6 +4,11 @@
     "script_version": "1.0.0"
   },
   "skills": {
+    "stark-autopilot": {
+      "hash": "5b167337d5caec98",
+      "usage_quality": "good",
+      "internals_quality": "good"
+    },
     "stark-claude-md-improver": {
       "hash": "452fa73fb2698971",
       "usage_quality": "ok",
@@ -96,8 +101,8 @@
     },
     "stark-session": {
       "hash": "b057c20d880d040c",
-      "usage_quality": "good",
-      "internals_quality": "good"
+      "usage_quality": "ok",
+      "internals_quality": "ok"
     },
     "stark-session-insights": {
       "hash": "db4caab76d3de9d4",

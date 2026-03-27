@@ -1,0 +1,561 @@
+<html>
+<head>
+
+
+<title>stark-autopilot — Internal Architecture</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafafa;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+.header { text-align: center; padding: 36px 20px 16px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+.header .sub { font-size: 12px; color: #666; margin-top: 4px; }
+.header .scope {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  background: #eff6ff; color: #1e40af;
+  padding: 3px 10px; border-radius: 4px; margin-top: 8px;
+}
+.container { max-width: 1000px; margin: 0 auto; padding: 0 20px 40px; }
+.section-title {
+  font-size: 14px; font-weight: 700; color: #666;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin: 32px 0 16px; padding-bottom: 6px;
+  border-bottom: 2px solid #e5e7eb;
+}
+.node { border-radius: 8px; padding: 12px 16px; text-align: center; }
+.node-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.node-desc { font-size: 10px; opacity: 0.8; }
+.node-phase    { background: #1e40af; color: #ffffff; }
+.node-decision { background: #7c3aed; color: #ffffff; }
+.node-failure  { background: #dc2626; color: #ffffff; }
+.node-config   { background: #047857; color: #ffffff; }
+.node-output   { background: #f59e0b; color: #1a1a1a; }
+.node-external { background: #e5e7eb; color: #666666; border: 1px dashed #9ca3af; }
+.flow { display: flex; flex-direction: column; gap: 0; align-items: center; }
+.flow-step {
+  display: flex; align-items: stretch;
+  width: 100%; max-width: 860px; min-height: 76px;
+}
+.flow-lane-left {
+  width: 180px; display: flex;
+  align-items: center; justify-content: flex-end;
+  padding-right: 18px;
+}
+.flow-lane-center {
+  width: 500px; display: flex;
+  align-items: center; justify-content: center;
+}
+.flow-lane-right {
+  width: 180px; display: flex;
+  align-items: center; padding-left: 18px;
+}
+.annotation {
+  font-size: 9px; color: #666; max-width: 160px; line-height: 1.4;
+}
+.annotation strong { color: #444; }
+.arrow-down {
+  width: 2px; height: 20px; background: #cbd5e1;
+  margin: 0 auto; position: relative;
+}
+.arrow-down::after {
+  content: ''; position: absolute; bottom: -4px; left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #cbd5e1;
+}
+.arrow-container {
+  display: flex; justify-content: center;
+  width: 100%; max-width: 860px;
+}
+.arrow-container .flow-lane-center {
+  display: flex; justify-content: center;
+}
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.card { padding: 16px; border-radius: 8px; }
+.card h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.card p  { font-size: 11px; line-height: 1.6; }
+.card-blue   { background: #eff6ff; border-left: 3px solid #1e40af; }
+.card-blue h3 { color: #1e40af; }
+.card-green  { background: #ecfdf5; border-left: 3px solid #059669; }
+.card-green h3 { color: #059669; }
+.card-purple { background: #f5f3ff; border-left: 3px solid #7c3aed; }
+.card-purple h3 { color: #7c3aed; }
+.card-amber  { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.card-amber h3 { color: #92400e; }
+.card-dark   { background: #f3f4f6; border-left: 3px solid #333333; }
+.card-dark h3 { color: #333333; }
+.card-red    { background: #fef2f2; border-left: 3px solid #dc2626; }
+.card-red h3 { color: #dc2626; }
+.data-table {
+  width: 100%; max-width: 860px; margin: 16px auto;
+  border-collapse: collapse; font-size: 11px;
+}
+.data-table th {
+  background: #f3f4f6; padding: 8px 12px; text-align: left;
+  font-weight: 600; color: #666; border-bottom: 2px solid #e5e7eb;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+}
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+.tag-phase    { background: #dbeafe; color: #1e40af; }
+.tag-decision { background: #ede9fe; color: #5b21b6; }
+.tag-failure  { background: #fee2e2; color: #991b1b; }
+.tag-config   { background: #d1fae5; color: #065f46; }
+.tag-output   { background: #fef3c7; color: #92400e; }
+.tag-external { background: #f3f4f6; color: #666666; }
+.legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin: 16px 0 24px; flex-wrap: wrap;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #666;
+}
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px; margin-top: 16px;
+}
+.summary-card { padding: 16px; border-radius: 8px; }
+.summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.summary-card p  { font-size: 11px; line-height: 1.5; }
+.footer {
+  text-align: center; padding: 20px;
+  font-size: 10px; color: #999;
+}
+
+/* === Extensions for autopilot === */
+.parallel-lanes {
+  display: flex; gap: 12px; justify-content: center;
+  margin: 8px 0;
+}
+.agent-lane {
+  border-radius: 8px; padding: 10px 14px; text-align: center;
+  min-width: 140px; font-size: 11px; font-weight: 600;
+}
+.agent-claude { background: #dbeafe; color: #1e40af; border: 2px solid #1e40af; }
+.agent-codex  { background: #d1fae5; color: #065f46; border: 2px solid #059669; }
+.agent-gemini { background: #ede9fe; color: #5b21b6; border: 2px solid #7c3aed; }
+.loop-indicator {
+  border: 2px dashed #9ca3af; border-radius: 12px;
+  padding: 16px; margin: 8px 0; position: relative;
+}
+.loop-label {
+  position: absolute; top: -10px; left: 20px;
+  background: #fafafa; padding: 0 8px;
+  font-size: 10px; font-weight: 600; color: #9ca3af;
+}
+.score-bar {
+  display: flex; align-items: center; gap: 6px;
+  margin: 2px 0;
+}
+.score-segment {
+  height: 8px; border-radius: 4px;
+}
+.score-label { font-size: 9px; color: #666; min-width: 50px; }
+.worktree-diagram {
+  display: flex; align-items: flex-start; gap: 8px;
+  justify-content: center; margin: 12px 0;
+}
+.wt-box {
+  border-radius: 6px; padding: 8px 12px;
+  font-size: 10px; text-align: center; min-width: 120px;
+}
+.wt-main { background: #f3f4f6; border: 2px solid #333; color: #333; }
+.wt-branch { border: 1px dashed #9ca3af; background: #fff; color: #666; }
+.wt-arrow {
+  display: flex; align-items: center; color: #9ca3af; font-size: 16px;
+  padding-top: 6px;
+}
+.merge-arrow {
+  display: flex; align-items: center; color: #059669; font-size: 11px;
+  font-weight: 600; padding-top: 6px;
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>stark-autopilot</h1>
+  <div class="sub">Autonomous Multi-Agent Implementation with Tournament-per-Step</div>
+  <div class="scope">INTERNALS &mdash; Architecture &amp; Data Flow</div>
+</div>
+
+<div class="container">
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#1e40af"></div> Phase</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed"></div> Decision</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#047857"></div> Config</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> Output</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#dc2626"></div> Failure</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e5e7eb; border:1px dashed #9ca3af"></div> External</div>
+  </div>
+
+  <!-- ============ ORCHESTRATION FLOW ============ -->
+  <div class="section-title">Orchestration Flow</div>
+
+  <div class="flow">
+
+    <!-- Step: Parse Input -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Input modes:</strong> plan file (markdown) or inline prompt string</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-phase" style="width:340px">
+          <div class="node-title">1.1 Parse Input</div>
+          <div class="node-desc">Plan file &rarr; extract steps &bull; Inline prompt &rarr; decompose to 3-5 steps</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Fallback:</strong> no input &rarr; ask "What should I build?"</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step: Extract Steps -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Schema:</strong> step_id (slug), title, prompt (with plan context)</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-config" style="width:340px">
+          <div class="node-title">1.2 Extract Steps + Detect Tests</div>
+          <div class="node-desc">Parse ## Phase / ### Task headings &bull; Auto-detect test runner</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Auto-detect:</strong> package.json &rarr; npm test, pyproject.toml &rarr; pytest, Makefile &rarr; make test</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step: Battle Plan -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>--dry-run</strong> stops here after displaying the plan</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-output" style="width:340px">
+          <div class="node-title">1.4 Show Battle Plan</div>
+          <div class="node-desc">Display step count, agents, test command, timeout, step titles</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Decision gate:</strong> --dry-run &rarr; exit</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Step Loop -->
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="loop-indicator" style="width:460px">
+          <div class="loop-label">FOR EACH STEP (sequential &mdash; builds on previous winner)</div>
+
+          <!-- 2a: Build prompt -->
+          <div class="node node-phase" style="width:100%; margin-bottom:8px">
+            <div class="node-title">2a. Build Step Prompt</div>
+            <div class="node-desc">Agent preamble + prior context + step task + test command &rarr; temp file</div>
+          </div>
+
+          <div class="arrow-down" style="margin:4px auto"></div>
+
+          <!-- 2b: Dispatch -->
+          <div class="node node-phase" style="width:100%; margin-bottom:8px">
+            <div class="node-title">2b. Dispatch Tournament</div>
+            <div class="node-desc">autopilot_dispatch.py &mdash; 3 parallel worktrees, 3 agents, collect diffs</div>
+          </div>
+
+          <!-- Parallel agent lanes -->
+          <div class="parallel-lanes">
+            <div class="agent-lane agent-claude">Claude<br><span style="font-weight:400;font-size:9px">worktree-1</span></div>
+            <div class="agent-lane agent-codex">Codex<br><span style="font-weight:400;font-size:9px">worktree-2</span></div>
+            <div class="agent-lane agent-gemini">Gemini<br><span style="font-weight:400;font-size:9px">worktree-3</span></div>
+          </div>
+
+          <div class="arrow-down" style="margin:4px auto"></div>
+
+          <!-- 2c: Evaluate -->
+          <div class="node node-decision" style="width:100%; margin-bottom:8px">
+            <div class="node-title">2c. Tournament Evaluation</div>
+            <div class="node-desc">Tests (0 or 50pts) + Semantic (5 dims &times; 10pts = 50pts) = 0-100 score</div>
+          </div>
+
+          <div class="arrow-down" style="margin:4px auto"></div>
+
+          <!-- 2d-2f: Apply + Commit + Cleanup -->
+          <div class="node node-phase" style="width:100%; margin-bottom:8px">
+            <div class="node-title">2d-f. Apply Winner &rarr; Commit &rarr; Cleanup Worktrees</div>
+            <div class="node-desc">git apply --3way winner_diff &bull; git commit &bull; remove worktrees</div>
+          </div>
+
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>Key invariant:</strong> each step starts from HEAD including all previous winners' code</div>
+      </div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 3: Summary -->
+    <div class="flow-step">
+      <div class="flow-lane-left"></div>
+      <div class="flow-lane-center">
+        <div class="node node-output" style="width:340px">
+          <div class="node-title">Phase 3: Summary + Metrics</div>
+          <div class="node-desc">Per-step winners, agent stats, win rates, avg scores, code output stats</div>
+        </div>
+      </div>
+      <div class="flow-lane-right"></div>
+    </div>
+
+    <div class="arrow-container"><div class="flow-lane-center"><div class="arrow-down"></div></div></div>
+
+    <!-- Phase 4: Persist -->
+    <div class="flow-step">
+      <div class="flow-lane-left">
+        <div class="annotation"><strong>Path:</strong> ~/.claude/code-review/history/autopilot/{slug}/</div>
+      </div>
+      <div class="flow-lane-center">
+        <div class="node node-output" style="width:340px">
+          <div class="node-title">Phase 4: Persist History</div>
+          <div class="node-desc">steps.json + summary.md + tournament-log.jsonl &bull; PR comment if applicable</div>
+        </div>
+      </div>
+      <div class="flow-lane-right">
+        <div class="annotation"><strong>PR detected?</strong> Post summary via stark-claude bot</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ============ GIT WORKTREE ARCHITECTURE ============ -->
+  <div class="section-title">Git Worktree Architecture (per step)</div>
+
+  <div class="worktree-diagram">
+    <div class="wt-box wt-main"><strong>main worktree</strong><br>HEAD (includes prior winners)</div>
+    <div class="wt-arrow">&rarr;</div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div class="wt-box wt-branch" style="border-color:#1e40af">autopilot/{step}/claude</div>
+      <div class="wt-box wt-branch" style="border-color:#059669">autopilot/{step}/codex</div>
+      <div class="wt-box wt-branch" style="border-color:#7c3aed">autopilot/{step}/gemini</div>
+    </div>
+    <div class="merge-arrow">&rarr; winner<br>merged</div>
+    <div class="wt-box wt-main"><strong>main worktree</strong><br>HEAD + winner diff</div>
+  </div>
+
+  <!-- ============ TOURNAMENT SCORING ============ -->
+  <div class="section-title">Tournament Scoring Model</div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Component</th>
+        <th>Points</th>
+        <th>Source</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="tag tag-phase">Test Score</span></td>
+        <td>0 or 50</td>
+        <td>--test-command execution</td>
+        <td>Binary: pass = 50, fail = 0. Skipped if no test command detected.</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-decision">Correctness</span></td>
+        <td>1&ndash;10</td>
+        <td>Semantic evaluation (Claude judge)</td>
+        <td>Does the code do what the step asked for?</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-decision">Quality</span></td>
+        <td>1&ndash;10</td>
+        <td>Semantic evaluation (Claude judge)</td>
+        <td>Clean, well-structured, follows conventions</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-decision">Completeness</span></td>
+        <td>1&ndash;10</td>
+        <td>Semantic evaluation (Claude judge)</td>
+        <td>Edge cases handled, tests written</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-decision">Integration</span></td>
+        <td>1&ndash;10</td>
+        <td>Semantic evaluation (Claude judge)</td>
+        <td>Works with existing codebase</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-decision">Simplicity</span></td>
+        <td>1&ndash;10</td>
+        <td>Semantic evaluation (Claude judge)</td>
+        <td>Simplest correct solution wins</td>
+      </tr>
+      <tr style="font-weight:600; background:#f9fafb">
+        <td>Total</td>
+        <td>0&ndash;100</td>
+        <td colspan="2">Tests (50) + Semantic (50). Ties broken by Correctness score.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ============ DATA FLOW ============ -->
+  <div class="section-title">Data Flow &amp; Key Files</div>
+
+  <div class="card-grid">
+    <div class="card card-blue">
+      <h3>Input Paths</h3>
+      <p>
+        <strong>Plan file:</strong> Markdown from /stark-design-to-plan. Parsed by ## Phase / ### Task headings into ordered steps.<br><br>
+        <strong>Inline prompt:</strong> Free-text description. Claude decomposes into 3-5 sequential steps automatically.
+      </p>
+    </div>
+    <div class="card card-green">
+      <h3>Scripts (Extension Points)</h3>
+      <p>
+        <strong>autopilot_dispatch.py</strong> &mdash; Creates worktrees, dispatches agents in parallel, collects diffs, runs tests. Main extension point for adding agents or changing dispatch strategy.<br><br>
+        <strong>Prompts:</strong> global/prompts/autopilot/{agent}/implement.md &mdash; per-agent implementation preambles.
+      </p>
+    </div>
+    <div class="card card-purple">
+      <h3>Evaluation Pipeline</h3>
+      <p>
+        Claude (orchestrator) acts as tournament judge. Reads each agent's diff, runs test command in each worktree, then scores on 5 semantic dimensions. Scores stored in tournament-log.jsonl for analysis.
+      </p>
+    </div>
+    <div class="card card-amber">
+      <h3>Output Artifacts</h3>
+      <p>
+        <strong>~/.claude/code-review/history/autopilot/{slug}/</strong><br>
+        &bull; steps.json &mdash; per-step results, diffs, scores<br>
+        &bull; summary.md &mdash; human-readable report<br>
+        &bull; tournament-log.jsonl &mdash; audit trail per tournament round
+      </p>
+    </div>
+  </div>
+
+  <!-- ============ FAILURE MODES ============ -->
+  <div class="section-title">Failure Modes &amp; Recovery</div>
+
+  <table class="data-table">
+    <thead>
+      <tr><th>Failure</th><th>Detection</th><th>Recovery Strategy</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="tag tag-failure">0/3 agents succeed</span></td>
+        <td>All agents error or timeout</td>
+        <td>Abort step, report error, ask user how to proceed</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-failure">1/3 agents succeed</span></td>
+        <td>Two agents fail</td>
+        <td>Use sole survivor's output, warn: no tournament possible</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-failure">All tests fail</span></td>
+        <td>Test score = 0 for all</td>
+        <td>Fall back to semantic-only scoring (max 50pts)</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-failure">Diff apply failure</span></td>
+        <td>git apply --3way fails</td>
+        <td>Copy files directly from winner's worktree</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-failure">Worktree creation fails</span></td>
+        <td>git worktree add errors</td>
+        <td>Fall back to sequential execution on same branch</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-failure">Agent timeout</span></td>
+        <td>Exceeds --timeout (default 900s)</td>
+        <td>Disqualify timed-out agent, tournament with survivors</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-failure">User Ctrl+C</span></td>
+        <td>SIGINT caught</td>
+        <td>Clean up all worktrees before exiting</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ============ CONFIG REFERENCE ============ -->
+  <div class="section-title">Configuration &amp; Extension Points</div>
+
+  <div class="card-grid">
+    <div class="card card-dark">
+      <h3>CLI Arguments</h3>
+      <p>
+        <strong>&lt;plan-or-prompt&gt;</strong> &mdash; path to plan.md or inline text (required)<br>
+        <strong>--test-command CMD</strong> &mdash; override auto-detected test runner<br>
+        <strong>--agents LIST</strong> &mdash; comma-separated (default: claude,codex,gemini)<br>
+        <strong>--timeout N</strong> &mdash; per-agent timeout in seconds (default: 900)<br>
+        <strong>--dry-run</strong> &mdash; show battle plan, don't execute
+      </p>
+    </div>
+    <div class="card card-dark">
+      <h3>Prompt Customization</h3>
+      <p>
+        Per-agent implementation prompts live at:<br>
+        <code>global/prompts/autopilot/{agent}/implement.md</code><br><br>
+        To change how an agent approaches implementation, edit its preamble. Each agent gets: preamble + prior-step context + step task + test command.
+      </p>
+    </div>
+    <div class="card card-dark">
+      <h3>Adding a New Agent</h3>
+      <p>
+        1. Create <code>global/prompts/autopilot/{new-agent}/implement.md</code><br>
+        2. Add dispatch logic in <code>autopilot_dispatch.py</code><br>
+        3. Register in github_app.py if bot reviews needed<br>
+        4. Pass via <code>--agents claude,codex,gemini,new-agent</code>
+      </p>
+    </div>
+  </div>
+
+  <!-- ============ OBSERVABILITY ============ -->
+  <div class="section-title">Observability Hooks</div>
+
+  <div class="summary-grid">
+    <div class="summary-card" style="background:#eff6ff; border-left:3px solid #1e40af">
+      <h3 style="color:#1e40af">Task Progress</h3>
+      <p>TaskCreate per phase and per step with activeForm labels. Dynamic status updates as agents complete and tournaments resolve.</p>
+    </div>
+    <div class="summary-card" style="background:#ecfdf5; border-left:3px solid #059669">
+      <h3 style="color:#059669">Timestamped Logs</h3>
+      <p>[HH:MM:SS] prefixed lines for every dispatch, agent completion (with file/line counts and duration), test results, winner declaration, and apply/commit.</p>
+    </div>
+    <div class="summary-card" style="background:#f5f3ff; border-left:3px solid #7c3aed">
+      <h3 style="color:#7c3aed">Metrics Block</h3>
+      <p>Final summary: total duration, steps completed, tournaments run, per-agent win rates, avg scores, test pass rates, files/lines changed, commit count.</p>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer"><div class="winner-badge">Visualization by Claude · Score: 8.8/10 · Generated from SKILL.md</div></div>
+
+</body>
+</html>

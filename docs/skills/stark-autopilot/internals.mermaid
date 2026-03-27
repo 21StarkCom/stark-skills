@@ -1,0 +1,45 @@
+graph TD
+    A["Parse Input<br/>(plan file or inline prompt)"] --> B["Extract Steps<br/>(step_id, title, prompt)"]
+    B --> C["Detect Test Command<br/>(npm test / pytest / make test)"]
+    C --> D["Show Battle Plan"]
+    D -->|"--dry-run"| Z["Exit"]
+    D -->|"execute"| E["Build Step Prompt<br/>(preamble + context + task)"]
+
+    subgraph "Step Loop (sequential)"
+        E --> F["Dispatch: autopilot_dispatch.py"]
+        F --> G1["Claude<br/>worktree-1"]
+        F --> G2["Codex<br/>worktree-2"]
+        F --> G3["Gemini<br/>worktree-3"]
+        G1 --> H["Tournament Evaluation"]
+        G2 --> H
+        G3 --> H
+        H -->|"Tests 0/50 + Semantic 0-50"| I{"Select Winner<br/>(highest score)"}
+        I --> J["Apply Winner Diff<br/>(git apply --3way)"]
+        J --> K["Commit + Cleanup Worktrees"]
+        K -->|"next step"| E
+    end
+
+    K -->|"all steps done"| L["Summary + Metrics"]
+    L --> M["Persist History<br/>(steps.json, summary.md, tournament-log.jsonl)"]
+    M --> N{"PR detected?"}
+    N -->|"yes"| O["Post Summary via stark-claude bot"]
+    N -->|"no"| P["Done"]
+    O --> P
+
+    style A fill:#1e40af,color:#fff
+    style B fill:#047857,color:#fff
+    style C fill:#047857,color:#fff
+    style D fill:#f59e0b,color:#1a1a1a
+    style E fill:#1e40af,color:#fff
+    style F fill:#1e40af,color:#fff
+    style G1 fill:#dbeafe,color:#1e40af
+    style G2 fill:#d1fae5,color:#065f46
+    style G3 fill:#ede9fe,color:#5b21b6
+    style H fill:#7c3aed,color:#fff
+    style I fill:#7c3aed,color:#fff
+    style J fill:#1e40af,color:#fff
+    style K fill:#1e40af,color:#fff
+    style L fill:#f59e0b,color:#1a1a1a
+    style M fill:#f59e0b,color:#1a1a1a
+    style N fill:#7c3aed,color:#fff
+    style Z fill:#dc2626,color:#fff
