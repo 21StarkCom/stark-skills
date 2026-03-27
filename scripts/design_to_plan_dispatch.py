@@ -177,9 +177,27 @@ def _extract_output(agent: str, raw: str, gemini_home: str | None = None) -> str
     if agent == "gemini" and raw.strip():
         try:
             envelope = json.loads(raw)
-            return envelope.get("response", raw)
+            response = envelope.get("response", raw)
+            if response and len(response.strip()) > 100:
+                return response
         except (json.JSONDecodeError, AttributeError):
             pass
+
+    # Gemini fallback: if stdout was empty/short, check if it wrote files to the workspace
+    if agent == "gemini" and gemini_home and len((raw or "").strip()) < 100:
+        import glob as _glob
+        for pattern in ("**/*plan*.md", "**/*implementation*.md", "**/*.md"):
+            found = _glob.glob(os.path.join(gemini_home, pattern), recursive=True)
+            for fpath in sorted(found, key=os.path.getsize, reverse=True):
+                try:
+                    with open(fpath) as f:
+                        content = f.read()
+                    if len(content.strip()) > 100:
+                        print(f"    gemini: recovered output from {fpath} ({len(content)} chars)",
+                              file=sys.stderr)
+                        return content
+                except OSError:
+                    continue
 
     return raw
 

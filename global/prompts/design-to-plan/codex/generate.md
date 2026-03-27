@@ -58,3 +58,6 @@ For each phase:
 - Flag design gaps that force implementation guesses
 - Prefer incremental delivery — each phase should leave the system in a working state
 - No filler — if a section has nothing to say, omit it
+- **Infrastructure provisioning** (Terraform, cloud resources, IAM, database setup) must be explicit first-class tasks — never implicit or deferred to notes
+- **Thread auth and security** through all verification examples — if the design requires auth headers, every curl/test command must include them
+- **Operational concerns** (monitoring, retention, partition maintenance) must be concrete scheduled tasks, not TODO comments
