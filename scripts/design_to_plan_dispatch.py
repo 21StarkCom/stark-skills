@@ -29,6 +29,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_HIGH, parse_jsonl_output
+
 # ── Config ──────────────────────────────────────────────────────────────
 
 _gemini_api_key_cache: str | None = None
@@ -81,7 +83,7 @@ SCRIPTS_DIR = Path(__file__).parent
 DEFAULT_PROMPTS_DIR = "design-to-plan"
 
 AGENTS = ["claude", "codex", "gemini"]
-CODEX_REASONING_CONFIG = 'model_reasoning_effort="high"'
+CODEX_REASONING_CONFIG = CODEX_REASONING_EFFORT_HIGH
 DEFAULT_TIMEOUT = 600  # Generation needs more time than review
 
 
@@ -148,30 +150,8 @@ def _load_prompt(
 
 def _extract_output(agent: str, raw: str, gemini_home: str | None = None) -> str:
     """Extract text content from agent-specific output formats."""
-    # Codex --json emits JSONL events
-    if agent == "codex" and raw.strip().startswith("{"):
-        parts = []
-        for line in raw.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                ev = json.loads(line)
-                if ev.get("type") == "item.completed":
-                    item = ev.get("item", {})
-                    itype = item.get("type", "")
-                    if itype == "agent_message":
-                        text = item.get("text", "")
-                        if text:
-                            parts.append(text)
-                    elif itype == "message":
-                        for c in item.get("content", []):
-                            if c.get("type") == "output_text":
-                                parts.append(c.get("text", ""))
-            except json.JSONDecodeError:
-                continue
-        if parts:
-            return "\n".join(parts)
+    if agent == "codex":
+        return parse_jsonl_output(raw)
 
     # Gemini -o json wraps in {"response": "..."}
     if agent == "gemini" and raw.strip():
@@ -229,6 +209,7 @@ def _build_cmd_and_kwargs(
         effective_timeout = timeout * 2
         cmd = [
             "codex", "exec",
+            "-m", CODEX_MODEL,
             "-c", CODEX_REASONING_CONFIG,
             "--ephemeral", "--json",
             "--full-auto",

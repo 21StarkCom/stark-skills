@@ -30,9 +30,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_HIGH, parse_jsonl_output
+
 # Re-export for backward compat
 __all__ = [
-    "FACTOR_WEIGHTS", "AGENTS", "CODEX_REASONING_CONFIG",
+    "FACTOR_WEIGHTS", "AGENTS", "CODEX_REASONING_CONFIG", "CODEX_MODEL",
     "REVIEW_EVAL_CRITERIA", "REVIEW_SCALE_MAP",
     "dispatch_competitor", "evaluate_visual", "evaluate_semantic",
     "evaluate_review",
@@ -204,7 +206,7 @@ AGENTS = {
 
 PYTHON = sys.executable
 GITHUB_APP = str(SCRIPTS_DIR / "github_app.py")
-CODEX_REASONING_CONFIG = 'model_reasoning_effort="high"'
+CODEX_REASONING_CONFIG = CODEX_REASONING_EFFORT_HIGH
 
 _gemini_api_key_cache: str | None | bool = None  # None=not tried, False=not found
 
@@ -440,6 +442,7 @@ def dispatch_competitor(agent: str, skill, audience: str):
     elif agent == "codex":
         cmd = [
             "codex", "exec",
+            "-m", CODEX_MODEL,
             "-c", CODEX_REASONING_CONFIG,
             "--ephemeral", "--json",
             "--full-auto",
@@ -510,20 +513,8 @@ def dispatch_competitor(agent: str, skill, audience: str):
                     duration_s=duration, api_key_fallback=used_api_key_fallback,
                 )
 
-        # For codex, extract text from JSONL
         if agent == "codex":
-            text_parts = []
-            for line in raw_output.splitlines():
-                try:
-                    obj = json.loads(line)
-                    if obj.get("type") == "message" and "content" in obj:
-                        for block in obj["content"]:
-                            if block.get("type") == "output_text":
-                                text_parts.append(block.get("text", ""))
-                except json.JSONDecodeError:
-                    continue
-            if text_parts:
-                raw_output = "\n".join(text_parts)
+            raw_output = parse_jsonl_output(raw_output)
 
         # For gemini, extract text from JSON response
         if agent == "gemini":
