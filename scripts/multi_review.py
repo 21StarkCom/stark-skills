@@ -44,6 +44,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from claude_utils import CLAUDE_MODEL, build_claude_cmd
 from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_HIGH, parse_jsonl_output
 from gemini_utils import (
     GEMINI_MODEL, get_gemini_api_key, log_api_key_fallback,
@@ -549,15 +550,7 @@ def _run_subagent(
             f"Then review them according to these instructions:\n\n"
             f"{full_prompt}"
         )
-        cmd = [
-            "claude",
-            "-p",
-            "-",
-            "--output-format",
-            "text",
-            "--model",
-            "claude-opus-4-6",
-        ]
+        cmd = build_claude_cmd()
         stdin_input = prompt
 
     elif agent == "codex":

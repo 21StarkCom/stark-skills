@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from claude_utils import CLAUDE_MODEL, build_claude_cmd
 from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_HIGH, parse_jsonl_output
 from gemini_utils import (
     GEMINI_MODEL, get_gemini_api_key, setup_gemini_home, make_gemini_env,
@@ -38,7 +39,7 @@ from gemini_utils import (
 
 # Re-export for backward compat
 __all__ = [
-    "FACTOR_WEIGHTS", "AGENTS", "CODEX_REASONING_CONFIG", "CODEX_MODEL", "GEMINI_MODEL",
+    "FACTOR_WEIGHTS", "AGENTS", "CLAUDE_MODEL", "CODEX_REASONING_CONFIG", "CODEX_MODEL", "GEMINI_MODEL",
     "REVIEW_EVAL_CRITERIA", "REVIEW_SCALE_MAP",
     "dispatch_competitor", "evaluate_visual", "evaluate_semantic",
     "evaluate_review",
@@ -416,12 +417,7 @@ def dispatch_competitor(agent: str, skill, audience: str):
     used_api_key_fallback = False
 
     if agent == "claude":
-        cmd = [
-            "claude",
-            "-p", "-",
-            "--output-format", "text",
-            "--model", "claude-opus-4-6",
-        ]
+        cmd = build_claude_cmd()
         stdin_input = prompt
 
     elif agent == "codex":

@@ -24,6 +24,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from claude_utils import build_claude_cmd
 from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_HIGH, parse_jsonl_output
 from gemini_utils import (
     GEMINI_MODEL, get_gemini_api_key as _get_gemini_api_key,
@@ -277,11 +278,7 @@ def _run_plan_subagent(
 
     # Build CLI command per agent
     if agent == "claude":
-        cmd = [
-            "claude", "-p", "-",
-            "--output-format", "text",
-            "--model", "claude-opus-4-6",
-        ]
+        cmd = build_claude_cmd()
         stdin_input = full_prompt
     elif agent == "codex":
         cmd = [

@@ -156,6 +156,7 @@ class TestSubAgentDispatch:
         assert cmd[0] == "claude"
         assert "--model" in cmd
         assert "claude-opus-4-6" in cmd
+        assert "--no-session-persistence" in cmd
         assert "-" in cmd  # stdin marker
         call_kwargs = mock_run.call_args[1]
         assert "input" in call_kwargs

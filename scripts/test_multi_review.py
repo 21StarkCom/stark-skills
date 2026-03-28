@@ -84,13 +84,13 @@ class TestModelFlags:
     """Sub-agents must use max-power model flags."""
 
     @patch("multi_review.subprocess.run")
-    def test_claude_uses_opus(self, mock_run):
+    def test_claude_uses_opus_and_no_session(self, mock_run):
         mock_run.return_value = MagicMock(stdout="[]", returncode=0)
         multi_review._run_subagent("claude", "architecture", "abc123")
         cmd = mock_run.call_args[0][0]
         assert "--model" in cmd
         assert "claude-opus-4-6" in cmd
-        assert "--max-tokens" not in cmd  # removed: no longer supported
+        assert "--no-session-persistence" in cmd  # one-shot, no session files
         assert "-" in cmd  # stdin marker
         call_kwargs = mock_run.call_args[1]
         assert "input" in call_kwargs

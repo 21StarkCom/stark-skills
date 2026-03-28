@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from claude_utils import build_claude_cmd
 from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_MEDIUM, parse_jsonl_output
 from gemini_utils import (
     GEMINI_MODEL, get_gemini_api_key as _get_gemini_api_key,
@@ -196,12 +197,7 @@ def _run_implementation_agent(
     stdin_input = None
 
     if agent == "claude":
-        cmd = [
-            "claude", "-p", "-",
-            "--output-format", "text",
-            "--model", "claude-opus-4-6",
-            "--allowedTools", "Edit,Write,Read,Bash,Glob,Grep",
-        ]
+        cmd = build_claude_cmd(allowed_tools="Edit,Write,Read,Bash,Glob,Grep")
         stdin_input = prompt
 
     elif agent == "codex":
