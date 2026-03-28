@@ -148,6 +148,39 @@ pr_review(REPO, PR_NUM, event="COMMENT", body=review_body, comments=[
 
 ---
 
+## Step 4.5: Runtime Verification (Python projects)
+
+Before presenting the summary, verify the code actually runs. This step is mandatory for Python projects and recommended for others.
+
+```bash
+# Install deps and import all modules
+python3 -m venv /tmp/pr-verify 2>/dev/null || true
+/tmp/pr-verify/bin/pip install -q -r requirements.txt 2>/dev/null
+
+/tmp/pr-verify/bin/python3 -c "
+import importlib, pathlib, sys
+sys.path.insert(0, '.')
+ok = fail = 0
+for f in pathlib.Path('.').rglob('*.py'):
+    if any(p in str(f) for p in ['test', 'venv', 'node_modules', '.git']): continue
+    mod = str(f.with_suffix('')).replace('/', '.')
+    try:
+        importlib.import_module(mod)
+        ok += 1
+    except Exception as e:
+        print(f'IMPORT FAIL: {mod} — {e}')
+        fail += 1
+print(f'{ok} OK, {fail} FAIL')
+"
+rm -rf /tmp/pr-verify
+```
+
+If any imports fail, fix them before presenting the PR. Import failures mean the code crashes on startup — a self-review that misses this is useless.
+
+**Why this exists:** In 8 rounds of reviewing a 12K-line AI-generated PR, the self-review (Step 4) missed interface mismatches and wrong SDK API calls that a simple `import every_module` would have caught. Runtime verification is faster and more reliable than semantic code review for catching "will this crash" bugs.
+
+---
+
 ## Step 5: Present Summary — STOP
 
 ```
@@ -163,6 +196,7 @@ Changes:
 - [file]: [what changed]
 
 Self-Review: Posted via stark-claude[bot]
+Runtime Verification: [N/N modules imported clean | N failures — listed above]
 
 Ready to squash-merge?
 ```
