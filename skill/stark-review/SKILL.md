@@ -519,6 +519,19 @@ Include per-phase timing in `rounds.json`:
 }
 ```
 
+### Event emission
+
+After the metrics block, emit a completion event to stark-insights:
+
+```bash
+~/.stark-insights/stark-emit skill_invocation \
+  skill=stark-review duration_s=$TOTAL_SECONDS success=$SUCCESS \
+  pr_number=$PR findings_total=$TOTAL findings_fixed=$FIXED \
+  noise_count=$NOISE agents_dispatched=$AGENTS rounds=$ROUNDS
+```
+
+Substitute actual values from the run. If stark-insights is not running, this fails silently.
+
 ### Observability in review-only / dry-run mode
 
 When running in review-only mode (no fix loop), adapt the metrics:

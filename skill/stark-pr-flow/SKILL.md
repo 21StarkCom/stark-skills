@@ -244,6 +244,18 @@ Additional skill-specific metrics:
 - PR number and URL
 - Merge strategy used, admin bypass used (yes/no)
 
+### Event emission
+
+After the flow completes, emit a completion event to stark-insights:
+
+```bash
+~/.stark-insights/stark-emit skill_invocation \
+  skill=stark-pr-flow duration_s=$TOTAL_SECONDS success=$SUCCESS \
+  pr_number=$PR repo=$REPO action=$ACTION
+```
+
+Where `$ACTION` is the final action performed (e.g., `merge`, `create`, `review`). Substitute actual values. If stark-insights is not running, this fails silently.
+
 ## Mistakes to Avoid
 
 - **Don't create draft PRs unless explicitly asked.** PRs are NOT draft by default.

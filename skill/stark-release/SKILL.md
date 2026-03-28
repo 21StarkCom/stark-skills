@@ -224,6 +224,18 @@ Additional skill-specific metrics:
 - Tag created, GitHub Release created (yes/no)
 - Push duration
 
+### Event emission
+
+After the release summary, emit a completion event to stark-insights:
+
+```bash
+~/.stark-insights/stark-emit skill_invocation \
+  skill=stark-release duration_s=$TOTAL_SECONDS success=$SUCCESS \
+  version=$VERSION bump_type=$BUMP
+```
+
+Substitute actual values from the run. If stark-insights is not running, this fails silently.
+
 ## Mistakes to Avoid
 
 - **Don't bump pyproject.toml.** Tags are the version source.

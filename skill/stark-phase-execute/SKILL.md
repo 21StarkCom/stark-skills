@@ -656,6 +656,18 @@ Printed as part of the dashboard (Phase 4). Includes per-phase timing breakdown,
 - A review round produced 0 new actionable findings → suggest reducing rounds
 - CI bypassed on any merge → flag with details
 
+### Event emission
+
+After the dashboard (Phase 4), emit a completion event to stark-insights:
+
+```bash
+~/.stark-insights/stark-emit skill_invocation \
+  skill=stark-phase-execute duration_s=$TOTAL_SECONDS success=$SUCCESS \
+  phase=$SLUG tasks_completed=$DONE tasks_failed=$FAILED prs_merged=$MERGED
+```
+
+Substitute actual values from the run. If stark-insights is not running, this fails silently.
+
 ---
 
 ## Dry Run Mode

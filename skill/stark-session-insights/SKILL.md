@@ -348,6 +348,18 @@ Files written:
   {list of files}
 ```
 
+### Event emission
+
+After the report summary, emit a completion event to stark-insights:
+
+```bash
+~/.stark-insights/stark-emit skill_invocation \
+  skill=stark-session-insights duration_s=$TOTAL_SECONDS success=$SUCCESS \
+  projects_processed=$N total_entries=$ENTRIES
+```
+
+Substitute actual values from the run. If stark-insights is not running, this fails silently.
+
 ## Edge Cases
 
 - **Empty history file** — error and abort, not a silent skip
