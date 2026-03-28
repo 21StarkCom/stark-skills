@@ -18,6 +18,15 @@
 - **Summary:** Multi-LLM documentation generator for stark-skills. 3 LLMs compete to generate HTML visualizations per skill, Claude judges PNG screenshots, markdown docs include Mermaid diagrams and PNG embeds. Two audience splits per skill (usage guide + internals). Routing guide with Mermaid decision trees. HTML sanitization via html.parser (not regex). Staleness detection with per-audience quality flags. Flat ThreadPoolExecutor (MAX_WORKERS=6).
 - **Knowledge extracted to:** `docs/decisions.md`
 
+## 2026-03-28 — Self-Maintaining Automation Fleet
+
+- **Date:** 2026-03-28
+- **Status:** Decomposed → issues created
+- **Tracking:** #107, #108, #109, #110, #111, #112
+- **Story Points:** 100 total (23 tasks across 6 phases)
+- **Summary:** 12 Claude Code Remote Triggers (CCR) forming a closed-loop self-maintaining platform across 6 GetEvinced repos. Four tiers: self-improvement (model evolution, review quality analysis), health & drift (CLI compatibility, dependency audit, Terraform config drift, API contract monitoring), cross-repo intelligence (ecosystem scanning, CLAUDE.md consistency), reporting & meta (weekly digest, observability config coverage, fleet self-monitoring, hooks auditing). Git as primary persistence with prepend-only logs. External GHA watchdog for CCR outage detection. PAT-based auth in V1 with GitHub App migration path for V2.
+- **Knowledge extracted to:** `docs/adr/0013-ccr-over-github-actions.md`, `docs/decisions.md`
+
 ## 2026-03-26 — Reusable Tournament Engine (`/stark-tournament`)
 
 - **Date:** 2026-03-26
