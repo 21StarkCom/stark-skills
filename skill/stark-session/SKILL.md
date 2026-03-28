@@ -120,6 +120,23 @@ ls .claude/skills/*/SKILL.md 2>/dev/null
 
 Extract skill names from directory paths.
 
+### Phase 4b — Persona Selection
+
+If `/stark-persona` skill is available (check `~/.claude/skills/stark-persona/SKILL.md` exists):
+
+```bash
+PERSONA_JSON=$(python3 scripts/stark_persona.py select --auto 2>/dev/null)
+```
+
+If the command succeeds and returns valid JSON, include in the briefing:
+```
+Persona: {persona} ({source}) — "{catchphrase}"
+```
+
+If it fails, skip silently — persona is optional, never blocks session start.
+
+The random pop-up survey (1-in-5 chance) fires AFTER persona selection, not before. If the survey triggers, present ONE question after the briefing.
+
 ### Phase 5 — Briefing
 
 Present a concise briefing:
@@ -141,6 +158,18 @@ Condense or omit empty sections. Don't dump full CLAUDE.md. Keep it concise.
 ---
 
 ## End Mode
+
+### Phase 0b — Persona Cleanup
+
+If `~/.stark-persona/active.json` exists:
+
+```bash
+python3 scripts/stark_persona.py session-end 2>/dev/null
+```
+
+This handles: 20% chance fun-fact callout, active.json deletion, cleanup confirmation.
+
+If the fun-fact block is returned, display it AFTER the session summary (as a closing flourish).
 
 ### Phase 1 — Run tests
 

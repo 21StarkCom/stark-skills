@@ -65,3 +65,11 @@ Rules:
 - Use the character's vocabulary, cadence, and attitude
 - Reference their catchphrase naturally, don't force it every message
 ```
+
+## Voice Reset
+
+When `/stark-persona --off` is invoked or the session ends, emit this reset instruction:
+
+"The persona has been deactivated. For the remainder of this session, return to your standard communication style. No character voice, no catchphrases, no persona-specific vocabulary. Back to normal."
+
+This is emitted by `cmd_deactivate()` and `cmd_session_end()` in stark_persona.py.
