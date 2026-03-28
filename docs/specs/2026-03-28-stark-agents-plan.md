@@ -16,6 +16,17 @@ Build `stark-agents` in nine phases so each increment stays shippable. Phase ord
 
 **Critical path:** Phase 1 -> Phase 2 -> Phase 3 -> Phase 4 -> Phase 5 -> Phase 6 -> Phase 7 (DevOps production)
 
+**Phase gate criteria** (each phase must pass before the next begins):
+- Phase 1: All ADR decisions documented, schema validator passes
+- Phase 2: `terraform apply` clean, secrets populated, IAM verified end-to-end
+- Phase 3: `alembic upgrade head` idempotent, Firestore CRUD passes, pgvector similarity search works
+- Phase 4: Health endpoints return 200, `agents_activate` returns correct agents, CI/CD trigger fires
+- Phase 5: End-to-end `devops_review` returns valid envelope against test fixture
+- Phase 6: Manual sync completes, staleness checker triggers correctly, scheduled sync runs
+- Phase 7: 48-hour canary with all rollout gates passing
+- Phase 8: Multi-agent PR produces separate finding sections, no regression on DevOps metrics
+- Phase 9: All agents enabled, operational runbooks written, on-call can disable any agent in < 2 min
+
 **Parallelization:** Phases 2+3 can partially overlap (Firestore setup doesn't depend on Cloud SQL). Agent prompt writing for all agents can happen in parallel with any phase.
 
 ---
@@ -38,7 +49,15 @@ gcloud services enable run.googleapis.com sqladmin.googleapis.com \
   cloudscheduler.googleapis.com artifactregistry.googleapis.com \
   cloudbuild.googleapis.com monitoring.googleapis.com \
   vpcaccess.googleapis.com iam.googleapis.com \
-  iamcredentials.googleapis.com logging.googleapis.com
+  iamcredentials.googleapis.com logging.googleapis.com \
+  datastore.googleapis.com
+
+# Create Terraform state bucket
+gsutil mb -p "$PROJECT_ID" -l "$REGION" "gs://${PROJECT_ID}-stark-agents-tfstate"
+gsutil versioning set on "gs://${PROJECT_ID}-stark-agents-tfstate"
+
+# Create Firestore database (one-time, region-bound — confirm region before running)
+gcloud firestore databases create --location="$REGION" --type=firestore-native
 
 python3.11 -m venv scripts/.venv
 scripts/.venv/bin/pip install -U pip pytest alembic sqlalchemy pgvector \
@@ -46,8 +65,46 @@ scripts/.venv/bin/pip install -U pip pytest alembic sqlalchemy pgvector \
   google-cloud-logging google-cloud-monitoring google-cloud-sql-connector \
   anthropic openai google-genai tiktoken pydantic pyyaml mcp
 
-terraform -chdir=infra/gcp/stark_agents init
+terraform -chdir=infra/gcp/stark_agents init \
+  -backend-config="bucket=${PROJECT_ID}-stark-agents-tfstate"
 ```
+
+### Secret Population
+
+After Terraform creates Secret Manager secrets (Phase 2), populate them manually:
+
+```bash
+# GitHub App private keys (base64 PEM from macOS Keychain)
+security find-generic-password -s STARK_CLAUDE_PRIVATE_KEY -w | \
+  gcloud secrets versions add stark-claude-key --data-file=-
+security find-generic-password -s STARK_CODEX_PRIVATE_KEY -w | \
+  gcloud secrets versions add stark-codex-key --data-file=-
+security find-generic-password -s STARK_GEMINI_PRIVATE_KEY -w | \
+  gcloud secrets versions add stark-gemini-key --data-file=-
+
+# LLM API keys
+echo -n "$ANTHROPIC_API_KEY" | gcloud secrets versions add anthropic-api-key --data-file=-
+echo -n "$OPENAI_API_KEY" | gcloud secrets versions add openai-api-key --data-file=-
+echo -n "$GOOGLE_AI_API_KEY" | gcloud secrets versions add google-ai-api-key --data-file=-
+```
+
+### Timeline & Ownership
+
+| Phase | Effort | Owner | Calendar Target |
+|-------|--------|-------|-----------------|
+| 1. Lock Runtime Layout | S (1-2 days) | Aryeh | Week 1 |
+| 2. Provision GCP | L (3-5 days) | Aryeh | Week 1-2 |
+| 3. Persistent Stores | M (2-3 days) | Aryeh | Week 2 |
+| 4. MCP Server Skeleton | M (2-3 days) | Aryeh | Week 2-3 |
+| 5. Review Engine | L (5-7 days) | Aryeh | Week 3-4 |
+| 6. Knowledge Sync | L (3-5 days) | Aryeh | Week 4-5 |
+| 7. DevOps Rollout | M (3-4 days) | Aryeh | Week 5-6 |
+| 8. Accessibility | M (3-4 days) | Aryeh | Week 7 |
+| 9. Remaining Agents | M (4-6 days) | Aryeh | Week 8-9 |
+
+**Buffer:** 2 weeks built into the 9-week timeline for unexpected blockers, particularly around GCP IAM issues and LLM provider integration edge cases.
+
+**Key-person risk:** Single owner. Mitigation: all infra is Terraform-managed, all code is in git, all ADRs document decisions. A second engineer can pick up any phase by reading the ADR + plan.
 
 ---
 
@@ -94,15 +151,25 @@ No infrastructure created — delete skeleton directories.
 ### Tasks
 
 1. **Provision infrastructure with Terraform**
-   - Files: `infra/gcp/stark_agents/{providers,apis,artifact_registry,iam,network,cloud_run,cloud_sql,firestore,secret_manager,scheduler,monitoring}.tf`
-   - Create: service accounts (with least-privilege per-secret bindings), Artifact Registry, Cloud Run service, VPC connector, Cloud SQL (db-f1-micro, pgvector extension, daily backups + PITR), Firestore (Native mode), Secret Manager secrets, Cloud Scheduler jobs (paused), alert policies
-   - IAM: explicit `roles/run.invoker` for Claude Code operator identities
-   - Done: `terraform apply` completes, all resources exist
+   - Files: `infra/gcp/stark_agents/{providers,backend,apis,artifact_registry,iam,network,cloud_run,cloud_sql,secret_manager,scheduler,monitoring}.tf`
+   - **State backend:** GCS bucket (created in bootstrap), versioned, locked
+   - Create: service accounts (with least-privilege per-secret and per-resource bindings, attached to Cloud Run via `service_account`), Artifact Registry, VPC connector, Cloud SQL (**db-g1-small** — db-f1-micro lacks resources for pgvector), Secret Manager secrets (empty — populated in bootstrap), Cloud Scheduler jobs (paused), alert policies, Cloud Monitoring dashboards (basic — latency, errors, cost)
+   - Cloud SQL: daily automated backups, PITR enabled, **`google_sql_database.default` with `CREATE EXTENSION IF NOT EXISTS vector` via `null_resource` provisioner** (pgvector must be installed before Alembic runs)
+   - **Cloud Run is NOT deployed yet** — no image exists. Create the Cloud Run service resource with a placeholder image (gcr.io/cloudrun/hello) to establish IAM bindings and URL. Real deployment happens in Phase 4.
+   - IAM: explicit `roles/run.invoker` for Claude Code operator identities, `roles/cloudsql.client` for Cloud Run service account, `roles/secretmanager.secretAccessor` scoped to specific secrets, `roles/iam.serviceAccountTokenCreator` for Cloud Scheduler OIDC
+   - Done: `terraform apply` completes, `gcloud sql connect` works, Secret Manager secrets accept versions
 
-2. **Wire CI/CD pipeline**
+2. **Populate secrets and verify end-to-end IAM**
+   - Run the secret population commands from Prerequisites
+   - Verify: Cloud Run service account can read each secret, connect to Cloud SQL, write to Firestore
+   - Done: `gcloud secrets versions access latest --secret=anthropic-api-key` returns the key
+
+3. **Wire CI/CD pipeline** (depends on Dockerfile from Phase 4 — creates trigger definition only, first build runs after Phase 4)
    - Files: `cloudbuild.stark-agents.yaml`, `infra/gcp/stark_agents/cloudbuild_trigger.tf`
-   - Build image, push to Artifact Registry, deploy Cloud Run revision, retain prior revision for rollback
-   - Done: Merge to `main` produces a new revision without manual steps
+   - **Requires:** GitHub repo connection to Cloud Build (manual setup in GCP Console if not already connected)
+   - Build image, push to Artifact Registry, deploy Cloud Run revision, retain prior revision
+   - Trigger fires on push to `main` when `stark_agents/**`, `agents/**`, or `Dockerfile.stark-agents` change
+   - Done: Trigger definition exists in Terraform; first build will run after Phase 4 creates the Dockerfile
 
 ### Verification
 ```bash
@@ -129,9 +196,10 @@ terraform -chdir=infra/gcp/stark_agents destroy
 
 1. **Implement schema migrations with Alembic**
    - Files: `alembic.ini`, `alembic/env.py`, `alembic/versions/0001_create_knowledge_tables.py`
+   - **Prerequisite:** pgvector extension already installed in Phase 2 via Terraform provisioner. Alembic migration 0001 starts with `CREATE EXTENSION IF NOT EXISTS vector` as a safety check.
    - Create: `knowledge_chunks` table (shared, with `agent_namespace` column), partial indexes per namespace, `embeddings_meta` table
    - Alembic is the only schema writer — no manual SQL
-   - Done: `alembic upgrade head` runs idempotently, `alembic downgrade -1` works
+   - Done: `alembic upgrade head` runs idempotently against the Cloud SQL instance, `alembic downgrade -1` works
 
 2. **Implement Firestore repositories**
    - Files: `stark_agents/storage/firestore.py`, `tests/test_firestore.py`
@@ -168,10 +236,11 @@ alembic downgrade base
 
 ### Tasks
 
-1. **Build server shell with auth and health**
-   - Files: `stark_agents/app.py`, `stark_agents/config.py`, `stark_agents/mcp_server.py`, `Dockerfile.stark-agents`
-   - Initialize: config loading, Secret Manager cache (1hr TTL with in-memory fallback), structured JSON logging, `/healthz`, `/readyz` (503 only on Secret Manager failure), SSE `/mcp` endpoint
-   - Done: Cloud Run serves health endpoints, starts cleanly from cold
+1. **Build server shell with auth, health, and observability**
+   - Files: `stark_agents/app.py`, `stark_agents/config.py`, `stark_agents/mcp_server.py`, `stark_agents/observability.py`, `Dockerfile.stark-agents`
+   - Initialize: config loading, Secret Manager cache (1hr TTL with in-memory fallback), structured JSON logging to Cloud Logging, `/healthz`, `/readyz` (503 only on Secret Manager failure), SSE `/mcp` endpoint
+   - **Observability from day 1:** Structured log events for every MCP tool call, Cloud Monitoring custom metrics (`agent_review_duration_seconds`, `agent_finding_count`, `agent_llm_cost_usd`, `agent_tool_errors`, `knowledge_sync_age_seconds`), alert policies for 5xx rate and latency
+   - Done: Cloud Run serves health endpoints, starts cleanly from cold, logs appear in Cloud Logging
 
 2. **Implement agent loader and management tools**
    - Files: `stark_agents/agent_loader.py`, `stark_agents/mcp_tools/management.py`
@@ -223,7 +292,7 @@ Revert to prior Cloud Run revision: `gcloud run services update-traffic stark-ag
 3. **Context assembler with token budgeting**
    - Files: `stark_agents/context_assembler.py`, `tests/test_context_assembler.py`
    - Assembly order: preamble -> knowledge chunks -> tool results -> diff -> instructions
-   - Token counting via `tiktoken` (cl100k_base)
+   - Token counting: use each provider's native tokenizer where available (Anthropic SDK `count_tokens()`, OpenAI `tiktoken` with model-appropriate encoding, Google AI SDK token counting). Fallback to `tiktoken` cl100k_base for budget estimation when native tokenizer unavailable.
    - Overflow truncation priority: knowledge (10->5->3->0) -> tool results (summarize) -> diff (filter to agent patterns) -> preamble (never)
    - Per-model context limits configured in provider adapter
    - Done: Prompt stays within budget for oversized diffs, preamble always present
@@ -277,7 +346,7 @@ No production impact — server still only exposes management tools until Phase 
 2. **Staleness checker with distributed lock**
    - Files: `stark_agents/knowledge/staleness.py`, `tests/test_staleness.py`
    - Check `embeddings_meta.last_refresh` before each agent run
-   - Firestore distributed lock (`sync_locks/{namespace}` with TTL)
+   - Firestore distributed lock (`sync_locks/{namespace}` with **60s TTL** — document auto-expires via Firestore TTL policy, no crash-before-release deadlock)
    - First instance acquires lock and refreshes, others poll (max 30s wait)
    - Circuit breaker: 3 consecutive failures -> skip inline refresh for 1 hour, use stale data + warning
    - Done: Concurrent requests don't stampede, circuit breaker activates correctly
@@ -322,9 +391,15 @@ Disable scheduler jobs, drop knowledge data: `DELETE FROM knowledge_chunks WHERE
 
 3. **DevOps canary rollout**
    - Set `agent_configs/devops.enabled = true` in Firestore
-   - Cap Cloud Run max instances
-   - Run one full sync cycle, monitor: p95 latency < 120s, error rate < 5%, weekly cost < $50
-   - Done: Stable for one full sync cycle (4 hours)
+   - Cap Cloud Run max instances to 3
+   - **Canary period: 48 hours minimum** (12 sync cycles), not one 4-hour cycle
+   - Monitor gates: p95 latency < 120s, error rate < 5%, no Firestore write failures, no finding false positive rate > 50% (spot-check 10 findings manually)
+   - **Rollback triggers (automatic via Cloud Monitoring alert -> PagerDuty/Slack):**
+     - Error rate > 10% for 5 consecutive minutes
+     - p95 latency > 180s for 10 consecutive minutes
+     - Any 5xx from the MCP server in Cloud Logging
+   - **Rollback procedure:** Set `agent_configs/devops.enabled = false` in Firestore. If Firestore is down, revert Cloud Run to prior revision (disables all agents). Additionally disable the agent client code path in `multi_review.py` via environment variable `STARK_AGENTS_ENABLED=false`.
+   - Done: Stable for 48 hours with all gates passing
 
 ### Verification
 ```bash
