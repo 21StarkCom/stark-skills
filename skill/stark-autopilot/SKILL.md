@@ -165,7 +165,8 @@ Install deps and import all new/modified Python modules:
 import importlib, pathlib, sys
 sys.path.insert(0, '.')
 failures = []
-for f in pathlib.Path('${pkg_name}').rglob('*.py'):
+for f in pathlib.Path('.').rglob('*.py'):
+    if any(p in str(f) for p in ['test', 'venv', 'node_modules', '.git']): continue
     if f.name == '__main__.py': continue
     mod = str(f.with_suffix('')).replace('/', '.')
     try: importlib.import_module(mod)
@@ -257,7 +258,8 @@ After ALL steps complete but BEFORE the summary, run a comprehensive verificatio
 import importlib, pathlib, sys
 sys.path.insert(0, '.')
 ok = fail = 0
-for f in pathlib.Path('${pkg_name}').rglob('*.py'):
+for f in pathlib.Path('.').rglob('*.py'):
+    if any(p in str(f) for p in ['test', 'venv', 'node_modules', '.git']): continue
     if f.name == '__main__.py': continue
     mod = str(f.with_suffix('')).replace('/', '.')
     try:
