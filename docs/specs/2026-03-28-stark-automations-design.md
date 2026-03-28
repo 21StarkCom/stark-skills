@@ -285,6 +285,29 @@ Cloud Functions Gen2 is backed by Cloud Run and technically has an HTTP endpoint
 }
 ```
 
+**Error object (when `error` is not null):**
+```json
+{
+  "code": "ANTHROPIC_UNAVAILABLE",
+  "message": "Anthropic API returned 503 after 3 attempts",
+  "retryable": true,
+  "details": {"http_status": 503, "attempts": 3}
+}
+```
+
+**Lock object (`lock.json`):**
+```json
+{
+  "schema_version": 1,
+  "run_id": "run_01HV9N6N...",
+  "trigger": "stark-sentinel",
+  "state": "started",
+  "started_at": "2026-03-28T05:00:03Z",
+  "finished_at": null,
+  "final_status": null
+}
+```
+
 ### 3.3 Run Status Enum
 
 Canonical status values used everywhere (ExecutionResult, HTTP response, logs, metrics):
@@ -327,10 +350,12 @@ Lock state machine: `started` → `completed` | `failed`
 
 **Duplicate handling:**
 - Lock in terminal state (`completed`/`failed`) → exit `DUPLICATE` status, no retry
-- Lock in `started` state AND `started_at` is older than 2× function timeout (1080s default) → **stale lock recovery:** overwrite lock with new `started` state, proceed with execution. Log `STALE_LOCK_RECOVERED` event.
+- Lock in `started` state AND `started_at` is older than 2× function timeout (1080s default) → **stale lock recovery:** overwrite lock using `ifGenerationMatch` on the current lock's generation number. This ensures only one concurrent recoverer wins — the loser gets a precondition failure and exits `DUPLICATE`. Log `STALE_LOCK_RECOVERED` event.
 - Lock in `started` state AND `started_at` is recent → exit `DUPLICATE` status (another invocation is likely still running)
 
 **Crash safety:** If the function crashes after acquiring the lock but before writing a terminal state, the lock remains `started`. The next scheduled run (or manual retry) will detect the stale lock via the TTL check and recover automatically. No manual intervention needed.
+
+**Side-effect replay risk:** If a run completed tool calls (e.g., created a GitHub issue) but crashed before writing the terminal lock, stale recovery will re-run the prompt. The model may create duplicate issues. Mitigation: tool handlers should be idempotent where possible (e.g., check if an issue with the same title already exists before creating). For v1, this is an accepted residual risk — the occurrence requires both a function crash AND it happening after mutations but before lock update, which is a narrow window.
 
 **Manual runs:** To prevent accidental double-triggers, `run_trigger.py` generates a `request_id` (ULID) and prints it. Re-running with the same `request_id` hits the lock. The script warns if the same trigger was invoked within the last 60 seconds.
 
@@ -406,7 +431,7 @@ TOOLS = [
                 "graphql": {"type": "string", "description": "GraphQL query string (when set, method/path are ignored)"},
                 "graphql_variables": {"type": "object", "description": "Variables for the GraphQL query"}
             },
-            "required": []  # Either (method + path) or graphql required
+            "required": ["method", "path"]  # For REST. GraphQL: handler accepts graphql field instead.
         }
     },
     {
@@ -542,7 +567,6 @@ The `ExecutionResult` includes `actions.simulated_actions` listing what would ha
 ```
 sa-stark-automations-scheduler@...
   └── roles/pubsub.publisher (on trigger topics only)
-  └── roles/cloudfunctions.invoker (on each function)
 
 sa-stark-automations-readonly@...   # Functions with Read-only GitHub
   ├── roles/secretmanager.secretAccessor (anthropic-key, github-read-token, slack-webhook)
@@ -593,12 +617,15 @@ ALLOWED_COMMANDS = {
 
 Extended profile (`repo-readwrite`) — adds:
 ```python
-{"gh"}  # GitHub CLI, configured with the function's GitHub token
+{"git"}  # git CLI for read-only repo inspection (clone, log, diff)
 ```
 
 **Removed from allowlist** (security risk outweighs value):
+- `gh` — bypasses `github_api` policy enforcement. All GitHub operations must go through the `github_api` tool handler.
 - `sed`, `awk` — Turing-complete; `awk` has `system()`. Use `grep`/`jq` instead.
 - `curl` — bypasses tool-handler restrictions. All HTTP calls go through `github_api` or `slack_post`.
+
+**Shell builtins:** `echo`, `test`, `[`, `true`, `false`, `read`, `printf` are allowed. `eval`, `exec`, `source`, `.` are **blocked** — these can execute arbitrary code and bypass the binary allowlist.
 
 **Workspace Isolation:**
 - Working directory forced to `/tmp/work/<run-id>/`
@@ -654,7 +681,7 @@ GetEvinced/stark-automations/
 │   ├── apis.tf               # google_project_service for all required APIs
 │   ├── registry.tf           # Trigger catalog (yamldecode from triggers.yaml)
 │   ├── functions.tf          # Cloud Functions gen2 (for_each from registry)
-│   ├── pubsub.tf             # Topics + subscriptions
+│   ├── pubsub.tf             # Topics + subscriptions + dead-letter topic
 │   ├── scheduler.tf          # Cloud Scheduler jobs (for_each from registry)
 │   ├── secrets.tf            # Secret Manager resources
 │   ├── storage.tf            # Results bucket + lifecycle
@@ -772,11 +799,14 @@ resource "google_project_service" "required" {
 
 | Alert | Condition | Channel |
 |-------|-----------|---------|
-| Function failure | Any function returns FAIL | Slack #stark-automation |
-| Consecutive failures | Same function FAIL 3× in a row | Slack #stark-automation (P2) |
+| Function failure | Any function returns FAILURE | Slack #stark-automation + email |
+| Consecutive failures | Same function FAILURE 3× in a row | Slack #stark-automation + email (P2) |
 | Stale execution | No success within 2× expected interval | Email |
 | Cost spike | Weekly cost > 2× 4-week median | Email |
 | Anthropic errors | 429 or 5xx rate > 3/hour | Slack #stark-automation |
+| Dead-letter messages | Any message in DLQ | Email |
+
+**Email as fallback:** All failure alerts go to both Slack and email. If Slack is down during a critical failure, the operator still gets notified via email.
 
 These replace stark-automation-monitor with native Cloud Monitoring.
 
@@ -811,14 +841,16 @@ labels = {
 
 ### 6.7 Retry Strategy
 
-**Anthropic API retries:** Exponential backoff with jitter. Base delays: 5s, 20s, 60s. Each delay adds random jitter of ±50% (e.g., 5s ± 2.5s). 3 retries max. Applies to both initial calls and mid-loop 429/5xx errors.
+**Anthropic API retries:** Exponential backoff with jitter. Base delays: 5s, 15s, 30s. Each delay adds random jitter of ±50%. 3 retries max. Applies to both initial calls and mid-loop 429/5xx errors.
 
-**GitHub API retries:** Same pattern as Anthropic. For mid-loop failures (tool call returns error), the error is passed back to the model as `tool_result` with `is_error: true` — the model may self-correct.
+**Timeout budget constraint:** Total retry wall time must fit within the function timeout. With a 120s per-attempt read timeout: worst case = 3×120s + 50s delays = 410s < 540s function timeout. This leaves ~130s for prompt fetch, secret loading, and artifact persistence.
+
+**GitHub API retries:** Same backoff pattern. For mid-loop failures (tool call returns error), the error is passed back to the model as `tool_result` with `is_error: true` — the model may self-correct.
 
 **Timeout budgets for external calls:**
 | Call | Connect timeout | Read timeout | Overall timeout |
 |------|----------------|--------------|-----------------|
-| Anthropic Messages API | 10s | 300s | 300s |
+| Anthropic Messages API | 10s | 120s | 120s |
 | GitHub REST/GraphQL | 5s | 30s | 30s |
 | Slack webhook | 5s | 10s | 10s |
 | Secret Manager | 5s | 10s | 10s |
