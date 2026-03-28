@@ -1,0 +1,29 @@
+name: Automation Fleet Heartbeat
+on:
+  schedule:
+    - cron: '0 12 * * *'  # Daily noon UTC
+  workflow_dispatch: {}
+
+jobs:
+  check-fleet-activity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for recent trigger activity
+        run: |
+          # Find the most recent commit touching automation/triggers/
+          latest_commit=$(git log -1 --format="%ct" -- automation/triggers/ 2>/dev/null || echo "0")
+          now=$(date +%s)
+          hours_ago=$(( (now - latest_commit) / 3600 ))
+
+          echo "Last trigger activity: ${hours_ago}h ago"
+
+          if [ "$hours_ago" -gt 48 ]; then
+            echo "::error::No trigger activity in ${hours_ago} hours — CCR fleet may be down"
+            exit 1
+          else
+            echo "Fleet healthy — last activity ${hours_ago}h ago"
+          fi

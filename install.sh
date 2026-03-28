@@ -280,6 +280,63 @@ status() {
     else
         warn "History dir not created yet"
     fi
+
+    # Automation fleet health
+    echo ""
+    echo "Automation fleet:"
+    local auto_dir="$REPO_DIR/automation"
+    if [ -d "$auto_dir" ]; then
+        # Registry check
+        if [ -f "$auto_dir/registry.json" ]; then
+            local trigger_count
+            trigger_count=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(len(d.get('triggers',{})))" "$auto_dir/registry.json" 2>/dev/null || echo "0")
+            if [ "$trigger_count" -gt 0 ]; then
+                info "Registry: $trigger_count triggers registered"
+            else
+                warn "Registry: exists but no triggers registered"
+            fi
+        else
+            error "Registry: automation/registry.json not found"
+        fi
+
+        # Trigger log files (expect 12)
+        local expected_triggers=(
+            stark-evolution stark-self-review stark-sentinel
+            stark-dependency-audit stark-infra-drift stark-api-compat
+            stark-intelligence stark-claude-md-sync stark-digest
+            stark-observability-check stark-automation-monitor stark-hooks-auditor
+        )
+        local found=0
+        local missing=0
+        for t in "${expected_triggers[@]}"; do
+            if [ -f "$auto_dir/triggers/$t.md" ]; then
+                found=$((found + 1))
+            else
+                missing=$((missing + 1))
+            fi
+        done
+        if [ "$missing" -eq 0 ]; then
+            info "Trigger logs: $found/12 present"
+        else
+            warn "Trigger logs: $found/12 present ($missing missing)"
+        fi
+
+        # CLI snapshots
+        local snapshot_files=(claude-help.txt claude-version.txt codex-help.txt codex-version.txt gemini-help.txt gemini-version.txt)
+        local snap_found=0
+        for sf in "${snapshot_files[@]}"; do
+            if [ -f "$auto_dir/cli-snapshots/$sf" ]; then
+                snap_found=$((snap_found + 1))
+            fi
+        done
+        if [ "$snap_found" -eq "${#snapshot_files[@]}" ]; then
+            info "CLI snapshots: $snap_found/${#snapshot_files[@]} committed"
+        else
+            warn "CLI snapshots: $snap_found/${#snapshot_files[@]} committed"
+        fi
+    else
+        info "Automation fleet: not installed"
+    fi
     echo ""
 }
 
