@@ -22,10 +22,9 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -208,7 +207,7 @@ def _run_agent(
 
     max_attempts = 2
     t0 = time.monotonic()
-    used_fallback = False
+    used_api_key_fallback = False
 
     for attempt in range(1, max_attempts + 1):
         try:
@@ -226,36 +225,36 @@ def _run_agent(
                     and should_fallback_to_api_key(stderr_snippet)
                     and try_gemini_api_key_fallback(run_kwargs, task_label, stderr_snippet)
                 ):
-                    used_fallback = True
+                    used_api_key_fallback = True
                     time.sleep(2)
                     continue
                 if attempt < max_attempts:
                     time.sleep(5 * attempt)
                     continue
                 _cleanup()
-                return "", time.monotonic() - t0, used_fallback, "cli_error"
+                return "", time.monotonic() - t0, used_api_key_fallback, "cli_error"
 
             raw = proc.stdout or ""
             output = _extract_output(agent, raw, gemini_home)
             _cleanup()
 
             if not output.strip():
-                return "", time.monotonic() - t0, used_fallback, "empty_output"
+                return "", time.monotonic() - t0, used_api_key_fallback, "empty_output"
 
-            return output, time.monotonic() - t0, used_fallback, None
+            return output, time.monotonic() - t0, used_api_key_fallback, None
 
         except subprocess.TimeoutExpired:
             if attempt < max_attempts:
                 print(f"    {agent}:{task_label} timed out, retrying...", file=sys.stderr)
                 continue
             _cleanup()
-            return "", time.monotonic() - t0, used_fallback, "timeout"
+            return "", time.monotonic() - t0, used_api_key_fallback, "timeout"
         except FileNotFoundError:
             _cleanup()
-            return "", time.monotonic() - t0, used_fallback, "agent_unavailable"
+            return "", time.monotonic() - t0, used_api_key_fallback, "agent_unavailable"
 
     _cleanup()
-    return "", time.monotonic() - t0, used_fallback, "unexpected_loop_exit"
+    return "", time.monotonic() - t0, used_api_key_fallback, "unexpected_loop_exit"
 
 
 # ── Phase 1: Generate Plans ───────────────────────────────────────────

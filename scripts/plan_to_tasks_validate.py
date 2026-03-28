@@ -18,18 +18,24 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from claude_utils import build_claude_cmd
+from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_HIGH
+from gemini_utils import (
+    GEMINI_MODEL, setup_gemini_home, make_gemini_env,
+    parse_json_output as parse_gemini_output,
+)
+
 # ── Constants ────────────────────────────────────────────────────────────
 
 SCRIPTS_DIR = Path(__file__).parent
 GLOBAL_CONFIG = Path.home() / ".claude" / "code-review" / "config.json"
-CODEX_REASONING_CONFIG = 'model_reasoning_effort="high"'
+CODEX_REASONING_CONFIG = CODEX_REASONING_EFFORT_HIGH
 DEFAULT_TIMEOUT = 300
 
 DEFAULT_PLAN_TO_TASKS_CONFIG: dict[str, Any] = {
@@ -295,12 +301,10 @@ def _run_validation_agent(
         if agent == "codex":
             result = subprocess.run(
                 [
-                    "codex",
-                    "exec",
-                    "-c",
-                    CODEX_REASONING_CONFIG,
-                    "--ephemeral",
-                    "--json",
+                    "codex", "exec",
+                    "-m", CODEX_MODEL,
+                    "-c", CODEX_REASONING_CONFIG,
+                    "--ephemeral", "--json",
                     "--full-auto",
                     "-",
                 ],
@@ -312,36 +316,25 @@ def _run_validation_agent(
             raw = result.stdout or result.stderr
 
         elif agent == "gemini":
-            # Gemini needs an isolated GEMINI_CLI_HOME with auth files copied in.
-            # Matches the pattern in plan_review_dispatch.py lines 284-300.
-            gemini_home = tempfile.mkdtemp(prefix="stark-gemini-validate-")
-            gemini_dir = os.path.join(gemini_home, ".gemini")
-            os.makedirs(gemini_dir, exist_ok=True)
-            real_gemini = os.environ.get("GEMINI_CLI_HOME", os.path.expanduser("~"))
-            real_gemini_dir = os.path.join(real_gemini, ".gemini")
-            for auth_file in ("settings.json", "oauth_creds.json", "google_accounts.json", "installation_id"):
-                src = os.path.join(real_gemini_dir, auth_file)
-                if os.path.exists(src):
-                    shutil.copy2(src, os.path.join(gemini_dir, auth_file))
-            env = {**os.environ, "GEMINI_CLI_HOME": gemini_home, "GOOGLE_CLOUD_LOCATION": "global"}
+            gemini_home = setup_gemini_home(
+                "stark-gemini-validate-", os.getcwd(), "validate",
+                approval_mode="plan",
+            )
             try:
                 proc = subprocess.run(
                     [
                         "gemini",
-                        "-p",
-                        VALIDATION_PROMPT,
-                        "-o",
-                        "json",
-                        "--approval-mode",
-                        "plan",
+                        "-m", GEMINI_MODEL,
+                        "-p", VALIDATION_PROMPT,
+                        "-o", "json",
                     ],
                     input=envelope_json,
                     capture_output=True,
                     text=True,
                     timeout=timeout,
-                    env=env,
+                    env=make_gemini_env(gemini_home),
                 )
-                raw = proc.stdout or proc.stderr
+                raw = parse_gemini_output(proc.stdout or proc.stderr)
             finally:
                 shutil.rmtree(gemini_home, ignore_errors=True)
 

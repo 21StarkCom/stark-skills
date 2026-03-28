@@ -14,11 +14,9 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -238,7 +236,7 @@ def _run_implementation_agent(
         run_kwargs["env"] = make_gemini_env(gemini_home)
 
     max_attempts = 2
-    used_fallback = False
+    used_api_key_fallback = False
 
     for attempt in range(1, max_attempts + 1):
         try:
@@ -256,7 +254,7 @@ def _run_implementation_agent(
                     and should_fallback_to_api_key(stderr_snippet)
                     and try_gemini_api_key_fallback(run_kwargs, step_id, stderr_snippet)
                 ):
-                    used_fallback = True
+                    used_api_key_fallback = True
                     time.sleep(2)
                     continue
                 if attempt < max_attempts:
@@ -275,7 +273,7 @@ def _run_implementation_agent(
                 raw = parse_gemini_output(raw)
 
             result.raw_output = raw
-            result.api_key_fallback = used_fallback
+            result.api_key_fallback = used_api_key_fallback
             break
 
         except subprocess.TimeoutExpired:
