@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""Emit skill completion events to stark-insights.
+
+Usage: stark-emit <event_type> [key=value ...]
+
+Designed for skill SKILL.md instructions — Claude runs this at the end
+of a skill invocation to log structured outcomes.
+
+Differences from hook-emit.py:
+  - Sets source=skill for proper dedupe key computation
+  - Reads CLAUDE_SESSION_ID for session linkage
+  - Coerces CLI values: true/false→bool, numeric strings→int/float
+
+Fails silently when container is down — scrapers are the safety net.
+"""
+
+import json
+import os
+import sys
+import urllib.request
+
+TOKEN_PATH = os.path.expanduser("~/.stark-insights/api-token")
+API_URL = "http://localhost:7420/events"
+
+
+def _coerce(v: str) -> bool | int | float | str:
+    if v.lower() == "true":
+        return True
+    if v.lower() == "false":
+        return False
+    try:
+        return int(v)
+    except ValueError:
+        pass
+    try:
+        return float(v)
+    except ValueError:
+        pass
+    return v
+
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        return
+
+    event_type = sys.argv[1]
+    payload: dict[str, bool | int | float | str] = {}
+    for arg in sys.argv[2:]:
+        if "=" in arg:
+            k, v = arg.split("=", 1)
+            payload[k] = _coerce(v)
+
+    token = ""
+    try:
+        with open(TOKEN_PATH) as f:
+            token = f.read().strip()
+    except OSError:
+        pass
+
+    event: dict = {
+        "type": event_type,
+        "cli": "claude",
+        "project": os.environ.get("CLAUDE_PROJECT", ""),
+        "source": "skill",
+        "payload": payload,
+    }
+
+    session_id = os.environ.get("CLAUDE_SESSION_ID")
+    if session_id:
+        event["session_id"] = session_id
+
+    req = urllib.request.Request(
+        API_URL,
+        data=json.dumps(event).encode(),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        },
+    )
+    try:
+        urllib.request.urlopen(req, timeout=2)
+    except Exception:
+        pass  # fail silently — scraper is the safety net
+
+
+if __name__ == "__main__":
+    main()

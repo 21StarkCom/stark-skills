@@ -229,7 +229,7 @@ Additional skill-specific metrics:
 After the release summary, emit a completion event to stark-insights:
 
 ```bash
-~/.stark-insights/stark-emit skill_invocation \
+$SCRIPTS/stark-emit skill_invocation \
   skill=stark-release duration_s=$TOTAL_SECONDS success=$SUCCESS \
   version=$VERSION bump_type=$BUMP
 ```
