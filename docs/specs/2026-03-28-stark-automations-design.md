@@ -25,13 +25,13 @@ Rather than reimplementing automations as traditional code, we preserve the prom
 - GCS-backed execution artifacts: one JSON result per run plus optional markdown report
 - Structured Cloud Logging, Cloud Monitoring dashboards, and Slack alerts
 
-### Critical Assumption: Prompt Portability
+### Prompt Strategy: Fork
 
-The design assumes existing prompts (written for CCR with `gh`, `git`, and MCP connectors) will work with a runtime preamble that maps old patterns to new tool handlers. This is the highest-risk bet in the design. **Validation gate:** Before enabling any trigger in production, run 3 dry-run executions with the CCR prompt + runtime preamble and compare output quality against the last 3 CCR runs. If >30% of tool calls fail or produce wrong results, fork the prompt.
+The 9 automation prompts are forked from `stark-skills/automation/prompts/` into `stark-automations/prompts/` and rewritten for the tool-handler interface (`github_api`, `slack_post`, `shell_exec`). No runtime preamble — prompts are purpose-built for GCP. **Quality gate:** Each forked prompt must pass dry-run testing with tool call error rate < 5% before its scheduler is enabled.
 
 ### Constraints
 
-- Prompt files remain in `stark-skills/automation/prompts/` and are fetched at runtime by git ref. They are not bundled into the deploy artifact. The runtime caches resolved prompt content by SHA for the lifetime of the function instance. **GitHub availability mitigation:** If GitHub is unreachable, the function retries 3× with backoff. If all retries fail, the run fails with `PROMPT_FETCH_FAILED`. This is acceptable: GitHub has >99.9% uptime, and missed runs will execute on the next schedule. The alternative (bundling prompts) would decouple prompt updates from execution, creating a worse problem.
+- Forked prompts live in `stark-automations/prompts/` and are **bundled into the deploy artifact** (included in the Cloud Functions zip). Prompt updates require a code deploy (`terraform apply`). This eliminates GitHub as a runtime dependency and removes the `PROMPT_FETCH_FAILED` failure mode entirely. Trade-off: prompt changes require a deploy, but deploys are automated via CI.
 - Secrets are stored only in Secret Manager. Never committed, never injected as plain environment variables.
 - Terraform follows the service-repo pattern from `infra-ai-platform`: this repo manages only service-specific resources in the existing GCP project and consumes shared outputs via remote state.
 - Cloud Scheduler is the system of record for cron. All schedules are explicit Terraform resources in UTC.
@@ -52,7 +52,7 @@ The design assumes existing prompts (written for CCR with `gh`, `git`, and MCP c
 
 1. Cloud Scheduler publishes a JSON payload to a per-trigger Pub/Sub topic.
 2. The corresponding Cloud Function Gen2 consumes the event.
-3. The function acquires a dedupe lock in GCS, resolves the prompt ref, fetches the prompt from GitHub, and loads required secrets from Secret Manager.
+3. The function acquires a dedupe lock in GCS, loads the bundled prompt from disk, and loads required secrets from Secret Manager.
 4. The function runs an Anthropic Messages API tool loop (bounded by `max_turns` and `max_tokens`).
 5. Tool calls are executed server-side through controlled handlers:
    - GitHub REST/GraphQL operations (scoped to `GetEvinced/*`)
@@ -325,7 +325,7 @@ Canonical status values used everywhere (ExecutionResult, HTTP response, logs, m
 | Code | Meaning | Retry | Status |
 |------|---------|-------|--------|
 | `INVALID_REQUEST` | Malformed payload, bad ref override | No | FAILURE |
-| `PROMPT_FETCH_FAILED` | Prompt missing or GitHub fetch failed | Yes | FAILURE |
+| `PROMPT_NOT_FOUND` | Bundled prompt file missing (deploy error) | No | FAILURE |
 | `SECRET_ACCESS_FAILED` | Secret Manager access denied/disabled | No | FAILURE |
 | `ANTHROPIC_RATE_LIMITED` | Anthropic 429 | Yes | FAILURE |
 | `ANTHROPIC_UNAVAILABLE` | Anthropic 5xx / timeout | Yes | FAILURE |
@@ -716,9 +716,12 @@ GetEvinced/stark-automations/
 │       ├── test_tools.py
 │       ├── test_sandbox.py
 │       └── conftest.py
+├── prompts/                    # Forked from stark-skills, rewritten for tool handlers
+│   ├── stark-sentinel.md
+│   ├── stark-evolution.md
+│   └── ...                   # 9 total
 ├── scripts/
-│   ├── run_trigger.py        # Manual trigger CLI
-│   └── compare_runs.py       # Migration comparison tool
+│   └── run_trigger.py        # Manual trigger CLI
 ├── pricing/
 │   └── anthropic.json        # Per-model token pricing (manual update)
 ├── .github/
@@ -879,12 +882,12 @@ labels = {
 | Failure | Recovery |
 |---------|----------|
 | Anthropic API down | Retry with jitter (3 attempts). After exhaustion: FAILURE status, alert Slack. |
-| GitHub API down (prompt fetch) | Retry with jitter. If cached prompt available (same SHA), use cache. Otherwise FAILURE. |
+| GitHub API down (prompt not affected — bundled) | N/A — prompts are bundled in deploy artifact. GitHub outage only affects `github_api` tool calls. |
 | GitHub API down (mid-loop tool call) | Error returned to model. Model may retry or skip. |
 | Slack webhook down | Non-blocking. Failure logged but doesn't fail the run. |
 | Function timeout | Result written with `TIMEOUT` status. Alert fires. |
 | Secret Manager unavailable | Function fails fast with `SECRET_ACCESS_FAILED`. Pub/Sub redelivers. |
-| Prompt ref not found | **Fail closed.** If `pinned_sha` is set and not found → `PROMPT_FETCH_FAILED`. If no pin configured, resolve `default_ref` (typically `main`). If `default_ref` also fails → `PROMPT_FETCH_FAILED`. Never silently fall back to a different ref than configured. |
+| Bundled prompt missing | Deploy error. `PROMPT_NOT_FOUND`, function fails immediately. Fix by redeploying. |
 | Duplicate Pub/Sub delivery | GCS lock short-circuits with `DUPLICATE` status. |
 | Stale lock (previous run crashed) | TTL-based recovery (see Section 3.4). |
 | Artifact write failure | Retry once. If still failing: FAILURE status, Cloud Logging serves as forensic fallback. |
@@ -944,100 +947,65 @@ If a future trigger requires internal access, a VPC connector can be attached pe
 
 ---
 
-## 8. Migration Plan
+## 8. Deployment Plan
 
-### Prerequisites (before implementation)
+This is a greenfield deployment — there are no CCR triggers running in production (the plan limit prevented that). No migration, no parallel run, no shadow mode.
 
-- [ ] Confirm 12→9 trigger mapping (Section 2.2)
-- [ ] Decide GitHub auth model: PAT or dedicated App (see Open Questions)
-- [ ] Create GCP service accounts and initial secrets
-
-### Phase 1: Build (Week 1-2)
+### Phase 1: Bootstrap (Week 1)
 
 - Create `GetEvinced/stark-automations` repo with structure from Section 6.1
+- Set up Terraform backend (GCS state bucket, same project as infra-ai-platform)
+- Create GCP service accounts and store `GITHUB_ADMIN_TOKEN` + Anthropic key in Secret Manager
 - Implement shared agent runtime (`functions/runtime/`)
-- Write Terraform for 1 function (stark-sentinel) as proof-of-concept
-- Validate: dry-run execution produces expected output
+- Fork and rewrite the 9 prompts for the tool-handler interface (see Section 9)
 
-### Phase 2: Deploy All (Week 2-3)
+### Phase 2: First Function (Week 1-2)
+
+- Write Terraform for 1 function (stark-sentinel) as proof-of-concept
+- Deploy and run in dry-run mode
+- Validate: tool call error rate < 5%, result artifacts well-formed
+- Manual review of output quality
+
+### Phase 3: Full Fleet (Week 2-3)
 
 - Extend Terraform registry to all 9 functions
 - Deploy Cloud Scheduler jobs (initially paused)
-- Run each function manually in dry-run mode
-- Enable scheduler jobs
+- Run each function manually in dry-run mode — validate each prompt
+- Fix any prompt issues found during dry-run testing
+- Enable scheduler jobs one at a time, monitoring each for 24h
 
-### Phase 3: Parallel Run — Shadow Mode (Week 3-4)
+### Phase 4: Steady State
 
-**Critical:** GCP functions run in **shadow mode** during parallel run to prevent duplicate mutations.
-
-- All GCP functions deployed with `SHADOW_MODE=true` environment variable
-- Shadow mode behavior:
-  - `github_api` writes → simulated (logged, not executed)
-  - `slack_post` → redirected to `#stark-automations-test` channel
-  - `shell_exec` → executes normally (stateless)
-  - `gcs_write` → writes to `shadow/` prefix
-- CCR triggers continue as primary
-- Automated comparison script (`scripts/compare_runs.py`) validates daily.
-
-**Cutover acceptance criteria (all must pass for 5 consecutive days):**
-  - Status match rate ≥ 90% (same SUCCESS/FAILURE outcome as CCR)
-  - Token usage within 3× of CCR runs (accounts for tool-mapping overhead)
-  - No `PROMPT_FETCH_FAILED` or `SECRET_ACCESS_FAILED` errors
-  - Simulated actions match CCR actual actions by type and count (±20%)
-  - No stale locks or unrecovered crashes
-
-### Phase 4: Cutover (Week 4)
-
-1. Remove `SHADOW_MODE=true` from GCP functions
-2. Disable CCR triggers (`enabled: false` in `automation/registry.json`)
-3. GCP functions become primary
-4. Monitor for 48 hours
+- All 9 schedulers enabled
+- Monitor for 1 week: check dashboards, alerts, cost tracking
+- Clean up CCR trigger registry in stark-skills (delete `automation/registry.json`, `scripts/register_triggers.sh`)
 
 ### Rollback
 
-- Re-enable CCR triggers in `automation/registry.json`
-- Pause Cloud Scheduler jobs (or re-enable `SHADOW_MODE`)
-- CCR triggers are stateless — re-enabling is instant
-- GCP artifacts preserved for postmortem
+- Pause Cloud Scheduler jobs via Terraform or console
+- Functions remain deployed but idle
+- No data loss — GCS artifacts preserved
 
 ---
 
-## 9. Open Questions
+## 9. Resolved Decisions
 
-### 1. GitHub Auth: PAT vs GitHub App
+### 1. GitHub Auth: `GITHUB_ADMIN_TOKEN` PAT
 
-**Option A (PAT):** Faster to ship. Split into read-only and write tokens. 90-day rotation alert.
+Use the existing `GITHUB_ADMIN_TOKEN` stored in Secret Manager. Split into read-only and write tokens for least privilege. 90-day rotation alert via Cloud Monitoring.
 
-**Option B (GitHub App):** Stronger repo-scoped least privilege. Auto-rotating credentials. Cleaner audit trails. We already have `stark-claude[bot]` — could create `stark-automations[bot]`.
+### 2. Separate Repo: `GetEvinced/stark-automations`
 
-**Trade-off:** PAT is simpler for v1 but requires manual rotation. GitHub App is more setup but better long-term. Tool interface stays the same either way.
+New repo with independent deploy cycle. Consumes `infra-ai-platform` shared outputs via `data.terraform_remote_state`.
 
-**Recommendation:** Ship v1 with split fine-grained PATs. Migrate to GitHub App in v2 if org policy requires it.
+### 3. Model: Sonnet for All Functions
 
-### 2. Separate Repo vs Extend infra-ai-platform
+All 9 functions use `claude-sonnet-4-20250514`. Per-function model override supported in `triggers.yaml` if individual functions need upgrading later.
 
-**Option A (separate repo):** Cleaner ownership, independent deploy cycle.
+### 4. Prompt Strategy: Fork (Option B)
 
-**Option B (directory in infra-ai-platform):** Shared state backend, no cross-repo Terraform references.
+Fork all 9 prompts into `stark-automations/prompts/`. Rewrite to use the tool-handler interface natively (`github_api`, `slack_post`, `shell_exec`) instead of `gh` CLI / `git` / MCP connectors. No runtime preamble — prompts are purpose-built for the GCP execution environment.
 
-**Trade-off:** Separate repo requires `data.terraform_remote_state` to consume shared outputs. Same repo risks coupling deploy cycles.
+The CCR prompts in `stark-skills/automation/prompts/` become legacy artifacts. Delete them after the fleet is stable (Phase 4).
 
-**Recommendation:** Separate repo. The remote state reference is trivial and the independence is worth it.
-
-### 3. Model Selection per Function
-
-Default: `claude-sonnet-4-20250514` for all functions. Some (stark-self-review, stark-intelligence) do complex analysis that might benefit from Opus.
-
-**Decision needed:** Which functions warrant the 5-10× cost increase? Current design supports per-function model override — just needs a policy decision.
-
-**Recommendation:** Start all on Sonnet. Upgrade individual functions to Opus only if quality is insufficient, with per-function cost monitoring to validate the spend.
-
-### 4. Prompt Adaptation Strategy
-
-Current prompts reference `gh` CLI, `git` commands, and Slack MCP connectors. The GCP runtime provides equivalent capabilities via tool handlers.
-
-**Option A (runtime preamble):** Add a system message that maps old patterns to new tools: "Use `github_api` instead of `gh`, `shell_exec` instead of direct bash." Model adapts.
-
-**Option B (fork prompts):** Rewrite prompts to use the new tool interface natively.
-
-**Recommendation:** Option A first. Fork only if accuracy degrades measurably during parallel run.
+**Quality gate:** Each forked prompt must pass dry-run testing with tool call error rate < 5% before its scheduler is enabled.
