@@ -61,8 +61,9 @@ gcloud firestore databases create --location="$REGION" --type=firestore-native
 
 python3.11 -m venv scripts/.venv
 scripts/.venv/bin/pip install -U pip pytest alembic sqlalchemy pgvector \
-  "psycopg[binary]" google-cloud-firestore google-cloud-secret-manager \
-  google-cloud-logging google-cloud-monitoring google-cloud-sql-connector \
+  "psycopg[binary]" "cloud-sql-python-connector[pg8000]" \
+  google-cloud-firestore google-cloud-secret-manager \
+  google-cloud-logging google-cloud-monitoring \
   anthropic openai google-genai tiktoken pydantic pyyaml mcp
 
 terraform -chdir=infra/gcp/stark_agents init \
@@ -154,7 +155,7 @@ No infrastructure created — delete skeleton directories.
    - Files: `infra/gcp/stark_agents/{providers,backend,apis,artifact_registry,iam,network,cloud_run,cloud_sql,secret_manager,scheduler,monitoring}.tf`
    - **State backend:** GCS bucket (created in bootstrap), versioned, locked
    - Create: service accounts (with least-privilege per-secret and per-resource bindings, attached to Cloud Run via `service_account`), Artifact Registry, VPC connector, Cloud SQL (**db-g1-small** — db-f1-micro lacks resources for pgvector), Secret Manager secrets (empty — populated in bootstrap), Cloud Scheduler jobs (paused), alert policies, Cloud Monitoring dashboards (basic — latency, errors, cost)
-   - Cloud SQL: daily automated backups, PITR enabled, **`google_sql_database.default` with `CREATE EXTENSION IF NOT EXISTS vector` via `null_resource` provisioner** (pgvector must be installed before Alembic runs)
+   - Cloud SQL: daily automated backups, PITR enabled, pgvector extension installed via **Alembic migration 0001** (not Terraform provisioner — Terraform can't authenticate to Cloud SQL without additional setup). The Cloud SQL Python connector used by Alembic handles auth natively via IAM.
    - **Cloud Run is NOT deployed yet** — no image exists. Create the Cloud Run service resource with a placeholder image (gcr.io/cloudrun/hello) to establish IAM bindings and URL. Real deployment happens in Phase 4.
    - IAM: explicit `roles/run.invoker` for Claude Code operator identities, `roles/cloudsql.client` for Cloud Run service account, `roles/secretmanager.secretAccessor` scoped to specific secrets, `roles/iam.serviceAccountTokenCreator` for Cloud Scheduler OIDC
    - Done: `terraform apply` completes, `gcloud sql connect` works, Secret Manager secrets accept versions
@@ -278,6 +279,7 @@ Revert to prior Cloud Run revision: `gcloud run services update-traffic stark-ag
 1. **Request-scoped repo workspace**
    - Files: `stark_agents/workspace.py`, `tests/test_workspace.py`
    - Shallow clone PR head ref via GitHub App installation token (private repos)
+   - **Clone to a tmpfs-backed volume or local SSD, not `/tmp`** — Cloud Run's `/tmp` is memory-backed and large repos will OOM. Use `--depth=1 --single-branch` to minimize clone size. Set max clone size limit (100MB).
    - Cleanup after review completes (always, even on error)
    - Done: Clone a private test repo, verify files exist, verify cleanup
 
@@ -346,7 +348,7 @@ No production impact — server still only exposes management tools until Phase 
 2. **Staleness checker with distributed lock**
    - Files: `stark_agents/knowledge/staleness.py`, `tests/test_staleness.py`
    - Check `embeddings_meta.last_refresh` before each agent run
-   - Firestore distributed lock (`sync_locks/{namespace}` with **60s TTL** — document auto-expires via Firestore TTL policy, no crash-before-release deadlock)
+   - Firestore distributed lock (`sync_locks/{namespace}` with **5-minute TTL** — must exceed max sync duration (~2-3 min). Document auto-expires via Firestore TTL policy, no crash-before-release deadlock)
    - First instance acquires lock and refreshes, others poll (max 30s wait)
    - Circuit breaker: 3 consecutive failures -> skip inline refresh for 1 hour, use stale data + warning
    - Done: Concurrent requests don't stampede, circuit breaker activates correctly
