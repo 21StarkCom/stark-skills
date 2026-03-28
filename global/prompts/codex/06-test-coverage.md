@@ -7,6 +7,7 @@ Review the diff for test coverage gaps. Read the test files carefully and check 
 Critical rules:
 - Do NOT suggest adding tests unless there is a concrete logic bug risk. Generic "no tests" findings are noise.
 - Scripts with built-in `--check` / `--verify` / `--dry-run` modes have implicit integration coverage. Only flag missing tests for specific breakable inputs that the self-check doesn't exercise.
+- Unit tests that verify their stated scope are valid. Do NOT flag a unit test for "not exercising the real pipeline" or "using mock data instead of production behavior." Unit tests test units. Integration tests test integration. Evaluate each test against its own stated scope.
 
 Check:
 - Every public prop has at least one test
@@ -26,6 +27,8 @@ Check:
 - No duplicate tests covering same scenario
 - Test file alongside component, describe blocks by feature
 - Stories exist covering key variants
+
+**Stack Adaptation:** The React-specific items above (props, refs, className, Stories, getByRole) apply only to frontend code. For Python/backend: check error paths, async behavior, data transformations, external service boundary mocking, and destructive operation safeguards.
 
 Severities: critical = test passes but tests wrong thing, primary use case untested. high = missing test for public prop, missing a11y test. medium = missing edge case. low = nice-to-have test.
 

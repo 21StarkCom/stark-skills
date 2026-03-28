@@ -25,6 +25,17 @@ Check:
 - className not merged — user className lost
 - ...rest applied to wrong element
 
+**Concurrency & Async (Backend):**
+- TOCTOU races — read-then-write without transactions (e.g., check existence then delete)
+- Non-atomic check-and-act on shared state (databases, distributed locks)
+- Lock release without transactional ownership verification
+- asyncio.gather results misaligned with input indices when items are skipped
+
+**Cross-Module Contracts (Backend):**
+- Callers using wrong field names on dataclasses/models (e.g., obj.id when field is source_id)
+- Constructor called with wrong keyword arguments
+- Function signature changed but callers not updated
+
 Severities: critical = runtime crash, visually broken. high = subtle bug, CSS inheritance broken. medium = unhandled edge case. low = defensive improvement.
 
 Output a JSON array only:

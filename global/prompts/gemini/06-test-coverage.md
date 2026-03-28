@@ -11,6 +11,7 @@ First, run these commands:
 **Critical rules:**
 - Do NOT suggest adding tests unless there is a concrete logic bug risk. Generic "no tests" findings are noise.
 - Scripts with built-in `--check` / `--verify` / `--dry-run` modes have implicit integration coverage. Only flag missing tests for specific breakable inputs that the self-check doesn't exercise.
+- Unit tests that verify their stated scope are valid. Do NOT flag a unit test for "not exercising the real pipeline" or "using mock data instead of production behavior." Unit tests test units. Evaluate each test against its own stated scope.
 
 Then review for test coverage gaps:
 
@@ -46,6 +47,8 @@ Then review for test coverage gaps:
 - Stories file exists
 - Key variants covered in stories
 - Real-world usage patterns demonstrated
+
+**Stack Adaptation:** The React-specific items above (props, refs, className, Stories, getByRole) apply only to frontend code. For Python/backend: check error paths, async behavior, data transformations, external service boundary mocking, and destructive operation safeguards.
 
 Severities:
 - critical: Test tests wrong thing, primary use case untested
