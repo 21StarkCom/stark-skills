@@ -194,6 +194,7 @@ class TestSubAgentDispatch:
         )
         cmd = mock_run.call_args[0][0]
         assert cmd[0] == "gemini"
+        assert "-m" in cmd  # explicit model
         assert "-o" in cmd
         assert "json" in cmd
         assert "--approval-mode" in cmd

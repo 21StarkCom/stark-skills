@@ -113,12 +113,13 @@ class TestModelFlags:
         assert cmd[-1] == "-"  # stdin marker
 
     @patch("multi_review.subprocess.run")
-    def test_gemini_uses_plan_mode(self, mock_run):
+    def test_gemini_uses_plan_mode_and_pinned_model(self, mock_run):
         mock_run.return_value = MagicMock(
             stdout='{"response": "[]"}', returncode=0,
         )
         multi_review._run_subagent("gemini", "architecture", "abc123")
         cmd = mock_run.call_args[0][0]
+        assert "-m" in cmd  # explicit model
         assert "-o" in cmd
         assert "json" in cmd
         assert "--approval-mode" in cmd

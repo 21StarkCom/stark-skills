@@ -26,53 +26,13 @@ from pathlib import Path
 from typing import Any
 
 from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_MEDIUM, parse_jsonl_output
+from gemini_utils import (
+    GEMINI_MODEL, get_gemini_api_key as _get_gemini_api_key,
+    log_api_key_fallback as _log_api_key_fallback,
+    setup_gemini_home, make_gemini_env,
+)
 
 # ── Config ──────────────────────────────────────────────────────────────
-
-_gemini_api_key_cache: str | None = None
-
-
-def _get_gemini_api_key() -> str | None:
-    """Retrieve Gemini API key from macOS Keychain (cached)."""
-    global _gemini_api_key_cache
-    if _gemini_api_key_cache is not None:
-        return _gemini_api_key_cache or None
-    try:
-        result = subprocess.run(
-            ["security", "find-generic-password", "-s", "GEMINI_API_KEY", "-w"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            _gemini_api_key_cache = result.stdout.strip()
-            return _gemini_api_key_cache
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        pass
-    _gemini_api_key_cache = ""
-    return None
-
-
-_RED = "\033[1;31m"
-_RED_BG = "\033[1;37;41m"
-_RESET = "\033[0m"
-_FALLBACK_LOG = Path.home() / ".claude" / "code-review" / "gemini-api-key-fallback.log"
-
-
-def _log_api_key_fallback(agent: str, task: str, reason: str) -> None:
-    """Log API key fallback event."""
-    import datetime
-    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    border = f"{_RED_BG}{'=' * 60}{_RESET}"
-    print(border, file=sys.stderr)
-    print(f"{_RED_BG}  GEMINI API KEY FALLBACK  {_RESET}", file=sys.stderr)
-    print(f"{_RED}  Agent: {agent}:{task}{_RESET}", file=sys.stderr)
-    print(f"{_RED}  Reason: {reason}{_RESET}", file=sys.stderr)
-    print(border, file=sys.stderr)
-    try:
-        _FALLBACK_LOG.parent.mkdir(parents=True, exist_ok=True)
-        with open(_FALLBACK_LOG, "a") as f:
-            f.write(f"{ts}  {agent}:{task}  reason={reason}\n")
-    except OSError:
-        pass
 
 
 AGENTS = ["claude", "codex", "gemini"]
@@ -256,19 +216,10 @@ def _run_implementation_agent(
         stdin_input = prompt
 
     elif agent == "gemini":
-        gemini_home = tempfile.mkdtemp(prefix="gemini-autopilot-")
-        gemini_dir = os.path.join(gemini_home, ".gemini")
-        os.makedirs(gemini_dir, exist_ok=True)
-        real_gemini = os.environ.get("GEMINI_CLI_HOME", os.path.expanduser("~"))
-        real_gemini_dir = os.path.join(real_gemini, ".gemini")
-        for auth_file in ("settings.json", "oauth_creds.json", "google_accounts.json", "installation_id"):
-            src = os.path.join(real_gemini_dir, auth_file)
-            if os.path.exists(src):
-                shutil.copy2(src, os.path.join(gemini_dir, auth_file))
-        with open(os.path.join(gemini_dir, "projects.json"), "w") as f:
-            json.dump({"projects": {worktree_path: "autopilot"}}, f)
+        gemini_home = setup_gemini_home("gemini-autopilot-", worktree_path, "autopilot")
         cmd = [
             "gemini",
+            "-m", GEMINI_MODEL,
             "-p", prompt,
             "--approval-mode", "yolo",
         ]
@@ -288,11 +239,7 @@ def _run_implementation_agent(
     if stdin_input is not None:
         run_kwargs["input"] = stdin_input
     if gemini_home:
-        run_kwargs["env"] = {
-            **os.environ,
-            "GEMINI_CLI_HOME": gemini_home,
-            "GOOGLE_CLOUD_LOCATION": "global",
-        }
+        run_kwargs["env"] = make_gemini_env(gemini_home)
 
     max_attempts = 2
     used_fallback = False

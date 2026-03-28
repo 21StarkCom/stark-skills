@@ -31,10 +31,14 @@ from pathlib import Path
 from typing import Any
 
 from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_HIGH, parse_jsonl_output
+from gemini_utils import (
+    GEMINI_MODEL, get_gemini_api_key, setup_gemini_home, make_gemini_env,
+    parse_json_output as parse_gemini_output,
+)
 
 # Re-export for backward compat
 __all__ = [
-    "FACTOR_WEIGHTS", "AGENTS", "CODEX_REASONING_CONFIG", "CODEX_MODEL",
+    "FACTOR_WEIGHTS", "AGENTS", "CODEX_REASONING_CONFIG", "CODEX_MODEL", "GEMINI_MODEL",
     "REVIEW_EVAL_CRITERIA", "REVIEW_SCALE_MAP",
     "dispatch_competitor", "evaluate_visual", "evaluate_semantic",
     "evaluate_review",
@@ -208,26 +212,7 @@ PYTHON = sys.executable
 GITHUB_APP = str(SCRIPTS_DIR / "github_app.py")
 CODEX_REASONING_CONFIG = CODEX_REASONING_EFFORT_HIGH
 
-_gemini_api_key_cache: str | None | bool = None  # None=not tried, False=not found
-
-
-def _get_gemini_api_key() -> str | None:
-    """Retrieve Gemini API key from macOS Keychain (cached)."""
-    global _gemini_api_key_cache
-    if _gemini_api_key_cache is not None:
-        return _gemini_api_key_cache if _gemini_api_key_cache else None
-    try:
-        result = subprocess.run(
-            ["security", "find-generic-password", "-s", "GEMINI_API_KEY", "-w"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            _gemini_api_key_cache = result.stdout.strip()
-            return _gemini_api_key_cache
-    except Exception:
-        pass
-    _gemini_api_key_cache = False
-    return None
+_get_gemini_api_key = get_gemini_api_key  # backward compat alias
 
 
 _css_cache: str | None = None
@@ -451,20 +436,10 @@ def dispatch_competitor(agent: str, skill, audience: str):
         stdin_input = prompt
 
     elif agent == "gemini":
-        gemini_home = tempfile.mkdtemp(prefix="gemini-viz-")
-        gemini_dir = os.path.join(gemini_home, ".gemini")
-        os.makedirs(gemini_dir, exist_ok=True)
-        real_gemini = os.environ.get("GEMINI_CLI_HOME", os.path.expanduser("~"))
-        real_gemini_dir = os.path.join(real_gemini, ".gemini")
-        for auth_file in ("settings.json", "oauth_creds.json", "google_accounts.json", "installation_id"):
-            src = os.path.join(real_gemini_dir, auth_file)
-            if os.path.exists(src):
-                shutil.copy2(src, os.path.join(gemini_dir, auth_file))
-        cwd = str(ROOT)
-        with open(os.path.join(gemini_dir, "projects.json"), "w") as f:
-            json.dump({"projects": {cwd: "viz"}}, f)
+        gemini_home = setup_gemini_home("gemini-viz-", str(ROOT), "viz")
         cmd = [
             "gemini",
+            "-m", GEMINI_MODEL,
             "-p", prompt,
             "-o", "json",
             "--approval-mode", "plan",
@@ -484,11 +459,7 @@ def dispatch_competitor(agent: str, skill, audience: str):
     if stdin_input is not None:
         run_kwargs["input"] = stdin_input
     if gemini_home:
-        run_kwargs["env"] = {
-            **os.environ,
-            "GEMINI_CLI_HOME": gemini_home,
-            "GOOGLE_CLOUD_LOCATION": "global",
-        }
+        run_kwargs["env"] = make_gemini_env(gemini_home)
 
     try:
         proc = subprocess.run(cmd, **run_kwargs)
@@ -516,21 +487,8 @@ def dispatch_competitor(agent: str, skill, audience: str):
         if agent == "codex":
             raw_output = parse_jsonl_output(raw_output)
 
-        # For gemini, extract text from JSON response
         if agent == "gemini":
-            try:
-                gobj = json.loads(raw_output)
-                if isinstance(gobj, list):
-                    text_parts = []
-                    for item in gobj:
-                        if isinstance(item, dict) and "response" in item:
-                            text_parts.append(item["response"])
-                    if text_parts:
-                        raw_output = "\n".join(text_parts)
-                elif isinstance(gobj, dict) and "response" in gobj:
-                    raw_output = gobj["response"]
-            except json.JSONDecodeError:
-                pass
+            raw_output = parse_gemini_output(raw_output)
 
         parsed = _parse_viz_response(raw_output)
         duration = time.monotonic() - t0

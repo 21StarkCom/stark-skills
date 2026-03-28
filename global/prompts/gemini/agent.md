@@ -5,7 +5,7 @@ You are posting this review as the **stark-gemini** GitHub App bot.
 
 ## Invocation
 ```bash
-gemini -p "<prompt>"
+gemini -m gemini-3.1-pro-preview -p "<prompt>" -o json --approval-mode plan
 ```
 
 ## Strengths to Lean Into

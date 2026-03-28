@@ -45,68 +45,15 @@ from pathlib import Path
 from typing import Any
 
 from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_HIGH, parse_jsonl_output
+from gemini_utils import (
+    GEMINI_MODEL, get_gemini_api_key, log_api_key_fallback,
+    setup_gemini_home, make_gemini_env, parse_json_output as parse_gemini_output,
+)
 
 # ── Config ──────────────────────────────────────────────────────────────
 
-_gemini_api_key_cache: str | None = None
-
-# ANSI escape codes for bold red text with border
-_RED = "\033[1;31m"
-_RED_BG = "\033[1;37;41m"
-_RESET = "\033[0m"
-_FALLBACK_LOG = Path.home() / ".claude" / "code-review" / "gemini-api-key-fallback.log"
-
-
-def _get_gemini_api_key() -> str | None:
-    """Retrieve Gemini API key from macOS Keychain (cached)."""
-    global _gemini_api_key_cache
-    if _gemini_api_key_cache is not None:
-        return _gemini_api_key_cache or None
-    try:
-        result = subprocess.run(
-            ["security", "find-generic-password", "-s", "GEMINI_API_KEY", "-w"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            _gemini_api_key_cache = result.stdout.strip()
-            return _gemini_api_key_cache
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        pass
-    _gemini_api_key_cache = ""
-    return None
-
-
-def _log_api_key_fallback(agent: str, domain: str, reason: str) -> None:
-    """Log API key fallback event to stderr (red+border) and to a persistent log file."""
-    import datetime
-    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    # Bold red bordered warning to stderr
-    border = f"{_RED_BG}{'=' * 60}{_RESET}"
-    print(border, file=sys.stderr)
-    print(
-        f"{_RED_BG}  ⚠  GEMINI API KEY FALLBACK  ⚠  {_RESET}",
-        file=sys.stderr,
-    )
-    print(
-        f"{_RED}  Agent: {agent}:{domain}{_RESET}",
-        file=sys.stderr,
-    )
-    print(
-        f"{_RED}  Reason: {reason}{_RESET}",
-        file=sys.stderr,
-    )
-    print(
-        f"{_RED}  Vertex AI auth failed → using GEMINI_API_KEY from Keychain{_RESET}",
-        file=sys.stderr,
-    )
-    print(border, file=sys.stderr)
-    # Append to persistent log file
-    try:
-        _FALLBACK_LOG.parent.mkdir(parents=True, exist_ok=True)
-        with open(_FALLBACK_LOG, "a") as f:
-            f.write(f"{ts}  {agent}:{domain}  reason={reason}\n")
-    except OSError:
-        pass
+_get_gemini_api_key = get_gemini_api_key  # backward compat alias
+_log_api_key_fallback = log_api_key_fallback  # backward compat alias
 
 
 SCRIPTS_DIR = Path(__file__).parent
@@ -634,31 +581,17 @@ def _run_subagent(
         stdin_input = prompt
 
     elif agent == "gemini":
-        # Gemini: -p for headless mode with prompt, -o json for structured output,
-        # --approval-mode plan = read-only (git diff, file reads OK, no writes).
-        # GEMINI_CLI_HOME tmpdir prevents session artifacts across parallel runs.
         prompt = (
             f"Run 'git diff {base}...HEAD' and read all changed files. "
             f"ONLY review files that appear in the diff. "
             f"Then review them according to these instructions:\n\n"
             f"{full_prompt}"
         )
-        gemini_home = tempfile.mkdtemp(prefix="gemini-review-")
-        gemini_dir = os.path.join(gemini_home, ".gemini")
-        os.makedirs(gemini_dir, exist_ok=True)
-        real_gemini = os.environ.get(
-            "GEMINI_CLI_HOME", os.path.expanduser("~"),
-        )
-        real_gemini_dir = os.path.join(real_gemini, ".gemini")
-        for auth_file in ("settings.json", "oauth_creds.json", "google_accounts.json", "installation_id"):
-            src = os.path.join(real_gemini_dir, auth_file)
-            if os.path.exists(src):
-                shutil.copy2(src, os.path.join(gemini_dir, auth_file))
         effective_cwd = cwd or os.getcwd()
-        with open(os.path.join(gemini_dir, "projects.json"), "w") as f:
-            json.dump({"projects": {effective_cwd: "review"}}, f)
+        gemini_home = setup_gemini_home("gemini-review-", effective_cwd, "review")
         cmd = [
             "gemini",
+            "-m", GEMINI_MODEL,
             "-p", prompt,
             "-o", "json",
             "--approval-mode", "plan",
@@ -689,11 +622,7 @@ def _run_subagent(
     if stdin_input is not None:
         run_kwargs["input"] = stdin_input
     if gemini_home:
-        run_kwargs["env"] = {
-            **os.environ,
-            "GEMINI_CLI_HOME": gemini_home,
-            "GOOGLE_CLOUD_LOCATION": "global",
-        }
+        run_kwargs["env"] = make_gemini_env(gemini_home)
 
     used_api_key_fallback = False
     for attempt in range(1, max_attempts + 1):
@@ -741,13 +670,8 @@ def _run_subagent(
             if agent == "codex":
                 raw = parse_jsonl_output(raw)
 
-            # Gemini -o json wraps the response in {"response": "...",...}
-            if gemini_home and raw.strip():
-                try:
-                    envelope = json.loads(raw)
-                    raw = envelope.get("response", raw)
-                except (json.JSONDecodeError, AttributeError):
-                    pass  # fall through to parse raw stdout as-is
+            if gemini_home:
+                raw = parse_gemini_output(raw)
                 _cleanup_temp()
 
             if not raw.strip():
