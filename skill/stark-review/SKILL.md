@@ -128,6 +128,66 @@ merge_base=$(git merge-base origin/{base_ref} HEAD)
 
 Run the configured `test_command` in the worktree. Parse output for failing test identifiers. Store as `baseline_failures` set. Pre-existing failures are not the skill's responsibility.
 
+## Phase 1.9: Runtime Verification (MANDATORY before review)
+
+Before dispatching review agents, verify the code actually runs. This catches interface mismatches and wrong SDK API calls that review agents consistently miss.
+
+### 1.9a. Import chain test
+
+Install deps in an isolated venv and import every module in the package:
+
+```bash
+[ -d /tmp/review-verify ] || python3 -m venv /tmp/review-verify
+/tmp/review-verify/bin/pip install -q -r requirements.txt 2>/dev/null
+
+/tmp/review-verify/bin/python3 -c "
+import importlib, pathlib, sys
+sys.path.insert(0, '.')
+failures = []
+for f in pathlib.Path('.').rglob('*.py'):
+    if any(p in str(f) for p in ['test', 'venv', 'node_modules', '.git']): continue
+    mod = str(f.with_suffix('')).replace('/', '.')
+    try: importlib.import_module(mod)
+    except Exception as e: failures.append((mod, str(e)[:100]))
+for m, e in failures: print(f'IMPORT FAIL: {m} — {e}')
+print(f'{len(failures)} import failures')
+"
+```
+
+Import failures are **CRITICAL findings** — they mean the code crashes before any logic runs. Add them to the findings list with severity=critical, classified as `fix`. These take priority over anything the review agents find.
+
+### 1.9b. SDK API spot-check
+
+Scan the diff for imports of external SDKs. For each SDK imported, verify the methods called in our code exist:
+
+```bash
+# For each SDK class used in the diff, verify method signatures
+/tmp/review-verify/bin/python3 -c "
+import inspect
+# Dynamically check methods based on what the diff uses
+# Example: if diff imports AsyncTransaction and calls .begin(), verify it exists
+from <sdk> import <Class>
+for method in [<methods_called_in_diff>]:
+    if not hasattr(<Class>, method):
+        print(f'SDK MISMATCH: {Class.__name__}.{method}() does not exist')
+"
+```
+
+SDK mismatches are **CRITICAL findings** — they cause `AttributeError` at runtime. This verification exists because in a real-world 8-round review, 5 consecutive attempts to fix a Firestore integration failed because every round guessed at the SDK API instead of checking the installed package.
+
+**Rule: Never trust AI knowledge or documentation for SDK APIs. Install the package and run `inspect.signature()`.**
+
+### 1.9c. Cross-module interface trace
+
+For functions that cross module boundaries (detected from the diff), verify:
+1. The callee's constructor/function signature accepts the args the caller passes
+2. Return types match what the caller consumes
+3. Config names (secrets, env vars) match between code and infrastructure definitions
+
+Interface mismatches are the #1 source of bugs in AI-generated multi-module code. Each module is written independently and assumes interfaces it hasn't verified.
+
+Add any mismatches as findings with severity=critical, classified as `fix`.
+
 ## Phase 2: Review-Fix Loop
 
 **Review-only mode:** Run Phase 2a once, skip to Phase 3.
@@ -493,6 +553,8 @@ After the metrics, check and print if applicable:
 - Agent failure rate > 20% → flag with breakdown by agent
 - A round produced 0 new actionable findings → suggest reducing rounds
 - Build/test retries > 1 → flag fix quality issue
+- Phase 1.9 found more critical issues than Phase 2 agents → flag "runtime verification was more valuable than review agents"
+- Signal-to-noise < 20% → flag "review agents producing excessive noise — consider reducing domains or tightening prompts"
 
 If none triggered: `No improvement opportunities detected.`
 
@@ -551,6 +613,20 @@ Agent counts are **per-round** (18 dispatched = 3 agents × 6 domains per round)
 - Be specific: include file paths, line numbers, and concrete fix suggestions
 - Distinguish between "this will break" (critical) and "this could be better" (suggestion/nit)
 - If the project has PR review guidelines in CLAUDE.md, those take precedence
+
+### Signal-to-Noise Optimization (learned from real-world data)
+
+In an 8-round review of a 12K-line PR, 18-agent dispatch produced 97 findings with ~10% signal-to-noise. Targeted 3-agent reviews with focused prompts found more real bugs per finding. Key learnings:
+
+1. **Runtime verification catches more critical bugs than review agents.** Import checks and `inspect.signature()` on SDK calls found startup crashes, interface mismatches, and wrong API usage that all 18 agents missed.
+
+2. **Cross-module interface mismatches are the #1 bug class** in AI-generated multi-module code. Each module is written independently and assumes interfaces it hasn't verified. Review agents read one file at a time and rarely trace call chains across module boundaries.
+
+3. **SDK API assumptions are consistently wrong.** AI agents confidently call methods that don't exist. The only reliable verification is installing the package and inspecting it. This pattern repeated 5 times on a single Firestore function.
+
+4. **When classifying findings, weigh runtime-verified findings highest.** A finding from Phase 1.9 (import/SDK check) is almost always a true positive. A finding from a review agent is ~30% true positive.
+
+5. **Test-coverage and style findings are almost always noise.** Unless the PR introduces untested critical logic, suppress test-coverage domain findings to reduce noise.
 
 ## Debugging Dispatch Failures
 
