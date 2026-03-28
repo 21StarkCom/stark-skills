@@ -53,3 +53,12 @@
 - **Story Points:** 149 total (38 tasks across 9 phases)
 - **Summary:** Six domain-specialized review agents (DevOps, Accessibility, Dependency, Docs, APICompat, Cost) on GCP Cloud Run with MCP server interface. Python MCP SDK, Cloud SQL + pgvector for RAG knowledge, Firestore for control plane (agent configs, findings, cost tracking). Ensemble scoring: 3 LLMs × semantic dedup × consensus confidence. Key decisions: Cloud SQL Python connector (not Auth Proxy), text-embedding-3-small (1536 dims), Playwright + axe-core for Accessibility browser runner, remediation disabled by default, cost agent as post-dispatch hook not file-pattern agent. Phased rollout: DevOps first (48h canary), Accessibility second (multi-agent validation), then remaining four agents one at a time.
 - **Knowledge extracted to:** Target repo (GetEvinced/stark-agents) — knowledge lives in issue bodies since the project is new.
+
+## 2026-03-28 — stark-automations: GCP Cloud Functions Automation Fleet
+
+- **Date:** 2026-03-28
+- **Status:** Decomposed → issues created
+- **Tracking:** GetEvinced/stark-automations#1, #2, #3, #4, #5, #6, #7, #8
+- **Story Points:** 151 total (43 tasks across 8 phases)
+- **Summary:** Migrate 9 automation triggers from CCR to GCP Cloud Functions Gen2 with Pub/Sub ingress, custom container images (python:3.12-slim + shell binaries), and Terraform-managed infrastructure. Key decisions: single codebase deployed 9 times via Terraform for_each on triggers.yaml, bundled prompts (no runtime GitHub fetch), two service accounts for read/write permission tiers, three model-facing tools (github_api, slack_post, shell_exec) with sandbox isolation, ifGenerationMatch=0 for lock acquisition, Eventarc-managed subscriptions (no manual Pub/Sub subscriptions), canary deploys (sentinel first), 6-day incremental scheduler activation with R/W triggers last.
+- **Knowledge extracted to:** Target repo (GetEvinced/stark-automations) — knowledge lives in issue bodies since the project is new. ADR creation is task #9.
