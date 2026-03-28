@@ -5,12 +5,14 @@ Constants and helpers used across all dispatch scripts that invoke the Gemini CL
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import json
 import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Generator
 from pathlib import Path
 
 # Default model — pinned to avoid auto-routing unpredictability in automation.
@@ -142,6 +144,23 @@ def setup_gemini_home(
         json.dump({"projects": {project_dir: project_label}}, f)
 
     return gemini_home
+
+
+
+@contextlib.contextmanager
+def gemini_session(
+    prefix: str,
+    project_dir: str,
+    project_label: str = "session",
+    approval_mode: str | None = None,
+) -> Generator[str, None, None]:
+    """Context manager: create an isolated Gemini home, yield its path, clean up on exit."""
+    home = setup_gemini_home(prefix, project_dir, project_label, approval_mode)
+    try:
+        yield home
+    finally:
+        if os.path.isdir(home):
+            shutil.rmtree(home, ignore_errors=True)
 
 
 def make_gemini_env(gemini_home: str) -> dict[str, str]:
