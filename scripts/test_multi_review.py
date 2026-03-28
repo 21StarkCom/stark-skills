@@ -109,7 +109,7 @@ class TestModelFlags:
         assert "--ephemeral" in cmd
         assert "--json" in cmd
         assert "-s" in cmd and "read-only" in cmd  # least-privilege sandbox
-        assert "-a" in cmd and "never" in cmd  # no approval prompts
+        assert "-a" not in cmd  # -a/--ask-for-approval not valid on codex exec
         assert cmd[-1] == "-"  # stdin marker
 
     @patch("multi_review.subprocess.run")
@@ -122,8 +122,7 @@ class TestModelFlags:
         assert "-m" in cmd  # explicit model
         assert "-o" in cmd
         assert "json" in cmd
-        assert "--approval-mode" in cmd
-        assert "plan" in cmd
+        assert "--approval-mode" not in cmd  # set via settings.json, not CLI flag
         # Gemini uses GEMINI_CLI_HOME env var for isolation + GOOGLE_CLOUD_LOCATION for Vertex AI
         call_kwargs = mock_run.call_args[1]
         assert "env" in call_kwargs
@@ -162,9 +161,9 @@ class TestCLIFlagsSmoke:
 
     @pytest.mark.skipif(not shutil.which("gemini"), reason="gemini CLI not installed")
     def test_gemini_accepts_flags(self):
-        """gemini -o json --approval-mode plan must not error."""
+        """gemini -o json -m must not error."""
         result = subprocess.run(
-            ["gemini", "-o", "json", "--approval-mode", "plan", "--help"],
+            ["gemini", "-o", "json", "--help"],
             capture_output=True, text=True, timeout=10,
         )
         assert result.returncode == 0, f"gemini rejected flags: {result.stderr}"
@@ -197,8 +196,13 @@ class TestCLIFlagsSmoke:
         with open(os.path.join(gemini_dir, "projects.json"), "w") as f:
             _json.dump(projects, f)
         env = {**os.environ, "GEMINI_CLI_HOME": gemini_home, "GEMINI_API_KEY": "invalid"}
+        # Write plan mode into settings.json (--approval-mode is not a CLI flag)
+        import json as _json2
+        settings_path = os.path.join(gemini_dir, "settings.json")
+        with open(settings_path, "w") as f:
+            _json2.dump({"defaultApprovalMode": "plan"}, f)
         result = subprocess.run(
-            ["gemini", "-p", "test", "-o", "json", "--approval-mode", "plan"],
+            ["gemini", "-p", "test", "-o", "json"],
             capture_output=True, text=True, timeout=30, env=env,
         )
         shutil.rmtree(gemini_home, ignore_errors=True)
@@ -234,28 +238,13 @@ class TestCLIEndToEnd:
     @pytest.mark.skipif(not shutil.which("gemini"), reason="gemini CLI not installed")
     def test_gemini_json_output_e2e(self, tmp_path):
         """gemini -o json returns a JSON envelope with 'response' key."""
-        import tempfile
-        import json as _json
-        gemini_home = tempfile.mkdtemp(prefix="gemini-test-")
-        gemini_dir = os.path.join(gemini_home, ".gemini")
-        os.makedirs(gemini_dir, exist_ok=True)
-        # Copy auth files from real home (same pattern as multi_review.py)
-        real_gemini = os.environ.get("GEMINI_CLI_HOME", os.path.expanduser("~"))
-        real_gemini_dir = os.path.join(real_gemini, ".gemini")
-        for auth_file in ("settings.json", "oauth_creds.json", "google_accounts.json", "installation_id"):
-            src = os.path.join(real_gemini_dir, auth_file)
-            if os.path.exists(src):
-                shutil.copy2(src, os.path.join(gemini_dir, auth_file))
-        with open(os.path.join(gemini_dir, "projects.json"), "w") as f:
-            _json.dump({"projects": {os.getcwd(): "test"}}, f)
-        env = {
-            **os.environ,
-            "GEMINI_CLI_HOME": gemini_home,
-            "GOOGLE_CLOUD_LOCATION": "global",
-        }
+        from gemini_utils import setup_gemini_home, make_gemini_env
+        gemini_home = setup_gemini_home(
+            "gemini-test-", os.getcwd(), "test", approval_mode="plan",
+        )
+        env = make_gemini_env(gemini_home)
         result = subprocess.run(
-            ["gemini", "-p", "Return exactly: []",
-             "-o", "json", "--approval-mode", "plan"],
+            ["gemini", "-p", "Return exactly: []", "-o", "json"],
             capture_output=True, text=True, timeout=120, env=env,
         )
         shutil.rmtree(gemini_home, ignore_errors=True)

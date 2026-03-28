@@ -286,18 +286,19 @@ def _run_plan_subagent(
             "-m", CODEX_MODEL,
             "-c", CODEX_REASONING_CONFIG,
             "--ephemeral", "--json",
-            "-s", "read-only", "-a", "never",
+            "-s", "read-only",
             "-",
         ]
         stdin_input = full_prompt
     elif agent == "gemini":
-        gemini_home = setup_gemini_home("gemini-plan-review-", os.getcwd(), "review")
+        gemini_home = setup_gemini_home(
+            "gemini-plan-review-", os.getcwd(), "review", approval_mode="plan",
+        )
         cmd = [
             "gemini",
             "-m", GEMINI_MODEL,
             "-p", prompt_text or "Review this plan document.",
             "-o", "json",
-            "--approval-mode", "plan",
         ]
         stdin_input = plan_content  # piped as context via stdin
     else:

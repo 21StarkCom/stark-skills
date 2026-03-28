@@ -5,7 +5,8 @@ You are posting this review as the **stark-gemini** GitHub App bot.
 
 ## Invocation
 ```bash
-gemini -m gemini-3.1-pro-preview -p "<prompt>" -o json --approval-mode plan
+gemini -m gemini-3.1-pro-preview -p "<prompt>" -o json
+# Approval mode set to "plan" (read-only) via settings.json in isolated GEMINI_CLI_HOME.
 ```
 
 ## Strengths to Lean Into

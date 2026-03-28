@@ -568,7 +568,7 @@ def _run_subagent(
             "-m", CODEX_MODEL,
             "-c", CODEX_REASONING_CONFIG,
             "--ephemeral", "--json",
-            "-s", "read-only", "-a", "never",
+            "-s", "read-only",
             "-",
         ]
         stdin_input = prompt
@@ -581,13 +581,14 @@ def _run_subagent(
             f"{full_prompt}"
         )
         effective_cwd = cwd or os.getcwd()
-        gemini_home = setup_gemini_home("gemini-review-", effective_cwd, "review")
+        gemini_home = setup_gemini_home(
+            "gemini-review-", effective_cwd, "review", approval_mode="plan",
+        )
         cmd = [
             "gemini",
             "-m", GEMINI_MODEL,
             "-p", prompt,
             "-o", "json",
-            "--approval-mode", "plan",
         ]
         stdin_input = None
 

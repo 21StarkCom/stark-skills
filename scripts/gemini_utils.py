@@ -69,8 +69,22 @@ def log_api_key_fallback(agent: str, task: str, reason: str) -> None:
 # ── Session isolation ─────────────────────────────────────────────────
 
 
-def setup_gemini_home(prefix: str, project_dir: str, project_label: str = "session") -> str:
+def setup_gemini_home(
+    prefix: str,
+    project_dir: str,
+    project_label: str = "session",
+    approval_mode: str | None = None,
+) -> str:
     """Create an isolated GEMINI_CLI_HOME with auth files and project scope.
+
+    Args:
+        prefix: Temp directory prefix (e.g. "gemini-review-").
+        project_dir: Absolute path to the project directory.
+        project_label: Label for the project in projects.json.
+        approval_mode: If set, patch the copied settings.json with this
+            ``defaultApprovalMode`` (e.g. "plan", "yolo"). This is the
+            correct way to set approval mode — ``--approval-mode`` is not
+            a documented CLI flag in Gemini CLI v0.34+.
 
     Returns the path to the temporary home directory (caller must clean up).
     """
@@ -85,6 +99,17 @@ def setup_gemini_home(prefix: str, project_dir: str, project_label: str = "sessi
         src = os.path.join(real_gemini_dir, auth_file)
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(gemini_dir, auth_file))
+
+    # Patch approval mode in the copied settings.json if requested.
+    if approval_mode:
+        settings_path = os.path.join(gemini_dir, "settings.json")
+        settings: dict = {}
+        if os.path.exists(settings_path):
+            with open(settings_path) as f:
+                settings = json.load(f)
+        settings["defaultApprovalMode"] = approval_mode
+        with open(settings_path, "w") as f:
+            json.dump(settings, f)
 
     with open(os.path.join(gemini_dir, "projects.json"), "w") as f:
         json.dump({"projects": {project_dir: project_label}}, f)

@@ -179,7 +179,7 @@ class TestSubAgentDispatch:
         assert "--ephemeral" in cmd
         assert "--json" in cmd
         assert "-s" in cmd and "read-only" in cmd
-        assert "-a" in cmd and "never" in cmd
+        assert "-a" not in cmd  # -a not valid on codex exec
         assert cmd[-1] == "-"  # stdin marker
         call_kwargs = mock_run.call_args[1]
         assert "input" in call_kwargs
@@ -198,8 +198,7 @@ class TestSubAgentDispatch:
         assert "-m" in cmd  # explicit model
         assert "-o" in cmd
         assert "json" in cmd
-        assert "--approval-mode" in cmd
-        assert "plan" in cmd
+        assert "--approval-mode" not in cmd  # set via settings.json, not CLI flag
         # Gemini pipes plan content via stdin, prompt_text via -p
         call_kwargs = mock_run.call_args[1]
         assert "input" in call_kwargs
@@ -322,9 +321,9 @@ class TestCLIFlagsSmoke:
 
     @pytest.mark.skipif(not shutil.which("gemini"), reason="gemini CLI not installed")
     def test_gemini_accepts_flags(self):
-        """gemini -o json --approval-mode plan must not error."""
+        """gemini -o json must not error."""
         result = subprocess.run(
-            ["gemini", "-o", "json", "--approval-mode", "plan", "--help"],
+            ["gemini", "-o", "json", "--help"],
             capture_output=True, text=True, timeout=10,
         )
         assert result.returncode == 0, f"gemini rejected flags: {result.stderr}"
