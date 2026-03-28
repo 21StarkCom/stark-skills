@@ -3,63 +3,63 @@
   "pat_created_at": "2026-03-28T08:00:00Z",
   "triggers": {
     "stark-sentinel": {
-      "trigger_id": "trig_01UVgu9fRpnfA11Hfe2Zih2F",
-      "last_registered": "2026-03-28T09:04:07.558325+00:00",
+      "trigger_id": "trig_01KH8Nsh8Degz45yvvMp2xmt",
+      "last_registered": "2026-03-28T09:24:13.265340+00:00",
       "enabled": true
     },
     "stark-evolution": {
-      "trigger_id": "trig_01RVGbmooX3FZzENAxpUgpV6",
-      "last_registered": "2026-03-28T09:04:07.558431+00:00",
-      "enabled": false
+      "trigger_id": "trig_01S6XhoXV4MfP7bLwp7CJrTM",
+      "last_registered": "2026-03-28T09:24:13.265340+00:00",
+      "enabled": true
     },
     "stark-self-review": {
-      "trigger_id": "trig_01QutBGptqoiHLjWTypXgMST",
-      "last_registered": "2026-03-28T09:04:07.558432+00:00",
-      "enabled": false
+      "trigger_id": "trig_01AZpFdyg9DPxXgXbj8Fd2Rk",
+      "last_registered": "2026-03-28T09:24:13.265340+00:00",
+      "enabled": true
     },
     "stark-dependency-audit": {
-      "trigger_id": "trig_01VkXAjD6E8WbGs3TqorHbXk",
-      "last_registered": "2026-03-28T09:04:07.558433+00:00",
-      "enabled": false
+      "trigger_id": "trig_01MjSKH3HQbrciYSfpvoh2FQ",
+      "last_registered": "2026-03-28T09:24:13.265340+00:00",
+      "enabled": true
     },
     "stark-infra-drift": {
-      "trigger_id": "trig_01LXFHD7ToDxo8fmVet8fjCu",
-      "last_registered": "2026-03-28T09:04:07.558434+00:00",
+      "trigger_id": "trig_013F4NfGiZvav77ALLy7iD7E",
+      "last_registered": "2026-03-28T09:24:13.265340+00:00",
       "enabled": true
     },
     "stark-api-compat": {
-      "trigger_id": "trig_0153ziX3omVrcFkUQWUhyzAG",
-      "last_registered": "2026-03-28T09:04:07.558435+00:00",
+      "trigger_id": "trig_017esUHeZq5QxDgMuH2C5RHN",
+      "last_registered": "2026-03-28T09:24:13.265340+00:00",
       "enabled": true
     },
     "stark-intelligence": {
-      "trigger_id": "trig_01UgB7Pts8tjLkaRrpPX1g4m",
-      "last_registered": "2026-03-28T09:04:07.558436+00:00",
-      "enabled": false
+      "trigger_id": "trig_01X4FiMt55ZAhN5dbUjtuPA9",
+      "last_registered": "2026-03-28T09:24:13.265340+00:00",
+      "enabled": true
     },
     "stark-claude-md-sync": {
-      "trigger_id": "trig_01PV9zkQpizBQiYBMbsT5Z8U",
-      "last_registered": "2026-03-28T09:04:07.558437+00:00",
+      "trigger_id": "trig_01CRq2aKcNgXSX8mrA9dafGn",
+      "last_registered": "2026-03-28T09:24:13.265340+00:00",
       "enabled": false
     },
     "stark-digest": {
-      "trigger_id": "trig_01KmdSobuTMm5khpr1nkuJFr",
-      "last_registered": "2026-03-28T09:04:07.558438+00:00",
-      "enabled": false
+      "trigger_id": "trig_013xX5g3whcviw6VKTEyaDm4",
+      "last_registered": "2026-03-28T09:24:13.265340+00:00",
+      "enabled": true
     },
     "stark-observability-check": {
-      "trigger_id": "trig_01NuQUGz4rhQXBaWWEDViE76",
-      "last_registered": "2026-03-28T09:04:07.558439+00:00",
-      "enabled": false
+      "trigger_id": "trig_012SBD7LuU3H5NUmDZsrxMRB",
+      "last_registered": "2026-03-28T09:24:13.265340+00:00",
+      "enabled": true
     },
     "stark-automation-monitor": {
-      "trigger_id": "trig_014DzzEvjgJ8BBA1gHSXx8m1",
-      "last_registered": "2026-03-28T09:04:07.558440+00:00",
-      "enabled": false
+      "trigger_id": "trig_01PcJEPLiw667i7Q14vbA2xU",
+      "last_registered": "2026-03-28T09:24:13.265340+00:00",
+      "enabled": true
     },
     "stark-hooks-auditor": {
-      "trigger_id": "trig_01TdTFBb5DmAHTqYZYSThwBp",
-      "last_registered": "2026-03-28T09:04:07.558441+00:00",
+      "trigger_id": "trig_01CC8KFTWbYZLXN3rCZszkzg",
+      "last_registered": "2026-03-28T09:24:13.265340+00:00",
       "enabled": false
     }
   }
