@@ -228,14 +228,14 @@ After the briefing (start mode) or summary (end mode), emit a completion event t
 
 **Start mode:**
 ```bash
-~/.stark-insights/stark-emit skill_invocation \
+$SCRIPTS/stark-emit skill_invocation \
   skill=stark-session args=start duration_s=$TOTAL_SECONDS success=true \
   branch=$BRANCH health_passed=$PASSED health_total=$TOTAL
 ```
 
 **End mode:**
 ```bash
-~/.stark-insights/stark-emit skill_invocation \
+$SCRIPTS/stark-emit skill_invocation \
   skill=stark-session args=end duration_s=$TOTAL_SECONDS success=$SUCCESS \
   prs_merged=$MERGED_COUNT docs_committed=$DOC_COUNT pushed=$PUSHED
 ```

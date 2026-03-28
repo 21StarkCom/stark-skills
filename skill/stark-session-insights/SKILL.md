@@ -353,7 +353,7 @@ Files written:
 After the report summary, emit a completion event to stark-insights:
 
 ```bash
-~/.stark-insights/stark-emit skill_invocation \
+$SCRIPTS/stark-emit skill_invocation \
   skill=stark-session-insights duration_s=$TOTAL_SECONDS success=$SUCCESS \
   projects_processed=$N total_entries=$ENTRIES
 ```

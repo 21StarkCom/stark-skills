@@ -238,7 +238,7 @@ Output:             {output_path}
 After the metrics block, emit a completion event to stark-insights:
 
 ```bash
-~/.stark-insights/stark-emit skill_invocation \
+$SCRIPTS/stark-emit skill_invocation \
   skill=stark-design duration_s=$TOTAL_SECONDS success=$SUCCESS \
   winner_agent=$AGENT output_path=$PATH
 ```

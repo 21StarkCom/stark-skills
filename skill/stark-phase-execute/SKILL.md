@@ -661,7 +661,7 @@ Printed as part of the dashboard (Phase 4). Includes per-phase timing breakdown,
 After the dashboard (Phase 4), emit a completion event to stark-insights:
 
 ```bash
-~/.stark-insights/stark-emit skill_invocation \
+$SCRIPTS/stark-emit skill_invocation \
   skill=stark-phase-execute duration_s=$TOTAL_SECONDS success=$SUCCESS \
   phase=$SLUG tasks_completed=$DONE tasks_failed=$FAILED prs_merged=$MERGED
 ```

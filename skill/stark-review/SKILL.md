@@ -524,7 +524,7 @@ Include per-phase timing in `rounds.json`:
 After the metrics block, emit a completion event to stark-insights:
 
 ```bash
-~/.stark-insights/stark-emit skill_invocation \
+$SCRIPTS/stark-emit skill_invocation \
   skill=stark-review duration_s=$TOTAL_SECONDS success=$SUCCESS \
   pr_number=$PR findings_total=$TOTAL findings_fixed=$FIXED \
   noise_count=$NOISE agents_dispatched=$AGENTS rounds=$ROUNDS

@@ -249,7 +249,7 @@ Additional skill-specific metrics:
 After the flow completes, emit a completion event to stark-insights:
 
 ```bash
-~/.stark-insights/stark-emit skill_invocation \
+$SCRIPTS/stark-emit skill_invocation \
   skill=stark-pr-flow duration_s=$TOTAL_SECONDS success=$SUCCESS \
   pr_number=$PR repo=$REPO action=$ACTION
 ```
