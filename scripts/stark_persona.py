@@ -20,8 +20,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import datetime
+import difflib
+import hashlib
 import json
 import os
+import random
 import re
 import sqlite3
 import sys
@@ -94,12 +98,16 @@ def ensure_dirs() -> None:
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    started_at  TEXT    NOT NULL DEFAULT (datetime('now')),
-    ended_at    TEXT,
-    persona     TEXT    NOT NULL,
-    combo       TEXT,
-    deactivated INTEGER NOT NULL DEFAULT 0
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at            TEXT    NOT NULL DEFAULT (datetime('now')),
+    ended_at              TEXT,
+    persona               TEXT    NOT NULL,
+    combo                 TEXT,
+    deactivated           INTEGER NOT NULL DEFAULT 0,
+    is_combo              INTEGER NOT NULL DEFAULT 0,
+    combo_components      TEXT,
+    date_signal_matched   INTEGER NOT NULL DEFAULT 0,
+    date_signal_reason    TEXT
 );
 
 CREATE TABLE IF NOT EXISTS ratings (
@@ -140,7 +148,26 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
+    # Migrate: add columns that may be missing on older databases
+    _migrate_sessions(conn)
     return conn
+
+
+def _migrate_sessions(conn: sqlite3.Connection) -> None:
+    """Add new columns to sessions table if they don't exist yet."""
+    existing = {
+        row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()
+    }
+    migrations = [
+        ("is_combo", "INTEGER NOT NULL DEFAULT 0"),
+        ("combo_components", "TEXT"),
+        ("date_signal_matched", "INTEGER NOT NULL DEFAULT 0"),
+        ("date_signal_reason", "TEXT"),
+    ]
+    for col, typedef in migrations:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {typedef}")
+    conn.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -316,6 +343,313 @@ def sync_weights(roster: list[PersonaRecord], conn: sqlite3.Connection) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Selection engine (#154, #155, #156)
+# ---------------------------------------------------------------------------
+
+
+def _get_persona_stats(conn: sqlite3.Connection, slug: str) -> dict:
+    """Get selection_count, like_count, hate_count for a persona."""
+    sel = conn.execute(
+        "SELECT COUNT(*) AS n FROM sessions WHERE persona = ?", (slug,)
+    ).fetchone()["n"]
+    likes = conn.execute(
+        "SELECT COUNT(*) AS n FROM ratings WHERE persona = ? AND rating = 'like'",
+        (slug,),
+    ).fetchone()["n"]
+    hates = conn.execute(
+        "SELECT COUNT(*) AS n FROM ratings WHERE persona = ? AND rating = 'hate'",
+        (slug,),
+    ).fetchone()["n"]
+    return {"selection_count": sel, "like_count": likes, "hate_count": hates}
+
+
+def compute_weight(weights_row: dict) -> float:
+    """Compute selection weight from persona stats.
+
+    Args:
+        weights_row: dict with selection_count, like_count, hate_count
+    """
+    selection_count = weights_row.get("selection_count", 0)
+    like_count = weights_row.get("like_count", 0)
+    hate_count = weights_row.get("hate_count", 0)
+
+    if selection_count == 0:
+        return 1.5  # discovery boost
+
+    net = like_count - hate_count
+    if net > 0:
+        return 1.0 + (min(net, 5) * 0.4)  # max 3.0
+    elif net < 0:
+        return max(0.2, 1.0 + (net * 0.4))  # floor 0.2
+    else:
+        return 1.0
+
+
+def get_date_matches(
+    roster: list[PersonaRecord], today: datetime.date | None = None
+) -> list[PersonaRecord]:
+    """Return personas whose date signals match today's month-day."""
+    if today is None:
+        today = datetime.date.today()
+    matches = []
+    for persona in roster:
+        for _label, date_str in persona.date_signals.items():
+            try:
+                d = datetime.date.fromisoformat(date_str)
+                if d.month == today.month and d.day == today.day:
+                    matches.append(persona)
+                    break  # one match per persona is enough
+            except ValueError:
+                continue
+    return matches
+
+
+def fuzzy_match_persona(
+    roster: list[PersonaRecord], name: str
+) -> PersonaRecord | None:
+    """Fuzzy-match a name against roster slugs and display names."""
+    # Exact slug match first
+    for p in roster:
+        if p.slug == name or p.name.lower() == name.lower():
+            return p
+
+    # Fuzzy match on slugs
+    slugs = [p.slug for p in roster]
+    slug_matches = difflib.get_close_matches(name.lower(), slugs, n=1, cutoff=0.5)
+    if slug_matches:
+        return next(p for p in roster if p.slug == slug_matches[0])
+
+    # Fuzzy match on display names
+    names = [p.name.lower() for p in roster]
+    name_matches = difflib.get_close_matches(name.lower(), names, n=1, cutoff=0.5)
+    if name_matches:
+        return next(p for p in roster if p.name.lower() == name_matches[0])
+
+    return None
+
+
+def _weighted_random_pick(
+    roster: list[PersonaRecord], conn: sqlite3.Connection, rng: random.Random | None = None
+) -> PersonaRecord:
+    """Pick a persona using weighted random selection."""
+    if rng is None:
+        rng = random.Random()
+    weights = []
+    for p in roster:
+        stats = _get_persona_stats(conn, p.slug)
+        weights.append(compute_weight(stats))
+    chosen = rng.choices(roster, weights=weights, k=1)[0]
+    return chosen
+
+
+def _persist_selection(
+    persona: PersonaRecord,
+    conn: sqlite3.Connection,
+    active_path: Path | str | None = None,
+    is_combo: bool = False,
+    combo_components: str | None = None,
+    date_signal_matched: bool = False,
+    date_signal_reason: str | None = None,
+) -> dict:
+    """Insert session row, update weight, write active.json, return result dict."""
+    # Compute new weight from stats
+    stats = _get_persona_stats(conn, persona.slug)
+    stats["selection_count"] += 1  # count this selection
+    new_weight = compute_weight(stats)
+
+    # Insert session
+    cur = conn.execute(
+        """INSERT INTO sessions
+           (persona, is_combo, combo_components, date_signal_matched, date_signal_reason)
+           VALUES (?, ?, ?, ?, ?)""",
+        (
+            persona.slug,
+            int(is_combo),
+            combo_components,
+            int(date_signal_matched),
+            date_signal_reason,
+        ),
+    )
+    session_id = cur.lastrowid
+
+    # Update weight
+    conn.execute(
+        """INSERT INTO weights (persona, weight, updated_at)
+           VALUES (?, ?, datetime('now'))
+           ON CONFLICT(persona) DO UPDATE SET weight = ?, updated_at = datetime('now')""",
+        (persona.slug, new_weight, new_weight),
+    )
+    conn.commit()
+
+    result = {
+        "session_id": session_id,
+        "persona": persona.slug,
+        "name": persona.name,
+        "source": persona.source,
+        "traits": persona.traits,
+        "speaking_style": persona.speaking_style,
+        "weight": new_weight,
+    }
+    if persona.catchphrase:
+        result["catchphrase"] = persona.catchphrase
+    if date_signal_matched:
+        result["date_signal_matched"] = True
+        result["date_signal_reason"] = date_signal_reason
+    if is_combo:
+        result["is_combo"] = True
+        result["combo_components"] = json.loads(combo_components) if combo_components else []
+
+    # Write active.json
+    write_active(result, active_path)
+
+    return result
+
+
+def select_single_persona(
+    roster: list[PersonaRecord],
+    conn: sqlite3.Connection,
+    name: str | None = None,
+    auto: bool = False,
+    active_path: Path | str | None = None,
+    rng: random.Random | None = None,
+    today: datetime.date | None = None,
+) -> dict:
+    """Select a single persona — by name, date signal, or weighted random.
+
+    Returns a dict with persona info.
+    """
+    if rng is None:
+        rng = random.Random()
+
+    date_signal_matched = False
+    date_signal_reason: str | None = None
+
+    if name:
+        # Fuzzy name match
+        persona = fuzzy_match_persona(roster, name)
+        if persona is None:
+            return {"error": f"No persona matching '{name}' found in roster"}
+    else:
+        # Check date matches first (#155)
+        date_matches = get_date_matches(roster, today)
+        if date_matches and rng.random() < 0.25:
+            persona = rng.choice(date_matches)
+            date_signal_matched = True
+            # Find which signal matched
+            check_date = today or datetime.date.today()
+            for label, date_str in persona.date_signals.items():
+                try:
+                    d = datetime.date.fromisoformat(date_str)
+                    if d.month == check_date.month and d.day == check_date.day:
+                        date_signal_reason = label
+                        break
+                except ValueError:
+                    continue
+        else:
+            # Weighted random
+            persona = _weighted_random_pick(roster, conn, rng)
+
+    return _persist_selection(
+        persona,
+        conn,
+        active_path=active_path,
+        date_signal_matched=date_signal_matched,
+        date_signal_reason=date_signal_reason,
+    )
+
+
+def select_combo(
+    roster: list[PersonaRecord],
+    conn: sqlite3.Connection,
+    active_path: Path | str | None = None,
+    rng: random.Random | None = None,
+) -> dict:
+    """Select a combo of 2-3 personas, pick 1-2 traits from each, synthesize."""
+    if rng is None:
+        rng = random.Random()
+    if len(roster) < 2:
+        return {"error": "Need at least 2 personas in roster for a combo"}
+
+    count = rng.choice([2, 3]) if len(roster) >= 3 else 2
+
+    # Weighted selection of distinct personas
+    chosen: list[PersonaRecord] = []
+    remaining = list(roster)
+    for _ in range(count):
+        pick = _weighted_random_pick(remaining, conn, rng)
+        chosen.append(pick)
+        remaining = [p for p in remaining if p.slug != pick.slug]
+
+    # Pick 1-2 traits from each
+    components = []
+    all_traits = []
+    for p in chosen:
+        trait_count = rng.randint(1, min(2, len(p.traits)))
+        selected_traits = rng.sample(p.traits, trait_count)
+        components.append({
+            "slug": p.slug,
+            "name": p.name,
+            "traits": selected_traits,
+        })
+        all_traits.extend(selected_traits)
+
+    # Generate combo name
+    names = [p.name for p in chosen]
+    if len(names) == 2:
+        combo_name = f"{names[0]} meets {names[1]}"
+    else:
+        combo_name = " \u00d7 ".join(names)
+
+    # Speaking style synthesis
+    styles = [p.speaking_style for p in chosen if p.speaking_style]
+    speaking_style = " Blended with: ".join(styles) if styles else ""
+
+    # Recipe hash: deterministic from sorted slugs
+    sorted_slugs = sorted(p.slug for p in chosen)
+    recipe_hash = hashlib.sha256("|".join(sorted_slugs).encode()).hexdigest()[:12]
+
+    combo_components_json = json.dumps(components)
+
+    # Use first persona as the "primary" for the session row
+    primary = chosen[0]
+
+    # Insert session
+    cur = conn.execute(
+        """INSERT INTO sessions
+           (persona, combo, is_combo, combo_components)
+           VALUES (?, ?, 1, ?)""",
+        (primary.slug, combo_name, combo_components_json),
+    )
+    session_id = cur.lastrowid
+
+    # Update weights for all chosen
+    for p in chosen:
+        stats = _get_persona_stats(conn, p.slug)
+        stats["selection_count"] += 1
+        w = compute_weight(stats)
+        conn.execute(
+            """INSERT INTO weights (persona, weight, updated_at)
+               VALUES (?, ?, datetime('now'))
+               ON CONFLICT(persona) DO UPDATE SET weight = ?, updated_at = datetime('now')""",
+            (p.slug, w, w),
+        )
+    conn.commit()
+
+    result = {
+        "session_id": session_id,
+        "combo_name": combo_name,
+        "is_combo": True,
+        "components": components,
+        "all_traits": all_traits,
+        "speaking_style": speaking_style,
+        "recipe_hash": recipe_hash,
+    }
+
+    write_active(result, active_path)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Subcommands
 # ---------------------------------------------------------------------------
 
@@ -328,6 +662,40 @@ def cmd_select(args: argparse.Namespace) -> int:
         print(json.dumps({"error": "roster is empty — populate with 'add' or seed roster.md"}))
         conn.close()
         return 1
+
+    sync_weights(roster, conn)
+
+    if args.combo:
+        result = select_combo(roster, conn)
+    else:
+        result = select_single_persona(
+            roster, conn, name=args.name, auto=args.auto,
+        )
+
+    if "error" in result:
+        print(json.dumps(result))
+        conn.close()
+        return 1
+
+    if args.auto:
+        print(json.dumps(result))
+    else:
+        # Human-friendly output
+        if result.get("is_combo"):
+            print(f"Combo: {result['combo_name']}")
+            print(f"Traits: {', '.join(result['all_traits'])}")
+            print(f"Style: {result['speaking_style']}")
+            print(f"Recipe: {result['recipe_hash']}")
+        else:
+            print(f"Persona: {result['name']} ({result['persona']})")
+            print(f"Source: {result['source']}")
+            print(f"Traits: {', '.join(result['traits'])}")
+            print(f"Style: {result['speaking_style']}")
+            if result.get("catchphrase"):
+                print(f"Catchphrase: {result['catchphrase']}")
+            if result.get("date_signal_matched"):
+                print(f"Date match: {result['date_signal_reason']}")
+
     conn.close()
     return 0
 
