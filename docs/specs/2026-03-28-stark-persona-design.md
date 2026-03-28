@@ -125,7 +125,7 @@ CREATE TABLE sessions (
 
 CREATE TABLE ratings (
     id TEXT PRIMARY KEY,
-    session_id TEXT REFERENCES sessions(id),
+    session_id TEXT UNIQUE REFERENCES sessions(id),  -- one rating per session (last wins)
     slug TEXT NOT NULL,             -- character slug
     rating TEXT NOT NULL,           -- 'like' or 'hate'
     rated_at TEXT NOT NULL
@@ -281,7 +281,7 @@ Instant feedback on the active persona.
 
 **Flow:**
 1. Look up active persona from current session
-2. Insert rating into `ratings` table
+2. Upsert rating into `ratings` table (UNIQUE on session_id — only one rating per session, last one wins)
 3. Recompute weight for this persona
 4. Emit `persona_event` (subtype: `rating`) to stark-insights
 5. One-liner confirmation: "Noted — Jules moves up the ranks." / "Got it — less Borat."
@@ -303,8 +303,8 @@ Instant feedback on the active persona.
 **Flow:**
 1. Select 1-3 questions (at least 1 persona-specific, optionally 1-2 general)
 2. Present as multiple choice
-3. Store each response in `survey_responses`
-4. Update `preference_profile` based on answers
+3. Store each response in `survey_responses` table (v1 — stored for future analysis)
+4. In v2: derive `preference_profile` from accumulated survey data. In v1: survey responses are stored but not used for selection.
 5. Emit `persona_event` (subtype: `survey_response`) per question
 
 ### 5.3 Random Pop-Up Survey
