@@ -38,7 +38,7 @@ SCRIPT_VERSION = "1.0.0"
 MAX_WORKERS = 6
 
 from tournament import (
-    AGENTS, FACTOR_WEIGHTS, CODEX_REASONING_CONFIG,
+    AGENTS,
     dispatch_competitor as _run_viz_agent,
     evaluate_visual as run_evaluation,
     build_eval_prompt as build_evaluation_prompt,
