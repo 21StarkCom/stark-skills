@@ -1,0 +1,14 @@
+{
+  "week": "2026-W14",
+  "triggers": [
+    {"name": "stark-sentinel", "runs": 7, "tokens": 86800, "cost": 0.35, "avg_duration": 47, "status": "PASS"},
+    {"name": "stark-evolution", "runs": 1, "tokens": 156000, "cost": 0.78, "avg_duration": 340, "status": "PASS"},
+    {"name": "stark-self-review", "runs": 1, "tokens": 89000, "cost": 0.44, "avg_duration": 180, "status": "PASS"},
+    {"name": "stark-dependency-audit", "runs": 1, "tokens": 60000, "cost": 0.30, "avg_duration": 240, "status": "PASS"},
+    {"name": "stark-automation-monitor", "runs": 7, "tokens": 210000, "cost": 0.91, "avg_duration": 120, "status": "PASS"}
+  ],
+  "total_runs": 17,
+  "total_tokens": 601800,
+  "total_cost": 2.78,
+  "alerts": []
+}
