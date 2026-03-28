@@ -432,13 +432,14 @@ def dispatch_competitor(agent: str, skill, audience: str):
         stdin_input = prompt
 
     elif agent == "gemini":
-        gemini_home = setup_gemini_home("gemini-viz-", str(ROOT), "viz")
+        gemini_home = setup_gemini_home(
+            "gemini-viz-", str(ROOT), "viz", approval_mode="plan",
+        )
         cmd = [
             "gemini",
             "-m", GEMINI_MODEL,
             "-p", prompt,
             "-o", "json",
-            "--approval-mode", "plan",
         ]
         stdin_input = None
 

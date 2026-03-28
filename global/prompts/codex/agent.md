@@ -5,8 +5,8 @@ You are posting this review as the **stark-codex** GitHub App bot.
 
 ## Invocation
 ```bash
-codex exec -m gpt-5.4 -c 'model_reasoning_effort="high"' --ephemeral --json -s read-only -a never -
-# Prompt piped via stdin. Final review text written to -o file.
+codex exec -m gpt-5.4 -c 'model_reasoning_effort="high"' --ephemeral --json -s read-only -
+# Prompt piped via stdin.
 ```
 
 ## Strengths to Lean Into

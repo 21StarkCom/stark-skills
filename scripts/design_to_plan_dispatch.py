@@ -171,13 +171,14 @@ def _build_cmd_and_kwargs(
         run_kwargs["timeout"] = effective_timeout
 
     elif agent == "gemini":
-        gemini_home = setup_gemini_home("gemini-d2p-", os.getcwd(), "generate-review")
+        gemini_home = setup_gemini_home(
+            "gemini-d2p-", os.getcwd(), "generate-review", approval_mode="plan",
+        )
         cmd = [
             "gemini",
             "-m", GEMINI_MODEL,
             "-p", prompt,
             "-o", "json",
-            "--approval-mode", "plan",
         ]
         if stdin_content:
             run_kwargs["input"] = stdin_content

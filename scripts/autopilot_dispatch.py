@@ -217,7 +217,7 @@ def _run_implementation_agent(
             "gemini",
             "-m", GEMINI_MODEL,
             "-p", prompt,
-            "--approval-mode", "yolo",
+            "--yolo",
         ]
         stdin_input = None
     else:
