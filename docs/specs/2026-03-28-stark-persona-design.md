@@ -29,6 +29,7 @@ A Claude Code skill that assigns a famous character persona to the AI assistant 
 | `/stark-persona` | Weighted random pick, enter character |
 | `/stark-persona "Jules Winnfield"` | Pick specific character by name |
 | `/stark-persona --combo` | Trait-blended mashup of 2-3 random characters |
+| `/stark-persona --off` | Deactivate persona, return to standard voice |
 | `/stark-persona --like` | Thumbs up current persona (updates weight) |
 | `/stark-persona --hate` | Thumbs down current persona (updates weight) |
 | `/stark-persona --survey` | 1-3 multiple choice improvement questions |
@@ -52,9 +53,30 @@ Persona: Jules Winnfield (Pulp Fiction) — "Allow me to retort."
 On selection, the skill outputs:
 1. Character name, source, and catchphrase
 2. A brief "entering character" moment (one line in-character)
-3. Stores the active persona in session context
+3. Writes `active.json` (see Section 3.2)
+4. Emits the persona voice instructions into the conversation context
 
-Claude then maintains the character's speaking style for the remainder of the session. The persona applies to conversational text only — code, tool calls, and structured outputs remain standard.
+**Voice mechanism:** The SKILL.md contains a persona prompt template that gets loaded into Claude's conversation context when the skill is invoked. After selecting a character, the skill outputs self-instructions:
+
+```
+For the remainder of this session, adopt the speaking style of {persona_name} ({source}):
+{speaking_style from roster}
+
+Rules:
+- Conversational text only — code, tool calls, and structured output stay standard
+- Stay in character but never compromise technical accuracy
+- Use the character's vocabulary, cadence, and attitude
+- Reference their catchphrase naturally, don't force it every message
+```
+
+This persists for the session because Claude Code skills are loaded into the conversation context. No external persistence needed for voice — `active.json` tracks identity for `--like`/`--hate`/`--off`, not for voice continuity.
+
+### Persona Deactivation (`--off`)
+
+1. Delete `~/.stark-persona/active.json`
+2. Emit `persona_event` (subtype: `deactivation`) to stark-insights with the persona slug and session duration at time of deactivation
+3. Output: "Persona deactivated. Back to standard."
+4. Claude reverts to normal communication style for the rest of the session
 
 ## 3. Storage Architecture
 
@@ -171,7 +193,7 @@ class EventType(str, Enum):
 
 ```python
 PAYLOAD_SCHEMAS["persona_event"] = {
-    "subtype": str,              # "selection" | "rating" | "survey_response" | "combo_selection"
+    "subtype": str,              # "selection" | "rating" | "survey_response" | "combo_selection" | "deactivation"
     "persona": str,               # character name or combo description
     "is_combo": bool,
     "combo_components": (list, type(None)),
@@ -471,7 +493,7 @@ Full trait tagging completed during implementation.
 | Roster file missing | Create with minimal seed (5 characters). |
 | No date signals match today | Proceed with normal weighted random. |
 | Character not found (specific pick) | Fuzzy match against roster. If no match: "Character not in roster. Add with --add?" |
-| No active persona (--like/--hate) | "No active persona this session. Pick one first." |
+| No active persona (--like/--hate/--off) | "No active persona this session. Pick one first." |
 | Survey dismissed | Persona activates anyway. No penalty. |
 
 ## 12. Future Considerations (Not in v1)
