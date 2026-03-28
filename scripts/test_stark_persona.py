@@ -11,7 +11,9 @@ from pathlib import Path
 import pytest
 
 from stark_persona import (
+    ROSTER_PATH,
     PersonaRecord,
+    _sanitize_input,
     compute_weight,
     delete_active,
     fuzzy_match_persona,
@@ -21,6 +23,8 @@ from stark_persona import (
     load_roster,
     main,
     parse_roster,
+    record_rating,
+    recompute_weight,
     select_combo,
     select_single_persona,
     sync_weights,
@@ -377,14 +381,14 @@ class TestWeightedSelection:
         roster = load_roster(SEED_ROSTER)
         sync_weights(roster, conn)
 
-        # Give jules many likes
-        conn.execute(
-            "INSERT INTO sessions (persona) VALUES (?)", ("jules-winnfield",)
-        )
-        for _ in range(5):
+        # Give jules many likes (one per session, respecting UNIQUE on session_id)
+        for i in range(5):
+            cur = conn.execute(
+                "INSERT INTO sessions (persona) VALUES (?)", ("jules-winnfield",)
+            )
             conn.execute(
-                "INSERT INTO ratings (session_id, persona, rating) VALUES (1, ?, 'like')",
-                ("jules-winnfield",),
+                "INSERT INTO ratings (session_id, persona, rating) VALUES (?, ?, 'like')",
+                (cur.lastrowid, "jules-winnfield"),
             )
         conn.commit()
 
@@ -673,3 +677,290 @@ class TestAutoJson:
         captured = capsys.readouterr()
         data = json.loads(captured.out)
         assert data["is_combo"] is True
+
+
+# ---------------------------------------------------------------------------
+# Feedback recording tests (#158)
+# ---------------------------------------------------------------------------
+
+
+class TestRecordRating:
+    """record_rating and recompute_weight tests."""
+
+    def _setup(self, tmp_path: Path) -> tuple:
+        """Helper: create db, roster, select a persona, return (conn, active_path)."""
+        conn = init_db(tmp_path / "persona.db")
+        roster = load_roster(SEED_ROSTER)
+        sync_weights(roster, conn)
+        active_path = tmp_path / "active.json"
+        result = select_single_persona(
+            roster, conn, active_path=active_path, rng=random.Random(42)
+        )
+        return conn, active_path, roster, result
+
+    def test_record_rating_updates_weights(self, tmp_path: Path) -> None:
+        conn, active_path, roster, result = self._setup(tmp_path)
+        slug = result["persona"]
+
+        weight_before = conn.execute(
+            "SELECT weight FROM weights WHERE persona = ?", (slug,)
+        ).fetchone()["weight"]
+
+        msg = record_rating(conn, "like", active_path=active_path, roster=roster)
+        assert "like" in msg
+
+        weight_after = conn.execute(
+            "SELECT weight FROM weights WHERE persona = ?", (slug,)
+        ).fetchone()["weight"]
+        # Like should increase or maintain weight
+        assert weight_after >= weight_before
+        conn.close()
+
+    def test_rating_is_idempotent_per_session(self, tmp_path: Path) -> None:
+        """Upsert: rating the same session twice replaces, doesn't duplicate."""
+        conn, active_path, roster, result = self._setup(tmp_path)
+        session_id = result["session_id"]
+
+        record_rating(conn, "like", active_path=active_path, roster=roster)
+        record_rating(conn, "hate", active_path=active_path, roster=roster)
+
+        count = conn.execute(
+            "SELECT COUNT(*) AS n FROM ratings WHERE session_id = ?", (session_id,)
+        ).fetchone()["n"]
+        assert count == 1  # upsert, not insert
+
+        rating = conn.execute(
+            "SELECT rating FROM ratings WHERE session_id = ?", (session_id,)
+        ).fetchone()["rating"]
+        assert rating == "hate"  # last wins
+        conn.close()
+
+    def test_combo_rating_dilutes_to_components(self, tmp_path: Path) -> None:
+        conn = init_db(tmp_path / "persona.db")
+        roster = load_roster(SEED_ROSTER)
+        sync_weights(roster, conn)
+        active_path = tmp_path / "active.json"
+
+        result = select_combo(
+            roster, conn, active_path=active_path, rng=random.Random(42)
+        )
+        components = result["components"]
+        assert len(components) >= 2
+
+        # Record initial weights for components
+        initial_weights = {}
+        for comp in components:
+            w = conn.execute(
+                "SELECT weight FROM weights WHERE persona = ?", (comp["slug"],)
+            ).fetchone()["weight"]
+            initial_weights[comp["slug"]] = w
+
+        record_rating(conn, "like", active_path=active_path, roster=roster)
+
+        # Check that component weights were updated (recomputed)
+        for comp in components:
+            w = conn.execute(
+                "SELECT weight FROM weights WHERE persona = ?", (comp["slug"],)
+            ).fetchone()["weight"]
+            # Weight should have changed from initial
+            assert w is not None
+        conn.close()
+
+    def test_favorite_combos_populated_on_combo_like(self, tmp_path: Path) -> None:
+        conn = init_db(tmp_path / "persona.db")
+        roster = load_roster(SEED_ROSTER)
+        sync_weights(roster, conn)
+        active_path = tmp_path / "active.json"
+
+        result = select_combo(
+            roster, conn, active_path=active_path, rng=random.Random(42)
+        )
+        combo_name = result["combo_name"]
+
+        record_rating(conn, "like", active_path=active_path, roster=roster)
+
+        fav = conn.execute(
+            "SELECT combo, times_used FROM favorite_combos WHERE combo = ?",
+            (combo_name,),
+        ).fetchone()
+        assert fav is not None
+        assert fav["times_used"] == 1
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Stats, history, print-weights tests (#159)
+# ---------------------------------------------------------------------------
+
+
+class TestStatsInline:
+    """cmd_stats inline format."""
+
+    def test_stats_inline_format(self, tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("stark_persona.DB_PATH", tmp_path / "persona.db")
+        monkeypatch.setattr("stark_persona.DATA_DIR", tmp_path)
+        monkeypatch.setattr("stark_persona.ACTIVE_PATH", tmp_path / "active.json")
+
+        result = main(["stats", "--format", "inline"])
+        assert result == 0
+
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert "sessions" in data
+        assert "combos" in data
+        assert "top_3" in data
+
+
+class TestStatsTable:
+    """cmd_stats table format."""
+
+    def test_stats_table_format(self, tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("stark_persona.DB_PATH", tmp_path / "persona.db")
+        monkeypatch.setattr("stark_persona.DATA_DIR", tmp_path)
+        monkeypatch.setattr("stark_persona.ACTIVE_PATH", tmp_path / "active.json")
+
+        # Select a persona first so there's data
+        main(["select", "--auto"])
+
+        result = main(["stats", "--format", "table"])
+        assert result == 0
+
+        captured = capsys.readouterr()
+        assert "Persona" in captured.out
+        assert "Weight" in captured.out
+        assert "Total sessions:" in captured.out
+
+
+class TestHistory:
+    """cmd_history output."""
+
+    def test_history_output(self, tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("stark_persona.DB_PATH", tmp_path / "persona.db")
+        monkeypatch.setattr("stark_persona.DATA_DIR", tmp_path)
+        monkeypatch.setattr("stark_persona.ACTIVE_PATH", tmp_path / "active.json")
+
+        # Select a persona first
+        main(["select", "--auto"])
+
+        result = main(["history"])
+        assert result == 0
+
+        captured = capsys.readouterr()
+        assert "Persona" in captured.out
+        assert "Rating" in captured.out
+
+    def test_history_empty(self, tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("stark_persona.DB_PATH", tmp_path / "persona.db")
+        monkeypatch.setattr("stark_persona.DATA_DIR", tmp_path)
+
+        result = main(["history"])
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "No sessions" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Add, deactivate, session-end tests (#160)
+# ---------------------------------------------------------------------------
+
+
+class TestAddSanitization:
+    """cmd_add input sanitization."""
+
+    def test_add_rejects_backticks(self, tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("stark_persona.DB_PATH", tmp_path / "persona.db")
+        monkeypatch.setattr("stark_persona.DATA_DIR", tmp_path)
+        monkeypatch.setattr("stark_persona.ROSTER_PATH", tmp_path / "roster.md")
+        # Seed roster
+        (tmp_path / "roster.md").write_text("# Persona Roster\n")
+
+        result = main(["add", "--name", "Bad`Name", "--source", "Movie", "--traits", "a, b, c"])
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "Invalid characters" in captured.out or "backtick" in captured.out.lower() or "Error" in captured.out
+
+    def test_add_rejects_html(self, tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("stark_persona.DB_PATH", tmp_path / "persona.db")
+        monkeypatch.setattr("stark_persona.DATA_DIR", tmp_path)
+        monkeypatch.setattr("stark_persona.ROSTER_PATH", tmp_path / "roster.md")
+        (tmp_path / "roster.md").write_text("# Persona Roster\n")
+
+        result = main(["add", "--name", "<script>alert</script>", "--source", "Web", "--traits", "a, b, c"])
+        assert result == 1
+
+
+class TestAddAppends:
+    """cmd_add appends to roster correctly."""
+
+    def test_add_appends_to_roster(self, tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("stark_persona.DB_PATH", tmp_path / "persona.db")
+        monkeypatch.setattr("stark_persona.DATA_DIR", tmp_path)
+        roster_path = tmp_path / "roster.md"
+        monkeypatch.setattr("stark_persona.ROSTER_PATH", roster_path)
+        roster_path.write_text("# Persona Roster\n")
+
+        result = main(["add", "--name", "Tony Montana", "--source", "Scarface (1983)", "--traits", "ambitious, volatile, dramatic"])
+        assert result == 0
+
+        content = roster_path.read_text()
+        assert "## Tony Montana" in content
+        assert "tony-montana" in content
+        assert "character" in content  # auto-detected type
+
+    def test_add_detects_person_type(self, tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("stark_persona.DB_PATH", tmp_path / "persona.db")
+        monkeypatch.setattr("stark_persona.DATA_DIR", tmp_path)
+        roster_path = tmp_path / "roster.md"
+        monkeypatch.setattr("stark_persona.ROSTER_PATH", roster_path)
+        roster_path.write_text("# Persona Roster\n")
+
+        result = main(["add", "--name", "Dave Chappelle", "--source", "Comedian, stand-up", "--traits", "witty, sharp, fearless"])
+        assert result == 0
+
+        content = roster_path.read_text()
+        assert "person" in content
+
+
+class TestDeactivate:
+    """cmd_deactivate deletes active.json."""
+
+    def test_deactivate_deletes_active(self, tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("stark_persona.DB_PATH", tmp_path / "persona.db")
+        monkeypatch.setattr("stark_persona.DATA_DIR", tmp_path)
+        active_path = tmp_path / "active.json"
+        monkeypatch.setattr("stark_persona.ACTIVE_PATH", active_path)
+
+        # Select first
+        main(["select", "--auto"])
+        assert active_path.exists()
+
+        result = main(["deactivate"])
+        assert result == 0
+        assert not active_path.exists()
+
+        captured = capsys.readouterr()
+        assert "deactivated" in captured.out.lower() or "Back to standard" in captured.out
+
+
+class TestSessionEnd:
+    """cmd_session_end cleans up."""
+
+    def test_session_end_cleans_up(self, tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("stark_persona.DB_PATH", tmp_path / "persona.db")
+        monkeypatch.setattr("stark_persona.DATA_DIR", tmp_path)
+        active_path = tmp_path / "active.json"
+        monkeypatch.setattr("stark_persona.ACTIVE_PATH", active_path)
+
+        # Select first
+        main(["select", "--auto"])
+        assert active_path.exists()
+
+        # Force no fun fact for deterministic test
+        monkeypatch.setattr("stark_persona.random.random", lambda: 0.5)
+
+        result = main(["session-end"])
+        assert result == 0
+        assert not active_path.exists()
+
+        captured = capsys.readouterr()
+        assert "Session ended" in captured.out

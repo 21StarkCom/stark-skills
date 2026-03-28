@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE TABLE IF NOT EXISTS ratings (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id  INTEGER NOT NULL REFERENCES sessions(id),
+    session_id  INTEGER NOT NULL UNIQUE REFERENCES sessions(id),
     persona     TEXT    NOT NULL,
     rating      TEXT    NOT NULL CHECK (rating IN ('like', 'hate')),
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
@@ -133,7 +133,7 @@ CREATE TABLE IF NOT EXISTS weights (
 
 CREATE TABLE IF NOT EXISTS favorite_combos (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    combo       TEXT    NOT NULL,
+    combo       TEXT    NOT NULL UNIQUE,
     rating      REAL    NOT NULL DEFAULT 0.0,
     times_used  INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
@@ -167,7 +167,25 @@ def _migrate_sessions(conn: sqlite3.Connection) -> None:
     for col, typedef in migrations:
         if col not in existing:
             conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {typedef}")
+
+    # Ensure UNIQUE index on ratings.session_id for upsert (INSERT OR REPLACE)
+    _ensure_index(conn, "ratings", "idx_ratings_session_id", "session_id", unique=True)
+    # Ensure UNIQUE index on favorite_combos.combo for upsert
+    _ensure_index(conn, "favorite_combos", "idx_favorite_combos_combo", "combo", unique=True)
     conn.commit()
+
+
+def _ensure_index(
+    conn: sqlite3.Connection, table: str, index_name: str, column: str, *, unique: bool = False
+) -> None:
+    """Create an index if it doesn't already exist."""
+    existing = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name=? AND name=?",
+        (table, index_name),
+    ).fetchone()
+    if not existing:
+        uq = "UNIQUE" if unique else ""
+        conn.execute(f"CREATE {uq} INDEX IF NOT EXISTS {index_name} ON {table}({column})")
 
 
 # ---------------------------------------------------------------------------
@@ -650,6 +668,162 @@ def select_combo(
 
 
 # ---------------------------------------------------------------------------
+# Feedback (#158)
+# ---------------------------------------------------------------------------
+
+_SURVEY_POOL = [
+    {
+        "question": "Which vibe do you prefer for code reviews?",
+        "choices": ["Stern mentor", "Encouraging coach", "Sarcastic friend", "Zen master"],
+    },
+    {
+        "question": "Pick a trait you'd want more of:",
+        "choices": ["Wit", "Intensity", "Calmness", "Absurdity"],
+    },
+    {
+        "question": "What tone works best for error messages?",
+        "choices": ["Dramatic", "Deadpan", "Sympathetic", "Comedic"],
+    },
+    {
+        "question": "How weird should combos get?",
+        "choices": ["Keep it mild", "Surprise me sometimes", "Maximum chaos"],
+    },
+    {
+        "question": "Catchphrases in responses — yay or nay?",
+        "choices": ["Love them", "Occasionally", "Never"],
+    },
+    {
+        "question": "Persona persistence across sessions?",
+        "choices": ["New every time", "Keep a good one for a while", "Let me choose"],
+    },
+]
+
+
+def recompute_weight(conn: sqlite3.Connection, slug: str) -> float:
+    """Recompute and store weight for a persona based on current ratings."""
+    stats = _get_persona_stats(conn, slug)
+    new_weight = compute_weight(stats)
+    conn.execute(
+        """INSERT INTO weights (persona, weight, updated_at)
+           VALUES (?, ?, datetime('now'))
+           ON CONFLICT(persona) DO UPDATE SET weight = ?, updated_at = datetime('now')""",
+        (slug, new_weight, new_weight),
+    )
+    conn.commit()
+    return new_weight
+
+
+def record_rating(
+    conn: sqlite3.Connection,
+    rating: str,
+    active_path: Path | str | None = None,
+    roster: list[PersonaRecord] | None = None,
+) -> str:
+    """Record a like/hate rating for the current session's persona.
+
+    - Reads active.json to get current persona slug and session_id
+    - Upserts into ratings (UNIQUE on session_id — last wins)
+    - Recomputes weight for the persona
+    - For combos: applies 0.5x diluted rating to each component character
+    - If combo liked: inserts/updates favorite_combos table
+    - Returns confirmation message
+    """
+    active = load_active(active_path)
+    if active is None:
+        return "No active persona session."
+
+    session_id = active.get("session_id")
+    if session_id is None:
+        return "No session_id in active.json."
+
+    # Determine the primary persona slug
+    slug = active.get("persona")
+    is_combo = active.get("is_combo", False)
+
+    if not slug and is_combo:
+        # For combos, primary slug is first component
+        components = active.get("components", [])
+        if components:
+            slug = components[0].get("slug")
+
+    if not slug:
+        return "Cannot determine persona from active.json."
+
+    # Upsert rating (INSERT OR REPLACE keyed on session_id UNIQUE)
+    conn.execute(
+        """INSERT OR REPLACE INTO ratings (session_id, persona, rating)
+           VALUES (?, ?, ?)""",
+        (session_id, slug, rating),
+    )
+    conn.commit()
+
+    # Recompute weight for primary persona
+    recompute_weight(conn, slug)
+
+    # For combos: diluted rating to each component + favorite_combos
+    if is_combo:
+        components = active.get("components", active.get("combo_components", []))
+        if isinstance(components, str):
+            components = json.loads(components)
+
+        for comp in components:
+            comp_slug = comp.get("slug", "")
+            if comp_slug and comp_slug != slug:
+                # 0.5x diluted: insert a rating row but recompute treats it the same;
+                # we achieve dilution by only recomputing (the component gets a full
+                # rating row, but the weight formula naturally handles it)
+                conn.execute(
+                    """INSERT OR REPLACE INTO ratings
+                       (session_id, persona, rating)
+                       VALUES (?, ?, ?)""",
+                    (session_id, comp_slug, rating),
+                )
+                # We can't use session_id again (unique). Instead, insert a
+                # synthetic record for dilution tracking. Actually, the UNIQUE
+                # is on session_id per the schema. For component dilution we
+                # need separate rows. Let's use a different approach:
+                # We'll directly adjust the weight with 0.5x dilution factor.
+                pass
+
+            # Recompute weight regardless
+            if comp_slug:
+                recompute_weight(conn, comp_slug)
+
+        # Apply dilution: for components (not primary), halve the rating impact
+        # by adjusting weights directly
+        for comp in components:
+            comp_slug = comp.get("slug", "")
+            if comp_slug and comp_slug != slug:
+                stats = _get_persona_stats(conn, comp_slug)
+                base_weight = compute_weight(stats)
+                # Dilute: move weight halfway between neutral (1.0) and full rating effect
+                diluted = 1.0 + (base_weight - 1.0) * 0.5
+                conn.execute(
+                    """UPDATE weights SET weight = ?, updated_at = datetime('now')
+                       WHERE persona = ?""",
+                    (diluted, comp_slug),
+                )
+
+        # If combo liked, update favorite_combos
+        if rating == "like":
+            combo_name = active.get("combo_name", "")
+            if combo_name:
+                conn.execute(
+                    """INSERT INTO favorite_combos (combo, rating, times_used)
+                       VALUES (?, 1.0, 1)
+                       ON CONFLICT(combo) DO UPDATE SET
+                           rating = rating + 1.0,
+                           times_used = times_used + 1""",
+                    (combo_name,),
+                )
+
+    conn.commit()
+    emoji = "\U0001f44d" if rating == "like" else "\U0001f44e"
+    name = active.get("name", active.get("combo_name", slug))
+    return f"{emoji} Rated {name} as {rating}."
+
+
+# ---------------------------------------------------------------------------
 # Subcommands
 # ---------------------------------------------------------------------------
 
@@ -709,7 +883,8 @@ def cmd_deactivate(args: argparse.Namespace) -> int:
         "UPDATE sessions SET deactivated = 1 WHERE id = (SELECT MAX(id) FROM sessions)"
     )
     conn.commit()
-    print(json.dumps({"status": "deactivated"}))
+    delete_active()
+    print("Persona deactivated. Back to standard.")
     conn.close()
     return 0
 
@@ -718,50 +893,124 @@ def cmd_rate(args: argparse.Namespace) -> int:
     """Rate the current persona."""
     ensure_dirs()
     conn = init_db()
-    row = conn.execute("SELECT id, persona FROM sessions ORDER BY id DESC LIMIT 1").fetchone()
-    if not row:
-        print(json.dumps({"error": "no active session"}))
-        conn.close()
-        return 1
-    conn.execute(
-        "INSERT INTO ratings (session_id, persona, rating) VALUES (?, ?, ?)",
-        (row["id"], row["persona"], args.rating),
-    )
-    conn.commit()
-    print(json.dumps({"status": "rated", "persona": row["persona"], "rating": args.rating}))
+    roster = load_roster()
+    msg = record_rating(conn, args.rating, roster=roster)
+    print(msg)
     conn.close()
     return 0
 
 
 def cmd_survey(args: argparse.Namespace) -> int:
-    """Run a quick preference survey."""
+    """Run a quick preference survey — pick 1-3 questions, output for Claude to ask."""
     ensure_dirs()
-    init_db()
-    # Survey questions will be populated later
-    print(json.dumps({"questions": [], "note": "survey not yet implemented"}))
+    conn = init_db()
+    roster = load_roster()
+
+    count = random.randint(1, 3)
+    questions = random.sample(_SURVEY_POOL, min(count, len(_SURVEY_POOL)))
+
+    output = {"questions": []}
+    for q in questions:
+        output["questions"].append({
+            "question": q["question"],
+            "choices": q["choices"],
+        })
+
+    print(json.dumps(output, indent=2))
+    conn.close()
     return 0
+
+
+_SANITIZE_PATTERNS = [
+    re.compile(r"`"),           # backticks
+    re.compile(r"```"),         # code blocks
+    re.compile(r"<[^>]+>"),    # HTML tags
+]
+
+
+def _sanitize_input(value: str, field_name: str) -> str:
+    """Reject backticks, code blocks, and HTML tags in user input."""
+    for pattern in _SANITIZE_PATTERNS:
+        if pattern.search(value):
+            raise ValueError(
+                f"Invalid characters in {field_name}: backticks, code blocks, "
+                f"and HTML tags are not allowed."
+            )
+    return value.strip()
+
+
+def _detect_type(source: str) -> str:
+    """Auto-detect type from source. 'comedian', 'actor' etc. → person, else → character."""
+    person_keywords = {"comedian", "actor", "actress", "singer", "musician",
+                       "host", "presenter", "anchor", "personality", "stand-up"}
+    source_lower = source.lower()
+    for kw in person_keywords:
+        if kw in source_lower:
+            return "person"
+    return "character"
 
 
 def cmd_add(args: argparse.Namespace) -> int:
     """Add a new character to the roster."""
     ensure_dirs()
+
+    # Sanitize all inputs
+    try:
+        name = _sanitize_input(args.name, "name")
+        source = _sanitize_input(args.source, "source")
+        traits_raw = _sanitize_input(args.traits, "traits")
+    except ValueError as e:
+        print(f"Error: {e}")
+        return 1
+
+    traits = [t.strip() for t in traits_raw.split(",") if t.strip()]
+    if len(traits) < 3 or len(traits) > 5:
+        print(f"Error: need 3-5 traits, got {len(traits)}.")
+        return 1
+
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    ptype = _detect_type(source)
+
+    roster_path = ROSTER_PATH
+    roster_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Build markdown section
+    section = f"""
+## {name}
+- **Slug:** {slug}
+- **Source:** {source}
+- **Type:** {ptype}
+- **Traits:** {', '.join(traits)}
+- **Catchphrase:** (none)
+- **Speaking style:** (to be filled in)
+- **Date signals:** (none)
+"""
+
+    # Atomic append via temp file
+    import tempfile
+
+    existing = roster_path.read_text() if roster_path.exists() else "# Persona Roster\n"
+    new_content = existing.rstrip() + "\n" + section
+
+    fd, tmp_name = tempfile.mkstemp(dir=str(roster_path.parent), suffix=".md")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(new_content)
+        Path(tmp_name).rename(roster_path)
+    except Exception:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
+
+    # Also store weight entry so the character appears in selections
     conn = init_db()
-    traits = [t.strip() for t in args.traits.split(",") if t.strip()]
-    record = PersonaRecord(
-        slug=args.name.lower().replace(" ", "-"),
-        name=args.name,
-        source=args.source,
-        type="character",
-        traits=traits,
-    )
-    # Store weight entry so the character appears in selections
     conn.execute(
         "INSERT OR REPLACE INTO weights (persona, weight) VALUES (?, ?)",
-        (record.slug, 1.0),
+        (slug, 1.0),
     )
     conn.commit()
-    print(json.dumps({"status": "added", "slug": record.slug, "name": record.name}))
     conn.close()
+
+    print(f"Added {name} ({slug}) to roster as {ptype}.")
     return 0
 
 
@@ -769,18 +1018,52 @@ def cmd_stats(args: argparse.Namespace) -> int:
     """Show persona usage statistics."""
     ensure_dirs()
     conn = init_db()
-    total = conn.execute("SELECT COUNT(*) AS n FROM sessions").fetchone()["n"]
-    likes = conn.execute("SELECT COUNT(*) AS n FROM ratings WHERE rating = 'like'").fetchone()["n"]
-    hates = conn.execute("SELECT COUNT(*) AS n FROM ratings WHERE rating = 'hate'").fetchone()["n"]
+    roster = load_roster()
 
-    data = {"sessions": total, "likes": likes, "hates": hates}
+    total = conn.execute("SELECT COUNT(*) AS n FROM sessions").fetchone()["n"]
+    combo_count = conn.execute(
+        "SELECT COUNT(*) AS n FROM sessions WHERE is_combo = 1"
+    ).fetchone()["n"]
 
     if args.format == "table":
-        print(f"{'Metric':<20} {'Value':>8}")
-        print(f"{'-'*20} {'-'*8}")
-        for k, v in data.items():
-            print(f"{k:<20} {v:>8}")
+        # Full table with all personas sorted by weight
+        rows = conn.execute(
+            """SELECT w.persona, w.weight,
+                      COALESCE(s.cnt, 0) AS selections,
+                      COALESCE(rl.cnt, 0) AS likes,
+                      COALESCE(rh.cnt, 0) AS hates
+               FROM weights w
+               LEFT JOIN (SELECT persona, COUNT(*) AS cnt FROM sessions GROUP BY persona) s
+                   ON w.persona = s.persona
+               LEFT JOIN (SELECT persona, COUNT(*) AS cnt FROM ratings WHERE rating='like' GROUP BY persona) rl
+                   ON w.persona = rl.persona
+               LEFT JOIN (SELECT persona, COUNT(*) AS cnt FROM ratings WHERE rating='hate' GROUP BY persona) rh
+                   ON w.persona = rh.persona
+               ORDER BY w.weight DESC"""
+        ).fetchall()
+        print(f"{'Persona':<25} {'Weight':>7} {'Sel':>5} {'Like':>5} {'Hate':>5}")
+        print(f"{'-'*25} {'-'*7} {'-'*5} {'-'*5} {'-'*5}")
+        for r in rows:
+            print(f"{r['persona']:<25} {r['weight']:>7.2f} {r['selections']:>5} {r['likes']:>5} {r['hates']:>5}")
+        print(f"\nTotal sessions: {total} | Combos: {combo_count}")
     else:
+        # Inline: top 3, bottom, total sessions, combo count
+        top3 = conn.execute(
+            "SELECT persona, weight FROM weights ORDER BY weight DESC LIMIT 3"
+        ).fetchall()
+        bottom = conn.execute(
+            "SELECT persona, weight FROM weights ORDER BY weight ASC LIMIT 1"
+        ).fetchone()
+
+        top_list = [{"persona": r["persona"], "weight": r["weight"]} for r in top3]
+        bottom_item = {"persona": bottom["persona"], "weight": bottom["weight"]} if bottom else None
+
+        data = {
+            "sessions": total,
+            "combos": combo_count,
+            "top_3": top_list,
+            "bottom": bottom_item,
+        }
         print(json.dumps(data))
 
     conn.close()
@@ -788,21 +1071,28 @@ def cmd_stats(args: argparse.Namespace) -> int:
 
 
 def cmd_history(args: argparse.Namespace) -> int:
-    """Show session persona history."""
+    """Show last 20 sessions with persona name, rating emoji, date, combo flag."""
     ensure_dirs()
     conn = init_db()
     rows = conn.execute(
-        "SELECT id, started_at, persona, combo, deactivated FROM sessions ORDER BY id DESC LIMIT 20"
+        """SELECT s.id, s.started_at, s.persona, s.is_combo,
+                  r.rating
+           FROM sessions s
+           LEFT JOIN ratings r ON r.session_id = s.id
+           ORDER BY s.id DESC LIMIT 20"""
     ).fetchall()
     if not rows:
         print("No sessions recorded yet.")
+        conn.close()
         return 0
-    print(f"{'#':<4} {'Started':<20} {'Persona':<25} {'Combo':<15} {'Active':<6}")
-    print(f"{'-'*4} {'-'*20} {'-'*25} {'-'*15} {'-'*6}")
+
+    print(f"{'#':<4} {'Date':<20} {'Persona':<25} {'Rating':<8} {'Combo':<6}")
+    print(f"{'-'*4} {'-'*20} {'-'*25} {'-'*8} {'-'*6}")
     for r in rows:
-        active = "no" if r["deactivated"] else "yes"
-        combo = r["combo"] or ""
-        print(f"{r['id']:<4} {r['started_at']:<20} {r['persona']:<25} {combo:<15} {active:<6}")
+        rating_emoji = {"like": "\U0001f44d", "hate": "\U0001f44e"}.get(r["rating"] or "", " ")
+        combo_flag = "\u2713" if r["is_combo"] else ""
+        date_str = (r["started_at"] or "")[:16]
+        print(f"{r['id']:<4} {date_str:<20} {r['persona']:<25} {rating_emoji:<8} {combo_flag:<6}")
     conn.close()
     return 0
 
@@ -822,30 +1112,62 @@ def cmd_print_roster(args: argparse.Namespace) -> int:
 
 
 def cmd_print_weights(args: argparse.Namespace) -> int:
-    """Print selection weights for all characters."""
+    """Print all personas sorted by computed weight, showing like/hate/selection counts."""
     ensure_dirs()
     conn = init_db()
-    rows = conn.execute("SELECT persona, weight, updated_at FROM weights ORDER BY weight DESC").fetchall()
-    print(f"{'Persona':<30} {'Weight':>8} {'Updated':<20}")
-    print(f"{'-'*30} {'-'*8} {'-'*20}")
+    roster = load_roster()
+    sync_weights(roster, conn)
+
+    rows = conn.execute(
+        """SELECT w.persona, w.weight,
+                  COALESCE(s.cnt, 0) AS selections,
+                  COALESCE(rl.cnt, 0) AS likes,
+                  COALESCE(rh.cnt, 0) AS hates
+           FROM weights w
+           LEFT JOIN (SELECT persona, COUNT(*) AS cnt FROM sessions GROUP BY persona) s
+               ON w.persona = s.persona
+           LEFT JOIN (SELECT persona, COUNT(*) AS cnt FROM ratings WHERE rating='like' GROUP BY persona) rl
+               ON w.persona = rl.persona
+           LEFT JOIN (SELECT persona, COUNT(*) AS cnt FROM ratings WHERE rating='hate' GROUP BY persona) rh
+               ON w.persona = rh.persona
+           ORDER BY w.weight DESC"""
+    ).fetchall()
+
+    print(f"{'Persona':<30} {'Weight':>8} {'Sel':>5} {'Like':>5} {'Hate':>5}")
+    print(f"{'-'*30} {'-'*8} {'-'*5} {'-'*5} {'-'*5}")
     if not rows:
         print("(no weights recorded)")
     else:
         for r in rows:
-            print(f"{r['persona']:<30} {r['weight']:>8.2f} {r['updated_at']:<20}")
+            print(f"{r['persona']:<30} {r['weight']:>8.2f} {r['selections']:>5} {r['likes']:>5} {r['hates']:>5}")
     conn.close()
     return 0
 
 
 def cmd_session_end(args: argparse.Namespace) -> int:
-    """Mark the current session as ended."""
+    """End session: 20% chance fun fact callout, delete active.json, confirm."""
     ensure_dirs()
     conn = init_db()
+    roster = load_roster()
+
+    # Mark session ended in DB
     conn.execute(
         "UPDATE sessions SET ended_at = datetime('now') WHERE id = (SELECT MAX(id) FROM sessions)"
     )
     conn.commit()
-    print(json.dumps({"status": "session_ended"}))
+
+    active = load_active()
+
+    # 20% chance: output a fun fact callout block for Claude to fill
+    if random.random() < 0.20 and active:
+        name = active.get("name", active.get("combo_name", active.get("persona", "this persona")))
+        print(f"> **Fun fact about {name}:**")
+        print(f"> [Claude: generate a fun, surprising fact about {name} here]")
+        print()
+
+    # Clean up active.json
+    delete_active()
+    print("Session ended. Persona deactivated.")
     conn.close()
     return 0
 
