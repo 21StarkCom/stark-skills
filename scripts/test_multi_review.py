@@ -97,17 +97,19 @@ class TestModelFlags:
         assert call_kwargs["input"]  # non-empty prompt
 
     @patch("multi_review.subprocess.run")
-    def test_codex_uses_xhigh(self, mock_run):
+    def test_codex_uses_high_reasoning_and_read_only(self, mock_run):
         mock_run.return_value = MagicMock(stdout="[]", returncode=0)
         multi_review._run_subagent("codex", "architecture", "abc123")
         cmd = mock_run.call_args[0][0]
         assert cmd[:2] == ["codex", "exec"]
         assert "review" not in cmd  # avoid triggering built-in review skill
+        assert "-m" in cmd  # explicit model
         assert "-c" in cmd
         assert multi_review.CODEX_REASONING_CONFIG in cmd
         assert "--ephemeral" in cmd
         assert "--json" in cmd
-        assert "--full-auto" in cmd
+        assert "-s" in cmd and "read-only" in cmd  # least-privilege sandbox
+        assert "-a" in cmd and "never" in cmd  # no approval prompts
         assert cmd[-1] == "-"  # stdin marker
 
     @patch("multi_review.subprocess.run")

@@ -177,7 +177,8 @@ class TestSubAgentDispatch:
         assert plan_review_dispatch.CODEX_REASONING_CONFIG in cmd
         assert "--ephemeral" in cmd
         assert "--json" in cmd
-        assert "--full-auto" in cmd
+        assert "-s" in cmd and "read-only" in cmd
+        assert "-a" in cmd and "never" in cmd
         assert cmd[-1] == "-"  # stdin marker
         call_kwargs = mock_run.call_args[1]
         assert "input" in call_kwargs

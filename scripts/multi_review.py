@@ -44,6 +44,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_HIGH, parse_jsonl_output
+
 # ── Config ──────────────────────────────────────────────────────────────
 
 _gemini_api_key_cache: str | None = None
@@ -149,7 +151,7 @@ DEFAULT_CONFIG = {
     },
 }
 
-CODEX_REASONING_CONFIG = 'model_reasoning_effort="high"'
+CODEX_REASONING_CONFIG = CODEX_REASONING_EFFORT_HIGH  # re-exported for backward compat
 
 REPLACE_FIELDS = {
     "agents",
@@ -623,9 +625,10 @@ def _run_subagent(
         )
         cmd = [
             "codex", "exec",
+            "-m", CODEX_MODEL,
             "-c", CODEX_REASONING_CONFIG,
             "--ephemeral", "--json",
-            "--full-auto",
+            "-s", "read-only", "-a", "never",
             "-",
         ]
         stdin_input = prompt
@@ -735,33 +738,8 @@ def _run_subagent(
 
             raw = result.stdout
 
-            # Codex --json emits JSONL events to stdout. Extract assistant
-            # message text from completed message/agent_message items.
-            if agent == "codex" and raw.strip().startswith("{"):
-                parts = []
-                for line in raw.splitlines():
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        ev = json.loads(line)
-                        if ev.get("type") == "item.completed":
-                            item = ev.get("item", {})
-                            itype = item.get("type", "")
-                            # Current format: type=agent_message, text=...
-                            if itype == "agent_message":
-                                text = item.get("text", "")
-                                if text:
-                                    parts.append(text)
-                            # Legacy format: type=message, content=[{type:output_text,text:...}]
-                            elif itype == "message":
-                                for c in item.get("content", []):
-                                    if c.get("type") == "output_text":
-                                        parts.append(c.get("text", ""))
-                    except json.JSONDecodeError:
-                        continue
-                if parts:
-                    raw = "\n".join(parts)
+            if agent == "codex":
+                raw = parse_jsonl_output(raw)
 
             # Gemini -o json wraps the response in {"response": "...",...}
             if gemini_home and raw.strip():
