@@ -68,6 +68,7 @@ Human-editable markdown file. Each character is an H2 section:
 # Persona Roster
 
 ## Jules Winnfield
+- **Slug:** jules-winnfield
 - **Source:** Pulp Fiction (1994)
 - **Type:** character
 - **Traits:** intense, philosophical, dramatic, righteous, intimidating
@@ -76,6 +77,7 @@ Human-editable markdown file. Each character is an H2 section:
 - **Date signals:** Samuel L. Jackson birthday: 1948-12-21
 
 ## Guri Alfi
+- **Slug:** guri-alfi
 - **Source:** Israeli comedian, Eretz Nehederet
 - **Type:** person
 - **Traits:** deadpan, cynical, dry, observational, understated
@@ -88,6 +90,7 @@ Human-editable markdown file. Each character is an H2 section:
 | Field | Required | Description |
 |-------|----------|-------------|
 | Name (H2) | Yes | Display name |
+| Slug | Yes | Stable ID (lowercase, hyphens). e.g., `jules-winnfield`. SQLite and analytics key on slug, not display name. |
 | Source | Yes | Movie, show, or "Israeli comedian" / "British naturalist" etc. |
 | Type | Yes | `character` (fictional) or `person` (real, use comedy style / public persona) |
 | Traits | Yes | 3-5 comma-separated trait tags |
@@ -103,14 +106,17 @@ Human-editable markdown file. Each character is an H2 section:
 
 Not in the repo. Created on first invocation. Stores mutable state: session history, ratings, survey responses, computed weights.
 
+Active persona stored at `~/.stark-persona/active.json` containing `{persona, is_combo, combo_components, session_id, selected_at}`. Written on selection, read by `--like`/`--hate`/fun-facts. Deleted on session end.
+
 **Tables:**
 
 ```sql
 CREATE TABLE sessions (
     id TEXT PRIMARY KEY,           -- ULID
-    persona TEXT NOT NULL,          -- character name
+    slug TEXT NOT NULL,             -- character slug (stable ID, e.g., "jules-winnfield")
+    persona TEXT NOT NULL,          -- display name
     is_combo BOOLEAN DEFAULT FALSE,
-    combo_components TEXT,          -- JSON array of names, null for singles
+    combo_components TEXT,          -- JSON array of slugs, null for singles
     selected_at TEXT NOT NULL,      -- ISO8601
     weight_at_selection REAL,
     date_signal_matched BOOLEAN DEFAULT FALSE,
@@ -120,7 +126,7 @@ CREATE TABLE sessions (
 CREATE TABLE ratings (
     id TEXT PRIMARY KEY,
     session_id TEXT REFERENCES sessions(id),
-    persona TEXT NOT NULL,
+    slug TEXT NOT NULL,             -- character slug
     rating TEXT NOT NULL,           -- 'like' or 'hate'
     rated_at TEXT NOT NULL
 );
@@ -134,13 +140,20 @@ CREATE TABLE survey_responses (
 );
 
 CREATE TABLE weights (
-    persona TEXT PRIMARY KEY,
+    slug TEXT PRIMARY KEY,          -- character slug
     base_weight REAL DEFAULT 1.0,
     like_count INTEGER DEFAULT 0,
     hate_count INTEGER DEFAULT 0,
     selection_count INTEGER DEFAULT 0,
     last_selected TEXT,
     computed_weight REAL DEFAULT 1.0  -- recalculated after each rating
+);
+
+CREATE TABLE favorite_combos (
+    recipe_hash TEXT PRIMARY KEY,   -- hash of sorted component slugs
+    component_slugs TEXT NOT NULL,  -- JSON array of slugs
+    like_count INTEGER DEFAULT 0,
+    last_used TEXT NOT NULL
 );
 ```
 
@@ -175,6 +188,8 @@ SENSITIVITY_MAP["persona_event"] = Sensitivity.PUBLIC
 
 **Emission:** Via stark-insights `/events` API (HTTP POST to `localhost:7420/events` with bearer token from `~/.stark-insights/api-token`). Falls back to logging if stark-insights is not running — persona selection should never fail because analytics are down.
 
+Events include an `event_id` field (ULID) for deduplication. stark-insights already handles dedupe via source-stable keys. Schema version: payloads include `schema_version: 1`. The existing stark-insights event envelope provides the versioning — no custom versioning needed.
+
 **Sync:** Automatic via existing stark-insights SQLite WAL → Cloud SQL pipeline. No new infrastructure needed.
 
 ## 4. Selection Engine
@@ -208,11 +223,12 @@ def compute_weight(persona: WeightRecord) -> float:
 On every invocation:
 
 1. **Check roster:** Scan all `Date signals` fields for today's month-day
-2. **Web search:** Search for "famous birthdays [month] [day]" and "celebrity deaths on [month day]". Cross-reference results against roster names.
-3. **Merge matches:** Combine roster date signals + web search hits into a candidate list
-4. **Roll the dice:** 25% chance (0.25 probability) that a date-matched persona is selected. If multiple matches, weighted random among them.
-5. **If date wins:** Present with context — "Today is Samuel L. Jackson's birthday. In his honor..."
-6. **If date loses (75%):** Proceed to normal weighted random from full roster
+2. **Build candidate list:** All roster entries whose date signals match today
+3. **Roll the dice:** 25% chance (0.25 probability) that a date-matched persona is selected. If multiple matches, weighted random among them.
+4. **If date wins:** Present with context — "Today is Samuel L. Jackson's birthday. In his honor..."
+5. **If date loses (75%):** Proceed to normal weighted random from full roster
+
+> **Note:** Live web search for date signals deferred to v2. Date-awareness in v1 uses ONLY the roster's `Date signals` field.
 
 ### 4.3 Combo Generation
 
@@ -227,7 +243,11 @@ When `--combo` is invoked:
 4. Full chaos allowed: cross-gender, cross-genre, cross-era ("What if Gal Gadot played Walter White?", "Reshef Levi directing a nature documentary with David Attenborough")
 5. Store the combo recipe in `sessions` table for reproducibility
 
-### 4.4 Preference Profile (Learned Over Time)
+**Combo feedback rules:** When a combo is rated, the rating applies to the combo recipe (stored by component slugs hash). Component characters each get a 0.5x diluted rating (a combo like doesn't boost individuals as much as a direct like). Combo recipes with likes get stored in the `favorite_combos` table for potential re-selection.
+
+### 4.4 Preference Profile (Learned Over Time) — v2, deferred
+
+> **Not implemented in v1.** The weight-based system (Section 4.1) is sufficient for initial learning. Preference profiling added once enough rating data exists (~50+ sessions).
 
 Survey responses and rating patterns build a preference profile stored in SQLite:
 
@@ -248,6 +268,10 @@ Dimensions (derived from survey answers and like/hate patterns):
 - **Origin preference:** American / Israeli / British / mixed
 
 This profile influences combo generation — combos bias toward preferred trait combinations.
+
+### 4.5 Timeouts and Back-pressure
+
+All external calls (stark-insights API) have a 2-second timeout. On timeout or connection error, skip silently. Persona selection never blocks on analytics. SQLite writes are synchronous but sub-millisecond.
 
 ## 5. Feedback Modes
 
@@ -369,7 +393,7 @@ When `/stark-session end` fires, 20% probability of a fun-facts callout block:
 **For real people:**
 Fun facts about their career, famous moments, lesser-known trivia.
 
-**Implementation:** The fun fact is generated by Claude at session end (not pre-stored). A web search may be used for accuracy on factual claims. For combos, the fun fact is creative/fictional.
+**Implementation:** The fun fact is generated by Claude at session end from training data (not pre-stored). Web search is an optional enhancement for accuracy on factual claims, not required. For combos, the fun fact is creative/fictional.
 
 ## 8. `--add` Mode
 
@@ -382,8 +406,8 @@ Fun facts about their career, famous moments, lesser-known trivia.
 2. Generate speaking style description (Claude generates based on traits + source)
 3. Prompt user: "Speaking style: '[generated description]' — look right?"
 4. On confirmation: append to `data/persona/roster.md`
-5. Initialize weight record in SQLite (untested: 1.5×)
-6. Stage and commit: `git add data/persona/roster.md && git commit -m "persona: add [name]"`
+5. Initialize weight record in SQLite (untested: 1.5x)
+6. Appends to roster.md. User commits manually or via `/stark-session end`. No auto-git-commit.
 
 **Type detection:** If source is a movie/show title → `type: character`. If source contains "comedian", "actor", "musician", etc. → `type: person`.
 
@@ -445,7 +469,7 @@ Full trait tagging completed during implementation.
 | stark-insights not running | Log warning, skip event emission. Persona still activates. |
 | SQLite DB missing | Create on first invocation with schema. |
 | Roster file missing | Create with minimal seed (5 characters). |
-| Web search fails (date-aware) | Skip date-aware boost, proceed with normal weighted random. |
+| No date signals match today | Proceed with normal weighted random. |
 | Character not found (specific pick) | Fuzzy match against roster. If no match: "Character not in roster. Add with --add?" |
 | No active persona (--like/--hate) | "No active persona this session. Pick one first." |
 | Survey dismissed | Persona activates anyway. No penalty. |
