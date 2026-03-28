@@ -4,7 +4,11 @@ Review the PR diff for security vulnerabilities and error handling gaps.
 
 > **Scope:** Only report findings specific to security and error handling. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, accessibility, correctness, types, or test coverage, skip it — a dedicated reviewer covers that domain.
 
-## Checklist
+## API Surface Calibration
+
+Only flag input validation issues at **public API boundaries** (HTTP endpoints, gRPC handlers, MCP tools, CLI argument parsers). Internal classes receiving already-validated inputs from other internal code do not need redundant validation — flag those as noise, not findings.
+
+## Checklist — Frontend
 
 **XSS & Injection**
 - `dangerouslySetInnerHTML` — is input sanitized? Is it necessary?
@@ -36,6 +40,31 @@ Review the PR diff for security vulnerabilities and error handling gaps.
 **Object Safety**
 - Object spread with user-controlled keys
 - Dynamic property access (`obj[userInput]`)
+
+## Checklist — Backend & Server
+
+**Command Injection**
+- `subprocess` / `create_subprocess_shell` with untrusted input — use `create_subprocess_exec` + `shlex.split()`
+- Template strings interpolating user input into shell commands
+- `shlex.quote()` missing on interpolated values
+
+**Credential Exposure**
+- Tokens/secrets embedded in CLI args or URLs (visible in `ps` / `/proc`)
+- Credentials logged to stdout/stderr
+- Secrets in environment variables leaking through child processes
+
+**SSRF & Network**
+- Unvalidated URLs passed to HTTP clients or `git clone`
+- Missing URL scheme allowlist (reject `file://`, `ssh://`, etc.)
+- Internal network access from user-controlled URLs
+
+**IAM & Permissions**
+- Overly broad IAM roles (project-level when per-resource suffices)
+- Service accounts with more permissions than needed
+- Missing audience checks on OIDC/JWT token verification
+
+**ASGI / Framework Integration**
+- Do NOT flag: accessing raw ASGI callables (`scope`, `receive`, `send`) or `request._send` when integrating with MCP SDK or similar ASGI frameworks — these are standard integration patterns
 
 ## Plan/Spec Files
 When reviewing changes to plan or spec documents (`.md` files containing code blocks), distinguish between:

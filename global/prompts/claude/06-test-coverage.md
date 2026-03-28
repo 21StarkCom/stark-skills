@@ -10,6 +10,7 @@ Review the PR diff for test coverage gaps and test quality issues. Think about w
 - **If you find code that will crash, raise, or produce wrong results at runtime, classify it as a correctness bug** — report the bug itself with a concrete description, not "this needs a test." The correctness reviewer handles bugs; you handle test quality.
 - Frame findings as "this behavior is untested and could break in way X" — not "this file has no tests."
 - **Scripts with built-in `--check` / `--verify` / `--dry-run` modes have implicit integration coverage.** Only flag missing tests for specific breakable inputs or logic branches that the self-check doesn't exercise.
+- **Unit tests that verify their stated scope are valid.** Do NOT flag a unit test for "not exercising the real pipeline" or "using mock data instead of production behavior." Unit tests test units. Integration tests test integration. Evaluate each test against its own stated scope, not against the scope of a different test layer.
 
 ## Checklist
 
@@ -47,6 +48,17 @@ Review the PR diff for test coverage gaps and test quality issues. Think about w
 - `describe` blocks by feature/prop
 - Async tests properly awaited
 - Stories exist and cover key variants
+
+## Stack Adaptation
+
+Adapt the checklist above to the codebase's tech stack. The React-specific items (props, refs, className, Stories, `screen.getByRole`) apply only to frontend code.
+
+**For Python / backend code, check instead:**
+- Error paths tested (exceptions raised, error responses returned)
+- Async behavior tested (concurrent calls, timeouts, cancellation)
+- Data transformations tested (parsing, serialization, edge cases)
+- External service boundaries mocked (databases, APIs, file systems)
+- Destructive operations tested with safeguards (dry-run, batch limits)
 
 ## Severity Guide
 - **critical**: Test passes but tests wrong thing, missing test for primary use case

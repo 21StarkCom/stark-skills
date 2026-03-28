@@ -2,6 +2,28 @@
 
 Tracks improvements to review prompts based on stark-review assessments.
 
+## 2026-03-28 — Backend stack coverage: security, correctness, test-coverage prompts
+
+**Source:** PR #48 in GetEvinced/stark-agents (Python MCP server — 30 commits, 12K+ lines)
+**Prompts dir:** default (PR code review)
+**Assessment:** 61% signal-to-noise (28 issues / 46 evaluated). All prompts were frontend/React-centric. Claude security produced 21 findings (50%+ noise at medium/low) because backend patterns weren't in checklist. Gemini returned 0 findings in 4/6 domains. Codex test-coverage flagged unit tests for not being integration tests.
+
+### Changes Made
+
+| File | Change | Reason |
+|------|--------|--------|
+| `global/prompts/{claude,codex,gemini}/05-security.md` | Added "Backend & Server" checklist (command injection, credential exposure, SSRF, IAM, OIDC) and "API Surface Calibration" (only flag validation at public API boundaries) | 7 noise findings from flagging input validation on internal classes. Backend patterns (shell injection, token in URLs) were missed by codex/gemini because not in checklist |
+| `global/prompts/claude/05-security.md` | Added ASGI framework exclusion (raw ASGI callables are standard patterns) | 2 false positives on `request._send` and ASGI integration |
+| `global/prompts/{claude,codex,gemini}/03-correctness.md` | Added "Concurrency & Async" (TOCTOU, non-atomic ops, lock races) and "Cross-Module Contracts" (field name mismatches, wrong kwargs) | Gemini was only agent to catch TOCTOU race. 3 agents independently found src.id/source_id mismatch but only because it was obvious — checklist should explicitly guide this |
+| `global/prompts/{claude,codex,gemini}/06-test-coverage.md` | Added "Stack Adaptation" section (Python backend patterns) and unit test scope rule | Codex flagged 2 valid unit tests as critical for "not exercising the real pipeline." React-specific items (props, Stories, getByRole) irrelevant to Python backend |
+
+### Validation
+- [ ] Prompt syntax OK
+- [ ] No orchestrator changes
+- [ ] No config changes
+
+---
+
 ## 2026-03-28 — Design review noise reduction: scope calibration, dedup hardening, Claude severity
 
 **Source:** Design review of stark-automations (`docs/specs/2026-03-28-stark-automations-design.md`)

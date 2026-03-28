@@ -36,6 +36,19 @@ Review the PR diff for correctness issues. Trace execution paths — think about
 - `className` not merged — user's className lost
 - `...rest` applied to wrong element
 
+**Concurrency & Async (Backend)**
+- TOCTOU races — read-then-write without transactions (e.g., check existence then delete)
+- Non-atomic check-and-act sequences on shared state (databases, distributed locks)
+- Lock release without transactional ownership verification
+- Global mutable state accessed by concurrent async tasks without synchronization
+- `asyncio.gather` results misaligned with input indices when items are skipped
+
+**Cross-Module Contracts (Backend)**
+- Callers using wrong field names on dataclasses/models (e.g., `obj.id` when field is `source_id`)
+- Constructor called with wrong keyword arguments
+- Function signature changed in one module but callers in another module not updated
+- Protocol/interface method signature mismatch between base and implementation
+
 ## Severity Guide
 - **critical**: Runtime crash, visually broken in common case
 - **high**: Subtle bug under specific conditions, CSS inheritance broken

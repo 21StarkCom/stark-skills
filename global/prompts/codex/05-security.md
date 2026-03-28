@@ -4,7 +4,9 @@ Review the diff for security vulnerabilities and error handling gaps.
 
 > **Scope:** Only report findings specific to security and error handling. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, accessibility, correctness, types, or test coverage, skip it — a dedicated reviewer covers that domain.
 
-Check:
+**API Surface Calibration:** Only flag input validation at **public API boundaries** (HTTP endpoints, gRPC handlers, MCP tools, CLI argument parsers). Internal classes receiving already-validated inputs from internal callers do not need redundant validation.
+
+**Frontend:**
 - dangerouslySetInnerHTML — sanitized? necessary?
 - User-controlled strings rendered as HTML without escaping
 - eval(), new Function(), innerHTML with dynamic input
@@ -19,6 +21,16 @@ Check:
 - console.log leaking sensitive data
 - Object spread/merge with user-controlled keys
 - Dynamic property access obj[userInput]
+
+**Backend & Server:**
+- subprocess / create_subprocess_shell with untrusted input — use exec + shlex
+- Tokens/secrets embedded in CLI args or URLs (visible in ps / /proc)
+- Credentials logged or passed to child processes
+- Unvalidated URLs passed to HTTP clients or git clone (SSRF)
+- Missing URL scheme allowlist (reject file://, ssh://)
+- Overly broad IAM roles (project-level when per-resource suffices)
+- Missing audience checks on OIDC/JWT token verification
+- Fail-open error handling (auth failures returning empty/success instead of raising)
 
 Plan/Spec Files: When reviewing changes to `.md` plan or spec documents containing code blocks, only flag design-level security gaps (e.g., missing auth model). Do not flag implementation details in planned code — those will be caught during actual code review. Do not re-flag items already documented as "Unresolved" or TODO in the plan.
 
