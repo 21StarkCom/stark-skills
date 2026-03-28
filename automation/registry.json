@@ -1,1 +1,66 @@
-{"schema_version":1,"triggers":{}}
+{
+  "schema_version": 1,
+  "pat_created_at": "2026-03-28T08:00:00Z",
+  "triggers": {
+    "stark-sentinel": {
+      "trigger_id": "trig_01UVgu9fRpnfA11Hfe2Zih2F",
+      "last_registered": "2026-03-28T09:04:07.558325+00:00",
+      "enabled": true
+    },
+    "stark-evolution": {
+      "trigger_id": "trig_01RVGbmooX3FZzENAxpUgpV6",
+      "last_registered": "2026-03-28T09:04:07.558431+00:00",
+      "enabled": false
+    },
+    "stark-self-review": {
+      "trigger_id": "trig_01QutBGptqoiHLjWTypXgMST",
+      "last_registered": "2026-03-28T09:04:07.558432+00:00",
+      "enabled": false
+    },
+    "stark-dependency-audit": {
+      "trigger_id": "trig_01VkXAjD6E8WbGs3TqorHbXk",
+      "last_registered": "2026-03-28T09:04:07.558433+00:00",
+      "enabled": false
+    },
+    "stark-infra-drift": {
+      "trigger_id": "trig_01LXFHD7ToDxo8fmVet8fjCu",
+      "last_registered": "2026-03-28T09:04:07.558434+00:00",
+      "enabled": true
+    },
+    "stark-api-compat": {
+      "trigger_id": "trig_0153ziX3omVrcFkUQWUhyzAG",
+      "last_registered": "2026-03-28T09:04:07.558435+00:00",
+      "enabled": true
+    },
+    "stark-intelligence": {
+      "trigger_id": "trig_01UgB7Pts8tjLkaRrpPX1g4m",
+      "last_registered": "2026-03-28T09:04:07.558436+00:00",
+      "enabled": false
+    },
+    "stark-claude-md-sync": {
+      "trigger_id": "trig_01PV9zkQpizBQiYBMbsT5Z8U",
+      "last_registered": "2026-03-28T09:04:07.558437+00:00",
+      "enabled": false
+    },
+    "stark-digest": {
+      "trigger_id": "trig_01KmdSobuTMm5khpr1nkuJFr",
+      "last_registered": "2026-03-28T09:04:07.558438+00:00",
+      "enabled": false
+    },
+    "stark-observability-check": {
+      "trigger_id": "trig_01NuQUGz4rhQXBaWWEDViE76",
+      "last_registered": "2026-03-28T09:04:07.558439+00:00",
+      "enabled": false
+    },
+    "stark-automation-monitor": {
+      "trigger_id": "trig_014DzzEvjgJ8BBA1gHSXx8m1",
+      "last_registered": "2026-03-28T09:04:07.558440+00:00",
+      "enabled": false
+    },
+    "stark-hooks-auditor": {
+      "trigger_id": "trig_01TdTFBb5DmAHTqYZYSThwBp",
+      "last_registered": "2026-03-28T09:04:07.558441+00:00",
+      "enabled": false
+    }
+  }
+}
