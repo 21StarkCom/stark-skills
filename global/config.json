@@ -30,5 +30,46 @@
     "fix_threshold": "medium",
     "disabled_domains": [],
     "max_rounds": 3
+  },
+  "automation": {
+    "model": "claude-sonnet-4-6",
+    "repos": [
+      "GetEvinced/stark-skills",
+      "GetEvinced/infra-pulse",
+      "GetEvinced/infra-ai-platform",
+      "GetEvinced/infra-sentinel",
+      "GetEvinced/stark-team",
+      "GetEvinced/stark-data-core"
+    ],
+    "connectors": {
+      "slack": "cf414024-1eec-4f23-8b5d-c6c0eb4b100e",
+      "context7": "088e0653-356a-4362-8b07-bd93b9acabbb"
+    },
+    "github_app_ids": {
+      "claude": { "app_id": 3066738, "installation_id": 115648521 },
+      "codex":  { "app_id": 3066834, "installation_id": 115650994 },
+      "gemini": { "app_id": 3066689, "installation_id": 115648971 }
+    },
+    "model_pins": {
+      "claude": { "file": "scripts/claude_utils.py", "constant": "CLAUDE_MODEL" },
+      "codex":  { "file": "scripts/codex_utils.py",  "constant": "CODEX_MODEL" },
+      "gemini": { "file": "scripts/gemini_utils.py",  "constant": "GEMINI_MODEL" }
+    },
+    "cost_alert_threshold_usd_per_week": 50.0,
+    "slack_channel": "#stark-automation",
+    "triggers": {
+      "stark-evolution":           { "cron": "0 3 * * 0",  "tier": 1, "budget_usd": 10.0 },
+      "stark-self-review":         { "cron": "0 6 * * 1",  "tier": 1, "budget_usd": 5.0 },
+      "stark-sentinel":            { "cron": "0 5 * * 0-3,5-6", "tier": 2, "budget_usd": 1.0 },
+      "stark-dependency-audit":    { "cron": "0 4 * * 2",  "tier": 2, "budget_usd": 3.0 },
+      "stark-infra-drift":         { "cron": "0 6 * * *",  "tier": 2, "budget_usd": 1.0 },
+      "stark-api-compat":          { "cron": "0 7 * * *",  "tier": 2, "budget_usd": 1.0 },
+      "stark-intelligence":        { "cron": "0 6 * * 3",  "tier": 3, "budget_usd": 3.0 },
+      "stark-claude-md-sync":      { "cron": "0 4 * * 4",  "tier": 3, "budget_usd": 2.0 },
+      "stark-digest":              { "cron": "0 14 * * 5", "tier": 4, "budget_usd": 2.0 },
+      "stark-observability-check": { "cron": "0 8 * * *",  "tier": 4, "budget_usd": 1.0 },
+      "stark-automation-monitor":  { "cron": "0 9 * * *",  "tier": 4, "budget_usd": 2.0 },
+      "stark-hooks-auditor":       { "cron": "0 5 * * 4",  "tier": 4, "budget_usd": 2.0 }
+    }
   }
 }
