@@ -66,6 +66,33 @@ def log_api_key_fallback(agent: str, task: str, reason: str) -> None:
         pass
 
 
+# Error patterns that indicate Vertex AI auth failure (retryable with API key).
+GEMINI_AUTH_ERROR_PATTERNS = ("ModelNotFound", "403", "PERMISSION_DENIED")
+
+
+def should_fallback_to_api_key(stderr: str) -> bool:
+    """Check if a Gemini CLI error looks like a Vertex AI auth failure."""
+    return any(p in stderr for p in GEMINI_AUTH_ERROR_PATTERNS)
+
+
+def try_gemini_api_key_fallback(
+    run_kwargs: dict,
+    context_label: str,
+    stderr_snippet: str,
+) -> bool:
+    """Attempt Gemini API key fallback after a Vertex AI auth error.
+
+    Mutates *run_kwargs* in place to inject GEMINI_API_KEY.
+    Returns True if fallback was applied (caller should retry), False otherwise.
+    """
+    api_key = get_gemini_api_key()
+    if not api_key or "env" not in run_kwargs:
+        return False
+    log_api_key_fallback("gemini", context_label, stderr_snippet[:120])
+    run_kwargs["env"]["GEMINI_API_KEY"] = api_key
+    return True
+
+
 # ── Session isolation ─────────────────────────────────────────────────
 
 

@@ -33,8 +33,9 @@ from typing import Any
 from claude_utils import CLAUDE_MODEL, build_claude_cmd
 from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_HIGH, parse_jsonl_output
 from gemini_utils import (
-    GEMINI_MODEL, get_gemini_api_key, setup_gemini_home, make_gemini_env,
+    GEMINI_MODEL, setup_gemini_home, make_gemini_env,
     parse_json_output as parse_gemini_output,
+    should_fallback_to_api_key, try_gemini_api_key_fallback,
 )
 
 # Re-export for backward compat
@@ -213,7 +214,6 @@ PYTHON = sys.executable
 GITHUB_APP = str(SCRIPTS_DIR / "github_app.py")
 CODEX_REASONING_CONFIG = CODEX_REASONING_EFFORT_HIGH
 
-_get_gemini_api_key = get_gemini_api_key  # backward compat alias
 
 
 _css_cache: str | None = None
@@ -463,15 +463,16 @@ def dispatch_competitor(agent: str, skill, audience: str):
         raw_output = proc.stdout or ""
 
         if proc.returncode != 0:
-            # Gemini API key fallback
-            if agent == "gemini" and not used_api_key_fallback:
-                api_key = _get_gemini_api_key()
-                if api_key:
-                    used_api_key_fallback = True
-                    run_kwargs.setdefault("env", {**os.environ})
-                    run_kwargs["env"]["GEMINI_API_KEY"] = api_key
-                    proc = subprocess.run(cmd, **run_kwargs)
-                    raw_output = proc.stdout or ""
+            stderr_snippet = proc.stderr[:500] if proc.stderr else ""
+            if (
+                agent == "gemini"
+                and not used_api_key_fallback
+                and should_fallback_to_api_key(stderr_snippet)
+                and try_gemini_api_key_fallback(run_kwargs, skill.name, stderr_snippet)
+            ):
+                used_api_key_fallback = True
+                proc = subprocess.run(cmd, **run_kwargs)
+                raw_output = proc.stdout or ""
 
             if proc.returncode != 0:
                 duration = time.monotonic() - t0

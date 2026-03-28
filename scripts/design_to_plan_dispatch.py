@@ -32,9 +32,9 @@ from typing import Any
 from claude_utils import build_claude_cmd
 from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_HIGH, parse_jsonl_output
 from gemini_utils import (
-    GEMINI_MODEL, get_gemini_api_key as _get_gemini_api_key,
-    log_api_key_fallback as _log_api_key_fallback,
-    setup_gemini_home, make_gemini_env, parse_json_output as parse_gemini_output,
+    GEMINI_MODEL, setup_gemini_home, make_gemini_env,
+    parse_json_output as parse_gemini_output,
+    should_fallback_to_api_key, try_gemini_api_key_fallback,
 )
 
 # ── Config ──────────────────────────────────────────────────────────────
@@ -220,20 +220,15 @@ def _run_agent(
                     f"  [{agent}:{task_label}] CLI error (exit {proc.returncode}): {stderr_snippet}",
                     file=sys.stderr,
                 )
-                # Gemini Vertex AI fallback
                 if (
                     agent == "gemini"
                     and attempt < max_attempts
-                    and ("ModelNotFound" in stderr_snippet or "403" in stderr_snippet
-                         or "PERMISSION_DENIED" in stderr_snippet)
+                    and should_fallback_to_api_key(stderr_snippet)
+                    and try_gemini_api_key_fallback(run_kwargs, task_label, stderr_snippet)
                 ):
-                    api_key = _get_gemini_api_key()
-                    if api_key and "env" in run_kwargs:
-                        _log_api_key_fallback(agent, task_label, stderr_snippet[:120])
-                        run_kwargs["env"]["GEMINI_API_KEY"] = api_key
-                        used_fallback = True
-                        time.sleep(2)
-                        continue
+                    used_fallback = True
+                    time.sleep(2)
+                    continue
                 if attempt < max_attempts:
                     time.sleep(5 * attempt)
                     continue
