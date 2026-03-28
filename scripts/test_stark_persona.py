@@ -1,4 +1,4 @@
-"""Tests for stark_persona.py — roster parsing (#152) + state layer (#153) + selection (#154-#156)."""
+"""Tests for stark_persona.py — roster parsing (#152) + state layer (#153) + selection (#154-#156) + emission (#162)."""
 
 from __future__ import annotations
 
@@ -7,15 +7,18 @@ import json
 import random
 import sqlite3
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from stark_persona import (
     ROSTER_PATH,
     PersonaRecord,
+    _make_dedupe_key,
     _sanitize_input,
     compute_weight,
     delete_active,
+    emit_persona_event,
     fuzzy_match_persona,
     get_date_matches,
     init_db,
@@ -24,6 +27,7 @@ from stark_persona import (
     main,
     parse_roster,
     record_rating,
+    record_survey_answer,
     recompute_weight,
     select_combo,
     select_single_persona,
@@ -964,3 +968,151 @@ class TestSessionEnd:
 
         captured = capsys.readouterr()
         assert "Session ended" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Event emission tests (#162)
+# ---------------------------------------------------------------------------
+
+
+class TestEmitPersonaEvent:
+    """emit_persona_event HTTP behavior."""
+
+    def test_emit_succeeds_when_api_available(self, tmp_path: Path) -> None:
+        """Mock urllib to verify correct HTTP request is made."""
+        token_path = tmp_path / "api-token"
+        token_path.write_text("test-token-abc")
+
+        with patch("stark_persona._INSIGHTS_TOKEN_PATH", token_path), \
+             patch("stark_persona.urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.return_value = MagicMock()
+
+            emit_persona_event(
+                subtype="selection",
+                payload={"persona": "jules", "session_id": 1},
+                dedupe_key="persona:selection:1:12345",
+            )
+
+            mock_urlopen.assert_called_once()
+            call_args = mock_urlopen.call_args
+            req = call_args[0][0]
+            assert req.full_url == "http://127.0.0.1:7420/events"
+            assert req.get_header("Authorization") == "Bearer test-token-abc"
+            assert req.get_header("Content-type") == "application/json"
+            body = json.loads(req.data)
+            assert body["type"] == "persona_event"
+            assert body["subtype"] == "selection"
+            assert body["source"] == "skill"
+            assert body["cli"] == "claude"
+            assert body["dedupe_key"] == "persona:selection:1:12345"
+            assert body["payload"]["persona"] == "jules"
+
+    def test_emit_fails_silently_on_connection_error(self, tmp_path: Path) -> None:
+        """Connection refused should log warning but not raise."""
+        token_path = tmp_path / "api-token"
+        token_path.write_text("test-token")
+
+        with patch("stark_persona._INSIGHTS_TOKEN_PATH", token_path), \
+             patch("stark_persona.urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.side_effect = ConnectionError("Connection refused")
+
+            # Should not raise
+            emit_persona_event(
+                subtype="rating",
+                payload={"persona": "the-dude", "rating": "like"},
+                dedupe_key="persona:rating:1:12345",
+            )
+
+    def test_emit_fails_silently_on_timeout(self, tmp_path: Path) -> None:
+        """Timeout should log warning but not raise."""
+        token_path = tmp_path / "api-token"
+        token_path.write_text("test-token")
+
+        import urllib.error
+        with patch("stark_persona._INSIGHTS_TOKEN_PATH", token_path), \
+             patch("stark_persona.urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.side_effect = TimeoutError("timed out")
+
+            # Should not raise
+            emit_persona_event(
+                subtype="deactivation",
+                payload={"persona": "deadpool"},
+                dedupe_key="persona:deactivation:1:12345",
+            )
+
+    def test_emit_fails_silently_on_missing_token(self, tmp_path: Path) -> None:
+        """Missing token file should log warning and return."""
+        missing = tmp_path / "nonexistent" / "api-token"
+
+        with patch("stark_persona._INSIGHTS_TOKEN_PATH", missing), \
+             patch("stark_persona.urllib.request.urlopen") as mock_urlopen:
+            emit_persona_event(
+                subtype="selection",
+                payload={},
+                dedupe_key="persona:selection:1:12345",
+            )
+            mock_urlopen.assert_not_called()
+
+
+class TestSelectionEmitsEvent:
+    """Selection flow emits persona event."""
+
+    def test_selection_emits_event(self, tmp_path: Path) -> None:
+        conn = init_db(tmp_path / "persona.db")
+        roster = load_roster(SEED_ROSTER)
+        sync_weights(roster, conn)
+
+        token_path = tmp_path / "api-token"
+        token_path.write_text("test-token")
+
+        with patch("stark_persona._INSIGHTS_TOKEN_PATH", token_path), \
+             patch("stark_persona.urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.return_value = MagicMock()
+
+            result = select_single_persona(
+                roster, conn,
+                active_path=tmp_path / "active.json",
+                rng=random.Random(42),
+            )
+
+            mock_urlopen.assert_called_once()
+            req = mock_urlopen.call_args[0][0]
+            body = json.loads(req.data)
+            assert body["subtype"] == "selection"
+            assert body["payload"]["persona"] == result["persona"]
+            assert body["payload"]["session_id"] == result["session_id"]
+            assert "dedupe_key" in body
+        conn.close()
+
+
+class TestRatingEmitsEvent:
+    """Rating flow emits persona event."""
+
+    def test_rating_emits_event(self, tmp_path: Path) -> None:
+        conn = init_db(tmp_path / "persona.db")
+        roster = load_roster(SEED_ROSTER)
+        sync_weights(roster, conn)
+        active_path = tmp_path / "active.json"
+
+        # Select first (without emission mock)
+        with patch("stark_persona._INSIGHTS_TOKEN_PATH", tmp_path / "no-token"):
+            result = select_single_persona(
+                roster, conn, active_path=active_path, rng=random.Random(42),
+            )
+
+        token_path = tmp_path / "api-token"
+        token_path.write_text("test-token")
+
+        with patch("stark_persona._INSIGHTS_TOKEN_PATH", token_path), \
+             patch("stark_persona.urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.return_value = MagicMock()
+
+            record_rating(conn, "like", active_path=active_path, roster=roster)
+
+            mock_urlopen.assert_called_once()
+            req = mock_urlopen.call_args[0][0]
+            body = json.loads(req.data)
+            assert body["subtype"] == "rating"
+            assert body["payload"]["rating"] == "like"
+            assert body["payload"]["persona"] == result["persona"]
+        conn.close()

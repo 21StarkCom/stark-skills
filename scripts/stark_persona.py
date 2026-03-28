@@ -9,6 +9,7 @@ Usage:
     stark_persona.py deactivate
     stark_persona.py rate --rating {like,hate}
     stark_persona.py survey
+    stark_persona.py survey-answer --question Q --answer A
     stark_persona.py add --name NAME --source SOURCE --traits TRAITS
     stark_persona.py stats [--format {inline,table}]
     stark_persona.py history
@@ -24,14 +25,19 @@ import datetime
 import difflib
 import hashlib
 import json
+import logging
 import os
 import random
 import re
 import sqlite3
 import sys
+import time
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -361,6 +367,52 @@ def sync_weights(roster: list[PersonaRecord], conn: sqlite3.Connection) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Event emission (#162)
+# ---------------------------------------------------------------------------
+
+_INSIGHTS_TOKEN_PATH = Path.home() / ".stark-insights" / "api-token"
+_INSIGHTS_ENDPOINT = "http://127.0.0.1:7420/events"
+
+
+def emit_persona_event(subtype: str, payload: dict, dedupe_key: str) -> None:
+    """POST a persona event to the local insights API. Fail-open: never raises."""
+    try:
+        token_path = _INSIGHTS_TOKEN_PATH
+        if not token_path.exists():
+            logger.warning("emit_persona_event: token file missing at %s", token_path)
+            return
+
+        token = token_path.read_text().strip()
+        envelope = {
+            "type": "persona_event",
+            "subtype": subtype,
+            "source": "skill",
+            "cli": "claude",
+            "dedupe_key": dedupe_key,
+            "payload": payload,
+        }
+        data = json.dumps(envelope).encode()
+        req = urllib.request.Request(
+            _INSIGHTS_ENDPOINT,
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {token}",
+            },
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=2)
+    except Exception:
+        logger.warning("emit_persona_event: failed to emit %s event", subtype, exc_info=True)
+
+
+def _make_dedupe_key(subtype: str, session_id: int | str | None) -> str:
+    """Generate dedupe key: persona:{subtype}:{session_id}:{timestamp}."""
+    ts = int(time.time())
+    return f"persona:{subtype}:{session_id}:{ts}"
+
+
+# ---------------------------------------------------------------------------
 # Selection engine (#154, #155, #156)
 # ---------------------------------------------------------------------------
 
@@ -520,6 +572,19 @@ def _persist_selection(
     # Write active.json
     write_active(result, active_path)
 
+    # Emit selection event (#162)
+    emit_persona_event(
+        subtype="selection",
+        payload={
+            "persona": persona.slug,
+            "is_combo": is_combo,
+            "weight_at_selection": new_weight,
+            "date_signal_matched": date_signal_matched,
+            "session_id": session_id,
+        },
+        dedupe_key=_make_dedupe_key("selection", session_id),
+    )
+
     return result
 
 
@@ -664,6 +729,20 @@ def select_combo(
     }
 
     write_active(result, active_path)
+
+    # Emit selection event (#162)
+    emit_persona_event(
+        subtype="selection",
+        payload={
+            "persona": primary.slug,
+            "is_combo": True,
+            "weight_at_selection": compute_weight(_get_persona_stats(conn, primary.slug)),
+            "date_signal_matched": False,
+            "session_id": session_id,
+        },
+        dedupe_key=_make_dedupe_key("selection", session_id),
+    )
+
     return result
 
 
@@ -818,6 +897,18 @@ def record_rating(
                 )
 
     conn.commit()
+
+    # Emit rating event (#162)
+    emit_persona_event(
+        subtype="rating",
+        payload={
+            "persona": slug,
+            "rating": rating,
+            "session_id": session_id,
+        },
+        dedupe_key=_make_dedupe_key("rating", session_id),
+    )
+
     emoji = "\U0001f44d" if rating == "like" else "\U0001f44e"
     name = active.get("name", active.get("combo_name", slug))
     return f"{emoji} Rated {name} as {rating}."
@@ -877,12 +968,26 @@ def cmd_select(args: argparse.Namespace) -> int:
 def cmd_deactivate(args: argparse.Namespace) -> int:
     """Deactivate the current persona."""
     ensure_dirs()
+    active = load_active()
     conn = init_db()
     # Mark the latest session as deactivated
     conn.execute(
         "UPDATE sessions SET deactivated = 1 WHERE id = (SELECT MAX(id) FROM sessions)"
     )
     conn.commit()
+
+    # Emit deactivation event (#162)
+    session_id = active.get("session_id") if active else None
+    persona = active.get("persona", active.get("combo_name", "unknown")) if active else "unknown"
+    emit_persona_event(
+        subtype="deactivation",
+        payload={
+            "persona": persona,
+            "session_id": session_id,
+        },
+        dedupe_key=_make_dedupe_key("deactivation", session_id),
+    )
+
     delete_active()
     print("Persona deactivated. Back to standard.")
     conn.close()
@@ -898,6 +1003,32 @@ def cmd_rate(args: argparse.Namespace) -> int:
     print(msg)
     conn.close()
     return 0
+
+
+def record_survey_answer(
+    conn: sqlite3.Connection,
+    question: str,
+    answer: str,
+) -> None:
+    """Store a survey answer and emit event (#162)."""
+    conn.execute(
+        "INSERT INTO survey_responses (question, answer) VALUES (?, ?)",
+        (question, answer),
+    )
+    conn.commit()
+
+    active = load_active()
+    session_id = active.get("session_id") if active else None
+
+    emit_persona_event(
+        subtype="survey_response",
+        payload={
+            "question": question,
+            "answer": answer,
+            "session_id": session_id,
+        },
+        dedupe_key=_make_dedupe_key("survey_response", session_id),
+    )
 
 
 def cmd_survey(args: argparse.Namespace) -> int:
@@ -917,6 +1048,16 @@ def cmd_survey(args: argparse.Namespace) -> int:
         })
 
     print(json.dumps(output, indent=2))
+    conn.close()
+    return 0
+
+
+def cmd_survey_answer(args: argparse.Namespace) -> int:
+    """Record a survey answer."""
+    ensure_dirs()
+    conn = init_db()
+    record_survey_answer(conn, args.question, args.answer)
+    print(f"Recorded answer for: {args.question}")
     conn.close()
     return 0
 
@@ -1196,6 +1337,11 @@ def build_parser() -> argparse.ArgumentParser:
     # survey
     sub.add_parser("survey", help="Quick preference survey")
 
+    # survey-answer
+    p_sa = sub.add_parser("survey-answer", help="Record a survey answer")
+    p_sa.add_argument("--question", required=True, help="The survey question")
+    p_sa.add_argument("--answer", required=True, help="The user's answer")
+
     # add
     p_add = sub.add_parser("add", help="Add a new character")
     p_add.add_argument("--name", required=True, help="Character name")
@@ -1230,6 +1376,7 @@ def main(argv: list[str] | None = None) -> int:
         "deactivate": cmd_deactivate,
         "rate": cmd_rate,
         "survey": cmd_survey,
+        "survey-answer": cmd_survey_answer,
         "add": cmd_add,
         "stats": cmd_stats,
         "history": cmd_history,
