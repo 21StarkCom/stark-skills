@@ -22,6 +22,7 @@ Build `/stark-persona` as a thin skill wrapper over a repo-local Python CLI so t
   - [`/Users/aryeh/git/Evinced/stark-skills`](/Users/aryeh/git/Evinced/stark-skills)
   - [`/Users/aryeh/git/Evinced/stark-insights`](/Users/aryeh/git/Evinced/stark-insights)
 - Tooling: `python3`, `pytest` in `stark-skills`; `uv` and Python 3.12 in `stark-insights`; `sqlite3`; `gh`.
+- pytest available via `pip install pytest` (or already installed). SQLite is Python stdlib — no additional install needed.
 - Local state/access:
   - `mkdir -p ~/.stark-persona`
   - `test -f ~/.stark-insights/api-token`
@@ -39,8 +40,8 @@ Build `/stark-persona` as a thin skill wrapper over a repo-local Python CLI so t
 
 ### Tasks
 1. Create the execution scaffold.
-Implementation: Add [`skill/stark-persona/SKILL.md`](/Users/aryeh/git/Evinced/stark-skills/skill/stark-persona/SKILL.md) as a thin wrapper over `python3 scripts/stark_persona.py <subcommand>`. Define `main(argv: list[str]) -> int`, `load_roster(path: Path) -> list[PersonaRecord]`, and `init_db(db_path: Path) -> sqlite3.Connection`.  
-Files/components touched: [`skill/stark-persona/SKILL.md`](/Users/aryeh/git/Evinced/stark-skills/skill/stark-persona/SKILL.md), [`scripts/stark_persona.py`](/Users/aryeh/git/Evinced/stark-skills/scripts/stark_persona.py).  
+Implementation: Add [`skill/stark-persona/SKILL.md`](/Users/aryeh/git/Evinced/stark-skills/skill/stark-persona/SKILL.md) as a thin wrapper over `python3 scripts/stark_persona.py <subcommand>`. Define `main(argv: list[str]) -> int`, `load_roster(path: Path) -> list[PersonaRecord]`, and `init_db(db_path: Path) -> sqlite3.Connection`. SKILL.md resolves the helper path via the symlink's realpath: `$(dirname $(realpath $0))/../../../scripts/stark_persona.py` — this works because `skill/stark-persona/SKILL.md` is symlinked from the repo.
+Files/components touched: [`skill/stark-persona/SKILL.md`](/Users/aryeh/git/Evinced/stark-skills/skill/stark-persona/SKILL.md), [`scripts/stark_persona.py`](/Users/aryeh/git/Evinced/stark-skills/scripts/stark_persona.py).
 Done when: `/stark-persona --print-roster` and `/stark-persona --print-weights` can run against an empty DB.
 
 2. Seed and parse the roster.
@@ -56,6 +57,7 @@ Done when: empty-state commands create the DB once and never require manual setu
 ### Risks
 - SKILL-only implementation becomes untestable: keep all stateful logic in Python.
 - Roster format drifts over time: validate on every read and fail with line-level errors.
+- SQLite corruption: if `persona.db` becomes corrupted, delete it — the schema auto-recreates on next invocation. Historical data is in stark-insights (Cloud SQL) and can be backfilled.
 
 ### Verification
 - `pytest scripts/test_stark_persona.py -q -k "roster or db"`
@@ -66,12 +68,12 @@ Done when: empty-state commands create the DB once and never require manual setu
 **Goal:** Make direct `/stark-persona` selection work for random, specific, and combo modes.
 **Dependencies:** Phase 1
 **Estimated effort:** L
-**Parallel track:** Roster content expansion (full ~70 characters) can run concurrently with Phases 2-3 since it only modifies `data/persona/roster.md` and has no code dependencies.
+**Parallel track:** Roster content expansion runs on a separate branch (`content/persona-roster`) to avoid merge conflicts with code changes in Phases 2-3. Merge after Phase 3 code is stable.
 
 ### Tasks
 1. Implement weighted selection.
-Implementation: Add `compute_weight(persona: WeightRecord) -> float`, `select_single_persona(...) -> SelectionResult`, and weight initialization for unseen personas. Persist `sessions` and `weights` rows atomically.  
-Files/components touched: [`scripts/stark_persona.py`](/Users/aryeh/git/Evinced/stark-skills/scripts/stark_persona.py), [`scripts/test_stark_persona.py`](/Users/aryeh/git/Evinced/stark-skills/scripts/test_stark_persona.py).  
+Implementation: Add `compute_weight(persona: WeightRecord) -> float`, `select_single_persona(...) -> SelectionResult`, and weight initialization for unseen personas. Persist `sessions` and `weights` rows atomically. Weight formula from design Section 4.1: untested=1.5x, liked=1.0+(min(net,5)*0.4) max 3.0x, hated=max(0.2, 1.0+(net*0.4)), neutral=1.0x. The `--auto` flag selects weighted random and outputs JSON (not conversational text) for machine consumption by stark-session.
+Files/components touched: [`scripts/stark_persona.py`](/Users/aryeh/git/Evinced/stark-skills/scripts/stark_persona.py), [`scripts/test_stark_persona.py`](/Users/aryeh/git/Evinced/stark-skills/scripts/test_stark_persona.py).
 Done when: a first-time persona gets 1.5x weight and repeated selections update `selection_count`/`last_selected`.
 
 2. Implement date-aware and specific selection.
@@ -94,6 +96,7 @@ Done when: `/stark-persona`, `/stark-persona "Jules Winnfield"`, and `/stark-per
 - `python3 scripts/stark_persona.py select --name "Jules Winnfield"`
 - `python3 scripts/stark_persona.py select --combo`
 - `sqlite3 ~/.stark-persona/persona.db "select slug,is_combo,selected_at from sessions order by selected_at desc limit 5;"`
+- Add a contract test that validates the JSON output of `stark_persona.py select --auto` matches the schema expected by SKILL.md (fields: persona, slug, source, catchphrase, speaking_style, is_combo, combo_components).
 
 ## Phase 3: Feedback, Stats, Add, And Local Session-End
 **Goal:** Complete the local feature set without cloud dependencies.  
@@ -112,7 +115,7 @@ Files/components touched: [`skill/stark-persona/SKILL.md`](/Users/aryeh/git/Evin
 Done when: all print modes return stable, non-empty output on both empty and populated DBs.
 
 3. Implement `--add`, `--off`, and session-end cleanup.
-Implementation: Add `append_roster_entry(...)`, atomic roster writes, explicit confirmation flow, `deactivate_persona()`, and `session_end()` with 20% fun-fact gate and unconditional `active.json` cleanup. Mark combo fun facts as fictional.  
+Implementation: Add `append_roster_entry(...)`, atomic roster writes, explicit confirmation flow, `deactivate_persona()`, and `session_end()` with 20% fun-fact gate and unconditional `active.json` cleanup. Mark combo fun facts as fictional. Sanitize `--add` input: strip markdown injection patterns, reject entries with backticks, code blocks, or HTML tags in the speaking style field. The roster is a prompt — treat writes as security-sensitive.  
 Files/components touched: [`data/persona/roster.md`](/Users/aryeh/git/Evinced/stark-skills/data/persona/roster.md), [`scripts/stark_persona.py`](/Users/aryeh/git/Evinced/stark-skills/scripts/stark_persona.py).  
 Done when: a new persona can be appended safely, `--off` works with no active persona, and session-end leaves no stale `active.json`.
 
@@ -128,6 +131,13 @@ Done when: a new persona can be appended safely, `--off` works with no active pe
 - `python3 scripts/stark_persona.py add --name "Doron Kavillio" --source "Fauda" --traits "intense,decisive,conflicted,tactical,israeli"`
 - `test ! -f ~/.stark-persona/active.json`
 
+### Phase Gates
+- Phase 1 → 2: `pytest -q` passes, `print-roster` returns valid output
+- Phase 2 → 3: selection + combo + date-aware all produce valid `active.json`
+- Phase 3 → 4: all `--like`/`--hate`/`--survey`/`--add`/`--off` work locally without analytics
+- Phase 4 → 5: `persona_event` accepted by stark-insights (curl test returns 201)
+- Phase 5 → 6: `/stark-session start` completes with persona line, `/stark-session end` cleans up
+
 ## Phase 4: Analytics And Operational Guardrails
 **Goal:** Add typed `persona_event` ingest and monitor it through the existing observability loop.  
 **Dependencies:** Phase 3  
@@ -135,7 +145,7 @@ Done when: a new persona can be appended safely, `--off` works with no active pe
 
 ### Tasks
 1. Add `persona_event` to `stark-insights`.
-Implementation: Add `PERSONA_EVENT = "persona_event"` and the payload schema/sensitivity mapping in [`src/stark_insights/models.py`](/Users/aryeh/git/Evinced/stark-insights/src/stark_insights/models.py); add model and API tests in [`tests/test_models.py`](/Users/aryeh/git/Evinced/stark-insights/tests/test_models.py) and [`tests/test_api.py`](/Users/aryeh/git/Evinced/stark-insights/tests/test_api.py).  
+Implementation: Add `PERSONA_EVENT = "persona_event"` and the payload schema/sensitivity mapping in [`src/stark_insights/models.py`](/Users/aryeh/git/Evinced/stark-insights/src/stark_insights/models.py); add model and API tests in [`tests/test_models.py`](/Users/aryeh/git/Evinced/stark-insights/tests/test_models.py) and [`tests/test_api.py`](/Users/aryeh/git/Evinced/stark-insights/tests/test_api.py). Deploy stark-insights changes (merge PR, restart container) BEFORE enabling producer emission in Task 2.  
 Files/components touched: [`src/stark_insights/models.py`](/Users/aryeh/git/Evinced/stark-insights/src/stark_insights/models.py), [`tests/test_models.py`](/Users/aryeh/git/Evinced/stark-insights/tests/test_models.py), [`tests/test_api.py`](/Users/aryeh/git/Evinced/stark-insights/tests/test_api.py).  
 Done when: authenticated POSTs for `persona_event` return `201` and schema violations return `400`.
 
@@ -165,7 +175,7 @@ Done when: there is a scheduled, existing daily check for persona ingest rather 
 
 ### Tasks
 1. Integrate start mode.
-Implementation: Update [`skill/stark-session/SKILL.md`](/Users/aryeh/git/Evinced/stark-skills/skill/stark-session/SKILL.md) so start mode calls `python3 scripts/stark_persona.py select --auto` after context gathering and inserts a single-line `Persona:` entry into the briefing.  
+Implementation: Update [`skill/stark-session/SKILL.md`](/Users/aryeh/git/Evinced/stark-skills/skill/stark-session/SKILL.md) so start mode calls `python3 scripts/stark_persona.py select --auto` after context gathering and inserts a single-line `Persona:` entry into the briefing. The random pop-up survey (1-in-5) fires AFTER persona selection, not before. If dismissed, persona is already active — survey never blocks session start.  
 Files/components touched: [`skill/stark-session/SKILL.md`](/Users/aryeh/git/Evinced/stark-skills/skill/stark-session/SKILL.md), [`scripts/stark_persona.py`](/Users/aryeh/git/Evinced/stark-skills/scripts/stark_persona.py).  
 Done when: `/stark-session start` still completes cleanly if persona selection fails or analytics are down.
 
