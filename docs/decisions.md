@@ -62,3 +62,12 @@
 - **Story Points:** 151 total (43 tasks across 8 phases)
 - **Summary:** Migrate 9 automation triggers from CCR to GCP Cloud Functions Gen2 with Pub/Sub ingress, custom container images (python:3.12-slim + shell binaries), and Terraform-managed infrastructure. Key decisions: single codebase deployed 9 times via Terraform for_each on triggers.yaml, bundled prompts (no runtime GitHub fetch), two service accounts for read/write permission tiers, three model-facing tools (github_api, slack_post, shell_exec) with sandbox isolation, ifGenerationMatch=0 for lock acquisition, Eventarc-managed subscriptions (no manual Pub/Sub subscriptions), canary deploys (sentinel first), 6-day incremental scheduler activation with R/W triggers last.
 - **Knowledge extracted to:** Target repo (GetEvinced/stark-automations) — knowledge lives in issue bodies since the project is new. ADR creation is task #9.
+
+## 2026-03-28 — stark-persona (Session Persona System)
+
+- **Date:** 2026-03-28
+- **Status:** Decomposed → issues created
+- **Tracking:** GetEvinced/stark-skills#145-#150 (6 phases), #151-#169 (19 tasks)
+- **Story Points:** 71 total (19 tasks across 6 phases)
+- **Summary:** Claude Code skill that assigns movie/comedy character personas via weighted random selection. Python helper CLI + thin SKILL.md wrapper. Local SQLite for state, stark-insights for analytics. Learns preferences over time via like/hate/survey feedback. Supports combo mashups and date-aware selection.
+- **Knowledge extracted to:** docs/adr/ (no new ADRs needed — design decisions captured in the design spec)
