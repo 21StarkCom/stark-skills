@@ -233,6 +233,18 @@ Synthesis merges:   N sections from non-winner designs
 Output:             {output_path}
 ```
 
+### Event emission
+
+After the metrics block, emit a completion event to stark-insights:
+
+```bash
+~/.stark-insights/stark-emit skill_invocation \
+  skill=stark-design duration_s=$TOTAL_SECONDS success=$SUCCESS \
+  winner_agent=$AGENT output_path=$PATH
+```
+
+Substitute actual values from the run. If stark-insights is not running, this fails silently.
+
 ## Failure Modes
 
 | Failure | Recovery |
