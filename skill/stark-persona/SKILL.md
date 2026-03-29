@@ -33,8 +33,7 @@ Session persona system — assigns a character voice to Claude for the session.
 Delegate all stateful operations to the Python helper:
 
 ```bash
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]:-$0}")")" && cd ../../.. && pwd)"
-python3 "$SCRIPT_DIR/scripts/stark_persona.py" <subcommand> [args]
+python3 ~/.claude/code-review/scripts/stark_persona.py <subcommand> [args]
 ```
 
 Parse the ARGUMENTS and map to the appropriate subcommand:
