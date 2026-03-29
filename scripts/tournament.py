@@ -1139,6 +1139,85 @@ class Tournament:
                 "quality_flag": result.quality_flag,
                 "scores": result.scores,
             })
+        self._emit_to_insights(result)
+
+    def _emit_to_insights(self, result: TournamentResult) -> None:
+        """Fire-and-forget POST of tournament results to stark-insights."""
+        import urllib.request
+        import urllib.error
+
+        token_path = Path.home() / ".stark-insights" / "api-token"
+        if not token_path.exists():
+            return  # stark-insights not configured
+
+        token = token_path.read_text().strip()
+        ts = time.time()
+        competitors = sorted(result.scores.keys()) if result.scores else []
+        if not competitors:
+            return  # nothing to emit
+
+        tournament_id = compute_tournament_id(ts, competitors)
+
+        # Rank by score descending
+        ranked = sorted(
+            result.scores.items(),
+            key=lambda x: _score_for_agent(x[1]),
+            reverse=True,
+        )
+
+        events = []
+        for rank, (agent, scores) in enumerate(ranked, 1):
+            events.append({
+                "type": "tournament_result",
+                "cli": "claude",
+                "source": "skill",
+                "payload": {
+                    "tournament_id": tournament_id,
+                    "agent": agent,
+                    "won": agent == result.winner,
+                    "rank": rank,
+                    "score": round(_score_for_agent(scores), 2),
+                    "max_score": 10.0,
+                    "quality_flag": result.quality_flag,
+                    "strategy": self.config.evaluation.strategy,
+                    "origin": "tournament",
+                    "task_summary": (self.config.prompt_template or "")[:200],
+                },
+            })
+
+        try:
+            data = json.dumps({"events": events}).encode()
+            req = urllib.request.Request(
+                "http://127.0.0.1:7420/events/batch",
+                data=data,
+                method="POST",
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {token}",
+                },
+            )
+            urllib.request.urlopen(req, timeout=5)
+        except Exception:
+            pass  # Fire-and-forget — tournaments must never block on observability
+
+
+# ── Insights emission ────────────────────────────────────────────────
+
+
+def compute_tournament_id(timestamp_epoch: float, agents: list[str]) -> str:
+    """Deterministic tournament ID matching the backfill scraper formula."""
+    raw = f"{timestamp_epoch}:{','.join(sorted(agents))}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def _score_for_agent(scores: Any) -> float:
+    """Extract a single float score from factor scores dict or a raw float."""
+    if isinstance(scores, (int, float)):
+        return float(scores)
+    if isinstance(scores, dict):
+        vals = [v for v in scores.values() if isinstance(v, (int, float))]
+        return sum(vals) / len(vals) if vals else 0.0
+    return 0.0
 
 
 # ── CLI ────────────────────────────────────────────────────────────────
