@@ -1,0 +1,3 @@
+{
+  "test_command": "python3 -m pytest scripts/ -x -q"
+}

@@ -1143,49 +1143,60 @@ class Tournament:
 
     def _emit_to_insights(self, result: TournamentResult) -> None:
         """Fire-and-forget POST of tournament results to stark-insights."""
-        import urllib.request
-        import urllib.error
-
-        token_path = Path.home() / ".stark-insights" / "api-token"
-        if not token_path.exists():
-            return  # stark-insights not configured
-
-        token = token_path.read_text().strip()
-        ts = time.time()
-        competitors = sorted(result.scores.keys()) if result.scores else []
-        if not competitors:
-            return  # nothing to emit
-
-        tournament_id = compute_tournament_id(ts, competitors)
-
-        # Rank by score descending
-        ranked = sorted(
-            result.scores.items(),
-            key=lambda x: _score_for_agent(x[1]),
-            reverse=True,
-        )
-
-        events = []
-        for rank, (agent, scores) in enumerate(ranked, 1):
-            events.append({
-                "type": "tournament_result",
-                "cli": "claude",
-                "source": "skill",
-                "payload": {
-                    "tournament_id": tournament_id,
-                    "agent": agent,
-                    "won": agent == result.winner,
-                    "rank": rank,
-                    "score": round(_score_for_agent(scores), 2),
-                    "max_score": 10.0,
-                    "quality_flag": result.quality_flag,
-                    "strategy": self.config.evaluation.strategy,
-                    "origin": "tournament",
-                    "task_summary": (self.config.prompt_template or "")[:200],
-                },
-            })
-
         try:
+            import urllib.request
+
+            token_path = Path.home() / ".stark-insights" / "api-token"
+            if not token_path.exists():
+                return  # stark-insights not configured
+
+            token = token_path.read_text().strip()
+            ts = time.time()
+            competitors = sorted(result.scores.keys()) if result.scores else []
+            if not competitors:
+                return  # nothing to emit
+
+            tournament_id = compute_tournament_id(ts, competitors)
+
+            # Use the same weighted scoring as the tournament core
+            if self.config.evaluation.strategy == "visual":
+                weights = dict(FACTOR_WEIGHTS)
+            else:
+                weights = {f: info["weight"] for f, info in self.config.evaluation.factors.items()
+                           if isinstance(info, dict) and "weight" in info and not f.startswith("_")}
+
+            # Rank by weighted score descending (matches core winner selection)
+            weighted = {}
+            for agent, scores in result.scores.items():
+                if isinstance(scores, dict):
+                    weighted[agent] = compute_weighted_average(scores, weights)
+                elif isinstance(scores, (int, float)):
+                    weighted[agent] = float(scores)
+                else:
+                    weighted[agent] = 0.0
+
+            ranked = sorted(weighted.items(), key=lambda x: x[1], reverse=True)
+
+            events = []
+            for rank, (agent, score) in enumerate(ranked, 1):
+                events.append({
+                    "type": "tournament_result",
+                    "cli": "claude",
+                    "source": "skill",
+                    "payload": {
+                        "tournament_id": tournament_id,
+                        "agent": agent,
+                        "won": agent == result.winner,
+                        "rank": rank,
+                        "score": round(score, 2),
+                        "max_score": 10.0,
+                        "quality_flag": result.quality_flag,
+                        "strategy": self.config.evaluation.strategy,
+                        "origin": "tournament",
+                        "task_summary": (self.config.prompt_template or "")[:200],
+                    },
+                })
+
             data = json.dumps({"events": events}).encode()
             req = urllib.request.Request(
                 "http://127.0.0.1:7420/events/batch",
@@ -1208,16 +1219,6 @@ def compute_tournament_id(timestamp_epoch: float, agents: list[str]) -> str:
     """Deterministic tournament ID matching the backfill scraper formula."""
     raw = f"{timestamp_epoch}:{','.join(sorted(agents))}"
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
-
-
-def _score_for_agent(scores: Any) -> float:
-    """Extract a single float score from factor scores dict or a raw float."""
-    if isinstance(scores, (int, float)):
-        return float(scores)
-    if isinstance(scores, dict):
-        vals = [v for v in scores.values() if isinstance(v, (int, float))]
-        return sum(vals) / len(vals) if vals else 0.0
-    return 0.0
 
 
 # ── CLI ────────────────────────────────────────────────────────────────
