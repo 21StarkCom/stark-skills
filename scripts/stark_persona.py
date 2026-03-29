@@ -361,7 +361,7 @@ def sync_weights(roster: list[PersonaRecord], conn: sqlite3.Connection) -> None:
         if record.slug not in existing:
             conn.execute(
                 "INSERT INTO weights (persona, weight) VALUES (?, ?)",
-                (record.slug, 1.0),
+                (record.slug, 1.5),  # discovery boost — matches compute_weight(0 selections)
             )
     conn.commit()
 
@@ -403,7 +403,7 @@ def emit_persona_event(subtype: str, payload: dict, dedupe_key: str) -> None:
         )
         urllib.request.urlopen(req, timeout=2)
     except Exception:
-        logger.warning("emit_persona_event: failed to emit %s event", subtype, exc_info=True)
+        logger.debug("emit_persona_event: failed to emit %s event", subtype, exc_info=True)
 
 
 def _make_dedupe_key(subtype: str, session_id: int | str | None) -> str:
@@ -848,39 +848,16 @@ def record_rating(
         for comp in components:
             comp_slug = comp.get("slug", "")
             if comp_slug and comp_slug != slug:
-                # 0.5x diluted: insert a rating row but recompute treats it the same;
-                # we achieve dilution by only recomputing (the component gets a full
-                # rating row, but the weight formula naturally handles it)
-                conn.execute(
-                    """INSERT OR REPLACE INTO ratings
-                       (session_id, persona, rating)
-                       VALUES (?, ?, ?)""",
-                    (session_id, comp_slug, rating),
-                )
-                # We can't use session_id again (unique). Instead, insert a
-                # synthetic record for dilution tracking. Actually, the UNIQUE
-                # is on session_id per the schema. For component dilution we
-                # need separate rows. Let's use a different approach:
-                # We'll directly adjust the weight with 0.5x dilution factor.
-                pass
-
-            # Recompute weight regardless
-            if comp_slug:
-                recompute_weight(conn, comp_slug)
-
-        # Apply dilution: for components (not primary), halve the rating impact
-        # by adjusting weights directly
-        for comp in components:
-            comp_slug = comp.get("slug", "")
-            if comp_slug and comp_slug != slug:
+                # Apply 0.5x diluted weight adjustment directly (can't reuse
+                # session_id in ratings due to UNIQUE constraint)
                 stats = _get_persona_stats(conn, comp_slug)
                 base_weight = compute_weight(stats)
-                # Dilute: move weight halfway between neutral (1.0) and full rating effect
                 diluted = 1.0 + (base_weight - 1.0) * 0.5
                 conn.execute(
-                    """UPDATE weights SET weight = ?, updated_at = datetime('now')
-                       WHERE persona = ?""",
-                    (diluted, comp_slug),
+                    """INSERT INTO weights (persona, weight, updated_at)
+                       VALUES (?, ?, datetime('now'))
+                       ON CONFLICT(persona) DO UPDATE SET weight = ?, updated_at = datetime('now')""",
+                    (comp_slug, diluted, diluted),
                 )
 
         # If combo liked, update favorite_combos
@@ -1063,8 +1040,7 @@ def cmd_survey_answer(args: argparse.Namespace) -> int:
 
 
 _SANITIZE_PATTERNS = [
-    re.compile(r"`"),           # backticks
-    re.compile(r"```"),         # code blocks
+    re.compile(r"`"),           # backticks (covers single and triple)
     re.compile(r"<[^>]+>"),    # HTML tags
 ]
 
@@ -1146,7 +1122,7 @@ def cmd_add(args: argparse.Namespace) -> int:
     conn = init_db()
     conn.execute(
         "INSERT OR REPLACE INTO weights (persona, weight) VALUES (?, ?)",
-        (slug, 1.0),
+        (slug, 1.5),
     )
     conn.commit()
     conn.close()

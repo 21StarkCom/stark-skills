@@ -261,9 +261,9 @@ class TestSyncWeights:
         rows = conn.execute("SELECT persona, weight FROM weights ORDER BY persona").fetchall()
         slugs = {r["persona"] for r in rows}
         assert slugs == {r.slug for r in roster}
-        # All default weight 1.0
+        # All default weight 1.5 (discovery boost)
         for r in rows:
-            assert r["weight"] == 1.0
+            assert r["weight"] == 1.5
         conn.close()
 
     def test_idempotent(self, tmp_path: Path) -> None:
