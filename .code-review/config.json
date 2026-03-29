@@ -1,0 +1,3 @@
+{
+  "test_command": "~/.claude/code-review/scripts/.venv/bin/python3 -m pytest scripts/ -x -q"
+}
