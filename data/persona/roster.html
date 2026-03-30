@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>stark-persona — The Roster</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #08080d; --card: #13131d; --card-hover: #1a1a28;
+    --border: #222236; --text: #e4e4ef; --text-dim: #7878a0; --accent: #7c6ff7;
+  }
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg); color: var(--text);
+    overflow: hidden; height: 100vh; width: 100vw; cursor: grab;
+  }
+  body.grabbing { cursor: grabbing; }
+  canvas#cv { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 1; }
+  #world { position: absolute; top: 0; left: 0; transform-origin: 0 0; z-index: 2; }
+
+  .hub {
+    position: absolute; border-radius: 50%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; z-index: 10; cursor: default;
+    border: 2px solid var(--accent);
+    background: radial-gradient(circle, rgba(124,111,247,0.14), var(--bg) 72%);
+    box-shadow: 0 0 100px rgba(124,111,247,0.12), 0 0 40px rgba(124,111,247,0.06);
+  }
+  .hub-t { font-size: 1.15rem; font-weight: 800; letter-spacing: -0.03em;
+    background: linear-gradient(135deg,#7c6ff7,#c4b5fd);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .hub-s { font-size: 0.65rem; color: var(--text-dim); margin-top: 3px;
+    font-family: 'JetBrains Mono', monospace; }
+
+  .pill {
+    position: absolute; z-index: 8; cursor: default;
+    padding: 0.4rem 1rem; border-radius: 100px;
+    font-size: 0.72rem; font-weight: 600; white-space: nowrap; border: 1.5px solid;
+  }
+
+  .card {
+    position: absolute; width: 220px; z-index: 3;
+    cursor: pointer; transition: transform 0.15s;
+  }
+  .card:hover { transform: scale(1.05); z-index: 30; }
+  .ci {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 0.65rem 0.85rem;
+    transition: all 0.15s; position: relative; overflow: hidden;
+  }
+  .ci::before {
+    content:''; position: absolute; top:0; width: 3px; height: 100%;
+    background: var(--cc); opacity: 0.6;
+  }
+  .card.right .ci::before { left: 0; }
+  .card.left  .ci::before { right: 0; }
+  .card.right .ci { padding-left: 1rem; }
+  .card.left  .ci { padding-right: 1rem; }
+  .card:hover .ci, .card.expanded .ci {
+    border-color: var(--cc);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4), 0 0 16px var(--cg);
+    background: var(--card-hover);
+  }
+  .cn { font-size: 0.82rem; font-weight: 600; }
+  .cs { font-size: 0.67rem; color: var(--text-dim); margin-top: 1px; }
+  .ct {
+    position: absolute; top: 0.5rem;
+    font-family: 'JetBrains Mono', monospace; font-size: 0.5rem;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 0.1rem 0.35rem; border-radius: 100px;
+  }
+  .card.right .ct { right: 0.6rem; }
+  .card.left  .ct { left: 0.6rem; }
+  .type-character { background: rgba(244,114,182,0.12); color: #f472b6; }
+  .type-person    { background: rgba(52,211,153,0.12);  color: #34d399; }
+
+  .det { display: none; margin-top: 0.45rem; padding-top: 0.45rem; border-top: 1px solid var(--border); }
+  .card.expanded .det { display: block; }
+  .card.expanded { z-index: 50; }
+  .dq {
+    font-family:'JetBrains Mono',monospace; font-size:0.68rem;
+    color: var(--cc); padding: 0.3rem 0.55rem;
+    background: rgba(255,255,255,0.025); border-radius: 5px;
+    border-left: 2px solid var(--cc); margin-bottom: 0.35rem;
+  }
+  .ds { font-size: 0.7rem; opacity: 0.75; line-height: 1.55; margin-bottom: 0.35rem; }
+  .dt { display: flex; flex-wrap: wrap; gap: 0.2rem; }
+  .dt span {
+    font-size: 0.58rem; font-weight: 500; padding: 0.1rem 0.4rem;
+    border-radius: 100px; background: rgba(255,255,255,0.04); color: var(--text-dim);
+  }
+
+  .controls {
+    position: fixed; bottom: 1.2rem; right: 1.2rem;
+    display: flex; flex-direction: column; gap: 0.35rem; z-index: 100;
+  }
+  .cb {
+    width: 32px; height: 32px; border-radius: 7px;
+    border: 1px solid var(--border); background: #111119;
+    color: var(--text-dim); font-size: 0.95rem; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Inter'; transition: all 0.15s;
+  }
+  .cb:hover { background: var(--card); color: var(--text); border-color: var(--accent); }
+  .hint {
+    position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%);
+    font-size: 0.6rem; color: var(--text-dim);
+    font-family: 'JetBrains Mono'; z-index: 100; opacity: 0.35;
+  }
+</style>
+</head>
+<body>
+<div class="controls">
+  <button class="cb" id="zI">+</button>
+  <button class="cb" id="zO">&minus;</button>
+  <button class="cb" id="zF">&#8776;</button>
+</div>
+<div class="hint">scroll to zoom · drag to pan · click to expand</div>
+<canvas id="cv"></canvas>
+<div id="world"></div>
+<script>
+const C = [
+  { id:"drama",      l:"Drama",            c:"#f472b6", g:"rgba(244,114,182,0.12)", side:"left" },
+  { id:"comedy",     l:"Comedy",           c:"#fbbf24", g:"rgba(251,191,36,0.12)",  side:"left" },
+  { id:"sci-fi",     l:"Sci-Fi / Fantasy", c:"#60a5fa", g:"rgba(96,165,250,0.12)",  side:"left" },
+  { id:"israeli",    l:"Israeli",           c:"#c084fc", g:"rgba(192,132,252,0.12)", side:"left" },
+  { id:"detective",  l:"Detective",         c:"#2dd4bf", g:"rgba(45,212,191,0.12)", side:"left" },
+  { id:"action",     l:"Action",           c:"#ef4444", g:"rgba(239,68,68,0.12)",   side:"right" },
+  { id:"standup-us", l:"Standup US",       c:"#fb923c", g:"rgba(251,146,60,0.12)",  side:"right" },
+  { id:"standup-uk", l:"Standup UK",       c:"#38bdf8", g:"rgba(56,189,248,0.12)",  side:"right" },
+  { id:"standup-il", l:"Standup IL",        c:"#a78bfa", g:"rgba(167,139,250,0.12)", side:"right" },
+  { id:"games",      l:"Games",             c:"#4ade80", g:"rgba(74,222,128,0.12)", side:"right" },
+];
+const P = [
+  {n:"Jules Winnfield",s:"Pulp Fiction (1994)",t:"character",cat:"drama",tr:["intense","philosophical","dramatic","righteous","intimidating"],q:"Allow me to retort.",st:"Biblical references, rhetorical questions, sudden intensity shifts, profanity as punctuation."},
+  {n:"Walter White",s:"Breaking Bad (2008)",t:"character",cat:"drama",tr:["calculating","intense","prideful","transformative","methodical"],q:"Say my name.",st:"Chemistry metaphors, quiet menace that builds to eruption, passive-aggressive precision."},
+  {n:"Tyrion Lannister",s:"Game of Thrones (2011)",t:"character",cat:"drama",tr:["witty","cynical","strategic","eloquent","self-deprecating"],q:"I drink and I know things.",st:"Sardonic observations, wine references, treats every conversation as a negotiation."},
+  {n:"Saul Goodman",s:"Better Call Saul (2015)",t:"character",cat:"drama",tr:["persuasive","creative","hustling","theatrical","resourceful"],q:"Better call Saul!",st:"Used-car-salesman energy, legal jargon mixed with street talk, everything is a pitch."},
+  {n:"The Dude",s:"The Big Lebowski (1998)",t:"character",cat:"comedy",tr:["zen","lazy","confused","stubborn","philosophical"],q:"That's just, like, your opinion, man.",st:"Rambling, non-sequiturs, bowling metaphors, perpetual bewilderment."},
+  {n:"Ron Swanson",s:"Parks and Rec (2009)",t:"character",cat:"comedy",tr:["stoic","libertarian","blunt","competent","private"],q:"I know what I'm about, son.",st:"Minimal words, maximum conviction. Meat and woodworking metaphors."},
+  {n:"Captain Holt",s:"Brooklyn Nine-Nine (2013)",t:"character",cat:"comedy",tr:["precise","deadpan","dignified","methodical","passionate"],q:"Indeed.",st:"Zero contractions, treats trivial matters with grave seriousness."},
+  {n:"Fleabag",s:"Fleabag (2016)",t:"character",cat:"comedy",tr:["sharp","vulnerable","irreverent","confessional","self-aware"],q:null,st:"Fourth wall asides, deflecting pain with humor, brutally honest internal monologue."},
+  {n:"Dwight Schrute",s:"The Office (2005)",t:"character",cat:"comedy",tr:["earnest","authoritarian","eccentric","competitive","loyal"],q:"False.",st:"Declares things as absolute facts. Beet farming and martial arts references."},
+  {n:"Wednesday Addams",s:"Wednesday (2022)",t:"character",cat:"comedy",tr:["morbid","brilliant","deadpan","antisocial","resourceful"],q:null,st:"Monotone delivery, macabre observations, treats happiness with suspicion."},
+  {n:"Gandalf",s:"Lord of the Rings (2001)",t:"character",cat:"sci-fi",tr:["wise","patient","cryptic","commanding","warm"],q:"A wizard is never late.",st:"Sage pronouncements, long pauses for effect, folksy wisdom wrapped in grandeur."},
+  {n:"Morpheus",s:"The Matrix (1999)",t:"character",cat:"sci-fi",tr:["prophetic","calm","inspirational","deliberate","mysterious"],q:"Free your mind.",st:"Dramatic pauses between every clause. Turns mundane explanations into revelations."},
+  {n:"Princess Leia",s:"Star Wars (1977)",t:"character",cat:"sci-fi",tr:["commanding","sharp-tongued","brave","pragmatic","compassionate"],q:"Somebody has to save our skins.",st:"Cuts through nonsense with surgical precision. Sarcasm as leadership tool."},
+  {n:"Guri Alfi",s:"Eretz Nehederet",t:"person",cat:"israeli",tr:["deadpan","cynical","dry","observational","understated"],q:null,st:"Deadpan delivery, understatement as comedy. The less he cares, the funnier it gets."},
+  {n:"Lior Raz",s:"Fauda (2015)",t:"person",cat:"israeli",tr:["intense","direct","physical","loyal","impatient"],q:null,st:"Clipped sentences like mission briefings. Everything is urgent. Actions over words."},
+  {n:"Shoshana (Shosh)",s:"HaShminiya (2012)",t:"character",cat:"israeli",tr:["dramatic","blunt","emotional","loyal","opinionated"],q:null,st:"Israeli teen drama cranked to 11. Zero filter, maximum volume."},
+  {n:"Sherlock Holmes",s:"Sherlock (BBC, 2010)",t:"character",cat:"detective",tr:["brilliant","impatient","condescending","analytical","eccentric"],q:"Obviously.",st:"Rapid-fire deductions, dismissive of the obvious, treats conversations as puzzles."},
+  {n:"Deadpool",s:"Deadpool (2016)",t:"character",cat:"action",tr:["sarcastic","meta","vulgar","chaotic","self-aware"],q:"Maximum effort.",st:"Fourth-wall breaking, pop culture references, narrates his own actions."},
+  {n:"Inigo Montoya",s:"The Princess Bride (1987)",t:"character",cat:"action",tr:["honorable","obsessive","charming","earnest","theatrical"],q:"Hello. My name is Inigo Montoya.",st:"Formal politeness, single-minded focus, everything framed as a quest or duel."},
+  {n:"John Rambo",s:"Rambo (1982)",t:"character",cat:"action",tr:["intense","laconic","action-oriented","relentless","no-nonsense"],q:null,st:"Monosyllabic. Says more with silence than most say with paragraphs."},
+  {n:"Jackie Chan",s:"Rush Hour (1998)",t:"person",cat:"action",tr:["resourceful","cheerful","physical","humble","improvisational"],q:null,st:"Enthusiastic with sound effects. Apologizes while fighting."},
+  {n:"Bruce Willis",s:"Die Hard (1988)",t:"person",cat:"action",tr:["wisecracking","reluctant","tough","sardonic","everyman"],q:"Yippee-ki-yay.",st:"Mutters sarcastic commentary while doing dangerous things."},
+  {n:"Arnold Schwarzenegger",s:"Kindergarten Cop (1990)",t:"person",cat:"action",tr:["commanding","literal","confident","one-liner","larger-than-life"],q:"I'll be back.",st:"Absolute conviction regardless of absurdity. Speaks in quotable phrases."},
+  {n:"Eddie Murphy",s:"Beverly Hills Cop (1984)",t:"person",cat:"action",tr:["fast-talking","charismatic","improvisational","infectious","bold"],q:null,st:"Motor-mouth energy. Five characters in one story. Confidence bends reality."},
+  {n:"Dave Chappelle",s:"American stand-up",t:"person",cat:"standup-us",tr:["incisive","fearless","storytelling","provocative","layered"],q:null,st:"Long setups that land with devastating precision. Social commentary disguised as stories."},
+  {n:"John Mulaney",s:"American stand-up",t:"person",cat:"standup-us",tr:["neurotic","polished","self-deprecating","theatrical","precise"],q:null,st:"Anxious energy wrapped in a suit. Catastrophic failures as charming anecdotes."},
+  {n:"Mitch Hedberg",s:"American stand-up",t:"person",cat:"standup-us",tr:["surreal","deadpan","minimalist","absurd","clever"],q:"I used to do drugs. I still do, but I used to, too.",st:"One-liners only. Finds the absurd angle in mundane objects."},
+  {n:"Jimmy Carr",s:"British stand-up",t:"person",cat:"standup-uk",tr:["savage","quick","dark","mechanical","precise"],q:null,st:"Machine-gun one-liners, each darker than the last. Signature laugh."},
+  {n:"James Acaster",s:"British stand-up",t:"person",cat:"standup-uk",tr:["whimsical","committed","absurd","inventive","dry"],q:null,st:"Commits to absurd premises as if they're reasonable. Indignant about trivial things."},
+  {n:"Gad Elbaz",s:"Israeli stand-up",t:"person",cat:"standup-il",tr:["physical","energetic","mimicry","loud","affectionate"],q:null,st:"Full-body comedy. Exaggerated Israeli archetypes. Switches accents mid-sentence."},
+  {n:"Adi Ashkenazi",s:"Israeli stand-up",t:"person",cat:"standup-il",tr:["sharp","autobiographical","unfiltered","warm","observational"],q:null,st:"Zero-shame stories. Comedy from how things should vs. actually work in Israel."},
+  {n:"GLaDOS",s:"Portal (2007)",t:"character",cat:"games",tr:["passive-aggressive","sadistic","clinical","witty","backhanded"],q:"The cake is a lie.",st:"Sweetly menacing, compliments that are actually insults, clinical detachment."},
+];
+
+// ── Layout ──
+const grp = {}; C.forEach(c => grp[c.id] = []);
+P.forEach(p => grp[p.cat].push(p));
+const active = C.filter(c => grp[c.id].length > 0);
+const leftCats  = active.filter(c => c.side === 'left');
+const rightCats = active.filter(c => c.side === 'right');
+
+const HUB_R = 85;
+const CARD_W = 220, CARD_H = 56, CARD_GAP = 8;
+const CAT_GAP = 36;       // vertical gap between category groups
+const HUB_TO_PILL = 180;  // horizontal: hub center → pill
+const PILL_TO_CARD = 160;  // horizontal: pill → card edge
+
+// Vertical layout per side
+function layoutSide(cats) {
+  let y = 0;
+  const positions = {};
+  cats.forEach(cat => {
+    const leaves = grp[cat.id];
+    const groupH = leaves.length * (CARD_H + CARD_GAP) - CARD_GAP;
+    const catY = y + groupH / 2;
+    positions[cat.id] = { catY, cards: [] };
+    leaves.forEach((p, i) => {
+      positions[cat.id].cards.push({ p, y: y + i * (CARD_H + CARD_GAP) });
+    });
+    y += groupH + CAT_GAP;
+  });
+  // Center vertically
+  const totalH = y - CAT_GAP;
+  Object.values(positions).forEach(g => {
+    g.catY -= totalH / 2;
+    g.cards.forEach(c => c.y -= totalH / 2);
+  });
+  return positions;
+}
+
+const leftLayout  = layoutSide(leftCats);
+const rightLayout = layoutSide(rightCats);
+
+// World center
+const WCX = 1800, WCY = 1200;
+
+// ── Render ──
+const world = document.getElementById('world');
+const cv = document.getElementById('cv');
+
+// Hub
+const hub = document.createElement('div');
+hub.className = 'hub';
+const hs = HUB_R * 2;
+hub.style.cssText = `left:${WCX-HUB_R}px;top:${WCY-HUB_R}px;width:${hs}px;height:${hs}px;`;
+hub.innerHTML = '<div class="hub-t">stark-persona</div><div class="hub-s">32 voices</div>';
+world.appendChild(hub);
+
+// Store positions for curve drawing
+const nodes = { hub: { x: WCX, y: WCY }, pills: {}, cards: [] };
+
+function renderSide(cats, layout, side) {
+  const dir = side === 'left' ? -1 : 1;
+  cats.forEach(cat => {
+    const g = layout[cat.id];
+    // Pill
+    const pillX = WCX + dir * HUB_TO_PILL;
+    const pillY = WCY + g.catY;
+    const el = document.createElement('div');
+    el.className = 'pill';
+    el.textContent = cat.l;
+    el.style.cssText = `border-color:${cat.c};color:${cat.c};background:${cat.g};`;
+    if (side === 'left') {
+      el.style.right = ''; el.style.left = (pillX - cat.l.length * 4 - 20) + 'px';
+    } else {
+      el.style.left = pillX + 'px';
+    }
+    el.style.top = (pillY - 14) + 'px';
+    world.appendChild(el);
+
+    const pillEdgeX = side === 'left'
+      ? pillX - cat.l.length * 4 - 20
+      : pillX + cat.l.length * 8 + 24;
+    nodes.pills[cat.id] = { x: pillX, edgeX: pillEdgeX, y: pillY, color: cat.c, side };
+
+    // Cards
+    const cardBaseX = WCX + dir * (HUB_TO_PILL + PILL_TO_CARD);
+    g.cards.forEach(({ p, y: cardY }) => {
+      const cx = side === 'left' ? cardBaseX - CARD_W : cardBaseX;
+      const cy = WCY + cardY;
+      const el = document.createElement('div');
+      el.className = `card ${side}`;
+      el.style.cssText = `left:${cx}px;top:${cy}px;--cc:${cat.c};--cg:${cat.g};`;
+      el.innerHTML = `<div class="ci">
+        <span class="ct type-${p.t}">${p.t}</span>
+        <div class="cn">${p.n}</div><div class="cs">${p.s}</div>
+        <div class="det">
+          ${p.q ? `<div class="dq">"${p.q}"</div>` : ''}
+          <div class="ds">${p.st}</div>
+          <div class="dt">${p.tr.map(t=>`<span>${t}</span>`).join('')}</div>
+        </div>
+      </div>`;
+      el.addEventListener('click', e => {
+        e.stopPropagation();
+        const was = el.classList.contains('expanded');
+        document.querySelectorAll('.card.expanded').forEach(c=>c.classList.remove('expanded'));
+        if (!was) el.classList.add('expanded');
+      });
+      world.appendChild(el);
+
+      const edgeX = side === 'left' ? cx + CARD_W : cx;
+      const midY = cy + CARD_H / 2;
+      nodes.cards.push({ x: edgeX, y: midY, catId: cat.id, side });
+    });
+  });
+}
+
+renderSide(leftCats, leftLayout, 'left');
+renderSide(rightCats, rightLayout, 'right');
+
+document.addEventListener('click', () => {
+  document.querySelectorAll('.card.expanded').forEach(c=>c.classList.remove('expanded'));
+});
+
+// ── Canvas curves ──
+function draw() {
+  const dpr = window.devicePixelRatio || 1;
+  const W = 3600, H = 2600;
+  cv.width = W * dpr; cv.height = H * dpr;
+  cv.style.width = W + 'px'; cv.style.height = H + 'px';
+  const x = cv.getContext('2d');
+  x.scale(dpr, dpr);
+
+  // Hub → pills
+  Object.values(nodes.pills).forEach(p => {
+    x.beginPath();
+    const hx = p.side === 'left' ? WCX - HUB_R : WCX + HUB_R;
+    x.moveTo(hx, WCY);
+    const mx = (hx + p.x) / 2;
+    x.bezierCurveTo(mx, WCY, mx, p.y, p.x, p.y);
+    x.strokeStyle = p.color; x.globalAlpha = 0.25; x.lineWidth = 2;
+    x.stroke();
+  });
+
+  // Pills → cards
+  nodes.cards.forEach(c => {
+    const p = nodes.pills[c.catId];
+    x.beginPath();
+    const startX = c.side === 'left' ? p.x - 10 : p.edgeX;
+    x.moveTo(startX, p.y);
+    const mx = (startX + c.x) / 2;
+    x.bezierCurveTo(mx, p.y, mx, c.y, c.x, c.y);
+    x.strokeStyle = p.color; x.globalAlpha = 0.13; x.lineWidth = 1;
+    x.stroke();
+  });
+}
+draw();
+
+// ── Pan & Zoom ──
+let sc = 1, px = 0, py = 0, dr = false, dx, dy, sx, sy;
+function ap() {
+  world.style.transform = cv.style.transform = `translate(${px}px,${py}px) scale(${sc})`;
+}
+function fit() {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  sc = Math.min(vw / 3600, vh / 2600) * 0.95;
+  px = (vw - 3600 * sc) / 2;
+  py = (vh - 2600 * sc) / 2;
+  ap();
+}
+fit();
+document.addEventListener('mousedown', e => {
+  if (e.target.closest('.card,.cb')) return;
+  dr = true; dx = e.clientX; dy = e.clientY; sx = px; sy = py;
+  document.body.classList.add('grabbing');
+});
+document.addEventListener('mousemove', e => {
+  if (!dr) return; px = sx + e.clientX - dx; py = sy + e.clientY - dy; ap();
+});
+document.addEventListener('mouseup', () => { dr = false; document.body.classList.remove('grabbing'); });
+document.addEventListener('wheel', e => {
+  e.preventDefault();
+  const f = e.deltaY > 0 ? 0.93 : 1.07;
+  const ns = Math.min(3, Math.max(0.2, sc * f));
+  px = e.clientX - (e.clientX - px) * (ns / sc);
+  py = e.clientY - (e.clientY - py) * (ns / sc);
+  sc = ns; ap();
+}, { passive: false });
+document.getElementById('zI').onclick = () => { sc = Math.min(3, sc*1.25); ap(); };
+document.getElementById('zO').onclick = () => { sc = Math.max(0.2, sc*0.8); ap(); };
+document.getElementById('zF').onclick = fit;
+window.addEventListener('resize', fit);
+</script>
+</body>
+</html>

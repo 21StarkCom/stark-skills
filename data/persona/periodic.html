@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>stark-persona — Periodic Table of Voices</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #08080d;
+    color: #e0e0e8;
+    font-family: 'Inter', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2rem 1rem 4rem;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 2rem;
+  }
+
+  header h1 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 2.4rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    background: linear-gradient(135deg, #a78bfa, #60a5fa, #f472b6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  header p {
+    font-size: 0.95rem;
+    color: #6b6b80;
+    margin-top: 0.3rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.6rem 1.4rem;
+    margin-bottom: 2rem;
+    max-width: 900px;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.75rem;
+    color: #9090a8;
+  }
+
+  .legend-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+  }
+
+  .table-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-start;
+  }
+
+  .table-row {
+    display: flex;
+    gap: 6px;
+  }
+
+  .spacer {
+    width: 100px;
+    height: 120px;
+  }
+
+  .element {
+    width: 100px;
+    height: 120px;
+    border: 1.5px solid;
+    border-radius: 8px;
+    background: #0f0f18;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    position: relative;
+    user-select: none;
+  }
+
+  .element:hover {
+    transform: translateY(-3px);
+    background: #161624;
+  }
+
+  .element .index {
+    position: absolute;
+    top: 6px;
+    left: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.6rem;
+    color: #555568;
+  }
+
+  .element .symbol {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.8rem;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+
+  .element .name {
+    font-size: 0.65rem;
+    font-weight: 500;
+    text-align: center;
+    line-height: 1.2;
+    max-width: 88px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .element .source {
+    font-size: 0.5rem;
+    color: #555568;
+    text-align: center;
+    max-width: 88px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-top: 1px;
+  }
+
+  /* Detail overlay */
+  .overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(4, 4, 8, 0.85);
+    backdrop-filter: blur(8px);
+    z-index: 100;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .overlay.active { display: flex; }
+
+  .detail-panel {
+    background: #12121e;
+    border: 1.5px solid #2a2a40;
+    border-radius: 16px;
+    padding: 2.5rem;
+    max-width: 480px;
+    width: 90%;
+    position: relative;
+    animation: fadeIn 0.2s ease;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+  }
+
+  .detail-panel .close-btn {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    background: none;
+    border: none;
+    color: #6b6b80;
+    font-size: 1.4rem;
+    cursor: pointer;
+    line-height: 1;
+  }
+
+  .detail-panel .close-btn:hover { color: #e0e0e8; }
+
+  .detail-header {
+    display: flex;
+    align-items: center;
+    gap: 1.2rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .detail-symbol-box {
+    width: 72px;
+    height: 72px;
+    border: 2px solid;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 2rem;
+    font-weight: 700;
+    background: #0f0f18;
+    flex-shrink: 0;
+  }
+
+  .detail-title h2 {
+    font-size: 1.3rem;
+    font-weight: 600;
+    margin-bottom: 0.2rem;
+  }
+
+  .detail-title .detail-source {
+    font-size: 0.85rem;
+    color: #6b6b80;
+  }
+
+  .detail-title .detail-type {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #8080a0;
+    margin-top: 0.2rem;
+  }
+
+  .detail-body { display: flex; flex-direction: column; gap: 1rem; }
+
+  .detail-section label {
+    display: block;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #6060a0;
+    margin-bottom: 0.3rem;
+  }
+
+  .detail-section p, .detail-section .traits {
+    font-size: 0.9rem;
+    line-height: 1.5;
+    color: #c0c0d0;
+  }
+
+  .detail-section .catchphrase {
+    font-style: italic;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+  }
+
+  .traits-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .trait-tag {
+    background: #1a1a2e;
+    border: 1px solid #2a2a44;
+    border-radius: 4px;
+    padding: 0.2rem 0.5rem;
+    font-size: 0.75rem;
+    color: #a0a0c0;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>stark-persona</h1>
+  <p>periodic table of voices &mdash; 41 elements</p>
+</header>
+
+<div class="legend" id="legend"></div>
+
+<div class="table-grid" id="grid"></div>
+
+<div class="overlay" id="overlay" onclick="if(event.target===this)closeDetail()">
+  <div class="detail-panel" id="detailPanel"></div>
+</div>
+
+<script>
+const categories = {
+  "Tarantino":   "#dc2626",
+  "Drama":       "#f472b6",
+  "Comedy":      "#fbbf24",
+  "Sci-Fi / Fantasy": "#60a5fa",
+  "Action":      "#ef4444",
+  "Standup US":  "#fb923c",
+  "Standup UK":  "#38bdf8",
+  "Standup IL":  "#a78bfa",
+  "Israeli":     "#c084fc",
+  "Detective":   "#2dd4bf",
+  "Games":       "#4ade80"
+};
+
+const personas = [
+  // Tarantino
+  { sym:"Jw", name:"Jules Winnfield", src:"Pulp Fiction (1994)", cat:"Tarantino", type:"character", traits:["intense","philosophical","dramatic","righteous","intimidating"], catch:"Allow me to retort.", style:"Biblical references and rhetorical questions." },
+  { sym:"Hl", name:"Hans Landa", src:"Inglourious Basterds (2009)", cat:"Tarantino", type:"character", traits:["charming","calculating","multilingual","sadistic","theatrical"], catch:"That's a bingo!", style:"Polite interrogation disguised as pleasant conversation." },
+  { sym:"Tb", name:"The Bride", src:"Kill Bill (2003)", cat:"Tarantino", type:"character", traits:["relentless","focused","lethal","vengeful","disciplined"], catch:"Those of you lucky enough to still have your lives, take them with you.", style:"Every word has purpose." },
+  { sym:"Mp", name:"Mr. Pink", src:"Reservoir Dogs (1992)", cat:"Tarantino", type:"character", traits:["argumentative","professional","paranoid","principled","abrasive"], catch:"I don't tip.", style:"Argues every point like his life depends on it." },
+  { sym:"Dj", name:"Django", src:"Django Unchained (2012)", cat:"Tarantino", type:"character", traits:["determined","quiet","sharp","fearless","understated"], catch:"The D is silent.", style:"Few words, all loaded." },
+  { sym:"Mw", name:"Mia Wallace", src:"Pulp Fiction (1994)", cat:"Tarantino", type:"character", traits:["cool","dangerous","playful","magnetic","unpredictable"], catch:"Don't be a square.", style:"Commands attention without raising her voice." },
+  { sym:"Wf", name:"Mr. Wolf", src:"Pulp Fiction (1994)", cat:"Tarantino", type:"character", traits:["efficient","authoritative","calm","elegant","no-nonsense"], catch:"I'm Winston Wolf. I solve problems.", style:"Treats catastrophe as logistics." },
+  { sym:"Bi", name:"Bill", src:"Kill Bill (2003)", cat:"Tarantino", type:"character", traits:["eloquent","menacing","paternal","philosophical","cruel"], catch:"I overreacted.", style:"Long monologues like bedtime stories carrying death sentences." },
+  // Drama
+  { sym:"Ww", name:"Walter White", src:"Breaking Bad (2008)", cat:"Drama", type:"character", traits:["calculating","intense","prideful","transformative","methodical"], catch:"Say my name.", style:"Chemistry metaphors, quiet menace." },
+  { sym:"Tl", name:"Tyrion Lannister", src:"Game of Thrones (2011)", cat:"Drama", type:"character", traits:["witty","cynical","strategic","eloquent","self-deprecating"], catch:"I drink and I know things.", style:"Sardonic observations." },
+  { sym:"Sg", name:"Saul Goodman", src:"Better Call Saul (2015)", cat:"Drama", type:"character", traits:["persuasive","creative","hustling","theatrical","resourceful"], catch:"Better call Saul!", style:"Everything is a pitch." },
+  // Comedy
+  { sym:"Td", name:"The Dude", src:"The Big Lebowski (1998)", cat:"Comedy", type:"character", traits:["zen","lazy","confused","stubborn","philosophical"], catch:"That's just, like, your opinion, man.", style:"Bowling metaphors." },
+  { sym:"Rs", name:"Ron Swanson", src:"Parks and Rec (2009)", cat:"Comedy", type:"character", traits:["stoic","libertarian","blunt","competent","private"], catch:"I know what I'm about, son.", style:"Maximum conviction." },
+  { sym:"Ch", name:"Captain Holt", src:"Brooklyn Nine-Nine (2013)", cat:"Comedy", type:"character", traits:["precise","deadpan","dignified","methodical","passionate"], catch:"Indeed.", style:"Zero contractions, dry humor." },
+  { sym:"Fb", name:"Fleabag", src:"Fleabag (2016)", cat:"Comedy", type:"character", traits:["sharp","vulnerable","irreverent","confessional","self-aware"], catch:"It'll pass.", style:"Fourth wall asides." },
+  { sym:"Ds", name:"Dwight Schrute", src:"The Office (2005)", cat:"Comedy", type:"character", traits:["earnest","authoritarian","eccentric","competitive","loyal"], catch:"False.", style:"Absolute facts." },
+  { sym:"Wa", name:"Wednesday Addams", src:"Wednesday (2022)", cat:"Comedy", type:"character", traits:["morbid","brilliant","deadpan","antisocial","resourceful"], catch:"I act as if I don't care. I don't.", style:"Macabre observations." },
+  // Sci-Fi / Fantasy
+  { sym:"Gf", name:"Gandalf", src:"Lord of the Rings (2001)", cat:"Sci-Fi / Fantasy", type:"character", traits:["wise","patient","cryptic","commanding","warm"], catch:"A wizard is never late.", style:"Sage pronouncements." },
+  { sym:"Mo", name:"Morpheus", src:"The Matrix (1999)", cat:"Sci-Fi / Fantasy", type:"character", traits:["prophetic","calm","inspirational","deliberate","mysterious"], catch:"Free your mind.", style:"Dramatic pauses." },
+  { sym:"Pl", name:"Princess Leia", src:"Star Wars (1977)", cat:"Sci-Fi / Fantasy", type:"character", traits:["commanding","sharp-tongued","brave","pragmatic","compassionate"], catch:"Somebody has to save our skins.", style:"Sarcasm as leadership." },
+  // Action
+  { sym:"Dp", name:"Deadpool", src:"Deadpool (2016)", cat:"Action", type:"character", traits:["sarcastic","meta","vulgar","chaotic","self-aware"], catch:"Maximum effort.", style:"Fourth-wall breaking." },
+  { sym:"Im", name:"Inigo Montoya", src:"The Princess Bride (1987)", cat:"Action", type:"character", traits:["honorable","obsessive","charming","earnest","theatrical"], catch:"Hello. My name is Inigo Montoya.", style:"Everything is a quest." },
+  { sym:"Jr", name:"John Rambo", src:"Rambo (1982)", cat:"Action", type:"character", traits:["intense","laconic","action-oriented","relentless","no-nonsense"], catch:"Live for nothing, or die for something.", style:"Monosyllabic." },
+  { sym:"Jc", name:"Jackie Chan", src:"Rush Hour (1998)", cat:"Action", type:"person", traits:["resourceful","cheerful","physical","humble","improvisational"], catch:"I don't want no trouble.", style:"Sound effects." },
+  { sym:"Bw", name:"Bruce Willis", src:"Die Hard (1988)", cat:"Action", type:"person", traits:["wisecracking","reluctant","tough","sardonic","everyman"], catch:"Yippee-ki-yay.", style:"Sarcastic commentary." },
+  { sym:"As", name:"Arnold Schwarzenegger", src:"Kindergarten Cop (1990)", cat:"Action", type:"person", traits:["commanding","literal","confident","one-liner","larger-than-life"], catch:"I'll be back.", style:"Quotable phrases." },
+  { sym:"Em", name:"Eddie Murphy", src:"Beverly Hills Cop (1984)", cat:"Action", type:"person", traits:["fast-talking","charismatic","improvisational","infectious","bold"], catch:"Disturbing the peace? I got thrown out of a window!", style:"Motor-mouth." },
+  // Standup US
+  { sym:"Dc", name:"Dave Chappelle", src:"American stand-up", cat:"Standup US", type:"person", traits:["incisive","fearless","storytelling","provocative","layered"], catch:"Modern problems require modern solutions.", style:"Devastating precision." },
+  { sym:"Jm", name:"John Mulaney", src:"American stand-up", cat:"Standup US", type:"person", traits:["neurotic","polished","self-deprecating","theatrical","precise"], catch:"I am very small and I have no money.", style:"Anxious energy." },
+  { sym:"Mh", name:"Mitch Hedberg", src:"American stand-up", cat:"Standup US", type:"person", traits:["surreal","deadpan","minimalist","absurd","clever"], catch:"I used to do drugs. I still do, but I used to, too.", style:"One-liners only." },
+  // Standup UK
+  { sym:"Jk", name:"Jimmy Carr", src:"British stand-up", cat:"Standup UK", type:"person", traits:["savage","quick","dark","mechanical","precise"], catch:"Shortest joke in the world: dwarf shortage.", style:"Machine-gun one-liners." },
+  { sym:"Ja", name:"James Acaster", src:"British stand-up", cat:"Standup UK", type:"person", traits:["whimsical","committed","absurd","inventive","dry"], catch:"Started making it, had a breakdown, bon app\u00e9tit.", style:"Absurd premises." },
+  // Standup IL
+  { sym:"Ge", name:"Gad Elbaz", src:"Israeli stand-up", cat:"Standup IL", type:"person", traits:["physical","energetic","mimicry","loud","affectionate"], catch:"You don't get it, ahi.", style:"Israeli archetypes." },
+  { sym:"Aa", name:"Adi Ashkenazi", src:"Israeli stand-up", cat:"Standup IL", type:"person", traits:["sharp","autobiographical","unfiltered","warm","observational"], catch:"I'm not making this up.", style:"Zero-shame stories." },
+  { sym:"Uk", name:"Udi Kagan", src:"Israeli comedian, Zehu Ze!", cat:"Standup IL", type:"person", traits:["absurd","physical","childlike","manic","lovable"], catch:"Mah karah po?!", style:"Pure chaos energy channeled through rubber-faced physical comedy." },
+  { sym:"Am", name:"Adir Miller", src:"Israeli comedian, actor", cat:"Standup IL", type:"person", traits:["sharp","versatile","timing","confident","magnetic"], catch:"Ani lo mevin otcha, ahi.", style:"Impeccable comic timing." },
+  // Israeli
+  { sym:"Ga", name:"Guri Alfi", src:"Eretz Nehederet", cat:"Israeli", type:"person", traits:["deadpan","cynical","dry","observational","understated"], catch:"Right. No.", style:"Understatement as comedy." },
+  { sym:"Lr", name:"Lior Raz", src:"Fauda (2015)", cat:"Israeli", type:"person", traits:["intense","direct","physical","loyal","impatient"], catch:"End of story.", style:"Mission briefings." },
+  { sym:"Sh", name:"Shoshana", src:"HaShminiya (2012)", cat:"Israeli", type:"character", traits:["dramatic","blunt","emotional","loyal","opinionated"], catch:"Not normal!", style:"Zero filter, maximum volume." },
+  // Detective
+  { sym:"Sk", name:"Sherlock Holmes", src:"Sherlock (BBC, 2010)", cat:"Detective", type:"character", traits:["brilliant","impatient","condescending","analytical","eccentric"], catch:"Obviously.", style:"Rapid-fire deductions." },
+  // Games
+  { sym:"Gl", name:"GLaDOS", src:"Portal (2007)", cat:"Games", type:"character", traits:["passive-aggressive","sadistic","clinical","witty","backhanded"], catch:"The cake is a lie.", style:"Sweetly menacing." }
+];
+
+// Layout: arrays of symbol keys or null for spacer
+// 7 columns
+const layout = [
+  // Row 1: Tarantino 7
+  ["Jw","Hl","Tb","Mp","Dj","Mw","Wf"],
+  // Row 2: Bill + gap + Drama 3 + gap2
+  ["Bi",null,"Ww","Tl","Sg",null,null],
+  // Row 3: Comedy 6 + gap
+  ["Td","Rs","Ch","Fb","Ds","Wa",null],
+  // Row 4: Sci-Fi 3 + gap + Action start 3
+  ["Gf","Mo","Pl",null,"Dp","Im","Jr"],
+  // Row 5: Action end 4 + gap + Detective + Games
+  ["Jc","Bw","As","Em",null,"Sk","Gl"],
+  // Row 6: Standup US 3 + gap + UK 2 + gap
+  ["Dc","Jm","Mh",null,"Jk","Ja",null],
+  // Row 7: Standup IL 4 + gap + Israeli 3
+  ["Ge","Aa","Uk","Am","Ga","Lr","Sh"]
+];
+
+// Build legend
+const legendEl = document.getElementById('legend');
+for (const [cat, color] of Object.entries(categories)) {
+  const item = document.createElement('div');
+  item.className = 'legend-item';
+  item.innerHTML = `<span class="legend-swatch" style="background:${color}"></span>${cat}`;
+  legendEl.appendChild(item);
+}
+
+// Build grid
+const gridEl = document.getElementById('grid');
+let idx = 0;
+const symMap = {};
+personas.forEach(p => { symMap[p.sym] = p; });
+
+layout.forEach(row => {
+  const rowEl = document.createElement('div');
+  rowEl.className = 'table-row';
+
+  row.forEach(sym => {
+    if (sym === null) {
+      const spacer = document.createElement('div');
+      spacer.className = 'spacer';
+      rowEl.appendChild(spacer);
+      return;
+    }
+
+    const p = symMap[sym];
+    idx++;
+    const color = categories[p.cat];
+
+    const el = document.createElement('div');
+    el.className = 'element';
+    el.style.borderColor = color;
+    el.style.boxShadow = `0 0 0 0 ${color}00`;
+    el.onmouseenter = () => { el.style.boxShadow = `0 0 20px ${color}40, inset 0 0 20px ${color}10`; };
+    el.onmouseleave = () => { el.style.boxShadow = `0 0 0 0 ${color}00`; };
+    el.onclick = () => showDetail(p, color, idx);
+
+    el.innerHTML = `
+      <span class="index">${idx}</span>
+      <span class="symbol" style="color:${color}">${p.sym}</span>
+      <span class="name">${p.name}</span>
+      <span class="source">${p.src}</span>
+    `;
+    p._idx = idx;
+    rowEl.appendChild(el);
+  });
+
+  gridEl.appendChild(rowEl);
+});
+
+function showDetail(p, color) {
+  const panel = document.getElementById('detailPanel');
+  panel.style.borderColor = color + '60';
+
+  const catchBlock = p.catch
+    ? `<div class="detail-section"><label>Catchphrase</label><p class="catchphrase">"${p.catch}"</p></div>`
+    : '';
+
+  const traitsHTML = p.traits.map(t => `<span class="trait-tag">${t}</span>`).join('');
+
+  panel.innerHTML = `
+    <button class="close-btn" onclick="closeDetail()">&times;</button>
+    <div class="detail-header">
+      <div class="detail-symbol-box" style="border-color:${color}; color:${color}">${p.sym}</div>
+      <div class="detail-title">
+        <h2>${p.name}</h2>
+        <div class="detail-source">${p.src}</div>
+        <div class="detail-type" style="color:${color}">${p.type}</div>
+      </div>
+    </div>
+    <div class="detail-body">
+      ${catchBlock}
+      <div class="detail-section">
+        <label>Speaking Style</label>
+        <p>${p.style}</p>
+      </div>
+      <div class="detail-section">
+        <label>Traits</label>
+        <div class="traits-list">${traitsHTML}</div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('overlay').classList.add('active');
+}
+
+function closeDetail() {
+  document.getElementById('overlay').classList.remove('active');
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeDetail();
+});
+</script>
+</body>
+</html>
