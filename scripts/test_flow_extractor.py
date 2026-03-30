@@ -1,12 +1,16 @@
 """Tests for workflow extraction from SKILL.md files."""
 
+import json
 from pathlib import Path
+
+import pytest
 
 from flow_extractor import (
     _classify_node,
     _derive_edges,
     _detect_direction,
     _generate_node_id,
+    _load_override,
     extract_workflow,
 )
 from flow_schema import FlowNode, FlowPosition
@@ -51,8 +55,10 @@ def test_extract_step_based_skill():
     assert any(node.type == 'output' for node in diagram.nodes)
 
 
-def test_no_workflow_skill_returns_none():
-    assert extract_workflow(_skill_path('stark-persona')) is None
+def test_no_workflow_skill_returns_none(tmp_path):
+    """Skill with no workflow AND no override file returns None."""
+    # Use empty override_dir to bypass stark-persona's override file
+    assert extract_workflow(_skill_path('stark-persona'), override_dir=tmp_path) is None
 
 
 def test_classify_node_variants():
@@ -87,3 +93,95 @@ def test_derive_edges_for_sequential_nodes():
         ('step1', 'step2', None),
         ('step2', 'step3', None),
     ]
+
+
+# --- Override file tests ---
+
+
+def test_override_file_used_when_present():
+    """stark-persona has usage.flow-override.json; extract_workflow should return it."""
+    diagram = extract_workflow(_skill_path('stark-persona'))
+
+    assert diagram is not None
+    assert len(diagram.nodes) == 3
+    assert diagram.nodes[0].id == 'invoke'
+    assert diagram.nodes[0].type == 'start'
+    assert diagram.nodes[2].id == 'apply'
+    assert diagram.nodes[2].type == 'output'
+    assert diagram.nodes[2].category == 'file'
+    assert len(diagram.edges) == 2
+
+
+def test_override_file_explicit_override_dir(tmp_path):
+    """Override dir can be passed explicitly."""
+    override_data = {
+        'version': 1,
+        'direction': 'LR',
+        'nodes': [
+            {'id': 'a', 'type': 'start', 'label': 'A', 'position': {'x': 0, 'y': 0}},
+            {'id': 'b', 'type': 'end', 'label': 'B', 'position': {'x': 100, 'y': 0}},
+        ],
+        'edges': [{'id': 'a-b', 'source': 'a', 'target': 'b'}],
+    }
+    (tmp_path / 'usage.flow-override.json').write_text(json.dumps(override_data))
+
+    diagram = extract_workflow(_skill_path('stark-review'), override_dir=tmp_path)
+
+    assert diagram is not None
+    assert diagram.direction == 'LR'
+    assert len(diagram.nodes) == 2
+    assert diagram.nodes[0].id == 'a'
+
+
+def test_override_internals_section(tmp_path):
+    """section='internals' looks for internals.flow-override.json."""
+    override_data = {
+        'version': 1,
+        'nodes': [
+            {'id': 'x', 'type': 'start', 'label': 'X', 'position': {'x': 0, 'y': 0}},
+            {'id': 'y', 'type': 'end', 'label': 'Y', 'position': {'x': 0, 'y': 100}},
+        ],
+        'edges': [{'id': 'x-y', 'source': 'x', 'target': 'y'}],
+    }
+    (tmp_path / 'internals.flow-override.json').write_text(json.dumps(override_data))
+
+    diagram = extract_workflow(_skill_path('stark-review'), override_dir=tmp_path, section='internals')
+
+    assert diagram is not None
+    assert diagram.nodes[0].id == 'x'
+
+
+def test_override_invalid_json_falls_back(tmp_path):
+    """Invalid JSON in override file falls back to extraction."""
+    (tmp_path / 'usage.flow-override.json').write_text('{not valid json}')
+
+    diagram = extract_workflow(_skill_path('stark-review'), override_dir=tmp_path)
+
+    # Falls back to markdown extraction, which succeeds for stark-review
+    assert diagram is not None
+    assert len(diagram.nodes) >= 5
+
+
+def test_override_invalid_schema_falls_back(tmp_path):
+    """Override file with valid JSON but invalid schema falls back to extraction."""
+    bad_data = {'version': 1, 'nodes': [], 'edges': [{'id': 'e1', 'source': 'missing', 'target': 'also_missing'}]}
+    (tmp_path / 'usage.flow-override.json').write_text(json.dumps(bad_data))
+
+    diagram = extract_workflow(_skill_path('stark-review'), override_dir=tmp_path)
+
+    assert diagram is not None
+    assert len(diagram.nodes) >= 5
+
+
+def test_load_override_nonexistent_dir(tmp_path):
+    """_load_override returns None when directory has no override file."""
+    assert _load_override(tmp_path, 'usage') is None
+
+
+def test_no_override_falls_through():
+    """Without override file, stark-review extracts normally from markdown."""
+    # stark-review has no override file, should extract from SKILL.md
+    diagram = extract_workflow(_skill_path('stark-review'))
+
+    assert diagram is not None
+    assert len(diagram.nodes) >= 5
