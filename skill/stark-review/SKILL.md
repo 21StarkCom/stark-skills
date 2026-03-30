@@ -603,7 +603,7 @@ When running in review-only mode (no fix loop), adapt the metrics:
 
 ### Agent counting
 
-Agent counts are **per-round** (18 dispatched = 3 agents × 6 domains per round). The metrics block shows the **last round's** agent counts. Total dispatches across all rounds go in the phase timing breakdown.
+Agent counts are **per-round** (27 dispatched = 3 agents × 9 domains per round). The metrics block shows the **last round's** agent counts. Total dispatches across all rounds go in the phase timing breakdown.
 
 ## Review Guidelines
 
