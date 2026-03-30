@@ -42,13 +42,13 @@ All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.claude/skil
 ### Pipeline (end-to-end, in order)
 
 - `/stark-design "prompt" | <path>` — generate design doc from requirements (3 agents generate, 6 cross-reviews, synthesized)
-- `/stark-review-design <path>` — multi-agent design/spec review (N agents × 10 domains, default N=2)
+- `/stark-review-design <path>` — multi-agent design/spec review (N agents × 11 domains, default N=2)
 - `/stark-design-to-plan <path>` — generate implementation plan from design doc (3 agents, 6 cross-reviews, synthesized)
 - `/stark-review-plan <path>` — multi-agent execution plan review (N agents × 10 adversarial domains, default N=2)
 - `/stark-plan-to-tasks <path> [--dry-run] [--cleanup <slug>]` — decompose plan into phased GitHub issues (3 LLM passes)
 - `/stark-phase-execute <plan-slug> [--dry-run]` — autonomous phase execution: implement all tasks, PR, review, merge, release, dashboard
 - `/stark-autopilot <plan-or-prompt>` — autonomous implementation with tournament at every step (3 agents compete in worktrees)
-- `/stark-review [PR_NUMBER]` — multi-agent PR code review (3 LLMs × 6 domains)
+- `/stark-review [PR_NUMBER]` — multi-agent PR code review (3 LLMs × 9 domains)
 - `/stark-review-improvement [--prompts-dir DIR]` — improve prompts based on review assessment (PR or design/plan review)
 - `/stark-review-design-improvement` — improve design review prompts (wraps /stark-review-improvement with --prompts-dir design-review)
 

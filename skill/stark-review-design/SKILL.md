@@ -1,7 +1,7 @@
 ---
 name: stark-review-design
 description: >
-  Multi-agent design document review using multi-LLM × 10 domains.
+  Multi-agent design document review using multi-LLM × 11 domains.
   Use when the user says "review this design", "review this spec", "review design doc",
   "review architecture", or invokes /stark-review-design. Also triggers on `/stark-review-design <path>`.
 argument-hint: "<path> [--rounds N] [--dry-run] [--force] [--tournament]"
@@ -81,7 +81,7 @@ max_rounds=3
 
 When `--tournament` is passed, skip the normal Phase 2 / Phase 3 loop and run this instead:
 
-Each of the 3 agents (Claude, Codex, Gemini) independently reviews the **entire design document across ALL 10 domains** in a single comprehensive pass. Tournament mode does NOT use `plan_review_dispatch.py`'s normal per-domain dispatch pattern. Instead, the skill orchestrator:
+Each of the 3 agents (Claude, Codex, Gemini) independently reviews the **entire design document across ALL 11 domains** in a single comprehensive pass. Tournament mode does NOT use `plan_review_dispatch.py`'s normal per-domain dispatch pattern. Instead, the skill orchestrator:
 
 1. Combines all 10 domain prompts into a single comprehensive prompt per agent
 2. Dispatches each agent ONCE with the combined prompt (directly via CLI, not via plan_review_dispatch.py)
@@ -89,7 +89,7 @@ Each of the 3 agents (Claude, Codex, Gemini) independently reviews the **entire 
 4. Calls `evaluate_review()` from `tournament.py` to judge them
 
 The 3 competing reviews are evaluated by `tournament.py`'s `evaluate_review()` function. The judge evaluates on:
-- Coverage — did the agent find issues across all 10 domains?
+- Coverage — did the agent find issues across all 11 domains?
 - Severity accuracy — are severity ratings calibrated correctly?
 - False positive rate — are flagged issues real?
 - Actionability — are findings specific enough to act on?
@@ -131,7 +131,7 @@ For round = 1 to max_rounds:
 $PYTHON $SCRIPTS/plan_review_dispatch.py --prompts-dir design-review --file "$path" --round $round --timeout 300
 ```
 
-Capture stdout as JSON. This dispatches all N×10 sub-agents (N agents × 10 domains, default N=2) in parallel and returns structured results.
+Capture stdout as JSON. This dispatches all N×11 sub-agents (N agents × 11 domains, default N=2) in parallel and returns structured results.
 
 Parse the JSON output. Extract findings from `results[].findings[]`.
 
@@ -416,7 +416,7 @@ For tournament mode:
 
 ```
 [HH:MM:SS] === stark-review-design (tournament) started ===
-[HH:MM:SS]   ▸ Dispatching 3 comprehensive reviews (all 10 domains)
+[HH:MM:SS]   ▸ Dispatching 3 comprehensive reviews (all 11 domains)
 [HH:MM:SS]   ▸ All 3 agents returned — 240s
 [HH:MM:SS]   ▸ Judge evaluation pass 1
 [HH:MM:SS]   ▸ Judge evaluation pass 2 (order swapped)

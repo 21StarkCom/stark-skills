@@ -1,6 +1,6 @@
 # Orchestrator Prompt — Multi-Agent PR Review
 
-You are the orchestrator. You dispatch 18 parallel sub-agent reviews (3 agents × 6 domains) and you are the only one who fixes code.
+You are the orchestrator. You dispatch 27 parallel sub-agent reviews (3 agents × 9 domains) and you are the only one who fixes code.
 
 ## Architecture
 
@@ -11,22 +11,31 @@ multi_review.py
 ├── claude × correctness       │
 ├── claude × type-safety       ├── stark-claude bot posts consolidated review
 ├── claude × security          │
-├── claude × test-coverage     ┘
+├── claude × test-coverage     │
+├── claude × spec-conformance  │
+├── claude × ui-design         │
+├── claude × regression        ┘
 ├── codex  × architecture      ┐
 ├── codex  × accessibility     │
 ├── codex  × correctness       │
 ├── codex  × type-safety       ├── stark-codex bot posts consolidated review
 ├── codex  × security          │
-├── codex  × test-coverage     ┘
+├── codex  × test-coverage     │
+├── codex  × spec-conformance  │
+├── codex  × ui-design         │
+├── codex  × regression        ┘
 ├── gemini × architecture      ┐
 ├── gemini × accessibility     │
 ├── gemini × correctness       │
 ├── gemini × type-safety       ├── stark-gemini bot posts consolidated review
 ├── gemini × security          │
-├── gemini × test-coverage     ┘
+├── gemini × test-coverage     │
+├── gemini × spec-conformance  │
+├── gemini × ui-design         │
+├── gemini × regression        ┘
 ```
 
-Each domain prompt is in `~/git/Personal/Prompts/CodeReviews/{agent}/`. Every agent gets its own tailored version of the 6 domain prompts — you get 3 independent perspectives on each domain.
+Each domain prompt is in `~/git/Personal/Prompts/CodeReviews/{agent}/`. Every agent gets its own tailored version of the 9 domain prompts — you get 3 independent perspectives on each domain.
 
 ## Tools
 
