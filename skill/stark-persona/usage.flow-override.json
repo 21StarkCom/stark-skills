@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "direction": "TB",
+  "nodes": [
+    {"id": "invoke", "type": "start", "label": "Invoke /stark-persona", "position": {"x": 0, "y": 0}},
+    {"id": "select", "type": "process", "label": "Select persona (weighted random)", "position": {"x": 0, "y": 100}},
+    {"id": "apply", "type": "output", "label": "Write active.json", "category": "file", "position": {"x": 0, "y": 200}}
+  ],
+  "edges": [
+    {"id": "invoke--select", "source": "invoke", "target": "select"},
+    {"id": "select--apply", "source": "select", "target": "apply"}
+  ]
+}

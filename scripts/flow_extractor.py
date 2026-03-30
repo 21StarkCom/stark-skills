@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+
+from pydantic import ValidationError
 
 from flow_schema import FlowDiagram, FlowEdge, FlowNode, FlowPosition
 
@@ -35,8 +38,38 @@ class Section:
     level: int
 
 
-def extract_workflow(skill_path: Path) -> FlowDiagram | None:
-    """Read a SKILL.md file and extract a flow diagram when possible."""
+def _load_override(override_dir: Path, section: str) -> FlowDiagram | None:
+    """Load and validate a flow-override JSON file, returning FlowDiagram or None."""
+    override_path = override_dir / f'{section}.flow-override.json'
+    if not override_path.exists():
+        return None
+    try:
+        data = json.loads(override_path.read_text(encoding='utf-8'))
+        diagram = FlowDiagram.model_validate(data)
+        logger.info('Loaded override from %s', override_path)
+        return diagram
+    except (json.JSONDecodeError, ValidationError) as exc:
+        logger.warning('Invalid override file %s: %s', override_path, exc)
+        return None
+
+
+def extract_workflow(
+    skill_path: Path,
+    *,
+    override_dir: Path | None = None,
+    section: str = 'usage',
+) -> FlowDiagram | None:
+    """Read a SKILL.md file and extract a flow diagram when possible.
+
+    If *override_dir* is given (or defaults to skill_path's parent), checks for
+    ``<section>.flow-override.json`` first. When found and valid, returns that
+    diagram directly without extracting from markdown.
+    """
+    check_dir = override_dir if override_dir is not None else skill_path.parent
+    override = _load_override(check_dir, section)
+    if override is not None:
+        return override
+
     content = skill_path.read_text(encoding='utf-8')
     sections = _find_workflow_sections(content)
     if not sections:
