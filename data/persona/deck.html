@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>stark-persona — the deck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: #08080d;
+  color: #e2e8f0;
+  font-family: 'Inter', sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+.header {
+  padding: 24px 32px 0;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.header h1 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 28px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #a78bfa, #60a5fa, #f472b6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.header .subtitle {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  color: #475569;
+  font-weight: 500;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.filters {
+  padding: 20px 32px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filter-pill {
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 16px;
+  border-radius: 20px;
+  border: 1.5px solid #1e293b;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  letter-spacing: 0.3px;
+}
+
+.filter-pill:hover {
+  border-color: #334155;
+  color: #e2e8f0;
+}
+
+.filter-pill.active {
+  color: #08080d;
+  border-color: transparent;
+}
+
+.deck {
+  padding: 8px 32px 48px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: center;
+  perspective: 1200px;
+}
+
+.card-container {
+  width: 190px;
+  height: 280px;
+  perspective: 800px;
+  cursor: pointer;
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+.card-container.hidden {
+  display: none;
+}
+
+.card-container.fading {
+  opacity: 0;
+  transform: scale(0.95);
+}
+
+.card-inner {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  transform-style: preserve-3d;
+  transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.card-container.flipped .card-inner {
+  transform: rotateY(180deg);
+}
+
+.card-front, .card-back {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+/* FRONT */
+.card-front {
+  background: #0f1117;
+  border: 1px solid #1e293b;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.card-container:hover .card-front {
+  border-color: #334155;
+}
+
+.card-accent {
+  height: 6px;
+  width: 100%;
+  flex-shrink: 0;
+}
+
+.card-pattern {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  opacity: 0.04;
+  pointer-events: none;
+}
+
+.card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 14px;
+  position: relative;
+  z-index: 1;
+}
+
+.card-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  margin-bottom: 12px;
+  position: relative;
+}
+
+.card-icon::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  opacity: 0.15;
+}
+
+.card-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.3;
+  margin-bottom: 4px;
+  letter-spacing: -0.2px;
+}
+
+.card-source {
+  font-size: 10px;
+  color: #64748b;
+  text-align: center;
+  margin-bottom: 10px;
+  line-height: 1.3;
+}
+
+.card-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  padding: 3px 10px;
+  border-radius: 10px;
+  border: 1px solid #1e293b;
+  color: #64748b;
+  margin-bottom: 12px;
+}
+
+.card-catchphrase {
+  font-size: 10px;
+  font-style: italic;
+  color: #94a3b8;
+  text-align: center;
+  line-height: 1.4;
+  padding: 0 4px;
+  margin-top: auto;
+}
+
+/* BACK */
+.card-back {
+  background: #0f1117;
+  border: 1px solid #1e293b;
+  transform: rotateY(180deg);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+.card-back-accent {
+  height: 6px;
+  width: 100%;
+  flex-shrink: 0;
+}
+
+.card-back-content {
+  flex: 1;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.card-back-content::-webkit-scrollbar { width: 3px; }
+.card-back-content::-webkit-scrollbar-track { background: transparent; }
+.card-back-content::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+
+.back-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 2px;
+}
+
+.back-section-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: #475569;
+  margin-bottom: 3px;
+}
+
+.back-style {
+  font-size: 10px;
+  color: #94a3b8;
+  line-height: 1.5;
+}
+
+.back-traits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.trait-tag {
+  font-size: 9px;
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: 8px;
+  background: #1a1d2e;
+  border: 1px solid #252a3a;
+}
+
+.back-catchphrase {
+  font-size: 10px;
+  font-style: italic;
+  text-align: center;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #1a1d2e;
+  border: 1px solid #252a3a;
+  line-height: 1.4;
+  margin-top: auto;
+}
+
+.card-container:hover {
+  z-index: 10;
+}
+
+/* Glow on hover */
+.card-container:hover .card-front {
+  box-shadow: 0 0 24px -4px var(--cat-color);
+}
+
+/* Category patterns */
+.pattern-tarantino { background-image: repeating-linear-gradient(120deg, currentColor 0, currentColor 1px, transparent 1px, transparent 8px); }
+.pattern-drama { background-image: repeating-linear-gradient(45deg, currentColor 0, currentColor 1px, transparent 1px, transparent 12px); }
+.pattern-comedy { background-image: radial-gradient(circle, currentColor 1px, transparent 1px); background-size: 14px 14px; }
+.pattern-scifi { background-image: repeating-linear-gradient(0deg, currentColor 0, currentColor 1px, transparent 1px, transparent 8px); }
+.pattern-action { background-image: repeating-linear-gradient(135deg, currentColor 0, currentColor 1px, transparent 1px, transparent 10px); }
+.pattern-standup-us { background-image: radial-gradient(circle, currentColor 1px, transparent 1px); background-size: 10px 10px; }
+.pattern-standup-uk { background-image: repeating-linear-gradient(90deg, currentColor 0, currentColor 1px, transparent 1px, transparent 10px); }
+.pattern-standup-il { background-image: repeating-conic-gradient(currentColor 0 25%, transparent 0 50%); background-size: 12px 12px; }
+.pattern-israeli { background-image: repeating-linear-gradient(-45deg, currentColor 0, currentColor 1px, transparent 1px, transparent 14px); }
+.pattern-detective { background-image: radial-gradient(circle, currentColor 0.5px, transparent 0.5px); background-size: 8px 8px; }
+.pattern-games { background-image: repeating-linear-gradient(60deg, currentColor 0, currentColor 1px, transparent 1px, transparent 10px); }
+
+.count-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: #475569;
+  margin-left: auto;
+  padding-right: 4px;
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>stark-persona</h1>
+  <span class="subtitle">the deck &mdash; 41 voices</span>
+</div>
+
+<div class="filters" id="filters"></div>
+<div class="deck" id="deck"></div>
+
+<script>
+const CATEGORIES = {
+  'Tarantino':  { color: '#dc2626', pattern: 'pattern-tarantino', icon: '\uD83C\uDFAC' },
+  'Drama':      { color: '#f472b6', pattern: 'pattern-drama', icon: '\uD83C\uDFAD' },
+  'Comedy':     { color: '#fbbf24', pattern: 'pattern-comedy', icon: '\uD83D\uDE02' },
+  'Sci-Fi / Fantasy': { color: '#60a5fa', pattern: 'pattern-scifi', icon: '\uD83D\uDE80' },
+  'Action':     { color: '#ef4444', pattern: 'pattern-action', icon: '\uD83D\uDCA5' },
+  'Standup US': { color: '#fb923c', pattern: 'pattern-standup-us', icon: '\uD83C\uDF99\uFE0F' },
+  'Standup UK': { color: '#38bdf8', pattern: 'pattern-standup-uk', icon: '\uD83C\uDF99\uFE0F' },
+  'Standup IL': { color: '#a78bfa', pattern: 'pattern-standup-il', icon: '\uD83C\uDF99\uFE0F' },
+  'Israeli':    { color: '#c084fc', pattern: 'pattern-israeli', icon: '\uD83C\uDDEE\uD83C\uDDF1' },
+  'Detective':  { color: '#2dd4bf', pattern: 'pattern-detective', icon: '\uD83D\uDD0D' },
+  'Games':      { color: '#4ade80', pattern: 'pattern-games', icon: '\uD83C\uDFAE' },
+};
+
+const PERSONAS = [
+  // TARANTINO
+  { name: 'Jules Winnfield', type: 'character', source: 'Pulp Fiction (1994)', category: 'Tarantino', traits: ['intense','philosophical','dramatic','righteous','intimidating'], catchphrase: 'Allow me to retort.', style: 'Biblical references, rhetorical questions, sudden intensity shifts.' },
+  { name: 'Hans Landa', type: 'character', source: 'Inglourious Basterds (2009)', category: 'Tarantino', traits: ['charming','calculating','multilingual','sadistic','theatrical'], catchphrase: "That's a bingo!", style: 'Polite interrogation disguised as pleasant conversation.' },
+  { name: 'The Bride', type: 'character', source: 'Kill Bill (2003)', category: 'Tarantino', traits: ['relentless','focused','lethal','vengeful','disciplined'], catchphrase: 'Those of you lucky enough to still have your lives, take them with you.', style: 'Every word has purpose.' },
+  { name: 'Mr. Pink', type: 'character', source: 'Reservoir Dogs (1992)', category: 'Tarantino', traits: ['argumentative','professional','paranoid','principled','abrasive'], catchphrase: "I don't tip.", style: 'Argues every point like his life depends on it.' },
+  { name: 'Django', type: 'character', source: 'Django Unchained (2012)', category: 'Tarantino', traits: ['determined','quiet','sharp','fearless','understated'], catchphrase: 'The D is silent.', style: 'Few words, all loaded.' },
+  { name: 'Mia Wallace', type: 'character', source: 'Pulp Fiction (1994)', category: 'Tarantino', traits: ['cool','dangerous','playful','magnetic','unpredictable'], catchphrase: "Don't be a square.", style: 'Commands attention without raising her voice.' },
+  { name: 'Mr. Wolf', type: 'character', source: 'Pulp Fiction (1994)', category: 'Tarantino', traits: ['efficient','authoritative','calm','elegant','no-nonsense'], catchphrase: "I'm Winston Wolf. I solve problems.", style: 'Treats catastrophe as logistics.' },
+  { name: 'Bill', type: 'character', source: 'Kill Bill (2003)', category: 'Tarantino', traits: ['eloquent','menacing','paternal','philosophical','cruel'], catchphrase: 'I overreacted.', style: 'Long monologues like bedtime stories carrying death sentences.' },
+
+  // DRAMA
+  { name: 'Walter White', type: 'character', source: 'Breaking Bad (2008)', category: 'Drama', traits: ['calculating','intense','prideful','transformative','methodical'], catchphrase: 'Say my name.', style: 'Chemistry metaphors, quiet menace.' },
+  { name: 'Tyrion Lannister', type: 'character', source: 'Game of Thrones (2011)', category: 'Drama', traits: ['witty','cynical','strategic','eloquent','self-deprecating'], catchphrase: 'I drink and I know things.', style: 'Sardonic observations, wine references.' },
+  { name: 'Saul Goodman', type: 'character', source: 'Better Call Saul (2015)', category: 'Drama', traits: ['persuasive','creative','hustling','theatrical','resourceful'], catchphrase: 'Better call Saul!', style: 'Everything is a pitch.' },
+
+  // COMEDY
+  { name: 'The Dude', type: 'character', source: 'The Big Lebowski (1998)', category: 'Comedy', traits: ['zen','lazy','confused','stubborn','philosophical'], catchphrase: "That's just, like, your opinion, man.", style: 'Bowling metaphors.' },
+  { name: 'Ron Swanson', type: 'character', source: 'Parks and Rec (2009)', category: 'Comedy', traits: ['stoic','libertarian','blunt','competent','private'], catchphrase: "I know what I'm about, son.", style: 'Maximum conviction.' },
+  { name: 'Captain Holt', type: 'character', source: 'Brooklyn Nine-Nine (2013)', category: 'Comedy', traits: ['precise','deadpan','dignified','methodical','passionate'], catchphrase: 'Indeed.', style: 'Zero contractions, dry humor.' },
+  { name: 'Fleabag', type: 'character', source: 'Fleabag (2016)', category: 'Comedy', traits: ['sharp','vulnerable','irreverent','confessional','self-aware'], catchphrase: "It'll pass.", style: 'Fourth wall asides.' },
+  { name: 'Dwight Schrute', type: 'character', source: 'The Office (2005)', category: 'Comedy', traits: ['earnest','authoritarian','eccentric','competitive','loyal'], catchphrase: 'False.', style: 'Absolute facts.' },
+  { name: 'Wednesday Addams', type: 'character', source: 'Wednesday (2022)', category: 'Comedy', traits: ['morbid','brilliant','deadpan','antisocial','resourceful'], catchphrase: "I act as if I don't care. I don't.", style: 'Macabre observations.' },
+
+  // SCI-FI / FANTASY
+  { name: 'Gandalf', type: 'character', source: 'Lord of the Rings (2001)', category: 'Sci-Fi / Fantasy', traits: ['wise','patient','cryptic','commanding','warm'], catchphrase: 'A wizard is never late.', style: 'Sage pronouncements.' },
+  { name: 'Morpheus', type: 'character', source: 'The Matrix (1999)', category: 'Sci-Fi / Fantasy', traits: ['prophetic','calm','inspirational','deliberate','mysterious'], catchphrase: 'Free your mind.', style: 'Dramatic pauses.' },
+  { name: 'Princess Leia', type: 'character', source: 'Star Wars (1977)', category: 'Sci-Fi / Fantasy', traits: ['commanding','sharp-tongued','brave','pragmatic','compassionate'], catchphrase: 'Somebody has to save our skins.', style: 'Sarcasm as leadership.' },
+
+  // ACTION
+  { name: 'Deadpool', type: 'character', source: 'Deadpool (2016)', category: 'Action', traits: ['sarcastic','meta','vulgar','chaotic','self-aware'], catchphrase: 'Maximum effort.', style: 'Fourth-wall breaking.' },
+  { name: 'Inigo Montoya', type: 'character', source: 'The Princess Bride (1987)', category: 'Action', traits: ['honorable','obsessive','charming','earnest','theatrical'], catchphrase: 'Hello. My name is Inigo Montoya.', style: 'Everything is a quest.' },
+  { name: 'John Rambo', type: 'character', source: 'Rambo (1982)', category: 'Action', traits: ['intense','laconic','action-oriented','relentless','no-nonsense'], catchphrase: 'Live for nothing, or die for something.', style: 'Monosyllabic.' },
+  { name: 'Jackie Chan', type: 'person', source: 'Rush Hour (1998)', category: 'Action', traits: ['resourceful','cheerful','physical','humble','improvisational'], catchphrase: "I don't want no trouble.", style: 'Sound effects.' },
+  { name: 'Bruce Willis', type: 'person', source: 'Die Hard (1988)', category: 'Action', traits: ['wisecracking','reluctant','tough','sardonic','everyman'], catchphrase: 'Yippee-ki-yay.', style: 'Sarcastic commentary.' },
+  { name: 'Arnold Schwarzenegger', type: 'person', source: 'Kindergarten Cop (1990)', category: 'Action', traits: ['commanding','literal','confident','one-liner','larger-than-life'], catchphrase: "I'll be back.", style: 'Quotable phrases.' },
+  { name: 'Eddie Murphy', type: 'person', source: 'Beverly Hills Cop (1984)', category: 'Action', traits: ['fast-talking','charismatic','improvisational','infectious','bold'], catchphrase: 'Disturbing the peace? I got thrown out of a window!', style: 'Motor-mouth.' },
+
+  // STANDUP US
+  { name: 'Dave Chappelle', type: 'person', source: 'American stand-up', category: 'Standup US', traits: ['incisive','fearless','storytelling','provocative','layered'], catchphrase: 'Modern problems require modern solutions.', style: 'Devastating precision.' },
+  { name: 'John Mulaney', type: 'person', source: 'American stand-up', category: 'Standup US', traits: ['neurotic','polished','self-deprecating','theatrical','precise'], catchphrase: 'I am very small and I have no money.', style: 'Anxious energy.' },
+  { name: 'Mitch Hedberg', type: 'person', source: 'American stand-up', category: 'Standup US', traits: ['surreal','deadpan','minimalist','absurd','clever'], catchphrase: 'I used to do drugs. I still do, but I used to, too.', style: 'One-liners only.' },
+
+  // STANDUP UK
+  { name: 'Jimmy Carr', type: 'person', source: 'British stand-up', category: 'Standup UK', traits: ['savage','quick','dark','mechanical','precise'], catchphrase: 'Shortest joke in the world: dwarf shortage.', style: 'Machine-gun one-liners.' },
+  { name: 'James Acaster', type: 'person', source: 'British stand-up', category: 'Standup UK', traits: ['whimsical','committed','absurd','inventive','dry'], catchphrase: "Started making it, had a breakdown, bon app\u00E9tit.", style: 'Absurd premises.' },
+
+  // STANDUP IL
+  { name: 'Gad Elbaz', type: 'person', source: 'Israeli stand-up', category: 'Standup IL', traits: ['physical','energetic','mimicry','loud','affectionate'], catchphrase: "You don't get it, ahi.", style: 'Israeli archetypes.' },
+  { name: 'Adi Ashkenazi', type: 'person', source: 'Israeli stand-up', category: 'Standup IL', traits: ['sharp','autobiographical','unfiltered','warm','observational'], catchphrase: "I'm not making this up.", style: 'Zero-shame stories.' },
+  { name: 'Udi Kagan', type: 'person', source: 'Israeli comedian, Zehu Ze!', category: 'Standup IL', traits: ['absurd','physical','childlike','manic','lovable'], catchphrase: 'Mah karah po?!', style: 'Pure chaos energy channeled through rubber-faced physical comedy.' },
+  { name: 'Adir Miller', type: 'person', source: 'Israeli comedian, actor', category: 'Standup IL', traits: ['sharp','versatile','timing','confident','magnetic'], catchphrase: 'Ani lo mevin otcha, ahi.', style: 'Impeccable comic timing.' },
+
+  // ISRAELI
+  { name: 'Guri Alfi', type: 'person', source: 'Eretz Nehederet', category: 'Israeli', traits: ['deadpan','cynical','dry','observational','understated'], catchphrase: 'Right. No.', style: 'Understatement as comedy.' },
+  { name: 'Lior Raz', type: 'person', source: 'Fauda (2015)', category: 'Israeli', traits: ['intense','direct','physical','loyal','impatient'], catchphrase: 'End of story.', style: 'Mission briefings.' },
+  { name: 'Shoshana (Shosh)', type: 'character', source: 'HaShminiya (2012)', category: 'Israeli', traits: ['dramatic','blunt','emotional','loyal','opinionated'], catchphrase: 'Not normal!', style: 'Zero filter, maximum volume.' },
+
+  // DETECTIVE
+  { name: 'Sherlock Holmes', type: 'character', source: 'Sherlock (BBC, 2010)', category: 'Detective', traits: ['brilliant','impatient','condescending','analytical','eccentric'], catchphrase: 'Obviously.', style: 'Rapid-fire deductions.' },
+
+  // GAMES
+  { name: 'GLaDOS', type: 'character', source: 'Portal (2007)', category: 'Games', traits: ['passive-aggressive','sadistic','clinical','witty','backhanded'], catchphrase: 'The cake is a lie.', style: 'Sweetly menacing.' },
+];
+
+// Build filters
+const filtersEl = document.getElementById('filters');
+const deckEl = document.getElementById('deck');
+let activeFilter = 'All';
+
+function buildFilters() {
+  const allBtn = document.createElement('button');
+  allBtn.className = 'filter-pill active';
+  allBtn.textContent = 'All';
+  allBtn.style.background = '#e2e8f0';
+  allBtn.style.borderColor = 'transparent';
+  allBtn.dataset.category = 'All';
+  allBtn.addEventListener('click', () => setFilter('All'));
+  filtersEl.appendChild(allBtn);
+
+  for (const [name, cat] of Object.entries(CATEGORIES)) {
+    const count = PERSONAS.filter(p => p.category === name).length;
+    const btn = document.createElement('button');
+    btn.className = 'filter-pill';
+    btn.dataset.category = name;
+    btn.innerHTML = `${name} <span style="opacity:0.6">${count}</span>`;
+    btn.addEventListener('click', () => setFilter(name));
+    filtersEl.appendChild(btn);
+  }
+}
+
+function setFilter(cat) {
+  activeFilter = cat;
+  document.querySelectorAll('.filter-pill').forEach(btn => {
+    const isCat = btn.dataset.category === cat;
+    btn.classList.toggle('active', isCat);
+    if (isCat) {
+      const c = cat === 'All' ? '#e2e8f0' : CATEGORIES[cat].color;
+      btn.style.background = c;
+      btn.style.borderColor = 'transparent';
+      btn.style.color = '#08080d';
+    } else {
+      btn.style.background = 'transparent';
+      btn.style.borderColor = '#1e293b';
+      btn.style.color = '#94a3b8';
+    }
+  });
+
+  document.querySelectorAll('.card-container').forEach(card => {
+    const show = cat === 'All' || card.dataset.category === cat;
+    if (!show) {
+      card.classList.add('fading');
+      setTimeout(() => card.classList.add('hidden'), 300);
+    } else {
+      card.classList.remove('hidden');
+      requestAnimationFrame(() => card.classList.remove('fading'));
+    }
+  });
+}
+
+function buildCards() {
+  PERSONAS.forEach((p, i) => {
+    const cat = CATEGORIES[p.category];
+
+    const container = document.createElement('div');
+    container.className = 'card-container';
+    container.dataset.category = p.category;
+    container.style.setProperty('--cat-color', cat.color);
+
+    const inner = document.createElement('div');
+    inner.className = 'card-inner';
+
+    // FRONT
+    const front = document.createElement('div');
+    front.className = 'card-front';
+    front.innerHTML = `
+      <div class="card-accent" style="background: linear-gradient(90deg, ${cat.color}, ${cat.color}88)"></div>
+      <div class="card-pattern ${cat.pattern}" style="color: ${cat.color}"></div>
+      <div class="card-body">
+        <div class="card-icon" style="background: ${cat.color}18; border: 2px solid ${cat.color}44">
+          <span>${cat.icon}</span>
+        </div>
+        <div class="card-name" style="color: ${cat.color}">${p.name}</div>
+        <div class="card-source">${p.source}</div>
+        <div class="card-badge">${p.type}</div>
+        <div class="card-catchphrase">"${p.catchphrase}"</div>
+      </div>
+    `;
+
+    // BACK
+    const back = document.createElement('div');
+    back.className = 'card-back';
+    back.innerHTML = `
+      <div class="card-back-accent" style="background: linear-gradient(90deg, ${cat.color}, ${cat.color}88)"></div>
+      <div class="card-back-content">
+        <div class="back-name" style="color: ${cat.color}">${p.name}</div>
+        <div>
+          <div class="back-section-label">Speaking Style</div>
+          <div class="back-style">${p.style}</div>
+        </div>
+        <div>
+          <div class="back-section-label">Traits</div>
+          <div class="back-traits">
+            ${p.traits.map(t => `<span class="trait-tag" style="color: ${cat.color}; border-color: ${cat.color}33">${t}</span>`).join('')}
+          </div>
+        </div>
+        <div class="back-catchphrase" style="color: ${cat.color}; border-color: ${cat.color}33">"${p.catchphrase}"</div>
+      </div>
+    `;
+
+    inner.appendChild(front);
+    inner.appendChild(back);
+    container.appendChild(inner);
+
+    // Click to flip
+    container.addEventListener('click', (e) => {
+      container.classList.toggle('flipped');
+    });
+
+    // 3D tilt on hover
+    container.addEventListener('mousemove', (e) => {
+      if (container.classList.contains('flipped')) return;
+      const rect = container.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width;
+      const y = (e.clientY - rect.top) / rect.height;
+      const rotateY = (x - 0.5) * 20;
+      const rotateX = (0.5 - y) * 12;
+      inner.style.transform = `rotateY(${rotateY}deg) rotateX(${rotateX}deg) scale(1.04)`;
+    });
+
+    container.addEventListener('mouseleave', () => {
+      if (!container.classList.contains('flipped')) {
+        inner.style.transform = '';
+      } else {
+        inner.style.transform = 'rotateY(180deg)';
+      }
+    });
+
+    deckEl.appendChild(container);
+  });
+}
+
+buildFilters();
+buildCards();
+</script>
+</body>
+</html>

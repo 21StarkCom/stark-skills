@@ -141,11 +141,11 @@ class TestLoadRoster:
         assert "Biblical" in jules.speaking_style
         assert jules.date_signals.get("Samuel L. Jackson birthday") == "1948-12-21"
 
-    def test_none_catchphrase(self) -> None:
+    def test_person_type(self) -> None:
         roster = load_roster(SEED_ROSTER)
         guri = next(r for r in roster if r.slug == "guri-alfi")
-        assert guri.catchphrase is None
         assert guri.type == "person"
+        assert guri.catchphrase == "Right. No."
 
     def test_missing_file_creates_seed(self, tmp_path: Path) -> None:
         """When roster file is missing, load_roster creates a minimal seed."""
