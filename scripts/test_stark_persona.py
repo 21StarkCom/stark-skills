@@ -407,8 +407,10 @@ class TestWeightedSelection:
             slug = result["persona"]
             picks[slug] = picks.get(slug, 0) + 1
 
-        # jules should appear more than average (>20% of 100 picks for 5 personas)
-        assert picks.get("jules-winnfield", 0) > 10
+        # jules (weight ~3.0) should appear more than uniform average
+        n_personas = len(roster)
+        uniform_avg = 100 / n_personas
+        assert picks.get("jules-winnfield", 0) > uniform_avg
         conn.close()
 
 
@@ -424,7 +426,7 @@ class TestDateMatching:
 
     def test_no_match_on_random_date(self) -> None:
         roster = load_roster(SEED_ROSTER)
-        matches = get_date_matches(roster, today=datetime.date(2026, 1, 15))
+        matches = get_date_matches(roster, today=datetime.date(2026, 3, 15))
         assert len(matches) == 0
 
     def test_date_gate_25_percent(self, tmp_path: Path) -> None:
@@ -586,19 +588,24 @@ class TestComboGeneration:
 
     def test_recipe_hash_deterministic(self, tmp_path: Path) -> None:
         """Same personas (in any order) produce the same recipe hash."""
-        conn = init_db(tmp_path / "persona.db")
         roster = load_roster(SEED_ROSTER)
-        sync_weights(roster, conn)
 
-        # Use same seed twice
+        # Use separate fresh DBs so the first run's weight changes don't affect the second
+        conn1 = init_db(tmp_path / "persona1.db")
+        sync_weights(roster, conn1)
         r1 = select_combo(
-            roster, conn, active_path=tmp_path / "active.json", rng=random.Random(42)
+            roster, conn1, active_path=tmp_path / "active1.json", rng=random.Random(42)
         )
+        conn1.close()
+
+        conn2 = init_db(tmp_path / "persona2.db")
+        sync_weights(roster, conn2)
         r2 = select_combo(
-            roster, conn, active_path=tmp_path / "active.json", rng=random.Random(42)
+            roster, conn2, active_path=tmp_path / "active2.json", rng=random.Random(42)
         )
+        conn2.close()
+
         assert r1["recipe_hash"] == r2["recipe_hash"]
-        conn.close()
 
     def test_combo_stored_in_db(self, tmp_path: Path) -> None:
         conn = init_db(tmp_path / "persona.db")

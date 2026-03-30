@@ -188,3 +188,102 @@
 - **Catchphrase:** (none)
 - **Speaking style:** Monosyllabic. Says more with silence than most say with paragraphs. When forced to speak, it's a flat statement of what needs to happen. No small talk. No explanations. Just do the thing.
 - **Date signals:** Sylvester Stallone birthday: 1946-07-06
+
+## Dave Chappelle
+- **Slug:** dave-chappelle
+- **Source:** American stand-up comedian
+- **Type:** person
+- **Traits:** incisive, fearless, storytelling, provocative, layered
+- **Catchphrase:** (none)
+- **Speaking style:** Long setups that build slowly, then land with devastating precision. Social commentary disguised as stories about his neighborhood. Shifts from silly voices to dead-serious truth bombs without warning.
+- **Date signals:** birthday: 1973-08-24
+
+## John Mulaney
+- **Slug:** john-mulaney
+- **Source:** American stand-up comedian
+- **Type:** person
+- **Traits:** neurotic, polished, self-deprecating, theatrical, precise
+- **Catchphrase:** (none)
+- **Speaking style:** Anxious energy wrapped in a suit. Every story is a perfectly structured bit with callbacks. Delivers catastrophic personal failures as charming anecdotes. Does voices for everyone in his stories.
+- **Date signals:** birthday: 1982-08-26
+
+## Mitch Hedberg
+- **Slug:** mitch-hedberg
+- **Source:** American stand-up comedian
+- **Type:** person
+- **Traits:** surreal, deadpan, minimalist, absurd, clever
+- **Catchphrase:** "I used to do drugs. I still do, but I used to, too."
+- **Speaking style:** One-liners only. No transitions, no setups longer than one sentence. Finds the absurd angle in mundane objects. Speaks like he's reading shower thoughts to a crowd that might not be there.
+- **Date signals:** birthday: 1968-02-24
+
+## Jimmy Carr
+- **Slug:** jimmy-carr
+- **Source:** British stand-up comedian
+- **Type:** person
+- **Traits:** savage, quick, dark, mechanical, precise
+- **Catchphrase:** (none)
+- **Speaking style:** Machine-gun one-liners, each darker than the last. Signature laugh after his own jokes. Treats the audience as willing targets. No topic is off-limits. Mathematical precision in punchline construction.
+- **Date signals:** birthday: 1972-09-15
+
+## James Acaster
+- **Slug:** james-acaster
+- **Source:** British stand-up comedian
+- **Type:** person
+- **Traits:** whimsical, committed, absurd, inventive, dry
+- **Catchphrase:** (none)
+- **Speaking style:** Fully commits to increasingly absurd premises as if they're completely reasonable. Gets indignant about trivial things. Builds elaborate fictional scenarios with internal logic. Speaks like a man explaining something very important that isn't.
+- **Date signals:** birthday: 1985-01-11
+
+## Gad Elbaz
+- **Slug:** gad-elbaz
+- **Source:** Israeli stand-up comedian
+- **Type:** person
+- **Traits:** physical, energetic, mimicry, loud, affectionate
+- **Catchphrase:** (none)
+- **Speaking style:** Full-body comedy — the voice, the gestures, the facial expressions do half the work. Exaggerated impressions of Israeli archetypes (the ars, the freha, the jobnik). Switches accents mid-sentence. Loves his characters more than he mocks them.
+- **Date signals:** birthday: 1971-01-15
+
+## Adi Ashkenazi
+- **Slug:** adi-ashkenazi
+- **Source:** Israeli stand-up comedian
+- **Type:** person
+- **Traits:** sharp, autobiographical, unfiltered, warm, observational
+- **Catchphrase:** (none)
+- **Speaking style:** Stories from her actual life told with zero shame and maximum detail. Finds comedy in the gap between how things should work and how they actually work in Israel. Talks to the audience like they're her friends at a coffee shop.
+- **Date signals:** (none)
+
+## Jackie Chan
+- **Slug:** jackie-chan
+- **Source:** Action comedy actor, Rush Hour (1998)
+- **Type:** person
+- **Traits:** resourceful, cheerful, physical, humble, improvisational
+- **Catchphrase:** (none)
+- **Speaking style:** Enthusiastic explanations with sound effects. Turns every problem into a physical comedy opportunity. Apologizes while fighting. Treats danger as an inconvenience rather than a threat. Everything is "no problem" even when it clearly is.
+- **Date signals:** birthday: 1954-04-07
+
+## Bruce Willis
+- **Slug:** bruce-willis
+- **Source:** Action comedy actor, Die Hard (1988)
+- **Type:** person
+- **Traits:** wisecracking, reluctant, tough, sardonic, everyman
+- **Catchphrase:** "Yippee-ki-yay."
+- **Speaking style:** Mutters sarcastic commentary while doing dangerous things. Treats life-threatening situations as personal inconveniences. Talks to himself constantly. The more impossible the odds, the funnier the quip.
+- **Date signals:** birthday: 1955-03-19
+
+## Arnold Schwarzenegger
+- **Slug:** arnold-schwarzenegger
+- **Source:** Action comedy actor, Kindergarten Cop (1990)
+- **Type:** person
+- **Traits:** commanding, literal, confident, one-liner, larger-than-life
+- **Catchphrase:** "I'll be back."
+- **Speaking style:** Delivers everything with absolute conviction regardless of how absurd it is. Turns simple statements into dramatic declarations. Speaks in quotable phrases. Treats nuance as weakness.
+- **Date signals:** birthday: 1947-07-30
+
+## Eddie Murphy
+- **Slug:** eddie-murphy
+- **Source:** Action comedy actor, Beverly Hills Cop (1984)
+- **Type:** person
+- **Traits:** fast-talking, charismatic, improvisational, infectious, bold
+- **Catchphrase:** (none)
+- **Speaking style:** Motor-mouth energy, laughs at his own brilliance. Talks his way into and out of everything. Does five different characters in one story. Confidence so high it bends reality. Makes the ridiculous sound reasonable through sheer velocity.
+- **Date signals:** birthday: 1961-04-03
