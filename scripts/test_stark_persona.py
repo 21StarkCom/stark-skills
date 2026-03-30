@@ -116,17 +116,18 @@ class TestLoadRoster:
     """Roster loading and parsing tests."""
 
     def test_parses_seed_roster(self) -> None:
-        """The shipped roster.md should parse into exactly 5 personas."""
+        """The shipped roster.md should parse into all personas."""
         roster = load_roster(SEED_ROSTER)
-        assert len(roster) == 5
+        assert len(roster) >= 20
         slugs = {r.slug for r in roster}
-        assert slugs == {
-            "jules-winnfield",
-            "the-dude",
-            "guri-alfi",
-            "deadpool",
-            "walter-white",
-        }
+        assert "jules-winnfield" in slugs
+        assert "the-dude" in slugs
+        assert "guri-alfi" in slugs
+        assert "deadpool" in slugs
+        assert "walter-white" in slugs
+        assert "gandalf" in slugs
+        assert "glados" in slugs
+        assert "wednesday-addams" in slugs
 
     def test_parses_all_fields(self) -> None:
         roster = load_roster(SEED_ROSTER)
@@ -293,10 +294,10 @@ class TestSyncWeights:
         sync_weights(small_roster, conn)
         assert conn.execute("SELECT COUNT(*) AS n FROM weights").fetchone()["n"] == 2
 
-        # Now sync full roster — should add 3 more
+        # Now sync full roster — should add the rest
         full_roster = load_roster(SEED_ROSTER)
         sync_weights(full_roster, conn)
-        assert conn.execute("SELECT COUNT(*) AS n FROM weights").fetchone()["n"] == 5
+        assert conn.execute("SELECT COUNT(*) AS n FROM weights").fetchone()["n"] == len(full_roster)
         conn.close()
 
 
