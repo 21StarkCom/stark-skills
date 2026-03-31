@@ -13,7 +13,7 @@ flowchart LR
     A[💡 Brainstorm] --> B[📄 Spec\ndocs/specs/]
     B --> C[🔨 Code]
     C --> D[🔀 PR\nlinks spec]
-    D --> E[🤖 stark-review\n3 LLMs × 6 domains]
+    D --> E[🤖 stark-review\n3 LLMs × 9 domains]
     E --> F[✅ Merge]
 ```
 
