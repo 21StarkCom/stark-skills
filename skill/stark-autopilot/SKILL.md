@@ -57,6 +57,7 @@ Parse the plan into an ordered list of steps. Each step needs:
 - `step_id` — slug like `phase-1-task-1`
 - `title` — human-readable name
 - `prompt` — full implementation prompt (includes context from the plan + the step's specific tasks)
+- `issue_numbers` — GitHub issue numbers referenced in the step (e.g., `[37, 38, 39]` from `#37`, `#38`, `#39`)
 
 ### 1.3 Detect test command
 
@@ -92,6 +93,25 @@ If `--dry-run`, stop here.
 ## Phase 2: Execute Steps
 
 For each step (sequentially — each builds on the previous winner):
+
+### 2a0. Transition issues to In Progress
+
+For each issue number in the step's `issue_numbers`, add a comment and update status:
+
+```bash
+unset GH_TOKEN  # Use user's PAT for issue operations
+for issue in ${step.issue_numbers}; do
+  gh issue comment $issue --repo $REPO --body "Implementation started — autopilot step \`$step_id\` dispatching 3 agents."
+done
+```
+
+If `.github/project-config.json` exists, also update the project board:
+1. `export GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)`
+2. Find project item: `github_projects.find_item_for_issue(...)`
+3. Update Status field to "Agent Working"
+4. `unset GH_TOKEN`
+
+Failure is non-fatal — log and continue.
 
 ### 2a. Build step prompt
 
@@ -232,6 +252,26 @@ If the diff fails to apply cleanly (shouldn't happen since worktrees started fro
 git add -A
 git commit -m "feat: [step title] (autopilot: $winner won $score/100)"
 ```
+
+### 2f1. Transition issues to Done
+
+For each issue number in the step's `issue_numbers`, close with a reference to the commit:
+
+```bash
+unset GH_TOKEN  # Use user's PAT
+COMMIT_SHA=$(git rev-parse --short HEAD)
+for issue in ${step.issue_numbers}; do
+  gh issue close $issue --repo $REPO \
+    --comment "Implemented in commit $COMMIT_SHA (autopilot step \`$step_id\`, $winner won $score)."
+done
+```
+
+If `.github/project-config.json` exists, also update the project board:
+1. `export GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)`
+2. Find project item and update Status to "Done"
+3. `unset GH_TOKEN`
+
+Failure is non-fatal — log and continue. Issues can be closed manually if the API call fails.
 
 ### 2g. Clean up worktrees
 
