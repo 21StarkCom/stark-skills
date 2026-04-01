@@ -125,8 +125,14 @@ if [ -n "$git_branch_str" ]; then
   [ -n "$git_dirty_str" ] && out="${out} ${C_RED}${git_dirty_str}${RESET}"
 fi
 
-# model
-[ -n "$model" ] && out="${out}${SEP}${C_SAPPHIRE}${model}${RESET}"
+# model — compress "Opus 4.6 (1M context)" → "Opus[1M]", "Sonnet 4.6" → "Sonnet" etc.
+if [ -n "$model" ]; then
+  short_model=$(echo "$model" | sed -E \
+    -e 's/ [0-9]+\.[0-9]+//' \
+    -e 's/ \(([0-9]+[KMG]) context\)/[\1]/' \
+  )
+  out="${out}${SEP}${C_SAPPHIRE}${short_model}${RESET}"
+fi
 
 # context % + velocity trend
 if [ -n "$ctx_pct" ]; then
@@ -176,7 +182,12 @@ if [ -n "$vim_mode" ]; then
   [ "$vim_mode" = "NORMAL" ] && out="${out}${SEP}${C_YELLOW}[N]${RESET}" || out="${out}${SEP}${C_DIM}[I]${RESET}"
 fi
 
-# time
-out="${out}${SEP}${C_DIM}$(date +%H:%M)${RESET}"
+# last activity time — show when last tool finished (flag emoji)
+if [ -n "$lt_ts" ] && [ "$lt_ts" -gt 0 ] 2>/dev/null; then
+  last_time=$(date -r "$lt_ts" +%H:%M 2>/dev/null || date +%H:%M)
+  out="${out}${SEP}${C_DIM}\U0001f3c1 ${last_time}${RESET}"
+else
+  out="${out}${SEP}${C_DIM}\U0001f3c1 $(date +%H:%M)${RESET}"
+fi
 
 printf "%b\n" "$out"
