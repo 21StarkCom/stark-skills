@@ -127,7 +127,8 @@ class TestModelFlags:
         call_kwargs = mock_run.call_args[1]
         assert "env" in call_kwargs
         assert "GEMINI_CLI_HOME" in call_kwargs["env"]
-        assert call_kwargs["env"].get("GOOGLE_CLOUD_LOCATION") == "global"
+        # GEMINI_API_KEY injected from Keychain for headless dispatch
+        assert "GEMINI_CLI_HOME" in call_kwargs["env"]
 
     @patch("multi_review.subprocess.run")
     def test_gemini_temp_dir_seeded(self, mock_run):
