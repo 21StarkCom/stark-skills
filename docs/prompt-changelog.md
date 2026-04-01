@@ -2,6 +2,23 @@
 
 Tracks improvements to review prompts based on stark-review assessments.
 
+## 2026-04-01 — Scope bleed and severity calibration
+
+**Source:** PR #99 in GetEvinced/stark-data-core (lint fixes + Phase 5 validation tests)
+**Prompts dir:** default (PR code review)
+**Assessment:** 16% signal-to-noise (5 issues / 32 not-real). Gemini spec-conformance produced 14 false positives by reviewing the entire codebase against the design spec instead of scoping to the PR diff. Codex test-coverage rated schema introspection tests as "critical" because they don't execute underlying logic.
+
+### Changes Made
+
+| File | Change | Reason |
+|------|--------|--------|
+| `global/prompts/gemini/07-spec-conformance.md` | Added diff-scoping rule: "ONLY review code that appears in the diff" | 14 false positives about pre-existing terraform/metrics deviations not touched by this PR |
+| `global/prompts/codex/06-test-coverage.md` | Added calibration: schema/signature tests are valid, rate at most medium | 2 findings rated "critical" for tests that intentionally validate API surface, not behavior |
+
+### Validation
+- [x] Prompt syntax OK
+- [x] Markdown structure preserved
+
 ## 2026-03-28 — Backend stack coverage: security, correctness, test-coverage prompts
 
 **Source:** PR #48 in GetEvinced/stark-agents (Python MCP server — 30 commits, 12K+ lines)
