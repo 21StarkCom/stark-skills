@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from claude_utils import build_claude_cmd
+from claude_utils import build_claude_cmd, make_clean_env
 from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_HIGH, parse_jsonl_output
 from gemini_utils import (
     GEMINI_MODEL, setup_gemini_home, make_gemini_env,
@@ -155,6 +155,7 @@ def _build_cmd_and_kwargs(
     if agent == "claude":
         cmd = build_claude_cmd()
         run_kwargs["input"] = prompt if stdin_content is None else f"{prompt}\n\n{stdin_content}"
+        run_kwargs["env"] = make_clean_env()
 
     elif agent == "codex":
         effective_timeout = timeout * 2
@@ -168,6 +169,7 @@ def _build_cmd_and_kwargs(
         ]
         run_kwargs["input"] = prompt if stdin_content is None else f"{prompt}\n\n{stdin_content}"
         run_kwargs["timeout"] = effective_timeout
+        run_kwargs["env"] = make_clean_env()
 
     elif agent == "gemini":
         gemini_home = setup_gemini_home(

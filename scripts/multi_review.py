@@ -43,7 +43,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from claude_utils import build_claude_cmd
+from claude_utils import build_claude_cmd, make_clean_env
 from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_HIGH, parse_jsonl_output
 from gemini_utils import (
     GEMINI_MODEL, setup_gemini_home, make_gemini_env,
@@ -613,6 +613,8 @@ def _run_subagent(
     }
     if stdin_input is not None:
         run_kwargs["input"] = stdin_input
+    if agent in ("claude", "codex"):
+        run_kwargs["env"] = make_clean_env()
     if gemini_home:
         run_kwargs["env"] = make_gemini_env(gemini_home)
 
