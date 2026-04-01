@@ -296,32 +296,32 @@ class TestMakeEvent:
 
 
 # ---------------------------------------------------------------------------
-# Session cost tracking
+# Session cost from transcript
 # ---------------------------------------------------------------------------
 
-class TestSessionCost:
-    def test_add_and_get_cost(self):
-        emit_queue.add_cost(input_tokens=100_000, output_tokens=5_000)
-        inp, out, cost = emit_queue.get_session_cost()
-        assert inp == 100_000
-        assert out == 5_000
+class TestTranscriptCost:
+    def test_compute_cost_from_transcript(self, isolated_queue):
+        transcript = isolated_queue / "test-transcript.jsonl"
+        transcript.write_text(
+            '{"type":"user","message":{"role":"user"}}\n'
+            '{"type":"assistant","message":{"usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":50000,"cache_creation_input_tokens":5000}}}\n'
+            '{"type":"user","message":{"role":"user"}}\n'
+            '{"type":"assistant","message":{"usage":{"input_tokens":2000,"output_tokens":300,"cache_read_input_tokens":60000,"cache_creation_input_tokens":3000}}}\n'
+        )
+        result = emit_queue.compute_cost_from_transcript(str(transcript))
+        assert result is not None
+        inp, out, cost = result
+        assert inp == 3000 + 110000 + 8000  # input + cache_read + cache_create
+        assert out == 500
         assert cost > 0
 
-    def test_cost_accumulates(self):
-        emit_queue.add_cost(input_tokens=50_000)
-        emit_queue.add_cost(input_tokens=50_000, output_tokens=10_000)
-        inp, out, cost = emit_queue.get_session_cost()
-        assert inp == 100_000
-        assert out == 10_000
+    def test_missing_transcript(self):
+        assert emit_queue.compute_cost_from_transcript("/nonexistent") is None
 
-    def test_zero_tokens_is_noop(self):
-        emit_queue.add_cost(input_tokens=0, output_tokens=0)
-        inp, out, cost = emit_queue.get_session_cost()
-        assert inp == 0 and out == 0 and cost == 0.0
-
-    def test_empty_session_cost(self):
-        inp, out, cost = emit_queue.get_session_cost()
-        assert inp == 0 and out == 0 and cost == 0.0
+    def test_empty_transcript(self, isolated_queue):
+        transcript = isolated_queue / "empty.jsonl"
+        transcript.write_text("")
+        assert emit_queue.compute_cost_from_transcript(str(transcript)) is None
 
 
 # ---------------------------------------------------------------------------
@@ -380,11 +380,9 @@ class TestStatusSnapshot:
     def test_write_and_read_snapshot(self, isolated_queue):
         with patch.object(emit_queue, "STATUS_PATH", isolated_queue / "status"):
             emit_queue.start_tool("ss-1", "Agent")
-            emit_queue.add_cost(input_tokens=200_000, output_tokens=10_000)
             emit_queue.write_status_snapshot()
             content = (isolated_queue / "status").read_text()
             assert "inflight=1" in content
-            assert "cost=" in content
             assert "longest_tool=Agent" in content
             emit_queue.end_tool("ss-1")
 

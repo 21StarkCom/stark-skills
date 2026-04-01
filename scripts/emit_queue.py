@@ -329,46 +329,60 @@ def longest_inflight() -> tuple[str, int] | None:
 
 
 # ---------------------------------------------------------------------------
-# Session cost tracking
+# Session cost tracking (reads from Claude Code transcript)
 # ---------------------------------------------------------------------------
 
-# Pricing per million tokens (USD) — Opus 4.6 (1M context)
+# Pricing per million tokens (USD) — Claude Opus 4.6
 _PRICING = {
     "input": 15.0,
+    "cache_read": 1.5,
+    "cache_create": 18.75,
     "output": 75.0,
 }
 
 
-def add_cost(input_tokens: int = 0, output_tokens: int = 0) -> None:
-    """Accumulate token usage for the current session."""
-    if input_tokens <= 0 and output_tokens <= 0:
-        return
-    db = _get_db()
-    try:
-        for key, delta in [("input_tokens", input_tokens), ("output_tokens", output_tokens)]:
-            if delta > 0:
-                db.execute(
-                    "INSERT INTO session_stats (key, value) VALUES (?, ?) "
-                    "ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + ? AS TEXT)",
-                    (key, str(delta), delta),
-                )
-        db.commit()
-    finally:
-        db.close()
+def compute_cost_from_transcript(transcript_path: str) -> tuple[int, int, float] | None:
+    """Parse a Claude Code transcript JSONL and compute session cost.
 
+    Returns (input_tokens, output_tokens, cost_usd) or None if unreadable.
+    Token fields from message.usage: input_tokens, output_tokens,
+    cache_read_input_tokens, cache_creation_input_tokens.
+    """
+    total_input = 0
+    total_output = 0
+    total_cache_read = 0
+    total_cache_create = 0
 
-def get_session_cost() -> tuple[int, int, float]:
-    """Returns (input_tokens, output_tokens, cost_usd)."""
-    db = _get_db()
     try:
-        rows = db.execute("SELECT key, value FROM session_stats WHERE key IN ('input_tokens', 'output_tokens')").fetchall()
-        stats = dict(rows)
-        inp = int(stats.get("input_tokens", 0))
-        out = int(stats.get("output_tokens", 0))
-        cost = (inp * _PRICING["input"] + out * _PRICING["output"]) / 1_000_000
-        return (inp, out, cost)
-    finally:
-        db.close()
+        with open(transcript_path) as f:
+            for line in f:
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if obj.get("type") != "assistant":
+                    continue
+                usage = (obj.get("message") or {}).get("usage")
+                if not usage or not isinstance(usage, dict):
+                    continue
+                total_input += usage.get("input_tokens", 0)
+                total_output += usage.get("output_tokens", 0)
+                total_cache_read += usage.get("cache_read_input_tokens", 0)
+                total_cache_create += usage.get("cache_creation_input_tokens", 0)
+    except OSError:
+        return None
+
+    if total_input == 0 and total_output == 0:
+        return None
+
+    cost = (
+        total_input * _PRICING["input"]
+        + total_cache_read * _PRICING["cache_read"]
+        + total_cache_create * _PRICING["cache_create"]
+        + total_output * _PRICING["output"]
+    ) / 1_000_000
+
+    return (total_input + total_cache_read + total_cache_create, total_output, cost)
 
 
 # ---------------------------------------------------------------------------
@@ -438,12 +452,7 @@ def write_status_snapshot() -> None:
             parts.append(f"longest_tool={li[0]}")
             parts.append(f"longest_s={li[1]}")
 
-    # Cost
-    inp, out, cost = get_session_cost()
-    if inp > 0 or out > 0:
-        parts.append(f"cost={cost:.2f}")
-        parts.append(f"input_tokens={inp}")
-        parts.append(f"output_tokens={out}")
+    # Cost is computed from transcript in the status line script (not here)
 
     tmp = STATUS_PATH.with_suffix(".tmp")
     try:

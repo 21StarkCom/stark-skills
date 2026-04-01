@@ -10,6 +10,7 @@ model=$(echo "$input" | jq -r '.model.display_name // ""')
 used_pct=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
 vim_mode=$(echo "$input" | jq -r '.vim.mode // empty')
 session_name=$(echo "$input" | jq -r '.session_name // empty')
+session_id=$(echo "$input" | jq -r '.session_id // empty')
 
 # ── Directory (just the repo/folder name) ─────────────────────────────────
 dir_display=$(basename "$cwd")
@@ -81,11 +82,10 @@ if [ -f "$last_tool_file" ]; then
   fi
 fi
 
-# ── Status snapshot (inflight, cost, longest) ────────────────────────────
+# ── Status snapshot (inflight, longest) ───────────────────────────────────
 inflight_count=0
 longest_tool=""
 longest_s=0
-session_cost=""
 status_file="$HOME/.stark-insights/status"
 if [ -f "$status_file" ]; then
   while IFS=$'\t' read -ra fields; do
@@ -94,10 +94,25 @@ if [ -f "$status_file" ]; then
         inflight=*)  inflight_count="${f#inflight=}" ;;
         longest_tool=*) longest_tool="${f#longest_tool=}" ;;
         longest_s=*) longest_s="${f#longest_s=}" ;;
-        cost=*)      session_cost="${f#cost=}" ;;
       esac
     done
   done < "$status_file"
+fi
+
+# ── Session cost (from transcript) ───────────────────────────────────────
+session_cost=""
+if [ -n "$session_id" ] && [ -n "$cwd" ]; then
+  # Transcript path: ~/.claude/projects/{project_slug}/{session_id}.jsonl
+  project_slug=$(echo "$cwd" | sed "s|/|-|g")
+  transcript="$HOME/.claude/projects/${project_slug}/${session_id}.jsonl"
+  if [ -f "$transcript" ]; then
+    session_cost=$(python3 -c "
+import sys; sys.path.insert(0, '$HOME/git/Evinced/stark-skills/scripts')
+from emit_queue import compute_cost_from_transcript
+r = compute_cost_from_transcript('$transcript')
+print(f'{r[2]:.2f}' if r else '')
+" 2>/dev/null)
+  fi
 fi
 
 # ── Telemetry queue health ────────────────────────────────────────────────
