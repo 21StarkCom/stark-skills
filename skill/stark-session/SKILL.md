@@ -111,6 +111,21 @@ If project config is missing, skip silently.
 
 Run each command in `session.health_checks` from config. Capture stdout/stderr on failure for display in briefing. Report pass/fail — non-fatal, never blocking.
 
+**Built-in check — telemetry queue health:**
+
+```bash
+python3 -c "
+import sys; sys.path.insert(0, '$HOME/git/Evinced/stark-skills/scripts')
+from emit_queue import pending_count, dead_letter_count
+p, d = pending_count(), dead_letter_count()
+if d > 0: print(f'WARN: {d} dead-lettered events, {p} pending — run: python3 -c \"from emit_queue import retry_dead_letters; retry_dead_letters()\"'); sys.exit(1)
+elif p > 10: print(f'WARN: {p} events pending drain — stark-insights may be down'); sys.exit(1)
+else: print(f'OK: queue healthy ({p} pending, {d} dead)')
+"
+```
+
+Report result in the Health line of the briefing. Non-fatal.
+
 ### Phase 4 — Available skills
 
 ```bash

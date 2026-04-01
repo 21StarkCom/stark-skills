@@ -1,26 +1,28 @@
 #!/usr/bin/env python3
-"""Emit skill completion events to stark-insights.
+"""Emit skill completion events to stark-insights via durable local queue.
 
 Usage: stark-emit <event_type> [key=value ...]
 
 Designed for skill SKILL.md instructions — Claude runs this at the end
 of a skill invocation to log structured outcomes.
 
+Events are written to a local SQLite queue (~/.stark-insights/queue.db)
+and drained to the API opportunistically. Events survive container
+restarts and network interruptions.
+
 Differences from hook-emit.py:
   - Sets source=skill for proper dedupe key computation
   - Reads CLAUDE_SESSION_ID for session linkage
   - Coerces CLI values: true/false→bool, numeric strings→int/float
-
-Fails silently when container is down — scrapers are the safety net.
 """
 
-import json
 import os
 import sys
-import urllib.request
 
-TOKEN_PATH = os.path.expanduser("~/.stark-insights/api-token")
-API_URL = "http://localhost:7420/events"
+# Add scripts/ to path for emit_queue import
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
+
+from emit_queue import drain, enqueue, make_event
 
 
 def _coerce(v: str) -> bool | int | float | str:
@@ -50,37 +52,28 @@ def main() -> None:
             k, v = arg.split("=", 1)
             payload[k] = _coerce(v)
 
-    token = ""
-    try:
-        with open(TOKEN_PATH) as f:
-            token = f.read().strip()
-    except OSError:
-        pass
-
-    event: dict = {
-        "type": event_type,
-        "cli": "claude",
-        "project": os.environ.get("CLAUDE_PROJECT", ""),
-        "source": "skill",
-        "payload": payload,
-    }
-
     session_id = os.environ.get("CLAUDE_SESSION_ID")
-    if session_id:
-        event["session_id"] = session_id
+    project = os.environ.get("CLAUDE_PROJECT", "")
 
-    req = urllib.request.Request(
-        API_URL,
-        data=json.dumps(event).encode(),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}",
-        },
+    event = make_event(
+        event_type,
+        payload,
+        cli="claude",
+        source="skill",
+        session_id=session_id,
+        project=project or None,
     )
+
     try:
-        urllib.request.urlopen(req, timeout=2)
+        enqueue(event)
+    except ValueError:
+        pass  # validation error — skip silently for backward compat
+
+    # Best-effort drain: flush whatever is pending
+    try:
+        drain()
     except Exception:
-        pass  # fail silently — scraper is the safety net
+        pass  # drain failures are fine — events are safe in SQLite
 
 
 if __name__ == "__main__":
