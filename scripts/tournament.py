@@ -451,7 +451,7 @@ def dispatch_competitor(agent: str, skill, audience: str):
 
     run_kwargs: dict[str, Any] = {
         "capture_output": True, "text": True,
-        "timeout": 900, "cwd": str(ROOT),
+        "timeout": 300 if agent == "gemini" else 900, "cwd": str(ROOT),
     }
     if stdin_input is not None:
         run_kwargs["input"] = stdin_input

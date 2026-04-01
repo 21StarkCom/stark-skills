@@ -37,6 +37,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
@@ -235,6 +236,8 @@ FINDINGS_FORMAT = (
 )
 
 MAX_WORKERS = 18  # 3 agents × 6 domains
+MAX_GEMINI_CONCURRENT = 3  # Vertex AI rate-limits under heavy parallel load
+_gemini_semaphore = threading.Semaphore(MAX_GEMINI_CONCURRENT)
 
 
 # ── Data structures ────────────────────────────────────────────────────
@@ -526,6 +529,23 @@ def _run_subagent(
     spec_context: str | None = None,
 ) -> SubAgentResult:
     """Run a single sub-agent: one CLI tool × one domain."""
+    if agent == "gemini":
+        _gemini_semaphore.acquire()
+    try:
+        return _run_subagent_inner(agent, domain_key, base, cwd, spec_context)
+    finally:
+        if agent == "gemini":
+            _gemini_semaphore.release()
+
+
+def _run_subagent_inner(
+    agent: str,
+    domain_key: str,
+    base: str,
+    cwd: str | None = None,
+    spec_context: str | None = None,
+) -> SubAgentResult:
+    """Inner implementation — called with gemini semaphore held if needed."""
     t0 = time.time()
     preamble = _load_agent_preamble(agent, cwd=cwd)
     domain_prompt = _load_domain_prompt(agent, domain_key, cwd=cwd)
@@ -606,7 +626,7 @@ def _run_subagent(
             shutil.rmtree(gemini_home, ignore_errors=True)
 
     max_attempts = 2
-    timeout_s = 900
+    timeout_s = 300 if agent == "gemini" else 900
     run_kwargs: dict[str, Any] = {
         "capture_output": True, "text": True,
         "timeout": timeout_s, "cwd": cwd,
