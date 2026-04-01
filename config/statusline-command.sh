@@ -152,7 +152,7 @@ fi
 
 # inflight count — sky with lightning bolt
 if [ "$inflight_count" -gt 0 ] 2>/dev/null; then
-  out="${out}${SEP}${C_SKY}\u26a1${inflight_count}${RESET}"
+  out="${out}${SEP}${C_SKY}\U0001f329 ${inflight_count}${RESET}"
 fi
 
 # longest inflight tool — amber if >3min
@@ -171,7 +171,7 @@ fi
 
 # telemetry queue — maroon with skull
 if [ -n "$queue_str" ]; then
-  out="${out}${SEP}${C_MAROON}\u2620 ${queue_str}${RESET}"
+  out="${out}${SEP}${C_MAROON}\U0001f41b ${queue_str}${RESET}"
 fi
 
 # session name
