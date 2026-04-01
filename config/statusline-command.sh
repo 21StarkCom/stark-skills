@@ -101,16 +101,12 @@ if [ -f "$status_file" ]; then
 fi
 
 # ── Telemetry queue health ────────────────────────────────────────────────
-queue_str=""
+queue_pending=0
+queue_dead=0
 queue_db="$HOME/.stark-insights/queue.db"
 if [ -f "$queue_db" ]; then
-  pending=$(sqlite3 "$queue_db" "SELECT COUNT(*) FROM pending" 2>/dev/null || echo 0)
-  dead=$(sqlite3 "$queue_db" "SELECT COUNT(*) FROM dead_letter" 2>/dev/null || echo 0)
-  if [ "$dead" -gt 0 ]; then
-    queue_str="${pending}q/${dead}dl"
-  elif [ "$pending" -gt 5 ]; then
-    queue_str="${pending}q"
-  fi
+  queue_pending=$(sqlite3 "$queue_db" "SELECT COUNT(*) FROM pending" 2>/dev/null || echo 0)
+  queue_dead=$(sqlite3 "$queue_db" "SELECT COUNT(*) FROM dead_letter" 2>/dev/null || echo 0)
 fi
 
 # ── Assemble ──────────────────────────────────────────────────────────────
@@ -145,14 +141,14 @@ if [ -n "$ctx_pct" ]; then
   fi
 fi
 
-# session cost — mauve
+# session cost — 💰
 if [ -n "$session_cost" ] && [ "$session_cost" != "0.00" ]; then
-  out="${out}${SEP}${C_MAUVE}\$${session_cost}${RESET}"
+  out="${out}${SEP}${C_MAUVE}\U0001f4b0\$${session_cost}${RESET}"
 fi
 
-# inflight count — sky with lightning bolt
+# inflight count — ⚡️
 if [ "$inflight_count" -gt 0 ] 2>/dev/null; then
-  out="${out}${SEP}${C_SKY}\U0001f329 ${inflight_count}${RESET}"
+  out="${out}${SEP}${C_SKY}\u26a1\ufe0f${inflight_count}${RESET}"
 fi
 
 # longest inflight tool — amber if >3min
@@ -164,14 +160,19 @@ elif [ "$longest_s" -gt 60 ] 2>/dev/null; then
   out="${out}${SEP}${C_DIM}\u23f3 ${longest_tool} ${lt_min}m${RESET}"
 fi
 
-# last tool duration — teal
+# last tool duration — ⏱️
 if [ -n "$last_tool_str" ]; then
-  out="${out}${SEP}${C_TEAL}\u23f1 ${last_tool_str}${RESET}"
+  out="${out}${SEP}${C_TEAL}\u23f1\ufe0f${last_tool_str}${RESET}"
 fi
 
-# telemetry queue — maroon with skull
-if [ -n "$queue_str" ]; then
-  out="${out}${SEP}${C_MAROON}\U0001f41b ${queue_str}${RESET}"
+# queue pending — 🪲
+if [ "$queue_pending" -gt 5 ] 2>/dev/null; then
+  out="${out}${SEP}${C_MAROON}\U0001fab2${queue_pending}${RESET}"
+fi
+
+# dead letter — 🐞
+if [ "$queue_dead" -gt 0 ] 2>/dev/null; then
+  out="${out}${SEP}${C_RED}\U0001f41e${queue_dead}${RESET}"
 fi
 
 # session name
