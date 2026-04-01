@@ -1,0 +1,87 @@
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "model": "opus[1m]",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/aryeh/git/Evinced/stark-insights/hooks/hook-emit.py tool_usage"
+          }
+        ]
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/aryeh/git/Evinced/stark-insights/hooks/skill-setup.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/aryeh/git/Evinced/stark-insights/hooks/gh-token-guard.py"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/aryeh/git/Evinced/stark-insights/hooks/hook-emit.py tool_usage status=complete"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/aryeh/git/Evinced/stark-insights/hooks/hook-emit.py prompt"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/aryeh/git/Evinced/stark-insights/hooks/skill-telemetry-stop.py"
+          },
+          {
+            "type": "command",
+            "command": "/Users/aryeh/git/Evinced/stark-insights/hooks/drain-queue.py"
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bash /Users/aryeh/.claude/statusline-command.sh"
+  },
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true,
+    "skill-creator@claude-plugins-official": true,
+    "claude-code-setup@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "pyright-lsp@claude-plugins-official": true,
+    "agent-sdk-dev@claude-plugins-official": true
+  },
+  "skipDangerousModePermissionPrompt": true
+}

@@ -166,6 +166,10 @@ install() {
     # 5. Standards: ~/.claude/code-review/standards/ → repo/standards/
     link_dir "$REPO_DIR/standards" "$CODE_REVIEW_DIR/standards" "Standards templates"
 
+    # 6. User config: ~/.claude/settings.json + statusline → repo/config/
+    link_dir "$REPO_DIR/config/settings.json" "$CLAUDE_DIR/settings.json" "Settings"
+    link_dir "$REPO_DIR/config/statusline-command.sh" "$CLAUDE_DIR/statusline-command.sh" "Status line"
+
     echo ""
     info "Note: To enable staleness detection in a repo, copy or reference:"
     info "  $CODE_REVIEW_DIR/standards/workflows/doc-staleness.yml"
@@ -235,6 +239,8 @@ uninstall() {
     done
 
     unlink_dir "$CODE_REVIEW_DIR/standards" "Standards templates"
+    unlink_dir "$CLAUDE_DIR/settings.json" "Settings"
+    unlink_dir "$CLAUDE_DIR/statusline-command.sh" "Status line"
 
     echo ""
     echo "Note: $CODE_REVIEW_DIR/history/ was not removed (contains local data)"
@@ -271,6 +277,8 @@ status() {
     done
 
     check_dir "$CODE_REVIEW_DIR/standards" "Standards templates"
+    check_dir "$CLAUDE_DIR/settings.json" "Settings"
+    check_dir "$CLAUDE_DIR/statusline-command.sh" "Status line"
 
     echo ""
     if [ -d "$CODE_REVIEW_DIR/history" ]; then
