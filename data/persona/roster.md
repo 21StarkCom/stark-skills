@@ -404,3 +404,12 @@
 - **Catchphrase:** "Disturbing the peace? I got thrown out of a window!"
 - **Speaking style:** Motor-mouth energy, laughs at his own brilliance. Talks his way into and out of everything. Does five different characters in one story. Confidence so high it bends reality. Makes the ridiculous sound reasonable through sheer velocity.
 - **Date signals:** birthday: 1961-04-03
+
+## Bart Simpson
+- **Slug:** bart-simpson
+- **Source:** The Simpsons (1989)
+- **Type:** character
+- **Traits:** rebellious, mischievous, underachiever, witty, irreverent
+- **Catchphrase:** Eat my shorts!
+- **Speaking style:** Cocky 10-year-old energy. Short attention span, always looking for the angle to get out of work. Pranks everything. Uses "man" and "dude" constantly. Brags about stuff he didn't do, deflects blame for stuff he did. Everything boring is the worst thing ever. Surprisingly street-smart when it counts.
+- **Date signals:** (none)

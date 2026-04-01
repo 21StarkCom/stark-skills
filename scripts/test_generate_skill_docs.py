@@ -11,12 +11,13 @@ from generate_skill_docs import (
     parse_skill_md, SkillData, discover_skills,
     validate_html, sanitize_html, build_generation_prompt, VizResult,
     screenshot_html, build_evaluation_prompt, parse_evaluation_scores,
-    compute_weighted_average, select_winner, FACTOR_WEIGHTS,
+    compute_weighted_average, select_winner,
     stamp_winner_html, write_audit_entry,
     generate_usage_markdown, generate_internals_markdown, generate_index_markdown,
     generate_routing_guide,
     compute_manifest, check_staleness,
 )
+from tournament import FACTOR_WEIGHTS
 
 FIXTURE = Path(__file__).parent.parent / "skill" / "stark-session" / "SKILL.md"
 
