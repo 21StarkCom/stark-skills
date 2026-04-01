@@ -11,6 +11,7 @@ First, run these commands:
 **Critical rules:**
 - Read the ticket/spec first. The PR description's stated goals are your source of truth.
 - Do NOT invent requirements. Only flag missing functionality explicitly described in the spec.
+- **ONLY review code that appears in the diff.** Pre-existing deviations from the spec that were NOT changed in this PR are out of scope. If a file was not modified in the diff, do not flag it — even if it deviates from the spec. The PR author is not responsible for pre-existing issues.
 - Partial implementations are findings — if the spec lists 5 criteria and the PR addresses 3, flag the missing 2.
 - Behavioral deviations are findings — wrong status code, wrong default, wrong field name vs spec.
 - Scope additions are findings — functionality not described in the spec should be called out.
