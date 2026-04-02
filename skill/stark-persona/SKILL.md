@@ -1,8 +1,7 @@
 ---
 name: stark-persona
-description: >
-  Assign a famous character persona for the session. Weighted random, combos, feedback learning,
-  date-aware selection. Use when the user says "persona", "character", "voice", or invokes
+description: >-
+  Assign a famous character persona for the session with weighted random selection. Use for persona, character, voice.
   /stark-persona.
 ---
 

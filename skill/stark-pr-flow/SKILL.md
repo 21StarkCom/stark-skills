@@ -1,6 +1,7 @@
 ---
 name: stark-pr-flow
-description: End-to-end PR workflow for GetEvinced repos — push, create PR, post self-review via stark-claude bot, present summary, and squash-merge with --admin on approval. Use when the user says "open PR", "create PR", "merge this", "ship it", or "stark-pr-flow".
+description: >-
+  End-to-end PR workflow: push, create, self-review, squash-merge. Use for open PR, create PR, merge this, ship it.
 argument-hint: <optional: PR title override or "draft" to create as draft>
 ---
 

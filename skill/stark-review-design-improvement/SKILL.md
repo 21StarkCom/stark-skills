@@ -1,11 +1,7 @@
 ---
 name: stark-review-design-improvement
-description: >
-  Improve design review prompts based on the Prompt Improvement Assessment from a
-  completed /stark-review-design run. Thin wrapper around /stark-review-improvement
-  that sets --prompts-dir design-review and resolves the assessment from the design
-  review history. Use when the user says "improve design review prompts", "fix design
-  review noise", or invokes /stark-review-design-improvement.
+description: >-
+  Improve design review prompts from assessment feedback. Wraps /stark-review-improvement for design-review prompts.
 argument-hint: (reads assessment from context or design-review history)
 ---
 

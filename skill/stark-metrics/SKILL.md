@@ -1,10 +1,7 @@
 ---
 name: stark-metrics
-description: >
-  Aggregate performance metrics across all stark skill runs. Agent scorecards,
-  finding quality, duration trends, prompt improvement impact, and actionable
-  recommendations. Use when the user says "show metrics", "how are reviews
-  performing", "agent stats", "review quality", or invokes /stark-metrics.
+description: >-
+  Aggregate review performance metrics: agent scorecards, finding quality, duration trends. Use for metrics, agent stats.
 argument-hint: "[--repo REPO] [--skill SKILL] [--since DATE] [--json]"
 ---
 

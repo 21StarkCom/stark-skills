@@ -1,6 +1,7 @@
 ---
 name: stark-onboard-project
-description: Bootstrap a new project end-to-end — initializes git, creates a GitHub repo in GetEvinced org, connects all 3 GitHub Apps (stark-claude, stark-codex, stark-gemini), then sets up Claude Code (CLAUDE.md, .claude/ directory, memory). Use when the user says "onboard project", "setup claude", "bootstrap claude", "init project", "create repo", "new project", or "stark-onboard-project". Also use when starting work in a directory that has no git repo and no CLAUDE.md.
+description: >-
+  Bootstrap new project: git init, GitHub repo, 3 GitHub Apps, CLAUDE.md, memory. Use for onboard, new project, create repo.
 argument-hint: <optional: path to the project directory, defaults to cwd>
 ---
 

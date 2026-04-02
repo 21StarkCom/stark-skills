@@ -1,11 +1,7 @@
 ---
 name: stark-session-insights
-description: >
-  Analyze Claude Code session history to extract usage patterns, skill invocations,
-  action frequencies, corrections, and preferences — grouped by project. Reads
-  ~/.claude/history.jsonl and generates per-project insight files. Use when the user
-  says "session insights", "analyze sessions", "usage patterns", "what do I do most",
-  or invokes /stark-session-insights.
+description: >-
+  Analyze Claude Code session history for usage patterns, corrections, and preferences by project. Use for session insights.
 argument-hint: "[--project <name>] [--refresh]"
 ---
 

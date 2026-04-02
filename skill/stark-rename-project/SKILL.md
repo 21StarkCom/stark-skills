@@ -1,9 +1,7 @@
 ---
 name: stark-rename-project
-description: >
-  Rename a project locally and on GitHub, update all references in sibling repos,
-  and reinstall symlinks. Use when the user says "rename project", "rename repo",
-  "rename this to", or invokes /stark-rename-project.
+description: >-
+  Rename project locally and on GitHub, update sibling repo references, reinstall symlinks. Use for rename project/repo.
 argument-hint: <old-name> <new-name> [--dry-run]
 ---
 

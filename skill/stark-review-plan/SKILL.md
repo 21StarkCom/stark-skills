@@ -1,10 +1,7 @@
 ---
 name: stark-review-plan
-description: >
-  Multi-agent execution plan review using multi-LLM × 10 adversarial domains with autonomous fix loop.
-  Absorbs stark-review-deployment-plan. Use when the user says "review this plan",
-  "review deployment plan", "review infra plan", "review migration plan", "audit deployment",
-  or invokes /stark-review-plan. Also triggers on `/stark-review-plan <path>`.
+description: >-
+  Multi-agent plan review: multi-LLM x 10 adversarial domains with fix loop. Use for review plan, audit deployment plan.
 argument-hint: "<path> [--rounds N] [--dry-run] [--force] [--tournament]"
 ---
 

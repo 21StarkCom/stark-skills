@@ -136,6 +136,40 @@ install() {
         fi
     done
 
+    # Validate skill descriptions and body sizes
+    echo ""
+    echo "Validating skill sizes..."
+    local desc_warnings=0
+    local body_warnings=0
+    for skill_dir in "$REPO_DIR"/skill/stark-*/; do
+        [ -d "$skill_dir" ] || continue
+        local skill_file="$skill_dir/SKILL.md"
+        [ -f "$skill_file" ] || continue
+        local sname
+        sname=$(basename "$skill_dir")
+
+        # Check description length (target ≤160 chars)
+        local desc_len
+        desc_len=$(awk '/^---$/{c++; next} c==1 && /description:/{found=1} found && /^[a-z]/ && !/description:/{found=0} found{s=s $0}' "$skill_file" | sed 's/description:[[:space:]]*//' | sed 's/^>-\?//' | tr -d '\n' | sed 's/^[[:space:]]*//' | wc -c | tr -d ' ')
+        if [ "$desc_len" -gt 200 ]; then
+            warn "Skill $sname: description is ${desc_len} chars (target ≤160)"
+            desc_warnings=$((desc_warnings + 1))
+        fi
+
+        # Check body line count (target ≤500 lines)
+        local body_lines
+        body_lines=$(awk 'BEGIN{c=0} /^---$/{c++; if(c==2){f=1; next}} f{print}' "$skill_file" | wc -l | tr -d ' ')
+        if [ "$body_lines" -gt 500 ]; then
+            warn "Skill $sname: body is ${body_lines} lines (target ≤500)"
+            body_warnings=$((body_warnings + 1))
+        fi
+    done
+    if [ "$desc_warnings" -eq 0 ] && [ "$body_warnings" -eq 0 ]; then
+        info "All skills within size targets"
+    else
+        warn "$desc_warnings description warning(s), $body_warnings body warning(s)"
+    fi
+
     # Clean up orphaned skill symlinks (deleted skills)
     local SKILLS_DIR="$HOME/.claude/skills"
     for link in "$SKILLS_DIR"/stark-*/SKILL.md; do

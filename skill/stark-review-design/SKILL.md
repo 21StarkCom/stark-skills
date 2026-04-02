@@ -1,9 +1,7 @@
 ---
 name: stark-review-design
-description: >
-  Multi-agent design document review using multi-LLM × 11 domains.
-  Use when the user says "review this design", "review this spec", "review design doc",
-  "review architecture", or invokes /stark-review-design. Also triggers on `/stark-review-design <path>`.
+description: >-
+  Multi-agent design/spec review: multi-LLM x 11 domains. Use for review design, review spec, review architecture.
 argument-hint: "<path> [--rounds N] [--dry-run] [--force] [--tournament]"
 ---
 

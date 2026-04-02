@@ -1,11 +1,7 @@
 ---
 name: stark-skill-analytics
-description: >
-  Analyze skill usage patterns and quality metrics across all Claude Code
-  sessions. Reads ~/.claude/history.jsonl and skill run history files to
-  produce adoption curves, usage rankings, quality signals, and
-  recommendations. Use when the user says "skill analytics", "skill usage",
-  "which skills are used", "adoption metrics", or invokes /stark-skill-analytics.
+description: >-
+  Skill usage and adoption metrics across sessions: rankings, quality signals, recommendations. Use for skill analytics.
 argument-hint: "[--skill <name>] [--format table|full]"
 ---
 

@@ -1,17 +1,7 @@
 ---
 name: stark-phase-execute
-description: >
-  Autonomously execute all tasks in a development phase end-to-end — for each task: session start,
-  implement, PR, multi-agent review with fix rounds, merge, session end. Then regression tests,
-  version bump, deploy, dashboard, memory/docs update, and prompt improvement detection.
-  Zero user intervention after trigger. If no GitHub issues exist for the plan slug, automatically
-  runs /stark-plan-to-tasks first to decompose the plan into issues, then executes them.
-  Use when the user says "execute phase", "run phase",
-  "stark-phase-execute", "execute these tasks", "implement this phase", "run the plan",
-  "autopilot", or any variation of wanting to autonomously execute a set of planned GitHub issues.
-  Also triggers on `/stark-phase-execute`. Proactively suggest this skill when the user has just
-  run `/stark-plan-to-tasks` and has open phase issues, OR when a plan file exists but hasn't
-  been decomposed yet.
+description: >-
+  Autonomously execute a dev phase: implement tasks, PR, review, fix, merge, release. Use for execute phase, run plan.
 argument-hint: "<plan-slug-or-path> [--dry-run] [--skip-deploy] [--skip-release] [--start-from <issue-number>] [--rounds <N>] [--repo ORG/REPO]"
 ---
 
@@ -518,50 +508,7 @@ ${DEPLOY_COMMAND}
 
 ## Phase 4: Dashboard
 
-Present a comprehensive summary after everything completes.
-
-### Task Summary Table
-
-```
-┌─────┬────────┬──────────────────────────────────┬────────┬─────────┬──────────┬───────┬────────┐
-│  #  │ Issue  │ Title                            │ PR     │ Status  │ Duration │ Finds │ Fixed  │
-├─────┼────────┼──────────────────────────────────┼────────┼─────────┼──────────┼───────┼────────┤
-│  1  │ #42    │ Add retry logic to API client     │ #57    │ merged  │ 5m 42s   │ 8     │ 6/8    │
-│  2  │ #43    │ Instrument request tracing        │ #58    │ merged  │ 8m 15s   │ 12    │ 10/12  │
-│  3  │ #44    │ Add health check endpoint         │ #59    │ failed  │ 3m 20s   │ —     │ —      │
-└─────┴────────┴──────────────────────────────────┴────────┴─────────┴──────────┴───────┴────────┘
-```
-
-### Aggregate Stats
-
-```
-Phase: {SLUG}
-Duration: {total}
-Tasks: {completed}/{total} ({failed} failed, {skipped} skipped)
-PRs merged: {N}
-Review findings: {total} ({critical} crit, {high} high, {medium} med, {low} low)
-Fix rate: {fixed}/{actionable} ({pct}%)
-Noise rate: {noise}/{total} ({pct}%)
-Regression: {passed}/{total} tests passing
-Release: v{version} ({bump_level})
-Deploy: {status}
-```
-
-### Agent Scorecard
-
-```
-┌─────────┬──────────┬───────┬───────┬─────────┬───────────┐
-│ Agent   │ Findings │ Fixed │ Noise │ Unique  │ Accuracy  │
-├─────────┼──────────┼───────┼───────┼─────────┼───────────┤
-│ Claude  │ 15       │ 12    │ 3     │ 5       │ 80%       │
-│ Codex   │ 12       │ 10    │ 2     │ 3       │ 83%       │
-│ Gemini  │ 11       │ 9     │ 2     │ 4       │ 82%       │
-└─────────┴──────────┴───────┴───────┴─────────┴───────────┘
-```
-
-### Failed Tasks
-
-For each failed task: error message, which step failed, suggested recovery action.
+Present a comprehensive summary after everything completes. See [references/dashboard-format.md](references/dashboard-format.md) for table formats (task summary, aggregate stats, agent scorecard, failed tasks).
 
 ---
 
@@ -593,80 +540,7 @@ Log recommendations to the observability file. Suggest running `/stark-review-im
 
 ## Observability
 
-Follow the [Skill Observability Protocol](~/.claude/code-review/standards/observability.md).
-
-### Task-based progress
-
-```
-TaskCreate: "Phase 0: Initialize"
-            activeForm: "Initializing phase execution"
-TaskCreate: "Phase 1: Task Loop ({N} tasks)"
-            activeForm: "Executing task loop"
-TaskCreate: "Phase 2: Regression Testing"
-            activeForm: "Running regression tests"
-TaskCreate: "Phase 3: Release & Deploy"
-            activeForm: "Releasing and deploying"
-TaskCreate: "Phase 4: Dashboard"
-            activeForm: "Generating dashboard"
-TaskCreate: "Phase 5: Housekeeping"
-            activeForm: "Updating memory and docs"
-```
-
-Create child tasks dynamically per issue as each begins. Only one task `in_progress` at a time.
-
-### Timestamped logs
-
-```
-[09:15:00] === stark-phase-execute: observability-v2 ===
-[09:15:02]   Phase 0: Initialize (5 tasks, repo: GetEvinced/infra-pulse)
-[09:15:05]   ▸ Task #42: Add retry logic to API client
-[09:15:05]     Branch: phase/observability-v2/issue-42-add-retry-logic
-[09:17:30]     Implementation complete (2m 25s)
-[09:17:35]     PR #57 created
-[09:17:40]     Worktree: /tmp/review-infra-pulse-pr57
-[09:18:00]     Review round 1: 8 findings (2 high, 4 medium, 2 low)
-[09:19:15]     Review round 2: 2 findings (2 low — noise)
-[09:19:18]     Worktree cleaned up
-[09:19:20]     ✓ Merged PR #57 (4m 15s)
-[09:19:22]   ▸ Task #43: Instrument request tracing
-...
-[09:45:00]   Phase 2: Regression — 142/142 tests passing
-[09:45:10]   Phase 3: CHANGELOG updated (3 added, 1 fixed)
-[09:45:30]   Phase 3: Release v1.4.0 (minor)
-[09:46:00] === Phase complete: 4/5 tasks merged, 1 failed ===
-```
-
-### 5-minute checkpoints
-
-At each phase transition where wall time > 5 minutes since T0, print:
-
-```
-[09:20:00] ⏱ Checkpoint: 5m elapsed, task 2/5 in progress (review round 1)
-```
-
-### Metrics block
-
-Printed as part of the dashboard (Phase 4). Includes per-phase timing breakdown, agent stats, and improvement flags per the observability protocol.
-
-### Improvement flags
-
-- Any single phase > 70% of total time → flag as bottleneck
-- Task failure rate > 30% → flag with breakdown
-- Agent failure rate > 20% → flag with agent breakdown
-- A review round produced 0 new actionable findings → suggest reducing rounds
-- CI bypassed on any merge → flag with details
-
-### Event emission
-
-After the dashboard (Phase 4), emit a completion event to stark-insights:
-
-```bash
-$SCRIPTS/stark-emit skill_invocation \
-  skill=stark-phase-execute duration_s=$TOTAL_SECONDS success=$SUCCESS \
-  phase=$SLUG tasks_completed=$DONE tasks_failed=$FAILED prs_merged=$MERGED
-```
-
-Substitute actual values from the run. If stark-insights is not running, this fails silently.
+See [references/observability.md](references/observability.md) for the full observability protocol (tasks, timestamped logs, checkpoints, metrics, improvement flags, event emission).
 
 ---
 
@@ -702,18 +576,4 @@ When `--dry-run` is set:
 
 ## Failure Modes
 
-| Failure | Recovery |
-|---------|----------|
-| Not on main at start | `git checkout main && git pull` |
-| Dirty working tree | Stash automatically, log warning |
-| Task implementation produces no changes | Log as skipped, continue |
-| PR creation fails | Retry once after push; if still fails, log and continue |
-| multi_review.py dispatch fails | Log agent failures, proceed with available findings |
-| Worktree already exists (crashed session) | Reuse existing: `cd /tmp/review-*` |
-| Merge conflict | Rebase on main, resolve, re-push, retry merge |
-| Merge fails (checks, permissions) | Force with `--admin`; if still fails, log and continue |
-| Test suite fails | Log failures, continue to next phase |
-| Release fails (no CHANGELOG, tag exists) | Log and skip deploy |
-| GitHub API rate limit | Wait 60s, retry once; if still limited, log and continue |
-| Subagent timeout | Log timeout, skip task, continue |
-| Stale remote branch from failed task | Clean up in error handler (1.8) |
+See [references/failure-modes.md](references/failure-modes.md) for the full recovery table.

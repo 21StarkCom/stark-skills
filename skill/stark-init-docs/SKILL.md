@@ -1,10 +1,7 @@
 ---
 name: stark-init-docs
-description: >
-  Scaffold dev docs structure into any repo. Modes: --template (empty skeleton),
-  --backfill (generate from git history), --upgrade (migrate existing docs),
-  --clean (remove skeleton). Use when the user says "init docs", "setup docs",
-  "scaffold docs", or invokes /stark-init-docs.
+description: >-
+  Scaffold dev docs structure (template/backfill/upgrade/clean modes). Use for init docs, setup docs, scaffold docs.
 argument-hint: "[--template] [--backfill] [--upgrade] [--clean]"
 ---
 

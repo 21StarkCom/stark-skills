@@ -1,10 +1,7 @@
 ---
 name: stark-pr-review-fix
-description: >
-  Full PR lifecycle: create PR, run multi-agent adversarial review, fix all findings,
-  re-review until clean, merge. Chains stark-pr-flow and stark-team-review into a single
-  autonomous pipeline. Use when the user says "PR review fix cycle", "full PR pipeline",
-  or invokes /stark-pr-review-fix.
+description: >-
+  Full PR lifecycle: create, multi-agent review, fix findings, re-review, merge. Use for PR review fix, full PR pipeline.
 argument-hint: "[PR title override] [--rounds N] [--no-merge]"
 ---
 

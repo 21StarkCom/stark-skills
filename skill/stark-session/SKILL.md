@@ -1,10 +1,7 @@
 ---
 name: stark-session
-description: >
-  Session management — start and end modes. Start: loads context, git state, health checks,
-  briefing. End: runs tests, merges PRs, commits docs, pushes. Config via .code-review/config.json
-  hierarchy. Use when the user says "session start", "session end", "start session", "end session",
-  "what was I working on", "catch me up", or invokes /stark-session.
+description: >-
+  Session start (context, git state, briefing) and end (tests, merge, push). Use for session start/end, catch me up.
 argument-hint: "[start|end]"
 ---
 

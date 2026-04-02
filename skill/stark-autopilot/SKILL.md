@@ -1,13 +1,7 @@
 ---
 name: stark-autopilot
-description: >
-  Autonomous multi-agent implementation with tournament at every step. Claude leads, dispatching
-  Claude + Codex + Gemini to compete on each implementation step in parallel git worktrees. Best
-  implementation wins via tournament evaluation, gets merged, and the next step begins. Use when
-  the user wants to build something end-to-end with all 3 agents competing, says "autopilot",
-  "build this with all agents", "tournament implementation", "let all 3 agents compete on building
-  this", or invokes /stark-autopilot. This is the most powerful execution mode — use it for
-  significant features, not one-line fixes.
+description: >-
+  Autonomous tournament implementation: 3 agents compete in worktrees per step, best wins. Use for autopilot, multi-agent build.
 argument-hint: '<plan-or-prompt> [--test-command CMD] [--agents claude,codex,gemini] [--timeout N] [--dry-run]'
 ---
 

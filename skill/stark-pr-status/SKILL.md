@@ -1,12 +1,7 @@
 ---
 name: stark-pr-status
-description: >
-  PR analytics dashboard — review rounds, findings by severity, signal-vs-noise,
-  time-to-merge, participants, and most impactful comments. Combines GitHub API
-  data with stark-team-review history. Use when the user says "PR status", "show PR
-  stats", "how is this PR doing", "PR dashboard", "what happened on PR 15",
-  or invokes /stark-pr-status. Also use when the user asks about review cycles,
-  merge times, or finding quality for specific PRs.
+description: >-
+  PR analytics dashboard: review rounds, findings, time-to-merge, signal-vs-noise. Use for PR status, PR stats, dashboard.
 argument-hint: "[PR_NUMBER | --all] [--repo REPO] [--state STATE] [--json]"
 ---
 

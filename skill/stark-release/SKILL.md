@@ -1,6 +1,7 @@
 ---
 name: stark-release
-description: Cut a new release — reviews unreleased CHANGELOG entries, bumps version (patch/minor/major), creates git tag, and optionally creates a GitHub Release with notes. Use when the user says "release", "cut a version", "tag a release", "bump version", or invokes /stark-release.
+description: >-
+  Cut a release: changelog review, version bump, git tag, GitHub Release. Use for release, tag, bump version.
 argument-hint: [patch|minor|major] (optional — will ask if not provided)
 ---
 

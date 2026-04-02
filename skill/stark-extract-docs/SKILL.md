@@ -1,11 +1,7 @@
 ---
 name: stark-extract-docs
-description: >
-  Extract durable knowledge from specs, plans, and reviews into project
-  documentation — ADRs, retrospectives, reference docs, glossary, and a
-  learning log. Use when the user says "extract docs", "generate ADRs",
-  "extract knowledge", "create retrospective", "docs from spec",
-  or invokes /stark-extract-docs.
+description: >-
+  Extract ADRs, retrospectives, and reference docs from specs, plans, and reviews. Use for extract docs, generate ADRs.
 argument-hint: "<path-to-spec> [--batch <dir>] [--dry-run] [--force]"
 ---
 
@@ -519,85 +515,11 @@ For batch mode, additionally show totals across all specs and dedup stats.
 
 ## Phase 7: Metrics & History
 
-### 7.1 Print metrics block
-
-```
-Metrics
-───────
-Total duration:     Xm Ys
-Phases:
-  Phase 1 (Setup):                    Xs
-  Phase 2 (Pass 1 — Extraction):      Xs
-  Phase 3 (Pass 2 — Routing):         Xs
-  Phase 4 (Preview & Write):          Xs
-  Phase 5 (Batch Coordination):       Xs  (batch only)
-  Phase 6 (Summary):                  Xs
-```
-
-### 7.2 Improvement flags
-
-Check and print if applicable:
-- Pass 2 extraction count is 0 → "Spec has no extractable knowledge — may be too thin"
-- ADR dedup rate > 50% (batch) → "Many overlapping decisions — consider consolidating"
-- Missing review artifacts → "No review found — review-derived knowledge unavailable"
-- Pass 1 > 70% of total time → "Extraction is the bottleneck"
-
-If none triggered: "No improvement opportunities detected."
-
-### 7.3 Persist history
-
-Write history file to `~/.claude/code-review/history/extract-docs/{target-repo}/{spec-slug}.json`:
-
-```bash
-mkdir -p ~/.claude/code-review/history/extract-docs/{target-repo}
-```
-
-Content — the full metrics JSON including:
-- `schema_version: 1`
-- `spec_path`
-- `target_repo`
-- `completed_at` (ISO 8601)
-- `input_hashes` (from Phase 2 extraction output)
-- `created_artifacts` — list of all files created/updated, ADR numbers, glossary entries, learning log entries
-- `timing` — per-phase durations following the observability protocol schema
-- `extractions` — counts by category
-- `outputs` — counts by output type
-
-This file enables:
-- Skip logic: compare `input_hashes` on next run
-- `--force` replacement: identify which artifacts to overwrite
-- `stark-metrics` aggregation
+See [references/metrics-history.md](references/metrics-history.md) for the metrics block format, improvement flags, and history persistence schema.
 
 ## Observability
 
-Follow the [Skill Observability Protocol](~/.claude/code-review/standards/observability.md).
-
-**Task-based progress at start:**
-
-```
-TaskCreate: "Phase 1: Setup — validate input, resolve artifacts"
-            activeForm: "Setting up extraction"
-TaskCreate: "Phase 2: Pass 1 — Knowledge Extraction"
-            activeForm: "Extracting knowledge from artifacts"
-TaskCreate: "Phase 3: Pass 2 — Routing & Generation"
-            activeForm: "Routing knowledge to doc types"
-TaskCreate: "Phase 4: Preview & Write"
-            activeForm: "Writing documentation files"
-TaskCreate: "Phase 5: Batch Coordination"   (batch mode only)
-            activeForm: "Deduplicating across specs"
-TaskCreate: "Phase 6: Summary"
-            activeForm: "Generating summary"
-TaskCreate: "Phase 7: Metrics & History"
-            activeForm: "Persisting metrics"
-```
-
-Set each to `in_progress` before starting, `completed` when done.
-
-**Timestamped log lines:** `[HH:MM:SS]` for each phase start/end and key events.
-
-**5-minute checkpoints:** For batch mode — show elapsed time + current spec + progress (N/M specs done).
-
-Record `T0` at skill start. All durations relative to `T0`.
+See [references/observability.md](references/observability.md) for the full observability protocol (tasks, timestamped logs, checkpoints).
 
 ## Force Re-Run Behavior (--force)
 
@@ -634,18 +556,7 @@ If no history file exists, `--force` simply bypasses the skip check and behaves 
 
 ## Failure Modes
 
-| Failure | Recovery |
-|---------|----------|
-| Spec doesn't exist or is empty | Error message, abort |
-| Spec is not `.md` | Error: "expected .md file" |
-| Target repo not found locally | Error with clone suggestion |
-| Pass 1 extracts nothing | Log cleanly, exit (not an error) |
-| Pass 1 returns invalid JSON | Retry once with error in prompt, then fail |
-| ADR number can't be determined | Fall back to `0001` with warning |
-| File write fails | Report what succeeded, what failed |
-| Batch: one spec fails | Continue to next, report failures at end |
-| Git commit fails | Files already written; suggest manual commit |
-| Target repo has dirty tree | Warn, skip commit, files still written |
+See [references/failure-modes.md](references/failure-modes.md) for the full recovery table.
 
 ## Mistakes to Avoid
 

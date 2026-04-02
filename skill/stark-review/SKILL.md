@@ -1,10 +1,7 @@
 ---
 name: stark-review
-description: >
-  Single-agent PR code review: 1 LLM per domain (9 domains). Fast, cheap alternative
-  to /stark-team-review (which uses 3 LLMs per domain). Default agent per domain is
-  configured in config.json domain_agents map; override with --agent. Use when the user
-  says "review", "review this PR", "quick review", or invokes /stark-review.
+description: >-
+  Single-agent PR code review: 1 LLM x 9 domains. Fast/cheap. Use for review, review this PR, quick review.
 argument-hint: "[PR_NUMBER] [--agent claude|codex|gemini] [--dry-run] [--repo ORG/REPO]"
 ---
 

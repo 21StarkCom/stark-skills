@@ -1,11 +1,7 @@
 ---
 name: stark-generate-docs
-description: >
-  Generate or update skill documentation with multi-LLM visualizations.
-  Detects which SKILL.md files changed, regenerates docs for those skills,
-  and commits the results. Use when the user says "generate docs",
-  "update skill docs", "regenerate viz", or invokes /stark-generate-docs.
-  Proactively use when a SKILL.md has been modified in the current session.
+description: >-
+  Generate/update skill documentation with multi-LLM visualizations. Use for generate docs, update skill docs.
 argument-hint: "[--skill <name>] [--all] [--check] [--force]"
 ---
 

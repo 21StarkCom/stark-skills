@@ -1,13 +1,7 @@
 ---
 name: stark-review-improvement
-description: >
-  Improve stark-skills prompts based on a Prompt Improvement Assessment from a
-  completed review run (/stark-team-review or /stark-review-design). Reads the assessment
-  from conversation context (or history files), edits the relevant prompt files in
-  ~/git/Evinced/stark-skills/, patches orchestrator scripts if needed, and logs the
-  learning. Supports --prompts-dir to target different prompt sets (default: PR code
-  review prompts; design-review for design doc prompts). Use when the user says
-  "improve review prompts", "fix review prompts", or invokes /stark-review-improvement.
+description: >-
+  Improve review prompts based on Prompt Improvement Assessment from completed reviews. Use for fix review prompts.
 argument-hint: "[--prompts-dir design-review] (reads assessment from context or latest history)"
 ---
 
