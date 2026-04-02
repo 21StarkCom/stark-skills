@@ -1033,6 +1033,30 @@ HISTORY_DIR = Path.home() / ".claude" / "code-review" / "history"
 HISTORY_SCHEMA_VERSION = 2
 
 
+def _emit_event(event: dict) -> None:
+    """Best-effort enqueue to the durable insights queue."""
+    try:
+        from emit_queue import enqueue
+        enqueue(event)
+    except Exception:
+        pass  # JSON on disk is the fallback; scraper will pick it up
+
+
+def _make_event(event_type: str, payload: dict, *, project: str | None = None, dedupe_key: str) -> dict:
+    """Build an event envelope for the insights queue."""
+    import datetime as _dt
+    return {
+        "type": event_type,
+        "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "cli": "claude",
+        "source": "skill",
+        "schema_version": 1,
+        "project": project,
+        "dedupe_key": dedupe_key,
+        "payload": payload,
+    }
+
+
 def _history_dir(repo: str, pr_number: int) -> Path:
     """Return history directory for a PR, creating it if needed."""
     parts = repo.split("/")
@@ -1113,6 +1137,37 @@ def save_round_history(
     }
 
     path.write_text(json.dumps(data, indent=2))
+
+    # Push events directly to insights queue (best-effort)
+    file_key = f"{repo}/{pr_number}/round-{rnd.round_num}"
+    finding_idx = 0
+    for res in rnd.results:
+        _emit_event(_make_event("agent_dispatch", {
+            "agent": res.agent, "domain": res.domain,
+            "task": f"{res.domain} review", "round": rnd.round_num,
+            "duration_s": res.duration_s,
+            "success": res.error is None,
+            "timeout": "Timed out" in (res.error or ""),
+            "finding_count": len(res.findings), "mode": mode,
+        }, project=repo, dedupe_key=f"review:{file_key}:agent:{res.agent}:{res.domain}"))
+
+        for f in res.findings:
+            _emit_event(_make_event("review_finding", {
+                "pr_number": pr_number, "repo": repo,
+                "round": rnd.round_num,
+                "agent": f.agent, "domain": f.domain,
+                "severity": f.severity, "title": f.title,
+                "description": f.description,
+                "classification": f.classification,
+                "classification_reason": f.classification_reason,
+                "cross_validated_by": f.cross_validated_by,
+                "fixed_in_round": f.fixed_in_round,
+                "fix_verified": f.fix_verified,
+                "mode": mode,
+                "domain_agent": (domain_agents or {}).get(f.domain),
+            }, project=repo, dedupe_key=f"review:{file_key}:finding:{finding_idx}"))
+            finding_idx += 1
+
     return path
 
 
@@ -1239,6 +1294,20 @@ def save_review_summary(
     }
 
     path.write_text(json.dumps(data, indent=2))
+
+    # Push quality summary to insights queue (best-effort)
+    _emit_event(_make_event("review_quality", {
+        "pr_number": pr_number, "repo": repo, "mode": mode,
+        "domain_agents": domain_agents,
+        "total_rounds": len(rounds),
+        "signal_to_noise_pct": data["summary"]["signal_to_noise_pct"],
+        "per_agent": per_agent,
+        "per_agent_domain": agent_domain_quality,
+        "per_domain": per_domain,
+        "avg_duration_s": avg_duration,
+        "error_counts": error_counts,
+    }, project=repo, dedupe_key=f"review:{repo}/{pr_number}:quality"))
+
     return path
 
 

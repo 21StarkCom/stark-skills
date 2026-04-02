@@ -42,9 +42,10 @@ SCHEMA_PATH = Path(__file__).parent / "event_schema.json"
 
 _REQUIRED_FIELDS = ("type", "timestamp", "cli", "source", "schema_version", "payload")
 _VALID_TYPES = {
-    "skill_invocation", "review_finding", "agent_dispatch", "prompt",
-    "correction", "memory_write", "code_change", "bug_fix",
-    "pr_event", "tool_usage", "ci_signal",
+    "skill_invocation", "review_finding", "review_quality",
+    "agent_dispatch", "prompt", "correction", "memory_write",
+    "code_change", "bug_fix", "pr_event", "tool_usage", "ci_signal",
+    "tournament_result",
 }
 _VALID_CLIS = {"claude", "codex", "gemini"}
 _VALID_SOURCES = {"skill", "hook", "scraper", "backfill"}
