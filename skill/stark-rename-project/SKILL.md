@@ -14,7 +14,7 @@ sibling repos under the same parent directory, and reinstall symlinks.
 
 ## Arguments
 
-- `<old-name>` — current project/repo name (e.g., `stark-review`)
+- `<old-name>` — current project/repo name (e.g., `stark-team-review`)
 - `<new-name>` — desired new name (e.g., `stark-skills`)
 - `--dry-run` — preview all changes without executing any of them
 

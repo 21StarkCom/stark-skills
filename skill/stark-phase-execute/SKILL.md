@@ -303,7 +303,7 @@ rm -f "$BODY_FILE"
 
 ### 1.4 Multi-agent review (up to N rounds)
 
-Create an isolated worktree for review, matching stark-review's approach:
+Create an isolated worktree for review, matching stark-team-review's approach:
 
 ```bash
 git fetch origin refs/pull/${PR_NUM}/head

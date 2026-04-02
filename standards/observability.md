@@ -18,7 +18,7 @@ Use `TaskCreate` and `TaskUpdate` to drive the native Claude Code progress displ
 
 **At skill start:** Create one task per phase/step. Use `activeForm` for the spinner text shown while in-progress.
 
-Example for `/stark-review`:
+Example for `/stark-team-review`:
 
 ```
 TaskCreate: "Phase 1: Setup — auth, fetch PR, create worktree"
@@ -64,7 +64,7 @@ Create round tasks dynamically as each round begins — don't pre-create all rou
 Alongside the task UI, print timestamped log lines for key events. These provide a textual record that persists in the conversation:
 
 ```
-[HH:MM:SS] === stark-review started ===
+[HH:MM:SS] === stark-team-review started ===
 [HH:MM:SS] Phase 1: Setup — started
 [HH:MM:SS] Phase 1: Setup — done (12s)
 [HH:MM:SS] Phase 2: Review-Fix Loop — started
@@ -94,7 +94,7 @@ Include: elapsed time since `T0`, current phase, and a progress indicator. For s
 When the skill completes (success or failure), print a structured metrics block:
 
 ```
-[HH:MM:SS] === stark-review completed ===
+[HH:MM:SS] === stark-team-review completed ===
 
 Metrics
 ───────
@@ -118,7 +118,7 @@ Rounds:              2 fix + 1 final
 
 Adapt the metrics to the skill. Not every skill has agents or rounds. The structure should reflect the skill's actual phases and operations:
 
-- **stark-review / stark-review-plan**: agent counts, per-round timing, finding outcomes
+- **stark-team-review / stark-review-plan**: agent counts, per-round timing, finding outcomes
 - **stark-session start**: per-health-check timing, context load time
 - **stark-update-deps**: dependency count, WebSearch count, verification pass/fail
 - **stark-rename-project**: files modified count, sibling repos updated, symlinks fixed

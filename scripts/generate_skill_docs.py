@@ -7,7 +7,7 @@ diagrams and embedded PNGs.
 
 Usage:
     generate_skill_docs.py                          # all skills
-    generate_skill_docs.py --skill stark-review     # one skill
+    generate_skill_docs.py --skill stark-team-review     # one skill
     generate_skill_docs.py --check                  # staleness check
     generate_skill_docs.py --no-screenshots         # skip PNG generation
     generate_skill_docs.py --no-evaluation          # skip judge, use first valid
@@ -446,7 +446,7 @@ def generate_internals_markdown(skill: SkillData, mermaid_diagram: str, doc_cont
 
 DOMAIN_MAP: dict[str, list[str]] = {
     "Code Review": [
-        "stark-review", "stark-review-design", "stark-review-plan",
+        "stark-team-review", "stark-review-design", "stark-review-plan",
         "stark-review-improvement",
     ],
     "PR & Shipping": ["stark-pr-flow", "stark-release"],
@@ -466,7 +466,7 @@ DOMAIN_MAP: dict[str, list[str]] = {
 _DECISION_TREES: dict[str, str] = {
     "Code Review": """\
 graph TD
-    A{What are you reviewing?} -->|PR code| B[stark-review]
+    A{What are you reviewing?} -->|PR code| B[stark-team-review]
     A -->|Design / architecture doc| C[stark-review-design]
     A -->|Execution / deployment plan| D[stark-review-plan]
     A -->|Improve review prompts| E[stark-review-improvement]""",

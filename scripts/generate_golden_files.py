@@ -24,7 +24,7 @@ SKILL_DIR = ROOT / 'skill'
 GOLDEN_DIR = ROOT / 'tests' / 'golden'
 
 GOLDEN_SKILLS = [
-    'stark-review',
+    'stark-team-review',
     'stark-pr-flow',
     'stark-session',
     'stark-update-deps',

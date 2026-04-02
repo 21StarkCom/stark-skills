@@ -17,7 +17,7 @@ This skill focuses on **skill usage patterns** — which skills are invoked, how
 
 ## Arguments
 
-- `[--skill <name>]` — detailed report for a single skill (e.g., `--skill stark-review`)
+- `[--skill <name>]` — detailed report for a single skill (e.g., `--skill stark-team-review`)
 - `[--format table|full]` — `table` = summary rankings only, `full` = detailed per-skill breakdown (default: `full`)
 - No arguments = full report across all skills
 
@@ -49,7 +49,7 @@ Parse all lines. Skip malformed JSON lines with a warning count.
 
 Filter entries where `display` starts with `/` (a slash command). For each:
 
-- Extract the skill name: the first whitespace-delimited token after `/`. E.g., `/stark-review 42` → `stark-review`, `/stark-review-plan docs/spec.md` → `stark-review-plan`.
+- Extract the skill name: the first whitespace-delimited token after `/`. E.g., `/stark-team-review 42` → `stark-team-review`, `/stark-review-plan docs/spec.md` → `stark-review-plan`.
 - Extract arguments: everything after the skill name (may be empty).
 - Classify as:
   - **quick** — no arguments (standalone `/skill-name`)
@@ -58,7 +58,7 @@ Filter entries where `display` starts with `/` (a slash command). For each:
 Store each invocation as:
 ```json
 {
-  "skill": "stark-review",
+  "skill": "stark-team-review",
   "args": "42",
   "type": "parameterized",
   "timestamp": 1742500000000,
@@ -201,7 +201,7 @@ Save to `~/.claude/code-review/insights/skills/skill-analytics.md`:
 
 | Rank | Skill | Invocations | Projects | First Used | Last Used | Trend |
 |------|-------|-------------|----------|------------|-----------|-------|
-| 1 | /stark-review | 142 | 8 | 2025-11-01 | 2026-03-21 | stable |
+| 1 | /stark-team-review | 142 | 8 | 2025-11-01 | 2026-03-21 | stable |
 | ... | ... | ... | ... | ... | ... | ... |
 
 ## Skill Adoption Timeline
@@ -213,7 +213,7 @@ Save to `~/.claude/code-review/insights/skills/skill-analytics.md`:
 
 ## Per-Skill Details
 
-### /stark-review
+### /stark-team-review
 - **Invocations:** {N} ({quick}% quick, {param}% parameterized)
 - **Projects:** {list}
 - **Run history:** {N} runs, avg {duration}s, {success_rate}% success
@@ -251,7 +251,7 @@ Most common skill sequences within sessions:
 
 | Sequence | Count | Example Session |
 |----------|-------|-----------------|
-| /stark-review -> /stark-review-improvement | 12 | {sessionId} |
+| /stark-team-review -> /stark-review-improvement | 12 | {sessionId} |
 | ... | ... | ... |
 
 ## Discovery

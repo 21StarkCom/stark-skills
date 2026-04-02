@@ -2,7 +2,7 @@
 name: stark-review-improvement
 description: >
   Improve stark-skills prompts based on a Prompt Improvement Assessment from a
-  completed review run (/stark-review or /stark-review-design). Reads the assessment
+  completed review run (/stark-team-review or /stark-review-design). Reads the assessment
   from conversation context (or history files), edits the relevant prompt files in
   ~/git/Evinced/stark-skills/, patches orchestrator scripts if needed, and logs the
   learning. Supports --prompts-dir to target different prompt sets (default: PR code
@@ -53,7 +53,7 @@ HISTORY_SUB  = (org/repo/pr structure)
 ### 1.1 Find the assessment
 
 Look in the **current conversation context** for either:
-- A "Prompt Improvement Assessment" section (from a `/stark-review` or `/stark-review-design` run)
+- A "Prompt Improvement Assessment" section (from a `/stark-team-review` or `/stark-review-design` run)
 - A `prompt-assessment.md` or `*.design-review.md` file path referenced in conversation
 
 If neither exists, check the most recent history directory for the matching review type:

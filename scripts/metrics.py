@@ -8,7 +8,7 @@ Usage:
     metrics.py                          # human-readable report
     metrics.py --json                   # JSON output
     metrics.py --repo GetEvinced/foo    # filter by repo
-    metrics.py --skill stark-review     # filter by skill type
+    metrics.py --skill stark-team-review     # filter by skill type
     metrics.py --since 2026-03-15       # filter by date
 """
 from __future__ import annotations
@@ -192,7 +192,7 @@ def _normalize_pr_review(data: dict, path: Path) -> RunRecord:
         errors.append(f"gemini: {gemini_note}")
 
     return RunRecord(
-        skill="stark-review",
+        skill="stark-team-review",
         started_at=date,
         completed_at=date,
         duration_s=0.0,
@@ -248,7 +248,7 @@ def _normalize_plan_review(data: dict, path: Path) -> RunRecord:
     plan_name = path.parent.name
 
     return RunRecord(
-        skill="stark-review-plan",
+        skill="stark-team-review-plan",
         started_at=date,
         completed_at=date,
         duration_s=sum(r.duration_s for r in agent_results),
@@ -559,7 +559,7 @@ def compute_report(records: list[RunRecord]) -> dict:
     if report["prompt_improvements"]["unapplied"] > 0:
         n = report["prompt_improvements"]["unapplied"]
         recommendations.append(
-            f"{n} prompt assessment(s) not yet applied — run /stark-review-improvement"
+            f"{n} prompt assessment(s) not yet applied — run /stark-team-review-improvement"
         )
 
     # Zero-finding domains
@@ -704,7 +704,7 @@ def main():
     parser = argparse.ArgumentParser(description="Stark skill metrics aggregator")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     parser.add_argument("--repo", help="Filter by repo (e.g., GetEvinced/infra-pulse)")
-    parser.add_argument("--skill", help="Filter by skill type (e.g., stark-review)")
+    parser.add_argument("--skill", help="Filter by skill type (e.g., stark-team-review)")
     parser.add_argument("--since", help="Filter by date (YYYY-MM-DD)")
     args = parser.parse_args()
 

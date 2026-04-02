@@ -14,7 +14,7 @@ cd ~/git/Evinced/stark-skills
 /stark-session start
 
 # Review a PR with 3 LLMs × 9 domains
-/stark-review 42
+/stark-team-review 42
 
 # End the session (tests, cleanup, push)
 /stark-session end
@@ -40,13 +40,13 @@ Review artifacts before they ship. Each review skill dispatches 3 LLMs in parall
 
 | Skill | What it reviews | When to use |
 |-------|----------------|-------------|
-| [`/stark-review`](docs/skills/stark-review/usage.md) | PR code changes | Before merging any PR. The core skill — 3 LLMs × 9 domains, autonomous fix loop. |
+| [`/stark-team-review`](docs/skills/stark-team-review/usage.md) | PR code changes | Before merging any PR. The core skill — 3 LLMs × 9 domains, autonomous fix loop. |
 | [`/stark-review-design`](docs/skills/stark-review-design/usage.md) | Architecture and design docs | Before committing to a design. Reviews across 10 domains (completeness, security, scalability, etc.). |
 | [`/stark-review-plan`](docs/skills/stark-review-plan/usage.md) | Execution plans and deployment plans | Before executing. Adversarial SRE review across 10 failure vectors — assumes the plan will break. |
 | [`/stark-review-improvement`](docs/skills/stark-review-improvement/usage.md) | Review prompt effectiveness | After reviews produce too many false positives. Tunes agent prompts based on assessment data. |
 | [`/stark-review-design-improvement`](docs/skills/stark-review-design-improvement/usage.md) | Design review prompt effectiveness | After design reviews produce too many false positives. Wraps `/stark-review-improvement` with design-review prompts. |
 
-**Best practice:** Run `/stark-review-plan` on specs *before* implementation starts. It's cheaper to fix a plan than to fix code. Use `/stark-review` on every PR — the autonomous fix loop handles most findings without human intervention.
+**Best practice:** Run `/stark-review-plan` on specs *before* implementation starts. It's cheaper to fix a plan than to fix code. Use `/stark-team-review` on every PR — the autonomous fix loop handles most findings without human intervention.
 
 ### Planning and Execution
 
@@ -141,7 +141,7 @@ Understand how the system is performing.
 ### Reviewing someone else's PR
 
 ```
-/stark-review 42        # multi-agent review with fix loop
+/stark-team-review 42   # multi-agent review with fix loop
 /stark-pr-status 42     # analytics: rounds, findings, signal quality
 ```
 
@@ -189,7 +189,7 @@ Each agent posts a consolidated review via its own GitHub App bot:
 stark-skills/
 ├── install.sh                    ← symlinks everything to install locations
 ├── skill/                        ← → ~/.claude/skills/
-│   ├── stark-review/SKILL.md     ← one dir per skill (26 total)
+│   ├── stark-team-review/SKILL.md  ← one dir per skill (26 total)
 │   ├── stark-persona/SKILL.md
 │   └── ...
 ├── scripts/                      ← → ~/.claude/code-review/scripts/

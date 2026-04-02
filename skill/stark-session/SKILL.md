@@ -160,7 +160,7 @@ Present a concise briefing:
 Branch: feature/xyz (3 ahead, clean)
 PRs: #42 (open, 2 approvals)
 Health: ✓ tests, ✓ lint, ✗ build (error: ...)
-Skills: /stark-review, /stark-session, /init-docs, ...
+Skills: /stark-team-review, /stark-session, /init-docs, ...
 
 Recent: 3 commits today on this branch
 Memory: [key context from memory files]

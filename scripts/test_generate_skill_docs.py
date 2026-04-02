@@ -259,12 +259,12 @@ def test_stamp_winner_html():
 
 def test_write_audit_entry(tmp_path):
     audit_path = tmp_path / "scores.jsonl"
-    entry = {"skill": "stark-review", "audience": "usage", "winner": "claude", "winner_score": 8.25}
+    entry = {"skill": "stark-team-review", "audience": "usage", "winner": "claude", "winner_score": 8.25}
     write_audit_entry(audit_path, entry)
     lines = audit_path.read_text().strip().split("\n")
     assert len(lines) == 1
     parsed = json.loads(lines[0])
-    assert parsed["skill"] == "stark-review"
+    assert parsed["skill"] == "stark-team-review"
     assert "timestamp" in parsed
 
     write_audit_entry(audit_path, {**entry, "skill": "stark-session"})
@@ -318,11 +318,11 @@ def test_generate_internals_markdown():
 
 
 def test_generate_index_markdown():
-    fixture_review = Path(__file__).parent.parent / "skill" / "stark-review" / "SKILL.md"
+    fixture_review = Path(__file__).parent.parent / "skill" / "stark-team-review" / "SKILL.md"
     fixture_session = Path(__file__).parent.parent / "skill" / "stark-session" / "SKILL.md"
     skills = [parse_skill_md(fixture_review), parse_skill_md(fixture_session)]
     md = generate_index_markdown(skills)
-    assert "stark-review" in md
+    assert "stark-team-review" in md
     assert "stark-session" in md
     assert "usage.md" in md
     assert "internals.md" in md

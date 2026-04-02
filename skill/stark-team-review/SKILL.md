@@ -1,20 +1,20 @@
 ---
-name: stark-review
+name: stark-team-review
 description: >
   Multi-agent PR code review using 3 LLMs × N domains with autonomous fix loop.
   Use when the user says "stark review", "review this PR with all agents",
-  "multi-agent review", or invokes /stark-review. Also triggers on
-  `/stark-review` or `/stark-review <number>`.
+  "multi-agent review", or invokes /stark-team-review. Also triggers on
+  `/stark-team-review` or `/stark-team-review <number>`.
 argument-hint: "[PR_NUMBER] [--rounds N] [--dry-run] [--repo ORG/REPO]"
 ---
 
-# stark-review
+# stark-team-review
 
 Multi-agent PR review: 3 LLMs (Claude, Codex, Gemini) × 9 domain specializations dispatched in parallel. Autonomous fix-review loop until clean or max rounds.
 
 ## Arguments
 
-- `<number>` — PR number (e.g., `/stark-review 91`)
+- `<number>` — PR number (e.g., `/stark-team-review 91`)
 - `--rounds N` — max fix-review cycles (default: 3)
 - `--repo ORG/REPO` — override repo detection
 - `--dry-run` — review only, no fixes, no GitHub posting
@@ -360,7 +360,7 @@ unset GH_TOKEN  # Use native gh auth
 **Labels** (auto-create if missing):
 
 ```bash
-gh label create "stark-review" --repo {ORG}/{REPO} --color "7057ff" --force
+gh label create "stark-team-review" --repo {ORG}/{REPO} --color "7057ff" --force
 gh label create "critical" --repo {ORG}/{REPO} --color "b60205" --force
 gh label create "high" --repo {ORG}/{REPO} --color "d93f0b" --force
 ```
@@ -393,7 +393,7 @@ cat > "$BODY_FILE" << 'ISSUE_EOF'
 {if confirmed by multiple agents: "- **Confirmed by:** {list of agent/domain pairs}"}
 
 ---
-_Created by `stark-review` · PR #{pr_number}_
+_Created by `stark-team-review` · PR #{pr_number}_
 ISSUE_EOF
 
 TITLE_FILE=$(mktemp) && chmod 600 "$TITLE_FILE"
@@ -403,14 +403,14 @@ gh api /repos/{ORG}/{REPO}/issues \
   --method POST \
   --field title="$(cat $TITLE_FILE)" \
   --field body="$(cat $BODY_FILE)" \
-  --field labels="[\"stark-review\",\"{finding.severity}\"]" \
+  --field labels="[\"stark-team-review\",\"{finding.severity}\"]" \
   --field type="Bug"
 rm -f "$BODY_FILE" "$TITLE_FILE"
 ```
 
 **Shell injection prevention:** Title and body written to temp files (`chmod 600`) — LLM content never interpolated in shell.
 
-**Deduplication:** Check for existing open issue with `stark-review` label matching same title + file path before creating.
+**Deduplication:** Check for existing open issue with `stark-team-review` label matching same title + file path before creating.
 
 **Cap:** Max 5 bug issues per review run. Overflow listed in PR comment.
 
@@ -492,7 +492,7 @@ Don't pre-create all rounds — the loop may exit early.
 Record `T0` at skill start. Print timestamped lines for every phase transition and key event:
 
 ```
-[HH:MM:SS] === stark-review started ===
+[HH:MM:SS] === stark-team-review started ===
 [HH:MM:SS] Phase 1: Setup — started
 [HH:MM:SS] Phase 1: Setup — done (12s)
 [HH:MM:SS] Phase 2: Review-Fix Loop — started
@@ -507,7 +507,7 @@ Record `T0` at skill start. Print timestamped lines for every phase transition a
 [HH:MM:SS] Phase 3: Summary — done (5s)
 [HH:MM:SS] Phase 4: Post & Persist — done (3s)
 [HH:MM:SS] Phase 5: Cleanup — done (2s)
-[HH:MM:SS] === stark-review completed ===
+[HH:MM:SS] === stark-team-review completed ===
 ```
 
 ### 5-minute checkpoints (required for runs > 5 min)
@@ -587,7 +587,7 @@ After the metrics block, emit a completion event to stark-insights:
 
 ```bash
 $SCRIPTS/stark-emit skill_invocation \
-  skill=stark-review duration_s=$TOTAL_SECONDS success=$SUCCESS \
+  skill=stark-team-review duration_s=$TOTAL_SECONDS success=$SUCCESS \
   pr_number=$PR findings_total=$TOTAL findings_fixed=$FIXED \
   noise_count=$NOISE agents_dispatched=$AGENTS rounds=$ROUNDS
 ```

@@ -2,7 +2,7 @@
 name: stark-pr-review-fix
 description: >
   Full PR lifecycle: create PR, run multi-agent adversarial review, fix all findings,
-  re-review until clean, merge. Chains stark-pr-flow and stark-review into a single
+  re-review until clean, merge. Chains stark-pr-flow and stark-team-review into a single
   autonomous pipeline. Use when the user says "PR review fix cycle", "full PR pipeline",
   or invokes /stark-pr-review-fix.
 argument-hint: "[PR title override] [--rounds N] [--no-merge]"
@@ -12,24 +12,24 @@ argument-hint: "[PR title override] [--rounds N] [--no-merge]"
 
 Autonomous PR lifecycle: push → create PR → multi-agent review → fix all findings → re-review → merge.
 
-Chains `/stark-pr-flow` (Steps 1-3) and `/stark-review` into a single pipeline with a fix loop.
+Chains `/stark-pr-flow` (Steps 1-3) and `/stark-team-review` into a single pipeline with a fix loop.
 
 ## Arguments
 
 - First positional argument — PR title override (passed to stark-pr-flow)
-- `--rounds N` — max fix-review cycles (default: 3, passed to stark-review)
+- `--rounds N` — max fix-review cycles (default: 3, passed to stark-team-review)
 - `--no-merge` — stop after reviews are clean, don't merge
 - `--draft` — create PR as draft
 
 ## Phase 1: Create PR
 
-Execute `/stark-pr-flow` Steps 1–3 only (push, analyze, create PR). Do NOT proceed to self-review or merge — stark-review handles that better.
+Execute `/stark-pr-flow` Steps 1–3 only (push, analyze, create PR). Do NOT proceed to self-review or merge — stark-team-review handles that better.
 
 Capture `$PR_NUM` and `$REPO` from the output.
 
 ## Phase 2: Multi-Agent Review + Fix Loop
 
-Execute `/stark-review $PR_NUM --rounds $ROUNDS`.
+Execute `/stark-team-review $PR_NUM --rounds $ROUNDS`.
 
 This runs 3 LLMs × 9 domains in parallel, collects findings, fixes critical/high issues, and re-reviews until clean or max rounds reached.
 
