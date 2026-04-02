@@ -13,7 +13,10 @@ cd ~/git/Evinced/stark-skills
 # Start a work session (context loading, health checks, briefing)
 /stark-session start
 
-# Review a PR with 3 LLMs × 9 domains
+# Quick review (1 LLM × 9 domains)
+/stark-review 42
+
+# Thorough review (3 LLMs × 9 domains)
 /stark-team-review 42
 
 # End the session (tests, cleanup, push)
@@ -40,7 +43,8 @@ Review artifacts before they ship. Each review skill dispatches 3 LLMs in parall
 
 | Skill | What it reviews | When to use |
 |-------|----------------|-------------|
-| [`/stark-team-review`](docs/skills/stark-team-review/usage.md) | PR code changes | Before merging any PR. The core skill — 3 LLMs × 9 domains, autonomous fix loop. |
+| `/stark-review` | PR code changes | Quick review. 1 LLM × 9 domains — fast, cheap, default agent configurable per domain. |
+| [`/stark-team-review`](docs/skills/stark-team-review/usage.md) | PR code changes | Thorough review. 3 LLMs × 9 domains, autonomous fix loop. |
 | [`/stark-review-design`](docs/skills/stark-review-design/usage.md) | Architecture and design docs | Before committing to a design. Reviews across 10 domains (completeness, security, scalability, etc.). |
 | [`/stark-review-plan`](docs/skills/stark-review-plan/usage.md) | Execution plans and deployment plans | Before executing. Adversarial SRE review across 10 failure vectors — assumes the plan will break. |
 | [`/stark-review-improvement`](docs/skills/stark-review-improvement/usage.md) | Review prompt effectiveness | After reviews produce too many false positives. Tunes agent prompts based on assessment data. |
@@ -141,8 +145,9 @@ Understand how the system is performing.
 ### Reviewing someone else's PR
 
 ```
-/stark-team-review 42   # multi-agent review with fix loop
-/stark-pr-status 42     # analytics: rounds, findings, signal quality
+/stark-review 42                    # quick: 1 agent × 9 domains
+/stark-team-review 42               # thorough: 3 agents × 9 domains
+/stark-pr-status 42                 # analytics: rounds, findings, signal quality
 ```
 
 ### Monthly maintenance

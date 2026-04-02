@@ -90,6 +90,7 @@ DEFAULT_CONFIG = {
     "verify_before_clean": True,
     "disabled_domains": [],
     "extra_domains": [],
+    "domain_agents": {},
     "severity_overrides": {},
     "github_apps": {
         "claude": "stark-claude",
@@ -109,7 +110,7 @@ REPLACE_FIELDS = {
     "disabled_domains",
 }
 ADDITIVE_FIELDS = {"extra_domains"}
-DEEP_MERGE_FIELDS = {"severity_overrides", "github_apps"}
+DEEP_MERGE_FIELDS = {"severity_overrides", "github_apps", "domain_agents"}
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -803,6 +804,82 @@ def run_review_round(
     return rnd
 
 
+def resolve_domain_agents(
+    config: dict,
+    domains: list[str],
+    override_agent: str | None = None,
+) -> dict[str, str]:
+    """Build a domain→agent mapping for single-agent review mode.
+
+    Priority: CLI override > config domain_agents > fallback "codex".
+    """
+    if override_agent:
+        return {d: override_agent for d in domains}
+    da = config.get("domain_agents", {})
+    return {d: da.get(d, "codex") for d in domains}
+
+
+def run_single_agent_round(
+    base: str,
+    round_num: int,
+    domain_agent_map: dict[str, str],
+    cwd: str | None = None,
+    out: Any = None,
+    spec_context: str | None = None,
+) -> ReviewRound:
+    """Run one round dispatching exactly 1 agent per domain."""
+    if out is None:
+        out = sys.stdout
+    rnd = ReviewRound(round_num=round_num)
+    total = len(domain_agent_map)
+
+    print(f"\n{'=' * 60}", file=out)
+    print(
+        f"  Review Round {round_num} — {total} domains (1 agent each)",
+        file=out,
+    )
+    print(f"{'=' * 60}", file=out)
+
+    with ThreadPoolExecutor(max_workers=min(total, MAX_WORKERS)) as pool:
+        futures = {}
+        for domain_key, agent in domain_agent_map.items():
+            if agent not in AGENTS:
+                print(f"  [!] Unknown agent '{agent}' for {domain_key}, skipping", file=out)
+                continue
+            agent_cfg = AGENTS[agent]
+            domain_cfg = DOMAINS.get(domain_key, {"label": domain_key})
+            future = pool.submit(_run_subagent, agent, domain_key, base, cwd, spec_context)
+            futures[future] = (agent, domain_key)
+            print(
+                f"  [{agent_cfg['emoji']}] {agent} × {domain_cfg['label']}...",
+                file=out,
+            )
+
+        for future in as_completed(futures):
+            agent, domain_key = futures[future]
+            agent_cfg = AGENTS[agent]
+            result = future.result()
+            rnd.results.append(result)
+
+            n = len(result.findings)
+            crits = sum(1 for f in result.findings if f.severity == "critical")
+            highs = sum(1 for f in result.findings if f.severity == "high")
+
+            if result.error:
+                print(
+                    f"  [{agent_cfg['emoji']}] {agent} × {domain_key}: ERROR — {result.error}",
+                    file=out,
+                )
+            else:
+                print(
+                    f"  [{agent_cfg['emoji']}] {agent} × {domain_key}: "
+                    f"{n} findings ({crits}C/{highs}H) [{result.duration_s:.1f}s]",
+                    file=out,
+                )
+
+    return rnd
+
+
 def format_agent_review_body(agent: str, rnd: ReviewRound) -> str:
     """Format all domain findings for one agent as a GitHub PR review body."""
     agent_cfg = AGENTS[agent]
@@ -945,6 +1022,120 @@ def has_actionable_findings(rnd: ReviewRound) -> bool:
 
 
 # ── Main ───────────────────────────────────────────────────────────────
+
+
+def review_pr_single(
+    repo: str,
+    pr_number: int,
+    base: str = "main",
+    dry_run: bool = False,
+    json_output: bool = False,
+    json_only: bool = False,
+    post_raw: bool = False,
+    override_agent: str | None = None,
+    cwd: str | None = None,
+) -> dict[str, Any]:
+    """Run single-agent review: 1 agent per domain (from domain_agents config)."""
+    out = sys.stderr if json_only else sys.stdout
+    config = discover_config(cwd=cwd)
+    disabled = set(config.get("disabled_domains", []))
+    active_domains = [d for d in DOMAINS if d not in disabled]
+    sev_overrides = config.get("severity_overrides", {})
+    da_map = resolve_domain_agents(config, active_domains, override_agent)
+
+    # Determine which agents are actually used (for posting)
+    used_agents = sorted(set(da_map.values()))
+
+    print(f"\n{'#' * 60}", file=out)
+    print(f"  Single-Agent Review: {repo} PR #{pr_number}", file=out)
+    print(f"  Base: {base}", file=out)
+    print(f"  {len(active_domains)} domains, agents: {', '.join(used_agents)}", file=out)
+    print(f"{'#' * 60}", file=out)
+
+    if not DOMAINS:
+        print("  [!] No domain prompt files found in:", GLOBAL_PROMPTS_DIR, file=sys.stderr)
+        sys.exit(1)
+
+    pr_body = None
+    try:
+        token = _get_gh_token("stark-claude")
+        env = {**os.environ, "GH_TOKEN": token}
+        pr_meta = subprocess.run(
+            ["gh", "api", f"repos/{repo}/pulls/{pr_number}", "--jq", ".body"],
+            capture_output=True, text=True, env=env, timeout=30,
+        )
+        if pr_meta.returncode == 0:
+            pr_body = pr_meta.stdout.strip() or None
+    except Exception as e:
+        print(f"  [!] Could not fetch PR body: {e}", file=sys.stderr)
+
+    spec_link = extract_spec_link(pr_body)
+    effective_cwd = cwd or os.getcwd()
+    spec_content = resolve_spec_content(spec_link, effective_cwd) if spec_link else None
+
+    if spec_content:
+        spec_context = f"## Design Spec\nThe PR references this spec:\n\n{spec_content}"
+    elif spec_link and spec_link != "N/A":
+        spec_context = f"## Design Spec\nThe PR references a spec at `{spec_link}` but it could not be resolved. Flag this in your review."
+    else:
+        spec_context = None
+
+    rnd = run_single_agent_round(base, 1, da_map, cwd=cwd, out=out, spec_context=spec_context)
+
+    if sev_overrides:
+        for res in rnd.results:
+            apply_severity_overrides(res.findings, sev_overrides)
+
+    # Post per-agent findings grouped by the agents actually used
+    if not dry_run or post_raw:
+        print(f"\n  Posting findings to PR #{pr_number}...", file=out)
+        for agent in used_agents:
+            agent_cfg = AGENTS[agent]
+            body = format_agent_review_body(agent, rnd)
+            if body:
+                ok = post_review(repo, pr_number, agent_cfg["app"], body)
+                status = "posted" if ok else "FAILED"
+                print(f"    {agent_cfg['emoji']} {agent} → {status}", file=out)
+
+    output = {
+        "repo": repo,
+        "pr": pr_number,
+        "base": base,
+        "mode": "single",
+        "domain_agents": da_map,
+        "domains": list(DOMAINS.keys()),
+        "rounds": [
+            {
+                "round": rnd.round_num,
+                "results": [
+                    {
+                        "agent": res.agent,
+                        "domain": res.domain,
+                        "findings": [asdict(f) for f in res.findings],
+                        "error": res.error,
+                        "duration_s": res.duration_s,
+                    }
+                    for res in rnd.results
+                ],
+            }
+        ],
+        "summary": {
+            "total_findings": len(all_findings(rnd)),
+            "critical": sum(1 for f in all_findings(rnd) if f.severity == "critical"),
+            "high": sum(1 for f in all_findings(rnd) if f.severity == "high"),
+            "medium": sum(1 for f in all_findings(rnd) if f.severity == "medium"),
+            "clean": not has_actionable_findings(rnd),
+        },
+    }
+
+    if not json_output:
+        print(f"\n{'=' * 60}", file=out)
+        print("  Summary", file=out)
+        print(f"{'=' * 60}", file=out)
+        print(format_summary_table([rnd]), file=out)
+        print(file=out)
+
+    return output
 
 
 def review_pr(
@@ -1146,8 +1337,20 @@ def main() -> None:
         help="Post per-agent raw findings to PR even in --json-only mode. "
         "The orchestrator handles its own classified summary separately.",
     )
+    parser.add_argument(
+        "--single",
+        action="store_true",
+        help="Single-agent mode: 1 agent per domain (from domain_agents config).",
+    )
+    parser.add_argument(
+        "--agent",
+        choices=list(AGENTS.keys()),
+        help="Override agent for all domains (implies --single).",
+    )
 
     args = parser.parse_args()
+    if args.agent:
+        args.single = True
 
     if args.pr:
         repo = args.repo or detect_repo()
@@ -1156,15 +1359,19 @@ def main() -> None:
             sys.exit(1)
         base = args.base or detect_base_branch()
 
-        result = review_pr(
-            repo,
-            args.pr,
-            base,
-            dry_run=args.dry_run,
-            json_output=args.json_output or args.json_only,
-            json_only=getattr(args, "json_only", False),
-            post_raw=getattr(args, "post_raw", False),
-        )
+        review_fn = review_pr_single if args.single else review_pr
+        review_kwargs: dict[str, Any] = {
+            "repo": repo,
+            "pr_number": args.pr,
+            "base": base,
+            "dry_run": args.dry_run,
+            "json_output": args.json_output or args.json_only,
+            "json_only": getattr(args, "json_only", False),
+            "post_raw": getattr(args, "post_raw", False),
+        }
+        if args.single:
+            review_kwargs["override_agent"] = args.agent
+        result = review_fn(**review_kwargs)
 
         if args.json_output or args.json_only:
             print(json.dumps(result, indent=2))

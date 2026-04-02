@@ -77,7 +77,7 @@ class TestBaseFlag:
         with patch("sys.argv", ["multi_review.py", "--pr", "1", "--base", "abc1234def", "--dry-run", "--json-only"]):
             multi_review.main()
         mock_review.assert_called_once()
-        assert mock_review.call_args[0][2] == "abc1234def"
+        assert mock_review.call_args.kwargs["base"] == "abc1234def"
 
 
 class TestModelFlags:
@@ -480,3 +480,45 @@ class TestReturnCodeHandling:
         result = multi_review._run_subagent("codex", "architecture", "abc123")
         assert result.error == "cli_error"
         assert len(result.findings) == 0
+
+
+class TestSingleAgentMode:
+    """resolve_domain_agents and --single CLI flag."""
+
+    def test_override_agent_all_domains(self):
+        domains = ["architecture", "security", "correctness"]
+        result = multi_review.resolve_domain_agents({}, domains, override_agent="claude")
+        assert result == {"architecture": "claude", "security": "claude", "correctness": "claude"}
+
+    def test_config_domain_agents(self):
+        config = {"domain_agents": {"security": "claude", "correctness": "gemini"}}
+        domains = ["architecture", "security", "correctness"]
+        result = multi_review.resolve_domain_agents(config, domains)
+        assert result == {"architecture": "codex", "security": "claude", "correctness": "gemini"}
+
+    def test_fallback_to_codex(self):
+        domains = ["architecture", "security"]
+        result = multi_review.resolve_domain_agents({}, domains)
+        assert result == {"architecture": "codex", "security": "codex"}
+
+    def test_override_takes_precedence_over_config(self):
+        config = {"domain_agents": {"security": "claude"}}
+        domains = ["security"]
+        result = multi_review.resolve_domain_agents(config, domains, override_agent="gemini")
+        assert result == {"security": "gemini"}
+
+    @patch("multi_review.review_pr_single", return_value={"summary": {"clean": True}})
+    @patch("multi_review.detect_repo", return_value="GetEvinced/test")
+    def test_single_flag_routes_to_single(self, mock_repo, mock_review):
+        with patch("sys.argv", ["multi_review.py", "--pr", "1", "--single", "--dry-run", "--json-only"]):
+            multi_review.main()
+        mock_review.assert_called_once()
+        assert mock_review.call_args.kwargs.get("override_agent") is None
+
+    @patch("multi_review.review_pr_single", return_value={"summary": {"clean": True}})
+    @patch("multi_review.detect_repo", return_value="GetEvinced/test")
+    def test_agent_flag_implies_single(self, mock_repo, mock_review):
+        with patch("sys.argv", ["multi_review.py", "--pr", "1", "--agent", "claude", "--dry-run", "--json-only"]):
+            multi_review.main()
+        mock_review.assert_called_once()
+        assert mock_review.call_args.kwargs["override_agent"] == "claude"

@@ -63,7 +63,8 @@ All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.claude/skil
 - `/stark-plan-to-tasks <path> [--dry-run] [--cleanup <slug>]` — decompose plan into phased GitHub issues (3 LLM passes)
 - `/stark-phase-execute <plan-slug> [--dry-run]` — autonomous phase execution: implement all tasks, PR, review, merge, release, dashboard
 - `/stark-autopilot <plan-or-prompt>` — autonomous implementation with tournament at every step (3 agents compete in worktrees)
-- `/stark-team-review [PR_NUMBER]` — multi-agent PR code review (3 LLMs × 9 domains)
+- `/stark-review [PR_NUMBER]` — single-agent PR code review (1 LLM × 9 domains, fast/cheap)
+- `/stark-team-review [PR_NUMBER]` — multi-agent PR code review (3 LLMs × 9 domains, thorough)
 - `/stark-review-improvement [--prompts-dir DIR]` — improve prompts based on review assessment (PR or design/plan review)
 - `/stark-review-design-improvement` — improve design review prompts (wraps /stark-review-improvement with --prompts-dir design-review)
 

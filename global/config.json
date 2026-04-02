@@ -1,5 +1,16 @@
 {
   "agents": ["claude", "codex", "gemini"],
+  "domain_agents": {
+    "architecture": "codex",
+    "accessibility": "codex",
+    "correctness": "codex",
+    "type-safety": "codex",
+    "security": "codex",
+    "test-coverage": "codex",
+    "spec-conformance": "codex",
+    "ui-design-conformance": "codex",
+    "regression-prevention": "codex"
+  },
   "fix_threshold": "medium",
   "test_command": null,
   "build_command": null,
