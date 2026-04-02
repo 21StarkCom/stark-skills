@@ -499,4 +499,51 @@ class TestStarkEmitCLI:
         assert event["session_id"] == "test-session"
 
 
+class TestDrainToBuffer:
+    """drain_to_buffer writes events from queue.db to buffer.db."""
+
+    def test_events_move_to_buffer(self, isolated_queue):
+        buffer_path = isolated_queue / "buffer.db"
+        with patch.object(emit_queue, "BUFFER_PATH", buffer_path):
+            emit_queue.enqueue(_make_event())
+            emit_queue.enqueue(_make_event(
+                dedupe_key="second",
+                payload={"skill": "stark-session", "duration_s": 30},
+            ))
+            assert emit_queue.pending_count() == 2
+
+            stats = emit_queue.drain_to_buffer()
+            assert stats["sent"] == 2
+            assert stats["failed"] == 0
+            assert emit_queue.pending_count() == 0
+
+            # Verify events in buffer.db
+            db = sqlite3.connect(str(buffer_path))
+            rows = db.execute("SELECT type, payload FROM events WHERE synced_at IS NULL").fetchall()
+            db.close()
+            assert len(rows) == 2
+            assert all(r[0] == "skill_invocation" for r in rows)
+
+    def test_empty_queue_noop(self, isolated_queue):
+        buffer_path = isolated_queue / "buffer.db"
+        with patch.object(emit_queue, "BUFFER_PATH", buffer_path):
+            stats = emit_queue.drain_to_buffer()
+            assert stats == {"sent": 0, "failed": 0}
+
+    def test_dedupe_on_second_drain(self, isolated_queue):
+        buffer_path = isolated_queue / "buffer.db"
+        with patch.object(emit_queue, "BUFFER_PATH", buffer_path):
+            emit_queue.enqueue(_make_event(dedupe_key="same-key"))
+            emit_queue.drain_to_buffer()
+
+            # Re-enqueue same dedupe key — buffer UNIQUE constraint dedupes
+            emit_queue.enqueue(_make_event(dedupe_key="same-key"))
+            emit_queue.drain_to_buffer()
+
+            db = sqlite3.connect(str(buffer_path))
+            count = db.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            db.close()
+            assert count == 1
+
+
 import sys

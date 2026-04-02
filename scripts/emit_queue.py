@@ -180,6 +180,93 @@ def drain(batch_size: int = DRAIN_BATCH_SIZE) -> dict:
     return stats
 
 
+BUFFER_PATH = Path(os.environ.get("BUFFER_PATH", Path.home() / ".stark-insights" / "buffer.db"))
+
+
+def _get_buffer_db() -> sqlite3.Connection:
+    """Open the buffer database (creating schema if needed)."""
+    BUFFER_PATH.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(str(BUFFER_PATH), timeout=10)
+    db.execute("PRAGMA journal_mode=WAL")
+    db.execute("PRAGMA busy_timeout=5000")
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS events (
+            id TEXT PRIMARY KEY,
+            dedupe_key TEXT UNIQUE,
+            session_id TEXT,
+            normalized_session_id TEXT,
+            type TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            cli TEXT,
+            user_id TEXT,
+            project TEXT,
+            payload TEXT NOT NULL,
+            schema_version INTEGER DEFAULT 1,
+            source TEXT,
+            synced_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_events_unsynced_timestamp
+            ON events (synced_at, timestamp);
+    """)
+    return db
+
+
+def drain_to_buffer(batch_size: int = DRAIN_BATCH_SIZE) -> dict:
+    """Flush pending events from queue.db directly into buffer.db (no HTTP).
+
+    Returns {sent, failed}.
+    """
+    import uuid as _uuid
+
+    queue_db = _get_db()
+    buffer_db = _get_buffer_db()
+    stats = {"sent": 0, "failed": 0}
+
+    try:
+        rows = queue_db.execute(
+            "SELECT id, dedupe_key, event_json, created_at FROM pending "
+            "ORDER BY created_at LIMIT ?",
+            (batch_size,),
+        ).fetchall()
+
+        for row_id, dedupe_key, event_json, created_at in rows:
+            try:
+                event = json.loads(event_json)
+                buffer_db.execute(
+                    """INSERT OR IGNORE INTO events
+                       (id, dedupe_key, session_id, normalized_session_id,
+                        type, timestamp, cli, user_id, project,
+                        payload, schema_version, source, synced_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)""",
+                    (
+                        str(_uuid.uuid4()),
+                        dedupe_key,
+                        event.get("session_id"),
+                        event.get("normalized_session_id"),
+                        event.get("type", ""),
+                        event.get("timestamp", ""),
+                        event.get("cli"),
+                        event.get("user_id"),
+                        event.get("project"),
+                        json.dumps(event.get("payload", {})),
+                        event.get("schema_version", 1),
+                        event.get("source"),
+                    ),
+                )
+                queue_db.execute("DELETE FROM pending WHERE id = ?", (row_id,))
+                stats["sent"] += 1
+            except Exception:
+                stats["failed"] += 1
+
+        queue_db.commit()
+        buffer_db.commit()
+    finally:
+        queue_db.close()
+        buffer_db.close()
+
+    return stats
+
+
 def pending_count() -> int:
     """Number of events waiting to be sent."""
     db = _get_db()

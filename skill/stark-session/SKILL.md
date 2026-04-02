@@ -269,6 +269,23 @@ If project config is missing, skip silently.
 - On push failure: report error, ask how to proceed
 - Otherwise (no upstream, not on main): ask "Push to origin?"
 
+### Phase 5.5 — Sync Telemetry
+
+Flush the event queue to the local buffer, then sync to Cloud SQL if available:
+
+```bash
+# 1. Drain queue.db → buffer.db (always works, no network needed)
+$PYTHON -c "import sys; sys.path.insert(0, '$SCRIPTS'); from emit_queue import drain_to_buffer; print(drain_to_buffer(batch_size=500))"
+
+# 2. Sync buffer.db → Cloud SQL (best-effort, skips if no DATABASE_URL or no network)
+SYNC_SCRIPT=~/git/Evinced/stark-insights/scripts/sync_buffer.py
+if [ -f "$SYNC_SCRIPT" ]; then
+    ~/git/Evinced/stark-insights/.venv/bin/python3 "$SYNC_SCRIPT" 2>/dev/null
+fi
+```
+
+Report result in Phase 6 summary. If sync fails, note "Telemetry: buffered locally (will sync next session)".
+
 ### Phase 6 — Summary
 
 ```
@@ -277,6 +294,7 @@ PRs: #42 merged (squash)
 Docs: committed (3 files)
 Project: 2 issues updated (Documentation State → Drafted)
 Pushed: main → origin/main
+Telemetry: 42 events synced to Cloud SQL (0 remaining)
 
 Session complete.
 ```
