@@ -119,7 +119,43 @@ install() {
         warn "Evinced dir not found at $EVINCED_DIR — skipping org config"
     fi
 
-    # 4. Skills: ~/.claude/skills/{name}/SKILL.md → repo/skill/{name}/SKILL.md
+    # 4. Validate skills (blocking — must pass before symlinking)
+    echo ""
+    echo "Validating skills..."
+    local skill_errors=0
+
+    for skill_dir in "$REPO_DIR"/skill/stark-*/; do
+        [ -d "$skill_dir" ] || continue
+        local skill_file="$skill_dir/SKILL.md"
+        [ -f "$skill_file" ] || continue
+        local sname
+        sname=$(basename "$skill_dir")
+
+        # Check A: disable-model-invocation: true is required
+        if ! grep -q "^disable-model-invocation: true" "$skill_file"; then
+            error "Skill $sname: missing 'disable-model-invocation: true' in frontmatter"
+            skill_errors=$((skill_errors + 1))
+        fi
+
+        # Check B: description ≤200 chars
+        local desc_len
+        desc_len=$(awk '/^---$/{c++; next} c==1 && /description:/{found=1} found && /^[a-z]/ && !/description:/{found=0} found{s=s $0}' "$skill_file" | sed 's/description:[[:space:]]*//' | sed 's/^>-\?//' | tr -d '\n' | sed 's/^[[:space:]]*//' | wc -c | tr -d ' ')
+        if [ "$desc_len" -gt 200 ]; then
+            error "Skill $sname: description is ${desc_len} chars (max 200)"
+            skill_errors=$((skill_errors + 1))
+        fi
+    done
+
+    if [ "$skill_errors" -gt 0 ]; then
+        echo ""
+        error "$skill_errors skill validation error(s). Fix before installing."
+        echo "  - disable-model-invocation: Add to frontmatter (all stark-skills are invoked via /slash-command)"
+        echo "  - description >200 chars: Front-load trigger keywords, move details to SKILL.md body"
+        return 1
+    fi
+    info "All skills passed validation"
+
+    # 5. Skills: ~/.claude/skills/{name}/SKILL.md → repo/skill/{name}/SKILL.md
     #    Auto-discover all stark-* skill dirs under skill/
     for skill_dir in "$REPO_DIR"/skill/stark-*/; do
         [ -d "$skill_dir" ] || continue
@@ -136,10 +172,7 @@ install() {
         fi
     done
 
-    # Validate skill descriptions and body sizes
-    echo ""
-    echo "Validating skill sizes..."
-    local desc_warnings=0
+    # Post-install: body size warnings (non-blocking)
     local body_warnings=0
     for skill_dir in "$REPO_DIR"/skill/stark-*/; do
         [ -d "$skill_dir" ] || continue
@@ -147,27 +180,15 @@ install() {
         [ -f "$skill_file" ] || continue
         local sname
         sname=$(basename "$skill_dir")
-
-        # Check description length (target ≤160 chars)
-        local desc_len
-        desc_len=$(awk '/^---$/{c++; next} c==1 && /description:/{found=1} found && /^[a-z]/ && !/description:/{found=0} found{s=s $0}' "$skill_file" | sed 's/description:[[:space:]]*//' | sed 's/^>-\?//' | tr -d '\n' | sed 's/^[[:space:]]*//' | wc -c | tr -d ' ')
-        if [ "$desc_len" -gt 200 ]; then
-            warn "Skill $sname: description is ${desc_len} chars (target ≤160)"
-            desc_warnings=$((desc_warnings + 1))
-        fi
-
-        # Check body line count (target ≤500 lines)
         local body_lines
         body_lines=$(awk 'BEGIN{c=0} /^---$/{c++; if(c==2){f=1; next}} f{print}' "$skill_file" | wc -l | tr -d ' ')
         if [ "$body_lines" -gt 500 ]; then
-            warn "Skill $sname: body is ${body_lines} lines (target ≤500)"
+            warn "Skill $sname: body is ${body_lines} lines (consider extracting to references/)"
             body_warnings=$((body_warnings + 1))
         fi
     done
-    if [ "$desc_warnings" -eq 0 ] && [ "$body_warnings" -eq 0 ]; then
-        info "All skills within size targets"
-    else
-        warn "$desc_warnings description warning(s), $body_warnings body warning(s)"
+    if [ "$body_warnings" -gt 0 ]; then
+        warn "$body_warnings skill(s) with body >500 lines"
     fi
 
     # Clean up orphaned skill symlinks (deleted skills)
@@ -197,10 +218,10 @@ install() {
         fi
     done
 
-    # 5. Standards: ~/.claude/code-review/standards/ → repo/standards/
+    # 6. Standards: ~/.claude/code-review/standards/ → repo/standards/
     link_dir "$REPO_DIR/standards" "$CODE_REVIEW_DIR/standards" "Standards templates"
 
-    # 6. User config: ~/.claude/settings.json + statusline → repo/config/
+    # 7. User config: ~/.claude/settings.json + statusline → repo/config/
     link_dir "$REPO_DIR/config/settings.json" "$CLAUDE_DIR/settings.json" "Settings"
     link_dir "$REPO_DIR/config/statusline-command.sh" "$CLAUDE_DIR/statusline-command.sh" "Status line"
 
