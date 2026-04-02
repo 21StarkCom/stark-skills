@@ -254,6 +254,12 @@ class Finding:
     title: str
     description: str
     suggestion: str
+    # Classification fields — filled by the skill after reviewing each finding.
+    classification: str | None = None        # fix, noise, false_positive, ignored
+    classification_reason: str | None = None  # why this classification was chosen
+    cross_validated_by: list[str] = field(default_factory=list)  # ["claude:security", ...]
+    fixed_in_round: int | None = None
+    fix_verified: bool | None = None          # tests passed after fix?
 
 
 @dataclass
@@ -1019,6 +1025,221 @@ def all_findings(rnd: ReviewRound) -> list[Finding]:
 def has_actionable_findings(rnd: ReviewRound) -> bool:
     """Check if a round has critical, high, or medium findings that need fixing."""
     return any(f.severity in ("critical", "high", "medium") for f in all_findings(rnd))
+
+
+# ── History persistence ──────────────────────────────────────────────────
+
+HISTORY_DIR = Path.home() / ".claude" / "code-review" / "history"
+HISTORY_SCHEMA_VERSION = 2
+
+
+def _history_dir(repo: str, pr_number: int) -> Path:
+    """Return history directory for a PR, creating it if needed."""
+    parts = repo.split("/")
+    d = HISTORY_DIR / parts[0] / parts[1] / str(pr_number) if len(parts) == 2 \
+        else HISTORY_DIR / repo / str(pr_number)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _agent_quality(findings: list[Finding], agent: str) -> dict[str, Any]:
+    """Compute quality metrics for one agent from classified findings."""
+    af = [f for f in findings if f.agent == agent]
+    fix = sum(1 for f in af if f.classification == "fix")
+    noise = sum(1 for f in af if f.classification == "noise")
+    fp = sum(1 for f in af if f.classification == "false_positive")
+    ignored = sum(1 for f in af if f.classification == "ignored")
+    unclassified = sum(1 for f in af if f.classification is None)
+    real = fix  # only "fix" findings are confirmed real
+    total_evaluated = real + noise + fp
+    return {
+        "total": len(af),
+        "fix": fix,
+        "noise": noise,
+        "false_positive": fp,
+        "ignored": ignored,
+        "unclassified": unclassified,
+        "signal_pct": round(real / total_evaluated * 100, 1) if total_evaluated else None,
+    }
+
+
+def save_round_history(
+    repo: str,
+    pr_number: int,
+    rnd: ReviewRound,
+    mode: str = "team",
+    domain_agents: dict[str, str] | None = None,
+) -> Path:
+    """Save one round's data to history. Returns the file path.
+
+    Called by the skill after classifying findings. The round's findings
+    should have their classification fields populated before calling this.
+    """
+    import datetime
+    d = _history_dir(repo, pr_number)
+    path = d / f"round-{rnd.round_num}.json"
+
+    all_f = []
+    for res in rnd.results:
+        all_f.extend(res.findings)
+
+    data = {
+        "schema_version": HISTORY_SCHEMA_VERSION,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "repo": repo,
+        "pr": pr_number,
+        "mode": mode,
+        "round": rnd.round_num,
+        "domain_agents": domain_agents,
+        "results": [
+            {
+                "agent": res.agent,
+                "domain": res.domain,
+                "duration_s": res.duration_s,
+                "error": res.error,
+                "api_key_fallback": res.api_key_fallback,
+                "findings": [asdict(f) for f in res.findings],
+            }
+            for res in rnd.results
+        ],
+        "classification_summary": {
+            "fix": sum(1 for f in all_f if f.classification == "fix"),
+            "noise": sum(1 for f in all_f if f.classification == "noise"),
+            "false_positive": sum(1 for f in all_f if f.classification == "false_positive"),
+            "ignored": sum(1 for f in all_f if f.classification == "ignored"),
+            "unclassified": sum(1 for f in all_f if f.classification is None),
+            "total": len(all_f),
+        },
+    }
+
+    path.write_text(json.dumps(data, indent=2))
+    return path
+
+
+def save_review_summary(
+    repo: str,
+    pr_number: int,
+    base: str,
+    rounds: list[ReviewRound],
+    mode: str = "team",
+    domain_agents: dict[str, str] | None = None,
+) -> Path:
+    """Save the full review summary across all rounds. Returns the file path.
+
+    Includes per-agent and per-domain quality metrics for optimization.
+    """
+    import datetime
+    d = _history_dir(repo, pr_number)
+    path = d / "rounds.json"
+
+    # Collect all classified findings across all rounds
+    all_findings_flat: list[Finding] = []
+    for rnd in rounds:
+        for res in rnd.results:
+            all_findings_flat.extend(res.findings)
+
+    # Per-agent quality
+    agents_seen = sorted(set(f.agent for f in all_findings_flat))
+    per_agent = {a: _agent_quality(all_findings_flat, a) for a in agents_seen}
+
+    # Per-agent × per-domain quality
+    per_agent_domain: dict[str, dict[str, Any]] = {}
+    for f in all_findings_flat:
+        key = f"{f.agent}:{f.domain}"
+        if key not in per_agent_domain:
+            per_agent_domain[key] = {"agent": f.agent, "domain": f.domain, "findings": []}
+        per_agent_domain[key]["findings"].append(f)
+
+    agent_domain_quality = {}
+    for key, info in per_agent_domain.items():
+        q = _agent_quality(info["findings"], info["agent"])
+        q["domain"] = info["domain"]
+        agent_domain_quality[key] = q
+
+    # Per-domain aggregated
+    domains_seen = sorted(set(f.domain for f in all_findings_flat))
+    per_domain: dict[str, dict[str, Any]] = {}
+    for domain in domains_seen:
+        df = [f for f in all_findings_flat if f.domain == domain]
+        fix = sum(1 for f in df if f.classification == "fix")
+        noise = sum(1 for f in df if f.classification in ("noise", "false_positive"))
+        per_domain[domain] = {
+            "total": len(df),
+            "fix": fix,
+            "noise": noise,
+            "agents_that_found_real": sorted(set(
+                f.agent for f in df if f.classification == "fix"
+            )),
+        }
+
+    # Duration stats per agent
+    duration_stats: dict[str, list[float]] = {}
+    for rnd in rounds:
+        for res in rnd.results:
+            if not res.error:
+                duration_stats.setdefault(res.agent, []).append(res.duration_s)
+    avg_duration = {
+        a: round(sum(ds) / len(ds), 1) for a, ds in duration_stats.items()
+    }
+
+    # Error counts per agent
+    error_counts: dict[str, int] = {}
+    for rnd in rounds:
+        for res in rnd.results:
+            if res.error:
+                error_counts[res.agent] = error_counts.get(res.agent, 0) + 1
+
+    total_fix = sum(1 for f in all_findings_flat if f.classification == "fix")
+    total_noise = sum(1 for f in all_findings_flat if f.classification in ("noise", "false_positive"))
+    total_evaluated = total_fix + total_noise
+
+    data = {
+        "schema_version": HISTORY_SCHEMA_VERSION,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "repo": repo,
+        "pr": pr_number,
+        "base": base,
+        "mode": mode,
+        "domain_agents": domain_agents,
+        "agents": agents_seen,
+        "domains": list(DOMAINS.keys()),
+        "rounds": [
+            {
+                "round": rnd.round_num,
+                "results": [
+                    {
+                        "agent": res.agent,
+                        "domain": res.domain,
+                        "findings": [asdict(f) for f in res.findings],
+                        "error": res.error,
+                        "duration_s": res.duration_s,
+                    }
+                    for res in rnd.results
+                ],
+            }
+            for rnd in rounds
+        ],
+        "summary": {
+            "total_rounds": len(rounds),
+            "total_findings": len(all_findings_flat),
+            "total_fix": total_fix,
+            "total_noise": total_noise,
+            "total_false_positive": sum(1 for f in all_findings_flat if f.classification == "false_positive"),
+            "total_ignored": sum(1 for f in all_findings_flat if f.classification == "ignored"),
+            "signal_to_noise_pct": round(total_fix / total_evaluated * 100, 1) if total_evaluated else None,
+            "clean": not has_actionable_findings(rounds[-1]) if rounds else True,
+        },
+        "quality": {
+            "per_agent": per_agent,
+            "per_agent_domain": agent_domain_quality,
+            "per_domain": per_domain,
+            "avg_duration_s": avg_duration,
+            "error_counts": error_counts,
+        },
+    }
+
+    path.write_text(json.dumps(data, indent=2))
+    return path
 
 
 # ── Main ───────────────────────────────────────────────────────────────
