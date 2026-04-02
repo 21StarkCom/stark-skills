@@ -8,29 +8,36 @@ from __future__ import annotations
 import os
 
 # Default model — pinned to avoid drift when the CLI default changes.
-CLAUDE_MODEL = "claude-opus-4-6"
+CLAUDE_MODEL = "claude-sonnet-4-6"
+
+# Vertex AI config for headless sub-agent dispatch.
+# Bypasses OAuth login — uses ADC (gcloud auth application-default login).
+_VERTEX_ENV = {
+    "CLAUDE_CODE_USE_VERTEX": "1",
+    "ANTHROPIC_VERTEX_PROJECT_ID": "development-222850",
+    "CLOUD_ML_REGION": "us-east5",
+}
 
 # Env vars that must NOT leak into CLI subprocesses.
-# Purpose-specific Anthropic keys (e.g., ANTHROPIC_VECTOR_INSIGHTS) are for
-# services like embedding pipelines — the CLI should use its own OAuth auth
-# or the ANTHROPIC_CODE_CLI key, not a service key loaded from a project .env.
 _STRIPPED_ENV_VARS = {"ANTHROPIC_API_KEY"}
 _ANTHROPIC_PREFIX = "ANTHROPIC_"
-_ANTHROPIC_ALLOWED = {"ANTHROPIC_CODE_CLI"}
+_ANTHROPIC_ALLOWED = {"ANTHROPIC_CODE_CLI", "ANTHROPIC_VERTEX_PROJECT_ID"}
 
 
 def make_clean_env() -> dict[str, str]:
-    """Return a copy of os.environ without project-specific Anthropic keys.
+    """Return a copy of os.environ with Vertex AI config for headless dispatch.
 
-    Strips ANTHROPIC_API_KEY and any ANTHROPIC_* vars that aren't
-    ANTHROPIC_CODE_CLI, so CLI subprocesses (claude, codex) use their
-    own auth rather than a service key loaded from a project .env file.
+    Strips ANTHROPIC_API_KEY and project-specific Anthropic vars, then
+    injects Vertex AI env vars so sub-agents authenticate via ADC
+    instead of requiring interactive OAuth login.
     """
-    return {
+    env = {
         k: v for k, v in os.environ.items()
         if k not in _STRIPPED_ENV_VARS
         and not (k.startswith(_ANTHROPIC_PREFIX) and k not in _ANTHROPIC_ALLOWED)
     }
+    env.update(_VERTEX_ENV)
+    return env
 
 
 def build_claude_cmd(
