@@ -25,8 +25,8 @@ if git_branch=$(git -C "$cwd" --no-optional-locks rev-parse --abbrev-ref HEAD 2>
   untracked=$(git -C "$cwd" --no-optional-locks ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
   changed=$(( modified + staged ))
   parts=""
-  [ "$changed" -gt 0 ] && parts="\u270e${changed}"
-  [ "$untracked" -gt 0 ] && { [ -n "$parts" ] && parts="${parts} "; parts="${parts}\u2728${untracked}"; }
+  [ "$changed" -gt 0 ] && parts="\U0001f4c4 ${changed}"
+  [ "$untracked" -gt 0 ] && { [ -n "$parts" ] && parts="${parts} "; parts="${parts}\U0001f50e ${untracked}"; }
   [ -n "$parts" ] && git_dirty_str="[${parts}]"
 fi
 
@@ -99,19 +99,20 @@ if [ -f "$status_file" ]; then
   done < "$status_file"
 fi
 
-# ── Session cost (from transcript) ───────────────────────────────────────
-session_cost=""
-if [ -n "$session_id" ] && [ -n "$cwd" ]; then
-  # Transcript path: ~/.claude/projects/{project_slug}/{session_id}.jsonl
-  project_slug=$(echo "$cwd" | sed "s|/|-|g")
-  transcript="$HOME/.claude/projects/${project_slug}/${session_id}.jsonl"
-  if [ -f "$transcript" ]; then
-    session_cost=$(python3 -c "
-import sys; sys.path.insert(0, '$HOME/git/Evinced/stark-skills/scripts')
-from emit_queue import compute_cost_from_transcript
-r = compute_cost_from_transcript('$transcript')
-print(f'{r[2]:.2f}' if r else '')
-" 2>/dev/null)
+# ── Token counts (cumulative session totals) ─────────────────────────────
+tokens_in=$(echo "$input" | jq -r '.context_window.total_input_tokens // empty')
+tokens_out=$(echo "$input" | jq -r '.context_window.total_output_tokens // empty')
+
+# ── Session start time (persisted per session_id) ─────────────────────────
+session_start_time=""
+if [ -n "$session_id" ]; then
+  start_file="$HOME/.stark-insights/session-start-${session_id}"
+  if [ ! -f "$start_file" ]; then
+    date +%s > "$start_file" 2>/dev/null
+  fi
+  start_ts=$(cat "$start_file" 2>/dev/null)
+  if [ -n "$start_ts" ]; then
+    session_start_time=$(date -r "$start_ts" +%H:%M 2>/dev/null || date +%H:%M)
   fi
 fi
 
@@ -156,14 +157,17 @@ if [ -n "$ctx_pct" ]; then
   fi
 fi
 
-# session cost — 💰
-if [ -n "$session_cost" ] && [ "$session_cost" != "0.00" ]; then
-  out="${out}${SEP}${C_MAUVE}\U0001f4b0\$${session_cost}${RESET}"
+# token counts — ⬆ sent (green) / ⬇ received (red)
+if [ -n "$tokens_in" ] || [ -n "$tokens_out" ]; then
+  tok_str=""
+  [ -n "$tokens_in" ]  && tok_str="\u2b06 ${C_GREEN}${tokens_in}${RESET}"
+  [ -n "$tokens_out" ] && tok_str="${tok_str} \u2b07 ${C_RED}${tokens_out}${RESET}"
+  out="${out}${SEP}${tok_str}"
 fi
 
 # inflight count — ⚡️
 if [ "$inflight_count" -gt 0 ] 2>/dev/null; then
-  out="${out}${SEP}${C_SKY}\u26a1\ufe0f${inflight_count}${RESET}"
+  out="${out}${SEP}${C_SKY}\u26a1\ufe0f ${inflight_count}${RESET}"
 fi
 
 # longest inflight tool — amber if >3min
@@ -177,17 +181,17 @@ fi
 
 # last tool duration — ⏱️
 if [ -n "$last_tool_str" ]; then
-  out="${out}${SEP}${C_TEAL}\u23f1\ufe0f${last_tool_str}${RESET}"
+  out="${out}${SEP}${C_TEAL}\u23f1\ufe0f ${last_tool_str}${RESET}"
 fi
 
 # queue pending — 🪲
 if [ "$queue_pending" -gt 5 ] 2>/dev/null; then
-  out="${out}${SEP}${C_MAROON}\U0001fab2${queue_pending}${RESET}"
+  out="${out}${SEP}${C_MAROON}\U0001fab2 ${queue_pending}${RESET}"
 fi
 
 # dead letter — 🐞
 if [ "$queue_dead" -gt 0 ] 2>/dev/null; then
-  out="${out}${SEP}${C_RED}\U0001f41e${queue_dead}${RESET}"
+  out="${out}${SEP}${C_RED}\U0001f41e ${queue_dead}${RESET}"
 fi
 
 # session name
@@ -198,12 +202,14 @@ if [ -n "$vim_mode" ]; then
   [ "$vim_mode" = "NORMAL" ] && out="${out}${SEP}${C_YELLOW}[N]${RESET}" || out="${out}${SEP}${C_DIM}[I]${RESET}"
 fi
 
-# last activity time — show when last tool finished (flag emoji)
+# start/end times — 🆂 start (red) / 🅴 end (green, only when work done)
+time_str=""
+[ -n "$session_start_time" ] && time_str="\U0001f182 ${C_RED}${session_start_time}${RESET}"
 if [ -n "$lt_ts" ] && [ "$lt_ts" -gt 0 ] 2>/dev/null; then
-  last_time=$(date -r "$lt_ts" +%H:%M 2>/dev/null || date +%H:%M)
-  out="${out}${SEP}${C_DIM}\U0001f3c1 ${last_time}${RESET}"
-else
-  out="${out}${SEP}${C_DIM}\U0001f3c1 $(date +%H:%M)${RESET}"
+  end_time=$(date -r "$lt_ts" +%H:%M 2>/dev/null || date +%H:%M)
+  [ -n "$time_str" ] && time_str="${time_str} "
+  time_str="${time_str}\U0001f174 ${C_GREEN}${end_time}${RESET}"
 fi
+[ -n "$time_str" ] && out="${out}${SEP}${time_str}"
 
 printf "%b\n" "$out"
