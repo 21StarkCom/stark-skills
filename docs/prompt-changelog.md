@@ -1,6 +1,6 @@
 # Prompt Changelog
 
-Tracks improvements to review prompts based on stark-review assessments.
+Tracks improvements to review prompts based on stark-team-review assessments.
 
 ## 2026-04-01 — Batch: scope enforcement, self-refuting findings, infra-repo awareness
 
@@ -145,7 +145,7 @@ Tracks improvements to review prompts based on stark-review assessments.
 
 | File | Change | Reason |
 |------|--------|--------|
-| `skill/stark-review/SKILL.md` | Added step 1.5: push local changes before creating worktree | Review agents were diffing against stale remote HEAD, missing local fixes |
+| `skill/stark-team-review/SKILL.md` | Added step 1.5: push local changes before creating worktree | Review agents were diffing against stale remote HEAD, missing local fixes |
 
 ### Validation
 - [x] Prompt syntax OK

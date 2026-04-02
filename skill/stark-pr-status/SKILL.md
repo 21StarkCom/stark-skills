@@ -3,7 +3,7 @@ name: stark-pr-status
 description: >
   PR analytics dashboard — review rounds, findings by severity, signal-vs-noise,
   time-to-merge, participants, and most impactful comments. Combines GitHub API
-  data with stark-review history. Use when the user says "PR status", "show PR
+  data with stark-team-review history. Use when the user says "PR status", "show PR
   stats", "how is this PR doing", "PR dashboard", "what happened on PR 15",
   or invokes /stark-pr-status. Also use when the user asks about review cycles,
   merge times, or finding quality for specific PRs.
@@ -12,7 +12,7 @@ argument-hint: "[PR_NUMBER | --all] [--repo REPO] [--state STATE] [--json]"
 
 # stark-pr-status
 
-PR-level analytics dashboard. Pulls data from GitHub API + stark-review history
+PR-level analytics dashboard. Pulls data from GitHub API + stark-team-review history
 to show the full lifecycle of a PR: reviews, findings, participants, and outcomes.
 
 ## Constants
@@ -61,7 +61,7 @@ For all-PRs mode, the output is a summary table with per-PR stats.
 ## Phase 3: Actionable Suggestions
 
 After presenting, check for patterns:
-- PRs open > 7 days with no reviews → suggest `/stark-review`
+- PRs open > 7 days with no reviews → suggest `/stark-team-review`
 - PRs with high noise ratio → suggest `/stark-review-improvement`
 - PRs ready to merge (approved, CI green) → suggest `/stark-pr-flow`
 
@@ -82,5 +82,5 @@ Skill-specific metrics:
 | No repo detected | "Run from a git repo or use --repo org/name" |
 | PR not found | "PR #N not found in {repo}" |
 | GitHub API auth failure | "Run install.sh or check GitHub App credentials" |
-| No history for PR | Show GitHub data only, note "No stark-review history" |
+| No history for PR | Show GitHub data only, note "No stark-team-review history" |
 | Rate limited | "GitHub API rate limited. Try again in a few minutes." |

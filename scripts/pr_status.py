@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """PR analytics dashboard — review rounds, findings, participants, timelines.
 
-Combines GitHub API data with stark-review history to produce a full
+Combines GitHub API data with stark-team-review history to produce a full
 lifecycle view of PRs: review cycles, finding quality, merge times.
 
 Usage:
@@ -165,7 +165,7 @@ def detect_repo(cwd: str | None = None) -> str:
 
 
 def _load_history(repo: str, pr_number: int) -> dict | None:
-    """Load stark-review history for a PR."""
+    """Load stark-team-review history for a PR."""
     # repo is like GetEvinced/foo — history uses the repo name part
     parts = repo.split("/")
     repo_name = parts[1] if len(parts) == 2 else repo
@@ -393,7 +393,7 @@ def analyze_pr(repo: str, pr_data: dict, token: str) -> PRStatus:
                     if overlap:
                         status.rework_of.append(rpr["number"])
 
-    # Load stark-review history
+    # Load stark-team-review history
     history = _load_history(repo, number)
     if history:
         status.has_history = True
@@ -684,7 +684,7 @@ def format_single_pr(s: PRStatus) -> str:
     # Data sources
     if not s.has_history:
         lines.append("")
-        lines.append("  \u26a0\ufe0f  No stark-review history found for this PR")
+        lines.append("  \u26a0\ufe0f  No stark-team-review history found for this PR")
 
     return "\n".join(lines)
 

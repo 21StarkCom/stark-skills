@@ -27,7 +27,7 @@ SCRIPTS = ~/.claude/code-review/scripts
 PYTHON  = $SCRIPTS/.venv/bin/python3
 ```
 
-This skill uses only the `stark-claude` GitHub App (not all three like `stark-review`).
+This skill uses only the `stark-claude` GitHub App (not all three like `stark-team-review`).
 
 ## Phase 1: Setup
 

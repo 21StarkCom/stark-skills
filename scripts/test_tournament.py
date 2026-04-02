@@ -83,12 +83,12 @@ def test_parse_scores():
 
 def test_write_audit_entry(tmp_path):
     audit_path = tmp_path / "scores.jsonl"
-    entry = {"skill": "stark-review", "audience": "usage", "winner": "claude", "winner_score": 8.25}
+    entry = {"skill": "stark-team-review", "audience": "usage", "winner": "claude", "winner_score": 8.25}
     write_audit_entry(audit_path, entry)
     lines = audit_path.read_text().strip().split("\n")
     assert len(lines) == 1
     parsed = json.loads(lines[0])
-    assert parsed["skill"] == "stark-review"
+    assert parsed["skill"] == "stark-team-review"
     assert "timestamp" in parsed
 
     write_audit_entry(audit_path, {**entry, "skill": "stark-session"})

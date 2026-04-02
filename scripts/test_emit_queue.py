@@ -32,7 +32,7 @@ def _make_event(**overrides) -> dict:
         "cli": "claude",
         "source": "skill",
         "schema_version": 1,
-        "payload": {"skill": "stark-review", "duration_s": 120},
+        "payload": {"skill": "stark-team-review", "duration_s": 120},
     }
     defaults.update(overrides)
     return defaults
@@ -480,7 +480,7 @@ class TestStarkEmitCLI:
         env["CLAUDE_PROJECT"] = "/test/project"
 
         result = subprocess.run(
-            [sys.executable, str(stark_emit), "skill_invocation", "skill=stark-review", "duration_s=42"],
+            [sys.executable, str(stark_emit), "skill_invocation", "skill=stark-team-review", "duration_s=42"],
             env=env,
             capture_output=True,
             text=True,
@@ -494,7 +494,7 @@ class TestStarkEmitCLI:
         assert len(rows) == 1
         event = json.loads(rows[0][0])
         assert event["type"] == "skill_invocation"
-        assert event["payload"]["skill"] == "stark-review"
+        assert event["payload"]["skill"] == "stark-team-review"
         assert event["payload"]["duration_s"] == 42
         assert event["session_id"] == "test-session"
 

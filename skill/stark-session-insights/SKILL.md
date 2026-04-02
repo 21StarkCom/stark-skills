@@ -87,7 +87,7 @@ For each project to process, run the following analyses using inline Python (via
 ### 2.2 Skill/command invocations
 
 Scan `display` text for patterns starting with `/stark-` or `/`:
-- Extract the command name (e.g., `/stark-review`, `/stark-session`, `/commit`, `/help`)
+- Extract the command name (e.g., `/stark-team-review`, `/stark-session`, `/commit`, `/help`)
 - Count invocations per command
 - Sort by frequency, show top 15
 
@@ -156,7 +156,7 @@ Group prompts by ISO week. Show a table with week label, prompt count, and a sho
 
 ### 2.11 Skill evolution
 
-If more than 2 weeks of data exist, compare skill usage in the first half vs. second half of the project timeline. Flag skills that appeared, disappeared, or shifted in frequency. This catches migration patterns (e.g., moving from `/code-review` to `/stark-review`).
+If more than 2 weeks of data exist, compare skill usage in the first half vs. second half of the project timeline. Flag skills that appeared, disappeared, or shifted in frequency. This catches migration patterns (e.g., moving from `/code-review` to `/stark-team-review`).
 
 ### 2.12 Session shape analysis
 

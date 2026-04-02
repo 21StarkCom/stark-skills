@@ -28,7 +28,7 @@ $PYTHON $SCRIPTS/metrics.py $ARGUMENTS
 Pass through any user-provided flags (`--repo`, `--skill`, `--since`, `--json`).
 
 If the script exits non-zero:
-- Exit 1: no history data — tell the user to run `/stark-review` first
+- Exit 1: no history data — tell the user to run `/stark-team-review` first
 - Exit 2: argument error — show usage
 
 ## Phase 2: Present Results
@@ -68,7 +68,7 @@ Additional skill-specific metrics:
 
 | Failure | Recovery |
 |---------|----------|
-| No history directory | "No history found. Run /stark-review to generate data." |
+| No history directory | "No history found. Run /stark-team-review to generate data." |
 | No matching records | "No records match filters. Try broader criteria." |
 | Corrupt JSON in history | Script warns on stderr, skips file, continues |
 | Script not found | "Run install.sh to set up stark-skills" |
