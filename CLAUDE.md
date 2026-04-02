@@ -73,6 +73,7 @@ All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.claude/skil
 - `/stark-pr-flow` — end-to-end PR workflow: push, create, review, merge
 - `/stark-session [start|end]` — session management: briefing on start, cleanup on end
 - `/stark-release [patch|minor|major]` — cut a release: changelog, tag, GitHub Release
+- `/stark-housekeeping [--dry-run] [--aggressive]` — audit and clean up stale issues, dead branches, worktree remnants
 - `/stark-tournament "prompt" [--config file.yaml]` — multi-LLM competition with configurable evaluation strategies
 - `/stark-persona` — session character voices with weighted selection, combos, catchphrases, and feedback
 
