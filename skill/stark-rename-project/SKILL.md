@@ -3,6 +3,8 @@ name: stark-rename-project
 description: >-
   Rename project locally and on GitHub, update sibling repo references, reinstall symlinks. Use for rename project/repo.
 argument-hint: <old-name> <new-name> [--dry-run]
+disable-model-invocation: true
+model: opus
 ---
 
 # rename-project
@@ -15,6 +17,8 @@ sibling repos under the same parent directory, and reinstall symlinks.
 - `<old-name>` — current project/repo name (e.g., `stark-team-review`)
 - `<new-name>` — desired new name (e.g., `stark-skills`)
 - `--dry-run` — preview all changes without executing any of them
+
+**Raw input:** `$ARGUMENTS`
 
 ## Constants
 
@@ -68,64 +72,9 @@ REMOTE_URL=$(git remote get-url origin)
 
 If none of the resume states match, proceed with standard validation.
 
-### 1d. Standard validation
+### 1d–1g. Validate remote, permissions, and availability
 
-```bash
-# Parse remote into components (not substring grep)
-# SSH: git@github.com:GetEvinced/stark-skills.git → HOST=github.com ORG=GetEvinced REPO=stark-skills
-# HTTPS: https://github.com/GetEvinced/stark-skills.git → same
-# Confirm parsed REPO matches OLD_NAME
-test "$REPO" = "$OLD_NAME" || error "Remote repo name '$REPO' doesn't match old-name '$OLD_NAME'"
-
-# Confirm no uncommitted changes
-test -z "$(git status --porcelain)" || error "Uncommitted changes — commit or stash first"
-
-# Confirm new-name doesn't exist locally (skip for case-only renames)
-if [ "$OLD_NAME" != "$NEW_NAME" ] || [ "$(echo "$OLD_NAME" | tr '[:upper:]' '[:lower:]')" != "$(echo "$NEW_NAME" | tr '[:upper:]' '[:lower:]')" ]; then
-    test ! -d "$PARENT/$NEW_NAME" || error "Directory $PARENT/$NEW_NAME already exists"
-fi
-
-# Fetch and store current repo ID for collision/idempotency checks
-CURRENT_REPO_ID=$(GH_TOKEN="$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)" \
-  gh api "/repos/$ORG/$OLD_NAME" --jq '.id')
-```
-
-For case-only renames (old and new differ only in case), skip the local
-existence check — case-insensitive filesystems report the existing dir
-as a match.
-
-### 1e. Parse remote
-
-Extract `HOST`, `ORG`, and repo name from the git remote URL:
-
-```bash
-REMOTE_URL=$(git remote get-url origin)
-# SSH: git@github.com:GetEvinced/stark-skills.git
-# HTTPS: https://github.com/GetEvinced/stark-skills.git
-```
-
-Parse HOST, ORG, OLD_NAME from the URL. All replacement patterns are
-built from these parsed values — no hardcoded org/host literals.
-
-### 1f. Permission pre-flight
-
-```bash
-GH_TOKEN="$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)" \
-  gh api "/repos/$ORG/$OLD_NAME" --jq '.permissions.admin'
-```
-
-If the result is not `true`, error:
-"GitHub App lacks admin permission on $ORG/$OLD_NAME. Grant Administration:write."
-
-### 1g. Check new-name availability on GitHub
-
-```bash
-GH_TOKEN="$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)" \
-  gh api "/repos/$ORG/$NEW_NAME" 2>/dev/null
-```
-
-If the API returns a repo AND its `id` differs from `$CURRENT_REPO_ID`,
-error: "A different repo named $ORG/$NEW_NAME already exists on GitHub."
+Parse remote URL into HOST/ORG/REPO, confirm no uncommitted changes, check admin permissions, verify new-name availability. For validation code and error handling, see [references/validation-details.md](references/validation-details.md).
 
 ## Phase 2: Rename on GitHub
 
@@ -136,50 +85,9 @@ error: "A different repo named $ORG/$NEW_NAME already exists on GitHub."
 If ID matches and name matches exactly (including case), skip to 2b.
 If ID matches but name differs in case, still issue the PATCH (case-only rename).
 
-### 2a. Rename the repository
+### 2a–2b. Rename repo and update remote URLs
 
-```bash
-GH_TOKEN="$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)" \
-  gh api -X PATCH "/repos/$ORG/$OLD_NAME" -f name="$NEW_NAME"
-```
-
-Verify the response: check that the returned `name` field matches `$NEW_NAME`.
-
-Handle errors:
-| HTTP Status | Meaning | Action |
-|-------------|---------|--------|
-| 200 | Success | Continue |
-| 403 | No admin permission | Error with permission instructions |
-| 404 | Repo not found | Error — check org/name |
-| 422 | Name already taken | Error — choose a different name |
-| 5xx | GitHub error | Error — retry manually |
-
-GitHub creates a redirect from the old URL to the new URL. Note: this
-redirect breaks if a repo with the old name is later created.
-
-### 2b. Update git remote URLs
-
-```bash
-# Read current URLs
-FETCH_URL=$(git remote get-url origin)
-PUSH_URL=$(git remote get-url --push origin 2>/dev/null || echo "$FETCH_URL")
-
-# Replace only the repo-name component (not arbitrary substrings)
-# Use Perl for literal replacement (sed treats . as regex wildcard)
-NEW_FETCH=$(echo "$FETCH_URL" | perl -pe "s|\Q$OLD_NAME\E([.]git)?$|$NEW_NAME\$1|")
-NEW_PUSH=$(echo "$PUSH_URL" | perl -pe "s|\Q$OLD_NAME\E([.]git)?$|$NEW_NAME\$1|")
-
-git remote set-url origin "$NEW_FETCH"
-if [ "$FETCH_URL" != "$PUSH_URL" ]; then
-    git remote set-url --push origin "$NEW_PUSH"
-fi
-
-# Verify
-git remote -v
-```
-
-Note: `\Q...\E` in Perl treats the old name as a literal string, not a
-regex. This prevents `.` in repo names from matching arbitrary characters.
+PATCH `/repos/$ORG/$OLD_NAME` to rename, then update local git remote URLs using Perl literal replacement. For API commands, error handling, and URL update code, see [references/validation-details.md](references/validation-details.md).
 
 ## Phase 3: Local Rename + Symlink Cleanup
 
@@ -208,30 +116,7 @@ the new location. The skill's working directory is now `$PARENT/$NEW_NAME`.
 
 ### 3b. Uninstall old symlinks
 
-Run this BEFORE modifying any files — Phase 4 would change install.sh,
-making uninstall look for wrong targets.
-
-```bash
-if [ "$HAS_UNINSTALL" = "true" ]; then
-    ./install.sh --uninstall
-else
-    # Fallback: find stale symlinks across ALL known install destinations
-    OLD_ABS="$PARENT/$OLD_NAME"
-    for search_dir in ~/.claude ~/git/Evinced/.code-review; do
-        [ -d "$search_dir" ] || continue
-        find "$search_dir" -type l | while IFS= read -r link; do
-            target=$(python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "$link")
-            # Match exact old path or children, not substring
-            if [ "$target" = "$OLD_ABS" ] || case "$target" in "$OLD_ABS/"*) true;; *) false;; esac; then
-                rm "$link" && echo "Removed stale symlink: $link"
-            fi
-        done
-    done
-fi
-```
-
-Only remove symlinks whose resolved absolute targets are exactly the old
-project path or rooted under it. Never delete non-symlink data.
+Run `install.sh --uninstall` BEFORE modifying any files. For fallback symlink cleanup code, see [references/validation-details.md](references/validation-details.md).
 
 ## Phase 4: Update References in Renamed Project
 
@@ -242,50 +127,9 @@ Use `git grep -Il ""` to identify tracked text files (skips binary files).
 Skip directories: `.git/`, `.github/workflows/`, `node_modules/`, `.venv/`,
 `__pycache__/`, `dist/`, `build/`.
 
-### 4a. Deterministic patterns (auto-applied to all tracked text files)
+### 4a-4d. Apply replacement patterns
 
-Apply these in order, most specific first. Treat `OLD_NAME` as a literal
-string, not a regex.
-
-1. `$PARENT/$OLD_NAME` → `$PARENT/$NEW_NAME` (absolute path references)
-2. `$ORG/$OLD_NAME` → `$ORG/$NEW_NAME` (org/repo references)
-3. `$HOST:$ORG/$OLD_NAME` → `$HOST:$ORG/$NEW_NAME` (SSH clone URLs)
-4. `$HOST/$ORG/$OLD_NAME` → `$HOST/$ORG/$NEW_NAME` (HTTPS URLs)
-
-Use Perl `\Q...\E` for literal matching (not regex). This prevents `.`
-in repo names from matching arbitrary characters.
-
-### 4b. Heuristic pattern (restricted scope)
-
-5. Bare `$OLD_NAME` with repo-name-aware boundaries — only in `*.md`,
-   `*.json`, `*.sh` files. Use custom lookarounds:
-   `(?<![A-Za-z0-9._-])OLD_NAME(?![A-Za-z0-9._-])`
-
-   This prevents matching inside longer identifiers like
-   `stark-review-improvement`.
-
-   Exclude `.github/workflows/` — CI/CD files are only scanned and
-   reported, not auto-modified.
-
-### 4c. Exclusion rules
-
-Do NOT replace:
-- `/{old-name}` (slash-prefixed) — skill invocation name
-- `name:\s*['"]?{old-name}['"]?` in frontmatter — skill identity
-- Installed skill paths like `~/.claude/skills/stark-review/` — these are skill identity, not repo name
-- Skill labels like `"Skill: stark-review"` in install.sh — stable identifiers
-- GitHub App names (`stark-claude`, `stark-codex`, `stark-gemini`)
-- Historical document filenames (e.g., `2026-03-16-stark-review-skill-design.md`) — only update content, not filenames
-- `~/.claude/code-review/` path — does not contain project name, should never be modified
-- Content inside `.git/` directory
-
-### 4d. Post-update validation
-
-```bash
-bash -n install.sh || error "install.sh has syntax errors after modification"
-```
-
-Track every file modified for the summary.
+Apply deterministic patterns (absolute paths, org/repo, SSH/HTTPS URLs) and heuristic bare-name pattern with exclusion rules. For the full pattern list, exclusion rules, and post-update validation, see [references/replacement-patterns.md](references/replacement-patterns.md).
 
 ## Phase 5: Update References in Sibling Repos
 
@@ -345,48 +189,11 @@ actionable instructions:
 
 ## Phase 7: Verify
 
-Post-rename checks:
-
-```bash
-# Remote URL works
-git ls-remote origin >/dev/null 2>&1 || echo "FAIL: git ls-remote origin failed"
-
-# Symlinks resolve to new path
-find ~/.claude -type l | while IFS= read -r link; do
-    target=$(python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "$link")
-    case "$target" in "$PARENT/$OLD_NAME"*) echo "STALE: $link → $target" ;; esac
-done
-```
-
-Grep for remaining references using all 5 patterns across the renamed
-project. Apply the same exclusion rules from Phase 4 so intentionally
-preserved references (skill invocations, frontmatter names) don't show
-as false positives. Report only unexpected residual matches.
-
-Scan `.github/workflows/*.yml` in renamed project and sibling repos for
-old-name references — report as "CI/CD files that may need manual update".
+Run post-rename checks: remote URL, symlink resolution, residual references, CI/CD workflow scan. For the full verification checklist, see [references/verification-checks.md](references/verification-checks.md).
 
 ## Phase 8: Summary
 
-Print:
-- Every file changed, grouped by repo
-- Verification results (pass/fail for each check)
-- Residual old-name references that need manual review
-- CI/CD workflow files with old-name references
-- Sibling repos skipped due to dirty worktrees
-- The `cd` command: `cd $PARENT/$NEW_NAME`
-- Known integration points that may need manual update (webhooks, Slack, Jira)
-- Note: GitHub redirects are in place but break if a repo with the old
-  name is created later
-
-## What This Skill Does NOT Do
-
-- Rename skills or their invocation commands (e.g., `/stark-review` stays `/stark-review`)
-- Update CI/CD pipelines or GitHub Actions (scans and reports them only)
-- Handle repos outside the parent directory
-- Rename GitHub Apps or their credentials
-- Modify binary files or untracked files
-- Update external webhooks, Slack integrations, or Jira links
+Print results: files changed per repo, verification pass/fail, residual references, CI/CD files needing manual update, sibling repos skipped. For the complete summary checklist, see [references/verification-checks.md](references/verification-checks.md).
 
 ## Observability
 
@@ -398,17 +205,6 @@ Additional skill-specific metrics:
 - Symlinks: removed (old), recreated (new)
 - Verification: checks passed/failed, residual references found
 
-## Mistakes to Avoid
+## Scope & Pitfalls
 
-| Mistake | Why it's wrong | Do this instead |
-|---------|---------------|-----------------|
-| Using `\b` word boundaries | Hyphens/dots are word boundaries in regex — matches inside `stark-review-improvement` | Use `(?<![A-Za-z0-9._-])..(?![A-Za-z0-9._-])` |
-| Using sed for replacements | `sed` treats `.` as regex wildcard — `foo.bar` matches `fooXbar` | Use Perl `\Q...\E` for literal matching |
-| Replacing skill paths in install.sh | `~/.claude/skills/stark-review/` is a skill identity, not a repo reference | Add explicit exclusion for installed skill paths |
-| Unquoted file lists in git add | Paths with spaces/dashes can break shell or git | Use arrays: `git add -- "${files[@]}"` |
-| Running `git commit -am` in sibling repos | Sweeps unrelated changes into the commit | `git add <specific-files> && git commit` |
-| Modifying files before uninstalling symlinks | install.sh references change, uninstall can't find old targets | Uninstall first (Phase 3b), then modify (Phase 4) |
-| Using `readlink -f` on macOS | Not available on macOS | Use `python3 -c "import os; print(os.path.realpath(...))"` |
-| Replacing inside `.github/workflows/` | CI/CD files should be reported, not auto-modified | Skip workflows, report in summary |
-| Hardcoding `GetEvinced` or `github.com` | Won't work for other orgs/hosts | Parse from `git remote get-url origin` |
-| Forgetting to `cd` after `mv` | All subsequent commands operate from invalid cwd | `cd $PARENT/$NEW_NAME` immediately after mv |
+For limitations (what this skill does NOT do) and common mistakes to avoid, see [references/mistakes-to-avoid.md](references/mistakes-to-avoid.md).

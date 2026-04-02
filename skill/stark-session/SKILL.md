@@ -3,6 +3,8 @@ name: stark-session
 description: >-
   Session start (context, git state, briefing) and end (tests, merge, push). Use for session start/end, catch me up.
 argument-hint: "[start|end]"
+disable-model-invocation: true
+model: opus
 ---
 
 # stark-session
@@ -13,6 +15,8 @@ Session lifecycle management with two modes: **start** (context load + briefing)
 
 - `/stark-session` or `/stark-session start` — starts a session (default mode)
 - `/stark-session end` — ends a session
+
+**Raw input:** `$ARGUMENTS`
 
 ## Config
 

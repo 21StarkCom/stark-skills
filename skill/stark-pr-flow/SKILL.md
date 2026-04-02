@@ -3,6 +3,8 @@ name: stark-pr-flow
 description: >-
   End-to-end PR workflow: push, create, self-review, squash-merge. Use for open PR, create PR, merge this, ship it.
 argument-hint: <optional: PR title override or "draft" to create as draft>
+disable-model-invocation: true
+model: opus
 ---
 
 # Evinced PR

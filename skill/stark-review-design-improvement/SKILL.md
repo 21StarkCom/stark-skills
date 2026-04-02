@@ -3,6 +3,8 @@ name: stark-review-design-improvement
 description: >-
   Improve design review prompts from assessment feedback. Wraps /stark-review-improvement for design-review prompts.
 argument-hint: (reads assessment from context or design-review history)
+disable-model-invocation: true
+model: opus
 ---
 
 # stark-review-design-improvement

@@ -3,6 +3,8 @@ name: stark-design
 description: >-
   Generate design docs from requirements via 3 agents + cross-review synthesis. Use for design, spec, architecture doc creation.
 argument-hint: '"prompt" | <path-to-requirements> [--agents claude,codex,gemini] [--timeout N] [--dry-run] [--output PATH]'
+disable-model-invocation: true
+model: opus
 ---
 
 # stark-design
@@ -23,6 +25,8 @@ Fills the pipeline start: **`/stark-design`** → `/stark-review-design` → `/s
 - `--output PATH` — override output path for the design document
 
 If neither a prompt nor a path is provided, ask: "What should the design cover?"
+
+**Raw input:** `$ARGUMENTS`
 
 ## Constants
 

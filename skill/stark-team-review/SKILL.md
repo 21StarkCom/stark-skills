@@ -3,6 +3,9 @@ name: stark-team-review
 description: >-
   Multi-agent PR code review: 3 LLMs x N domains with autonomous fix loop. Use for team review, multi-agent review.
 argument-hint: "[PR_NUMBER] [--rounds N] [--dry-run] [--repo ORG/REPO]"
+disable-model-invocation: true
+context: fork
+model: opus
 ---
 
 # stark-team-review
@@ -17,6 +20,8 @@ Multi-agent PR review: 3 LLMs (Claude, Codex, Gemini) × 9 domain specialization
 - `--dry-run` — review only, no fixes, no GitHub posting
 - If number omitted, detect from current branch: `gh pr view --json number --jq .number`
 - If detection fails (e.g., on `main`), list open PRs and ask: `gh pr list --json number,title,headRefName --jq '.[] | "#\(.number) \(.title) (\(.headRefName))"'`
+
+**Raw input:** `$ARGUMENTS`
 
 ## Constants
 

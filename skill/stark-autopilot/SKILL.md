@@ -3,6 +3,8 @@ name: stark-autopilot
 description: >-
   Autonomous tournament implementation: 3 agents compete in worktrees per step, best wins. Use for autopilot, multi-agent build.
 argument-hint: '<plan-or-prompt> [--test-command CMD] [--agents claude,codex,gemini] [--timeout N] [--dry-run]'
+disable-model-invocation: true
+model: opus
 ---
 
 # stark-autopilot
@@ -26,6 +28,8 @@ This is the nuclear option — maximum quality through competition at every step
 - `--dry-run` — show what would happen without executing
 
 If no input provided, ask: "What should I build?"
+
+**Raw input:** `$ARGUMENTS`
 
 ## Constants
 
@@ -90,22 +94,7 @@ For each step (sequentially — each builds on the previous winner):
 
 ### 2a0. Transition issues to In Progress
 
-For each issue number in the step's `issue_numbers`, add a comment and update status:
-
-```bash
-unset GH_TOKEN  # Use user's PAT for issue operations
-for issue in ${step.issue_numbers}; do
-  gh issue comment $issue --repo $REPO --body "Implementation started — autopilot step \`$step_id\` dispatching 3 agents."
-done
-```
-
-If `.github/project-config.json` exists, also update the project board:
-1. `export GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)`
-2. Find project item: `github_projects.find_item_for_issue(...)`
-3. Update Status field to "Agent Working"
-4. `unset GH_TOKEN`
-
-Failure is non-fatal — log and continue.
+Update issue status and project board. For commands, see [references/issue-management.md](references/issue-management.md).
 
 ### 2a. Build step prompt
 
@@ -138,87 +127,13 @@ Read the diffs from the JSON output. For each agent's implementation:
 - Tests pass: +50 points
 - Tests fail: 0 points
 
-**Semantic evaluation (always):**
-Read each agent's diff and evaluate on 5 dimensions (1-10 each, max 50 points):
-- **Correctness** — does the code do what the step asked for?
-- **Quality** — is the code clean, well-structured, following conventions?
-- **Completeness** — are edge cases handled, tests written?
-- **Integration** — does it work with the existing codebase?
-- **Simplicity** — is it the simplest correct solution?
-
-Total score: test score (0 or 50) + semantic score (0-50) = 0-100.
-
-Display the scorecard:
-
-```
-Step 1: [title] — Tournament Results
-─────────────────────────────────────
-              Tests  Correct  Quality  Complete  Integrate  Simple  Total
-  claude      PASS     9        8        9          8         8     92 ★
-  codex       PASS     8        9        7          9         9     92
-  gemini      FAIL     9        7        8          7         8     39
-
-Winner: claude (92/100) — tie-broken by correctness
-```
+For evaluation dimensions, scoring formula, and scorecard format, see [references/tournament-scoring.md](references/tournament-scoring.md).
 
 ### 2d. Verify winner (MANDATORY — do not skip)
 
-Before applying, the winner's code must pass these gates in the winner's worktree. A failure here disqualifies the winner — fall back to the next-highest scorer.
+Before applying, the winner's code must pass import checks, SDK API verification, and cross-module interface checks. For all gate details, see [references/verification-gates.md](references/verification-gates.md).
 
-**Gate 1: Import check**
-
-Install deps and import all new/modified Python modules:
-
-```bash
-# Create or reuse a verification venv
-[ -d /tmp/autopilot-verify ] || python3 -m venv /tmp/autopilot-verify
-/tmp/autopilot-verify/bin/pip install -q -r requirements.txt 2>/dev/null
-
-# Import every Python module in the package
-/tmp/autopilot-verify/bin/python3 -c "
-import importlib, pathlib, sys
-sys.path.insert(0, '.')
-failures = []
-for f in pathlib.Path('.').rglob('*.py'):
-    if any(p in str(f) for p in ['test', 'venv', 'node_modules', '.git']): continue
-    if f.name == '__main__.py': continue
-    mod = str(f.with_suffix('')).replace('/', '.')
-    try: importlib.import_module(mod)
-    except Exception as e: failures.append((mod, e))
-for m, e in failures: print(f'FAIL {m}: {e}')
-sys.exit(len(failures))
-"
-```
-
-If any module fails to import → disqualify this winner. The most common cause is cross-module interface mismatches (calling constructors with wrong args, importing names that don't exist).
-
-**Gate 2: SDK API verification (when step adds external SDK calls)**
-
-If the step introduces calls to external SDKs (database clients, cloud APIs, LLM SDKs), verify the methods exist:
-
-```bash
-/tmp/autopilot-verify/bin/python3 -c "
-import inspect
-from <sdk_module> import <Class>
-# Verify method signatures match what our code calls
-for method_name in [<methods_we_call>]:
-    assert hasattr(<Class>, method_name), f'{method_name} does not exist'
-    sig = inspect.signature(getattr(<Class>, method_name))
-    print(f'{method_name}: {sig}')
-"
-```
-
-This caught 5 bugs in the Firestore SDK alone — methods that AI agents confidently called but that don't exist (`begin()`, `rollback()`, `async_transactional` decorator). **Never trust AI knowledge or documentation for SDK APIs — verify against the installed package.**
-
-**Gate 3: Cross-module interface check (every 5 steps or per phase)**
-
-Every 5 steps (or when completing a phase), trace the call chain between modules:
-
-1. For each function call that crosses module boundaries, verify the callee's signature accepts the args the caller passes
-2. For each return value consumed by another module, verify the type matches
-3. For each config/secret name used in code, verify it matches what infrastructure (Terraform, env vars) defines
-
-This is the #1 source of bugs in multi-step autopilot runs — each agent writes code assuming interfaces it hasn't verified.
+If a gate fails, disqualify the winner and fall back to the next-highest scorer.
 
 ### 2e. Apply winner
 
@@ -249,23 +164,7 @@ git commit -m "feat: [step title] (autopilot: $winner won $score/100)"
 
 ### 2f1. Transition issues to Done
 
-For each issue number in the step's `issue_numbers`, close with a reference to the commit:
-
-```bash
-unset GH_TOKEN  # Use user's PAT
-COMMIT_SHA=$(git rev-parse --short HEAD)
-for issue in ${step.issue_numbers}; do
-  gh issue close $issue --repo $REPO \
-    --comment "Implemented in commit $COMMIT_SHA (autopilot step \`$step_id\`, $winner won $score)."
-done
-```
-
-If `.github/project-config.json` exists, also update the project board:
-1. `export GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)`
-2. Find project item and update Status to "Done"
-3. `unset GH_TOKEN`
-
-Failure is non-fatal — log and continue. Issues can be closed manually if the API call fails.
+Close issues with commit reference and update project board. For commands, see [references/issue-management.md](references/issue-management.md).
 
 ### 2g. Clean up worktrees
 
@@ -282,85 +181,13 @@ Print step summary, then move to next step. The next step's agents will work fro
 
 ## Phase 2.5: End-of-Run Verification (MANDATORY)
 
-After ALL steps complete but BEFORE the summary, run a comprehensive verification:
+After ALL steps complete, run full import chain test, smoke test, and SDK API spot-check. For verification procedures, see [references/verification-gates.md](references/verification-gates.md).
 
-### Full import chain test
-
-```bash
-/tmp/autopilot-verify/bin/pip install -q -r requirements.txt
-/tmp/autopilot-verify/bin/python3 -c "
-import importlib, pathlib, sys
-sys.path.insert(0, '.')
-ok = fail = 0
-for f in pathlib.Path('.').rglob('*.py'):
-    if any(p in str(f) for p in ['test', 'venv', 'node_modules', '.git']): continue
-    if f.name == '__main__.py': continue
-    mod = str(f.with_suffix('')).replace('/', '.')
-    try:
-        importlib.import_module(mod)
-        ok += 1
-    except Exception as e:
-        print(f'FAIL {mod}: {e}')
-        fail += 1
-print(f'{ok} OK, {fail} FAIL')
-sys.exit(fail)
-"
-```
-
-If ANY module fails to import, fix the issue before proceeding to the summary. This catches circular imports, missing dependencies, and interface mismatches.
-
-### Smoke test key objects
-
-Instantiate the main entry points (app, config, registry) to verify they construct without crashing:
-
-```python
-# Adjust for your project — the goal is to exercise the real construction path
-from <pkg>.config import get_settings
-settings = get_settings()
-from <pkg>.schema import load_all_agents
-agents = load_all_agents(Path('agents'))
-print(f"Loaded {len(agents)} agents")
-```
-
-### SDK API spot-check
-
-For each external SDK used in the project, verify the specific methods called in our code actually exist:
-
-```python
-import inspect
-# Example for Firestore
-from google.cloud.firestore_v1.async_transaction import AsyncTransaction
-for method in ['get', 'set', 'update', 'commit', '_rollback']:
-    assert hasattr(AsyncTransaction, method), f"AsyncTransaction.{method} does not exist"
-```
-
-**This phase exists because:** In an 8-round review of a 22-step autopilot run, 43 bugs were found — the majority were cross-module interface mismatches and wrong SDK API assumptions that would have been caught by importing the modules and verifying method signatures. The cost of this verification is ~60 seconds. The cost of not doing it is hours of review rounds.
+If ANY check fails, fix before proceeding to Phase 3.
 
 ## Phase 3: Summary
 
-After all steps complete:
-
-```
-stark-autopilot — Complete
-──────────────────────────
-Steps:    5/5 completed
-Duration: 45m 12s
-
-Step Results:
-  1. [title] — claude won (92/100)
-  2. [title] — codex won (88/100)
-  3. [title] — claude won (95/100)
-  4. [title] — gemini won (91/100)
-  5. [title] — claude won (89/100)
-
-Agent Stats:
-  claude:  3 wins, avg 92.0/100
-  codex:   1 win,  avg 85.3/100
-  gemini:  1 win,  avg 82.7/100
-
-Files changed: 23 (+1,450 / -200)
-Commits: 5
-```
+Print step results, agent stats, and code output. For summary template, see [references/issue-management.md](references/issue-management.md).
 
 ## Phase 4: Persist
 
@@ -381,83 +208,8 @@ Post the summary as a PR comment under stark-claude.
 
 ## Observability
 
-### Task-based progress (required)
-
-At start:
-```
-TaskCreate: "Phase 1: Setup — parse plan, detect tests"
-            activeForm: "Setting up autopilot"
-```
-
-Per step (dynamic):
-```
-TaskCreate: "Step 1: [title] — 3 agents competing"
-            activeForm: "Step 1: tournament in progress"
-```
-
-### Timestamped log lines (required)
-
-```
-[HH:MM:SS] === stark-autopilot started ===
-[HH:MM:SS] Phase 1: Setup — 5 steps, pytest detected
-[HH:MM:SS] Step 1: [title] — dispatching 3 agents
-[HH:MM:SS]   ▸ claude: done — 8 files, +245/-30 [180s]
-[HH:MM:SS]   ▸ codex: done — 6 files, +198/-25 [220s]
-[HH:MM:SS]   ▸ gemini: done — 7 files, +210/-28 [150s]
-[HH:MM:SS]   ▸ Tests: claude=PASS, codex=PASS, gemini=FAIL
-[HH:MM:SS]   ▸ Winner: claude (92/100)
-[HH:MM:SS]   ▸ Applied + committed
-[HH:MM:SS] Step 2: [title] — dispatching 3 agents
-...
-[HH:MM:SS] === stark-autopilot completed (5/5 steps, 45m 12s) ===
-```
-
-### Metrics block at end (required)
-
-```
-Metrics
-───────
-Total duration:     45m 12s
-Steps completed:    5/5
-Tournaments run:    5
-Total agent runs:   15 (5 steps × 3 agents)
-
-Per-agent wins:
-  claude:  3 (60%)
-  codex:   1 (20%)
-  gemini:  1 (20%)
-
-Per-agent avg score:
-  claude:  92.0/100
-  codex:   85.3/100
-  gemini:  82.7/100
-
-Test results:
-  Total runs:    15
-  Passed:        12 (80%)
-  Failed:         3 (20%)
-
-Code output:
-  Files changed:  23
-  Lines added:    1,450
-  Lines removed:  200
-  Commits:        5
-```
+For task templates, log line formats, and metrics block format, see [references/observability.md](references/observability.md).
 
 ## Failure Modes
 
-| Failure | Recovery |
-|---------|----------|
-| No input | Ask: "What should I build?" |
-| 0/3 agents succeed on a step | Abort step, report error, ask user how to proceed |
-| 1/3 agents succeed | Use that agent's output, warn about no tournament |
-| 2/3 agents succeed | Tournament between 2, warn about reduced competition |
-| Diff fails to apply | Copy files from winner's worktree directly |
-| Tests fail for all agents | Use semantic-only scoring, warn "no agent passed tests" |
-| Worktree creation fails | Try without worktrees (sequential, same branch) |
-| Agent timeout | Disqualify, continue with remaining agents |
-| Mid-run abort (user Ctrl+C) | Clean up all worktrees before exiting |
-| Winner fails import check | Disqualify, fall back to next-highest scorer |
-| All winners fail import check | Fix the import error before continuing (likely a missing dep or circular import) |
-| SDK method doesn't exist | Install SDK, run `inspect.signature()` to find correct API, fix before committing |
-| End-of-run verification fails | Fix all failures before generating summary — do not ship broken code |
+For the failure/recovery table (13 scenarios including agent timeouts, import failures, and mid-run aborts), see [references/failure-modes.md](references/failure-modes.md).

@@ -3,6 +3,9 @@ name: stark-phase-execute
 description: >-
   Autonomously execute a dev phase: implement tasks, PR, review, fix, merge, release. Use for execute phase, run plan.
 argument-hint: "<plan-slug-or-path> [--dry-run] [--skip-deploy] [--skip-release] [--start-from <issue-number>] [--rounds <N>] [--repo ORG/REPO]"
+disable-model-invocation: true
+context: fork
+model: opus
 ---
 
 # stark-phase-execute
@@ -32,6 +35,8 @@ This skill requires full autonomy. Before triggering, ensure:
 | `--start-from <N>` | 1st issue | Resume from a specific issue number |
 | `--rounds <N>` | 3 | Max review-fix rounds per PR |
 | `--repo ORG/REPO` | auto-detect | Override repo detection from git remote |
+
+**Raw input:** `$ARGUMENTS`
 
 ## Constants
 

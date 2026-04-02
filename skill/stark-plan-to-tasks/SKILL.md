@@ -3,6 +3,9 @@ name: stark-plan-to-tasks
 description: >-
   Decompose spec/plan into phased GitHub issues with story points and risk labels. Use for plan to tasks, decompose plan.
 argument-hint: "<path-to-spec> [--dry-run] [--cleanup <slug>]"
+disable-model-invocation: true
+context: fork
+model: opus
 ---
 
 # stark-plan-to-tasks
@@ -14,6 +17,8 @@ Decompose a spec/design document into phased GitHub issues. Three LLM passes: qu
 - `<path-to-spec>` — path to spec/plan markdown file (required, must be `.md`)
 - `--dry-run` — run all three passes, preview issue payloads, write to `/tmp/stark-plan-to-tasks-preview-{plan-slug}.md`, stop before creating issues or modifying any files
 - `--cleanup <plan-slug>` — find all issues with `plan:{slug}` label, list them, and offer to close with a "Cleaned up by stark-plan-to-tasks" comment
+
+**Raw input:** `$ARGUMENTS`
 
 ## Constants
 

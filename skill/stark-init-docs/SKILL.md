@@ -3,6 +3,8 @@ name: stark-init-docs
 description: >-
   Scaffold dev docs structure (template/backfill/upgrade/clean modes). Use for init docs, setup docs, scaffold docs.
 argument-hint: "[--template] [--backfill] [--upgrade] [--clean]"
+disable-model-invocation: true
+model: opus
 ---
 
 # init-docs
@@ -17,6 +19,8 @@ Scaffold a standardized developer documentation structure into any repository. F
 - `--clean` — remove skeleton files (preserves user-generated content)
 - Modes are combinable: `--upgrade --backfill` migrates existing docs then generates new ones
 - If no arguments given, show the four options and ask which mode to use
+
+**Raw input:** `$ARGUMENTS`
 
 ## Constants
 

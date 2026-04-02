@@ -3,6 +3,9 @@ name: stark-pr-status
 description: >-
   PR analytics dashboard: review rounds, findings, time-to-merge, signal-vs-noise. Use for PR status, PR stats, dashboard.
 argument-hint: "[PR_NUMBER | --all] [--repo REPO] [--state STATE] [--json]"
+disable-model-invocation: true
+model: haiku
+allowed-tools: Read, Grep, Glob, Bash, Write
 ---
 
 # stark-pr-status

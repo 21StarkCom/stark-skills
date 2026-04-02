@@ -3,6 +3,8 @@ name: stark-release
 description: >-
   Cut a release: changelog review, version bump, git tag, GitHub Release. Use for release, tag, bump version.
 argument-hint: [patch|minor|major] (optional — will ask if not provided)
+disable-model-invocation: true
+model: sonnet
 ---
 
 # Release Management

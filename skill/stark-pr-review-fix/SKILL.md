@@ -3,6 +3,8 @@ name: stark-pr-review-fix
 description: >-
   Full PR lifecycle: create, multi-agent review, fix findings, re-review, merge. Use for PR review fix, full PR pipeline.
 argument-hint: "[PR title override] [--rounds N] [--no-merge]"
+disable-model-invocation: true
+model: opus
 ---
 
 # stark-pr-review-fix
@@ -17,6 +19,8 @@ Chains `/stark-pr-flow` (Steps 1-3) and `/stark-team-review` into a single pipel
 - `--rounds N` — max fix-review cycles (default: 3, passed to stark-team-review)
 - `--no-merge` — stop after reviews are clean, don't merge
 - `--draft` — create PR as draft
+
+**Raw input:** `$ARGUMENTS`
 
 ## Phase 1: Create PR
 

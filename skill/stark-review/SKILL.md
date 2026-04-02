@@ -3,6 +3,8 @@ name: stark-review
 description: >-
   Single-agent PR code review: 1 LLM x 9 domains. Fast/cheap. Use for review, review this PR, quick review.
 argument-hint: "[PR_NUMBER] [--agent claude|codex|gemini] [--dry-run] [--repo ORG/REPO]"
+disable-model-invocation: true
+model: sonnet
 ---
 
 # stark-review
@@ -19,6 +21,8 @@ For full 3-LLM cross-validation, use `/stark-team-review` instead.
 - `--dry-run` — review only, no GitHub posting
 - If number omitted, detect from current branch: `gh pr view --json number --jq .number`
 - If detection fails, list open PRs and ask: `gh pr list --json number,title,headRefName --jq '.[] | "#\(.number) \(.title) (\(.headRefName))"'`
+
+**Raw input:** `$ARGUMENTS`
 
 ## Constants
 

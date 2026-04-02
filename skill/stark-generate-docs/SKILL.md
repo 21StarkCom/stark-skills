@@ -3,6 +3,8 @@ name: stark-generate-docs
 description: >-
   Generate/update skill documentation with multi-LLM visualizations. Use for generate docs, update skill docs.
 argument-hint: "[--skill <name>] [--all] [--check] [--force]"
+disable-model-invocation: true
+model: opus
 ---
 
 # stark-generate-docs
@@ -15,6 +17,8 @@ Generate or update skill documentation with multi-LLM visualization competition.
 - `/stark-generate-docs --skill <name>` — regenerate one specific skill
 - `/stark-generate-docs --all` — regenerate all (alias for `--force`)
 - `/stark-generate-docs --check` — check if any docs are stale (no changes)
+
+**Raw input:** `$ARGUMENTS`
 
 ## Constants
 

@@ -3,6 +3,8 @@ name: stark-review-design
 description: >-
   Multi-agent design/spec review: multi-LLM x 11 domains. Use for review design, review spec, review architecture.
 argument-hint: "<path> [--rounds N] [--dry-run] [--force] [--tournament]"
+disable-model-invocation: true
+model: opus
 ---
 
 # stark-review-design
@@ -18,6 +20,8 @@ N rounds, then final review-only round. Answers the question: **"Is this the rig
 - `--dry-run` — review only, no fixes, no PR posting, no review file
 - `--force` — proceed even if design file has uncommitted changes
 - `--tournament` — tournament mode: 3 agents each review ALL domains independently, evaluated by judge
+
+**Raw input:** `$ARGUMENTS`
 
 ## Domains (10)
 

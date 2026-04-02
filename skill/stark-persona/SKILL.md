@@ -3,6 +3,8 @@ name: stark-persona
 description: >-
   Assign a famous character persona for the session with weighted random selection. Use for persona, character, voice.
   /stark-persona.
+disable-model-invocation: true
+model: opus
 ---
 
 # stark-persona

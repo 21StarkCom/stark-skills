@@ -3,6 +3,8 @@ name: stark-claude-md-improver
 description: >-
   Analyze and improve CLAUDE.md files for completeness and accuracy. Use for improve/review/audit claude.md.
 argument-hint: [path to CLAUDE.md] (optional — auto-discovers all CLAUDE.md files in project hierarchy)
+disable-model-invocation: true
+model: opus
 ---
 
 # CLAUDE.md Improver

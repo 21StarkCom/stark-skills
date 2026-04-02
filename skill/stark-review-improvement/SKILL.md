@@ -3,6 +3,8 @@ name: stark-review-improvement
 description: >-
   Improve review prompts based on Prompt Improvement Assessment from completed reviews. Use for fix review prompts.
 argument-hint: "[--prompts-dir design-review] (reads assessment from context or latest history)"
+disable-model-invocation: true
+model: opus
 ---
 
 # stark-review-improvement
@@ -15,6 +17,8 @@ Closes the feedback loop on stark-skills: reads the prompt improvement assessmen
   - *(omitted)* — PR code review prompts (`global/prompts/{claude,codex,gemini}/`)
   - `design-review` — design/spec review prompts (`global/prompts/design-review/{claude,codex,gemini}/`)
   - `plan-review` — plan review prompts (`global/prompts/plan-review/{claude,codex,gemini}/`)
+
+**Raw input:** `$ARGUMENTS`
 
 ## Constants
 

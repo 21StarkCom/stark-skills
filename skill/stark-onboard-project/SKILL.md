@@ -3,6 +3,8 @@ name: stark-onboard-project
 description: >-
   Bootstrap new project: git init, GitHub repo, 3 GitHub Apps, CLAUDE.md, memory. Use for onboard, new project, create repo.
 argument-hint: <optional: path to the project directory, defaults to cwd>
+disable-model-invocation: true
+model: opus
 ---
 
 # Onboard Project

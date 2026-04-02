@@ -3,6 +3,8 @@ name: stark-update-deps
 description: >-
   Audit and update dependency versions across all manifest types to latest stable. Use for update deps, upgrade versions.
 argument-hint: (no args — auto-discovers all dependency manifests)
+disable-model-invocation: true
+model: sonnet
 ---
 
 # Dependency Version Updater

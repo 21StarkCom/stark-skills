@@ -3,6 +3,9 @@ name: stark-extract-docs
 description: >-
   Extract ADRs, retrospectives, and reference docs from specs, plans, and reviews. Use for extract docs, generate ADRs.
 argument-hint: "<path-to-spec> [--batch <dir>] [--dry-run] [--force]"
+disable-model-invocation: true
+context: fork
+model: opus
 ---
 
 # stark-extract-docs
@@ -22,6 +25,8 @@ Both passes run in the current Claude Code session — no external agent dispatc
 - `--force` — re-extract even if history file exists for this spec
 - `--include-low` — include low-confidence extractions (normally skipped)
 - `--target-repo <path>` — override target repo detection with a local path
+
+**Raw input:** `$ARGUMENTS`
 
 ## Constants
 

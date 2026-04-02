@@ -3,6 +3,9 @@ name: stark-metrics
 description: >-
   Aggregate review performance metrics: agent scorecards, finding quality, duration trends. Use for metrics, agent stats.
 argument-hint: "[--repo REPO] [--skill SKILL] [--since DATE] [--json]"
+disable-model-invocation: true
+model: haiku
+allowed-tools: Read, Grep, Glob, Bash, Write
 ---
 
 # stark-metrics

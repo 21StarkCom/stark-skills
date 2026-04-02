@@ -3,6 +3,8 @@ name: stark-design-to-plan
 description: >-
   Convert design docs into phased implementation plans via 3 agents + cross-review. Use for plan from design/spec.
 argument-hint: "<path> [--agents claude,codex,gemini] [--timeout N] [--dry-run] [--force]"
+disable-model-invocation: true
+model: opus
 ---
 
 # stark-design-to-plan
@@ -20,6 +22,8 @@ Fills the pipeline gap: `/stark-review-design` → **`/stark-design-to-plan`** �
 - `--timeout N` — per-agent timeout in seconds (default: 600)
 - `--dry-run` — generate plans and reviews but don't write output files
 - `--force` — proceed even if design file has uncommitted changes
+
+**Raw input:** `$ARGUMENTS`
 
 ## Constants
 

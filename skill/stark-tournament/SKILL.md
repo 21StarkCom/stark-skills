@@ -3,6 +3,8 @@ name: stark-tournament
 description: >-
   Run multi-LLM tournaments: N competitors, judged evaluation, winner declared. Use for tournament, compare LLMs.
 argument-hint: '"prompt" | --config tournament.yaml [--strategy semantic|visual|test] [--competitors claude,codex,gemini] [--factors correctness=2.0 quality=1.0] [--judge MODEL] [--timeout N] [--json]'
+disable-model-invocation: true
+model: opus
 ---
 
 # stark-tournament
@@ -26,6 +28,8 @@ Run N LLM competitors on the same task, evaluate outputs with a judge, pick a wi
 - `--dry-run` — print config and exit without running
 
 If neither `"prompt"` nor `--config` is provided, ask the user what they want to compete on.
+
+**Raw input:** `$ARGUMENTS`
 
 ## Constants
 
