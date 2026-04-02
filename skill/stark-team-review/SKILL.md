@@ -238,7 +238,16 @@ git push origin review/pr-{number}:{head_ref}
 
 ### 2f. Persist round
 
-Write round data to `~/.claude/code-review/history/{org}/{repo}/{pr}/round-{N}.json` containing: all findings, their classifications, agent results, and duration.
+Write round data using the **v2 history schema** to `~/.claude/code-review/history/{org}/{repo}/{pr}/round-{N}.json`.
+
+**Every finding MUST have these fields set before saving:**
+- `classification`: one of `fix`, `noise`, `false_positive`, `ignored`
+- `classification_reason`: one sentence explaining why
+- `cross_validated_by`: list of other `agent:domain` pairs that flagged the same issue (±5 lines, similar title)
+- `fixed_in_round`: round number when fixed (if applicable)
+- `fix_verified`: true if tests passed after the fix
+
+The round file must include `schema_version: 2`, `mode: "team"`, `classification_summary` (counts per classification), and per-result `findings` with all classification fields populated.
 
 ### 2g. Stop check
 
@@ -431,13 +440,23 @@ Failure in any step → log warning and continue.
 
 ### 4.5 Save history
 
-Write to `~/.claude/code-review/history/{org}/{repo}/{pr}/`:
+Write to `~/.claude/code-review/history/{org}/{repo}/{pr}/` using the **v2 history schema**:
 
 | File | Content |
 |------|---------|
+| `round-{N}.json` | Per-round: all findings with classifications, agent results, timing |
+| `rounds.json` | Full summary: all rounds + `quality` block with per-agent and per-agent×domain metrics |
 | `summary.md` | Human-readable final summary (same as PR comment) |
-| `rounds.json` | All rounds, all findings, all outcomes, per-phase timing |
 | `prompt-assessment.md` | Prompt improvement recommendations |
+
+The `rounds.json` file MUST include the `quality` section:
+- `quality.per_agent` — signal rate per agent (findings, fix, noise, FP counts)
+- `quality.per_agent_domain` — signal rate per agent×domain (the key input for `domain_agents` optimization)
+- `quality.per_domain` — which agents found real bugs per domain
+- `quality.avg_duration_s` — average duration per agent
+- `quality.error_counts` — errors per agent
+
+This data feeds `/stark-metrics` to recommend per-domain agent defaults.
 
 Create directories on demand. If saving fails, warn but don't fail.
 

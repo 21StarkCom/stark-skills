@@ -402,14 +402,14 @@
       "type": "decision"
     },
     {
-      "category": "file",
+      "category": "worker",
       "id": "phase4_step5",
       "label": "4.5 Save history",
       "position": {
         "x": 310,
         "y": 2286
       },
-      "type": "output"
+      "type": "agent"
     },
     {
       "category": null,

@@ -95,11 +95,16 @@ Parse the JSON output. The orchestrator posts per-agent findings to the PR via t
 
 ## Phase 3: Classify and Present
 
-From the JSON output, classify findings:
+From the JSON output, classify **every** finding by reading the referenced `file:line` in the worktree:
 
-- **Fix**: critical and high severity findings — fix these
-- **Note**: medium severity — mention to user, fix if straightforward
-- **Skip**: low severity — don't fix, don't mention unless user asks
+| Classification | Criteria |
+|----------------|----------|
+| `fix` | Severity >= medium AND the issue actually exists in the code |
+| `false_positive` | The described problem doesn't exist in the code |
+| `noise` | Subjective, style preference, or not actionable |
+| `ignored` | Below fix threshold (low severity) |
+
+For each finding, set `classification` and `classification_reason` (one sentence explaining why).
 
 Present a summary:
 
@@ -129,7 +134,35 @@ If there are critical or high findings:
    ```
 4. Re-run Phase 2 (max 3 rounds total). If still not clean after 3 rounds, present remaining findings and stop.
 
-## Phase 5: Cleanup
+## Phase 5: Persist History
+
+After each round (including the final one), save classified data using the orchestrator's history functions:
+
+```python
+from multi_review import save_round_history, save_review_summary
+
+# After classifying findings in round N:
+save_round_history(repo, pr_number, round_obj, mode="single", domain_agents=da_map)
+
+# After ALL rounds complete:
+save_review_summary(repo, pr_number, base, all_rounds, mode="single", domain_agents=da_map)
+```
+
+The skill doesn't call these Python functions directly — instead, it writes the equivalent JSON to:
+- `~/.claude/code-review/history/{org}/{repo}/{pr}/round-{N}.json` — per-round data
+- `~/.claude/code-review/history/{org}/{repo}/{pr}/rounds.json` — full summary
+
+**Critical for optimization:** Every finding MUST have `classification` and `classification_reason` set before saving. Unclassified findings are tracked but cannot improve the system. The `quality.per_agent_domain` section in the summary is what `/stark-metrics` uses to recommend `domain_agents` tuning.
+
+The history schema (v2) includes:
+- `mode`: "single" or "team"
+- `domain_agents`: the agent map used (for single mode)
+- `classification_summary`: fix/noise/false_positive/ignored counts
+- `quality.per_agent`: signal rate per agent
+- `quality.per_agent_domain`: signal rate per agent×domain (the key optimization input)
+- `quality.per_domain`: which agents found real bugs per domain
+
+## Phase 6: Cleanup
 
 ```bash
 cd -

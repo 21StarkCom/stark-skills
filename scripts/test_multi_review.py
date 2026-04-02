@@ -482,6 +482,71 @@ class TestReturnCodeHandling:
         assert len(result.findings) == 0
 
 
+class TestHistoryPersistence:
+    """save_round_history and save_review_summary write correct schema."""
+
+    def _make_round(self, classifications=None):
+        findings = [
+            multi_review.Finding(
+                agent="codex", domain="security", severity="high",
+                file="foo.py", line=10, title="SQL injection",
+                description="Unescaped input", suggestion="Use parameterized queries",
+                classification=classifications[0] if classifications else None,
+                classification_reason="Real bug" if classifications else None,
+            ),
+            multi_review.Finding(
+                agent="codex", domain="security", severity="low",
+                file="bar.py", line=5, title="Missing type hint",
+                description="No annotation", suggestion="Add type",
+                classification=classifications[1] if classifications else None,
+                classification_reason="Style only" if classifications else None,
+            ),
+        ]
+        result = SubAgentResult(
+            agent="codex", domain="security", raw_output="[]",
+            findings=findings, duration_s=42.5,
+        )
+        return ReviewRound(round_num=1, results=[result])
+
+    def test_save_round_creates_file(self, tmp_path):
+        with patch.object(multi_review, "HISTORY_DIR", tmp_path):
+            rnd = self._make_round(["fix", "ignored"])
+            path = multi_review.save_round_history("GetEvinced/test", 42, rnd, mode="single")
+            assert path.exists()
+            data = json.loads(path.read_text())
+            assert data["schema_version"] == 2
+            assert data["mode"] == "single"
+            assert data["pr"] == 42
+            assert data["classification_summary"]["fix"] == 1
+            assert data["classification_summary"]["ignored"] == 1
+
+    def test_save_summary_quality_metrics(self, tmp_path):
+        with patch.object(multi_review, "HISTORY_DIR", tmp_path):
+            rnd = self._make_round(["fix", "noise"])
+            path = multi_review.save_review_summary(
+                "GetEvinced/test", 42, "main", [rnd], mode="single",
+                domain_agents={"security": "codex"},
+            )
+            data = json.loads(path.read_text())
+            assert data["schema_version"] == 2
+            assert data["summary"]["total_fix"] == 1
+            assert data["summary"]["total_noise"] == 1
+            assert data["summary"]["signal_to_noise_pct"] == 50.0
+            assert "codex" in data["quality"]["per_agent"]
+            assert data["quality"]["per_agent"]["codex"]["fix"] == 1
+            assert "codex:security" in data["quality"]["per_agent_domain"]
+
+    def test_save_summary_unclassified(self, tmp_path):
+        with patch.object(multi_review, "HISTORY_DIR", tmp_path):
+            rnd = self._make_round()  # no classifications
+            path = multi_review.save_review_summary(
+                "GetEvinced/test", 42, "main", [rnd], mode="team",
+            )
+            data = json.loads(path.read_text())
+            assert data["summary"]["signal_to_noise_pct"] is None
+            assert data["quality"]["per_agent"]["codex"]["unclassified"] == 2
+
+
 class TestSingleAgentMode:
     """resolve_domain_agents and --single CLI flag."""
 
