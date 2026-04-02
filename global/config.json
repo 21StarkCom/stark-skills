@@ -1,5 +1,5 @@
 {
-  "agents": ["claude", "codex", "gemini"],
+  "agents": ["claude", "codex"],
   "domain_agents": {
     "architecture": "codex",
     "accessibility": "codex",
@@ -32,7 +32,7 @@
     "pr_merge_strategy": "squash"
   },
   "plan_to_tasks": {
-    "validation_agents": ["codex", "gemini"],
+    "validation_agents": ["codex"],
     "max_quality_gate_rounds": 3,
     "max_validation_iterations": 2
   },
