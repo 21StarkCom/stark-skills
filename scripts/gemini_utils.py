@@ -129,16 +129,19 @@ def setup_gemini_home(
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(gemini_dir, auth_file))
 
-    # Patch approval mode in the copied settings.json if requested.
+    # Patch settings.json for headless dispatch:
+    # - Force API key auth (avoids Vertex AI project mismatch in sub-agents)
+    # - Set approval mode if requested
+    settings_path = os.path.join(gemini_dir, "settings.json")
+    settings: dict = {}
+    if os.path.exists(settings_path):
+        with open(settings_path) as f:
+            settings = json.load(f)
+    settings.setdefault("security", {}).setdefault("auth", {})["selectedType"] = "gemini-api-key"
     if approval_mode:
-        settings_path = os.path.join(gemini_dir, "settings.json")
-        settings: dict = {}
-        if os.path.exists(settings_path):
-            with open(settings_path) as f:
-                settings = json.load(f)
         settings["defaultApprovalMode"] = approval_mode
-        with open(settings_path, "w") as f:
-            json.dump(settings, f)
+    with open(settings_path, "w") as f:
+        json.dump(settings, f)
 
     with open(os.path.join(gemini_dir, "projects.json"), "w") as f:
         json.dump({"projects": {project_dir: project_label}}, f)
@@ -164,12 +167,15 @@ def gemini_session(
 
 
 def make_gemini_env(gemini_home: str) -> dict[str, str]:
-    """Build env dict with GEMINI_CLI_HOME and GOOGLE_CLOUD_LOCATION set."""
-    return {
+    """Build env dict with GEMINI_CLI_HOME and GEMINI_API_KEY for headless dispatch."""
+    env = {
         **os.environ,
         "GEMINI_CLI_HOME": gemini_home,
-        "GOOGLE_CLOUD_LOCATION": "global",
     }
+    api_key = get_gemini_api_key()
+    if api_key:
+        env["GEMINI_API_KEY"] = api_key
+    return env
 
 
 # ── Output parsing ────────────────────────────────────────────────────

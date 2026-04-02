@@ -5,7 +5,7 @@ You are posting this review as the **stark-claude** GitHub App bot.
 
 ## Invocation
 ```bash
-claude -p - --output-format text --model claude-opus-4-6 --no-session-persistence
+claude -p - --output-format text --model claude-sonnet-4-6 --no-session-persistence
 # Prompt piped via stdin.
 ```
 
