@@ -31,6 +31,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/stark-review-design-improvement` skill — improve design review prompts
 - stark-insights event emission wired into 7 skills
 - Review lessons embedded into autopilot, review, and pr-flow skills
+- `scripts/config_loader.py` — shared config loader with typed accessors and hierarchical defaults (#183)
+- `scripts/session_id.py` — authoritative session ID resolver (#184)
+- `scripts/runtime_env.py` — isolated subprocess environment builder (#194)
+- `scripts/preflight.py` — environment validation checks with timeout (#201)
+- `scripts/emit_queue.py` — SQLite-backed event queue with dead-letter (#202)
+- `scripts/event_schema.json` — event schema v2 with session awareness (#202)
+- `scripts/validation_gate.py` — post-generation code validation chain (#185)
+- `scripts/failure_classifier.py` — error categorization with confidence scoring (#186)
+- `scripts/self_healer.py` — pattern-based auto-remediation with circuit breaker (#195, #206)
+- `scripts/healer_patterns.json` — 8 healer patterns incl. TypeScript patterns (#195, #205)
+- `scripts/lock_helpers.py` — exclusive-write locks with operator unlock (#208)
+- `scripts/approach_contract.py` — pre-execution goal confirmation (#211)
+- `scripts/session_state.py` — persistent session state management (#188)
+- `scripts/context_compactor.py` — session checkpoint generation (#198)
+- `scripts/learning_capture.py` — corrections and constraints extraction (#199)
+- `scripts/skill_router.py` — contextual skill suggestions based on history (#197)
+- `scripts/backfill_history.py` — historical data backfill for metrics baselines (#187)
+- `scripts/cost_controls.py` — budget tracking, alerts, hard-stop, credential expiry (#210)
+- `scripts/alert_delivery.py` — critical system event delivery path (#215)
+- `scripts/dashboard.py` — HTML dashboard with 8 KPIs and fallback rendering (#200)
+- Canary rollout framework for healer auto-mode (#213)
+- Install provisioning for local infrastructure dirs and SQLite DBs (#193)
 
 ### Changed
 - PR review coverage expanded from 6 to 9 domains per agent (18 → 27 sub-agents)
@@ -38,8 +60,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Design/plan review split into separate dispatch modes with tournament support
 - `stark-onboard-project` now includes `/onboard-service` pointer for GCP services
 - `stark-review-design` auto-commits fixes after each review round
+- Config-driven agent enablement — agents respect `models.{agent}.enabled` in config (#203)
+- Metrics extended with all 8 KPIs from design (#190, #196)
+- Automation registry updated with new triggers and migrations (#191)
+- Housekeeping expanded: session, checkpoint, lock, log cleanup, artifact archival (#189, #192)
+- 6 SKILL.md files updated: session, housekeeping, phase-execute, autopilot, team-review, design-to-plan
+- Config deprecation pipeline: add P0, warn P1, remove P2 (#204, #209, #212)
+- Session/compactor/router wired into skill entry points (#207, #214)
+- Preflight and approach contract wired into automation triggers (#216)
 
 ### Fixed
+- Regression test failures from config-driven agent enablement
+- Stale test assertions for removed GOOGLE_CLOUD_LOCATION hardcoding
 - Persona stderr noise, combo rating, weight seeding
 - Persona installed path for script invocation
 - Autopilot `${pkg_name}` placeholder replaced with `.rglob` from cwd
