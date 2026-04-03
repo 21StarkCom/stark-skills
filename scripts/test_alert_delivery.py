@@ -65,6 +65,22 @@ class TestEmitAlert:
         markers = list(tmp_path.glob("alert-*.marker"))
         assert len(markers) == 2
 
+    def test_same_second_collision_counter(self, tmp_path):
+        """When two criticals land at the same unix second, the counter suffix prevents clobbering."""
+        alerts = tmp_path / "alerts.jsonl"
+        fixed_ts = 1700000000
+        with patch.object(alert_delivery, "ALERTS_PATH", alerts), \
+             patch.object(alert_delivery, "MARKERS_DIR", tmp_path), \
+             patch("time.time", return_value=fixed_ts):
+            alert_delivery.emit_alert("critical", "src1", "first")
+            alert_delivery.emit_alert("critical", "src2", "second")
+
+        markers = list(tmp_path.glob("alert-*.marker"))
+        assert len(markers) == 2
+        names = {m.name for m in markers}
+        assert f"alert-{fixed_ts}.marker" in names
+        assert f"alert-{fixed_ts}-1.marker" in names
+
     def test_marker_file_name_contains_timestamp(self, tmp_path):
         alerts = tmp_path / "alerts.jsonl"
         with patch.object(alert_delivery, "ALERTS_PATH", alerts), \

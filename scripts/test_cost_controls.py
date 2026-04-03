@@ -157,6 +157,26 @@ class TestCheckCosts:
         result = self._check(tmp_path, [_entry(10.0, "test")])
         assert result["budget_remaining_usd"] == pytest.approx(40.0)
 
+    def test_critical_when_daily_exceeds_hard_stop(self, tmp_path):
+        # daily_alert_usd=15, hard_stop_usd=100 — daily spend of 101 triggers critical
+        # via the elif branch (not weekly hard_stop path)
+        config = {**_DEFAULT_CONFIG, "weekly_budget_usd": 200.0, "hard_stop_usd": 100.0}
+        result = self._check(tmp_path, [_entry(101.0, "test")], config=config)
+        assert result["alert_level"] == "critical"
+
+    def test_malformed_jsonl_lines_are_skipped(self, tmp_path):
+        tracking = tmp_path / "cost-tracking.jsonl"
+        tracking.write_text('not-json\n{"timestamp":"2026-01-01T00:00:00Z","cost_usd":5.0,"source":"x"}\n')
+        result = cost_controls.check_costs(
+            tracking_path=tracking,
+            alerts_path=tmp_path / "alerts.jsonl",
+            hard_stop_path=tmp_path / "cost-hard-stop",
+            config=_DEFAULT_CONFIG,
+        )
+        # The valid entry is counted; the bad line is skipped without crashing
+        assert result["weekly_usd"] == pytest.approx(5.0)
+        assert result["alert_level"] == "ok"
+
 
 # ---------------------------------------------------------------------------
 # reset_costs
@@ -212,6 +232,21 @@ class TestCLI:
         out = capsys.readouterr().out
         data = json.loads(out)
         assert "alert_level" in data
+
+    def test_check_human_readable_output(self, tmp_path, capsys):
+        tracking = tmp_path / "cost-tracking.jsonl"
+        tracking.write_text("")
+        with patch.object(cost_controls, "COST_TRACKING_PATH", tracking), \
+             patch.object(cost_controls, "ALERTS_PATH", tmp_path / "alerts.jsonl"), \
+             patch.object(cost_controls, "HARD_STOP_PATH", tmp_path / "cost-hard-stop"), \
+             patch.object(cost_controls, "AUDIT_PATH", tmp_path / "audit.jsonl"):
+            cost_controls.main(["--check"])
+
+        out = capsys.readouterr().out
+        assert "Alert level" in out
+        assert "Daily spend" in out
+        assert "Weekly spend" in out
+        assert "Budget left" in out
 
     def test_reset_json_output_is_valid(self, tmp_path, capsys):
         with patch.object(cost_controls, "COST_TRACKING_PATH", tmp_path / "cost-tracking.jsonl"), \
