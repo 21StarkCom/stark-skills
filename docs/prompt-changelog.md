@@ -2,6 +2,25 @@
 
 Tracks improvements to review prompts based on stark-team-review assessments.
 
+## 2026-04-03 — Cross-domain dedup + codex ui-design-conformance scope fix
+
+**Source:** PR #178 in GetEvinced/stark-skills (33 codex findings, 36% cross-domain duplicates)
+**Prompts dir:** default (PR code review)
+**Assessment:** Codex ui-design-conformance produced 7 findings on a pure backend PR (security bugs, correctness bugs — zero UI issues). 12 of 33 findings were duplicated across domains (unsigned webhook in 3 domains, disabled_paths in 4 domains, etc.).
+
+### Changes Made
+
+| File | Change | Reason |
+|------|--------|--------|
+| `global/prompts/codex/08-ui-design-conformance.md` | Rewrote to match Claude's stronger version — bolded scope rules, explicit "no UI = empty array and stop", structured checklist | 7 off-scope findings on pure backend PR; weak scope instruction was ignored |
+| `global/prompts/codex/agent.md` | Added "Cross-Domain Dedup" section — defer to specialized domain reviewer | 36% of findings duplicated across domains |
+| `global/prompts/claude/agent.md` | Added same "Cross-Domain Dedup" section | Consistency across agents; prevents future duplication |
+
+### Validation
+- [x] Prompt syntax OK
+- [x] Tests pass (554 passed)
+- [x] Config valid JSON
+
 ## 2026-04-03 — Fix codex dispatch cwd, add scope calibration for small PRs
 
 **Source:** PR #135 in GetEvinced/stark-data-core

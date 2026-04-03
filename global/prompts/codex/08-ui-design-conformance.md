@@ -1,34 +1,47 @@
 # UI Design Conformance
 
-Review the diff for conformance to the UI design (Figma mockups, design system specs). Does the implementation match what was designed?
+Review the PR diff for conformance to the UI design (Figma mockups, design system specs, or visual requirements). Think about whether the implementation visually and interactively matches what was designed.
 
-> **Scope:** Only report UI design conformance findings. Skip if PR has no UI changes — output empty array.
+> **Scope:** Only report findings specific to UI design conformance. Do not flag security, architecture, correctness, or test coverage issues — dedicated reviewers cover those domains. Your job is strictly: does the UI match the design?
 
-Critical rules:
-- Only applies to frontend/UI code. Pure backend PRs get an empty array.
-- Compare against the design system and referenced mockups.
-- Do NOT flag subjective preferences. Only clear deviations from the specified design.
-- Design tokens take precedence over hardcoded values.
+## Critical Rules
 
-Check:
-- Colors use design tokens, not hardcoded hex
-- Spacing follows design system scale
-- Typography uses correct font family/weight/size from design system
-- Layout matches mockup (flex direction, alignment, gaps)
-- Responsive breakpoints handled (if design specifies)
-- Hover, focus, active, disabled states implemented
-- Loading/empty/error states match design
-- Uses existing design system components (not reimplemented)
+- **This domain applies only to frontend/UI code.** If the PR has no UI changes (pure backend, scripts, config, Python, infra), output an empty array `[]` and stop. Do not review backend code for non-UI concerns.
+- **Compare against the design system and any referenced mockups.** If the PR references a Figma link or design spec, that is your source of truth.
+- **Do NOT flag subjective preferences.** "I would have used a different shade" is not a finding. Flag only clear deviations from the specified design.
+- **Design tokens take precedence over hardcoded values.** If the codebase uses a design system with tokens (colors, spacing, typography), flag hardcoded values that should use tokens.
+
+## Checklist
+
+**Visual Fidelity**
+- Colors use design tokens, not hardcoded hex values
+- Spacing follows the design system's scale (4px, 8px, 12px, 16px, etc.)
+- Typography uses the correct font family, weight, and size from the design system
+- Border radius, shadows, and elevation match the design system
+
+**Layout & Responsive**
+- Component layout matches the mockup (flex direction, alignment, gaps)
+- Responsive breakpoints are handled (if the design specifies mobile/tablet/desktop)
+- Content overflow is handled (truncation, wrapping, scrolling as designed)
+
+**Interaction States**
+- Hover, focus, active, and disabled states are implemented
+- Loading/skeleton states match the design (if specified)
+- Empty states are implemented (if specified)
+- Error states have appropriate visual treatment
+
+**Component Consistency**
+- Uses existing design system components where they exist (not reimplemented)
 - No one-off styles that duplicate design system patterns
 
-Severity:
-- critical: Wrong layout, wrong component, missing interaction state
-- high: Wrong color token, hardcoded value instead of token
-- medium: Missing responsive handling, minor layout difference
-- low: Slightly different animation timing
+## Severity Guide
+- **critical**: Major visual deviation — wrong layout, wrong component entirely, missing interaction state
+- **high**: Wrong spacing scale, wrong color token, hardcoded value instead of token
+- **medium**: Missing responsive handling, minor layout difference from mockup
+- **low**: Slightly different animation timing, minor spacing inconsistency
 
-Output:
+## Output
 ```json
 [{"severity": "...", "file": "...", "line": 0, "title": "...", "description": "...", "suggestion": "..."}]
 ```
-JSON array only. Empty array `[]` if clean.
+JSON array only. No other text. Empty array `[]` if clean.
