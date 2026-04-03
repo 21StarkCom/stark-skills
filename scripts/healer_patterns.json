@@ -45,5 +45,32 @@
     "action": "release_stale_lock",
     "verify_command": "ls",
     "requires_confirmation": false
+  },
+  {
+    "id": "ts-missing-type-export",
+    "category": "TYPE_ERROR",
+    "regex": "has no exported member '([^']+)'|Cannot find name '([^']+)'",
+    "guard": "ls tsconfig.json 2>/dev/null",
+    "action": "add_type_export",
+    "verify_command": "npx tsc --noEmit 2>&1 | head -5",
+    "requires_confirmation": true
+  },
+  {
+    "id": "ts-unused-import",
+    "category": "SYNTAX_ERROR",
+    "regex": "'([^']+)' is declared but.*never used",
+    "guard": "ls tsconfig.json 2>/dev/null",
+    "action": "remove_unused_import",
+    "verify_command": "npx tsc --noEmit 2>&1 | head -5",
+    "requires_confirmation": false
+  },
+  {
+    "id": "ts-strict-null",
+    "category": "TYPE_ERROR",
+    "regex": "Object is possibly '(null|undefined)'|Type '.*null.*' is not assignable",
+    "guard": null,
+    "action": "add_null_check",
+    "verify_command": "npx tsc --noEmit 2>&1 | head -5",
+    "requires_confirmation": true
   }
 ]

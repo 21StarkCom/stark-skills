@@ -52,6 +52,7 @@ _VALID_TYPES = {
     "tournament_result",
     "preflight_check", "approach_contract",
     "validation_result", "heal_attempt",
+    "learning_capture", "skill_suggestion",
 }
 
 # ---------------------------------------------------------------------------
