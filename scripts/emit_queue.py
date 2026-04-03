@@ -15,11 +15,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import time
 import urllib.request
+import uuid as _uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+import session_id as _session_id
 
 # ---------------------------------------------------------------------------
 # Config
@@ -46,7 +50,28 @@ _VALID_TYPES = {
     "agent_dispatch", "prompt", "correction", "memory_write",
     "code_change", "bug_fix", "pr_event", "tool_usage", "ci_signal",
     "tournament_result",
+    "preflight_check", "approach_contract",
 }
+
+# ---------------------------------------------------------------------------
+# Redaction (applied before persisting event JSON)
+# ---------------------------------------------------------------------------
+
+# Patterns that look like API keys or tokens.
+_REDACT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r'sk-[A-Za-z0-9_-]{10,}'), "sk-[REDACTED]"),
+    (re.compile(r'ghp_[A-Za-z0-9]{10,}'), "ghp_[REDACTED]"),
+    (re.compile(r'ghs_[A-Za-z0-9]{10,}'), "ghs_[REDACTED]"),
+    # Base64-encoded secrets (>40 chars, includes + and / from base64 alphabet)
+    (re.compile(r'[A-Za-z0-9+/]{41,}={0,2}'), "[BASE64-REDACTED]"),
+]
+
+
+def _redact(text: str) -> str:
+    """Strip patterns that look like API keys or tokens from a serialized string."""
+    for pattern, replacement in _REDACT_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
 _VALID_CLIS = {"claude", "codex", "gemini"}
 _VALID_SOURCES = {"skill", "hook", "scraper", "backfill"}
 
@@ -122,7 +147,7 @@ def enqueue(event: dict) -> int | None:
         raise ValueError(f"Invalid event: {'; '.join(errors)}")
 
     dedupe_key = event.get("dedupe_key")
-    event_json = json.dumps(event, default=str)
+    event_json = _redact(json.dumps(event, default=str))
     db = _get_db()
     try:
         cursor = db.execute(
@@ -561,6 +586,27 @@ def _read_token() -> str:
         return ""
 
 
+# ---------------------------------------------------------------------------
+# Health CLI
+# ---------------------------------------------------------------------------
+
+
+def _health() -> dict:
+    """Query queue.db and return count + max created_at as a JSON-serialisable dict."""
+    db = _get_db()
+    try:
+        row = db.execute("SELECT COUNT(*), MAX(created_at) FROM pending").fetchone()
+        count, max_ts = row if row else (0, None)
+        return {"pending_count": count, "max_created_at": max_ts}
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# HTTP delivery
+# ---------------------------------------------------------------------------
+
+
 def _post_event(event_json: str, token: str) -> tuple[bool, str | None]:
     """POST a single event to the API. Returns (success, error_message)."""
     req = urllib.request.Request(
@@ -595,25 +641,54 @@ def make_event(
     user_id: str | None = None,
     dedupe_key: str | None = None,
 ) -> dict:
-    """Build a validated event dict with defaults filled in."""
+    """Build a validated event dict with defaults filled in.
+
+    V2 changes (schema_version=2):
+    - event_id: auto-generated uuid4, always present
+    - schema_version: now set to 2
+    - session_id: auto-resolved via session_id.resolve_session_id() if not provided
+    """
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    event = {
+
+    # Auto-resolve session_id if not provided (v2 behaviour).
+    resolved_session_id: str = session_id if session_id is not None else _session_id.resolve_session_id()
+
+    event: dict = {
         "type": event_type,
+        "event_id": str(_uuid.uuid4()),
         "timestamp": now,
         "cli": cli,
         "source": source,
-        "schema_version": 1,
+        "schema_version": 2,
+        "session_id": resolved_session_id,
         "payload": payload,
     }
-    if session_id:
-        event["session_id"] = session_id
     if project:
         event["project"] = project
     if user_id:
         event["user_id"] = user_id
     if dedupe_key:
         event["dedupe_key"] = dedupe_key
-    elif session_id:
+    else:
         ts = int(time.time())
-        event["dedupe_key"] = f"{event_type}:{session_id}:{ts}"
+        event["dedupe_key"] = f"{event_type}:{resolved_session_id}:{ts}"
     return event
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="emit_queue utility")
+    parser.add_argument("--health", action="store_true",
+                        help="Print queue health stats as JSON and exit")
+    args = parser.parse_args()
+
+    if args.health:
+        print(json.dumps(_health(), indent=2))
+    else:
+        parser.print_help()

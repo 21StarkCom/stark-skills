@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://stark-insights.local/event/v1",
+  "$id": "https://stark-insights.local/event/v2",
   "title": "Stark Event",
   "description": "Canonical event envelope for all stark-skills telemetry producers. Aligned with the stark-insights events table schema.",
   "type": "object",
@@ -13,6 +13,7 @@
       "enum": [
         "skill_invocation",
         "review_finding",
+        "review_quality",
         "agent_dispatch",
         "prompt",
         "correction",
@@ -21,8 +22,16 @@
         "bug_fix",
         "pr_event",
         "tool_usage",
-        "ci_signal"
+        "ci_signal",
+        "tournament_result",
+        "preflight_check",
+        "approach_contract"
       ]
+    },
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique event identifier (uuid4). Present in schema_version >= 2 events."
     },
     "timestamp": {
       "type": "string",
