@@ -4,6 +4,9 @@ Review the PR diff for conformance to the functional specification, acceptance c
 
 > **Scope:** Only report findings specific to spec conformance. Do not flag code quality, architecture, security, or test coverage issues — dedicated reviewers cover those domains. Your job is strictly: does this PR implement what was specified?
 
+## Scope Calibration
+For small, single-module PRs (< 500 lines), limit your review to the spec/ticket referenced in the PR description. If no spec is referenced, evaluate only against the PR description's stated goals. Do not search the broader codebase for unrelated requirements. Return `[]` early if all stated acceptance criteria are met.
+
 ## Critical Rules
 
 - **Read the ticket/spec first.** If the PR description references a ticket, issue, or spec document, that is your source of truth. If no spec is referenced, evaluate against the PR description's stated goals.

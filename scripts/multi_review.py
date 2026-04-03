@@ -1688,11 +1688,20 @@ def main() -> None:
         args.single = True
 
     if args.pr:
-        repo = args.repo or detect_repo()
+        # Resolve git root so sub-agents (especially codex) run inside the repo
+        try:
+            _git_root = subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True, timeout=5,
+            ).stdout.strip() or None
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            _git_root = None
+
+        repo = args.repo or detect_repo(cwd=_git_root)
         if not repo:
             print("Could not detect repo. Use --repo.", file=sys.stderr)
             sys.exit(1)
-        base = args.base or detect_base_branch()
+        base = args.base or detect_base_branch(cwd=_git_root)
 
         review_fn = review_pr_single if args.single else review_pr
         review_kwargs: dict[str, Any] = {
@@ -1703,6 +1712,7 @@ def main() -> None:
             "json_output": args.json_output or args.json_only,
             "json_only": getattr(args, "json_only", False),
             "post_raw": getattr(args, "post_raw", False),
+            "cwd": _git_root,
         }
         if args.single:
             review_kwargs["override_agent"] = args.agent

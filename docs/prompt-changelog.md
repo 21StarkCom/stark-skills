@@ -2,6 +2,27 @@
 
 Tracks improvements to review prompts based on stark-team-review assessments.
 
+## 2026-04-03 — Fix codex dispatch cwd, add scope calibration for small PRs
+
+**Source:** PR #135 in GetEvinced/stark-data-core
+**Prompts dir:** default (PR code review)
+**Assessment:** All 9 codex dispatches failed with `cli_error` (missing cwd → "not inside a trusted directory"). 4 claude domains (architecture, type-safety, spec-conformance, regression-prevention) took 800-990s each with zero findings on a 489-line CRUD API PR.
+
+### Changes Made
+
+| File | Change | Reason |
+|------|--------|--------|
+| `scripts/multi_review.py` | Pass `cwd=git_root` in `--pr` path | Codex CLI requires git repo cwd; was inheriting parent process cwd (often non-repo) |
+| `global/prompts/claude/01-architecture.md` | Add Scope Calibration section | 813s with zero findings on simple CRUD PR |
+| `global/prompts/claude/04-type-safety.md` | Add Scope Calibration section + Python early-exit | 945s with zero findings; TypeScript-focused domain wasted on Python PR |
+| `global/prompts/claude/07-spec-conformance.md` | Add Scope Calibration section | 793s with zero findings on PR that met all criteria |
+| `global/prompts/claude/09-regression-prevention.md` | Add Scope Calibration section (new-files-only early-exit) | 966s with zero findings; PR only added files, no regressions possible |
+
+### Validation
+- [x] Prompt syntax OK
+- [x] Python compiles
+- [x] Config valid JSON
+
 ## 2026-04-01 — Batch: scope enforcement, self-refuting findings, infra-repo awareness
 
 **Source:** 4 unapplied assessments — infra-ai-platform #4, infra-sentinel #20, infra-sentinel #23, infra-pulse #162

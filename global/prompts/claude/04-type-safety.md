@@ -4,6 +4,9 @@ Review the PR diff for type safety issues. Think about downstream consumers — 
 
 > **Scope:** Only report findings specific to TypeScript types and API surface. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, security, accessibility, correctness, or test coverage, skip it — a dedicated reviewer covers that domain.
 
+## Scope Calibration
+For small, single-module PRs (< 500 lines, one new feature or CRUD layer), focus exclusively on type issues directly present in the diff. Skip broad type-system analysis, cross-package type surface audits, and downstream consumer impact reviews — they add review time with no findings for simple additions. For Python-only PRs with no TypeScript, return `[]` immediately.
+
 ## Checklist
 
 **Type Correctness**

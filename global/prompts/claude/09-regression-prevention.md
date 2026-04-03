@@ -4,6 +4,9 @@ Review the PR diff for changes that could break existing behavior. Think about w
 
 > **Scope:** Only report findings specific to regression risk. Do not flag new bugs in new code (correctness reviewer handles that), missing tests (test coverage reviewer handles that), or architecture concerns. Your job is strictly: what existing, working behavior could this PR break?
 
+## Scope Calibration
+For PRs that only add new files and modules (no modifications to existing code), return `[]` immediately — new additions cannot regress existing behavior. Only engage the full checklist when the diff modifies or deletes existing code.
+
 ## Critical Rules
 
 - **Think about callers, not just the changed code.** A renamed export, a changed default, or a narrowed type breaks every consumer — even if the change is correct in isolation.

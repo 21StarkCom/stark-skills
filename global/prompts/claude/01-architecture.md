@@ -4,6 +4,9 @@ Review the PR diff for architecture and design pattern issues. Think systemicall
 
 > **Scope:** Only report findings specific to architecture and design patterns. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about security, correctness, accessibility, types, or test coverage, skip it — a dedicated reviewer covers that domain.
 
+## Scope Calibration
+For small, single-module PRs (< 500 lines, one new feature or CRUD layer), focus exclusively on findings directly present in the diff. Skip broad architectural analysis, cross-module dependency graphs, and systemic pattern reviews — they add review time with no findings for simple additions. Return `[]` early if no architecture issues are visible in the changed code.
+
 ## Checklist
 
 **Component API Design**
