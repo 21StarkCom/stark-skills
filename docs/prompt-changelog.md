@@ -2,6 +2,28 @@
 
 Tracks improvements to review prompts based on stark-team-review assessments.
 
+## 2026-04-03 — Codex noise reduction (test-coverage, architecture, ui-design) + claude a11y scope calibration
+
+**Source:** PR #194 in GetEvinced/design-system-core (widget grid review round 2)
+**Prompts dir:** default (PR code review)
+**Assessment:** 27% signal-to-noise; codex test-coverage, architecture, and ui-design-conformance all 100% noise; claude accessibility had scope-exceeding enhancement findings
+
+### Changes Made
+
+| File | Change | Reason |
+|------|--------|--------|
+| `codex/06-test-coverage.md` | Require concrete "this will break when..." scenario for every test gap | All 4 codex test findings were generic suggestions with no break scenario |
+| `codex/08-ui-design-conformance.md` | Check 3-5 nearby files for established patterns before flagging | Both findings were false positives — flagged Tailwind usage that's the project convention |
+| `codex/01-architecture.md` | In fix PRs, only flag architecture issues with correctness/regression risk | Both findings suggested refactoring for single-consumer patterns in a targeted fix PR |
+| `claude/02-accessibility.md` | Added scope calibration: enhancements beyond PR scope tagged `[enhancement]`, severity -1 | 1/3 claude a11y findings was valid but scope-exceeding |
+
+### Validation
+- [x] Prompt syntax OK
+- [x] No Python changes
+- [x] No config changes
+
+---
+
 ## 2026-04-03 — Cross-domain dedup + codex ui-design-conformance scope fix
 
 **Source:** PR #178 in GetEvinced/stark-skills (33 codex findings, 36% cross-domain duplicates)

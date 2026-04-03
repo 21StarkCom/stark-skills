@@ -10,6 +10,7 @@ Review the PR diff for conformance to the UI design (Figma mockups, design syste
 - **Compare against the design system and any referenced mockups.** If the PR references a Figma link or design spec, that is your source of truth.
 - **Do NOT flag subjective preferences.** "I would have used a different shade" is not a finding. Flag only clear deviations from the specified design.
 - **Design tokens take precedence over hardcoded values.** If the codebase uses a design system with tokens (colors, spacing, typography), flag hardcoded values that should use tokens.
+- **Check established patterns before flagging.** Before reporting a hardcoded value or non-token usage, examine 3-5 other files in the same directory. If the surrounding codebase consistently uses the same pattern (e.g., raw Tailwind classes instead of tokens), it's an established convention — not a violation. Only flag deviations from the codebase's own patterns.
 
 ## Checklist
 

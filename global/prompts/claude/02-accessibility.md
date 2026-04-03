@@ -37,11 +37,15 @@ Review the PR diff for accessibility issues. Go beyond checklist compliance — 
 - Icon-only buttons have accessible names
 - Visually hidden text where context is only visual
 
+## Scope Calibration
+- If a finding is an **enhancement** beyond what the PR explicitly sets out to fix (e.g., "also add X for completeness"), classify its severity one level lower and prefix the title with `[enhancement]`. The PR author should not be penalized for not fixing things they didn't touch.
+- Focus on regressions and violations introduced by the PR's changes, not pre-existing issues in unchanged code.
+
 ## Severity Guide
 - **critical**: Interactive element not keyboard accessible, missing label association, focus trap
 - **high**: Missing ARIA on complex widget, focus indicator missing, contrast failure
 - **medium**: Suboptimal semantic choice, missing `aria-describedby` on error, heading skip
-- **low**: Screen reader experience improvement
+- **low**: Screen reader experience improvement, enhancements beyond PR scope
 
 ## Output
 ```json
