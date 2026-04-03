@@ -71,3 +71,12 @@
 - **Story Points:** 71 total (19 tasks across 6 phases)
 - **Summary:** Claude Code skill that assigns movie/comedy character personas via weighted random selection. Python helper CLI + thin SKILL.md wrapper. Local SQLite for state, stark-insights for analytics. Learns preferences over time via like/hate/survey feedback. Supports combo mashups and date-aware selection.
 - **Knowledge extracted to:** docs/adr/ (no new ADRs needed — design decisions captured in the design spec)
+
+## 2026-04-03 — Workflow Improvement (stark-skills Ecosystem)
+
+- **Date:** 2026-04-03
+- **Status:** Decomposed → issues created
+- **Tracking:** #179, #180, #181, #182
+- **Story Points:** 173 total (34 tasks across 4 phases)
+- **Summary:** Four-phase improvement stack for the stark-skills ecosystem: (P0) unified runtime config with shared loader, preflight environment validation, approach contracts, agent environment isolation, event schema v2; (P1) post-generation code validation gate, failure classification with 8 canonical codes, self-healing with 5 patterns in suggest mode, PID-aware exclusive write locks; (P2) persistent session state surviving /clear, context compaction checkpoints, learning capture from structured metadata, contextual skill suggestions with 13 trigger rules, old config removal; (P3) HTML operator dashboard with 8 KPIs, automation fleet trigger migration, cost controls with hard-stop and auto-recovery, healer auto-mode with per-pattern circuit breaker, alert delivery path.
+- **Knowledge extracted to:** `docs/adr/0015-additive-config-migration-three-step.md`, `docs/adr/0016-single-session-id-resolver.md`, `docs/adr/0017-pid-aware-exclusive-write-locks.md`, `docs/glossary.md`

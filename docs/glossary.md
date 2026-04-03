@@ -12,3 +12,21 @@
 **Release gate** — A composite quality check (PR approved + CI pass + docs complete + artifacts linked + release approval + rollout notes) enforced via a GitHub Actions status check named `release-gate`. Must pass before PR merge is allowed.
 
 **Spec completeness gate** — Validation that blocks tasks from entering `ready for agent` unless Risk and AI Suitability fields are set, and Spec Approval is `approved` for high-risk items.
+
+**Preflight** — Environment validation check (`scripts/preflight.py`) that runs before execution-heavy skills. Returns `ready`, `degraded`, or `blocked` based on CLI availability, auth status, and config state. Introduced in Workflow Improvement P0.
+
+**PreFlightResult** — Structured JSON output from preflight containing `overall` status, `recommended_mode`, per-check details, and remediation messages. The contract between preflight.py and all consuming skills.
+
+**Approach contract** — Pre-execution confirmation step (`scripts/approach_contract.py`) that displays the derived goal, approach, and constraints from a plan before long-running skills begin execution. Requires Y/n/edit in interactive mode.
+
+**Validation gate** — Post-code-generation quality check (`scripts/validation_gate.py`) that runs lint, typecheck, and test commands. Returns structured results consumed by the failure classifier. Introduced in Workflow Improvement P1.
+
+**Failure classifier** — Error categorization module (`scripts/failure_classifier.py`) that maps stderr output to one of 8 canonical error codes and pattern IDs used by the self-healer.
+
+**Self-healer** — Auto-remediation system (`scripts/self_healer.py`) that applies pattern-based fixes for classified failures. Operates in `suggest` mode (display fix) or `auto` mode (apply fix). Per-pattern circuit breaker reverts individual patterns to suggest mode on failures.
+
+**Context compaction** — Checkpoint generation (`scripts/context_compactor.py`) that summarizes session progress, diff stats, and key decisions into a compact markdown file. Called every 2 phases during phase execution to manage context window exhaustion.
+
+**Learning capture** — Signal extraction (`scripts/learning_capture.py`) that reads structured metadata (not raw transcripts) to produce staged diffs for prompt and CLAUDE.md improvements. Signals include corrections, constraints, and wrong-approach events.
+
+**Skill router** — Contextual suggestion engine (`scripts/skill_router.py`) with 13 trigger rules that surfaces underused skills at relevant moments. Tracks dismissals per skill with configurable cooldown. Max 2 suggestions per session start.
