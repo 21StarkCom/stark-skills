@@ -199,6 +199,18 @@ if cats:
 " 2>/dev/null || true
 ```
 
+**Built-in check — healer canary status:**
+
+```bash
+python3 ~/.claude/code-review/scripts/healer_canary.py --status --json 2>/dev/null || true
+```
+
+Parse the JSON (`patterns` array). Display any notable items:
+- Any pattern with `circuit == "open"`: `WARN: healer circuit open: {id}`
+- Any pattern with `mode == "suggest"` and `successful_suggests >= 3`: `Near promotion: {id} ({n}/5 suggests)`
+
+Skip silently if command fails or output is empty.
+
 Report all results in the Health line of the briefing. Non-fatal — never blocking.
 
 ### Phase 4 — Available skills

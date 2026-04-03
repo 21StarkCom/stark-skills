@@ -11,7 +11,7 @@ import argparse
 import json
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 PATTERNS_PATH = Path(__file__).parent / "healer_patterns.json"
 SESSION_PATH = Path.home() / ".claude" / "code-review" / "healer-session.json"
 HEALER_LOG = Path.home() / ".claude" / "code-review" / "healer.jsonl"
+CIRCUIT_PATH = Path.home() / ".claude" / "code-review" / "healer-circuits.json"
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +97,64 @@ def _session_increment(pattern_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Circuit breaker
+# ---------------------------------------------------------------------------
+
+def _read_circuits() -> dict:
+    try:
+        return json.loads(CIRCUIT_PATH.read_text())
+    except Exception:
+        return {}
+
+
+def _write_circuits(data: dict) -> None:
+    try:
+        CIRCUIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CIRCUIT_PATH.write_text(json.dumps(data, indent=2))
+    except Exception:
+        pass
+
+
+def _is_circuit_tripped(pattern_id: str, threshold: int) -> bool:
+    circuits = _read_circuits()
+    state = circuits.get(pattern_id, {})
+    tripped_at = state.get("tripped_at")
+    if tripped_at:
+        try:
+            trip_time = datetime.fromisoformat(tripped_at.replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) - trip_time < timedelta(hours=24):
+                return True
+        except Exception:
+            pass
+    return state.get("consecutive_failures", 0) >= threshold
+
+
+def _record_circuit_failure(pattern_id: str, threshold: int) -> bool:
+    """Record a failure; returns True if circuit was newly tripped."""
+    circuits = _read_circuits()
+    state = circuits.get(pattern_id, {})
+    state["consecutive_failures"] = state.get("consecutive_failures", 0) + 1
+    newly_tripped = False
+    if state["consecutive_failures"] >= threshold and not state.get("tripped_at"):
+        state["tripped_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        state["ever_tripped"] = True
+        newly_tripped = True
+    circuits[pattern_id] = state
+    _write_circuits(circuits)
+    return newly_tripped
+
+
+def _record_circuit_success(pattern_id: str) -> None:
+    circuits = _read_circuits()
+    state = circuits.get(pattern_id, {})
+    state["consecutive_failures"] = 0
+    state["tripped_at"] = None
+    state["last_reset_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    circuits[pattern_id] = state
+    _write_circuits(circuits)
+
+
+# ---------------------------------------------------------------------------
 # Action execution
 # ---------------------------------------------------------------------------
 
@@ -146,6 +205,14 @@ def main() -> None:
                         help="Emit JSON output")
     args = parser.parse_args()
 
+    try:
+        from config_loader import get_self_heal_config
+        cfg = get_self_heal_config()
+    except Exception:
+        cfg = {}
+    threshold = cfg.get("circuit_breaker_threshold", 3)
+    auto_patterns = cfg.get("auto_patterns", [])
+
     patterns = _load_patterns()
     pattern = _find_pattern(patterns, args.pattern_id)
 
@@ -180,6 +247,14 @@ def main() -> None:
                     "guard": guard_cmd,
                 }
                 _emit(result, args.as_json)
+                _log({
+                    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "pattern_id": pattern["id"],
+                    "action": pattern["action"],
+                    "mode": args.mode,
+                    "status": "aborted",
+                    "reason": "guard_failed",
+                })
                 sys.exit(0)
         except Exception as e:
             result = {
@@ -189,6 +264,14 @@ def main() -> None:
                 "error": str(e),
             }
             _emit(result, args.as_json)
+            _log({
+                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "pattern_id": pattern["id"],
+                "action": pattern["action"],
+                "mode": args.mode,
+                "status": "aborted",
+                "reason": "guard_failed",
+            })
             sys.exit(0)
 
     # Session max check
@@ -209,8 +292,38 @@ def main() -> None:
     action = pattern["action"]
     requires_confirmation = pattern.get("requires_confirmation", False)
 
+    # Auto-mode gate: pattern must be in auto_patterns to actually auto-apply
+    effective_mode = args.mode
+    if args.mode == "auto" and pattern["id"] not in auto_patterns:
+        effective_mode = "suggest"
+
+    # Circuit breaker: skip if circuit is open (auto mode only)
+    if effective_mode == "auto" and _is_circuit_tripped(pattern["id"], threshold):
+        result = {
+            "status": "skipped",
+            "reason": "circuit_open",
+            "pattern_id": pattern["id"],
+            "action": action,
+        }
+        _emit(result, args.as_json)
+        _emit_event({"pattern_id": pattern["id"], "action": action, "mode": "auto", "status": "skipped", "reason": "circuit_open"})
+        _log({
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "pattern_id": pattern["id"],
+            "action": action,
+            "mode": "auto",
+            "status": "skipped",
+            "reason": "circuit_open",
+        })
+        try:
+            from alert_delivery import emit_alert
+            emit_alert("warning", "self_healer", f"Pattern {pattern['id']} circuit is open — auto-heal skipped")
+        except Exception:
+            pass
+        sys.exit(0)
+
     # Suggest mode
-    if args.mode == "suggest":
+    if effective_mode == "suggest":
         result = {
             "status": "suggested",
             "pattern_id": pattern["id"],
@@ -218,12 +331,12 @@ def main() -> None:
             "requires_confirmation": requires_confirmation,
         }
         _emit(result, args.as_json)
-        _emit_event({"pattern_id": pattern["id"], "action": action, "mode": "suggest", "status": "suggested"})
+        _emit_event({"pattern_id": pattern["id"], "action": action, "mode": effective_mode, "status": "suggested"})
         _log({
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "pattern_id": pattern["id"],
             "action": action,
-            "mode": "suggest",
+            "mode": effective_mode,
             "status": "suggested",
         })
         sys.exit(0)
@@ -267,6 +380,23 @@ def main() -> None:
         "mode": "auto",
         "status": "applied",
     })
+
+    # Update circuit breaker state based on outcome
+    if execution["success"] and execution["verify_passed"]:
+        _record_circuit_success(pattern["id"])
+    else:
+        newly_tripped = _record_circuit_failure(pattern["id"], threshold)
+        if newly_tripped:
+            try:
+                from alert_delivery import emit_alert
+                emit_alert(
+                    "critical",
+                    "self_healer",
+                    f"Pattern {pattern['id']} circuit tripped after {threshold} consecutive failures",
+                )
+            except Exception:
+                pass
+
     sys.exit(0)
 
 

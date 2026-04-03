@@ -38,6 +38,7 @@ DEFAULT_SELF_HEAL = {
     "max_auto_retries": 0,
     "patterns_file": "healer_patterns.json",
     "circuit_breaker_threshold": 3,
+    "auto_patterns": [],
 }
 DEFAULT_VALIDATION_GATE = {
     "enabled": True,

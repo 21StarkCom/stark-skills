@@ -56,7 +56,8 @@
     "mode": "suggest",
     "max_auto_retries": 0,
     "patterns_file": "healer_patterns.json",
-    "circuit_breaker_threshold": 3
+    "circuit_breaker_threshold": 3,
+    "auto_patterns": []
   },
   "validation_gate": {
     "enabled": true,
