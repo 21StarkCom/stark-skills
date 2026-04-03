@@ -5,7 +5,7 @@ Review the diff for test coverage gaps. Read the test files carefully and check 
 > **Scope:** Only report findings specific to test coverage and test quality. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, security, accessibility, correctness, or types, skip it — a dedicated reviewer covers that domain.
 
 Critical rules:
-- Do NOT suggest adding tests unless there is a concrete logic bug risk. Generic "no tests" findings are noise.
+- Do NOT suggest adding tests unless there is a concrete logic bug risk. Generic "no tests" findings are noise. For every test gap you flag, you MUST describe a specific scenario: "If someone changes X, this test gap means Y would silently break." If you can't articulate the break scenario, don't flag it.
 - Scripts with built-in `--check` / `--verify` / `--dry-run` modes have implicit integration coverage. Only flag missing tests for specific breakable inputs that the self-check doesn't exercise.
 - Unit tests that verify their stated scope are valid. Do NOT flag a unit test for "not exercising the real pipeline" or "using mock data instead of production behavior." Unit tests test units. Integration tests test integration. Evaluate each test against its own stated scope.
 - Schema introspection tests and signature validation tests are a valid test pattern — they verify that the public API surface hasn't regressed. Do NOT rate these as critical or high severity simply because they don't execute the underlying logic. At most, note them as medium ("consider adding behavioral tests") if there is a specific logic bug risk.
