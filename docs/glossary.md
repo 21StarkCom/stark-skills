@@ -30,3 +30,13 @@
 **Learning capture** — Signal extraction (`scripts/learning_capture.py`) that reads structured metadata (not raw transcripts) to produce staged diffs for prompt and CLAUDE.md improvements. Signals include corrections, constraints, and wrong-approach events.
 
 **Skill router** — Contextual suggestion engine (`scripts/skill_router.py`) with 13 trigger rules that surfaces underused skills at relevant moments. Tracks dismissals per skill with configurable cooldown. Max 2 suggestions per session start.
+
+**Domain triage** — LLM-based pre-filter that classifies which review domains are relevant to a given input before dispatching to review agents. Reduces review cost by skipping irrelevant domains. Implemented in `scripts/domain_triage.py`.
+
+**Triage mode** — One of three modes controlling domain triage behavior: `full` (skip triage, dispatch all domains), `conservative` (only skip domains the LLM is confidently sure are irrelevant, threshold 0.8), `aggressive` (only dispatch domains the LLM explicitly marks as relevant). Default starts as `conservative` and promotes to `aggressive` after shadow validation.
+
+**Triage orchestrator** — Central script (`scripts/triage_orchestrator.py`) that owns the triage → dispatch → TUI → telemetry flow. Single entry point called by all four review skills (stark-review, stark-team-review, stark-review-design, stark-review-plan) with || fallback to direct dispatch.
+
+**Shadow mode** — Triage validation mode (`--shadow`) that dispatches all domains regardless of triage verdict but annotates each finding with `triage_would_skip: bool`. Used during shadow validation to measure triage accuracy without affecting review quality.
+
+**Domain manifest** — JSON file (`global/prompts/triage/domains.json`) mapping review types (pr-review, design-review, plan-review) to their domain catalogues with slugs, labels, filenames, and semantic descriptions. Used by the triage engine to construct LLM prompts.
