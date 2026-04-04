@@ -18,6 +18,20 @@ Build the triage feature in dependency order: deploy the new `triage_decision` s
 - Hard dependency on the existing review-agent CLIs
 - Rollout gate that forbids `aggressive` as default until shadow data shows 40%+ domain reduction with zero missed critical/high findings
 
+**Owner:** Aryeh (all phases). Go/no-go authority for Phase 5 promotion: Aryeh.
+
+**Target timeline:**
+
+| Phase | Target | Duration |
+|-------|--------|----------|
+| Phase 0: Insights schema | Week 1 | 1 day |
+| Phase 1: Engine + assets | Week 1–2 | 4–5 days |
+| Phase 2: Orchestrator | Week 2–3 | 4–5 days |
+| Phase 3: Skill cutover | Week 3 | 2 days |
+| *Bake period* | *Week 3–4* | *5 days minimum* |
+| Phase 4: Shadow validation | Week 4 | 3 days |
+| Phase 5: Aggressive default | Week 5 | 1 day (canary) → 1 day (global) |
+
 **Repo-specific notes:**
 - Tests live in `scripts/test_*.py` — not a separate `tests/` directory
 - `install.sh` symlinks the entire `global/prompts` tree — new `global/prompts/triage/` is automatically included
@@ -37,14 +51,27 @@ cd /Users/aryeh/git/Evinced/stark-skills
 ./install.sh --status
 scripts/.venv/bin/python3 -m pytest scripts/test_multi_review.py scripts/test_plan_review_dispatch.py -v
 gh auth status
+
+# Pre-flight: verify utility modules exist
+grep -rn 'def build_claude_cmd' scripts/ && echo "claude_utils OK" || echo "MISSING: claude_utils"
+grep -rn 'def make_clean_env' scripts/ && echo "make_clean_env OK" || echo "MISSING: make_clean_env"
+grep -rn 'CODEX_MODEL' scripts/ && echo "codex_utils OK" || echo "MISSING: codex_utils"
+
+# Pre-flight: verify dispatch scripts have JSON-safe output
+grep -n 'json.only\|json_only\|--json' scripts/multi_review.py scripts/plan_review_dispatch.py
+
+# Pre-flight: verify findings include domain field
+grep -n '"domain"' scripts/multi_review.py scripts/plan_review_dispatch.py
 ```
+
+If any pre-flight check fails, resolve before starting Phase 1. For `plan_review_dispatch.py`: if it lacks a `--json-only` mode (stdout/stderr separation), add it in Phase 2.1 alongside `--domains`.
 
 ---
 
 ## Phase 0: Insights Schema (separate repo)
 
 **Goal:** Make `stark-insights` accept `triage_decision` events before `stark-skills` emits them.
-**Dependencies:** None
+**Dependencies:** None. **Must complete before Phase 2 merge.**
 **Effort:** S
 
 ### Tasks
@@ -80,7 +107,13 @@ File: `~/git/Evinced/stark-insights/src/stark_insights/models.py`
 
 **0.2 — Deploy updated stark-insights**
 
-Deploy before merging emitter code in `stark-skills`. Docker container restart picks up the schema change.
+Deploy before merging emitter code in `stark-skills`:
+```bash
+cd ~/git/Evinced/stark-insights
+docker-compose build && docker-compose up -d
+# Wait for health check
+curl -sS http://localhost:7420/health | jq .status
+```
 
 ### Verification
 
@@ -171,7 +204,7 @@ def triage_domains(
     agent: Literal["claude", "codex"] = "claude",
     disabled_domains: list[str] | None = None,
     conservative_threshold: float = 0.8,
-    timeout: int = 15,
+    timeout: int = 45,              # LLM inference timeout — 45s allows for large prompts
     prompts_root: str | None = None,  # default: ~/.claude/code-review/prompts/triage/
 ) -> TriageResult:
 ```
@@ -192,6 +225,31 @@ Implementation flow:
 13. On any failure after retry: return full-mode fallback result with `error` set. Save raw output to `~/.claude/code-review/history/triage-errors/` (0o600, rotate max 50, 7-day TTL)
 
 Done when: `triage_domains(content, "pr", domains, mode="full")` returns all domains with no subprocess calls; `agent="gemini"` raises `ValueError`; all unit tests pass.
+
+**1.2a — Domain slug alignment check**
+
+After creating `domains.json` and before writing tests, verify that manifest keys match what the dispatch scripts discover:
+```bash
+scripts/.venv/bin/python3 -c "
+import sys, json; sys.path.insert(0, 'scripts')
+from multi_review import _discover_domains, GLOBAL_PROMPTS_DIR
+from plan_review_dispatch import _discover_plan_domains
+manifest = json.load(open('global/prompts/triage/domains.json'))
+pr_domains = set(_discover_domains().keys())
+plan_domains = set(_discover_plan_domains().keys())
+design_prompts = str(GLOBAL_PROMPTS_DIR).replace('prompts', 'prompts/design-review')
+# Compare and report mismatches
+for rtype, discovered in [('pr-review', pr_domains), ('plan-review', plan_domains)]:
+    manifest_keys = set(manifest.get(rtype, {}).keys())
+    missing = discovered - manifest_keys
+    extra = manifest_keys - discovered
+    if missing: print(f'WARNING: {rtype} missing from manifest: {missing}')
+    if extra: print(f'WARNING: {rtype} extra in manifest: {extra}')
+    if not missing and not extra: print(f'{rtype}: OK ({len(discovered)} domains)')
+"
+```
+
+This check must pass before Phase 1.4 tests are written.
 
 **1.3 — Create `scripts/triage_tui.py`**
 
@@ -266,7 +324,7 @@ Remove `scripts/domain_triage.py`, `scripts/triage_tui.py`, `global/prompts/tria
 ## Phase 2: Dispatch Plumbing and Orchestrator
 
 **Goal:** Add `--domains` allowlist to existing dispatch scripts. Build the orchestrator that owns triage → dispatch → TUI → insights emission.
-**Dependencies:** Phase 1
+**Dependencies:** Phase 1. Phase 0 must be deployed before this phase merges (verify with Phase 0 curl command at start of Phase 2).
 **Effort:** L
 
 ### Tasks
@@ -303,16 +361,21 @@ Add to `global/config.json`:
 "triage": {
     "mode": "conservative",
     "agent": "claude",
-    "timeout": 15,
-    "conservative_confidence_threshold": 0.8
+    "timeout": 45,
+    "conservative_confidence_threshold": 0.8,
+    "insights_url": "http://localhost:7420"
 },
 "design_review": {
     ... existing ...,
     "triage": { "mode": "conservative" }
+},
+"plan_review": {
+    ... add if missing ...,
+    "triage": { "mode": "conservative" }
 }
 ```
 
-Note: initial default is `conservative` (not `aggressive`) per rollout plan.
+Note: initial default is `conservative` (not `aggressive`) per rollout plan. Both `design_review` and `plan_review` get explicit triage overrides so the Phase 5 global flip can be scoped per review type.
 
 Merge semantics: per-review-type `triage` blocks deep-merge on top of global `triage`. Add `"triage"` to `DEEP_MERGE_FIELDS` in `multi_review.py`. The orchestrator performs triage config merge — dispatch scripts don't need to know about triage config.
 
@@ -324,20 +387,28 @@ CLI arguments per design: `--type`, `--pr`, `--repo`, `--file`, `--base`, `--tri
 
 Orchestration flow:
 1. Parse args, load config (hierarchical), merge triage config
-2. Resolve input: `gh pr diff` for PR type, `Path(file).read_text()` for design/plan
+2. Resolve input: for PR type, use `git diff {base}...HEAD` (same source as dispatch scripts, not `gh pr diff`). For design/plan, `Path(file).read_text()`.
 3. Discover domains for review type (import discovery functions from dispatch scripts)
 4. Call `triage_domains()` — engine handles disabled_domains, mode logic, fallback
 5. Render triage TUI section
-6. Build dispatch command: `--domains` allowlist passed to dispatch script
-7. In `--shadow` mode: dispatch ALL domains, but annotate each finding with `triage_would_skip` based on the triage verdict
-8. Run dispatch subprocess, capture JSON output (stderr to separate stream — avoid contaminating JSON)
+6. Build dispatch command with review-type-specific mapping:
+   - `pr` → `multi_review.py --pr $PR --repo $REPO [--single] --domains $DOMAINS`
+   - `design` → `plan_review_dispatch.py --prompts-dir design-review --config-section design_review --file $FILE --domains $DOMAINS`
+   - `plan` → `plan_review_dispatch.py --prompts-dir plan-review --file $FILE --domains $DOMAINS`
+7. In `--shadow` mode: `--shadow` implies `--dry-run` (never post live PR comments). Dispatch ALL domains but annotate each finding with `triage_would_skip: bool` based on the triage verdict. Annotation requires findings to include a `domain` field (verified in pre-flight).
+8. Run dispatch subprocess with execution timeout (default: 10 minutes, configurable). Capture JSON on stdout, TUI/progress on stderr. For `plan_review_dispatch.py`: pipe JSON to stdout (add `--json-only` if missing in Phase 2.1).
 9. Render dispatch and summary TUI sections
-10. Emit `triage_decision` event via `POST http://localhost:7420/events` (connect timeout 2s, read timeout 3s, catch all exceptions)
+10. Emit `triage_decision` event: read token from `~/.stark-insights/api-token`, POST to `{insights_url}/events` with `Authorization: Bearer $TOKEN` header. Connect timeout 2s, read timeout 3s, catch all exceptions.
 11. Return structured result (for `--json`) or exit
 
-**Argument pass-through:** `--agents`, `--disabled-domains`, `--timeout`, `--single`, and `--base` are forwarded to the dispatch subprocess. The orchestrator must explicitly build the subprocess argv with these values.
+**Shadow mode output schema** — each finding gains:
+```json
+{ "domain": "security", "severity": "high", "title": "...", "triage_would_skip": false }
+```
 
-Zero-domain handling: if `dispatched_domains` is empty, print TUI message, emit event, exit 0.
+**Argument pass-through:** `--agents`, `--disabled-domains`, `--timeout`, `--single`, `--base`, and `--round` are forwarded to the dispatch subprocess. The orchestrator must explicitly build the subprocess argv. `--tournament` is NOT supported in V1 — skills using `--tournament` continue to call dispatch scripts directly.
+
+Zero-domain handling: if `dispatched_domains` is empty **and the user did not explicitly request zero domains**, fall back to full mode (dispatch all). This prevents a hallucinating triage model from silently suppressing all reviews. Log a warning. If the user explicitly passed `--domains ""`, respect it and exit 0.
 
 JSON mode: TUI output goes to stderr, JSON to stdout. Never mix.
 
@@ -417,27 +488,34 @@ Files:
 - `skill/stark-review-design/SKILL.md`
 - `skill/stark-review-plan/SKILL.md`
 
-Pattern for each skill: replace direct dispatch invocation with orchestrator call, add inline fallback:
+Pattern for each skill: replace direct dispatch invocation with orchestrator call. Use executable fallback (not a comment):
 
 ```bash
-# Primary: route through triage orchestrator
-$PYTHON $SCRIPTS/triage_orchestrator.py --type pr --pr $PR_NUMBER --repo $REPO --single
-
-# Fallback (if orchestrator fails to start):
-# $PYTHON $SCRIPTS/multi_review.py --pr $PR_NUMBER --repo $REPO
+# Primary: route through triage orchestrator with automatic fallback
+$PYTHON $SCRIPTS/triage_orchestrator.py --type pr --pr $PR_NUMBER --repo $REPO --single \
+  || $PYTHON $SCRIPTS/multi_review.py --pr $PR_NUMBER --repo $REPO
 ```
 
+The `||` ensures that if the orchestrator exits non-zero (crash, import error, arg parse failure), the direct dispatch runs instead.
+
 Mapping:
-| Skill | `--type` | `--single` | Old script |
-|-------|----------|-----------|------------|
-| stark-review | pr | yes | multi_review.py (single mode) |
-| stark-team-review | pr | no | multi_review.py |
-| stark-review-design | design | no | plan_review_dispatch.py --prompts-dir design-review |
-| stark-review-plan | plan | no | plan_review_dispatch.py --prompts-dir plan-review |
+| Skill | `--type` | `--single` | Old script | Notes |
+|-------|----------|-----------|------------|-------|
+| stark-review | pr | yes | multi_review.py (single mode) | |
+| stark-team-review | pr | no | multi_review.py | |
+| stark-review-design | design | no | plan_review_dispatch.py --prompts-dir design-review | `--tournament` stays on direct dispatch for V1 |
+| stark-review-plan | plan | no | plan_review_dispatch.py --prompts-dir plan-review | `--tournament` stays on direct dispatch for V1 |
 
-**3.2 — Update eval/golden artifacts**
+**Contract preservation:** The orchestrator's `--json` output must be wire-compatible with what the skill currently parses from the dispatch scripts. If the skill reads `results[].findings[]`, the orchestrator's JSON must include the same structure. `--dry-run` must mean "dispatch but don't post" (not "triage only") when called from a skill context. `--round` must pass through to the dispatch script.
 
-Files: any `skill/evals/*.json` and `tests/golden/*.json` that assert specific dispatch command strings.
+**3.2 — Update eval/golden artifacts (same commit as 3.1)**
+
+First, discover which files need updating:
+```bash
+find skill/ tests/ -name '*.json' | xargs grep -l 'multi_review\|plan_review_dispatch' 2>/dev/null
+```
+
+All SKILL.md changes and eval/golden updates must be in **one atomic commit** to avoid CI failure windows.
 
 Done when: evals and golden snapshots reference orchestrator commands.
 
@@ -478,50 +556,95 @@ Restore SKILL.md files to direct-dispatch commands. Revert eval/golden. Rerun `i
 ## Phase 4: Shadow Validation
 
 **Goal:** Prove triage is safe before promoting to aggressive default.
-**Dependencies:** Phase 3
+**Dependencies:** Phase 3 + minimum 5-day bake period. During the bake period, run 2-3 shadow PRs manually and inspect `--json` output to confirm triage is producing sane verdicts.
 **Effort:** M
 
 ### Tasks
 
-**4.1 — Run shadow validation on 20 real PRs**
+**4.0 — Bake period verification (5 days after Phase 3 merge)**
 
-Select 20 PRs across 3+ repos with diverse change profiles (small, medium, large; frontend, backend, config-only).
-
-For each PR:
+Run manual spot-checks during the bake period:
 ```bash
+# Spot-check: does triage produce reasonable verdicts?
 scripts/.venv/bin/python3 scripts/triage_orchestrator.py \
-  --type pr --pr $PR --repo $REPO --shadow --json \
-  2>/tmp/shadow-$PR-stderr.log \
-  > /tmp/shadow-$PR.json
+  --type pr --pr $RECENT_PR --repo GetEvinced/$REPO --shadow --json \
+  2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'Domains: {len(d[\"triage\"][\"dispatched_domains\"])}/{len(d[\"triage\"][\"dispatched_domains\"])+len(d[\"triage\"][\"skipped_domains\"])} dispatched, triage: {d[\"triage\"][\"duration_s\"]:.1f}s')"
 ```
 
-Note: stderr to separate file to avoid JSON corruption.
+If anything looks off, investigate before proceeding with 4.1.
 
-**4.2 — Analyze results and produce gate artifact**
+**4.1 — Run shadow validation across all review types**
 
-Write `docs/triage-shadow-validation.md` with:
-- Per-PR table: PR number, repo, skip rate, missed findings count, triage duration
-- Aggregate metrics: overall skip rate, total missed critical/high, p95 triage latency
-- Pass/fail determination
+Pre-identify the sample from historical data (don't wait for new PRs):
 
-Gate criteria (from design Success Criteria):
-- Average skip rate ≥ 40% across the sample
-- Zero missed critical/high findings (findings from triage-skipped domains that would have been medium+)
+**PR reviews (20 PRs):**
+Select across 3+ repos with diverse change profiles (small <50 lines, medium 50-500, large 500+; frontend, backend, config-only, docs-only).
+
+```bash
+mkdir -p /tmp/shadow-validation
+for PR in $PR_LIST; do
+  scripts/.venv/bin/python3 scripts/triage_orchestrator.py \
+    --type pr --pr $PR --repo $REPO --shadow --json \
+    2>/tmp/shadow-validation/pr-$REPO-$PR-stderr.log \
+    > /tmp/shadow-validation/pr-$REPO-$PR.json
+done
+```
+
+Note: `--shadow` implies `--dry-run` — no live PR comments posted.
+
+**Design reviews (5 design docs):**
+```bash
+for DOC in $DESIGN_DOCS; do
+  scripts/.venv/bin/python3 scripts/triage_orchestrator.py \
+    --type design --file "$DOC" --shadow --json \
+    2>/tmp/shadow-validation/design-$(basename $DOC)-stderr.log \
+    > /tmp/shadow-validation/design-$(basename $DOC).json
+done
+```
+
+**Plan reviews (5 plan docs):**
+```bash
+for DOC in $PLAN_DOCS; do
+  scripts/.venv/bin/python3 scripts/triage_orchestrator.py \
+    --type plan --file "$DOC" --shadow --json \
+    2>/tmp/shadow-validation/plan-$(basename $DOC)-stderr.log \
+    > /tmp/shadow-validation/plan-$(basename $DOC).json
+done
+```
+
+**4.2 — Analyze results with `scripts/analyze_shadow.py`**
+
+New script: `scripts/analyze_shadow.py` reads all shadow JSON files and computes gate metrics.
+
+```bash
+scripts/.venv/bin/python3 scripts/analyze_shadow.py /tmp/shadow-validation/ \
+  --output docs/triage-shadow-validation.md
+```
+
+Output: machine-readable pass/fail plus human-readable `docs/triage-shadow-validation.md`.
+
+Gate criteria — **all must pass for each review type separately:**
+- Average skip rate ≥ 40%
+- Zero missed critical/high findings (a "miss" = finding with severity critical or high from a `triage_would_skip: true` domain)
 - p95 triage latency < 10s
+
+**If gate partially fails** (e.g., PR passes but design fails): promote `aggressive` only for the passing review type. Keep `conservative` for the failing type. Investigate and re-run.
 
 **4.3 — Commit validation artifact**
 
 ```bash
-git add docs/triage-shadow-validation.md
+git add docs/triage-shadow-validation.md scripts/analyze_shadow.py
 git commit -m "docs: triage shadow validation results"
 ```
 
-Done when: gate artifact committed with passing results.
+Done when: gate artifact committed with passing results for all review types.
 
 ### Risks
 
-- **Weak sample:** Include small (<50 lines), medium (50-500), and large (500+) PRs. Include repos with different domain profiles.
+- **Weak sample:** Require minimum 3 repos, mix of change sizes, include at least 2 docs-only and 2 config-only PRs.
 - **False confidence from retries:** Measure `triage_duration_s` from orchestrator output, not wall-clock.
+- **Shadow artifacts naming collision:** Use `{type}-{repo}-{pr_or_filename}.json` to avoid overwrites.
+- **Insights down during shadow:** Shadow results are captured in local JSON files, not dependent on insights availability.
 
 ### Rollback
 
@@ -531,27 +654,39 @@ Keep `conservative` as default. Shadow validation can be re-run at any time.
 
 ## Phase 5: Aggressive Default
 
-**Goal:** Flip the default mode from conservative to aggressive.
-**Dependencies:** Phase 4 gate passed
+**Goal:** Promote to aggressive mode via canary, then globally.
+**Dependencies:** Phase 4 gate passed. Go/no-go authority: Aryeh.
 **Effort:** S
 
 ### Tasks
 
-**5.1 — Promote default mode**
+**5.1 — Canary: enable aggressive for one repo**
+
+Pick one high-traffic repo. Add to its `.code-review/config.json`:
+```json
+{ "triage": { "mode": "aggressive" } }
+```
+
+Run normally for 3-5 days. Monitor via stark-insights:
+- Triage fallback rate (error field non-null) — should be < 5%
+- Skip rate — should match shadow validation expectations
+- No user-reported missed reviews
+
+**5.2 — Promote globally (after canary passes)**
 
 File: `global/config.json`
 
-Change:
+Per-review-type promotion (only promote review types that passed the gate):
 ```json
 "triage": {
-    "mode": "aggressive",  // was "conservative"
+    "mode": "aggressive",
     ...
 }
 ```
 
 This is a one-line config change. No code changes bundled in this commit.
 
-**5.2 — Commit and deploy**
+**5.3 — Commit and deploy**
 
 ```bash
 git add global/config.json
@@ -560,13 +695,19 @@ git commit -m "config: promote triage default from conservative to aggressive
 Shadow validation passed:
 - Skip rate: X% (>40% gate)
 - Missed critical/high: 0
-- p95 triage latency: Xs (<10s gate)"
+- p95 triage latency: Xs (<10s gate)
+Canary: $REPO for N days, no issues"
 ./install.sh
 ```
 
 ### Rollback
 
 Change `mode` back to `"conservative"` or `"full"` in `global/config.json`. Per-repo override: add `"triage": {"mode": "full"}` to `.code-review/config.json`.
+
+**Rollback triggers:**
+- Triage fallback rate > 15% over 24 hours
+- Any user report of a missed critical/high finding
+- Triage latency p95 > 15s sustained for 1 hour
 
 ---
 
@@ -594,16 +735,19 @@ Change `mode` back to `"conservative"` or `"full"` in `global/config.json`. Per-
 - `scripts/test_triage_failures.py` — 5 tests: timeout retry, parse error, agent unavailable, insights timeout, skill fallback
 
 **E2E validation** (Phase 4):
-- 20 real PRs across 3+ repos with `--shadow --json`
+- 20 real PRs + 5 design docs + 5 plan docs across 3+ repos with `--shadow --json`
+- `scripts/analyze_shadow.py` computes gate metrics from shadow JSON files
 - Gate artifact committed as `docs/triage-shadow-validation.md`
 
 ## 5. Rollback Plan
 
-| Phase | Rollback |
-|-------|----------|
-| Phase 0 | Revert stark-insights schema, redeploy |
-| Phase 1 | Delete new files. No production impact (dead code) |
-| Phase 2 | Set `triage.mode: "full"` globally. Dispatch scripts work without `--domains` |
-| Phase 3 | Restore SKILL.md to direct-dispatch, revert eval/golden, rerun install.sh |
-| Phase 4 | Keep `conservative` or set `"full"` |
-| Phase 5 | Change config back from `aggressive` to `conservative` — one-line diff |
+| Phase | Rollback | Trigger |
+|-------|----------|---------|
+| Phase 0 | Revert stark-insights schema, redeploy | Schema validation failures in insight tests |
+| Phase 1 | Delete new files. No production impact (dead code) | Unit test failures |
+| Phase 2 | Set `triage.mode: "full"` globally. Dispatch scripts work without `--domains` | Integration test failures or dispatch regressions |
+| Phase 3 | Restore SKILL.md to direct-dispatch, revert eval/golden, rerun install.sh | >5% of skill invocations fail within 30 min of deploy |
+| Phase 4 | Keep `conservative` or set `"full"` | Gate criteria not met |
+| Phase 5 | Change config back from `aggressive` to `conservative` — one-line diff | Fallback rate >15% / 24h, any missed critical/high, p95 triage >15s / 1h |
+
+**Execution order for Phase 3 rollback:** (1) revert SKILL.md + golden files, (2) commit, (3) rerun `install.sh`. Do not run install.sh between steps — that creates an inconsistency window.
