@@ -211,10 +211,10 @@ Add any mismatches as findings with severity=critical, classified as `fix`.
 ### 2a. Run review
 
 ```bash
-$PYTHON $SCRIPTS/multi_review.py --pr {number} --base {merge_base} --json-only --post-raw 2>/dev/null
+$PYTHON $SCRIPTS/triage_orchestrator.py --type pr --pr {number} --base {merge_base} --json || $PYTHON $SCRIPTS/multi_review.py --pr {number} --base {merge_base} --json-only --post-raw 2>/dev/null
 ```
 
-Parse stdout as JSON. This is one call per round — `multi_review.py` runs all sub-agents in parallel, posts each agent's raw findings to the PR under its own bot identity (stark-claude, stark-codex, stark-gemini), and returns a JSON object with `rounds[0].results[]` containing findings per agent × domain.
+Parse stdout as JSON. The triage orchestrator runs domain triage first, then dispatches only relevant domains. If the orchestrator fails, the `||` fallback calls `multi_review.py` directly with all domains. The dispatch posts each agent's raw findings to the PR under its own bot identity (stark-claude, stark-codex, stark-gemini), and returns a JSON object with findings per agent × domain.
 
 ### 2b. Classify findings
 

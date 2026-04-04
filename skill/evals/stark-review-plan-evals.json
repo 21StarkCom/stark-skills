@@ -4,14 +4,14 @@
     {
       "id": 1,
       "prompt": "review this plan docs/specs/2026-03-18-new-feature.md",
-      "expected_output": "Dispatches plan_review_dispatch.py with --file, runs 3 agents x 7 domains, classifies findings, produces summary",
+      "expected_output": "Dispatches triage_orchestrator.py --type plan (fallback: plan_review_dispatch.py) with --file, runs triage then dispatches relevant domains, classifies findings, produces summary",
       "files": [],
       "assertions": [
         {"name": "uses_venv_python", "check": "Uses $SCRIPTS/.venv/bin/python3, not system python"},
-        {"name": "calls_plan_dispatch", "check": "Invokes plan_review_dispatch.py with --file docs/specs/2026-03-18-new-feature.md"},
+        {"name": "calls_orchestrator", "check": "Invokes triage_orchestrator.py --type plan --file docs/specs/2026-03-18-new-feature.md (with || plan_review_dispatch.py fallback)"},
         {"name": "validates_file_exists", "check": "Checks that the plan file exists before dispatching"},
         {"name": "checks_uncommitted", "check": "Runs git diff --name-only to check for uncommitted changes"},
-        {"name": "parses_json_output", "check": "Parses plan_review_dispatch.py JSON stdout for findings"},
+        {"name": "parses_json_output", "check": "Parses orchestrator/plan_review_dispatch.py JSON stdout for findings"},
         {"name": "writes_review_file", "check": "Creates .review.md sibling file with summary"}
       ]
     },

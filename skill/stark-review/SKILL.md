@@ -77,17 +77,17 @@ This map follows the standard config hierarchy (repo > org > global). Override p
 
 ## Phase 2: Run Review
 
-Run the orchestrator in single-agent mode:
+Run the triage orchestrator in single-agent mode (falls back to direct dispatch if orchestrator fails):
 
 ```bash
 cd "$WORKTREE"
-$PYTHON $SCRIPTS/multi_review.py --pr $PR_NUM --single --json-only --post-raw
+$PYTHON $SCRIPTS/triage_orchestrator.py --type pr --pr $PR_NUM --single --json || $PYTHON $SCRIPTS/multi_review.py --pr $PR_NUM --single --json-only --post-raw
 ```
 
 If `--agent` was specified by the user, pass it through:
 
 ```bash
-$PYTHON $SCRIPTS/multi_review.py --pr $PR_NUM --single --agent $AGENT --json-only --post-raw
+$PYTHON $SCRIPTS/triage_orchestrator.py --type pr --pr $PR_NUM --single --json || $PYTHON $SCRIPTS/multi_review.py --pr $PR_NUM --single --agent $AGENT --json-only --post-raw
 ```
 
 If `--dry-run` was specified, add `--dry-run` (no GitHub posting).

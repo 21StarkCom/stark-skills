@@ -130,10 +130,10 @@ For round = 1 to max_rounds:
 ### 2a. Dispatch sub-agents
 
 ```bash
-$PYTHON $SCRIPTS/plan_review_dispatch.py --prompts-dir design-review --file "$path" --round $round --timeout 300
+$PYTHON $SCRIPTS/triage_orchestrator.py --type design --file "$path" --round $round --json || $PYTHON $SCRIPTS/plan_review_dispatch.py --prompts-dir design-review --file "$path" --round $round --timeout 300
 ```
 
-Capture stdout as JSON. This dispatches all N×12 sub-agents (N agents × 12 domains, default N=2) in parallel and returns structured results.
+Capture stdout as JSON. The triage orchestrator runs domain triage first, then dispatches only relevant domains. If the orchestrator fails, the `||` fallback calls `plan_review_dispatch.py` directly with all domains (N agents × 12 domains, default N=2).
 
 Parse the JSON output. Extract findings from `results[].findings[]`.
 

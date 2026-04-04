@@ -4,14 +4,14 @@
     {
       "id": 1,
       "prompt": "review PR 91 on design-system-core",
-      "expected_output": "Calls multi_review.py with --pr 91, authenticates via github_app.py, creates worktree, runs review, posts summary",
+      "expected_output": "Calls triage_orchestrator.py --type pr with --pr 91 (fallback: multi_review.py), authenticates via github_app.py, creates worktree, runs review, posts summary",
       "files": [],
       "assertions": [
         {"name": "uses_venv_python", "check": "Uses $SCRIPTS/.venv/bin/python3, not system python"},
-        {"name": "calls_multi_review", "check": "Invokes multi_review.py with --pr 91 --json-only --dry-run"},
+        {"name": "calls_orchestrator", "check": "Invokes triage_orchestrator.py --type pr --pr 91 --json (with || multi_review.py fallback)"},
         {"name": "authenticates_first", "check": "Runs github_app.py token before any gh api calls"},
         {"name": "creates_worktree", "check": "Creates git worktree in /tmp/ for isolated review"},
-        {"name": "parses_json_output", "check": "Parses multi_review.py JSON stdout for findings"},
+        {"name": "parses_json_output", "check": "Parses orchestrator/multi_review.py JSON stdout for findings"},
         {"name": "generates_summary", "check": "Produces markdown summary with findings table"}
       ]
     },
@@ -22,7 +22,7 @@
       "files": [],
       "assertions": [
         {"name": "detects_pr_from_branch", "check": "Runs gh pr view --json number --jq .number to get PR number"},
-        {"name": "uses_dry_run", "check": "Passes --dry-run to multi_review.py"},
+        {"name": "uses_dry_run", "check": "Passes --dry-run to triage_orchestrator.py or multi_review.py"},
         {"name": "no_github_posting", "check": "Does not call github_app.py pr review or post to PR"},
         {"name": "still_produces_summary", "check": "Outputs findings summary to terminal even in dry-run"}
       ]
