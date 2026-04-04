@@ -130,6 +130,57 @@ class TestMutationMethods:
         assert loaded.context["count"] == 42
 
 
+class TestBackwardCompatibility:
+    """Ensure old state files (missing new fields) and future files (extra keys) load safely."""
+
+    def test_name_field_defaults_none_on_old_state(self, isolated, sessions_dir):
+        old_data = {
+            "session_id": "old-session",
+            "started_at": "2025-01-01T00:00:00Z",
+            "branch": "main",
+            "repo": "org/repo",
+            "tasks_completed": [],
+            "last_checkpoint": None,
+            "context": {},
+        }
+        (sessions_dir / "old-session.json").write_text(json.dumps(old_data))
+        loaded = session_state.SessionState.load("old-session")
+        assert loaded is not None
+        assert loaded.name is None
+
+    def test_start_head_field_defaults_none_on_old_state(self, isolated, sessions_dir):
+        old_data = {
+            "session_id": "old-session",
+            "started_at": "2025-01-01T00:00:00Z",
+            "branch": "main",
+            "repo": "org/repo",
+            "tasks_completed": [],
+            "last_checkpoint": None,
+            "context": {},
+        }
+        (sessions_dir / "old-session.json").write_text(json.dumps(old_data))
+        loaded = session_state.SessionState.load("old-session")
+        assert loaded is not None
+        assert loaded.start_head is None
+
+    def test_unknown_keys_ignored_on_load(self, isolated, sessions_dir):
+        future_data = {
+            "session_id": "future-session",
+            "started_at": "2025-06-01T00:00:00Z",
+            "branch": "main",
+            "repo": "org/repo",
+            "tasks_completed": [],
+            "last_checkpoint": None,
+            "context": {},
+            "some_future_field": "unexpected_value",
+            "another_unknown": 42,
+        }
+        (sessions_dir / "future-session.json").write_text(json.dumps(future_data))
+        loaded = session_state.SessionState.load("future-session")
+        assert loaded is not None
+        assert loaded.session_id == "future-session"
+
+
 class TestCLI:
     def test_cli_json_output_is_valid(self, isolated):
         script = Path(__file__).parent / "session_state.py"

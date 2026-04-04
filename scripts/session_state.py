@@ -72,6 +72,8 @@ class SessionState:
     tasks_completed: list[str] = field(default_factory=list)
     last_checkpoint: str | None = None
     context: dict[str, Any] = field(default_factory=dict)
+    name: str | None = None
+    start_head: str | None = None
 
     # ------------------------------------------------------------------
     # Persistence
@@ -113,6 +115,8 @@ class SessionState:
             tasks_completed=data.get("tasks_completed", []),
             last_checkpoint=data.get("last_checkpoint"),
             context=data.get("context", {}),
+            name=data.get("name"),
+            start_head=data.get("start_head"),
         )
 
     @classmethod
