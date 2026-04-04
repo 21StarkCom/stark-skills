@@ -132,7 +132,7 @@ REPLACE_FIELDS = {
     "disabled_domains",
 }
 ADDITIVE_FIELDS = {"extra_domains"}
-DEEP_MERGE_FIELDS = {"severity_overrides", "github_apps", "domain_agents"}
+DEEP_MERGE_FIELDS = {"severity_overrides", "github_apps", "domain_agents", "triage"}
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -1379,13 +1379,19 @@ def review_pr_single(
     json_only: bool = False,
     post_raw: bool = False,
     override_agent: str | None = None,
+    domains: str | None = None,
     cwd: str | None = None,
 ) -> dict[str, Any]:
     """Run single-agent review: 1 agent per domain (from domain_agents config)."""
     out = sys.stderr if json_only else sys.stdout
     config = discover_config(cwd=cwd)
+    if domains:
+        allowed = set(domains.split(","))
+        domains_to_review = {k: v for k, v in DOMAINS.items() if k in allowed}
+    else:
+        domains_to_review = DOMAINS
     disabled = set(config.get("disabled_domains", []))
-    active_domains = [d for d in DOMAINS if d not in disabled]
+    active_domains = [d for d in domains_to_review if d not in disabled]
     sev_overrides = config.get("severity_overrides", {})
     da_map = resolve_domain_agents(config, active_domains, override_agent)
 
@@ -1398,7 +1404,7 @@ def review_pr_single(
     print(f"  {len(active_domains)} domains, agents: {', '.join(used_agents)}", file=out)
     print(f"{'#' * 60}", file=out)
 
-    if not DOMAINS:
+    if not domains_to_review:
         print("  [!] No domain prompt files found in:", GLOBAL_PROMPTS_DIR, file=sys.stderr)
         sys.exit(1)
 
@@ -1449,7 +1455,7 @@ def review_pr_single(
         "base": base,
         "mode": "single",
         "domain_agents": da_map,
-        "domains": list(DOMAINS.keys()),
+        "domains": active_domains,
         "rounds": [
             {
                 "round": rnd.round_num,
@@ -1492,14 +1498,20 @@ def review_pr(
     json_output: bool = False,
     json_only: bool = False,
     post_raw: bool = False,
+    domains: str | None = None,
     cwd: str | None = None,
 ) -> dict[str, Any]:
     """Run the full multi-agent review on a single PR."""
     out = sys.stderr if json_only else sys.stdout
     config = discover_config(cwd=cwd)
     active_agents = [a for a in config.get("agents", list(AGENTS.keys())) if a in AGENTS]
+    if domains:
+        allowed = set(domains.split(","))
+        domains_to_review = {k: v for k, v in DOMAINS.items() if k in allowed}
+    else:
+        domains_to_review = DOMAINS
     disabled = set(config.get("disabled_domains", []))
-    active_domains = [d for d in DOMAINS if d not in disabled]
+    active_domains = [d for d in domains_to_review if d not in disabled]
     sev_overrides = config.get("severity_overrides", {})
     n_agents = len(active_agents)
     n_domains = len(active_domains)
@@ -1512,7 +1524,7 @@ def review_pr(
     )
     print(f"{'#' * 60}", file=out)
 
-    if not DOMAINS:
+    if not domains_to_review:
         print("  [!] No domain prompt files found in:", GLOBAL_PROMPTS_DIR, file=sys.stderr)
         print("  [!] Expected files like 01-architecture.md", file=sys.stderr)
         sys.exit(1)
@@ -1601,7 +1613,7 @@ def review_pr(
         "pr": pr_number,
         "base": base,
         "agents": list(AGENTS.keys()),
-        "domains": list(DOMAINS.keys()),
+        "domains": active_domains,
         "rounds": [
             {
                 "round": r.round_num,
@@ -1693,6 +1705,10 @@ def main() -> None:
         choices=list(AGENTS.keys()),
         help="Override agent for all domains (implies --single).",
     )
+    parser.add_argument(
+        "--domains",
+        help="Comma-separated domain slugs to review (overrides discovery)",
+    )
 
     args = parser.parse_args()
     if args.agent:
@@ -1723,6 +1739,7 @@ def main() -> None:
             "json_output": args.json_output or args.json_only,
             "json_only": getattr(args, "json_only", False),
             "post_raw": getattr(args, "post_raw", False),
+            "domains": args.domains,
             "cwd": _git_root,
         }
         if args.single:
@@ -1762,6 +1779,7 @@ def main() -> None:
                     base,
                     dry_run=args.dry_run,
                     json_output=args.json_output,
+                    domains=args.domains,
                     cwd=repo_dir,
                 )
                 all_results.append(result)

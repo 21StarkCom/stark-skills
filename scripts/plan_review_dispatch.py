@@ -423,6 +423,7 @@ def dispatch_plan_review(
     repo_dir: str | None = None,
     global_prompts_dir: str | None = None,
     agents: list[str] | None = None,
+    domains: dict[str, dict[str, Any]] | None = None,
     disabled_domains: list[str] | None = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
@@ -438,7 +439,8 @@ def dispatch_plan_review(
         disabled_domains = []
 
     # Discover and filter domains
-    domains = _discover_plan_domains(global_prompts_dir=global_prompts_dir)
+    if domains is None:
+        domains = _discover_plan_domains(global_prompts_dir=global_prompts_dir)
     for dd in disabled_domains:
         domains.pop(dd, None)
 
@@ -572,6 +574,16 @@ def main():
     parser.add_argument("--agents", help="Comma-separated list of agents")
     parser.add_argument("--disabled-domains", help="Comma-separated domains to skip")
     parser.add_argument(
+        "--domains",
+        help="Comma-separated domain slugs to review (overrides discovery)",
+    )
+    parser.add_argument(
+        "--json-only",
+        action="store_true",
+        dest="json_only",
+        help="JSON to stdout, progress to stderr",
+    )
+    parser.add_argument(
         "--prompts-dir",
         help="Prompt directory name under ~/.claude/code-review/prompts/ (default: plan-review)",
         default="plan-review",
@@ -599,6 +611,10 @@ def main():
     global_prompts_dir = str(
         Path.home() / ".claude" / "code-review" / "prompts" / args.prompts_dir
     )
+    domains = _discover_plan_domains(global_prompts_dir=global_prompts_dir)
+    if args.domains:
+        allowed = set(args.domains.split(","))
+        domains = {k: v for k, v in domains.items() if k in allowed}
 
     plan_content = Path(args.file).read_text()
     result = dispatch_plan_review(
@@ -606,6 +622,7 @@ def main():
         round_num=args.round,
         repo_dir=args.repo_dir,
         agents=agents,
+        domains=domains,
         disabled_domains=disabled,
         timeout=timeout,
         global_prompts_dir=global_prompts_dir,
