@@ -2,6 +2,26 @@
 
 Tracks improvements to review prompts based on stark-team-review assessments.
 
+## 2026-04-04 — DB enum coercion FP + existing-test detection FP
+
+**Source:** PR #141 in GetEvinced/stark-data-core
+**Prompts dir:** default (PR code review)
+**Assessment:** 33% signal-to-noise; 3 false positives on enum construction from DB enum values flagged as "unsafe coercion"; 1 false positive flagging missing test that already existed
+
+### Changes Made
+
+| File | Change | Reason |
+|------|--------|--------|
+| `{claude,codex,gemini}/03-correctness.md` | Added bullet: DB enum columns guarantee valid values, don't flag Python enum construction from them | 3× FP on `TeamTypeEnum(info.type)` where source is a PG enum column |
+| `{claude,codex,gemini}/06-test-coverage.md` | Added bullet: verify no existing test covers the symbol before reporting | 1× FP flagging missing test for `TeamTypeEnum` when `test_team_type_enum_values` already existed |
+
+### Validation
+- [x] Prompt syntax OK
+- [x] No Python logic changes
+- [x] No config changes
+
+---
+
 ## 2026-04-03 — Codex noise reduction (test-coverage, architecture, ui-design) + claude a11y scope calibration
 
 **Source:** PR #194 in GetEvinced/design-system-core (widget grid review round 2)
