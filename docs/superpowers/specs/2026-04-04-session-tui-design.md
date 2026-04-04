@@ -38,7 +38,7 @@ The triage TUI (`triage_tui.py`) contains reusable rendering primitives (ANSI he
 ┌──────────────────────────────────┐
 │        tui_core.py               │
 │  TUIConfig, make_config()        │
-│  ansi(), icon(), plain_text()    │
+│  ansi(), icon(), strip_ansi()    │
 │  section_header(), format_banner()│
 │  render_checklist_item()         │
 │  render_kv_line()                │
@@ -248,20 +248,22 @@ class DiffSummary(TypedDict):
     file_count: int
     key_files: list[FileChange]
 
-class BannerData(TypedDict, total=False):
-    mode: str           # "start" | "end" — required
-    repo: str           # required
-    branch: str         # required
-    session_id: str     # required
+class _BannerRequired(TypedDict):
+    mode: Literal["start", "end"]
+    repo: str
+    branch: str
+    session_id: str
+    started_at: str     # ISO8601 with timezone (e.g., "2026-04-04T13:55:00+03:00")
+
+class BannerData(_BannerRequired, total=False):
     persona_name: str
     persona_catchphrase: str
-    started_at: str     # ISO8601 only (e.g., "2026-04-04T13:55:00+03:00")
-    ended_at: str       # ISO8601 only (end mode)
+    ended_at: str       # ISO8601 with timezone (end mode)
     duration: str       # pre-formatted, e.g., "2h 47m" (end mode)
     session_name: str   # end mode only
 ```
 
-**`started_at` and `ended_at` are always ISO8601.** The render function extracts `HH:MM` for display. The caller (SKILL.md) reads `session_state.started_at` (already ISO8601) and computes `ended_at` via `datetime.now().isoformat()`.
+**`started_at` and `ended_at` are always ISO8601 with timezone offset** (e.g., `2026-04-04T13:55:00+03:00`). The render function extracts `HH:MM` for display. The caller (SKILL.md) reads `session_state.started_at` (already ISO8601) and computes `ended_at` via `datetime.now(timezone.utc).astimezone().isoformat()`. Duration is computed as `ended - started` using timezone-aware datetimes, avoiding DST errors.
 
 **Render functions:**
 
@@ -295,7 +297,10 @@ def render_alerts(config: TUIConfig, alerts: list[AlertInfo]) -> str:
 
 def render_board(config: TUIConfig, items: list[BoardItem]) -> str:
     """Board section. Returns empty string if no board items (section omitted entirely).
-    Status indicators: in_flight → ▶, blocked → ⏸, clarify → ?
+    Status indicators include text labels for accessibility:
+    'in_flight' → ▶ In Flight / [ACTIVE] In Flight
+    'blocked' → ⏸ Blocked / [BLOCKED] Blocked
+    'clarify' → ? Clarify / [?] Clarify
     """
 
 def render_receipt(config: TUIConfig, items: list[HealthCheck]) -> str:
@@ -364,6 +369,8 @@ class SessionState:
 
 The name is a short slug (lowercase, hyphens, max 50 chars). The SKILL.md tells the agent: "Name this session based on what was accomplished. Use the branch name or PR titles as a starting point. Keep it under 50 characters, lowercase with hyphens."
 
+**Fallback:** If all four priority levels produce nothing (e.g., no PRs, no issues, detached HEAD, no commits), the name defaults to `"session-{session_id}"` — never `None` at session end.
+
 No other changes to session_state.py — `started_at`, `session_id`, `repo`, and `branch` already exist.
 
 ### 4. SKILL.md Integration
@@ -377,15 +384,18 @@ The session SKILL.md currently collects data via subprocess calls and prints pla
 The SKILL.md remains the orchestrator — it collects git state, fetches PRs, runs health checks, reads alerts, queries the project board. The TUI module is purely a rendering layer.
 
 **Flag passthrough:** The SKILL.md must detect `--plain` and `--no-color` from the user's invocation context. Since SKILL.md is interpreted by an LLM agent (not a script), the agent checks:
-- If the user said "plain" or the environment has `NO_COLOR=1` → `make_config(no_color=True)`
-- If piping output or `TERM=dumb` → auto-detected by `make_config()`
-- `json_mode` is not used for session TUI (no JSON output mode for sessions)
+- If the user said "no color" or "no-color" → `make_config(no_color=True)`
+- If the user said "plain" or "plain mode" → `make_config(plain=True)` (this is different from no_color — plain also strips emoji and box-drawing)
+- `NO_COLOR=1`, `TERM=dumb`, and non-TTY → auto-detected by `make_config()`, no explicit flag needed
+- `json_mode` is always `False` for session TUI — there is no JSON output mode for sessions. All session render functions return content when `json_mode=False`; when `json_mode=True` they return empty string (inherited from core), but this mode is never activated for sessions.
 
-**Data collection error handling:** Each data source (git, gh, health checks, board, alerts) is collected independently. If one fails (e.g., `gh` not authenticated, health check command not configured), the SKILL.md:
+**Data collection error handling:** Each data source (git, gh, health checks, board, alerts) is collected independently with a timeout (30s per source). If one fails or times out (e.g., `gh` not authenticated, health check command not configured, subprocess hangs), the SKILL.md:
 - Catches the error
-- Passes an empty list or a warning item to the corresponding render function
+- Passes an empty list or a single warning item (`passed=None, detail="unavailable: <reason>"`) to the corresponding render function
 - Continues collecting other data
 - Never lets a non-critical data source abort the entire briefing
+
+Git state and session state are the only "required" data sources — if git is not available, the briefing degrades to just the banner with a warning. All other sections are best-effort.
 
 **Start flow:**
 1. `config = make_config()`
@@ -436,7 +446,8 @@ Alerts and Board sections are omitted entirely when empty — no empty headers. 
 | `skill/stark-session/SKILL.md` | Modified | Call session_tui render functions |
 | `scripts/test_tui_core.py` | New | Tests for shared primitives |
 | `scripts/test_session_tui.py` | New | Tests for session rendering |
-| `scripts/test_triage_tui.py` | Modified | May need import path updates |
+| `scripts/test_triage_tui.py` | Modified | Import path updates after extraction |
+| `scripts/test_session_state.py` | Modified | Add test for name field backward compat |
 
 ---
 
