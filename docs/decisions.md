@@ -89,3 +89,12 @@
 - **Story Points:** 67 total (19 tasks across 6 phases)
 - **Summary:** LLM-based domain triage for the multi-agent review system. A triage engine calls one LLM to classify which review domains are relevant to a given input (PR diff, design doc, plan doc), then the orchestrator dispatches only relevant domains. Two modes: aggressive (explicit yes needed) and conservative (confident no needed, threshold 0.8). Fail-open on all triage failures. Conservative-first rollout: conservative default → 5-day bake → shadow validation (20 PRs + 10 docs, gate: 40% skip rate, 0 missed critical/high, p95 <10s) → single-repo canary → global aggressive promotion. Triage telemetry via stark-insights triage_decision events. TUI with color/plain/no-color modes. Skills route through orchestrator with || fallback to direct dispatch.
 - **Knowledge extracted to:** `docs/adr/0018-fail-open-triage-as-optimization.md`, `docs/glossary.md`
+
+## 2026-04-04 — Session TUI (Structured Terminal Output)
+
+- **Date:** 2026-04-04
+- **Status:** Decomposed → issues created
+- **Tracking:** #245, #246, #247, #248, #249, #250
+- **Story Points:** 45 total (13 tasks across 6 phases)
+- **Summary:** Replace the plain text briefing in `/stark-session start` and `/stark-session end` with structured, color-coded terminal output. Extract shared rendering primitives from `triage_tui.py` into `tui_core.py` (TUIConfig, ANSI helpers, banners, section headers, sanitize_text, slugify). Build `session_tui.py` as a pure rendering layer with TypedDict inputs. Add `session_tui_cli.py` as a CLI bridge with ThreadPoolExecutor data collection (45s budget, 15s per source), error redaction, and graceful degradation. Extend `session_state.py` with optional `name` and `start_head` fields for session identity and scoped diffs. Session naming uses priority order: merged PRs → closed issues → branch name → commit prefix → fallback. Same NO_COLOR/non-TTY/--plain behavior as triage TUI. Zero triage behavior regression gated by byte-for-byte parity.
+- **Knowledge extracted to:** `docs/decisions.md`
