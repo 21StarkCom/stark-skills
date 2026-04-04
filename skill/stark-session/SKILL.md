@@ -26,8 +26,17 @@ Session lifecycle management with two modes: **start** (context load + briefing)
 
 - `/stark-session` or `/stark-session start` — starts a session (default mode)
 - `/stark-session end` — ends a session
+- `--plain` — plain text mode (no ANSI, no emoji, no box-drawing)
+- `--no-color` — disable ANSI color only (keep emoji and box-drawing)
 
 **Raw input:** `$ARGUMENTS`
+
+## Constants
+
+```
+SCRIPTS = ~/.claude/code-review/scripts
+PYTHON  = $SCRIPTS/.venv/bin/python3
+```
 
 ## Config
 
@@ -70,6 +79,16 @@ Parse the JSON output:
 - If `last_checkpoint` is set: display `Last checkpoint: {last_checkpoint}`
 
 If the command fails, skip silently — session state is optional.
+
+### Phase 0c — Record start HEAD
+
+Record the current HEAD SHA for session-scoped diffs at end time:
+
+```bash
+START_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
+```
+
+Persist `start_head` to session state if session state was loaded. This is used by `/stark-session end` for accurate diff summaries.
 
 ### Phase 1 — Gather context (silent)
 
@@ -251,21 +270,44 @@ Suggested: /stark-housekeeping, /stark-skill-analytics
 ```
 If the command fails or returns no suggestions, skip silently.
 
-### Phase 5 — Briefing
+### Phase 5 — Structured Briefing
 
-Present a concise briefing:
+Render the session briefing using the TUI CLI. Build the command from data collected in Phases 0b–4b:
 
+```bash
+# Build flags from $ARGUMENTS
+PLAIN_FLAG=""
+NO_COLOR_FLAG=""
+[[ "$ARGUMENTS" == *"--plain"* ]] && PLAIN_FLAG="--plain"
+[[ "$ARGUMENTS" == *"--no-color"* ]] && NO_COLOR_FLAG="--no-color"
+
+# Also check environment
+[[ -n "$STARK_PLAIN" ]] && PLAIN_FLAG="--plain"
+
+# Build persona JSON if available
+PERSONA_ARG=""
+if [ -n "$PERSONA_JSON" ]; then
+    PERSONA_ARG="--persona '$PERSONA_JSON'"
+fi
+
+# Build next-up JSON from task list items discovered in phases 2-4
+# Format: [{"label": "Address review comments on #42", "priority": "action", "issue": "#42"}, ...]
+NEXT_UP_ARG=""
+if [ -n "$NEXT_UP_JSON" ]; then
+    NEXT_UP_ARG="--next-up '$NEXT_UP_JSON'"
+fi
+
+$PYTHON $SCRIPTS/session_tui_cli.py start \
+    --session-id "$SESSION_ID" \
+    --repo "$REPO" \
+    --start-head "$START_HEAD" \
+    --started-at "$STARTED_AT" \
+    $PLAIN_FLAG $NO_COLOR_FLAG $PERSONA_ARG $NEXT_UP_ARG
 ```
-Branch: feature/xyz (3 ahead, clean)
-PRs: #42 (open, 2 approvals)
-Health: ✓ tests, ✓ lint, ✗ build (error: ...)
-Skills: /stark-team-review, /stark-session, /init-docs, ...
 
-Recent: 3 commits today on this branch
-Memory: [key context from memory files]
-```
+If the CLI exits non-zero, fall back to plain-text briefing using the data already collected in earlier phases. Log the error but do not show the raw traceback.
 
-Condense or omit empty sections. Don't dump full CLAUDE.md. Keep it concise.
+The structured briefing replaces the previous plain text output with color-coded sections for git state, PRs, health, alerts, board, and next-up items. Environment behavior (NO_COLOR, TERM=dumb, non-TTY) is handled automatically by the CLI's `make_config()`.
 
 ### Phase 6 — Session Task List
 
@@ -405,18 +447,54 @@ fi
 
 Report result in Phase 6 summary. If sync fails, note "Telemetry: buffered locally (will sync next session)".
 
-### Phase 6 — Summary
+### Phase 5.6 — Derive Session Name
 
-```
-Tests: ✓ passed
-PRs: #42 merged (squash)
-Docs: committed (3 files)
-Project: 2 issues updated (Documentation State → Drafted)
-Pushed: main → origin/main
-Telemetry: 42 events synced to Cloud SQL (0 remaining)
+Choose a meaningful session name based on what was accomplished (priority order):
 
-Session complete.
+1. PRs merged during the session: `gh pr list --state merged --search "merged:>=$(echo $STARTED_AT | cut -dT -f1)" --json number,title,mergedAt 2>/dev/null` — filter results where mergedAt > $STARTED_AT
+2. Issues closed: `gh issue list --state closed --search "closed:>=$(echo $STARTED_AT | cut -dT -f1)" --json number,title,closedAt 2>/dev/null` — same timestamp filter
+3. Branch name: `git branch --show-current`
+4. Most common commit prefix: `git log $START_HEAD..HEAD --format=%s 2>/dev/null`
+5. Fallback: `session-$SESSION_ID`
+
+Pass the chosen name through `slugify()` (or use the CLI which does it internally). The name must match `[a-z0-9-]{1,50}`.
+
+### Phase 6 — Structured Summary
+
+Build the receipt JSON from end-mode operation outcomes:
+
+```bash
+# Build receipt from phases 1-5.5 results
+# Each item: {"name": "...", "passed": true|false|null, "detail": "...", "duration": seconds|null}
+RECEIPT_JSON='[
+    {"name": "Tests", "passed": '$TESTS_PASSED', "detail": "'$TESTS_DETAIL'", "duration": '$TESTS_DURATION'},
+    {"name": "Build", "passed": '$BUILD_PASSED', "detail": "'$BUILD_DETAIL'", "duration": '$BUILD_DURATION'},
+    {"name": "Push", "passed": '$PUSH_PASSED', "detail": "'$PUSH_DETAIL'", "duration": null},
+    {"name": "PRs", "passed": '$PRS_PASSED', "detail": "'$PRS_DETAIL'", "duration": null},
+    {"name": "Issues", "passed": null, "detail": "'$ISSUES_DETAIL'", "duration": null},
+    {"name": "Docs", "passed": '$DOCS_PASSED', "detail": "'$DOCS_DETAIL'", "duration": null},
+    {"name": "Telemetry", "passed": '$TELEMETRY_PASSED', "detail": "'$TELEMETRY_DETAIL'", "duration": null}
+]'
+
+$PYTHON $SCRIPTS/session_tui_cli.py end \
+    --session-id "$SESSION_ID" \
+    --repo "$REPO" \
+    --name "$SESSION_NAME" \
+    --start-head "$START_HEAD" \
+    --started-at "$STARTED_AT" \
+    --receipt "$RECEIPT_JSON" \
+    $PLAIN_FLAG $NO_COLOR_FLAG $PERSONA_ARG
 ```
+
+After rendering, persist the session name:
+```python
+session_state.name = session_name
+session_state.save()
+```
+
+If the CLI exits non-zero, fall back to a plain-text summary listing the operation results.
+
+The structured summary shows: session banner with name/duration/end time, receipt checklist, session-scoped diff summary, and next-up items for the next session.
 
 ---
 
