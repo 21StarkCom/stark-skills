@@ -49,6 +49,7 @@ Then review for correctness issues:
 - Callers using wrong field names on dataclasses/models (e.g., obj.id when field is source_id)
 - Constructor called with wrong keyword arguments
 - Function signature changed but callers not updated
+- Database enum columns guarantee value validity at the storage layer — do not flag Python enum construction from DB enum values as unsafe coercion
 
 Severities:
 - critical: Runtime crash, visually broken in common case

@@ -435,6 +435,10 @@ def load_all_records() -> list[RunRecord]:
             if rounds_file.exists():
                 try:
                     data = json.loads(rounds_file.read_text())
+                    if isinstance(data, list):
+                        # Some plan reviews store an array of rounds; skip
+                        print(f"Warning: skipping {rounds_file}: expected object, got array", file=sys.stderr)
+                        continue
                     records.append(_normalize_plan_review(data, rounds_file))
                 except (json.JSONDecodeError, TypeError) as e:
                     print(f"Warning: skipping {rounds_file}: {e}", file=sys.stderr)

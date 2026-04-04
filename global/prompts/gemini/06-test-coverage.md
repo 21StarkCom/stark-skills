@@ -12,6 +12,7 @@ First, run these commands:
 - Do NOT suggest adding tests unless there is a concrete logic bug risk. Generic "no tests" findings are noise.
 - Scripts with built-in `--check` / `--verify` / `--dry-run` modes have implicit integration coverage. Only flag missing tests for specific breakable inputs that the self-check doesn't exercise.
 - Unit tests that verify their stated scope are valid. Do NOT flag a unit test for "not exercising the real pipeline" or "using mock data instead of production behavior." Unit tests test units. Evaluate each test against its own stated scope.
+- **Before reporting a missing test, verify no existing test covers the symbol.** Search test file names and test function names in the diff context for the class/function/enum name. If a test already exists, do not flag it as missing.
 
 Then review for test coverage gaps:
 

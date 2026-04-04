@@ -49,6 +49,7 @@ Review the PR diff for correctness issues. Trace execution paths — think about
 - Constructor called with wrong keyword arguments
 - Function signature changed in one module but callers in another module not updated
 - Protocol/interface method signature mismatch between base and implementation
+- Database enum columns guarantee value validity at the storage layer — do not flag Python enum construction from DB enum values as unsafe coercion
 
 ## Self-Consistency Rule
 Do not report a finding if your own analysis concludes no change is needed. If you identify a potential issue but then determine it is handled correctly, mitigated by existing code, or not actually a bug — do not include it in the output. Self-refuting findings ("X could be a problem... but actually it's fine") are noise.

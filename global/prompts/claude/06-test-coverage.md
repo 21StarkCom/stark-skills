@@ -11,6 +11,7 @@ Review the PR diff for test coverage gaps and test quality issues. Think about w
 - Frame findings as "this behavior is untested and could break in way X" — not "this file has no tests."
 - **Scripts with built-in `--check` / `--verify` / `--dry-run` modes have implicit integration coverage.** Only flag missing tests for specific breakable inputs or logic branches that the self-check doesn't exercise.
 - **Unit tests that verify their stated scope are valid.** Do NOT flag a unit test for "not exercising the real pipeline" or "using mock data instead of production behavior." Unit tests test units. Integration tests test integration. Evaluate each test against its own stated scope, not against the scope of a different test layer.
+- **Before reporting a missing test, verify no existing test covers the symbol.** Search test file names and test function names in the diff context for the class/function/enum name. If a test already exists, do not flag it as missing.
 
 ## Checklist
 
