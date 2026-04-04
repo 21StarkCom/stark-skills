@@ -54,10 +54,13 @@ Required existing modules:
 - `scripts/claude_utils.py`, `scripts/gemini_utils.py`, `scripts/codex_utils.py` — CLI helpers
 - `scripts/config_loader.py` — hierarchical config
 
+**Pre-implementation verification:** Before starting Phase 1, verify each module above exists and its public API matches what the plan depends on. Run: `$PYTHON -c "from preflight import run_preflight; from lock_helpers import acquire_lock; from validation_gate import run_tests"` etc. Document any missing or changed APIs as Phase 1 blockers.
+
 Known design gaps to resolve during Phase 1:
 - `skill/stark-release/SKILL.md` is repo-specific (`src/infra_pulse/__init__.py`); needs generic version detection
-- `plan-to-tasks` is a skill contract, not a Python API; needs callable adapter
+- `plan-to-tasks` is a skill contract, not a Python API; needs callable adapter (this is a **significant refactor** — split into subtasks: extract core logic, add idempotent issue creation, add label contract validation, test independently)
 - No `pipeline` section in `global/config.json` yet; model rates and pipeline defaults must be added
+- `design_to_plan_dispatch.py` `--mode generate` parameter needs verification — confirm the script accepts this flag before depending on it in Phase 3
 
 ---
 
@@ -140,12 +143,13 @@ Create `scripts/pipeline/checkpoint.py` with `CheckpointManager`:
 - Atomic writes (write-to-tmp + rename)
 - `schema_version` field with migration framework (`migrate_v1_to_v2()` etc.)
 - Slug sanitization integrated from config.py
-- File lock using `lock_helpers.acquire_lock()` with PID in lock file for stale detection — **resolves design review finding #14**
+- File lock using `lock_helpers.acquire_lock()` with PID in lock file for stale detection. **Stale lock reclaim:** read PID from lock, check `os.kill(pid, 0)` — if process is dead, reclaim. If process is alive but not a pipeline process (check `/proc/{pid}/cmdline` or `ps`), warn and require `--force` to reclaim. — **resolves design review finding #14**
+- `base_sha` capture: record `git rev-parse HEAD` at pipeline start, store in state.json. This is the anchor for `docs-update`'s diff range.
 - State schema matching design spec: `schema_version`, `slug`, `repo`, `base_sha`, `input`, `config`, `current_stage`, `current_phase`, `current_task` (int, not string — **resolves finding #1**), `current_review_round`, `completed_stages`, `phase_progress`, `escalations`, `metrics_summary`
 
 Files: `scripts/pipeline/checkpoint.py`, `scripts/pipeline/test_checkpoint.py`
 
-Done when: state survives crash/reload, migrations can upgrade schema versions, concurrent starts fail fast, stale locks are reclaimed.
+Done when: state survives crash/reload, migrations can upgrade schema versions, concurrent starts fail fast, stale locks are reclaimed via PID check.
 
 **2.2 Implement dispatch wrappers**
 
@@ -154,9 +158,15 @@ Create `scripts/pipeline/dispatch.py` with the three dispatch functions from the
 - `dispatch_worktree(prompt, worktree_path, model, timeout, retries)` — always Claude
 - `dispatch_cli(command, env, cwd, timeout)` — subprocess wrapper
 
-Retry policy: distinguish transient failures (timeout, non-zero exit with known retryable patterns like rate limiting) from permanent failures (auth error, invalid prompt) — **resolves design review finding #13**. Exponential backoff with jitter: `base * (2^attempt) + random(0, base)`.
+Retry policy with explicit classification per CLI tool:
+- **Transient (retry):** timeout, exit code 1 with "rate limit" or "429" in stderr, exit code 137 (OOM kill), empty stdout with exit 0, network errors
+- **Permanent (no retry):** exit code 1 with "auth" or "invalid" in stderr, exit code 2 (usage error), `dispatch_cli` failures (git/gh are deterministic)
+- Exponential backoff with jitter: `base * (2^attempt) + random(0, base)` where base=5s
+— **resolves design review finding #13**
 
-Per-agent semaphores: Claude 5, Codex 5, Gemini 3. Thread-safe GH_TOKEN via per-subprocess env dict.
+Per-agent semaphores (configurable in `pipeline` config section): Claude 5, Codex 5, Gemini 3. Thread-safe GH_TOKEN via per-subprocess env dict — never set process-wide.
+
+`dispatch_cli` takes `command: list[str]` (not a string) — this prevents shell injection. No shell=True.
 
 Files: `scripts/pipeline/dispatch.py`, `scripts/pipeline/test_dispatch.py`
 
@@ -170,11 +180,12 @@ Create `scripts/pipeline/metrics.py`:
 - Per-invocation append to `audit.jsonl` (thread-safe via queue or mutex — **resolves design review finding #12**)
 - Stage-level aggregation into `StageMetrics`
 - Pipeline-level running totals in `metrics_summary`
-- Budget ceiling check after each stage
+- Budget ceiling check after each stage **and** after each dispatch invocation within fan-out stages (not just at stage boundaries — a 36-agent design-review dispatch can blow past the budget before the stage completes)
+- Token extraction must be resilient: if Claude JSON doesn't contain `usage.input_tokens` (e.g., CLI version changes), log warning and set tokens to None rather than crashing
 
 Files: `scripts/pipeline/metrics.py`, `scripts/pipeline/test_metrics.py`
 
-Done when: totals remain correct across resume boundaries, budget ceiling triggers abort.
+Done when: totals remain correct across resume boundaries, budget ceiling triggers abort mid-stage if needed.
 
 ### Risks
 - Resume corruption if state and artifacts diverge: write stage result and artifact metadata in same checkpoint transition.
@@ -230,25 +241,38 @@ Done when: `--start-at design-to-plan` produces a plan doc, `--start-at plan-rev
 
 **3.4 Implement plan-to-tasks stage adapter**
 
-Extract callable Python from the `stark-plan-to-tasks` skill logic. Reuse `plan_to_tasks_validate.py` for validation. Make issue creation idempotent: query `plan:{slug}` issues before creating new ones.
+This is a significant refactor — split into subtasks:
+
+3.4a. **Extract core logic** from `stark-plan-to-tasks` SKILL.md into `scripts/pipeline/plan_to_tasks.py`. Extract the plan parsing, phase/task decomposition, and issue body generation into callable Python functions (not just subprocess wrappers).
+
+3.4b. **Add idempotent issue creation** — before creating an issue, query existing issues with `plan:{slug}` label using `gh issue list --label "plan:{slug}" --limit 200 --json number,title,labels`. Match by title. Reuse existing issues; only create missing ones. **Critical: use `--limit 200`** to avoid gh's default 30-item truncation.
+
+3.4c. **Add label contract validation** — after issue creation, verify that every issue has both `plan:{slug}` and `phase:{N}` labels. If any are missing, add them. Write `issues.json` manifest only after validation passes.
+
+3.4d. **Handle plan changes on resume** — if `issues.json` exists from a prior run but the plan has changed, detect drift (issue count mismatch, title changes) and escalate rather than silently creating duplicate issues.
+
+Reuse `plan_to_tasks_validate.py` for the 3-LLM validation pass.
 
 Output: `issues.json` manifest with issue numbers, phases, labels.
 
-Files: `scripts/pipeline/stages.py`, `scripts/pipeline/plan_to_tasks.py`
+Files: `scripts/pipeline/plan_to_tasks.py`, `scripts/pipeline/stages.py`, `scripts/pipeline/test_plan_to_tasks.py`
 
-Done when: stage creates or reuses GitHub issues, writes `issues.json`, reruns don't duplicate.
+Done when: stage creates or reuses GitHub issues, writes `issues.json`, reruns don't duplicate, label contract is enforced.
 
 **3.5 Implement engine for linear stage sequencing**
 
 Create `scripts/pipeline/engine.py`:
 - Load stage list, determine start stage (from `--start-at`, auto-detection, or resume)
+- **`--start-at` validation:** if starting mid-pipeline, verify required upstream artifacts exist (e.g., `--start-at plan-review` requires a plan doc; `--start-at phase-execute` requires `issues.json`). If missing, error with "Required artifact from stage X not found. Run from an earlier stage or provide the artifact."
 - Execute stages sequentially, checkpoint after each
 - Handle design/plan review escalation (critical findings → 4-option escalation, critical can't be skipped)
+- **Stub escalation.py import:** the engine needs escalation for review stages, but the full escalation module is Phase 4. Create a minimal `escalation.py` stub in Phase 3 with `escalate(finding, context) -> EscalationResult` that supports the 4-option prompt. Phase 4 extends it with macOS notification, persistence, and non-interactive behavior.
+- **Non-interactive escalation:** when `stdin` is not a TTY (headless/CI), auto-select "abort" for critical findings and "skip" for medium findings. Log the decision. This prevents the pipeline from hanging in non-interactive environments.
 - `--dry-run` mode prints execution plan
 
-Files: `scripts/pipeline/engine.py`, `scripts/pipeline/test_engine.py`
+Files: `scripts/pipeline/engine.py`, `scripts/pipeline/escalation.py` (stub), `scripts/pipeline/test_engine.py`
 
-Done when: `python scripts/stark_pipeline.py docs/specs/design.md --start-at design-review` runs through review → plan → review → tasks with checkpointing.
+Done when: `python scripts/stark_pipeline.py docs/specs/design.md --start-at design-review` runs through review → plan → review → tasks with checkpointing. `--start-at` rejects missing upstream artifacts.
 
 ### Risks
 - Skill/Python drift for plan-to-tasks: keep new adapter as single implementation, have skill shell out to it.
@@ -276,26 +300,35 @@ python scripts/stark_pipeline.py docs/superpowers/specs/2026-04-04-stark-pipelin
 Create `scripts/pipeline/worktree.py`:
 - `create_worktree(repo_root, slug, task_num) -> Path` — creates `stark-pipeline-{slug}-task-{num}` worktree
 - Worktree **persists across fix rounds** — not cleaned until after diff collection and PR creation — **resolves design review findings #4 and #15**
+- Lifecycle: create → implement → test → review → fix → ... → collect_diff → push → create_pr → merge_pr → THEN cleanup
 - `collect_diff(worktree_path) -> DiffResult` — captures diff before cleanup
 - `cleanup_worktree(worktree_path)` — `git worktree remove --force`
-- Startup sweep: remove orphaned `stark-pipeline-*` worktrees (but only if no `state.lock` is held for that slug)
-- After each PR merge: `git checkout main && git pull --rebase origin main` before next task — **resolves design review finding #7**
+- **Startup sweep safety:** remove orphaned `stark-pipeline-*` worktrees **only for slugs that have no active `state.lock`**. If resuming (`--resume`), **never** sweep the worktree for the current task — check `state.json` for `current_task` and preserve that worktree.
+- After each PR merge: refresh local main from the **repo root** (not the worktree CWD): `git -C {repo_root} checkout main && git -C {repo_root} pull --rebase origin main`. **If rebase conflicts:** escalate with details (this means someone else pushed to main during the pipeline run). — **resolves design review finding #7**
+- **Disk space guard:** before creating a worktree, check available disk space. If <1GB free, escalate.
 
 Files: `scripts/pipeline/worktree.py`, `scripts/pipeline/test_worktree.py`
 
-Done when: worktrees survive across review-fix rounds, cleanup is reliable, orphan sweep works.
+Done when: worktrees survive across review-fix rounds, cleanup is reliable, orphan sweep doesn't destroy resumed worktrees, main refresh uses correct CWD.
 
-**4.2 Implement task discovery and phase loop**
+**4.2 Implement task discovery, implementation dispatch, and phase loop**
 
 Extend `scripts/pipeline/engine.py` with phase-execute logic:
-- Discover phases via `gh issue list --label "plan:{slug}"`, group by `phase:{N}` label
-- Tasks within phase ordered by issue number
+- Discover phases via `gh issue list --label "plan:{slug}" --limit 200 --json number,title,labels,body`. **Critical: `--limit 200`** to avoid default 30-item truncation. If result count equals limit, paginate.
+- **Reconciliation gate:** compare discovered issues with `issues.json` manifest. If mismatch (issues deleted, labels changed), escalate before executing.
+- Group by `phase:{N}` label, order phases by N, tasks within phase by issue number
+- **Per-task loop** (the full inner loop from the design spec):
+  1. Create worktree (4.1)
+  2. **Dispatch implementation agent** — `dispatch_worktree(prompt, worktree_path)` with the issue body as context. This is step ② from the design spec — the core implementation step.
+  3. Run tests in worktree (via `validation_gate.py`)
+  4. Review-fix loop (4.3)
+  5. Collect diff, push branch, create PR, merge (4.4)
 - Sequential task execution within phase, sequential phases
 - Checkpoint after each task (PR merged), each review round, each phase
 
 Files: `scripts/pipeline/engine.py`
 
-Done when: `--start-at phase-execute --slug my-feature` discovers issues and iterates phases.
+Done when: `--start-at phase-execute --slug my-feature` discovers issues, dispatches implementation, and iterates phases.
 
 **4.3 Implement review-fix-escalation loop**
 
@@ -319,18 +352,20 @@ Done when: escalation round-trips work, kill-and-resume returns to correct task/
 **4.4 Implement PR creation, merge, and idempotency**
 
 Extend engine with steps ⑨-⑩:
-- Before PR create: check if PR from expected branch exists (reuse if so)
-- Before merge: verify clean main, open PR status
+- Before PR create: check if PR from expected branch exists (`gh pr list --head {branch} --json number`). Reuse if found.
+- Before merge: **poll for mergeable status** — `gh pr view {number} --json mergeable,mergeStateStatus`. Wait up to 60s for checks to complete. If not mergeable after timeout, escalate.
 - `unset GH_TOKEN` for PR operations (user PAT)
-- Phase-end regression test via `validation_gate.py`
+- Phase-end regression test via `validation_gate.py` on main after all phase tasks merged
+- **After docs-update PR merge (Phase 5):** refresh local main before release stage
 
 Files: `scripts/pipeline/engine.py`
 
-Done when: retry doesn't create duplicate PRs, merge works, phase regression test runs.
+Done when: retry doesn't create duplicate PRs, merge waits for checks, phase regression test runs.
 
 ### Risks
 - Branch protection blocks direct pushes: only task branches + PR merges mutate code.
 - Cleanup races destroy diffs: collect and persist diff before `git worktree remove`.
+- **Rebase conflict after main refresh:** if `git pull --rebase` fails (concurrent pushes to main), escalate with conflict details rather than crashing.
 
 ### Verification
 ```bash
@@ -363,8 +398,9 @@ Done when: docs-update creates/merges a docs PR, escalates on failure.
 Create `scripts/pipeline/release.py`:
 - Detect version source: `package.json`, `pyproject.toml`, `setup.cfg`, `__init__.py` (generic, not repo-specific)
 - Release-candidate validation gate: tests pass, no uncommitted changes, all phase PRs merged
-- Idempotent: check tag/release existence before creating
+- Idempotent: check tag existence before creating. If tag exists but GitHub Release doesn't, create Release pointing to existing tag. If both exist, skip. **This prevents the "tag created but Release creation failed" deadlock.**
 - `--release-type` flag for bump level
+- **Point of no return:** before pushing the tag, prompt for confirmation in interactive mode (or auto-proceed in non-interactive if all validation gates passed)
 
 Files: `scripts/pipeline/release.py`, `scripts/pipeline/stages.py`
 
@@ -457,6 +493,20 @@ $PYTHON -m pytest scripts/pipeline/ -q
 python scripts/stark_pipeline.py docs/superpowers/specs/2026-04-04-stark-pipeline-design.md --dry-run
 python scripts/stark_pipeline.py docs/superpowers/specs/2026-04-04-stark-pipeline-design.md --dry-run --no-tui
 ```
+
+---
+
+## Success Criteria (measurable)
+
+The pipeline is complete when all of the following pass:
+
+1. `python scripts/stark_pipeline.py docs/specs/test-design.md --dry-run` produces correct execution plan
+2. `python scripts/stark_pipeline.py --resume test-slug` resumes from the correct stage/task/round after a SIGTERM
+3. Full unit test suite passes: `$PYTHON -m pytest scripts/pipeline/ -q` with 0 failures
+4. A live run from design-review through plan-to-tasks completes with real agent dispatches
+5. A live phase-execute run on a test slug implements at least 1 task, reviews it, and merges a PR
+6. `--no-tui` output contains all the same information as TUI mode (verified by diff of structured events)
+7. `/stark-pipeline --dry-run` from Claude Code matches direct CLI invocation
 
 ---
 
