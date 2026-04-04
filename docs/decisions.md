@@ -80,3 +80,12 @@
 - **Story Points:** 173 total (34 tasks across 4 phases)
 - **Summary:** Four-phase improvement stack for the stark-skills ecosystem: (P0) unified runtime config with shared loader, preflight environment validation, approach contracts, agent environment isolation, event schema v2; (P1) post-generation code validation gate, failure classification with 8 canonical codes, self-healing with 5 patterns in suggest mode, PID-aware exclusive write locks; (P2) persistent session state surviving /clear, context compaction checkpoints, learning capture from structured metadata, contextual skill suggestions with 13 trigger rules, old config removal; (P3) HTML operator dashboard with 8 KPIs, automation fleet trigger migration, cost controls with hard-stop and auto-recovery, healer auto-mode with per-pattern circuit breaker, alert delivery path.
 - **Knowledge extracted to:** `docs/adr/0015-additive-config-migration-three-step.md`, `docs/adr/0016-single-session-id-resolver.md`, `docs/adr/0017-pid-aware-exclusive-write-locks.md`, `docs/glossary.md`
+
+## 2026-04-04 — Domain Triage (Review Cost Optimization)
+
+- **Date:** 2026-04-04
+- **Status:** Decomposed → issues created
+- **Tracking:** #220, #221, #222, #223, #224, #225
+- **Story Points:** 67 total (19 tasks across 6 phases)
+- **Summary:** LLM-based domain triage for the multi-agent review system. A triage engine calls one LLM to classify which review domains are relevant to a given input (PR diff, design doc, plan doc), then the orchestrator dispatches only relevant domains. Two modes: aggressive (explicit yes needed) and conservative (confident no needed, threshold 0.8). Fail-open on all triage failures. Conservative-first rollout: conservative default → 5-day bake → shadow validation (20 PRs + 10 docs, gate: 40% skip rate, 0 missed critical/high, p95 <10s) → single-repo canary → global aggressive promotion. Triage telemetry via stark-insights triage_decision events. TUI with color/plain/no-color modes. Skills route through orchestrator with || fallback to direct dispatch.
+- **Knowledge extracted to:** `docs/adr/0018-fail-open-triage-as-optimization.md`, `docs/glossary.md`
