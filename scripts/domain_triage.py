@@ -17,7 +17,7 @@ from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_MEDIUM, parse_jsonl_
 from config_loader import get_model_id
 
 
-TRIAGE_DIR = Path(__file__).parent.parent / "global" / "prompts" / "triage"
+TRIAGE_DIR = Path(__file__).resolve().parent.parent / "global" / "prompts" / "triage"
 _ALLOWED_MODES = {"aggressive", "conservative", "full"}
 _ALLOWED_AGENTS = {"claude", "codex"}
 _REVIEW_TO_PROMPT = {
