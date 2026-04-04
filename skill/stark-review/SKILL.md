@@ -4,7 +4,7 @@ description: >-
   Single-agent PR code review: 1 LLM x 9 domains. Fast/cheap. Use for review, review this PR, quick review.
 argument-hint: "[PR_NUMBER] [--agent claude|codex|gemini] [--dry-run] [--repo ORG/REPO]"
 disable-model-invocation: true
-model: sonnet
+model: opus[1m]
 ---
 
 # stark-review

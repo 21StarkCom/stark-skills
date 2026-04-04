@@ -2,7 +2,7 @@
 name: stark-autopilot
 description: >-
   Autonomous tournament implementation: 3 agents compete in worktrees per step, best wins. Use for autopilot, multi-agent build.
-argument-hint: '<plan-or-prompt> [--test-command CMD] [--agents claude,codex,gemini] [--timeout N] [--dry-run]'
+argument-hint: '<plan-or-prompt> [--plan-slug SLUG] [--test-command CMD] [--agents claude,codex,gemini] [--timeout N] [--dry-run]'
 disable-model-invocation: true
 model: opus
 ---
@@ -34,6 +34,7 @@ This is the nuclear option — maximum quality through competition at every step
 ## Arguments
 
 - `<plan-or-prompt>` — path to implementation plan, or inline task description
+- `--plan-slug SLUG` — fetch issues labeled `plan:{SLUG}` from GitHub and use as steps (alternative to plan file)
 - `--test-command CMD` — test command to run after each step (e.g., `npm test`, `pytest`)
 - `--agents LIST` — comma-separated agent IDs (default: claude,codex,gemini)
 - `--timeout N` — per-agent timeout in seconds (default: 900)
@@ -55,15 +56,66 @@ REPO_ROOT = $(git rev-parse --show-toplevel)
 
 ### 1.1 Parse input
 
-Two input modes:
+Three input modes, resolved in this order:
 
-**Plan file:** If input is a path to a markdown file (from `/stark-design-to-plan` or manual), read it and extract the step list. Each `## Phase N` or `### Task N` heading becomes a step.
+**Issue-driven (preferred — from `/stark-plan-to-tasks` output):** If `--plan-slug SLUG` is provided, or if the input is a `.md` file path, attempt to load steps from GitHub issues:
 
-**Inline prompt:** If input is a description, decompose it into steps yourself. For complex tasks, create 3-5 implementation steps that build on each other. For simple tasks, a single step is fine.
+1. Derive `PLAN_SLUG`:
+   - If `--plan-slug` was given, use it directly
+   - If a plan file was given, derive from filename: strip `.md`, strip known suffixes (`-design`, `-spec`, `-plan`). Truncate to 47 chars + 3-char hash if >50. Same logic as `/stark-plan-to-tasks` §1.7.
+
+2. Detect target repo (same as plan-to-tasks: frontmatter → body scan → `git remote -v` → ask user).
+
+3. Fetch issues:
+   ```bash
+   unset GH_TOKEN
+   gh issue list \
+     --label "plan:$PLAN_SLUG" \
+     --repo $ORG_REPO \
+     --state all \
+     --json number,title,body,labels,state \
+     --limit 200
+   ```
+
+4. If issues found with that label: enter **issue-driven mode** (see §1.2).
+5. If no issues found and input is a `.md` file: fall back to **plan-file mode** with a warning:
+   > No issues found for `plan:{PLAN_SLUG}`. Falling back to plan-file parsing. Run `/stark-plan-to-tasks {path}` first for richer issue-driven execution.
+6. If no issues found and `--plan-slug` was explicit: error and stop:
+   > Error: No issues found with label `plan:{SLUG}` on `{ORG_REPO}`.
+
+**Plan file (fallback):** If input is a `.md` file and no matching issues were found, read it and extract the step list. Each `## Phase N` or `### Task N` heading becomes a step.
+
+**Inline prompt:** If input is a description (not a file path, no `--plan-slug`), decompose it into steps yourself. For complex tasks, create 3-5 implementation steps that build on each other. For simple tasks, a single step is fine.
 
 When a plan file path is available, retain it as `plan_path` for the approach contract step.
 
 ### 1.2 Extract steps
+
+**Issue-driven mode:**
+
+Group fetched issues into phases and tasks:
+
+1. **Identify phase tracking issues** — issues whose title starts with "Phase" and whose body contains a task checklist (`- [ ] #NNN`)
+2. **Identify task issues** — all other issues with the `plan:{PLAN_SLUG}` label
+3. **Group tasks under phases** by matching the phase reference in each task's Dependencies section or by the task checklist in the phase issue
+4. **Order phases** by their dependency links (phase `depends_on` from the issue body)
+5. **Filter by ai_suitability** (from the issue body metadata):
+   - `autonomous` and `assisted` tasks → include in steps
+   - `human-led` tasks → skip with warning:
+     > Skipping human-led task #{number}: {title} — requires manual implementation
+6. **Skip already-closed tasks** — if `state` is `CLOSED`, skip:
+   > Skipping #{number}: {title} — already closed
+
+Each phase becomes one step. A step contains:
+- `step_id` — phase slug (e.g., `phase-1-data-model`)
+- `title` — phase name
+- `prompt` — composed from the task issue bodies: concatenate each task's What, Why, Where, How, and Acceptance Criteria sections. Include the plan file content as background context if available.
+- `issue_numbers` — issue numbers of all included tasks in the phase
+
+If ALL tasks in a phase are closed or human-led, skip the entire phase:
+> Skipping phase {step_id}: all tasks are closed or human-led.
+
+**Plan-file mode / Inline mode:**
 
 Parse the plan into an ordered list of steps. Each step needs:
 - `step_id` — slug like `phase-1-task-1`
@@ -88,17 +140,21 @@ If no test command found, warn: "No test command detected. Tournament will use s
 ```
 stark-autopilot — Battle Plan
 ──────────────────────────────
-Steps:       5
+Mode:        issue-driven (plan:widget-system, 12 tasks across 4 phases)
+Steps:       4
 Agents:      claude, codex, gemini
 Test command: pytest
 Timeout:     900s per agent
+Skipped:     2 human-led, 1 already closed
 
-Step 1: [title]
-Step 2: [title]
+Step 1: Data Model & Storage (#37, #38, #39)
+Step 2: API Layer (#40, #41, #42)
 ...
 
 Each step: 3 agents compete in parallel worktrees → tournament → winner merged
 ```
+
+In plan-file or inline mode, replace the Mode line with `Mode: plan-file` or `Mode: inline`.
 
 If `--dry-run`, stop here.
 

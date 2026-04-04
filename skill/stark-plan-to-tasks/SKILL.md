@@ -10,7 +10,7 @@ model: opus
 
 # stark-plan-to-tasks
 
-Decompose a spec/design document into phased GitHub issues. Three LLM passes: quality gate → decomposition → validation. Extracts architectural knowledge to project docs, deletes the plan.
+Decompose a spec/design document into phased GitHub issues. Three LLM passes: quality gate → decomposition → validation. Extracts architectural knowledge to project docs.
 
 ## Arguments
 
@@ -206,7 +206,7 @@ Each phase:
 | `task_id` | Stable slug, e.g., `task-1-1-user-entity` |
 | `title` | Clear, imperative, scoped |
 | `what` | Deliverable description |
-| `why` | Context from the plan — must stand alone (plan gets deleted) |
+| `why` | Context from the plan — must stand alone without reading the plan |
 | `where` | Specific files/modules to create or modify (max 4 files) |
 | `how` | Implementation approach, key decisions already made (max 500 words) |
 | `acceptance_criteria` | Testable conditions for "done" (max 5 items) |
@@ -436,7 +436,7 @@ Abort if the user says no.
 | Constraints | `docs/security.md`, `docs/performance.md` (by filename) | Create `docs/constraints.md` |
 | Glossary terms | `docs/glossary.md`, `docs/GLOSSARY.md` (case-insensitive) | Create `docs/glossary.md` |
 
-If the plan contains no extractable knowledge, skip doc enrichment. Still delete the plan — the knowledge lives in the issues.
+If the plan contains no extractable knowledge, skip doc enrichment entirely.
 
 **Decision record:** Append to `docs/decisions.md` (create with `# Decisions` header if missing):
 
@@ -454,19 +454,15 @@ If the plan contains no extractable knowledge, skip doc enrichment. Still delete
 **After enrichment:**
 
 ```bash
-# Delete the plan file
-rm "{PLAN_FILE}"
-
 # Commit: add specific files only — never git add -A
 git add docs/decisions.md {enriched-doc-files} {created-doc-files}
-git rm "{PLAN_FILE}"
 git commit -m "docs: extract knowledge from plan, create tasks (#{phase-issue-numbers})"
 ```
 
-The commit is local-only. Do not push or create a PR.
+The commit is local-only. Do not push or create a PR. The plan file is preserved — do NOT delete it.
 
 If the commit fails (pre-commit hook, dirty tree):
-> Warning: Commit failed. Plan file NOT deleted. Enrichment files left unstaged for your review.
+> Warning: Commit failed. Enrichment files left unstaged for your review.
 Leave all changes unstaged — do not force the commit.
 
 ---
@@ -479,7 +475,12 @@ Print to terminal:
 - Total story points
 - Risk distribution (e.g., 3 low, 5 med, 1 high)
 - Confidence distribution
+- AI suitability distribution (e.g., 8 autonomous, 3 assisted, 1 human-led)
 - Links to each phase tracking issue (`{ORG_REPO}#NNN — {phase name}`)
+- Ready-to-use autopilot command:
+  > To implement with autopilot: `/stark-autopilot {PLAN_FILE}`
+  >
+  > Or in a new session: `/stark-autopilot --plan-slug {PLAN_SLUG}`
 
 Clean up temp files (decomposition JSON, validation envelope, any preview files).
 
@@ -508,7 +509,7 @@ Clean up temp files (decomposition JSON, validation envelope, any preview files)
   "knowledge_files_written": 3,
   "knowledge_files_updated": 1,
   "decision_record_appended": true,
-  "plan_deleted": true,
+  "plan_preserved": true,
   "dry_run": false
 }
 ```
@@ -522,7 +523,7 @@ Follows the Skill Observability Protocol. TaskCreate per step with `activeForm` 
 ## Mistakes to Avoid
 
 - Don't use `git add -A` for the enrichment commit — add specific files by name.
-- Don't delete the plan file before all issues are successfully created.
+- Don't delete the plan file — it is preserved for reference after task creation.
 - Don't create issues without error handling — if issue 8 of 15 fails, track partial state in run manifest.
 - Don't use comma-separated `--label` values — use separate `--field labels` entries or a JSON array.
 - Don't auto-fix the plan in Pass 1 — flag gaps, let the architect fix them.
@@ -542,7 +543,7 @@ See [references/failure-modes.md](references/failure-modes.md) for the full reco
 - Challenge architectural decisions (those were validated during brainstorming)
 - Add scope beyond what the plan describes
 - Assign issues to people or agents
-- Kick off implementation (execution is a separate concern)
+- Kick off implementation — prints the `/stark-autopilot` command for the next step
 - Create GitHub Projects or milestones (but integrates with existing projects via `.github/project-config.json`)
 - Supplement weak plans with external research — if the plan is insufficient, it stops and asks
 
@@ -552,6 +553,6 @@ See [references/failure-modes.md](references/failure-modes.md) for the full reco
 - **Plan is too vague for any decomposition** — Pass 1 will flag this. If the plan can't pass the checklist after 3 rounds, stop.
 - **Target repo has no docs/ directory** — create `docs/` with minimal structure during knowledge extraction.
 - **Very large plan (20+ tasks)** — handled by per-phase task generation. Guardrails recommend max 6-8 phases × 8-10 tasks; exceeding this signals the plan should be split.
-- **Plan contains no extractable knowledge** — skip Phase 6 doc enrichment, still delete the plan.
+- **Plan contains no extractable knowledge** — skip Phase 6 doc enrichment entirely.
 - **Detected repo doesn't match current checkout** — warn and ask user.
 - **Multiple git remotes** — prefer `origin`, warn if multiple remotes point to different orgs.
