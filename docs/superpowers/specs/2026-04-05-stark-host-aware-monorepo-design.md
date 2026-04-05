@@ -333,10 +333,15 @@ Example schema shape:
     "agent_override": { "type": "string", "required": false },
     "dry_run": { "type": "boolean", "required": false }
   },
-  "capabilities": [
+  "host_capabilities": [
     "progress",
-    "session_state",
+    "runtime_paths"
+  ],
+  "core_services": [
     "runtime_history",
+    "worker_dispatch"
+  ],
+  "external_prerequisites": [
     "git_shell",
     "gh_auth_status"
   ],
@@ -349,9 +354,16 @@ Example schema shape:
     "success",
     "degraded",
     "blocked"
-  ]
+  ],
+  "degradation_policy": {
+    "min_workers": 1,
+    "outcome_if_below": "blocked",
+    "outcome_if_partial": "degraded"
+  }
 }
 ```
+
+The three capability fields match the taxonomy in **Host capability taxonomy**: `host_capabilities` are resolved via the adapter, `core_services` are always available from `stark_core`, `external_prerequisites` are validated at workflow start against the environment. First-wave workflows must not require `session_state` (deferred to Phase C).
 
 ### Contract versioning policy
 
@@ -520,6 +532,8 @@ class ArtifactPresenter(Protocol):
 - All adapter method calls in shared core are wrapped with try/except at the call site
 - Adapter exceptions for non-critical capabilities (`progress`, `telemetry_sink`) are logged as `host_adapter_failure` telemetry events and silently tolerated
 - Adapter exceptions for critical capabilities (`runtime_paths`) surface as workflow-level `blocked` outcomes — the workflow cannot proceed without a valid runtime root
+- `environment_info()` failure defaults to `blocked` because the safe starting assumption is that host environment validation is required; a workflow may explicitly relax this and accept degraded environment info when it has no external prerequisites to validate
+- `ask_choice()` failure is `blocked` when the workflow requires an interactive decision and has no valid default; if the workflow contract explicitly allows a default and one is supplied, shared core may continue with that default
 - Adapters that cannot fulfill a declared capability raise `AdapterCapabilityError`; shared core probes `supported_capabilities()` at workflow start
 
 ### Adapter concurrency contract
@@ -694,7 +708,12 @@ Telemetry events must not contain secrets, credentials, or raw source code. Even
 
 - Artifact writes are isolated by run-scoped directories — parallel runs cannot collide
 - History writes use atomic temp-then-rename within run-scoped paths
-- `locks/` uses file locks with a defined TTL (default: 10 minutes) and acquisition timeout (default: 30 seconds). If acquisition times out, the workflow fails as `blocked`. `stark_doctor.py` recovers stale locks (older than TTL)
+- `locks/` uses file locks with a heartbeat-based liveness protocol:
+  - Lock files contain `{"pid": N, "host_id": "...", "workflow_id": "...", "heartbeat": "<ISO timestamp>"}`
+  - The lock holder updates `heartbeat` every 30 seconds while running
+  - A lock is considered stale only when **both** the PID is no longer running (checked via `os.kill(pid, 0)`) **and** the heartbeat is older than 2 minutes. TTL alone is not sufficient — a long-running migration or review may legitimately hold a lock for longer than any fixed TTL.
+  - If a prospective acquirer finds a stale lock, it removes it and re-acquires. If the lock holder is still alive (PID check passes), the acquirer waits up to 30 seconds then fails as `blocked`.
+  - `stark_doctor.py` can force-remove locks with `--force-unlock` after confirming the PID is dead
 - Telemetry appends use `flock` with short timeout; contention drops the event rather than blocking
 - Multiple workflows from different hosts writing to the same runtime root is supported without coordination beyond the file-lock convention
 
@@ -738,6 +757,25 @@ Workers and host adapters retrieve secrets via `stark_core.secrets.get_secret(ke
 4. Compatibility shims may mirror or migrate selected legacy files, but the canonical source of truth is Stark runtime
 5. The `manifest.json` records the runtime schema version; startup code checks it and runs pending migrations automatically
 
+### Relationship to `~/.stark-insights`
+
+`~/.stark-insights` is a separate system: a local Docker container + SQLite queue (`queue.db`, `buffer.db`) that receives telemetry events via HTTP POST and syncs to Cloud SQL. It is provisioned by `install.sh` today and referenced by hooks in `config/settings.json`, multiple skills, and `scripts/emit_queue.py`.
+
+**Decision: `~/.stark-insights` is not migrated into `~/.stark/runtime/`. It remains a separate system.**
+
+Rationale:
+
+- `stark-insights` is a service with its own API, schema, Docker container, and deployment lifecycle. It is not "runtime state" — it is a downstream consumer of events.
+- `~/.stark/runtime/telemetry/events.jsonl` is the local durable log. `stark-insights` is the analytics pipeline that consumes from it (or from the existing local queue).
+- Merging them would couple the local runtime to a service deployment, which is the opposite of the runtime independence this spec establishes.
+
+What changes:
+
+- `install.sh` currently creates `~/.stark-insights/`. The new `stark_install.py` does **not** create or manage it — that remains `stark-insights`'s own installer responsibility.
+- Skills that emit to `stark-insights` via HTTP POST continue to do so. The V1 telemetry (`events.jsonl`) is a parallel local store, not a replacement for the insights pipeline.
+- If `stark-insights` is down, events go to `events.jsonl` only. If `stark-insights` is up, events go to both. The two stores are independent and may be reconciled later if needed.
+- `config/settings.json` hooks that reference `~/git/Evinced/stark-insights/` are host-specific install config (Claude adapter) and move to `hosts/claude/install/` during Phase B.
+
 ### Why this is necessary
 
 Runtime state belongs to Stark, not to Claude. As long as the runtime lives under `~/.claude`, Claude remains the accidental platform owner.
@@ -752,31 +790,28 @@ Config must distinguish host config from worker config.
 
 Canonical host IDs use the full name: `claude-code`, `codex-cli`. The install CLI accepts short aliases (`claude`, `codex`) that map to canonical IDs. Config files always use canonical IDs.
 
-### Config file locations
+### Config ownership model
 
-There are two distinct config scopes:
+There are three config scopes with strict ownership. No field appears in more than one scope.
 
-- **Shared config** (`stark.config.json` at repo root) — host-neutral settings: workers, runtime, workflow defaults. This is the authoritative source for shared behavior.
-- **Host install config** (`hosts/<host>/install/config.json`) — host-specific settings: install root, compatibility mode, host-specific feature flags. These are host-owned.
+| Scope | File | Owns | Does not own |
+|---|---|---|---|
+| **Shared** | `stark.config.json` (repo root) | workers, runtime, workflow defaults | host install paths, host compatibility, host feature flags |
+| **Org overlay** | `org/<org>/config.json` | per-org worker overrides, per-org workflow defaults | host install, shared runtime root |
+| **Host** | `hosts/<host>/install/config.json` | install root, compatibility mode, host feature flags, hooks | workers, runtime, workflow semantics |
 
-The current `global/config.json` migrates into `stark.config.json`. The current `config/settings.json` migrates into host-specific install config.
+The canonical config loading function lives in `stark_core.config` and replaces both `scripts/config_loader.py` (reads `~/.claude/code-review/config.json`) and `scripts/plan_to_tasks_validate.py`'s inline loader (merges global → repo). One loader, one merge order.
 
-### Top-level shared config shape
+### Merge order
+
+`stark.config.json` → `org/<org>/config.json` → `hosts/<host>/install/config.json`
+
+Later scopes override earlier scopes for keys they own. A host config that attempts to set a `workers` key is rejected at load time (schema validation). A shared config that contains host-specific `install_root` is rejected. This is enforced by the config schema, not by convention.
+
+### Shared config shape
 
 ```json
 {
-  "hosts": {
-    "claude-code": {
-      "enabled": true,
-      "install_root": "~/.claude/skills",
-      "compatibility_mode": "read-legacy-runtime"
-    },
-    "codex-cli": {
-      "enabled": true,
-      "install_root": "~/.codex/agents",
-      "compatibility_mode": "none"
-    }
-  },
   "workers": {
     "claude": {
       "enabled": true,
@@ -800,7 +835,7 @@ The current `global/config.json` migrates into `stark.config.json`. The current 
     }
   },
   "workflow_defaults": {
-    "stark-review": {
+    "stark-team-review": {
       "worker_set": ["claude", "codex", "gemini"],
       "timeout_s": 300,
       "degradation_policy": { "min_workers": 1 }
@@ -809,22 +844,36 @@ The current `global/config.json` migrates into `stark.config.json`. The current 
 }
 ```
 
-### Org config overlay
+Note: `stark-team-review` is the multi-worker workflow. `stark-review` is single-agent and does not set `worker_set` here.
 
-The existing `org/evinced/` config merges on top of shared config, below host config. Merge order: `stark.config.json` → `org/<org>/config.json` → `hosts/<host>/install/config.json`. This is the same hierarchical merge the current system uses, made explicit. Org config migration is assigned to Phase B (see Rollout Plan).
+### Host config shape (example: Claude)
+
+```json
+{
+  "host_id": "claude-code",
+  "install_root": "~/.claude/skills",
+  "compatibility_mode": "read-legacy-runtime",
+  "hooks": {
+    "pre_session": "~/.stark-insights/hooks/skill-setup.py"
+  }
+}
+```
+
+Host-specific install paths, compatibility behavior, and hooks live here — never in shared config.
 
 ### Required config decisions
 
-1. **Hosts and workers are separate top-level sections**
-2. **Runtime root is explicit and host-neutral**
-3. **Host install roots are configurable per-host**
-4. **Workflow defaults reference workers, not hosts**
-5. **Config merge order is shared → org → host**
+1. **Workers and workflow defaults are shared-owned — never in host config**
+2. **Host install paths and compatibility modes are host-owned — never in shared config**
+3. **Runtime root is shared-owned and host-neutral**
+4. **Config merge order is shared → org → host, enforced by schema validation**
+5. **One canonical loader in `stark_core.config` replaces both existing loaders**
 6. **Host IDs are canonical (claude-code, codex-cli); short aliases for CLI only**
+7. **Cross-scope key pollution is a load-time error, not a silent merge**
 
 ### Migration rule
 
-The existing `global/config.json` is migrated into `stark.config.json`. The existing `config/settings.json` is split into host-specific install config. Any new field that mixes host and worker concerns is rejected.
+The existing `global/config.json` is migrated into `stark.config.json` (shared fields only). The existing `config/settings.json` is split: host-specific fields go to `hosts/<host>/install/config.json`, hooks go to host config. Any field that mixes host and worker concerns is rejected at migration time and requires manual resolution.
 
 ---
 
@@ -1045,7 +1094,7 @@ Mutable runtime state (history records, session state, migration checkpoints) mu
 - fsync
 - rename into canonical location
 
-Write-once artifacts (review markdown, JSON reports) scoped under run-ID directories do not require atomic rename — they are written once and never updated. Telemetry appends to `events.jsonl` using atomic line writes (< PIPE_BUF).
+Write-once artifacts (review markdown, JSON reports) scoped under run-ID directories do not require atomic rename — they are written once and never updated. Telemetry appends to `events.jsonl` are protected by `flock` and remain best-effort rather than part of the critical write path.
 
 ### Run commitment model
 
@@ -1194,10 +1243,21 @@ Map each failure class from the Failure Handling section to test cases:
 
 ### 6. Cross-host golden tests
 
-For the five first-wave workflows:
+For each first-wave workflow, a golden test runs the same inputs through both hosts and asserts:
 
-- same inputs produce equivalent `WorkflowResult` artifacts/outcomes across hosts
-- host UX may differ, but shared output structure matches the artifact schema
+1. **Outcome equivalence:** `WorkflowResult.outcome` is identical (same `success`/`degraded`/`blocked`)
+2. **Artifact structural equivalence:** artifacts in `~/.stark/runtime/artifacts/<workflow>/<run-id>/` have the same set of files, same top-level JSON keys, same field types. Values may differ (timestamps, run IDs, host metadata) but the schema shape must match.
+3. **Worker participation equivalence:** `WorkflowResult.worker_results` lists the same set of `worker_id` entries with compatible `status` values (both hosts dispatched the same workers)
+4. **Finding-count tolerance:** for review workflows, the classified findings count from each host must be within ±10% or ±2 absolute (whichever is greater), since non-deterministic model output can vary across runs. The test asserts structural equivalence, not content identity.
+
+What is explicitly **not** required to match:
+
+- host UX output (progress messages, terminal rendering)
+- run IDs and timestamps
+- telemetry event payloads (host metadata differs by design)
+- exact finding text (model output is non-deterministic)
+
+This definition makes the golden tests executable: they compare JSON structure and counts, not string equality. A failing golden test must report which specific assertion failed (outcome, artifact shape, worker set, or finding count) so the root cause is immediately visible.
 
 ### 7. Smoke tests
 
@@ -1341,7 +1401,7 @@ Deliver:
 - migration of `config/settings.json` into host-specific install config
 - retirement of `install.sh` compatibility shim (replaced by `stark_install.py`)
 
-Exit criteria: both hosts pass adapter conformance + golden tests + smoke tests. `stark-review` produces equivalent artifacts from both hosts.
+Exit criteria: both hosts pass adapter conformance + golden tests + smoke tests. Specifically, for each first-wave workflow: outcome equivalence, artifact structural equivalence, worker participation equivalence, and finding-count tolerance as defined in the cross-host golden test specification (see Testing and Verification Strategy).
 
 **Blocking prerequisite for Codex:** validate that `codex-cli` supports a configurable extension/agents directory before starting Codex wrappers. **Owner: Aryeh. Deadline: before Phase B Codex work begins.** If Codex CLI does not support this, the fallback is a Python CLI entrypoint (`python3 -m stark_core.cli stark-review ...`) that Codex invokes via its tool-use or shell capabilities.
 
