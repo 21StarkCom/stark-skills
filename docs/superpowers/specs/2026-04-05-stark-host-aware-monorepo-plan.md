@@ -28,6 +28,24 @@ Build the host boundary before moving host products. The execution order is:
 - Contracts are scoped to 5 first-wave workflows only
 - `~/.stark-insights` remains a separate downstream system, not part of the runtime
 
+**Plan-level success criteria** — the plan is done when:
+
+1. Both hosts pass adapter conformance, smoke tests, and cross-host golden tests for all 5 first-wave workflows
+2. `~/.stark/runtime/` is the sole write target for new runs; legacy `~/.claude/code-review/` is read-only through the Claude adapter
+3. `scripts/stark_install.py --host all --status` reports clean for both hosts
+4. No shared code in `stark_core/` references `~/.claude` paths (CI-enforced)
+5. All existing Claude workflows continue to function (backward compatibility)
+
+**Effort estimates:**
+
+| Label | Meaning | Approximate calendar time (1 engineer) |
+|---|---|---|
+| S | Small | 1–3 days |
+| M | Medium | 1–2 weeks |
+| L | Large | 2–4 weeks |
+
+Total estimated: 10–16 weeks for one engineer. Phases 4+5 parallelizable if staffed.
+
 **Design-to-plan mapping:**
 
 | Design Phase | Plan Phases | Scope |
@@ -83,6 +101,7 @@ Confirm whether `codex-cli` can load `AGENTS.md` from a configurable location. I
 - Files: `docs/architecture/adr-codex-extension-surface.md` (new)
 - Done when: one documented decision exists and Phase 5 can target a stable invocation surface
 - Owner: Aryeh
+- **Deadline: 1 week from plan start.** If no decision by deadline, default to CLI fallback and unblock Phase 5.
 
 **0.2 Inventory all Claude-coupled reads and writes**
 
@@ -147,12 +166,12 @@ Create `stark_core/config.py`. Load `stark.config.json` → `org/<org>/config.js
 - Files: `stark_core/config.py`, `stark.config.json`, `org/evinced/config.json` scaffold, `tests/config/`
 - Done when: invalid cross-scope keys fail tests; valid merges produce deterministic results
 
-**1.4 Move shared prompt ownership**
+**1.4 Prepare shared prompt resolution**
 
-Relocate `global/prompts/` to `prompts/` at repo root. Update prompt resolution in shared code. Keep a temporary compatibility symlink only if Phase 3 extraction needs it.
+Add a prompt resolver in `stark_core/` that reads from `prompts/` (the future canonical location). Create `prompts/` as a **symlink to `global/prompts/`** so existing scripts and `install.sh` continue working unchanged. The actual directory move happens in Phase 3 after extraction is complete and scripts have been migrated.
 
-- Files: `prompts/`, prompt resolver in `stark_core/`
-- Done when: no shared import or script resolves prompts from `global/prompts/`
+- Files: `stark_core/prompts.py`, `prompts` → `global/prompts` (symlink)
+- Done when: `stark_core` resolves prompts via the new resolver; existing scripts still work via `global/prompts/`
 
 **1.5 Implement the host adapter base interface and conformance harness**
 
@@ -178,7 +197,7 @@ mypy stark_core
 
 #### Rollback
 
-Keep existing scripts as the production path until `pip install -e .` and contract/config tests are green. Rollback by reverting `pyproject.toml`, `stark_core/`, and contract/config changes together.
+Keep existing scripts as the production path until `pip install -e .` and contract/config tests are green. Rollback by reverting `pyproject.toml`, `stark_core/`, contracts, and the `prompts` symlink together. Existing scripts continue using `global/prompts/` unchanged.
 
 ---
 
@@ -229,6 +248,16 @@ Create `scripts/migrate_runtime_state.py` with `--dry-run`, `--batch-size`, `--r
 - Files: `scripts/migrate_runtime_state.py`, `runtime/migrations/`
 - Done when: copy-then-verify, interrupted-resume, and rollback tests pass against fixture legacy data
 
+**Important:** Migration is built and tested here but **not executed in production** until Phase 6 (task 6.3), after both host products are stable. The cutover sequence is:
+
+1. Run `migrate_runtime_state.py --dry-run` to report volume and validate
+2. Switch host adapters to write new runs to `~/.stark/runtime/` (this happens naturally once hosts are deployed)
+3. Run `migrate_runtime_state.py --from claude` to copy legacy history
+4. Verify migrated data via `--verify` flag
+5. Update `manifest.json` migration epoch — legacy read-through stops for migrated records
+
+There is no "write fence" step because the design spec's architecture avoids dual-write by construction: once a host adapter writes to Stark runtime, it never writes to `~/.claude`. Legacy scripts that haven't been migrated yet continue writing to `~/.claude` (Claude adapter reads those via compatibility_paths). The two stores are reconciled only when migration copies them.
+
 **2.6 Implement secret access abstraction**
 
 Add `stark_core/secrets.py` abstracting macOS Keychain (local) and env vars (CI). Worker and adapter code never reads tokens from config JSON or runtime artifacts.
@@ -276,14 +305,14 @@ Run `python3 scripts/migrate_runtime_state.py --from claude --rollback`. Restore
 
 **3.1 Extract worker dispatch and failure normalization**
 
-Implement `WorkerDispatchRequest` and `WorkerDispatchResult` types. Enforce allowlisted `worker_id`. All worker CLI invocation uses `subprocess` with argument lists only (never `shell=True`). Normalize every failure to `WorkerDispatchResult(status="failed")`. Worker timeout default 300s, `max_retries` default 1.
+Implement `WorkerDispatchRequest` and `WorkerDispatchResult` types. Enforce allowlisted `worker_id`. All worker CLI invocation uses `subprocess` with argument lists only (never `shell=True`). Normalize every failure to `WorkerDispatchResult(status="failed")`. Worker timeout default 300s (configurable per-workflow — design workflows need 600s+), `max_retries` default 1. Sanitize worker environment: only pass explicitly allowlisted env vars to subprocess (PATH, HOME, auth tokens), not the full parent environment.
 
 - Files: `stark_core/workers/types.py`, `stark_core/workers/dispatch.py`, `stark_core/workers/{claude,codex,gemini}.py`
 - Done when: stubbed worker tests cover success, timeout, auth failure, retry, and partial results
 
 **3.2 Extract orchestration from existing scripts**
 
-Move reusable logic out of `scripts/multi_review.py`, `scripts/skill_router.py`, and related workflow scripts into `stark_core/orchestration/` and `stark_core/workflows/`. Keep temporary script shims that call shared code until host wrappers replace them in Phases 4–5.
+Move reusable logic out of `scripts/multi_review.py`, `scripts/plan_review_dispatch.py`, `scripts/design_to_plan_dispatch.py`, and related workflow scripts into `stark_core/orchestration/` and `stark_core/workflows/`. Keep temporary script shims that call shared code until host wrappers replace them in Phases 4–5. (Inventory from Phase 0.2 determines the exact script list.)
 
 - Files: `stark_core/orchestration/*.py`, `stark_core/workflows/*.py`, compatibility shims in `scripts/`
 - Done when: all five workflows can run through shared code with a test adapter and stub workers
@@ -301,6 +330,25 @@ Expose `python3 -m stark_core.cli <workflow> ...` for smoke tests and as the Cod
 
 - Files: `stark_core/cli.py`
 - Done when: every first-wave workflow can be invoked without a host wrapper in CI
+
+**3.5 Finalize prompt directory move**
+
+Replace the `prompts` → `global/prompts` symlink (created in Phase 1.4) with the actual directory. Move `global/prompts/` to `prompts/`. Update `install.sh` symlinks to point to the new location. Remove the old `global/prompts/` directory.
+
+- Files: `prompts/` (actual directory), `install.sh` symlink updates
+- Done when: `global/prompts/` no longer exists; all prompt resolution goes through `stark_core` or the new `prompts/` path
+
+**3.6 Add CI pipeline for shared core**
+
+Define the CI configuration that runs on every PR touching `stark_core/`, `contracts/`, or `prompts/`:
+- Unit tests (contracts, config, adapters, runtime, telemetry)
+- Security conformance (no `~/.claude` in shared core, subprocess list-only, permissions)
+- Lint + type check (ruff, mypy)
+- Workflow tests with stub workers
+- Gated: smoke tests with live workers (requires credentials, runs on merge to main only)
+
+- Files: `.github/workflows/stark-core-ci.yml` (new)
+- Done when: CI runs automatically on PRs and blocks merge on failure
 
 #### Risks
 
@@ -326,7 +374,7 @@ Retain script shims to old entrypoints until each extracted workflow passes its 
 **Goal:** Preserve Claude as a first-class host while removing its architectural ownership.
 **Dependencies:** Phase 3
 **Effort:** M
-**Parallelizable with:** Phase 5 (Codex)
+**Parallelizable with:** Phase 5 (Codex) — coordinate on `stark_install.py`: Phase 4 owns the shared installer framework + `--host claude`; Phase 5 adds `--host codex` as an extension. Merge Phase 4 installer work first.
 
 #### Tasks
 
@@ -462,10 +510,17 @@ Implement `scripts/stark_doctor.py`: runtime permissions, manifest version, `sta
 
 **6.3 Complete config and install cutover**
 
-Migrate `org/evinced/` to `org/evinced/config.json` (org overlay format). Retire direct use of `global/config.json`. Remove `install.sh` compatibility shim.
+Migrate `org/evinced/` to `org/evinced/config.json` (org overlay format). Retire direct use of `global/config.json`. Deprecate `install.sh` — add a deprecation warning that prints on every run, pointing to `stark_install.py`. Remove `install.sh` after one release cycle (not immediately).
 
-- Files: `org/evinced/config.json`, `install.sh` removal, release notes
-- Done when: install and runtime setup flow exclusively through `scripts/stark_install.py`
+- Files: `org/evinced/config.json`, `install.sh` (deprecation warning added), release notes
+- Done when: install and runtime setup flow through `scripts/stark_install.py`; `install.sh` prints deprecation warning but still works
+
+**6.5 Document migration path for existing users**
+
+Write a migration guide for users who already have `~/.claude/skills/` symlinks from a previous `install.sh` run. The guide covers: running `stark_install.py --host claude` to set up the new layout, what changes in their `~/.claude/` directory, and how to verify the migration succeeded.
+
+- Files: `docs/operations/migration-guide.md` (new)
+- Done when: an existing Claude user can follow the guide and end up with working new-layout wrappers
 
 **6.4 Document operational maintenance**
 
@@ -527,15 +582,20 @@ Tests follow the dependency order. The pyramid is strict — no layer tests what
 
 ## 6. Rollback Plan Summary
 
-| Phase | Rollback strategy |
-|---|---|
-| 0 | Freeze Codex host work; continue with CLI + Claude extraction only |
-| 1 | Revert `pyproject.toml`, `stark_core/`, contracts together; existing scripts remain production path |
-| 2 | `migrate_runtime_state.py --rollback`; restore read-through; keep `~/.stark/runtime/` |
-| 3 | Point script shims back to legacy implementations per-workflow |
-| 4 | Restore prior wrapper placement; disable new Claude adapter entrypoints |
-| 5 | Disable Codex installer; keep neutral CLI fallback only |
-| 6 | Block cutover; keep `install.sh` compatibility wrapper until golden tests pass |
+**Rollback trigger criteria:** A phase triggers rollback when:
+- Its verification commands fail after fix attempts AND the failure is not a test environment issue
+- A downstream phase is blocked for > 3 working days by a defect introduced in this phase
+- The phase owner decides the approach is fundamentally wrong (not just implementation bugs)
+
+| Phase | Trigger | Rollback strategy |
+|---|---|---|
+| 0 | Codex decision not made by deadline | Freeze Codex host work; default to CLI fallback; continue Claude extraction |
+| 1 | `pip install -e .` or contract tests cannot be made green | Revert `pyproject.toml`, `stark_core/`, contracts together; existing scripts remain production path |
+| 2 | Migration data corruption or runtime bootstrap failures | `migrate_runtime_state.py --rollback`; restore read-through; keep `~/.stark/runtime/` |
+| 3 | Extracted workflow behaves differently from legacy script | Point script shims back to legacy implementations per-workflow |
+| 4 | Claude smoke tests fail after wrapper migration | Restore prior wrapper placement; disable new Claude adapter entrypoints |
+| 5 | Codex smoke or conformance fails | Disable Codex installer; keep neutral CLI fallback only |
+| 6 | Golden tests fail or data reconciliation incomplete | Block cutover; keep `install.sh` compatibility wrapper until fixed |
 
 ## 7. Phase Dependency Graph
 
