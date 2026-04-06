@@ -12,39 +12,6 @@ vim_mode=$(echo "$input" | jq -r '.vim.mode // empty')
 session_name=$(echo "$input" | jq -r '.session_name // empty')
 session_id=$(echo "$input" | jq -r '.session_id // empty')
 
-# ── Directory (just the repo/folder name) ─────────────────────────────────
-dir_display=$(basename "$cwd")
-
-# ── Git branch + dirty ────────────────────────────────────────────────────
-git_branch_str=""
-git_dirty_str=""
-if git_branch=$(git -C "$cwd" --no-optional-locks rev-parse --abbrev-ref HEAD 2>/dev/null); then
-  git_branch_str="$git_branch"
-  modified=$(git -C "$cwd" --no-optional-locks diff --name-only 2>/dev/null | wc -l | tr -d ' ')
-  staged=$(git -C "$cwd" --no-optional-locks diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
-  untracked=$(git -C "$cwd" --no-optional-locks ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
-  changed=$(( modified + staged ))
-  parts=""
-  [ "$changed" -gt 0 ] && parts="\U0001f4c4 ${changed}"
-  [ "$untracked" -gt 0 ] && { [ -n "$parts" ] && parts="${parts} "; parts="${parts}\U0001f50e ${untracked}"; }
-  [ -n "$parts" ] && git_dirty_str="[${parts}]"
-fi
-
-# ── Context usage + velocity ─────────────────────────────────────────────
-ctx_pct=""
-ctx_alert=0
-ctx_trend=""
-if [ -n "$used_pct" ]; then
-  ctx_pct=$(printf "%.0f" "$used_pct")
-  [ "$ctx_pct" -ge 75 ] && ctx_alert=1
-  # Record context % and get trend indicator
-  ctx_trend=$(python3 -c "
-import sys; sys.path.insert(0, '$HOME/git/Evinced/stark-skills/scripts')
-from emit_queue import record_context_pct
-print(record_context_pct($ctx_pct))
-" 2>/dev/null)
-fi
-
 # ── Catppuccin Mocha ANSI (256-color) ─────────────────────────────────────
 # peach=#fab387 ≈ 216, yellow=#f9e2af ≈ 229, green=#a6e3a1 ≈ 150
 # sapphire=#74c7ec ≈ 117, lavender=#b4befe ≈ 183, red=#f38ba8 ≈ 211
@@ -63,6 +30,50 @@ C_TEAL="\033[38;5;158m"
 C_MAROON="\033[38;5;217m"
 C_MAUVE="\033[38;5;141m"
 C_SKY="\033[38;5;117m"
+
+# ── Directory (just the repo/folder name) ─────────────────────────────────
+dir_display=$(basename "$cwd")
+
+# ── Git branch + dirty ────────────────────────────────────────────────────
+git_branch_str=""
+git_dirty_str=""
+if git_branch=$(git -C "$cwd" --no-optional-locks rev-parse --abbrev-ref HEAD 2>/dev/null); then
+  git_branch_str="$git_branch"
+  modified=$(git -C "$cwd" --no-optional-locks diff --name-only 2>/dev/null | wc -l | tr -d ' ')
+  staged=$(git -C "$cwd" --no-optional-locks diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
+  untracked=$(git -C "$cwd" --no-optional-locks ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
+  changed=$(( modified + staged ))
+  # Lines added/removed (staged + unstaged)
+  diff_stat=$(git -C "$cwd" --no-optional-locks diff --numstat 2>/dev/null; git -C "$cwd" --no-optional-locks diff --cached --numstat 2>/dev/null)
+  lines_added=0; lines_removed=0
+  if [ -n "$diff_stat" ]; then
+    lines_added=$(echo "$diff_stat" | awk '{s+=$1} END{print s+0}')
+    lines_removed=$(echo "$diff_stat" | awk '{s+=$2} END{print s+0}')
+  fi
+  parts=""
+  [ "$changed" -gt 0 ] && parts="\U0001f4c4 ${changed}"
+  [ "$untracked" -gt 0 ] && { [ -n "$parts" ] && parts="${parts} "; parts="${parts}\U0001f50e ${untracked}"; }
+  diff_parts=""
+  [ "$lines_added" -gt 0 ] && diff_parts="${C_GREEN}+${lines_added}${RESET}"
+  [ "$lines_removed" -gt 0 ] && { [ -n "$diff_parts" ] && diff_parts="${diff_parts} "; diff_parts="${diff_parts}${C_RED}-${lines_removed}${RESET}"; }
+  [ -n "$diff_parts" ] && { [ -n "$parts" ] && parts="${parts} "; parts="${parts}${diff_parts}"; }
+  [ -n "$parts" ] && git_dirty_str="[${parts}]"
+fi
+
+# ── Context usage + velocity ─────────────────────────────────────────────
+ctx_pct=""
+ctx_alert=0
+ctx_trend=""
+if [ -n "$used_pct" ]; then
+  ctx_pct=$(printf "%.0f" "$used_pct")
+  [ "$ctx_pct" -ge 75 ] && ctx_alert=1
+  # Record context % and get trend indicator
+  ctx_trend=$(python3 -c "
+import sys; sys.path.insert(0, '$HOME/git/Evinced/stark-skills/scripts')
+from emit_queue import record_context_pct
+print(record_context_pct($ctx_pct))
+" 2>/dev/null)
+fi
 
 # ── Last tool duration ────────────────────────────────────────────────────
 last_tool_str=""
@@ -102,6 +113,52 @@ fi
 # ── Token counts (cumulative session totals) ─────────────────────────────
 tokens_in=$(echo "$input" | jq -r '.context_window.total_input_tokens // empty')
 tokens_out=$(echo "$input" | jq -r '.context_window.total_output_tokens // empty')
+model_id=$(echo "$input" | jq -r '.model.id // ""')
+
+# ── Cost estimation ───────────────────────────────────────────────────────
+# Prices per million tokens (USD). Cumulative session totals.
+session_cost=""
+if [ -n "$tokens_in" ] && [ -n "$tokens_out" ] && [ -n "$model_id" ]; then
+  session_cost=$(STARK_MODEL_ID="$model_id" STARK_TOKENS_IN="$tokens_in" \
+    STARK_TOKENS_OUT="$tokens_out" python3 - <<'PYEOF'
+import os
+
+model = os.environ.get("STARK_MODEL_ID", "")
+try:
+    tokens_in = int(float(os.environ.get("STARK_TOKENS_IN") or 0))
+    tokens_out = int(float(os.environ.get("STARK_TOKENS_OUT") or 0))
+except (ValueError, TypeError):
+    tokens_in = tokens_out = 0
+
+PRICES = {
+    "claude-opus-4":     {"in": 15.0, "out": 75.0},
+    "claude-sonnet-4":   {"in": 3.0,  "out": 15.0},
+    "claude-sonnet-3-7": {"in": 3.0,  "out": 15.0},
+    "claude-opus-3-5":   {"in": 15.0, "out": 75.0},
+    "claude-sonnet-3-5": {"in": 3.0,  "out": 15.0},
+    "claude-haiku-4-5":  {"in": 0.8,  "out": 4.0},
+    "claude-haiku-3-5":  {"in": 0.8,  "out": 4.0},
+    "claude-opus-3":     {"in": 15.0, "out": 75.0},
+    "claude-haiku-3":    {"in": 0.25, "out": 1.25},
+}
+
+price = None
+for key in sorted(PRICES.keys(), key=len, reverse=True):
+    normalized_model = model.replace(".", "-")
+    if key in normalized_model or normalized_model.startswith(key):
+        price = PRICES[key]
+        break
+
+if price is not None:
+    M = 1_000_000
+    cost = (tokens_in / M) * price["in"] + (tokens_out / M) * price["out"]
+    if cost < 0.01:
+        print(f"{cost*100:.3f}\u00a2")
+    else:
+        print(f"${cost:.3f}")
+PYEOF
+  2>/dev/null)
+fi
 
 # ── Session start time (persisted per session_id) ─────────────────────────
 session_start_time=""
@@ -134,7 +191,7 @@ SEP=" ${C_DIM}|${RESET} "
 out="${C_YELLOW}${dir_display}${RESET}"
 if [ -n "$git_branch_str" ]; then
   out="${out} ${C_GREEN}${git_branch_str}${RESET}"
-  [ -n "$git_dirty_str" ] && out="${out} ${C_RED}${git_dirty_str}${RESET}"
+  [ -n "$git_dirty_str" ] && out="${out} ${C_MAROON}${git_dirty_str}${RESET}"
 fi
 
 # model — compress "Opus 4.6 (1M context)" → "Opus[1M]", "Sonnet 4.6" → "Sonnet" etc.
@@ -163,6 +220,11 @@ if [ -n "$tokens_in" ] || [ -n "$tokens_out" ]; then
   [ -n "$tokens_in" ]  && tok_str="\u2b06 ${C_GREEN}${tokens_in}${RESET}"
   [ -n "$tokens_out" ] && tok_str="${tok_str} \u2b07 ${C_RED}${tokens_out}${RESET}"
   out="${out}${SEP}${tok_str}"
+fi
+
+# cost estimate — 💰
+if [ -n "$session_cost" ]; then
+  out="${out}${SEP}${C_PEACH}\U0001f4b0 ${session_cost}${RESET}"
 fi
 
 # inflight count — ⚡️

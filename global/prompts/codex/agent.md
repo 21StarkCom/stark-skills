@@ -40,5 +40,6 @@ If a "Design Spec" section is included above, use it as review context:
 
 ## ADR-Aware Review
 If a `docs/adr/` directory exists in the repo, scan accepted ADRs for decisions relevant to the changed files.
+- **VERIFY BEFORE CITING:** Only reference ADRs you have actually located and read in the repository filesystem. Do not assume ADR numbers exist based on topic inference. If you cannot find a `docs/adr/` directory or matching ADR file, do not reference any ADR — report the finding on its own merits without citing a non-existent document.
 - If the PR contradicts an accepted ADR without a superseding ADR, flag it: "This change contradicts ADR NNNN (title). If intentional, a new ADR superseding NNNN should accompany this PR."
 - If the PR introduces a significant architectural choice without an ADR, suggest one.

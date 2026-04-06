@@ -2,6 +2,27 @@
 
 Tracks improvements to review prompts based on stark-team-review assessments.
 
+## 2026-04-06 — ADR hallucination guard, design-doc type calibration
+
+**Source:** PR #264 in GetEvinced/stark-skills
+**Prompts dir:** default (PR code review)
+**Assessment:** 53-55% signal-to-noise across 2 rounds; Codex fabricated ADR-0014/-0015/-0017 references (10 FPs); Codex type-safety flagged spec pseudo-code types as missing enums (5 noise)
+
+### Changes Made
+
+| File | Change | Reason |
+|------|--------|--------|
+| `global/prompts/codex/agent.md` | Added VERIFY BEFORE CITING rule to ADR-Aware Review section | Codex fabricated ADR numbers it never read from the filesystem (10 false positives across 2 rounds, 4 domains) |
+| `global/prompts/codex/07-spec-conformance.md` | Added external document verification rule to Critical rules | Spec-conformance domain cited non-existent ADRs (4 FPs) — reinforces agent-level guard |
+| `global/prompts/codex/04-type-safety.md` | Added design doc exclusion to Do NOT flag section | Codex flagged `str`/`dict` in spec pseudo-code as missing enums/typed payloads (5 noise across 2 rounds) |
+
+### Validation
+- [x] Prompt syntax OK
+- [x] Python compiles
+- [x] Config valid JSON
+
+---
+
 ## 2026-04-05 — Cross-agent dedup, spec context injection, generator protocol, severity overrides
 
 **Source:** PR #179 in GetEvinced/stark-data-core

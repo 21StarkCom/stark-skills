@@ -7,6 +7,7 @@ Review the diff for conformance to the functional specification, acceptance crit
 Critical rules:
 - Read the ticket/spec first. The PR description's stated goals are your source of truth.
 - Do NOT invent requirements. Only flag missing functionality explicitly described in the spec.
+- Do NOT cite external documents (ADRs, RFCs, prior specs) unless you have verified the document exists in the repository by reading it. If you cannot locate the referenced file, report the finding on its own merits without citing a phantom document.
 - Partial implementations are findings — if the spec lists 5 criteria and the PR addresses 3, flag the missing 2.
 - Behavioral deviations are findings — wrong status code, wrong default, wrong field name vs spec.
 - Scope additions are findings — functionality not described in the spec should be called out.

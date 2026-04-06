@@ -6,6 +6,7 @@ Review the diff for type safety issues. This is your strongest domain — be tho
 
 **Do NOT flag:**
 - Missing TypeScript declarations (`.d.ts`) for plain JavaScript packages that have no TypeScript consumers or no `types` field in package.json. Only flag missing declarations when the package is consumed by TypeScript code.
+- Missing concrete types (enums, literal unions, typed payloads) in design documents or spec pseudo-code. Specs use illustrative types like `str` and `dict` to convey intent — concrete types are defined at implementation time. Only flag type contradictions between defined contracts (e.g., one section says `status: Literal["ok", "failed"]` and another uses `status: bool`).
 
 Check:
 - Would this pass tsc --noEmit from a consuming package?

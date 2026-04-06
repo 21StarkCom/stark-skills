@@ -28,6 +28,7 @@ $PYTHON $SCRIPTS/metrics.py $ARGUMENTS
 Pass through any user-provided flags (`--repo`, `--skill`, `--since`, `--json`).
 
 If the script exits non-zero:
+
 - Exit 1: no history data — tell the user to run `/stark-team-review` first
 - Exit 2: argument error — show usage
 
@@ -59,6 +60,7 @@ After presenting the report, check for meta-observations:
 Follow the [Skill Observability Protocol](~/.claude/code-review/standards/observability.md) for all timing, checkpoints, and metrics reporting.
 
 Additional skill-specific metrics:
+
 - Records loaded: count by skill type
 - Filters applied: repo, skill, date
 - Report sections generated
@@ -66,9 +68,12 @@ Additional skill-specific metrics:
 
 ## Failure Modes
 
-| Failure | Recovery |
-|---------|----------|
-| No history directory | "No history found. Run /stark-team-review to generate data." |
-| No matching records | "No records match filters. Try broader criteria." |
-| Corrupt JSON in history | Script warns on stderr, skips file, continues |
-| Script not found | "Run install.sh to set up stark-skills" |
+
+| Failure                 | Recovery                                                     |
+| ----------------------- | ------------------------------------------------------------ |
+| No history directory    | "No history found. Run /stark-team-review to generate data." |
+| No matching records     | "No records match filters. Try broader criteria."            |
+| Corrupt JSON in history | Script warns on stderr, skips file, continues                |
+| Script not found        | "Run install.sh to set up stark-skills"                      |
+
+
