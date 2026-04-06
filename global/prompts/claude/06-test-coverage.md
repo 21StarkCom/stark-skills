@@ -62,6 +62,7 @@ Adapt the checklist above to the codebase's tech stack. The React-specific items
 - Destructive operations tested with safeguards (dry-run, batch limits)
 
 ## Severity Guide
+- **Severity calibration:** Do **not** use `critical` for test-only quality gaps (e.g., "pass a mock to prove a feature flag is honored," missing mock wiring, or auxiliary edge-case coverage). Cap those at **high** or lower. Reserve `critical` for tests that would **green-light** a wrong primary behavior (data loss, auth bypass, or clear security regression) or for absence of tests on an **exploitable** public boundary the PR introduces.
 - **critical**: Test passes but tests wrong thing, missing test for primary use case
 - **high**: Missing test for public prop, missing a11y test for interactive element
 - **medium**: Missing edge case, test could be more specific

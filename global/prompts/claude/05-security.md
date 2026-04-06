@@ -62,6 +62,7 @@ Only flag input validation issues at **public API boundaries** (HTTP endpoints, 
 - Unvalidated URLs passed to HTTP clients or `git clone`
 - Missing URL scheme allowlist (reject `file://`, `ssh://`, etc.)
 - Internal network access from user-controlled URLs
+- **Vendor webhooks:** Fields such as `download_url` or redirect targets inside signed webhook JSON are still **server-fetchable URLs**. If the PR persists them and a worker fetches them later, treat as SSRF unless constrained: require HTTPS, allowlist hosts to expected vendor domains, and reject chains that escape to internal or metadata endpoints.
 
 **IAM & Permissions**
 - Overly broad IAM roles (project-level when per-resource suffices)

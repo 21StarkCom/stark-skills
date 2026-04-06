@@ -28,6 +28,7 @@ Then review for security issues:
 - Credentials logged or passed to child processes
 - Unvalidated URLs passed to HTTP clients or git clone (SSRF)
 - Missing URL scheme allowlist (reject file://, ssh://)
+- Vendor webhook payloads: URL fields later fetched by backend workers — enforce HTTPS + vendor host allowlist (SSRF if stored and fetched blindly)
 - Overly broad IAM roles (project-level when per-resource suffices)
 - Missing audience checks on OIDC/JWT token verification
 - Fail-open error handling (auth failures returning empty/success instead of raising)

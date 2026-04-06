@@ -2,6 +2,31 @@
 
 Tracks improvements to review prompts based on stark-team-review assessments.
 
+## 2026-04-06 — Test-coverage severity cap, vendor-webhook SSRF (PR review)
+
+**Source:** PR #170 in GetEvinced/transcript-optimizer  
+**Prompts dir:** default (PR code review)  
+**Assessment:** Codex labeled a test-harness gap as `critical`; SSRF theme on webhook `download_url` paths
+
+### Changes Made
+
+| File | Change | Reason |
+|------|--------|--------|
+| `global/prompts/claude/06-test-coverage.md` | Added severity calibration bullet under Severity Guide | Reserve `critical` for primary-path / exploitable gaps; not mock-wiring or flag-coverage style tests |
+| `global/prompts/codex/06-test-coverage.md` | Same calibration in severities line | Align Codex with Claude |
+| `global/prompts/gemini/06-test-coverage.md` | Added calibration before severity list | Keep three agents consistent |
+| `global/prompts/claude/05-security.md` | Vendor webhook URL persistence + fetch SSRF checklist | Close loop on Zoom/webhook URL findings |
+| `global/prompts/codex/05-security.md` | One-line vendor webhook SSRF bullet | Codex compact checklist |
+| `global/prompts/gemini/05-security.md` | One-line vendor webhook SSRF bullet | Gemini parity |
+
+### Validation
+
+- [x] Prompt syntax OK
+- [x] Python compiles (n/a — markdown only)
+- [x] Config valid JSON (n/a)
+
+---
+
 ## 2026-04-06 — ADR hallucination guard, design-doc type calibration
 
 **Source:** PR #264 in GetEvinced/stark-skills

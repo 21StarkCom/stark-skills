@@ -33,7 +33,7 @@ Check:
 
 **Stack Adaptation:** The React-specific items above (props, refs, className, Stories, getByRole) apply only to frontend code. For Python/backend: check error paths, async behavior, data transformations, external service boundary mocking, and destructive operation safeguards.
 
-Severities: critical = test passes but tests wrong thing, primary use case untested. high = missing test for public prop, missing a11y test. medium = missing edge case. low = nice-to-have test.
+Severities: **Do not** use `critical` for test-harness or assertion-style gaps (e.g., "the disabled-path test does not pass a mock client"). Those are **high** at most. Reserve `critical` for wrong assertions on primary production paths or missing tests where the PR ships an exploitable boundary with zero coverage. Otherwise: critical = test passes but tests wrong thing, primary use case untested. high = missing test for public prop, missing a11y test. medium = missing edge case. low = nice-to-have test.
 
 Output a JSON array only:
 [{"severity": "...", "file": "...", "line": 0, "title": "...", "description": "...", "suggestion": "..."}]

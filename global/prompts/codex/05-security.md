@@ -32,6 +32,7 @@ Review the diff for security vulnerabilities and error handling gaps.
 - Credentials logged or passed to child processes
 - Unvalidated URLs passed to HTTP clients or git clone (SSRF)
 - Missing URL scheme allowlist (reject file://, ssh://)
+- Vendor webhook JSON (`download_url`, file links, etc.) persisted then fetched by workers — same SSRF rules; allowlist HTTPS vendor hosts before outbound fetch
 - Overly broad IAM roles (project-level when per-resource suffices)
 - Missing audience checks on OIDC/JWT token verification
 - Fail-open error handling (auth failures returning empty/success instead of raising)

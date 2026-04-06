@@ -52,6 +52,7 @@ Then review for test coverage gaps:
 **Stack Adaptation:** The React-specific items above (props, refs, className, Stories, getByRole) apply only to frontend code. For Python/backend: check error paths, async behavior, data transformations, external service boundary mocking, and destructive operation safeguards.
 
 Severities:
+- **Calibration:** Never `critical` for pure test-quality nits (mock not passed, harness does not prove a flag). Cap at **high**. Use `critical` only when the test story would approve a wrong primary behavior or when an exploitable boundary has no tests.
 - critical: Test tests wrong thing, primary use case untested
 - high: Missing test for public prop, missing a11y test
 - medium: Missing edge case
