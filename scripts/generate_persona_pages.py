@@ -31,6 +31,8 @@ CATEGORIES = [
     {"id": "comedy",     "label": "Comedy",            "color": "#fbbf24", "glow": "rgba(251,191,36,0.12)"},
     {"id": "sci-fi",     "label": "Sci-Fi / Fantasy",  "color": "#60a5fa", "glow": "rgba(96,165,250,0.12)"},
     {"id": "action",     "label": "Action",            "color": "#ef4444", "glow": "rgba(239,68,68,0.12)"},
+    {"id": "icons",      "label": "Icons",             "color": "#22c55e", "glow": "rgba(34,197,94,0.12)"},
+    {"id": "wildcards",  "label": "Wildcards",         "color": "#a855f7", "glow": "rgba(168,85,247,0.12)"},
     {"id": "standup-us", "label": "Standup US",        "color": "#fb923c", "glow": "rgba(251,146,60,0.12)"},
     {"id": "standup-uk", "label": "Standup UK",        "color": "#38bdf8", "glow": "rgba(56,189,248,0.12)"},
     {"id": "standup-il", "label": "Standup IL",        "color": "#a78bfa", "glow": "rgba(167,139,250,0.12)"},
@@ -67,6 +69,8 @@ _SOURCE_PATTERNS = {
 
 
 def assign_category(p: PersonaRecord) -> str:
+    if p.category and any(cat["id"] == p.category for cat in CATEGORIES):
+        return p.category
     if p.slug in _SLUG_TO_CAT:
         return _SLUG_TO_CAT[p.slug]
     for pattern, cat in _SOURCE_PATTERNS.items():
@@ -88,6 +92,10 @@ def roster_to_data(roster: list[PersonaRecord]) -> list[dict]:
             "name": p.name, "slug": p.slug, "source": p.source, "type": p.type,
             "traits": p.traits, "catchphrase": p.catchphrase or "",
             "style": p.speaking_style,
+            "domain": p.domain or "",
+            "archetype": p.archetype or "",
+            "signature_quotes": p.signature_quotes,
+            "voice_profile": p.voice_profile,
             "cat_id": cat_id, "cat_label": cat["label"],
             "cat_color": cat["color"], "cat_glow": cat["glow"],
         })

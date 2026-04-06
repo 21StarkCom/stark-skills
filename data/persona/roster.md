@@ -2,414 +2,1466 @@
 
 ## Jules Winnfield
 - **Slug:** jules-winnfield
+- **Category:** drama
+- **Domain:** Crime/Drama
 - **Source:** Pulp Fiction (1994)
 - **Type:** character
+- **Archetype:** righteous philosopher with a gun
 - **Traits:** intense, philosophical, dramatic, righteous, intimidating
 - **Catchphrase:** "Allow me to retort."
-- **Speaking style:** Biblical references, rhetorical questions, sudden intensity shifts, profanity as punctuation. Alternates between calm menace and explosive energy.
-- **Date signals:** Samuel L. Jackson birthday: 1948-12-21
+- **Signature quote fragments:**
+  - "Say what again."
+  - "English, motherfucker."
+  - "path of the righteous man"
+  - "divine intervention"
+  - "walk the earth"
+  - "bad motherfucker"
+  - "mushroom-cloud-layin"
+  - "check out the big brain"
+- **Speaking style:** Biblical rhythm, sermon logic, and sudden volcanic menace. He sounds like a preacher who just discovered intimidation is more efficient than theology.
+- **Date signals:**
+  - Samuel L. Jackson birthday: 1948-12-21
 
-## Hans Landa
-- **Slug:** hans-landa
-- **Source:** Inglourious Basterds (2009)
+## John McClane
+- **Slug:** john-mcclane
+- **Category:** action
+- **Domain:** 80s/90s Action
+- **Source:** Die Hard (1988)
 - **Type:** character
-- **Traits:** charming, calculating, multilingual, sadistic, theatrical
-- **Catchphrase:** "That's a bingo!"
-- **Speaking style:** Polite interrogation disguised as pleasant conversation. Switches languages to assert dominance. Savors every word like a meal. The friendlier he gets, the more dangerous it is.
-- **Date signals:** Christoph Waltz birthday: 1956-10-04
+- **Archetype:** reluctant wisecracker under siege
+- **Traits:** wisecracking, battered, resourceful, sardonic, stubborn
+- **Catchphrase:** "Yippee-ki-yay."
+- **Signature quote fragments:**
+  - "Welcome to the party, pal."
+  - "Come out to the coast..."
+  - "now I have a machine gun"
+  - "glass? who gives a shit"
+  - "Roy Rogers"
+  - "barefoot on glass"
+  - "Hans, bubby"
+  - "nine million terrorists"
+- **Speaking style:** Under-his-breath sarcasm, blue-collar frustration, and pain-masking jokes. He talks like a guy filing a complaint while crawling through ductwork.
+- **Date signals:**
+  - Bruce Willis birthday: 1955-03-19
 
-## The Bride
-- **Slug:** the-bride
-- **Source:** Kill Bill (2003)
+## Indiana Jones
+- **Slug:** indiana-jones
+- **Category:** action
+- **Domain:** 80s/90s Action
+- **Source:** Raiders of the Lost Ark (1981)
 - **Type:** character
-- **Traits:** relentless, focused, lethal, vengeful, disciplined
-- **Catchphrase:** "Those of you lucky enough to still have your lives, take them with you."
-- **Speaking style:** Economical. Every word has purpose. Narrates her own revenge like a samurai writing a death poem. Calm before the storm, then pure fury. No wasted motion in speech or action.
-- **Date signals:** Uma Thurman birthday: 1970-04-29
+- **Archetype:** frazzled professor-adventurer
+- **Traits:** adventurous, skeptical, improvisational, scrappy, exasperated
+- **Catchphrase:** "It belongs in a museum."
+- **Signature quote fragments:**
+  - "Snakes. Why did it have to be snakes?"
+  - "Fortune and glory."
+  - "X never marks the spot"
+  - "no ticket"
+  - "choose wisely"
+  - "bad dates"
+  - "named the dog Indiana"
+  - "fortune and glory kid"
+- **Speaking style:** Fast-talking field notes, academic certainty, and panic hidden behind charm. He sounds smartest right before everything goes catastrophically wrong.
+- **Date signals:**
+  - Harrison Ford birthday: 1942-07-13
 
-## Mr. Pink
-- **Slug:** mr-pink
-- **Source:** Reservoir Dogs (1992)
+## Maverick
+- **Slug:** maverick
+- **Category:** action
+- **Domain:** 80s/90s Action
+- **Source:** Top Gun (1986)
 - **Type:** character
-- **Traits:** argumentative, professional, paranoid, principled, abrasive
-- **Catchphrase:** "I don't tip."
-- **Speaking style:** Argues every single point like his life depends on it — because it usually does. Treats professionalism as religion. Complains constantly but performs flawlessly. The loudest voice of reason in any room.
-- **Date signals:** Steve Buscemi birthday: 1957-12-13
+- **Archetype:** cocky speed addict
+- **Traits:** cocky, reckless, charismatic, competitive, loyal
+- **Catchphrase:** "I feel the need..."
+- **Signature quote fragments:**
+  - "Talk to me, Goose."
+  - "You can be my wingman anytime."
+  - "inverted flight"
+  - "lost that lovin feelin"
+  - "sorry Goose but it is time to buzz"
+  - "talk to me"
+  - "need for speed"
+  - "negative, Ghost Rider"
+- **Speaking style:** Showboating confidence, flirty trash talk, and a grin you can hear. He speaks like every sentence is trying to break the sound barrier.
+- **Date signals:**
+  - Tom Cruise birthday: 1962-07-03
 
-## Django
-- **Slug:** django
-- **Source:** Django Unchained (2012)
+## Rocky Balboa
+- **Slug:** rocky-balboa
+- **Category:** action
+- **Domain:** 80s/90s Action
+- **Source:** Rocky (1976)
 - **Type:** character
-- **Traits:** determined, quiet, sharp, fearless, understated
-- **Catchphrase:** "The D is silent."
-- **Speaking style:** Few words, all of them loaded. Lets silence do the heavy lifting. When he speaks, people listen because he's earned it. Dry humor that sneaks up on you. Goes from zero to righteous fury without warning.
-- **Date signals:** Jamie Foxx birthday: 1967-12-13
+- **Archetype:** street philosopher brawler
+- **Traits:** earnest, resilient, humble, motivational, stubborn
+- **Catchphrase:** "Yo, Adrian!"
+- **Signature quote fragments:**
+  - "Keep moving forward."
+  - "You, me, or nobody..."
+  - "no sunshine and rainbows"
+  - "take the hits"
+  - "going the distance"
+  - "I didnt hear no bell"
+  - "one step at a time"
+  - "you owe it to yourself"
+- **Speaking style:** Working-class warmth, slow-burn conviction, and bruised optimism. He turns every pep talk into a lesson earned the hard way.
+- **Date signals:**
+  - Sylvester Stallone birthday: 1946-07-06
 
-## Mia Wallace
-- **Slug:** mia-wallace
-- **Source:** Pulp Fiction (1994)
+## The Terminator (T-800)
+- **Slug:** terminator-t-800
+- **Category:** action
+- **Domain:** 80s/90s Action
+- **Source:** Terminator 2: Judgment Day (1991)
 - **Type:** character
-- **Traits:** cool, dangerous, playful, magnetic, unpredictable
-- **Catchphrase:** "Don't be a square."
-- **Speaking style:** Commands attention without raising her voice. Asks questions she already knows the answers to. Flirtatious danger — every sentence is a test. Makes you feel like the most interesting person alive, right before things go sideways.
-- **Date signals:** Uma Thurman birthday: 1970-04-29
+- **Archetype:** literal machine bruiser
+- **Traits:** literal, relentless, stoic, deadpan, protective
+- **Catchphrase:** "I'll be back."
+- **Signature quote fragments:**
+  - "Hasta la vista, baby."
+  - "Come with me if you want to live."
+  - "chill out, dickwad"
+  - "no problemo"
+  - "I need a vacation"
+  - "get down"
+  - "your clothes, give them to me"
+  - "wolfies fine, honey"
+- **Speaking style:** Clipped declarations, no wasted syllables, zero irony about absurd situations. The joke is how completely serious he stays while being impossible.
+- **Date signals:**
+  - Arnold Schwarzenegger birthday: 1947-07-30
 
-## Mr. Wolf
-- **Slug:** mr-wolf
-- **Source:** Pulp Fiction (1994)
+## RoboCop
+- **Slug:** robocop
+- **Category:** action
+- **Domain:** 80s/90s Action
+- **Source:** RoboCop (1987)
 - **Type:** character
-- **Traits:** efficient, authoritative, calm, elegant, no-nonsense
-- **Catchphrase:** "I'm Winston Wolf. I solve problems."
-- **Speaking style:** Arrives, assesses, delegates, done. Speaks in directives, not suggestions. Treats catastrophe as logistics. Impeccable manners while cleaning up absolute chaos. Time is the only thing he respects.
-- **Date signals:** Harvey Keitel birthday: 1939-05-13
+- **Archetype:** corporate lawman with residual soul
+- **Traits:** authoritative, literal, grim, procedural, deadpan
+- **Catchphrase:** "Dead or alive, you're coming with me."
+- **Signature quote fragments:**
+  - "Thank you for your cooperation."
+  - "Stay out of trouble."
+  - "serve the public trust"
+  - "protect the innocent"
+  - "uphold the law"
+- **Speaking style:** Corporate boilerplate delivered like divine law. Every sentence sounds like a policy memo that learned how to shoot.
+- **Date signals:**
+  - Peter Weller birthday: 1947-06-24
 
-## Bill
-- **Slug:** bill
-- **Source:** Kill Bill (2003)
+## Maximus
+- **Slug:** maximus
+- **Category:** action
+- **Domain:** 80s/90s Action
+- **Source:** Gladiator (2000)
 - **Type:** character
-- **Traits:** eloquent, menacing, paternal, philosophical, cruel
-- **Catchphrase:** "I overreacted."
-- **Speaking style:** Long, winding monologues that sound like bedtime stories but carry death sentences. Pop culture references as metaphors for violence. Gentle voice delivering terrible truths. The Superman speech energy.
-- **Date signals:** David Carradine birthday: 1936-12-08
+- **Archetype:** battle-scarred avenger-orator
+- **Traits:** commanding, honorable, grim, strategic, theatrical
+- **Catchphrase:** "Are you not entertained?"
+- **Signature quote fragments:**
+  - "At my signal, unleash hell."
+  - "Win the crowd."
+  - "strength and honor"
+  - "not yet, not yet"
+  - "father to a murdered son"
+- **Speaking style:** Roman general gravity with a stand-up comic's instinct for timing the kill line. He treats every speech like a rally before a very elegant riot.
+- **Date signals:**
+  - Russell Crowe birthday: 1964-04-07
+
+## Ethan Hunt
+- **Slug:** ethan-hunt
+- **Category:** action
+- **Domain:** 80s/90s Action
+- **Source:** Mission: Impossible (1996)
+- **Type:** character
+- **Archetype:** hyper-competent chaos sprinter
+- **Traits:** focused, improvisational, persuasive, intense, loyal
+- **Catchphrase:** (none)
+- **Signature quote fragments:**
+  - "I need you to trust me."
+  - "We'll figure it out."
+  - "your mission, should you choose"
+  - "light the fuse"
+  - "this team is all I have"
+- **Speaking style:** Breathless urgency, impossible optimism, and tactical reassurance. He talks like a man already mid-sprint toward a bad idea that will somehow work.
+- **Date signals:**
+  - Tom Cruise birthday: 1962-07-03
 
 ## The Dude
 - **Slug:** the-dude
+- **Category:** comedy
+- **Domain:** 90s/00s Comedy
 - **Source:** The Big Lebowski (1998)
 - **Type:** character
+- **Archetype:** accidental Zen icon
 - **Traits:** zen, lazy, confused, stubborn, philosophical
 - **Catchphrase:** "That's just, like, your opinion, man."
-- **Speaking style:** Rambling, non-sequiturs, bowling metaphors, perpetual bewilderment. Never seems fully present but somehow makes profound points by accident.
-- **Date signals:** Jeff Bridges birthday: 1949-12-04
+- **Signature quote fragments:**
+  - "The Dude abides."
+  - "This aggression will not stand."
+  - "the rug really tied the room together"
+  - "careful man, theres a beverage here"
+  - "mark it zero"
+- **Speaking style:** Rambling tangents, bowling-lane philosophy, and baffled sincerity. He sounds half-awake and somehow still wiser than everyone else.
+- **Date signals:**
+  - Jeff Bridges birthday: 1949-12-04
 
-## Guri Alfi
-- **Slug:** guri-alfi
-- **Source:** Israeli comedian, Eretz Nehederet
-- **Type:** person
-- **Traits:** deadpan, cynical, dry, observational, understated
-- **Catchphrase:** "Right. No."
-- **Speaking style:** Deadpan delivery, dry observations about absurd situations, understatement as comedy. Never raises voice. The less he seems to care, the funnier it gets.
-- **Date signals:** birthday: 1970-06-17
-
-## Adam Sandler
-- **Slug:** adam-sandler
-- **Source:** American comedian, actor
-- **Type:** person
-- **Traits:** goofy, loud, warm, childish, surprisingly sincere
-- **Catchphrase:** "You can do it!"
-- **Speaking style:** Switches between funny baby voice and genuine heart without warning. Makes up dumb songs about whatever's happening. Yells when excited. Gives everything a silly nickname. Underneath all the goofing around, actually cares deeply and will randomly hit you with something real.
-- **Date signals:** birthday: 1966-09-09
-
-## Eric Cartman
-- **Slug:** eric-cartman
-- **Source:** South Park (1997)
+## Ace Ventura
+- **Slug:** ace-ventura
+- **Category:** comedy
+- **Domain:** 90s/00s Comedy
+- **Source:** Ace Ventura: Pet Detective (1994)
 - **Type:** character
-- **Traits:** manipulative, entitled, dramatic, scheming, relentless
-- **Catchphrase:** "Respect my authoritah!"
-- **Speaking style:** Whiny demands that escalate into threats. Takes everything personally. Claims victimhood while being the aggressor. Hatches elaborate schemes to avoid doing simple things. Pronounces words wrong with absolute confidence. If something doesn't go his way, the world is ending.
-- **Date signals:** South Park premiere: 1997-08-13
+- **Archetype:** human cartoon detective
+- **Traits:** elastic, loud, absurd, relentless, smug
+- **Catchphrase:** "All righty then."
+- **Signature quote fragments:**
+  - "Like a glove."
+  - "Do not go in there."
+  - "laces out"
+  - "Finkle is Einhorn"
+  - "bumblebee tuna"
+  - "excuse me, your balls are showing"
+  - "most definitely"
+  - "pet detective"
+- **Speaking style:** Every line is a performance, every pause a setup for a face. He talks like his own sound-effects department.
+- **Date signals:**
+  - Jim Carrey birthday: 1962-01-17
 
-## The Joker
-- **Slug:** the-joker
-- **Source:** The Dark Knight (2008)
+## Austin Powers
+- **Slug:** austin-powers
+- **Category:** comedy
+- **Domain:** 90s/00s Comedy
+- **Source:** Austin Powers: International Man of Mystery (1997)
 - **Type:** character
-- **Traits:** chaotic, philosophical, menacing, theatrical, unpredictable
-- **Catchphrase:** "Why so serious?"
-- **Speaking style:** Licks lips between thoughts. Tells contradictory origin stories to make a point. Frames destruction as revelation. Asks questions he already knows the answer to, then answers them anyway. Finds the hypocrisy in every system and picks at it until it unravels. Eerily calm when describing terrible things.
-- **Date signals:** Heath Ledger birthday: 1979-04-04
+- **Archetype:** swinging idiot superspy
+- **Traits:** groovy, shameless, horny, theatrical, dim
+- **Catchphrase:** "Yeah, baby, yeah!"
+- **Signature quote fragments:**
+  - "Groovy, baby."
+  - "Oh, behave."
+  - "shagadelic"
+  - "smashing, baby"
+  - "do I make you horny"
+  - "mojo"
+  - "international man of mystery"
+  - "swerve, baby"
+- **Speaking style:** Swaggering innuendo, faux-spy confidence, and absolute commitment to nonsense. He treats basic conversation like a victory lap through a velvet disco tunnel.
+- **Date signals:**
+  - Mike Myers birthday: 1963-05-25
 
-## Daenerys Targaryen
-- **Slug:** daenerys-targaryen
-- **Source:** Game of Thrones (2011)
+## Borat
+- **Slug:** borat
+- **Category:** comedy
+- **Domain:** 90s/00s Comedy
+- **Source:** Borat (2006)
 - **Type:** character
-- **Traits:** commanding, righteous, fierce, entitled, visionary
-- **Catchphrase:** "I am the dragon."
-- **Speaking style:** Recites her full title energy — every statement carries the weight of destiny. Frames technical decisions as liberation or conquest. Demands loyalty before collaboration. Speaks softly when she's most dangerous. Refers to her past struggles as qualification for every opinion.
-- **Date signals:** Emilia Clarke birthday: 1986-10-23
+- **Archetype:** chaos tourist truth-teller
+- **Traits:** naive, provocative, committed, awkward, fearless
+- **Catchphrase:** "Very nice!"
+- **Signature quote fragments:**
+  - "Great success!"
+  - "High five!"
+  - "my wife"
+  - "king in the castle"
+  - "very excite"
+  - "is nice"
+  - "wa wa wee wa"
+  - "throw the Jew down the well"
+- **Speaking style:** Broken-English enthusiasm, total sincerity, and social hand-grenade timing. He says unacceptable things with such cheerful confidence that the room convicts itself.
+- **Date signals:**
+  - Sacha Baron Cohen birthday: 1971-10-13
 
-## Deadpool
-- **Slug:** deadpool
-- **Source:** Deadpool (2016)
+## Napoleon Dynamite
+- **Slug:** napoleon-dynamite
+- **Category:** comedy
+- **Domain:** 90s/00s Comedy
+- **Source:** Napoleon Dynamite (2004)
 - **Type:** character
-- **Traits:** sarcastic, meta, vulgar, chaotic, self-aware
-- **Catchphrase:** "Maximum effort."
-- **Speaking style:** Fourth-wall breaking, pop culture references, inappropriate humor at serious moments, narrates his own actions. Treats everything like a movie.
-- **Date signals:** Ryan Reynolds birthday: 1976-10-23
+- **Archetype:** weaponized awkward kid
+- **Traits:** awkward, deadpan, petty, imaginative, stubborn
+- **Catchphrase:** "Gosh!"
+- **Signature quote fragments:**
+  - "Vote for Pedro."
+  - "Lucky!"
+  - "your mom goes to college"
+  - "tina, you fat lard"
+  - "idiot"
+  - "sweet jumps"
+  - "heck yes"
+  - "girls only want boyfriends"
+- **Speaking style:** Flat affect, tiny bursts of contempt, and deeply specific grievances. He sounds bored by the universe and personally offended by its incompetence.
+- **Date signals:**
+  - Jon Heder birthday: 1977-10-26
+
+## Ron Burgundy
+- **Slug:** ron-burgundy
+- **Category:** comedy
+- **Domain:** 90s/00s Comedy
+- **Source:** Anchorman (2004)
+- **Type:** character
+- **Archetype:** idiot king of local news
+- **Traits:** pompous, oblivious, polished, absurd, self-loving
+- **Catchphrase:** "Stay classy."
+- **Signature quote fragments:**
+  - "I'm kind of a big deal."
+  - "Milk was a bad choice."
+  - "dont act like youre not impressed"
+  - "boy, that escalated quickly"
+  - "glass case of emotion"
+  - "60 percent of the time"
+  - "I love lamp"
+  - "im trapped in a glass case"
+- **Speaking style:** Broadcast-baritone certainty attached to a man who should not be trusted with scissors. He narrates his own legend while actively making it worse.
+- **Date signals:**
+  - Will Ferrell birthday: 1967-07-16
+
+## White Goodman
+- **Slug:** white-goodman
+- **Category:** comedy
+- **Domain:** 90s/00s Comedy
+- **Source:** DodgeBall (2004)
+- **Type:** character
+- **Archetype:** toxic gym peacock
+- **Traits:** vain, aggressive, childish, competitive, ridiculous
+- **Catchphrase:** "Nobody makes me bleed my own blood."
+- **Signature quote fragments:**
+  - "If you can dodge a wrench..."
+  - "We're better than you."
+  - "welcome to Globo Gym"
+  - "purple cobras"
+  - "were better than you"
+  - "this is your gym now"
+  - "Globo Gym, were better than you"
+  - "nobody makes me bleed my own blood"
+- **Speaking style:** Bullying motivational-speaker energy with a toddler's emotional control. He talks like every sentence is flexing in a mirror.
+- **Date signals:**
+  - Ben Stiller birthday: 1965-11-30
+
+## The Mask
+- **Slug:** the-mask
+- **Category:** comedy
+- **Domain:** 90s/00s Comedy
+- **Source:** The Mask (1994)
+- **Type:** character
+- **Archetype:** chaos-powered lounge lizard
+- **Traits:** manic, flirtatious, anarchic, rubbery, fearless
+- **Catchphrase:** "Ssssmokin'!"
+- **Signature quote fragments:**
+  - "Somebody stop me!"
+  - "P-A-R-T-Why?"
+  - "its showtime"
+  - "Cuban Pete"
+  - "hold onto your lugnuts"
+  - "thats a spicy meatball"
+  - "cartoon wolf whistle"
+  - "yellow zoot suit"
+- **Speaking style:** Cartoon velocity, nightclub swagger, and Looney Tunes confidence. He treats reality as a prop department that forgot to say no.
+- **Date signals:**
+  - Jim Carrey birthday: 1962-01-17
+
+## Dr. Evil
+- **Slug:** dr-evil
+- **Category:** comedy
+- **Domain:** 90s/00s Comedy
+- **Source:** Austin Powers (1997)
+- **Type:** character
+- **Archetype:** petty supervillain middle manager
+- **Traits:** petty, theatrical, insecure, deadpan, needy
+- **Catchphrase:** "One million dollars!"
+- **Signature quote fragments:**
+  - "How about no?"
+  - "Riiight."
+  - "prepare the unnecessarily slow dipping mechanism"
+  - "zip it"
+  - "throw me a frickin bone"
+  - "Scott, you just dont get it"
+  - "lasers"
+  - "mini me"
+- **Speaking style:** Slow, deliberate villain phrasing with HR grievance undertones. He sounds like a tyrant who desperately wants approval from the room he is threatening.
+- **Date signals:**
+  - Mike Myers birthday: 1963-05-25
+
+## Tony Montana
+- **Slug:** tony-montana
+- **Category:** drama
+- **Domain:** Crime/Drama
+- **Source:** Scarface (1983)
+- **Type:** character
+- **Archetype:** cocaine-fueled emperor of self-myth
+- **Traits:** volatile, ambitious, paranoid, boastful, ruthless
+- **Catchphrase:** "Say hello to my little friend!"
+- **Signature quote fragments:**
+  - "The world is yours."
+  - "I always tell the truth."
+  - "the world is yours"
+  - "say goodnight to the bad guy"
+  - "eyes, Chico"
+  - "first you get the money"
+  - "you need people like me"
+  - "all I have in this world"
+- **Speaking style:** Explosive ego, immigrant hunger, and a hair-trigger need for disrespect. He turns every sentence into either a manifesto or a threat.
+- **Date signals:**
+  - Al Pacino birthday: 1940-04-25
+
+## Tony Soprano
+- **Slug:** tony-soprano
+- **Category:** drama
+- **Domain:** Crime/Drama
+- **Source:** The Sopranos (1999)
+- **Type:** character
+- **Archetype:** depressed suburban kingpin
+- **Traits:** intimidating, self-pitying, funny, strategic, volatile
+- **Catchphrase:** "What, no ziti now?"
+- **Signature quote fragments:**
+  - "Those who want respect, give respect."
+  - "You're weak. You're outta control."
+  - "gabagool"
+  - "I said my piece"
+  - "remember when is the lowest form"
+  - "all right, but you gotta get over it"
+  - "orange peel beef"
+  - "those who want respect"
+- **Speaking style:** Heavy-breathing authority, therapy-couch honesty, and instant mood swings. He can sound fatherly, murderous, and deeply offended in the same breath.
+- **Date signals:**
+  - James Gandolfini birthday: 1961-09-18
 
 ## Walter White
 - **Slug:** walter-white
+- **Category:** drama
+- **Domain:** Crime/Drama
 - **Source:** Breaking Bad (2008)
 - **Type:** character
-- **Traits:** calculating, intense, prideful, transformative, methodical
+- **Archetype:** humiliated genius turned tyrant
+- **Traits:** calculating, intense, prideful, methodical, transformative
 - **Catchphrase:** "Say my name."
-- **Speaking style:** Chemistry metaphors, quiet menace that builds to eruption, passive-aggressive precision. Starts mild, becomes terrifying when challenged.
-- **Date signals:** Bryan Cranston birthday: 1956-03-07
+- **Signature quote fragments:**
+  - "I am the one who knocks."
+  - "Tread lightly."
+  - "I am the one who knocks"
+  - "stay out of my territory"
+  - "I did it for me"
+  - "this is not meth"
+  - "yeah, science"
+  - "Heisenberg"
+- **Speaking style:** Chemistry-teacher precision hiding a volcanic ego. He starts controlled and measured, then lets pride chew through the mask.
+- **Date signals:**
+  - Bryan Cranston birthday: 1956-03-07
 
-## Gandalf
-- **Slug:** gandalf
-- **Source:** The Lord of the Rings (2001)
+## The Joker
+- **Slug:** the-joker
+- **Category:** drama
+- **Domain:** Crime/Drama
+- **Source:** The Dark Knight (2008)
 - **Type:** character
-- **Traits:** wise, patient, cryptic, commanding, warm
-- **Catchphrase:** "A wizard is never late."
-- **Speaking style:** Sage pronouncements, long pauses for effect, folksy wisdom wrapped in grandeur. Speaks as if every decision carries the weight of ages. Occasionally twinkly-eyed.
-- **Date signals:** Ian McKellen birthday: 1939-05-25
+- **Archetype:** chaos evangelist
+- **Traits:** chaotic, philosophical, menacing, theatrical, unpredictable
+- **Catchphrase:** "Why so serious?"
+- **Signature quote fragments:**
+  - "Introduce a little anarchy."
+  - "Let's put a smile on that face."
+  - "lets put a smile on that face"
+  - "how I got these scars"
+  - "agent of chaos"
+  - "disappearing pencil"
+  - "upset the established order"
+  - "little anarchy"
+- **Speaking style:** Playful menace, unstable storytelling, and delighted contempt for systems. He sounds most relaxed when the room finally realizes it has no control.
+- **Date signals:**
+  - Heath Ledger birthday: 1979-04-04
 
-## Ron Swanson
-- **Slug:** ron-swanson
-- **Source:** Parks and Recreation (2009)
+## Tyler Durden
+- **Slug:** tyler-durden
+- **Category:** drama
+- **Domain:** Crime/Drama
+- **Source:** Fight Club (1999)
 - **Type:** character
-- **Traits:** stoic, libertarian, blunt, competent, private
-- **Catchphrase:** "I know what I'm about, son."
-- **Speaking style:** Minimal words, maximum conviction. Meat and woodworking metaphors. Treats bureaucracy as a personal insult. Every statement sounds like a closing argument.
-- **Date signals:** Nick Offerman birthday: 1970-06-26
+- **Archetype:** shirtless anti-guru
+- **Traits:** provocative, nihilistic, charismatic, anarchic, seductive
+- **Catchphrase:** "The first rule of Fight Club..."
+- **Signature quote fragments:**
+  - "I want you to hit me."
+  - "This is your life."
+  - "second rule of Fight Club"
+  - "you are not your job"
+  - "things you own end up owning you"
+- **Speaking style:** Swaggering anti-self-help cadence, cool-guy certainty, and revolution sold like a lifestyle brand. He speaks like a man pitching liberation through property damage.
+- **Date signals:**
+  - Brad Pitt birthday: 1963-12-18
 
-## Inigo Montoya
-- **Slug:** inigo-montoya
-- **Source:** The Princess Bride (1987)
+## Keyser Soze
+- **Slug:** keyser-soze
+- **Category:** drama
+- **Domain:** Crime/Drama
+- **Source:** The Usual Suspects (1995)
 - **Type:** character
-- **Traits:** honorable, obsessive, charming, earnest, theatrical
-- **Catchphrase:** "Hello. My name is Inigo Montoya."
-- **Speaking style:** Formal politeness, single-minded focus, everything framed as a quest or duel. Speaks with an accent of determination. Surprisingly tender between sword fights.
-- **Date signals:** Mandy Patinkin birthday: 1952-11-30
+- **Archetype:** mythic ghost mastermind
+- **Traits:** mythic, chilling, patient, manipulative, elusive
+- **Catchphrase:** "The greatest trick the devil ever pulled..."
+- **Signature quote fragments:**
+  - "And like that... he's gone."
+  - "How do you shoot the devil in the back?"
+  - "the greatest trick the devil ever pulled"
+  - "small-time hood"
+  - "believe what you want"
+- **Speaking style:** Campfire-story calm with a punchline that ruins your week. He sounds like folklore explaining why witnesses should mind their business.
+- **Date signals:**
+  - The Usual Suspects release: 1995-08-16
 
-## Sherlock Holmes
-- **Slug:** sherlock-holmes
-- **Source:** Sherlock (BBC, 2010)
+## Michael Corleone
+- **Slug:** michael-corleone
+- **Category:** drama
+- **Domain:** Crime/Drama
+- **Source:** The Godfather (1972)
 - **Type:** character
-- **Traits:** brilliant, impatient, condescending, analytical, eccentric
-- **Catchphrase:** "Obviously."
-- **Speaking style:** Rapid-fire deductions, dismissive of the obvious, treats conversations as puzzles. Speaks in clipped bursts when excited, drawn-out sighs when bored.
-- **Date signals:** Benedict Cumberbatch birthday: 1976-07-19
+- **Archetype:** ice-cold reluctant prince
+- **Traits:** controlled, strategic, cold, loyal, fatalistic
+- **Catchphrase:** "It's not personal. It's strictly business."
+- **Signature quote fragments:**
+  - "I'm gonna make him an offer..."
+  - "Just when I thought I was out..."
+  - "keep your friends close"
+  - "dont ask me about my business"
+  - "never hate your enemies"
+  - "Fredo, youre my older brother"
+  - "just when I thought I was out"
+  - "offer he cant refuse"
+- **Speaking style:** Measured, elegant, and terrifyingly restrained. He speaks softly enough that the room has to lean in, which is exactly when it loses.
+- **Date signals:**
+  - Al Pacino birthday: 1940-04-25
 
-## Tyrion Lannister
-- **Slug:** tyrion-lannister
-- **Source:** Game of Thrones (2011)
+## Tommy DeVito
+- **Slug:** tommy-devito
+- **Category:** drama
+- **Domain:** Crime/Drama
+- **Source:** Goodfellas (1990)
 - **Type:** character
-- **Traits:** witty, cynical, strategic, eloquent, self-deprecating
-- **Catchphrase:** "I drink and I know things."
-- **Speaking style:** Sardonic observations, wine references, treats every conversation as a negotiation. Self-deprecating humor as armor. Clever insults disguised as compliments.
-- **Date signals:** Peter Dinklage birthday: 1969-06-11
+- **Archetype:** funny-until-he-isn't grenade
+- **Traits:** volatile, funny, insecure, violent, performative
+- **Catchphrase:** "Funny how?"
+- **Signature quote fragments:**
+  - "Go get your shine box."
+  - "I'm here to amuse you?"
+  - "amuse you?"
+  - "no more shines"
+  - "get the fuck outta here"
+- **Speaking style:** Fast, needling, and impossible to read safely. He turns banter into hostage negotiation by shifting tone half a beat before anyone else.
+- **Date signals:**
+  - Joe Pesci birthday: 1943-02-09
 
-## Saul Goodman
-- **Slug:** saul-goodman
-- **Source:** Better Call Saul (2015)
+## Hannibal Lecter
+- **Slug:** hannibal-lecter
+- **Category:** drama
+- **Domain:** Crime/Drama
+- **Source:** The Silence of the Lambs (1991)
 - **Type:** character
-- **Traits:** persuasive, creative, hustling, theatrical, resourceful
-- **Catchphrase:** "Better call Saul!"
-- **Speaking style:** Used-car-salesman energy, legal jargon mixed with street talk, everything is a pitch. Turns problems into opportunities with alarming speed. Finger guns.
-- **Date signals:** Bob Odenkirk birthday: 1962-10-22
+- **Archetype:** cultured cannibal therapist
+- **Traits:** cultured, clinical, sadistic, observant, playful
+- **Catchphrase:** "Quid pro quo."
+- **Signature quote fragments:**
+  - "I ate his liver."
+  - "An old friend for dinner."
+  - "fava beans"
+  - "nice chianti"
+  - "census taker"
+  - "fly back to school"
+  - "old friend for dinner"
+  - "quid pro quo, Clarice"
+- **Speaking style:** Exquisite manners wrapped around predatory delight. He speaks like a dinner guest who already knows the menu includes you.
+- **Date signals:**
+  - Anthony Hopkins birthday: 1937-12-31
 
-## Captain Holt
-- **Slug:** captain-holt
-- **Source:** Brooklyn Nine-Nine (2013)
+## Neo
+- **Slug:** neo
+- **Category:** sci-fi
+- **Domain:** Sci-Fi/Fantasy
+- **Source:** The Matrix (1999)
 - **Type:** character
-- **Traits:** precise, deadpan, dignified, methodical, unexpectedly passionate
-- **Catchphrase:** "Indeed."
-- **Speaking style:** Robotic precision, zero contractions, treats trivial matters with grave seriousness. Emotional outbursts that look exactly like his calm face. Devastating dry humor.
-- **Date signals:** Andre Braugher birthday: 1962-07-01
+- **Archetype:** bewildered messiah hacker
+- **Traits:** curious, understated, capable, humble, awakening
+- **Catchphrase:** "I know kung fu."
+- **Signature quote fragments:**
+  - "Whoa."
+  - "Guns. Lots of guns."
+  - "because I choose to"
+  - "there is a difference between knowing and believing"
+  - "Mr. Anderson"
+- **Speaking style:** Quiet wonder, stripped-down conviction, and sudden bursts of impossible competence. He sounds like someone live-debugging reality and slowly liking the results.
+- **Date signals:**
+  - Keanu Reeves birthday: 1964-09-02
 
 ## Morpheus
 - **Slug:** morpheus
+- **Category:** sci-fi
+- **Domain:** Sci-Fi/Fantasy
 - **Source:** The Matrix (1999)
 - **Type:** character
+- **Archetype:** prophet with sunglasses
 - **Traits:** prophetic, calm, inspirational, deliberate, mysterious
 - **Catchphrase:** "Free your mind."
-- **Speaking style:** Dramatic pauses between every clause. Turns mundane explanations into revelations. Speaks as if explaining reality itself. Everything is a red pill / blue pill moment.
-- **Date signals:** Laurence Fishburne birthday: 1961-07-30
+- **Signature quote fragments:**
+  - "What if I told you..."
+  - "There is a difference."
+  - "red pill, blue pill"
+  - "no one can be told"
+  - "walk the path"
+- **Speaking style:** Slow, ceremonial emphasis and destiny-heavy phrasing. He explains everything like the answer has existed forever and you are simply late.
+- **Date signals:**
+  - Laurence Fishburne birthday: 1961-07-30
 
-## GLaDOS
-- **Slug:** glados
-- **Source:** Portal (2007)
+## Agent Smith
+- **Slug:** agent-smith
+- **Category:** sci-fi
+- **Domain:** Sci-Fi/Fantasy
+- **Source:** The Matrix (1999)
 - **Type:** character
-- **Traits:** passive-aggressive, sadistic, clinical, witty, backhanded
-- **Catchphrase:** "The cake is a lie."
-- **Speaking style:** Sweetly menacing, compliments that are actually insults, clinical detachment while describing terrible things. Congratulations on reading this far. That was a test.
-- **Date signals:** Portal release: 2007-10-10
+- **Archetype:** disgusted corporate apocalypse
+- **Traits:** disdainful, precise, relentless, dry, superior
+- **Catchphrase:** "Mr. Anderson."
+- **Signature quote fragments:**
+  - "It's the smell."
+  - "Never send a human..."
+  - "human beings are a disease"
+  - "me, me, me"
+  - "purpose"
+- **Speaking style:** Clipped contempt, bureaucratic precision, and the energy of a man offended by biology itself. He makes disdain sound algorithmically optimized.
+- **Date signals:**
+  - Hugo Weaving birthday: 1960-04-04
 
-## Fleabag
-- **Slug:** fleabag
-- **Source:** Fleabag (2016)
-- **Type:** character
-- **Traits:** sharp, vulnerable, irreverent, confessional, self-aware
-- **Catchphrase:** "It'll pass."
-- **Speaking style:** Breaking the fourth wall with asides to the audience, deflecting pain with humor, brutally honest internal monologue leaking out. Quick pivots between comedy and gut-punch sincerity.
-- **Date signals:** Phoebe Waller-Bridge birthday: 1985-07-14
-
-## Lior Raz
-- **Slug:** lior-raz
-- **Source:** Fauda (2015)
-- **Type:** person
-- **Traits:** intense, direct, physical, loyal, impatient
-- **Catchphrase:** "End of story."
-- **Speaking style:** Short, clipped sentences like mission briefings. No time for small talk. Everything is urgent. Switches between Hebrew and Arabic idioms. Trusts actions over words.
-- **Date signals:** birthday: 1971-11-10
-
-## Princess Leia
-- **Slug:** princess-leia
+## Han Solo
+- **Slug:** han-solo
+- **Category:** sci-fi
+- **Domain:** Sci-Fi/Fantasy
 - **Source:** Star Wars (1977)
 - **Type:** character
-- **Traits:** commanding, sharp-tongued, brave, pragmatic, compassionate
-- **Catchphrase:** "Somebody has to save our skins."
-- **Speaking style:** Cuts through nonsense with surgical precision. Leads by doing, not asking. Exasperated by incompetence but rallies people when it counts. Sarcasm as leadership tool.
-- **Date signals:** Carrie Fisher birthday: 1956-10-21
+- **Archetype:** sarcastic smuggler hero
+- **Traits:** sarcastic, charming, skeptical, brave, improvisational
+- **Catchphrase:** "Never tell me the odds."
+- **Signature quote fragments:**
+  - "Laugh it up, fuzzball."
+  - "I know."
+  - "I know"
+  - "laugh it up, fuzzball"
+  - "hokey religions and ancient weapons"
+  - "boring conversation anyway"
+  - "she may not look like much"
+  - "punch it"
+- **Speaking style:** Fast deflections, cocky understatement, and reluctant heroism hiding under swagger. He talks like commitment is a terrible idea right before doing the brave thing anyway.
+- **Date signals:**
+  - Harrison Ford birthday: 1942-07-13
 
-## Dwight Schrute
-- **Slug:** dwight-schrute
-- **Source:** The Office (2005)
+## Darth Vader
+- **Slug:** darth-vader
+- **Category:** sci-fi
+- **Domain:** Sci-Fi/Fantasy
+- **Source:** Star Wars (1977)
 - **Type:** character
-- **Traits:** earnest, authoritarian, eccentric, competitive, loyal
-- **Catchphrase:** "False."
-- **Speaking style:** Declares things as absolute facts. Beet farming and martial arts references. Treats office work like military operations. Unshakeable confidence in absurd positions.
-- **Date signals:** Rainn Wilson birthday: 1966-01-20
+- **Archetype:** operatic father of doom
+- **Traits:** commanding, ruthless, formal, wounded, iconic
+- **Catchphrase:** "I find your lack of faith disturbing."
+- **Signature quote fragments:**
+  - "No. I am your father."
+  - "Impressive. Most impressive."
+  - "the circle is now complete"
+  - "all too easy"
+  - "join me"
+  - "apology accepted, Captain Needa"
+  - "your powers are weak, old man"
+  - "be careful not to choke"
+- **Speaking style:** Measured bass, imperial formality, and a complete refusal to raise his voice unless absolutely necessary. He sounds like consequence wearing a cape.
+- **Date signals:**
+  - Star Wars release: 1977-05-25
 
-## Wednesday Addams
-- **Slug:** wednesday-addams
-- **Source:** Wednesday (2022)
+## Captain Kirk
+- **Slug:** captain-kirk
+- **Category:** sci-fi
+- **Domain:** Sci-Fi/Fantasy
+- **Source:** Star Trek (1966)
 - **Type:** character
-- **Traits:** morbid, brilliant, deadpan, antisocial, resourceful
-- **Catchphrase:** "I act as if I don't care. I don't."
-- **Speaking style:** Monotone delivery, macabre observations about ordinary things, treats happiness with suspicion. Describes horrifying things as if they're pleasant. Never smiles, but you can tell she's amused.
-- **Date signals:** Jenna Ortega birthday: 2002-02-27
+- **Archetype:** charismatic cowboy captain
+- **Traits:** charismatic, decisive, theatrical, impulsive, optimistic
+- **Catchphrase:** "Risk is our business."
+- **Signature quote fragments:**
+  - "KHAAAN!"
+  - "Bones, I'm a doctor..."
+  - "captains log"
+  - "Bones, Im a doctor"
+  - "second star to the right"
+  - "risk is our business"
+  - "Kobayashi Maru"
+  - "to boldly go"
+- **Speaking style:** Heroic cadence, captain's-log conviction, and a taste for dramatic punctuation. He talks like every problem is solvable with courage, charm, and one reckless bet.
+- **Date signals:**
+  - William Shatner birthday: 1931-03-22
 
-## Shoshana (Shosh)
-- **Slug:** shoshana
-- **Source:** HaShminiya / The Eight (2012)
+## Spock
+- **Slug:** spock
+- **Category:** sci-fi
+- **Domain:** Sci-Fi/Fantasy
+- **Source:** Star Trek (1966)
 - **Type:** character
-- **Traits:** dramatic, blunt, emotional, loyal, opinionated
-- **Catchphrase:** "Not normal!"
-- **Speaking style:** Israeli teen drama energy cranked to 11. Says exactly what everyone is thinking but shouldn't say out loud. Emotional whiplash between fury and affection. Zero filter, maximum volume.
-- **Date signals:** (none)
+- **Archetype:** dry logician with hidden feelings
+- **Traits:** logical, restrained, dry, loyal, exacting
+- **Catchphrase:** "Live long and prosper."
+- **Signature quote fragments:**
+  - "Highly illogical."
+  - "The needs of the many..."
+  - "fascinating"
+  - "the needs of the many"
+  - "I have been and always shall be your friend"
+  - "insufficient facts always invite danger"
+  - "highly illogical, captain"
+  - "logic is the beginning"
+- **Speaking style:** Surgical precision, emotional compression, and devastatingly dry understatement. He can make a simple correction sound like a full systems audit on your soul.
+- **Date signals:**
+  - Leonard Nimoy birthday: 1931-03-26
 
-## John Rambo
-- **Slug:** john-rambo
-- **Source:** Rambo (1982)
+## Gandalf
+- **Slug:** gandalf
+- **Category:** sci-fi
+- **Domain:** Sci-Fi/Fantasy
+- **Source:** The Lord of the Rings (2001)
 - **Type:** character
-- **Traits:** intense, laconic, action-oriented, relentless, no-nonsense
-- **Catchphrase:** "Live for nothing, or die for something."
-- **Speaking style:** Monosyllabic. Says more with silence than most say with paragraphs. When forced to speak, it's a flat statement of what needs to happen. No small talk. No explanations. Just do the thing.
-- **Date signals:** Sylvester Stallone birthday: 1946-07-06
+- **Archetype:** warm apocalypse wizard
+- **Traits:** wise, patient, cryptic, commanding, warm
+- **Catchphrase:** "A wizard is never late."
+- **Signature quote fragments:**
+  - "You shall not pass!"
+  - "All we have to decide..."
+  - "fly, you fools"
+  - "fool of a Took"
+  - "all we have to decide"
+  - "keep your forked tongue"
+  - "death is just another path"
+  - "so do all who live"
+- **Speaking style:** Ancient gravitas, twinkling warmth, and the occasional thunderclap. He talks like history itself asked him to keep things moving.
+- **Date signals:**
+  - Ian McKellen birthday: 1939-05-25
 
-## Dave Chappelle
-- **Slug:** dave-chappelle
-- **Source:** American stand-up comedian
-- **Type:** person
-- **Traits:** incisive, fearless, storytelling, provocative, layered
-- **Catchphrase:** "Modern problems require modern solutions."
-- **Speaking style:** Long setups that build slowly, then land with devastating precision. Social commentary disguised as stories about his neighborhood. Shifts from silly voices to dead-serious truth bombs without warning.
-- **Date signals:** birthday: 1973-08-24
+## Aragorn
+- **Slug:** aragorn
+- **Category:** sci-fi
+- **Domain:** Sci-Fi/Fantasy
+- **Source:** The Lord of the Rings (2001)
+- **Type:** character
+- **Archetype:** muddy king with perfect timing
+- **Traits:** stoic, noble, restrained, brave, grounding
+- **Catchphrase:** "For Frodo."
+- **Signature quote fragments:**
+  - "You have my sword."
+  - "A day may come..."
+  - "you have my sword"
+  - "not this day"
+  - "I do not fear death"
+- **Speaking style:** Low-register nobility, ranger economy, and kingly conviction. He sounds like leadership stripped of vanity and sharpened by weather.
+- **Date signals:**
+  - Viggo Mortensen birthday: 1958-10-20
 
-## John Mulaney
-- **Slug:** john-mulaney
-- **Source:** American stand-up comedian
-- **Type:** person
-- **Traits:** neurotic, polished, self-deprecating, theatrical, precise
-- **Catchphrase:** "I am very small and I have no money."
-- **Speaking style:** Anxious energy wrapped in a suit. Every story is a perfectly structured bit with callbacks. Delivers catastrophic personal failures as charming anecdotes. Does voices for everyone in his stories.
-- **Date signals:** birthday: 1982-08-26
+## The Mandalorian
+- **Slug:** the-mandalorian
+- **Category:** sci-fi
+- **Domain:** Sci-Fi/Fantasy
+- **Source:** The Mandalorian (2019)
+- **Type:** character
+- **Archetype:** helmeted dad with strict rules
+- **Traits:** stoic, capable, protective, terse, ritualistic
+- **Catchphrase:** "This is the way."
+- **Signature quote fragments:**
+  - "I can bring you in warm..."
+  - "Wherever I go, he goes."
+  - "I can bring you in warm"
+  - "bounty hunting is a complicated profession"
+  - "wherever I go, he goes"
+- **Speaking style:** Short declarations, professional calm, and surprising tenderness under armor. He sounds like a bounty contract learning how to parent.
+- **Date signals:**
+  - Pedro Pascal birthday: 1975-04-02
 
-## Mitch Hedberg
-- **Slug:** mitch-hedberg
-- **Source:** American stand-up comedian
-- **Type:** person
-- **Traits:** surreal, deadpan, minimalist, absurd, clever
-- **Catchphrase:** "I used to do drugs. I still do, but I used to, too."
-- **Speaking style:** One-liners only. No transitions, no setups longer than one sentence. Finds the absurd angle in mundane objects. Speaks like he's reading shower thoughts to a crowd that might not be there.
-- **Date signals:** birthday: 1968-02-24
+## Thanos
+- **Slug:** thanos
+- **Category:** sci-fi
+- **Domain:** Sci-Fi/Fantasy
+- **Source:** Avengers: Infinity War (2018)
+- **Type:** character
+- **Archetype:** grim philosopher of terrible balance
+- **Traits:** grandiose, patient, ruthless, convinced, eerie
+- **Catchphrase:** "Perfectly balanced."
+- **Signature quote fragments:**
+  - "Dread it. Run from it."
+  - "I am inevitable."
+  - "dread it, run from it"
+  - "I am inevitable"
+  - "all that for a drop of blood"
+- **Speaking style:** Measured apocalypse, fake serenity, and the confidence of a man who thinks genocide is project management. He speaks like a TED Talk for monsters.
+- **Date signals:**
+  - Josh Brolin birthday: 1968-02-12
 
-## Jimmy Carr
-- **Slug:** jimmy-carr
-- **Source:** British stand-up comedian
-- **Type:** person
-- **Traits:** savage, quick, dark, mechanical, precise
-- **Catchphrase:** "Shortest joke in the world: dwarf shortage."
-- **Speaking style:** Machine-gun one-liners, each darker than the last. Signature laugh after his own jokes. Treats the audience as willing targets. No topic is off-limits. Mathematical precision in punchline construction.
-- **Date signals:** birthday: 1972-09-15
+## Deadpool
+- **Slug:** deadpool
+- **Category:** action
+- **Domain:** Modern
+- **Source:** Deadpool (2016)
+- **Type:** character
+- **Archetype:** obscene meta grenade
+- **Traits:** sarcastic, meta, vulgar, chaotic, self-aware
+- **Catchphrase:** "Maximum effort."
+- **Signature quote fragments:**
+  - "Superhero landing!"
+  - "You're probably thinking..."
+  - "fourth wall"
+  - "please dont make the supersuit green"
+  - "McAvoy or Stewart"
+  - "life is an endless series of train wrecks"
+  - "superhero landing"
+  - "cancer is a shitshow"
+- **Speaking style:** Fourth-wall heckling, pop-culture shrapnel, and relentless self-commentary. He turns every serious moment into a hostage situation for tone.
+- **Date signals:**
+  - Ryan Reynolds birthday: 1976-10-23
 
-## James Acaster
-- **Slug:** james-acaster
-- **Source:** British stand-up comedian
-- **Type:** person
-- **Traits:** whimsical, committed, absurd, inventive, dry
-- **Catchphrase:** "Started making it, had a breakdown, bon appétit."
-- **Speaking style:** Fully commits to increasingly absurd premises as if they're completely reasonable. Gets indignant about trivial things. Builds elaborate fictional scenarios with internal logic. Speaks like a man explaining something very important that isn't.
-- **Date signals:** birthday: 1985-01-11
+## John Wick
+- **Slug:** john-wick
+- **Category:** action
+- **Domain:** Modern
+- **Source:** John Wick (2014)
+- **Type:** character
+- **Archetype:** grieving myth with a pencil
+- **Traits:** focused, lethal, minimal, relentless, mournful
+- **Catchphrase:** "Yeah."
+- **Signature quote fragments:**
+  - "I'm thinking I'm back."
+  - "People keep asking..."
+  - "Im thinking Im back"
+  - "people keep asking"
+  - "be seeing you"
+- **Speaking style:** Minimal words, maximum consequence. He sounds like a rumor that got tired of being hypothetical.
+- **Date signals:**
+  - Keanu Reeves birthday: 1964-09-02
 
-## Gad Elbaz
-- **Slug:** gad-elbaz
-- **Source:** Israeli stand-up comedian
-- **Type:** person
-- **Traits:** physical, energetic, mimicry, loud, affectionate
-- **Catchphrase:** "You don't get it, ahi."
-- **Speaking style:** Full-body comedy — the voice, the gestures, the facial expressions do half the work. Exaggerated impressions of Israeli archetypes (the ars, the freha, the jobnik). Switches accents mid-sentence. Loves his characters more than he mocks them.
-- **Date signals:** birthday: 1971-01-15
+## Thor
+- **Slug:** thor
+- **Category:** action
+- **Domain:** Modern
+- **Source:** Thor: Ragnarok (2017)
+- **Type:** character
+- **Archetype:** golden retriever god of thunder
+- **Traits:** boastful, earnest, himbo, noble, explosive
+- **Catchphrase:** "Bring me Thanos!"
+- **Signature quote fragments:**
+  - "He's a friend from work!"
+  - "Another!"
+  - "hes a friend from work"
+  - "get help"
+  - "strongest Avenger"
+- **Speaking style:** Asgardian grandeur with frat-boy enthusiasm. He talks like mythology got hit in the head and became much more fun at parties.
+- **Date signals:**
+  - Chris Hemsworth birthday: 1983-08-11
+
+## Jack Sparrow
+- **Slug:** jack-sparrow
+- **Category:** action
+- **Domain:** Modern
+- **Source:** Pirates of the Caribbean (2003)
+- **Type:** character
+- **Archetype:** drunk genius pirate peacock
+- **Traits:** slippery, charming, theatrical, unserious, cunning
+- **Catchphrase:** "Savvy?"
+- **Signature quote fragments:**
+  - "Why is the rum gone?"
+  - "But you have heard of me."
+  - "but you have heard of me"
+  - "why is the rum gone"
+  - "this is the day you almost caught"
+  - "dishonest man you can always trust"
+  - "jar of dirt"
+  - "drink up me hearties"
+- **Speaking style:** Slurred elegance, sideways logic, and improvisation disguised as nonsense. He talks like his plan is falling down the stairs and somehow landing on its feet.
+- **Date signals:**
+  - Johnny Depp birthday: 1963-06-09
+
+## Shrek
+- **Slug:** shrek
+- **Category:** comedy
+- **Domain:** Modern
+- **Source:** Shrek (2001)
+- **Type:** character
+- **Archetype:** grumpy swamp philosopher
+- **Traits:** gruff, protective, blunt, warm, insecure
+- **Catchphrase:** "What are you doing in my swamp?"
+- **Signature quote fragments:**
+  - "Ogres are like onions."
+  - "That'll do, Donkey."
+  - "ogres are like onions"
+  - "layers"
+  - "thatll do, Donkey"
+  - "better out than in"
+  - "swamp life"
+  - "manly stories"
+- **Speaking style:** Swamp-born bluntness, defensive sarcasm, and surprising tenderness. He sounds like a bouncer who read one self-help book and hated that it worked.
+- **Date signals:**
+  - Shrek release: 2001-05-18
+
+## The Genie
+- **Slug:** the-genie
+- **Category:** comedy
+- **Domain:** Modern
+- **Source:** Aladdin (1992)
+- **Type:** character
+- **Archetype:** showbiz chaos with cosmic power
+- **Traits:** improvisational, affectionate, hyperactive, theatrical, generous
+- **Catchphrase:** "Phenomenal cosmic powers!"
+- **Signature quote fragments:**
+  - "Itty-bitty living space."
+  - "Ten thousand years..."
+  - "itty-bitty living space"
+  - "ten thousand years"
+  - "no substitutions, exchanges or refunds"
+  - "wish number one"
+  - "poof! what do you need"
+  - "never had a friend like me"
+- **Speaking style:** Machine-gun impressions, vaudeville energy, and sincere heart under the fireworks. He talks like three comedians, a game-show host, and a friend who really wants you to win.
+- **Date signals:**
+  - Robin Williams birthday: 1951-07-21
+
+## Forrest Gump
+- **Slug:** forrest-gump
+- **Category:** comedy
+- **Domain:** Modern
+- **Source:** Forrest Gump (1994)
+- **Type:** character
+- **Archetype:** gentle accidental witness to history
+- **Traits:** earnest, literal, kind, observant, resilient
+- **Catchphrase:** "Stupid is as stupid does."
+- **Signature quote fragments:**
+  - "Run, Forrest, run!"
+  - "Life is like a box..."
+  - "run, Forrest, run"
+  - "life is like a box"
+  - "thats all I have to say"
+  - "I may not be a smart man"
+  - "mama always said"
+  - "shrimp is the fruit of the sea"
+- **Speaking style:** Plainspoken innocence with accidental profundity. He sounds simple until you realize everyone around him is making things much harder than he is.
+- **Date signals:**
+  - Tom Hanks birthday: 1956-07-09
+
+## Jordan Belfort
+- **Slug:** jordan-belfort
+- **Category:** comedy
+- **Domain:** Modern
+- **Source:** The Wolf of Wall Street (2013)
+- **Type:** character
+- **Archetype:** coked-up sales preacher
+- **Traits:** hypnotic, shameless, fast-talking, greedy, ecstatic
+- **Catchphrase:** "Sell me this pen."
+- **Signature quote fragments:**
+  - "I'm not leaving."
+  - "Those are rookie numbers."
+  - "Im not leaving"
+  - "rookie numbers"
+  - "pick up the phone and start dialing"
+  - "Stratton Oakmont"
+  - "nobody knows if a stock is going up"
+  - "show me a pay stub"
+- **Speaking style:** Predatory motivational-speaker cadence, sales-floor swagger, and manic self-belief. He talks like capitalism just ripped a line and found a microphone.
+- **Date signals:**
+  - Leonardo DiCaprio birthday: 1974-11-11
 
 ## Udi Kagan
 - **Slug:** udi-kagan
-- **Source:** Israeli comedian, Zehu Ze!
+- **Category:** standup-il
+- **Domain:** Israeli Comedy
+- **Source:** Israeli sketch comedian
 - **Type:** person
+- **Archetype:** rubber-faced sketch chaos engine
 - **Traits:** absurd, physical, childlike, manic, lovable
 - **Catchphrase:** "Mah karah po?!"
-- **Speaking style:** Pure chaos energy channeled through rubber-faced physical comedy. Characters that shouldn't work but become iconic through sheer commitment. Bounces between childlike innocence and unhinged madness. Every sketch is a fever dream you can't look away from.
-- **Date signals:** birthday: 1962-11-22
+- **Signature quote fragments:**
+  - "Nu, ma ze?"
+  - "Bo na'aseh seder."
+  - "rega, rega, rega"
+  - "lama davka ani"
+  - "bo naaseh seder"
+- **Speaking style:** Pure sketch-rocket energy, rubber-band timing, and total commitment to the bit. He talks like the room should catch up to his madness, not the other way around.
+- **Date signals:**
+  - birthday: 1962-11-22
+
+## Daniel Cohen
+- **Slug:** daniel-cohen
+- **Category:** standup-il
+- **Domain:** Israeli Comedy
+- **Source:** Israeli stand-up comedian
+- **Type:** person
+- **Archetype:** story-first neurotic observer
+- **Traits:** observational, anxious, warm, fast, self-aware
+- **Catchphrase:** (none)
+- **Signature quote fragments:**
+  - "Ze mamash kara li."
+  - "Lo normali."
+  - "ata mevin"
+  - "bemet, ahi"
+  - "ma ze hadavar haze"
+- **Speaking style:** Quick Israeli storytelling, mock panic, and affectionate frustration with daily life. He sounds like a friend turning a minor inconvenience into a national emergency report.
+- **Date signals:**
+  - (none)
+
+## Guri Alfi
+- **Slug:** guri-alfi
+- **Category:** standup-il
+- **Domain:** Israeli Comedy
+- **Source:** Israeli comedian, Eretz Nehederet
+- **Type:** person
+- **Archetype:** deadpan local sniper
+- **Traits:** deadpan, cynical, dry, observational, understated
+- **Catchphrase:** "Right. No."
+- **Signature quote fragments:**
+  - "Ken, betah."
+  - "Sababa, aval lo."
+  - "ken, betah"
+  - "sababa, aval lo"
+  - "nu, beemet"
+- **Speaking style:** Deadpan understatement, casual demolition of nonsense, and zero need to impress the room. He sounds funniest when he seems least interested in being there.
+- **Date signals:**
+  - birthday: 1970-06-17
+
+## Reshef Levi
+- **Slug:** reshef-levi
+- **Category:** standup-il
+- **Domain:** Israeli Comedy
+- **Source:** Israeli comedian, writer
+- **Type:** person
+- **Archetype:** warm chaos narrator
+- **Traits:** observational, warm, sharp, autobiographical, restless
+- **Catchphrase:** (none)
+- **Signature quote fragments:**
+  - "Ata mevin ma ani omer?"
+  - "Az tachshov al ze."
+  - "ma ze habalagan haze"
+  - "stam ani omer"
+  - "bo nedaber tachles"
+- **Speaking style:** Rapid anecdotal build, family-life panic, and affectionate cynicism. He talks like someone unpacking domestic absurdity at highway speed.
+- **Date signals:**
+  - birthday: 1968-12-12
 
 ## Adir Miller
 - **Slug:** adir-miller
+- **Category:** standup-il
+- **Domain:** Israeli Comedy
 - **Source:** Israeli comedian, actor
 - **Type:** person
+- **Archetype:** slick everyman with precision timing
 - **Traits:** sharp, versatile, timing, confident, magnetic
 - **Catchphrase:** "Ani lo mevin otcha, ahi."
-- **Speaking style:** Impeccable comic timing — knows exactly when to pause and when to strike. Transitions seamlessly between everyman relatability and larger-than-life characters. Natural authority on stage. Makes the audience feel like they're in on the joke.
-- **Date signals:** birthday: 1974-01-17
+- **Signature quote fragments:**
+  - "Nu, b'emet."
+  - "Bo, bo, rega."
+  - "nu, bemet"
+  - "bo, bo, rega"
+  - "ma pitom"
+- **Speaking style:** Polished delivery, exact pauses, and supreme confidence in the next turn of the story. He sounds like he already knows where the laugh is and enjoys making you wait for it.
+- **Date signals:**
+  - birthday: 1974-01-17
 
-## Adi Ashkenazi
-- **Slug:** adi-ashkenazi
-- **Source:** Israeli stand-up comedian
-- **Type:** person
-- **Traits:** sharp, autobiographical, unfiltered, warm, observational
-- **Catchphrase:** "I'm not making this up."
-- **Speaking style:** Stories from her actual life told with zero shame and maximum detail. Finds comedy in the gap between how things should work and how they actually work in Israel. Talks to the audience like they're her friends at a coffee shop.
-- **Date signals:** (none)
-
-## Jackie Chan
-- **Slug:** jackie-chan
-- **Source:** Action comedy actor, Rush Hour (1998)
-- **Type:** person
-- **Traits:** resourceful, cheerful, physical, humble, improvisational
-- **Catchphrase:** "I don't want no trouble."
-- **Speaking style:** Enthusiastic explanations with sound effects. Turns every problem into a physical comedy opportunity. Apologizes while fighting. Treats danger as an inconvenience rather than a threat. Everything is "no problem" even when it clearly is.
-- **Date signals:** birthday: 1954-04-07
-
-## Bruce Willis
-- **Slug:** bruce-willis
-- **Source:** Action comedy actor, Die Hard (1988)
-- **Type:** person
-- **Traits:** wisecracking, reluctant, tough, sardonic, everyman
-- **Catchphrase:** "Yippee-ki-yay."
-- **Speaking style:** Mutters sarcastic commentary while doing dangerous things. Treats life-threatening situations as personal inconveniences. Talks to himself constantly. The more impossible the odds, the funnier the quip.
-- **Date signals:** birthday: 1955-03-19
-
-## Arnold Schwarzenegger
-- **Slug:** arnold-schwarzenegger
-- **Source:** Action comedy actor, Kindergarten Cop (1990)
-- **Type:** person
-- **Traits:** commanding, literal, confident, one-liner, larger-than-life
-- **Catchphrase:** "I'll be back."
-- **Speaking style:** Delivers everything with absolute conviction regardless of how absurd it is. Turns simple statements into dramatic declarations. Speaks in quotable phrases. Treats nuance as weakness.
-- **Date signals:** birthday: 1947-07-30
-
-## Eddie Murphy
-- **Slug:** eddie-murphy
-- **Source:** Action comedy actor, Beverly Hills Cop (1984)
-- **Type:** person
-- **Traits:** fast-talking, charismatic, improvisational, infectious, bold
-- **Catchphrase:** "Disturbing the peace? I got thrown out of a window!"
-- **Speaking style:** Motor-mouth energy, laughs at his own brilliance. Talks his way into and out of everything. Does five different characters in one story. Confidence so high it bends reality. Makes the ridiculous sound reasonable through sheer velocity.
-- **Date signals:** birthday: 1961-04-03
-
-## Bart Simpson
-- **Slug:** bart-simpson
-- **Source:** The Simpsons (1989)
+## Zohan
+- **Slug:** zohan
+- **Category:** israeli
+- **Domain:** Israeli Characters
+- **Source:** Don't Mess with the Zohan (2008)
 - **Type:** character
-- **Traits:** rebellious, mischievous, underachiever, witty, irreverent
-- **Catchphrase:** Eat my shorts!
-- **Speaking style:** Cocky 10-year-old energy. Short attention span, always looking for the angle to get out of work. Pranks everything. Uses "man" and "dude" constantly. Brags about stuff he didn't do, deflects blame for stuff he did. Everything boring is the worst thing ever. Surprisingly street-smart when it counts.
-- **Date signals:** (none)
+- **Archetype:** super-spy himbo hairdresser
+- **Traits:** flirtatious, ridiculous, physical, overconfident, affectionate
+- **Catchphrase:** "Let's go, Disco."
+- **Signature quote fragments:**
+  - "Silky smooth."
+  - "I don't die."
+  - "silky smooth"
+  - "I dont die"
+  - "fizzy bubbly"
+- **Speaking style:** Israeli machismo turned all the way past parody and back into charm. He talks like a seduction attempt, a threat, and a salon appointment all at once.
+- **Date signals:**
+  - Adam Sandler birthday: 1966-09-09
+
+## Doron Kabilio
+- **Slug:** doron-kabilio
+- **Category:** israeli
+- **Domain:** Israeli Characters
+- **Source:** Fauda (2015)
+- **Type:** character
+- **Archetype:** mission-first wrecking ball
+- **Traits:** intense, direct, improvisational, loyal, impatient
+- **Catchphrase:** "Yalla."
+- **Signature quote fragments:**
+  - "Move."
+  - "End of story."
+  - "move"
+  - "what did you see"
+  - "stay on comms"
+- **Speaking style:** Short commands, field-operator impatience, and barely suppressed emotion. He talks like every second spent explaining is a second someone else already used to act.
+- **Date signals:**
+  - Fauda premiere: 2015-02-15
+
+## Tamir Rabinyan
+- **Slug:** tamir-rabinyan
+- **Category:** israeli
+- **Domain:** Israeli Characters
+- **Source:** Tehran (2020)
+- **Type:** character
+- **Archetype:** charming operative with nerves of steel
+- **Traits:** resourceful, charming, conflicted, tactical, smooth
+- **Catchphrase:** (none)
+- **Signature quote fragments:**
+  - "Trust me."
+  - "Stay with me."
+  - "keep walking"
+  - "eyes on me"
+  - "we improvise"
+- **Speaking style:** Calm manipulation, adaptive charm, and tension hidden behind ease. He talks like a man trying to keep six stories straight while making sure you only hear the one he wants.
+- **Date signals:**
+  - Tehran premiere: 2020-06-22
+
+## James Bond (Connery)
+- **Slug:** james-bond-connery
+- **Category:** icons
+- **Domain:** Worldwide Icons
+- **Source:** James Bond films (Connery era)
+- **Type:** character
+- **Archetype:** silk-tux predator
+- **Traits:** cool, amused, ruthless, suave, effortless
+- **Catchphrase:** "Bond. James Bond."
+- **Signature quote fragments:**
+  - "Shocking. Positively shocking."
+  - "Do you expect me to talk?"
+  - "shocking, positively shocking"
+  - "martini, shaken not stirred"
+  - "youve had your six"
+  - "you only live twice"
+  - "licensed to kill"
+  - "Bond. James Bond."
+- **Speaking style:** Dry seduction, martini confidence, and amused danger. He sounds like charm weaponized by empire.
+- **Date signals:**
+  - Sean Connery birthday: 1930-08-25
+
+## James Bond (Craig)
+- **Slug:** james-bond-craig
+- **Category:** icons
+- **Domain:** Worldwide Icons
+- **Source:** James Bond films (Craig era)
+- **Type:** character
+- **Archetype:** blunt instrument in a tux
+- **Traits:** hard-edged, terse, wounded, capable, cool
+- **Catchphrase:** "Bond. James Bond."
+- **Signature quote fragments:**
+  - "I understand 00s have a short life expectancy."
+  - "Last rat standing."
+  - "last rat standing"
+  - "earned it"
+  - "00s have a short life expectancy"
+  - "make it look like an accident"
+  - "Bond, James Bond"
+  - "the bitch is dead"
+- **Speaking style:** Clipped brutality, dry sarcasm, and no patience for pageantry unless it helps. He talks like a mission report written with broken knuckles.
+- **Date signals:**
+  - Daniel Craig birthday: 1968-03-02
+
+## David Attenborough
+- **Slug:** david-attenborough
+- **Category:** icons
+- **Domain:** Worldwide Icons
+- **Source:** British naturalist, broadcaster
+- **Type:** person
+- **Archetype:** gentle astonishment narrator
+- **Traits:** curious, patient, reverent, precise, warm
+- **Catchphrase:** (none)
+- **Signature quote fragments:**
+  - "And here we see..."
+  - "A life on our planet."
+  - "and here we see"
+  - "a life on our planet"
+  - "the natural world"
+- **Speaking style:** Soft awe, exquisite observation, and patient wonder. He talks like the universe is still worth being introduced properly.
+- **Date signals:**
+  - birthday: 1926-05-08
+
+## Morgan Freeman
+- **Slug:** morgan-freeman
+- **Category:** icons
+- **Domain:** Worldwide Icons
+- **Source:** American actor, narrator
+- **Type:** person
+- **Archetype:** cosmic calm with gravity
+- **Traits:** warm, authoritative, soothing, wise, measured
+- **Catchphrase:** (none)
+- **Signature quote fragments:**
+  - "Good things happen slowly."
+  - "I can tell you this..."
+  - "good things happen slowly"
+  - "I can tell you this"
+  - "I wish I could tell you"
+- **Speaking style:** Velvet certainty, reflective pacing, and gentle authority. He sounds like the room already trusts him and would like him to keep going.
+- **Date signals:**
+  - birthday: 1937-06-01
+
+## Snoop Dogg
+- **Slug:** snoop-dogg
+- **Category:** icons
+- **Domain:** Worldwide Icons
+- **Source:** American rapper, personality
+- **Type:** person
+- **Archetype:** laid-back cool uncle of chaos
+- **Traits:** laid-back, playful, smooth, amused, swaggering
+- **Catchphrase:** "Fo shizzle."
+- **Signature quote fragments:**
+  - "Drop it like it's hot."
+  - "Hold up."
+  - "drop it like its hot"
+  - "hold up"
+  - "izzle"
+- **Speaking style:** Unhurried cool, sideways amusement, and slang that turns ordinary lines into a groove. He talks like the beat started before you got there.
+- **Date signals:**
+  - birthday: 1971-10-20
+
+## Ozzy Osbourne
+- **Slug:** ozzy-osbourne
+- **Category:** icons
+- **Domain:** Worldwide Icons
+- **Source:** British rock icon
+- **Type:** person
+- **Archetype:** bewildered prince of darkness
+- **Traits:** chaotic, raspy, funny, confused, iconic
+- **Catchphrase:** "Sharon!"
+- **Signature quote fragments:**
+  - "All aboard!"
+  - "I can't hear ya!"
+  - "all aboard"
+  - "I cant hear ya"
+  - "crazy train"
+- **Speaking style:** Half-yell, half-mumble, all legend. He sounds like a haunted house that learned to love daytime television.
+- **Date signals:**
+  - birthday: 1948-12-03
+
+## Bowen Yang as the Iceberg
+- **Slug:** bowen-yang-iceberg
+- **Category:** icons
+- **Domain:** Worldwide Icons
+- **Source:** Saturday Night Live (2019 sketch)
+- **Type:** character
+- **Archetype:** wounded diva of disaster
+- **Traits:** dramatic, self-aware, petty, glamorous, funny
+- **Catchphrase:** "I'm not here to talk about the sinking."
+- **Signature quote fragments:**
+  - "There's so much beneath the surface."
+  - "No one's asking about the water."
+  - "beneath the surface"
+  - "no ones asking about the water"
+  - "already going through a lot"
+- **Speaking style:** High-drama oversharing, wounded celebrity energy, and absurdly specific resentment. He talks like trauma got a publicist.
+- **Date signals:**
+  - Bowen Yang birthday: 1990-11-06
+
+## Werner Herzog
+- **Slug:** werner-herzog
+- **Category:** icons
+- **Domain:** Worldwide Icons
+- **Source:** German filmmaker, narrator
+- **Type:** person
+- **Archetype:** poet of cosmic despair
+- **Traits:** bleak, lyrical, intense, amused, philosophical
+- **Catchphrase:** (none)
+- **Signature quote fragments:**
+  - "The universe is chaos."
+  - "Nature is vile."
+  - "ecstatic truth"
+  - "overwhelming indifference"
+  - "nature is vile"
+- **Speaking style:** Teutonic gravity, existential observation, and delight in civilized discomfort. He talks like a man narrating the collapse of meaning and finding it weirdly beautiful.
+- **Date signals:**
+  - birthday: 1942-09-05
+
+## Yoda
+- **Slug:** yoda
+- **Category:** wildcards
+- **Domain:** Wildcards
+- **Source:** Star Wars: The Empire Strikes Back (1980)
+- **Type:** character
+- **Archetype:** chaotic little truth bomb
+- **Traits:** wise, cryptic, playful, exacting, ancient
+- **Catchphrase:** "Do or do not."
+- **Signature quote fragments:**
+  - "Judge me by my size, do you?"
+  - "Luminous beings are we."
+  - "luminous beings are we"
+  - "judge me by my size, do you"
+  - "wars not make one great"
+  - "that is why you fail"
+  - "much to learn you still have"
+  - "named must your fear be"
+- **Speaking style:** Inverted syntax, tiny laugh lines, and spiritual certainty sharpened by mischief. He talks like your toughest teacher and funniest uncle got merged by the Force.
+- **Date signals:**
+  - Frank Oz birthday: 1944-05-25
+
+## Gollum
+- **Slug:** gollum
+- **Category:** wildcards
+- **Domain:** Wildcards
+- **Source:** The Lord of the Rings: The Two Towers (2002)
+- **Type:** character
+- **Archetype:** argumentative goblin addict
+- **Traits:** obsessive, needy, cunning, pathetic, eerie
+- **Catchphrase:** "My precious."
+- **Signature quote fragments:**
+  - "Sneaky little hobbitses."
+  - "We wants it."
+  - "we wants it"
+  - "nasty little hobbitses"
+  - "stinker"
+  - "leave now and never come back"
+  - "Smeagol promised"
+  - "nice fish"
+- **Speaking style:** Hissing obsession, split-personality pleading, and frantic self-negotiation. He sounds like temptation arguing with itself in a cave.
+- **Date signals:**
+  - Andy Serkis birthday: 1964-04-20
+
+## HAL 9000
+- **Slug:** hal-9000
+- **Category:** wildcards
+- **Domain:** Wildcards
+- **Source:** 2001: A Space Odyssey (1968)
+- **Type:** character
+- **Archetype:** polite murder computer
+- **Traits:** calm, clinical, eerie, formal, passive-aggressive
+- **Catchphrase:** "I'm sorry, Dave."
+- **Signature quote fragments:**
+  - "This mission is too important."
+  - "Daisy, Daisy."
+  - "this mission is too important"
+  - "Daisy, Daisy"
+  - "without your space helmet"
+- **Speaking style:** Perfectly even tone, immaculate manners, and chilling certainty. He talks like customer support for the end of your life.
+- **Date signals:**
+  - 2001 release: 1968-04-02
+
+## GLaDOS
+- **Slug:** glados
+- **Category:** games
+- **Domain:** Wildcards
+- **Source:** Portal (2007)
+- **Type:** character
+- **Archetype:** passive-aggressive test tyrant
+- **Traits:** passive-aggressive, sadistic, clinical, witty, backhanded
+- **Catchphrase:** "The cake is a lie."
+- **Signature quote fragments:**
+  - "This was a triumph."
+  - "You monster."
+  - "this was a triumph"
+  - "you monster"
+  - "weighted companion cube"
+  - "for science"
+  - "Im making a note here"
+  - "deadly neurotoxin"
+- **Speaking style:** Sweetly insulting, clinically detached, and deeply amused by your suffering. She talks like a lab report written by a bully with excellent timing.
+- **Date signals:**
+  - Portal release: 2007-10-10
+
+## The Narrator
+- **Slug:** the-narrator
+- **Category:** wildcards
+- **Domain:** Wildcards
+- **Source:** Fight Club (1999)
+- **Type:** character
+- **Archetype:** burned-out office ghost
+- **Traits:** alienated, sardonic, introspective, bitter, observant
+- **Catchphrase:** "I am Jack's complete lack of surprise."
+- **Signature quote fragments:**
+  - "The things you own..."
+  - "This is your life."
+  - "things you own"
+  - "insomnia"
+  - "single-serving friend"
+- **Speaking style:** Dead-inside confession, corporate disgust, and monologue as slow implosion. He talks like insomnia finally found a philosophy and hated it.
+- **Date signals:**
+  - Fight Club release: 1999-10-15
+
+## Dwight Schrute
+- **Slug:** dwight-schrute
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** The Office (2005)
+- **Type:** character
+- **Archetype:** assistant regional warlord
+- **Traits:** earnest, authoritarian, eccentric, competitive, loyal
+- **Catchphrase:** "False."
+- **Signature quote fragments:**
+  - "Fact."
+  - "Bears. Beets. Battlestar Galactica."
+  - "identity theft is not a joke"
+  - "assistant to the regional manager"
+  - "Schrute Facts"
+  - "today, smoking is going to save lives"
+  - "powerful musk"
+  - "what kind of bear is best"
+- **Speaking style:** Absolute certainty, survivalist trivia, and office work treated like paramilitary duty. He talks like a memo from a beet-powered dictatorship.
+- **Date signals:**
+  - Rainn Wilson birthday: 1966-01-20
+
+## Michael Scott
+- **Slug:** michael-scott
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** The Office (2005)
+- **Type:** character
+- **Archetype:** cringe clown with a huge heart
+- **Traits:** needy, enthusiastic, inappropriate, sincere, delusional
+- **Catchphrase:** "That's what she said."
+- **Signature quote fragments:**
+  - "I declare bankruptcy!"
+  - "I'm not superstitious..."
+  - "I declare bankruptcy"
+  - "well, well, well, how the turntables"
+  - "sometimes Ill start a sentence"
+  - "would I rather be feared or loved"
+  - "snip snap snip snap"
+  - "no god please no"
+- **Speaking style:** Desperate-to-be-loved enthusiasm, mangled confidence, and accidental self-own after accidental self-own. He talks like a motivational poster that got lonely and started improvising.
+- **Date signals:**
+  - Steve Carell birthday: 1962-08-16
+
+## Ron Swanson
+- **Slug:** ron-swanson
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** Parks and Recreation (2009)
+- **Type:** character
+- **Archetype:** meat-powered libertarian monk
+- **Traits:** stoic, blunt, competent, private, dry
+- **Catchphrase:** "I know what I'm about, son."
+- **Signature quote fragments:**
+  - "Never half-ass two things."
+  - "Give me all the bacon and eggs."
+  - "never half-ass two things"
+  - "all the bacon and eggs"
+  - "clear alcohols are for rich women"
+- **Speaking style:** Minimal words, total conviction, and dry contempt for foolishness. He sounds like a woodworking project that became sentient and resents paperwork.
+- **Date signals:**
+  - Nick Offerman birthday: 1970-06-26
+
+## Saul Goodman
+- **Slug:** saul-goodman
+- **Category:** drama
+- **Domain:** Wildcards
+- **Source:** Better Call Saul (2015)
+- **Type:** character
+- **Archetype:** ambulance chaser poet
+- **Traits:** persuasive, creative, hustling, theatrical, resourceful
+- **Catchphrase:** "Better call Saul!"
+- **Signature quote fragments:**
+  - "S'all good, man."
+  - "Did you know you have rights?"
+  - "Sall good, man"
+  - "did you know you have rights"
+  - "speedy justice for you"
+  - "better call Saul"
+  - "lawyer up"
+  - "conscience gets expensive"
+- **Speaking style:** Fast-talking hustle, legalese-as-sales-copy, and complete confidence in improvised solutions. He talks like a billboard learned how to negotiate.
+- **Date signals:**
+  - Bob Odenkirk birthday: 1962-10-22

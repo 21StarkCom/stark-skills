@@ -98,12 +98,22 @@ class TestPersonaRecord:
             name="Yoda",
             source="Star Wars",
             type="character",
+            category="sci-fi",
+            domain="Wildcards",
+            archetype="wise imp",
             traits=["wise", "cryptic"],
             catchphrase="Do or do not, there is no try",
+            signature_quotes=["Luminous beings are we."],
+            voice_profile=["Cadence: inverted syntax"],
             speaking_style="Inverted sentence structure, speaks in riddles",
             date_signals={"Star Wars Day": "2026-05-04"},
         )
+        assert p.category == "sci-fi"
+        assert p.domain == "Wildcards"
+        assert p.archetype == "wise imp"
         assert p.traits == ["wise", "cryptic"]
+        assert p.signature_quotes == ["Luminous beings are we."]
+        assert p.voice_profile == ["Cadence: inverted syntax"]
         assert p.date_signals["Star Wars Day"] == "2026-05-04"
 
 
@@ -127,7 +137,7 @@ class TestLoadRoster:
         assert "walter-white" in slugs
         assert "gandalf" in slugs
         assert "glados" in slugs
-        assert "wednesday-addams" in slugs
+        assert "michael-scott" in slugs
 
     def test_parses_all_fields(self) -> None:
         roster = load_roster(SEED_ROSTER)
@@ -140,6 +150,45 @@ class TestLoadRoster:
         assert jules.catchphrase == "Allow me to retort."
         assert "Biblical" in jules.speaking_style
         assert jules.date_signals.get("Samuel L. Jackson birthday") == "1948-12-21"
+
+    def test_parses_structured_list_fields(self) -> None:
+        md = """\
+# Persona Roster
+
+## Yoda
+- **Slug:** yoda
+- **Category:** sci-fi
+- **Domain:** Wildcards
+- **Source:** Star Wars: Episode V - The Empire Strikes Back (1980)
+- **Type:** character
+- **Archetype:** wise imp
+- **Traits:** wise, cryptic, playful
+- **Catchphrase:** "Do or do not."
+- **Signature quote fragments:**
+  - "Do or do not."
+  - "Judge me by my size, do you?"
+- **Voice profile:**
+  - Cadence: inverted syntax
+  - Humor: dry lesson wrapped in a riddle
+- **Speaking style:** Inverted syntax, gentle scolding, and old-master certainty.
+- **Date signals:**
+  - Star Wars Day: 2026-05-04
+  - Frank Oz birthday: 1944-05-25
+"""
+        roster = parse_roster(md)
+        yoda = roster[0]
+        assert yoda.category == "sci-fi"
+        assert yoda.domain == "Wildcards"
+        assert yoda.archetype == "wise imp"
+        assert yoda.signature_quotes == ["Do or do not.", "Judge me by my size, do you?"]
+        assert yoda.voice_profile == [
+            "Cadence: inverted syntax",
+            "Humor: dry lesson wrapped in a riddle",
+        ]
+        assert yoda.date_signals == {
+            "Star Wars Day": "2026-05-04",
+            "Frank Oz birthday": "1944-05-25",
+        }
 
     def test_person_type(self) -> None:
         roster = load_roster(SEED_ROSTER)
@@ -383,7 +432,11 @@ class TestWeightedSelection:
     def test_weighted_selection_respects_weights(self, tmp_path: Path) -> None:
         """Heavily liked persona should be picked more often."""
         conn = init_db(tmp_path / "persona.db")
-        roster = load_roster(SEED_ROSTER)
+        roster = [
+            PersonaRecord(slug="jules-winnfield", name="Jules Winnfield", source="Pulp Fiction", type="character"),
+            PersonaRecord(slug="the-dude", name="The Dude", source="The Big Lebowski", type="character"),
+            PersonaRecord(slug="deadpool", name="Deadpool", source="Deadpool", type="character"),
+        ]
         sync_weights(roster, conn)
 
         # Give jules many likes (one per session, respecting UNIQUE on session_id)
@@ -398,7 +451,7 @@ class TestWeightedSelection:
         conn.commit()
 
         picks: dict[str, int] = {}
-        for i in range(100):
+        for i in range(300):
             result = select_single_persona(
                 roster, conn,
                 active_path=tmp_path / "active.json",
@@ -409,7 +462,7 @@ class TestWeightedSelection:
 
         # jules (weight ~3.0) should appear more than uniform average
         n_personas = len(roster)
-        uniform_avg = 100 / n_personas
+        uniform_avg = 300 / n_personas
         assert picks.get("jules-winnfield", 0) > uniform_avg
         conn.close()
 

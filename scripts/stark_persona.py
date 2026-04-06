@@ -52,8 +52,13 @@ class PersonaRecord:
     name: str
     source: str
     type: str  # "character" or "person"
+    category: Optional[str] = None
+    domain: Optional[str] = None
+    archetype: Optional[str] = None
     traits: list[str] = field(default_factory=list)
     catchphrase: Optional[str] = None
+    signature_quotes: list[str] = field(default_factory=list)
+    voice_profile: list[str] = field(default_factory=list)
     speaking_style: str = ""
     date_signals: dict[str, str] = field(default_factory=dict)  # name → YYYY-MM-DD
 
@@ -198,27 +203,104 @@ def _ensure_index(
 # Roster parsing (#152)
 # ---------------------------------------------------------------------------
 
-def _extract_field(lines: list[str], field_name: str) -> str | None:
-    """Extract a **Field:** value from a list of markdown lines."""
-    pattern = re.compile(rf"^-\s+\*\*{re.escape(field_name)}:\*\*\s*(.+)$")
-    for line in lines:
-        m = pattern.match(line.strip())
-        if m:
-            return m.group(1).strip()
-    return None
+def _parse_field_blocks(lines: list[str]) -> dict[str, dict[str, object]]:
+    """Parse markdown field blocks into a structured mapping.
+
+    Supports both legacy single-line values:
+        - **Source:** Pulp Fiction (1994)
+
+    And structured list values:
+        - **Signature quote fragments:**
+          - "Allow me to retort."
+          - "Say what again."
+    """
+
+    field_re = re.compile(r"^-\s+\*\*(.+?):\*\*\s*(.*)$")
+    fields: dict[str, dict[str, object]] = {}
+    current_name: str | None = None
+    current_value: str = ""
+    current_items: list[str] = []
+
+    def flush() -> None:
+        if current_name is None:
+            return
+        fields[current_name] = {
+            "value": current_value.strip() or None,
+            "items": list(current_items),
+        }
+
+    for raw_line in lines:
+        line = raw_line.rstrip()
+        match = field_re.match(line)
+        if match:
+            flush()
+            current_name = match.group(1).strip()
+            current_value = match.group(2).strip()
+            current_items = []
+            continue
+
+        if current_name is None:
+            continue
+
+        if line.startswith("  - "):
+            current_items.append(line[4:].strip())
+            continue
+
+        if not line.strip():
+            continue
+
+        # Allow wrapped continuation lines for either scalar values or list items.
+        if current_items:
+            current_items[-1] = f"{current_items[-1]} {line.strip()}"
+        else:
+            current_value = f"{current_value} {line.strip()}".strip()
+
+    flush()
+    return fields
+
+
+def _extract_field(fields: dict[str, dict[str, object]], field_name: str) -> str | None:
+    """Extract the scalar value for a parsed field block."""
+    block = fields.get(field_name)
+    if not block:
+        return None
+    value = block.get("value")
+    return value if isinstance(value, str) else None
+
+
+def _extract_list_field(fields: dict[str, dict[str, object]], field_name: str) -> list[str]:
+    """Extract a list field, accepting bullets or a fallback scalar value."""
+    block = fields.get(field_name)
+    if not block:
+        return []
+    items = block.get("items")
+    if isinstance(items, list) and items:
+        return [
+            item.strip()
+            for item in items
+            if isinstance(item, str)
+            and item.strip()
+            and item.strip().lower() not in {"(none)", "none"}
+        ]
+    value = block.get("value")
+    if isinstance(value, str) and value.strip() and value.strip().lower() not in {"(none)", "none"}:
+        return [value.strip()]
+    return []
 
 
 def _parse_persona_section(name: str, lines: list[str], start_line: int) -> PersonaRecord:
     """Parse a single ## section into a PersonaRecord. Raises ValueError on issues."""
-    slug = _extract_field(lines, "Slug")
+    fields = _parse_field_blocks(lines)
+
+    slug = _extract_field(fields, "Slug")
     if not slug:
         raise ValueError(f"Line ~{start_line}: persona '{name}' missing required field 'Slug'")
 
-    source = _extract_field(lines, "Source")
+    source = _extract_field(fields, "Source")
     if not source:
         raise ValueError(f"Line ~{start_line}: persona '{name}' missing required field 'Source'")
 
-    ptype = _extract_field(lines, "Type")
+    ptype = _extract_field(fields, "Type")
     if not ptype:
         raise ValueError(f"Line ~{start_line}: persona '{name}' missing required field 'Type'")
     if ptype not in ("character", "person"):
@@ -227,7 +309,7 @@ def _parse_persona_section(name: str, lines: list[str], start_line: int) -> Pers
             f"(must be 'character' or 'person')"
         )
 
-    traits_raw = _extract_field(lines, "Traits")
+    traits_raw = _extract_field(fields, "Traits")
     traits = [t.strip() for t in (traits_raw or "").split(",") if t.strip()]
     if len(traits) < 3 or len(traits) > 5:
         raise ValueError(
@@ -235,25 +317,38 @@ def _parse_persona_section(name: str, lines: list[str], start_line: int) -> Pers
             f"(must have 3-5)"
         )
 
-    catchphrase_raw = _extract_field(lines, "Catchphrase")
+    catchphrase_raw = _extract_field(fields, "Catchphrase")
     catchphrase = None
     if catchphrase_raw and catchphrase_raw not in ("(none)", "none", ""):
         # Strip surrounding quotes if present
         catchphrase = catchphrase_raw.strip('"').strip("'")
 
-    speaking_style = _extract_field(lines, "Speaking style") or ""
+    speaking_style = _extract_field(fields, "Speaking style") or ""
     if not speaking_style:
         raise ValueError(
             f"Line ~{start_line}: persona '{name}' missing required field 'Speaking style'"
         )
 
+    category = _extract_field(fields, "Category")
+    domain = _extract_field(fields, "Domain")
+    archetype = _extract_field(fields, "Archetype")
+    signature_quotes = [
+        quote.strip('"').strip("'")
+        for quote in (
+            _extract_list_field(fields, "Signature quote fragments")
+            or _extract_list_field(fields, "Signature quotes")
+        )
+    ]
+    voice_profile = _extract_list_field(fields, "Voice profile")
+
     # Parse date signals: "label: YYYY-MM-DD" patterns
     date_signals: dict[str, str] = {}
-    ds_raw = _extract_field(lines, "Date signals")
-    if ds_raw:
+    ds_values = _extract_list_field(fields, "Date signals")
+    ds_raw = _extract_field(fields, "Date signals")
+    candidates = ds_values or ([ds_raw] if ds_raw else [])
+    for candidate in candidates:
         # Format: "Label: YYYY-MM-DD" or "label1: date1, label2: date2"
-        # But typically one per persona. Split on pattern.
-        for match in re.finditer(r"([^:,]+?):\s*(\d{4}-\d{2}-\d{2})", ds_raw):
+        for match in re.finditer(r"([^:,]+?):\s*(\d{4}-\d{2}-\d{2})", candidate):
             date_signals[match.group(1).strip()] = match.group(2)
 
     return PersonaRecord(
@@ -261,8 +356,13 @@ def _parse_persona_section(name: str, lines: list[str], start_line: int) -> Pers
         name=name,
         source=source,
         type=ptype,
+        category=category,
+        domain=domain,
+        archetype=archetype,
         traits=traits,
         catchphrase=catchphrase,
+        signature_quotes=signature_quotes,
+        voice_profile=voice_profile,
         speaking_style=speaking_style,
         date_signals=date_signals,
     )
@@ -478,23 +578,36 @@ def fuzzy_match_persona(
     roster: list[PersonaRecord], name: str
 ) -> PersonaRecord | None:
     """Fuzzy-match a name against roster slugs and display names."""
+    query = name.lower().strip()
+
     # Exact slug match first
     for p in roster:
-        if p.slug == name or p.name.lower() == name.lower():
+        if p.slug == name or p.name.lower() == query:
             return p
 
-    # Fuzzy match on slugs
-    slugs = [p.slug for p in roster]
-    slug_matches = difflib.get_close_matches(name.lower(), slugs, n=1, cutoff=0.5)
-    if slug_matches:
-        return next(p for p in roster if p.slug == slug_matches[0])
+    def score(candidate: str) -> float:
+        candidate = candidate.lower()
+        if query == candidate:
+            return 1.0
+        if query in candidate or candidate in query:
+            return 0.95
 
-    # Fuzzy match on display names
-    names = [p.name.lower() for p in roster]
-    name_matches = difflib.get_close_matches(name.lower(), names, n=1, cutoff=0.5)
-    if name_matches:
-        return next(p for p in roster if p.name.lower() == name_matches[0])
+        ratio = difflib.SequenceMatcher(None, query, candidate).ratio()
+        tokens = [token for token in re.split(r"[^a-z0-9]+", candidate) if token]
+        if any(token.startswith(query) or query.startswith(token) for token in tokens if len(token) >= 3):
+            ratio = max(ratio, 0.85)
+        return ratio
 
+    best_match: PersonaRecord | None = None
+    best_score = 0.0
+    for persona in roster:
+        candidate_score = max(score(persona.slug), score(persona.name))
+        if candidate_score > best_score:
+            best_score = candidate_score
+            best_match = persona
+
+    if best_match and best_score >= 0.72:
+        return best_match
     return None
 
 
@@ -1095,12 +1208,22 @@ def cmd_add(args: argparse.Namespace) -> int:
     section = f"""
 ## {name}
 - **Slug:** {slug}
+- **Category:** drama
+- **Domain:** Custom
 - **Source:** {source}
 - **Type:** {ptype}
+- **Archetype:** custom add
 - **Traits:** {', '.join(traits)}
 - **Catchphrase:** (none)
+- **Signature quote fragments:**
+  - (add short iconic lines)
+- **Voice profile:**
+  - Cadence: (to be filled in)
+  - Humor: (to be filled in)
+  - Tells: (to be filled in)
 - **Speaking style:** (to be filled in)
-- **Date signals:** (none)
+- **Date signals:**
+  - (none)
 """
 
     # Atomic append via temp file
@@ -1221,10 +1344,13 @@ def cmd_print_roster(args: argparse.Namespace) -> int:
     if not roster:
         print("(empty roster)")
         return 0
-    print(f"{'Slug':<25} {'Name':<25} {'Source':<30} {'Type':<10} {'Traits'}")
-    print(f"{'-'*25} {'-'*25} {'-'*30} {'-'*10} {'-'*30}")
+    print(f"{'Slug':<24} {'Category':<12} {'Name':<24} {'Source':<28} {'Type':<10} {'Traits'}")
+    print(f"{'-'*24} {'-'*12} {'-'*24} {'-'*28} {'-'*10} {'-'*30}")
     for r in roster:
-        print(f"{r.slug:<25} {r.name:<25} {r.source:<30} {r.type:<10} {', '.join(r.traits)}")
+        print(
+            f"{r.slug:<24} {(r.category or '-'):12.12} {r.name:<24} "
+            f"{r.source:<28.28} {r.type:<10} {', '.join(r.traits)}"
+        )
     return 0
 
 
