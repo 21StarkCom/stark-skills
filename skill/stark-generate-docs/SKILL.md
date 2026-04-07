@@ -9,7 +9,7 @@ model: opus
 
 # stark-generate-docs
 
-Generate or update skill documentation with multi-LLM visualization competition.
+Generate or update skill documentation with enabled-agent visualization competition.
 
 ## Arguments
 

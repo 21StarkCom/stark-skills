@@ -1,6 +1,6 @@
 # stark-skills
 
-A multi-agent AI engineering system. 26 skills that take you from a napkin idea to production code, with adversarial review at every stage.
+A multi-agent AI engineering system. 28 skills that take you from a napkin idea to production code, with adversarial review at every stage.
 
 ## The Pipeline
 
@@ -22,7 +22,7 @@ Two patterns recur throughout. **Generate** skills (blue) dispatch 3 agents to i
 
 **Step 6 — `/stark-phase-execute`** picks up those issues and autonomously implements them — for each issue: implement, create PR, run multi-agent review, fix findings, merge. Zero user intervention. For maximum quality, `/stark-autopilot` is the alternative execution mode: all 3 agents compete on every implementation step in parallel git worktrees, with a tournament to pick the winner at each step.
 
-**Step 7 — `/stark-review`** is the PR code review that runs during execution (or standalone). 3 agents × 9 domains = 27 parallel sub-agent reviews, posted to GitHub under the respective bot identities.
+**Step 7 — `/stark-team-review`** is the full PR code review that runs during execution (or standalone). 3 agents × 9 domains = 27 parallel sub-agent reviews, posted to GitHub under the respective bot identities. For a faster manual pass, `/stark-review` runs a single agent across the same 9 domains.
 
 ## The Ecosystem
 

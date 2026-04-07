@@ -37,6 +37,10 @@ from gemini_utils import (
     parse_json_output as parse_gemini_output,
     should_fallback_to_api_key, try_gemini_api_key_fallback,
 )
+try:
+    from runtime_env import build_agent_env
+except ImportError:  # pragma: no cover - backward compat for older installs
+    build_agent_env = None
 
 try:
     from config_loader import get_model_id, is_agent_enabled
@@ -484,7 +488,11 @@ def dispatch_competitor(agent: str, skill, audience: str):
     if stdin_input is not None:
         run_kwargs["input"] = stdin_input
     if agent in ("claude", "codex"):
-        run_kwargs["env"] = make_clean_env()
+        run_kwargs["env"] = (
+            build_agent_env(agent, "review")
+            if build_agent_env is not None
+            else make_clean_env()
+        )
     if gemini_home:
         run_kwargs["env"] = make_gemini_env(gemini_home)
 

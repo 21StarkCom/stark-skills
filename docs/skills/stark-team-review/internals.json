@@ -1,4 +1,4 @@
 {
   "doc_content": {},
-  "alt_text": "A clean internal architecture page for the skill \\\"stark-review\\\" showing a top summary strip with control-plane stats, a vertical workflow diagram from invocation through setup, auth gating, worktree isolation, parallel 18-agent review rounds, classification and fixing, summary generation, posting, and cleanup, followed by tables for runtime contracts and decision gates, cards for observability, failure recovery, and extension points, all color-coded by phase, decision, config, output, failure, and external dependency.\"}}"
+  "alt_text": "Internal architecture page for the skill \"stark-team-review\" showing a top summary strip with control-plane stats, a vertical workflow diagram from invocation through setup, auth gating, worktree isolation, parallel 27-agent review rounds, classification and fixing, summary generation, posting, and cleanup, followed by tables for runtime contracts and decision gates, plus cards for observability, failure recovery, and extension points."
 }

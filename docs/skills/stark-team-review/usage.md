@@ -1,12 +1,12 @@
-# stark-review
+# stark-team-review
 
-Multi-agent PR code review using 3 LLMs × N domains with autonomous fix loop. Use when the user says "stark review", "review this PR with all agents", "multi-agent review", or invokes /stark-review. Also triggers on `/stark-review` or `/stark-review <number>`.
+Multi-agent PR code review using 3 LLMs × 9 domains with autonomous fix loop. Use when the user says "team review", "review this PR with all agents", "multi-agent review", or invokes /stark-team-review. Also triggers on `/stark-team-review` or `/stark-team-review <number>`.
 
 ## Workflow Overview
 
 ```mermaid
 graph TD
-    A["/stark-review [PR] [--rounds N] [--dry-run]"] --> B["Phase 1: Setup"]
+    A["/stark-team-review [PR] [--rounds N] [--dry-run]"] --> B["Phase 1: Setup"]
     B --> B1["Detect repo from git remote"]
     B1 --> B2["Authenticate stark-claude bot"]
     B2 --> B3["Fetch PR metadata"]
@@ -50,11 +50,11 @@ graph TD
     style R fill:#e5e7eb,color:#666
 ```
 
-![Usage guide for the stark-review skill showing a vertical workflow diagram with five phases: Setup (auth, PR metadata, worktree creation), Review-Fix Loop (18 parallel sub-agents across 3 LLMs and 6 domains with finding classification into fix, recurring, false positive, noise, and ignored categories), Summary generation, Post and Persist (PR comments, bug issues, history), and Cleanup. Includes quick start commands, argument reference table, operating mode comparison (full vs review-only), six output cards (PR comments, automated fixes, bug issues, review history, noise analysis, metrics), finding classification table, common workflow patterns, and related skills.](usage.png)
+![Usage guide for the stark-team-review skill showing a vertical workflow diagram with five phases: Setup (auth, PR metadata, worktree creation), Review-Fix Loop (27 parallel sub-agents across 3 LLMs and 9 domains with finding classification into fix, recurring, false positive, noise, and ignored categories), Summary generation, Post and Persist (PR comments, bug issues, history), and Cleanup. Includes quick start commands, argument reference table, operating mode comparison (full vs review-only), six output cards (PR comments, automated fixes, bug issues, review history, noise analysis, metrics), finding classification table, common workflow patterns, and related skills.](usage.png)
 
 ## When to Use
 
-Multi-agent PR code review using 3 LLMs × N domains with autonomous fix loop. Use when the user says "stark review", "review this PR with all agents", "multi-agent review", or invokes /stark-review. Also triggers on `/stark-review` or `/stark-review <number>`.
+Multi-agent PR code review using 3 LLMs × 9 domains with autonomous fix loop. Use when the user says "team review", "review this PR with all agents", "multi-agent review", or invokes /stark-team-review. Also triggers on `/stark-team-review` or `/stark-team-review <number>`.
 
 ## Prerequisites
 
@@ -68,7 +68,7 @@ Multi-agent PR code review using 3 LLMs × N domains with autonomous fix loop. U
 
 ## Quick Start
 
-/stark-review
+/stark-team-review
 
 ## Common Patterns
 
@@ -79,5 +79,4 @@ Multi-agent PR code review using 3 LLMs × N domains with autonomous fix loop. U
 
 
 ## Related Skills
-
 

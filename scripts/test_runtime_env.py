@@ -88,6 +88,22 @@ def test_review_operation_includes_gh_token():
     assert env.get("GH_TOKEN") == FAKE_TOKEN
 
 
+@pytest.mark.parametrize(
+    ("agent", "expected_app"),
+    [
+        ("claude", "stark-claude"),
+        ("codex", "stark-codex"),
+        ("gemini", "stark-gemini"),
+    ],
+)
+def test_review_operation_uses_agent_specific_app(agent: str, expected_app: str):
+    """Review envs must request the matching GitHub App token for each agent."""
+    with patch("runtime_env.github_app.get_token", return_value=FAKE_TOKEN) as mock_tok:
+        env = runtime_env.build_agent_env(agent, "review")
+    assert env.get("GH_TOKEN") == FAKE_TOKEN
+    mock_tok.assert_called_once_with(app=expected_app)
+
+
 def test_pr_create_operation_excludes_gh_token():
     """build_agent_env('claude', 'pr_create') must NOT include GH_TOKEN."""
     with patch("runtime_env.github_app.get_token", return_value=FAKE_TOKEN) as mock_tok:

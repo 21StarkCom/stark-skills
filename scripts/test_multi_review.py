@@ -96,8 +96,9 @@ class TestModelFlags:
         assert "input" in call_kwargs
         assert call_kwargs["input"]  # non-empty prompt
 
+    @patch("multi_review.build_agent_env", return_value={"GH_TOKEN": "codex-token"})
     @patch("multi_review.subprocess.run")
-    def test_codex_uses_high_reasoning_and_read_only(self, mock_run):
+    def test_codex_uses_high_reasoning_and_read_only(self, mock_run, mock_build_env):
         mock_run.return_value = MagicMock(stdout="[]", returncode=0)
         multi_review._run_subagent("codex", "architecture", "abc123")
         cmd = mock_run.call_args[0][0]
@@ -111,6 +112,8 @@ class TestModelFlags:
         assert "-s" in cmd and "read-only" in cmd  # least-privilege sandbox
         assert "-a" not in cmd  # -a/--ask-for-approval not valid on codex exec
         assert cmd[-1] == "-"  # stdin marker
+        assert mock_run.call_args[1]["env"] == {"GH_TOKEN": "codex-token"}
+        mock_build_env.assert_called_once_with("codex", "review")
 
     @patch("multi_review.is_agent_enabled", return_value=True)
     @patch("multi_review.subprocess.run")
@@ -589,3 +592,16 @@ class TestSingleAgentMode:
             multi_review.main()
         mock_review.assert_called_once()
         assert mock_review.call_args.kwargs["override_agent"] == "claude"
+
+
+def test_worker_budget_tracks_current_matrix():
+    with patch.object(multi_review, "AGENTS", {"claude": {}, "codex": {}}), patch.object(
+        multi_review,
+        "DOMAINS",
+        {
+            "architecture": {"label": "Architecture"},
+            "security": {"label": "Security"},
+            "testing": {"label": "Testing"},
+        },
+    ):
+        assert multi_review._max_worker_budget() == 6

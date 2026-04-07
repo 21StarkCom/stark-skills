@@ -164,8 +164,9 @@ class TestSubAgentDispatch:
         assert len(result.findings) == 1
         assert result.error is None
 
+    @patch("plan_review_dispatch.build_agent_env", return_value={"GH_TOKEN": "codex-token"})
     @patch("plan_review_dispatch.subprocess.run")
-    def test_codex_dispatch(self, mock_run):
+    def test_codex_dispatch(self, mock_run, mock_build_env):
         mock_run.return_value = MagicMock(stdout="", returncode=0)
         result = plan_review_dispatch._run_plan_subagent(
             "codex", "general", "Test plan", timeout=300,
@@ -184,6 +185,8 @@ class TestSubAgentDispatch:
         call_kwargs = mock_run.call_args[1]
         assert "input" in call_kwargs
         assert "Test plan" in call_kwargs["input"]
+        assert call_kwargs["env"] == {"GH_TOKEN": "codex-token"}
+        mock_build_env.assert_called_once_with("codex", "review")
 
     @patch("plan_review_dispatch.subprocess.run")
     def test_gemini_dispatch(self, mock_run):

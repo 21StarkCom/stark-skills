@@ -6,7 +6,7 @@
     "troubleshooting": "**\"No issues with label plan:{slug}\"** \u2014 Either the slug doesn't match any plan file, or the plan file couldn't be found in `docs/`. Check that the slug matches your plan filename.\n\n**Task fails mid-execution** \u2014 The phase continues with remaining tasks. Check the dashboard output for error details and use `--start-from` to re-run the failed task after fixing the root cause.\n\n**Review loop never converges** \u2014 Reduce rounds with `--rounds 1` or `--rounds 2`. The default (3) may be excessive for simple changes.\n\n**CI bypass warnings in dashboard** \u2014 A PR was merged despite failing CI checks. Review the observability log for which checks failed and verify manually.\n\n**Auth errors on PR creation** \u2014 Ensure `GH_TOKEN` is unset (the skill uses `gh` native auth for PRs). Bot tokens are only for review comments.",
     "related_skills": [
       "stark-plan-to-tasks",
-      "stark-review",
+      "stark-team-review",
       "stark-release",
       "stark-design-to-plan",
       "stark-pr-flow",

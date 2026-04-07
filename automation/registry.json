@@ -64,16 +64,6 @@
       "trigger_id": "trig_01CC8KFTWbYZLXN3rCZszkzg",
       "last_registered": "2026-03-28T09:24:13.265340+00:00",
       "enabled": false
-    },
-    "stark-dashboard-refresh": {
-      "trigger_id": "trig_01DshRfr3shXXmN8pQv2KYzJ",
-      "last_registered": "2026-04-03T00:00:00.000000+00:00",
-      "enabled": true
-    },
-    "stark-learning-capture": {
-      "trigger_id": "trig_01LrnCptr7wkN2Xp4bZvAqHm",
-      "last_registered": "2026-04-03T00:00:00.000000+00:00",
-      "enabled": true
     }
   }
 }

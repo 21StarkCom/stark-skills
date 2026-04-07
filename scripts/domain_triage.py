@@ -15,6 +15,10 @@ from typing import Literal, TypedDict
 from claude_utils import build_claude_cmd, make_clean_env
 from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_MEDIUM, parse_jsonl_output
 from config_loader import get_model_id
+try:
+    from runtime_env import build_agent_env
+except ImportError:  # pragma: no cover - backward compat for older installs
+    build_agent_env = None
 
 
 TRIAGE_DIR = Path(__file__).resolve().parent.parent / "global" / "prompts" / "triage"
@@ -64,6 +68,16 @@ class TriageResult:
 
 def _warn(message: str) -> None:
     print(f"domain_triage: {message}", file=sys.stderr)
+
+
+def _coerce_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value).decode("utf-8", errors="replace")
+    return str(value)
 
 
 def _fallback_description(domain: str) -> str:
@@ -170,8 +184,8 @@ def _summarize_document(content: str) -> str:
     return summarized or content[:120000]
 
 
-def _parse_triage_response(raw: str, candidate_domains: list[str]) -> tuple[list[DomainVerdict], str | None]:
-    cleaned = raw.strip()
+def _parse_triage_response(raw: str | bytes, candidate_domains: list[str]) -> tuple[list[DomainVerdict], str | None]:
+    cleaned = _coerce_text(raw).strip()
     if not cleaned:
         return [], "empty_response"
 
@@ -266,7 +280,6 @@ def _dispatch_to_agent(agent: str, prompt: str, timeout: int) -> tuple[str, str 
         "timeout": timeout,
         "cwd": str(Path(__file__).parent),
         "input": prompt,
-        "env": make_clean_env(),
     }
 
     last_error: str | None = None
@@ -274,6 +287,11 @@ def _dispatch_to_agent(agent: str, prompt: str, timeout: int) -> tuple[str, str 
         try:
             if agent == "claude":
                 cmd = build_claude_cmd()
+                run_kwargs["env"] = (
+                    build_agent_env("claude", "review")
+                    if build_agent_env is not None
+                    else make_clean_env()
+                )
             elif agent == "codex":
                 cmd = [
                     "codex",
@@ -288,16 +306,21 @@ def _dispatch_to_agent(agent: str, prompt: str, timeout: int) -> tuple[str, str 
                     "read-only",
                     "-",
                 ]
+                run_kwargs["env"] = (
+                    build_agent_env("codex", "review")
+                    if build_agent_env is not None
+                    else make_clean_env()
+                )
             else:
                 return "", f"unsupported agent: {agent}"
 
             result = subprocess.run(cmd, **run_kwargs)
-            output = result.stdout
+            output = _coerce_text(result.stdout)
             if agent == "codex":
                 output = parse_jsonl_output(output)
             if result.returncode == 0:
                 return output, None
-            stderr = (result.stderr or "").strip()
+            stderr = _coerce_text(result.stderr).strip()
             last_error = f"exit_{result.returncode}: {stderr or 'no stderr'}"
             _warn(f"triage agent {agent} failed on attempt {attempt + 1}: {last_error}")
         except subprocess.TimeoutExpired:

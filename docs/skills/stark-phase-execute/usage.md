@@ -108,4 +108,4 @@ Claude Code with full tool permissions, `gh` authenticated with user PAT, `claud
 
 ## Related Skills
 
-`/stark-plan-to-tasks`, `/stark-review`, `/stark-release`, `/stark-design-to-plan`, `/stark-pr-flow`, `/stark-session`
+`/stark-plan-to-tasks`, `/stark-team-review`, `/stark-release`, `/stark-design-to-plan`, `/stark-pr-flow`, `/stark-session`

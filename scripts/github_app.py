@@ -102,16 +102,21 @@ def _detect_repo() -> str:
 # ── App selection ──────────────────────────────────────────────────────
 
 
-def _app_config() -> dict[str, str]:
-    return APPS[_active_app]
+def _resolve_app_name(app: str | None = None) -> str:
+    name = app or _active_app
+    if name not in APPS:
+        raise KeyError(f"Unknown app '{name}'. Available: {', '.join(APPS.keys())}")
+    return name
+
+
+def _app_config(app: str | None = None) -> dict[str, str]:
+    return APPS[_resolve_app_name(app)]
 
 
 def select_app(name: str) -> None:
     """Set the active app. Raises KeyError if unknown."""
     global _active_app
-    if name not in APPS:
-        raise KeyError(f"Unknown app '{name}'. Available: {', '.join(APPS.keys())}")
-    _active_app = name
+    _active_app = _resolve_app_name(name)
 
 
 # ── Token cache (file-based, per-app, survives across invocations within 1hr)
@@ -119,12 +124,12 @@ def select_app(name: str) -> None:
 _CACHE_DIR = Path.home() / ".cache" / "github-app-tokens"
 
 
-def _cache_file() -> Path:
-    return _CACHE_DIR / f"{_active_app}.json"
+def _cache_file(app: str | None = None) -> Path:
+    return _CACHE_DIR / f"{_resolve_app_name(app)}.json"
 
 
-def _read_cached_token() -> str | None:
-    cf = _cache_file()
+def _read_cached_token(app: str | None = None) -> str | None:
+    cf = _cache_file(app)
     if not cf.exists():
         return None
     try:
@@ -137,9 +142,9 @@ def _read_cached_token() -> str | None:
     return None
 
 
-def _write_cached_token(token: str, expires_at: float) -> None:
+def _write_cached_token(token: str, expires_at: float, app: str | None = None) -> None:
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    cf = _cache_file()
+    cf = _cache_file(app)
     cf.write_text(json.dumps({"token": token, "expires_at": expires_at}))
     cf.chmod(0o600)
 
@@ -147,10 +152,10 @@ def _write_cached_token(token: str, expires_at: float) -> None:
 # ── Core auth ───────────────────────────────────────────────────────────
 
 
-def _get_private_key() -> str:
+def _get_private_key(app: str | None = None) -> str:
     import base64
 
-    cfg = _app_config()
+    cfg = _app_config(app)
     result = subprocess.run(
         ["security", "find-generic-password", "-s", cfg["keychain_service"], "-w"],
         capture_output=True,
@@ -162,8 +167,8 @@ def _get_private_key() -> str:
     return base64.b64decode(result.stdout.strip()).decode()
 
 
-def _make_jwt(private_key: str) -> str:
-    cfg = _app_config()
+def _make_jwt(private_key: str, app: str | None = None) -> str:
+    cfg = _app_config(app)
     now = int(time.time())
     return jwt.encode(
         {"iat": now - 60, "exp": now + 600, "iss": cfg["app_id"]},
@@ -175,23 +180,18 @@ def _make_jwt(private_key: str) -> str:
 def get_token(app: str | None = None) -> str:
     """Get a valid installation token (cached or fresh).
 
-    If *app* is given, temporarily switch to that app for this call.
+    If *app* is given, resolve config, cache, and key material for that app
+    without mutating the module-global active app.
     """
-    if app:
-        prev = _active_app
-        select_app(app)
-        try:
-            return get_token()
-        finally:
-            select_app(prev)
+    app_name = _resolve_app_name(app)
 
-    cached = _read_cached_token()
+    cached = _read_cached_token(app_name)
     if cached:
         return cached
 
-    cfg = _app_config()
-    private_key = _get_private_key()
-    encoded_jwt = _make_jwt(private_key)
+    cfg = _app_config(app_name)
+    private_key = _get_private_key(app_name)
+    encoded_jwt = _make_jwt(private_key, app_name)
 
     resp = requests.post(
         f"{API}/app/installations/{cfg['installation_id']}/access_tokens",
@@ -214,13 +214,13 @@ def get_token(app: str | None = None) -> str:
     expires_dt = datetime.fromisoformat(expires_str.replace("Z", "+00:00"))
     expires_at = expires_dt.timestamp()
 
-    _write_cached_token(token, expires_at)
+    _write_cached_token(token, expires_at, app_name)
     return token
 
 
-def _headers() -> dict[str, str]:
+def _headers(app: str | None = None) -> dict[str, str]:
     return {
-        "Authorization": f"Bearer {get_token()}",
+        "Authorization": f"Bearer {get_token(app=app)}",
         "Accept": "application/vnd.github+json",
     }
 

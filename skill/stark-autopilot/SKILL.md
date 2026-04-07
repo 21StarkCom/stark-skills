@@ -1,7 +1,7 @@
 ---
 name: stark-autopilot
 description: >-
-  Autonomous tournament implementation: 3 agents compete in worktrees per step, best wins. Use for autopilot, multi-agent build.
+  Autonomous tournament implementation: enabled agents compete in worktrees per step, best wins. Use for autopilot, multi-agent build.
 argument-hint: '<plan-or-prompt> [--plan-slug SLUG] [--test-command CMD] [--agents claude,codex,gemini] [--timeout N] [--dry-run]'
 disable-model-invocation: true
 model: opus
@@ -21,10 +21,10 @@ Parse the JSON result:
 
 # stark-autopilot
 
-Autonomous implementation with tournament-per-step. Claude orchestrates while all 3 agents
-(Claude, Codex, Gemini) compete on every implementation step. Each step:
+Autonomous implementation with tournament-per-step. Claude orchestrates while all enabled agents
+compete on every implementation step. Each step:
 
-1. Three agents implement in parallel git worktrees
+1. Enabled agents implement in parallel git worktrees
 2. Tournament evaluates the implementations (tests + semantic judging)
 3. Winner's code gets applied to the main branch
 4. Next step begins from the winner's foundation

@@ -1,7 +1,7 @@
 ---
 name: stark-team-review
 description: >-
-  Multi-agent PR code review: 3 LLMs x N domains with autonomous fix loop. Use for team review, multi-agent review.
+  Multi-agent PR code review: all enabled LLMs x N domains with autonomous fix loop. Use for team review, multi-agent review.
 argument-hint: "[PR_NUMBER] [--rounds N] [--dry-run] [--repo ORG/REPO]"
 disable-model-invocation: true
 context: fork
@@ -22,7 +22,7 @@ Parse the JSON result:
 
 # stark-team-review
 
-Multi-agent PR review: 3 LLMs (Claude, Codex, Gemini) × 9 domain specializations dispatched in parallel. Autonomous fix-review loop until clean or max rounds.
+Multi-agent PR review: all enabled LLMs across 9 domain specializations dispatched in parallel. Default install runs Claude + Codex; Gemini participates when enabled in config. Autonomous fix-review loop until clean or max rounds.
 
 ## Arguments
 
