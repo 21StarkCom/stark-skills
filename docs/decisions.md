@@ -98,3 +98,12 @@
 - **Story Points:** 45 total (13 tasks across 6 phases)
 - **Summary:** Replace the plain text briefing in `/stark-session start` and `/stark-session end` with structured, color-coded terminal output. Extract shared rendering primitives from `triage_tui.py` into `tui_core.py` (TUIConfig, ANSI helpers, banners, section headers, sanitize_text, slugify). Build `session_tui.py` as a pure rendering layer with TypedDict inputs. Add `session_tui_cli.py` as a CLI bridge with ThreadPoolExecutor data collection (45s budget, 15s per source), error redaction, and graceful degradation. Extend `session_state.py` with optional `name` and `start_head` fields for session identity and scoped diffs. Session naming uses priority order: merged PRs → closed issues → branch name → commit prefix → fallback. Same NO_COLOR/non-TTY/--plain behavior as triage TUI. Zero triage behavior regression gated by byte-for-byte parity.
 - **Knowledge extracted to:** `docs/decisions.md`
+
+## 2026-04-07 -- stark-graph: Pluggable Dependency Graph Pipeline
+
+- **Date:** 2026-04-07
+- **Status:** Decomposed -> issues created
+- **Tracking:** #265, #266, #267, #268, #269, #270, #271
+- **Story Points:** 140 total (34 tasks across 7 phases)
+- **Summary:** Build stark-graph as a staged Python pipeline inside stark-skills for dependency graph analysis of PR changes. Seven phases: schema/CLI foundation, Python AST parser with docstring extraction, drift validator with warn mode, graph differ with blast radius via reverse BFS, idempotent PR commenting via GitHub App, review pipeline integration with prompt enrichment, and CI rollout with bootstrap-to-strict promotion. Key decisions: Pydantic v2 models as inter-stage contracts, subprocess-based per-file parse timeout (not threading), two-job CI security split (untrusted code never runs alongside secrets), three-state strict mode toggle via repository variables (false/partial/true), shadow mode soak before blocking enforcement, FP rate tracking via labeled PRs with 5% threshold for promotion.
+- **Knowledge extracted to:** `docs/adr/0019-pydantic-contracts-for-graph-pipeline.md`, `docs/decisions.md`
