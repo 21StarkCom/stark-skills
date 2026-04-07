@@ -11,6 +11,10 @@ import shutil
 import subprocess
 import sys
 import time
+from pathlib import Path
+
+# Make the graph package importable regardless of cwd
+sys.path.insert(0, str(Path(__file__).parent))
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -172,13 +176,17 @@ def _resolve_base_sha(pr: str, base: str, repo_root: str) -> str | None:
         return None
     else:
         # Local: resolve via gh pr view
-        gh_result = subprocess.run(
-            ["gh", "pr", "view", pr, "--json", "baseRefName", "-q", ".baseRefName"],
-            capture_output=True,
-            text=True,
-            cwd=repo_root,
-        )
-        branch = gh_result.stdout.strip() if gh_result.returncode == 0 else base
+        try:
+            gh_result = subprocess.run(
+                ["gh", "pr", "view", pr, "--json", "baseRefName", "-q", ".baseRefName"],
+                capture_output=True,
+                text=True,
+                cwd=repo_root,
+                timeout=10,
+            )
+        except subprocess.TimeoutExpired:
+            gh_result = None
+        branch = (gh_result.stdout.strip() if gh_result and gh_result.returncode == 0 else base)
         if not branch:
             branch = base
 
@@ -211,6 +219,135 @@ def _cleanup_old_worktrees(repo_root: str) -> None:
     )
 
 
+# ── Stage handlers ────────────────────────────────────────────────────────
+
+
+def _load_config() -> dict:
+    """Load global/config.json from the stark-skills repo root."""
+    config_path = Path(__file__).parent.parent / "global" / "config.json"
+    try:
+        return json.loads(config_path.read_text())
+    except Exception:
+        return {}
+
+
+def _stage_parse(
+    args: argparse.Namespace,
+    repo_root: str,
+    repo_name: str,
+    workdir: str,
+) -> None:
+    """Run the parse stage: walk *.py files and emit graph JSON."""
+    from graph.python_parser import PythonParser
+
+    config = _load_config()
+    max_workers = config.get("graph_max_parse_workers", 1)
+
+    parser = PythonParser(max_workers=max_workers)
+
+    # Honour --include patterns or fall back to full repo root
+    if args.include:
+        paths = []
+        for pattern in args.include:
+            paths.extend(Path(repo_root).glob(pattern))
+    else:
+        paths = [Path(repo_root)]
+
+    graph = parser.parse(paths, repo_name)
+
+    os.makedirs(workdir, exist_ok=True)
+    graph_path = os.path.join(workdir, "graph.json")
+    graph_json = graph.model_dump_json(indent=2)
+
+    # Always write graph to workdir
+    Path(graph_path).write_text(graph_json)
+
+    # If --output, also write there
+    if args.output:
+        Path(args.output).write_text(graph_json)
+
+    # Print status JSON to stdout (graph is in graph_path)
+    status = {
+        "stage": "parse",
+        "repo": repo_name,
+        "workdir": workdir,
+        "graph": graph_path,
+        "node_count": len(graph.nodes),
+        "edge_count": len(graph.edges),
+        "skipped_files": len(graph.skipped_files),
+    }
+    print(json.dumps(status, indent=2))
+
+
+def _stage_audit(
+    args: argparse.Namespace,
+    repo_root: str,
+    repo_name: str,
+    workdir: str,
+) -> None:
+    """Run audit stage: parse + non-blocking docstring coverage report.
+
+    Reports NO_DOCSTRING findings and coverage percentage.
+    Always exits 0.
+    """
+    from graph.python_parser import PythonParser
+
+    config = _load_config()
+    max_workers = config.get("graph_max_parse_workers", 1)
+
+    parser = PythonParser(max_workers=max_workers)
+
+    if args.include:
+        paths = []
+        for pattern in args.include:
+            paths.extend(Path(repo_root).glob(pattern))
+    else:
+        paths = [Path(repo_root)]
+
+    graph = parser.parse(paths, repo_name)
+    audit_data = parser.audit_data  # node_id -> has_docstring
+
+    total = len(graph.nodes)
+    missing: list[dict] = []
+    for node in graph.nodes:
+        has_doc = audit_data.get(node.id, False)
+        if not has_doc:
+            missing.append({"node_id": node.id, "finding": "NO_DOCSTRING"})
+
+    covered = total - len(missing)
+    coverage_pct = round((covered / total * 100) if total else 0.0, 1)
+
+    # Machine-readable JSON report
+    report = {
+        "repo": repo_name,
+        "total_nodes": total,
+        "nodes_with_docstring": covered,
+        "coverage_pct": coverage_pct,
+        "findings": missing,
+    }
+
+    os.makedirs(workdir, exist_ok=True)
+    report_path = os.path.join(workdir, "audit_report.json")
+    Path(report_path).write_text(json.dumps(report, indent=2))
+
+    # Human-readable output
+    print(f"stark-graph audit — {repo_name}")
+    print(f"  Nodes:     {total}")
+    print(f"  Coverage:  {coverage_pct}% ({covered}/{total} have docstrings)")
+    if missing:
+        print(f"  Missing ({len(missing)}):")
+        for item in missing[:50]:  # cap display at 50
+            print(f"    NO_DOCSTRING  {item['node_id']}")
+        if len(missing) > 50:
+            print(f"    ... and {len(missing) - 50} more")
+    else:
+        print("  All nodes have docstrings.")
+    print(f"\n  Report written to: {report_path}")
+
+    # Always exit 0
+    sys.exit(0)
+
+
 # ── Main ─────────────────────────────────────────────────────────────────
 
 
@@ -235,18 +372,25 @@ def main() -> None:
     if args.pr and args.base:
         base_sha = _resolve_base_sha(args.pr, args.base, repo_root)
 
-    # Dispatch to stage handler (stub — prints JSON status)
-    result = {
-        "stage": args.stage,
-        "repo": args.repo_name or os.path.basename(repo_root),
-        "workdir": workdir,
-        "base_sha": base_sha,
-    }
-    if args.output:
-        with open(args.output, "w") as f:
-            json.dump(result, f, indent=2)
+    repo_name = args.repo_name or os.path.basename(repo_root)
+
+    if args.stage == "parse":
+        _stage_parse(args, repo_root, repo_name, workdir)
+    elif args.stage == "audit":
+        _stage_audit(args, repo_root, repo_name, workdir)
     else:
-        print(json.dumps(result, indent=2))
+        # validate / diff — not yet implemented; emit status stub
+        result = {
+            "stage": args.stage,
+            "repo": repo_name,
+            "workdir": workdir,
+            "base_sha": base_sha,
+        }
+        if args.output:
+            with open(args.output, "w") as f:
+                json.dump(result, f, indent=2)
+        else:
+            print(json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":

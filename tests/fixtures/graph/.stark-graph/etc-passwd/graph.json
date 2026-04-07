@@ -1,0 +1,212 @@
+{
+  "schema_version": "1.0",
+  "repo": "graph",
+  "nodes": [
+    {
+      "id": "graph:__init__.py",
+      "layer": "module",
+      "parent": null,
+      "depends": [],
+      "publishes": [],
+      "called_by": [],
+      "file_path": "__init__.py",
+      "line": 1
+    },
+    {
+      "id": "graph:class_with_docstring.py",
+      "layer": "module",
+      "parent": null,
+      "depends": [],
+      "publishes": [],
+      "called_by": [],
+      "file_path": "class_with_docstring.py",
+      "line": 1
+    },
+    {
+      "id": "graph:class_with_docstring.py:MyService",
+      "layer": "class",
+      "parent": "graph:class_with_docstring.py",
+      "depends": [
+        "json",
+        "pathlib.Path"
+      ],
+      "publishes": [
+        "MyService.result"
+      ],
+      "called_by": [
+        "some.caller"
+      ],
+      "file_path": "class_with_docstring.py",
+      "line": 7
+    },
+    {
+      "id": "graph:class_with_docstring.py:NestedOuter",
+      "layer": "class",
+      "parent": "graph:class_with_docstring.py",
+      "depends": [],
+      "publishes": [],
+      "called_by": [],
+      "file_path": "class_with_docstring.py",
+      "line": 18
+    },
+    {
+      "id": "graph:class_with_docstring.py:NestedOuter.NestedInner",
+      "layer": "class",
+      "parent": "graph:class_with_docstring.py",
+      "depends": [
+        "json"
+      ],
+      "publishes": [],
+      "called_by": [],
+      "file_path": "class_with_docstring.py",
+      "line": 21
+    },
+    {
+      "id": "graph:class_without_docstring.py",
+      "layer": "module",
+      "parent": null,
+      "depends": [],
+      "publishes": [],
+      "called_by": [],
+      "file_path": "class_without_docstring.py",
+      "line": 1
+    },
+    {
+      "id": "graph:class_without_docstring.py:NoDoc",
+      "layer": "class",
+      "parent": "graph:class_without_docstring.py",
+      "depends": [],
+      "publishes": [],
+      "called_by": [],
+      "file_path": "class_without_docstring.py",
+      "line": 4
+    },
+    {
+      "id": "graph:empty.py",
+      "layer": "module",
+      "parent": null,
+      "depends": [],
+      "publishes": [],
+      "called_by": [],
+      "file_path": "empty.py",
+      "line": 1
+    },
+    {
+      "id": "graph:invalid_metadata.py",
+      "layer": "module",
+      "parent": null,
+      "depends": [],
+      "publishes": [],
+      "called_by": [],
+      "file_path": "invalid_metadata.py",
+      "line": 1
+    },
+    {
+      "id": "graph:invalid_metadata.py:HasInvalidMetadata",
+      "layer": "class",
+      "parent": "graph:invalid_metadata.py",
+      "depends": [
+        "valid.dep"
+      ],
+      "publishes": [
+        "good.publish"
+      ],
+      "called_by": [],
+      "file_path": "invalid_metadata.py",
+      "line": 4
+    },
+    {
+      "id": "graph:valid_module.py",
+      "layer": "module",
+      "parent": null,
+      "depends": [
+        "os.path",
+        "re"
+      ],
+      "publishes": [
+        "valid_module.output"
+      ],
+      "called_by": [],
+      "file_path": "valid_module.py",
+      "line": 1
+    }
+  ],
+  "edges": [
+    {
+      "source": "graph:__init__.py",
+      "target": "pathlib",
+      "type": "imports",
+      "origin": "ast"
+    },
+    {
+      "source": "graph:class_with_docstring.py",
+      "target": "json",
+      "type": "imports",
+      "origin": "ast"
+    },
+    {
+      "source": "graph:class_with_docstring.py",
+      "target": "pathlib",
+      "type": "imports",
+      "origin": "ast"
+    },
+    {
+      "source": "graph:class_with_docstring.py:MyService",
+      "target": "json",
+      "type": "depends",
+      "origin": "docstring"
+    },
+    {
+      "source": "graph:class_with_docstring.py:MyService",
+      "target": "pathlib.Path",
+      "type": "depends",
+      "origin": "docstring"
+    },
+    {
+      "source": "graph:class_with_docstring.py:MyService",
+      "target": "Path",
+      "type": "inherits",
+      "origin": "ast"
+    },
+    {
+      "source": "graph:class_with_docstring.py:NestedOuter.NestedInner",
+      "target": "json",
+      "type": "depends",
+      "origin": "docstring"
+    },
+    {
+      "source": "graph:invalid_metadata.py:HasInvalidMetadata",
+      "target": "valid.dep",
+      "type": "depends",
+      "origin": "docstring"
+    },
+    {
+      "source": "graph:valid_module.py",
+      "target": "os.path",
+      "type": "depends",
+      "origin": "docstring"
+    },
+    {
+      "source": "graph:valid_module.py",
+      "target": "re",
+      "type": "depends",
+      "origin": "docstring"
+    },
+    {
+      "source": "graph:valid_module.py",
+      "target": "os",
+      "type": "imports",
+      "origin": "ast"
+    },
+    {
+      "source": "graph:valid_module.py",
+      "target": "re",
+      "type": "imports",
+      "origin": "ast"
+    }
+  ],
+  "partial": false,
+  "skipped_files": [
+    "/Users/aryeh/git/Evinced/stark-skills/tests/fixtures/graph/syntax_error.py"
+  ]
+}
