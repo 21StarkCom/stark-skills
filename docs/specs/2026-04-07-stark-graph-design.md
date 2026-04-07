@@ -167,11 +167,11 @@ AST parsing cannot detect: dependency injection (constructor params resolved at 
 
 ## Pipeline Stages
 
-Six stages, each a standalone script. Orchestrated by `stark_graph.py` which chains them in sequence.
+Four stages in MVP (parse, validate, diff, comment), each a standalone script. Orchestrated by `stark_graph.py` which chains them in sequence. Phase 2 adds merge and render stages.
 
 ### Inter-Stage Data Contract
 
-All stages communicate via JSON files in a working directory (default: `.stark-graph/`):
+All stages communicate via JSON files in a working directory (default: `.stark-graph/{slug}/`):
 
 ```
 .stark-graph/
@@ -183,7 +183,7 @@ All stages communicate via JSON files in a working directory (default: `.stark-g
     └── graph.svg
 ```
 
-Each stage reads from the previous stage's output file and writes its own. The orchestrator passes `--workdir .stark-graph/` to all stages. Stage scripts accept `--input` and `--output` flags for explicit override.
+Each stage reads from the previous stage's output file and writes its own. The orchestrator passes `--workdir .stark-graph/{pr_or_branch_slug}/` to all stages (e.g., `.stark-graph/pr-123/` or `.stark-graph/feat-upload/`). This prevents working directory collisions when multiple PRs are processed concurrently on the same runner. Stage scripts accept `--input` and `--output` flags for explicit override.
 
 ### Error Contract (all stages)
 
@@ -314,6 +314,39 @@ Direct: 3 services | Transitive: 7 (depth ≤5) | Event subscribers: 2
 
 Deferred. The PR comment provides sufficient dependency change visibility for MVP. Renderer added when there's a concrete consumer (UI dashboard, Confluence artifact).
 
+## CI Integration
+
+The graph pipeline runs in GitHub Actions as part of the PR review workflow.
+
+```yaml
+# .github/workflows/graph-review.yml (sketch)
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  graph:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for worktree-based base graph
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install pydantic
+      - run: |
+          python stark_graph.py \
+            --repo . \
+            --pr ${{ github.event.pull_request.number }} \
+            --warn  # remove --warn after bootstrap
+        env:
+          GH_TOKEN: ${{ secrets.STARK_CLAUDE_TOKEN }}
+```
+
+**Dependencies:** Python 3.12+, pydantic. No system packages for MVP (graphviz only needed in Phase 2).
+
+**Skipped files and coverage:** If the parser skips files (syntax errors, size limits, timeouts), the validation report includes `skipped_files` and the coverage percentage reflects only successfully parsed files. If coverage drops below a configurable threshold (default 80%), the pipeline posts a warning comment. This prevents silent coverage erosion.
+
 ## Review Integration
 
 Graph feeds into the existing review pipeline at two points.
@@ -387,12 +420,28 @@ stark_graph.py --repo /path/to/repo --stage audit
 # Diff against main
 stark_graph.py --repo /path/to/repo --stage diff --base main
 
+# Warn mode — validate but exit 0 even on drift (for phased rollout)
+stark_graph.py --repo /path/to/repo --stage validate --warn
+
 # Full PR pipeline (validate + diff + comment)
 stark_graph.py --repo /path/to/repo --pr 123
+
+# Full PR pipeline in warn mode (post comment but don't block)
+stark_graph.py --repo /path/to/repo --pr 123 --warn
 
 # Override repo identity
 stark_graph.py --repo /path/to/repo --repo-name GetEvinced/stark-showcase
 ```
+
+### `--warn` Mode
+
+When `--warn` is passed, the pipeline runs identically but:
+- `drift_validator.py` exits 0 instead of 1 on drift findings
+- PR comment is prefixed with `⚠️ Warn mode — findings reported but not blocking`
+- The validation JSON includes `"mode": "warn"` for metrics tracking
+- All other stages (diff, comment) run normally
+
+This allows teams to measure false positive rates during bootstrap without blocking PRs. Promote to strict mode by removing `--warn` once the rate is acceptable.
 
 ## Testing Strategy
 
