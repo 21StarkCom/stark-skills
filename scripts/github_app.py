@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import os
 import re
 import subprocess
 import sys
@@ -152,7 +154,15 @@ def _write_cached_token(token: str, expires_at: float, app: str | None = None) -
 # ── Core auth ───────────────────────────────────────────────────────────
 
 
+class _KeychainError(Exception):
+    """Raised when macOS Keychain auth is unavailable or fails."""
+
+
 def _get_private_key(app: str | None = None) -> str:
+    """Get private key from macOS Keychain.
+
+    Raises _KeychainError if the key cannot be read (e.g. on Linux/CI).
+    """
     import base64
 
     cfg = _app_config(app)
@@ -162,39 +172,52 @@ def _get_private_key(app: str | None = None) -> str:
         text=True,
     )
     if result.returncode != 0:
-        print(f"Error reading Keychain ({cfg['keychain_service']}): {result.stderr.strip()}", file=sys.stderr)
-        sys.exit(1)
+        raise _KeychainError(
+            f"Keychain read failed ({cfg['keychain_service']}): {result.stderr.strip()}"
+        )
     return base64.b64decode(result.stdout.strip()).decode()
 
 
-def _make_jwt(private_key: str, app: str | None = None) -> str:
-    cfg = _app_config(app)
+def _get_private_key_from_env() -> tuple[str, str, str]:
+    """Get (private_key, app_id, installation_id) from CI env vars.
+
+    Reads STARK_PRIVATE_KEY_B64, STARK_APP_ID, STARK_INSTALL_ID.
+    Raises KeyError if any variable is missing.
+    """
+    import base64
+
+    private_key = base64.b64decode(os.environ["STARK_PRIVATE_KEY_B64"]).decode()
+    return private_key, os.environ["STARK_APP_ID"], os.environ["STARK_INSTALL_ID"]
+
+
+def _make_jwt_raw(private_key: str, app_id: str) -> str:
+    """Mint a GitHub App JWT from a raw private key and app ID."""
     now = int(time.time())
     return jwt.encode(
-        {"iat": now - 60, "exp": now + 600, "iss": cfg["app_id"]},
+        {"iat": now - 60, "exp": now + 600, "iss": app_id},
         private_key,
         algorithm="RS256",
     )
 
 
-def get_token(app: str | None = None) -> str:
-    """Get a valid installation token (cached or fresh).
+def _make_jwt(private_key: str, app: str | None = None) -> str:
+    cfg = _app_config(app)
+    return _make_jwt_raw(private_key, cfg["app_id"])
 
-    If *app* is given, resolve config, cache, and key material for that app
-    without mutating the module-global active app.
+
+def _mint_installation_token(
+    private_key: str, app_id: str, installation_id: str
+) -> tuple[str, float]:
+    """Exchange a private key for a GitHub installation access token.
+
+    Returns (token, expires_at_timestamp).
+    Raises RuntimeError if the API call fails.
     """
-    app_name = _resolve_app_name(app)
+    from datetime import datetime
 
-    cached = _read_cached_token(app_name)
-    if cached:
-        return cached
-
-    cfg = _app_config(app_name)
-    private_key = _get_private_key(app_name)
-    encoded_jwt = _make_jwt(private_key, app_name)
-
+    encoded_jwt = _make_jwt_raw(private_key, app_id)
     resp = requests.post(
-        f"{API}/app/installations/{cfg['installation_id']}/access_tokens",
+        f"{API}/app/installations/{installation_id}/access_tokens",
         headers={
             "Authorization": f"Bearer {encoded_jwt}",
             "Accept": "application/vnd.github+json",
@@ -202,20 +225,69 @@ def get_token(app: str | None = None) -> str:
         timeout=10,
     )
     if resp.status_code != 201:
-        print(f"Token exchange failed ({resp.status_code}): {resp.text}", file=sys.stderr)
-        sys.exit(1)
+        raise RuntimeError(f"Token exchange failed ({resp.status_code}): {resp.text}")
 
     data = resp.json()
-    token = data["token"]
+    expires_dt = datetime.fromisoformat(data["expires_at"].replace("Z", "+00:00"))
+    return data["token"], expires_dt.timestamp()
 
-    from datetime import datetime
 
-    expires_str = data["expires_at"]  # e.g. "2026-03-04T06:13:16Z"
-    expires_dt = datetime.fromisoformat(expires_str.replace("Z", "+00:00"))
-    expires_at = expires_dt.timestamp()
+def get_token(app: str | None = None) -> str:
+    """Get a valid installation token (cached or fresh).
 
-    _write_cached_token(token, expires_at, app_name)
-    return token
+    Auth precedence:
+      1. Cache (in-memory token not yet expired)
+      2. GitHub App via macOS Keychain (local dev)
+      3. GitHub App via env vars STARK_APP_ID / STARK_INSTALL_ID / STARK_PRIVATE_KEY_B64 (CI)
+      4. GH_TOKEN env var fallback (emits a warning log)
+
+    If *app* is given, resolve config, cache, and key material for that app
+    without mutating the module-global active app.
+    """
+    app_name = _resolve_app_name(app)
+
+    # 1. Cache
+    cached = _read_cached_token(app_name)
+    if cached:
+        return cached
+
+    cfg = _app_config(app_name)
+
+    # 2. Keychain (macOS)
+    try:
+        private_key = _get_private_key(app_name)
+        token, expires_at = _mint_installation_token(
+            private_key, cfg["app_id"], cfg["installation_id"]
+        )
+        _write_cached_token(token, expires_at, app_name)
+        return token
+    except _KeychainError:
+        pass  # Not on macOS or key not installed; try env vars
+
+    # 3. Env vars (CI / Linux)
+    try:
+        private_key, app_id, install_id = _get_private_key_from_env()
+        token, expires_at = _mint_installation_token(private_key, app_id, install_id)
+        _write_cached_token(token, expires_at, app_name)
+        return token
+    except KeyError:
+        pass  # STARK_* env vars not set
+
+    # 4. GH_TOKEN fallback
+    gh_token = os.environ.get("GH_TOKEN")
+    if gh_token:
+        logging.warning(
+            "stark-graph: using GH_TOKEN fallback (App auth unavailable — "
+            "Keychain failed and STARK_* env vars are not set)"
+        )
+        return gh_token
+
+    print(
+        "No GitHub auth available: Keychain read failed, STARK_* env vars not set, "
+        "GH_TOKEN not set.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 
 def _headers(app: str | None = None) -> dict[str, str]:
