@@ -28,7 +28,7 @@
 | `/stark-session` | Session management: briefing on start, cleanup on end | [usage](stark-session/usage.md) · [internals](stark-session/internals.md) |
 | `/stark-release` | Cut a release: changelog, tag, GitHub Release | [usage](stark-release/usage.md) · [internals](stark-release/internals.md) |
 | `/stark-tournament` | Multi-LLM competition with configurable evaluation | [usage](stark-tournament/usage.md) · [internals](stark-tournament/internals.md) |
-| `/stark-persona` | Session character voices with weighted selection and combos | — |
+| `/stark-persona` | Session character voices with weighted selection and combos | [showcase](stark-persona/index.html) |
 
 ## Project Setup & Docs
 

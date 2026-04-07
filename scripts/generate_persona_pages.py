@@ -50,15 +50,31 @@ _SLUG_TO_CAT = {
     "daenerys-targaryen": "drama",
     "the-dude": "comedy", "ron-swanson": "comedy", "captain-holt": "comedy",
     "fleabag": "comedy", "dwight-schrute": "comedy", "wednesday-addams": "comedy",
-    "adam-sandler": "comedy",
+    "adam-sandler": "comedy", "george-costanza": "comedy", "cosmo-kramer": "comedy",
+    "chandler-bing": "comedy", "dr-perry-cox": "comedy", "jack-donaghy": "comedy",
+    "gob-bluth": "comedy", "ferris-bueller": "comedy", "les-grossman": "comedy",
+    "lucille-bluth": "comedy", "frank-reynolds": "comedy", "charlie-kelly": "comedy",
+    "dennis-reynolds": "comedy", "tobias-funke": "comedy",
+    "jean-ralphio-saperstein": "comedy", "jenna-maroney": "comedy",
+    "tracy-jordan": "comedy", "al-bundy": "comedy", "kenny-powers": "comedy",
+    "leon-black": "comedy", "ari-gold": "comedy", "rafi": "comedy",
+    "susie-greene": "comedy", "selina-meyer": "comedy", "jeff-winger": "comedy",
+    "april-ludgate": "comedy", "red-forman": "comedy", "sue-sylvester": "comedy",
+    "dorothy-zbornak": "comedy", "barney-stinson": "comedy",
     "gandalf": "sci-fi", "morpheus": "sci-fi", "princess-leia": "sci-fi",
     "deadpool": "action", "inigo-montoya": "action", "john-rambo": "action",
-    "jackie-chan": "action", "bruce-willis": "action",
+    "jackie-chan": "action", "bruce-willis": "action", "axel-foley": "action",
+    "danny-ocean": "action",
     "arnold-schwarzenegger": "action", "eddie-murphy": "action",
     "sherlock-holmes": "detective", "the-joker": "detective",
-    "glados": "games",
+    "neal-caffrey": "detective",
+    "glados": "games", "sterling-archer": "animated", "bender-rodriguez": "animated",
+    "roger-smith": "animated", "daria-morgendorffer": "animated",
     "eric-cartman": "animated", "shoshana": "animated",
     "guri-alfi": "israeli", "lior-raz": "israeli",
+    "mike-ehrmantraut": "drama", "gus-fring": "drama", "gregory-house": "drama",
+    "roger-sterling": "drama", "dexter-morgan": "drama", "patrick-bateman": "drama",
+    "lorne-malvo": "drama", "anton-chigurh": "drama",
 }
 
 _SOURCE_PATTERNS = {
@@ -128,7 +144,7 @@ def build_constellations_json(data: list[dict]) -> str:
             stars.append({
                 "name": d["name"], "source": d["source"], "type": d["type"],
                 "traits": d["traits"], "catchphrase": d["catchphrase"],
-                "style": d["style"],
+                "style": d["style"], "quotes": d["signature_quotes"],
             })
         constellations.append({
             "name": cat["label"], "color": cat["color"], "stars": stars,
@@ -146,7 +162,7 @@ def build_personas_json(data: list[dict]) -> str:
             "cat": d["cat_id"], "catLabel": d["cat_label"],
             "color": d["cat_color"], "glow": d["cat_glow"],
             "traits": d["traits"], "catch": d["catchphrase"],
-            "style": d["style"],
+            "style": d["style"], "quotes": d["signature_quotes"],
         })
     return json.dumps(out)
 
@@ -192,6 +208,9 @@ canvas:active{cursor:grabbing}
 #tooltip .tt-badge.person{background:rgba(251,191,36,0.15);color:#fbbf24}
 #tooltip .tt-catchphrase{font-family:'JetBrains Mono',monospace;font-size:12px;color:#94a3b8;font-style:italic;margin-bottom:10px;line-height:1.5;border-left:2px solid;padding-left:10px}
 #tooltip .tt-style{font-size:12px;color:#cbd5e1;line-height:1.5;margin-bottom:10px}
+#tooltip .tt-qlabel{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;margin:10px 0 6px}
+#tooltip .tt-quotes{display:grid;gap:6px;margin-bottom:10px;max-height:180px;overflow:auto;padding-right:4px}
+#tooltip .tt-quote{font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.45;color:#dbeafe;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:7px 9px}
 #tooltip .tt-traits{display:flex;flex-wrap:wrap;gap:4px}
 #tooltip .tt-trait{font-size:10px;padding:2px 7px;border-radius:6px;background:rgba(100,116,139,0.15);color:#94a3b8}
 </style>
@@ -203,6 +222,14 @@ canvas:active{cursor:grabbing}
 <canvas id="sky"></canvas>
 <script>
 const DATA = $constellations_json;
+function e(v) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 const canvas = document.getElementById('sky');
 const ctx = canvas.getContext('2d');
@@ -326,13 +353,16 @@ function findStar(mx, my) {
 }
 
 function showTooltip(star, cat, x, y) {
-  const traits = star.traits.map(t => '<span class="tt-trait">' + t + '</span>').join('');
+  const traits = star.traits.map(t => '<span class="tt-trait">' + e(t) + '</span>').join('');
+  const quotes = (star.quotes || [])
+    .map(q => '<div class="tt-quote">"' + e(q) + '"</div>').join('');
   tooltip.innerHTML =
-    '<div class="tt-name" style="color:' + cat.color + '">' + star.name + '</div>' +
-    '<div class="tt-source">' + star.source + '</div>' +
-    '<span class="tt-badge ' + star.type + '">' + star.type + '</span>' +
-    (star.catchphrase ? '<div class="tt-catchphrase" style="border-color:' + cat.color + '">"' + star.catchphrase + '"</div>' : '') +
-    '<div class="tt-style">' + star.style + '</div>' +
+    '<div class="tt-name" style="color:' + cat.color + '">' + e(star.name) + '</div>' +
+    '<div class="tt-source">' + e(star.source) + '</div>' +
+    '<span class="tt-badge ' + star.type + '">' + e(star.type) + '</span>' +
+    (star.catchphrase ? '<div class="tt-catchphrase" style="border-color:' + cat.color + '">"' + e(star.catchphrase) + '"</div>' : '') +
+    '<div class="tt-style">' + e(star.style) + '</div>' +
+    (quotes ? '<div class="tt-qlabel">Quote wall</div><div class="tt-quotes">' + quotes + '</div>' : '') +
     '<div class="tt-traits">' + traits + '</div>';
   tooltip.style.display = 'block';
   tooltip.style.left = Math.min(x + 15, innerWidth - 360) + 'px';
@@ -399,6 +429,9 @@ body{font-family:'Inter',sans-serif;background:#08080d;color:#e2e8f0;min-height:
 .detail .d-source{font-size:0.8rem;color:#94a3b8;margin-bottom:1rem}
 .detail .d-catch{font-family:'JetBrains Mono',monospace;font-size:0.8rem;padding:0.5rem 0.8rem;border-left:3px solid;border-radius:0 6px 6px 0;background:rgba(255,255,255,0.03);margin-bottom:1rem;line-height:1.5}
 .detail .d-style{font-size:0.8rem;color:#cbd5e1;line-height:1.6;margin-bottom:1rem}
+.detail .d-qlabel{font-family:'JetBrains Mono',monospace;font-size:0.62rem;text-transform:uppercase;letter-spacing:0.08em;color:#64748b;margin:0 0 0.45rem}
+.detail .d-quotes{display:grid;gap:0.5rem;margin-bottom:1rem;max-height:190px;overflow:auto;padding-right:0.2rem}
+.detail .d-quote{font-family:'JetBrains Mono',monospace;font-size:0.7rem;line-height:1.5;padding:0.55rem 0.7rem;border-radius:10px;border:1px solid rgba(255,255,255,0.07);background:rgba(255,255,255,0.035);color:#dbeafe}
 .detail .d-traits{display:flex;flex-wrap:wrap;gap:4px}
 .detail .d-trait{font-size:0.65rem;padding:3px 8px;border-radius:100px;background:rgba(255,255,255,0.06);color:#94a3b8}
 </style>
@@ -411,9 +444,17 @@ body{font-family:'Inter',sans-serif;background:#08080d;color:#e2e8f0;min-height:
 <script>
 const CATS = $cats_json;
 const P = $personas_json;
+function e(v) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 document.getElementById('legend').innerHTML = CATS.map(c =>
-  '<div class="legend-item"><div class="legend-dot" style="background:'+c.color+'"></div>'+c.label+'</div>'
+  '<div class="legend-item"><div class="legend-dot" style="background:'+c.color+'"></div>'+e(c.label)+'</div>'
 ).join('');
 
 const grid = document.getElementById('grid');
@@ -424,12 +465,13 @@ P.forEach(p => {
   el.style.background = p.glow;
   const typeBg = p.type==='character' ? 'rgba(96,165,250,0.15)' : 'rgba(52,211,153,0.15)';
   const typeCol = p.type==='character' ? '#60a5fa' : '#34d399';
-  el.innerHTML = '<span class="num">'+p.num+'</span><span class="ctype" style="background:'+typeBg+';color:'+typeCol+'">'+p.type+'</span><div class="sym" style="color:'+p.color+'">'+p.sym+'</div><div class="cname">'+p.name+'</div><div class="csource">'+p.source+'</div>';
+  el.innerHTML = '<span class="num">'+p.num+'</span><span class="ctype" style="background:'+typeBg+';color:'+typeCol+'">'+e(p.type)+'</span><div class="sym" style="color:'+p.color+'">'+e(p.sym)+'</div><div class="cname">'+e(p.name)+'</div><div class="csource">'+e(p.source)+'</div>';
   el.onmouseenter = () => { el.style.boxShadow = '0 0 20px '+p.glow; };
   el.onmouseleave = () => { el.style.boxShadow = 'none'; };
   el.onclick = () => {
-    const traits = p.traits.map(t => '<span class="d-trait">'+t+'</span>').join('');
-    document.getElementById('detail').innerHTML = '<button class="close" onclick="document.getElementById(\'overlay\').classList.remove(\'active\')">&times;</button><div class="d-sym" style="color:'+p.color+'">'+p.sym+'</div><div class="d-name">'+p.name+'</div><div class="d-source">'+p.source+'</div>'+(p.catch?'<div class="d-catch" style="border-color:'+p.color+';color:'+p.color+'">"'+p.catch+'"</div>':'')+'<div class="d-style">'+p.style+'</div><div class="d-traits">'+traits+'</div>';
+    const traits = p.traits.map(t => '<span class="d-trait">'+e(t)+'</span>').join('');
+    const quotes = (p.quotes || []).map(q => '<div class="d-quote">"'+e(q)+'"</div>').join('');
+    document.getElementById('detail').innerHTML = '<button class="close" onclick="document.getElementById(\'overlay\').classList.remove(\'active\')">&times;</button><div class="d-sym" style="color:'+p.color+'">'+e(p.sym)+'</div><div class="d-name">'+e(p.name)+'</div><div class="d-source">'+e(p.source)+'</div>'+(p.catch?'<div class="d-catch" style="border-color:'+p.color+';color:'+p.color+'">"'+e(p.catch)+'"</div>':'')+'<div class="d-style">'+e(p.style)+'</div>'+(quotes?'<div class="d-qlabel">Quote showcase</div><div class="d-quotes">'+quotes+'</div>':'')+'<div class="d-traits">'+traits+'</div>';
     document.getElementById('overlay').classList.add('active');
   };
   grid.appendChild(el);
@@ -472,7 +514,10 @@ body{font-family:'Inter',sans-serif;background:#08080d;color:#e2e8f0;min-height:
 .cf .catch{font-family:'JetBrains Mono',monospace;font-size:0.6rem;color:#94a3b8;font-style:italic;line-height:1.5;margin-top:auto;border-top:1px solid #1e1e2e;padding-top:0.5rem}
 .cb{background:#1a1a28;transform:rotateY(180deg);padding:1rem 0.8rem;display:flex;flex-direction:column}
 .cb .bt{font-size:0.85rem;font-weight:700;margin-bottom:0.5rem}
-.cb .bs{font-size:0.68rem;color:#cbd5e1;line-height:1.6;margin-bottom:0.8rem;flex:1}
+.cb .bs{font-size:0.68rem;color:#cbd5e1;line-height:1.6;margin-bottom:0.65rem}
+.cb .bqhead{font-family:'JetBrains Mono',monospace;font-size:0.52rem;text-transform:uppercase;letter-spacing:0.08em;color:#64748b;margin-bottom:0.4rem}
+.cb .bqwrap{display:grid;gap:0.35rem;margin-bottom:0.7rem;max-height:112px;overflow:auto;padding-right:0.2rem;flex:1}
+.cb .bq{font-family:'JetBrains Mono',monospace;font-size:0.58rem;line-height:1.45;padding:0.4rem 0.48rem;border-radius:8px;border:1px solid rgba(255,255,255,0.07);background:rgba(255,255,255,0.04);color:#dbeafe}
 .cb .btr{display:flex;flex-wrap:wrap;gap:3px}
 .cb .btr span{font-size:0.55rem;padding:2px 6px;border-radius:100px;background:rgba(255,255,255,0.06);color:#94a3b8}
 .cb .bc{font-family:'JetBrains Mono',monospace;font-size:0.6rem;font-style:italic;margin-top:0.6rem;padding-top:0.5rem;border-top:1px solid #2a2a3a;line-height:1.5}
@@ -485,6 +530,14 @@ body{font-family:'Inter',sans-serif;background:#08080d;color:#e2e8f0;min-height:
 <script>
 const CATS = $cats_json;
 const P = $personas_json;
+function e(v) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 const filters = document.getElementById('filters');
 const ab = document.createElement('button'); ab.className='fbtn active'; ab.textContent='All'; ab.dataset.f='all'; filters.appendChild(ab);
@@ -504,8 +557,9 @@ function render(filter) {
     const w = document.createElement('div'); w.className = 'cw';
     const tb = p.type==='character' ? 'rgba(96,165,250,0.15)' : 'rgba(52,211,153,0.15)';
     const tc = p.type==='character' ? '#60a5fa' : '#34d399';
-    const traits = p.traits.map(t => '<span>'+t+'</span>').join('');
-    w.innerHTML = '<div class="card" onclick="this.classList.toggle(\'flipped\')"><div class="cf"><div class="accent" style="background:'+p.color+'"></div><div class="body"><div class="cat" style="color:'+p.color+'">'+p.catLabel+'</div><div class="name">'+p.name+'</div><div class="src">'+p.source+'</div><div class="tbadge" style="background:'+tb+';color:'+tc+'">'+p.type+'</div>'+(p.catch?'<div class="catch" style="color:'+p.color+'">"'+p.catch+'"</div>':'')+'</div></div><div class="cb"><div class="bt" style="color:'+p.color+'">'+p.name+'</div><div class="bs">'+p.style+'</div><div class="btr">'+traits+'</div>'+(p.catch?'<div class="bc" style="color:'+p.color+'">"'+p.catch+'"</div>':'')+'</div></div>';
+    const traits = p.traits.map(t => '<span>'+e(t)+'</span>').join('');
+    const quotes = (p.quotes || []).map(q => '<div class="bq">"'+e(q)+'"</div>').join('');
+    w.innerHTML = '<div class="card" onclick="this.classList.toggle(\'flipped\')"><div class="cf"><div class="accent" style="background:'+p.color+'"></div><div class="body"><div class="cat" style="color:'+p.color+'">'+e(p.catLabel)+'</div><div class="name">'+e(p.name)+'</div><div class="src">'+e(p.source)+'</div><div class="tbadge" style="background:'+tb+';color:'+tc+'">'+e(p.type)+'</div>'+(p.catch?'<div class="catch" style="color:'+p.color+'">"'+e(p.catch)+'"</div>':'')+'</div></div><div class="cb"><div class="bt" style="color:'+p.color+'">'+e(p.name)+'</div><div class="bs">'+e(p.style)+'</div>'+(quotes?'<div class="bqhead">Quote showcase</div><div class="bqwrap">'+quotes+'</div>':'')+'<div class="btr">'+traits+'</div>'+(p.catch?'<div class="bc" style="color:'+p.color+'">"'+e(p.catch)+'"</div>':'')+'</div></div>';
     w.addEventListener('mousemove', e => {
       const card = w.querySelector('.card'); if (card.classList.contains('flipped')) return;
       const r = w.getBoundingClientRect();
