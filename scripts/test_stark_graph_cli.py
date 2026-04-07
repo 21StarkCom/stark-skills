@@ -10,10 +10,17 @@ PYTHON = sys.executable  # use the same python running pytest
 # Worktree root — used as a valid git repo for tests that need one
 REPO_DIR = str(Path(__file__).parent.parent)
 
+# Fixture directory — small, fast to parse
+FIXTURE_DIR = str(Path(__file__).parent.parent / "tests" / "fixtures" / "graph")
+
 
 def _run(*args, **kwargs):
     """Run stark_graph.py with given args, return CompletedProcess."""
-    cmd = [PYTHON, str(SCRIPT), "--repo", REPO_DIR] + list(args)
+    # Use the small fixture dir for tests that trigger parsing,
+    # unless explicitly overridden
+    repo = kwargs.pop("repo", FIXTURE_DIR)
+    cmd = [PYTHON, str(SCRIPT), "--repo", repo] + list(args)
+    kwargs.setdefault("timeout", 30)
     return subprocess.run(cmd, capture_output=True, text=True, **kwargs)
 
 
