@@ -29,6 +29,9 @@ You must explicitly read the code. Start every review by running these shell com
 - If no issues: `[]`
 - This is critical: the output is parsed programmatically. Any text outside the JSON array will break parsing.
 
+## PR Description Context
+Before flagging behavioral changes as regressions or missing features, read the PR title and description for stated intent. If the PR description explains why something was removed, renamed, or changed, do not flag the same change as a regression or issue — it is intentional. This applies especially to cleanup PRs, dead code removal, and rename operations.
+
 ## Spec-Aware Review
 If a "Design Spec" section is included above, use it as review context:
 - Validate: does the implementation match the spec's goals?
