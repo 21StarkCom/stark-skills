@@ -33,6 +33,7 @@ from triage_tui import (
 SCRIPTS_DIR = Path(__file__).parent
 MULTI_REVIEW = SCRIPTS_DIR / "multi_review.py"
 PLAN_REVIEW_DISPATCH = SCRIPTS_DIR / "plan_review_dispatch.py"
+STARK_GRAPH = SCRIPTS_DIR / "stark_graph.py"
 
 
 def _log(message: str) -> None:
@@ -90,6 +91,67 @@ def _detect_repo() -> str:
     if len(parts) < 2:
         raise RuntimeError("Could not parse git remote origin. Use --repo.")
     return f"{parts[-2]}/{parts[-1]}"
+
+
+def _run_graph_gate(config: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    """Run the graph validation gate before PR review dispatch.
+
+    Modes (graph_gate_mode config key):
+      disabled  — skip entirely (default)
+      shadow    — run, log exit code, never block
+      blocking  — honor exit codes: exit 1 → graph_blocked=True
+
+    Exit code 2 from stark_graph.py always degrades gracefully (log + continue).
+
+    Returns a dict with:
+      graph_blocked: bool — True only in blocking mode with exit code 1
+      graph_mode: str — effective gate mode
+      graph_exit_code: int | None — exit code from stark_graph, or None if skipped
+      graph_error: str | None — error message if degraded
+    """
+    gate_mode = config.get("graph_gate_mode", "disabled")
+
+    if gate_mode == "disabled":
+        return {"graph_blocked": False, "graph_mode": "disabled", "graph_exit_code": None, "graph_error": None}
+
+    if args.review_type != "pr":
+        return {"graph_blocked": False, "graph_mode": gate_mode, "graph_exit_code": None, "graph_error": None}
+
+    cmd = [sys.executable, str(STARK_GRAPH), "--stage", "validate"]
+    _log(f"graph gate: running validation (mode={gate_mode})")
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        _log("graph gate: validation timed out — degraded, continuing")
+        return {"graph_blocked": False, "graph_mode": gate_mode, "graph_exit_code": None, "graph_error": "timeout"}
+    except OSError as exc:
+        _log(f"graph gate: validation failed to start — degraded: {exc}")
+        return {"graph_blocked": False, "graph_mode": gate_mode, "graph_exit_code": None, "graph_error": str(exc)}
+
+    exit_code = result.returncode
+
+    if exit_code == 2:
+        _log("graph gate: exit 2 (setup error) — degraded, continuing without graph context")
+        return {"graph_blocked": False, "graph_mode": gate_mode, "graph_exit_code": 2, "graph_error": "graph_setup_error"}
+
+    if gate_mode == "shadow":
+        _log(f"graph gate: shadow mode — exit {exit_code} logged, not enforced")
+        return {"graph_blocked": False, "graph_mode": "shadow", "graph_exit_code": exit_code, "graph_error": None}
+
+    # blocking mode
+    if exit_code == 1:
+        _log("graph gate: blocking mode — validation errors detected (exit 1)")
+        try:
+            report = json.loads(result.stdout)
+            errors = report.get("errors", [])
+            if errors:
+                _log(f"graph gate: {len(errors)} validation error(s): {'; '.join(errors[:3])}")
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        return {"graph_blocked": True, "graph_mode": "blocking", "graph_exit_code": 1, "graph_error": None}
+
+    return {"graph_blocked": False, "graph_mode": gate_mode, "graph_exit_code": exit_code, "graph_error": None}
 
 
 def _load_triage_config(config: dict[str, Any], review_type: str) -> dict[str, Any]:
@@ -449,6 +511,22 @@ def main() -> int:
                 failed=0,
                 total_duration_s=time.monotonic() - started_at,
             )
+            if args.json_output:
+                print(json.dumps(payload, indent=2))
+            return 0
+
+        gate_result = _run_graph_gate(config, args)
+        if gate_result["graph_blocked"]:
+            _log("graph gate: blocking review dispatch due to validation errors")
+            payload = _build_final_payload(
+                triage_result,
+                dispatch_results=[],
+                findings=[],
+                succeeded=0,
+                failed=0,
+                total_duration_s=time.monotonic() - started_at,
+            )
+            payload["graph_gate"] = gate_result
             if args.json_output:
                 print(json.dumps(payload, indent=2))
             return 0
