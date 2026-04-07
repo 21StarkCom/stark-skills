@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Generate skill documentation with multi-LLM visualization competition.
 
-Parses SKILL.md frontmatter, dispatches 3 LLMs to generate HTML visualizations,
-has Claude judge the screenshots, and assembles markdown docs with Mermaid
+Parses SKILL.md frontmatter, dispatches the enabled LLM competitors to generate
+HTML visualizations, has Claude judge the screenshots, and assembles markdown docs with Mermaid
 diagrams and embedded PNGs.
 
 Usage:

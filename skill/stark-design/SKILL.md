@@ -1,7 +1,7 @@
 ---
 name: stark-design
 description: >-
-  Generate design docs from requirements via 3 agents + cross-review synthesis. Use for design, spec, architecture doc creation.
+  Generate design docs from requirements via the enabled agents + cross-review synthesis. Use for design, spec, architecture doc creation.
 argument-hint: '"prompt" | <path-to-requirements> [--agents claude,codex,gemini] [--timeout N] [--dry-run] [--output PATH]'
 disable-model-invocation: true
 model: opus
@@ -9,8 +9,8 @@ model: opus
 
 # stark-design
 
-Generate a design document from requirements or a prompt. Three agents each independently produce
-a design, then each design is cross-reviewed by the other two agents (3 designs, 6 reviews).
+Generate a design document from requirements or a prompt. The enabled agents each independently produce
+a design, then each design is cross-reviewed by the other enabled agents.
 The highest-scoring design becomes the base, synthesized with the best elements from the others.
 
 Fills the pipeline start: **`/stark-design`** → `/stark-review-design` → `/stark-design-to-plan` → `/stark-review-plan` → `/stark-plan-to-tasks` → `/stark-phase-execute`
@@ -66,7 +66,7 @@ export GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)
 
 ## Phase 2: Generate Designs
 
-Dispatch 3 agents in parallel, each produces a design document:
+Dispatch the enabled agents in parallel. Each produces a design document:
 
 ```bash
 $PYTHON $SCRIPTS/design_to_plan_dispatch.py \
@@ -83,7 +83,7 @@ echo "$requirements_content" > /tmp/stark-design-$$/requirements.md
 
 Capture JSON output. Extract `results[].plan_content` for each agent.
 
-**Minimum viable:** At least 2 of 3 agents must succeed. If only 1 succeeds, use that single design (skip cross-review). If 0 succeed, abort with dispatch failure diagnostics.
+**Minimum viable:** At least 2 enabled agents must succeed. If only 1 succeeds, use that single design (skip cross-review). If 0 succeed, abort with dispatch failure diagnostics.
 
 Write each design to a temp file and a plans.json for Phase 3:
 ```bash
@@ -92,7 +92,7 @@ mkdir -p /tmp/stark-design-$$
 
 ## Phase 3: Cross-Review Designs
 
-Each design gets reviewed by the other 2 agents (6 reviews total):
+Each design gets reviewed by the other enabled agents (full 3-agent mode produces 6 reviews):
 
 ```bash
 $PYTHON $SCRIPTS/design_to_plan_dispatch.py \

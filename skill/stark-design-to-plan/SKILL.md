@@ -1,7 +1,7 @@
 ---
 name: stark-design-to-plan
 description: >-
-  Convert design docs into phased implementation plans via 3 agents + cross-review. Use for plan from design/spec.
+  Convert design docs into phased implementation plans via the enabled agents + cross-review. Use for plan from design/spec.
 argument-hint: "<path> [--agents claude,codex,gemini] [--timeout N] [--dry-run] [--force]"
 disable-model-invocation: true
 model: opus
@@ -21,8 +21,8 @@ Parse the JSON result:
 
 # stark-design-to-plan
 
-Generate a phased implementation plan from a design document. Three agents each independently
-produce a plan, then each plan is cross-reviewed by the other two agents (3 plans, 6 reviews).
+Generate a phased implementation plan from a design document. The enabled agents each independently
+produce a plan, then each plan is cross-reviewed by the other enabled agents.
 The highest-scoring plan becomes the base, synthesized with the best elements from the others.
 
 Fills the pipeline gap: `/stark-review-design` → **`/stark-design-to-plan`** → `/stark-review-plan`
@@ -85,7 +85,7 @@ python3 ~/.claude/code-review/scripts/approach_contract.py --plan-file <path> --
 
 ## Phase 2: Generate Plans
 
-Dispatch 3 agents in parallel, each produces an implementation plan:
+Dispatch the enabled agents in parallel. Each produces an implementation plan:
 
 ```bash
 $PYTHON $SCRIPTS/design_to_plan_dispatch.py \
@@ -96,7 +96,7 @@ $PYTHON $SCRIPTS/design_to_plan_dispatch.py \
 
 Capture JSON output. Extract `results[].plan_content` for each agent.
 
-**Minimum viable:** At least 2 of 3 agents must succeed. If only 1 succeeds, warn and use that single plan (skip cross-review). If 0 succeed, abort with dispatch failure diagnostics.
+**Minimum viable:** At least 2 enabled agents must succeed. If only 1 succeeds, warn and use that single plan (skip cross-review). If 0 succeed, abort with dispatch failure diagnostics.
 
 Write each plan to a temp file for Phase 3 input:
 ```bash
@@ -111,7 +111,7 @@ Also write plans as a JSON file for the cross-review dispatch:
 
 ## Phase 3: Cross-Review Plans
 
-Each plan gets reviewed by the other 2 agents (6 reviews total):
+Each plan gets reviewed by the other enabled agents (full 3-agent mode produces 6 reviews):
 
 ```bash
 $PYTHON $SCRIPTS/design_to_plan_dispatch.py \

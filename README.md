@@ -1,6 +1,6 @@
 # stark-skills
 
-AI-powered development workflow system for Claude Code. 28 skills covering the full development lifecycle — from planning through code review, shipping, and maintenance. Built on 3 competing AI agents (Claude, Codex, Gemini) that cross-validate each other's work.
+AI-powered development workflow system for Claude Code. 28 skills covering the full development lifecycle — from planning through code review, shipping, and maintenance. Claude and Codex are enabled by default, with optional Gemini support available through config.
 
 ## Quick Start
 
@@ -16,7 +16,7 @@ cd ~/git/Evinced/stark-skills
 # Quick review (1 LLM × 9 domains)
 /stark-review 42
 
-# Thorough review (3 LLMs × 9 domains)
+# Thorough review (all enabled LLMs × 9 domains; default: 2)
 /stark-team-review 42
 
 # End the session (tests, cleanup, push)
@@ -39,12 +39,12 @@ The human provides the idea and writes the spec. Everything after `/stark-plan-t
 
 ### Quality Gates
 
-Review artifacts before they ship. Each review skill dispatches 3 LLMs in parallel, classifies findings as real issues vs. noise, and applies fixes autonomously.
+Review artifacts before they ship. Each review skill dispatches the enabled LLM agents in parallel, classifies findings as real issues vs. noise, and applies fixes autonomously.
 
 | Skill | What it reviews | When to use |
 |-------|----------------|-------------|
 | `/stark-review` | PR code changes | Quick review. 1 LLM × 9 domains — fast, cheap, default agent configurable per domain. |
-| [`/stark-team-review`](docs/skills/stark-team-review/usage.md) | PR code changes | Thorough review. 3 LLMs × 9 domains, autonomous fix loop. |
+| [`/stark-team-review`](docs/skills/stark-team-review/usage.md) | PR code changes | Thorough review. All enabled LLMs × 9 domains (2 by default), autonomous fix loop. |
 | [`/stark-review-design`](skill/stark-review-design/SKILL.md) | Architecture and design docs | Before committing to a design. Reviews across 12 domains (completeness, security, scalability, etc.). |
 | [`/stark-review-plan`](docs/skills/stark-review-plan/usage.md) | Execution plans and deployment plans | Before executing. Adversarial SRE review across 10 failure vectors — assumes the plan will break. |
 | [`/stark-review-improvement`](docs/skills/stark-review-improvement/usage.md) | Review prompt effectiveness | After reviews produce too many false positives. Tunes agent prompts based on assessment data. |
@@ -58,11 +58,11 @@ Turn ideas into tracked, phased GitHub issues, then execute them autonomously.
 
 | Skill | What it does | When to use |
 |-------|-------------|-------------|
-| [`/stark-design`](docs/skills/stark-design/usage.md) | Generate design doc from requirements | Starting a new feature. 3 agents generate designs, 6 cross-reviews, synthesized into final doc. |
-| [`/stark-design-to-plan`](docs/skills/stark-design-to-plan/usage.md) | Generate implementation plan from design doc | After design is reviewed. 3 agents generate plans, 6 cross-reviews, synthesized. |
+| [`/stark-design`](docs/skills/stark-design/usage.md) | Generate design doc from requirements | Starting a new feature. Enabled agents generate designs, then cross-review one another before synthesis. |
+| [`/stark-design-to-plan`](docs/skills/stark-design-to-plan/usage.md) | Generate implementation plan from design doc | After design is reviewed. Enabled agents generate plans, then cross-review one another before synthesis. |
 | [`/stark-plan-to-tasks`](docs/skills/stark-plan-to-tasks/usage.md) | Decompose a spec into phased GitHub issues | After a spec/plan is reviewed and approved. 3 LLM passes: quality gate → decomposition → validation. |
 | [`/stark-phase-execute`](docs/skills/stark-phase-execute/usage.md) | Autonomously implement all tasks in a phase | When you have GitHub issues ready. Branches, implements, PRs, reviews, merges — zero intervention. |
-| [`/stark-autopilot`](docs/skills/stark-autopilot/usage.md) | Autonomous implementation with tournament | When you want 3 agents to compete per step in worktrees. Best implementation wins at each step. |
+| [`/stark-autopilot`](docs/skills/stark-autopilot/usage.md) | Autonomous implementation with tournament | When you want all enabled agents to compete per step in worktrees. Best implementation wins at each step. |
 
 **Best practice:** The full pipeline is: `/stark-design` → `/stark-review-design` → `/stark-design-to-plan` → `/stark-review-plan` → `/stark-plan-to-tasks` → `/stark-phase-execute`. Each step feeds the next. Don't skip the review steps — unreviewed plans produce ambiguous issues that block autonomous execution.
 
@@ -99,7 +99,7 @@ Generate, scaffold, and maintain project documentation.
 |-------|-------------|-------------|
 | [`/stark-init-docs`](docs/skills/stark-init-docs/usage.md) | Scaffold docs structure (ADRs, runbooks, etc.) | When starting a new project or adding docs to an existing one. Modes: template, backfill, upgrade, clean. |
 | [`/stark-extract-docs`](docs/skills/stark-extract-docs/usage.md) | Extract knowledge from specs/reviews into ADRs, retros, glossary | After a spec is implemented. Captures decisions and learnings before they're forgotten. |
-| [`/stark-generate-docs`](docs/skills/stark-generate-docs/usage.md) | Generate skill visualizations with multi-LLM competition | After modifying a SKILL.md. 3 LLMs compete, Claude judges screenshots, best wins. |
+| [`/stark-generate-docs`](docs/skills/stark-generate-docs/usage.md) | Generate skill visualizations with multi-LLM competition | After modifying a SKILL.md. Enabled LLM competitors generate candidates, Claude judges screenshots, best wins. |
 | [`/stark-claude-md-improver`](docs/skills/stark-claude-md-improver/usage.md) | Analyze and improve CLAUDE.md files | When CLAUDE.md feels stale or incomplete. Checks for missing conventions, outdated paths, etc. |
 
 **Best practice:** Run `/stark-extract-docs` after every major feature or incident. The specs and review artifacts contain decisions and context that belong in permanent docs — ADRs, runbooks, glossary terms. If you wait, the context is lost.
@@ -147,7 +147,7 @@ Understand how the system is performing.
 
 ```
 /stark-review 42                    # quick: 1 agent × 9 domains
-/stark-team-review 42               # thorough: 3 agents × 9 domains
+/stark-team-review 42               # thorough: enabled agents × 9 domains (default: 2)
 /stark-pr-status 42                 # analytics: rounds, findings, signal quality
 ```
 
@@ -173,15 +173,16 @@ cd ~/git/Evinced/new-repo
 
 ## Architecture
 
-The core engine dispatches 3 AI agents across N domain specializations:
+The core engine dispatches the enabled AI agents across the configured review domains:
 
 ```
-3 agents × 9 domains = 27 parallel sub-agent reviews
-
+Default install:
 ├── claude × {architecture, accessibility, correctness, type-safety, security, test-coverage,
 │              spec-conformance, ui-design-conformance, regression-prevention}
-├── codex  × {same 9 domains}
-└── gemini × {same 9 domains}
+└── codex  × {same 9 domains}
+
+Optional:
+└── gemini × {same 9 domains} when `models.gemini.enabled` is true
 ```
 
 Each agent posts a consolidated review via its own GitHub App bot:
@@ -287,7 +288,7 @@ Every skill has auto-generated documentation with visual workflow diagrams:
 - **[Skill Index](docs/skills/index.md)** — Full list with links to usage and internals docs
 - **Per-skill docs** — Each skill has `usage.md` (how to use) and `internals.md` (how it works), plus HTML visualizations and PNG screenshots
 
-The docs are generated by [`/stark-generate-docs`](docs/skills/stark-generate-docs/usage.md) — 3 LLMs compete to produce HTML visualizations, Claude judges the screenshots, and the best one wins.
+The docs are generated by [`/stark-generate-docs`](docs/skills/stark-generate-docs/usage.md) — the enabled LLM competitors produce HTML visualizations, Claude judges the screenshots, and the best one wins.
 
 ## Design Specs
 

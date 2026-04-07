@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Autopilot dispatch — tournament-per-step implementation with 3 agents.
+"""Autopilot dispatch — tournament-per-step implementation with enabled agents.
 
 For each implementation step:
-  1. Create 3 git worktrees (one per agent)
+  1. Create one git worktree per enabled agent
   2. Dispatch agents in parallel, each implementing the step in its worktree
   3. Collect diffs from each worktree
   4. Return structured results for tournament evaluation
@@ -30,6 +30,10 @@ from gemini_utils import (
     should_fallback_to_api_key, try_gemini_api_key_fallback,
     parse_json_output as parse_gemini_output,
 )
+try:
+    from runtime_env import build_agent_env
+except ImportError:  # pragma: no cover - backward compat for older installs
+    build_agent_env = None
 
 try:
     from config_loader import get_model_id, is_agent_enabled, get_self_heal_config
@@ -106,7 +110,16 @@ def create_worktree(repo_root: str, agent: str, step_id: str) -> str:
         capture_output=True, text=True, cwd=repo_root,
     )
     if result.returncode != 0:
-        # Branch might already exist, try without -b
+        subprocess.run(
+            ["git", "worktree", "remove", "--force", worktree_dir],
+            capture_output=True, text=True, cwd=repo_root,
+        )
+        if os.path.exists(worktree_dir):
+            shutil.rmtree(worktree_dir, ignore_errors=True)
+        subprocess.run(
+            ["git", "worktree", "prune"],
+            capture_output=True, text=True, cwd=repo_root,
+        )
         subprocess.run(
             ["git", "branch", "-D", branch_name],
             capture_output=True, text=True, cwd=repo_root,
@@ -261,7 +274,11 @@ def _run_implementation_agent(
     if stdin_input is not None:
         run_kwargs["input"] = stdin_input
     if agent in ("claude", "codex"):
-        run_kwargs["env"] = make_clean_env()
+        run_kwargs["env"] = (
+            build_agent_env(agent, "review")
+            if build_agent_env is not None
+            else make_clean_env()
+        )
     if gemini_home:
         run_kwargs["env"] = make_gemini_env(gemini_home)
 

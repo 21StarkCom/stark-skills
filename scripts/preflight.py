@@ -165,7 +165,21 @@ def check_model_resolution() -> tuple[str, str]:
     missing = [a for a in expected if a not in models]
     if missing:
         return "fail", f"missing agent config: {missing}"
-    return "pass", f"agents configured: {sorted(models.keys())}"
+    enabled = sorted(
+        agent
+        for agent, cfg in models.items()
+        if isinstance(cfg, dict) and cfg.get("enabled")
+    )
+    if not enabled:
+        return "fail", "no enabled agents in config"
+    disabled = sorted(
+        agent
+        for agent, cfg in models.items()
+        if isinstance(cfg, dict) and not cfg.get("enabled")
+    )
+    if disabled:
+        return "pass", f"enabled agents: {enabled}; disabled agents: {disabled}"
+    return "pass", f"enabled agents: {enabled}"
 
 
 def check_cost_hard_stop() -> tuple[str, str]:

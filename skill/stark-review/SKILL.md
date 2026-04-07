@@ -11,7 +11,7 @@ model: opus[1m]
 
 Single-agent PR review: 1 LLM × 9 domains dispatched in parallel. Each domain uses its configured default agent (from `domain_agents` in config.json), or an inline override.
 
-For full 3-LLM cross-validation, use `/stark-team-review` instead.
+For cross-validation across all enabled agents, use `/stark-team-review` instead.
 
 ## Arguments
 

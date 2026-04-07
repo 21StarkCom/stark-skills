@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG="$REPO_ROOT/global/config.json"
 REGISTRY="$REPO_ROOT/automation/registry.json"
-PROMPTS_DIR="$REPO_ROOT/automation/triggers"
+PROMPTS_DIR="$REPO_ROOT/automation/prompts"
 ENVIRONMENT_ID="env_01ERsNoR4xcvaJCsG4WVA3F2"
 
 # Parse args

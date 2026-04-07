@@ -19,6 +19,7 @@ def test_dry_run_lists_triggers():
         capture_output=True, text=True, cwd=str(REPO_ROOT),
     )
     assert result.returncode == 0
+    assert f"Prompts: {REPO_ROOT / 'automation' / 'prompts'}" in result.stdout
     assert "stark-sentinel" in result.stdout
 
 
@@ -36,3 +37,10 @@ def test_unknown_trigger_fails():
         capture_output=True, text=True, cwd=str(REPO_ROOT),
     )
     assert result.returncode != 0
+
+
+def test_all_configured_triggers_have_prompt_files():
+    config = json.loads((REPO_ROOT / "global" / "config.json").read_text())
+    configured = set(config["automation"]["triggers"].keys())
+    prompts = {path.stem for path in (REPO_ROOT / "automation" / "prompts").glob("stark-*.md")}
+    assert configured == prompts

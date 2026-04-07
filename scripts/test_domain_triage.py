@@ -297,6 +297,18 @@ class TestDomainTriage(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual([verdict.domain for verdict in verdicts], ["architecture", "security"])
 
+    def test_parse_bytes_json_payload(self) -> None:
+        verdicts, error = domain_triage._parse_triage_response(
+            _triage_json(
+                {"domain": "architecture", "relevant": True, "confidence": 0.8, "reason": "fits"},
+                {"domain": "security", "relevant": False, "confidence": 0.85, "reason": "skip"},
+            ).encode("utf-8"),
+            ["architecture", "security"],
+        )
+
+        self.assertIsNone(error)
+        self.assertEqual([verdict.domain for verdict in verdicts], ["architecture", "security"])
+
     @patch("domain_triage.get_model_id", return_value="test-model")
     @patch("domain_triage.subprocess.run")
     @patch("domain_triage._load_domain_descriptions", return_value={})
@@ -309,6 +321,42 @@ class TestDomainTriage(unittest.TestCase):
         _mock_model: MagicMock,
     ) -> None:
         mock_run.return_value = SimpleNamespace(stdout="not json at all", stderr="", returncode=0)
+
+        result = self._run_triage(agent="claude")
+
+        self.assertEqual(result.dispatched_domains, ["architecture", "security", "testing"])
+        self.assertIsNotNone(result.error)
+        self.assertIn("json_parse_error", result.error)
+        self.assertTrue(all(verdict.relevant for verdict in result.verdicts))
+
+    @patch("domain_triage.build_agent_env", return_value={"GH_TOKEN": "codex-token"})
+    @patch("domain_triage.get_model_id", return_value="test-model")
+    @patch("domain_triage.subprocess.run")
+    def test_codex_dispatch_uses_agent_specific_env(
+        self,
+        mock_run: MagicMock,
+        _mock_model: MagicMock,
+        mock_build_env: MagicMock,
+    ) -> None:
+        mock_run.return_value = SimpleNamespace(stdout="{}", stderr="", returncode=0)
+
+        domain_triage._dispatch_to_agent("codex", "prompt", timeout=5)
+
+        mock_build_env.assert_called_once_with("codex", "review")
+        self.assertEqual(mock_run.call_args.kwargs["env"], {"GH_TOKEN": "codex-token"})
+
+    @patch("domain_triage.get_model_id", return_value="test-model")
+    @patch("domain_triage.subprocess.run")
+    @patch("domain_triage._load_domain_descriptions", return_value={})
+    @patch("domain_triage._load_prompt", return_value="{domains}\n\n{content}")
+    def test_parse_malformed_bytes_fallback(
+        self,
+        _mock_prompt: MagicMock,
+        _mock_descriptions: MagicMock,
+        mock_run: MagicMock,
+        _mock_model: MagicMock,
+    ) -> None:
+        mock_run.return_value = SimpleNamespace(stdout=b"\x9enot json at all", stderr=b"", returncode=0)
 
         result = self._run_triage(agent="claude")
 

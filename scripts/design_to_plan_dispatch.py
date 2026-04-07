@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Multi-agent generate-and-cross-review dispatch.
 
-Generic orchestrator for the 3-generate + 6-cross-review pattern:
-  - Phase 1 (generate): 3 agents each independently produce a document
-  - Phase 2 (cross-review): Each document is reviewed by the other 2 agents
+Generic orchestrator for enabled-agent generate and cross-review:
+  - Phase 1 (generate): each enabled agent independently produces a document
+  - Phase 2 (cross-review): each document is reviewed by the other enabled agents
 
 Used by:
   - /stark-design-to-plan (design doc → implementation plan)
@@ -35,6 +35,10 @@ from gemini_utils import (
     parse_json_output as parse_gemini_output,
     should_fallback_to_api_key, try_gemini_api_key_fallback,
 )
+try:
+    from runtime_env import build_agent_env
+except ImportError:  # pragma: no cover - backward compat for older installs
+    build_agent_env = None
 
 try:
     from config_loader import get_model_id, is_agent_enabled
@@ -179,7 +183,11 @@ def _build_cmd_and_kwargs(
     if agent == "claude":
         cmd = build_claude_cmd()
         run_kwargs["input"] = prompt if stdin_content is None else f"{prompt}\n\n{stdin_content}"
-        run_kwargs["env"] = make_clean_env()
+        run_kwargs["env"] = (
+            build_agent_env("claude", "review")
+            if build_agent_env is not None
+            else make_clean_env()
+        )
 
     elif agent == "codex":
         effective_timeout = timeout * 2
@@ -193,7 +201,11 @@ def _build_cmd_and_kwargs(
         ]
         run_kwargs["input"] = prompt if stdin_content is None else f"{prompt}\n\n{stdin_content}"
         run_kwargs["timeout"] = effective_timeout
-        run_kwargs["env"] = make_clean_env()
+        run_kwargs["env"] = (
+            build_agent_env("codex", "review")
+            if build_agent_env is not None
+            else make_clean_env()
+        )
 
     elif agent == "gemini":
         gemini_home = setup_gemini_home(
