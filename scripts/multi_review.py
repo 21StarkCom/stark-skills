@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Multi-agent PR review orchestrator.
 
-Runs 3 CLI agents (Claude, Codex, Gemini) × 6 domain specializations = 18
-parallel sub-agent reviews. Each agent posts a consolidated review via its
-GitHub App, grouped by domain.
+Runs up to 3 CLI agents (Claude, Codex, Gemini) across 9 domain
+specializations. Each agent posts a consolidated review via its GitHub App,
+grouped by domain.
 
 Architecture:
     multi_review.py (orchestrator)
-    ├── claude × 6 domains  → stark-claude bot
-    ├── codex  × 6 domains  → stark-codex bot
-    └── gemini × 6 domains  → stark-gemini bot
+    ├── claude × 9 domains  → stark-claude bot
+    ├── codex  × 9 domains  → stark-codex bot
+    └── gemini × 9 domains  → stark-gemini bot
 
 Prompts loaded from ~/.claude/code-review/prompts/{agent}/ (with repo/org overrides):
     agent.md          Agent-specific preamble
@@ -19,6 +19,9 @@ Prompts loaded from ~/.claude/code-review/prompts/{agent}/ (with repo/org overri
     04-type-safety    TypeScript types & API surface
     05-security       Security & error handling
     06-test-coverage  Test coverage & quality
+    07-spec-conformance  Spec and acceptance criteria alignment
+    08-ui-design-conformance  UI design system and interaction consistency
+    09-regression-prevention  Backward compatibility and change safety
 
 Usage:
     multi_review.py --pr 10
@@ -51,6 +54,10 @@ from gemini_utils import (
     parse_json_output as parse_gemini_output,
     should_fallback_to_api_key, try_gemini_api_key_fallback,
 )
+try:
+    from runtime_env import build_agent_env
+except ImportError:  # pragma: no cover - backward compat for older installs
+    build_agent_env = None
 
 try:
     from config_loader import get_model_id as _config_get_model_id, is_agent_enabled
@@ -286,9 +293,13 @@ FINDINGS_FORMAT = (
     "Output ONLY the JSON array, no other text."
 )
 
-MAX_WORKERS = 18  # 3 agents × 6 domains
 MAX_GEMINI_CONCURRENT = 3  # Vertex AI rate-limits under heavy parallel load
 _gemini_semaphore = threading.Semaphore(MAX_GEMINI_CONCURRENT)
+
+
+def _max_worker_budget() -> int:
+    """Keep the pool aligned with the currently configured agent/domain matrix."""
+    return max(1, len(AGENTS) * max(1, len(DOMAINS)))
 
 
 # ── Data structures ────────────────────────────────────────────────────
@@ -724,7 +735,11 @@ def _run_subagent_inner(
     if stdin_input is not None:
         run_kwargs["input"] = stdin_input
     if agent in ("claude", "codex"):
-        run_kwargs["env"] = make_clean_env()
+        run_kwargs["env"] = (
+            build_agent_env(agent, "review")
+            if build_agent_env is not None
+            else make_clean_env()
+        )
     if gemini_home:
         run_kwargs["env"] = make_gemini_env(gemini_home)
 
@@ -871,7 +886,7 @@ def run_review_round(
         print("  No enabled agents available for this round.", file=out)
         return rnd
 
-    with ThreadPoolExecutor(max_workers=min(total, MAX_WORKERS)) as pool:
+    with ThreadPoolExecutor(max_workers=min(total, _max_worker_budget())) as pool:
         futures = {}
         for agent in agents:
             if not is_agent_enabled(agent):
@@ -952,7 +967,7 @@ def run_single_agent_round(
         print("  No enabled agents available for this round.", file=out)
         return rnd
 
-    with ThreadPoolExecutor(max_workers=min(total, MAX_WORKERS)) as pool:
+    with ThreadPoolExecutor(max_workers=min(total, _max_worker_budget())) as pool:
         futures = {}
         for domain_key, agent in domain_agent_map.items():
             if agent not in AGENTS:
@@ -1159,6 +1174,39 @@ def deduplicate_findings(findings: list[Finding]) -> list[Finding]:
                 used[j] = True
         used[i] = True
         merged.append(combined)
+
+    # --- Pass 3: cross-agent collapse on exact file+line ---
+    # Different agents often describe the same bug with very different titles
+    # (e.g., "TypeError in actor" vs "ORM object slicing error"). When findings
+    # share the exact same file and line from different agents, merge them even
+    # if titles don't overlap.
+    loc_groups: dict[tuple[str, int], list[int]] = {}
+    for idx, group in enumerate(merged):
+        rep = group[0]
+        loc_key = (rep.file, rep.line)
+        loc_groups.setdefault(loc_key, []).append(idx)
+
+    final_merged: list[list[Finding]] = []
+    used_final = [False] * len(merged)
+    for indices in loc_groups.values():
+        if len(indices) > 1:
+            # Multiple groups on the same file+line from different agents → merge
+            agents_in_groups = set()
+            for idx in indices:
+                for f in merged[idx]:
+                    agents_in_groups.add(f.agent)
+            if len(agents_in_groups) > 1:
+                combined_group: list[Finding] = []
+                for idx in indices:
+                    combined_group.extend(merged[idx])
+                    used_final[idx] = True
+                final_merged.append(combined_group)
+                continue
+        for idx in indices:
+            if not used_final[idx]:
+                used_final[idx] = True
+                final_merged.append(merged[idx])
+    merged = final_merged
 
     deduped: list[Finding] = []
     for group in merged:
@@ -1779,7 +1827,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Multi-agent PR review orchestrator — "
-            "3 agents (Claude, Codex, Gemini) × 6 domains = 18 parallel sub-agent reviews"
+            "up to 3 agents (Claude, Codex, Gemini) across 9 review domains"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(

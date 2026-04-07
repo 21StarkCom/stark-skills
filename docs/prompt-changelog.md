@@ -2,6 +2,28 @@
 
 Tracks improvements to review prompts based on stark-team-review assessments.
 
+## 2026-04-07 — Schema verification, PR context, cross-agent dedup (PR review)
+
+**Source:** PR #237 in GetEvinced/stark-data-core
+**Prompts dir:** default (PR code review)
+**Assessment:** Codex produced 3 critical false positives by inferring schema changes from service renames; both agents ignored PR description intent; 5 agents flagged same bug independently without collapsing
+
+### Changes Made
+
+| File | Change | Reason |
+|------|--------|--------|
+| `global/prompts/codex/03-correctness.md` | Added schema verification rule | Codex inferred column renames from service rename — must verify against ORM models |
+| `global/prompts/codex/09-regression-prevention.md` | Added intentional removal rule | Codex flagged dead CLI removal as regression despite PR body explaining it |
+| `global/prompts/claude/agent.md` | Added PR Description Context section | Agent ignored PR body explaining intentional changes |
+| `global/prompts/codex/agent.md` | Added PR Description Context section | Same as above |
+| `global/prompts/gemini/agent.md` | Added PR Description Context section | Same as above |
+| `scripts/multi_review.py` | Added pass 3 cross-agent dedup on exact file+line | 5 agents flagged same bug with different titles, fuzzy title match missed them |
+
+### Validation
+- [x] Prompt syntax OK
+- [x] Python compiles
+- [x] Config valid JSON (no config changes)
+
 ## 2026-04-06 — Test-coverage severity cap, vendor-webhook SSRF (PR review)
 
 **Source:** PR #170 in GetEvinced/transcript-optimizer  

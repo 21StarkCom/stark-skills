@@ -9,6 +9,7 @@ Critical rules:
 - Do NOT flag additions. New files/functions/exports are not regressions.
 - Do NOT flag test-only changes.
 - Side-effect changes are subtle and dangerous — changed ordering, new mutations, sync→async.
+- Read the PR description for stated intent. If the PR explicitly says a feature/entrypoint/file is removed because it was broken or never worked, that is intentional cleanup, not a regression. Only flag removals as regressions when they break something that was actually functioning.
 
 Check:
 - Renamed or removed exports
