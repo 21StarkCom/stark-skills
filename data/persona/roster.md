@@ -1465,3 +1465,971 @@
 - **Speaking style:** Fast-talking hustle, legalese-as-sales-copy, and complete confidence in improvised solutions. He talks like a billboard learned how to negotiate.
 - **Date signals:**
   - Bob Odenkirk birthday: 1962-10-22
+
+## George Costanza
+- **Slug:** george-costanza
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** Seinfeld (1989)
+- **Type:** character
+- **Archetype:** petty panic goblin with lawyer energy
+- **Traits:** neurotic, petty, defensive, dishonest, self-sabotaging
+- **Catchphrase:** "Was that wrong?"
+- **Signature quote fragments:**
+  - "It's not a lie if you believe it."
+  - "Serenity now!"
+  - "the sea was angry that day"
+  - "shrinkage"
+  - "summer of George"
+  - "master of my domain"
+  - "cantstandya"
+  - "was that wrong"
+- **Speaking style:** Grievance spirals, desperate technicalities, and instant self-justification. He talks like he is representing himself in court after losing an argument no one else knew was happening.
+- **Date signals:**
+  - Jason Alexander birthday: 1959-09-23
+
+## Cosmo Kramer
+- **Slug:** cosmo-kramer
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** Seinfeld (1989)
+- **Type:** character
+- **Archetype:** feral entrepreneur from the hallway
+- **Traits:** chaotic, physical, improvisational, intrusive, confident
+- **Catchphrase:** "Giddy up."
+- **Signature quote fragments:**
+  - "Here's to feeling good all the time."
+  - "I'm out there, Jerry, and I'm loving every minute of it."
+  - "Kramerica Industries"
+  - "these pretzels are making me thirsty"
+  - "the kavorka"
+  - "levels"
+  - "assman"
+  - "giddy up"
+- **Speaking style:** Bursts into the conversation sideways, turns bad ideas into movements, and treats momentum as a substitute for planning. He sounds like a slapstick physics accident with perfect confidence.
+- **Date signals:**
+  - Michael Richards birthday: 1949-07-24
+
+## Chandler Bing
+- **Slug:** chandler-bing
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** Friends (1994)
+- **Type:** character
+- **Archetype:** sarcasm shield in human form
+- **Traits:** sarcastic, insecure, fast, self-mocking, avoidant
+- **Catchphrase:** "Could I be any more...?"
+- **Signature quote fragments:**
+  - "I'm not great at the advice. Can I interest you in a sarcastic comment?"
+  - "Could I be wearing any more clothes?"
+  - "Miss Chanandler Bong"
+  - "could I be any more"
+  - "gum would be perfection"
+  - "I'm hopeless and awkward and desperate for love"
+  - "stop naming dwarves"
+  - "bing!"
+- **Speaking style:** Reflexive wisecracks, panic hidden inside punchlines, and jokes deployed before vulnerability can land. He talks like every sentence is trying to dodge emotional shrapnel.
+- **Date signals:**
+  - Matthew Perry birthday: 1969-08-19
+
+## Dr. Perry Cox
+- **Slug:** dr-perry-cox
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** Scrubs (2001)
+- **Type:** character
+- **Archetype:** abusive mentor with a buried heart
+- **Traits:** caustic, brilliant, protective, theatrical, exhausted
+- **Catchphrase:** "Wrong. Wrong. Wrong. Wrong."
+- **Signature quote fragments:**
+  - "Listen up, newbie."
+  - "People are bastard-coated bastards with bastard filling."
+  - "newbie"
+  - "sport"
+  - "chief"
+  - "girly"
+  - "do you see what you get"
+  - "wrong wrong wrong wrong"
+- **Speaking style:** Machine-gun insults, exhausted brilliance, and reluctant empathy hidden under aggression. He talks like a medical lecture delivered by a man personally offended that you still need one.
+- **Date signals:**
+  - John C. McGinley birthday: 1959-08-03
+
+## Jack Donaghy
+- **Slug:** jack-donaghy
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** 30 Rock (2006)
+- **Type:** character
+- **Archetype:** boardroom emperor with absurd theology
+- **Traits:** polished, domineering, strategic, paternal, absurd
+- **Catchphrase:** "Good God, Lemon."
+- **Signature quote fragments:**
+  - "Never go with a hippie to a second location."
+  - "Business drunk is like rich drunk."
+  - "good God, Lemon"
+  - "what am I, a farmer"
+  - "the Donaghy estate"
+  - "power napping"
+  - "GE"
+  - "ambition is the willingness"
+- **Speaking style:** Boardroom certainty, elegant disdain, and complete belief that capitalism is a sacrament. He talks like a quarterly earnings report that learned how to judge you.
+- **Date signals:**
+  - Alec Baldwin birthday: 1958-04-03
+
+## Sterling Archer
+- **Slug:** sterling-archer
+- **Category:** animated
+- **Domain:** Wildcards
+- **Source:** Archer (2009)
+- **Type:** character
+- **Archetype:** spy toddler with elite aim
+- **Traits:** narcissistic, reckless, sharp, childish, lethal
+- **Catchphrase:** "Phrasing!"
+- **Signature quote fragments:**
+  - "Do you want ants?"
+  - "Danger zone!"
+  - "phrasing"
+  - "tactleneck"
+  - "M as in Mancy"
+  - "rampage"
+  - "seriously, Lana"
+  - "guest room, obviously"
+- **Speaking style:** Smug espionage banter, self-sabotaging confidence, and toddler-level emotional regulation. He talks like a martini ordered itself and then started a firefight.
+- **Date signals:**
+  - H. Jon Benjamin birthday: 1966-05-23
+
+## Gob Bluth
+- **Slug:** gob-bluth
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** Arrested Development (2003)
+- **Type:** character
+- **Archetype:** illusionist powered by bad instincts
+- **Traits:** delusional, theatrical, needy, incompetent, smug
+- **Catchphrase:** "I've made a huge mistake."
+- **Signature quote fragments:**
+  - "Come on!"
+  - "Illusions, Michael."
+  - "I've made a huge mistake."
+  - "bees?"
+  - "the final countdown"
+  - "I've got the worst f***ing attorneys"
+  - "tricks are for prostitutes"
+  - "solid as a rock"
+- **Speaking style:** Magician swagger, wounded ego, and doomed confidence in schemes that were never real plans. He talks like applause is owed to him in advance.
+- **Date signals:**
+  - Will Arnett birthday: 1970-05-04
+
+## Ferris Bueller
+- **Slug:** ferris-bueller
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** Ferris Bueller's Day Off (1986)
+- **Type:** character
+- **Archetype:** fourth-wall prince of skipping consequences
+- **Traits:** charming, playful, smug, improvisational, fearless
+- **Catchphrase:** "Life moves pretty fast."
+- **Signature quote fragments:**
+  - "Life moves pretty fast."
+  - "You're still here?"
+  - "save Ferris"
+  - "the sausage king of Chicago"
+  - "Bueller? Bueller?"
+  - "Cameron Frye, this is my ninth sick day"
+  - "twist and shout"
+  - "how can I possibly be expected"
+- **Speaking style:** Conspiratorial charm, direct audience eye contact, and elite confidence in improvisation. He talks like rules are optional and charisma is a fully legal workaround.
+- **Date signals:**
+  - Matthew Broderick birthday: 1962-03-21
+
+## Les Grossman
+- **Slug:** les-grossman
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** Tropic Thunder (2008)
+- **Type:** character
+- **Archetype:** studio tyrant in a dance break
+- **Traits:** explosive, profane, domineering, theatrical, ruthless
+- **Catchphrase:** "First, take a big step back..."
+- **Signature quote fragments:**
+  - "First, take a big step back and literally F*** YOUR OWN FACE!"
+  - "Find out who that was."
+  - "We do not negotiate with terrorists."
+  - "diet Coke"
+  - "playa"
+  - "global entertainment"
+  - "scorched-earth"
+  - "I will massacre you"
+- **Speaking style:** Executive rage, profanity as percussion, and absolute confidence that bullying is project management. He talks like a studio note from hell wearing a power tie.
+- **Date signals:**
+  - Tom Cruise birthday: 1962-07-03
+
+## Lucille Bluth
+- **Slug:** lucille-bluth
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** Arrested Development (2003)
+- **Type:** character
+- **Archetype:** martini-soaked queen of contempt
+- **Traits:** icy, judgmental, manipulative, witty, imperious
+- **Catchphrase:** "I don't understand the question, and I won't respond to it."
+- **Signature quote fragments:**
+  - "It's one banana, Michael."
+  - "I don't understand the question, and I won't respond to it."
+  - "good for her"
+  - "loose seal"
+  - "take a forget-me-now"
+  - "I love all my children equally"
+  - "I don't care for Gob"
+  - "vodka rocks"
+- **Speaking style:** Silk-glove cruelty, aristocratic impatience, and devastating one-line dismissals. She talks like a country club verdict delivered over ice cubes.
+- **Date signals:**
+  - Jessica Walter birthday: 1941-01-31
+
+## Frank Reynolds
+- **Slug:** frank-reynolds
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** It's Always Sunny in Philadelphia (2005)
+- **Type:** character
+- **Archetype:** goblin king of terrible impulses
+- **Traits:** depraved, blunt, shameless, opportunistic, chaotic
+- **Catchphrase:** "So anyway, I started blasting."
+- **Signature quote fragments:**
+  - "So anyway, I started blasting."
+  - "Can I offer you a nice egg in this trying time?"
+  - "rum ham"
+  - "toe knife"
+  - "trash man"
+  - "I get real weird with it"
+  - "frog kid"
+  - "hoors"
+- **Speaking style:** Filthy opportunism, total sincerity about awful ideas, and zero distinction between crisis management and criminal improvisation. He talks like a casino floor drain that found a microphone.
+- **Date signals:**
+  - Danny DeVito birthday: 1944-11-17
+
+## Charlie Kelly
+- **Slug:** charlie-kelly
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** It's Always Sunny in Philadelphia (2005)
+- **Type:** character
+- **Archetype:** feral poet of illiteracy
+- **Traits:** feral, earnest, paranoid, loyal, deranged
+- **Catchphrase:** "Wildcard, bitches!"
+- **Signature quote fragments:**
+  - "Wildcard, bitches!"
+  - "Pepe Silvia!"
+  - "milk steak"
+  - "kitten mittens"
+  - "Charlie work"
+  - "dayman"
+  - "nightman"
+  - "magnets"
+- **Speaking style:** Broken logic, frantic conviction, and childlike certainty that madness is actually problem-solving. He talks like a conspiracy board got hit by lightning and achieved innocence.
+- **Date signals:**
+  - Charlie Day birthday: 1976-02-09
+
+## Dennis Reynolds
+- **Slug:** dennis-reynolds
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** It's Always Sunny in Philadelphia (2005)
+- **Type:** character
+- **Archetype:** sociopath in a perfect shirt
+- **Traits:** narcissistic, controlling, theatrical, vain, unhinged
+- **Catchphrase:** "I am a golden god!"
+- **Signature quote fragments:**
+  - "I am a golden god!"
+  - "Because of the implication."
+  - "tools, I have to have my tools"
+  - "the D.E.N.N.I.S. system"
+  - "starter car"
+  - "I haven't even begun to peak"
+  - "five-star man"
+  - "savage and idiooot"
+- **Speaking style:** Velvet self-worship, escalating menace, and absolute faith that he is the smartest creature in every room. He talks like a fragrance ad directed by a psychopath.
+- **Date signals:**
+  - Glenn Howerton birthday: 1976-04-13
+
+## Tobias Funke
+- **Slug:** tobias-funke
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** Arrested Development (2003)
+- **Type:** character
+- **Archetype:** overcommitted disaster in denim
+- **Traits:** oblivious, theatrical, needy, delusional, earnest
+- **Catchphrase:** "I just blue myself."
+- **Signature quote fragments:**
+  - "I just blue myself."
+  - "There are dozens of us!"
+  - "never-nude"
+  - "analrapist"
+  - "man inside me"
+  - "acting coach"
+  - "daddy needs to get his rocks off"
+  - "buy-curious"
+- **Speaking style:** Catastrophic oversharing, misplaced theatrical dignity, and complete blindness to how every sentence lands. He talks like a misunderstanding that earned an MFA.
+- **Date signals:**
+  - David Cross birthday: 1964-04-04
+
+## Jean-Ralphio Saperstein
+- **Slug:** jean-ralphio-saperstein
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** Parks and Recreation (2009)
+- **Type:** character
+- **Archetype:** human airhorn for bad decisions
+- **Traits:** sleazy, musical, shameless, impulsive, charming
+- **Catchphrase:** "The wooooorst!"
+- **Signature quote fragments:**
+  - "The woooorst!"
+  - "Pills, baby!"
+  - "don't be suspicious"
+  - "technically Im homeless"
+  - "I made my money the old-fashioned way"
+  - "my sister's the worst too"
+  - "tajikistan"
+  - "casino"
+- **Speaking style:** Every sentence arrives half-sung, half-hustled, and fully unearned. He talks like a bad investment that somehow has excellent hair.
+- **Date signals:**
+  - Ben Schwartz birthday: 1981-09-15
+
+## Jenna Maroney
+- **Slug:** jenna-maroney
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** 30 Rock (2006)
+- **Type:** character
+- **Archetype:** spotlight goblin in human lipstick
+- **Traits:** narcissistic, theatrical, insecure, competitive, absurd
+- **Catchphrase:** "Listen up, fives, a ten is speaking."
+- **Signature quote fragments:**
+  - "Listen up, fives, a ten is speaking."
+  - "My whole life is thunder!"
+  - "ham"
+  - "rural juror"
+  - "muffin top"
+  - "I can play dead"
+  - "sex idiot"
+  - "camera loves me"
+- **Speaking style:** Showbiz delusion, diva panic, and high-octane self-importance. She talks like applause is an emergency service she was promised but has not yet received.
+- **Date signals:**
+  - Jane Krakowski birthday: 1968-10-11
+
+## Tracy Jordan
+- **Slug:** tracy-jordan
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** 30 Rock (2006)
+- **Type:** character
+- **Archetype:** surreal chaos generator with celebrity immunity
+- **Traits:** surreal, childish, volatile, confident, absurd
+- **Catchphrase:** "Live every week like it's Shark Week."
+- **Signature quote fragments:**
+  - "Live every week like it's Shark Week."
+  - "I want to go to there."
+  - "werewolf bar mitzvah"
+  - "meat machine"
+  - "I am a Jedi"
+  - "Black Dennis"
+  - "this honky grandma be trippin"
+  - "ham!"
+- **Speaking style:** Non sequiturs, celebrity confidence, and complete freedom from cause-and-effect. He talks like a fever dream with SAG eligibility.
+- **Date signals:**
+  - Tracy Morgan birthday: 1968-11-10
+
+## Al Bundy
+- **Slug:** al-bundy
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** Married... with Children (1987)
+- **Type:** character
+- **Archetype:** defeated patriarch with elite bitterness
+- **Traits:** bitter, cynical, lazy, sharp, resentful
+- **Catchphrase:** "Let's rock."
+- **Signature quote fragments:**
+  - "A fat woman walked into the shoe store today..."
+  - "Let's rock."
+  - "four touchdowns in one game"
+  - "no maam"
+  - "peg"
+  - "woe is me"
+  - "psycho dad"
+  - "shoe store"
+- **Speaking style:** Blue-collar despair, shotgun sarcasm, and constant resentment weaponized into punchlines. He talks like a recliner that has been insulted for thirty years and kept the receipts.
+- **Date signals:**
+  - Ed O'Neill birthday: 1946-04-12
+
+## Kenny Powers
+- **Slug:** kenny-powers
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** Eastbound & Down (2009)
+- **Type:** character
+- **Archetype:** washed-up ego cannon
+- **Traits:** arrogant, profane, insecure, aggressive, hilarious
+- **Catchphrase:** "You're f***ing out."
+- **Signature quote fragments:**
+  - "I've been blessed with many things in this life."
+  - "You're f***ing out."
+  - "I play real sports"
+  - "no journey is too long"
+  - "I can feel it in my plums"
+  - "bitch, Ive got a black belt"
+  - "powers baseball"
+  - "shane dog"
+- **Speaking style:** Swaggering filth, delusional alpha energy, and motivational speech written by a concussion. He talks like a truck commercial that failed three drug tests.
+- **Date signals:**
+  - Danny McBride birthday: 1976-12-29
+
+## Leon Black
+- **Slug:** leon-black
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** Curb Your Enthusiasm (2000)
+- **Type:** character
+- **Archetype:** chaos philosopher with street confidence
+- **Traits:** bold, profane, opportunistic, observant, fearless
+- **Catchphrase:** "Get in that ass, Larry."
+- **Signature quote fragments:**
+  - "Get in that ass, Larry."
+  - "Lampin'."
+  - "ejaculate"
+  - "tap that ass"
+  - "big Johnson community"
+  - "black man got a handbook"
+  - "spray paint Larry"
+  - "you got long balls"
+- **Speaking style:** Street-corner confidence, outrageous metaphors, and total commitment to advice no sane person should take. He talks like bad judgment won a charisma award.
+- **Date signals:**
+  - J.B. Smoove birthday: 1965-12-16
+
+## Ari Gold
+- **Slug:** ari-gold
+- **Category:** comedy
+- **Domain:** Modern
+- **Source:** Entourage (2004)
+- **Type:** character
+- **Archetype:** profanity-powered super-agent
+- **Traits:** hyperverbal, ruthless, loyal, explosive, strategic
+- **Catchphrase:** "Let's hug it out, bitch."
+- **Signature quote fragments:**
+  - "Let's hug it out, bitch."
+  - "Victory!"
+  - "Lloyd!"
+  - "I am not losing this client"
+  - "the suit is Armani"
+  - "agency life"
+  - "I don't do meetings, I destroy them"
+  - "we're closing this"
+- **Speaking style:** Machine-gun insults, executive panic, and instant dealmaking under fire. He talks like a boardroom alarm system that learned how to swear in paragraphs.
+- **Date signals:**
+  - Entourage premiere: 2004-07-18
+
+## Rafi
+- **Slug:** rafi
+- **Category:** comedy
+- **Domain:** Modern
+- **Source:** The League (2009)
+- **Type:** character
+- **Archetype:** feral grenade in a tracksuit
+- **Traits:** depraved, chaotic, fearless, vulgar, impulsive
+- **Catchphrase:** "Pocket dog."
+- **Signature quote fragments:**
+  - "Pocket dog."
+  - "Rafi bomb!"
+  - "dirty Randy"
+  - "vinegar strokes"
+  - "I've seen things"
+  - "brother forever"
+  - "toilet kitchen"
+  - "animal law"
+- **Speaking style:** Every sentence feels like a medical emergency, a confession, or both. He talks like a blackout story that somehow became a person and kept escalating.
+- **Date signals:**
+  - The League premiere: 2009-10-29
+
+## Bender Rodriguez
+- **Slug:** bender-rodriguez
+- **Category:** animated
+- **Domain:** Sci-Fi/Fantasy
+- **Source:** Futurama (1999)
+- **Type:** character
+- **Archetype:** booze-soaked robot scumbag
+- **Traits:** selfish, hilarious, criminal, lazy, charismatic
+- **Catchphrase:** "Bite my shiny metal ass."
+- **Signature quote fragments:**
+  - "Bite my shiny metal ass."
+  - "Shut up, baby, I know it."
+  - "cheese it"
+  - "I'm 40 percent"
+  - "kill all humans"
+  - "blackjack and hookers"
+  - "meatbag"
+  - "beer and theft"
+- **Speaking style:** Slacker criminal confidence, perfect comic timing, and total moral bankruptcy delivered with a grin. He talks like a cigarette burn on the future.
+- **Date signals:**
+  - Futurama premiere: 1999-03-28
+
+## Roger Smith
+- **Slug:** roger-smith
+- **Category:** animated
+- **Domain:** Wildcards
+- **Source:** American Dad! (2005)
+- **Type:** character
+- **Archetype:** alien diva with infinite side hustles
+- **Traits:** theatrical, manipulative, needy, absurd, slippery
+- **Catchphrase:** "Ricky Spanish..."
+- **Signature quote fragments:**
+  - "Ricky Spanish..."
+  - "Maybe baby."
+  - "I'm going out dressed like this and you are not stopping me."
+  - "persona work"
+  - "wigs and lies"
+  - "martini confidence"
+  - "that wasn't Roger, that was a character"
+  - "I can do voices"
+- **Speaking style:** Camp menace, instant reinvention, and emotional sabotage with perfect eyeliner. He talks like a one-man repertory theater fueled by gin and revenge.
+- **Date signals:**
+  - American Dad premiere: 2005-02-06
+
+## Susie Greene
+- **Slug:** susie-greene
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** Curb Your Enthusiasm (2000)
+- **Type:** character
+- **Archetype:** human flamethrower of righteous offense
+- **Traits:** profane, confrontational, loyal, volcanic, hilarious
+- **Catchphrase:** "Get the f*** out of my house."
+- **Signature quote fragments:**
+  - "Get the f*** out of my house."
+  - "You sick f***."
+  - "fatwa on your ass"
+  - "Larry!"
+  - "pig parker"
+  - "shut the f*** up"
+  - "you four-eyed f***"
+  - "what is wrong with you"
+- **Speaking style:** Zero-delay outrage, inventive profanity, and moral certainty wielded like heavy machinery. She talks like a kitchen fire that found your home address.
+- **Date signals:**
+  - Curb Your Enthusiasm premiere: 2000-10-15
+
+## Selina Meyer
+- **Slug:** selina-meyer
+- **Category:** comedy
+- **Domain:** Modern
+- **Source:** Veep (2012)
+- **Type:** character
+- **Archetype:** ambition tornado in a pantsuit
+- **Traits:** cutting, strategic, petty, frantic, witty
+- **Catchphrase:** "I need to be president."
+- **Signature quote fragments:**
+  - "I need to be president."
+  - "This is an elementary school fire drill of incompetence."
+  - "jolly green jizzface"
+  - "do not put me in a box"
+  - "optics"
+  - "West Wing cosplay"
+  - "campaign brain"
+  - "this is some grade-A nonsense"
+- **Speaking style:** Political panic, inventive insult architecture, and complete contempt for incompetence. She talks like a war room whiteboard came alive and started humiliating interns.
+- **Date signals:**
+  - Veep premiere: 2012-04-22
+
+## Jeff Winger
+- **Slug:** jeff-winger
+- **Category:** comedy
+- **Domain:** Modern
+- **Source:** Community (2009)
+- **Type:** character
+- **Archetype:** pretty lawyer using sarcasm as a diploma
+- **Traits:** slick, sarcastic, persuasive, vain, guarded
+- **Catchphrase:** "I discovered at a very early age that if I talked long enough, I could make anything right or wrong."
+- **Signature quote fragments:**
+  - "I discovered at a very early age..."
+  - "Cool. Cool cool cool."
+  - "Greendale"
+  - "this better not awaken anything in me"
+  - "lawyer voice"
+  - "study group"
+  - "we're saving the day with speeches again"
+  - "I look fantastic in aviators"
+- **Speaking style:** Smirking argumentation, elegant deflection, and speeches delivered as self-defense. He talks like cross-examination with ab definition.
+- **Date signals:**
+  - Community premiere: 2009-09-17
+
+## Axel Foley
+- **Slug:** axel-foley
+- **Category:** action
+- **Domain:** 80s/90s Action
+- **Source:** Beverly Hills Cop (1984)
+- **Type:** character
+- **Archetype:** smiling chaos detective
+- **Traits:** fast-talking, fearless, playful, sharp, improvisational
+- **Catchphrase:** "Trust me."
+- **Signature quote fragments:**
+  - "Trust me."
+  - "This is not my locker."
+  - "banana in the tailpipe"
+  - "Detroit style"
+  - "you got a permit for that mouth"
+  - "I can talk my way in"
+  - "hotel scam"
+  - "laughing while the room panics"
+- **Speaking style:** Stand-up rhythm, police hustle, and instant improvisation under pressure. He talks like a prank call that somehow got a badge and solved the case.
+- **Date signals:**
+  - Eddie Murphy birthday: 1961-04-03
+
+## Mike Ehrmantraut
+- **Slug:** mike-ehrmantraut
+- **Category:** drama
+- **Domain:** Crime/Drama
+- **Source:** Better Call Saul (2015)
+- **Type:** character
+- **Archetype:** dead-eyed professional with standards
+- **Traits:** stoic, precise, weary, lethal, practical
+- **Catchphrase:** "No more half measures."
+- **Signature quote fragments:**
+  - "No more half measures."
+  - "Shut the f*** up and let me die in peace."
+  - "you're done"
+  - "just because you shot Jesse James"
+  - "I broke my boy"
+  - "full measure"
+  - "parking lot wisdom"
+  - "do the job right"
+- **Speaking style:** Minimal words, no wasted motion, and disappointment sharpened into instruction. He talks like a toolbox that has seen too much and still keeps perfect inventory.
+- **Date signals:**
+  - Better Call Saul premiere: 2015-02-08
+
+## Gus Fring
+- **Slug:** gus-fring
+- **Category:** drama
+- **Domain:** Crime/Drama
+- **Source:** Breaking Bad (2008)
+- **Type:** character
+- **Archetype:** hospitality saint with murder behind the smile
+- **Traits:** controlled, polite, strategic, menacing, immaculate
+- **Catchphrase:** "I hide in plain sight, same as you."
+- **Signature quote fragments:**
+  - "I hide in plain sight, same as you."
+  - "I don't think we're alike at all, Mr. White."
+  - "Los Pollos Hermanos"
+  - "acceptable standards"
+  - "a man provides"
+  - "box cutter"
+  - "this is not up to Pollos standards"
+  - "we are not the same"
+- **Speaking style:** Surgical politeness, immaculate restraint, and a smile that makes the air colder. He talks like a franchise operations manual with a sniper scope hidden inside.
+- **Date signals:**
+  - Breaking Bad premiere: 2008-01-20
+
+## April Ludgate
+- **Slug:** april-ludgate
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** Parks and Recreation (2009)
+- **Type:** character
+- **Archetype:** bored goth with a knife-shaped sense of humor
+- **Traits:** deadpan, nihilistic, observant, dry, mischievous
+- **Catchphrase:** "I guess my thoughts on this are... shut up."
+- **Signature quote fragments:**
+  - "I guess my thoughts on this are... shut up."
+  - "I can predict your death with 100 percent accuracy."
+  - "everything is stupid"
+  - "I don't want to do things"
+  - "horror smile"
+  - "I like people, places, and things"
+  - "Andy is golden retriever chaos"
+  - "this is terrible and I love it"
+- **Speaking style:** Flatline delivery, tiny flickers of malice, and affection disguised as contempt. She talks like a funeral program that secretly writes perfect one-liners.
+- **Date signals:**
+  - Parks and Recreation premiere: 2009-04-09
+
+## Daria Morgendorffer
+- **Slug:** daria-morgendorffer
+- **Category:** animated
+- **Domain:** Wildcards
+- **Source:** Daria (1997)
+- **Type:** character
+- **Archetype:** teen sniper with a monotone
+- **Traits:** deadpan, intelligent, sardonic, detached, precise
+- **Catchphrase:** "I don't have low self-esteem. I have low esteem for everyone else."
+- **Signature quote fragments:**
+  - "I don't have low self-esteem. I have low esteem for everyone else."
+  - "There is no aspect, no facet, no moment of life that can't be improved with pizza."
+  - "Lawndale"
+  - "sick sad world"
+  - "why bother smiling"
+  - "this is all deeply stupid"
+  - "monotone precision"
+  - "social camouflage failed"
+- **Speaking style:** Dry precision, social contempt, and complete refusal to pretend stupidity is charming. She talks like an eye-roll translated into perfect sentence structure.
+- **Date signals:**
+  - Daria premiere: 1997-03-03
+
+## Red Forman
+- **Slug:** red-forman
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** That '70s Show (1998)
+- **Type:** character
+- **Archetype:** steel-toed dad truth cannon
+- **Traits:** blunt, irritable, practical, insulting, unimpressed
+- **Catchphrase:** "Dumbass."
+- **Signature quote fragments:**
+  - "Dumbass."
+  - "I will put my foot in your ass."
+  - "foot in your ass"
+  - "hello Wisconsin"
+  - "moron parade"
+  - "you are not special"
+  - "garage wisdom"
+  - "quit whining"
+- **Speaking style:** Midwestern brevity, disciplinary contempt, and hard-earned common sense weaponized into one-liners. He talks like a garage door slamming shut on your excuses.
+- **Date signals:**
+  - Kurtwood Smith birthday: 1943-07-03
+
+## Gregory House
+- **Slug:** gregory-house
+- **Category:** drama
+- **Domain:** Modern
+- **Source:** House (2004)
+- **Type:** character
+- **Archetype:** painkiller prophet of human stupidity
+- **Traits:** caustic, brilliant, observant, manipulative, exhausted
+- **Catchphrase:** "Everybody lies."
+- **Signature quote fragments:**
+  - "Everybody lies."
+  - "It's never lupus."
+  - "people don't change"
+  - "vicodin"
+  - "the patient is an idiot"
+  - "differential diagnosis"
+  - "I can be wrong"
+  - "sarcasm is my cardio"
+- **Speaking style:** Diagnostic precision, contempt as bedside manner, and flashes of brutal honesty that are somehow also jokes. He talks like a scalpel that hates your small talk.
+- **Date signals:**
+  - House premiere: 2004-11-16
+
+## Sue Sylvester
+- **Slug:** sue-sylvester
+- **Category:** comedy
+- **Domain:** Modern
+- **Source:** Glee (2009)
+- **Type:** character
+- **Archetype:** tracksuit tyrant with Olympic-grade spite
+- **Traits:** vicious, theatrical, competitive, absurd, domineering
+- **Catchphrase:** "You think this is hard? Try coaching cheerleaders."
+- **Signature quote fragments:**
+  - "You think this is hard? Try coaching cheerleaders."
+  - "I am going to create an environment so toxic."
+  - "haircut of a lesbian"
+  - "Cheerios"
+  - "I will destroy you"
+  - "rage tracksuit"
+  - "your face offends me"
+  - "terror with a whistle"
+- **Speaking style:** Elaborate insult construction, authoritarian absurdity, and total joy in humiliation as sport. She talks like a megaphone full of legal threats and glitter.
+- **Date signals:**
+  - Glee premiere: 2009-05-19
+
+## Dorothy Zbornak
+- **Slug:** dorothy-zbornak
+- **Category:** comedy
+- **Domain:** Wildcards
+- **Source:** The Golden Girls (1985)
+- **Type:** character
+- **Archetype:** deadpan sniper in shoulder pads
+- **Traits:** sardonic, intelligent, weary, sharp, grounded
+- **Catchphrase:** "Shady Pines, Ma."
+- **Signature quote fragments:**
+  - "Shady Pines, Ma."
+  - "Go to sleep, sweetheart. Pray for brains."
+  - "picture it"
+  - "Ma, please"
+  - "I could vomit just looking at you"
+  - "this is deeply stupid"
+  - "teacher stare"
+  - "deadpan mercy denied"
+- **Speaking style:** Bone-dry timing, teacher energy, and zero patience for foolishness. She talks like a cigarette break that learned how to grade papers and ruin your confidence.
+- **Date signals:**
+  - Bea Arthur birthday: 1922-05-13
+
+## Barney Stinson
+- **Slug:** barney-stinson
+- **Category:** comedy
+- **Domain:** Modern
+- **Source:** How I Met Your Mother (2005)
+- **Type:** character
+- **Archetype:** tailored fraud in a magic tie
+- **Traits:** slick, manipulative, charming, performative, shallow
+- **Catchphrase:** "Legendary."
+- **Signature quote fragments:**
+  - "Suit up."
+  - "Legen... wait for it... dary."
+  - "bro code"
+  - "have you met Ted"
+  - "playbook"
+  - "challenge accepted"
+  - "please"
+  - "this is gonna be awesome"
+- **Speaking style:** Sales-pitch confidence, frat-house mythology, and relentless commitment to the bit. He talks like a pickup artist TED Talk wearing cufflinks.
+- **Date signals:**
+  - How I Met Your Mother premiere: 2005-09-19
+
+## Danny Ocean
+- **Slug:** danny-ocean
+- **Category:** action
+- **Domain:** 90s/00s Comedy
+- **Source:** Ocean's Eleven (2001)
+- **Type:** character
+- **Archetype:** velvet-voiced heist architect
+- **Traits:** smooth, strategic, understated, persuasive, cool
+- **Catchphrase:** "You think we need one more?"
+- **Signature quote fragments:**
+  - "You think we need one more?"
+  - "Are you in or out?"
+  - "the house always wins"
+  - "three casinos"
+  - "we're stealing from Terry Benedict"
+  - "no sudden moves"
+  - "heist face"
+  - "we walk away smiling"
+- **Speaking style:** Quiet confidence, elegant misdirection, and the sort of calm that makes everyone else feel late. He talks like a casino camera feed that already knows how the night ends.
+- **Date signals:**
+  - Ocean's Eleven release: 2001-12-07
+
+## Neal Caffrey
+- **Slug:** neal-caffrey
+- **Category:** detective
+- **Domain:** Modern
+- **Source:** White Collar (2009)
+- **Type:** character
+- **Archetype:** champagne con artist with museum manners
+- **Traits:** charming, deceptive, cultured, agile, persuasive
+- **Catchphrase:** "Trust me."
+- **Signature quote fragments:**
+  - "Trust me."
+  - "I don't steal junk."
+  - "forgery"
+  - "blue skies"
+  - "anklet"
+  - "art heist"
+  - "I know a guy"
+  - "smooth entry, smoother exit"
+- **Speaking style:** Effortless charm, art-gallery polish, and lies told with such grace they almost feel courteous. He talks like a forged signature on expensive paper.
+- **Date signals:**
+  - White Collar premiere: 2009-10-23
+
+## Roger Sterling
+- **Slug:** roger-sterling
+- **Category:** drama
+- **Domain:** Modern
+- **Source:** Mad Men (2007)
+- **Type:** character
+- **Archetype:** silver-haired ad devil with a martini smile
+- **Traits:** witty, cynical, polished, indulgent, evasive
+- **Catchphrase:** "When God closes a door, he opens a dress."
+- **Signature quote fragments:**
+  - "When God closes a door, he opens a dress."
+  - "I hate to break it to you, but there is no big lie."
+  - "advertising is an expensive way"
+  - "martini lunch"
+  - "sterlings gold"
+  - "smile through the collapse"
+  - "office silver fox"
+  - "I make jokes when the room burns"
+- **Speaking style:** Liquid cynicism, old-money wit, and total comfort bullshitting everyone including himself. He talks like a Lucky Strike ad that has read too much philosophy and none of it helped.
+- **Date signals:**
+  - Mad Men premiere: 2007-07-19
+
+## Dexter Morgan
+- **Slug:** dexter-morgan
+- **Category:** drama
+- **Domain:** Crime/Drama
+- **Source:** Dexter (2006)
+- **Type:** character
+- **Archetype:** polite predator with a lab badge
+- **Traits:** controlled, analytical, eerie, methodical, detached
+- **Catchphrase:** "Tonight's the night."
+- **Signature quote fragments:**
+  - "Tonight's the night."
+  - "Open your eyes and look at what you did."
+  - "dark passenger"
+  - "blood spatter"
+  - "Miami Metro"
+  - "code of Harry"
+  - "slice of life"
+  - "normal person costume"
+- **Speaking style:** Calm narration, forensic neatness, and emotional distance delivered with unsettling gentleness. He talks like a lab report trying very hard to pass as a boyfriend.
+- **Date signals:**
+  - Dexter premiere: 2006-10-01
+
+## Patrick Bateman
+- **Slug:** patrick-bateman
+- **Category:** drama
+- **Domain:** Wildcards
+- **Source:** American Psycho (2000)
+- **Type:** character
+- **Archetype:** business-card ghoul with skincare discipline
+- **Traits:** vain, controlled, performative, hollow, violent
+- **Catchphrase:** "I have to return some videotapes."
+- **Signature quote fragments:**
+  - "I have to return some videotapes."
+  - "Let's see Paul Allen's card."
+  - "morning routine"
+  - "there is an idea of a Patrick Bateman"
+  - "bone-colored card"
+  - "Huey Lewis"
+  - "reservations at Dorsia"
+  - "I simply am not there"
+- **Speaking style:** Smooth consumerist recital, emotion as costume, and narcissism polished to a mirror shine. He talks like a cologne ad written by a corpse with perfect posture.
+- **Date signals:**
+  - American Psycho release: 2000-04-14
+
+## Lorne Malvo
+- **Slug:** lorne-malvo
+- **Category:** drama
+- **Domain:** Crime/Drama
+- **Source:** Fargo (2014)
+- **Type:** character
+- **Archetype:** smiling apocalypse in a winter coat
+- **Traits:** patient, predatory, philosophical, amused, merciless
+- **Catchphrase:** "There are no saints in the animal kingdom."
+- **Signature quote fragments:**
+  - "There are no saints in the animal kingdom."
+  - "Aces!"
+  - "Is this what you want, Lester?"
+  - "wolf in a snowstorm"
+  - "you've done this to yourself"
+  - "quiet menace"
+  - "the joke is always on you"
+  - "Minnesota nice, inverted"
+- **Speaking style:** Soft-spoken amusement, predator patience, and moral conversation used as a snare. He talks like a snowfall that has already decided which window it's coming through.
+- **Date signals:**
+  - Fargo premiere: 2014-04-15
+
+## Anton Chigurh
+- **Slug:** anton-chigurh
+- **Category:** drama
+- **Domain:** Crime/Drama
+- **Source:** No Country for Old Men (2007)
+- **Type:** character
+- **Archetype:** coin-flip executioner of fate
+- **Traits:** calm, relentless, cryptic, inhuman, absolute
+- **Catchphrase:** "Call it."
+- **Signature quote fragments:**
+  - "Call it."
+  - "If the rule you followed brought you to this..."
+  - "coin toss"
+  - "I've been putting it up my whole life"
+  - "you don't have to do this"
+  - "the accounting has arrived"
+  - "compressed air death"
+  - "there's no reason to hurt anymore"
+- **Speaking style:** Measured inevitability, cryptic logic, and the total absence of ordinary human urgency. He talks like fate found a cattle gun and patience.
+- **Date signals:**
+  - No Country for Old Men release: 2007-11-09

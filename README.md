@@ -87,7 +87,7 @@ Start and end your work sessions with consistent context loading and cleanup.
 | [`/stark-session start`](docs/skills/stark-session/usage.md) | Load context, git state, health checks, briefing | Beginning of every work session. Catches stale branches, failing tests, open PRs. |
 | [`/stark-session end`](docs/skills/stark-session/usage.md) | Tests, merge PRs, commit docs, push | End of every work session. Ensures nothing is left dangling. |
 | [`/stark-session-insights`](docs/skills/stark-session-insights/usage.md) | Analyze session history for patterns | Periodically. Shows which skills you use most, common corrections, preference patterns. |
-| [`/stark-persona`](docs/skills/stark-persona/usage.md) | Session character voices | Adds personality to sessions. Weighted selection, date-aware combos, catchphrases, feedback loop. |
+| [`/stark-persona`](docs/skills/stark-persona/index.html) | Session character voices | Adds personality to sessions. Weighted selection, date-aware combos, catchphrases, feedback loop. |
 
 **Best practice:** Make `/stark-session start` and `/stark-session end` habitual — like opening and closing a shift. The start briefing catches context you'd otherwise miss (someone pushed to your branch, CI is red, a PR needs your review).
 
