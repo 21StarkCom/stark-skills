@@ -1,6 +1,6 @@
-# stark-graph — Code Dependency Graph System
+# stark-graph — Code Dependency Graph & Docstring Pipeline
 
-**Date:** 2026-04-07
+**Date:** 2026-04-07 (revised 2026-04-08)
 **Status:** Design
 **Approach:** B — Pluggable Pipeline
 **Schema Version:** 1
@@ -10,19 +10,50 @@
 
 Code review agents lack structural awareness. They review diffs in isolation without understanding how changes propagate through the dependency graph. This leads to missed blast radius, undetected breaking changes to consumers, and no validation that documented dependencies match reality.
 
+Additionally, docstrings across the codebase are inconsistent, incomplete, or absent. Manual docstring maintenance doesn't scale — developers forget to update them when dependencies change, and there's no enforcement mechanism. The result is documentation that drifts from reality, which is worse than no documentation at all.
+
 ## Solution
 
-A pluggable pipeline that:
+A pluggable pipeline with two complementary subsystems:
+
+### Dependency Graph (validation + blast radius)
+
 1. Parses source code (AST) and docstrings to build a hierarchical dependency graph
 2. Validates declared dependencies (docstrings) match actual dependencies (AST) — strict, CI-blocking
 3. Diffs the graph between main and PR branches to surface dependency changes
 4. Enriches review agent prompts with graph context for blast radius awareness
 5. Posts dependency change summaries as PR comments
 
+### Docstring Generation (deterministic + LLM-assisted)
+
+1. Extracts structural metadata from code deterministically (AST, types, signatures)
+2. Classifies symbols by importance to decide generation strategy
+3. Generates docstrings using templates for simple cases, LLM only for semantic synthesis
+4. Validates generated output against deterministic correctness checks
+5. Enforces freshness and completeness in CI
+
+The generation subsystem feeds the validation subsystem: generated docstrings include `Depends:` annotations that the drift validator then enforces.
+
 ## Alternatives Considered
 
 - **Approach A — Monolithic Script:** Single file handling parse/validate/diff/render. Simple to build, but adding a second language or repo requires rewriting. Rejected for poor extensibility.
 - **Approach C — LSP-Backed Graph:** Use Pyright/tsserver for type-aware dependency resolution. Most accurate, but LSP startup overhead (2-5s), hard dependency on language servers in CI, and per-project-only scope (no cross-repo). Rejected for CI complexity.
+- **Approach D — LLM-Driven Docstrings:** Let the model read source and generate complete docstrings from scratch. High hallucination risk, expensive, hard to validate, non-deterministic output. Rejected — the model should fill slots, not write free-form prose.
+
+## Architecture Principles
+
+Ten rules that govern the pipeline design:
+
+1. **Do not ask the LLM to do extraction.** Never let the model infer things that code can extract exactly. Parameters, types, exceptions, decorators, visibility — all come from AST.
+2. **Generate docstrings only for code that matters.** Skip trivial private helpers, one-line wrappers, obvious getters/setters, generated code, migrations, test helpers.
+3. **Use a template-first system.** The LLM fills slots in a canonical skeleton, not free-form text. Many functions need zero LLM.
+4. **Make "no guess" a hard rule.** When confidence is low, emit a minimal docstring or skip. Never invent.
+5. **Separate correctness from readability.** Correctness is deterministic (params covered, return documented). Semantic confidence is separate (summary consistent with tests/callers).
+6. **Run generation at change boundaries.** Pre-commit locally, PR CI for changed files, nightly for full-repo reconciliation.
+7. **Put most logic in repo-owned code.** Parser, extractor, normalizer, scorer, detector, annotator — all in code. The model is a replaceable subroutine.
+8. **Use GitHub Actions as the policy gate.** Regenerate, validate, diff, comment, fail — all in CI.
+9. **Use GCP only where centralization is worth it.** Start in Actions; move generation to GCP only when scale demands it.
+10. **Version prompts and outputs like build artifacts.** Prompt version, model version, schema version, confidence score — all tracked.
 
 ## Graph Model
 
@@ -135,6 +166,154 @@ class GeneratedProto:  # stark-graph: ignore
 
 Suppressed nodes are tracked in the validation report under a `suppressed` field.
 
+## Extraction Layer
+
+The extraction layer builds a structured payload for each symbol using deterministic code analysis. This payload is the sole input for both template generation and LLM enrichment — the model never sees raw source directly.
+
+### What Code Extracts
+
+| Data | Source | Notes |
+|------|--------|-------|
+| Parameter names | `ast.arguments` | Positional, keyword, *args, **kwargs |
+| Type hints | `ast.arg.annotation`, `ast.FunctionDef.returns` | Evaluated as strings, not types |
+| Default values | `ast.arguments.defaults` | Repr'd for display |
+| Raised exceptions | `ast.Raise` nodes | Only explicit `raise X` — not runtime |
+| Async/generator status | `ast.AsyncFunctionDef`, `ast.Yield` | Binary flags |
+| Decorators | `ast.FunctionDef.decorator_list` | Full decorator expression |
+| Overloads | `@typing.overload` detection | Grouped by function name |
+| Return annotation | `ast.FunctionDef.returns` | String repr |
+| Visibility | Name prefix (`_` private, `__` dunder) | Plus `__all__` membership |
+| Base classes | `ast.ClassDef.bases` | For inheritance edges |
+| Import graph | `ast.Import`, `ast.ImportFrom` | Resolved to qualified names |
+| Existing docstring | `ast.get_docstring()` | Preserved if present |
+| Complexity signals | Statement count, branch count, call count | For classification |
+
+### Structured Payload
+
+Each symbol produces a JSON payload:
+
+```json
+{
+  "name": "fetch_user",
+  "qualified_name": "showcase.services.user_service.UserService.fetch_user",
+  "visibility": "public",
+  "kind": "method",
+  "is_async": false,
+  "is_generator": false,
+  "signature": "(self, user_id: str, include_deleted: bool = False) -> User | None",
+  "params": [
+    {"name": "user_id", "type": "str", "default": null},
+    {"name": "include_deleted", "type": "bool", "default": "False"}
+  ],
+  "return_type": "User | None",
+  "raises": ["UserNotFoundError", "DatabaseError"],
+  "decorators": [],
+  "calls": ["self._repo.get_by_id", "self._cache.invalidate"],
+  "base_classes": [],
+  "imports": ["showcase.repositories.user.UserRepository"],
+  "existing_docstring": null,
+  "complexity": {"statements": 12, "branches": 3, "calls": 4},
+  "file_path": "backend/showcase/services/user_service.py",
+  "line": 45
+}
+```
+
+This reduces hallucination and token use. The LLM receives facts, not source code to interpret.
+
+## Symbol Classification
+
+Deterministic heuristics decide what each symbol deserves. Classification happens before any generation.
+
+### Tiers
+
+| Tier | Criteria | Generation Strategy |
+|------|----------|-------------------|
+| **Skip** | Private + trivial (≤3 statements), one-line wrappers, obvious property getters/setters, generated code (`# stark-graph: ignore`), migrations, test helpers, `__init__` passthrough | No docstring generated |
+| **Template-only** | Public + simple (≤5 statements, no branches), clear naming, single return path | Deterministic template — zero LLM |
+| **LLM-assisted** | Public + non-trivial (>5 statements or >1 branch), unclear intent from name alone | Template skeleton + LLM fills summary/behavior |
+| **Protected** | Core/shared APIs, `__all__` exports, cross-module public interfaces, classes with >3 consumers | LLM-assisted + stricter confidence threshold + tests in context |
+
+### Classification Rules
+
+```python
+def classify(symbol: ExtractedSymbol) -> Tier:
+    if symbol.suppressed:
+        return Tier.SKIP
+    if symbol.visibility == "private" and symbol.complexity.statements <= 3:
+        return Tier.SKIP
+    if symbol.is_property and symbol.complexity.statements <= 2:
+        return Tier.SKIP
+    if symbol.kind == "test":
+        return Tier.SKIP
+    if symbol.visibility == "public" and symbol.complexity.statements <= 5 \
+       and symbol.complexity.branches <= 1:
+        return Tier.TEMPLATE
+    if symbol.in_all or symbol.consumer_count > 3:
+        return Tier.PROTECTED
+    return Tier.LLM_ASSISTED
+```
+
+The classifier is pure code — no model calls. Override per-symbol with `# stark-graph: tier=skip|template|llm|protected`.
+
+## Template System
+
+Templates produce canonical docstring skeletons. For Tier.TEMPLATE symbols, the skeleton is the final output. For Tier.LLM_ASSISTED and Tier.PROTECTED, the LLM fills slots in the skeleton.
+
+### Skeleton Construction
+
+1. **Summary line** — For templates: derived from function name + verb pattern (`get_X` → "Get X.", `is_X` → "Check whether X.", `create_X` → "Create X."). For LLM tiers: `{{SUMMARY}}` slot.
+2. **Args section** — Always deterministic. Built from `params` payload.
+3. **Returns section** — Always deterministic. Built from `return_type`.
+4. **Raises section** — Always deterministic. Built from `raises` list.
+5. **Yields section** — If generator. Deterministic.
+6. **Long description** — LLM-only slot `{{DESCRIPTION}}`. Omitted for Template tier.
+7. **Examples** — LLM-only slot `{{EXAMPLES}}`. Only for Protected tier.
+8. **Notes** — LLM-only slot `{{NOTES}}`. Only for edge cases the LLM flags.
+
+### Example: Zero-LLM Output (Tier.TEMPLATE)
+
+```python
+def get_user(self, user_id: str) -> User:
+    """Get user.
+
+    Args:
+        user_id: The user ID.
+
+    Returns:
+        The user.
+
+    Raises:
+        UserNotFoundError: If the user is not found.
+    """
+```
+
+### Example: LLM-Assisted Output (Tier.LLM_ASSISTED)
+
+The LLM receives the structured payload + skeleton and fills only `{{SUMMARY}}` and `{{DESCRIPTION}}`:
+
+```python
+def reconcile_versions(self, project_id: str, strategy: MergeStrategy = MergeStrategy.LATEST) -> ReconcileResult:
+    """Reconcile divergent version histories for a project.
+
+    Compares all active version branches against the canonical timeline
+    and resolves conflicts using the specified merge strategy. Versions
+    that cannot be auto-reconciled are marked for manual review.
+
+    Args:
+        project_id: The project ID.
+        strategy: The merge strategy to use.
+
+    Returns:
+        The reconciliation result.
+
+    Raises:
+        ProjectNotFoundError: If the project is not found.
+        ReconcileConflictError: If auto-reconciliation fails.
+    """
+```
+
+The Args/Returns/Raises sections are deterministic. The summary and description are LLM-generated.
+
 ## Parser Interface
 
 Each language parser implements one protocol:
@@ -157,6 +336,18 @@ Uses the `ast` module. MVP scope is **module and class nodes only** (function-le
 
 **Error handling:** Files that fail `ast.parse()` (syntax errors, encoding issues) are skipped with a WARNING log entry. Empty files and `__init__.py` with no classes produce module nodes only. Files above 500KB are skipped (likely generated). The parser emits a `skipped_files` list in its output for the validation report.
 
+### Python Extractor (Generation)
+
+Extends the parser to produce the full structured payload (see Extraction Layer). Uses the same `ast` module but extracts function-level detail:
+
+```python
+class Extractor(Protocol):
+    def extract(self, paths: list[Path], repo: str) -> list[ExtractedSymbol]: ...
+    def language(self) -> str: ...
+```
+
+The extractor runs alongside the parser. Both share AST traversal — a single pass produces both the graph (nodes/edges) and the symbol payloads.
+
 ### TypeScript Parser (Phase 2)
 
 Node.js subprocess using `ts-morph` or the TypeScript compiler API. Same output contract — writes Graph JSON to stdout. Must run sandboxed (no network, read-only fs) to prevent RCE from malicious tsconfig.json plugins.
@@ -167,7 +358,7 @@ AST parsing cannot detect: dependency injection (constructor params resolved at 
 
 ## Pipeline Stages
 
-Four stages in MVP (parse, validate, diff, comment), each a standalone script. Orchestrated by `stark_graph.py` which chains them in sequence. Phase 2 adds merge and render stages.
+Seven stages in the full pipeline (extract, classify, generate, parse, validate, diff, comment). The orchestrator chains them based on the requested command. Phase 2 adds merge and render stages.
 
 ### Inter-Stage Data Contract
 
@@ -175,11 +366,14 @@ All stages communicate via JSON files in a working directory (default: `.stark-g
 
 ```
 .stark-graph/
-├── parse-python.json        # Stage 1 output
-├── graph.json               # Stage 2 output (= parse output for single-language MVP)
-├── validation.json           # Stage 3 output
-├── diff.json                 # Stage 4 output
-└── render/                   # Stage 5 output (Phase 2)
+├── extract.json              # Stage 1 output (symbol payloads)
+├── classify.json             # Stage 2 output (tiered symbol list)
+├── generate-report.json      # Stage 3 output (generation results + confidence)
+├── parse-python.json         # Stage 4 output (graph)
+├── graph.json                # Stage 4 output (= parse output for single-language MVP)
+├── validation.json           # Stage 5 output
+├── diff.json                 # Stage 6 output
+└── render/                   # Stage 8 output (Phase 2)
     └── graph.svg
 ```
 
@@ -198,14 +392,91 @@ The orchestrator behavior on errors:
 - Exit 1 from validation → block, post PR comment explaining drift, stop pipeline
 - Exit 2 from any stage → warn, post PR comment that graph context is unavailable, proceed with review agents without graph enrichment (graceful degradation)
 
-### Stage 1: Parse (per language)
+### Stage 1: Extract
+
+- Input: list of source files (from `--repo` path), repo identity
+- Output: `.stark-graph/extract.json` (list of `ExtractedSymbol` payloads)
+- Script: `symbol_extractor.py`
+- Per-file timeout: 5s. Files exceeding timeout are skipped with a warning.
+
+Produces the structured payload described in the Extraction Layer section. One pass over the AST, extracting everything code can determine.
+
+### Stage 2: Classify
+
+- Input: `.stark-graph/extract.json`
+- Output: `.stark-graph/classify.json` (symbols grouped by tier: skip, template, llm, protected)
+- Script: `symbol_classifier.py`
+
+Pure deterministic logic. Applies the classification rules to sort symbols into tiers. Output includes the tier and the reason (for auditability):
+
+```json
+{
+  "symbols": [
+    {"qualified_name": "...", "tier": "template", "reason": "public, 3 statements, 0 branches"},
+    {"qualified_name": "...", "tier": "llm", "reason": "public, 12 statements, 3 branches"},
+    {"qualified_name": "...", "tier": "skip", "reason": "private, 2 statements"}
+  ],
+  "counts": {"skip": 45, "template": 30, "llm": 18, "protected": 7}
+}
+```
+
+### Stage 3: Generate
+
+- Input: `.stark-graph/classify.json`, `.stark-graph/extract.json`
+- Output: `.stark-graph/generate-report.json` (generated docstrings + metadata)
+- Script: `docstring_generator.py`
+
+Three sub-paths:
+
+1. **Template tier:** Build docstring from skeleton + deterministic slot fills. No model call.
+2. **LLM tier:** Build skeleton, send structured payload to model, model fills `{{SUMMARY}}` and `{{DESCRIPTION}}` slots. Formatter normalizes output.
+3. **Protected tier:** Same as LLM tier but with tests included in context and stricter confidence threshold.
+
+**Low confidence fallback:** If the model returns low-confidence output (vague phrases, invented guarantees, contradictions with the payload), the generator falls back to a minimal deterministic docstring and flags the symbol as `needs-human-intent`.
+
+Output includes per-symbol metadata:
+
+```json
+{
+  "generated": [
+    {
+      "qualified_name": "...",
+      "tier": "template",
+      "docstring": "...",
+      "correctness_score": 1.0,
+      "semantic_confidence": null,
+      "generator_version": "1.0",
+      "prompt_version": null,
+      "model": null,
+      "fallback_reason": null
+    },
+    {
+      "qualified_name": "...",
+      "tier": "llm",
+      "docstring": "...",
+      "correctness_score": 1.0,
+      "semantic_confidence": 0.85,
+      "generator_version": "1.0",
+      "prompt_version": "v3",
+      "model": "claude-sonnet-4-6",
+      "fallback_reason": null
+    }
+  ],
+  "skipped": ["..."],
+  "needs_human_intent": ["..."]
+}
+```
+
+### Stage 4: Parse (per language)
 
 - Input: list of source files (from `--repo` path), repo identity
 - Output: `.stark-graph/parse-python.json` (Graph JSON)
 - Scripts: `python_parser.py`
 - Per-file timeout: 5s. Files exceeding timeout are skipped with a warning.
 
-### Stage 2: Validate (strict)
+This is the existing graph parser — unchanged. Builds the dependency graph from AST and docstring annotations. If generation ran first (Stage 3), it operates on the already-updated docstrings.
+
+### Stage 5: Validate (strict)
 
 For MVP with a single language, the merge step is inlined into the orchestrator (passthrough). A standalone `graph_merge.py` is extracted in Phase 2 when the TS parser introduces real multi-language merge.
 
@@ -231,11 +502,11 @@ Validation output:
 {
   "schema_version": "1",
   "status": "FAIL",
-  "stale": [{"node": "GetEvinced/stark-showcase:backend/showcase/services/version_service.py:VersionService", "declared": "showcase.indexes.TypesenseIndex", "evidence": null}],
-  "missing": [{"node": "GetEvinced/stark-showcase:backend/showcase/services/version_service.py:VersionService", "actual": "showcase.jobs.ReaperJob", "declared": null}],
+  "stale": [{"node": "...:VersionService", "declared": "showcase.indexes.TypesenseIndex", "evidence": null}],
+  "missing": [{"node": "...:VersionService", "actual": "showcase.jobs.ReaperJob", "declared": null}],
   "broken_xref": [],
-  "no_docstring": ["GetEvinced/stark-showcase:backend/showcase/utils/helpers.py"],
-  "suppressed": ["GetEvinced/stark-showcase:backend/showcase/proto/generated_pb2.py"],
+  "no_docstring": ["...:backend/showcase/utils/helpers.py"],
+  "suppressed": ["...:backend/showcase/proto/generated_pb2.py"],
   "skipped_files": ["backend/showcase/vendor/large_lib.py"],
   "coverage": {"modules": 12, "with_docstring": 10, "pct": 83.3}
 }
@@ -243,13 +514,13 @@ Validation output:
 
 All node references use full node IDs. Display names are for human readability only.
 
-### Stage 3: Diff
+### Stage 6: Diff
 
 - Input: base branch Graph JSON + PR branch Graph JSON
 - Output: `.stark-graph/diff.json`
 - Script: `graph_differ.py`
 
-**Base graph acquisition:** The orchestrator checks out the base branch in a temporary git worktree, runs the parser, and produces the base graph. The PR branch graph is from Stage 1. Both graphs are identified by commit SHA in their envelope.
+**Base graph acquisition:** The orchestrator checks out the base branch in a temporary git worktree, runs the parser, and produces the base graph. The PR branch graph is from Stage 4. Both graphs are identified by commit SHA in their envelope.
 
 ```json
 {
@@ -279,7 +550,7 @@ All node references use full node IDs. Display names are for human readability o
 3. **Transitive:** BFS up to `transitive_depth_cap` (default 5, configurable). Uses a visited set for cycle safety. If cap reached, `depth_cap_reached: true`
 4. **Event subscribers:** For each changed node that has a `publishes` field, find all nodes whose `depends` entries reference a module containing that node. This is an approximation — exact event matching is Phase 2.
 
-### Stage 4: PR Comment
+### Stage 7: PR Comment
 
 - Input: `.stark-graph/diff.json`, `.stark-graph/validation.json`
 - Output: GitHub PR comment via stark-claude[bot]
@@ -310,13 +581,62 @@ Direct: 3 services | Transitive: 7 (depth ≤5) | Event subscribers: 2
 </details>
 ```
 
-### Stage 5: Render (Phase 2)
+### Stage 8: Render (Phase 2)
 
 Deferred. The PR comment provides sufficient dependency change visibility for MVP. Renderer added when there's a concrete consumer (UI dashboard, Confluence artifact).
 
+## Confidence Scoring
+
+Two distinct scores, serving different purposes.
+
+### Correctness Score (deterministic)
+
+Derived entirely from code analysis. Binary pass/fail per check:
+
+- Parameters covered in docstring
+- Return type documented
+- Raised exceptions documented
+- Required sections present
+- Style/format valid
+- Matches annotations and AST
+
+Composite score: fraction of checks passing (0.0 to 1.0). **Hard build failures** enforce correctness.
+
+### Semantic Confidence Score (model/heuristic)
+
+Derived from model output quality signals:
+
+- Summary consistent with test names and caller patterns
+- No contradiction with implementation (e.g., docstring says "returns None" but return type is `str`)
+- No suspicious vague phrases ("handles various cases", "processes data appropriately")
+- No invented guarantees ("thread-safe", "O(1)" without evidence)
+- No hallucinated exceptions or side effects
+
+Score: 0.0 to 1.0. Used to decide disposition:
+
+| Score | Action |
+|-------|--------|
+| ≥ 0.8 | Accept |
+| 0.5–0.8 | Downgrade to minimal deterministic docstring |
+| < 0.5 | Skip generation, file `needs-human-intent` |
+
+Confidence thresholds are configurable per tier. Protected tier uses higher thresholds (≥ 0.9 to accept).
+
 ## CI Integration
 
-The graph pipeline runs in GitHub Actions as part of the PR review workflow.
+The pipeline runs at three boundaries with different scope and cost profiles.
+
+### Local (pre-commit)
+
+Fast, deterministic only:
+- Detect changed symbols (`git diff --name-only`)
+- Generate templates for new/modified public symbols
+- Run style checks on existing docstrings
+- No LLM calls — keeps commits fast
+
+### PR CI (GitHub Actions)
+
+Focused on changed files:
 
 ```yaml
 # .github/workflows/graph-review.yml (sketch)
@@ -325,12 +645,12 @@ on:
     types: [opened, synchronize]
 
 jobs:
-  graph:
+  docstring-generate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # full history for worktree-based base graph
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - run: pip install pydantic
@@ -338,12 +658,57 @@ jobs:
           python stark_graph.py \
             --repo . \
             --pr ${{ github.event.pull_request.number }} \
-            --warn  # remove --warn after bootstrap
+            --stages extract,classify,generate,validate \
+            --changed-only \
+            --warn  # remove after bootstrap
+        env:
+          GH_TOKEN: ${{ secrets.STARK_CLAUDE_TOKEN }}
+
+  docstring-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: |
+          python stark_graph.py \
+            --repo . \
+            --stage validate \
+            --warn
+
+  blast-radius:
+    needs: docstring-validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: |
+          python stark_graph.py \
+            --repo . \
+            --pr ${{ github.event.pull_request.number }} \
+            --stages diff,comment
         env:
           GH_TOKEN: ${{ secrets.STARK_CLAUDE_TOKEN }}
 ```
 
 **Dependencies:** Python 3.12+, pydantic. No system packages for MVP (graphviz only needed in Phase 2).
+
+PR behavior:
+- Regenerate docstrings for changed symbols
+- Fail if committed docstrings differ from canonical output (staleness check)
+- Comment summary stats and coverage deltas
+- Attach low-confidence warnings
+- Tag high-risk changes if blast radius is large
+
+### Scheduled (nightly)
+
+Expensive, full-repo:
+- Whole-repo extraction + classification + generation
+- Drift detection across all symbols
+- Dependency annotation audit (coverage trends)
+- Backlog creation for `needs-human-intent` symbols
+- Configurable: runs weekly by default, nightly for high-churn repos
 
 **Skipped files and coverage:** If the parser skips files (syntax errors, size limits, timeouts), the validation report includes `skipped_files` and the coverage percentage reflects only successfully parsed files. If coverage drops below a configurable threshold (default 80%), the pipeline posts a warning comment. This prevents silent coverage erosion.
 
@@ -372,18 +737,82 @@ Repository content (docstrings, symbol names, file paths) flows into review agen
 - HTML/SVG/Markdown-escaped before rendering
 - PR comment content is sanitized via GitHub's own markdown renderer (no raw HTML)
 
+## Hard Rules for No-Review Operation
+
+If the pipeline operates without human review of generated docstrings, these rules are non-negotiable:
+
+1. **Never overwrite a high-confidence existing docstring with a lower-confidence one.**
+2. **Never invent exceptions, guarantees, complexity, or side effects.**
+3. **When uncertain, emit a shorter docstring, not a richer one.**
+4. **Every generated docstring must pass deterministic validation.**
+5. **Every changed symbol must be revalidated in CI.**
+6. **Docstring drift must fail builds.**
+7. **Model output must be normalized by a formatter before commit.**
+8. **All repo policy must live in code/config, not only prompts.**
+
+Violations of rules 1–3 are checked by the confidence scorer. Rules 4–6 are enforced by CI. Rules 7–8 are structural constraints on the codebase.
+
+## Versioning
+
+Generated docstrings are build artifacts. Track provenance for debugging regressions.
+
+### What Gets Versioned
+
+| Artifact | Where Tracked | Example |
+|----------|--------------|---------|
+| Prompt templates | `global/prompts/docgen/` versioned in git | `v3` |
+| Generation schema | `scripts/graph/model.py` Pydantic models | Schema version `1` |
+| Model selection | `global/config.json` `docgen_model` key | `claude-sonnet-4-6` |
+| Confidence thresholds | `global/config.json` `docgen_thresholds` | `{"accept": 0.8, "protected_accept": 0.9}` |
+| Generator version | `scripts/graph/docstring_generator.py` | `1.0` |
+
+### Generation Metadata
+
+Stored in CI artifacts (not in source code):
+
+```json
+{
+  "symbol": "showcase.services.version_service.VersionService",
+  "symbol_content_hash": "sha256:abc123",
+  "generator_version": "1.0",
+  "prompt_version": "v3",
+  "model": "claude-sonnet-4-6",
+  "correctness_score": 1.0,
+  "semantic_confidence": 0.87,
+  "fallback_reason": null,
+  "generated_at": "2026-04-08T10:00:00Z"
+}
+```
+
+This metadata enables:
+- Debugging why a docstring changed between runs
+- Detecting regressions when prompts or models change
+- Auditing LLM cost by tier and model
+
 ## File Structure
 
 ```
 scripts/
 ├── graph/                        # all graph pipeline scripts
 │   ├── __init__.py
-│   ├── model.py                  # Graph, Node, Edge Pydantic models + validation
-│   ├── python_parser.py          # Python AST + docstring parser
+│   ├── model.py                  # Graph, Node, Edge, ExtractedSymbol Pydantic models
+│   ├── python_parser.py          # Python AST + docstring parser (graph nodes/edges)
+│   ├── symbol_extractor.py       # Python AST → structured payloads (generation)
+│   ├── symbol_classifier.py      # Deterministic tier assignment
+│   ├── docstring_generator.py    # Template + LLM slot-filling
+│   ├── docstring_formatter.py    # Normalize style, enforce conventions
+│   ├── confidence_scorer.py      # Correctness + semantic confidence
 │   ├── drift_validator.py        # AST vs docstring strict check
 │   ├── graph_differ.py           # base vs PR graph diff + blast radius
 │   └── pr_commenter.py           # post diff + blast radius to PR (idempotent)
 ├── stark_graph.py                # pipeline orchestrator (CLI entry point)
+
+global/
+├── prompts/
+│   └── docgen/                   # LLM prompt templates for docstring generation
+│       ├── summary.md            # summary slot prompt
+│       ├── description.md        # description slot prompt
+│       └── examples.md           # examples slot prompt (Protected tier)
 
 skill/
 └── stark-graph/
@@ -396,11 +825,13 @@ The skill wraps `stark_graph.py` for agent invocation:
 
 | Command | Behavior |
 |---------|----------|
-| `/stark-graph` | Full pipeline on current repo (parse → validate → diff → comment) |
-| `/stark-graph validate` | Parse + validate only (drift check, no diff/comment) |
+| `/stark-graph` | Full pipeline on current repo (extract → classify → generate → parse → validate → audit) |
+| `/stark-graph validate` | Parse + validate only (drift check, no generation) |
 | `/stark-graph audit` | Parse + report missing docstrings (no CI blocking) |
 | `/stark-graph diff` | Parse + diff against main (no comment posting) |
 | `/stark-graph pr 123` | Full pipeline targeting PR #123 |
+| `/stark-graph generate` | Extract + classify + generate only (no validation/diff) |
+| `/stark-graph generate --changed-only` | Generate docstrings for changed files only |
 
 ## CLI Interface
 
@@ -408,14 +839,19 @@ The skill wraps `stark_graph.py` for agent invocation:
 # Full pipeline on a repo
 stark_graph.py --repo /path/to/stark-showcase/backend
 
-# Parse only (outputs Graph JSON to stdout)
+# Individual stages
+stark_graph.py --repo /path/to/repo --stage extract
+stark_graph.py --repo /path/to/repo --stage classify
+stark_graph.py --repo /path/to/repo --stage generate
 stark_graph.py --repo /path/to/repo --stage parse
-
-# Validate only (exits 1 on drift)
 stark_graph.py --repo /path/to/repo --stage validate
-
-# Audit mode — report missing docstrings, no CI blocking (exit 0 always)
 stark_graph.py --repo /path/to/repo --stage audit
+
+# Multiple stages
+stark_graph.py --repo /path/to/repo --stages extract,classify,generate,validate
+
+# Changed files only (for PR CI)
+stark_graph.py --repo /path/to/repo --stages generate,validate --changed-only
 
 # Diff against main
 stark_graph.py --repo /path/to/repo --stage diff --base main
@@ -423,7 +859,7 @@ stark_graph.py --repo /path/to/repo --stage diff --base main
 # Warn mode — validate but exit 0 even on drift (for phased rollout)
 stark_graph.py --repo /path/to/repo --stage validate --warn
 
-# Full PR pipeline (validate + diff + comment)
+# Full PR pipeline (generate + validate + diff + comment)
 stark_graph.py --repo /path/to/repo --pr 123
 
 # Full PR pipeline in warn mode (post comment but don't block)
@@ -437,11 +873,18 @@ stark_graph.py --repo /path/to/repo --repo-name GetEvinced/stark-showcase
 
 When `--warn` is passed, the pipeline runs identically but:
 - `drift_validator.py` exits 0 instead of 1 on drift findings
-- PR comment is prefixed with `⚠️ Warn mode — findings reported but not blocking`
+- PR comment is prefixed with `Warning: Warn mode — findings reported but not blocking`
 - The validation JSON includes `"mode": "warn"` for metrics tracking
 - All other stages (diff, comment) run normally
 
 This allows teams to measure false positive rates during bootstrap without blocking PRs. Promote to strict mode by removing `--warn` once the rate is acceptable.
+
+### `--changed-only` Mode
+
+When `--changed-only` is passed:
+- `git diff --name-only HEAD...{base}` determines which files changed
+- Only changed files are extracted, classified, and generated
+- Validation runs on the full repo (not just changed files) to catch cascading drift
 
 ## Testing Strategy
 
@@ -449,7 +892,11 @@ This allows teams to measure false positive rates during bootstrap without block
 
 | Component | Tests |
 |-----------|-------|
-| `model.py` | Pydantic model validation: required fields, optional defaults, schema version rejection |
+| `model.py` | Pydantic model validation: required fields, optional defaults, schema version rejection, ExtractedSymbol serialization |
+| `symbol_extractor.py` | Fixture files: function with all annotation types, class with methods, async/generator, decorators, overloads, missing types, syntax errors, encoding issues |
+| `symbol_classifier.py` | Tier assignment: private trivial → skip, public simple → template, public complex → llm, exported → protected, override annotation |
+| `docstring_generator.py` | Template generation: zero-LLM path produces correct skeleton. LLM path: mock model returns slots, formatter normalizes. Fallback: low-confidence → minimal docstring. |
+| `confidence_scorer.py` | Correctness: all checks pass/fail independently. Semantic: vague phrases detected, contradictions flagged, threshold behavior correct. |
 | `python_parser.py` | Fixture files: valid module, class with docstring, class without docstring, syntax error file, empty file, `__init__.py`, file >500KB, encoding issues |
 | `drift_validator.py` | One fixture per check type: STALE, MISSING, NO_DOCSTRING, clean (zero findings), suppressed node. Assert exact JSON output per fixture. |
 | `graph_differ.py` | Fixture graph pairs: added edge, removed edge, added node, removed node, cycle (no infinite loop), depth cap reached |
@@ -457,16 +904,21 @@ This allows teams to measure false positive rates during bootstrap without block
 
 ### Integration Tests
 
-- Full pipeline on a fixture repo (committed to `tests/fixtures/graph/`): parse → validate → diff. Assert intermediate JSON files validate against Pydantic models.
+- Full pipeline on a fixture repo (committed to `tests/fixtures/graph/`): extract → classify → generate → parse → validate → diff. Assert intermediate JSON files validate against Pydantic models.
 - Blast radius on a fixture graph with known cycle: verify no infinite loop, verify counts match expected.
+- Generation round-trip: extract symbols from fixture, generate docstrings, re-parse, validate — zero drift.
 
 ### Acceptance Criteria
 
 | Component | Criterion |
 |-----------|-----------|
 | Python parser | Extracts 100% of class and module nodes from stark-showcase backend (verified by manual spot-check of 5 files) |
+| Symbol extractor | Extracts all parameters, types, exceptions, decorators for 100% of public functions in stark-showcase backend |
+| Classifier | ≤5% of symbols manually judged as wrong tier on stark-showcase |
+| Template generator | Zero-LLM docstrings pass correctness validation for 100% of Template-tier symbols |
+| LLM generator | Semantic confidence ≥0.8 for ≥80% of LLM-tier symbols on stark-showcase |
 | Drift validator | False positive rate <5% on bootstrapped stark-showcase codebase (measured during --warn rollout phase) |
-| Full pipeline | Completes in <30s on stark-showcase backend (~50 Python files) on a standard CI runner |
+| Full pipeline | Completes in <60s on stark-showcase backend (~50 Python files) on a standard CI runner |
 | PR comment | Correctly shows added/removed edges for a test PR with known dependency changes |
 
 ## Capacity Baseline
@@ -474,11 +926,16 @@ This allows teams to measure false positive rates during bootstrap without block
 Expected for stark-showcase backend MVP:
 - **Files:** ~50 Python files
 - **Nodes:** ~50 modules + ~80 classes = ~130 nodes
+- **Symbols (generation):** ~200 functions/methods + ~80 classes + ~50 modules = ~330 symbols
+- **Tier distribution (estimated):** ~150 skip, ~100 template, ~60 llm, ~20 protected
+- **LLM calls per full run:** ~80 (llm + protected tiers)
 - **Edges:** ~200 import edges + ~50 docstring depends edges = ~250 edges
 - **Graph JSON size:** ~50-100KB
 - **Parse time:** <5s (sequential, single-threaded sufficient for MVP scale)
-- **Full pipeline:** <30s target including worktree checkout for base graph
+- **Generation time:** <30s for templates, ~30s for LLM calls (batched)
+- **Full pipeline:** <60s target including generation and worktree checkout for base graph
 - **PR frequency:** ~5-10 PRs/day
+- **LLM cost per PR (changed-only):** ~5-10 LLM calls × $0.01 = ~$0.05-0.10
 
 At this scale, sequential parsing, in-memory graph, and full re-parse per PR are acceptable. Incremental parsing (Phase 2) is needed when file count exceeds ~500.
 
@@ -487,20 +944,28 @@ At this scale, sequential parsing, in-memory graph, and full re-parse per PR are
 Full vertical slice on one repo. Everything works end-to-end before generalizing.
 
 ### In Scope
+- Python AST extractor (full structured payload for all symbol types)
+- Symbol classifier (four tiers, deterministic rules)
+- Docstring generator (template path + LLM slot-filling)
+- Confidence scorer (correctness + semantic)
+- Docstring formatter (normalize style)
 - Python parser (ast module, module + class level)
 - Graph model (Pydantic, schema_version)
 - Drift validator (strict for Depends, informational for Called by)
 - Graph differ (base vs PR with blast radius)
 - PR comment posting (idempotent, with retry)
 - Review domain enrichment (configurable domain list)
-- `/stark-graph` skill
+- `/stark-graph` skill (with `generate` sub-command)
+- LLM prompt templates for summary/description/examples slots
 - Docstring convention docs
 - Fixture-based test suite
 - `--audit` mode for bootstrap
 - `--warn` mode for phased rollout
+- `--changed-only` mode for PR CI efficiency
+- Generation metadata in CI artifacts
 
 ### Phase 2
-- TypeScript parser (sandboxed)
+- TypeScript parser (sandboxed) + TypeScript extractor
 - Function-level nodes and `calls` edges
 - Cross-repo graph merge (`graph_merge.py` extracted)
 - `changed_edges` in diff output
@@ -510,6 +975,17 @@ Full vertical slice on one repo. Everything works end-to-end before generalizing
 - Incremental parsing (cache by commit SHA)
 - Interactive D3 explorer
 - Coverage metrics CI artifact
+- Generation cache by content hash (skip re-generation for unchanged symbols)
+- Retrieval over tests/design docs for richer LLM context
+
+### Phase 3 (GCP)
+- Centralized generation service (Cloud Run)
+- Generation cache keyed by file hash + symbol hash
+- Org-wide reporting (BigQuery dashboards for coverage/drift trends)
+- Fleet-wide analytics across all repos
+- Shared prompt/model/version policy engine
+- Embeddings/retrieval over code/tests/docs for richer context
+- Batch generation queue for large repos
 
 ### Out of Scope
 - LSP integration
@@ -517,15 +993,41 @@ Full vertical slice on one repo. Everything works end-to-end before generalizing
 - Go/Java/other language parsers
 - Graph database storage
 - Historical graph diffing (beyond base vs PR)
+- LLM-generated docstrings committed directly without deterministic validation
 
 ## Bootstrap Strategy
 
 Existing code in stark-showcase has no structured docstrings. Bootstrap path:
 
 1. **Audit:** Run `stark_graph.py --repo ... --stage audit` — generates a report of all classes/modules missing docstrings. Output is plain text + JSON (accessible to all reviewers).
-2. **Generate drafts:** LLM agent reads each class, infers dependencies from AST, generates draft docstrings. Uses the same LLM already authorized for code review (no new data boundary).
-3. **Human review:** Developer reviews draft docstrings in a PR. Docstrings are pure metadata (class/module names, event names) — no proprietary logic exposed.
-4. **Warn mode:** Enable `stark_graph.py --warn` in CI for 1-2 sprints. Reports violations without failing CI. Measure false positive rate.
-5. **Strict mode:** When false positive rate <5%, enable strict validation. Start with a subset of directories if needed (`--include backend/showcase/services/`).
+2. **Extract + Classify:** Run the extraction and classification pipeline to understand the symbol landscape. How many skip vs template vs llm vs protected?
+3. **Generate drafts:** Run `stark_graph.py --repo ... --stage generate` — produces docstrings for all non-skip symbols. Template-tier symbols get zero-LLM docstrings. LLM-tier symbols get model-assisted docstrings with confidence scores.
+4. **Review low-confidence:** Developer reviews only `needs-human-intent` symbols and low-confidence LLM output. Template and high-confidence LLM output can be accepted without review.
+5. **Warn mode:** Enable `stark_graph.py --warn` in CI for 1-2 sprints. Reports violations without failing CI. Measure false positive rate.
+6. **Strict mode:** When false positive rate <5%, enable strict validation. Start with a subset of directories if needed (`--include backend/showcase/services/`).
 
 Recovery: if a bootstrapped docstring is incorrect, any developer can fix it. `# stark-graph: ignore` provides an escape hatch for nodes that are hard to document (generated code, metaprogramming).
+
+## Operating Model Summary
+
+### Tier 1: Fully Deterministic (~60-80% of symbols)
+
+- Build template from AST
+- Fill sections mechanically
+- No LLM call
+- Always passes correctness validation
+
+### Tier 2: Assisted Generation (~15-30% of symbols)
+
+- Structured inputs only (never raw source)
+- LLM writes summary + behavior description
+- Formatter normalizes output
+- Validator checks correctness
+- Confidence scorer gates acceptance
+
+### Tier 3: Protected Surfaces (~5-10% of symbols)
+
+- Same as Tier 2 but with richer context (tests, callers)
+- Stricter confidence threshold
+- May require human review for first generation
+- No auto-downgrade of existing high-confidence docstrings
