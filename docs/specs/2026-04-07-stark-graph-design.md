@@ -142,7 +142,7 @@ Publishes: upload.started, upload.completed
 
 | Field | Meaning | Validation | MVP Strictness |
 |-------|---------|------------|----------------|
-| **Depends** | Services/modules this unit calls or instantiates | Cross-checked against `import` statements | **Strict** — CI-blocking |
+| **Depends** | Intra-repo services/modules this unit calls or instantiates | Cross-checked against intra-repo `import` statements (stdlib and third-party imports are excluded from validation) | **Strict** — CI-blocking |
 | **Publishes** | Events, signals, or side effects | Trust-only — not import-traceable. Removal visible in diff output but not CI-blocking. | **Trust-only** |
 | **Called by** | Reverse edges — who consumes this | Informational — helps reviewers but not strictly validated in MVP | **Informational** |
 
@@ -238,7 +238,7 @@ Deterministic heuristics decide what each symbol deserves. Classification happen
 | Tier | Criteria | Generation Strategy |
 |------|----------|-------------------|
 | **Skip** | Private + trivial (≤3 statements), one-line wrappers, obvious property getters/setters, generated code (`# stark-graph: ignore`), migrations, test helpers, `__init__` passthrough | No docstring generated |
-| **Template-only** | Public + simple (≤5 statements, no branches), clear naming, single return path | Deterministic template — zero LLM |
+| **Template-only** | Public + simple (≤5 statements, ≤1 branch), clear naming, single return path | Deterministic template — zero LLM |
 | **LLM-assisted** | Public + non-trivial (>5 statements or >1 branch), unclear intent from name alone | Template skeleton + LLM fills summary/behavior |
 | **Protected** | Core/shared APIs, `__all__` exports, cross-module public interfaces | LLM-assisted + stricter confidence threshold + tests in context |
 
@@ -466,6 +466,7 @@ Output includes per-symbol metadata:
 
 ```json
 {
+  "schema_version": "1",
   "generated": [
     {
       "qualified_name": "...",
@@ -569,7 +570,7 @@ Three graph-level validation checks (MVP, module/class scope):
 | Check | Meaning | Action |
 |-------|---------|--------|
 | **STALE** | Docstring declares `Depends: X`, AST finds no import of X | CI fail |
-| **MISSING** | AST finds `import X`, docstring doesn't declare `Depends: X` | CI fail |
+| **MISSING** | AST finds `import X` (intra-repo only), docstring doesn't declare `Depends: X` | CI fail |
 | **NO_DOCSTRING** | Class/module has no structured docstring and is not suppressed | CI fail |
 
 `Called by` cross-validation (`BROKEN_XREF`) is **informational in MVP** — reported but not CI-blocking. Promoted to strict in Phase 2 once the convention is established.
@@ -771,14 +772,14 @@ jobs:
       - run: |
           python stark_graph.py \
             --repo . \
-            --pr ${{ github.event.pull_request.number }} \
-            --stages extract,classify,generate,validate \
+            --stages extract,classify,generate,write-back \
+            --write \
             --changed-only \
             --warn  # remove after bootstrap
-        env:
-          GH_TOKEN: ${{ secrets.STARK_CLAUDE_TOKEN }}
+        # No GH_TOKEN — this job only reads/writes local files
 
   docstring-validate:
+    needs: docstring-generate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -787,8 +788,9 @@ jobs:
       - run: |
           python stark_graph.py \
             --repo . \
-            --stage validate \
+            --stages parse,validate \
             --warn
+        # No GH_TOKEN — local validation only
 
   blast-radius:
     needs: docstring-validate
@@ -803,7 +805,8 @@ jobs:
             --pr ${{ github.event.pull_request.number }} \
             --stages diff,comment
         env:
-          GH_TOKEN: ${{ secrets.STARK_CLAUDE_TOKEN }}
+          # Only the comment job needs write credentials
+          STARK_CLAUDE_PRIVATE_KEY: ${{ secrets.STARK_CLAUDE_PRIVATE_KEY }}
 ```
 
 **Dependencies:** Python 3.12+, pydantic. No system packages for MVP (graphviz only needed in Phase 2).
@@ -930,9 +933,9 @@ scripts/
 global/
 ├── prompts/
 │   └── docgen/                   # LLM prompt templates for docstring generation
-│       ├── summary.md            # summary slot prompt
-│       ├── description.md        # description slot prompt
-│       └── examples.md           # examples slot prompt (Protected tier)
+│       ├── summary.md            # summary slot prompt (receives: structured payload JSON)
+│       ├── description.md        # description slot prompt (receives: payload + summary)
+│       └── examples.md           # examples slot prompt (Protected tier; receives: payload + tests)
 
 skill/
 └── stark-graph/
@@ -945,11 +948,11 @@ The skill wraps `stark_graph.py` for agent invocation:
 
 | Command | Maps to CLI | Behavior |
 |---------|-------------|----------|
-| `/stark-graph` | `--stages extract,classify,generate,write-back,parse,validate` | Local pipeline: generate + validate (no diff/comment — those require `--pr`) |
+| `/stark-graph` | `--stages extract,classify,generate,parse,validate` | Local pipeline: generate + validate (no write-back — use `--write` to modify source files; no diff/comment — those require `--pr`) |
 | `/stark-graph validate` | `--stages parse,validate` | Drift check only (no generation). Orchestrator auto-runs parse as prerequisite. |
 | `/stark-graph audit` | `--stage audit` | Human-readable coverage report. Always exits 0. |
 | `/stark-graph diff` | `--stages parse,diff --base main` | Blast radius against main (no comment posting) |
-| `/stark-graph pr 123` | `--pr 123` | Full pipeline: generate + write-back + parse + validate + diff + comment |
+| `/stark-graph pr 123` | `--pr 123 --write` | Full pipeline: generate + write-back + parse + validate + diff + comment |
 | `/stark-graph generate` | `--stages extract,classify,generate` | Generate only (no write-back, no validation) |
 | `/stark-graph generate --changed-only` | `--stages extract,classify,generate --changed-only` | Generate for changed files only |
 
@@ -987,6 +990,12 @@ stark_graph.py --repo /path/to/repo --pr 123 --warn
 
 # Override repo identity
 stark_graph.py --repo /path/to/repo --repo-name GetEvinced/stark-showcase
+
+# Limit scope to specific directories (for phased strict rollout)
+stark_graph.py --repo /path/to/repo --stage validate --include backend/showcase/services/
+
+# Write generated docstrings back to source files
+stark_graph.py --repo /path/to/repo --stages extract,classify,generate --write
 ```
 
 ### `--warn` Mode
@@ -998,6 +1007,18 @@ When `--warn` is passed, the pipeline runs identically but:
 - All other stages (diff, comment) run normally
 
 This allows teams to measure false positive rates during bootstrap without blocking PRs. Promote to strict mode by removing `--warn` once the rate is acceptable.
+
+### `--stage` vs `--stages`
+
+`--stage X` runs exactly one stage. `--stages X,Y,Z` runs multiple in sequence. If both are passed, `--stages` takes precedence and `--stage` is ignored. The orchestrator auto-resolves prerequisites: if a stage requires input from a prior stage and that output file is missing, the prerequisite stage runs automatically.
+
+### `--write` Mode
+
+When `--write` is passed, the write-back stage (Stage 4) executes after generation, modifying source files in-place. Without `--write`, generation only produces `generate-report.json` — source files are not touched. This separation prevents accidental source modification during dry-run or audit workflows.
+
+### `--include` Mode
+
+When `--include PATTERN` is passed, only files matching the pattern are processed. Multiple `--include` flags are supported. Patterns use glob syntax relative to `--repo` (e.g., `--include backend/showcase/services/**/*.py`). Validation still runs on matched files only, allowing phased strict rollout by directory.
 
 ### `--changed-only` Mode
 
