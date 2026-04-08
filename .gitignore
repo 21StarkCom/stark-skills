@@ -12,3 +12,4 @@ skill/*-workspace/
 .analysis-raw-data/
 scripts/node_modules/
 .remember/
+*-playground.html
