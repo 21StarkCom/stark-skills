@@ -44,20 +44,29 @@ import requests
 
 # ── Config ──────────────────────────────────────────────────────────────
 
-APPS: dict[str, dict[str, str]] = {
+APPS: dict[str, dict] = {
     "stark-claude": {
         "app_id": "3066738",
-        "installation_id": "115648521",
+        "installation_id": "115648521",  # default (GetEvinced org)
+        "installations": {
+            "GetEvinced": "115648521",
+        },
         "keychain_service": "STARK_CLAUDE_PRIVATE_KEY",
     },
     "stark-codex": {
         "app_id": "3066834",
-        "installation_id": "115648800",  # GetEvinced org — add repos via GitHub App settings
+        "installation_id": "115650994",  # default (GetEvinced org)
+        "installations": {
+            "GetEvinced": "115650994",
+        },
         "keychain_service": "STARK_CODEX_PRIVATE_KEY",
     },
     "stark-gemini": {
         "app_id": "3066689",
-        "installation_id": "115648971",
+        "installation_id": "115648971",  # default (GetEvinced org)
+        "installations": {
+            "GetEvinced": "115648971",
+        },
         "keychain_service": "STARK_GEMINI_PRIVATE_KEY",
     },
 }
@@ -121,17 +130,20 @@ def select_app(name: str) -> None:
     _active_app = _resolve_app_name(name)
 
 
-# ── Token cache (file-based, per-app, survives across invocations within 1hr)
+# ── Token cache (file-based, per-app+installation, survives across invocations within 1hr)
 
 _CACHE_DIR = Path.home() / ".cache" / "github-app-tokens"
 
 
-def _cache_file(app: str | None = None) -> Path:
-    return _CACHE_DIR / f"{_resolve_app_name(app)}.json"
+def _cache_file(app: str | None = None, installation_id: str | None = None) -> Path:
+    name = _resolve_app_name(app)
+    if installation_id:
+        return _CACHE_DIR / f"{name}-{installation_id}.json"
+    return _CACHE_DIR / f"{name}.json"
 
 
-def _read_cached_token(app: str | None = None) -> str | None:
-    cf = _cache_file(app)
+def _read_cached_token(app: str | None = None, installation_id: str | None = None) -> str | None:
+    cf = _cache_file(app, installation_id)
     if not cf.exists():
         return None
     try:
@@ -144,10 +156,40 @@ def _read_cached_token(app: str | None = None) -> str | None:
     return None
 
 
-def _write_cached_token(token: str, expires_at: float, app: str | None = None) -> None:
+def _write_cached_token(
+    token: str, expires_at: float, app: str | None = None, installation_id: str | None = None
+) -> None:
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    cf = _cache_file(app)
+    cf = _cache_file(app, installation_id)
     cf.write_text(json.dumps({"token": token, "expires_at": expires_at}))
+    cf.chmod(0o600)
+
+
+# ── Installation ID cache (per-app, 1-hour TTL, populated by API discovery)
+
+_INSTALL_CACHE = Path.home() / ".cache"
+
+
+def _install_cache_file(app_name: str) -> Path:
+    return _INSTALL_CACHE / f"github-app-installations-{app_name}.json"
+
+
+def _read_install_cache(app_name: str) -> dict[str, str]:
+    cf = _install_cache_file(app_name)
+    if not cf.exists():
+        return {}
+    try:
+        data = json.loads(cf.read_text())
+        if data.get("expires_at", 0) > time.time():
+            return data.get("entries", {})
+    except (json.JSONDecodeError, KeyError):
+        pass
+    return {}
+
+
+def _write_install_cache(app_name: str, entries: dict[str, str]) -> None:
+    cf = _install_cache_file(app_name)
+    cf.write_text(json.dumps({"expires_at": time.time() + 3600, "entries": entries}))
     cf.chmod(0o600)
 
 
@@ -232,7 +274,76 @@ def _mint_installation_token(
     return data["token"], expires_dt.timestamp()
 
 
-def get_token(app: str | None = None) -> str:
+def get_installation_id(owner: str, app: str | None = None) -> str:
+    """Resolve the installation ID for a given org/user owner.
+
+    Resolution order:
+    1. Hardcoded ``installations`` dict in the app config.
+    2. File cache at ``~/.cache/github-app-installations-{app}.json`` (1-hour TTL).
+    3. ``GET /app/installations`` API call (result is cached for 1 hour).
+
+    Raises RuntimeError if the app is not installed for this owner.
+    """
+    app_name = _resolve_app_name(app)
+    cfg = APPS[app_name]
+
+    # 1. Hardcoded dict
+    hardcoded: dict[str, str] = cfg.get("installations", {})
+    if owner in hardcoded:
+        return hardcoded[owner]
+
+    # 2. File cache
+    cached = _read_install_cache(app_name)
+    if owner in cached:
+        return cached[owner]
+
+    # 3. API discovery via JWT (not an installation token)
+    try:
+        private_key = _get_private_key(app_name)
+    except _KeychainError:
+        try:
+            private_key, _, _ = _get_private_key_from_env()
+        except KeyError:
+            raise RuntimeError(
+                f"Cannot discover installations for {app_name!r}: "
+                "Keychain unavailable and STARK_* env vars not set."
+            )
+
+    app_jwt = _make_jwt(private_key, app_name)
+    resp = requests.get(
+        f"{API}/app/installations",
+        headers={
+            "Authorization": f"Bearer {app_jwt}",
+            "Accept": "application/vnd.github+json",
+        },
+        params={"per_page": 100},
+        timeout=30,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(
+            f"Failed to list installations for {app_name!r} "
+            f"({resp.status_code}): {resp.text}"
+        )
+
+    discovered: dict[str, str] = {
+        inst["account"]["login"]: str(inst["id"])
+        for inst in resp.json()
+        if "account" in inst
+    }
+
+    # Merge discovered entries into cache (preserves entries from previous pages)
+    merged = {**cached, **discovered}
+    _write_install_cache(app_name, merged)
+
+    if owner not in discovered:
+        raise RuntimeError(
+            f"GitHub App {app_name!r} is not installed on owner {owner!r}. "
+            f"Known installations: {', '.join(discovered.keys()) or 'none'}."
+        )
+    return discovered[owner]
+
+
+def get_token(app: str | None = None, *, owner: str | None = None) -> str:
     """Get a valid installation token (cached or fresh).
 
     Auth precedence:
@@ -243,32 +354,51 @@ def get_token(app: str | None = None) -> str:
 
     If *app* is given, resolve config, cache, and key material for that app
     without mutating the module-global active app.
+
+    If *owner* is given (e.g. ``"MyOrg"``), resolve the installation ID for
+    that org/user via :func:`get_installation_id` so that the returned token
+    is valid for repos outside the default GetEvinced installation.
     """
     app_name = _resolve_app_name(app)
+    cfg = _app_config(app_name)
 
-    # 1. Cache
-    cached = _read_cached_token(app_name)
+    # Resolve installation ID — per-owner when possible, default otherwise.
+    install_id = cfg["installation_id"]
+    if owner:
+        try:
+            install_id = get_installation_id(owner, app_name)
+        except RuntimeError as exc:
+            logging.warning(
+                "Could not resolve installation for owner %r (%s). "
+                "Falling back to default installation.",
+                owner,
+                exc,
+            )
+
+    # 1. Cache (keyed on installation_id so different orgs don't share tokens)
+    cached = _read_cached_token(app_name, install_id)
     if cached:
         return cached
-
-    cfg = _app_config(app_name)
 
     # 2. Keychain (macOS)
     try:
         private_key = _get_private_key(app_name)
         token, expires_at = _mint_installation_token(
-            private_key, cfg["app_id"], cfg["installation_id"]
+            private_key, cfg["app_id"], install_id
         )
-        _write_cached_token(token, expires_at, app_name)
+        _write_cached_token(token, expires_at, app_name, install_id)
         return token
     except _KeychainError:
         pass  # Not on macOS or key not installed; try env vars
 
     # 3. Env vars (CI / Linux)
     try:
-        private_key, app_id, install_id = _get_private_key_from_env()
-        token, expires_at = _mint_installation_token(private_key, app_id, install_id)
-        _write_cached_token(token, expires_at, app_name)
+        private_key, app_id, env_install_id = _get_private_key_from_env()
+        # In CI, honour the per-owner install_id if we resolved one; otherwise
+        # fall back to what the env vars specify.
+        effective_install_id = install_id if owner else env_install_id
+        token, expires_at = _mint_installation_token(private_key, app_id, effective_install_id)
+        _write_cached_token(token, expires_at, app_name, effective_install_id)
         return token
     except KeyError:
         pass  # STARK_* env vars not set
@@ -529,7 +659,11 @@ def main() -> None:
     select_app(args.app)
 
     if args.command == "token":
-        print(get_token())
+        # Extract owner from --repo flag or git remote so that per-org
+        # installation routing kicks in automatically.
+        repo_str = getattr(args, "repo", None) or _detect_repo()
+        owner = repo_str.split("/")[0] if repo_str and "/" in repo_str else None
+        print(get_token(owner=owner))
 
     elif args.command == "repo":
         repo = _resolve_repo(args)

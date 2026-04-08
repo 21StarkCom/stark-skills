@@ -93,13 +93,18 @@ Fail if this returns a non-zero exit code or empty token:
 ### 1.5 Repo access probe
 
 ```bash
-GH_TOKEN="$GH_TOKEN" gh api /repos/{ORG}/{REPO} --jq .permissions.push
+GH_TOKEN="$GH_TOKEN" gh api /repos/{ORG}/{REPO} > /dev/null
 ```
 
-- Fail if the API call returns 404:
-  > Error: Repo `{ORG_REPO}` not found on GitHub. Check the org/repo name.
-- Fail if `.permissions.push` is `false` or null:
-  > Error: stark-claude does not have write access to `{ORG_REPO}`. Grant the app Issues + Labels write permissions and re-install on this repo.
+Interpret the HTTP status code returned by `gh api`:
+
+- **200** — repo is accessible; proceed.
+- **404** — repo not found or app not installed on this org:
+  > Error: Repo `{ORG_REPO}` not found or stark-claude is not installed on `{ORG}`. Verify the org/repo name and ensure the app is installed at https://github.com/apps/stark-claude.
+- **403** — app installed but lacks sufficient permissions:
+  > Error: stark-claude does not have access to `{ORG_REPO}`. Grant the app Issues + Labels write permissions and re-install on this repo.
+
+Note: do **not** inspect `.permissions.push` — GitHub App tokens always return `false` for that field regardless of actual permissions.
 
 ### 1.6 Validation agent CLI check
 
