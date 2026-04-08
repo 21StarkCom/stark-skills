@@ -1,110 +1,135 @@
-# Design Review — stark-graph
+# Design Review — stark-graph (revised 2026-04-08)
 
 **File:** `docs/specs/2026-04-07-stark-graph-design.md`
-**Date:** 2026-04-07
-**Mode:** Standard (2 agents × 12 domains)
+**Date:** 2026-04-08
+**Mode:** Standard (2 agents x 12 domains)
 **Rounds:** 2 fix + 1 final
 
 ---
 
-**Issues found:** 26 | **Noise:** 77 | **Ignored:** 0
-**Signal-to-noise:** 25%
+## Headline
 
-## Fixed (Round 1 — 21 issues)
+**Issues found:** 30 (21 round 1 + 9 round 2) | **Noise:** ~283 across 3 rounds
+**Signal-to-noise:** ~10% (324 total findings, 30 real issues fixed, 5 unresolved)
 
-| # | Agent(s) | Domain | Severity | Title | Outcome |
-|---|----------|--------|----------|-------|---------|
-| 1 | claude×2, codex×2 | api-design, data-modeling, extensibility | critical/high | No schema_version on JSON artifacts | Fixed — added schema_version to all envelopes |
-| 2 | claude×2, codex×2 | completeness, data-modeling, general | critical/high | Main-branch graph storage undefined | Fixed — defined CI artifact storage + worktree-based base graph |
-| 3 | claude×3, codex | completeness, scalability, data-modeling | high | Blast radius algorithm unspecified | Fixed — BFS with depth cap 5, cycle-safe, documented |
-| 4 | claude, codex | api-design | critical | Inter-stage data contracts missing | Fixed — defined .stark-graph/ workdir convention |
-| 5 | claude×3, codex×2 | api-design, completeness, resilience | high | Stage error contracts undefined | Fixed — exit 0/1/2 contract, graceful degradation |
-| 6 | claude×4, codex×2 | test-plan | critical | No test strategy | Fixed — added testing section with unit/integration/acceptance |
-| 7 | claude×2 | consistency | high | Module node ID format inconsistent | Fixed — defined 2-part (module) vs 3-part (class) convention |
-| 8 | claude×3, codex×2 | general, consistency, api-design | high | changed_edges.detail not producible from model | Fixed — deferred to Phase 2 |
-| 9 | codex×3, claude | general, data-modeling, extensibility | high | Short-name matching ambiguity | Fixed — switched to qualified names |
-| 10 | codex×2, claude | api-design, completeness, consistency | high | No --audit mode in CLI | Fixed — added --stage audit |
-| 11 | claude×2, codex | general, resilience | high | No --warn mode / phased rollout | Fixed — added --warn flag and bootstrap phasing |
-| 12 | claude | consistency | high | Stage count says 7, only 6 defined | Fixed — corrected to 4 MVP stages |
-| 13 | claude, codex | completeness, consistency | high | Cross-repo described in MVP and Phase 2 | Fixed — clarified merge is Phase 2 only |
-| 14 | codex | consistency | high | Publishes/Called-by vs edge types mismatch | Fixed — explicit node fields, not edge types |
-| 15 | claude×2, codex×2 | test-plan, general | high | No acceptance criteria | Fixed — added per-component criteria |
-| 16 | claude, codex×2 | scalability | medium | No capacity baseline | Fixed — added expected file/node/edge counts |
-| 17 | claude×2 | resilience | high | Pipeline crash blocks all reviews | Fixed — exit 2 triggers graceful degradation |
-| 18 | claude | resilience | high | Concurrent PR race on graph file | Fixed — PR-specific working directories |
-| 19 | claude | completeness | high | /stark-graph skill undescribed | Fixed — added skill command table |
-| 20 | claude, codex | scope | high | SVG renderer unjustified in MVP | Fixed — moved to Phase 2 |
-| 21 | codex | security | high | Prompt injection from untrusted docstrings | Fixed — grammar constraint + escaping |
+---
 
-## Fixed (Round 2 — 5 issues)
+## Fixed — Round 1 (21 issues)
 
 | # | Agent(s) | Domain | Severity | Title | Outcome |
 |---|----------|--------|----------|-------|---------|
-| 22 | codex | api-design | high | --warn mode not in CLI | Fixed — added to CLI with behavior spec |
-| 23 | claude | completeness | high | Concurrent working directory collisions | Fixed — .stark-graph/{slug}/ convention |
-| 24 | claude | consistency | high | Stage numbering inconsistent | Fixed — corrected to 4 stages |
-| 25 | claude | completeness | high | CI integration unspecified | Fixed — added CI section with GH Actions sketch |
-| 26 | codex | completeness | high | Skipped files create coverage gaps | Fixed — coverage threshold with warning |
+| 1 | both | completeness | CRITICAL | No write-back mechanism for generated docstrings | Added Stage 4 (write-back) with --write flag |
+| 2 | both | api-design | CRITICAL | `audit` exposed in CLI/skill but no stage definition | Defined audit as reporting mode |
+| 3 | both | consistency | HIGH | Single-pass claim contradicts separate stages | Removed claim; acknowledged two traversals |
+| 4 | codex | consistency | HIGH | CLI/CI examples omit parse prerequisite | Added auto-prerequisite resolution |
+| 5 | both | consistency | HIGH | Validation scope doesn't cover function-level docstrings | Added correctness_validator.py |
+| 6 | both | resilience | HIGH | No timeout/retry/fallback for LLM API calls | Added LLM call contract |
+| 7 | claude | scope | HIGH | consumer_count creates stage ordering dependency | Deferred to optional post-graph pass |
+| 8 | claude | data-modeling | HIGH | Base graph path missing from workdir | Added base-parse-python.json |
+| 9 | claude | general | HIGH | GitHub App auth can't work on Linux CI | Added env-var fallback |
+| 10 | claude | completeness | HIGH | Formatter rules never defined | Added formatting rules section |
+| 11 | codex | security | HIGH | LLM can exfiltrate sensitive code metadata | Added redaction policy |
+| 12 | both | api-design | HIGH | Intermediate JSONs lack schema versioning | Added schema_version to all |
+| 13 | claude | test-plan | HIGH | Prompt injection mitigations untested | Added test coverage |
+| 14 | claude | resilience | HIGH | Worktree checkout failure unhandled | Added retry + fallback |
+| 15 | codex | consistency | MEDIUM | Module suppression syntax impossible | Added file-header pragma |
+| 16 | claude | consistency | MEDIUM | Publishes "flagged if removed" not implemented | Clarified: diff-only visibility |
+| 17 | claude | general | MEDIUM | Dual tier naming scheme | Standardized on Skip/Template/LLM/Protected |
+| 18 | claude | consistency | MEDIUM | Default skill contradicts pipeline | Aligned skill table with CLI |
+| 19 | codex | consistency | MEDIUM | Sole input claim vs tests in context | Changed to "primary input" |
+| 20 | claude | consistency | MEDIUM | validate skill entry implies two stages | Added explicit CLI mapping |
+| 21 | codex | security | HIGH | Write-capable token in all CI jobs | Scoped credentials per job |
 
-## Unresolved (Final Round)
+## Fixed — Round 2 (9 issues)
 
-| # | Agent(s) | Domain | Severity | Title | Status |
-|---|----------|--------|----------|-------|--------|
-| U1 | claude | general | high | BFS direction (forward vs reverse) not specified | Accept — will clarify in implementation plan |
-| U2 | claude | completeness | high | --include flag referenced but not in CLI | Accept — implementation detail, not spec gap |
-| U3 | codex | security | critical | CI runs untrusted branch code with write secret | Non-issue — `pull_request` trigger runs on base commit; write token only for bot comments |
-| U4 | codex | data-modeling | critical | Event subscribers not first-class entities | Accept — acknowledged as approximation, Phase 2 |
+| # | Agent(s) | Domain | Severity | Title | Outcome |
+|---|----------|--------|----------|-------|---------|
+| 22 | claude | consistency | HIGH | Skill default includes write-back without --write | Removed write-back from default |
+| 23 | claude | api-design | HIGH | --include flag referenced but not in CLI | Added --include spec |
+| 24 | both | general | HIGH | CI YAML doesn't show write-back | Updated YAML sketch |
+| 25 | claude | consistency | MEDIUM | generate-report.json missing schema_version | Added |
+| 26 | claude | consistency | HIGH | Template tier "no branches" contradicts code | Fixed to "<=1 branch" |
+| 27 | both | completeness | HIGH | Depends scope (stdlib/third-party) undefined | Clarified: intra-repo only |
+| 28 | claude | api-design | MEDIUM | --stage vs --stages conflict undefined | Added precedence rules |
+| 29 | claude | completeness | MEDIUM | LLM prompt template format unspecified | Added input documentation |
+| 30 | both | consistency | MEDIUM | CI YAML credential inconsistency | Fixed to STARK_CLAUDE_PRIVATE_KEY |
+
+## Unresolved — Final Round (5 issues)
+
+| # | Agent(s) | Domain | Severity | Title | Recommendation |
+|---|----------|--------|----------|-------|----------------|
+| U1 | both | general | CRITICAL | CI jobs don't share write-back artifacts | Implementation plan must consolidate generate+validate into one job, or use Actions artifacts to pass modified files |
+| U2 | claude | completeness | HIGH | TYPE_CHECKING imports produce false MISSING | Add exclusion for `if TYPE_CHECKING:` blocks and `from __future__ import annotations` |
+| U3 | both | resilience | HIGH | Write-back not atomic | Use temp-file + atomic rename pattern; document in implementation plan |
+| U4 | claude | security | HIGH | LLM API key provisioning for CI undefined | Add `ANTHROPIC_API_KEY` to CI secrets documentation alongside GitHub App key |
+| U5 | claude | scalability | HIGH | LLM concurrency unspecified | Add batching/concurrency model: ThreadPoolExecutor with max_workers=5 |
 
 ## Noise & False Positives
 
-| Root Cause | Count | Improvement Action |
-|------------|-------|--------------------|
-| **Phase 2 concern applied to MVP** | 38 | Design clearly scopes MVP vs Phase 2 — review prompts should weight scope section |
-| **Extensibility over-engineering** | 22 | Prompts ask for extension points; MVP intentionally avoids premature abstraction |
-| **Repeated finding from prior round** | 12 | Some agents re-flag addressed issues — round context not carried forward |
-| **Design philosophy disagreement** | 5 | "Required docstrings = too heavy" contradicts the system's core value proposition |
+**Root cause analysis:**
+
+| Root Cause | Count | Action |
+|------------|-------|--------|
+| **Phase 2/3 scope applied to MVP** | ~120 | Reviewers flag Phase 2 extensibility/scalability as MVP issues. Design already explicitly defers these. No action needed. |
+| **Intentional scope decision** | ~80 | "MVP bundles two products" flagged repeatedly. This is a deliberate architecture choice. No action. |
+| **Accessibility for deferred features** | ~15 | Interactive D3 explorer and SVG renderer are Phase 2; accessibility requirements don't apply yet. |
+| **Testing depth beyond design scope** | ~40 | Reviewers want CI workflow E2E tests, real LLM integration tests, etc. Valid for implementation plan, not design doc. |
+| **Depends semantics philosophical debate** | ~20 | "Depends is semantic but validated as imports" flagged repeatedly. The pragmatic proxy approach is documented and intentional. |
+| **Prompt refinement suggestions** | ~8 | Style, wording, and presentation suggestions. Not design issues. |
 
 ## Changes Made
 
 ```
-Round 1: +279 -124 lines (major restructure)
-Round 2: +52 -3 lines (targeted fixes)
-Total:   +331 -127 lines
+2 fix rounds, 30 issues total:
+- Round 1: +180 lines, -48 lines (21 fixes)
+- Round 2: +35 lines, -14 lines (9 fixes)
+- Total: +215 lines, -62 lines
 ```
+
+Major structural additions:
+- Stage 4 (Write-back) with --write flag, safety rules, backup mechanism
+- Audit Mode definition (reporting mode, not pipeline stage)
+- Correctness Validator (function-level docstring validation)
+- Docstring Formatting section (Google style, 88-char width)
+- LLM call contract (timeout, retry, circuit breaker)
+- LLM input redaction policy
+- Worktree failure handling (prune + retry)
+- --include, --write, --stage vs --stages CLI documentation
+- CI credential scoping (no token on generate/validate jobs)
+- Module-level suppression syntax
 
 ## Prompt Improvement Assessment
 
 | Signal | Level | File |
 |--------|-------|------|
-| Codex consistently flags MVP scope as over-engineered despite explicit scoping | Global | `global/prompts/design-review/codex/04-scope.md` — add "respect the stated MVP boundary" |
-| Both agents flag Phase 2 items as current issues | Global | All domain prompts — add "distinguish MVP from Phase 2 when scope section exists" |
-| Codex extensibility domain produces ~6 findings per round regardless of design quality | Global | `global/prompts/design-review/codex/09-extensibility.md` — calibrate severity for MVP-stage designs |
+| Both agents repeatedly flag Phase 2 scope as MVP issues | **Global** | `global/prompts/design-review/*/scope.md` -- add instruction to respect explicit scope boundaries |
+| Codex flags "two products" as critical every round despite intentional design | **Global** | `global/prompts/design-review/codex/scope.md` -- add "do not flag deliberate scope bundling if the design explains its rationale" |
+| Both agents produce ~10 accessibility findings for deferred Phase 2 features | **Global** | `global/prompts/design-review/*/accessibility.md` -- add "only flag accessibility for in-scope features, not deferred ones" |
+| Depends semantics debate recurs across general, consistency, data-modeling | **Repo** | Consider adding a "Design Decisions" section explaining the Depends proxy approach |
 
-No improvement opportunities detected for: accessibility, resilience, security, test-plan.
+---
 
 ## Metrics
 
 ```
-Total duration:     ~18m
+Total duration:     ~13m 15s
 Phases:
-  Phase 1 (Setup):        3s
-  Phase 2 (Review-Fix):   14m 4s
-    Round 1 dispatch:     2m 10s
-    Round 1 classify+fix: 3m 50s
-    Round 2 dispatch:     4m 5s
-    Round 2 classify+fix: 2m 0s
-  Phase 3 (Final):        3m 8s
-  Phase 4 (Summary):      30s
-  Phase 5 (Output):       10s
+  Phase 1 (Setup):        15s
+  Phase 2 (Review-Fix):   ~9m 30s
+    Round 1 dispatch:     4m 03s
+    Round 1 classify+fix: ~3m 00s
+    Round 2 dispatch:     3m 47s  
+    Round 2 classify+fix: ~1m 30s
+  Phase 3 (Final):        5m 22s
+  Phase 4 (Summary):      ~30s
+  Phase 5 (Output):       ~10s
 
-Issues found:        26 (26 fixed, 4 unresolved)
-Noise:               77
-Signal-to-noise:     25%
-Agents:              72 dispatched (24×3 rounds), 72 succeeded, 0 failed
+Issues found:        30 (21 round 1, 9 round 2; 5 unresolved)
+Noise:               ~283 (across 3 rounds)
+Agents:              72 dispatched (24 per round), all succeeded
 Rounds:              2 fix + 1 final
-```
 
-### Improvement Flags
-- Phase 2 dispatch (R2) was 4m5s — 23% of total. Normal for 24 agents.
-- Noise ratio high at 75% — extensibility and scope prompts are the main contributors.
-- No dispatch failures across all 72 sub-agent invocations.
+Improvement flags:
+- Triage timeout on all 3 rounds -> fell back to full mode
+- High noise ratio (~10% signal) -> scope/accessibility prompts need tuning
+```
