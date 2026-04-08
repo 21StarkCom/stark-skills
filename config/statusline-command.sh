@@ -35,6 +35,14 @@ C_MAROON="\033[38;5;217m"
 C_MAUVE="\033[38;5;141m"
 C_SKY="\033[38;5;117m"
 
+# ── Worktree detection ────────────────────────────────────────────────────
+worktree_name=""
+git_common=$(git -C "$cwd" --no-optional-locks rev-parse --git-common-dir 2>/dev/null)
+git_dir=$(git -C "$cwd" --no-optional-locks rev-parse --git-dir 2>/dev/null)
+if [ -n "$git_common" ] && [ -n "$git_dir" ] && [ "$git_common" != "$git_dir" ]; then
+  worktree_name=$(basename "$cwd")
+fi
+
 # ── Directory (just the repo/folder name) ─────────────────────────────────
 dir_display=$(basename "$cwd")
 
@@ -193,8 +201,12 @@ SEP=" ${C_DIM}|${RESET} "
 
 # ── Line 1: repo, model, operational ─────────────────────────────────────
 
+# worktree indicator — 🌲 worktree-name (only when in a worktree)
+out=""
+[ -n "$worktree_name" ] && out="${C_TEAL}[\U0001f332 ${worktree_name}]${RESET} "
+
 # repo + git
-out="${C_YELLOW}${dir_display}${RESET}"
+out="${out}${C_YELLOW}${dir_display}${RESET}"
 if [ -n "$git_branch_str" ]; then
   out="${out} ${C_GREEN}${git_branch_str}${RESET}"
   [ -n "$git_dirty_str" ] && out="${out} ${C_MAROON}${git_dirty_str}${RESET}"
