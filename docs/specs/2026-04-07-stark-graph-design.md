@@ -143,7 +143,7 @@ Publishes: upload.started, upload.completed
 | Field | Meaning | Validation | MVP Strictness |
 |-------|---------|------------|----------------|
 | **Depends** | Services/modules this unit calls or instantiates | Cross-checked against `import` statements | **Strict** — CI-blocking |
-| **Publishes** | Events, signals, or side effects | Trust-only — not import-traceable. Flagged if removed. | **Trust-only** |
+| **Publishes** | Events, signals, or side effects | Trust-only — not import-traceable. Removal visible in diff output but not CI-blocking. | **Trust-only** |
 | **Called by** | Reverse edges — who consumes this | Informational — helps reviewers but not strictly validated in MVP | **Informational** |
 
 ### Parsing Rules
@@ -157,18 +157,27 @@ Publishes: upload.started, upload.completed
 
 ### Suppression
 
-Individual nodes can be excluded from strict validation with `# stark-graph: ignore` on the class/module definition line:
+Individual nodes can be excluded from strict validation:
+
+**Class-level:** `# stark-graph: ignore` on the class definition line:
 
 ```python
 class GeneratedProto:  # stark-graph: ignore
     """Auto-generated, no docstring required."""
 ```
 
+**Module-level:** `# stark-graph: ignore` as the first comment in the file (before the module docstring):
+
+```python
+# stark-graph: ignore
+"""Auto-generated protobuf bindings — no structured docstring required."""
+```
+
 Suppressed nodes are tracked in the validation report under a `suppressed` field.
 
 ## Extraction Layer
 
-The extraction layer builds a structured payload for each symbol using deterministic code analysis. This payload is the sole input for both template generation and LLM enrichment — the model never sees raw source directly.
+The extraction layer builds a structured payload for each symbol using deterministic code analysis. This payload is the primary input for both template generation and LLM enrichment — the model never sees raw source directly. For Protected-tier symbols, additional structured context (test names, caller patterns) is appended alongside the payload (see Stage 3).
 
 ### What Code Extracts
 
@@ -231,7 +240,7 @@ Deterministic heuristics decide what each symbol deserves. Classification happen
 | **Skip** | Private + trivial (≤3 statements), one-line wrappers, obvious property getters/setters, generated code (`# stark-graph: ignore`), migrations, test helpers, `__init__` passthrough | No docstring generated |
 | **Template-only** | Public + simple (≤5 statements, no branches), clear naming, single return path | Deterministic template — zero LLM |
 | **LLM-assisted** | Public + non-trivial (>5 statements or >1 branch), unclear intent from name alone | Template skeleton + LLM fills summary/behavior |
-| **Protected** | Core/shared APIs, `__all__` exports, cross-module public interfaces, classes with >3 consumers | LLM-assisted + stricter confidence threshold + tests in context |
+| **Protected** | Core/shared APIs, `__all__` exports, cross-module public interfaces | LLM-assisted + stricter confidence threshold + tests in context |
 
 ### Classification Rules
 
@@ -248,10 +257,12 @@ def classify(symbol: ExtractedSymbol) -> Tier:
     if symbol.visibility == "public" and symbol.complexity.statements <= 5 \
        and symbol.complexity.branches <= 1:
         return Tier.TEMPLATE
-    if symbol.in_all or symbol.consumer_count > 3:
+    if symbol.in_all:
         return Tier.PROTECTED
     return Tier.LLM_ASSISTED
 ```
+
+**Consumer count upgrade (optional second pass):** The classifier initially runs without graph data (Stage 2 precedes Stage 5). After the graph is built, an optional promotion pass upgrades symbols with >3 consumers from LLM to Protected tier. This is a refinement — the initial classification is correct without it, just conservative (some Protected symbols may first generate at LLM tier).
 
 The classifier is pure code — no model calls. Override per-symbol with `# stark-graph: tier=skip|template|llm|protected`.
 
@@ -346,7 +357,7 @@ class Extractor(Protocol):
     def language(self) -> str: ...
 ```
 
-The extractor runs alongside the parser. Both share AST traversal — a single pass produces both the graph (nodes/edges) and the symbol payloads.
+The extractor and parser are separate scripts with independent AST traversals. This means two passes over the file set, which is acceptable at MVP scale (<5s each). Merging them into a single pass is a Phase 2 optimization if parse time becomes a concern at >500 files.
 
 ### TypeScript Parser (Phase 2)
 
@@ -358,7 +369,7 @@ AST parsing cannot detect: dependency injection (constructor params resolved at 
 
 ## Pipeline Stages
 
-Seven stages in the full pipeline (extract, classify, generate, parse, validate, diff, comment). The orchestrator chains them based on the requested command. Phase 2 adds merge and render stages.
+Eight stages in the full pipeline (extract, classify, generate, write-back, parse, validate, diff, comment), plus audit as a reporting mode. The orchestrator chains them based on the requested command and auto-resolves prerequisites (e.g., `--stage validate` implicitly runs parse first if parse output is missing). Phase 2 adds merge and render stages.
 
 ### Inter-Stage Data Contract
 
@@ -369,12 +380,15 @@ All stages communicate via JSON files in a working directory (default: `.stark-g
 ├── extract.json              # Stage 1 output (symbol payloads)
 ├── classify.json             # Stage 2 output (tiered symbol list)
 ├── generate-report.json      # Stage 3 output (generation results + confidence)
-├── parse-python.json         # Stage 4 output (graph)
-├── graph.json                # Stage 4 output (= parse output for single-language MVP)
-├── validation.json           # Stage 5 output
-├── diff.json                 # Stage 6 output
-└── render/                   # Stage 8 output (Phase 2)
+├── parse-python.json         # Stage 5 output (graph from HEAD)
+├── base-parse-python.json    # Stage 5 output (graph from base branch, for diff)
+├── graph.json                # Stage 5 output (= parse output for single-language MVP)
+├── validation.json           # Stage 6 output
+├── diff.json                 # Stage 7 output
+└── render/                   # Phase 2
     └── graph.svg
+
+All inter-stage JSON files include a `schema_version` field in their envelope for contract compatibility.
 ```
 
 Each stage reads from the previous stage's output file and writes its own. The orchestrator passes `--workdir .stark-graph/{pr_or_branch_slug}/` to all stages (e.g., `.stark-graph/pr-123/` or `.stark-graph/feat-upload/`). This prevents working directory collisions when multiple PRs are processed concurrently on the same runner. Stage scripts accept `--input` and `--output` flags for explicit override.
@@ -411,6 +425,7 @@ Pure deterministic logic. Applies the classification rules to sort symbols into 
 
 ```json
 {
+  "schema_version": "1",
   "symbols": [
     {"qualified_name": "...", "tier": "template", "reason": "public, 3 statements, 0 branches"},
     {"qualified_name": "...", "tier": "llm", "reason": "public, 12 statements, 3 branches"},
@@ -433,6 +448,19 @@ Three sub-paths:
 3. **Protected tier:** Same as LLM tier but with tests included in context and stricter confidence threshold.
 
 **Low confidence fallback:** If the model returns low-confidence output (vague phrases, invented guarantees, contradictions with the payload), the generator falls back to a minimal deterministic docstring and flags the symbol as `needs-human-intent`.
+
+**LLM call contract:**
+- Per-call timeout: 30s (configurable via `docgen_timeout` in config)
+- Retry: 2 attempts with exponential backoff (2s, 4s)
+- Circuit breaker: after 3 consecutive failures, skip remaining LLM-tier symbols and fall back to templates for the rest of the run. Log the circuit break event.
+- Rate limit: respect `Retry-After` headers. If rate-limited, queue remaining symbols and retry after the specified delay.
+- On total LLM failure (provider down), the pipeline continues with template-only output for all tiers and exits 0 with a warning in the report. Generation is best-effort — it should never block the graph validation pipeline.
+
+**LLM input redaction:** Before sending the structured payload to the model, strip fields that could leak sensitive information:
+- `file_path` is shortened to the last two path segments (e.g., `services/user_service.py`)
+- `calls` entries are included only if they reference symbols within the same repo (no external library internals)
+- Actual source code is never sent — only the structured payload
+- Credentials, environment variable names, and hardcoded strings detected in defaults are replaced with `<REDACTED>`
 
 Output includes per-symbol metadata:
 
@@ -467,26 +495,76 @@ Output includes per-symbol metadata:
 }
 ```
 
-### Stage 4: Parse (per language)
+### Stage 4: Write-back
+
+- Input: `.stark-graph/generate-report.json`, source files
+- Output: modified source files (in-place), `.stark-graph/writeback-report.json`
+- Script: `docstring_writer.py`
+- Flag: `--write` (required — write-back is opt-in to prevent accidental source modification)
+
+Writes generated docstrings back into source files using AST-aware insertion (preserves formatting, indentation, and surrounding code). Only writes symbols where the generated docstring differs from the existing one.
+
+**Safety rules:**
+- Never overwrites a high-confidence existing docstring with a lower-confidence one (Hard Rule 1)
+- Skips symbols flagged as `needs-human-intent`
+- Creates a backup of each modified file in `.stark-graph/backup/` before writing
+
+The write-back report records which files were modified and which symbols were updated, skipped, or protected:
+
+```json
+{
+  "schema_version": "1",
+  "modified_files": ["backend/showcase/services/user_service.py"],
+  "updated_symbols": 12,
+  "skipped_lower_confidence": 2,
+  "skipped_needs_human": 3,
+  "unchanged": 45
+}
+```
+
+### Audit Mode
+
+Audit is a reporting mode, not a pipeline stage. It runs parse + validate internally and produces a human-readable coverage report. Always exits 0 regardless of findings.
+
+- Invoked via: `--stage audit` or `/stark-graph audit`
+- Internally runs: parse → validate (in-memory, no intermediate files required)
+- Output: text report to stdout + `.stark-graph/audit.json`
+- Does not modify source files or post PR comments
+
+```json
+{
+  "schema_version": "1",
+  "total_modules": 50,
+  "total_classes": 80,
+  "with_docstring": 95,
+  "coverage_pct": 73.1,
+  "missing": ["backend/showcase/utils/helpers.py:HelperClass"],
+  "suppressed": ["backend/showcase/proto/generated_pb2.py"]
+}
+```
+
+### Stage 5: Parse (per language)
 
 - Input: list of source files (from `--repo` path), repo identity
 - Output: `.stark-graph/parse-python.json` (Graph JSON)
 - Scripts: `python_parser.py`
 - Per-file timeout: 5s. Files exceeding timeout are skipped with a warning.
 
-This is the existing graph parser — unchanged. Builds the dependency graph from AST and docstring annotations. If generation ran first (Stage 3), it operates on the already-updated docstrings.
+This is the graph parser. Builds the dependency graph from AST and docstring annotations. If write-back ran first (Stage 4), it operates on the already-updated docstrings in source files.
 
-### Stage 5: Validate (strict)
+### Stage 6: Validate (strict)
 
-For MVP with a single language, the merge step is inlined into the orchestrator (passthrough). A standalone `graph_merge.py` is extracted in Phase 2 when the TS parser introduces real multi-language merge.
+In MVP (single language), no merge step is needed — parse output is passed directly to validation. Phase 2 extracts `graph_merge.py` to merge multi-language parse outputs before validation.
 
-Validation runs directly on the parse output:
+Validation has two sub-systems:
+
+#### Graph Drift Validation
 
 - Input: `.stark-graph/parse-python.json` (or merged `graph.json` in Phase 2)
 - Output: `.stark-graph/validation.json`, exit code 0 (pass) or 1 (fail)
 - Script: `drift_validator.py`
 
-Three validation checks (MVP):
+Three graph-level validation checks (MVP, module/class scope):
 
 | Check | Meaning | Action |
 |-------|---------|--------|
@@ -514,13 +592,34 @@ Validation output:
 
 All node references use full node IDs. Display names are for human readability only.
 
-### Stage 6: Diff
+#### Docstring Correctness Validation
 
-- Input: base branch Graph JSON + PR branch Graph JSON
+Separate from graph drift, this validates generated function/method-level docstrings against AST facts. This ensures the Hard Rule "every changed symbol must be revalidated" applies to all generated tiers, not just graph-tracked nodes.
+
+- Input: `.stark-graph/generate-report.json`, source files
+- Output: appended to `.stark-graph/validation.json` under a `correctness` key
+- Script: `correctness_validator.py`
+
+Checks per symbol:
+- All parameters in signature appear in Args section
+- Return type matches Returns section
+- All explicit `raise` statements appear in Raises section
+- No contradictions between docstring claims and AST facts
+
+Failures are CI-blocking (exit 1). This validator runs only on symbols that were generated or modified — it does not scan the full repo.
+
+### Stage 7: Diff
+
+- Input: base branch Graph JSON (`.stark-graph/base-parse-python.json`) + PR branch Graph JSON (`.stark-graph/parse-python.json`)
 - Output: `.stark-graph/diff.json`
 - Script: `graph_differ.py`
 
-**Base graph acquisition:** The orchestrator checks out the base branch in a temporary git worktree, runs the parser, and produces the base graph. The PR branch graph is from Stage 4. Both graphs are identified by commit SHA in their envelope.
+**Base graph acquisition:** The orchestrator checks out the base branch in a temporary git worktree, runs the parser, and produces the base graph at `.stark-graph/base-parse-python.json`. The PR branch graph is from Stage 5. Both graphs are identified by commit SHA in their envelope.
+
+**Worktree failure handling:** If `git worktree add` fails (e.g., pending changes, locked worktree from prior run), the orchestrator:
+1. Attempts cleanup of stale worktrees: `git worktree prune`
+2. Retries once
+3. On second failure: skips the diff stage, posts a warning comment ("Dependency diff unavailable — worktree creation failed"), exits 2 (infrastructure error). The validation pipeline is not affected.
 
 ```json
 {
@@ -550,7 +649,7 @@ All node references use full node IDs. Display names are for human readability o
 3. **Transitive:** BFS up to `transitive_depth_cap` (default 5, configurable). Uses a visited set for cycle safety. If cap reached, `depth_cap_reached: true`
 4. **Event subscribers:** For each changed node that has a `publishes` field, find all nodes whose `depends` entries reference a module containing that node. This is an approximation — exact event matching is Phase 2.
 
-### Stage 7: PR Comment
+### Stage 8: PR Comment
 
 - Input: `.stark-graph/diff.json`, `.stark-graph/validation.json`
 - Output: GitHub PR comment via stark-claude[bot]
@@ -581,9 +680,24 @@ Direct: 3 services | Transitive: 7 (depth ≤5) | Event subscribers: 2
 </details>
 ```
 
-### Stage 8: Render (Phase 2)
+### Render (Phase 2)
 
 Deferred. The PR comment provides sufficient dependency change visibility for MVP. Renderer added when there's a concrete consumer (UI dashboard, Confluence artifact).
+
+## Docstring Formatting
+
+The formatter (`docstring_formatter.py`) normalizes all generated docstrings to a canonical style before write-back. Rules:
+
+- **Style:** Google-style docstrings (Args/Returns/Raises/Yields/Examples sections)
+- **Line width:** 88 characters (matching Black default)
+- **Indentation:** 4 spaces, matching the function/class body
+- **Section order:** Summary → Description → Args → Returns → Yields → Raises → Examples → Notes
+- **Blank lines:** one blank line between summary and first section, one between sections
+- **Trailing punctuation:** summary line ends with a period
+- **Type annotations:** omitted from Args/Returns if already present in the signature (avoids duplication)
+- **Empty sections:** removed (no "Args:" with no arguments listed)
+
+The formatter runs on all generated docstrings regardless of tier. It also validates that the docstring is syntactically valid Python (parseable by `ast.get_docstring()`).
 
 ## Confidence Scoring
 
@@ -694,6 +808,10 @@ jobs:
 
 **Dependencies:** Python 3.12+, pydantic. No system packages for MVP (graphviz only needed in Phase 2).
 
+**CI authentication:** `github_app.py` reads the GitHub App private key from `STARK_CLAUDE_PRIVATE_KEY` environment variable (base64-encoded PEM) when macOS Keychain is unavailable. In GitHub Actions, store this as a repository secret. The script auto-detects the environment: Keychain on macOS dev machines, env-var on Linux CI runners.
+
+**Credential scoping:** The `docstring-generate` and `docstring-validate` jobs do not need `GH_TOKEN` — they only read/write local files. Only the `blast-radius` job (which posts PR comments) requires the token. This limits the blast radius of credential exposure in jobs that execute repository-controlled code.
+
 PR behavior:
 - Regenerate docstrings for changed symbols
 - Fail if committed docstrings differ from canonical output (staleness check)
@@ -802,7 +920,9 @@ scripts/
 │   ├── docstring_generator.py    # Template + LLM slot-filling
 │   ├── docstring_formatter.py    # Normalize style, enforce conventions
 │   ├── confidence_scorer.py      # Correctness + semantic confidence
-│   ├── drift_validator.py        # AST vs docstring strict check
+│   ├── docstring_writer.py       # Write generated docstrings back to source files
+│   ├── correctness_validator.py  # Function-level docstring vs AST validation
+│   ├── drift_validator.py        # Graph-level AST vs docstring annotation check
 │   ├── graph_differ.py           # base vs PR graph diff + blast radius
 │   └── pr_commenter.py           # post diff + blast radius to PR (idempotent)
 ├── stark_graph.py                # pipeline orchestrator (CLI entry point)
@@ -823,15 +943,15 @@ skill/
 
 The skill wraps `stark_graph.py` for agent invocation:
 
-| Command | Behavior |
-|---------|----------|
-| `/stark-graph` | Full pipeline on current repo (extract → classify → generate → parse → validate → audit) |
-| `/stark-graph validate` | Parse + validate only (drift check, no generation) |
-| `/stark-graph audit` | Parse + report missing docstrings (no CI blocking) |
-| `/stark-graph diff` | Parse + diff against main (no comment posting) |
-| `/stark-graph pr 123` | Full pipeline targeting PR #123 |
-| `/stark-graph generate` | Extract + classify + generate only (no validation/diff) |
-| `/stark-graph generate --changed-only` | Generate docstrings for changed files only |
+| Command | Maps to CLI | Behavior |
+|---------|-------------|----------|
+| `/stark-graph` | `--stages extract,classify,generate,write-back,parse,validate` | Local pipeline: generate + validate (no diff/comment — those require `--pr`) |
+| `/stark-graph validate` | `--stages parse,validate` | Drift check only (no generation). Orchestrator auto-runs parse as prerequisite. |
+| `/stark-graph audit` | `--stage audit` | Human-readable coverage report. Always exits 0. |
+| `/stark-graph diff` | `--stages parse,diff --base main` | Blast radius against main (no comment posting) |
+| `/stark-graph pr 123` | `--pr 123` | Full pipeline: generate + write-back + parse + validate + diff + comment |
+| `/stark-graph generate` | `--stages extract,classify,generate` | Generate only (no write-back, no validation) |
+| `/stark-graph generate --changed-only` | `--stages extract,classify,generate --changed-only` | Generate for changed files only |
 
 ## CLI Interface
 
@@ -901,12 +1021,16 @@ When `--changed-only` is passed:
 | `drift_validator.py` | One fixture per check type: STALE, MISSING, NO_DOCSTRING, clean (zero findings), suppressed node. Assert exact JSON output per fixture. |
 | `graph_differ.py` | Fixture graph pairs: added edge, removed edge, added node, removed node, cycle (no infinite loop), depth cap reached |
 | `pr_commenter.py` | Mock GitHub API: idempotent update, retry on 429, timeout handling |
+| `docstring_writer.py` | Write-back: correct insertion, indentation preservation, backup creation, high-confidence protection (Hard Rule 1) |
+| `correctness_validator.py` | Per-check pass/fail: params covered, return documented, raises documented, no contradictions |
+| Prompt injection | Grammar validation rejects `Depends: $(curl ...)`, `Depends: '; DROP TABLE`, and other injection payloads. JSON encoding preserves structure. Allowlist filter blocks non-matching values. |
 
 ### Integration Tests
 
 - Full pipeline on a fixture repo (committed to `tests/fixtures/graph/`): extract → classify → generate → parse → validate → diff. Assert intermediate JSON files validate against Pydantic models.
 - Blast radius on a fixture graph with known cycle: verify no infinite loop, verify counts match expected.
-- Generation round-trip: extract symbols from fixture, generate docstrings, re-parse, validate — zero drift.
+- Generation round-trip: extract symbols from fixture, generate docstrings, write back, re-parse, validate — zero drift.
+- Performance: full pipeline on fixture repo completes in <60s (wall clock, single-threaded, no LLM — template tier only). LLM-tier timing validated separately with mock model returning in <100ms.
 
 ### Acceptance Criteria
 
@@ -957,8 +1081,10 @@ Full vertical slice on one repo. Everything works end-to-end before generalizing
 - Review domain enrichment (configurable domain list)
 - `/stark-graph` skill (with `generate` sub-command)
 - LLM prompt templates for summary/description/examples slots
+- Docstring writer (write-back to source files)
+- Correctness validator (function-level docstring vs AST)
 - Docstring convention docs
-- Fixture-based test suite
+- Fixture-based test suite (including prompt injection and performance)
 - `--audit` mode for bootstrap
 - `--warn` mode for phased rollout
 - `--changed-only` mode for PR CI efficiency
@@ -1010,24 +1136,30 @@ Recovery: if a bootstrapped docstring is incorrect, any developer can fix it. `#
 
 ## Operating Model Summary
 
-### Tier 1: Fully Deterministic (~60-80% of symbols)
+Uses the canonical tier names from the classifier (Skip, Template, LLM, Protected):
 
-- Build template from AST
-- Fill sections mechanically
-- No LLM call
+### Skip (~45% of symbols)
+
+- No docstring generated
+- Private trivial helpers, test code, generated code
+
+### Template (~30% of symbols)
+
+- Deterministic skeleton from AST — zero LLM calls
 - Always passes correctness validation
+- Covers simple public functions with clear naming
 
-### Tier 2: Assisted Generation (~15-30% of symbols)
+### LLM-Assisted (~18% of symbols)
 
-- Structured inputs only (never raw source)
-- LLM writes summary + behavior description
+- Structured payload sent to model — model fills summary + description slots
 - Formatter normalizes output
-- Validator checks correctness
-- Confidence scorer gates acceptance
+- Correctness validator checks against AST
+- Confidence scorer gates acceptance (≥ 0.8)
+- Falls back to template on low confidence
 
-### Tier 3: Protected Surfaces (~5-10% of symbols)
+### Protected (~7% of symbols)
 
-- Same as Tier 2 but with richer context (tests, callers)
-- Stricter confidence threshold
+- Same as LLM-Assisted but with test names and caller patterns as additional context
+- Stricter confidence threshold (≥ 0.9)
 - May require human review for first generation
-- No auto-downgrade of existing high-confidence docstrings
+- Never auto-downgrades an existing high-confidence docstring
