@@ -395,6 +395,49 @@ MAX_GEMINI_CONCURRENT = 3  # Vertex AI rate-limits under heavy parallel load
 _gemini_semaphore = threading.Semaphore(MAX_GEMINI_CONCURRENT)
 
 
+def _get_diff_stats(base: str, cwd: str | None = None) -> tuple[int, int]:
+    """Get diff file count and total changed lines for adaptive timeout.
+
+    Returns (file_count, line_count). Returns (0, 0) on failure.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--shortstat", f"{base}...HEAD"],
+            capture_output=True, text=True, timeout=30,
+            cwd=cwd,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return (0, 0)
+        text = result.stdout.strip()
+        files_m = re.search(r'(\d+)\s+files?\s+changed', text)
+        ins_m = re.search(r'(\d+)\s+insertions?', text)
+        del_m = re.search(r'(\d+)\s+deletions?', text)
+        file_count = int(files_m.group(1)) if files_m else 0
+        insertions = int(ins_m.group(1)) if ins_m else 0
+        deletions = int(del_m.group(1)) if del_m else 0
+        return (file_count, insertions + deletions)
+    except (subprocess.TimeoutExpired, OSError):
+        return (0, 0)
+
+
+def _adaptive_timeout(agent: str, file_count: int, line_count: int, config: dict) -> int:
+    """Determine sub-agent timeout based on PR size and config.
+
+    Default: 600s (gemini), 900s (claude/codex).
+    Large PRs: uses runtime.large_pr_timeout_s from config.
+    """
+    runtime = config.get("runtime", {})
+    file_threshold = runtime.get("large_pr_file_threshold", 40)
+    line_threshold = runtime.get("large_pr_line_threshold", 3000)
+    large_timeout = runtime.get("large_pr_timeout_s", 1800)
+
+    default_timeout = 600 if agent == "gemini" else 900
+
+    if file_count >= file_threshold or line_count >= line_threshold:
+        return max(default_timeout, large_timeout)
+    return default_timeout
+
+
 def _max_worker_budget() -> int:
     """Keep the pool aligned with the currently configured agent/domain matrix."""
     return max(1, len(AGENTS) * max(1, len(DOMAINS)))
@@ -719,12 +762,13 @@ def _run_subagent(
     cwd: str | None = None,
     spec_context: str | None = None,
     graph_context: str | None = None,
+    override_timeout_s: int | None = None,
 ) -> SubAgentResult:
     """Run a single sub-agent: one CLI tool × one domain."""
     if agent == "gemini":
         _gemini_semaphore.acquire()
     try:
-        return _run_subagent_inner(agent, domain_key, base, cwd, spec_context, graph_context)
+        return _run_subagent_inner(agent, domain_key, base, cwd, spec_context, graph_context, override_timeout_s)
     finally:
         if agent == "gemini":
             _gemini_semaphore.release()
@@ -737,6 +781,7 @@ def _run_subagent_inner(
     cwd: str | None = None,
     spec_context: str | None = None,
     graph_context: str | None = None,
+    override_timeout_s: int | None = None,
 ) -> SubAgentResult:
     """Inner implementation — called with gemini semaphore held if needed."""
     t0 = time.time()
@@ -828,7 +873,7 @@ def _run_subagent_inner(
             shutil.rmtree(gemini_home, ignore_errors=True)
 
     max_attempts = 2
-    timeout_s = 600 if agent == "gemini" else 900
+    timeout_s = override_timeout_s if override_timeout_s is not None else (600 if agent == "gemini" else 900)
     run_kwargs: dict[str, Any] = {
         "capture_output": True, "text": True,
         "timeout": timeout_s, "cwd": cwd,
@@ -967,16 +1012,20 @@ def run_review_round(
     """Run one round of parallel reviews: agents × domains."""
     if out is None:
         out = sys.stdout
-    if agents is None or domains is None:
-        config = discover_config(cwd=cwd)
-        if agents is None:
-            agents = [a for a in config.get("agents", list(AGENTS.keys())) if a in AGENTS]
-            agents = [a for a in agents if is_agent_enabled(a)]
-        if domains is None:
-            disabled = set(config.get("disabled_domains", []))
-            domains = [d for d in DOMAINS if d not in disabled]
+    config = discover_config(cwd=cwd)
+    if agents is None:
+        agents = [a for a in config.get("agents", list(AGENTS.keys())) if a in AGENTS]
+        agents = [a for a in agents if is_agent_enabled(a)]
+    if domains is None:
+        disabled = set(config.get("disabled_domains", []))
+        domains = [d for d in DOMAINS if d not in disabled]
     rnd = ReviewRound(round_num=round_num)
     enriched_set = set(enriched_domains or [])
+
+    # Adaptive timeout for large PRs
+    file_count, line_count = _get_diff_stats(base, cwd=cwd)
+    if file_count > 0 or line_count > 0:
+        print(f"  [diff] {file_count} files, {line_count} lines changed", file=out)
 
     total = len(agents) * len(domains)
     print(f"\n{'=' * 60}", file=out)
@@ -997,10 +1046,11 @@ def run_review_round(
                 print(f"  [{agent}] skipped: disabled in config", file=out)
                 continue
             agent_cfg = AGENTS[agent]
+            agent_timeout = _adaptive_timeout(agent, file_count, line_count, config)
             for domain_key in domains:
                 domain_cfg = DOMAINS[domain_key]
                 domain_graph_context = graph_context if domain_key in enriched_set else None
-                future = pool.submit(_run_subagent, agent, domain_key, base, cwd, spec_context, domain_graph_context)
+                future = pool.submit(_run_subagent, agent, domain_key, base, cwd, spec_context, domain_graph_context, agent_timeout)
                 futures[future] = (agent, domain_key)
                 print(
                     f"  [{agent_cfg['emoji']}] {agent} × {domain_cfg['label']}...",
@@ -1060,9 +1110,15 @@ def run_single_agent_round(
     """Run one round dispatching exactly 1 agent per domain."""
     if out is None:
         out = sys.stdout
+    config = discover_config(cwd=cwd)
     rnd = ReviewRound(round_num=round_num)
     enriched_set = set(enriched_domains or [])
     total = len(domain_agent_map)
+
+    # Adaptive timeout for large PRs
+    file_count, line_count = _get_diff_stats(base, cwd=cwd)
+    if file_count > 0 or line_count > 0:
+        print(f"  [diff] {file_count} files, {line_count} lines changed", file=out)
 
     print(f"\n{'=' * 60}", file=out)
     print(
@@ -1085,9 +1141,10 @@ def run_single_agent_round(
                 print(f"  [{agent}] skipped for {domain_key}: disabled in config", file=out)
                 continue
             agent_cfg = AGENTS[agent]
+            agent_timeout = _adaptive_timeout(agent, file_count, line_count, config)
             domain_cfg = DOMAINS.get(domain_key, {"label": domain_key})
             domain_graph_context = graph_context if domain_key in enriched_set else None
-            future = pool.submit(_run_subagent, agent, domain_key, base, cwd, spec_context, domain_graph_context)
+            future = pool.submit(_run_subagent, agent, domain_key, base, cwd, spec_context, domain_graph_context, agent_timeout)
             futures[future] = (agent, domain_key)
             print(
                 f"  [{agent_cfg['emoji']}] {agent} × {domain_cfg['label']}...",

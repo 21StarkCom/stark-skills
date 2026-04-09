@@ -50,7 +50,10 @@
       "GOOGLE_APPLICATION_CREDENTIALS"
     ],
     "max_concurrent_agents": 3,
-    "temp_dir_prefix": "stark-env"
+    "temp_dir_prefix": "stark-env",
+    "large_pr_file_threshold": 40,
+    "large_pr_line_threshold": 3000,
+    "large_pr_timeout_s": 1800
   },
   "self_heal": {
     "enabled": true,

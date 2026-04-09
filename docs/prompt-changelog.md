@@ -2,6 +2,28 @@
 
 Tracks improvements to review prompts based on stark-team-review assessments.
 
+## 2026-04-09 — Adaptive timeout for large PRs, large-diff triage guidance
+
+**Source:** PR #325 in GetEvinced/stark-data-core
+**Prompts dir:** default (PR code review)
+**Assessment:** All 18 sub-agents (2 agents × 9 domains) timed out on a 68-file, 6592-insertion PR. Every finding came from orchestrator runtime verification — prompt-driven agents contributed zero findings.
+
+### Changes Made
+
+| File | Change | Reason |
+|------|--------|--------|
+| `scripts/multi_review.py` | Added `_get_diff_stats()` and `_adaptive_timeout()` functions | Pre-compute PR size, scale timeout from 900s to 1800s for large PRs |
+| `scripts/multi_review.py` | Added `override_timeout_s` param to `_run_subagent` and `_run_subagent_inner` | Plumb adaptive timeout through dispatch chain |
+| `scripts/multi_review.py` | Updated `run_review_round` and `run_single_agent_round` to use adaptive timeout | Both dispatch paths now compute diff stats and pass scaled timeout |
+| `global/prompts/claude/agent.md` | Added "Large-Diff Triage" section after CRITICAL SCOPE RULE | Guide agents to prioritize migrations/auth/schema over tests/docs for large PRs |
+| `global/prompts/codex/agent.md` | Added large-diff triage paragraph | Same guidance, compact format matching Codex prompt style |
+| `global/config.json` | Added `large_pr_file_threshold`, `large_pr_line_threshold`, `large_pr_timeout_s` under runtime | Configurable thresholds (defaults: 40 files, 3000 lines, 1800s timeout) |
+
+### Validation
+- [x] Prompt syntax OK
+- [x] Python compiles
+- [x] Config valid JSON
+
 ## 2026-04-07 — Schema verification, PR context, cross-agent dedup (PR review)
 
 **Source:** PR #237 in GetEvinced/stark-data-core
