@@ -15,8 +15,8 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# Allow importing metrics from the same scripts/ directory
-sys.path.insert(0, os.path.dirname(__file__))
+# Allow importing metrics from the parent scripts/ directory
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import metrics as _metrics
 
 DASHBOARD_DIR = Path.home() / ".claude" / "code-review" / "dashboard"

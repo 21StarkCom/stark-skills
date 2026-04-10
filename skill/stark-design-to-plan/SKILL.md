@@ -235,77 +235,9 @@ rm -rf /tmp/stark-d2p-$$
 
 ## Observability
 
-### Task-based progress (required)
+Standard observability: create task per phase, emit timestamped progress logs (`[HH:MM:SS] Phase N: ...`), record metrics block (plans generated N/3, reviews N/6, winner agent + score, runner-up, synthesis merges, output path, per-phase durations), emit completion event via `emit_queue.py`.
 
-```
-TaskCreate: "Phase 1: Setup — validate design"
-            activeForm: "Validating design document"
-TaskCreate: "Phase 2: Generate — 3 agents producing plans"
-            activeForm: "Generating 3 implementation plans"
-TaskCreate: "Phase 3: Cross-review — 6 reviews"
-            activeForm: "Running 6 cross-reviews"
-TaskCreate: "Phase 4: Synthesize — merge best elements"
-            activeForm: "Synthesizing final plan"
-TaskCreate: "Phase 5: Output — write files"
-            activeForm: "Writing plan and review files"
-```
-
-### Timestamped log lines (required)
-
-```
-[HH:MM:SS] === stark-design-to-plan started ===
-[HH:MM:SS] Phase 1: Setup — done (2s)
-[HH:MM:SS] Phase 2: Generate — dispatching 3 agents
-[HH:MM:SS]   ▸ claude: done — 245 lines [120s]
-[HH:MM:SS]   ▸ codex: done — 198 lines [185s]
-[HH:MM:SS]   ▸ gemini: done — 210 lines [95s]
-[HH:MM:SS] Phase 2: done (3m 05s)
-[HH:MM:SS] Phase 3: Cross-review — dispatching 6 reviews
-[HH:MM:SS]   ▸ codex→claude: 8.2/10 [90s]
-[HH:MM:SS]   ▸ gemini→claude: 8.1/10 [75s]
-[HH:MM:SS]   ▸ claude→codex: 7.5/10 [85s]
-[HH:MM:SS]   ▸ gemini→codex: 7.8/10 [70s]
-[HH:MM:SS]   ▸ claude→gemini: 7.9/10 [80s]
-[HH:MM:SS]   ▸ codex→gemini: 7.5/10 [88s]
-[HH:MM:SS] Phase 3: done (3m 08s)
-[HH:MM:SS] Phase 4: Synthesize — winner: claude (8.2/10)
-[HH:MM:SS] Phase 4: done (30s)
-[HH:MM:SS] Phase 5: Output — done (3s)
-[HH:MM:SS] === stark-design-to-plan completed ===
-```
-
-### Metrics block at end (required)
-
-```
-Metrics
-───────
-Total duration:     Xm Ys
-Phases:
-  Phase 1 (Setup):       2s
-  Phase 2 (Generate):    3m 05s
-    claude:              2m 00s
-    codex:               3m 05s
-    gemini:              1m 35s
-  Phase 3 (Cross-review): 3m 08s
-    Reviews completed:   6/6
-  Phase 4 (Synthesize):  30s
-  Phase 5 (Output):      3s
-
-Plans generated:     3/3
-Reviews completed:   6/6
-Winner:              claude (8.2/10)
-Runner-up:           gemini (7.7/10)
-Synthesis merges:    2 sections from non-winner plans
-Output:              {output_path}
-```
-
-### Improvement flags (required)
-
-- Any agent plan generation > 5 min → flag slow agent
-- Any cross-review parse failure → flag parse issue
-- Score gap < 0.5 between top 2 → "close race — review synthesis carefully"
-- Any dimension score < 5 in winning plan → "winning plan has weak spots in {dimension}"
-- Agent failure in generation → "only N/3 plans generated — consider re-running"
+Improvement flags: plan generation > 5 min → flag slow agent; cross-review parse failure → flag parse issue; score gap < 0.5 → "close race"; any dimension < 5 in winning plan → "weak spots in {dimension}"; agent generation failure → "only N/3 plans".
 
 ## Failure Modes
 

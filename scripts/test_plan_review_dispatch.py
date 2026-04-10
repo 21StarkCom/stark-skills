@@ -13,7 +13,7 @@ import plan_review_dispatch
 
 
 class TestPromptResolution:
-    """Plan review prompts resolve: repo → global, per agent × domain."""
+    """Plan review prompts resolve: repo → global agent → global domains."""
 
     def test_global_prompt_found(self, tmp_path):
         """Global prompt is used when no repo override exists."""
@@ -58,6 +58,73 @@ class TestPromptResolution:
         )
         assert result == ""
 
+    def test_domains_fallback_when_no_agent_file(self, tmp_path):
+        """domains/ is used when no per-agent file exists."""
+        # Create global dir without any agent-specific domain file
+        global_dir = tmp_path / "prompts"
+        global_dir.mkdir(parents=True)
+        (global_dir / "claude").mkdir()  # agent dir exists but no domain file
+        (global_dir / "claude" / "agent.md").write_text("claude preamble")
+
+        # Put the domain file in shared domains/
+        domains_dir = global_dir / "domains"
+        domains_dir.mkdir()
+        (domains_dir / "01-completeness.md").write_text("Shared completeness prompt")
+
+        result = plan_review_dispatch.resolve_plan_prompt(
+            "claude",
+            "01-completeness.md",
+            repo_dir=None,
+            global_prompts_dir=str(global_dir),
+        )
+        assert result == "Shared completeness prompt"
+
+    def test_agent_specific_takes_priority_over_domains(self, tmp_path):
+        """Agent-specific file wins over shared domains/ file."""
+        global_dir = tmp_path / "prompts"
+        global_dir.mkdir(parents=True)
+
+        # Both per-agent and shared domains/ have the file
+        agent_dir = global_dir / "claude"
+        agent_dir.mkdir()
+        (agent_dir / "01-completeness.md").write_text("Agent-specific prompt")
+
+        domains_dir = global_dir / "domains"
+        domains_dir.mkdir()
+        (domains_dir / "01-completeness.md").write_text("Shared domains prompt")
+
+        result = plan_review_dispatch.resolve_plan_prompt(
+            "claude",
+            "01-completeness.md",
+            repo_dir=None,
+            global_prompts_dir=str(global_dir),
+        )
+        assert result == "Agent-specific prompt"
+
+    def test_repo_takes_priority_over_domains(self, tmp_path):
+        """Repo override wins over shared domains/ file."""
+        global_dir = tmp_path / "prompts"
+        global_dir.mkdir(parents=True)
+
+        # Only shared domains/ has the file globally
+        domains_dir = global_dir / "domains"
+        domains_dir.mkdir()
+        (domains_dir / "01-completeness.md").write_text("Shared domains prompt")
+
+        # Repo has an override
+        repo_dir = tmp_path / "repo"
+        repo_prompts = repo_dir / ".code-review" / "plan-prompts" / "claude"
+        repo_prompts.mkdir(parents=True)
+        (repo_prompts / "01-completeness.md").write_text("Repo prompt wins")
+
+        result = plan_review_dispatch.resolve_plan_prompt(
+            "claude",
+            "01-completeness.md",
+            repo_dir=str(repo_dir),
+            global_prompts_dir=str(global_dir),
+        )
+        assert result == "Repo prompt wins"
+
 
 class TestDiscoverPlanDomains:
     """Domain discovery scans first agent dir for numbered .md files."""
@@ -85,6 +152,28 @@ class TestDiscoverPlanDomains:
             global_prompts_dir=str(tmp_path),
         )
         assert domains == {}
+
+    def test_falls_back_to_domains_dir(self, tmp_path):
+        """Falls back to domains/ when no agent directory has domain files."""
+        # Create agent dirs with only agent.md (no domain files)
+        for agent in ["claude", "codex", "gemini"]:
+            agent_dir = tmp_path / agent
+            agent_dir.mkdir()
+            (agent_dir / "agent.md").write_text(f"{agent} preamble")
+
+        # Create shared domains/ directory with domain files
+        domains_dir = tmp_path / "domains"
+        domains_dir.mkdir()
+        (domains_dir / "01-completeness.md").write_text("shared completeness prompt")
+        (domains_dir / "02-feasibility.md").write_text("shared feasibility prompt")
+
+        domains = plan_review_dispatch._discover_plan_domains(
+            global_prompts_dir=str(tmp_path),
+        )
+        assert "completeness" in domains
+        assert "feasibility" in domains
+        assert domains["completeness"]["filename"] == "01-completeness.md"
+        assert domains["completeness"]["order"] == "01"
 
 
 class TestLoadPlanReviewConfig:

@@ -360,21 +360,4 @@ Next steps:
 
 ## Observability
 
-Follow the [Skill Observability Protocol](../../standards/observability.md) for all timing, checkpoints, and metrics reporting.
-
-Additional skill-specific metrics:
-- Phases: skipped (already done) vs executed
-- GitHub Apps: connected count (0-3), per-app status
-- CLAUDE.md: generated / already existed
-- Total onboarding time
-
-## Mistakes to Avoid
-
-- **Don't overwrite an existing CODEOWNERS.** Check first, skip if present.
-- **Don't overwrite an existing CLAUDE.md.** Check first, suggest improver instead.
-- **Don't skip user confirmation** before creating GitHub repo or writing CLAUDE.md.
-- **Don't use `git add -A` after initial commit.** Add files individually.
-- **Don't hardcode repo names.** Auto-detect from directory name or ask.
-- **Don't create draft PRs** — PRs are not draft by default per user preference.
-- **Use `~/git/Evinced/scripts/.venv/bin/python3`** for any script execution. System Python lacks deps.
-- **Org name in API paths is `GetEvinced`** (not `Evinced`).
+Standard observability: create task, emit timestamped progress logs, record metrics block (phases skipped vs executed, GitHub Apps connected count, CLAUDE.md generated/existing, total time), emit completion event via `emit_queue.py`. See [../../standards/observability.md](../../standards/observability.md).

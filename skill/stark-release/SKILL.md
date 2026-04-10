@@ -236,32 +236,4 @@ Commit:     [hash]
 
 ## Observability
 
-Follow the [Skill Observability Protocol](../../standards/observability.md) for all timing, checkpoints, and metrics reporting.
-
-Additional skill-specific metrics:
-- Version: previous → new, bump type (patch/minor/major)
-- CHANGELOG entries: count by category (Fixed/Added/Changed)
-- Tag created, GitHub Release created (yes/no)
-- Push duration
-
-### Event emission
-
-After the release summary, emit a completion event to stark-insights:
-
-```bash
-$SCRIPTS/stark-emit skill_invocation \
-  skill=stark-release duration_s=$TOTAL_SECONDS success=$SUCCESS \
-  version=$VERSION bump_type=$BUMP
-```
-
-Substitute actual values from the run. If stark-insights is not running, this fails silently.
-
-## Mistakes to Avoid
-
-- **Don't skip the version file bump.** Tags are the primary version source, but runtime version files (`__init__.py`, `package.json`, `Cargo.toml`) must match — if you skip them, the deployed app still shows the old version.
-- **Don't bump `pyproject.toml` if it uses `setuptools-scm`.** Dynamic versioning reads from git tags automatically.
-- **Don't set GH_TOKEN.** Releases use the user's PAT via native `gh` auth. Releases should show as created by the user, not a bot.
-- **Don't release with empty [Unreleased].** Always verify content exists.
-- **Don't leave [Unreleased] content behind.** Move ALL entries to the versioned section.
-- **Don't create the tag before committing CHANGELOG.** Commit first, then tag (so the
-  tag points to the commit that contains the updated CHANGELOG).
+Standard observability: create task, emit timestamped logs, record metrics block (version prev→new, bump type, CHANGELOG entries by category, tag/release created, push duration), emit: `$SCRIPTS/stark-emit skill_invocation skill=stark-release duration_s=... success=... version=... bump_type=...`. See [../../standards/observability.md](../../standards/observability.md).

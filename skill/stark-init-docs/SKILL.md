@@ -309,13 +309,7 @@ If nothing was removed, skip the commit.
 
 ## Observability
 
-Follow the [Skill Observability Protocol](../../standards/observability.md) for all timing, checkpoints, and metrics reporting.
-
-Additional skill-specific metrics:
-- Mode(s) executed: template / backfill / upgrade / clean
-- Files: created, skipped (already exists), moved (upgrade), deleted (clean)
-- ADRs generated, specs generated, guides generated (backfill)
-- Internal links updated (upgrade)
+Standard observability: record metrics block (mode executed, files created/skipped/moved/deleted, ADRs/specs/guides generated, internal links updated). See [../../standards/observability.md](../../standards/observability.md).
 
 ## Error Handling
 

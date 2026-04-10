@@ -23,7 +23,7 @@ GATE_P95_LATENCY_MAX_S = 10.0     # p95 triage latency must be < 10s
 
 CRITICAL_HIGH = {"critical", "high"}
 
-SCRIPTS_DIR = Path(__file__).parent
+SCRIPTS_DIR = Path(__file__).resolve().parent.parent  # scripts/
 REPO_ROOT = SCRIPTS_DIR.parent
 DEFAULT_INPUT_DIR = Path("/tmp/shadow-validation/")
 DEFAULT_OUTPUT_FILE = REPO_ROOT / "docs" / "triage-shadow-validation.md"

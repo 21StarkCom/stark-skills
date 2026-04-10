@@ -70,13 +70,7 @@ Then ask: "Want me to apply these improvements?" If yes, edit the files directly
 
 ## Observability
 
-Follow the [Skill Observability Protocol](../../standards/observability.md) for all timing, checkpoints, and metrics reporting.
-
-Additional skill-specific metrics:
-- CLAUDE.md files discovered and analyzed: count
-- Per-file score (1-5) across 5 dimensions
-- Issues found, additions suggested, removals suggested, moves suggested
-- Changes applied (if user approved)
+Standard observability: record metrics block (CLAUDE.md files analyzed, per-file score across 5 dimensions, issues/suggestions/removals/moves, changes applied). See [../../standards/observability.md](../../standards/observability.md).
 
 ## Rules
 

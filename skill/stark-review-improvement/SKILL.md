@@ -82,14 +82,12 @@ Extract each recommendation row from the assessment table. For each:
 
 Classify each action:
 
-
 | Category            | Target Files                     | Examples                                                          |
 | ------------------- | -------------------------------- | ----------------------------------------------------------------- |
 | `prompt-edit`       | `$PROMPT_ROOT/{agent}/{file}.md` | Tighten scope, add instructions, fix output format                |
 | `orchestrator-edit` | `$ORCHESTRATOR`                  | Pass variables to agents, add post-processing, cross-domain dedup |
 | `config-edit`       | `$CONFIG` or `$ORG_CONFIG`       | Add `disabled_paths`, `severity_overrides`, `disabled_domains`    |
 | `no-action`         | —                                | Observation only, no concrete fix available                       |
-
 
 ### 1.3 Confirm with user
 
@@ -105,7 +103,6 @@ Read the target prompt file. Apply the minimum edit needed.
 
 **Common fixes for PR code review prompts (`--prompts-dir` not set):**
 
-
 | Issue                                 | Fix Location                                 | What to Change                                                                                             |
 | ------------------------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | Agent reviews files outside PR diff   | `agent.md` "How You Receive Context" section | Replace hardcoded `main` with `<base>` placeholder; add "ONLY review files that appear in the diff output" |
@@ -115,9 +112,7 @@ Read the target prompt file. Apply the minimum edit needed.
 | Output not parseable as JSON          | `agent.md` output rules                      | Strengthen JSON-only instruction                                                                           |
 | Cross-domain duplicate findings       | Not a prompt fix → `orchestrator-edit`       | —                                                                                                          |
 
-
 **Common fixes for design/plan review prompts (`--prompts-dir design-review` or `plan-review`):**
-
 
 | Issue                                                              | Fix Location                    | What to Change                                                                                                          |
 | ------------------------------------------------------------------ | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
@@ -127,7 +122,6 @@ Read the target prompt file. Apply the minimum edit needed.
 | Over-engineering for scale (low-volume system gets scale critique) | `07-scalability.md`             | Add: "Consider the stated traffic volume. Do not recommend horizontal scaling for systems under 100 runs/day."          |
 | False positives on explicit design decisions                       | Domain prompt (relevant domain) | Add: "If the design explicitly addresses this concern in another section, do not flag it."                              |
 | Findings about missing features that are out of scope              | `01-completeness.md`            | Add: "Only flag missing items that are within the stated scope. Out-of-scope omissions are not completeness issues."    |
-
 
 **Rules for prompt edits:**
 
@@ -143,23 +137,19 @@ Read the relevant function. Apply targeted fix. The orchestrator depends on `--p
 
 **For PR code review (`multi_review.py`):**
 
-
 | Issue                            | Where                           | Fix                                          |
 | -------------------------------- | ------------------------------- | -------------------------------------------- |
 | Agent doesn't receive `base` ref | `_run_subagent()`               | Inject `{base}` into the prompt string       |
 | No file exclusion filtering      | `_run_subagent()` or new helper | Filter diff output before passing to agents  |
 | Missing post-processing (dedup)  | After `_parse_findings()`       | Add cross-agent dedup by file+line proximity |
 
-
 **For design/plan review (`plan_review_dispatch.py`):**
-
 
 | Issue                                      | Where                                 | Fix                                                                                    |
 | ------------------------------------------ | ------------------------------------- | -------------------------------------------------------------------------------------- |
 | Cross-domain duplicate findings            | After collecting all results          | Add dedup: same section + same concern across domains → keep highest-severity instance |
 | Agent produces too many low-value findings | Prompt construction in `_run_agent()` | Inject max-findings instruction: "Return at most N findings, prioritized by severity"  |
 | Findings reference wrong section numbers   | Prompt construction                   | Include document table of contents as context                                          |
-
 
 **Rules for orchestrator edits:**
 
@@ -242,13 +232,7 @@ Do NOT push unless the user explicitly asks.
 
 ## Observability
 
-Follow the [Skill Observability Protocol](../../standards/observability.md) for all timing, checkpoints, and metrics reporting.
-
-Additional skill-specific metrics:
-
-- Action items: total parsed, approved, applied (by category: prompt/orchestrator/config)
-- Validation: syntax checks passed/failed
-- Files modified: count by type (prompt, orchestrator, config)
+Standard observability: record metrics block (action items parsed/approved/applied by category, validation syntax checks, files modified by type). See [../../standards/observability.md](../../standards/observability.md).
 
 ## Important Constraints
 
