@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from string import Template
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from stark_persona import PersonaRecord, load_roster, ROSTER_PATH
 
 # ---------------------------------------------------------------------------

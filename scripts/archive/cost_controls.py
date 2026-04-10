@@ -12,8 +12,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
+# Allow importing from the parent scripts/ directory
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # ---------------------------------------------------------------------------
 # Paths (module-level constants so tests can patch them)

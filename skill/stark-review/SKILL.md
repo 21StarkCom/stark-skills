@@ -183,24 +183,7 @@ git worktree remove "$WORKTREE" --force
 
 ## Observability
 
-Follow the [Skill Observability Protocol](../../standards/observability.md).
-
-```
-[HH:MM:SS] === stark-review started ===
-[HH:MM:SS] Phase 1: Setup — PR #42, repo GetEvinced/foo, agent: codex
-[HH:MM:SS] Phase 2: Review — 9 domains dispatched
-[HH:MM:SS] Phase 2: Review — 9 complete (8 succeeded, 1 failed) — 45s
-[HH:MM:SS] Phase 3: 4 findings (1C/2H/1M)
-[HH:MM:SS] Phase 4: Fixing 3 findings...
-[HH:MM:SS] === stark-review completed ===
-```
-
-Emit telemetry:
-```bash
-skill-telemetry.sh stark-review $TOTAL_SECONDS $SUCCESS \
-  pr_number=$PR_NUM findings_total=$TOTAL agent=$AGENT \
-  domains=$N_DOMAINS duration_s=$TOTAL_SECONDS
-```
+Standard observability: timestamped progress logs, record metrics block (PR number, agent used, domains succeeded/failed, findings by severity, fix rounds, duration). Emit completion event via `emit_queue.py`. See [../../standards/observability.md](../../standards/observability.md).
 
 ## Failure Modes
 

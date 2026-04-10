@@ -104,41 +104,70 @@ def validate(event: dict) -> list[str]:
 # SQLite queue
 # ---------------------------------------------------------------------------
 
+_db_initialized: dict[str, float] = {}
+
+
+def _needs_init(db_path: str, cache: dict[str, float]) -> bool:
+    """Check if the DB at *db_path* needs DDL initialization.
+
+    Tracks the inode of the file when DDL was last run.  If the file was
+    deleted and recreated (different inode or missing), we re-run DDL.
+    """
+    if db_path not in cache:
+        return True
+    try:
+        current_ino = os.stat(db_path).st_ino
+    except OSError:
+        return True
+    return current_ino != cache[db_path]
+
+
+def _mark_initialized(db_path: str, cache: dict[str, float]) -> None:
+    """Record the inode of *db_path* so we can detect recreation."""
+    try:
+        cache[db_path] = os.stat(db_path).st_ino
+    except OSError:
+        cache.pop(db_path, None)
+
+
 def _get_db() -> sqlite3.Connection:
     """Open (and initialize if needed) the queue database."""
     QUEUE_DIR.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(str(QUEUE_DB), timeout=10)
+    db_path = str(QUEUE_DB)
+    db = sqlite3.connect(db_path, timeout=10)
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA busy_timeout=5000")
-    db.executescript("""
-        CREATE TABLE IF NOT EXISTS pending (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            dedupe_key  TEXT UNIQUE,
-            event_json  TEXT NOT NULL,
-            created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-            retries     INTEGER NOT NULL DEFAULT 0,
-            last_error  TEXT
-        );
-        CREATE TABLE IF NOT EXISTS dead_letter (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            dedupe_key  TEXT,
-            event_json  TEXT NOT NULL,
-            created_at  TEXT NOT NULL,
-            failed_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-            retries     INTEGER NOT NULL,
-            last_error  TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_pending_created ON pending(created_at);
-        CREATE TABLE IF NOT EXISTS inflight (
-            tool_use_id TEXT PRIMARY KEY,
-            tool_name   TEXT NOT NULL,
-            started_at  REAL NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS session_stats (
-            key   TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        );
-    """)
+    if _needs_init(db_path, _db_initialized):
+        db.executescript("""
+            CREATE TABLE IF NOT EXISTS pending (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                dedupe_key  TEXT UNIQUE,
+                event_json  TEXT NOT NULL,
+                created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                retries     INTEGER NOT NULL DEFAULT 0,
+                last_error  TEXT
+            );
+            CREATE TABLE IF NOT EXISTS dead_letter (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                dedupe_key  TEXT,
+                event_json  TEXT NOT NULL,
+                created_at  TEXT NOT NULL,
+                failed_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                retries     INTEGER NOT NULL,
+                last_error  TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_pending_created ON pending(created_at);
+            CREATE TABLE IF NOT EXISTS inflight (
+                tool_use_id TEXT PRIMARY KEY,
+                tool_name   TEXT NOT NULL,
+                started_at  REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS session_stats (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+        """)
+        _mark_initialized(db_path, _db_initialized)
     return db
 
 
@@ -210,31 +239,37 @@ def drain(batch_size: int = DRAIN_BATCH_SIZE) -> dict:
 BUFFER_PATH = Path(os.environ.get("BUFFER_PATH", Path.home() / ".stark-insights" / "buffer.db"))
 
 
+_buffer_db_initialized: dict[str, float] = {}
+
+
 def _get_buffer_db() -> sqlite3.Connection:
     """Open the buffer database (creating schema if needed)."""
     BUFFER_PATH.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(str(BUFFER_PATH), timeout=10)
+    buffer_path = str(BUFFER_PATH)
+    db = sqlite3.connect(buffer_path, timeout=10)
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA busy_timeout=5000")
-    db.executescript("""
-        CREATE TABLE IF NOT EXISTS events (
-            id TEXT PRIMARY KEY,
-            dedupe_key TEXT UNIQUE,
-            session_id TEXT,
-            normalized_session_id TEXT,
-            type TEXT NOT NULL,
-            timestamp TEXT NOT NULL,
-            cli TEXT,
-            user_id TEXT,
-            project TEXT,
-            payload TEXT NOT NULL,
-            schema_version INTEGER DEFAULT 1,
-            source TEXT,
-            synced_at TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_events_unsynced_timestamp
-            ON events (synced_at, timestamp);
-    """)
+    if _needs_init(buffer_path, _buffer_db_initialized):
+        db.executescript("""
+            CREATE TABLE IF NOT EXISTS events (
+                id TEXT PRIMARY KEY,
+                dedupe_key TEXT UNIQUE,
+                session_id TEXT,
+                normalized_session_id TEXT,
+                type TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                cli TEXT,
+                user_id TEXT,
+                project TEXT,
+                payload TEXT NOT NULL,
+                schema_version INTEGER DEFAULT 1,
+                source TEXT,
+                synced_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_events_unsynced_timestamp
+                ON events (synced_at, timestamp);
+        """)
+        _mark_initialized(buffer_path, _buffer_db_initialized)
     return db
 
 
@@ -243,8 +278,6 @@ def drain_to_buffer(batch_size: int = DRAIN_BATCH_SIZE) -> dict:
 
     Returns {sent, failed}.
     """
-    import uuid as _uuid
-
     queue_db = _get_db()
     buffer_db = _get_buffer_db()
     stats = {"sent": 0, "failed": 0}

@@ -114,8 +114,7 @@ class TestGraphQL(unittest.TestCase):
 
 
 class TestTokenSelection(unittest.TestCase):
-    @patch("github_app.requests.post")
-    @patch("github_app._make_jwt", return_value="jwt-token")
+    @patch("github_app._mint_installation_token", return_value=("token-for-claude", 9999999999.0))
     @patch("github_app._get_private_key", return_value="private-key")
     @patch("github_app._write_cached_token")
     @patch("github_app._read_cached_token", return_value=None)
@@ -124,22 +123,16 @@ class TestTokenSelection(unittest.TestCase):
         mock_read_cached: MagicMock,
         mock_write_cached: MagicMock,
         mock_get_private_key: MagicMock,
-        mock_make_jwt: MagicMock,
-        mock_post: MagicMock,
+        mock_mint: MagicMock,
     ) -> None:
-        mock_post.return_value = MagicMock(
-            status_code=201,
-            json=lambda: {"token": "token-for-claude", "expires_at": "2030-01-01T00:00:00Z"},
-        )
-
         with patch.object(github_app, "_active_app", "stark-codex"):
             token = github_app.get_token(app="stark-claude")
             self.assertEqual(token, "token-for-claude")
             self.assertEqual(github_app._active_app, "stark-codex")
 
-        mock_read_cached.assert_called_once_with("stark-claude")
+        mock_read_cached.assert_called_once()
         mock_get_private_key.assert_called_once_with("stark-claude")
-        mock_make_jwt.assert_called_once_with("private-key", "stark-claude")
+        mock_mint.assert_called_once()
         mock_write_cached.assert_called_once()
 
     @patch("github_app._headers", return_value={"Authorization": "Bearer fake", "Accept": "application/vnd.github+json"})

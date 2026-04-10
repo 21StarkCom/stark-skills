@@ -59,162 +59,32 @@ try:
 except ImportError:  # pragma: no cover - backward compat for older installs
     build_agent_env = None
 
-try:
-    from config_loader import get_model_id as _config_get_model_id, is_agent_enabled
-except ImportError:  # pragma: no cover - backward compat for older installs
-    def _config_get_model_id(agent: str) -> str | None:
-        return None
-
-    def is_agent_enabled(agent: str) -> bool:
-        return True
+from dispatcher_base import (
+    DEFAULT_CONFIG,
+    AGENTS as _BASE_AGENTS,
+    discover_config,
+    resolve_model as _resolve_model,
+    is_agent_enabled,
+    discover_domains as _base_discover_domains,
+    resolve_prompt as _base_resolve_prompt,
+)
 
 # ── Config ──────────────────────────────────────────────────────────────
-
-
 
 SCRIPTS_DIR = Path(__file__).parent
 PYTHON = str(SCRIPTS_DIR / ".venv" / "bin" / "python3")
 GITHUB_APP = str(SCRIPTS_DIR / "github_app.py")
 GLOBAL_PROMPTS_DIR = Path.home() / ".claude" / "code-review" / "prompts"
 
-# Agent definitions — CLI tool + GitHub App mapping
-_ALL_AGENTS = {
-    "claude": {
-        "app": "stark-claude",
-        "emoji": "\U0001f9e0",
-        "label": "Claude",
-    },
-    "codex": {
-        "app": "stark-codex",
-        "emoji": "\U0001f4bb",
-        "label": "Codex",
-    },
-    "gemini": {
-        "app": "stark-gemini",
-        "emoji": "\u2728",
-        "label": "Gemini",
-    },
-}
-AGENTS = {agent: cfg for agent, cfg in _ALL_AGENTS.items() if is_agent_enabled(agent)}
-if not AGENTS:
-    AGENTS = dict(_ALL_AGENTS)
-
-# ── Hierarchical config ───────────────────────────────────────────────
-
-DEFAULT_CONFIG = {
-    "agents": ["claude", "codex", "gemini"],
-    "fix_threshold": "medium",
-    "test_command": None,
-    "build_command": None,
-    "verify_before_clean": True,
-    "disabled_domains": [],
-    "extra_domains": [],
-    "context_files": [],
-    "domain_agents": {},
-    "severity_overrides": {},
-    "github_apps": {
-        "claude": "stark-claude",
-        "codex": "stark-codex",
-        "gemini": "stark-gemini",
-    },
-}
+# AGENTS: filtered by is_agent_enabled, sourced from dispatcher_base
+AGENTS = _BASE_AGENTS
 
 CODEX_REASONING_CONFIG = CODEX_REASONING_EFFORT_HIGH  # re-exported for backward compat
 
 
-def _resolve_model(agent: str) -> str:
-    if agent == "claude":
-        return _config_get_model_id(agent) or "claude"
-    if agent == "codex":
-        return _config_get_model_id(agent) or CODEX_MODEL
-    if agent == "gemini":
-        return _config_get_model_id(agent) or GEMINI_MODEL
-    raise ValueError(f"Unknown agent: {agent}")
-
-REPLACE_FIELDS = {
-    "agents",
-    "fix_threshold",
-    "test_command",
-    "build_command",
-    "verify_before_clean",
-    "disabled_domains",
-    "context_files",
-}
-ADDITIVE_FIELDS = {"extra_domains"}
-DEEP_MERGE_FIELDS = {"severity_overrides", "github_apps", "domain_agents", "triage"}
-
-
-def _deep_merge(base: dict, override: dict) -> dict:
-    result = dict(base)
-    for k, v in override.items():
-        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
-            result[k] = _deep_merge(result[k], v)
-        else:
-            result[k] = v
-    return result
-
-
-def _find_config_chain(cwd: str, global_dir: str) -> list[Path]:
-    """Walk from cwd up to ~ looking for .code-review/config.json, then global."""
-    chain = []
-    home = Path.home()
-    current = Path(cwd).resolve()
-    while current != home and current != current.parent:
-        cfg = current / ".code-review" / "config.json"
-        if cfg.exists():
-            chain.append(cfg)
-        current = current.parent
-    global_cfg = Path(global_dir) / "config.json"
-    if global_cfg.exists():
-        chain.append(global_cfg)
-    return chain
-
-
-def discover_config(cwd: str | None = None, global_dir: str | None = None) -> dict:
-    """Discover and merge config: repo -> org -> global."""
-    if cwd is None:
-        cwd = os.getcwd()
-    if global_dir is None:
-        global_dir = str(Path.home() / ".claude" / "code-review")
-
-    chain = _find_config_chain(cwd, global_dir)
-    merged = dict(DEFAULT_CONFIG)
-    for cfg_path in reversed(chain):
-        try:
-            layer = json.loads(cfg_path.read_text())
-        except (json.JSONDecodeError, OSError):
-            continue
-        for key, val in layer.items():
-            if key in REPLACE_FIELDS:
-                merged[key] = val
-            elif key in ADDITIVE_FIELDS:
-                existing = merged.get(key, [])
-                merged[key] = list(set(existing) | set(val))
-            elif key in DEEP_MERGE_FIELDS:
-                merged[key] = _deep_merge(merged.get(key, {}), val)
-            else:
-                merged[key] = val
-    return merged
-
-
 def _discover_domains() -> dict[str, dict[str, Any]]:
-    """Discover domains from prompt files in any agent directory."""
-    domains: dict[str, dict[str, Any]] = {}
-    for agent in AGENTS:
-        agent_dir = GLOBAL_PROMPTS_DIR / agent
-        if not agent_dir.exists():
-            continue
-        for f in sorted(agent_dir.glob("[0-9]*.md")):
-            key = f.stem.split("-", 1)[1] if "-" in f.stem else f.stem
-            if key not in domains:
-                domains[key] = {
-                    "order": f.stem.split("-")[0] if "-" in f.stem else "99",
-                    "label": key.replace("-", " ").title(),
-                    "filename": f.name,
-                }
-        if domains:
-            break
-    return domains
+    """Discover PR review domains — delegates to dispatcher_base.discover_domains."""
+    return _base_discover_domains(GLOBAL_PROMPTS_DIR, agents=list(AGENTS))
 
 
 DOMAINS = _discover_domains()
@@ -486,26 +356,42 @@ class ReviewRound:
 # ── Prompt loading ─────────────────────────────────────────────────────
 
 
-def resolve_prompt(
-    agent: str, filename: str, cwd: str | None = None, global_prompts_dir: str | None = None
-) -> str:
-    """Resolve a prompt file: repo → org → global."""
+def _find_repo_root(cwd: str | None = None) -> str | None:
+    """Walk from *cwd* up to $HOME looking for .code-review/prompts/.
+
+    Returns the first directory that contains a `.code-review/prompts/`
+    subdirectory, or ``None`` if none is found.  This preserves the legacy
+    walk that picks up org-level prompt overrides (e.g.
+    ``~/git/Evinced/.code-review/prompts/``).
+    """
     if cwd is None:
         cwd = os.getcwd()
-    if global_prompts_dir is None:
-        global_prompts_dir = str(GLOBAL_PROMPTS_DIR)
-
     home = Path.home()
     current = Path(cwd).resolve()
     while current != home and current != current.parent:
-        candidate = current / ".code-review" / "prompts" / agent / filename
-        if candidate.exists():
-            return candidate.read_text().strip()
+        if (current / ".code-review" / "prompts").is_dir():
+            return str(current)
         current = current.parent
-    global_path = Path(global_prompts_dir) / agent / filename
-    if global_path.exists():
-        return global_path.read_text().strip()
-    return ""
+    return None
+
+
+def resolve_prompt(
+    agent: str, filename: str, cwd: str | None = None, global_prompts_dir: str | None = None
+) -> str:
+    """Resolve a prompt file: repo/org → global agent → global domains/.
+
+    Delegates to dispatcher_base.resolve_prompt for the three-tier resolution
+    (repo override, global agent dir, shared domains/ fallback), but first
+    discovers the repo root by walking from *cwd* up to $HOME.
+    """
+    if global_prompts_dir is None:
+        global_prompts_dir = str(GLOBAL_PROMPTS_DIR)
+    repo_root = _find_repo_root(cwd)
+    return _base_resolve_prompt(
+        agent, filename,
+        prompts_dir=global_prompts_dir,
+        repo_dir=repo_root,
+    )
 
 
 def _load_agent_preamble(agent: str, cwd: str | None = None) -> str:
@@ -514,13 +400,22 @@ def _load_agent_preamble(agent: str, cwd: str | None = None) -> str:
 
 
 def _load_domain_prompt(agent: str, domain_key: str, cwd: str | None = None) -> str:
-    """Load the domain-specific review prompt for a given agent."""
+    """Load the domain-specific review prompt for a given agent.
+
+    Resolution order (via dispatcher_base.resolve_prompt):
+        1. Repo/org override: {repo_root}/.code-review/prompts/{agent}/{filename}
+        2. Global agent dir:  ~/.claude/code-review/prompts/{agent}/{filename}
+        3. Shared domains/:   ~/.claude/code-review/prompts/domains/{filename}
+        4. Cross-agent fallback (legacy): try other agents' prompts
+        5. Generic fallback string
+    """
     domain = DOMAINS.get(domain_key)
     if not domain:
         return f"Review this code for {domain_key} issues. {FINDINGS_FORMAT}"
     content = resolve_prompt(agent, domain["filename"], cwd=cwd)
     if content:
         return content
+    # Cross-agent fallback (legacy behavior)
     for fallback_agent in AGENTS:
         if fallback_agent == agent:
             continue
@@ -763,12 +658,13 @@ def _run_subagent(
     spec_context: str | None = None,
     graph_context: str | None = None,
     override_timeout_s: int | None = None,
+    prompt_cache: dict[tuple[str, str], str] | None = None,
 ) -> SubAgentResult:
     """Run a single sub-agent: one CLI tool × one domain."""
     if agent == "gemini":
         _gemini_semaphore.acquire()
     try:
-        return _run_subagent_inner(agent, domain_key, base, cwd, spec_context, graph_context, override_timeout_s)
+        return _run_subagent_inner(agent, domain_key, base, cwd, spec_context, graph_context, override_timeout_s, prompt_cache)
     finally:
         if agent == "gemini":
             _gemini_semaphore.release()
@@ -782,6 +678,7 @@ def _run_subagent_inner(
     spec_context: str | None = None,
     graph_context: str | None = None,
     override_timeout_s: int | None = None,
+    prompt_cache: dict[tuple[str, str], str] | None = None,
 ) -> SubAgentResult:
     """Inner implementation — called with gemini semaphore held if needed."""
     t0 = time.time()
@@ -793,8 +690,12 @@ def _run_subagent_inner(
             error="agent_disabled",
             duration_s=0.0,
         )
-    preamble = _load_agent_preamble(agent, cwd=cwd)
-    domain_prompt = _load_domain_prompt(agent, domain_key, cwd=cwd)
+    if prompt_cache:
+        preamble = prompt_cache.get((agent, "__preamble__"), "")
+        domain_prompt = prompt_cache.get((agent, domain_key), "")
+    else:
+        preamble = _load_agent_preamble(agent, cwd=cwd)
+        domain_prompt = _load_domain_prompt(agent, domain_key, cwd=cwd)
     parts = []
     if preamble:
         parts.append(preamble)
@@ -1039,6 +940,13 @@ def run_review_round(
         print("  No enabled agents available for this round.", file=out)
         return rnd
 
+    # Pre-load all prompts (avoids per-worker file I/O)
+    prompt_cache: dict[tuple[str, str], str] = {}
+    for agent in agents:
+        prompt_cache[(agent, "__preamble__")] = _load_agent_preamble(agent, cwd=cwd)
+        for domain_key in domains:
+            prompt_cache[(agent, domain_key)] = _load_domain_prompt(agent, domain_key, cwd=cwd)
+
     with ThreadPoolExecutor(max_workers=min(total, _max_worker_budget())) as pool:
         futures = {}
         for agent in agents:
@@ -1050,7 +958,7 @@ def run_review_round(
             for domain_key in domains:
                 domain_cfg = DOMAINS[domain_key]
                 domain_graph_context = graph_context if domain_key in enriched_set else None
-                future = pool.submit(_run_subagent, agent, domain_key, base, cwd, spec_context, domain_graph_context, agent_timeout)
+                future = pool.submit(_run_subagent, agent, domain_key, base, cwd, spec_context, domain_graph_context, agent_timeout, prompt_cache)
                 futures[future] = (agent, domain_key)
                 print(
                     f"  [{agent_cfg['emoji']}] {agent} × {domain_cfg['label']}...",
@@ -1420,8 +1328,8 @@ def _emit_event(event: dict) -> None:
     try:
         from emit_queue import enqueue
         enqueue(event)
-    except Exception:
-        pass  # JSON on disk is the fallback; scraper will pick it up
+    except Exception as exc:
+        print(f"  [!] Failed to emit event: {exc}", file=sys.stderr)
 
 
 def _make_event(event_type: str, payload: dict, *, project: str | None = None, dedupe_key: str) -> dict:

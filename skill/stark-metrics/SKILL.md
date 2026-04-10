@@ -57,14 +57,7 @@ After presenting the report, check for meta-observations:
 
 ## Observability
 
-Follow the [Skill Observability Protocol](../../standards/observability.md) for all timing, checkpoints, and metrics reporting.
-
-Additional skill-specific metrics:
-
-- Records loaded: count by skill type
-- Filters applied: repo, skill, date
-- Report sections generated
-- Recommendations count
+Standard observability: record metrics block (records loaded by skill type, filters applied, sections generated, recommendations count). See [../../standards/observability.md](../../standards/observability.md).
 
 ## Failure Modes
 

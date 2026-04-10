@@ -45,36 +45,42 @@
     },
     {
       "id": "e8_step5_to_step6",
-      "label": null,
+      "label": "Yes",
       "source": "step5",
       "target": "step6"
     },
     {
-      "id": "e9_step6_to_step7",
+      "id": "e9_step5_to_step7",
+      "label": "No",
+      "source": "step5",
+      "target": "step7"
+    },
+    {
+      "id": "e10_step6_to_step7",
       "label": null,
       "source": "step6",
       "target": "step7"
     },
     {
-      "id": "e10_step7_to_step8",
+      "id": "e11_step7_to_step8",
       "label": null,
       "source": "step7",
       "target": "step8"
     },
     {
-      "id": "e11_step8_to_step9",
+      "id": "e12_step8_to_step9",
       "label": null,
       "source": "step8",
       "target": "step9"
     },
     {
-      "id": "e12_step9_to_step10",
+      "id": "e13_step9_to_step10",
       "label": null,
       "source": "step9",
       "target": "step10"
     },
     {
-      "id": "e13_step10_to_failure_modes_11",
+      "id": "e14_step10_to_failure_modes_11",
       "label": null,
       "source": "step10",
       "target": "failure_modes_11"
@@ -106,7 +112,7 @@
       "id": "step3",
       "label": "Step 3: Review Unreleased Changes",
       "position": {
-        "x": 270,
+        "x": 130,
         "y": 270
       },
       "type": "decision"
@@ -116,7 +122,7 @@
       "id": "step4",
       "label": "Step 4: Determine Bump Type",
       "position": {
-        "x": 130,
+        "x": 280,
         "y": 382
       },
       "type": "decision"
@@ -124,19 +130,19 @@
     {
       "category": null,
       "id": "step5",
-      "label": "Step 5: Bump `__version__",
+      "label": "Step 5: Bump Version in Source",
       "position": {
-        "x": 290,
+        "x": 140,
         "y": 494
       },
-      "type": "process"
+      "type": "decision"
     },
     {
       "category": null,
       "id": "step6",
       "label": "Step 6: Update CHANGELOG",
       "position": {
-        "x": 210,
+        "x": 300,
         "y": 606
       },
       "type": "process"
@@ -146,7 +152,7 @@
       "id": "step7",
       "label": "Step 7: Create Tag",
       "position": {
-        "x": 210,
+        "x": 220,
         "y": 718
       },
       "type": "output"
@@ -156,7 +162,7 @@
       "id": "step8",
       "label": "Step 8: Push",
       "position": {
-        "x": 210,
+        "x": 220,
         "y": 830
       },
       "type": "process"
@@ -166,7 +172,7 @@
       "id": "step9",
       "label": "Step 9: GitHub Release",
       "position": {
-        "x": 210,
+        "x": 220,
         "y": 942
       },
       "type": "output"
@@ -176,7 +182,7 @@
       "id": "step10",
       "label": "Step 10: Summary",
       "position": {
-        "x": 210,
+        "x": 220,
         "y": 1054
       },
       "type": "end"
@@ -186,7 +192,7 @@
       "id": "failure_modes_11",
       "label": "Failure Modes",
       "position": {
-        "x": 210,
+        "x": 220,
         "y": 1166
       },
       "type": "end"

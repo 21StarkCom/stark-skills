@@ -109,13 +109,7 @@ If `--keep-all` was used, also note the output directory containing all competit
 
 ## Observability
 
-Follow the [Skill Observability Protocol](../../standards/observability.md) for all timing, checkpoints, and metrics reporting.
-
-Additional skill-specific metrics:
-- Competitors dispatched / succeeded / failed
-- Evaluation strategy and factor count
-- Winner ID and score
-- Total duration
+Standard observability: record metrics block (competitors dispatched/succeeded/failed, evaluation strategy and factor count, winner ID + score, total duration). See [../../standards/observability.md](../../standards/observability.md).
 
 ## Failure Modes
 

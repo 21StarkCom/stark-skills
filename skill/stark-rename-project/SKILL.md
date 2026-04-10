@@ -197,13 +197,7 @@ Print results: files changed per repo, verification pass/fail, residual referenc
 
 ## Observability
 
-Follow the [Skill Observability Protocol](../../standards/observability.md) for all timing, checkpoints, and metrics reporting.
-
-Additional skill-specific metrics:
-- GitHub rename: API call duration, success/failure
-- Files modified: count in renamed project, count per sibling repo
-- Symlinks: removed (old), recreated (new)
-- Verification: checks passed/failed, residual references found
+Standard observability: record metrics block (GitHub rename duration, files modified per repo, symlinks removed/recreated, verification checks passed/failed, residual references). See [../../standards/observability.md](../../standards/observability.md).
 
 ## Scope & Pitfalls
 

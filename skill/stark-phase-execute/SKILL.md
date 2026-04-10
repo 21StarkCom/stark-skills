@@ -26,21 +26,20 @@ Autonomous execution engine for development phases. Takes a plan slug (or plan f
 
 After all tasks: regression tests, version bump, deploy, dashboard, memory update, prompt improvement detection.
 
-**This skill overrides all user-confirmation gates in sub-workflows.** No "wait for approval", no "proceed anyway?", no "are you sure?" — every decision is made autonomously. The user triggers it and walks away.
+**This skill overrides all user-confirmation gates in sub-workflows.** No "wait for approval", no "proceed anyway?", no "are you sure?" — every decision is made autonomously.
 
 ## Prerequisites
 
-This skill requires full autonomy. Before triggering, ensure:
-- Claude Code is running with `--dangerouslySkipPermissions` or equivalent tool allowlists
+- Claude Code running with `--dangerouslySkipPermissions` or equivalent tool allowlists
 - `gh auth status` shows an active user PAT
 - `claude`, `codex`, `gemini`, `gh` are all in PATH
-- GitHub Apps (stark-claude, stark-codex, stark-gemini) are installed on the target repo
+- GitHub Apps (stark-claude, stark-codex, stark-gemini) installed on the target repo
 
 ## Arguments
 
 | Arg | Default | Description |
 |-----|---------|-------------|
-| `<plan-slug>` | required | Plan slug — matches the `plan:{SLUG}` label on issues. If no issues exist yet, auto-runs `/stark-plan-to-tasks` first. Can also be a path to a plan file (auto-detected). |
+| `<plan-slug>` | required | Plan slug matching `plan:{SLUG}` label on issues. Can also be a path to a plan file (auto-detected). If no issues exist, auto-runs `/stark-plan-to-tasks`. |
 | `--dry-run` | off | Walk the plan, show what would happen, don't execute |
 | `--skip-deploy` | off | Skip deployment after release |
 | `--skip-release` | off | Skip version bump and release |
@@ -58,28 +57,11 @@ PYTHON  = $SCRIPTS/.venv/bin/python3
 HISTORY = ~/.claude/code-review/history
 ```
 
-Detect repo (or use `--repo` override):
-
-```bash
-REMOTE=$(git remote get-url origin)
-ORG_REPO=<parse org/repo from REMOTE>
-ORG=$(echo $ORG_REPO | cut -d/ -f1)
-REPO=$(echo $ORG_REPO | cut -d/ -f2)
-```
+Detect repo (or use `--repo` override): parse `org/repo` from `git remote get-url origin`.
 
 Resolve plan slug from argument:
-
-- If the argument is a file path (contains `/` or ends in `.md`):
-  - Store as `PLAN_FILE` for potential use in 0.3
-  - Extract slug from filename using the **same algorithm as `/stark-plan-to-tasks`** (§slug-derivation):
-    1. Strip directory and `.md` extension
-    2. Strip known suffixes: remove trailing `-design`, `-spec`, or `-plan` (only the final suffix, e.g., `api-design-plan` → `api-design`)
-    3. Keep the date prefix
-    4. If slug exceeds 50 characters, truncate to 47 and append a 3-character hash suffix (first 3 chars of MD5 of full slug)
-  - Example: `docs/superpowers/plans/2026-03-23-stark-signals.md` → `SLUG=2026-03-23-stark-signals`
-  - **MUST match `/stark-plan-to-tasks`** — if you change this, change both skills.
-- Otherwise: treat as slug directly (`SLUG=$1`)
-- Track the resolved plan path as `plan_path` whenever a plan file is provided or discovered later.
+- If the argument is a file path (contains `/` or ends in `.md`): store as `PLAN_FILE`, extract slug from filename: strip directory and `.md` extension, strip trailing `-design`, `-spec`, or `-plan` suffix, keep date prefix. If slug exceeds 50 characters, truncate to 47 and append first 3 chars of MD5 hash. Example: `docs/superpowers/plans/2026-03-23-stark-signals.md` → `SLUG=2026-03-23-stark-signals`. **MUST match `/stark-plan-to-tasks`** slug algorithm.
+- Otherwise: treat as slug directly.
 
 ---
 
@@ -88,6 +70,8 @@ Resolve plan slug from argument:
 Capture T0. Create the observability log.
 
 ### 0.1 Validate environment
+
+Pull latest main, verify clean state, confirm toolchain:
 
 ```bash
 git checkout main && git pull --rebase origin main
@@ -98,84 +82,43 @@ gh auth status                  # must show active account
 $PYTHON $SCRIPTS/github_app.py --app stark-claude token >/dev/null
 ```
 
-If any check fails → stop and report. Don't proceed with a broken environment.
+If any check fails → stop and report.
 
 ### 0.2 Fetch plan tasks
 
-#### Project-based task fetching (preferred)
+**Project-based (preferred):** If `.github/project-config.json` exists, use bot token and `github_projects.get_items(config['project_id'], Status='Ready for Agent')`. Filter by AI Suitability: Autonomous or Assisted only. Unset GH_TOKEN after.
 
-If `.github/project-config.json` exists:
-
-1. Load config, get project ID
-2. Use bot token: `export GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)`
-3. Query project items via Python:
-   ```python
-   import github_projects, github_app
-   github_app.select_app('stark-claude')
-   items = github_projects.get_items(config['project_id'], Status='Ready for Agent')
-   # Filter by AI Suitability: only Autonomous or Assisted
-   eligible = [i for i in items if i['fields'].get('AI Suitability') in ('Autonomous', 'Assisted')]
-   ```
-4. If items found, use these instead of label-based fetch
-5. If no project config or no items, fall back to label-based fetching
-6. `unset GH_TOKEN` after project queries
-
-#### Label-based task fetching (fallback)
-
+**Label-based (fallback):**
 ```bash
-unset GH_TOKEN   # user's PAT for issue reads
+unset GH_TOKEN
 gh api "/repos/${ORG_REPO}/issues?labels=plan:${SLUG}&state=open&sort=created&direction=asc&per_page=100" \
   --jq '.[] | {number, title, labels: [.labels[].name], body}'
 ```
 
-**Filter out phase tracking issues.** `/stark-plan-to-tasks` creates two types of issues with the `plan:` label: phase tracking issues (parent issues with task checklists) and task issues (implementable work). Phase tracking issues have a body starting with a task checklist (`- [ ] #NNN`) and no `## What` section. Skip them — only keep issues whose body contains `## What` (the task body format from plan-to-tasks).
+**Filter out phase tracking issues** (body starts with `- [ ] #NNN` checklist, no `## What` section). Only keep issues whose body contains `## What`.
 
-Parse remaining issues into ordered task list. Extract from labels: story points (`sp:N`), risk (`risk:*`), type (`type:*`).
+Store raw issue count as `raw_issue_count`. Apply `--start-from` filter.
 
-Store the **raw issue count** (before filtering) as `raw_issue_count`.
-
-If `--start-from` is set, skip tasks before that issue number.
-
-If no tasks found after filtering:
-- If `raw_issue_count > 0` → issues exist but were all filtered out (tracking issues, `--start-from`). This is a normal end-of-work state, NOT a missing decomposition. Stop: "All {raw_issue_count} issues with label `plan:{SLUG}` were filtered out (tracking issues or --start-from). Nothing to execute."
-- If `raw_issue_count == 0` → no issues exist at all → **auto-decompose the plan** (see 0.3 below). If still no tasks after decomposition → stop: "Decomposition ran but produced no issues."
+If no tasks found:
+- `raw_issue_count > 0` → all filtered out (tracking issues or `--start-from`). Stop: "All {N} issues filtered out."
+- `raw_issue_count == 0` → auto-decompose (see 0.3).
 
 ### 0.3 Auto-decompose plan (if no tasks exist)
 
-When no GitHub issues with `plan:{SLUG}` are found, the plan hasn't been decomposed yet. Automatically run `/stark-plan-to-tasks` before proceeding.
+1. **Locate plan file:** Use `PLAN_FILE` if set from argument, otherwise search `docs/` recursively for `*${SLUG}*.md` (not `*.review.md`). If not found → stop.
 
-1. **Locate the plan file** (always, before dry-run check). If `PLAN_FILE` was set during slug resolution (argument was a file path), use it directly. Otherwise, search `docs/` recursively:
-
-   ```bash
-   PLAN_FILE=$(find docs/ -name "*${SLUG}*" -name "*.md" ! -name "*.review.md" 2>/dev/null | sort | head -1)
-   ```
-
-   If no plan file found → stop: "No issues with label `plan:{SLUG}` and no plan file matching `*{SLUG}*.md` in docs/."
-
-   Log which file was selected: `[HH:MM:SS]   Plan file: ${PLAN_FILE}`
-
-**If `--dry-run`:** report that `/stark-plan-to-tasks` would be invoked, show the resolved plan file path, but do NOT run it (it creates real GitHub issues). Stop with: "Dry run: would invoke /stark-plan-to-tasks on {PLAN_FILE}. Run without --dry-run to decompose and execute."
-
-Otherwise:
+**If `--dry-run`:** report the plan file path but do NOT invoke `stark-plan-to-tasks`. Stop.
 
 2. **Run `/stark-plan-to-tasks`:**
+```
+Invoke Skill: stark-plan-to-tasks ${PLAN_FILE}
+```
+> **Warning:** If `--repo` targets a different repo than the current directory, abort — cross-repo auto-decomposition is not supported.
 
-   Log: `[HH:MM:SS]   No tasks found for plan:{SLUG} — running /stark-plan-to-tasks on ${PLAN_FILE}`
-
-   ```
-   Invoke Skill: stark-plan-to-tasks ${PLAN_FILE}
-   ```
-
-   If `--repo` was passed, the plan-to-tasks skill auto-detects the repo from `git remote` in the current directory. Ensure you're in the correct repo directory before invoking. If `--repo` targets a different repo than the current directory, warn and abort — cross-repo auto-decomposition is not supported.
-
-   This decomposes the plan into phased GitHub issues with `plan:{SLUG}` labels. It runs autonomously (3 LLM passes: quality gate → decomposition → validation).
-
-3. **Re-fetch tasks** using the same logic from 0.2 (project-based or label-based) and filter per 0.2. The newly created issues should now appear.
-
-4. If still no tasks → stop: "Decomposition ran but produced no issues. Check /stark-plan-to-tasks output for errors."
+3. Re-fetch tasks using 0.2 logic. If still no tasks → stop.
 
 ### 0.3b Approach Contract
-Before dispatching expensive implementation work, confirm the approach:
+
 ```bash
 python3 ~/.claude/code-review/scripts/approach_contract.py --plan-file <plan_path> --force-confirm
 ```
@@ -190,29 +133,14 @@ Max rounds:  {ROUNDS} per PR
 Dry run:     {yes/no}
 
   1. #{number} — {title} (sp:{N}, risk:{level})
-  2. #{number} — {title} (sp:{N}, risk:{level})
   ...
 ```
 
-Create a parent task for the phase. Create child tasks for each issue.
+Create a parent task for the phase with child tasks for each issue.
 
 ### 0.5 Initialize observability log
 
-Write to `{HISTORY}/{ORG}/{REPO}/phase-{SLUG}-{YYYYMMDD-HHMMSS}.json`:
-
-```json
-{
-  "phase": "{SLUG}",
-  "repo": "{ORG_REPO}",
-  "started_at": "ISO8601",
-  "dry_run": false,
-  "max_rounds": 3,
-  "tasks": [],
-  "summary": null
-}
-```
-
-Updated incrementally as tasks complete.
+Write to `{HISTORY}/{ORG}/{REPO}/phase-{SLUG}-{YYYYMMDD-HHMMSS}.json` with phase, repo, started_at, dry_run, max_rounds, tasks (empty), summary (null). Updated incrementally as tasks complete.
 
 ---
 
@@ -220,257 +148,123 @@ Updated incrementally as tasks complete.
 
 Execute each task sequentially. Each merges to main before the next begins.
 
-For each task (issue):
-
 ### 1.1 Session start
 
-Pull latest main, create feature branch:
+Pull latest main and create feature branch:
 
 ```bash
 git checkout main && git pull --rebase origin main
 git checkout -b phase/{SLUG}/issue-{NUMBER}-{slugified-title}
 ```
 
-If project config is loaded:
-1. Use bot token for project mutations: `export GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)`
-2. Validate spec completeness: `github_projects.check_spec_completeness(item['fields'])`
-   - If gate fails, log `"Skipping #{number}: spec incomplete ({missing})"`, skip to next task
-3. Claim the task:
-   - `github_projects.transition_status(project_id, item_id, 'Agent Working')`
-   - `github_projects.set_field(project_id, item_id, 'Agent', 'Claude')`
-4. `unset GH_TOKEN`
+If project config is loaded: use bot token, validate spec completeness via `github_projects.check_spec_completeness()`. If gate fails, log and skip to next task. Claim the task with `transition_status(... 'Agent Working')` and `set_field(... 'Agent', 'Claude')`. Unset GH_TOKEN.
 
 Log: `[HH:MM:SS]   ▸ Task #{NUMBER}: {title}`
 
 ### 1.2 Implement
 
-Spawn a subagent (Agent tool, foreground) with this prompt:
+Spawn a subagent (Agent tool, foreground):
 
 ```
 You are implementing GitHub issue #{NUMBER} for repo {ORG_REPO}.
-
 Issue title: {title}
-Issue body:
-{body}
-
+Issue body: {body}
 Branch: phase/{SLUG}/issue-{NUMBER}-{slugified-title}
 Working directory: {repo root}
 
 Instructions:
-1. Read the issue carefully. Understand what needs to change.
-2. Explore the codebase to understand relevant code.
-3. Implement the changes described in the issue.
-4. Run the project's test suite to verify.
+1. Read the issue. Understand what needs to change.
+2. Explore the codebase for relevant code.
+3. Implement the changes.
+4. Run the project's test suite.
 5. Stage and commit with: feat|fix|chore(scope): description (#{NUMBER})
 6. Do NOT push — the orchestrator handles that.
 
-If the issue references other issues or specs, read them for context.
 If tests fail, fix them. If you can't resolve after 2 attempts, commit what you have and note the failure.
 ```
 
-When the subagent completes, verify:
-- Files changed? (`git diff --stat HEAD`)
-- Uncommitted changes? (`git status --porcelain` → commit them)
-- No changes at all? → log failure, skip to next task
+Verify after completion: files changed (`git diff --stat HEAD`), no uncommitted changes (`git status --porcelain`). If no changes at all → log failure, skip to next task.
 
-If the implementation subagent reports ambiguity and project config is loaded:
-1. Use bot token: `export GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)`
-2. `github_projects.transition_status(project_id, item_id, 'Blocked')`
-3. `github_projects.set_field(project_id, item_id, 'Blocked Reason', 'Ambiguous requirements — needs clarification')`
-4. `unset GH_TOKEN`
-5. Post comment on issue explaining what's ambiguous
-6. Skip to next task
+If subagent reports ambiguity and project config is loaded: use bot token, transition to 'Blocked', set blocked reason, post issue comment, skip to next task.
 
 ### 1.2b Validation chain
-
-After the implementation subagent completes, run the validation → classify → heal → re-validate chain:
 
 ```bash
 python3 $SCRIPTS/validation_gate.py --json --repo-root $(pwd)
 ```
 
-Parse the result:
-- If `overall` is "pass": continue to 1.3.
-- If `overall` is "fail": extract `stderr_path` from the result, then classify:
+- `overall=pass` → continue to 1.3.
+- `overall=fail` → classify: `python3 $SCRIPTS/failure_classifier.py --stderr-file $STDERR_PATH --json`
+  - If `pattern_id` non-null: attempt heal (max 2 attempts): `python3 $SCRIPTS/self_healer.py --pattern-id $PATTERN_ID --stderr-file $STDERR_PATH --mode auto --json`. Re-run validation after each attempt.
+  - After 2 failed heal attempts: escalate, set task status `blocked`, stop the phase.
+  - If `pattern_id` null (UNCLASSIFIED): log and continue — agent code issue, not environment.
 
-```bash
-python3 $SCRIPTS/failure_classifier.py --stderr-file $STDERR_PATH --json
-```
-
-If `pattern_id` is non-null, attempt to heal (max 2 attempts total across this task):
-
-```bash
-python3 $SCRIPTS/self_healer.py --pattern-id $PATTERN_ID --stderr-file $STDERR_PATH --mode auto --json
-```
-
-Re-run validation after each heal attempt. Stop the heal loop as soon as validation passes.
-
-**Stop condition:** if validation still fails after 2 heal attempts, escalate to the user — do not continue implementing or pushing. Log: `"Task #{NUMBER}: validation failed after 2 heal attempts (pattern={PATTERN_ID}), escalating."` Set task status to `blocked` and stop the phase.
-
-If `pattern_id` is null (UNCLASSIFIED failure): log the category and continue — this is an agent code issue, not an environment issue.
-
-Log the validation result in the task observability entry:
-```json
-{"validation": {"passed": true, "heal_attempts": 0, "pattern_id": null}}
-```
+Log validation result in task observability: `{"validation": {"passed": true, "heal_attempts": 0, "pattern_id": null}}`
 
 ### 1.3 Push & create PR
 
 ```bash
-unset GH_TOKEN   # user's PAT for PR creation
+unset GH_TOKEN
 git push -u origin $(git branch --show-current)
 ```
 
-Generate PR body, write to temp file (never interpolate LLM output in shell):
-
-```bash
-BODY_FILE=$(mktemp) && chmod 600 "$BODY_FILE"
-cat > "$BODY_FILE" << 'PREOF'
-## Summary
-Implements #{NUMBER}: {title}
-
-## Changes
-{from git diff --stat}
-
-Closes #{NUMBER}
-
-🤖 Auto-generated by stark-phase-execute
-PREOF
-
-PR_URL=$(gh pr create \
-  --title "feat: {title} (#{NUMBER})" \
-  --body "$(cat $BODY_FILE)" \
-  --base main \
-  --head $(git branch --show-current))
-PR_NUM=$(echo $PR_URL | grep -o '[0-9]*$')
-rm -f "$BODY_FILE"
-```
-
-**No draft PRs.** No user confirmation before creation.
+Write PR body to a temp file (`mktemp`, `chmod 600`) — never interpolate LLM output in shell. Body includes: Summary implementing #{NUMBER}, Changes from `git diff --stat`, `Closes #{NUMBER}`, attribution line. Create PR with `gh pr create`, extract PR_NUM from URL. No draft PRs.
 
 ### 1.4 Multi-agent review (up to N rounds)
 
-Create an isolated worktree for review, matching stark-team-review's approach:
-
+Create a review worktree:
 ```bash
 git fetch origin refs/pull/${PR_NUM}/head
 git worktree add /tmp/review-${REPO}-pr${PR_NUM} -b review/pr-${PR_NUM} FETCH_HEAD
-cd /tmp/review-${REPO}-pr${PR_NUM}
-git fetch origin main
-merge_base=$(git merge-base origin/main HEAD)
 ```
 
-**The round loop is managed by this skill, not by multi_review.py.** `multi_review.py` does not have a `--rounds` flag — it runs one round of 27 sub-agents and returns JSON.
+**The round loop is managed by this skill, not by multi_review.py.** For round = 1 to MAX_ROUNDS:
 
-For round = 1 to MAX_ROUNDS:
+1. Dispatch review: `$PYTHON $SCRIPTS/multi_review.py --pr $PR_NUM --base $merge_base --json-only --dry-run`
+2. Classify each finding: `fix` (severity >= medium, issue exists), `false_positive`, `noise` (single-agent, style), `ignored` (low severity)
+3. **Stop check:** zero `fix` findings or all FP/noise/ignored → stop (clean). Otherwise fix and continue.
+4. Fix all `fix` findings. Spawn subagent for complex fixes.
+5. Test — run `test_command` from config. Fix regressions.
+6. Commit and push from worktree with message `fix: address review findings (round {N}) (#{NUMBER})`
+7. If round >= MAX_ROUNDS → stop.
 
-1. **Dispatch review** — run one round of all sub-agents:
-   ```bash
-   $PYTHON $SCRIPTS/multi_review.py --pr $PR_NUM --base $merge_base --json-only --dry-run
-   ```
-   The `--dry-run` flag prevents multi_review.py from posting to GitHub (this skill posts manually). `--json-only` returns structured findings.
+After loop, post review summary via stark-claude[bot]: `export GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)`, use `pr_review()`, then unset GH_TOKEN.
 
-2. **Classify** each finding by reading the referenced `file:line` in the worktree:
-   - `fix` — severity >= medium AND issue exists in code
-   - `false_positive` — described problem doesn't exist
-   - `noise` — subjective/style, or single-agent contradicted by other 2
-   - `ignored` — below fix threshold (low severity)
-
-3. **Stop check** (before fixing):
-   - Zero `fix` findings → **stop** (clean)
-   - All findings are FP/noise/ignored → **stop** (nothing fixable)
-   - Otherwise → fix and continue
-
-4. **Fix** all `fix` findings in the worktree. Spawn a subagent if needed for complex fixes.
-
-5. **Test** — run `test_command` from config in the worktree. Fix regressions.
-
-6. **Commit + push** from the worktree:
-   ```bash
-   git add <changed files>
-   git commit -m "fix: address review findings (round {N}) (#{NUMBER})"
-   git push origin review/pr-${PR_NUM}:$(original branch name)
-   ```
-
-7. If round >= MAX_ROUNDS → **stop** (max reached)
-
-After the loop, **post the review summary** to the PR via stark-claude[bot]:
-
-```bash
-export GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)
-```
-
-Use `pr_review()` from `github_app.py` or `stark_claude.py` to post the consolidated findings as a PR comment. Then unset GH_TOKEN.
-
-**Clean up worktree:**
-
-```bash
-cd {original working dir}
-git worktree remove /tmp/review-${REPO}-pr${PR_NUM}
-git branch -D review/pr-${PR_NUM}
-```
+**Clean up worktree:** `git worktree remove /tmp/review-${REPO}-pr${PR_NUM} && git branch -D review/pr-${PR_NUM}`
 
 ### 1.5 Merge
 
-**Do not update project Status when creating PRs or after merge** — the project-pr-sync GitHub Action handles these transitions automatically.
-
-Before merging, verify CI status:
+> **Warning:** Do not update project Status here — the project-pr-sync GitHub Action handles transitions automatically.
 
 ```bash
-unset GH_TOKEN   # user's PAT for merge
+unset GH_TOKEN
 gh pr checks $PR_NUM --watch --fail-level all 2>/dev/null || true
-```
-
-If CI passes or no required checks exist:
-```bash
 gh pr merge $PR_NUM --squash --admin --delete-branch
-```
-
-If CI fails: log the failing checks, merge anyway with `--admin` (autonomous mode), but flag it in the observability log as `ci_bypassed: true`.
-
-```bash
 git checkout main && git pull --rebase origin main && git fetch --prune
 ```
 
-**No waiting for approval.** Merge immediately after review completes.
+If CI fails: merge anyway with `--admin`, flag `ci_bypassed: true` in observability log.
 
 ### 1.6 Close issue
 
-The PR body contains `Closes #{NUMBER}`, so GitHub auto-closes on merge. Verify closure:
-
+PR body contains `Closes #{NUMBER}` for auto-close. Verify closure:
 ```bash
 unset GH_TOKEN
 gh api "/repos/${ORG_REPO}/issues/${NUMBER}" --jq .state
 ```
-
-If still open (e.g., the `Closes` keyword didn't trigger), close explicitly:
-```bash
-gh issue close $NUMBER --comment "Implemented and merged via PR #${PR_NUM}. Closed by stark-phase-execute."
-```
+If still open: `gh issue close $NUMBER --comment "Implemented and merged via PR #${PR_NUM}. Closed by stark-phase-execute."`
 
 ### 1.7 Log task result
 
-Append to the observability JSON:
-
+Append to observability JSON:
 ```json
 {
-  "issue_number": 42,
-  "title": "Add retry logic to API client",
-  "branch": "phase/observability-v2/issue-42-add-retry-logic",
-  "pr_number": 57,
-  "status": "merged",
-  "ci_bypassed": false,
-  "started_at": "ISO8601",
-  "finished_at": "ISO8601",
-  "duration_seconds": 342,
+  "issue_number": 42, "title": "...", "branch": "...", "pr_number": 57,
+  "status": "merged", "ci_bypassed": false,
+  "started_at": "ISO8601", "finished_at": "ISO8601", "duration_seconds": 342,
   "review_rounds": 2,
-  "findings": {
-    "total": 8,
-    "by_severity": {"critical": 0, "high": 2, "medium": 4, "low": 2},
-    "fixed": 6,
-    "noise": 2,
-    "by_agent": {"claude": 3, "codex": 3, "gemini": 2}
-  },
+  "findings": {"total": 8, "by_severity": {"critical":0,"high":2,"medium":4,"low":2},
+    "fixed": 6, "noise": 2, "by_agent": {"claude":3,"codex":3,"gemini":2}},
   "error": null
 }
 ```
@@ -479,57 +273,26 @@ Print: `[HH:MM:SS]   ✓ Task #{NUMBER} merged (PR #{PR_NUM}, {rounds} rounds, {
 
 ### 1.7b Session state update
 
-After each task merges successfully, update session state and optionally checkpoint:
+After each merge, record completed task and check for checkpoint interval:
 ```bash
 python3 ~/.claude/code-review/scripts/session_state.py --json 2>/dev/null || true
-```
-Record `"phase/{SLUG}/issue-{NUMBER}"` as a completed task. Track elapsed time since last checkpoint; if `context_compaction.checkpoint_interval_minutes` has elapsed (from config), generate one:
-```bash
 python3 ~/.claude/code-review/scripts/context_compactor.py --json 2>/dev/null || true
 ```
-
-Both calls are best-effort — wrap in `|| true` or `2>/dev/null`. Never let session state failure block task execution.
+Both are best-effort — wrap in `|| true`. Never block task execution.
 
 ### 1.8 Error handling
 
-If any step fails for a task:
-
-1. Log the error with full context
-2. Set task status to `failed` with error message
-3. Cleanup: switch back to main, remove any lingering worktree
-4. Clean up remote branch if PR was created but not merged:
-   ```bash
-   git push origin --delete phase/{SLUG}/issue-{NUMBER}-{slugified-title} 2>/dev/null || true
-   ```
-5. Print: `[HH:MM:SS]   ✗ Task #{NUMBER} failed: {error}`
-6. **Continue to next task** — never block the phase
+If any step fails for a task: log error, set task `failed`, switch back to main, remove lingering worktree, delete remote branch (`git push origin --delete ... 2>/dev/null || true`). Print: `[HH:MM:SS]   ✗ Task #{NUMBER} failed: {error}`. **Continue to next task** — never block the phase.
 
 ---
 
 ## Phase 2: Regression Testing
 
-After all tasks complete (or fail):
-
 ```bash
 git checkout main && git pull --rebase origin main && git fetch --prune
 ```
 
-Detect test command from config hierarchy (`.code-review/config.json` → `~/.claude/code-review/config.json`). Fallback: detect from `package.json` (npm test), `pyproject.toml` (pytest), `Makefile`, etc.
-
-Run the full suite. Log:
-
-```json
-{
-  "test_command": "pytest",
-  "exit_code": 0,
-  "duration_seconds": 87,
-  "passed": 142,
-  "failed": 0,
-  "skipped": 3
-}
-```
-
-If tests fail, log failures but continue — the dashboard will surface them.
+Detect test command from config hierarchy (fall back to auto-detect from `package.json`, `pyproject.toml`, `Makefile`). Run full suite. Log exit code, duration, pass/fail/skip counts. If tests fail, log and continue — dashboard surfaces them.
 
 ---
 
@@ -539,40 +302,19 @@ Skip if `--skip-release`.
 
 ### 3.1 Update CHANGELOG
 
-Before bumping the version, ensure CHANGELOG has content. For each merged task in this phase, add an entry under `## [Unreleased]` in CHANGELOG.md:
-
-- Feature tasks (GitHub Issue Type = Feature) → `### Added` section
-- Bug fix tasks (GitHub Issue Type = Bug) → `### Fixed` section
-- Other tasks (GitHub Issue Type = Task) → `### Changed` section
-
-Entry format: `- {task title} (#{issue_number})`
-
-If CHANGELOG.md doesn't exist, create one with standard Keep a Changelog format.
+For each merged task, add an entry under `## [Unreleased]`: Feature → `### Added`, Bug → `### Fixed`, Task → `### Changed`. Format: `- {task title} (#{issue_number})`. Create `CHANGELOG.md` with Keep a Changelog format if missing.
 
 ### 3.2 Version bump & release
 
-Determine bump from GitHub Issue Type:
-- Any Feature → minor
-- Only Bug or Task → patch
-- Any breaking change (noted in task description) → major
-
-**Delegate to `/stark-release`** with the determined bump type as argument. This preserves the hierarchical config override chain — repos with custom release workflows (different version files, different tag formats, CI-triggered deploys) get their repo-level `/stark-release` overrides respected.
+Determine bump: Feature → minor, Bug/Task only → patch, breaking change noted → major.
 
 ```
 Invoke Skill: stark-release {bump_type}
 ```
 
-`/stark-release` has no user-confirmation gates — it auto-determines bump when passed as argument and always creates the GitHub Release.
-
 ### 3.3 Deploy
 
-Skip if `--skip-deploy`.
-
-Read `deploy_command` from config. If not configured, skip and note in log.
-
-```bash
-${DEPLOY_COMMAND}
-```
+Skip if `--skip-deploy`. Read `deploy_command` from config. If not configured, skip. Run `${DEPLOY_COMMAND}`.
 
 ---
 
@@ -580,21 +322,11 @@ ${DEPLOY_COMMAND}
 
 Present a comprehensive summary after everything completes. See [references/dashboard-format.md](references/dashboard-format.md) for table formats (task summary, aggregate stats, agent scorecard, failed tasks).
 
----
-
-## Phase 4b: Skill Suggestions
-
-After all tasks complete, suggest relevant follow-up skills:
-
+After all tasks complete, suggest follow-up skills:
 ```bash
 python3 ~/.claude/code-review/scripts/skill_router.py --context implementation --json 2>/dev/null || true
 ```
-
-Parse the JSON. Display at most 2 suggestions:
-```
-Next steps: /stark-init-docs, /stark-extract-docs
-```
-Skip silently if the command fails or returns no suggestions.
+Display at most 2 suggestions. Skip silently if command fails.
 
 ---
 
@@ -602,12 +334,11 @@ Skip silently if the command fails or returns no suggestions.
 
 ### 5.1 Update memory
 
-Save a project memory summarizing the phase execution — what was accomplished, surprises, decisions made. Only non-obvious information useful in future conversations.
+Save a project memory summarizing the phase execution: what was accomplished, surprises, decisions made. Only non-obvious information useful in future conversations.
 
 ### 5.2 Update docs
 
-If the project has docs (`docs/`, `mkdocs.yml`):
-- Update architecture docs affected by the phase changes
+If the project has docs (`docs/`, `mkdocs.yml`): update architecture docs affected by the phase changes.
 
 ### 5.3 Prompt improvement detection
 
@@ -620,45 +351,21 @@ Read review history from this phase's PRs. Check for patterns:
 | Agent consistently missing issues others find | 2+ misses | Flag: prompt weak in that domain |
 | Unparseable output from an agent | any | Flag: fix `global/prompts/{agent}/agent.md` |
 
-Log recommendations to the observability file. Suggest running `/stark-review-improvement` if any threshold exceeded.
+Log recommendations to observability file. Suggest `/stark-review-improvement` if any threshold exceeded.
 
 ---
 
 ## Observability
 
-See [references/observability.md](references/observability.md) for the full observability protocol (tasks, timestamped logs, checkpoints, metrics, improvement flags, event emission).
+Standard observability: create task, emit timestamped progress logs, record metrics block (phase, repo, task counts, duration, findings per task, agent scores, ci_bypassed, improvement flags), emit completion event via `emit_queue.py`. See [references/observability.md](references/observability.md) for the full protocol.
 
 ---
 
 ## Dry Run Mode
 
-When `--dry-run` is set:
-
-1. Fetch and display all tasks (same as normal), including filtering out tracking issues
-2. For each task: print branch name, issue title, labels, estimated steps
-3. Verify `multi_review.py` is accessible: `$PYTHON $SCRIPTS/multi_review.py --help >/dev/null 2>&1`
-4. Show the planned review configuration (rounds, agents)
-5. Show what release/deploy would do (detected bump type, current version → next)
-6. **Do NOT create branches, PRs, or make any changes**
+When `--dry-run`: fetch and display all tasks, print branch/title/labels/steps for each, verify `multi_review.py --help`, show planned review config and release/deploy preview. Do NOT create branches, PRs, or make any changes.
 
 ---
-
-## Mistakes to Avoid
-
-- **Don't use `git add -A`** — always add specific files by name
-- **Don't forget auth split** — unset GH_TOKEN for PR/issue/merge ops, export bot token only for review comments
-- **Don't block on failures** — log and continue to next task
-- **Don't create draft PRs** — PRs are not draft by default
-- **Don't interpolate LLM output in shell** — always use temp files for PR/issue bodies
-- **Don't skip regression tests** — even if all tasks merged cleanly, regressions can emerge from interactions
-- **Don't amend commits** — always create new commits
-- **Don't push to main directly** — everything goes through PR
-- **Don't wait for user approval** — this skill is fully autonomous
-- **Don't ask questions** — make the best autonomous decision and log the reasoning
-- **Don't pass `--rounds` to multi_review.py** — it doesn't accept that flag; manage the round loop in this skill
-- **Don't skip worktree isolation** — always create a worktree for review, clean up after
-- **Don't skip CHANGELOG entries** — the release step depends on them
-- **Don't try to implement phase tracking issues** — filter them out in 0.2
 
 ## Failure Modes
 

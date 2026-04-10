@@ -65,13 +65,7 @@ After presenting, check for patterns:
 
 ## Observability
 
-Follow the [Skill Observability Protocol](../../standards/observability.md).
-
-Skill-specific metrics:
-- PRs analyzed: count
-- GitHub API calls: count
-- History records loaded: count
-- Data sources: github-only | history-only | both
+Standard observability: record metrics block (PRs analyzed, GitHub API calls, history records loaded, data sources). See [../../standards/observability.md](../../standards/observability.md).
 
 ## Failure Modes
 

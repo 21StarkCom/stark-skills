@@ -304,7 +304,7 @@ class TestDomainGating:
 
         captured_calls: list[tuple[str, str | None]] = []
 
-        def mock_run_subagent(agent, domain_key, base, cwd, spec_context, graph_context=None):
+        def mock_run_subagent(agent, domain_key, base, cwd, spec_context, graph_context=None, override_timeout_s=None):
             captured_calls.append((domain_key, graph_context))
             return self._make_subagent_result(agent, domain_key)
 
@@ -338,7 +338,7 @@ class TestDomainGating:
 
         captured_calls: list[tuple[str, str | None]] = []
 
-        def mock_run_subagent(agent, domain_key, base, cwd, spec_context, graph_context=None):
+        def mock_run_subagent(agent, domain_key, base, cwd, spec_context, graph_context=None, override_timeout_s=None):
             captured_calls.append((domain_key, graph_context))
             return self._make_subagent_result(agent, domain_key)
 
@@ -360,7 +360,7 @@ class TestDomainGating:
 
         captured_calls: list[tuple[str, str | None]] = []
 
-        def mock_run_subagent(agent, domain_key, base, cwd, spec_context, graph_context=None):
+        def mock_run_subagent(agent, domain_key, base, cwd, spec_context, graph_context=None, override_timeout_s=None):
             captured_calls.append((domain_key, graph_context))
             return self._make_subagent_result(agent, domain_key)
 

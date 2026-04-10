@@ -40,14 +40,11 @@ try:
 except ImportError:  # pragma: no cover - backward compat for older installs
     build_agent_env = None
 
-try:
-    from config_loader import get_model_id, is_agent_enabled
-except ImportError:  # pragma: no cover - backward compat for older installs
-    def get_model_id(agent: str) -> str | None:
-        return None
-
-    def is_agent_enabled(agent: str) -> bool:
-        return True
+from dispatcher_base import (
+    resolve_model as _resolve_model,
+    is_agent_enabled,
+    resolve_prompt as _base_resolve_prompt,
+)
 
 # ── Config ──────────────────────────────────────────────────────────────
 
@@ -60,16 +57,6 @@ if not AGENTS:
     AGENTS = ["claude", "codex", "gemini"]
 CODEX_REASONING_CONFIG = CODEX_REASONING_EFFORT_HIGH
 DEFAULT_TIMEOUT = 600  # Generation needs more time than review
-
-
-def _resolve_model(agent: str) -> str:
-    if agent == "claude":
-        return get_model_id(agent) or "claude"
-    if agent == "codex":
-        return get_model_id(agent) or CODEX_MODEL
-    if agent == "gemini":
-        return get_model_id(agent) or GEMINI_MODEL
-    raise ValueError(f"Unknown agent: {agent}")
 
 
 def _get_prompts_dir(prompts_dir: str | None = None) -> Path:
@@ -118,16 +105,18 @@ def _load_prompt(
     repo_dir: str | None = None,
     prompts_dir: str | None = None,
 ) -> str:
-    """Load a prompt file: repo → global."""
+    """Load a prompt file: repo → global agent → global domains.
+
+    Thin wrapper around dispatcher_base.resolve_prompt using the
+    {prompts_dir_name}-prompts repo_subdir convention.
+    """
     prompts_dir_name = prompts_dir or DEFAULT_PROMPTS_DIR
-    if repo_dir:
-        repo_path = Path(repo_dir) / ".code-review" / f"{prompts_dir_name}-prompts" / agent / filename
-        if repo_path.exists():
-            return repo_path.read_text().strip()
-    global_path = _get_prompts_dir(prompts_dir) / agent / filename
-    if global_path.exists():
-        return global_path.read_text().strip()
-    return ""
+    return _base_resolve_prompt(
+        agent, filename,
+        prompts_dir=_get_prompts_dir(prompts_dir),
+        repo_dir=repo_dir,
+        repo_subdir=f"{prompts_dir_name}-prompts",
+    )
 
 
 # ── CLI dispatch helpers ───────────────────────────────────────────────

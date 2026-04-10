@@ -258,6 +258,12 @@ Branch $BRANCH deleted (local + remote)
 
 ---
 
+## Safety Guards
+
+> **Warning:** Never create draft PRs unless the user explicitly asks for one.
+
+> **Warning:** Never use `git add -A` or `git add .` — stage specific files by name to avoid committing secrets or untracked artifacts.
+
 ## Failure Modes
 
 | Failure | Recovery |
@@ -274,33 +280,4 @@ Branch $BRANCH deleted (local + remote)
 
 ## Observability
 
-Follow the [Skill Observability Protocol](../../standards/observability.md) for all timing, checkpoints, and metrics reporting.
-
-Additional skill-specific metrics:
-- Push duration, PR creation duration, self-review duration, merge duration
-- PR number and URL
-- Merge strategy used, admin bypass used (yes/no)
-
-### Event emission
-
-After the flow completes, emit a completion event to stark-insights:
-
-```bash
-$SCRIPTS/stark-emit skill_invocation \
-  skill=stark-pr-flow duration_s=$TOTAL_SECONDS success=$SUCCESS \
-  pr_number=$PR repo=$REPO action=$ACTION
-```
-
-Where `$ACTION` is the final action performed (e.g., `merge`, `create`, `review`). Substitute actual values. If stark-insights is not running, this fails silently.
-
-## Mistakes to Avoid
-
-- **Don't create draft PRs unless explicitly asked.** PRs are NOT draft by default.
-- **Don't `git add -A`.** Always add specific files.
-- **Don't set GH_TOKEN for PR/merge operations.** Use the user's native `gh` auth for creating and merging PRs. Only set `GH_TOKEN=$BOT_TOKEN` for review comment posting.
-- **Don't merge without user approval.** Always present summary and wait.
-- **Don't post reviews via `gh api`.** Always use `github_app.py` so reviews appear as `stark-claude[bot]`.
-- **Don't hardcode repo names.** Auto-detect from `gh repo view`.
-- **Don't skip the self-review.** Every PR gets a stark-claude review before merge.
-- **Always use `--admin` on merge.** Squash-and-merge workflow with admin bypass.
-- **Use `~/git/Evinced/scripts/.venv/bin/python3`** for running scripts. System Python lacks the required dependencies.
+Standard observability: create task, emit timestamped logs, record metrics block (push/PR creation/self-review/merge durations, PR number, merge strategy, admin bypass). Emit: `$SCRIPTS/stark-emit skill_invocation skill=stark-pr-flow duration_s=... success=... pr_number=... repo=... action=...`. See [../../standards/observability.md](../../standards/observability.md).

@@ -36,16 +36,15 @@ except ImportError:  # pragma: no cover - backward compat for older installs
     build_agent_env = None
 
 try:
-    from config_loader import get_model_id, is_agent_enabled, get_self_heal_config
+    from config_loader import get_self_heal_config
 except ImportError:  # pragma: no cover - backward compat for older installs
-    def get_model_id(agent: str) -> str | None:
-        return None
-
-    def is_agent_enabled(agent: str) -> bool:
-        return True
-
-    def get_self_heal_config() -> dict:
+    def get_self_heal_config() -> dict:  # type: ignore[misc]
         return {"enabled": False, "mode": "suggest"}
+
+from dispatcher_base import (
+    resolve_model as _resolve_model,
+    is_agent_enabled,
+)
 
 # ── Config ──────────────────────────────────────────────────────────────
 
@@ -55,16 +54,6 @@ if not AGENTS:
     AGENTS = ["claude", "codex", "gemini"]
 CODEX_REASONING_CONFIG = CODEX_REASONING_EFFORT_MEDIUM
 DEFAULT_TIMEOUT = 900  # Implementation needs more time
-
-
-def _resolve_model(agent: str) -> str:
-    if agent == "claude":
-        return get_model_id(agent) or "claude"
-    if agent == "codex":
-        return get_model_id(agent) or CODEX_MODEL
-    if agent == "gemini":
-        return get_model_id(agent) or GEMINI_MODEL
-    raise ValueError(f"Unknown agent: {agent}")
 
 
 # ── Data structures ────────────────────────────────────────────────────

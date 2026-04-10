@@ -255,13 +255,7 @@ Verification: All N updated versions confirmed on official registries.
 
 ## Observability
 
-Follow the [Skill Observability Protocol](../../standards/observability.md) for all timing, checkpoints, and metrics reporting.
-
-Additional skill-specific metrics:
-- Dependencies: total scanned, updated (safe/review/blocked/skip)
-- WebSearch calls: count, per-ecosystem breakdown
-- Verification: confirmed, failed, reverted
-- Major version bumps: count with migration flags
+Standard observability: record metrics block (deps scanned/updated/blocked/skipped, WebSearch calls by ecosystem, verification confirmed/failed/reverted, major bumps with migration flags). See [../../standards/observability.md](../../standards/observability.md).
 
 ## Edge Cases
 

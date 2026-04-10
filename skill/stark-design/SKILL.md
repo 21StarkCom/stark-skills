@@ -198,66 +198,7 @@ rm -rf /tmp/stark-design-$$
 
 ## Observability
 
-### Task-based progress (required)
-
-```
-TaskCreate: "Phase 1: Setup — parse input"
-            activeForm: "Parsing requirements"
-TaskCreate: "Phase 2: Generate — 3 agents producing designs"
-            activeForm: "Generating 3 design documents"
-TaskCreate: "Phase 3: Cross-review — 6 reviews"
-            activeForm: "Running 6 cross-reviews"
-TaskCreate: "Phase 4: Synthesize — merge best elements"
-            activeForm: "Synthesizing final design"
-TaskCreate: "Phase 5: Output — write files"
-            activeForm: "Writing design and review files"
-```
-
-### Timestamped log lines (required)
-
-```
-[HH:MM:SS] === stark-design started ===
-[HH:MM:SS] Phase 1: Setup — done (1s)
-[HH:MM:SS] Phase 2: Generate — dispatching 3 agents
-[HH:MM:SS]   ▸ claude: done — 280 lines [140s]
-[HH:MM:SS]   ▸ codex: done — 220 lines [190s]
-[HH:MM:SS]   ▸ gemini: done — 250 lines [100s]
-[HH:MM:SS] Phase 2: done (3m 10s)
-[HH:MM:SS] Phase 3: Cross-review — dispatching 6 reviews
-[HH:MM:SS]   ▸ codex→claude: 8.2/10 [85s]
-[HH:MM:SS]   ...
-[HH:MM:SS] Phase 3: done (2m 50s)
-[HH:MM:SS] Phase 4: Synthesize — winner: claude (8.2/10)
-[HH:MM:SS] Phase 4: done (30s)
-[HH:MM:SS] Phase 5: Output — done (3s)
-[HH:MM:SS] === stark-design completed ===
-```
-
-### Metrics block at end (required)
-
-```
-Metrics
-───────
-Total duration:     Xm Ys
-Designs generated:  3/3
-Reviews completed:  6/6
-Winner:             claude (8.2/10)
-Runner-up:          gemini (7.8/10)
-Synthesis merges:   N sections from non-winner designs
-Output:             {output_path}
-```
-
-### Event emission
-
-After the metrics block, emit a completion event to stark-insights:
-
-```bash
-$SCRIPTS/stark-emit skill_invocation \
-  skill=stark-design duration_s=$TOTAL_SECONDS success=$SUCCESS \
-  winner_agent=$AGENT output_path=$PATH
-```
-
-Substitute actual values from the run. If stark-insights is not running, this fails silently.
+Standard observability: create task per phase, emit timestamped progress logs, record metrics block (designs generated N/3, reviews N/6, winner agent + score, runner-up, synthesis merges, output path, per-phase durations), emit: `$SCRIPTS/stark-emit skill_invocation skill=stark-design duration_s=... success=... winner_agent=... output_path=...`.
 
 ## Failure Modes
 
