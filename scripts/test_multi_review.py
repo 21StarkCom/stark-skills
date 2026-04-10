@@ -84,12 +84,12 @@ class TestModelFlags:
     """Sub-agents must use pinned model flags."""
 
     @patch("multi_review.subprocess.run")
-    def test_claude_uses_sonnet_and_no_session(self, mock_run):
+    def test_claude_uses_configured_model_and_no_session(self, mock_run):
         mock_run.return_value = MagicMock(stdout="[]", returncode=0)
         multi_review._run_subagent("claude", "architecture", "abc123")
         cmd = mock_run.call_args[0][0]
         assert "--model" in cmd
-        assert "claude-sonnet-4-6" in cmd
+        assert "claude-opus-4-6" in cmd
         assert "--no-session-persistence" in cmd  # one-shot, no session files
         assert "-" in cmd  # stdin marker
         call_kwargs = mock_run.call_args[1]
@@ -263,7 +263,7 @@ class TestCLIEndToEnd:
     def test_claude_stdin_e2e(self):
         """claude -p - reads prompt from stdin and returns text output."""
         result = subprocess.run(
-            ["claude", "-p", "-", "--output-format", "text", "--model", "claude-sonnet-4-6"],
+            ["claude", "-p", "-", "--output-format", "text", "--model", "claude-opus-4-6"],
             capture_output=True, text=True, timeout=120,
             input="Return exactly: hello",
         )
