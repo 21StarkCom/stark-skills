@@ -6,6 +6,7 @@ set -euo pipefail
 #
 # Usage:
 #   ./install.sh                     # install everything
+#   ./install.sh --select            # interactive skill picker
 #   ./install.sh --uninstall         # remove all symlinks
 #   ./install.sh --status            # show what's installed
 #
@@ -17,7 +18,9 @@ set -euo pipefail
 # Files stay in the repo — symlinks point to them. Updating the repo
 # updates the installed system. No copying, no drift.
 
-REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT="$0"
+[ -L "$SCRIPT" ] && SCRIPT="$(readlink "$SCRIPT")"
+REPO_DIR="$(cd "$(dirname "$SCRIPT")" && pwd)"
 CLAUDE_DIR="$HOME/.claude"
 CODE_REVIEW_DIR="$CLAUDE_DIR/code-review"
 EVINCED_DIR="$HOME/git/Evinced"
@@ -27,6 +30,9 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 NC='\033[0m'
+CYAN='\033[0;36m'
+DIM='\033[0;90m'
+BOLD='\033[1m'
 
 info()  { echo -e "${GREEN}[✓]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
@@ -170,6 +176,280 @@ check_dir() {
     else
         error "$label: not installed"
     fi
+}
+
+# ── TUI: Interactive Skill Selection ─────────────────────────
+
+declare -a TUI_NAMES=()
+declare -a TUI_DESCS=()
+declare -a TUI_SELECTED=()
+declare -a TUI_INSTALLED=()
+TUI_CURSOR=0
+TUI_SCROLL=0
+TUI_COUNT=0
+
+tui_get_desc() {
+    awk '
+        /^---$/ { c++; if (c == 2) exit; next }
+        c == 1 && /^description:/ {
+            sub(/^description:[[:space:]]*/, "")
+            sub(/^>-?[[:space:]]*/, "")
+            if ($0 != "") desc = $0
+            reading = 1; next
+        }
+        c == 1 && reading && /^[[:space:]]/ {
+            sub(/^[[:space:]]+/, "")
+            if (desc) desc = desc " " $0; else desc = $0
+            next
+        }
+        c == 1 && reading { reading = 0 }
+        END { print desc }
+    ' "$1"
+}
+
+tui_discover() {
+    TUI_NAMES=(); TUI_DESCS=(); TUI_SELECTED=(); TUI_INSTALLED=()
+    TUI_CURSOR=0; TUI_SCROLL=0
+
+    for skill_dir in "$REPO_DIR"/skill/stark-*/; do
+        [ -d "$skill_dir" ] || continue
+        skill_dir="${skill_dir%/}"
+        local name skill_file desc
+        name=$(basename "$skill_dir")
+        skill_file="$skill_dir/SKILL.md"
+        [ -f "$skill_file" ] || continue
+
+        TUI_NAMES+=("$name")
+        desc=$(tui_get_desc "$skill_file")
+        TUI_DESCS+=("$desc")
+
+        if [ -L "$HOME/.claude/skills/$name/SKILL.md" ]; then
+            TUI_INSTALLED+=(1)
+            TUI_SELECTED+=(1)
+        else
+            TUI_INSTALLED+=(0)
+            TUI_SELECTED+=(0)
+        fi
+    done
+    TUI_COUNT=${#TUI_NAMES[@]}
+}
+
+tui_draw() {
+    local rows cols visible
+    rows=$(tput lines)
+    cols=$(tput cols)
+    visible=$((rows - 8))
+    [ "$visible" -lt 5 ] && visible=5
+    [ "$visible" -gt "$TUI_COUNT" ] && visible=$TUI_COUNT
+
+    if [ "$TUI_CURSOR" -lt "$TUI_SCROLL" ]; then
+        TUI_SCROLL=$TUI_CURSOR
+    elif [ "$TUI_CURSOR" -ge $((TUI_SCROLL + visible)) ]; then
+        TUI_SCROLL=$((TUI_CURSOR - visible + 1))
+    fi
+
+    local name_w=34
+    local desc_w=$((cols - name_w - 10))
+    [ "$desc_w" -lt 10 ] && desc_w=10
+
+    tput cup 0 0
+    tput ed
+
+    echo -e "  ${BOLD}stark-skills${NC} — select skills to install"
+    echo ""
+    echo -e "  ${DIM}↑/k${NC} up  ${DIM}↓/j${NC} down  ${DIM}Space${NC} toggle  ${DIM}a${NC} all  ${DIM}n${NC} none  ${DIM}Enter${NC} apply  ${DIM}q${NC} quit"
+    echo ""
+
+    local end=$((TUI_SCROLL + visible))
+    [ "$end" -gt "$TUI_COUNT" ] && end=$TUI_COUNT
+
+    local i
+    for ((i = TUI_SCROLL; i < end; i++)); do
+        local arrow="  "
+        [ "$i" -eq "$TUI_CURSOR" ] && arrow="▸ "
+
+        local check color
+        if [ "${TUI_SELECTED[$i]}" -eq 1 ]; then
+            check="[✓]"
+            if [ "${TUI_INSTALLED[$i]}" -eq 1 ]; then color="$GREEN"; else color="$CYAN"; fi
+        else
+            check="[ ]"
+            if [ "${TUI_INSTALLED[$i]}" -eq 1 ]; then color="$YELLOW"; else color="$DIM"; fi
+        fi
+
+        local name="${TUI_NAMES[$i]}"
+        local desc="${TUI_DESCS[$i]}"
+        [ "${#desc}" -gt "$desc_w" ] && desc="${desc:0:$((desc_w - 3))}..."
+
+        local padded
+        printf -v padded "%-${name_w}s" "$name"
+
+        echo -e "${arrow}${color}${check} ${padded}${NC} ${DIM}${desc}${NC}"
+    done
+
+    # Scroll indicators
+    if [ "$TUI_SCROLL" -gt 0 ]; then
+        tput cup 3 $((cols - 3)); echo -ne "${DIM}▲${NC}"
+    fi
+    if [ "$end" -lt "$TUI_COUNT" ]; then
+        tput cup $((4 + visible)) $((cols - 3)); echo -ne "${DIM}▼${NC}"
+    fi
+
+    # Footer
+    local sel=0 to_inst=0 to_rm=0
+    for ((i = 0; i < TUI_COUNT; i++)); do
+        [ "${TUI_SELECTED[$i]}" -eq 1 ] && sel=$((sel + 1))
+        [ "${TUI_SELECTED[$i]}" -eq 1 ] && [ "${TUI_INSTALLED[$i]}" -eq 0 ] && to_inst=$((to_inst + 1))
+        [ "${TUI_SELECTED[$i]}" -eq 0 ] && [ "${TUI_INSTALLED[$i]}" -eq 1 ] && to_rm=$((to_rm + 1))
+    done
+
+    echo ""
+    local summary="${sel}/${TUI_COUNT} selected"
+    [ "$to_inst" -gt 0 ] && summary="${summary} · ${to_inst} to install"
+    [ "$to_rm" -gt 0 ] && summary="${summary} · ${to_rm} to uninstall"
+    echo -e "  ${summary}"
+    echo -e "  ${GREEN}■${NC}${DIM} installed ${NC} ${CYAN}■${NC}${DIM} will install ${NC} ${YELLOW}■${NC}${DIM} will uninstall${NC}"
+}
+
+tui_run() {
+    tui_discover
+    if [ "$TUI_COUNT" -eq 0 ]; then
+        error "No skills found in $REPO_DIR/skill/"
+        return 1
+    fi
+
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        error "Interactive mode requires a terminal"
+        return 1
+    fi
+
+    tput smcup
+    tput civis
+    trap 'tput cnorm; tput rmcup; exit 0' INT TERM
+
+    while true; do
+        tui_draw
+
+        IFS= read -rsn1 key
+        case "$key" in
+            $'\x1b')
+                IFS= read -rsn2 -t 1 rest || true
+                case "$rest" in
+                    '[A') [ "$TUI_CURSOR" -gt 0 ] && TUI_CURSOR=$((TUI_CURSOR - 1)) ;;
+                    '[B') [ "$TUI_CURSOR" -lt $((TUI_COUNT - 1)) ] && TUI_CURSOR=$((TUI_CURSOR + 1)) ;;
+                esac
+                ;;
+            ' ')
+                TUI_SELECTED[$TUI_CURSOR]=$(( 1 - ${TUI_SELECTED[$TUI_CURSOR]} ))
+                [ "$TUI_CURSOR" -lt $((TUI_COUNT - 1)) ] && TUI_CURSOR=$((TUI_CURSOR + 1))
+                ;;
+            'k') [ "$TUI_CURSOR" -gt 0 ] && TUI_CURSOR=$((TUI_CURSOR - 1)) ;;
+            'j') [ "$TUI_CURSOR" -lt $((TUI_COUNT - 1)) ] && TUI_CURSOR=$((TUI_CURSOR + 1)) ;;
+            'a') for ((i = 0; i < TUI_COUNT; i++)); do TUI_SELECTED[$i]=1; done ;;
+            'n') for ((i = 0; i < TUI_COUNT; i++)); do TUI_SELECTED[$i]=0; done ;;
+            ''|$'\n')
+                tput cnorm
+                tput rmcup
+                return 0
+                ;;
+            'q')
+                tput cnorm
+                tput rmcup
+                echo "Cancelled."
+                exit 0
+                ;;
+        esac
+    done
+}
+
+tui_apply() {
+    local installed=0 removed=0 unchanged=0 skipped=0
+
+    echo ""
+    echo "Applying skill selection..."
+    echo ""
+
+    for ((i = 0; i < TUI_COUNT; i++)); do
+        local name="${TUI_NAMES[$i]}"
+        local skill_file="$REPO_DIR/skill/$name/SKILL.md"
+
+        if [ "${TUI_SELECTED[$i]}" -eq 1 ]; then
+            if [ "${TUI_INSTALLED[$i]}" -eq 1 ]; then
+                unchanged=$((unchanged + 1))
+                continue
+            fi
+            # Validate before installing
+            if ! grep -q "^disable-model-invocation: true" "$skill_file"; then
+                error "Skill $name: missing 'disable-model-invocation: true' — skipped"
+                skipped=$((skipped + 1))
+                continue
+            fi
+            mkdir -p "$HOME/.claude/skills/$name"
+            link_dir "$skill_file" "$HOME/.claude/skills/$name/SKILL.md" "Skill: $name"
+            installed=$((installed + 1))
+        else
+            if [ "${TUI_INSTALLED[$i]}" -eq 1 ]; then
+                unlink_dir "$HOME/.claude/skills/$name/SKILL.md" "Skill: $name"
+                rmdir "$HOME/.claude/skills/$name" 2>/dev/null || true
+                removed=$((removed + 1))
+            fi
+        fi
+    done
+
+    echo ""
+    info "Skills: ${installed} installed, ${removed} removed, ${unchanged} unchanged"
+    [ "$skipped" -gt 0 ] && warn "${skipped} skill(s) skipped (validation failed)"
+}
+
+interactive() {
+    echo ""
+    echo "Installing stark-skills from $REPO_DIR (interactive)"
+    echo ""
+
+    validate_json_config
+
+    # Core infrastructure (always installed)
+    link_dir "$REPO_DIR/global/config.json" "$CODE_REVIEW_DIR/config.json" "Global config"
+    link_dir "$REPO_DIR/global/orchestrator.md" "$CODE_REVIEW_DIR/orchestrator.md" "Orchestrator"
+    link_dir "$REPO_DIR/global/prompts" "$CODE_REVIEW_DIR/prompts" "Prompts"
+    link_dir "$REPO_DIR/scripts" "$CODE_REVIEW_DIR/scripts" "Scripts"
+
+    for script in multi_review.py github_app.py github_projects.py setup_project.py stark_graph.py; do
+        if [ -f "$REPO_DIR/scripts/$script" ]; then
+            info "  Script: $script"
+        else
+            warn "  Script: $script not found"
+        fi
+    done
+
+    mkdir -p "$CODE_REVIEW_DIR/history"
+    info "History dir: $CODE_REVIEW_DIR/history/"
+
+    if [ -d "$EVINCED_DIR" ]; then
+        link_dir "$REPO_DIR/org/evinced" "$EVINCED_DIR/.code-review" "Evinced org config"
+    else
+        warn "Evinced dir not found at $EVINCED_DIR — skipping org config"
+    fi
+
+    # Interactive skill selection
+    tui_run
+    tui_apply
+
+    # Orphan cleanup
+    for link in "$HOME"/.claude/skills/stark-*/SKILL.md; do
+        [ -L "$link" ] && [ ! -e "$link" ] && rm "$link" && rmdir "$(dirname "$link")" 2>/dev/null || true
+    done
+
+    # Standards & config (always installed)
+    link_dir "$REPO_DIR/standards" "$CODE_REVIEW_DIR/standards" "Standards templates"
+    link_dir "$REPO_DIR/config/settings.json" "$CLAUDE_DIR/settings.json" "Settings"
+    link_dir "$REPO_DIR/config/statusline-command.sh" "$CLAUDE_DIR/statusline-command.sh" "Status line"
+
+    provision_infrastructure
+
+    echo ""
+    info "Installation complete. Verify with: ./install.sh --status"
+    echo ""
 }
 
 install() {
@@ -495,5 +775,6 @@ status() {
 case "${1:-}" in
     --uninstall) uninstall ;;
     --status)    status ;;
+    --select)    interactive ;;
     *)           install ;;
 esac
