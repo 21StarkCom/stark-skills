@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.6.0] - 2026-04-10
+
+### Added
+- Gemini agent enabled with `gemini-3.1-pro-preview` via Vertex AI global endpoint
+- **stark-graph** — pluggable dependency graph pipeline (7 phases): Python parser, audit mode, drift validator, graph diff + blast radius, idempotent PR commenting, review integration, CI workflows
+- **Domain triage** — context-aware domain dispatch: triage engine, TUI renderer, orchestrator, shadow validation, `--domains` allowlist for dispatch scripts
+- **Session TUI** — rich session start/end rendering: `tui_core.py` shared primitives, `session_tui.py` renderer, `session_tui_cli.py` CLI entry point, `SessionState` name/start_head fields
+- Interactive TUI skill picker (`mngt-skills --select`) + global CLI entry point
+- `analyze_shadow.py` — shadow validation gate metrics for domain triage
+- Multi-org GitHub App routing — per-owner installation IDs with dynamic API discovery
+- Adaptive timeout and large-diff triage for large PRs
+- `tournament.dispatch_agent_prompt()` — generic agent dispatcher for tournament use (fixes broken `dispatch_competitor` call path)
+- `conftest.py` autouse fixture to clear `config_loader.load_config` lru_cache between tests
+
+### Changed
+- Prompt consolidation: 40 byte-identical domain files collapsed into shared `domains/` directories
+- Top 5 skills compressed 44-57% (phase-execute 665→372 lines, housekeeping 555→239)
+- Claude dispatch uses `infra-ai-platform` project with global endpoint + opus default
+- `config_loader`: `_SECTION_DEFAULTS` registry replaces 7 identical accessor functions; `_merge_dict` warns on non-dict overrides
+- `dispatcher_base`: `resolve_model("claude")` returns real model ID via `CLAUDE_MODEL` constant; OSError on config files now warns to stderr
+- `plan_review_dispatch`: uses `resolve_model()` instead of hardcoded `CODEX_MODEL`/`GEMINI_MODEL` constants
+- `multi_review`: dedup Pass 3 skips `line=0` findings; `all_findings()` cached in summary construction; dead `codex_output_file` removed
+- Review skills routed through triage orchestrator with fallback
+- Cross-agent dedup, spec context injection, severity overrides expanded
+- Test-coverage severity calibration + vendor-webhook SSRF hints in security prompts
+
+### Fixed
+- **Security:** `github_app` atomic token cache writes via `tempfile.mkstemp` + `os.replace` (was briefly world-readable); `gemini_utils.make_gemini_env` strips `ANTHROPIC_API_KEY` (was leaking full env); `autopilot_dispatch` `shell=True` → `shlex.split` (command injection); `session_state.load()` path traversal via `_sanitize_id()`
+- **Critical:** `multi_review.deduplicate_findings` mutated Finding objects in-place (corrupted descriptions); `multi_review.review_pr` posted comments as disabled agents; `design_to_plan_dispatch` `int()` crash on non-numeric LLM scores; `emit_queue` `time.monotonic()` → `time.time()` for cross-process SQLite; `generate_skill_docs` HTML sanitizer now suppresses all dangerous tags; `plan_to_tasks_validate` Gemini output double-unwrapping
+- **Important:** `github_app.get_token()` raises `RuntimeError` instead of `sys.exit(1)`; `github_projects` SingleSelect parser removed incorrect guard; `tournament.select_winner` `.get()` prevents KeyError; `runtime_env` temp dir injected as `STARK_AGENT_TMPDIR` + cleanup runs once per process; `autopilot_dispatch` uses `"implementation"` operation instead of `"review"` for bot token boundary; `flow_layout` uses `model_copy()` instead of in-place Pydantic mutation
+- Symlink path bug in `domain_triage` + plan review fixes
+- Dispatch routing audit and docs refresh
+- Real wall-clock timestamps required in observability protocol
+
 ## [v0.5.1] - 2026-04-03
 
 ### Fixed
