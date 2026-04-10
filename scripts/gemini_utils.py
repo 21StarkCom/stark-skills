@@ -25,6 +25,7 @@ except ImportError:  # pragma: no cover - backward compat for older installs
         return True
 
 # Default model — pinned to avoid auto-routing unpredictability in automation.
+# Available on Vertex AI via the global endpoint (GOOGLE_CLOUD_LOCATION=global).
 GEMINI_MODEL = "gemini-3.1-pro-preview"
 
 
@@ -149,14 +150,14 @@ def setup_gemini_home(
             shutil.copy2(src, os.path.join(gemini_dir, auth_file))
 
     # Patch settings.json for headless dispatch:
-    # - Force API key auth (avoids Vertex AI project mismatch in sub-agents)
+    # - Preserve the user's auth config (Vertex AI, API key, etc.) as-is
     # - Set approval mode if requested
+    # API key fallback is handled by try_gemini_api_key_fallback() on auth errors.
     settings_path = os.path.join(gemini_dir, "settings.json")
     settings: dict = {}
     if os.path.exists(settings_path):
         with open(settings_path) as f:
             settings = json.load(f)
-    settings.setdefault("security", {}).setdefault("auth", {})["selectedType"] = "gemini-api-key"
     if approval_mode:
         settings["defaultApprovalMode"] = approval_mode
     with open(settings_path, "w") as f:
@@ -186,15 +187,21 @@ def gemini_session(
 
 
 def make_gemini_env(gemini_home: str) -> dict[str, str]:
-    """Build env dict with GEMINI_CLI_HOME and GEMINI_API_KEY for headless dispatch."""
-    env = {
+    """Build env dict with GEMINI_CLI_HOME for headless dispatch.
+
+    Sets GOOGLE_CLOUD_LOCATION=global so that preview models (e.g.
+    gemini-3.1-pro-preview) are reachable via Vertex AI's global endpoint.
+    Regional endpoints only carry GA models.
+
+    Does NOT inject GEMINI_API_KEY by default — the user's configured auth
+    (Vertex AI, OAuth, etc.) is respected as-is. API key injection only
+    happens via try_gemini_api_key_fallback() when the primary auth fails.
+    """
+    return {
         **os.environ,
         "GEMINI_CLI_HOME": gemini_home,
+        "GOOGLE_CLOUD_LOCATION": "global",
     }
-    api_key = get_gemini_api_key()
-    if api_key:
-        env["GEMINI_API_KEY"] = api_key
-    return env
 
 
 # ── Output parsing ────────────────────────────────────────────────────

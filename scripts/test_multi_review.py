@@ -248,8 +248,9 @@ class TestCLIEndToEnd:
             "gemini-test-", os.getcwd(), "test", approval_mode="plan",
         )
         env = make_gemini_env(gemini_home)
+        from gemini_utils import GEMINI_MODEL
         result = subprocess.run(
-            ["gemini", "-p", "Return exactly: []", "-o", "json"],
+            ["gemini", "-m", GEMINI_MODEL, "-p", "Return exactly: []", "-o", "json"],
             capture_output=True, text=True, timeout=120, env=env,
         )
         shutil.rmtree(gemini_home, ignore_errors=True)
