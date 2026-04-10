@@ -220,6 +220,50 @@ class TestDiscoverDomains:
         result = discover_domains(tmp_path, agents=["claude"])
         assert result["type-safety"]["label"] == "Type Safety"
 
+    def test_merges_agent_and_shared_domains(self, tmp_path):
+        """Agent dir has some domains, shared domains/ has others — both merged.
+
+        Reproduces the design-review layout where 10-accessibility.md and
+        11-test-plan.md stay per-agent while 00-09 are in domains/.
+        """
+        claude_dir = tmp_path / "claude"
+        claude_dir.mkdir()
+        (claude_dir / "10-accessibility.md").write_text("a11y")
+        (claude_dir / "11-test-plan.md").write_text("tests")
+        (claude_dir / "agent.md").write_text("preamble")
+
+        shared = tmp_path / "domains"
+        shared.mkdir()
+        (shared / "00-general.md").write_text("general")
+        (shared / "01-completeness.md").write_text("completeness")
+        (shared / "09-resilience.md").write_text("resilience")
+
+        result = discover_domains(tmp_path, agents=["claude"])
+        # Agent-specific domains
+        assert "accessibility" in result
+        assert "test-plan" in result
+        # Shared domains
+        assert "general" in result
+        assert "completeness" in result
+        assert "resilience" in result
+        # Total: 5 domains discovered
+        assert len(result) == 5
+
+    def test_agent_specific_takes_priority_over_shared(self, tmp_path):
+        """When same domain slug exists in both agent dir and domains/, agent wins."""
+        claude_dir = tmp_path / "claude"
+        claude_dir.mkdir()
+        (claude_dir / "01-arch.md").write_text("claude-specific arch")
+
+        shared = tmp_path / "domains"
+        shared.mkdir()
+        (shared / "01-arch.md").write_text("shared arch")
+
+        result = discover_domains(tmp_path, agents=["claude"])
+        assert "arch" in result
+        # Agent-specific was found first, shared is skipped (key already exists)
+        assert len(result) == 1
+
 
 # ── resolve_prompt ────────────────────────────────────────────────────
 

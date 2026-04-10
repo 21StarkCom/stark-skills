@@ -258,6 +258,12 @@ Branch $BRANCH deleted (local + remote)
 
 ---
 
+## Safety Guards
+
+> **Warning:** Never create draft PRs unless the user explicitly asks for one.
+
+> **Warning:** Never use `git add -A` or `git add .` — stage specific files by name to avoid committing secrets or untracked artifacts.
+
 ## Failure Modes
 
 | Failure | Recovery |

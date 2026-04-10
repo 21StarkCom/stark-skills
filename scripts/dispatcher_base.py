@@ -182,8 +182,9 @@ def discover_domains(
     """Discover domains from prompt files under *prompts_dir*.
 
     Scans the first agent directory (in *agents* order) that contains
-    ``[0-9]*.md`` files.  Falls back to ``{prompts_dir}/domains/`` if no
-    agent directory has domain files.
+    ``[0-9]*.md`` files, then merges in any additional domains from
+    ``{prompts_dir}/domains/``.  Agent-specific files take priority over
+    shared ones when both define the same domain slug.
 
     Args:
         prompts_dir: Base prompts directory (e.g. ``~/.claude/code-review/prompts/plan-review``).
@@ -221,9 +222,9 @@ def discover_domains(
         if domains:
             break
 
-    # Fall back to shared domains/ directory if no per-agent domain files found
-    if not domains:
-        shared_dir = prompts_path / "domains"
+    # Always merge shared domains/ directory (agent-specific files take priority)
+    shared_dir = prompts_path / "domains"
+    if shared_dir.exists():
         for f in sorted(shared_dir.glob("[0-9]*.md")):
             key = f.stem.split("-", 1)[1] if "-" in f.stem else f.stem
             if key not in domains:
