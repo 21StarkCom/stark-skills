@@ -1306,8 +1306,8 @@ def _emit_event(event: dict) -> None:
     try:
         from emit_queue import enqueue
         enqueue(event)
-    except Exception:
-        pass  # JSON on disk is the fallback; scraper will pick it up
+    except Exception as exc:
+        print(f"  [!] Failed to emit event: {exc}", file=sys.stderr)
 
 
 def _make_event(event_type: str, payload: dict, *, project: str | None = None, dedupe_key: str) -> dict:
