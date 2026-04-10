@@ -59,176 +59,31 @@ try:
 except ImportError:  # pragma: no cover - backward compat for older installs
     build_agent_env = None
 
-try:
-    from config_loader import get_model_id as _config_get_model_id, is_agent_enabled
-except ImportError:  # pragma: no cover - backward compat for older installs
-    def _config_get_model_id(agent: str) -> str | None:
-        return None
-
-    def is_agent_enabled(agent: str) -> bool:
-        return True
+from dispatcher_base import (
+    DEFAULT_CONFIG,
+    AGENTS as _BASE_AGENTS,
+    discover_config,
+    resolve_model as _resolve_model,
+    is_agent_enabled,
+    discover_domains as _base_discover_domains,
+)
 
 # ── Config ──────────────────────────────────────────────────────────────
-
-
 
 SCRIPTS_DIR = Path(__file__).parent
 PYTHON = str(SCRIPTS_DIR / ".venv" / "bin" / "python3")
 GITHUB_APP = str(SCRIPTS_DIR / "github_app.py")
 GLOBAL_PROMPTS_DIR = Path.home() / ".claude" / "code-review" / "prompts"
 
-# Agent definitions — CLI tool + GitHub App mapping
-_ALL_AGENTS = {
-    "claude": {
-        "app": "stark-claude",
-        "emoji": "\U0001f9e0",
-        "label": "Claude",
-    },
-    "codex": {
-        "app": "stark-codex",
-        "emoji": "\U0001f4bb",
-        "label": "Codex",
-    },
-    "gemini": {
-        "app": "stark-gemini",
-        "emoji": "\u2728",
-        "label": "Gemini",
-    },
-}
-AGENTS = {agent: cfg for agent, cfg in _ALL_AGENTS.items() if is_agent_enabled(agent)}
-if not AGENTS:
-    AGENTS = dict(_ALL_AGENTS)
-
-# ── Hierarchical config ───────────────────────────────────────────────
-
-DEFAULT_CONFIG = {
-    "agents": ["claude", "codex", "gemini"],
-    "fix_threshold": "medium",
-    "test_command": None,
-    "build_command": None,
-    "verify_before_clean": True,
-    "disabled_domains": [],
-    "extra_domains": [],
-    "context_files": [],
-    "domain_agents": {},
-    "severity_overrides": {},
-    "github_apps": {
-        "claude": "stark-claude",
-        "codex": "stark-codex",
-        "gemini": "stark-gemini",
-    },
-}
+# AGENTS: filtered by is_agent_enabled, sourced from dispatcher_base
+AGENTS = _BASE_AGENTS
 
 CODEX_REASONING_CONFIG = CODEX_REASONING_EFFORT_HIGH  # re-exported for backward compat
 
 
-def _resolve_model(agent: str) -> str:
-    if agent == "claude":
-        return _config_get_model_id(agent) or "claude"
-    if agent == "codex":
-        return _config_get_model_id(agent) or CODEX_MODEL
-    if agent == "gemini":
-        return _config_get_model_id(agent) or GEMINI_MODEL
-    raise ValueError(f"Unknown agent: {agent}")
-
-REPLACE_FIELDS = {
-    "agents",
-    "fix_threshold",
-    "test_command",
-    "build_command",
-    "verify_before_clean",
-    "disabled_domains",
-    "context_files",
-}
-ADDITIVE_FIELDS = {"extra_domains"}
-DEEP_MERGE_FIELDS = {"severity_overrides", "github_apps", "domain_agents", "triage"}
-
-
-def _deep_merge(base: dict, override: dict) -> dict:
-    result = dict(base)
-    for k, v in override.items():
-        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
-            result[k] = _deep_merge(result[k], v)
-        else:
-            result[k] = v
-    return result
-
-
-def _find_config_chain(cwd: str, global_dir: str) -> list[Path]:
-    """Walk from cwd up to ~ looking for .code-review/config.json, then global."""
-    chain = []
-    home = Path.home()
-    current = Path(cwd).resolve()
-    while current != home and current != current.parent:
-        cfg = current / ".code-review" / "config.json"
-        if cfg.exists():
-            chain.append(cfg)
-        current = current.parent
-    global_cfg = Path(global_dir) / "config.json"
-    if global_cfg.exists():
-        chain.append(global_cfg)
-    return chain
-
-
-def discover_config(cwd: str | None = None, global_dir: str | None = None) -> dict:
-    """Discover and merge config: repo -> org -> global."""
-    if cwd is None:
-        cwd = os.getcwd()
-    if global_dir is None:
-        global_dir = str(Path.home() / ".claude" / "code-review")
-
-    chain = _find_config_chain(cwd, global_dir)
-    merged = dict(DEFAULT_CONFIG)
-    for cfg_path in reversed(chain):
-        try:
-            layer = json.loads(cfg_path.read_text())
-        except (json.JSONDecodeError, OSError):
-            continue
-        for key, val in layer.items():
-            if key in REPLACE_FIELDS:
-                merged[key] = val
-            elif key in ADDITIVE_FIELDS:
-                existing = merged.get(key, [])
-                merged[key] = list(set(existing) | set(val))
-            elif key in DEEP_MERGE_FIELDS:
-                merged[key] = _deep_merge(merged.get(key, {}), val)
-            else:
-                merged[key] = val
-    return merged
-
-
 def _discover_domains() -> dict[str, dict[str, Any]]:
-    """Discover domains from prompt files in any agent directory.
-
-    Falls back to scanning domains/ if no agent directory has domain files.
-    """
-    domains: dict[str, dict[str, Any]] = {}
-    for agent in AGENTS:
-        agent_dir = GLOBAL_PROMPTS_DIR / agent
-        if not agent_dir.exists():
-            continue
-        for f in sorted(agent_dir.glob("[0-9]*.md")):
-            key = f.stem.split("-", 1)[1] if "-" in f.stem else f.stem
-            if key not in domains:
-                domains[key] = {
-                    "order": f.stem.split("-")[0] if "-" in f.stem else "99",
-                    "label": key.replace("-", " ").title(),
-                    "filename": f.name,
-                }
-        if domains:
-            break
-    # Fall back to shared domains/ directory if no per-agent domain files found
-    if not domains:
-        shared_dir = GLOBAL_PROMPTS_DIR / "domains"
-        for f in sorted(shared_dir.glob("[0-9]*.md")):
-            key = f.stem.split("-", 1)[1] if "-" in f.stem else f.stem
-            if key not in domains:
-                domains[key] = {
-                    "order": f.stem.split("-")[0] if "-" in f.stem else "99",
-                    "label": key.replace("-", " ").title(),
-                    "filename": f.name,
-                }
-    return domains
+    """Discover PR review domains — delegates to dispatcher_base.discover_domains."""
+    return _base_discover_domains(GLOBAL_PROMPTS_DIR, agents=list(AGENTS))
 
 
 DOMAINS = _discover_domains()
