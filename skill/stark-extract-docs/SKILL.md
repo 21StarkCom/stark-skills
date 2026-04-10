@@ -1,7 +1,7 @@
 ---
 name: stark-extract-docs
 description: >-
-  Extract ADRs, retrospectives, and reference docs from specs, plans, and reviews. Use for extract docs, generate ADRs.
+  Extract ADRs and glossary entries from specs, plans, and reviews. Use for extract docs, generate ADRs.
 argument-hint: "<path-to-spec> [--batch <dir>] [--dry-run] [--force]"
 disable-model-invocation: true
 context: fork
@@ -10,7 +10,7 @@ model: opus
 
 # stark-extract-docs
 
-Extract durable knowledge from specs, plans, and review files into project documentation. Two-pass architecture: Pass 1 extracts knowledge into a structured intermediate format, Pass 2 routes it to the right doc types and locations.
+Extract durable knowledge from specs, plans, and review files into ADRs and glossary entries. Two-pass architecture: Pass 1 extracts knowledge into a structured intermediate format, Pass 2 routes it to ADRs and glossary.
 
 Both passes run in the current Claude Code session — no external agent dispatch.
 
@@ -75,29 +75,25 @@ Filesystem resolution for org/repo string: check `$PARENT_DIR/{repo-name}`, then
 - List target project's `docs/` tree.
 - Detect ADR directory: check for `docs/adr/`, `docs/decisions/`, `docs/adrs/`. Default to `docs/adr/`.
 - If ADR directory exists, find highest `NNNN` number. Store as `next_adr_number`.
-- Read `docs/retrospectives/learning-log.md` and `docs/glossary.md` if they exist (for dedup).
+- Read `docs/glossary.md` if it exists (for dedup).
 
 ### 1.6 Check plan-to-tasks overlap
 
-Check for history at `~/.claude/code-review/history/plan-to-tasks/{target-repo}/{spec-slug}.json`. If found with `"plan_deleted": true`, set `SKIP_PLAN_TO_TASKS_CATEGORIES=true` — extract only `evolution`, `decision_defended`, `agent_signal`. Missing history file = `false` (normal first run).
+Check for history at `~/.claude/code-review/history/plan-to-tasks/{target-repo}/{spec-slug}.json`. If found with `"plan_deleted": true`, set `SKIP_PLAN_TO_TASKS_CATEGORIES=true` — extract only `decision_defended`. Missing history file = `false` (normal first run).
 
 ## Phase 2: Pass 1 — Knowledge Extraction
 
-Read ALL found artifacts. If `SKIP_PLAN_TO_TASKS_CATEGORIES=true`, extract from `evolution`, `decision_defended`, `agent_signal` only. Otherwise extract from all 8 categories:
+Read ALL found artifacts. If `SKIP_PLAN_TO_TASKS_CATEGORIES=true`, extract from `decision_defended` only. Otherwise extract from all 5 categories:
 
 | Category | Where to look | What to extract |
 |----------|--------------|-----------------|
 | `decision` | Spec: design principles, architecture section, technology choices | Architectural choices with rationale |
 | `decision_defended` | Review: "Intentional Design Choices" tables, "Unresolved" marked intentional | Decisions challenged and held, with challenge and rationale |
 | `constraint` | Spec: "Non-Goals", performance/security constraints | Boundaries and limitations; `has_alternatives: true` if alternatives considered |
-| `integration` | Spec: API contracts, invocation patterns, auth mechanisms | Interface specifications and contracts |
-| `data_model` | Spec: schema definitions, config formats, entity relationships | Structural definitions |
-| `evolution` | Review: "Fixed Across Rounds", severity trends | What changed during review, by round |
-| `agent_signal` | Review: "Prompt Improvement Assessment" tables, agent failure patterns | Agent behavior patterns worth tracking |
 | `glossary` | Spec: domain terms with specific meaning | Term definitions |
 
 **Required extraction fields (all categories):** `category`, `title`, `content` (2–5 sentences), `evidence`, `source`, `confidence` (high/medium/low).
-**Category-specific:** `constraint` → `has_alternatives` (boolean); `evolution` → `round` (e.g., "1→2"); `agent_signal` → `affected_agents` (string[]).
+**Category-specific:** `constraint` → `has_alternatives` (boolean).
 
 Output the complete JSON to memory for Phase 3:
 ```json
@@ -131,13 +127,9 @@ If `--dry-run`: print the JSON in a fenced block and exit.
 | Category | Target | Location |
 |----------|--------|----------|
 | `decision` | ADR | `{TARGET_DIR}/{adr_dir}/NNNN-<slug>.md` |
-| `decision_defended` | ADR + Retro | ADR file + retrospective "Decisions Defended" table |
+| `decision_defended` | ADR | `{TARGET_DIR}/{adr_dir}/NNNN-<slug>.md` |
 | `constraint` (has_alternatives=true) | ADR | `{TARGET_DIR}/{adr_dir}/NNNN-<slug>.md` |
-| `constraint` (has_alternatives=false) | Reference | `{TARGET_DIR}/docs/reference/constraints.md` (append) |
-| `integration` | Reference | `{TARGET_DIR}/docs/reference/<component-slug>.md` |
-| `data_model` | Reference | `{TARGET_DIR}/docs/reference/<entity-slug>.md` |
-| `evolution` | Retrospective | `{SOURCE_REPO}/docs/retrospectives/YYYY-MM-DD-<spec-slug>.md` |
-| `agent_signal` | Retro + Log | retrospective + `learning-log.md` |
+| `constraint` (has_alternatives=false) | ADR | `{TARGET_DIR}/{adr_dir}/NNNN-<slug>.md` (constraint-only ADR) |
 | `glossary` | Glossary | `{TARGET_DIR}/docs/glossary.md` (append) |
 
 ### 3.2 Generate ADRs
@@ -166,67 +158,10 @@ Use project template if `{adr_dir}/0000-template.md` exists, otherwise generate:
 
 If `confidence: "medium"`, prepend `<!-- needs review -->`. Assign `NNNN = next_adr_number`, then increment. Slug: lowercase, hyphens, max 50 chars.
 
-### 3.3 Generate retrospective
-
-Group all `evolution` and `agent_signal` extractions. If none exist, skip (do NOT create empty file).
-
-Filename: `{SOURCE_REPO}/docs/retrospectives/{spec-date}-{name}.md`
-
-```markdown
-# Review Retrospective — {spec title}
-
-**Spec:** `{spec-path}`
-**Date:** {spec-date}
-**Review rounds:** {from review file or "unknown"}
-
-## Design Evolution
-
-| Round | Change | Trigger |
-|-------|--------|---------|
-{one row per evolution extraction}
-
-## Decisions Defended
-
-| Decision | Challenge | Rationale |
-|----------|-----------|-----------|
-{one row per decision_defended extraction}
-
-## Agent Performance
-
-| Agent | Domain | Signal | Notes |
-|-------|--------|--------|-------|
-{one row per agent_signal extraction}
-
-## Prompt Improvement Candidates
-
-| Signal | Level | Target |
-|--------|-------|--------|
-{from agent_signal extractions referencing prompt files}
-```
-
-### 3.4 Generate learning log entries
-
-For each `agent_signal` extraction, append a row to `docs/retrospectives/learning-log.md`:
-```
-| {today} | {spec-slug} | {content, one line} | {category} |
-```
-Dedup: skip if same spec + observation text already exists. Create file with header if missing.
-
-### 3.5 Generate reference docs
-
-For `integration` and `data_model` extractions: derive filename from title slug `docs/reference/{slug}.md`. Append new section to existing file or create with `# {title}` heading.
-
-### 3.6 Append to glossary
+### 3.3 Append to glossary
 
 For `glossary` extractions: create `# Glossary` header if file missing. Skip if term already exists. Append `**{term}** — {definition}`.
 
-### 3.7 Append to constraints
-
-For `constraint` extractions with `has_alternatives: false`: create `# Constraints` header if missing. Append `- **{title}** — {content}`.
-
-### 3.8 Update staleness config
-
-If `{TARGET_DIR}/.doc-staleness.yml` exists and `docs/retrospectives/` was created, add it to `exclude_paths` if not already there.
 
 ## Phase 4: Preview & Write
 
@@ -235,16 +170,14 @@ If `{TARGET_DIR}/.doc-staleness.yml` exists and `docs/retrospectives/` was creat
 ```
 [HH:MM:SS] === Files to write ===
 Will create:
-  docs/adr/0003-no-rollback-for-rename.md
-  docs/retrospectives/2026-03-19-rename-project.md
+  docs/adr/0020-no-rollback-for-rename.md
 Will update:
-  docs/retrospectives/learning-log.md (append 3 entries)
   docs/glossary.md (append 2 terms)
 ```
 
 ### 4.2 Create directories
 
-Create missing directories. Only create `docs/retrospectives/` if retrospective content exists.
+Create missing directories (e.g. `docs/adr/` if absent).
 
 ### 4.3 Write files
 
@@ -276,9 +209,6 @@ Artifacts found:      spec ✓, plan ✓, spec review ✓, plan review ✗
 Extractions:          {total} total ({N} per category)
 Outputs:
   ADRs created:       {N}
-  Retrospective:      {path or "none"}
-  Reference docs:     {N} created, {N} updated
-  Learning log:       {N} entries appended
   Glossary:           {N} terms added
 Files:                {N} created, {N} updated
 ```
@@ -293,7 +223,7 @@ Standard observability: create task, emit timestamped progress logs, record metr
 
 ## Force Re-Run Behavior (--force)
 
-Read `created_artifacts` from history file. ADRs: overwrite same files. Retrospective: overwrite. Learning log: remove previous run's entries by spec slug + observation text, then append new. Glossary: remove previous terms by name, then append. Reference docs/constraints: overwrite sections added by previous run (tracked in history). If no history file, `--force` bypasses skip check only.
+Read `created_artifacts` from history file. ADRs: overwrite same files. Glossary: remove previous terms by name, then append. If no history file, `--force` bypasses skip check only.
 
 ## What This Skill Does NOT Do
 
@@ -306,11 +236,10 @@ Read `created_artifacts` from history file. ADRs: overwrite same files. Retrospe
 
 ## Edge Cases
 
-- **Spec has no review file** — skip `evolution`, `decision_defended`, `agent_signal`. Extract from spec only.
+- **Spec has no review file** — skip `decision_defended`. Extract from spec only.
 - **Spec has no plan** — skip plan-specific knowledge.
-- **Target has no `docs/`** — create `docs/adr/`, `docs/reference/`. Only create `docs/retrospectives/` if content exists.
+- **Target has no `docs/`** — create `docs/adr/`.
 - **ADR dir uses different name** — detected in Phase 1.5.
-- **Source repo ≠ target repo** — retrospectives go to source, ADRs to target. Warn about separate commits.
 
 ## Failure Modes
 
