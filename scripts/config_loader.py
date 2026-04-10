@@ -80,12 +80,16 @@ def _merge_dict(defaults: dict[str, Any], overrides: Any) -> dict[str, Any]:
     keys in the defaults (e.g. ``model_id``).
     """
     merged = deepcopy(defaults)
-    if isinstance(overrides, dict):
-        for key, value in overrides.items():
-            if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
-                merged[key] = _merge_dict(merged[key], value)
-            else:
-                merged[key] = deepcopy(value)
+    if overrides is None:
+        return merged
+    if not isinstance(overrides, dict):
+        _warn(f"expected dict override, got {type(overrides).__name__!r} — using defaults")
+        return merged
+    for key, value in overrides.items():
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+            merged[key] = _merge_dict(merged[key], value)
+        else:
+            merged[key] = deepcopy(value)
     return merged
 
 
@@ -108,32 +112,28 @@ def load_config() -> dict[str, Any]:
     return loaded
 
 
-def get_models_config() -> dict[str, Any]:
-    return _merge_dict(DEFAULT_MODELS, load_config().get("models"))
+_SECTION_DEFAULTS: dict[str, dict[str, Any]] = {
+    "models": DEFAULT_MODELS,
+    "runtime": DEFAULT_RUNTIME,
+    "self_heal": DEFAULT_SELF_HEAL,
+    "validation_gate": DEFAULT_VALIDATION_GATE,
+    "skill_activation": DEFAULT_SKILL_ACTIVATION,
+    "context_compaction": DEFAULT_CONTEXT_COMPACTION,
+    "cost": DEFAULT_COST,
+}
 
 
-def get_runtime_config() -> dict[str, Any]:
-    return _merge_dict(DEFAULT_RUNTIME, load_config().get("runtime"))
+def _get_section(key: str) -> dict[str, Any]:
+    return _merge_dict(_SECTION_DEFAULTS[key], load_config().get(key))
 
 
-def get_self_heal_config() -> dict[str, Any]:
-    return _merge_dict(DEFAULT_SELF_HEAL, load_config().get("self_heal"))
-
-
-def get_validation_gate_config() -> dict[str, Any]:
-    return _merge_dict(DEFAULT_VALIDATION_GATE, load_config().get("validation_gate"))
-
-
-def get_skill_activation_config() -> dict[str, Any]:
-    return _merge_dict(DEFAULT_SKILL_ACTIVATION, load_config().get("skill_activation"))
-
-
-def get_context_compaction_config() -> dict[str, Any]:
-    return _merge_dict(DEFAULT_CONTEXT_COMPACTION, load_config().get("context_compaction"))
-
-
-def get_cost_config() -> dict[str, Any]:
-    return _merge_dict(DEFAULT_COST, load_config().get("cost"))
+def get_models_config() -> dict[str, Any]:           return _get_section("models")
+def get_runtime_config() -> dict[str, Any]:          return _get_section("runtime")
+def get_self_heal_config() -> dict[str, Any]:        return _get_section("self_heal")
+def get_validation_gate_config() -> dict[str, Any]:  return _get_section("validation_gate")
+def get_skill_activation_config() -> dict[str, Any]: return _get_section("skill_activation")
+def get_context_compaction_config() -> dict[str, Any]: return _get_section("context_compaction")
+def get_cost_config() -> dict[str, Any]:             return _get_section("cost")
 
 
 def is_agent_enabled(agent: str) -> bool:

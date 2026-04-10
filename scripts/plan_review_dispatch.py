@@ -24,9 +24,9 @@ from pathlib import Path
 from typing import Any
 
 from claude_utils import build_claude_cmd, make_clean_env
-from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_HIGH, parse_jsonl_output
+from codex_utils import CODEX_REASONING_EFFORT_HIGH, parse_jsonl_output
 from gemini_utils import (
-    GEMINI_MODEL, setup_gemini_home, make_gemini_env,
+    setup_gemini_home, make_gemini_env,
     parse_json_output as parse_gemini_output,
     should_fallback_to_api_key, try_gemini_api_key_fallback,
 )
@@ -37,6 +37,7 @@ except ImportError:  # pragma: no cover - backward compat for older installs
 
 from dispatcher_base import (
     discover_domains as _base_discover_domains,
+    resolve_model as _resolve_model,
     resolve_prompt as _base_resolve_prompt,
 )
 
@@ -261,7 +262,7 @@ def _run_plan_subagent(
     elif agent == "codex":
         cmd = [
             "codex", "exec",
-            "-m", CODEX_MODEL,
+            "-m", _resolve_model("codex"),
             "-c", CODEX_REASONING_CONFIG,
             "--ephemeral", "--json",
             "-s", "read-only",
@@ -274,7 +275,7 @@ def _run_plan_subagent(
         )
         cmd = [
             "gemini",
-            "-m", GEMINI_MODEL,
+            "-m", _resolve_model("gemini"),
             "-p", prompt_text or "Review this plan document.",
             "-o", "json",
         ]
@@ -493,17 +494,16 @@ def dispatch_plan_review(
         for f in r.findings:
             severity_counts[f.severity] = severity_counts.get(f.severity, 0) + 1
             fd = asdict(f)
-            fd["_agent"] = r.agent  # tag for cross-domain dedup
+            fd.setdefault("agent", r.agent)  # ensure agent field for cross-domain dedup
             all_findings.append(fd)
 
     # Cross-agent dedup: remove findings with identical (section, title) from
     # the same agent across different domains.  Keep the first occurrence
     # (domain order is deterministic).
-    pre_dedup = len(all_findings)
     seen_keys: set[tuple[str, str, str]] = set()
     deduped_findings: list[dict[str, Any]] = []
     for f in all_findings:
-        key = (f.get("section", ""), f.get("title", ""), f.get("_agent", ""))
+        key = (f.get("section", ""), f.get("title", ""), f.get("agent", ""))
         if key not in seen_keys:
             seen_keys.add(key)
             deduped_findings.append(f)

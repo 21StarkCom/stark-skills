@@ -43,14 +43,14 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace as _dc_replace
 from pathlib import Path
 from typing import Any
 
 from claude_utils import build_claude_cmd, make_clean_env
-from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_HIGH, parse_jsonl_output
+from codex_utils import CODEX_REASONING_EFFORT_HIGH, parse_jsonl_output
 from gemini_utils import (
-    GEMINI_MODEL, setup_gemini_home, make_gemini_env,
+    setup_gemini_home, make_gemini_env,
     parse_json_output as parse_gemini_output,
     should_fallback_to_api_key, try_gemini_api_key_fallback,
 )
@@ -60,7 +60,6 @@ except ImportError:  # pragma: no cover - backward compat for older installs
     build_agent_env = None
 
 from dispatcher_base import (
-    DEFAULT_CONFIG,
     AGENTS as _BASE_AGENTS,
     discover_config,
     resolve_model as _resolve_model,
@@ -707,7 +706,6 @@ def _run_subagent_inner(
     full_prompt = "\n\n".join(parts)
 
     stdin_input = None
-    codex_output_file = None
     gemini_home = None
 
     if agent == "claude":
@@ -768,8 +766,6 @@ def _run_subagent_inner(
         )
 
     def _cleanup_temp():
-        if codex_output_file and os.path.exists(codex_output_file):
-            os.unlink(codex_output_file)
         if gemini_home and os.path.isdir(gemini_home):
             shutil.rmtree(gemini_home, ignore_errors=True)
 
@@ -956,7 +952,7 @@ def run_review_round(
             agent_cfg = AGENTS[agent]
             agent_timeout = _adaptive_timeout(agent, file_count, line_count, config)
             for domain_key in domains:
-                domain_cfg = DOMAINS[domain_key]
+                domain_cfg = DOMAINS.get(domain_key, {"label": domain_key})
                 domain_graph_context = graph_context if domain_key in enriched_set else None
                 future = pool.submit(_run_subagent, agent, domain_key, base, cwd, spec_context, domain_graph_context, agent_timeout, prompt_cache)
                 futures[future] = (agent, domain_key)
@@ -1257,6 +1253,8 @@ def deduplicate_findings(findings: list[Finding]) -> list[Finding]:
     loc_groups: dict[tuple[str, int], list[int]] = {}
     for idx, group in enumerate(merged):
         rep = group[0]
+        if rep.line == 0:
+            continue  # skip unknown-line findings — different bugs at line 0 shouldn't merge
         loc_key = (rep.file, rep.line)
         loc_groups.setdefault(loc_key, []).append(idx)
 
@@ -1280,13 +1278,17 @@ def deduplicate_findings(findings: list[Finding]) -> list[Finding]:
             if not used_final[idx]:
                 used_final[idx] = True
                 final_merged.append(merged[idx])
+    # Include groups not processed by Pass 3 (line=0 and non-loc-grouped)
+    for idx, group in enumerate(merged):
+        if not used_final[idx]:
+            final_merged.append(group)
     merged = final_merged
 
     deduped: list[Finding] = []
     for group in merged:
-        # Keep the highest-severity finding
+        # Keep the highest-severity finding (copy to avoid mutating originals)
         group.sort(key=lambda f: SEVERITY_ORDER.get(f.severity, 99))
-        best = group[0]
+        best = _dc_replace(group[0])
         if len(group) > 1:
             # Deduplicate confirmer labels (same agent/domain shouldn't appear twice)
             seen_confirmers: set[str] = set()
@@ -1716,13 +1718,13 @@ def review_pr_single(
                 ],
             }
         ],
-        "summary": {
-            "total_findings": len(all_findings(rnd)),
-            "critical": sum(1 for f in all_findings(rnd) if f.severity == "critical"),
-            "high": sum(1 for f in all_findings(rnd) if f.severity == "high"),
-            "medium": sum(1 for f in all_findings(rnd) if f.severity == "medium"),
-            "clean": not has_actionable_findings(rnd),
-        },
+        "summary": (lambda deduped: {
+            "total_findings": len(deduped),
+            "critical": sum(1 for f in deduped if f.severity == "critical"),
+            "high": sum(1 for f in deduped if f.severity == "high"),
+            "medium": sum(1 for f in deduped if f.severity == "medium"),
+            "clean": not any(f.severity in ("critical", "high", "medium") for f in deduped),
+        })(all_findings(rnd)),
     }
 
     if not json_output:
@@ -1833,7 +1835,8 @@ def review_pr(
         # the LLM skill handles the classified summary but raw data must land on the PR).
         if not dry_run or post_raw:
             print(f"\n  Posting per-agent findings to PR #{pr_number}...", file=out)
-            for agent, agent_cfg in AGENTS.items():
+            for agent in active_agents:
+                agent_cfg = AGENTS[agent]
                 body = format_agent_review_body(agent, rnd)
                 if body:
                     ok = post_review(repo, pr_number, agent_cfg["app"], body)
@@ -1886,17 +1889,13 @@ def review_pr(
             }
             for r in rounds
         ],
-        "summary": {
-            "total_findings": sum(len(all_findings(r)) for r in rounds),
-            "critical": sum(
-                sum(1 for f in all_findings(r) if f.severity == "critical") for r in rounds
-            ),
-            "high": sum(sum(1 for f in all_findings(r) if f.severity == "high") for r in rounds),
-            "medium": sum(
-                sum(1 for f in all_findings(r) if f.severity == "medium") for r in rounds
-            ),
-            "clean": not has_actionable_findings(rounds[-1]) if rounds else False,
-        },
+        "summary": (lambda all_deduped: {
+            "total_findings": sum(len(d) for d in all_deduped),
+            "critical": sum(sum(1 for f in d if f.severity == "critical") for d in all_deduped),
+            "high": sum(sum(1 for f in d if f.severity == "high") for d in all_deduped),
+            "medium": sum(sum(1 for f in d if f.severity == "medium") for d in all_deduped),
+            "clean": not any(f.severity in ("critical", "high", "medium") for f in all_deduped[-1]) if all_deduped else False,
+        })([all_findings(r) for r in rounds]),
     }
 
     if not json_output:

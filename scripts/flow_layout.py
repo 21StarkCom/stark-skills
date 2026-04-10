@@ -72,10 +72,12 @@ def compute_layout(diagram: FlowDiagram) -> FlowDiagram | None:
         return None
 
     try:
-        for node in diagram.nodes:
-            node.position = positions[node.id]
+        new_nodes = [
+            node.model_copy(update={"position": positions[node.id]})
+            for node in diagram.nodes
+        ]
     except KeyError as exc:
         logger.warning('Dagre layout output missing node position for %s', exc.args[0])
         return None
 
-    return diagram
+    return diagram.model_copy(update={"nodes": new_nodes})

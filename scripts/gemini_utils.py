@@ -186,6 +186,11 @@ def gemini_session(
             shutil.rmtree(home, ignore_errors=True)
 
 
+_BLOCKED_ENV_KEYS = {"ANTHROPIC_API_KEY"}
+_BLOCKED_PREFIX = "ANTHROPIC_"
+_ALLOWED_ANTHROPIC_KEYS = {"ANTHROPIC_CODE_CLI", "ANTHROPIC_VERTEX_PROJECT_ID"}
+
+
 def make_gemini_env(gemini_home: str) -> dict[str, str]:
     """Build env dict with GEMINI_CLI_HOME for headless dispatch.
 
@@ -193,15 +198,21 @@ def make_gemini_env(gemini_home: str) -> dict[str, str]:
     gemini-3.1-pro-preview) are reachable via Vertex AI's global endpoint.
     Regional endpoints only carry GA models.
 
+    Strips ANTHROPIC_API_KEY and Anthropic-specific vars to match the
+    sanitization applied to Claude/Codex subprocesses.
+
     Does NOT inject GEMINI_API_KEY by default — the user's configured auth
     (Vertex AI, OAuth, etc.) is respected as-is. API key injection only
     happens via try_gemini_api_key_fallback() when the primary auth fails.
     """
-    return {
-        **os.environ,
-        "GEMINI_CLI_HOME": gemini_home,
-        "GOOGLE_CLOUD_LOCATION": "global",
+    env = {
+        k: v for k, v in os.environ.items()
+        if k not in _BLOCKED_ENV_KEYS
+        and not (k.startswith(_BLOCKED_PREFIX) and k not in _ALLOWED_ANTHROPIC_KEYS)
     }
+    env["GEMINI_CLI_HOME"] = gemini_home
+    env["GOOGLE_CLOUD_LOCATION"] = "global"
+    return env
 
 
 # ── Output parsing ────────────────────────────────────────────────────

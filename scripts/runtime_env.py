@@ -83,6 +83,17 @@ def _cleanup_stale_temp_dirs(prefix: str) -> None:
             pass  # Alive but owned by another user
 
 
+_cleanup_done: bool = False
+
+
+def _run_cleanup_once(prefix: str) -> None:
+    """Run stale temp-dir cleanup at most once per process."""
+    global _cleanup_done
+    if not _cleanup_done:
+        _cleanup_stale_temp_dirs(prefix)
+        _cleanup_done = True
+
+
 def _make_temp_dir(prefix: str) -> str:
     """Create a process-scoped temp dir with 0o700 permissions.
 
@@ -144,9 +155,9 @@ def build_agent_env(agent: str, operation: str) -> dict[str, str]:
     # Final safety rail — strip the API key even if it somehow slipped through.
     env.pop(_BLOCKED_KEY, None)
 
-    # Side effect: temp dir lifecycle management.
+    # Temp dir lifecycle: create a process-scoped dir and inject its path.
     prefix = runtime_cfg.get("temp_dir_prefix", "stark-env")
-    _cleanup_stale_temp_dirs(prefix)
-    _make_temp_dir(prefix)
+    _run_cleanup_once(prefix)
+    env["STARK_AGENT_TMPDIR"] = _make_temp_dir(prefix)
 
     return env

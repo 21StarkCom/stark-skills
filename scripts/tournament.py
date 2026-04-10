@@ -180,7 +180,7 @@ class TournamentConfig:
         if not isinstance(data, dict):
             raise ValueError(f"Expected YAML mapping, got {type(data).__name__}")
 
-        schema_version = data.get("schema_version")
+        schema_version = data.get("schema_version", 1)
         if schema_version != 1:
             raise ValueError(
                 f"Unsupported schema_version: {schema_version} (expected 1)"
@@ -409,11 +409,82 @@ def select_winner(agent_scores: dict[str, float], accuracy_scores: dict[str, flo
     if len(tied) == 1:
         return tied[0]
     # Break tie by accuracy
-    max_acc = max(accuracy_scores[a] for a in tied)
-    acc_tied = [a for a in tied if accuracy_scores[a] == max_acc]
+    max_acc = max(accuracy_scores.get(a, 0) for a in tied)
+    acc_tied = [a for a in tied if accuracy_scores.get(a, 0) == max_acc]
     if len(acc_tied) == 1:
         return acc_tied[0]
     return random.choice(acc_tied)
+
+
+def dispatch_agent_prompt(agent: str, prompt: str, timeout: int = 300) -> str:
+    """Run an agent CLI with a plain text prompt and return the raw output.
+
+    Generic dispatcher for tournament use — unlike dispatch_competitor, this
+    accepts a pre-built prompt string rather than a SkillData object.
+
+    Returns the agent's text output, or raises RuntimeError on failure.
+    """
+    stdin_input: str | None = None
+    gemini_home: str | None = None
+
+    if not is_agent_enabled(agent):
+        raise RuntimeError(f"agent {agent} is disabled in config")
+
+    if agent == "claude":
+        cmd = build_claude_cmd()
+        stdin_input = prompt
+    elif agent == "codex":
+        cmd = [
+            "codex", "exec",
+            "-m", _resolve_model("codex"),
+            "-c", CODEX_REASONING_CONFIG,
+            "--ephemeral", "--json",
+            "-s", "read-only",
+            "-",
+        ]
+        stdin_input = prompt
+    elif agent == "gemini":
+        gemini_home = setup_gemini_home(
+            "gemini-tournament-", os.getcwd(), "tournament", approval_mode="plan",
+        )
+        cmd = ["gemini", "-m", _resolve_model("gemini"), "-p", prompt, "-o", "json"]
+    else:
+        raise RuntimeError(f"Unknown agent: {agent}")
+
+    run_kwargs: dict[str, Any] = {
+        "capture_output": True, "text": True,
+        "timeout": timeout, "cwd": os.getcwd(),
+    }
+    if stdin_input is not None:
+        run_kwargs["input"] = stdin_input
+    if agent in ("claude", "codex"):
+        run_kwargs["env"] = (
+            build_agent_env(agent, "review")
+            if build_agent_env is not None
+            else make_clean_env()
+        )
+    if gemini_home:
+        run_kwargs["env"] = make_gemini_env(gemini_home)
+
+    try:
+        result = subprocess.run(cmd, **run_kwargs)
+    finally:
+        if gemini_home and os.path.isdir(gemini_home):
+            shutil.rmtree(gemini_home, ignore_errors=True)
+
+    if result.returncode != 0:
+        raise RuntimeError(f"Agent {agent} exited {result.returncode}: {result.stderr[:200]}")
+
+    raw = result.stdout
+    if agent == "codex":
+        raw = parse_jsonl_output(raw)
+    elif agent == "gemini":
+        raw = parse_gemini_output(raw)
+
+    if not raw.strip():
+        raise RuntimeError(f"Agent {agent} returned empty output")
+
+    return raw
 
 
 def dispatch_competitor(agent: str, skill, audience: str):
@@ -761,7 +832,7 @@ def evaluate_test(
                 pass_rate = 0.0
 
             entry: dict[str, Any] = {"_pass_rate": round(pass_rate, 2)}
-            if proc.returncode != 0 and total == 0:
+            if proc.returncode != 0:
                 entry["_error"] = stdout[-500:] if len(stdout) > 500 else stdout
             results[comp_id] = entry
 
@@ -1037,23 +1108,20 @@ class Tournament:
         outputs: dict[str, str] = {}
         errors: dict[str, str] = {}
 
+        timeout_s = config.execution.timeout_seconds
+        max_retries = config.execution.retries
+
         def _dispatch_one(comp: CompetitorConfig) -> tuple[str, str | None, str | None]:
             """Dispatch a single competitor, return (id, output, error)."""
-            try:
-                prompt = config.resolve_prompt(comp)
-                result = dispatch_competitor(comp.agent, prompt, comp.id)
-                # dispatch_competitor returns different types depending on context;
-                # for the generic tournament, we treat the return as a string output
-                if isinstance(result, str):
-                    return (comp.id, result if result.strip() else None, None)
-                # If it has an error attribute (like VizResult), handle that
-                if hasattr(result, "error") and result.error:
-                    return (comp.id, None, result.error)
-                # If it has html/doc_content, extract usable output
-                output_text = getattr(result, "html", None) or getattr(result, "doc_content", None) or ""
-                return (comp.id, output_text if output_text.strip() else None, None)
-            except Exception as e:
-                return (comp.id, None, str(e))
+            for attempt in range(max(1, max_retries)):
+                try:
+                    prompt = config.resolve_prompt(comp)
+                    output = dispatch_agent_prompt(comp.agent, prompt, timeout=timeout_s)
+                    return (comp.id, output, None)
+                except Exception as e:
+                    if attempt + 1 >= max(1, max_retries):
+                        return (comp.id, None, str(e))
+            return (comp.id, None, "exhausted retries")
 
         with ThreadPoolExecutor(max_workers=config.execution.max_workers) as executor:
             futures = {executor.submit(_dispatch_one, c): c for c in competitors}

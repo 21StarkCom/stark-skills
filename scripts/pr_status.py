@@ -136,6 +136,7 @@ def _gh_api(path: str, token: str) -> Any:
         timeout=30,
     )
     if result.returncode != 0:
+        print(f"  [!] gh api {path} failed (exit {result.returncode}): {result.stderr[:200]}", file=sys.stderr)
         return None
     try:
         return json.loads(result.stdout)

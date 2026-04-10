@@ -310,7 +310,7 @@ def _parse_field_values(field_values_nodes: list[dict]) -> dict[str, Any]:
             fields[fname] = fv["text"]
         elif "number" in fv:
             fields[fname] = fv["number"]
-        elif "name" in fv and fv["name"] != fname:
+        elif "name" in fv:
             # SingleSelect — "name" is the selected option value
             fields[fname] = fv["name"]
         elif "title" in fv:

@@ -18,8 +18,14 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
+
+try:
+    from claude_utils import CLAUDE_MODEL
+except ImportError:  # pragma: no cover - available at runtime
+    CLAUDE_MODEL = "claude-opus-4-6"
 
 try:
     from codex_utils import CODEX_MODEL
@@ -140,13 +146,18 @@ def discover_config(cwd: str | None = None, global_dir: str | None = None) -> di
     for cfg_path in reversed(chain):
         try:
             layer = json.loads(cfg_path.read_text())
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError:
+            continue
+        except OSError as exc:
+            print(f"dispatcher_base: cannot read {cfg_path}: {exc}", file=sys.stderr)
             continue
         for key, val in layer.items():
             if key in REPLACE_FIELDS:
                 merged[key] = val
             elif key in ADDITIVE_FIELDS:
                 existing = merged.get(key, [])
+                if not isinstance(val, list):
+                    val = [val] if val is not None else []
                 merged[key] = list(set(existing) | set(val))
             elif key in DEEP_MERGE_FIELDS:
                 merged[key] = _deep_merge(merged.get(key, {}), val)
@@ -164,7 +175,7 @@ def resolve_model(agent: str) -> str:
     Public API — use this instead of private _resolve_model in each dispatcher.
     """
     if agent == "claude":
-        return _config_get_model_id(agent) or "claude"
+        return _config_get_model_id(agent) or CLAUDE_MODEL
     if agent == "codex":
         return _config_get_model_id(agent) or CODEX_MODEL
     if agent == "gemini":

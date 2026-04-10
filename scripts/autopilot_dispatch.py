@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -24,9 +25,9 @@ from pathlib import Path
 from typing import Any
 
 from claude_utils import build_claude_cmd, make_clean_env
-from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_MEDIUM, parse_jsonl_output
+from codex_utils import CODEX_REASONING_EFFORT_MEDIUM, parse_jsonl_output
 from gemini_utils import (
-    GEMINI_MODEL, setup_gemini_home, make_gemini_env,
+    setup_gemini_home, make_gemini_env,
     should_fallback_to_api_key, try_gemini_api_key_fallback,
     parse_json_output as parse_gemini_output,
 )
@@ -79,13 +80,20 @@ class StepResult:
 # ── Worktree management ───────────────────────────────────────────────
 
 
+def _sanitize_ref(value: str) -> str:
+    """Sanitize a string for safe use in git branch names and directory names."""
+    return re.sub(r'[^a-zA-Z0-9._-]', '-', value)
+
+
 def create_worktree(repo_root: str, agent: str, step_id: str) -> str:
     """Create a git worktree for an agent to work in.
 
     Returns the worktree path.
     """
-    branch_name = f"autopilot/{agent}/{step_id}"
-    worktree_dir = os.path.join(repo_root, ".worktrees", f"autopilot-{agent}-{step_id}")
+    safe_agent = _sanitize_ref(agent)
+    safe_step = _sanitize_ref(step_id)
+    branch_name = f"autopilot/{safe_agent}/{safe_step}"
+    worktree_dir = os.path.join(repo_root, ".worktrees", f"autopilot-{safe_agent}-{safe_step}")
 
     # Get current HEAD
     head = subprocess.run(
@@ -135,12 +143,6 @@ def collect_diff(worktree_path: str) -> tuple[str, list[str], int, int]:
     )
 
     # Get the diff
-    result = subprocess.run(
-        ["git", "diff", "--cached", "--stat"],
-        capture_output=True, text=True, cwd=worktree_path,
-    )
-    stat = result.stdout
-
     result = subprocess.run(
         ["git", "diff", "--cached"],
         capture_output=True, text=True, cwd=worktree_path,
@@ -264,7 +266,7 @@ def _run_implementation_agent(
         run_kwargs["input"] = stdin_input
     if agent in ("claude", "codex"):
         run_kwargs["env"] = (
-            build_agent_env(agent, "review")
+            build_agent_env(agent, "implementation")
             if build_agent_env is not None
             else make_clean_env()
         )
@@ -469,12 +471,13 @@ def run_step_tournament(
         except RuntimeError as e:
             print(f"  [{agent}] worktree FAILED: {e}", file=sys.stderr)
 
+    worktree_failures = total - len(worktrees)
     if not worktrees:
         return {
             "step_id": step_id,
             "error": "no_worktrees",
             "results": [],
-            "summary": {"total": total, "succeeded": 0, "failed": total},
+            "summary": {"total": total, "succeeded": 0, "failed": total, "worktree_failures": total},
         }
 
     # Dispatch agents in parallel
@@ -514,12 +517,14 @@ def run_step_tournament(
 
     # Run tests if test_command provided
     if test_command:
+        import shlex
+        test_argv = shlex.split(test_command)
         for sr in results:
             if sr.error or not sr.worktree_path:
                 continue
             try:
                 test_result = subprocess.run(
-                    test_command, shell=True,
+                    test_argv,
                     capture_output=True, text=True,
                     timeout=120, cwd=sr.worktree_path,
                 )
@@ -556,6 +561,7 @@ def run_step_tournament(
             "total": total,
             "succeeded": len(succeeded),
             "failed": total - len(succeeded),
+            "worktree_failures": worktree_failures,
             "tests_run": test_command is not None,
         },
     }

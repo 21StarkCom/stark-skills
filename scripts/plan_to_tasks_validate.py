@@ -24,11 +24,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from claude_utils import build_claude_cmd
 from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_HIGH
 from gemini_utils import (
     GEMINI_MODEL, setup_gemini_home, make_gemini_env,
-    parse_json_output as parse_gemini_output,
 )
 
 # ── Constants ────────────────────────────────────────────────────────────
@@ -334,7 +332,7 @@ def _run_validation_agent(
                     timeout=timeout,
                     env=make_gemini_env(gemini_home),
                 )
-                raw = parse_gemini_output(proc.stdout or proc.stderr)
+                raw = proc.stdout or proc.stderr
             finally:
                 shutil.rmtree(gemini_home, ignore_errors=True)
 
@@ -400,9 +398,10 @@ def dispatch_validators(
     else:
         breakdown_dict = breakdown
 
-    if agents is None:
+    if not agents:
         config = load_config()
-        agents = config.get("validation_agents", ["codex"])
+        configured: list[str] | None = config.get("validation_agents")
+        agents = configured if configured else ["codex"]
 
     envelope = build_validation_envelope(
         plan_content=plan_content,

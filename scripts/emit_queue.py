@@ -383,7 +383,7 @@ def start_tool(tool_use_id: str, tool_name: str) -> None:
     try:
         db.execute(
             "INSERT OR REPLACE INTO inflight (tool_use_id, tool_name, started_at) VALUES (?, ?, ?)",
-            (tool_use_id, tool_name, time.monotonic()),
+            (tool_use_id, tool_name, time.time()),
         )
         db.commit()
     finally:
@@ -398,7 +398,7 @@ def end_tool(tool_use_id: str) -> tuple[str, int] | None:
     """
     if not tool_use_id:
         return None
-    now = time.monotonic()
+    now = time.time()
     db = _get_db()
     try:
         row = db.execute(
@@ -461,7 +461,7 @@ def inflight_count() -> int:
 
 def longest_inflight() -> tuple[str, int] | None:
     """Longest-running inflight tool. Returns (tool_name, elapsed_s) or None."""
-    now = time.monotonic()
+    now = time.time()
     db = _get_db()
     try:
         row = db.execute(

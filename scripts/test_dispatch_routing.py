@@ -78,7 +78,7 @@ def test_autopilot_codex_uses_agent_specific_env(monkeypatch):
 
     result = autopilot_dispatch._run_implementation_agent("codex", "step-1", "prompt", "/tmp/worktree", timeout=1)
 
-    assert env_calls == [("codex", "review")]
+    assert env_calls == [("codex", "implementation")]
     assert seen_envs[0] == {"GH_TOKEN": "codex-token"}
     assert result.error is None
 

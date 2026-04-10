@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import multi_review
+from dispatcher_base import DEFAULT_CONFIG
 from multi_review import (
     ReviewRound,
     SubAgentResult,
@@ -388,7 +389,7 @@ class TestConfigWiring:
     @patch("multi_review.discover_config")
     def test_disabled_domains_excluded(self, mock_config, mock_sub):
         mock_config.return_value = {
-            **multi_review.DEFAULT_CONFIG,
+            **DEFAULT_CONFIG,
             "disabled_domains": ["accessibility"],
         }
         mock_sub.return_value = multi_review.SubAgentResult(
@@ -404,7 +405,7 @@ class TestConfigWiring:
     @patch("multi_review.discover_config")
     def test_agents_config_respected(self, mock_config, mock_sub):
         mock_config.return_value = {
-            **multi_review.DEFAULT_CONFIG,
+            **DEFAULT_CONFIG,
             "agents": ["claude"],
         }
         mock_sub.return_value = multi_review.SubAgentResult(
@@ -469,8 +470,9 @@ class TestReturnCodeHandling:
         cmd = mock_run.call_args[0][0]
         assert cmd[-1] != call_kwargs["input"]  # prompt not in argv
 
+    @patch("multi_review.build_agent_env", return_value={"PATH": "/usr/bin"})
     @patch("multi_review.subprocess.run")
-    def test_prompt_passed_via_stdin_codex(self, mock_run):
+    def test_prompt_passed_via_stdin_codex(self, mock_run, _mock_env):
         mock_run.return_value = MagicMock(stdout="", stderr="", returncode=0)
         multi_review._run_subagent("codex", "architecture", "abc123")
         call_kwargs = mock_run.call_args[1]
@@ -479,8 +481,9 @@ class TestReturnCodeHandling:
         cmd = mock_run.call_args[0][0]
         assert cmd[-1] == "-"  # stdin marker
 
+    @patch("multi_review.build_agent_env", return_value={"PATH": "/usr/bin"})
     @patch("multi_review.subprocess.run")
-    def test_codex_nonzero_returncode(self, mock_run):
+    def test_codex_nonzero_returncode(self, mock_run, _mock_env):
         """Codex CLI error should be caught even with -o file."""
         mock_run.return_value = MagicMock(stdout="", stderr="bad flag", returncode=2)
         result = multi_review._run_subagent("codex", "architecture", "abc123")

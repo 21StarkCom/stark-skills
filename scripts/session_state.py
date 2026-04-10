@@ -98,7 +98,7 @@ class SessionState:
     @classmethod
     def load(cls, session_id: str) -> "SessionState | None":
         """Load session state from disk. Returns None if not found."""
-        path = SESSIONS_DIR / f"{session_id}.json"
+        path = SESSIONS_DIR / f"{cls._sanitize_id(session_id)}.json"
         if not path.exists():
             return None
         try:

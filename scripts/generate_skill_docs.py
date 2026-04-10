@@ -133,9 +133,8 @@ class _Sanitizer(html.parser.HTMLParser):
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag_lower = tag.lower()
         if tag_lower in _DANGEROUS_TAGS:
-            if tag_lower == "script":
-                self._skip_depth += 1
-                self._skip_tag = "script"
+            self._skip_depth += 1
+            self._skip_tag = tag_lower
             return
         if self._skip_depth > 0:
             return
@@ -152,12 +151,10 @@ class _Sanitizer(html.parser.HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         tag_lower = tag.lower()
-        if tag_lower == "script" and self._skip_depth > 0:
+        if tag_lower in _DANGEROUS_TAGS and self._skip_depth > 0:
             self._skip_depth -= 1
             if self._skip_depth == 0:
                 self._skip_tag = None
-            return
-        if tag_lower in _DANGEROUS_TAGS:
             return
         if self._skip_depth > 0:
             return

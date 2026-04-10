@@ -135,6 +135,22 @@ def select_app(name: str) -> None:
 _CACHE_DIR = Path.home() / ".cache" / "github-app-tokens"
 
 
+def _atomic_write_json(path: Path, data: dict) -> None:
+    """Write JSON to *path* atomically with restricted permissions (0o600)."""
+    import tempfile
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}-")
+    try:
+        os.chmod(tmp, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+
+
 def _cache_file(app: str | None = None, installation_id: str | None = None) -> Path:
     name = _resolve_app_name(app)
     if installation_id:
@@ -159,19 +175,13 @@ def _read_cached_token(app: str | None = None, installation_id: str | None = Non
 def _write_cached_token(
     token: str, expires_at: float, app: str | None = None, installation_id: str | None = None
 ) -> None:
-    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    cf = _cache_file(app, installation_id)
-    cf.write_text(json.dumps({"token": token, "expires_at": expires_at}))
-    cf.chmod(0o600)
+    _atomic_write_json(_cache_file(app, installation_id), {"token": token, "expires_at": expires_at})
 
 
 # ── Installation ID cache (per-app, 1-hour TTL, populated by API discovery)
 
-_INSTALL_CACHE = Path.home() / ".cache"
-
-
 def _install_cache_file(app_name: str) -> Path:
-    return _INSTALL_CACHE / f"github-app-installations-{app_name}.json"
+    return _CACHE_DIR / f"installations-{app_name}.json"
 
 
 def _read_install_cache(app_name: str) -> dict[str, str]:
@@ -188,9 +198,10 @@ def _read_install_cache(app_name: str) -> dict[str, str]:
 
 
 def _write_install_cache(app_name: str, entries: dict[str, str]) -> None:
-    cf = _install_cache_file(app_name)
-    cf.write_text(json.dumps({"expires_at": time.time() + 3600, "entries": entries}))
-    cf.chmod(0o600)
+    _atomic_write_json(
+        _install_cache_file(app_name),
+        {"expires_at": time.time() + 3600, "entries": entries},
+    )
 
 
 # ── Core auth ───────────────────────────────────────────────────────────
@@ -412,12 +423,10 @@ def get_token(app: str | None = None, *, owner: str | None = None) -> str:
         )
         return gh_token
 
-    print(
+    raise RuntimeError(
         "No GitHub auth available: Keychain read failed, STARK_* env vars not set, "
-        "GH_TOKEN not set.",
-        file=sys.stderr,
+        "GH_TOKEN not set."
     )
-    sys.exit(1)
 
 
 def _headers(app: str | None = None) -> dict[str, str]:
@@ -472,7 +481,6 @@ def graphql(query: str, *, variables: dict | None = None, retry: bool = True) ->
         body["variables"] = variables
 
     attempts = 2 if retry else 1
-    last_exc: Exception | None = None
     for attempt in range(attempts):
         try:
             r = requests.post(
@@ -487,11 +495,10 @@ def graphql(query: str, *, variables: dict | None = None, retry: bool = True) ->
                 msgs = "; ".join(e.get("message", str(e)) for e in data["errors"])
                 raise RuntimeError(f"GraphQL errors: {msgs}")
             return data
-        except requests.exceptions.ConnectionError as exc:
-            last_exc = exc
+        except requests.exceptions.ConnectionError:
             if attempt + 1 >= attempts:
                 raise
-    raise last_exc  # unreachable, but keeps type-checker happy
+    raise RuntimeError("GraphQL request failed after retries")
 
 
 # ── High-level operations ───────────────────────────────────────────────
@@ -635,7 +642,7 @@ def main() -> None:
 
     pr_merge_p = pr_sub.add_parser("merge", help="Merge PR")
     pr_merge_p.add_argument("number", type=int)
-    pr_merge_p.add_argument("--squash", action="store_true", default=True)
+    pr_merge_p.add_argument("--squash", action="store_true")
     pr_merge_p.add_argument("--merge", action="store_true")
     pr_merge_p.add_argument("--rebase", action="store_true")
     pr_merge_p.add_argument("--title", default="")

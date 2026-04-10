@@ -650,9 +650,6 @@ def _run_end(args: argparse.Namespace) -> None:
     banner = render_session_banner(config, banner_data)
     receipt_str = render_receipt(config, receipt_items) if receipt_items else ""
 
-    # Add approximate warning to diff if needed
-    output_parts: list[str] = []
-
     from session_tui import render_diff_summary, render_next_up, _section  # noqa: E402
 
     output_sections: list[str] = [banner]

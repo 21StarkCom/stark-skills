@@ -29,9 +29,9 @@ from pathlib import Path
 from typing import Any
 
 from claude_utils import build_claude_cmd, make_clean_env
-from codex_utils import CODEX_MODEL, CODEX_REASONING_EFFORT_HIGH, parse_jsonl_output
+from codex_utils import CODEX_REASONING_EFFORT_HIGH, parse_jsonl_output
 from gemini_utils import (
-    GEMINI_MODEL, setup_gemini_home, make_gemini_env,
+    setup_gemini_home, make_gemini_env,
     parse_json_output as parse_gemini_output,
     should_fallback_to_api_key, try_gemini_api_key_fallback,
 )
@@ -314,7 +314,7 @@ def generate_plans(
 
     if total == 0:
         return {
-            "mode": "generate",
+            "phase": "generate",
             "results": [],
             "summary": {"total": 0, "succeeded": 0, "failed": 0},
         }
@@ -418,8 +418,15 @@ def _parse_cross_review(raw: str) -> tuple[dict[str, int], list[str], list[str]]
     except json.JSONDecodeError:
         return {}, [], []
 
+    def _safe_int(v: Any) -> int | None:
+        try:
+            return int(float(v))
+        except (ValueError, TypeError):
+            return None
+
     scores_data = data.get("scores", {})
-    scores = {k: int(v) for k, v in scores_data.items() if isinstance(v, (int, float, str))}
+    scores = {k: s for k, v in scores_data.items()
+              if isinstance(v, (int, float, str)) and (s := _safe_int(v)) is not None}
     strengths = data.get("strengths", [])
     weaknesses = data.get("weaknesses", [])
     return scores, strengths, weaknesses
@@ -466,7 +473,7 @@ def cross_review_plans(
 
     if total == 0:
         return {
-            "mode": "cross-review",
+            "phase": "cross-review",
             "results": [],
             "plan_averages": {author: 0.0 for author in plans},
             "winner": None,
@@ -536,7 +543,7 @@ def cross_review_plans(
         author: sum(scores) / len(scores) if scores else 0.0
         for author, scores in plan_scores.items()
     }
-    winner = max(plan_averages, key=plan_averages.get) if plan_averages else None
+    winner = max(plan_averages, key=lambda k: plan_averages[k]) if plan_averages else None
 
     return {
         "phase": "cross-review",

@@ -454,6 +454,5 @@ class TestGithubAppEnvVarAuth:
             patch.object(github_app, "subprocess") as mock_sub,
         ):
             mock_sub.run.return_value = Mock(returncode=1, stderr="not found")
-            with pytest.raises(SystemExit) as exc:
+            with pytest.raises(RuntimeError, match="No GitHub auth available"):
                 github_app.get_token()
-            assert exc.value.code == 1

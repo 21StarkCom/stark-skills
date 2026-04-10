@@ -248,12 +248,12 @@ def _make_config(**overrides):
 
 
 @patch("tournament.evaluate_semantic")
-@patch("tournament.dispatch_competitor")
+@patch("tournament.dispatch_agent_prompt")
 def test_tournament_semantic_mock(mock_dispatch, mock_eval):
     """Mock dispatch and evaluate_semantic, run Tournament.run(), verify winner."""
-    # dispatch_competitor returns string output for each competitor
-    def fake_dispatch(agent, prompt, comp_id):
-        return f"Output from {comp_id}"
+    # dispatch_agent_prompt returns string output for each competitor
+    def fake_dispatch(agent, prompt, timeout=300):
+        return f"Output from {agent}"
 
     mock_dispatch.side_effect = fake_dispatch
 
@@ -275,7 +275,7 @@ def test_tournament_semantic_mock(mock_dispatch, mock_eval):
     mock_eval.assert_called_once()
 
 
-@patch("tournament.dispatch_competitor")
+@patch("tournament.dispatch_agent_prompt")
 def test_tournament_all_fail(mock_dispatch):
     """All competitors fail, verify all_failed result."""
     mock_dispatch.side_effect = Exception("CLI not found")
@@ -290,11 +290,11 @@ def test_tournament_all_fail(mock_dispatch):
 
 
 @patch("tournament.evaluate_semantic")
-@patch("tournament.dispatch_competitor")
+@patch("tournament.dispatch_agent_prompt")
 def test_tournament_eval_failure_fallback(mock_dispatch, mock_eval):
     """Evaluation raises exception, verify first-valid fallback with eval_failed flag."""
-    def fake_dispatch(agent, prompt, comp_id):
-        return f"Output from {comp_id}"
+    def fake_dispatch(agent, prompt, timeout=300):
+        return f"Output from {agent}"
 
     mock_dispatch.side_effect = fake_dispatch
     mock_eval.side_effect = RuntimeError("Judge API down")
@@ -308,13 +308,13 @@ def test_tournament_eval_failure_fallback(mock_dispatch, mock_eval):
     assert result.winner_score == 0.0
 
 
-@patch("tournament.dispatch_competitor")
+@patch("tournament.dispatch_agent_prompt")
 def test_tournament_single_survivor(mock_dispatch):
     """Only 1 competitor succeeds, verify degraded flag without evaluation."""
-    def fake_dispatch(agent, prompt, comp_id):
-        if comp_id == "claude":
+    def fake_dispatch(agent, prompt, timeout=300):
+        if agent == "claude":
             return "Claude output"
-        raise Exception(f"{comp_id} failed")
+        raise Exception(f"{agent} failed")
 
     mock_dispatch.side_effect = fake_dispatch
 
@@ -382,11 +382,11 @@ def test_evaluate_test_timeout(tmp_path):
 
 
 @patch("tournament.evaluate_test")
-@patch("tournament.dispatch_competitor")
+@patch("tournament.dispatch_agent_prompt")
 def test_tournament_test_strategy(mock_dispatch, mock_eval_test):
     """Tournament.run() with strategy='test' uses evaluate_test."""
-    def fake_dispatch(agent, prompt, comp_id):
-        return f"def add(a, b): return a + b  # {comp_id}"
+    def fake_dispatch(agent, prompt, timeout=300):
+        return f"def add(a, b): return a + b  # {agent}"
 
     mock_dispatch.side_effect = fake_dispatch
 

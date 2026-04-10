@@ -331,8 +331,9 @@ class TestSubAgentDispatch:
         assert result.error == "parse_error"
         assert len(result.findings) == 0
 
+    @patch("plan_review_dispatch.build_agent_env", return_value={"PATH": "/usr/bin"})
     @patch("plan_review_dispatch.subprocess.run")
-    def test_agent_unavailable(self, mock_run):
+    def test_agent_unavailable(self, mock_run, _mock_env):
         mock_run.side_effect = FileNotFoundError("codex not found")
         result = plan_review_dispatch._run_plan_subagent(
             "codex", "general", "Test plan", timeout=300,
@@ -361,8 +362,9 @@ class TestReturnCodeHandling:
         assert result.error == "empty_output"
         assert len(result.findings) == 0
 
+    @patch("plan_review_dispatch.build_agent_env", return_value={"PATH": "/usr/bin"})
     @patch("plan_review_dispatch.subprocess.run")
-    def test_codex_nonzero_returncode(self, mock_run):
+    def test_codex_nonzero_returncode(self, mock_run, _mock_env):
         mock_run.return_value = MagicMock(stdout="", stderr="bad flag", returncode=2)
         result = plan_review_dispatch._run_plan_subagent(
             "codex", "general", "Test plan", timeout=300,
@@ -382,8 +384,9 @@ class TestReturnCodeHandling:
         cmd = mock_run.call_args[0][0]
         assert cmd[-1] != call_kwargs["input"]  # prompt not in argv
 
+    @patch("plan_review_dispatch.build_agent_env", return_value={"PATH": "/usr/bin"})
     @patch("plan_review_dispatch.subprocess.run")
-    def test_prompt_passed_via_stdin_codex(self, mock_run):
+    def test_prompt_passed_via_stdin_codex(self, mock_run, _mock_env):
         mock_run.return_value = MagicMock(stdout="", stderr="", returncode=0)
         plan_review_dispatch._run_plan_subagent(
             "codex", "general", "Test plan", timeout=300,
