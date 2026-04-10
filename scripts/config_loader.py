@@ -11,7 +11,7 @@ from typing import Any
 CONFIG_PATH = Path.home() / ".claude" / "code-review" / "config.json"
 
 DEFAULT_MODELS = {
-    "claude": {"enabled": True, "model_id": "claude-sonnet-4-6"},
+    "claude": {"enabled": True, "model_id": "claude-opus-4-6"},
     "codex": {"enabled": True, "model_id": "gpt-5.4"},
     "gemini": {"enabled": False, "model_id": "gemini-2.5-pro"},
 }

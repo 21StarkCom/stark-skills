@@ -22,7 +22,7 @@ except ImportError:  # pragma: no cover - backward compat for older installs
     build_agent_env = None
 
 # Default model — pinned to avoid drift when the CLI default changes.
-CLAUDE_MODEL = "claude-sonnet-4-6"
+CLAUDE_MODEL = "claude-opus-4-6"
 
 
 class AgentDisabledError(RuntimeError):
@@ -30,10 +30,11 @@ class AgentDisabledError(RuntimeError):
 
 # Vertex AI config for headless sub-agent dispatch.
 # Bypasses OAuth login — uses ADC (gcloud auth application-default login).
+# Global region required for latest model versions (opus-4-6, sonnet-4-6).
 _VERTEX_ENV = {
     "CLAUDE_CODE_USE_VERTEX": "1",
-    "ANTHROPIC_VERTEX_PROJECT_ID": "development-222850",
-    "CLOUD_ML_REGION": "us-east5",
+    "ANTHROPIC_VERTEX_PROJECT_ID": "infra-ai-platform",
+    "CLOUD_ML_REGION": "global",
 }
 
 # Env vars that must NOT leak into CLI subprocesses.

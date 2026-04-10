@@ -30,10 +30,11 @@ _USER_AUTH_OPS: frozenset[str] = frozenset({"pr_create", "issue_ops"})
 # Vertex AI config — mirrors claude_utils._VERTEX_ENV to avoid circular import.
 # These are injected unconditionally for the claude agent regardless of
 # whether the vars are already in os.environ.
+# Global region required for latest model versions (opus-4-6, sonnet-4-6).
 _VERTEX_ENV: dict[str, str] = {
     "CLAUDE_CODE_USE_VERTEX": "1",
-    "ANTHROPIC_VERTEX_PROJECT_ID": "development-222850",
-    "CLOUD_ML_REGION": "us-east5",
+    "ANTHROPIC_VERTEX_PROJECT_ID": "infra-ai-platform",
+    "CLOUD_ML_REGION": "global",
 }
 
 # This key must NEVER appear in any subprocess environment.
