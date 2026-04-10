@@ -35,6 +35,11 @@ try:
 except ImportError:  # pragma: no cover - backward compat for older installs
     build_agent_env = None
 
+from dispatcher_base import (
+    discover_domains as _base_discover_domains,
+    resolve_prompt as _base_resolve_prompt,
+)
+
 # ── Config ──────────────────────────────────────────────────────────────
 
 
@@ -98,30 +103,17 @@ def resolve_plan_prompt(
 ) -> str:
     """Resolve a plan review prompt file: repo → global agent → global domains.
 
-    Resolution order:
-        1. {repo_dir}/.code-review/plan-prompts/{agent}/{filename}
-        2. {global_prompts_dir}/{agent}/{filename}
-        3. {global_prompts_dir}/domains/{filename}   (shared, agent-agnostic)
+    Thin wrapper around dispatcher_base.resolve_prompt with plan-review
+    repo_subdir convention (plan-prompts).
     """
-    # Check repo-level override
-    if repo_dir:
-        repo_path = Path(repo_dir) / ".code-review" / "plan-prompts" / agent / filename
-        if repo_path.exists():
-            return repo_path.read_text().strip()
-
-    # Fall back to global agent-specific path
     if global_prompts_dir is None:
         global_prompts_dir = str(GLOBAL_PROMPTS_DIR)
-    global_path = Path(global_prompts_dir) / agent / filename
-    if global_path.exists():
-        return global_path.read_text().strip()
-
-    # Fall back to shared domains/ directory
-    domains_path = Path(global_prompts_dir) / "domains" / filename
-    if domains_path.exists():
-        return domains_path.read_text().strip()
-
-    return ""
+    return _base_resolve_prompt(
+        agent, filename,
+        prompts_dir=global_prompts_dir,
+        repo_dir=repo_dir,
+        repo_subdir="plan-prompts",
+    )
 
 
 # ── Domain discovery ───────────────────────────────────────────────────
@@ -130,46 +122,10 @@ def resolve_plan_prompt(
 def _discover_plan_domains(
     global_prompts_dir: str | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """Discover plan review domains from prompt files.
-
-    Scans the first agent directory found for [0-9]*.md files.
-    Falls back to scanning domains/ if no agent directory has domain files.
-    Returns dict keyed by domain slug (e.g. "completeness").
-    """
+    """Discover plan review domains — delegates to dispatcher_base.discover_domains."""
     if global_prompts_dir is None:
         global_prompts_dir = str(GLOBAL_PROMPTS_DIR)
-
-    prompts_path = Path(global_prompts_dir)
-    domains: dict[str, dict[str, Any]] = {}
-
-    for agent in AGENTS:
-        agent_dir = prompts_path / agent
-        if not agent_dir.exists():
-            continue
-        for f in sorted(agent_dir.glob("[0-9]*.md")):
-            key = f.stem.split("-", 1)[1] if "-" in f.stem else f.stem
-            if key not in domains:
-                domains[key] = {
-                    "order": f.stem.split("-")[0] if "-" in f.stem else "99",
-                    "label": key.replace("-", " ").title(),
-                    "filename": f.name,
-                }
-        if domains:
-            break
-
-    # Fall back to shared domains/ directory if no per-agent domain files found
-    if not domains:
-        shared_dir = prompts_path / "domains"
-        for f in sorted(shared_dir.glob("[0-9]*.md")):
-            key = f.stem.split("-", 1)[1] if "-" in f.stem else f.stem
-            if key not in domains:
-                domains[key] = {
-                    "order": f.stem.split("-")[0] if "-" in f.stem else "99",
-                    "label": key.replace("-", " ").title(),
-                    "filename": f.name,
-                }
-
-    return domains
+    return _base_discover_domains(global_prompts_dir, agents=AGENTS)
 
 
 # ── Config loading ─────────────────────────────────────────────────────
