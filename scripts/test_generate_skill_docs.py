@@ -47,7 +47,6 @@ def test_parse_complexity_simple():
 def test_parse_complexity_complex():
     fixture = Path(__file__).parent.parent / "skill" / "stark-phase-execute" / "SKILL.md"
     data = parse_skill_md(fixture)
-    # After skill compression (665->372 lines), phase-execute is now medium complexity
     assert data.complexity == "medium"
     assert data.line_count > 300
 
