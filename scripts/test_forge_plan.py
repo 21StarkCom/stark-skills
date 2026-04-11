@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from forge_plan import (
+from forge_plan import (  # pyright: ignore[reportMissingImports]
     _all_findings_from_result,
     _build_routed_agent_groups,
     _count_findings_at_or_above,

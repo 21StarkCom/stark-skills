@@ -164,7 +164,7 @@ def _severity_meets_threshold(severity: str, threshold: str) -> bool:
 
 def classify_findings(
     findings: list[dict[str, Any]],
-    _spec_text: str,
+    spec_text: str,
     previous_rounds: list[dict[str, Any]],
     fix_threshold: str,
 ) -> list[dict[str, Any]]:
@@ -178,6 +178,7 @@ def classify_findings(
 
     Second recurrence gets status=fix with recurring=True flag.
     """
+    del spec_text  # reserved for future section-aware classification
     # Build recurrence map: finding_id -> count of previous rounds where it was 'fix'
     recurrence_map: dict[str, int] = {}
     for rnd in previous_rounds:
@@ -375,7 +376,7 @@ def _apply_consensus(
         groups.setdefault(key, []).append(f)
 
     result: list[dict[str, Any]] = []
-    for _key, group in groups.items():
+    for _, group in groups.items():
         unique_agents = {f.get("agent") for f in group}
         if len(unique_agents) >= threshold:
             rep = dict(group[0])

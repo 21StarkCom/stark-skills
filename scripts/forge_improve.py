@@ -122,7 +122,7 @@ def build_improvement_prompt(
 
 def create_improvement_pr(
     branch_name: str,
-    files: list[str],  # noqa: ARG001 — informational; caller already committed
+    files: list[str],  # informational; caller already committed
     title: str,
     body: str,
 ) -> bool:
@@ -141,6 +141,7 @@ def create_improvement_pr(
     Returns:
         True if the PR was created successfully, False on error.
     """
+    del files  # used by caller for context; not needed in gh pr create
     env_cmd = "unset GH_TOKEN"
     pr_cmd = [
         "gh", "pr", "create",

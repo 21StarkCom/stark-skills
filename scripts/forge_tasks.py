@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from forge_plan import PhaseResult
+from forge_plan import PhaseResult  # pyright: ignore[reportMissingImports]
 
 
 # ── Data models ────────────────────────────────────────────────────────────
@@ -160,13 +160,14 @@ def run_tasks_phase(
     plan_path: Path,
     state: dict[str, Any],
     cfg: dict[str, Any],
-    _repo_dir: Path,
+    repo_dir: Path,
 ) -> PhaseResult:
     """Decompose plan into tasks, validate, retry on failure.
 
     Up to 2 retries on validation failure (3 total attempts).
     Returns PhaseResult with status="completed" on success, "halted" on failure.
     """
+    del repo_dir  # reserved for future working-directory-aware decomposition
     plan_text = plan_path.read_text(encoding="utf-8")
     plan_hash = state.get("phases", {}).get("plan", {}).get("plan_hash")
 
@@ -304,7 +305,7 @@ def _create_issue(task: Task, max_retries: int = 2) -> int | None:
 def create_issues(
     tasks: list[Task],
     state: dict[str, Any],
-    _cfg: dict[str, Any],
+    cfg: dict[str, Any],
     dry_run: bool = False,
 ) -> list[int]:
     """Create GitHub issues for each task, skipping existing ones.
@@ -314,6 +315,7 @@ def create_issues(
 
     Returns list of issue numbers (existing or newly created).
     """
+    del cfg  # reserved for future org/repo override support
     issue_numbers: list[int] = []
     state_tasks = state.setdefault("phases", {}).setdefault("tasks", {})
     state_issue_map: dict[str, int] = state_tasks.setdefault("issue_numbers", {})

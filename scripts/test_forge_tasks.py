@@ -3,17 +3,15 @@ from __future__ import annotations
 
 import json
 import subprocess
-from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from forge_tasks import (
+from forge_tasks import (  # pyright: ignore[reportMissingImports]
     Task,
     _create_issue,
     _extract_tasks,
     _search_existing_issue,
-    _validate_breakdown,
     _validation_passed,
     create_issues,
     run_tasks_phase,
@@ -160,7 +158,7 @@ class TestRunTasksPhase:
         pass_validator = MagicMock(approved=True, issues=[])
         decompose_calls = [0]
 
-        def decompose_side_effect(plan_text, cfg):
+        def decompose_side_effect(_plan_text, _cfg):
             decompose_calls[0] += 1
             return sample_breakdown
 
@@ -172,7 +170,7 @@ class TestRunTasksPhase:
 
         with (
             patch("forge_tasks._decompose_plan", side_effect=decompose_side_effect),
-            patch("forge_tasks._validate_breakdown", side_effect=lambda *a, **k: next(validation_iter)),
+            patch("forge_tasks._validate_breakdown", side_effect=lambda *_a, **_k: next(validation_iter)),
             patch("forge_tasks.time.sleep"),  # Skip backoff
         ):
             result = run_tasks_phase(plan_file, minimal_state, minimal_cfg, tmp_path)
@@ -264,7 +262,6 @@ class TestCreateIssues:
     def test_records_issue_numbers_in_state(self, minimal_state, minimal_cfg):
         """Issue numbers for all tasks are recorded in state."""
         tasks = self._make_tasks(3)
-        task_ids = [t.task_id for t in tasks]
 
         with (
             patch("forge_tasks._search_existing_issue", return_value=None),
@@ -282,7 +279,7 @@ class TestCreateIssues:
         """Mix of existing and new issues handled correctly."""
         tasks = self._make_tasks(2)
 
-        def mock_search(title, **kwargs):
+        def mock_search(title, **_kwargs):
             return 5 if "Task 1" in title else None
 
         with (
@@ -394,7 +391,7 @@ class TestCreateIssue:
         url = "https://github.com/GetEvinced/repo/issues/10"
         captured_env = {}
 
-        def capture_run(cmd, **kwargs):
+        def capture_run(_cmd, **kwargs):
             captured_env.update(kwargs.get("env", {}))
             proc = MagicMock(spec=subprocess.CompletedProcess)
             proc.returncode = 0

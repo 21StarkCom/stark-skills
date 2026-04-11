@@ -58,7 +58,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from forge_improve import (
+from forge_improve import (  # pyright: ignore[reportMissingImports]
     build_improvement_prompt,
     create_improvement_pr,
     maybe_consolidate_heuristics,

@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from forge_review import (
+from forge_review import (  # pyright: ignore[reportMissingImports]
     PhaseResult,
     _apply_consensus,
     _group_domains_by_agent,
