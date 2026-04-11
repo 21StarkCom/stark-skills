@@ -8,7 +8,7 @@ Multi-agent PR code review system. Claude, Codex, and Gemini are all enabled by 
 
 - `global/` — global config + prompts, installed to `~/.claude/code-review/`
 - `scripts/` — Python orchestrator + GitHub App auth, installed to `~/.claude/code-review/scripts/`
-- `skill/` — all skills (`skill/stark-*/SKILL.md`, 29 skills), installed as symlinks to `~/.claude/skills/`
+- `skill/` — all skills (`skill/stark-*/SKILL.md`, 30 skills), installed as symlinks to `~/.claude/skills/`
 - `org/evinced/` — Evinced org config, installed to `~/git/Evinced/.code-review/`
 - `data/` — persona roster, review coverage HTML, generated showcase pages
 - `automation/` — CCR automation fleet: 12 triggers, prompts, logs, cost tracking, reports
@@ -83,7 +83,8 @@ All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.claude/skil
 
 ### Pipeline (end-to-end, in order)
 
-- `/stark-design "prompt" | <path>` — generate design doc from requirements (enabled agents generate, then cross-review before synthesis)
+- `/stark-forge <path> [--auto-detect] [--dry-run] [--resume] [--workers N]` — end-to-end design pipeline: classify, review, plan, tasks
+- `/stark-design "prompt" | <path>` — (archived) generate design doc from requirements; use `superpowers:brainstorm` + `/stark-forge` instead
 - `/stark-review-design <path>` — multi-agent design/spec review (N agents × 12 domains, default N=2)
 - `/stark-design-to-plan <path>` — generate implementation plan from design doc (enabled agents generate, then cross-review before synthesis)
 - `/stark-review-plan <path>` — multi-agent execution plan review (N agents × 10 adversarial domains, default N=2)
