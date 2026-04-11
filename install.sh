@@ -496,6 +496,7 @@ install() {
     fi
 
     # 4. Validate skills (blocking — must pass before symlinking)
+    # Archived: /stark-design — use superpowers:brainstorm + /stark-forge instead
     echo ""
     echo "Validating skills..."
     local skill_errors=0
