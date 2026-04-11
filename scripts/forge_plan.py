@@ -301,8 +301,6 @@ def run_plan_review(
     )
 
     result = PhaseResult(status="pending")
-    seen_finding_ids: dict[str, int] = {}  # finding_id -> recurrence count
-
     print(
         f"\n[forge_plan] Phase 2b: plan review (max_rounds={max_rounds}, "
         f"halt_round={halt_round}, threshold={fix_threshold})",

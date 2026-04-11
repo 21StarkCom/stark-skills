@@ -2,13 +2,11 @@
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from forge_plan import (
-    PhaseResult,
     _all_findings_from_result,
     _build_routed_agent_groups,
     _count_findings_at_or_above,
@@ -355,7 +353,7 @@ class TestRunPlanReview:
         empty_dispatch = {"results": []}
         dispatch_calls = []
 
-        def tracking_dispatch(plan_content, round_num, **kwargs):
+        def tracking_dispatch(_plan_content, round_num, **_kwargs):
             dispatch_calls.append(round_num)
             return empty_dispatch
 
@@ -382,7 +380,7 @@ class TestRunPlanReview:
         medium_finding = {"severity": "medium", "title": "Gap", "section": "S1"}
         call_count = [0]
 
-        def dispatch_with_decay(plan_content, round_num, **kwargs):
+        def dispatch_with_decay(_plan_content, _round_num, **_kwargs):
             call_count[0] += 1
             # First call has findings, subsequent calls are clean
             if call_count[0] == 1:
@@ -396,7 +394,7 @@ class TestRunPlanReview:
             patch("forge_plan._discover_plan_review_domains", return_value={
                 "general": {"order": "01", "filename": "general.md"},
             }),
-            patch("forge_plan._git_commit", side_effect=lambda d, f, m: "sha" + str(len(commit_calls) + 1)) as mock_commit,
+            patch("forge_plan._git_commit", side_effect=lambda _d, _f, _m: "sha" + str(len(commit_calls) + 1)) as mock_commit,
         ):
             result = run_plan_review(plan_file, minimal_state, cfg, tmp_path)
             commit_calls = mock_commit.call_args_list

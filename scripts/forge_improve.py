@@ -122,7 +122,7 @@ def build_improvement_prompt(
 
 def create_improvement_pr(
     branch_name: str,
-    files: list[str],
+    files: list[str],  # noqa: ARG001 — informational; caller already committed
     title: str,
     body: str,
 ) -> bool:

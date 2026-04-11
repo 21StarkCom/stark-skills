@@ -160,7 +160,7 @@ def run_tasks_phase(
     plan_path: Path,
     state: dict[str, Any],
     cfg: dict[str, Any],
-    repo_dir: Path,
+    _repo_dir: Path,
 ) -> PhaseResult:
     """Decompose plan into tasks, validate, retry on failure.
 
@@ -304,7 +304,7 @@ def _create_issue(task: Task, max_retries: int = 2) -> int | None:
 def create_issues(
     tasks: list[Task],
     state: dict[str, Any],
-    cfg: dict[str, Any],
+    _cfg: dict[str, Any],
     dry_run: bool = False,
 ) -> list[int]:
     """Create GitHub issues for each task, skipping existing ones.

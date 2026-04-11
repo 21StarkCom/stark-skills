@@ -7,7 +7,6 @@ import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -55,7 +54,7 @@ def _insert_stats(db: Path, domain: str, signal: int, noise: int) -> None:
 # forge_improve imports (after DB helpers so fixtures can be defined above)
 # ---------------------------------------------------------------------------
 
-import sys, os
+import sys
 
 sys.path.insert(0, str(Path(__file__).parent))
 

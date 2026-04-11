@@ -164,7 +164,7 @@ def _severity_meets_threshold(severity: str, threshold: str) -> bool:
 
 def classify_findings(
     findings: list[dict[str, Any]],
-    spec_text: str,
+    _spec_text: str,
     previous_rounds: list[dict[str, Any]],
     fix_threshold: str,
 ) -> list[dict[str, Any]]:

@@ -7,11 +7,10 @@ Tests use temporary git repos via tmp_path fixtures.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -128,7 +127,7 @@ class TestDryRunNoCommits:
         # Capture all subprocess calls
         commit_calls: list[list[str]] = []
 
-        def fake_run(cmd, *args, **kwargs):
+        def fake_run(cmd, *_args, **_kwargs):
             if isinstance(cmd, list) and "commit" in cmd:
                 commit_calls.append(cmd)
             result = MagicMock()
