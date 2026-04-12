@@ -184,7 +184,7 @@
     "min_severity_to_block": "high",
     "timeout_s": 900,
     "per_run_budget_usd": 10.00,
-    "stability_overlap_jaccard_min": 0.4,
+    "stability_overlap_jaccard_min": 0.416,
     "max_input_chars": 200000,
     "allow_human_review_halt": true
   },
