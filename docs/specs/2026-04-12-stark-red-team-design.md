@@ -129,32 +129,72 @@ The model override is implemented in the dispatcher by passing `-m o3` to the Co
 ```python
 round = 1
 current_design = design_after_design_review
+spent_usd = 0.0
+
 while round <= cfg.max_rounds:
+    # Cost circuit breaker — rt5
+    if spent_usd >= cfg.per_run_budget_usd:
+        state.red_team.design.status = "halted"
+        halt("budget_exceeded", f"red team spent ${spent_usd:.2f} of ${cfg.per_run_budget_usd:.2f}")
+
     rt = run_red_team("design", current_design, cfg, cwd)
+    spent_usd += rt.cost_usd
     state.red_team.design.rounds.append(rt_to_state(rt))
     audit.record_round(rt)
-    post_per_persona_pr_comments(rt)  # one comment per persona on the PR
+    audit.record_findings(rt.findings)  # rt3 — persist raw finding text
+    post_per_persona_pr_comments(rt)
+
+    # Human-review halt — rt4
+    if rt.human_review_count > 0:
+        state.red_team.design.status = "halted_human_review"
+        halt("human_review_requested",
+             f"{rt.human_review_count} finding(s) request human review; not auto-addressable")
+
     if rt.blocking_count == 0:
         state.red_team.design.status = "clean"
         break
-    current_design = regenerate_design(current_design, rt)  # design-gen with red-team input
+
+    # Stability check on the halting round — rt2 (folded in)
+    # If this is the last permitted round and blocking_count > 0, run a second
+    # call on the same input before halting. Only halt if BOTH calls produce
+    # blocking findings AND at least one finding overlaps by (persona, concern).
+    if round == cfg.max_rounds:
+        rt_verify = run_red_team("design", current_design, cfg, cwd)
+        spent_usd += rt_verify.cost_usd
+        audit.record_round(rt_verify, tag="stability_verify")
+        if rt_verify.blocking_count == 0 or not _overlap(rt, rt_verify):
+            # Flicker — downgrade to advisory, do not halt
+            state.red_team.design.status = "clean_after_flicker"
+            post_flicker_notice_comment(rt, rt_verify)
+            break
+
+    current_design = regenerate_design(current_design, rt)
     rerun_design_review(current_design)  # existing review loop on revised design
     round += 1
 else:
     state.red_team.design.status = "halted"
     if cfg.halt_on_unresolved:
-        halt(
-            f"red team has {rt.blocking_count} unresolved blocking "
-            f"findings after {cfg.max_rounds} rounds"
-        )
+        halt("findings_unresolved",
+             f"red team has {rt.blocking_count} unresolved blocking "
+             f"findings after {cfg.max_rounds} rounds")
+```
+
+```python
+def _overlap(rt_a: RedTeamResult, rt_b: RedTeamResult) -> bool:
+    """Two red-team outputs overlap if at least one blocking finding in each
+    shares the same persona and has a concern that's textually similar
+    (case-insensitive bag-of-words Jaccard ≥ 0.4)."""
+    ...
 ```
 
 **Key properties:**
-- Each loop iteration = 1 red-team call + 1 design regeneration + 1 design-review loop. The design-review loop has its own max-rounds cap.
-- "Blocking" is determined by `min_severity_to_block` (default `high`) — only `critical` and `high` findings count toward the halt decision; `medium` is advisory.
-- The design-generator receives the red-team findings in its prompt with this framing: *"The previous design was revised because a committee of senior architects (see personas below) raised these objections. For each finding, either (a) address it in the revised design, or (b) explicitly accept the trade-off and document why in the Trade-offs section."*
+- Each loop iteration = 1 red-team call + optional design regeneration + 1 design-review loop. The design-review loop has its own max-rounds cap. The stability-verify call fires only on the final round when halt is imminent, so cost is bounded to `max_rounds + 1` red-team calls per stage in the worst case.
+- **Three ways to halt:** budget exceeded (rt5), human-review requested (rt4), or findings unresolved after `max_rounds` with stability confirmation (rt2).
+- **"Blocking"** is determined by `min_severity_to_block` (default `high`). `medium` is advisory. Human-review findings halt regardless of severity.
+- The design-generator receives the red-team findings in its prompt with this framing: *"The previous design was revised because a committee of senior architects (see personas below) raised these objections. For each finding that is NOT a human-review request, either (a) address it in the revised design, or (b) explicitly accept the trade-off and document why in the Trade-offs section. Do not attempt to auto-address findings marked REQUEST_HUMAN_REVIEW — those halt the loop for human attention."*
 - The red team sees the same 5 personas every iteration — the criteria don't drift mid-loop.
-- If `halt_on_unresolved` is `false`, unresolved findings are logged prominently but the pipeline exits 0. This is the advisory-only downgrade.
+- **Stability check** (rt2): on the halting round only, run the red team a second time. If the blocking set doesn't overlap with the first call (flicker), downgrade to clean-with-advisory. If both calls produce overlapping blocking findings, halt. This costs one extra call only when halting is imminent.
+- If `halt_on_unresolved` is `false`, findings-unresolved becomes advisory; budget and human-review halts are unaffected (they have no advisory mode).
 
 ### 4.4 What the red team sees
 
@@ -171,31 +211,35 @@ The red-team prompt is assembled from:
 ```python
 @dataclass
 class RedTeamFinding:
-    id: str                 # "rt1", "rt2", ... — stable within a round
-    persona: str            # one of the 5 persona slugs
-    severity: str           # "critical" | "high" | "medium"
-    concern: str            # 1-sentence statement of what's wrong
-    consequence: str        # 2-3 sentences on what breaks if this ships as-is
-    counter_proposal: str   # concrete alternative the persona would take
-    trade_off: str          # what the counter-proposal gives up
+    id: str                           # "rt1", "rt2", ... — stable within a round
+    persona: str                      # one of the 5 persona slugs
+    severity: str                     # "critical" | "high" | "medium"
+    concern: str                      # 1-sentence statement of what's wrong
+    consequence: str                  # 2-3 sentences on what breaks if this ships as-is
+    counter_proposal: str             # concrete alternative OR the sentinel "REQUEST_HUMAN_REVIEW"
+    trade_off: str | None             # what the counter-proposal gives up (unused when human-review is requested)
+    reason_for_uncertainty: str | None # required iff counter_proposal == "REQUEST_HUMAN_REVIEW"
 
 @dataclass
 class RedTeamResult:
-    stage: str              # "design" | "plan"
+    stage: str                        # "design" | "plan"
     round_num: int
-    synthesis: str          # paragraph naming top 1-2 cross-persona tensions
+    synthesis: str                    # paragraph naming top 1-2 cross-persona tensions
     findings: list[RedTeamFinding]
-    blocking_count: int     # count of findings at ≥ min_severity_to_block
-    raw_output: str         # preserved for audit
+    blocking_count: int               # count of findings at ≥ min_severity_to_block (excluding human-review requests)
+    human_review_count: int           # count of findings with counter_proposal == "REQUEST_HUMAN_REVIEW"
+    raw_output: str                   # preserved for audit
     duration_s: float
     error: str | None = None
 ```
 
 **Schema-level invariants:**
-- Every finding must have `counter_proposal` and `trade_off`. A finding without a counter-proposal is just a gripe — the dispatcher rejects it (downgrades severity to `medium` and notes the schema violation).
+- Every finding must have either (a) a concrete `counter_proposal` + `trade_off`, or (b) `counter_proposal == "REQUEST_HUMAN_REVIEW"` + a populated `reason_for_uncertainty` (rt4). The second form is the red team's honest-uncertainty voice: the persona is worried but cannot articulate a fix. Findings that satisfy neither form are rejected (downgraded to `medium` and flagged as schema violations).
+- **Human-review findings halt the loop unconditionally** regardless of severity. The design-generator must not attempt to auto-address them — they are reserved for human eyes. The loop resumes only when a human explicitly overrides (`--accept-red-team-human-review` flag on the caller, not yet implemented in v1).
 - `synthesis` is required. The dispatcher rejects outputs where `synthesis` is empty or obviously copy-pasted from a single finding — the whole point of the red team is the cross-persona view.
 - `persona` must be one of the 5 configured slugs. Unknown personas → logged + dropped.
 - No `file:line` fields. If the LLM tries to put code-level references in findings, they're stripped during parsing to keep the red team at the design level.
+- The red team prompt explicitly invites `REQUEST_HUMAN_REVIEW` as a first-class option — it is *not* a fallback or error path. Persona prompts include the framing: "*If you cannot articulate a concrete counter-proposal but the concern is real, request human review. This is a sign of integrity, not failure.*"
 
 ## 6. Config schema (`global/config.json` → `red_team`)
 
@@ -219,7 +263,9 @@ class RedTeamResult:
       "cost-ops"
     ],
     "min_severity_to_block": "high",
-    "timeout_s": 900
+    "timeout_s": 900,
+    "per_run_budget_usd": 3.00,
+    "stability_overlap_jaccard_min": 0.4
   }
 }
 ```
@@ -227,17 +273,32 @@ class RedTeamResult:
 | Field | Meaning |
 |---|---|
 | `enabled` | Master kill-switch for the whole red-team layer |
-| `agent` | Which agent to invoke (default `codex`; alternatives can be added later) |
+| `agent` | Which agent to invoke (default `codex`) |
 | `model` | Per-call model override passed via `-m` to the agent CLI |
 | `max_rounds` | Cap on iterative refinement loop |
-| `halt_on_unresolved` | If false, downgrade to advisory-only |
+| `halt_on_unresolved` | If false, findings-unresolved becomes advisory (budget + human-review halts are unaffected) |
 | `stages.design.enabled` | Run red team after design-review |
 | `stages.plan.enabled` | Run red team after plan-review (v1: false) |
-| `personas` | Ordered list — order controls prompt assembly order and determines persona sections in the output |
-| `min_severity_to_block` | Floor for findings that count toward the halt decision |
+| `personas` | Ordered list — controls prompt assembly order and persona sections in output |
+| `min_severity_to_block` | Floor for findings that count toward the findings-unresolved halt |
 | `timeout_s` | Per-call timeout (matches other heavy dispatches) |
+| `per_run_budget_usd` | Cost circuit breaker (rt5). Cumulative red-team spend above this halts with `budget_exceeded` |
+| `stability_overlap_jaccard_min` | Threshold for concern-text overlap in stability check (rt2) |
 
-Standard config hierarchy applies: repo → org → global. A repo can set `red_team.enabled: false` to opt out entirely. A repo with atypical stakes can raise `max_rounds` to 3 or lower `min_severity_to_block` to `medium` to be stricter.
+### Config override rules (rt1 — prompt-injection defense)
+
+Standard config hierarchy applies: repo → org → global, but **two fields are LOCKED to global config** and cannot be overridden at the org or repo level:
+
+| Locked field | Why |
+|---|---|
+| `personas` | Persona slugs resolve to prompt files in `global/prompts/red-team/personas/`. Allowing a repo to specify arbitrary persona slugs opens a prompt-injection surface where a malicious config points at an attacker-controlled markdown file with injected system instructions. |
+| `model` | Allowing a repo to silently downgrade `o3` to a cheaper/weaker model preserves the "red team ran" appearance while destroying the substance. Downgrading the model must be a global, reviewable, centrally-audited decision. |
+
+All other fields (`enabled`, `max_rounds`, `halt_on_unresolved`, `stages.*.enabled`, `min_severity_to_block`, `per_run_budget_usd`, `timeout_s`, `stability_overlap_jaccard_min`) respect the full hierarchy.
+
+**Enforcement:** `get_red_team_config()` in `config_loader.py` checks if the resolved config from org/repo level contains a key in `_RED_TEAM_LOCKED_FIELDS = {"personas", "model"}`. If yes, the value is dropped from the override, a warning is logged to stderr with the locked field name and the source file that tried to set it, and a `red_team.config.override_rejected` event is emitted for audit.
+
+A repo that genuinely needs a custom persona (e.g., an ML-heavy repo wanting an "ML Systems Architect") must open a PR against `stark-skills` to add the persona file to the global repo. This is by design: customization has the same friction as abuse, so legitimate additions are reviewable.
 
 ## 7. Prompts layout
 
@@ -330,21 +391,26 @@ For `/stark-forge`'s state file and `/stark-forged-review`'s `.forged-review-sta
 
 ## 10. Audit schema
 
-New tables in `forged_review_metrics.db` (reused since it already exists; adding tables is backward-compatible with existing audits):
+Three new tables in `forged_review_metrics.db` (reused since it already exists; adding tables is backward-compatible with existing audits):
 
 ```sql
 CREATE TABLE red_team_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id TEXT NOT NULL,
-    stage TEXT NOT NULL,              -- "design" | "plan"
+    stage TEXT NOT NULL,                -- "design" | "plan"
     rounds_used INTEGER NOT NULL,
-    final_status TEXT NOT NULL,       -- "clean" | "halted" | "error" | "disabled"
+    final_status TEXT NOT NULL,         -- "clean" | "clean_after_flicker" | "halted"
+                                        --  | "halted_human_review" | "halted_budget"
+                                        --  | "error" | "disabled"
     total_findings INTEGER NOT NULL,
     critical_count INTEGER NOT NULL,
     high_count INTEGER NOT NULL,
     medium_count INTEGER NOT NULL,
+    human_review_count INTEGER NOT NULL,
     duration_s REAL NOT NULL,
+    cost_usd REAL NOT NULL,             -- rt5 — cumulative cost of all red-team calls this run
     model TEXT NOT NULL,
+    caller TEXT NOT NULL,               -- "forge" | "forged-review"
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
@@ -357,16 +423,45 @@ CREATE TABLE red_team_persona_stats (
     findings_raised INTEGER NOT NULL,
     findings_at_critical INTEGER NOT NULL,
     findings_at_high INTEGER NOT NULL,
-    findings_at_medium INTEGER NOT NULL
+    findings_at_medium INTEGER NOT NULL,
+    human_review_requests INTEGER NOT NULL  -- rt4 — per-persona honest-uncertainty signal
 );
+
+-- rt3 — persist raw finding text so persona-tuning in §14 has data to tune from.
+-- Sized for ~20 findings/run × ~1KB/finding × 1000 runs/year ≈ 20MB/year.
+CREATE TABLE red_team_findings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    round_num INTEGER NOT NULL,
+    finding_id TEXT NOT NULL,           -- "rt1", "rt2", ... stable within a round
+    persona TEXT NOT NULL,
+    severity TEXT NOT NULL,             -- "critical" | "high" | "medium"
+    concern TEXT NOT NULL,
+    consequence TEXT NOT NULL,
+    counter_proposal TEXT NOT NULL,     -- concrete text OR "REQUEST_HUMAN_REVIEW"
+    trade_off TEXT,                     -- nullable when counter_proposal is REQUEST_HUMAN_REVIEW
+    reason_for_uncertainty TEXT,        -- populated iff counter_proposal is REQUEST_HUMAN_REVIEW
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE INDEX idx_red_team_findings_run ON red_team_findings(run_id, round_num);
+CREATE INDEX idx_red_team_findings_persona ON red_team_findings(persona, severity);
 ```
 
-**Why per-persona stats matter:** after a few weeks of live use, we can query:
-- Which personas fire most? *(tuning: is one persona too broad or noisy?)*
-- Which get resolved most in round 2? *(tuning: is a persona's concerns easy to address, or trivial?)*
-- Which are most likely to cause halts? *(tuning: which persona is the hardest blocker?)*
+**Why the three tables:**
+- `red_team_runs` — run-level rollup for cost/halt/duration dashboards. Includes `caller` to distinguish `/stark-forge` vs. `/stark-forged-review` runs, and `cost_usd` so historical data can inform future budget tuning.
+- `red_team_persona_stats` — per-persona aggregates for the tuning ritual in §14. Tracks human-review requests as a separate signal.
+- `red_team_findings` — **raw finding text**, added in response to rt3. Without this, §14's "tune personas based on observed signal" has no substrate.
 
-A persona whose findings are always dismissed is probably badly scoped. A persona that never fires is probably redundant with the existing review domains. Both are signals for revising the persona list.
+**Why per-persona stats matter:** after a few weeks of live use, we can query:
+- *Which personas fire most?* (tuning: is one persona too broad or noisy?)
+- *Which get resolved most in round 2?* (is a persona's concerns easy to address, or trivial?)
+- *Which are most likely to cause halts?* (which persona is the hardest blocker?)
+- *Which raise the most `REQUEST_HUMAN_REVIEW` findings?* (a sign of a mature persona that knows its own limits)
+- *What did the data architect actually say on PR #42, round 2?* — answerable by joining `red_team_findings` on `run_id + round_num + persona`.
+
+A persona whose findings are always dismissed is probably badly scoped. A persona that never fires is probably redundant with existing review domains. A persona that only ever requests human review is probably missing a concrete capability. All three are signals for revising the persona list — and all three are now empirically observable.
 
 ## 11. Scripts
 
@@ -374,10 +469,10 @@ A persona whose findings are always dismissed is probably badly scoped. A person
 
 | File | Purpose | Est. lines |
 |---|---|---|
-| `scripts/stark_red_team.py` | Dispatcher. `run_red_team(stage, artifact, cfg, cwd, source_spec=None, pr_diff=None) → RedTeamResult`. Prompt assembly, Codex dispatch with `-m o3` override, output parsing, schema validation, severity gating. | ~250 |
-| `scripts/red_team_audit.py` | Minimal extension using `audit_base`. `init_red_team_tables()`, `record_red_team_run()`, `record_persona_stats()`. | ~100 |
-| `scripts/test_stark_red_team.py` | Unit tests: prompt assembly, output parsing, schema validation rejection, severity gating, halt logic, persona file loading, model override. Mocks Codex dispatch. | ~300 |
-| `scripts/test_red_team_audit.py` | Schema + insert tests. | ~80 |
+| `scripts/stark_red_team.py` | Dispatcher. `run_red_team(stage, artifact, cfg, cwd, source_spec=None, pr_diff=None) → RedTeamResult`. Prompt assembly, Codex dispatch with `-m o3` override, output parsing, schema validation (including `REQUEST_HUMAN_REVIEW` handling per rt4), severity gating, cost tracking per call (rt5), stability overlap computation per rt2. | ~350 |
+| `scripts/red_team_audit.py` | Extension using `audit_base`. `init_red_team_tables()`, `record_red_team_run()`, `record_persona_stats()`, **`record_findings()`** (rt3 — writes raw finding text to `red_team_findings`). | ~140 |
+| `scripts/test_stark_red_team.py` | Unit tests: prompt assembly, output parsing, schema validation (including REQUEST_HUMAN_REVIEW accepted form and missing-reason-for-uncertainty rejection), severity gating, halt logic (findings/human-review/budget), stability overlap (same persona + Jaccard ≥ threshold), config override locking (rt1), persona file loading, model override. Mocks Codex dispatch. | ~450 |
+| `scripts/test_red_team_audit.py` | Schema + insert + round-trip tests for all three tables. | ~140 |
 
 ### 11.2 Modified files
 
@@ -428,8 +523,11 @@ A persona whose findings are always dismissed is probably badly scoped. A person
 | `blocking_count == 0` on first round | Skip the loop entirely. Mark status `clean`. Audit as "round 1 only". |
 | Design regeneration fails between rounds | Halt with exit 2. Preserve state so `--resume` can pick up. |
 | Design-review loop fails between rounds | Halt with exit 2. Preserve state. |
-| Red team still blocking after `max_rounds` AND `halt_on_unresolved: true` | Halt with exit 1. Post the final red-team comments. Preserve state. |
-| Red team still blocking after `max_rounds` AND `halt_on_unresolved: false` | Log findings prominently. Post comments. Pipeline continues. Exit 0. |
+| Red team still blocking after `max_rounds` AND `halt_on_unresolved: true` | Stability check fires (rt2): run one more red-team call on the same input. If second call has 0 blocking OR no finding overlap with the first, mark `clean_after_flicker` and exit 0 with advisory comment. Otherwise halt with exit 1. Preserve state. |
+| Red team still blocking after `max_rounds` AND `halt_on_unresolved: false` | Same stability check. On confirmed blocking, log prominently, post comments, exit 0. On flicker, mark `clean_after_flicker`, exit 0. |
+| Red team produces `human_review_count > 0` at any round (rt4) | Halt with status `halted_human_review` regardless of severity or `halt_on_unresolved`. Human-review findings are never auto-addressable — the design-generator must not revise based on them. Exit 1. Preserve state. Future `--accept-red-team-human-review` flag (not in v1) will allow explicit human override to resume. |
+| Cumulative red-team `cost_usd` exceeds `per_run_budget_usd` (rt5) | Halt immediately with status `halted_budget` before the next round starts. Exit 1. Preserve state. Budget overrun is a structural signal that the design is churning and needs human intervention, not more loops. |
+| Repo-level config attempts to override `red_team.personas` or `red_team.model` (rt1) | Drop the override. Log warning to stderr with source file. Emit `red_team.config.override_rejected` event. Continue with global-locked values. |
 | Timeout during a red-team call | Retry once with same inputs. On second timeout, treat as `error` for that round, halt with exit 2 if `halt_on_unresolved`. |
 
 ## 14. Rollout
@@ -446,15 +544,29 @@ A persona whose findings are always dismissed is probably badly scoped. A person
 - [ ] `stark_red_team.py` dispatcher compiles, imports cleanly, runs standalone on a fixture design doc with mocked Codex output.
 - [ ] All 5 persona prompt files exist under `global/prompts/red-team/personas/`.
 - [ ] `global/prompts/red-team/design.md` exists; `plan.md` exists as a scaffolded placeholder.
-- [ ] `red_team` section added to `global/config.json` with the exact shape in §6.
-- [ ] `get_red_team_config()` typed accessor in `config_loader.py` returns the merged default + override dict.
-- [ ] `red_team_audit.py` creates the two tables in §10; inserting a round + persona stats survives a round-trip read.
-- [ ] Unit tests cover: prompt assembly (all 5 personas loaded, order preserved), output JSON parsing (valid + malformed + missing-field cases), severity gating (`min_severity_to_block` respected), halt logic (max_rounds exceeded triggers halt when `halt_on_unresolved: true`), persona-file-missing graceful degradation, model-override path (`-m o3` in the command), PR comment generation (one body per persona, synthesis included in each).
-- [ ] `/stark-forge` design-stage integration: red team runs after design-review convergence, feeds findings back into design regeneration, loops up to `max_rounds`, halts cleanly on unresolved.
+- [ ] Persona prompts explicitly invite `REQUEST_HUMAN_REVIEW` as a first-class option (rt4).
+- [ ] `red_team` section added to `global/config.json` with the exact shape in §6, including `per_run_budget_usd` and `stability_overlap_jaccard_min`.
+- [ ] `get_red_team_config()` typed accessor in `config_loader.py` returns the merged default + override dict AND rejects overrides of `personas` / `model` from org/repo levels, emitting a warning + `red_team.config.override_rejected` event (rt1).
+- [ ] `red_team_audit.py` creates all **three** tables in §10 (`red_team_runs`, `red_team_persona_stats`, `red_team_findings` — rt3); inserting a round + persona stats + raw findings survives a round-trip read.
+- [ ] `record_findings()` persists `concern`, `consequence`, `counter_proposal`, `trade_off`, and `reason_for_uncertainty` for every finding (rt3).
+- [ ] Unit tests cover:
+  - Prompt assembly (all 5 personas loaded, order preserved, persona prompts include `REQUEST_HUMAN_REVIEW` invitation)
+  - Output JSON parsing (valid + malformed + missing-field cases + REQUEST_HUMAN_REVIEW form)
+  - Schema rejection of findings missing `counter_proposal`/`trade_off` AND missing `reason_for_uncertainty` when human-review is requested
+  - Severity gating (`min_severity_to_block` respected)
+  - Halt logic: findings-unresolved, human-review-requested (rt4), budget-exceeded (rt5)
+  - Stability check (rt2): flicker → `clean_after_flicker`; confirmed blocking → halt
+  - Config override locking: repo-level `personas` / `model` overrides dropped with warning (rt1)
+  - Persona-file-missing graceful degradation
+  - Model-override path (`-m o3` appears in the assembled command)
+  - Cost tracking: cumulative `cost_usd` updated per call, halts on budget breach
+  - PR comment generation (one body per persona, synthesis in each)
+- [ ] `/stark-forge` design-stage integration: red team runs after design-review convergence, feeds findings back into design regeneration, loops up to `max_rounds`, halts cleanly on unresolved/human-review/budget.
 - [ ] `/stark-forged-review` forge-path call site is scaffolded (function exists, wired to config, no-op when forge-path auto-apply is not active).
 - [ ] Plan-stage call sites exist but short-circuit on `stages.plan.enabled: false`.
 - [ ] `forged_review_metrics.db` opens with the new tables; existing `forged-review` audits still work.
-- [ ] PR commenting: when a PR context exists, red-team findings post as separate comments under `stark-codex[bot]`, one per persona, each including the shared `synthesis`.
+- [ ] PR commenting: when a PR context exists, red-team findings post as separate comments under `stark-codex[bot]`, one per persona, each including the shared `synthesis`. Comments are idempotent across rounds via deterministic markers.
 - [ ] `red_team.skipped` event fires correctly when enabled=false, CLI missing, or `stages.design.enabled: false`.
+- [ ] `red_team.config.override_rejected` event fires when a repo/org config tries to override `personas` or `model`.
 - [ ] Design spec references red-team personas in `skill/stark-forge/SKILL.md` and `skill/stark-forged-review/README.md`.
 - [ ] `skill-creator:skill-creator` structural eval passes on the updated skills.
