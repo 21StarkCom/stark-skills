@@ -104,6 +104,13 @@ def init_metrics_db(db_path: str | Path = DEFAULT_DB_PATH) -> None:
     """Create the forged_review metrics tables if they don't exist."""
     audit_base.init_db(db_path, _CREATE_TABLES)
 
+    # Red team tables live in the same DB for cross-skill queries.
+    try:
+        import red_team_audit
+        red_team_audit.init_red_team_tables(db_path)
+    except ImportError:
+        pass  # red_team_audit optional in older installs
+
 
 def record_domain_call(
     jsonl_path: str | Path, call: DomainCall

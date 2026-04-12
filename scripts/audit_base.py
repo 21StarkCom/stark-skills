@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -55,3 +55,35 @@ def append_jsonl(path: str | Path, record: Any) -> None:
 def now_ts() -> float:
     """Unix timestamp helper — kept here so callers don't re-import time."""
     return time.time()
+
+
+@dataclass
+class CostAccumulator:
+    """Tracks cumulative cost across a red-team cycle with per-subsystem breakdown.
+
+    Used by stark_red_team.py to sum red-team + stability + regen + inner-review
+    costs so the cost circuit breaker covers the whole cascade the red team
+    triggers (design spec rt5 + rt_b4).
+    """
+
+    total_usd: float = 0.0
+    breakdown: dict[str, float] = field(default_factory=dict)
+
+    def add_call(
+        self,
+        subsystem: str,
+        input_tokens: int,
+        output_tokens: int,
+        rates: dict[str, float],
+    ) -> float:
+        """Add one call's cost. Returns the incremental USD for this call."""
+        in_rate = rates.get("input_per_1m_usd", 0.0)
+        out_rate = rates.get("output_per_1m_usd", 0.0)
+        cost = (input_tokens * in_rate + output_tokens * out_rate) / 1_000_000
+        self.total_usd += cost
+        self.breakdown[subsystem] = self.breakdown.get(subsystem, 0.0) + cost
+        return cost
+
+    def would_exceed(self, budget_usd: float, next_estimate_usd: float) -> bool:
+        """Return True iff total_usd + next_estimate_usd > budget_usd."""
+        return (self.total_usd + next_estimate_usd) > budget_usd
