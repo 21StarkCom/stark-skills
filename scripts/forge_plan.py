@@ -400,3 +400,27 @@ def run_plan_review(
 
     print(f"[forge_plan] Plan hash frozen: {plan_hash[:12]}...", file=sys.stderr)
     return result
+
+
+# ── Red-team plan-stage scaffold ──────────────────────────────────────
+#
+# Added by Task 17 of stark-red-team. This is a NO-OP in v1 — the plan
+# stage is gated on red_team.stages.plan.enabled which defaults to false.
+# When the config flag flips true (Week 3 of the rollout), this function
+# will dispatch the red team on the plan artifact.
+
+def _maybe_run_red_team_plan_stage(state: dict, cfg_loader=None) -> dict:
+    """Scaffolded call site for plan-stage red team. Disabled in v1.
+
+    When red_team.stages.plan.enabled becomes true in config, this function
+    will dispatch the red team on the plan artifact (mirror of
+    forge_orchestrator.run_red_team_design_stage). For v1 this is a no-op.
+    """
+    if cfg_loader is None:
+        from config_loader import get_red_team_config as cfg_loader  # type: ignore
+    cfg = cfg_loader()
+    stages = cfg.get("stages", {})
+    plan_enabled = stages.get("plan", {}).get("enabled", False)
+    if not plan_enabled:
+        return {"status": "disabled", "reason": "red_team.stages.plan.enabled is false"}
+    return {"status": "skipped", "reason": "plan-stage red team scaffold not yet implemented"}

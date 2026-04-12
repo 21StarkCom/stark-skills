@@ -565,5 +565,23 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_HALTED
 
 
+# ── Red-team forge-path scaffold ──────────────────────────────────────
+#
+# Added by Task 18 of stark-red-team.
+# RED TEAM SCAFFOLD — fires when forge-path auto-apply ships.
+# For v1 this code path is unreachable (forge path is itself a placeholder).
+# When auto-apply lands, uncomment and wire to the real call site:
+#
+# from forged_review_dispatch import dispatch_red_team_for_stage
+# rt_status = dispatch_red_team_for_stage(
+#     stage="design",
+#     artifact=design_doc_text,
+#     source_spec=pr_description,
+#     pr_diff=pr_diff,
+#     cwd=str(ctx.worktree),
+#     run_id=ctx.run_id,
+# )
+
+
 if __name__ == "__main__":
     sys.exit(main())

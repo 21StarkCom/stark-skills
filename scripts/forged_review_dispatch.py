@@ -473,3 +473,52 @@ def run_review_round(
                     leader_error=f"dispatch exception: {exc}",
                 )
     return results
+
+
+# ── Red-team integration scaffold ─────────────────────────────────────
+#
+# Added by Task 18 of stark-red-team. This wrapper exists so the
+# forged_review forge path can call into stark_red_team without coupling
+# directly. The forge path itself is a v1 no-op placeholder, so this
+# wrapper will only be exercised once that path activates.
+
+def dispatch_red_team_for_stage(
+    stage: str,
+    artifact: str,
+    source_spec: str,
+    pr_diff: str | None,
+    cwd: str | None,
+    run_id: str,
+) -> dict:
+    """Wrapper for the red-team dispatcher, called from forged_review's forge path.
+
+    V1 scaffolding: the forge path in /stark-forged-review is itself deferred
+    to a later release. This call site exists so when forge-path auto-apply
+    ships, the red-team hook is already in place.
+    """
+    from config_loader import get_red_team_config, get_model_rates
+    import stark_red_team as _rt
+
+    cfg = get_red_team_config()
+    if not cfg.get("enabled", True) or not cfg.get("stages", {}).get(stage, {}).get("enabled", False):
+        return {"status": "disabled", "reason": f"red_team.stages.{stage}.enabled is false"}
+
+    model_rates = get_model_rates()
+    result = _rt.run_red_team(
+        stage=stage,
+        artifact=artifact,
+        source_spec=source_spec,
+        pr_diff=pr_diff,
+        personas=cfg["personas"],
+        model=cfg["model"],
+        model_rates=model_rates,
+        cwd=cwd,
+        timeout_s=cfg["timeout_s"],
+        min_severity_to_block=cfg["min_severity_to_block"],
+        max_input_chars=cfg["max_input_chars"],
+        round_num=1,
+    )
+    return {
+        "status": "halted" if result.blocking_count > 0 or result.human_review_count > 0 else "clean",
+        "result": result,
+    }

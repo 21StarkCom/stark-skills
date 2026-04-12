@@ -491,3 +491,115 @@ def run_forge(
             atexit.unregister(release_lock)
         except Exception:
             pass
+
+
+# ── Red-team integration (v1 design stage) ────────────────────────────
+#
+# Added by Task 16 of stark-red-team. This is the active v1 plug point.
+# It runs the red team on a finalized design artifact and returns a
+# status dict the caller can use to halt or proceed.
+#
+# v1 ships a single-round integration; the iterative refinement loop
+# (regen → re-review → re-red-team) lands when forge auto-apply matures.
+# The forge pipeline currently does NOT call this automatically — that
+# happens in a follow-up integration task once the surrounding pipeline
+# can act on the halt return values cleanly.
+
+from pathlib import Path as _RT_Path  # alias to avoid clobbering existing imports
+from typing import Any as _RT_Any
+
+
+def run_red_team_design_stage(
+    design_path: _RT_Path,
+    source_spec_text: str,
+    pr_diff: str | None,
+    cwd: str | None,
+    run_id: str,
+    caller: str = "forge",
+) -> dict[str, _RT_Any]:
+    """Run the red-team layer against a design artifact at convergence time.
+
+    Returns a status dict shaped as:
+        {"status": str, "rounds": [...], "halt_reason": str | None}
+
+    Pipeline callers should halt on {"halted_human_review", "halted",
+    "error"} and proceed on {"clean", "disabled"}.
+
+    v1 single-round: no auto-regen, no stability re-check. Future versions
+    will iterate within the function.
+    """
+    from config_loader import get_red_team_config, get_model_rates
+    import stark_red_team as _rt
+    import red_team_audit
+
+    cfg = get_red_team_config()
+    if not cfg.get("enabled", True) or not cfg.get("stages", {}).get("design", {}).get("enabled", False):
+        return {"status": "disabled", "rounds": [], "halt_reason": None}
+
+    model_rates = get_model_rates()
+    artifact = _RT_Path(design_path).read_text(encoding="utf-8")
+
+    result = _rt.run_red_team(
+        stage="design",
+        artifact=artifact,
+        source_spec=source_spec_text,
+        pr_diff=pr_diff,
+        personas=cfg["personas"],
+        model=cfg["model"],
+        model_rates=model_rates,
+        cwd=cwd,
+        timeout_s=cfg["timeout_s"],
+        min_severity_to_block=cfg["min_severity_to_block"],
+        max_input_chars=cfg["max_input_chars"],
+        round_num=1,
+    )
+
+    # Audit
+    try:
+        red_team_audit.init_red_team_tables()
+        red_team_audit.record_red_team_run({
+            "run_id": run_id,
+            "stage": "design",
+            "rounds_used": 1,
+            "final_status": (
+                "clean"
+                if result.blocking_count == 0 and result.human_review_count == 0
+                else "halted"
+            ),
+            "total_findings": len(result.findings),
+            "critical_count": sum(1 for f in result.findings if f.severity == "critical"),
+            "high_count": sum(1 for f in result.findings if f.severity == "high"),
+            "medium_count": sum(1 for f in result.findings if f.severity == "medium"),
+            "human_review_count": result.human_review_count,
+            "duration_s": result.duration_s,
+            "cost_usd": result.cost_usd,
+            "model": cfg["model"],
+            "caller": caller,
+        })
+        if result.findings:
+            red_team_audit.record_findings([
+                {
+                    "run_id": run_id,
+                    "stage": "design",
+                    "round_num": 1,
+                    "finding_id": f.id,
+                    "persona": f.persona,
+                    "severity": f.severity,
+                    "concern": f.concern,
+                    "consequence": f.consequence,
+                    "counter_proposal": f.counter_proposal,
+                    "trade_off": f.trade_off,
+                    "reason_for_uncertainty": f.reason_for_uncertainty,
+                }
+                for f in result.findings
+            ])
+    except Exception:  # pragma: no cover - audit must never break the pipeline
+        pass
+
+    if result.error:
+        return {"status": "error", "rounds": [result], "halt_reason": result.error}
+    if result.human_review_count > 0:
+        return {"status": "halted_human_review", "rounds": [result], "halt_reason": "human_review_requested"}
+    if result.blocking_count > 0:
+        return {"status": "halted", "rounds": [result], "halt_reason": "findings_unresolved"}
+    return {"status": "clean", "rounds": [result], "halt_reason": None}

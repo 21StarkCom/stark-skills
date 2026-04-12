@@ -80,3 +80,38 @@ def test_now_ts_returns_float():
     ts = audit_base.now_ts()
     assert isinstance(ts, float)
     assert ts > 0
+
+
+def test_cost_accumulator_add_call_updates_total():
+    acc = audit_base.CostAccumulator()
+    acc.add_call("red_team", input_tokens=1000, output_tokens=500, rates={"input_per_1m_usd": 15.0, "output_per_1m_usd": 60.0})
+    # (1000 * 15 + 500 * 60) / 1_000_000 = 0.015 + 0.03 = 0.045
+    assert abs(acc.total_usd - 0.045) < 1e-9
+
+
+def test_cost_accumulator_tracks_subsystem_breakdown():
+    acc = audit_base.CostAccumulator()
+    acc.add_call("red_team", input_tokens=1000, output_tokens=500,
+                 rates={"input_per_1m_usd": 15.0, "output_per_1m_usd": 60.0})
+    acc.add_call("regen", input_tokens=2000, output_tokens=1000,
+                 rates={"input_per_1m_usd": 15.0, "output_per_1m_usd": 75.0})
+    assert set(acc.breakdown.keys()) == {"red_team", "regen"}
+    assert abs(acc.breakdown["red_team"] - 0.045) < 1e-9
+    assert abs(acc.breakdown["regen"] - 0.105) < 1e-9  # (2k*15 + 1k*75) / 1m
+    assert abs(acc.total_usd - 0.15) < 1e-9
+
+
+def test_cost_accumulator_would_exceed_returns_bool():
+    acc = audit_base.CostAccumulator()
+    acc.add_call("red_team", input_tokens=500_000, output_tokens=100_000,
+                 rates={"input_per_1m_usd": 15.0, "output_per_1m_usd": 60.0})
+    # total = (500k*15 + 100k*60)/1m = 7.5 + 6.0 = 13.5
+    assert acc.would_exceed(budget_usd=15.0, next_estimate_usd=1.0) is False
+    assert acc.would_exceed(budget_usd=15.0, next_estimate_usd=2.0) is True
+
+
+def test_cost_accumulator_initial_state():
+    acc = audit_base.CostAccumulator()
+    assert acc.total_usd == 0.0
+    assert acc.breakdown == {}
+    assert acc.would_exceed(budget_usd=10.0, next_estimate_usd=0.01) is False

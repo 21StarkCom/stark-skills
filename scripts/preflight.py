@@ -24,7 +24,12 @@ from typing import Callable
 # Ensure scripts/ is on path when run directly.
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config_loader import get_models_config, is_agent_enabled
+from config_loader import (
+    get_models_config,
+    is_agent_enabled,
+    get_red_team_config,
+    get_model_rates,
+)
 import emit_queue
 import github_app
 import lock_helpers
@@ -225,6 +230,39 @@ def check_stale_locks() -> tuple[str, str]:
     return "pass", "no stale locks"
 
 
+def check_red_team_model_rates() -> tuple[str, str]:
+    """Verify red_team.model has an entry in the top-level model_rates section.
+
+    The _fallback row is deliberately conservative (high rates) so missing
+    entries DON'T silently under-count — the preflight must fail blocked
+    so operators notice and fix the real rate entry.
+    """
+    try:
+        cfg = get_red_team_config()
+    except Exception as exc:
+        return "warn", f"could not load red_team config: {exc}"
+
+    if not cfg.get("enabled", True):
+        return "skip", "red_team disabled in config"
+
+    model = cfg.get("model")
+    if not model:
+        return "fail", "red_team.model is not set"
+
+    try:
+        rates = get_model_rates()
+    except Exception as exc:
+        return "warn", f"could not load model_rates: {exc}"
+
+    if model not in rates or model == "_fallback":
+        return "fail", (
+            f"red_team.model '{model}' has no entry in model_rates — "
+            f"add one to global/config.json. _fallback is not accepted."
+        )
+
+    return "pass", f"rates found for {model}"
+
+
 # ---------------------------------------------------------------------------
 # Check registry: (name, fn, is_critical)
 # critical=True → a "fail" status sets overall to "blocked"
@@ -243,6 +281,7 @@ _CHECKS: list[tuple[str, Callable[[], tuple[str, str]], bool]] = [
     ("check_cost_hard_stop",       check_cost_hard_stop,       True),
     ("check_stale_locks",          check_stale_locks,          False),
     ("check_deprecated_config",    check_deprecated_config,    False),
+    ("check_red_team_model_rates", check_red_team_model_rates, True),
 ]
 
 
