@@ -164,6 +164,48 @@
     "delta_rereview": true,
     "auto_merge_when_clean": true
   },
+  "red_team": {
+    "enabled": true,
+    "agent": "codex",
+    "model": "o3",
+    "max_rounds": 2,
+    "halt_on_unresolved": true,
+    "stages": {
+      "design": { "enabled": true },
+      "plan":   { "enabled": false }
+    },
+    "personas": [
+      "security-trust",
+      "reliability-distsys",
+      "data",
+      "product-dx",
+      "cost-ops"
+    ],
+    "min_severity_to_block": "high",
+    "timeout_s": 900,
+    "per_run_budget_usd": 10.00,
+    "stability_overlap_jaccard_min": 0.4,
+    "max_input_chars": 200000,
+    "allow_human_review_halt": true
+  },
+  "model_rates": {
+    "o3": {
+      "input_per_1m_usd": 15.00,
+      "output_per_1m_usd": 60.00
+    },
+    "claude-opus-4-6": {
+      "input_per_1m_usd": 15.00,
+      "output_per_1m_usd": 75.00
+    },
+    "gpt-5.4": {
+      "input_per_1m_usd": 5.00,
+      "output_per_1m_usd": 15.00
+    },
+    "_fallback": {
+      "input_per_1m_usd": 100.00,
+      "output_per_1m_usd": 300.00
+    }
+  },
   "automation": {
     "model": "claude-opus-4-6",
     "repos": [

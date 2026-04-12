@@ -121,6 +121,40 @@ DEFAULT_FORGED_REVIEW = {
     "delta_rereview": True,
     "auto_merge_when_clean": True,
 }
+DEFAULT_RED_TEAM = {
+    "enabled": True,
+    "agent": "codex",
+    "model": "o3",
+    "max_rounds": 2,
+    "halt_on_unresolved": True,
+    "stages": {
+        "design": {"enabled": True},
+        "plan": {"enabled": False},
+    },
+    "personas": [
+        "security-trust",
+        "reliability-distsys",
+        "data",
+        "product-dx",
+        "cost-ops",
+    ],
+    "min_severity_to_block": "high",
+    "timeout_s": 900,
+    "per_run_budget_usd": 10.00,
+    "stability_overlap_jaccard_min": 0.4,
+    "max_input_chars": 200_000,
+    "allow_human_review_halt": True,
+}
+
+DEFAULT_MODEL_RATES = {
+    "o3": {"input_per_1m_usd": 15.00, "output_per_1m_usd": 60.00},
+    "claude-opus-4-6": {"input_per_1m_usd": 15.00, "output_per_1m_usd": 75.00},
+    "gpt-5.4": {"input_per_1m_usd": 5.00, "output_per_1m_usd": 15.00},
+    "_fallback": {"input_per_1m_usd": 100.00, "output_per_1m_usd": 300.00},
+}
+
+# rt1 — locked fields cannot be overridden below the global config level
+_RED_TEAM_LOCKED_FIELDS: frozenset[str] = frozenset({"personas", "model"})
 
 
 def _warn(message: str) -> None:
@@ -177,6 +211,8 @@ _SECTION_DEFAULTS: dict[str, dict[str, Any]] = {
     "cost": DEFAULT_COST,
     "forge": DEFAULT_FORGE,
     "forged_review": DEFAULT_FORGED_REVIEW,
+    "red_team": DEFAULT_RED_TEAM,
+    "model_rates": DEFAULT_MODEL_RATES,
 }
 
 
@@ -193,6 +229,67 @@ def get_context_compaction_config() -> dict[str, Any]: return _get_section("cont
 def get_cost_config() -> dict[str, Any]:             return _get_section("cost")
 def get_forge_config() -> dict[str, Any]:            return _get_section("forge")
 def get_forged_review_config() -> dict[str, Any]:    return _get_section("forged_review")
+
+
+def get_red_team_config() -> dict[str, Any]:
+    """Return merged red_team config with locked-field override rejection.
+
+    Two-layer defense (spec rt1):
+    1. _RED_TEAM_LOCKED_FIELDS (personas, model) cannot be overridden at any
+       config level — overrides are dropped with a stderr warning.
+    2. Any top-level override key NOT present in DEFAULT_RED_TEAM is also
+       dropped. This prevents an attacker from smuggling unrecognized fields
+       into the merged config that future code might inadvertently read.
+       Only the explicitly-defined config surface is acceptable.
+    """
+    raw_override = load_config().get("red_team") or {}
+    filtered = _strip_locked_fields(raw_override, _RED_TEAM_LOCKED_FIELDS, "red_team")
+    pruned = _prune_unknown_keys(filtered, set(DEFAULT_RED_TEAM.keys()), "red_team")
+    return _merge_dict(DEFAULT_RED_TEAM, pruned)
+
+
+def get_model_rates() -> dict[str, Any]:
+    return _get_section("model_rates")
+
+
+def _strip_locked_fields(
+    override: dict[str, Any],
+    locked: frozenset[str],
+    section_name: str,
+) -> dict[str, Any]:
+    """Remove locked fields from an override dict with a warning to stderr."""
+    cleaned = {}
+    for k, v in override.items():
+        if k in locked:
+            _warn(
+                f"{section_name}.{k} is locked to global config and cannot be "
+                f"overridden — rejecting override value {v!r}"
+            )
+        else:
+            cleaned[k] = v
+    return cleaned
+
+
+def _prune_unknown_keys(
+    override: dict[str, Any],
+    known_keys: set[str],
+    section_name: str,
+) -> dict[str, Any]:
+    """Drop top-level keys not present in the default schema with a warning.
+
+    Defense-in-depth against config injection of unrecognized keys that
+    future code might inadvertently consume.
+    """
+    cleaned = {}
+    for k, v in override.items():
+        if k not in known_keys:
+            _warn(
+                f"{section_name}.{k} is not a known config key and will be "
+                f"ignored — drop it from your config or add it to the schema"
+            )
+        else:
+            cleaned[k] = v
+    return cleaned
 
 
 def is_agent_enabled(agent: str) -> bool:
