@@ -387,11 +387,13 @@ tui_apply() {
                 unchanged=$((unchanged + 1))
                 continue
             fi
-            # Validate before installing
+            # Warn if model-invocation isn't disabled. Most stark skills are
+            # slash-command-only and should have `disable-model-invocation: true`
+            # to prevent a subagent from auto-triggering them, but a few skills
+            # (eval fixtures, experimental auto-invokable ones) legitimately
+            # want the flag off. Warn loudly but don't block the install.
             if ! grep -q "^disable-model-invocation: true" "$skill_file"; then
-                error "Skill $name: missing 'disable-model-invocation: true' — skipped"
-                skipped=$((skipped + 1))
-                continue
+                warn "Skill $name: missing 'disable-model-invocation: true' — model can auto-invoke this skill (intended for eval/experimental only)"
             fi
             mkdir -p "$HOME/.claude/skills/$name"
             link_dir "$skill_file" "$HOME/.claude/skills/$name/SKILL.md" "Skill: $name"
@@ -508,10 +510,12 @@ install() {
         local sname
         sname=$(basename "$skill_dir")
 
-        # Check A: disable-model-invocation: true is required
+        # Check A: disable-model-invocation: true is recommended but not required.
+        # See the matching warn in the interactive installer for the rationale.
+        # Most stark skills are slash-command-only, but eval fixtures and
+        # experimental auto-invokable skills legitimately want the flag off.
         if ! grep -q "^disable-model-invocation: true" "$skill_file"; then
-            error "Skill $sname: missing 'disable-model-invocation: true' in frontmatter"
-            skill_errors=$((skill_errors + 1))
+            warn "Skill $sname: missing 'disable-model-invocation: true' (model can auto-invoke — intended for eval/experimental only)"
         fi
 
         # Check B: description ≤200 chars
@@ -526,7 +530,6 @@ install() {
     if [ "$skill_errors" -gt 0 ]; then
         echo ""
         error "$skill_errors skill validation error(s). Fix before installing."
-        echo "  - disable-model-invocation: Add to frontmatter (all stark-skills are invoked via /slash-command)"
         echo "  - description >200 chars: Front-load trigger keywords, move details to SKILL.md body"
         return 1
     fi
