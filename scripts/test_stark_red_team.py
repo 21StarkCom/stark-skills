@@ -183,3 +183,193 @@ def test_assemble_prompt_truncates_oversized_inputs(tmp_path, monkeypatch):
     )
     assert "[TRUNCATED" in prompt
     assert len(prompt) < 300_000
+
+
+def test_parse_output_valid_json_object():
+    raw = '{"synthesis": "S", "findings": [{"id": "rt1", "persona": "data", "severity": "high", "concern": "C", "consequence": "C2", "counter_proposal": "CP", "trade_off": "T"}]}'
+    parsed = rt.parse_output(raw)
+    assert parsed["synthesis"] == "S"
+    assert len(parsed["findings"]) == 1
+    assert parsed["findings"][0]["id"] == "rt1"
+
+
+def test_parse_output_extracts_json_from_fenced_code_block():
+    raw = 'Here you go:\n\n```json\n{"synthesis": "S", "findings": []}\n```\n\nDone.'
+    parsed = rt.parse_output(raw)
+    assert parsed == {"synthesis": "S", "findings": []}
+
+
+def test_parse_output_extracts_from_surrounded_json():
+    raw = 'Some prose... {"synthesis": "S", "findings": []} trailing.'
+    parsed = rt.parse_output(raw)
+    assert parsed == {"synthesis": "S", "findings": []}
+
+
+def test_parse_output_returns_empty_on_garbage():
+    parsed = rt.parse_output("completely unparseable text")
+    assert parsed == {}
+
+
+def test_parse_output_returns_empty_on_empty_string():
+    assert rt.parse_output("") == {}
+    assert rt.parse_output("   \n  ") == {}
+
+
+def test_validate_findings_accepts_concrete_shape():
+    raw_findings = [{
+        "id": "rt1",
+        "persona": "security-trust",
+        "severity": "critical",
+        "concern": "X",
+        "consequence": "Y",
+        "counter_proposal": "Z",
+        "trade_off": "W",
+    }]
+    result = rt.validate_findings(raw_findings)
+    assert len(result) == 1
+    assert result[0].counter_proposal == "Z"
+    assert result[0].reason_for_uncertainty is None
+
+
+def test_validate_findings_accepts_human_review_shape():
+    raw_findings = [{
+        "id": "rt2",
+        "persona": "data",
+        "severity": "high",
+        "concern": "X",
+        "consequence": "Y",
+        "counter_proposal": rt.REQUEST_HUMAN_REVIEW,
+        "reason_for_uncertainty": "Don't know.",
+    }]
+    result = rt.validate_findings(raw_findings)
+    assert len(result) == 1
+    assert result[0].counter_proposal == rt.REQUEST_HUMAN_REVIEW
+    assert result[0].trade_off is None
+    assert result[0].reason_for_uncertainty == "Don't know."
+
+
+def test_validate_findings_rejects_unknown_persona():
+    raw_findings = [{
+        "id": "rt1",
+        "persona": "quantum-architect",
+        "severity": "critical",
+        "concern": "X",
+        "consequence": "Y",
+        "counter_proposal": "Z",
+        "trade_off": "W",
+    }]
+    result = rt.validate_findings(raw_findings)
+    assert len(result) == 0
+
+
+def test_validate_findings_rejects_invalid_severity():
+    raw_findings = [{
+        "id": "rt1",
+        "persona": "data",
+        "severity": "earth-shattering",
+        "concern": "X",
+        "consequence": "Y",
+        "counter_proposal": "Z",
+        "trade_off": "W",
+    }]
+    result = rt.validate_findings(raw_findings)
+    assert len(result) == 0
+
+
+def test_validate_findings_rejects_missing_counter_proposal():
+    raw_findings = [{
+        "id": "rt1",
+        "persona": "data",
+        "severity": "high",
+        "concern": "X",
+        "consequence": "Y",
+    }]
+    result = rt.validate_findings(raw_findings)
+    assert len(result) == 0
+
+
+def test_validate_findings_downgrades_human_review_without_reason():
+    raw_findings = [{
+        "id": "rt1",
+        "persona": "data",
+        "severity": "high",
+        "concern": "X",
+        "consequence": "Y",
+        "counter_proposal": rt.REQUEST_HUMAN_REVIEW,
+    }]
+    result = rt.validate_findings(raw_findings)
+    assert len(result) == 0
+
+
+def test_count_blocking_respects_min_severity():
+    findings = [
+        rt.RedTeamFinding("rt1", "data", "critical", "a", "b", "c", "d", None),
+        rt.RedTeamFinding("rt2", "data", "high", "a", "b", "c", "d", None),
+        rt.RedTeamFinding("rt3", "data", "medium", "a", "b", "c", "d", None),
+    ]
+    assert rt.count_blocking(findings, min_severity="high") == 2
+    assert rt.count_blocking(findings, min_severity="critical") == 1
+    assert rt.count_blocking(findings, min_severity="medium") == 3
+
+
+def test_count_blocking_excludes_human_review_findings():
+    findings = [
+        rt.RedTeamFinding("rt1", "data", "critical", "a", "b", rt.REQUEST_HUMAN_REVIEW, None, "reason"),
+        rt.RedTeamFinding("rt2", "data", "high", "a", "b", "fix", "tradeoff", None),
+    ]
+    assert rt.count_blocking(findings, min_severity="high") == 1
+
+
+def _mk_result(findings):
+    return rt.RedTeamResult(
+        stage="design",
+        round_num=1,
+        synthesis="s",
+        findings=findings,
+        blocking_count=rt.count_blocking(findings),
+        human_review_count=0,
+        raw_output="{}",
+        duration_s=1.0,
+    )
+
+
+def test_overlap_returns_true_on_matching_persona_and_concern():
+    a = _mk_result([
+        rt.RedTeamFinding("rt1", "data", "high",
+                          "schema migration has no backfill plan",
+                          "c", "cp", "to", None),
+    ])
+    b = _mk_result([
+        rt.RedTeamFinding("rt1", "data", "high",
+                          "the schema migration lacks a backfill plan and will break",
+                          "c", "cp", "to", None),
+    ])
+    assert rt._overlap(a, b, jaccard_min=0.3) is True
+
+
+def test_overlap_returns_false_on_different_personas():
+    a = _mk_result([
+        rt.RedTeamFinding("rt1", "data", "high", "same concern text", "c", "cp", "to", None),
+    ])
+    b = _mk_result([
+        rt.RedTeamFinding("rt1", "security-trust", "high", "same concern text", "c", "cp", "to", None),
+    ])
+    assert rt._overlap(a, b, jaccard_min=0.3) is False
+
+
+def test_overlap_returns_false_on_completely_different_concerns():
+    a = _mk_result([
+        rt.RedTeamFinding("rt1", "data", "high", "schema migration lacks backfill", "c", "cp", "to", None),
+    ])
+    b = _mk_result([
+        rt.RedTeamFinding("rt1", "data", "high", "query latency unbounded under concurrent load", "c", "cp", "to", None),
+    ])
+    assert rt._overlap(a, b, jaccard_min=0.4) is False
+
+
+def test_overlap_returns_false_when_one_is_empty():
+    a = _mk_result([
+        rt.RedTeamFinding("rt1", "data", "high", "x", "c", "cp", "to", None),
+    ])
+    b = _mk_result([])
+    assert rt._overlap(a, b, jaccard_min=0.4) is False

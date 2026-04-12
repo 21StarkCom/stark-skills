@@ -11,8 +11,11 @@ See design spec §4 for the full flow.
 from __future__ import annotations
 
 import hashlib
+import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 REQUEST_HUMAN_REVIEW = "REQUEST_HUMAN_REVIEW"
 
@@ -147,3 +150,174 @@ def assemble_prompt(
         *inputs,
     ]
     return "\n\n".join(parts)
+
+
+def parse_output(raw: str) -> dict[str, Any]:
+    """Best-effort JSON extraction from a red-team raw output.
+
+    Returns the parsed object, or empty dict if extraction fails.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return {}
+
+    try:
+        result = json.loads(text)
+        if isinstance(result, dict):
+            return result
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Try fenced code blocks
+    if "```" in text:
+        for part in text.split("```"):
+            part = part.strip()
+            if part.startswith("json"):
+                part = part[4:].strip()
+            if part.startswith("{"):
+                try:
+                    result = json.loads(part)
+                    if isinstance(result, dict):
+                        return result
+                except (json.JSONDecodeError, ValueError):
+                    continue
+
+    # Try first/last curly brace
+    start = text.find("{")
+    end = text.rfind("}")
+    if 0 <= start < end:
+        try:
+            result = json.loads(text[start : end + 1])
+            if isinstance(result, dict):
+                return result
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    return {}
+
+
+def validate_findings(raw_findings: list[dict[str, Any]]) -> list[RedTeamFinding]:
+    """Convert raw dicts to RedTeamFinding, dropping invalid entries.
+
+    Rules:
+    - `persona` must be in VALID_PERSONA_SLUGS
+    - `severity` must be in VALID_SEVERITIES
+    - Required string fields: id, concern, consequence, counter_proposal
+    - Either (a) concrete counter_proposal + trade_off (string), or
+             (b) counter_proposal == REQUEST_HUMAN_REVIEW + reason_for_uncertainty (string)
+    - Invalid entries are silently dropped
+    """
+    out: list[RedTeamFinding] = []
+    for raw in raw_findings:
+        if not isinstance(raw, dict):
+            continue
+        persona = raw.get("persona")
+        severity = raw.get("severity")
+        counter_proposal = raw.get("counter_proposal")
+
+        if persona not in VALID_PERSONA_SLUGS:
+            continue
+        if severity not in VALID_SEVERITIES:
+            continue
+        if not isinstance(counter_proposal, str) or not counter_proposal:
+            continue
+
+        required_strs = ("id", "concern", "consequence")
+        if any(not isinstance(raw.get(k), str) or not raw.get(k) for k in required_strs):
+            continue
+
+        if counter_proposal == REQUEST_HUMAN_REVIEW:
+            reason = raw.get("reason_for_uncertainty")
+            if not isinstance(reason, str) or not reason:
+                continue
+            out.append(RedTeamFinding(
+                id=raw["id"],
+                persona=persona,
+                severity=severity,
+                concern=raw["concern"],
+                consequence=raw["consequence"],
+                counter_proposal=REQUEST_HUMAN_REVIEW,
+                trade_off=None,
+                reason_for_uncertainty=reason,
+            ))
+        else:
+            trade_off = raw.get("trade_off")
+            if not isinstance(trade_off, str) or not trade_off:
+                continue
+            out.append(RedTeamFinding(
+                id=raw["id"],
+                persona=persona,
+                severity=severity,
+                concern=raw["concern"],
+                consequence=raw["consequence"],
+                counter_proposal=counter_proposal,
+                trade_off=trade_off,
+                reason_for_uncertainty=None,
+            ))
+    return out
+
+
+def count_blocking(
+    findings: list[RedTeamFinding],
+    min_severity: str = "high",
+) -> int:
+    """Count findings at or above min_severity, excluding REQUEST_HUMAN_REVIEW.
+
+    Human-review findings are tracked separately via count_human_review —
+    they halt the loop unconditionally but don't contribute to blocking_count.
+    """
+    floor = SEVERITY_RANK[min_severity]
+    return sum(
+        1
+        for f in findings
+        if f.counter_proposal != REQUEST_HUMAN_REVIEW
+        and SEVERITY_RANK.get(f.severity, 0) >= floor
+    )
+
+
+def count_human_review(findings: list[RedTeamFinding]) -> int:
+    return sum(1 for f in findings if f.counter_proposal == REQUEST_HUMAN_REVIEW)
+
+
+_WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9']*")
+
+
+def _tokenize(text: str) -> set[str]:
+    return {m.group(0).lower() for m in _WORD_RE.finditer(text)}
+
+
+def _jaccard(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def _overlap(
+    rt_a: "RedTeamResult",
+    rt_b: "RedTeamResult",
+    jaccard_min: float = 0.4,
+) -> bool:
+    """Return True iff at least one blocking finding in each output shares
+    the same persona and has a concern text Jaccard >= jaccard_min.
+
+    Used by the stability check (rt2 + rt_b2). Two calls that find overlapping
+    blocking findings under this definition are considered stably-blocking;
+    calls that don't overlap are treated as flicker and the round is
+    downgraded to advisory.
+    """
+    blocking_a = [f for f in rt_a.findings if f.counter_proposal != REQUEST_HUMAN_REVIEW
+                  and SEVERITY_RANK.get(f.severity, 0) >= SEVERITY_RANK["high"]]
+    blocking_b = [f for f in rt_b.findings if f.counter_proposal != REQUEST_HUMAN_REVIEW
+                  and SEVERITY_RANK.get(f.severity, 0) >= SEVERITY_RANK["high"]]
+    if not blocking_a or not blocking_b:
+        return False
+
+    for fa in blocking_a:
+        tok_a = _tokenize(fa.concern)
+        for fb in blocking_b:
+            if fa.persona != fb.persona:
+                continue
+            tok_b = _tokenize(fb.concern)
+            if _jaccard(tok_a, tok_b) >= jaccard_min:
+                return True
+    return False
