@@ -1,11 +1,17 @@
 ---
 name: stark-review
 description: >-
-  Single-agent PR code review: 1 LLM x 9 domains. Fast/cheap. Use for review, review this PR, quick review.
+  [DEPRECATED] Single-agent PR code review: 1 LLM x 9 domains. Use /stark-forged-review instead.
 argument-hint: "[PR_NUMBER] [--agent claude|codex|gemini] [--dry-run] [--repo ORG/REPO]"
 disable-model-invocation: true
 model: opus[1m]
 ---
+
+> **⚠ Deprecated.** This skill is superseded by `/stark-forged-review`, which
+> runs leader + second-opinion per domain with dynamic triage and optional
+> forge-path escalation. `/stark-review` remains functional during the rollout
+> window (see `docs/specs/2026-04-12-stark-forged-review-design.md` §11) and
+> will be removed after validation.
 
 ## Preflight
 

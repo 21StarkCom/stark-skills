@@ -145,6 +145,25 @@
     "noise_improvement_threshold": 0.33,
     "heuristic_consolidation_threshold": 50
   },
+  "forged_review": {
+    "forge_threshold": 4,
+    "max_rounds": 3,
+    "domain_pairs": {
+      "architecture":          { "leader": "claude", "second": "codex" },
+      "accessibility":         { "leader": "claude", "second": "gemini" },
+      "correctness":           { "leader": "codex",  "second": "claude" },
+      "type-safety":           { "leader": "codex",  "second": "gemini" },
+      "security":              { "leader": "gemini", "second": "codex" },
+      "test-coverage":         { "leader": "codex",  "second": "gemini" },
+      "spec-conformance":      { "leader": "claude", "second": "codex" },
+      "ui-design-conformance": { "leader": "gemini", "second": "claude" },
+      "regression-prevention": { "leader": "gemini", "second": "claude" }
+    },
+    "always_on_domains": ["correctness", "regression-prevention"],
+    "triage_agent": "claude",
+    "delta_rereview": true,
+    "auto_merge_when_clean": true
+  },
   "automation": {
     "model": "claude-opus-4-6",
     "repos": [

@@ -3,18 +3,18 @@
 Provides JSONL-based call auditing and SQLite-backed run metrics
 for the stark-forge pipeline.
 
-All SQLite connections use WAL mode and busy_timeout=5000ms for
-concurrent access safety.
+Low-level SQLite plumbing (connect, init, WAL pragmas) lives in
+`audit_base`. This module owns the forge-specific schema and public API,
+which remains stable for backward compatibility with existing callers.
 """
 
 from __future__ import annotations
 
-import json
-import sqlite3
-import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+import audit_base
 
 
 @dataclass
@@ -28,7 +28,7 @@ class AuditCall:
     finding_count: int
     severity_counts: dict[str, int] = field(default_factory=dict)
     error: str | None = None
-    timestamp: float = field(default_factory=time.time)
+    timestamp: float = field(default_factory=audit_base.now_ts)
 
 
 _CREATE_TABLES = """\
@@ -58,31 +58,14 @@ CREATE TABLE IF NOT EXISTS domain_stats (
 """
 
 
-def _connect(db_path: str | Path) -> sqlite3.Connection:
-    """Open a connection with WAL mode and busy timeout."""
-    conn = sqlite3.connect(str(db_path))
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=5000")
-    return conn
-
-
 def init_metrics_db(db_path: str | Path) -> None:
     """Create the forge_metrics tables if they don't exist."""
-    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    conn = _connect(db_path)
-    try:
-        conn.executescript(_CREATE_TABLES)
-        conn.commit()
-    finally:
-        conn.close()
+    audit_base.init_db(db_path, _CREATE_TABLES)
 
 
 def record_call(audit_path: str | Path, call_data: AuditCall) -> None:
     """Append a call record as a JSONL line to the audit file."""
-    path = Path(audit_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(asdict(call_data)) + "\n")
+    audit_base.append_jsonl(audit_path, call_data)
 
 
 def record_run(db_path: str | Path, run_data: dict[str, Any]) -> None:
@@ -93,7 +76,7 @@ def record_run(db_path: str | Path, run_data: dict[str, Any]) -> None:
         outcome, domain_stats (list of dicts with domain, agent, round_num,
         finding_count, signal_count, noise_count, duration_s)
     """
-    conn = _connect(db_path)
+    conn = audit_base.connect(db_path)
     try:
         conn.execute(
             "INSERT INTO runs (run_id, doc_path, total_rounds, total_findings, "
@@ -135,7 +118,7 @@ def get_domain_snr(db_path: str | Path, domain: str, last_n: int = 10) -> float:
     domain_stats rows for the given domain.  Returns 1.0 if no data exists
     (assume clean until proven noisy).
     """
-    conn = _connect(db_path)
+    conn = audit_base.connect(db_path)
     try:
         row = conn.execute(
             "SELECT COALESCE(SUM(signal_count), 0), COALESCE(SUM(noise_count), 0) "
@@ -157,7 +140,7 @@ def get_domain_snr(db_path: str | Path, domain: str, last_n: int = 10) -> float:
 
 def prune_metrics(db_path: str | Path, retention_days: int = 90) -> int:
     """Delete rows older than retention_days. Returns total rows deleted."""
-    conn = _connect(db_path)
+    conn = audit_base.connect(db_path)
     try:
         cutoff = f"-{retention_days} days"
         r1 = conn.execute(

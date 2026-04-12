@@ -102,6 +102,25 @@ DEFAULT_FORGE = {
     "noise_improvement_threshold": 0.33,
     "heuristic_consolidation_threshold": 50,
 }
+DEFAULT_FORGED_REVIEW = {
+    "forge_threshold": 4,
+    "max_rounds": 3,
+    "domain_pairs": {
+        "architecture":          {"leader": "claude", "second": "codex"},
+        "accessibility":         {"leader": "claude", "second": "gemini"},
+        "correctness":           {"leader": "codex",  "second": "claude"},
+        "type-safety":           {"leader": "codex",  "second": "gemini"},
+        "security":              {"leader": "gemini", "second": "codex"},
+        "test-coverage":         {"leader": "codex",  "second": "gemini"},
+        "spec-conformance":      {"leader": "claude", "second": "codex"},
+        "ui-design-conformance": {"leader": "gemini", "second": "claude"},
+        "regression-prevention": {"leader": "gemini", "second": "claude"},
+    },
+    "always_on_domains": ["correctness", "regression-prevention"],
+    "triage_agent": "claude",
+    "delta_rereview": True,
+    "auto_merge_when_clean": True,
+}
 
 
 def _warn(message: str) -> None:
@@ -157,6 +176,7 @@ _SECTION_DEFAULTS: dict[str, dict[str, Any]] = {
     "context_compaction": DEFAULT_CONTEXT_COMPACTION,
     "cost": DEFAULT_COST,
     "forge": DEFAULT_FORGE,
+    "forged_review": DEFAULT_FORGED_REVIEW,
 }
 
 
@@ -172,6 +192,7 @@ def get_skill_activation_config() -> dict[str, Any]: return _get_section("skill_
 def get_context_compaction_config() -> dict[str, Any]: return _get_section("context_compaction")
 def get_cost_config() -> dict[str, Any]:             return _get_section("cost")
 def get_forge_config() -> dict[str, Any]:            return _get_section("forge")
+def get_forged_review_config() -> dict[str, Any]:    return _get_section("forged_review")
 
 
 def is_agent_enabled(agent: str) -> bool:
