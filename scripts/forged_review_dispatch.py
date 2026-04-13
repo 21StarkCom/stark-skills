@@ -40,6 +40,7 @@ except ImportError:  # pragma: no cover
     build_agent_env = None  # type: ignore
 
 import forged_review_engine as eng
+import forged_review_triage_cache as triage_cache
 
 
 DEFAULT_TIMEOUT_S = 900
@@ -278,13 +279,26 @@ def dispatch_triage(
     changed_files: list[str],
     pr_description: str,
     cwd: str | None = None,
+    *,
+    use_cache: bool = True,
 ) -> dict[str, Any]:
     """Run the triage prompt. Returns {selected_domains, rationale}.
 
     On any failure, returns a safe-default dict that selects all 9 domains.
+    When `use_cache` is true (the default), the result is looked up in the
+    on-disk triage cache keyed by a hash of (diff, files, body) and saved
+    back after a fresh LLM call. Cache hits log `[forged-review] triage:
+    cache hit` to stderr so operators can see the saved LLM call.
     """
     cfg = get_forged_review_config()
     triage_agent = cfg.get("triage_agent", "claude")
+
+    cache_key = triage_cache.compute_triage_key(pr_diff, changed_files, pr_description)
+    if use_cache:
+        cached = triage_cache.load_cached_triage(cache_key)
+        if cached is not None:
+            _log(f"triage: cache hit (key={cache_key[:10]}…)")
+            return cached
 
     try:
         triage_prompt = load_prompt("triage/triage.md")
@@ -308,6 +322,13 @@ def dispatch_triage(
     parsed = extract_json(result.raw_output, expect_array=False)
     if not isinstance(parsed, dict) or "selected_domains" not in parsed:
         return _fallback_triage("triage output malformed")
+
+    if use_cache:
+        try:
+            triage_cache.save_cached_triage(cache_key, parsed)
+        except OSError as exc:  # pragma: no cover — best-effort caching
+            _log(f"triage: cache save failed (non-fatal): {exc}")
+
     return parsed
 
 
