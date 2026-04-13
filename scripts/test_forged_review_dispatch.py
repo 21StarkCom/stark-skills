@@ -219,7 +219,7 @@ def test_dispatch_domain_leader_failure_still_produces_result(monkeypatch):
 def test_run_review_round_parallel_dispatch(monkeypatch):
     seen_domains = []
 
-    def fake_dispatch(domain, leader_agent, second_agent, pr_diff, file_scope, cwd):
+    def fake_dispatch(domain, leader_agent, second_agent, pr_diff, file_scope, cwd, max_diff_chars=0):
         seen_domains.append(domain)
         return disp.DomainResult(
             domain=domain,
@@ -246,8 +246,77 @@ def test_run_review_round_parallel_dispatch(monkeypatch):
     assert set(seen_domains) == {"correctness", "security"}
 
 
+def test_truncate_diff_for_prompt_under_limit_unchanged():
+    small = "diff --git a/foo b/foo\n" + "x\n" * 100
+    assert disp.truncate_diff_for_prompt(small, max_chars=10_000) == small
+
+
+def test_truncate_diff_for_prompt_over_limit_includes_marker():
+    big = "HEAD_MARK\n" + ("x" * 50_000) + "\nTAIL_MARK"
+    result = disp.truncate_diff_for_prompt(big, max_chars=1000)
+    assert len(result) <= 1000
+    assert "stark-forged-review" in result
+    assert "HEAD_MARK" in result
+    assert "TAIL_MARK" in result
+
+
+def test_truncate_diff_for_prompt_empty_is_noop():
+    assert disp.truncate_diff_for_prompt("", max_chars=1000) == ""
+
+
+def test_run_review_round_passes_max_diff_chars_to_dispatch(monkeypatch):
+    seen_diffs = []
+
+    def fake_dispatch(domain, leader_agent, second_agent, pr_diff, file_scope, cwd, max_diff_chars):
+        seen_diffs.append((domain, len(pr_diff), max_diff_chars))
+        return disp.DomainResult(
+            domain=domain,
+            leader_agent=leader_agent,
+            second_agent=second_agent,
+            merged={"confirmed": [], "disputed": [], "leader_only": [], "second_only": []},
+            leader_duration_s=0.1,
+            second_duration_s=0.1,
+            actionable=[],
+        )
+
+    monkeypatch.setattr(disp, "dispatch_domain", fake_dispatch)
+    huge = "x" * 200_000
+    disp.run_review_round(
+        selected_domains=["correctness"],
+        domain_pairs={"correctness": {"leader": "codex", "second": "claude"}},
+        pr_diff=huge,
+        max_diff_chars=10_000,
+    )
+    assert seen_diffs == [("correctness", 200_000, 10_000)]
+
+
+def test_dispatch_domain_truncates_diff_before_leader(monkeypatch):
+    seen_inputs = []
+
+    def fake_run_agent(agent, prompt, cwd=None, timeout_s=None):
+        seen_inputs.append(prompt)
+        # Return empty so dispatch_domain doesn't crash parsing.
+        return disp.AgentCallResult(agent=agent, raw_output="[]", duration_s=0.1)
+
+    monkeypatch.setattr(disp, "run_agent", fake_run_agent)
+    monkeypatch.setattr(disp, "load_prompt", lambda rel: f"PROMPT {rel}")
+
+    huge = "A" * 5000 + "MIDDLE_MARKER" + "B" * 5000
+    disp.dispatch_domain(
+        domain="correctness",
+        leader_agent="codex",
+        second_agent="claude",
+        pr_diff=huge,
+        max_diff_chars=500,
+    )
+    assert len(seen_inputs) == 2  # leader + second
+    for inp in seen_inputs:
+        assert "stark-forged-review" in inp  # truncation marker present
+        assert "MIDDLE_MARKER" not in inp  # middle elided
+
+
 def test_run_review_round_emits_heartbeat_on_stderr(monkeypatch, capsys):
-    def fake_dispatch(domain, leader_agent, second_agent, pr_diff, file_scope, cwd):
+    def fake_dispatch(domain, leader_agent, second_agent, pr_diff, file_scope, cwd, max_diff_chars=0):
         return disp.DomainResult(
             domain=domain,
             leader_agent=leader_agent,

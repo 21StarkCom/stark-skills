@@ -162,7 +162,8 @@
     "always_on_domains": ["correctness", "regression-prevention"],
     "triage_agent": "claude",
     "delta_rereview": true,
-    "auto_merge_when_clean": true
+    "auto_merge_when_clean": true,
+    "max_diff_chars_per_domain": 60000
   },
   "red_team": {
     "enabled": true,
