@@ -3,7 +3,7 @@ name: stark-forged-review
 description: >-
   Multi-agent PR review with leader + second-opinion per domain, dynamic triage, and forge-style escalation on non-trivial findings. Replaces stark-review.
 argument-hint: "[PR_NUMBER] [--dry-run] [--repo ORG/REPO] [--resume] [--no-escalate] [--force-escalate]"
-disable-model-invocation: true
+disable-model-invocation: false
 model: opus[1m]
 ---
 
