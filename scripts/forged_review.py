@@ -379,15 +379,34 @@ def run(
 
 def _execute(ctx: RunContext, pr_info: dict[str, Any]) -> int:
     """Inner main: triage → review → gate → (light|forge) → delta loop → merge-gate JSON."""
+    print(
+        f"[forged-review] starting run {ctx.run_id} on PR {ctx.pr_number} "
+        f"({ctx.repo}) branch={ctx.branch}",
+        file=sys.stderr,
+        flush=True,
+    )
     pr_diff = fetch_pr_diff(ctx.pr_number, ctx.repo)
     changed_files = fetch_pr_changed_files(ctx.pr_number, ctx.repo)
+    print(
+        f"[forged-review] fetched diff ({len(pr_diff)} chars, "
+        f"{len(changed_files)} changed files)",
+        file=sys.stderr,
+        flush=True,
+    )
 
     # Phase 1: Triage
+    print("[forged-review] triage: starting", file=sys.stderr, flush=True)
     triage = disp.dispatch_triage(
         pr_diff=pr_diff,
         changed_files=changed_files,
         pr_description=pr_info.get("body", ""),
         cwd=str(ctx.worktree),
+    )
+    print(
+        f"[forged-review] triage: done, "
+        f"selected={triage.get('selected_domains', [])}",
+        file=sys.stderr,
+        flush=True,
     )
     all_domains = list(ctx.cfg["domain_pairs"].keys())
     try:

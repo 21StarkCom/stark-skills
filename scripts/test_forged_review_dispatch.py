@@ -246,6 +246,31 @@ def test_run_review_round_parallel_dispatch(monkeypatch):
     assert set(seen_domains) == {"correctness", "security"}
 
 
+def test_run_review_round_emits_heartbeat_on_stderr(monkeypatch, capsys):
+    def fake_dispatch(domain, leader_agent, second_agent, pr_diff, file_scope, cwd):
+        return disp.DomainResult(
+            domain=domain,
+            leader_agent=leader_agent,
+            second_agent=second_agent,
+            merged={"confirmed": [], "disputed": [], "leader_only": [], "second_only": []},
+            leader_duration_s=0.1,
+            second_duration_s=0.2,
+            actionable=[],
+        )
+
+    monkeypatch.setattr(disp, "dispatch_domain", fake_dispatch)
+    pairs = {"correctness": {"leader": "codex", "second": "claude"}}
+    disp.run_review_round(
+        selected_domains=["correctness"],
+        domain_pairs=pairs,
+        pr_diff="diff",
+    )
+    err = capsys.readouterr().err
+    assert "[forged-review] round: starting" in err
+    assert "[forged-review] domain correctness: done" in err
+    assert "[forged-review] round: complete" in err
+
+
 def test_run_review_round_skips_unknown_domains(monkeypatch):
     monkeypatch.setattr(disp, "dispatch_domain", lambda *a, **k: None)  # should not be called
 
