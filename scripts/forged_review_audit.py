@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS runs (
     total_critical INTEGER NOT NULL,
     merge_outcome TEXT NOT NULL,     -- "merged" | "declined" | "halted" | "dry_run"
     duration_s REAL NOT NULL,
+    invocation_source TEXT NOT NULL DEFAULT 'unknown', -- "explicit" | "auto" | "resume" | "unknown"
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
@@ -101,8 +102,28 @@ CREATE TABLE IF NOT EXISTS finding_verdicts (
 
 
 def init_metrics_db(db_path: str | Path = DEFAULT_DB_PATH) -> None:
-    """Create the forged_review metrics tables if they don't exist."""
+    """Create the forged_review metrics tables if they don't exist.
+
+    Also runs idempotent schema migrations for columns added after the
+    initial release: existing DBs get ALTER TABLE ADD COLUMN so they
+    don't need to be dropped and recreated on upgrade.
+    """
     audit_base.init_db(db_path, _CREATE_TABLES)
+
+    # Schema migration: add invocation_source column if missing.
+    conn = audit_base.connect(db_path)
+    try:
+        existing_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(runs)").fetchall()
+        }
+        if "invocation_source" not in existing_cols:
+            conn.execute(
+                "ALTER TABLE runs ADD COLUMN invocation_source TEXT "
+                "NOT NULL DEFAULT 'unknown'"
+            )
+            conn.commit()
+    finally:
+        conn.close()
 
     # Red team tables live in the same DB for cross-skill queries.
     try:
@@ -135,8 +156,8 @@ def record_run(
         conn.execute(
             "INSERT OR REPLACE INTO runs "
             "(run_id, repo, pr_number, path, total_rounds, total_actionable, "
-            " total_critical, merge_outcome, duration_s) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " total_critical, merge_outcome, duration_s, invocation_source) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run_data["run_id"],
                 run_data["repo"],
@@ -147,6 +168,7 @@ def record_run(
                 run_data["total_critical"],
                 run_data["merge_outcome"],
                 run_data["duration_s"],
+                run_data.get("invocation_source", "unknown"),
             ),
         )
         for rnd in run_data.get("rounds", []):
@@ -196,6 +218,36 @@ def record_run(
         conn.commit()
     finally:
         conn.close()
+
+
+def get_invocation_source_counts(
+    db_path: str | Path = DEFAULT_DB_PATH,
+    since_days: int | None = None,
+) -> dict[str, int]:
+    """Return counts of runs grouped by invocation_source.
+
+    Useful for answering "how often is /stark-forged-review being
+    auto-invoked by subagents vs explicitly typed by a human?". The
+    data is only meaningful to the extent callers pass --via when
+    invoking the orchestrator; rows without it land in 'unknown'.
+    """
+    conn = audit_base.connect(db_path)
+    try:
+        if since_days is not None:
+            rows = conn.execute(
+                "SELECT invocation_source, COUNT(*) FROM runs "
+                "WHERE created_at >= datetime('now', ?) "
+                "GROUP BY invocation_source",
+                (f"-{int(since_days)} days",),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT invocation_source, COUNT(*) FROM runs "
+                "GROUP BY invocation_source"
+            ).fetchall()
+    finally:
+        conn.close()
+    return {row[0] or "unknown": row[1] for row in rows}
 
 
 def get_disagreement_rate(

@@ -64,6 +64,7 @@ class RunContext:
     force_escalate: bool
     state_path: Path
     cfg: dict[str, Any]
+    invocation_source: str = "unknown"
     rounds: list[dict[str, Any]] = field(default_factory=list)
     path_taken: str = "undecided"
     status: str = "in_progress"
@@ -297,6 +298,7 @@ def run(
     resume: bool,
     no_escalate: bool,
     force_escalate: bool,
+    invocation_source: str = "unknown",
 ) -> int:
     """Main orchestration. Returns exit code."""
     if no_escalate and force_escalate:
@@ -351,6 +353,7 @@ def run(
     else:
         run_id = f"run-{int(time.time())}-pr{pr_info['pr_number']}"
 
+    effective_source = "resume" if resume and state else invocation_source
     ctx = RunContext(
         pr_number=pr_info["pr_number"],
         repo=pr_info["repo"],
@@ -364,6 +367,7 @@ def run(
         force_escalate=force_escalate,
         state_path=state_path,
         cfg=cfg,
+        invocation_source=effective_source,
     )
     if state:
         ctx.rounds = state.get("rounds", [])
@@ -569,6 +573,18 @@ def main(argv: list[str] | None = None) -> int:
                         help="Forbid forge-path escalation; always fix in place")
     parser.add_argument("--force-escalate", action="store_true",
                         help="Always take the forge path regardless of gate")
+    parser.add_argument(
+        "--via",
+        default="unknown",
+        choices=["explicit", "auto", "resume", "unknown"],
+        help=(
+            "How the skill was invoked. 'explicit' = user typed the slash "
+            "command, 'auto' = a model auto-dispatched via Skill tool, "
+            "'resume' = --resume of an existing run (auto-set), 'unknown' "
+            "= not specified. Recorded in the metrics DB for auto-vs-explicit "
+            "telemetry."
+        ),
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -579,6 +595,7 @@ def main(argv: list[str] | None = None) -> int:
             resume=args.resume,
             no_escalate=args.no_escalate,
             force_escalate=args.force_escalate,
+            invocation_source=args.via,
         )
     except KeyboardInterrupt:
         print("\ninterrupted", file=sys.stderr)
