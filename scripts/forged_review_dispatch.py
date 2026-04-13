@@ -46,6 +46,12 @@ import forged_review_triage_cache as triage_cache
 DEFAULT_TIMEOUT_S = 900
 GEMINI_TIMEOUT_S = 600
 HEARTBEAT_INTERVAL_S = 30
+# Maximum diff size (in chars) to include in a single leader/second prompt
+# before we truncate with a head+tail window. 60k ≈ 750 lines of 80-col diff,
+# which fits comfortably in every current model's context window even after
+# the prompt body and leader-findings JSON are added. Tunable via
+# forged_review.max_diff_chars_per_domain in config.
+DEFAULT_MAX_DIFF_CHARS = 60000
 PROMPTS_ROOT = Path.home() / ".claude" / "code-review" / "prompts" / "forged-review"
 
 
@@ -59,6 +65,31 @@ def _log(msg: str) -> None:
     the parent process mid-round. Heartbeat lines prevent that.
     """
     print(f"[forged-review] {msg}", file=sys.stderr, flush=True)
+
+
+def truncate_diff_for_prompt(pr_diff: str, max_chars: int = DEFAULT_MAX_DIFF_CHARS) -> str:
+    """Return a diff string safe to paste into a domain prompt.
+
+    When the diff is under `max_chars`, returns it unchanged. When it
+    exceeds the limit, keeps the first ~60% and last ~40% of the budget
+    (so we see both the earliest and most-recent file changes) and
+    splices in an explicit marker that tells the reviewing LLM the diff
+    was truncated. This avoids two failure modes: (1) an OOM-style
+    context blowup on 10k-line refactors, and (2) silent truncation
+    where the LLM reviews a partial diff without knowing.
+    """
+    if not pr_diff or len(pr_diff) <= max_chars:
+        return pr_diff
+    marker = (
+        "\n\n[... diff truncated by stark-forged-review: "
+        f"{len(pr_diff)} chars exceeds {max_chars}-char budget. "
+        "Head and tail shown below; middle sections elided. Review findings "
+        "should be qualified as 'partial coverage' when this marker is present. ...]\n\n"
+    )
+    budget = max_chars - len(marker)
+    head_chars = max(1, int(budget * 0.6))
+    tail_chars = max(1, budget - head_chars)
+    return pr_diff[:head_chars] + marker + pr_diff[-tail_chars:]
 
 
 # ── Dataclasses ────────────────────────────────────────────────────────
@@ -379,6 +410,7 @@ def dispatch_domain(
     pr_diff: str,
     file_scope: list[str] | None = None,
     cwd: str | None = None,
+    max_diff_chars: int = DEFAULT_MAX_DIFF_CHARS,
 ) -> DomainResult:
     """Run leader then second-opinion for one domain. Returns DomainResult."""
     scope_note = ""
@@ -389,12 +421,14 @@ def dispatch_domain(
             + "\n".join(f"- {f}" for f in file_scope)
         )
 
+    safe_diff = truncate_diff_for_prompt(pr_diff or "", max_chars=max_diff_chars)
+
     # Leader pass
     leader_prompt = load_prompt(_domain_prompt_path(leader_agent, domain, "leader"))
     leader_input = (
         leader_prompt
         + "\n\n## PR Diff\n"
-        + (pr_diff or "")
+        + safe_diff
         + scope_note
     )
     leader_result = run_agent(leader_agent, leader_input, cwd=cwd)
@@ -410,7 +444,7 @@ def dispatch_domain(
     second_input = (
         second_prompt
         + "\n\n## PR Diff\n"
-        + (pr_diff or "")
+        + safe_diff
         + "\n\n## Leader findings (classify each)\n"
         + json.dumps(leader_findings, indent=2)
         + scope_note
@@ -468,6 +502,7 @@ def run_review_round(
     cwd: str | None = None,
     file_scope: list[str] | None = None,
     max_workers: int = 3,
+    max_diff_chars: int = DEFAULT_MAX_DIFF_CHARS,
 ) -> dict[str, DomainResult]:
     """Run all selected domains in parallel. Returns {domain: DomainResult}.
 
@@ -480,6 +515,12 @@ def run_review_round(
     if not selected_domains:
         return results
 
+    diff_len = len(pr_diff or "")
+    if diff_len > max_diff_chars:
+        _log(
+            f"round: pr diff is {diff_len} chars, "
+            f"truncating to {max_diff_chars}-char budget per domain"
+        )
     _log(f"round: starting ({len(selected_domains)} domains, max_workers={max_workers})")
 
     stop_heartbeat = threading.Event()
@@ -515,6 +556,7 @@ def run_review_round(
                     pr_diff,
                     file_scope,
                     cwd,
+                    max_diff_chars,
                 )
                 futures[fut] = domain
             for fut in as_completed(futures):

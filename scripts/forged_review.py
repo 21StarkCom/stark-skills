@@ -238,6 +238,7 @@ def run_round(
         pr_diff=pr_diff,
         cwd=str(ctx.worktree),
         file_scope=file_scope,
+        max_diff_chars=ctx.cfg.get("max_diff_chars_per_domain", disp.DEFAULT_MAX_DIFF_CHARS),
     )
 
     domain_findings: dict[str, dict[str, Any]] = {}
