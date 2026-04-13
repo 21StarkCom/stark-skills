@@ -17,6 +17,8 @@ import json
 import os
 import shutil
 import subprocess
+import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -42,7 +44,20 @@ import forged_review_engine as eng
 
 DEFAULT_TIMEOUT_S = 900
 GEMINI_TIMEOUT_S = 600
+HEARTBEAT_INTERVAL_S = 30
 PROMPTS_ROOT = Path.home() / ".claude" / "code-review" / "prompts" / "forged-review"
+
+
+def _log(msg: str) -> None:
+    """Emit a progress line to stderr with a flush.
+
+    Callers driving this module through a parent harness (nested subagent,
+    CI runner, etc.) typically enforce an idle-stream timeout. Long domain
+    dispatches happen inside blocking subprocess.run calls that buffer
+    until exit, so without periodic stderr output the harness can kill
+    the parent process mid-round. Heartbeat lines prevent that.
+    """
+    print(f"[forged-review] {msg}", file=sys.stderr, flush=True)
 
 
 # ── Dataclasses ────────────────────────────────────────────────────────
@@ -436,42 +451,84 @@ def run_review_round(
     """Run all selected domains in parallel. Returns {domain: DomainResult}.
 
     Each domain still runs leader→second serially; domains run in parallel via
-    a ThreadPoolExecutor.
+    a ThreadPoolExecutor. A heartbeat thread emits progress to stderr while
+    futures are pending so parent harnesses see a live stream during the
+    long silent windows when all workers are blocked in subprocess.run.
     """
     results: dict[str, DomainResult] = {}
     if not selected_domains:
         return results
 
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {}
-        for domain in selected_domains:
-            pair = domain_pairs.get(domain)
-            if not pair:
-                continue
-            fut = pool.submit(
-                dispatch_domain,
-                domain,
-                pair["leader"],
-                pair["second"],
-                pr_diff,
-                file_scope,
-                cwd,
+    _log(f"round: starting ({len(selected_domains)} domains, max_workers={max_workers})")
+
+    stop_heartbeat = threading.Event()
+    started_at = time.time()
+    completed_count = 0
+    completed_lock = threading.Lock()
+
+    def _heartbeat() -> None:
+        while not stop_heartbeat.wait(HEARTBEAT_INTERVAL_S):
+            with completed_lock:
+                done = completed_count
+            elapsed = int(time.time() - started_at)
+            _log(
+                f"round: {elapsed}s elapsed, "
+                f"{done}/{len(selected_domains)} domains complete"
             )
-            futures[fut] = domain
-        for fut in as_completed(futures):
-            domain = futures[fut]
-            try:
-                results[domain] = fut.result()
-            except Exception as exc:  # pragma: no cover - guardrail
-                results[domain] = DomainResult(
-                    domain=domain,
-                    leader_agent=domain_pairs[domain]["leader"],
-                    second_agent=domain_pairs[domain]["second"],
-                    merged={"confirmed": [], "disputed": [], "leader_only": [], "second_only": []},
-                    leader_duration_s=0.0,
-                    second_duration_s=0.0,
-                    leader_error=f"dispatch exception: {exc}",
+
+    heartbeat_thread = threading.Thread(target=_heartbeat, daemon=True)
+    heartbeat_thread.start()
+
+    try:
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {}
+            for domain in selected_domains:
+                pair = domain_pairs.get(domain)
+                if not pair:
+                    continue
+                fut = pool.submit(
+                    dispatch_domain,
+                    domain,
+                    pair["leader"],
+                    pair["second"],
+                    pr_diff,
+                    file_scope,
+                    cwd,
                 )
+                futures[fut] = domain
+            for fut in as_completed(futures):
+                domain = futures[fut]
+                try:
+                    result = fut.result()
+                    results[domain] = result
+                    status = "ok"
+                    if result.leader_error:
+                        status = f"leader_err={result.leader_error[:60]}"
+                    elif result.second_error:
+                        status = f"second_err={result.second_error[:60]}"
+                    _log(
+                        f"domain {domain}: done "
+                        f"(leader={result.leader_duration_s:.1f}s, "
+                        f"second={result.second_duration_s:.1f}s, {status})"
+                    )
+                except Exception as exc:  # pragma: no cover - guardrail
+                    results[domain] = DomainResult(
+                        domain=domain,
+                        leader_agent=domain_pairs[domain]["leader"],
+                        second_agent=domain_pairs[domain]["second"],
+                        merged={"confirmed": [], "disputed": [], "leader_only": [], "second_only": []},
+                        leader_duration_s=0.0,
+                        second_duration_s=0.0,
+                        leader_error=f"dispatch exception: {exc}",
+                    )
+                    _log(f"domain {domain}: dispatch exception: {exc}")
+                with completed_lock:
+                    completed_count += 1
+    finally:
+        stop_heartbeat.set()
+        heartbeat_thread.join(timeout=1.0)
+
+    _log(f"round: complete ({int(time.time() - started_at)}s total)")
     return results
 
 
