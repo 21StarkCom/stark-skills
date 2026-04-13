@@ -106,6 +106,11 @@ Round ≥ 2 runs only the domains that had actionable findings last round,
 scoped to files touched by the fix commits. This is a significant cost
 saving vs. full re-review and is enabled via `cfg.delta_rereview`.
 
+> **v1 status:** the engine has the scoping logic and the config flag
+> exists, but the orchestrator halts after round 1 awaiting fixes. Delta
+> re-review activates once the auto-apply light/forge paths ship (same
+> rollout phase as the forge path — see Rollout below).
+
 ## State file — `.forged-review-state.json`
 
 Lives in the worktree. Full schema in the design spec §4. Key fields:
@@ -114,7 +119,8 @@ Lives in the worktree. Full schema in the design spec §4. Key fields:
 - `triage`: selected domains + rationale
 - `rounds[]`: per-round findings, actionable count, gate decision, fix commits
 - `forge_sub_state`: per-phase status for the forge path
-- `status`: `"in_progress" | "clean" | "awaiting_fixes" | "halted" | "merged"`
+- `status` (v1 values): `"in_progress" | "clean" | "dry_run_complete" | "awaiting_fixes"`
+- `status` (reserved for future rollout): `"halted"`, `"merged"` — set once the auto-apply paths ship
 
 ## Config (`global/config.json` → `forged_review`)
 
@@ -172,13 +178,18 @@ them mechanically.
 
 ## Observability
 
-Events emitted via `emit_queue.py`:
+Events emitted via `emit_queue.py` in v1:
 
 - `forged_review.round.start` `{run_id, round, mode, domains}`
 - `forged_review.round.end` `{run_id, round, actionable, critical, mode}`
 - `forged_review.gate` `{run_id, decision, reason}`
-- `forged_review.forge_path.start` `{triggered_by}`
 - `forged_review.complete` `{run_id, pr, status, duration_s}`
+
+Reserved for future rollout (not yet emitted):
+
+- `forged_review.forge_path.start` `{triggered_by}` — fires when the forge path activates (currently deferred with the auto-apply rollout)
+
+In addition, the orchestrator prints lifecycle progress lines (`[forged-review] …`) to **stderr** — run start, diff fetch, triage start/done, round start, per-domain done with timings, round complete, and a 30-second heartbeat during long rounds. These are for keeping parent streams alive inside nested subagents and harnessed runs; the JSON contract on stdout is unchanged.
 
 Metrics in `~/.claude/code-review/history/forged-review/forged_review_metrics.db`:
 
