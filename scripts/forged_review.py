@@ -378,7 +378,21 @@ def run(
     try:
         return _execute(ctx, pr_info)
     finally:
-        if not dry_run and existing_worktree is None:
+        # Only clean up the worktree when the run reached a terminal
+        # success state. On `awaiting_fixes` (gated by `ctx.status`),
+        # mid-run exceptions (`ctx.status` still "in_progress"), or any
+        # dispatch failure, we MUST leave the worktree on disk so the
+        # next invocation can load `.forged-review-state.json` via
+        # `--resume`. Without this guard, the resume flow is unreachable:
+        # the state file the halt message tells the user to resume from
+        # is erased by this same finally block a few lines before the
+        # user ever gets a chance to re-invoke the orchestrator.
+        should_cleanup = (
+            not dry_run
+            and existing_worktree is None
+            and ctx.status == "clean"
+        )
+        if should_cleanup:
             cleanup_worktree(worktree, repo_root)
 
 
@@ -519,6 +533,13 @@ def _print_result_json(
     message: str = "",
 ) -> int:
     """Print a single JSON object to stdout for the skill to consume."""
+    # Record the resolved outcome on the context so callers (e.g. the
+    # finally block in `run()`) can distinguish terminal success from a
+    # halt that still has a state file the user will want to --resume.
+    # Contract: this function is called at most once per run — every
+    # caller `return`s its result directly — so the mutation is
+    # write-once in practice even though the field is not frozen.
+    ctx.status = status
     needs_merge = (
         status == "clean"
         and not ctx.dry_run

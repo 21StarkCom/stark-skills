@@ -234,6 +234,138 @@ def test_print_result_json_awaiting_fixes_returns_halted(tmp_path, capsys):
     assert exit_code == 1
 
 
+def test_print_result_json_records_status_on_ctx(tmp_path, capsys):
+    """`run()`'s finally block uses `ctx.status` to decide whether to
+    clean up the worktree. That field starts as 'in_progress' and is
+    only meaningful once the run has resolved to a terminal/halt state,
+    so `_print_result_json` must stamp it on the way out."""
+    ctx = _ctx(tmp_path)
+    assert ctx.status == "in_progress"
+
+    orch._print_result_json(ctx, status="awaiting_fixes", message="fix it")
+    capsys.readouterr()  # drain
+    assert ctx.status == "awaiting_fixes"
+
+    orch._print_result_json(ctx, status="clean")
+    capsys.readouterr()
+    assert ctx.status == "clean"
+
+
+# ── run() worktree lifecycle ───────────────────────────────────────────
+
+
+def _stub_run_dependencies(monkeypatch, tmp_path, inner_exit, inner_status):
+    """Mock every side-effecting dependency of `orch.run()` so we can
+    exercise the finally-block cleanup gating in isolation."""
+    fake_worktree = tmp_path / "wt-fake"
+    fake_worktree.mkdir()
+
+    monkeypatch.setattr(
+        orch, "get_forged_review_config",
+        lambda: {
+            "forge_threshold": 4,
+            "max_rounds": 3,
+            "always_on_domains": [],
+            "domain_pairs": {},
+            "auto_merge_when_clean": True,
+        },
+    )
+    monkeypatch.setattr(
+        orch.subprocess, "check_output",
+        lambda *a, **kw: str(tmp_path) + "\n",
+    )
+    monkeypatch.setattr(
+        orch, "detect_pr_context",
+        lambda pr_number, repo_override: {
+            "pr_number": 42,
+            "repo": "x/y",
+            "branch": "feat/foo",
+            "base": "main",
+            "body": "",
+            "title": "",
+        },
+    )
+    monkeypatch.setattr(
+        orch, "create_worktree",
+        lambda branch, repo_root: fake_worktree,
+    )
+    cleanup_calls: list[Path] = []
+    monkeypatch.setattr(
+        orch, "cleanup_worktree",
+        lambda wt, repo_root: cleanup_calls.append(wt),
+    )
+    monkeypatch.setattr(orch.audit, "init_metrics_db", lambda: None)
+
+    def fake_execute(ctx, pr_info):
+        ctx.status = inner_status
+        return inner_exit
+
+    monkeypatch.setattr(orch, "_execute", fake_execute)
+    return fake_worktree, cleanup_calls
+
+
+def test_run_preserves_worktree_on_awaiting_fixes(monkeypatch, tmp_path):
+    """Regression: the finally block in `run()` used to call
+    `cleanup_worktree` for every non-dry-run, non-resume invocation,
+    which nuked the `.forged-review-state.json` the halt message told
+    the user to `--resume` from. Pin the fix."""
+    _, cleanup_calls = _stub_run_dependencies(
+        monkeypatch, tmp_path,
+        inner_exit=orch.EXIT_HALTED, inner_status="awaiting_fixes",
+    )
+
+    exit_code = orch.run(
+        pr_number=42, repo_override="x/y",
+        dry_run=False, resume=False,
+        no_escalate=False, force_escalate=False,
+    )
+
+    assert exit_code == orch.EXIT_HALTED
+    assert cleanup_calls == [], (
+        "cleanup_worktree must not fire on awaiting_fixes — the state file "
+        "inside the worktree is required for the next --resume"
+    )
+
+
+def test_run_cleans_up_worktree_on_clean(monkeypatch, tmp_path):
+    """The inverse: a terminal-success run should still clean up the
+    worktree so repeated invocations don't leak directories."""
+    fake_worktree, cleanup_calls = _stub_run_dependencies(
+        monkeypatch, tmp_path,
+        inner_exit=orch.EXIT_OK, inner_status="clean",
+    )
+
+    exit_code = orch.run(
+        pr_number=42, repo_override="x/y",
+        dry_run=False, resume=False,
+        no_escalate=False, force_escalate=False,
+    )
+
+    assert exit_code == orch.EXIT_OK
+    assert cleanup_calls == [fake_worktree]
+
+
+def test_run_preserves_worktree_on_dispatch_failure(monkeypatch, tmp_path):
+    """Mid-run exceptions leave `ctx.status` at its initial
+    'in_progress' value. Treat that as "don't touch the worktree" so
+    operators can inspect whatever partial state survived."""
+    _, cleanup_calls = _stub_run_dependencies(
+        monkeypatch, tmp_path,
+        inner_exit=orch.EXIT_DISPATCH_FAIL, inner_status="in_progress",
+    )
+
+    exit_code = orch.run(
+        pr_number=42, repo_override="x/y",
+        dry_run=False, resume=False,
+        no_escalate=False, force_escalate=False,
+    )
+
+    assert exit_code == orch.EXIT_DISPATCH_FAIL
+    assert cleanup_calls == [], (
+        "unresolved runs must preserve the worktree for debugging"
+    )
+
+
 # ── main CLI arg rejection ─────────────────────────────────────────────
 
 
