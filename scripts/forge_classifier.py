@@ -76,12 +76,25 @@ def _compile_patterns(rules: dict[str, Any]) -> dict[str, list[re.Pattern[str]]]
     return compiled
 
 
+# Word-boundary patterns — substring matches like "ui" in "build" or "aria" in
+# "variant" previously caused backend specs to be labelled "frontend".
+_FRONTEND_RE = re.compile(
+    r"\b(ui|ux|screen[-\s]?reader|wcag|aria|a11y|accessib\w*)\b",
+    re.IGNORECASE,
+)
+_BACKEND_RE = re.compile(
+    r"\b(api|database|postgres\w*|service|auth|endpoint|rpc|grpc|kafka|redis|cron|worker)\b",
+    re.IGNORECASE,
+)
+
+
 def _determine_design_type(content: str, spec_path: Path) -> str:
-    lowered = content.lower()
     suffix = spec_path.suffix.lower()
-    if any(term in lowered for term in ("ui", "ux", "screen reader", "wcag", "aria")):
+    frontend_hits = len(_FRONTEND_RE.findall(content))
+    backend_hits = len(_BACKEND_RE.findall(content))
+    if frontend_hits > backend_hits and frontend_hits > 0:
         return "frontend"
-    if any(term in lowered for term in ("api", "database", "postgresql", "service", "auth")):
+    if backend_hits > 0:
         return "backend"
     if suffix in {".md", ".txt", ".rst"}:
         return "general"

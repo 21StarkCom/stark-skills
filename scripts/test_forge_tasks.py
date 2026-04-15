@@ -9,8 +9,11 @@ import pytest
 
 from forge_tasks import (  # pyright: ignore[reportMissingImports]
     Task,
+    _build_decomposer_prompt,
     _create_issue,
+    _extract_json_object,
     _extract_tasks,
+    _format_validation_feedback,
     _search_existing_issue,
     _validation_passed,
     create_issues,
@@ -158,7 +161,7 @@ class TestRunTasksPhase:
         pass_validator = MagicMock(approved=True, issues=[])
         decompose_calls = [0]
 
-        def decompose_side_effect(_plan_text, _cfg):
+        def decompose_side_effect(_plan_text, _cfg, prior_issues=None):
             decompose_calls[0] += 1
             return sample_breakdown
 
@@ -406,3 +409,152 @@ class TestCreateIssue:
             _create_issue(task)
 
         assert "GH_TOKEN" not in captured_env
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Decomposer fragility fixes — JSON extraction + retry feedback
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestExtractJsonObject:
+    """The brace-balanced extractor must survive realistic LLM output."""
+
+    def test_clean_object(self):
+        assert _extract_json_object('{"a": 1}') == {"a": 1}
+
+    def test_object_with_leading_chatter(self):
+        raw = "Sure, here is the breakdown:\n\n{\"phases\": []}"
+        assert _extract_json_object(raw) == {"phases": []}
+
+    def test_object_with_trailing_chatter(self):
+        raw = '{"phases": []}\n\nLet me know if you need anything else!'
+        assert _extract_json_object(raw) == {"phases": []}
+
+    def test_object_with_fenced_code_block(self):
+        raw = '```json\n{"phases": [{"phase_id": "P1"}]}\n```'
+        assert _extract_json_object(raw) == {"phases": [{"phase_id": "P1"}]}
+
+    def test_object_with_nested_braces_in_strings(self):
+        # A string value containing literal braces must not confuse the scanner
+        raw = '{"body": "Use {x} as the placeholder"}'
+        assert _extract_json_object(raw) == {"body": "Use {x} as the placeholder"}
+
+    def test_object_with_escaped_quotes_in_string(self):
+        raw = r'{"body": "She said \"hi\""}'
+        assert _extract_json_object(raw) == {"body": 'She said "hi"'}
+
+    def test_returns_none_on_no_object(self):
+        assert _extract_json_object("just prose, no JSON at all") is None
+
+    def test_returns_none_on_unterminated_object(self):
+        assert _extract_json_object('{"phases": [') is None
+
+    def test_skips_invalid_then_finds_valid(self):
+        # First "{" starts an invalid object; scanner should keep looking
+        raw = 'note: { broken } and then {"phases": []}'
+        result = _extract_json_object(raw)
+        assert result == {"phases": []}
+
+    def test_picks_largest_top_level_object(self):
+        # Realistic: the LLM emits the breakdown wrapped in a parent object
+        raw = '{"phases": [{"phase_id": "P1", "tasks": []}]}'
+        assert _extract_json_object(raw) == {
+            "phases": [{"phase_id": "P1", "tasks": []}]
+        }
+
+
+class TestFormatValidationFeedback:
+    def test_empty_returns_empty_string(self):
+        assert _format_validation_feedback([]) == ""
+
+    def test_renders_issue_fields(self):
+        issue = MagicMock(
+            phase_id="P1",
+            task_id="P1.1",
+            field="acceptance",
+            problem="Too many criteria (7 > 5)",
+            suggestion="Split into two tasks",
+        )
+        result = _format_validation_feedback([issue])
+        assert "P1/P1.1" in result
+        assert "acceptance" in result
+        assert "Too many criteria" in result
+        assert "Split into two tasks" in result
+
+    def test_caps_at_30_issues(self):
+        issues = [
+            MagicMock(
+                phase_id=f"P{i}", task_id=f"P{i}.1",
+                field="x", problem=f"problem {i}", suggestion="",
+            )
+            for i in range(50)
+        ]
+        result = _format_validation_feedback(issues)
+        # Issue 30+ should be omitted
+        assert "problem 0" in result
+        assert "problem 29" in result
+        assert "problem 30" not in result
+
+
+class TestBuildDecomposerPrompt:
+    def test_includes_guardrails(self):
+        prompt = _build_decomposer_prompt("# plan body", prior_issues=None)
+        assert "≤5 acceptance criteria" in prompt
+        assert "self-contained" in prompt
+        assert "# Plan" in prompt
+        # No retry-feedback header on a fresh attempt
+        assert "Previous attempt" not in prompt
+
+    def test_includes_feedback_header_on_retry(self):
+        issue = MagicMock(
+            phase_id="P1", task_id="P1.1",
+            field="size", problem="too big", suggestion="split",
+        )
+        prompt = _build_decomposer_prompt("# plan body", prior_issues=[issue])
+        assert "Previous attempt" in prompt
+        assert "P1/P1.1" in prompt
+        assert "too big" in prompt
+
+
+class TestRetryFeedbackLoop:
+    """Validator issues from attempt N must reach attempt N+1's prompt."""
+
+    def test_prior_issues_threaded_through_retry(
+        self, plan_file, minimal_state, minimal_cfg, tmp_path
+    ):
+        """On validation failure, the next _decompose_plan call should
+        receive prior_issues populated with the failing validator's issues."""
+        sample_breakdown = {"phases": [{"phase_id": "P1", "tasks": []}]}
+        # Two attempts: first fails validation, second passes
+        first_issue = MagicMock(
+            phase_id="P1", task_id="P1.1",
+            field="size", problem="task too big", suggestion="split",
+        )
+        fail_validator = MagicMock(approved=False, issues=[first_issue])
+        pass_validator = MagicMock(approved=True, issues=[])
+        validation_iter = iter([[fail_validator], [pass_validator]])
+
+        decompose_calls: list[list] = []
+
+        def fake_decompose(_plan_text, _cfg, prior_issues=None):
+            decompose_calls.append(list(prior_issues or []))
+            return sample_breakdown
+
+        with (
+            patch("forge_tasks._decompose_plan", side_effect=fake_decompose),
+            patch(
+                "forge_tasks._validate_breakdown",
+                side_effect=lambda *_a, **_k: next(validation_iter),
+            ),
+            patch("forge_tasks.time.sleep"),
+        ):
+            result = run_tasks_phase(
+                plan_file, minimal_state, minimal_cfg, tmp_path
+            )
+
+        assert result.status == "completed"
+        assert len(decompose_calls) == 2
+        # First attempt has no feedback; second attempt has the failing issue
+        assert decompose_calls[0] == []
+        assert decompose_calls[1] == [first_issue]
+

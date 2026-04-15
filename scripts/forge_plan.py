@@ -345,6 +345,13 @@ def run_plan_review(
         result.rounds.append(round_record)
         result.noise += noise
 
+        # Persist rounds after every iteration so a halt/crash before the
+        # clean-halt tail doesn't lose the round log.
+        state["phases"]["plan_review"]["rounds"] = list(result.rounds)
+        state["phases"]["plan_review"]["findings_fixed"] = result.findings_fixed
+        state["phases"]["plan_review"]["noise"] = result.noise
+        state["updated_at"] = datetime.now(timezone.utc).isoformat()
+
         print(
             f"[forge_plan] Round {round_num}: {actionable} actionable, {noise} noise",
             file=sys.stderr,
@@ -373,7 +380,36 @@ def run_plan_review(
             # We do this by continuing to the halt round iteration
             continue
 
-        # Apply fixes (delegate to orchestrator/LLM in full implementation; here we record)
+        # Apply fixes — dispatch an LLM to rewrite the plan, then commit
+        # only if the rewrite actually changed the document. A silent
+        # no-op commit would mislead readers and re-find the same issues.
+        from forge_fix_loop import apply_fixes  # noqa: PLC0415
+
+        fix_findings = [
+            f for f in round_findings
+            if f.get("severity", "medium").lower() in {"medium", "high", "critical"}
+        ]
+        _, changed = apply_fixes(
+            plan_path,
+            fix_findings,
+            artifact_kind="implementation plan",
+            round_num=round_num,
+            timeout=timeout,
+        )
+
+        if not changed:
+            print(
+                f"[forge_plan] Round {round_num}: fix dispatch produced no "
+                f"changes ({actionable} actionable findings). Halting — "
+                "subsequent rounds would re-find the same issues.",
+                file=sys.stderr,
+            )
+            round_record["fix_dispatch_noop"] = True
+            state["phases"]["plan_review"]["rounds"] = list(result.rounds)
+            state["updated_at"] = datetime.now(timezone.utc).isoformat()
+            result.status = "halted"
+            return result
+
         result.findings_fixed += actionable
 
         # Commit after each fix round

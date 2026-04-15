@@ -63,6 +63,18 @@ def _create_spec(path: Path, name: str = "spec.md") -> Path:
     return spec
 
 
+def _stub_dispatch_phase():
+    """Patch ``_dispatch_phase`` to return ``("completed", {})``.
+
+    Used by e2e tests that only want to exercise the orchestrator's
+    worktree/state/resume plumbing, not the real agent dispatch stack.
+    """
+    return patch(
+        "forge_orchestrator._dispatch_phase",
+        return_value=("completed", {}),
+    )
+
+
 # ---------------------------------------------------------------------------
 # test_main_branch_rejection
 # ---------------------------------------------------------------------------
@@ -105,6 +117,7 @@ class TestMainBranchRejection:
             patch("forge_orchestrator._setup_worktree", return_value=(worktree, "forge/spec")),
             patch("forge_orchestrator.acquire_lock", return_value=True),
             patch("forge_orchestrator.release_lock"),
+            _stub_dispatch_phase(),
         ):
             code = run_forge(spec)
 
@@ -146,6 +159,7 @@ class TestDryRunNoCommits:
             patch("forge_orchestrator.acquire_lock", return_value=True),
             patch("forge_orchestrator.release_lock"),
             patch("subprocess.run", side_effect=fake_run),
+            _stub_dispatch_phase(),
         ):
             run_forge(spec, dry_run=True)
 
@@ -167,6 +181,7 @@ class TestDryRunNoCommits:
             patch("forge_orchestrator._setup_worktree", return_value=(worktree, "forge/spec")),
             patch("forge_orchestrator.acquire_lock", return_value=True),
             patch("forge_orchestrator.release_lock"),
+            _stub_dispatch_phase(),
         ):
             run_forge(spec, dry_run=True)
 
@@ -196,6 +211,7 @@ class TestWorktreeIsolation:
             patch("forge_orchestrator._setup_worktree", return_value=(worktree, "forge/spec")),
             patch("forge_orchestrator.acquire_lock", return_value=True),
             patch("forge_orchestrator.release_lock"),
+            _stub_dispatch_phase(),
         ):
             run_forge(spec)
 
@@ -227,6 +243,7 @@ class TestWorktreeIsolation:
             patch("forge_orchestrator._setup_worktree", side_effect=fake_setup),
             patch("forge_orchestrator.acquire_lock", return_value=True),
             patch("forge_orchestrator.release_lock"),
+            _stub_dispatch_phase(),
         ):
             run_forge(spec)
 
@@ -289,6 +306,7 @@ class TestCrashResume:
             patch("forge_orchestrator.acquire_lock", return_value=True),
             patch("forge_orchestrator.release_lock"),
             patch("forge_orchestrator.write_state_atomic", side_effect=tracking_write),
+            _stub_dispatch_phase(),
         ):
             code = run_forge(spec, resume=True)
 
@@ -326,6 +344,7 @@ class TestCrashResume:
             patch("forge_orchestrator.acquire_lock", return_value=True),
             patch("forge_orchestrator.release_lock"),
             patch("forge_orchestrator.write_state_atomic", side_effect=tracking_write),
+            _stub_dispatch_phase(),
         ):
             code = run_forge(spec)
 
@@ -358,6 +377,7 @@ class TestExitCodes:
             patch("forge_orchestrator._setup_worktree", return_value=(worktree, "forge/spec")),
             patch("forge_orchestrator.acquire_lock", return_value=True),
             patch("forge_orchestrator.release_lock"),
+            _stub_dispatch_phase(),
         ):
             code = run_forge(spec)
 
