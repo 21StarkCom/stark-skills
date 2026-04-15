@@ -1130,3 +1130,85 @@ class TestDesignReviewFixTimeoutTiering:
         assert captured_kwargs.get("timeout") == 900, (
             "fix-dispatch should default to 900s when fix_timeout is unset"
         )
+
+
+class TestDesignReviewReviewTimeoutResolution:
+    """Per-domain dispatch timeout must honor ``review_timeout`` when set,
+    falling back to the legacy ``timeout`` key for backward compatibility,
+    finally defaulting to 300s."""
+
+    def _dispatch_clean(self) -> dict:
+        return {"findings": [], "summary": {"total_findings": 0}}
+
+    def _run_and_capture_dispatch_timeout(
+        self, cfg, spec_file, minimal_state, tmp_path,
+    ) -> int | None:
+        captured: dict = {}
+
+        def capture_dispatch(*args, **kwargs):
+            captured["timeout"] = kwargs.get("timeout")
+            return self._dispatch_clean()
+
+        with (
+            patch(
+                "forge_review._dispatch_review", side_effect=capture_dispatch,
+            ),
+            patch(
+                "forge_review._discover_forge_domains",
+                return_value={
+                    "general": {"order": "01", "filename": "01-general.md"},
+                },
+            ),
+            patch("forge_review.is_agent_enabled", return_value=True),
+        ):
+            run_design_review(spec_file, minimal_state, cfg, tmp_path)
+
+        return captured.get("timeout")
+
+    def test_review_timeout_wins_over_legacy_timeout(
+        self, spec_file, minimal_state, tmp_path,
+    ):
+        cfg = {
+            "max_rounds": 1,
+            "fix_threshold": "medium",
+            "review_timeout": 456,
+            "timeout": 60,
+            "domain_routing": {"general": "claude"},
+            "agent_fallback_order": ["claude"],
+            "consensus_domains": [],
+            "consensus_threshold": 2,
+        }
+        assert self._run_and_capture_dispatch_timeout(
+            cfg, spec_file, minimal_state, tmp_path,
+        ) == 456
+
+    def test_falls_back_to_legacy_timeout_when_review_timeout_absent(
+        self, spec_file, minimal_state, tmp_path,
+    ):
+        cfg = {
+            "max_rounds": 1,
+            "fix_threshold": "medium",
+            "timeout": 120,
+            "domain_routing": {"general": "claude"},
+            "agent_fallback_order": ["claude"],
+            "consensus_domains": [],
+            "consensus_threshold": 2,
+        }
+        assert self._run_and_capture_dispatch_timeout(
+            cfg, spec_file, minimal_state, tmp_path,
+        ) == 120
+
+    def test_defaults_to_300_when_neither_key_set(
+        self, spec_file, minimal_state, tmp_path,
+    ):
+        cfg = {
+            "max_rounds": 1,
+            "fix_threshold": "medium",
+            "domain_routing": {"general": "claude"},
+            "agent_fallback_order": ["claude"],
+            "consensus_domains": [],
+            "consensus_threshold": 2,
+        }
+        assert self._run_and_capture_dispatch_timeout(
+            cfg, spec_file, minimal_state, tmp_path,
+        ) == 300

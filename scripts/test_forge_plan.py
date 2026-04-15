@@ -604,3 +604,82 @@ class TestPlanReviewFixTimeoutTiering:
         assert captured_kwargs.get("timeout") == 900, (
             "fix-dispatch should default to 900s when fix_timeout is unset"
         )
+
+
+class TestPlanReviewReviewTimeoutResolution:
+    """Per-domain plan-review dispatch honors ``review_timeout`` when set,
+    falls back to legacy ``timeout``, and defaults to 300s."""
+
+    def _dispatch_clean(self) -> dict:
+        return {
+            "results": [
+                {"agent": "claude", "domain": "general", "findings": []}
+            ]
+        }
+
+    def _run_and_capture_dispatch_timeout(
+        self, cfg, plan_file, minimal_state, tmp_path,
+    ) -> int | None:
+        captured: dict = {}
+
+        def capture_dispatch(*args, **kwargs):
+            captured["timeout"] = kwargs.get("timeout")
+            return self._dispatch_clean()
+
+        with (
+            patch(
+                "forge_plan._dispatch_plan_review",
+                side_effect=capture_dispatch,
+            ),
+            patch(
+                "forge_plan._discover_plan_review_domains",
+                return_value={
+                    "general": {"order": "01", "filename": "general.md"},
+                },
+            ),
+        ):
+            run_plan_review(plan_file, minimal_state, cfg, tmp_path)
+
+        return captured.get("timeout")
+
+    def test_review_timeout_wins_over_legacy_timeout(
+        self, plan_file, minimal_state, tmp_path,
+    ):
+        cfg = {
+            "max_rounds": 1,
+            "fix_threshold": "medium",
+            "review_timeout": 789,
+            "timeout": 60,
+            "plan_review_routing": {"general": "claude"},
+            "agent_fallback_order": ["claude"],
+        }
+        assert self._run_and_capture_dispatch_timeout(
+            cfg, plan_file, minimal_state, tmp_path,
+        ) == 789
+
+    def test_falls_back_to_legacy_timeout_when_review_timeout_absent(
+        self, plan_file, minimal_state, tmp_path,
+    ):
+        cfg = {
+            "max_rounds": 1,
+            "fix_threshold": "medium",
+            "timeout": 150,
+            "plan_review_routing": {"general": "claude"},
+            "agent_fallback_order": ["claude"],
+        }
+        assert self._run_and_capture_dispatch_timeout(
+            cfg, plan_file, minimal_state, tmp_path,
+        ) == 150
+
+    def test_defaults_to_300_when_neither_key_set(
+        self, plan_file, minimal_state, tmp_path,
+    ):
+        cfg = {
+            "max_rounds": 1,
+            "fix_threshold": "medium",
+            "plan_review_routing": {"general": "claude"},
+            "agent_fallback_order": ["claude"],
+        }
+        assert self._run_and_capture_dispatch_timeout(
+            cfg, plan_file, minimal_state, tmp_path,
+        ) == 300
