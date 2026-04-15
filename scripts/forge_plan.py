@@ -290,7 +290,7 @@ def run_plan_review(
     max_rounds = cfg.get("max_rounds", 3)
     halt_round = max_rounds + 1
     fix_threshold = cfg.get("fix_threshold", "medium")
-    timeout = cfg.get("timeout", 300)
+    timeout = cfg.get("review_timeout", cfg.get("timeout", 300))
     fix_timeout = cfg.get("fix_timeout", 900)
     plan_review_routing = cfg.get("plan_review_routing", {})
     fallback_order = cfg.get("agent_fallback_order", ["claude", "codex", "gemini"])
