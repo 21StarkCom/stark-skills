@@ -98,7 +98,13 @@ DEFAULT_FORGE = {
     "fix_threshold": "medium",
     "noise_improvement_threshold": 0.33,
     "heuristic_consolidation_threshold": 50,
-    "timeout": 900,
+    # Per-domain review dispatch budget (single audit of a section).
+    "review_timeout": 300,
+    # Whole-artifact rewrite budget. Much higher because the fix dispatch
+    # has to re-emit the full spec/plan between markers, which scales with
+    # artifact size × finding count. 900s comfortably fits ~35k-token
+    # rewrites on Opus; smaller rewrites finish in a fraction of that.
+    "fix_timeout": 900,
 }
 DEFAULT_FORGED_REVIEW = {
     "forge_threshold": 4,

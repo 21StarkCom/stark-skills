@@ -291,6 +291,7 @@ def run_plan_review(
     halt_round = max_rounds + 1
     fix_threshold = cfg.get("fix_threshold", "medium")
     timeout = cfg.get("timeout", 300)
+    fix_timeout = cfg.get("fix_timeout", 900)
     plan_review_routing = cfg.get("plan_review_routing", {})
     fallback_order = cfg.get("agent_fallback_order", ["claude", "codex", "gemini"])
     global_prompts_dir = str(FORGE_PLAN_REVIEW_DIR)
@@ -394,7 +395,7 @@ def run_plan_review(
             fix_findings,
             artifact_kind="implementation plan",
             round_num=round_num,
-            timeout=timeout,
+            timeout=fix_timeout,
         )
 
         if not changed:
