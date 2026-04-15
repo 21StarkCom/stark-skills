@@ -413,6 +413,7 @@ def run_design_review(
     consensus_domains = cfg.get("consensus_domains", [])
     consensus_threshold = cfg.get("consensus_threshold", 2)
     timeout = cfg.get("timeout", 300)
+    fix_timeout = cfg.get("fix_timeout", 900)
     prompts_dir = str(FORGE_PROMPTS_DIR)
 
     spec_text = spec_path.read_text(encoding="utf-8")
@@ -558,7 +559,7 @@ def run_design_review(
             fix_findings,
             artifact_kind="design spec",
             round_num=round_num,
-            timeout=timeout,
+            timeout=fix_timeout,
         )
 
         if changed:

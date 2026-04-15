@@ -1026,3 +1026,107 @@ class TestDesignReviewFixDispatchNoop:
         assert not any(
             r.get("fix_dispatch_noop") for r in result.rounds
         )
+
+
+class TestDesignReviewFixTimeoutTiering:
+    """The fix-dispatch call (full-spec rewrite) must use ``fix_timeout``,
+    not the shared ``timeout`` used for per-domain review dispatches. The
+    rewrite is a much larger output-bound operation and needs a longer
+    budget than a single-domain audit."""
+
+    def _dispatch_with_fix(self) -> dict:
+        return {
+            "findings": [
+                {
+                    "agent": "claude",
+                    "domain": "general",
+                    "section": "## Solution",
+                    "title": "Needs work",
+                    "severity": "high",
+                    "description": "Add error handling",
+                }
+            ],
+            "summary": {"total_findings": 1},
+        }
+
+    def test_apply_fixes_receives_fix_timeout_not_review_timeout(
+        self, spec_file, minimal_state, tmp_path
+    ):
+        cfg = {
+            "max_rounds": 2,
+            "fix_threshold": "medium",
+            "timeout": 60,
+            "fix_timeout": 123,
+            "domain_routing": {"general": "claude"},
+            "agent_fallback_order": ["claude"],
+            "consensus_domains": [],
+            "consensus_threshold": 2,
+        }
+
+        captured_kwargs: dict = {}
+
+        def capture_apply(*args, **kwargs):
+            captured_kwargs.update(kwargs)
+            return ("# new body", True)
+
+        with (
+            patch(
+                "forge_review._dispatch_review",
+                return_value=self._dispatch_with_fix(),
+            ),
+            patch(
+                "forge_review._discover_forge_domains",
+                return_value={
+                    "general": {"order": "01", "filename": "01-general.md"},
+                },
+            ),
+            patch("forge_review.is_agent_enabled", return_value=True),
+            patch("forge_review._commit_round", return_value="sha"),
+            patch("forge_fix_loop.apply_fixes", side_effect=capture_apply),
+        ):
+            run_design_review(spec_file, minimal_state, cfg, tmp_path)
+
+        assert captured_kwargs.get("timeout") == 123, (
+            "fix-dispatch must use cfg['fix_timeout'], not cfg['timeout']"
+        )
+
+    def test_fix_timeout_defaults_to_900_when_unset(
+        self, spec_file, minimal_state, tmp_path
+    ):
+        cfg = {
+            "max_rounds": 2,
+            "fix_threshold": "medium",
+            "timeout": 60,
+            # fix_timeout deliberately absent
+            "domain_routing": {"general": "claude"},
+            "agent_fallback_order": ["claude"],
+            "consensus_domains": [],
+            "consensus_threshold": 2,
+        }
+
+        captured_kwargs: dict = {}
+
+        def capture_apply(*args, **kwargs):
+            captured_kwargs.update(kwargs)
+            return ("# new body", True)
+
+        with (
+            patch(
+                "forge_review._dispatch_review",
+                return_value=self._dispatch_with_fix(),
+            ),
+            patch(
+                "forge_review._discover_forge_domains",
+                return_value={
+                    "general": {"order": "01", "filename": "01-general.md"},
+                },
+            ),
+            patch("forge_review.is_agent_enabled", return_value=True),
+            patch("forge_review._commit_round", return_value="sha"),
+            patch("forge_fix_loop.apply_fixes", side_effect=capture_apply),
+        ):
+            run_design_review(spec_file, minimal_state, cfg, tmp_path)
+
+        assert captured_kwargs.get("timeout") == 900, (
+            "fix-dispatch should default to 900s when fix_timeout is unset"
+        )
