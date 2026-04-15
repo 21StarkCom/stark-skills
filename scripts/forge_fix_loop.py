@@ -31,6 +31,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+# Module-level resolution of the claude-agent-enabled check. Defined at
+# import time so static type checkers see a single stable signature — the
+# previous function-local ``try/except ImportError`` shadowed the imported
+# symbol and tripped "conditional function variants must have identical
+# signatures" warnings. Parameter name matches the upstream import so
+# Pyright does not flag a signature mismatch across the two branches.
+try:
+    from config_loader import is_agent_enabled as _is_agent_enabled
+except ImportError:  # pragma: no cover - standalone usage without config_loader
+    def _is_agent_enabled(agent: str) -> bool:  # type: ignore[no-redef]  # noqa: ARG001
+        return True
+
 
 # Sentinel markers for the JSON patch array.
 _PATCHES_BEGIN = "<<<FORGE_PATCHES>>>"
@@ -246,6 +258,24 @@ def _read_vertex_env() -> dict[str, str]:
         return dict(os.environ)
 
 
+def _vertex_credentials_available() -> bool:
+    """Return ``True`` if Google Application Default Credentials are
+    discoverable in this process.
+
+    ``AnthropicVertex`` authenticates via ``google.auth.default()`` at
+    call time. If ADC cannot be found, constructing the client succeeds
+    but every ``messages.create()`` call fails. Probing ADC here lets us
+    make the Vertex-vs-API-key decision at client-construction time so
+    the fallback is reachable on machines with only an API key.
+    """
+    try:
+        import google.auth  # noqa: PLC0415
+        creds, _ = google.auth.default()
+        return creds is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _make_anthropic_client() -> Any:
     """Return an Anthropic SDK client, or ``None`` if unavailable.
 
@@ -253,27 +283,24 @@ def _make_anthropic_client() -> Any:
       1. If the ``claude`` agent is disabled in config, return ``None``
          without constructing any client (preserves the old
          ``build_claude_cmd`` contract that honored ``models.claude.enabled``).
-      2. Prefer AnthropicVertex when the runtime env injects
-         ``CLAUDE_CODE_USE_VERTEX=1`` with a project id. Read those from
-         ``_read_vertex_env`` — that dict is Vertex-sanitized (has no
-         ``ANTHROPIC_API_KEY``) but always has the Vertex vars.
+      2. Prefer ``AnthropicVertex`` when Google ADC are discoverable and
+         the runtime env supplies an ``ANTHROPIC_VERTEX_PROJECT_ID``.
+         This is the stark-skills production path — ``runtime_env``
+         injects the Vertex vars unconditionally, and ADC are set up via
+         ``gcloud auth application-default login`` on dev and CI machines.
+         Gating on ADC availability (rather than on an env flag) makes
+         the API-key fallback reachable on machines without gcloud creds.
       3. Fall back to direct ``Anthropic()`` when ``ANTHROPIC_API_KEY``
-         is set in the real process environment. This path must read
-         ``os.environ`` directly, not ``_read_vertex_env()`` — the latter
-         strips the key by design.
+         is set in the real process environment. This path reads
+         ``os.environ`` directly — ``_read_vertex_env()`` strips the key
+         by design, so checking it there would silently skip the fallback.
       4. Return ``None`` when no auth path is configured; the caller
          logs and returns "" to halt the round.
 
     Mocked in tests to return a fake object with a ``messages.create``
     method.
     """
-    try:
-        from config_loader import is_agent_enabled  # noqa: PLC0415
-    except ImportError:
-        def is_agent_enabled(_agent: str) -> bool:
-            return True
-
-    if not is_agent_enabled("claude"):
+    if not _is_agent_enabled("claude"):
         print(
             "[forge_fix_loop] claude agent disabled in config; "
             "skipping SDK client construction.",
@@ -286,8 +313,8 @@ def _make_anthropic_client() -> Any:
     except ImportError:
         return None
 
-    vertex_env = _read_vertex_env()
-    if vertex_env.get("CLAUDE_CODE_USE_VERTEX") == "1":
+    if _vertex_credentials_available():
+        vertex_env = _read_vertex_env()
         project_id = vertex_env.get("ANTHROPIC_VERTEX_PROJECT_ID", "")
         region = vertex_env.get("CLOUD_ML_REGION", "global")
         if project_id:

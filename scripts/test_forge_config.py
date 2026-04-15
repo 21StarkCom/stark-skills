@@ -31,7 +31,26 @@ class TestForgeConfigDefaults:
         assert cfg["consensus_threshold"] == 2
         assert cfg["noise_improvement_threshold"] == 0.33
         assert cfg["heuristic_consolidation_threshold"] == 50
-        assert cfg["timeout"] == 900
+        assert cfg["review_timeout"] == 300
+        assert cfg["fix_timeout"] == 900
+
+    def test_timeout_overrides_merge_through_get_forge_config(self, tmp_path):
+        """User-supplied review_timeout / fix_timeout in the config file
+        must override the ``DEFAULT_FORGE`` defaults via ``get_forge_config``.
+        Guards against regressions where a new timeout key is added to
+        defaults but not wired through the merge path."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            json.dumps({
+                "forge": {"review_timeout": 450, "fix_timeout": 1200},
+            })
+        )
+        with patch.object(config_loader, "CONFIG_PATH", config_file):
+            cfg = get_forge_config()
+        assert cfg["review_timeout"] == 450
+        assert cfg["fix_timeout"] == 1200
+        # Untouched defaults must still be present after the merge.
+        assert cfg["max_rounds"] == 3
 
     def test_domain_routing_has_all_12_domains(self):
         assert len(DEFAULT_FORGE["domain_routing"]) == 12
@@ -87,14 +106,6 @@ class TestForgeFixThreshold:
         with patch.object(config_loader, "CONFIG_PATH", config_file):
             cfg = get_forge_config()
         assert cfg["fix_threshold"] == value
-
-    def test_timeout_override_accepted(self, tmp_path):
-        config_file = tmp_path / "config.json"
-        config_file.write_text(json.dumps({"forge": {"timeout": 1200}}))
-        with patch.object(config_loader, "CONFIG_PATH", config_file):
-            cfg = get_forge_config()
-        assert cfg["timeout"] == 1200
-
 
 class TestForgeHaltRound:
     """halt_round is always max_rounds + 1 — computed, not stored."""

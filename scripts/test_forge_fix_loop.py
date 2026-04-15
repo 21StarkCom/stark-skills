@@ -555,78 +555,107 @@ class TestDispatchFixAgentLogging:
 class TestMakeAnthropicClient:
     """Client factory resolution rules:
 
-    1. ``is_agent_enabled("claude") == False`` → ``None`` (short-circuit).
-    2. ``CLAUDE_CODE_USE_VERTEX=1`` + project id in Vertex env → ``AnthropicVertex``.
-    3. ``ANTHROPIC_API_KEY`` in ``os.environ`` (real process env, not the
-       sanitized Vertex env) → direct ``Anthropic``.
-    4. Otherwise → ``None``.
-
-    Vertex config comes from ``_read_vertex_env`` (which delegates to
-    ``claude_utils.make_clean_env`` in production) because Vertex vars are
-    injected by ``runtime_env``. The API key must be read from
-    ``os.environ`` directly because ``make_clean_env`` intentionally strips
-    it."""
+    1. ``_is_agent_enabled("claude") == False`` → ``None`` (short-circuit).
+    2. Google ADC discoverable + project id in ``_read_vertex_env()`` →
+       ``AnthropicVertex``. We gate Vertex on real ADC availability
+       (probed via ``google.auth.default()``) rather than on
+       ``CLAUDE_CODE_USE_VERTEX``, because the latter is hardcoded to ``1``
+       by ``make_clean_env`` for subprocess dispatch and would always win.
+       Probing ADC lets the API-key fallback fire on machines without
+       gcloud credentials.
+    3. ``ANTHROPIC_API_KEY`` in ``os.environ`` → direct ``Anthropic``.
+    4. Otherwise → ``None``."""
 
     def test_returns_none_when_no_auth(self):
         from forge_fix_loop import _make_anthropic_client
-        with patch("forge_fix_loop._read_vertex_env", return_value={}), \
+        with patch("forge_fix_loop._vertex_credentials_available", return_value=False), \
+             patch("forge_fix_loop._read_vertex_env", return_value={}), \
              patch.dict("os.environ", {}, clear=True):
             assert _make_anthropic_client() is None
 
-    def test_returns_none_when_vertex_flag_but_no_project(self):
+    def test_returns_none_when_adc_present_but_no_project_id(self):
         from forge_fix_loop import _make_anthropic_client
-        with patch(
-            "forge_fix_loop._read_vertex_env",
-            return_value={"CLAUDE_CODE_USE_VERTEX": "1"},
-        ), patch.dict("os.environ", {}, clear=True):
+        with patch("forge_fix_loop._vertex_credentials_available", return_value=True), \
+             patch("forge_fix_loop._read_vertex_env", return_value={}), \
+             patch.dict("os.environ", {}, clear=True):
             assert _make_anthropic_client() is None
 
-    def test_returns_vertex_client_when_vertex_env_present(self):
+    def test_returns_vertex_client_when_adc_and_project_id_available(self):
         from anthropic import AnthropicVertex
         from forge_fix_loop import _make_anthropic_client
-        with patch(
-            "forge_fix_loop._read_vertex_env",
-            return_value={
-                "CLAUDE_CODE_USE_VERTEX": "1",
-                "ANTHROPIC_VERTEX_PROJECT_ID": "proj",
-                "CLOUD_ML_REGION": "global",
-            },
-        ), patch.dict("os.environ", {}, clear=True):
+        with patch("forge_fix_loop._vertex_credentials_available", return_value=True), \
+             patch(
+                 "forge_fix_loop._read_vertex_env",
+                 return_value={
+                     "ANTHROPIC_VERTEX_PROJECT_ID": "proj",
+                     "CLOUD_ML_REGION": "us-east1",
+                 },
+             ), patch.dict("os.environ", {}, clear=True):
             client = _make_anthropic_client()
         assert client is not None
         assert isinstance(client, AnthropicVertex)
 
-    def test_returns_direct_client_when_api_key_set_and_no_vertex(self):
+    def test_returns_direct_client_when_adc_missing_and_api_key_set(self):
+        """API-key path must be reachable when ADC are not set up — this
+        is the forged-review round-2 bug the previous round-1 fix missed:
+        gating on an env flag that ``_read_vertex_env`` hardcodes kept
+        the Vertex branch unconditionally winning. Probing real ADC
+        availability resolves it."""
         from anthropic import Anthropic
         from forge_fix_loop import _make_anthropic_client
-        with patch("forge_fix_loop._read_vertex_env", return_value={}), \
-             patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test"}, clear=True):
+        with patch("forge_fix_loop._vertex_credentials_available", return_value=False), \
+             patch(
+                 "forge_fix_loop._read_vertex_env",
+                 return_value={"ANTHROPIC_VERTEX_PROJECT_ID": "would-have-won"},
+             ), patch.dict(
+                 "os.environ",
+                 {"ANTHROPIC_API_KEY": "sk-test"},
+                 clear=True,
+             ):
             client = _make_anthropic_client()
         assert client is not None
         assert isinstance(client, Anthropic)
 
-    def test_vertex_wins_over_api_key_when_both_present(self):
+    def test_vertex_wins_over_api_key_when_adc_available(self):
         from anthropic import AnthropicVertex
         from forge_fix_loop import _make_anthropic_client
-        with patch(
-            "forge_fix_loop._read_vertex_env",
-            return_value={
-                "CLAUDE_CODE_USE_VERTEX": "1",
-                "ANTHROPIC_VERTEX_PROJECT_ID": "proj",
-                "CLOUD_ML_REGION": "global",
-            },
-        ), patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test"}, clear=True):
+        with patch("forge_fix_loop._vertex_credentials_available", return_value=True), \
+             patch(
+                 "forge_fix_loop._read_vertex_env",
+                 return_value={
+                     "ANTHROPIC_VERTEX_PROJECT_ID": "proj",
+                     "CLOUD_ML_REGION": "global",
+                 },
+             ), patch.dict(
+                 "os.environ",
+                 {"ANTHROPIC_API_KEY": "sk-test"},
+                 clear=True,
+             ):
             client = _make_anthropic_client()
         assert isinstance(client, AnthropicVertex)
 
     def test_returns_none_when_claude_agent_disabled(self):
         from forge_fix_loop import _make_anthropic_client
-        with patch("forge_fix_loop._read_vertex_env", return_value={
-            "CLAUDE_CODE_USE_VERTEX": "1",
-            "ANTHROPIC_VERTEX_PROJECT_ID": "proj",
-        }), patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test"}, clear=True), \
-             patch("config_loader.is_agent_enabled", return_value=False):
+        with patch("forge_fix_loop._is_agent_enabled", return_value=False), \
+             patch("forge_fix_loop._vertex_credentials_available", return_value=True), \
+             patch(
+                 "forge_fix_loop._read_vertex_env",
+                 return_value={"ANTHROPIC_VERTEX_PROJECT_ID": "proj"},
+             ), patch.dict(
+                 "os.environ",
+                 {"ANTHROPIC_API_KEY": "sk-test"},
+                 clear=True,
+             ):
             assert _make_anthropic_client() is None
+
+    def test_vertex_credentials_available_returns_false_on_exception(self):
+        """The probe catches all exceptions — google.auth raises
+        DefaultCredentialsError, but we also want to survive any other
+        unexpected auth-library failure so the API-key fallback still
+        fires."""
+        from forge_fix_loop import _vertex_credentials_available
+        with patch("google.auth.default", side_effect=RuntimeError("boom")):
+            assert _vertex_credentials_available() is False
 
 
 class TestResolveFixModel:
