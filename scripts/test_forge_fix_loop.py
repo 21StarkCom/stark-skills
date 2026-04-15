@@ -553,18 +553,24 @@ class TestDispatchFixAgentLogging:
 
 
 class TestMakeAnthropicClient:
-    """Client factory picks AnthropicVertex when Vertex env is set,
-    direct Anthropic when ANTHROPIC_API_KEY is set, and None otherwise.
+    """Client factory resolution rules:
 
-    Auth config is read via ``_read_vertex_env`` (which normally
-    delegates to ``claude_utils.make_clean_env``), so tests stub that
-    function rather than ``os.environ``. That matches how the SDK path
-    actually resolves auth in production — stark-skills's runtime_env
-    injects Vertex config into the env dict passed to subagents."""
+    1. ``is_agent_enabled("claude") == False`` → ``None`` (short-circuit).
+    2. ``CLAUDE_CODE_USE_VERTEX=1`` + project id in Vertex env → ``AnthropicVertex``.
+    3. ``ANTHROPIC_API_KEY`` in ``os.environ`` (real process env, not the
+       sanitized Vertex env) → direct ``Anthropic``.
+    4. Otherwise → ``None``.
+
+    Vertex config comes from ``_read_vertex_env`` (which delegates to
+    ``claude_utils.make_clean_env`` in production) because Vertex vars are
+    injected by ``runtime_env``. The API key must be read from
+    ``os.environ`` directly because ``make_clean_env`` intentionally strips
+    it."""
 
     def test_returns_none_when_no_auth(self):
         from forge_fix_loop import _make_anthropic_client
-        with patch("forge_fix_loop._read_vertex_env", return_value={}):
+        with patch("forge_fix_loop._read_vertex_env", return_value={}), \
+             patch.dict("os.environ", {}, clear=True):
             assert _make_anthropic_client() is None
 
     def test_returns_none_when_vertex_flag_but_no_project(self):
@@ -572,10 +578,11 @@ class TestMakeAnthropicClient:
         with patch(
             "forge_fix_loop._read_vertex_env",
             return_value={"CLAUDE_CODE_USE_VERTEX": "1"},
-        ):
+        ), patch.dict("os.environ", {}, clear=True):
             assert _make_anthropic_client() is None
 
     def test_returns_vertex_client_when_vertex_env_present(self):
+        from anthropic import AnthropicVertex
         from forge_fix_loop import _make_anthropic_client
         with patch(
             "forge_fix_loop._read_vertex_env",
@@ -584,8 +591,62 @@ class TestMakeAnthropicClient:
                 "ANTHROPIC_VERTEX_PROJECT_ID": "proj",
                 "CLOUD_ML_REGION": "global",
             },
-        ):
+        ), patch.dict("os.environ", {}, clear=True):
             client = _make_anthropic_client()
-        if client is not None:
-            from anthropic import AnthropicVertex
-            assert isinstance(client, AnthropicVertex)
+        assert client is not None
+        assert isinstance(client, AnthropicVertex)
+
+    def test_returns_direct_client_when_api_key_set_and_no_vertex(self):
+        from anthropic import Anthropic
+        from forge_fix_loop import _make_anthropic_client
+        with patch("forge_fix_loop._read_vertex_env", return_value={}), \
+             patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test"}, clear=True):
+            client = _make_anthropic_client()
+        assert client is not None
+        assert isinstance(client, Anthropic)
+
+    def test_vertex_wins_over_api_key_when_both_present(self):
+        from anthropic import AnthropicVertex
+        from forge_fix_loop import _make_anthropic_client
+        with patch(
+            "forge_fix_loop._read_vertex_env",
+            return_value={
+                "CLAUDE_CODE_USE_VERTEX": "1",
+                "ANTHROPIC_VERTEX_PROJECT_ID": "proj",
+                "CLOUD_ML_REGION": "global",
+            },
+        ), patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test"}, clear=True):
+            client = _make_anthropic_client()
+        assert isinstance(client, AnthropicVertex)
+
+    def test_returns_none_when_claude_agent_disabled(self):
+        from forge_fix_loop import _make_anthropic_client
+        with patch("forge_fix_loop._read_vertex_env", return_value={
+            "CLAUDE_CODE_USE_VERTEX": "1",
+            "ANTHROPIC_VERTEX_PROJECT_ID": "proj",
+        }), patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test"}, clear=True), \
+             patch("config_loader.is_agent_enabled", return_value=False):
+            assert _make_anthropic_client() is None
+
+
+class TestResolveFixModel:
+    """Model resolution: ``FORGE_FIX_MODEL`` env > ``get_model_id("claude")``
+    from config > ``_FIX_MODEL_DEFAULT``."""
+
+    def test_env_override_wins(self):
+        from forge_fix_loop import _resolve_fix_model
+        with patch.dict("os.environ", {"FORGE_FIX_MODEL": "env-model"}, clear=True), \
+             patch("config_loader.get_model_id", return_value="cfg-model"):
+            assert _resolve_fix_model() == "env-model"
+
+    def test_config_model_used_when_no_env_override(self):
+        from forge_fix_loop import _resolve_fix_model
+        with patch.dict("os.environ", {}, clear=True), \
+             patch("config_loader.get_model_id", return_value="cfg-model"):
+            assert _resolve_fix_model() == "cfg-model"
+
+    def test_falls_back_to_default(self):
+        from forge_fix_loop import _FIX_MODEL_DEFAULT, _resolve_fix_model
+        with patch.dict("os.environ", {}, clear=True), \
+             patch("config_loader.get_model_id", return_value=None):
+            assert _resolve_fix_model() == _FIX_MODEL_DEFAULT

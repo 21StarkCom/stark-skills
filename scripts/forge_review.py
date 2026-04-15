@@ -412,7 +412,7 @@ def run_design_review(
     fallback_order = cfg.get("agent_fallback_order", ["claude", "codex", "gemini"])
     consensus_domains = cfg.get("consensus_domains", [])
     consensus_threshold = cfg.get("consensus_threshold", 2)
-    timeout = cfg.get("timeout", 300)
+    timeout = cfg.get("review_timeout", cfg.get("timeout", 300))
     fix_timeout = cfg.get("fix_timeout", 900)
     prompts_dir = str(FORGE_PROMPTS_DIR)
 

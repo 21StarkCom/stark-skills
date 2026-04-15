@@ -613,15 +613,19 @@ install() {
     local py="$REPO_DIR/scripts/.venv/bin/python3"
     if [ -x "$py" ]; then
         info "venv: $py"
-        for pkg in jwt requests; do
-            if "$py" -c "import $pkg" 2>/dev/null; then
-                info "  $pkg: installed"
+        # pkg:import_name pairs — the import name may differ from pip name.
+        # anthropic: required by forge_fix_loop SDK dispatch (PR #312).
+        for pair in "PyJWT:jwt" "requests:requests" "anthropic:anthropic"; do
+            local pip_name="${pair%%:*}"
+            local import_name="${pair##*:}"
+            if "$py" -c "import $import_name" 2>/dev/null; then
+                info "  $pip_name: installed"
             else
-                error "  $pkg: missing — run: $py -m pip install PyJWT requests"
+                error "  $pip_name: missing — run: $py -m pip install $pip_name"
             fi
         done
     else
-        warn "No venv at scripts/.venv/ — run: python3 -m venv $REPO_DIR/scripts/.venv && $REPO_DIR/scripts/.venv/bin/pip install PyJWT requests"
+        warn "No venv at scripts/.venv/ — run: python3 -m venv $REPO_DIR/scripts/.venv && $REPO_DIR/scripts/.venv/bin/pip install PyJWT requests anthropic"
     fi
 }
 
