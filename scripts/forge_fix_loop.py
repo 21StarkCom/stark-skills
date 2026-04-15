@@ -238,24 +238,37 @@ class _FakeUsage:
 
 
 def _read_vertex_env() -> dict[str, str]:
-    """Return the env vars the stark-skills subagent pipeline would inject
-    into a subprocess — same values used for ``claude -p -`` dispatch.
+    """Return the Vertex project id and region for SDK client construction.
 
-    The values live in ``runtime_env._VERTEX_ENV`` (or ``claude_utils``
-    as a fallback). Reading them from there instead of ``os.environ``
-    means the Vertex path works regardless of whether the user's shell
-    pre-set the vars, matching how the CLI path worked before.
+    Resolution order: real ``os.environ`` (user's shell or CI export)
+    first, then the canonical ``claude_utils._VERTEX_ENV`` defaults
+    (``ANTHROPIC_VERTEX_PROJECT_ID = infra-ai-platform``,
+    ``CLOUD_ML_REGION = global``). When ``claude_utils`` is unavailable
+    (standalone usage), only the env vars are consulted.
 
-    Note: ``make_clean_env`` strips ``ANTHROPIC_API_KEY`` on purpose
-    (it must never leak into CLI subprocesses), so callers that need to
-    check for the direct-API fallback must read ``os.environ`` instead
-    of this dict.
+    This is intentionally a narrow accessor — an earlier version of
+    this helper routed through ``claude_utils.make_clean_env()``, which
+    is designed to build sanitized **CLI subprocess** environments.
+    Coupling SDK auth to that helper meant any CLI-side allowlist or
+    env-stripping change could silently break SDK client construction.
+    Reading the two specific keys we need keeps the cross-purpose
+    dependency tight.
     """
-    try:
-        from claude_utils import make_clean_env  # noqa: PLC0415
-        return make_clean_env()
-    except ImportError:
-        return dict(os.environ)
+    settings: dict[str, str] = {}
+    project_id = os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID")
+    region = os.environ.get("CLOUD_ML_REGION")
+    if project_id is None or region is None:
+        try:
+            from claude_utils import _VERTEX_ENV  # noqa: PLC0415
+            project_id = project_id or _VERTEX_ENV.get("ANTHROPIC_VERTEX_PROJECT_ID")
+            region = region or _VERTEX_ENV.get("CLOUD_ML_REGION")
+        except ImportError:
+            pass
+    if project_id:
+        settings["ANTHROPIC_VERTEX_PROJECT_ID"] = project_id
+    if region:
+        settings["CLOUD_ML_REGION"] = region
+    return settings
 
 
 def _vertex_credentials_available() -> bool:

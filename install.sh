@@ -649,7 +649,10 @@ install() {
         fi
     done
 
-    check_python_deps
+    # Guard with || warn so a missing venv or package on a fresh install
+    # surfaces as a warning instead of aborting the run via ``set -e``.
+    # ``interactive()`` already uses the same pattern.
+    check_python_deps || warn "Some Python dependencies are missing — see above and install before running review commands."
 }
 
 uninstall() {
@@ -782,7 +785,10 @@ status() {
         info "Automation fleet: not installed"
     fi
 
-    check_python_deps
+    # ``--status`` is informational — never abort just because a dep
+    # is missing. ``check_python_deps`` returns non-zero on failure
+    # so suppress that with ``|| true`` to keep ``set -e`` happy.
+    check_python_deps || true
     echo ""
 }
 
