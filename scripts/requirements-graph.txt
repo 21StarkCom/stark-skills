@@ -2,3 +2,5 @@ pydantic==2.12.5
 requests==2.33.1
 PyJWT==2.12.1
 cryptography==46.0.6
+anthropic==0.95.0
+google-auth==2.49.2
