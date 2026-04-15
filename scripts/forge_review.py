@@ -547,15 +547,37 @@ def run_design_review(
         if fix_count == 0:
             continue
 
-        # Apply fixes and commit
-        result.findings_fixed += fix_count
-        sha = _commit_round(spec_path, round_num, fix_count)
-        if sha:
-            result.commit_shas.append(sha)
-            round_record["commit_sha"] = sha
+        # Apply fixes to the spec, then commit only if the agent actually
+        # produced a different document. A no-op commit would mislead
+        # readers into thinking fixes landed when they didn't.
+        from forge_fix_loop import apply_fixes  # noqa: PLC0415
 
-        # Re-read spec after fixes
-        spec_text = spec_path.read_text(encoding="utf-8")
+        fix_findings = [f for f in classified if f["status"] == "fix"]
+        new_text, changed = apply_fixes(
+            spec_path,
+            fix_findings,
+            artifact_kind="design spec",
+            round_num=round_num,
+            timeout=timeout,
+        )
+
+        if changed:
+            result.findings_fixed += fix_count
+            sha = _commit_round(spec_path, round_num, fix_count)
+            if sha:
+                result.commit_shas.append(sha)
+                round_record["commit_sha"] = sha
+            spec_text = new_text
+        else:
+            print(
+                f"[forge_review] Round {round_num}: fix dispatch produced no "
+                f"changes ({fix_count} fix findings). Skipping commit and "
+                "halting — subsequent rounds would re-find the same issues.",
+                file=sys.stderr,
+            )
+            round_record["fix_dispatch_noop"] = True
+            result.status = "halted"
+            break
 
         # Record for recurrence tracking
         previous_rounds.append(round_record)

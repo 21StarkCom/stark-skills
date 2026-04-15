@@ -395,8 +395,116 @@ class TestRunPlanReview:
                 "general": {"order": "01", "filename": "general.md"},
             }),
             patch("forge_plan._git_commit", side_effect=lambda _d, _f, _m: "sha" + str(len(commit_calls) + 1)) as mock_commit,
+            patch(
+                "forge_fix_loop.apply_fixes",
+                return_value=("# Plan rewritten by mock\n", True),
+            ),
         ):
             result = run_plan_review(plan_file, minimal_state, cfg, tmp_path)
             commit_calls = mock_commit.call_args_list
 
         assert result.findings_fixed >= 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Fix-loop halt-on-noop (regression coverage for the silent-no-op-commit bug)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestPlanReviewFixDispatchNoop:
+    """When the fix-application LLM produces no plan changes, the loop must
+    halt rather than commit a no-op and re-find the same issues."""
+
+    def _dispatch_with_finding(self) -> dict:
+        return {
+            "results": [
+                {
+                    "agent": "claude",
+                    "domain": "general",
+                    "findings": [
+                        {"severity": "high", "title": "Critical gap", "section": "S1"},
+                    ],
+                }
+            ]
+        }
+
+    def test_halts_when_apply_fixes_returns_no_change(
+        self, plan_file, minimal_state, minimal_cfg, tmp_path
+    ):
+        """apply_fixes returning changed=False halts plan review, persists
+        rounds in state, marks fix_dispatch_noop, and skips the commit."""
+        commit_calls: list = []
+
+        def fake_commit(*args, **kwargs):
+            commit_calls.append((args, kwargs))
+            return "should-not-be-called"
+
+        with (
+            patch(
+                "forge_plan._dispatch_plan_review",
+                return_value=self._dispatch_with_finding(),
+            ),
+            patch(
+                "forge_plan._discover_plan_review_domains",
+                return_value={
+                    "general": {"order": "01", "filename": "general.md"},
+                },
+            ),
+            patch("forge_plan._git_commit", side_effect=fake_commit),
+            patch(
+                "forge_fix_loop.apply_fixes",
+                return_value=("# Original plan body\n", False),
+            ),
+        ):
+            result = run_plan_review(
+                plan_file, minimal_state, minimal_cfg, tmp_path
+            )
+
+        assert result.status == "halted"
+        assert commit_calls == [], "commit must be skipped on no-op rewrite"
+        assert any(
+            r.get("fix_dispatch_noop") for r in result.rounds
+        ), "round record must flag fix_dispatch_noop"
+        # Per-round persistence — state must reflect the rounds even on halt
+        persisted_rounds = minimal_state["phases"]["plan_review"].get("rounds", [])
+        assert len(persisted_rounds) >= 1
+        assert any(r.get("fix_dispatch_noop") for r in persisted_rounds)
+
+    def test_changed_rewrite_continues_normally(
+        self, plan_file, minimal_state, minimal_cfg, tmp_path
+    ):
+        """Successful (changed=True) rewrite should commit and proceed
+        through the rest of the loop instead of halting on noop."""
+        responses = [
+            self._dispatch_with_finding(),
+            {"results": [{"agent": "claude", "domain": "general", "findings": []}]},
+            {"results": [{"agent": "claude", "domain": "general", "findings": []}]},
+        ]
+
+        def dispatch_side_effect(*args, **kwargs):
+            return responses.pop(0) if responses else {
+                "results": [{"agent": "claude", "domain": "general", "findings": []}]
+            }
+
+        with (
+            patch(
+                "forge_plan._dispatch_plan_review", side_effect=dispatch_side_effect,
+            ),
+            patch(
+                "forge_plan._discover_plan_review_domains",
+                return_value={
+                    "general": {"order": "01", "filename": "general.md"},
+                },
+            ),
+            patch("forge_plan._git_commit", return_value="committed-sha"),
+            patch(
+                "forge_fix_loop.apply_fixes",
+                return_value=("# Plan rewritten by mock\n", True),
+            ),
+        ):
+            result = run_plan_review(
+                plan_file, minimal_state, minimal_cfg, tmp_path
+            )
+
+        assert result.status == "completed"
+        assert not any(r.get("fix_dispatch_noop") for r in result.rounds)

@@ -346,7 +346,51 @@ class ForgeProgress:
         return {"events": list(self._events)}
 
 
-# ── Pipeline stub ─────────────────────────────────────────────────────
+# ── Pipeline dispatcher ───────────────────────────────────────────────
+
+# Exit codes propagated to ``run_forge``:
+#   0 — success
+#   1 — halted by iron-rule loop (findings unresolved)
+#   2 — dispatch/infrastructure error in a phase
+#
+# ``_run_pipeline`` threads ``cfg`` (loaded once from ``get_forge_config``)
+# through every phase, persists state after *every* phase transition, and
+# halts the pipeline as soon as any phase returns ``status != "completed"``.
+# Earlier versions of this function were a stub that reported ``ok`` for
+# every phase without dispatching anything.
+
+
+def _spec_path_in_worktree(worktree_path: Path, state: dict[str, Any]) -> Path:
+    """Resolve the spec file inside the worktree.
+
+    The spec was copied in by ``_setup_worktree`` — prefer the worktree
+    copy so edits from fix-loops land on the right file.
+    """
+    raw = state.get("spec_path", "")
+    if not raw:
+        return Path("")
+    original = Path(raw)
+    candidate = worktree_path / original.name
+    if candidate.exists():
+        return candidate
+    return original
+
+
+def _write_phase_state(
+    state: dict[str, Any],
+    state_path: Path,
+    phase: str,
+    status: str,
+    *,
+    backup_dir: Path | None,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    """Update a phase's status and persist state atomically."""
+    state["phases"][phase]["status"] = status
+    if extra:
+        state["phases"][phase].update(extra)
+    state["updated_at"] = datetime.now(timezone.utc).isoformat()
+    write_state_atomic(state_path, state, backup_dir=backup_dir)
 
 
 def _run_pipeline(
@@ -359,31 +403,210 @@ def _run_pipeline(
     workers: int = 3,
     backup_dir: Path | None = None,
 ) -> int:
-    """Run the forge pipeline phases. Stub for Phase 2 — returns 0.
+    """Run the forge pipeline phases in order, persisting state after each.
 
-    Will be filled in during Phase 3+ with actual dispatch logic.
+    Halts as soon as any phase returns a non-``completed`` status. Returns:
+      0 — all phases completed
+      1 — a phase halted (findings unresolved)
+      2 — a phase raised an exception
     """
+    del workers  # honored by individual phases via cfg["workers"]
+
+    try:
+        from config_loader import get_forge_config  # noqa: PLC0415
+        cfg = get_forge_config()
+    except ImportError:
+        cfg = {}
+
+    spec_path = _spec_path_in_worktree(worktree_path, state)
     phases = _phases_to_run(state)
 
     for phase in phases:
-        if dry_run and phase != "classify" and phase != "design_review":
-            break
+        # Mark phase as starting BEFORE dispatch so a crash mid-phase is
+        # recoverable — _phases_to_run re-runs 'starting' phases on resume.
+        _write_phase_state(state, state_path, phase, "starting", backup_dir=backup_dir)
+        progress.run(phase, "dispatching")
 
-        state["phases"][phase]["status"] = "starting"
-        state["updated_at"] = datetime.now(timezone.utc).isoformat()
-        write_state_atomic(state_path, state, backup_dir=backup_dir)
+        try:
+            status, extra = _dispatch_phase(
+                phase,
+                spec_path=spec_path,
+                worktree_path=worktree_path,
+                state=state,
+                cfg=cfg,
+                dry_run=dry_run,
+            )
+        except Exception as exc:  # noqa: BLE001
+            progress.fail(phase, f"{type(exc).__name__}: {exc}")
+            _write_phase_state(
+                state, state_path, phase, "error",
+                backup_dir=backup_dir,
+                extra={"error": f"{type(exc).__name__}: {exc}"},
+            )
+            return 2
 
-        # Phase 3+ will dispatch actual agents here
-        progress.ok(phase, "completed")
+        _write_phase_state(
+            state, state_path, phase, status,
+            backup_dir=backup_dir, extra=extra,
+        )
 
-        state["phases"][phase]["status"] = "completed"
-        state["updated_at"] = datetime.now(timezone.utc).isoformat()
-        write_state_atomic(state_path, state, backup_dir=backup_dir)
+        if status == "completed":
+            progress.ok(phase, "completed")
+        elif status == "skipped":
+            progress.skip(phase, extra.get("reason", "skipped") if extra else "skipped")
+        else:
+            progress.halt(phase, extra.get("reason", status) if extra else status)
+            return 1
 
         if dry_run and phase == "design_review":
+            # Mirror the prior stub's dry-run contract: stop after design_review.
             break
 
     return 0
+
+
+def _dispatch_phase(
+    phase: str,
+    *,
+    spec_path: Path,
+    worktree_path: Path,
+    state: dict[str, Any],
+    cfg: dict[str, Any],
+    dry_run: bool,
+) -> tuple[str, dict[str, Any]]:
+    """Run a single phase and return ``(status, extra_state)``.
+
+    ``status`` is one of ``completed``, ``halted``, ``skipped``, ``error``.
+    ``extra_state`` holds phase-specific fields to merge into state on exit.
+    """
+    if phase == "classify":
+        return _dispatch_classify(spec_path, cfg)
+    if phase == "design_review":
+        if dry_run:
+            return "skipped", {"reason": "dry-run"}
+        return _dispatch_design_review(spec_path, state, cfg, worktree_path)
+    if phase == "plan":
+        return _dispatch_plan(spec_path, state, cfg, worktree_path)
+    if phase == "plan_review":
+        return _dispatch_plan_review(state, cfg, worktree_path)
+    if phase == "tdd":
+        return _dispatch_tdd()
+    if phase == "tasks":
+        return _dispatch_tasks(state, cfg, worktree_path)
+    return "error", {"reason": f"unknown phase: {phase}"}
+
+
+def _dispatch_classify(
+    spec_path: Path, cfg: dict[str, Any]
+) -> tuple[str, dict[str, Any]]:
+    from forge_classifier import classify_spec  # noqa: PLC0415
+
+    content = spec_path.read_text(encoding="utf-8")
+    result = classify_spec(content, spec_path, auto_detect=True, cfg=cfg)
+    return "completed", {
+        "domains": list(result.domains),
+        "skipped_domains": list(result.skipped_domains),
+        "design_type": result.design_type,
+        "tier_used": result.tier_used,
+        "confidence": result.confidence,
+    }
+
+
+def _dispatch_design_review(
+    spec_path: Path,
+    state: dict[str, Any],
+    cfg: dict[str, Any],
+    repo_dir: Path,
+) -> tuple[str, dict[str, Any]]:
+    from forge_review import run_design_review  # noqa: PLC0415
+
+    phase_result = run_design_review(spec_path, state, cfg, repo_dir)
+    status = "completed" if phase_result.status == "completed" else "halted"
+    extra: dict[str, Any] = {
+        "findings_fixed": phase_result.findings_fixed,
+        "noise": phase_result.noise,
+        "commit_shas": list(phase_result.commit_shas),
+    }
+    if status == "halted":
+        extra["reason"] = "design review findings unresolved"
+    return status, extra
+
+
+def _dispatch_plan(
+    spec_path: Path,
+    state: dict[str, Any],
+    cfg: dict[str, Any],
+    repo_dir: Path,
+) -> tuple[str, dict[str, Any]]:
+    from forge_plan import run_plan_phase  # noqa: PLC0415
+
+    phase_result = run_plan_phase(spec_path, state, cfg, repo_dir)
+    status = "completed" if phase_result.status == "completed" else "halted"
+    extra: dict[str, Any] = {
+        "commit_shas": list(phase_result.commit_shas),
+    }
+    if phase_result.plan_path is not None:
+        extra["plan_path"] = str(phase_result.plan_path)
+    if status == "halted":
+        extra["reason"] = "plan generation halted"
+    return status, extra
+
+
+def _dispatch_plan_review(
+    state: dict[str, Any],
+    cfg: dict[str, Any],
+    repo_dir: Path,
+) -> tuple[str, dict[str, Any]]:
+    from forge_plan import run_plan_review  # noqa: PLC0415
+
+    plan_path_str = state.get("phases", {}).get("plan", {}).get("plan_path")
+    if not plan_path_str:
+        return "halted", {"reason": "no plan_path in state — did the plan phase run?"}
+    plan_path = Path(plan_path_str)
+    if not plan_path.exists():
+        return "halted", {"reason": f"plan file missing: {plan_path}"}
+
+    phase_result = run_plan_review(plan_path, state, cfg, repo_dir)
+    status = "completed" if phase_result.status == "completed" else "halted"
+    extra: dict[str, Any] = {
+        "findings_fixed": phase_result.findings_fixed,
+        "noise": phase_result.noise,
+        "commit_shas": list(phase_result.commit_shas),
+    }
+    if phase_result.plan_hash:
+        extra["plan_hash"] = phase_result.plan_hash
+    if status == "halted":
+        extra["reason"] = "plan review findings unresolved"
+    return status, extra
+
+
+def _dispatch_tdd() -> tuple[str, dict[str, Any]]:
+    from forge_tdd import skip_tdd_phase  # noqa: PLC0415
+
+    result = skip_tdd_phase()
+    return "completed", {"skipped": result.get("skipped", True)}
+
+
+def _dispatch_tasks(
+    state: dict[str, Any],
+    cfg: dict[str, Any],
+    repo_dir: Path,
+) -> tuple[str, dict[str, Any]]:
+    from forge_tasks import run_tasks_phase  # noqa: PLC0415
+
+    plan_path_str = state.get("phases", {}).get("plan", {}).get("plan_path")
+    if not plan_path_str:
+        return "halted", {"reason": "no plan_path in state — did the plan phase run?"}
+    plan_path = Path(plan_path_str)
+    if not plan_path.exists():
+        return "halted", {"reason": f"plan file missing: {plan_path}"}
+
+    phase_result = run_tasks_phase(plan_path, state, cfg, repo_dir)
+    status = "completed" if phase_result.status == "completed" else "halted"
+    extra: dict[str, Any] = {}
+    if status == "halted":
+        extra["reason"] = "task decomposition failed after retries"
+    return status, extra
 
 
 # ── Main entrypoint ──────────────────────────────────────────────────

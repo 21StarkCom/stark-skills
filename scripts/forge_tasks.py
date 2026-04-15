@@ -31,6 +31,32 @@ class Task:
     issue_number: int | None = None
 
 
+# Decomposer guardrails — must mirror the constraints in
+# plan_to_tasks_validate.VALIDATION_PROMPT so the decomposer produces
+# output that has a chance of passing validation. Keeping these in lockstep
+# is what fixes the user-reported "3/3 validation failures on reasonable
+# decompositions" — previously the decomposer prompt didn't mention sizing,
+# coverage, or dependency rules at all and the LLM had to infer them.
+_DECOMPOSER_GUARDRAILS = """
+## Constraints
+- Each task: ≤5 acceptance criteria, ≤4 file paths touched, ≤500 words in
+  the "how" section. Split tasks that exceed these limits.
+- Each task must be self-contained — implementable without reading sibling
+  tasks. Restate any cross-task context inside the task body.
+- Cover every requirement in the plan with at least one task. Do not skip
+  optional sections.
+- Task IDs are sequential within a phase (P1.1, P1.2, ...). Reference other
+  tasks only via their task_id; no forward references that create cycles.
+- No two tasks may describe the same work. If two tasks overlap, merge or
+  re-scope them.
+- Provide review hints that are specific to the change, not generic
+  ("test the API" is not specific; "verify pagination cursor wrapping at
+  the page boundary" is).
+- Story points and risk ratings must be internally consistent — a 1pt task
+  cannot be high-risk; a high-risk task cannot be 1pt.
+"""
+
+
 # ── Subprocess wrapper (mockable) ──────────────────────────────────────────
 
 
@@ -56,24 +82,127 @@ def _run_subprocess(
     )
 
 
-# ── LLM task decomposition stub ────────────────────────────────────────────
+# ── LLM task decomposition ─────────────────────────────────────────────────
 
 
-def _decompose_plan(plan_text: str, cfg: dict[str, Any]) -> dict[str, Any]:
+def _format_validation_feedback(prior_issues: list[Any]) -> str:
+    """Render validator issues from the prior attempt for prompt feedback.
+
+    Returns an empty string when there are no issues — callers should test
+    the result before adding a "feedback" section header to the prompt.
+    """
+    if not prior_issues:
+        return ""
+    lines: list[str] = []
+    for issue in prior_issues[:30]:  # cap at 30 to keep prompt size sane
+        phase_id = getattr(issue, "phase_id", "?")
+        task_id = getattr(issue, "task_id", "?")
+        field_name = getattr(issue, "field", "?")
+        problem = getattr(issue, "problem", "")
+        suggestion = getattr(issue, "suggestion", "")
+        line = f"- {phase_id}/{task_id} [{field_name}]: {problem}"
+        if suggestion:
+            line += f" — suggestion: {suggestion}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _extract_json_object(raw: str) -> dict[str, Any] | None:
+    """Pull the largest top-level JSON object out of LLM output.
+
+    Walks the string with a balanced-brace scanner that respects strings
+    and escapes — far more tolerant of reasoning chatter, code fences, or
+    trailing prose than ``raw.find("{") / raw.rfind("}")``.
+    """
+    text = raw.strip()
+    # Strip a single fenced code block if the entire payload is wrapped
+    if text.startswith("```"):
+        import re  # noqa: PLC0415
+        text = re.sub(r"^```(?:json)?\s*\n?", "", text)
+        text = re.sub(r"\n?```\s*$", "", text)
+
+    depth = 0
+    start_idx = -1
+    in_string = False
+    escape = False
+    for i, ch in enumerate(text):
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == "{":
+            if depth == 0:
+                start_idx = i
+            depth += 1
+        elif ch == "}":
+            if depth == 0:
+                continue
+            depth -= 1
+            if depth == 0 and start_idx != -1:
+                candidate = text[start_idx:i + 1]
+                try:
+                    parsed = json.loads(candidate)
+                except json.JSONDecodeError:
+                    start_idx = -1
+                    continue
+                if isinstance(parsed, dict):
+                    return parsed
+    return None
+
+
+def _build_decomposer_prompt(
+    plan_text: str,
+    prior_issues: list[Any] | None = None,
+) -> str:
+    """Build the decomposer prompt, optionally with retry feedback.
+
+    The schema example is intentionally kept compact; the constraints block
+    does the heavy lifting since LLMs tend to copy schema literally.
+    """
+    schema_example = (
+        '{"phases": [{"phase_id": "P1", "name": "Phase Name", "tasks": ['
+        '{"task_id": "P1.1", "title": "Task title", '
+        '"body": "Acceptance criteria...\\n", '
+        '"labels": ["forge", "phase-1"]}'
+        "]}]}"
+    )
+    sections = [
+        "Decompose the following implementation plan into phased GitHub issues.",
+        f"Output ONLY a JSON object with this schema:\n{schema_example}",
+        _DECOMPOSER_GUARDRAILS.strip(),
+    ]
+    feedback = _format_validation_feedback(prior_issues or [])
+    if feedback:
+        sections.append(
+            "## Previous attempt failed validation\n"
+            "The prior decomposition was rejected for the issues below. "
+            "Fix every one of them in this regeneration:\n"
+            f"{feedback}"
+        )
+    sections.append(f"# Plan\n\n{plan_text}")
+    return "\n\n".join(sections)
+
+
+def _decompose_plan(
+    plan_text: str,
+    cfg: dict[str, Any],
+    prior_issues: list[Any] | None = None,
+) -> dict[str, Any]:
     """Call an LLM to decompose the plan into phased tasks (JSON).
 
-    Returns a breakdown dict ``{"phases": [...]}`` on success or ``{}`` on failure.
-    This stub uses Claude CLI; in tests, patch this function directly.
+    Returns a breakdown dict ``{"phases": [...]}`` on success or ``{}`` on
+    failure. ``prior_issues`` carries validator feedback from the previous
+    attempt — when present, it is folded into the prompt so retries
+    converge instead of re-rolling the same dice.
     """
-    prompt = (
-        "Decompose the following implementation plan into phased GitHub issues. "
-        "Output ONLY a JSON object with this schema:\n"
-        '{"phases": [{"phase_id": "P1", "name": "Phase Name", "tasks": ['
-        '{"task_id": "P1.1", "title": "Task title", "body": "Acceptance criteria...\\n", '
-        '"labels": ["forge", "phase-1"]}'
-        "]}]}\n\n"
-        f"# Plan\n\n{plan_text}"
-    )
+    prompt = _build_decomposer_prompt(plan_text, prior_issues=prior_issues)
 
     try:
         from claude_utils import build_claude_cmd, make_clean_env  # noqa: PLC0415
@@ -86,17 +215,8 @@ def _decompose_plan(plan_text: str, cfg: dict[str, Any]) -> dict[str, Any]:
         )
         if result.returncode != 0 or not result.stdout.strip():
             return {}
-        raw = result.stdout.strip()
-        # Strip markdown fences
-        if raw.startswith("```"):
-            import re  # noqa: PLC0415
-            raw = re.sub(r"^```(?:json)?\s*\n?", "", raw)
-            raw = re.sub(r"\n?```$", "", raw)
-        start = raw.find("{")
-        end = raw.rfind("}")
-        if start == -1 or end == -1:
-            return {}
-        return json.loads(raw[start:end + 1])
+        parsed = _extract_json_object(result.stdout)
+        return parsed or {}
     except Exception as exc:  # noqa: BLE001
         print(f"[forge_tasks] decompose_plan error: {exc}", file=sys.stderr)
         return {}
@@ -173,13 +293,20 @@ def run_tasks_phase(
 
     max_attempts = 3
     breakdown: dict[str, Any] = {}
+    prior_issues: list[Any] = []
 
     for attempt in range(1, max_attempts + 1):
+        feedback_note = (
+            f" with feedback from {len(prior_issues)} prior issue(s)"
+            if prior_issues
+            else ""
+        )
         print(
-            f"\n[forge_tasks] Decomposing plan (attempt {attempt}/{max_attempts})...",
+            f"\n[forge_tasks] Decomposing plan (attempt {attempt}/{max_attempts})"
+            f"{feedback_note}...",
             file=sys.stderr,
         )
-        breakdown = _decompose_plan(plan_text, cfg)
+        breakdown = _decompose_plan(plan_text, cfg, prior_issues=prior_issues)
         if not breakdown:
             print(
                 f"[forge_tasks] Decomposition failed on attempt {attempt}.",
@@ -197,9 +324,16 @@ def run_tasks_phase(
             )
             break
 
-        issues_count = sum(len(getattr(r, "issues", [])) for r in validation_results)
+        # Collect the issues into the feedback list so the next attempt's
+        # prompt can address them specifically. Without this loop the
+        # decomposer just re-rolls the dice on every retry.
+        prior_issues = []
+        for r in validation_results:
+            prior_issues.extend(getattr(r, "issues", []))
+
         print(
-            f"[forge_tasks] Validation failed — {issues_count} issue(s) on attempt {attempt}.",
+            f"[forge_tasks] Validation failed — {len(prior_issues)} issue(s) "
+            f"on attempt {attempt}; feeding back into next attempt.",
             file=sys.stderr,
         )
         breakdown = {}  # Reset — force re-generation

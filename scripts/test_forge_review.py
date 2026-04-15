@@ -704,6 +704,10 @@ class TestRunDesignReview:
             ),
             patch("forge_review.is_agent_enabled", return_value=True),
             patch("forge_review._commit_round", return_value="sha123"),
+            patch(
+                "forge_fix_loop.apply_fixes",
+                return_value=("# Spec rewritten by mock\n", True),
+            ),
         ):
             result = run_design_review(spec_file, minimal_state, cfg, tmp_path)
 
@@ -915,3 +919,110 @@ class TestRunDesignReview:
             result = run_design_review(spec_file, minimal_state, cfg, tmp_path)
 
         assert result.status in ("completed", "halted")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Fix-loop halt-on-noop (regression coverage for the silent-no-op-commit bug)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestDesignReviewFixDispatchNoop:
+    """When the fix-application LLM produces no changes, the loop must halt
+    rather than commit an empty no-op with a misleading message and re-find
+    the same issues forever."""
+
+    def _dispatch_with_fix(self, finding_severity: str = "high") -> dict:
+        # forge_review._dispatch_review is expected to return a dict with a
+        # top-level "findings" list — mirroring dispatch_plan_review's shape.
+        return {
+            "findings": [
+                {
+                    "agent": "claude",
+                    "domain": "general",
+                    "section": "## Solution",
+                    "title": "Needs work",
+                    "severity": finding_severity,
+                    "description": "Add error handling",
+                }
+            ],
+            "summary": {"total_findings": 1},
+        }
+
+    def test_halts_when_apply_fixes_returns_no_change(
+        self, spec_file, minimal_state, minimal_cfg, tmp_path
+    ):
+        """apply_fixes returning changed=False halts the round, sets
+        fix_dispatch_noop on the round record, and skips the commit."""
+        commit_calls: list = []
+
+        def fake_commit(*args, **kwargs):
+            commit_calls.append((args, kwargs))
+            return "should-not-be-called"
+
+        with (
+            patch(
+                "forge_review._dispatch_review",
+                return_value=self._dispatch_with_fix(),
+            ),
+            patch(
+                "forge_review._discover_forge_domains",
+                return_value={
+                    "general": {"order": "01", "filename": "01-general.md"},
+                },
+            ),
+            patch("forge_review.is_agent_enabled", return_value=True),
+            patch("forge_review._commit_round", side_effect=fake_commit),
+            patch(
+                "forge_fix_loop.apply_fixes",
+                return_value=("# Original spec body", False),
+            ),
+        ):
+            result = run_design_review(
+                spec_file, minimal_state, minimal_cfg, tmp_path
+            )
+
+        assert result.status == "halted"
+        assert commit_calls == [], "commit must be skipped on no-op rewrite"
+        # Round record should be marked
+        assert any(
+            r.get("fix_dispatch_noop") for r in result.rounds
+        ), "round record must flag fix_dispatch_noop"
+
+    def test_continues_when_apply_fixes_changes_spec(
+        self, spec_file, minimal_state, minimal_cfg, tmp_path
+    ):
+        """Successful (changed=True) rewrite should commit and continue
+        instead of halting with fix_dispatch_noop."""
+        # First call returns a fix; subsequent calls are clean
+        empty: dict = {"findings": [], "summary": {"total_findings": 0}}
+        responses = [self._dispatch_with_fix(), empty, empty]
+
+        def dispatch_side_effect(*args, **kwargs):
+            return responses.pop(0) if responses else empty
+
+        with (
+            patch(
+                "forge_review._dispatch_review", side_effect=dispatch_side_effect,
+            ),
+            patch(
+                "forge_review._discover_forge_domains",
+                return_value={
+                    "general": {"order": "01", "filename": "01-general.md"},
+                },
+            ),
+            patch("forge_review.is_agent_enabled", return_value=True),
+            patch("forge_review._commit_round", return_value="abc123"),
+            patch(
+                "forge_fix_loop.apply_fixes",
+                return_value=("# Rewritten spec body", True),
+            ),
+        ):
+            result = run_design_review(
+                spec_file, minimal_state, minimal_cfg, tmp_path
+            )
+
+        assert result.status == "completed"
+        # No round should be flagged as a fix-dispatch noop
+        assert not any(
+            r.get("fix_dispatch_noop") for r in result.rounds
+        )

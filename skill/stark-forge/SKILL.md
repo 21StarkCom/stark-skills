@@ -1,7 +1,7 @@
 ---
 name: stark-forge
 description: >-
-  Multi-phase design pipeline: generate design, review, plan, review plan, implement. Wraps existing dispatch primitives with domain routing and audit.
+  Multi-phase design pipeline: classify, review design, generate plan, review plan, decompose into GitHub issues. Wraps existing dispatch primitives with domain routing, iron-rule fix loops, and crash-safe state.
 argument-hint: '<path> [--auto-detect] [--dry-run] [--resume] [--workers N]'
 disable-model-invocation: true
 model: opus
@@ -20,27 +20,31 @@ Parse the JSON result:
 
 # stark-forge
 
-End-to-end design pipeline that chains design generation, design review, plan generation,
-plan review, and implementation — with per-domain agent routing, iterative refinement,
-and audit metrics collection.
+Pipeline that takes a design spec as input and produces reviewed plans and
+phased GitHub issues — with per-domain agent routing, iron-rule fix loops,
+crash-safe state, and audit metrics collection.
 
-**Pipeline:** `/stark-forge` = `/stark-design` → `/stark-review-design` → `/stark-design-to-plan` → `/stark-review-plan` → implement
+**Pipeline:** classify → design review → plan generation → plan review → tdd (v2) → tasks
+
+The spec is the *input*, not an output: there is no design-generation phase.
+The terminal phase is `tasks`, which decomposes the reviewed plan into phased
+GitHub issues. Implementation is handed off to `/stark-phase-execute`.
 
 **Exit codes:**
 - `0` — pipeline completed successfully
-- `1` — pipeline halted (findings exceeded threshold after max rounds)
-- `2` — dispatch failure (agent crash, timeout, or infrastructure error)
-- `3` — invalid input (missing file, bad arguments, config error)
+- `1` — pipeline halted (a phase returned `status != "completed"`, e.g. iron-rule findings unresolved)
+- `2` — dispatch failure (agent crash, unexpected exception in a phase)
+- `3` — invalid input / branch guard / lock conflict
 
 ## Arguments
 
-- `<path>` — path to requirements or design document (positional, required)
-- `--auto-detect` — auto-detect which pipeline phases to run based on document type
-- `--dry-run` — run all phases but don't write output files or create PRs
+- `<path>` — path to the input design spec (positional, required)
+- `--auto-detect` — use heuristic classifier without interactive domain confirmation
+- `--dry-run` — run classify + design_review only; stop before plan/plan_review/tasks and skip all commits
 - `--resume` — resume from the last completed phase (reads state from `.forge-state.json`)
 - `--workers N` — max concurrent agent workers (default: from config, typically 3)
 
-If no path is provided, ask: "What should forge build? Provide a requirements file path."
+If no path is provided, ask: "What should forge build? Provide a spec file path."
 
 **Raw input:** `$ARGUMENTS`
 
@@ -53,6 +57,30 @@ PROMPTS  = ~/.claude/code-review/prompts
 HISTORY  = ~/.claude/code-review/history/forge
 ```
 
+## Invocation
+
+The pipeline is implemented end-to-end in `forge_orchestrator.run_forge`.
+You do not need to hand-roll a driver:
+
+```bash
+$PYTHON -c "
+from pathlib import Path
+from forge_orchestrator import run_forge
+import sys
+sys.exit(run_forge(
+    Path('<path>'),
+    auto_detect=<bool>,
+    dry_run=<bool>,
+    resume=<bool>,
+    workers=<int>,
+))
+"
+```
+
+`run_forge` handles: branch guard, worktree setup, lock acquisition, state
+init/load/backup, spec-hash drift warning, phase dispatch, per-phase atomic
+state writes, progress rendering, and JSON summary on stdout when not a TTY.
+
 ## Phase 1: Setup
 
 ### 1.1 Parse input
@@ -62,115 +90,118 @@ Read the input document at `<path>`. Validate:
 - File is markdown (`.md`) or text
 - File is non-empty
 
-If `--resume` is set, load `.forge-state.json` from the document's directory and skip to the next incomplete phase.
+`run_forge` performs its own branch guard (refuses main/master with exit 3)
+and lock-file handling. Do not duplicate those checks.
 
-### 1.2 Initialize state
+### 1.2 State schema
 
-Create `.forge-state.json` next to the input document:
+`init_state` writes `.forge-state.json` inside the forge worktree with this
+shape (see `forge_orchestrator.init_state` for the canonical source):
+
 ```json
 {
   "version": 1,
-  "input_path": "<path>",
+  "spec_path": "<absolute path>",
+  "spec_hash": "<sha256>",
   "phases": {
-    "design": {"status": "pending"},
-    "design_review": {"status": "pending"},
-    "plan": {"status": "pending"},
-    "plan_review": {"status": "pending"},
-    "implement": {"status": "pending"}
+    "classify":      {"status": "pending"},
+    "design_review": {"status": "pending", "rounds": []},
+    "plan":          {"status": "pending"},
+    "plan_review":   {"status": "pending", "rounds": []},
+    "tdd":           {"status": "pending"},
+    "tasks":         {"status": "pending"}
   },
-  "tdd": {"status": "pending"},
-  "current_round": 0,
-  "max_rounds": 3,
-  "created_at": "<ISO timestamp>"
+  "created_at": "<ISO timestamp>",
+  "updated_at": "<ISO timestamp>"
 }
 ```
 
-### 1.3 Load config
+There is no top-level `tdd`, `current_round`, or `max_rounds` key — those
+live inside per-phase sub-objects or come from config at dispatch time.
+Each phase transitions `pending → starting → completed | halted | error`;
+`starting` phases are re-run on `--resume` (crash recovery).
 
-```python
-from config_loader import get_forge_config
-forge_cfg = get_forge_config()
-```
+### 1.3 Config
 
-Read `workers`, `max_rounds`, `fix_threshold`, `domain_routing`, and `plan_review_routing` from config.
+`run_forge` loads `get_forge_config()` once and threads it through every
+phase. Relevant keys: `max_rounds`, `fix_threshold`, `domain_routing`,
+`plan_review_routing`, `agent_fallback_order`, `consensus_domains`,
+`consensus_threshold`, `workers`, `timeout`.
 
-### 1.4 Initialize audit
+### 1.4 Worktree
 
-```python
-from forge_audit import init_metrics_db
-init_metrics_db(f"{HISTORY}/forge_metrics.db")
-```
+`_setup_worktree` creates `.worktrees/forge-<slug>` and copies the spec
+inside. All edits land on the worktree copy, never the original.
 
-### 1.5 Create worktree
+## Phase 2: Classify
 
-Create an isolated git worktree for the pipeline run:
-```bash
-branch_name="forge/$(basename <path> .md)-$(date +%s)"
-git worktree add .worktrees/$(basename $branch_name) -b $branch_name
-```
+`forge_classifier.classify_spec` picks which design-review domains to
+dispatch using a 3-tier classifier:
 
-## Phase 2: Design Generation
+1. **Tier 1 (heuristic):** regex patterns from `forge_heuristics.json`.
+   Confidence ≥ 0.5 with `--auto-detect` wins immediately.
+2. **Tier 2 (LLM):** `domain_triage.triage_domains` chooses domains when
+   heuristics are low-confidence.
+3. **Tier 3 (interactive):** prompts the user to confirm/adjust when
+   `--auto-detect` is off and stdin is a TTY.
 
-Dispatch the design generation phase using the forge-specific prompts.
-
-Use `$PROMPTS/forge-design-review/` for domain prompts and agent preambles.
-
-Status output: `[OK] Design generation complete` or `[FAIL] Design generation failed`
+Status output: `[RUN] classify: dispatching` → `[OK] classify: completed`.
+State records `domains`, `skipped_domains`, `design_type`, `tier_used`,
+`confidence`.
 
 ## Phase 3: Design Review
 
-For each domain in `domain_routing`:
-1. Resolve the assigned agent
-2. Dispatch the review using `forge-design-review` prompts
-3. Record each call via `forge_audit.record_call()`
-4. Collect findings
+`forge_review.run_design_review` runs the iron-rule loop:
 
-Status output per domain: `[OK] {domain}` or `[SKIP] {domain}` or `[FAIL] {domain}`
+1. For each round `1..max_rounds`, dispatch domains grouped by routed agent
+   (plus consensus-domain dispatch to multiple agents).
+2. Classify findings into `fix` / `noise` / `blocked`. Third-time recurrence
+   escalates to `blocked`; two-agent cross-reference promotes to high-confidence `fix`.
+3. Dispatch `forge_fix_loop.apply_fixes` to rewrite the spec. **If the rewrite
+   produces no changes, the phase halts** rather than committing an empty
+   no-op and re-finding the same issues.
+4. Commit fixed rounds with `_commit_round`.
+5. Round `max_rounds + 1` is the halt round: dispatch all domains one last
+   time. Any fix/blocked finding → halt.
 
-If findings exceed `fix_threshold` after all domains:
-- If `current_round < max_rounds`: apply fixes and re-review
-- If `current_round >= max_rounds`: `[HALT] Design review — findings remain after {max_rounds} rounds`
-
-The halt round is always `max_rounds + 1` — never hardcode it.
+On halt: `[HALT] design_review: design review findings unresolved`.
 
 ## Phase 4: Plan Generation
 
-Dispatch plan generation from the reviewed design document.
-
-Status output: `[OK] Plan generation complete` or `[FAIL] Plan generation failed`
+`forge_plan.run_plan_phase` dispatches every enabled agent to generate its
+own plan, cross-reviews them, selects a winner by average score, writes the
+winning plan to `{spec-stem}-plan.md`, and commits it.
 
 ## Phase 5: Plan Review
 
-For each domain in `plan_review_routing`:
-1. Resolve the assigned agent
-2. Dispatch the review using `forge-plan-review` prompts
-3. Record each call via `forge_audit.record_call()`
-4. Collect findings
+`forge_plan.run_plan_review` runs the same iron-rule shape as design review,
+over the 10 plan-review domains: general, completeness, security,
+feasibility, operability, sequencing, rollback, risk, gates, timeline.
 
-Same iterative refinement logic as Phase 3.
+Same fix-dispatch contract as design review: the loop halts if the LLM
+produces a no-op rewrite. Per-round state is persisted after every iteration
+so a halt or crash preserves the round log.
 
-Status output: `[OK] Plan review complete` or `[HALT] Plan review — findings remain`
+## Phase 6: TDD (v2 passthrough)
 
-## Phase 6: Implementation
+`forge_tdd.skip_tdd_phase` currently returns `completed` immediately. v2
+will populate this with test-first scaffolding.
 
-Dispatch implementation using the reviewed plan.
+## Phase 7: Tasks
 
-Status output: `[OK] Implementation complete` or `[FAIL] Implementation failed`
+`forge_tasks.run_tasks_phase` decomposes the reviewed plan into phased
+tasks via an LLM call, validates the breakdown with
+`plan_to_tasks_validate.dispatch_validators`, and retries up to 3 times on
+failure. State records `breakdown` and `task_count`.
 
-## Phase 7: Finalize
+GitHub issue creation is a separate step — `create_issues` is called by the
+caller after `run_forge` returns. Implementation is handed off to
+`/stark-phase-execute <slug>`.
 
-1. Record the full run via `forge_audit.record_run()`
-2. Update `.forge-state.json` with final status
-3. Print summary:
-   - Total rounds per phase
-   - Finding counts by severity
-   - Total duration
-   - Final outcome
+## Finalize
 
-```
-[OK] stark-forge complete — 2 design rounds, 1 plan round, 12 findings resolved
-```
-or
-```
-[HALT] stark-forge halted at design review — 3 critical findings remain
-```
+`run_forge` prints a JSON summary on stdout when stdout is not a TTY,
+containing the event stream from `ForgeProgress`. The state file at
+`.forge-state.json` (mirrored to `.forge-backup/state-backup.json`) has the
+full per-phase record, including `findings_fixed`, `commit_shas`, `rounds`,
+and `plan_hash`.
