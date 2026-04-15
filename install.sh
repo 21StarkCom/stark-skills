@@ -18,9 +18,15 @@ set -euo pipefail
 # Files stay in the repo — symlinks point to them. Updating the repo
 # updates the installed system. No copying, no drift.
 
-SCRIPT="$0"
-[ -L "$SCRIPT" ] && SCRIPT="$(readlink "$SCRIPT")"
-REPO_DIR="$(cd "$(dirname "$SCRIPT")" && pwd)"
+# REPO_DIR can be pre-set by a caller (e.g. ``scripts/test_install_deps.py``
+# sourcing this script to exercise ``check_python_deps`` against a scratch
+# repo). When unset, derive it from ``$0`` / ``$BASH_SOURCE`` so direct
+# execution still works.
+if [ -z "${REPO_DIR:-}" ]; then
+    SCRIPT="${BASH_SOURCE[0]:-$0}"
+    [ -L "$SCRIPT" ] && SCRIPT="$(readlink "$SCRIPT")"
+    REPO_DIR="$(cd "$(dirname "$SCRIPT")" && pwd)"
+fi
 CLAUDE_DIR="$HOME/.claude"
 CODE_REVIEW_DIR="$CLAUDE_DIR/code-review"
 EVINCED_DIR="$HOME/git/Evinced"
@@ -50,6 +56,37 @@ validate_json_config() {
 
     rm -f /tmp/stark-install-config.err
     info "Config JSON: valid"
+}
+
+# Validate Python deps in the scripts venv. Called from both install()
+# and status() so fresh installs see missing packages immediately instead
+# of discovering them at first review run. Each entry is pip_name:import_name
+# because pip and import names differ (PyJWT → jwt).
+check_python_deps() {
+    echo ""
+    echo "Checking Python dependencies..."
+    local py="$REPO_DIR/scripts/.venv/bin/python3"
+    if [ ! -x "$py" ]; then
+        warn "No venv at scripts/.venv/ — run: python3 -m venv $REPO_DIR/scripts/.venv && $REPO_DIR/scripts/.venv/bin/pip install PyJWT requests anthropic"
+        return 1
+    fi
+    info "venv: $py"
+    local missing=0
+    # anthropic: required by forge_fix_loop SDK dispatch (PR #312).
+    for pair in "PyJWT:jwt" "requests:requests" "anthropic:anthropic"; do
+        local pip_name="${pair%%:*}"
+        local import_name="${pair##*:}"
+        if "$py" -c "import $import_name" 2>/dev/null; then
+            info "  $pip_name: installed"
+        else
+            error "  $pip_name: missing — run: $py -m pip install $pip_name"
+            missing=$((missing + 1))
+        fi
+    done
+    if [ "$missing" -gt 0 ]; then
+        return 1
+    fi
+    return 0
 }
 
 provision_infrastructure() {
@@ -427,6 +464,11 @@ interactive() {
 
     provision_infrastructure
 
+    # Surface missing Python deps immediately — forge fix-dispatch needs
+    # the anthropic SDK and the CLI fallback was removed in PR #312, so a
+    # fresh install without anthropic silently halts at the first fix round.
+    check_python_deps || warn "Some Python dependencies are missing — see above and install before running review commands."
+
     echo ""
     info "Installation complete. Verify with: ./install.sh --status"
     echo ""
@@ -607,26 +649,7 @@ install() {
         fi
     done
 
-    # Check Python deps
-    echo ""
-    echo "Checking Python dependencies..."
-    local py="$REPO_DIR/scripts/.venv/bin/python3"
-    if [ -x "$py" ]; then
-        info "venv: $py"
-        # pkg:import_name pairs — the import name may differ from pip name.
-        # anthropic: required by forge_fix_loop SDK dispatch (PR #312).
-        for pair in "PyJWT:jwt" "requests:requests" "anthropic:anthropic"; do
-            local pip_name="${pair%%:*}"
-            local import_name="${pair##*:}"
-            if "$py" -c "import $import_name" 2>/dev/null; then
-                info "  $pip_name: installed"
-            else
-                error "  $pip_name: missing — run: $py -m pip install $pip_name"
-            fi
-        done
-    else
-        warn "No venv at scripts/.venv/ — run: python3 -m venv $REPO_DIR/scripts/.venv && $REPO_DIR/scripts/.venv/bin/pip install PyJWT requests anthropic"
-    fi
+    check_python_deps
 }
 
 uninstall() {
@@ -758,12 +781,20 @@ status() {
     else
         info "Automation fleet: not installed"
     fi
+
+    check_python_deps
     echo ""
 }
 
-case "${1:-}" in
-    --uninstall) uninstall ;;
-    --status)    status ;;
-    --select)    interactive ;;
-    *)           install ;;
-esac
+# Only run the top-level dispatcher when the script is executed directly.
+# When sourced (e.g. by ``scripts/test_install_deps.py``), skip dispatch so
+# callers can invoke individual helpers like ``check_python_deps`` in
+# isolation.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+    case "${1:-}" in
+        --uninstall) uninstall ;;
+        --status)    status ;;
+        --select)    interactive ;;
+        *)           install ;;
+    esac
+fi
