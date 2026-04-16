@@ -11,10 +11,13 @@ See [README.md](README.md) for the full behavioral reference, pipeline diagram, 
 
 ## Preflight
 
+Run:
+
 ```bash
 python3 ~/.claude/code-review/scripts/preflight.py --workflow stark-forged-review --json
 ```
 
+Parse the JSON result:
 - `overall: blocked` — print failing checks and stop.
 - `overall: degraded` — warn and continue.
 - `overall: ready` — continue silently.
@@ -39,27 +42,41 @@ PYTHON  = $SCRIPTS/.venv/bin/python3
 
 ## Run
 
+Invoke the orchestrator:
+
 ```bash
 $PYTHON $SCRIPTS/forged_review.py $ARGUMENTS
 ```
 
-Orchestrator prints one JSON object to stdout, progress to stderr.
+It prints a single JSON object to stdout and progress to stderr. Capture the stdout JSON and the exit code.
 
 ## Handle stdout JSON
 
-Shape: `{status, pr_number, repo, needs_merge_confirmation, message, summary}`. `status` is `clean | dry_run_complete | awaiting_fixes`. All three terminal success/fix states emit valid stdout JSON — `awaiting_fixes` exits with code 1 but the JSON is still there, so always try to parse stdout first. **JSON may be absent** on: exit 2/3 (dispatch / invalid input), code 130 (`KeyboardInterrupt`), and any uncaught-exception exit. Treat non-zero + no-JSON as a hard failure; don't claim "awaiting fixes" without parsed output.
+Expected shape:
 
-- **`clean` + `needs_merge_confirmation: true`** — print summary, ask `Clean. Merge PR #<pr_number>? [Y/n]`. On yes/empty:
+```text
+{status, pr_number, repo, needs_merge_confirmation, message, summary}
+```
 
-  ```bash
-  unset GH_TOKEN && gh pr merge <pr_number> --squash --delete-branch --repo <repo>
-  ```
+`status` is one of `clean | dry_run_complete | awaiting_fixes | failed`.
 
-  On no, print `PR left open at user request` and exit 0.
-- **`clean` + `needs_merge_confirmation: false`** — print summary, exit 0.
-- **`awaiting_fixes`** — print message + findings; do NOT merge; exit with orchestrator's code.
-- **`dry_run_complete`** — print summary, exit 0.
-- anything else — print summary, exit with orchestrator's code.
+- **`clean` + `needs_merge_confirmation: true`**
+  1. Print the summary.
+  2. Ask `Clean. Merge PR #<pr_number>? [Y/n]`
+  3. On yes/empty, run:
+
+     ```bash
+     unset GH_TOKEN && gh pr merge <pr_number> --squash --delete-branch --repo <repo>
+     ```
+
+  4. On no, print `PR left open at user request` and exit 0.
+- **`clean` + `needs_merge_confirmation: false`** — print the summary and exit 0.
+- **`awaiting_fixes`**
+  - Print the message and findings summary.
+  - Do NOT merge.
+  - Exit with the orchestrator's exit code.
+- **`dry_run_complete`** — print the summary and exit 0.
+- **anything else** — print the summary and exit with the orchestrator's exit code.
 
 ## Exit codes
 
@@ -69,3 +86,9 @@ Shape: `{status, pr_number, repo, needs_merge_confirmation, message, summary}`. 
 | 1 | Halted / awaiting fixes |
 | 2 | Dispatch failure |
 | 3 | Invalid input |
+
+## Observability
+
+- Emits `forged_review.*` events via `emit_queue.py`.
+- Records per-run metrics to `~/.claude/code-review/history/forged-review/forged_review_metrics.db`.
+- Prints `[forged-review] …` progress lines to stderr.
