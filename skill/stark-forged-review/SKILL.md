@@ -58,7 +58,9 @@ Expected shape:
 {status, pr_number, repo, needs_merge_confirmation, message, summary}
 ```
 
-`status` is one of `clean | dry_run_complete | awaiting_fixes | failed`.
+`status` is one of `clean | dry_run_complete | awaiting_fixes`.
+
+> **Note:** failure cases (invalid input, dispatch errors) exit with code 2 or 3 and may not produce JSON on stdout. Handle non-zero exit codes independently.
 
 - **`clean` + `needs_merge_confirmation: true`**
   1. Print the summary.

@@ -218,7 +218,11 @@ function parseArgs(argv: string[]): CliOptions {
       continue;
     }
     if (arg === "--mode") {
-      options.mode = readValue(argv, ++index, "--mode") as Mode;
+      const modeValue = readValue(argv, ++index, "--mode");
+      if (modeValue !== "api" && modeValue !== "plan") {
+        throw new Error(`--mode must be "api" or "plan", got "${modeValue}"`);
+      }
+      options.mode = modeValue;
       continue;
     }
     if (arg === "--skill") {
@@ -359,7 +363,7 @@ async function requestProposal(
     method: "POST",
     headers: openAiHeaders(),
     body: JSON.stringify(requestBody),
-  });
+  }, Math.max(deadline - Date.now(), 5000));
   console.error(
     `[skill_optimize] submitted ${bundle.skillPath} -> ${payload.id} (${payload.status ?? "unknown"})`,
   );
@@ -376,6 +380,7 @@ async function requestProposal(
         method: "GET",
         headers: openAiHeaders(),
       },
+      Math.max(deadline - Date.now(), 5000),
     );
     if (payload.status !== lastStatus) {
       console.error(
@@ -523,13 +528,19 @@ function buildRewriteRequest(
     ...bundleFiles.map((file) => `- ${file.path}`),
     "",
     "Current files:",
-    ...bundleFiles.flatMap((file) => [
-      `## FILE: ${file.path}`,
-      "```md",
-      file.content.trimEnd(),
-      "```",
-      "",
-    ]),
+    ...bundleFiles.flatMap((file) => {
+      let fence = "```";
+      while (file.content.includes(fence)) {
+        fence += "`";
+      }
+      return [
+        `## FILE: ${file.path}`,
+        `${fence}md`,
+        file.content.trimEnd(),
+        fence,
+        "",
+      ];
+    }),
   ];
   return sections.join("\n");
 }
@@ -603,10 +614,10 @@ function openAiHeaders(): Record<string, string> {
   };
 }
 
-async function openaiFetch(url: string, init: RequestInit): Promise<any> {
+async function openaiFetch(url: string, init: RequestInit, timeoutMs = 30000): Promise<any> {
   const response = await fetch(url, {
     ...init,
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) {
     throw new Error(`OpenAI API request failed: ${response.status} ${await response.text()}`);
