@@ -7,18 +7,7 @@ import {
   hasBrokenRefs,
 } from "./skill_lib.ts";
 
-// findRepoRoot returns null when no ancestor .git/ exists. The narrowed
-// return type forces this check, so we can't accidentally audit a tree
-// that lives outside a repo.
 const repoRoot = findRepoRoot(process.cwd());
-if (repoRoot === null) {
-  console.error(
-    `skill_audit must run from inside a git repository; ` +
-      `no .git/ found walking up from ${process.cwd()}.`,
-  );
-  process.exit(2);
-}
-
 const args = new Set(process.argv.slice(2));
 const asJson = args.has("--json");
 const validateOnly = args.has("--validate");

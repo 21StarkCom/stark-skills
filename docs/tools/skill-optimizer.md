@@ -36,13 +36,12 @@ Purpose: inventory a skill bundle, generate a rewrite brief or API-backed rewrit
   ```bash
   node tools/skill_optimize.ts --mode api --skills stark-forged-review,stark-review-plan,stark-team-review
   ```
-- All skills (plan mode only — API mode requires an explicit target):
+- All skills:
   ```bash
-  node tools/skill_optimize.ts --mode plan
+  node tools/skill_optimize.ts --mode api
   ```
 
-If no `--skill` or `--skills` flag is provided, `--mode plan` processes every discovered skill.
-`--mode api` **requires** at least one `--skill`/`--skills` target so a bare run cannot upload every bundle to the Responses API by accident.
+If no `--skill` or `--skills` flag is provided, the optimizer processes every discovered skill.
 
 ## Recommended workflow
 
@@ -54,11 +53,7 @@ If no `--skill` or `--skills` flag is provided, `--mode plan` processes every di
    ```bash
    node tools/skill_optimize.ts --mode api --skill stark-forged-review --diff
    ```
-3. Review artifacts in `artifacts/skill-optimizer/<flat-slug>/`, where
-   `<flat-slug>` encodes the bundle's full repo-relative SKILL.md path.
-   The encoder escapes `_` → `_u` first, then substitutes `/` → `_s`, so
-   distinct source paths always produce distinct slugs. Example:
-   `skill/stark-forged-review/SKILL.md` → `skill_sstark-forged-review_sSKILL.md`.
+3. Review artifacts in `artifacts/skill-optimizer/<skill-slug>/`.
 4. Apply the saved proposal without paying for a second model call:
    ```bash
    node tools/skill_optimize.ts --mode api --skill stark-forged-review --reuse-proposal --apply
@@ -71,7 +66,7 @@ Use `--diff` to print the proposal diff to stderr during the run.
 
 The optimizer also always writes a persistent diff artifact:
 
-- `artifacts/skill-optimizer/<flat-slug>/proposal.diff`
+- `artifacts/skill-optimizer/<skill-slug>/proposal.diff`
 
 This diff compares the current repo file against the proposed rewrite for every changed file in the bundle.
 
