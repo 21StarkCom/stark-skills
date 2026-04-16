@@ -16,6 +16,7 @@ import {
 } from "./skill_lib.ts";
 
 type Mode = "api" | "plan";
+type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
 type RewriteAction = "update" | "delete" | "keep";
 
 type RewriteChange = {
@@ -44,7 +45,7 @@ type CliOptions = {
   model: string;
   outDir: string;
   pollIntervalMs: number;
-  reasoningEffort: string;
+  reasoningEffort: ReasoningEffort;
   reuseProposal: boolean;
   skillTargets: string[];
   maxOutputTokens: number;
@@ -146,10 +147,6 @@ async function processBundle(
     console.error(diffText);
   }
 
-  if (options.apply) {
-    applyProposal(proposal);
-  }
-
   const changedFiles = proposal.changes
     .filter((change) => change.action !== "keep")
     .map((change) => {
@@ -166,6 +163,10 @@ async function processBundle(
         deltaWords: countWords(afterContent) - countWords(beforeContent),
       };
     });
+
+  if (options.apply) {
+    applyProposal(proposal);
+  }
 
   return {
     skillPath: bundle.skillPath,
@@ -254,7 +255,12 @@ function parseArgs(argv: string[]): CliOptions {
       continue;
     }
     if (arg === "--reasoning-effort") {
-      options.reasoningEffort = readValue(argv, ++index, "--reasoning-effort");
+      const effort = readValue(argv, ++index, "--reasoning-effort");
+      const allowed: ReasoningEffort[] = ["low", "medium", "high", "xhigh"];
+      if (!allowed.includes(effort as ReasoningEffort)) {
+        throw new Error(`--reasoning-effort must be one of: ${allowed.join(", ")}, got "${effort}"`);
+      }
+      options.reasoningEffort = effort as ReasoningEffort;
       continue;
     }
     if (arg === "--max-output-tokens") {
@@ -277,8 +283,8 @@ function parseArgs(argv: string[]): CliOptions {
     throw new Error("--poll-interval-ms must be a positive integer");
   }
 
-  if (options.mode === "api" && !process.env.OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is required for --mode api");
+  if (options.mode === "api" && !options.reuseProposal && !process.env.OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY is required for --mode api (not needed with --reuse-proposal)");
   }
   if (
     options.mode === "api" &&
@@ -314,7 +320,7 @@ async function requestProposal(
   bundleFiles: Array<{ path: string; content: string }>,
   options: CliOptions,
 ): Promise<RewriteProposal> {
-  const schema = buildProposalSchema(bundleFiles.map((file) => file.path));
+  const schema = buildProposalSchema(bundleFiles.map((file) => file.path), bundle.refs);
   const requestBody = {
     background: true,
     model: options.model,
@@ -442,7 +448,7 @@ async function requestAndPersistProposal(
   return proposal;
 }
 
-function buildProposalSchema(allowedPaths: string[]): Record<string, unknown> {
+function buildProposalSchema(allowedPaths: string[], refPaths: string[]): Record<string, unknown> {
   return {
     type: "object",
     additionalProperties: false,
@@ -478,11 +484,11 @@ function buildProposalSchema(allowedPaths: string[]): Record<string, unknown> {
       },
       refs_kept: {
         type: "array",
-        items: { type: "string", enum: allowedPaths },
+        items: refPaths.length ? { type: "string", enum: refPaths } : { type: "string" },
       },
       refs_removed: {
         type: "array",
-        items: { type: "string", enum: allowedPaths },
+        items: refPaths.length ? { type: "string", enum: refPaths } : { type: "string" },
       },
       contradictions_resolved: {
         type: "array",
