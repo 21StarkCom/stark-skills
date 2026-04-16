@@ -1,0 +1,798 @@
+#!/usr/bin/env node
+
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import {
+  countWords,
+  discoverSkillBundles,
+  findRepoRoot,
+  loadBundleFiles,
+  rel,
+  resolveSkillTarget,
+  type SkillBundle,
+} from "./skill_lib.ts";
+
+type Mode = "api" | "plan";
+type RewriteAction = "update" | "delete" | "keep";
+
+type RewriteChange = {
+  path: string;
+  action: RewriteAction;
+  summary: string;
+  content?: string;
+};
+
+type RewriteProposal = {
+  bundle_summary: string;
+  global_notes: string[];
+  changes: RewriteChange[];
+  refs_kept: string[];
+  refs_removed: string[];
+  contradictions_resolved: string[];
+  terminology_normalizations: string[];
+  warnings: string[];
+};
+
+type CliOptions = {
+  apply: boolean;
+  apiTimeoutMs: number;
+  diff: boolean;
+  mode: Mode;
+  model: string;
+  outDir: string;
+  pollIntervalMs: number;
+  reasoningEffort: string;
+  reuseProposal: boolean;
+  skillTargets: string[];
+  maxOutputTokens: number;
+};
+
+type BundleRunSummary = {
+  skillPath: string;
+  artifactDir: string;
+  diffPath?: string;
+  mode: Mode;
+  applied: boolean;
+  proposalPath?: string;
+  proposalSummaryPath?: string;
+  changedFiles: Array<{
+    path: string;
+    action: RewriteAction;
+    beforeWords: number;
+    afterWords: number;
+    deltaWords: number;
+  }>;
+  refsRemoved: string[];
+  warnings: string[];
+};
+
+const repoRoot = findRepoRoot(process.cwd());
+const options = parseArgs(process.argv.slice(2));
+const bundles = discoverSkillBundles(repoRoot);
+const selectedBundles = selectBundles(bundles, options.skillTargets);
+const runSummaries: BundleRunSummary[] = [];
+
+for (const bundle of selectedBundles) {
+  const summary = await processBundle(bundle, options);
+  runSummaries.push(summary);
+}
+
+writeRunSummary(repoRoot, options.outDir, options, runSummaries);
+
+console.log(
+  JSON.stringify(
+    {
+      repoRoot,
+      mode: options.mode,
+      apply: options.apply,
+      bundles: runSummaries,
+    },
+    null,
+    2,
+  ),
+);
+
+async function processBundle(
+  bundle: SkillBundle,
+  options: CliOptions,
+): Promise<BundleRunSummary> {
+  const bundleFiles = loadBundleFiles(repoRoot, bundle);
+  const artifactDir = path.join(
+    repoRoot,
+    options.outDir,
+    path.basename(path.dirname(bundle.skillPath)),
+  );
+  fs.mkdirSync(artifactDir, { recursive: true });
+
+  const manifest = {
+    repoRoot,
+    skill: bundle.skillPath,
+    refs: bundle.refs,
+    missingRefs: bundle.missingRefs,
+    files: bundleFiles.map((file) => ({
+      path: file.path,
+      words: countWords(file.content),
+      lines: file.content.split(/\r?\n/).length,
+    })),
+  };
+  writeUtf8(path.join(artifactDir, "bundle.json"), JSON.stringify(manifest, null, 2));
+
+  if (options.mode === "plan") {
+    writeUtf8(path.join(artifactDir, "rewrite-request.md"), buildRewriteRequest(bundle, bundleFiles));
+    return {
+      skillPath: bundle.skillPath,
+      artifactDir: rel(repoRoot, artifactDir),
+      mode: options.mode,
+      applied: false,
+      changedFiles: [],
+      refsRemoved: [],
+      warnings: ["Plan mode only: no proposal generated."],
+    };
+  }
+
+  const proposalPath = path.join(artifactDir, "proposal.json");
+  const proposal = options.reuseProposal
+    ? loadExistingProposal(proposalPath)
+    : await requestAndPersistProposal(bundle, bundleFiles, options, artifactDir);
+  validateProposal(bundle, proposal);
+  const diffPath = path.join(artifactDir, "proposal.diff");
+  const diffText = generateProposalDiff(bundleFiles, proposal);
+  writeUtf8(diffPath, diffText);
+
+  if (options.diff && diffText.trim()) {
+    console.error(diffText);
+  }
+
+  if (options.apply) {
+    applyProposal(proposal);
+  }
+
+  const changedFiles = proposal.changes
+    .filter((change) => change.action !== "keep")
+    .map((change) => {
+      const beforeContent =
+        change.action === "delete"
+          ? readExisting(change.path)
+          : bundleFiles.find((file) => file.path === change.path)?.content ?? "";
+      const afterContent = change.action === "update" ? change.content ?? "" : "";
+      return {
+        path: change.path,
+        action: change.action,
+        beforeWords: countWords(beforeContent),
+        afterWords: countWords(afterContent),
+        deltaWords: countWords(afterContent) - countWords(beforeContent),
+      };
+    });
+
+  return {
+    skillPath: bundle.skillPath,
+    artifactDir: rel(repoRoot, artifactDir),
+    diffPath: rel(repoRoot, diffPath),
+    mode: options.mode,
+    applied: options.apply,
+    proposalPath: rel(repoRoot, proposalPath),
+    proposalSummaryPath: rel(repoRoot, path.join(artifactDir, "proposal-summary.md")),
+    changedFiles,
+    refsRemoved: proposal.refs_removed,
+    warnings: proposal.warnings,
+  };
+}
+
+function parseArgs(argv: string[]): CliOptions {
+  const options: CliOptions = {
+    apply: false,
+    apiTimeoutMs: 180000,
+    diff: false,
+    mode: process.env.OPENAI_API_KEY ? "api" : "plan",
+    model: "gpt-5.4-pro",
+    outDir: "artifacts/skill-optimizer",
+    pollIntervalMs: 5000,
+    reasoningEffort: "medium",
+    reuseProposal: false,
+    skillTargets: [],
+    maxOutputTokens: 16000,
+  };
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--apply") {
+      options.apply = true;
+      continue;
+    }
+    if (arg === "--diff") {
+      options.diff = true;
+      continue;
+    }
+    if (arg === "--reuse-proposal") {
+      options.reuseProposal = true;
+      continue;
+    }
+    if (arg === "--api-timeout-ms") {
+      options.apiTimeoutMs = Number.parseInt(
+        readValue(argv, ++index, "--api-timeout-ms"),
+        10,
+      );
+      continue;
+    }
+    if (arg === "--mode") {
+      options.mode = readValue(argv, ++index, "--mode") as Mode;
+      continue;
+    }
+    if (arg === "--skill") {
+      options.skillTargets.push(readValue(argv, ++index, "--skill"));
+      continue;
+    }
+    if (arg === "--skills") {
+      options.skillTargets.push(
+        ...readValue(argv, ++index, "--skills")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      );
+      continue;
+    }
+    if (arg === "--model") {
+      options.model = readValue(argv, ++index, "--model");
+      continue;
+    }
+    if (arg === "--out-dir") {
+      options.outDir = readValue(argv, ++index, "--out-dir");
+      continue;
+    }
+    if (arg === "--poll-interval-ms") {
+      options.pollIntervalMs = Number.parseInt(
+        readValue(argv, ++index, "--poll-interval-ms"),
+        10,
+      );
+      continue;
+    }
+    if (arg === "--reasoning-effort") {
+      options.reasoningEffort = readValue(argv, ++index, "--reasoning-effort");
+      continue;
+    }
+    if (arg === "--max-output-tokens") {
+      options.maxOutputTokens = Number.parseInt(
+        readValue(argv, ++index, "--max-output-tokens"),
+        10,
+      );
+      continue;
+    }
+    throw new Error(`Unknown argument: ${arg}`);
+  }
+
+  if (!Number.isFinite(options.maxOutputTokens) || options.maxOutputTokens <= 0) {
+    throw new Error("--max-output-tokens must be a positive integer");
+  }
+  if (!Number.isFinite(options.apiTimeoutMs) || options.apiTimeoutMs <= 0) {
+    throw new Error("--api-timeout-ms must be a positive integer");
+  }
+  if (!Number.isFinite(options.pollIntervalMs) || options.pollIntervalMs <= 0) {
+    throw new Error("--poll-interval-ms must be a positive integer");
+  }
+
+  if (options.mode === "api" && !process.env.OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY is required for --mode api");
+  }
+  if (
+    options.mode === "api" &&
+    options.model === "gpt-5.4-pro" &&
+    options.reasoningEffort === "low"
+  ) {
+    throw new Error("gpt-5.4-pro supports reasoning effort: medium, high, xhigh");
+  }
+
+  return options;
+}
+
+function readValue(argv: string[], index: number, flag: string): string {
+  const value = argv[index];
+  if (!value) {
+    throw new Error(`${flag} requires a value`);
+  }
+  return value;
+}
+
+function selectBundles(
+  bundles: SkillBundle[],
+  targets: string[],
+): SkillBundle[] {
+  if (!targets.length) {
+    return bundles;
+  }
+  return targets.map((target) => resolveSkillTarget(repoRoot, bundles, target));
+}
+
+async function requestProposal(
+  bundle: SkillBundle,
+  bundleFiles: Array<{ path: string; content: string }>,
+  options: CliOptions,
+): Promise<RewriteProposal> {
+  const schema = buildProposalSchema(bundleFiles.map((file) => file.path));
+  const requestBody = {
+    background: true,
+    model: options.model,
+    reasoning: {
+      effort: options.reasoningEffort,
+    },
+    max_output_tokens: options.maxOutputTokens,
+    input: [
+      {
+        role: "system",
+        content: [
+          {
+            type: "input_text",
+            text: [
+              "Rewrite only the provided skill bundle files.",
+              "Make them shorter, sharper, and internally consistent.",
+              "Keep commands, paths, flags, frontmatter keys, and safety-critical rules exact.",
+              "SKILL.md is the authoritative contract; delete redundant references when safe.",
+              "Do not invent repo facts or touch paths outside the allowed set.",
+            ].join("\n"),
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: buildRewriteRequest(bundle, bundleFiles),
+          },
+        ],
+      },
+    ],
+    text: {
+      format: {
+        type: "json_schema",
+        name: "skill_bundle_rewrite",
+        strict: true,
+        schema,
+      },
+    },
+  };
+
+  const deadline = Date.now() + options.apiTimeoutMs;
+  let payload = await openaiFetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: openAiHeaders(),
+    body: JSON.stringify(requestBody),
+  });
+  console.error(
+    `[skill_optimize] submitted ${bundle.skillPath} -> ${payload.id} (${payload.status ?? "unknown"})`,
+  );
+
+  let lastStatus = payload.status;
+  while (!isTerminalStatus(payload.status)) {
+    if (Date.now() >= deadline) {
+      throw new Error(`OpenAI background response timed out after ${options.apiTimeoutMs}ms`);
+    }
+    await sleep(Math.min(options.pollIntervalMs, Math.max(deadline - Date.now(), 0)));
+    payload = await openaiFetch(
+      `https://api.openai.com/v1/responses/${payload.id}`,
+      {
+        method: "GET",
+        headers: openAiHeaders(),
+      },
+    );
+    if (payload.status !== lastStatus) {
+      console.error(
+        `[skill_optimize] ${payload.id} status ${lastStatus ?? "unknown"} -> ${payload.status ?? "unknown"}`,
+      );
+      lastStatus = payload.status;
+    }
+  }
+  console.error(`[skill_optimize] ${payload.id} completed with status ${payload.status}`);
+
+  if (payload.status !== "completed") {
+    throw new Error(
+      `OpenAI response did not complete successfully: ${payload.status} ${JSON.stringify(payload.error ?? {})}`,
+    );
+  }
+  const outputText = extractOutputText(payload);
+  try {
+    return JSON.parse(outputText) as RewriteProposal;
+  } catch (error) {
+    throw new Error(`Failed to parse proposal JSON: ${(error as Error).message}\n${outputText}`);
+  }
+}
+
+function generateProposalDiff(
+  bundleFiles: Array<{ path: string; content: string }>,
+  proposal: RewriteProposal,
+): string {
+  const beforeMap = new Map(bundleFiles.map((file) => [file.path, file.content]));
+  const chunks: string[] = [];
+
+  for (const change of proposal.changes) {
+    if (change.action === "keep") {
+      continue;
+    }
+    const beforeContent = beforeMap.get(change.path) ?? "";
+    const afterContent = change.action === "delete" ? "" : change.content ?? "";
+    if (beforeContent === afterContent) {
+      continue;
+    }
+    chunks.push(diffText(change.path, beforeContent, afterContent, change.action));
+  }
+
+  return chunks.join("\n");
+}
+
+async function requestAndPersistProposal(
+  bundle: SkillBundle,
+  bundleFiles: Array<{ path: string; content: string }>,
+  options: CliOptions,
+  artifactDir: string,
+): Promise<RewriteProposal> {
+  const proposal = await requestProposal(bundle, bundleFiles, options);
+  writeUtf8(
+    path.join(artifactDir, "proposal.json"),
+    JSON.stringify(proposal, null, 2),
+  );
+  writeUtf8(path.join(artifactDir, "proposal-summary.md"), renderProposalSummary(bundle, proposal));
+  writeProposalFiles(artifactDir, proposal);
+  return proposal;
+}
+
+function buildProposalSchema(allowedPaths: string[]): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "bundle_summary",
+      "global_notes",
+      "changes",
+      "refs_kept",
+      "refs_removed",
+      "contradictions_resolved",
+      "terminology_normalizations",
+      "warnings",
+    ],
+    properties: {
+      bundle_summary: { type: "string" },
+      global_notes: {
+        type: "array",
+        items: { type: "string" },
+      },
+      changes: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["path", "action", "summary", "content"],
+          properties: {
+            path: { type: "string", enum: allowedPaths },
+            action: { type: "string", enum: ["update", "delete", "keep"] },
+            summary: { type: "string" },
+            content: { type: "string" },
+          },
+        },
+      },
+      refs_kept: {
+        type: "array",
+        items: { type: "string", enum: allowedPaths },
+      },
+      refs_removed: {
+        type: "array",
+        items: { type: "string", enum: allowedPaths },
+      },
+      contradictions_resolved: {
+        type: "array",
+        items: { type: "string" },
+      },
+      terminology_normalizations: {
+        type: "array",
+        items: { type: "string" },
+      },
+      warnings: {
+        type: "array",
+        items: { type: "string" },
+      },
+    },
+  };
+}
+
+function buildRewriteRequest(
+  bundle: SkillBundle,
+  bundleFiles: Array<{ path: string; content: string }>,
+): string {
+  const sections = [
+    "# Rewrite brief",
+    "",
+    `Skill: ${bundle.skillPath}`,
+    `References: ${bundle.refs.length ? bundle.refs.join(", ") : "(none)"}`,
+    "",
+    "Target state:",
+    "- Shorter and easier to execute.",
+    "- Consistent structure and terminology.",
+    "- No duplicated caveats or contradictory instructions.",
+    "- Reference docs kept only if they clearly add unique value.",
+    "",
+    "Rules:",
+    "- Operate only on the allowed files below.",
+    "- Preserve YAML frontmatter keys when present.",
+    "- Keep commands, paths, literals, and non-obvious constraints intact.",
+    "- If a reference doc is redundant, delete it and absorb the needed content elsewhere in the bundle.",
+    "- Keep markdown link targets valid after the rewrite.",
+    "- Prefer imperative instructions over explanation.",
+    "",
+    "Allowed files:",
+    ...bundleFiles.map((file) => `- ${file.path}`),
+    "",
+    "Current files:",
+    ...bundleFiles.flatMap((file) => [
+      `## FILE: ${file.path}`,
+      "```md",
+      file.content.trimEnd(),
+      "```",
+      "",
+    ]),
+  ];
+  return sections.join("\n");
+}
+
+function extractOutputText(payload: any): string {
+  if (typeof payload.output_text === "string" && payload.output_text.trim()) {
+    return payload.output_text;
+  }
+  const parts: string[] = [];
+  for (const item of payload.output ?? []) {
+    for (const content of item.content ?? []) {
+      if (content.type === "output_text" && typeof content.text === "string") {
+        parts.push(content.text);
+      }
+    }
+  }
+  const joined = parts.join("").trim();
+  if (!joined) {
+    throw new Error("Responses API returned no output text");
+  }
+  return joined;
+}
+
+function loadExistingProposal(proposalPath: string): RewriteProposal {
+  if (!fs.existsSync(proposalPath)) {
+    throw new Error(`No existing proposal found at ${rel(repoRoot, proposalPath)}`);
+  }
+  return JSON.parse(fs.readFileSync(proposalPath, "utf8")) as RewriteProposal;
+}
+
+function diffText(
+  filePath: string,
+  beforeContent: string,
+  afterContent: string,
+  action: RewriteAction,
+): string {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "skill-opt-diff-"));
+  const beforePath = path.join(tempDir, "before.md");
+  const afterPath = path.join(tempDir, "after.md");
+  writeUtf8(beforePath, beforeContent);
+  writeUtf8(afterPath, afterContent);
+
+  try {
+    return execFileSync(
+      "diff",
+      [
+        "-u",
+        "--label",
+        `a/${filePath}`,
+        "--label",
+        `${action === "delete" ? "/dev/null" : `b/${filePath}`}`,
+        beforePath,
+        afterPath,
+      ],
+      { encoding: "utf8" },
+    );
+  } catch (error: any) {
+    if (typeof error?.stdout === "string" && error.stdout) {
+      return error.stdout;
+    }
+    throw error;
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+function openAiHeaders(): Record<string, string> {
+  return {
+    Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+    "Content-Type": "application/json",
+  };
+}
+
+async function openaiFetch(url: string, init: RequestInit): Promise<any> {
+  const response = await fetch(url, {
+    ...init,
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!response.ok) {
+    throw new Error(`OpenAI API request failed: ${response.status} ${await response.text()}`);
+  }
+  return response.json();
+}
+
+function isTerminalStatus(status: string | undefined): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled" || status === "incomplete";
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function validateProposal(bundle: SkillBundle, proposal: RewriteProposal): void {
+  const allowedPaths = new Set([bundle.skillPath, ...bundle.refs]);
+  const seen = new Set<string>();
+  for (const change of proposal.changes) {
+    if (!allowedPaths.has(change.path)) {
+      throw new Error(`Proposal touched unexpected path: ${change.path}`);
+    }
+    if (change.path === bundle.skillPath && change.action === "delete") {
+      throw new Error("Proposal cannot delete the main SKILL.md");
+    }
+    if (seen.has(change.path)) {
+      throw new Error(`Proposal touched the same path twice: ${change.path}`);
+    }
+    seen.add(change.path);
+    if (typeof change.content !== "string") {
+      throw new Error(`Change is missing string content: ${change.path}`);
+    }
+    if (change.action === "update" && change.content.length === 0) {
+      throw new Error(`Updated file is missing content: ${change.path}`);
+    }
+  }
+  for (const ref of proposal.refs_removed) {
+    if (!bundle.refs.includes(ref)) {
+      throw new Error(`refs_removed contains a non-reference path: ${ref}`);
+    }
+  }
+}
+
+function writeProposalFiles(artifactDir: string, proposal: RewriteProposal): void {
+  const proposedRoot = path.join(artifactDir, "proposed");
+  for (const change of proposal.changes) {
+    if (change.action !== "update") {
+      continue;
+    }
+    const outputPath = path.join(proposedRoot, change.path);
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    writeUtf8(outputPath, change.content ?? "");
+  }
+}
+
+function applyProposal(proposal: RewriteProposal): void {
+  for (const change of proposal.changes) {
+    const outputPath = path.join(repoRoot, change.path);
+    if (change.action === "delete") {
+      if (fs.existsSync(outputPath)) {
+        fs.unlinkSync(outputPath);
+      }
+      continue;
+    }
+    if (change.action === "update") {
+      fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+      writeUtf8(outputPath, change.content ?? "");
+    }
+  }
+}
+
+function renderProposalSummary(
+  bundle: SkillBundle,
+  proposal: RewriteProposal,
+): string {
+  const lines = [
+    `# Proposal Summary: ${bundle.skillPath}`,
+    "",
+    proposal.bundle_summary,
+    "",
+    "## Changes",
+    ...proposal.changes.map((change) => `- \`${change.action}\` \`${change.path}\` — ${change.summary}`),
+    "",
+    "## Contradictions Resolved",
+    ...(proposal.contradictions_resolved.length
+      ? proposal.contradictions_resolved.map((item) => `- ${item}`)
+      : ["- None called out."]),
+    "",
+    "## Terminology",
+    ...(proposal.terminology_normalizations.length
+      ? proposal.terminology_normalizations.map((item) => `- ${item}`)
+      : ["- None called out."]),
+    "",
+    "## Notes",
+    ...(proposal.global_notes.length
+      ? proposal.global_notes.map((item) => `- ${item}`)
+      : ["- None."]),
+    "",
+    "## Warnings",
+    ...(proposal.warnings.length
+      ? proposal.warnings.map((item) => `- ${item}`)
+      : ["- None."]),
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+function writeRunSummary(
+  repoRoot: string,
+  outDir: string,
+  options: CliOptions,
+  bundles: BundleRunSummary[],
+): void {
+  const absoluteOutDir = path.join(repoRoot, outDir);
+  fs.mkdirSync(absoluteOutDir, { recursive: true });
+  const timestamp = new Date().toISOString().replace(/[:]/g, "-");
+  const runsDir = path.join(absoluteOutDir, "runs");
+  fs.mkdirSync(runsDir, { recursive: true });
+
+  const runSummary = {
+    generatedAt: new Date().toISOString(),
+    mode: options.mode,
+    apply: options.apply,
+    diff: options.diff,
+    bundleCount: bundles.length,
+    bundles,
+  };
+
+  const summaryJson = JSON.stringify(runSummary, null, 2);
+  writeUtf8(path.join(absoluteOutDir, "run-summary.json"), summaryJson);
+  writeUtf8(path.join(runsDir, `${timestamp}.json`), summaryJson);
+
+  const lines = [
+    "# Skill Optimizer Run Summary",
+    "",
+    `- Generated: ${runSummary.generatedAt}`,
+    `- Mode: ${options.mode}`,
+    `- Apply: ${options.apply ? "yes" : "no"}`,
+    `- Diff requested: ${options.diff ? "yes" : "no"}`,
+    `- Bundles: ${bundles.length}`,
+    "",
+    "## Bundles",
+  ];
+
+  for (const bundle of bundles) {
+    lines.push(`### ${bundle.skillPath}`);
+    lines.push(`- Artifact dir: \`${bundle.artifactDir}\``);
+    if (bundle.proposalPath) {
+      lines.push(`- Proposal: \`${bundle.proposalPath}\``);
+    }
+    if (bundle.proposalSummaryPath) {
+      lines.push(`- Proposal summary: \`${bundle.proposalSummaryPath}\``);
+    }
+    if (bundle.diffPath) {
+      lines.push(`- Diff: \`${bundle.diffPath}\``);
+    }
+    lines.push(`- Applied: ${bundle.applied ? "yes" : "no"}`);
+    if (bundle.changedFiles.length) {
+      lines.push("- Changed files:");
+      for (const change of bundle.changedFiles) {
+        lines.push(
+          `  - \`${change.action}\` \`${change.path}\` (${change.beforeWords}w -> ${change.afterWords}w, delta ${change.deltaWords})`,
+        );
+      }
+    } else {
+      lines.push("- Changed files: none");
+    }
+    if (bundle.warnings.length) {
+      lines.push("- Warnings:");
+      for (const warning of bundle.warnings) {
+        lines.push(`  - ${warning}`);
+      }
+    }
+    lines.push("");
+  }
+
+  const summaryMd = `${lines.join("\n")}\n`;
+  writeUtf8(path.join(absoluteOutDir, "run-summary.md"), summaryMd);
+  writeUtf8(path.join(runsDir, `${timestamp}.md`), summaryMd);
+}
+
+function readExisting(filePath: string): string {
+  const absolutePath = path.join(repoRoot, filePath);
+  return fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, "utf8") : "";
+}
+
+function writeUtf8(filePath: string, content: string): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, content, "utf8");
+}
