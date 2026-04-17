@@ -13,7 +13,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 
 import {
   bundleArtifactSlug,
@@ -33,12 +33,13 @@ type Change = {
   content: string;
 };
 
-function makeRepo(): string | null {
+function makeRepo(t: TestContext): string | null {
   try {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-opt-cli-"));
     fs.mkdirSync(path.join(tmp, ".git"));
     return tmp;
-  } catch {
+  } catch (err) {
+    t.skip(`os.tmpdir() unavailable: ${(err as Error).message}`);
     return null;
   }
 }
@@ -131,8 +132,8 @@ function runCliAsync(
   });
 }
 
-test("diff generation failure is non-fatal — proposal.json and summary are still saved", () => {
-  const repo = makeRepo();
+test("diff generation failure is non-fatal — proposal.json and summary are still saved", (t) => {
+  const repo = makeRepo(t);
   if (!repo) return;
   try {
     writeSkill(repo, "alpha", "# alpha\n\nOriginal.\n");
@@ -210,8 +211,8 @@ function startMockResponsesServer(
   });
 }
 
-test("--mode api polls until terminal status", async () => {
-  const repo = makeRepo();
+test("--mode api polls until terminal status", async (t) => {
+  const repo = makeRepo(t);
   if (!repo) return;
   try {
     writeSkill(repo, "alpha", "# alpha\n\nOriginal.\n");
@@ -298,8 +299,8 @@ test("--mode api polls until terminal status", async () => {
   }
 });
 
-test("--mode api with mock Responses server submits, parses, and persists a proposal", async () => {
-  const repo = makeRepo();
+test("--mode api with mock Responses server submits, parses, and persists a proposal", async (t) => {
+  const repo = makeRepo(t);
   if (!repo) return;
   try {
     writeSkill(repo, "alpha", "# alpha\n\nOriginal.\n");
@@ -357,8 +358,8 @@ test("--mode api with mock Responses server submits, parses, and persists a prop
   }
 });
 
-test("--mode plan writes bundle manifest and rewrite request", () => {
-  const repo = makeRepo();
+test("--mode plan writes bundle manifest and rewrite request", (t) => {
+  const repo = makeRepo(t);
   if (!repo) return;
   try {
     writeSkill(repo, "alpha", "# alpha\n\nOriginal content.\n");
@@ -376,8 +377,8 @@ test("--mode plan writes bundle manifest and rewrite request", () => {
   }
 });
 
-test("--mode api without --skill exits with a guard error", () => {
-  const repo = makeRepo();
+test("--mode api without --skill exits with a guard error", (t) => {
+  const repo = makeRepo(t);
   if (!repo) return;
   try {
     writeSkill(repo, "alpha", "# alpha\n\nOriginal.\n");
@@ -389,8 +390,8 @@ test("--mode api without --skill exits with a guard error", () => {
   }
 });
 
-test("--reuse-proposal --apply writes the rewritten content", () => {
-  const repo = makeRepo();
+test("--reuse-proposal --apply writes the rewritten content", (t) => {
+  const repo = makeRepo(t);
   if (!repo) return;
   try {
     writeSkill(repo, "alpha", "# alpha\n\nOriginal.\n");
@@ -424,8 +425,8 @@ test("--reuse-proposal --apply writes the rewritten content", () => {
   }
 });
 
-test("--reuse-proposal rejects a stale proposal when a bundle file was modified", () => {
-  const repo = makeRepo();
+test("--reuse-proposal rejects a stale proposal when a bundle file was modified", (t) => {
+  const repo = makeRepo(t);
   if (!repo) return;
   try {
     writeSkill(repo, "alpha", "# alpha\n\nOriginal.\n");
@@ -477,8 +478,44 @@ function fullProposal(changes: Change[]): RewriteProposal {
   };
 }
 
-test("planProposalApply does not mutate bundle files when a later proposal's target is a symlink", () => {
-  const repo = makeRepo();
+test("planProposalApply rejects targets whose ancestor directory is a symlink", (t) => {
+  if (process.platform === "win32") return; // symlinks need extra perms
+  const repo = makeRepo(t);
+  if (!repo) return;
+  try {
+    writeSkill(repo, "beta", "# beta\n\nOriginal beta body.\n");
+    // Attacker-style setup: `skill/alpha` is a symlink that resolves inside
+    // the repo, so realpath-based checks still see everything as in-tree.
+    // A plain write to skill/alpha/SKILL.md would follow the symlink and
+    // clobber skill/beta/SKILL.md; the ancestor-symlink guard must catch it.
+    fs.symlinkSync(
+      path.join(repo, "skill/beta"),
+      path.join(repo, "skill/alpha"),
+    );
+    const stagingRoot = fs.mkdtempSync(path.join(repo, "staging-"));
+    const proposal = fullProposal([
+      {
+        path: "skill/alpha/SKILL.md",
+        action: "update",
+        summary: "sneaky",
+        content: "# alpha\n\nWould overwrite beta.\n",
+      },
+    ]);
+    assert.throws(
+      () => planProposalApply(proposal, stagingRoot, repo),
+      /symlinked ancestor/,
+    );
+    assert.equal(
+      fs.readFileSync(path.join(repo, "skill/beta/SKILL.md"), "utf8"),
+      "# beta\n\nOriginal beta body.\n",
+    );
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("planProposalApply does not mutate bundle files when a later proposal's target is a symlink", (t) => {
+  const repo = makeRepo(t);
   if (!repo) return;
   try {
     writeSkill(repo, "alpha", "# alpha\n\nOriginal alpha body.\n");
@@ -534,8 +571,8 @@ test("planProposalApply does not mutate bundle files when a later proposal's tar
   }
 });
 
-test("commitStagedOps atomically swaps staged content over originals and honors deletes", () => {
-  const repo = makeRepo();
+test("commitStagedOps atomically swaps staged content over originals and honors deletes", (t) => {
+  const repo = makeRepo(t);
   if (!repo) return;
   try {
     writeSkill(repo, "alpha", "# alpha\n\nOriginal.\n");
@@ -567,7 +604,7 @@ test("commitStagedOps atomically swaps staged content over originals and honors 
   }
 });
 
-test("stagingName preserves the repo-relative structure one-to-one", () => {
+test("stagingName preserves the repo-relative structure one-to-one", (t) => {
   const expectedA = path.join("skill", "alpha", "SKILL.md");
   const expectedB = path.join("standards", "shared.md");
   assert.equal(stagingName("/repo/skill/alpha/SKILL.md", "/repo"), expectedA);
@@ -581,7 +618,7 @@ test("stagingName preserves the repo-relative structure one-to-one", () => {
   assert.notEqual(nested1, nested2);
 });
 
-test("bundleArtifactSlug gives distinct slugs for bundles with the same leaf name", () => {
+test("bundleArtifactSlug gives distinct slugs for bundles with the same leaf name", (t) => {
   assert.equal(
     bundleArtifactSlug("skill/alpha/SKILL.md"),
     "skill__alpha__SKILL.md",
@@ -602,8 +639,8 @@ test("bundleArtifactSlug gives distinct slugs for bundles with the same leaf nam
   );
 });
 
-test("dry-run surfaces cross-bundle conflicts on a shared ref", () => {
-  const repo = makeRepo();
+test("dry-run surfaces cross-bundle conflicts on a shared ref", (t) => {
+  const repo = makeRepo(t);
   if (!repo) return;
   try {
     fs.mkdirSync(path.join(repo, "standards"), { recursive: true });
@@ -660,8 +697,8 @@ test("dry-run surfaces cross-bundle conflicts on a shared ref", () => {
   }
 });
 
-test("--reuse-proposal --apply handles two bundles sharing a ref", () => {
-  const repo = makeRepo();
+test("--reuse-proposal --apply handles two bundles sharing a ref", (t) => {
+  const repo = makeRepo(t);
   if (!repo) return;
   try {
     fs.mkdirSync(path.join(repo, "standards"), { recursive: true });

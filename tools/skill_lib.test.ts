@@ -1,12 +1,12 @@
 // These tests require a writable os.tmpdir(). In sandboxed environments
-// where /tmp is locked down, makeRepo returns null and the test exits
-// early rather than failing the setup before it reaches any assertion.
+// where /tmp is locked down, makeRepo calls t.skip() so the test reports a
+// visible skip instead of a silent green pass that would hide regressions.
 
 import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 
 import {
   buildBundle,
@@ -16,18 +16,19 @@ import {
   resolveSkillTarget,
 } from "./skill_lib.ts";
 
-function makeRepo(): string | null {
+function makeRepo(t: TestContext): string | null {
   try {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-lib-"));
     fs.mkdirSync(path.join(tmp, ".git"), { recursive: true });
     return tmp;
-  } catch {
+  } catch (err) {
+    t.skip(`os.tmpdir() unavailable: ${(err as Error).message}`);
     return null;
   }
 }
 
-test("resolveRefs picks up inline, reference-style, and angle-bracket links", () => {
-  const tmp = makeRepo();
+test("resolveRefs picks up inline, reference-style, and angle-bracket links", (t) => {
+  const tmp = makeRepo(t);
   if (!tmp) return;
   try {
     const skillDir = path.join(tmp, "skill", "alpha");
@@ -63,8 +64,8 @@ test("resolveRefs picks up inline, reference-style, and angle-bracket links", ()
   }
 });
 
-test("resolveRefs handles reference-style definitions with angle-bracketed spaced paths", () => {
-  const tmp = makeRepo();
+test("resolveRefs handles reference-style definitions with angle-bracketed spaced paths", (t) => {
+  const tmp = makeRepo(t);
   if (!tmp) return;
   try {
     const skillDir = path.join(tmp, "skill", "alpha");
@@ -89,8 +90,8 @@ test("resolveRefs handles reference-style definitions with angle-bracketed space
   }
 });
 
-test("resolveRefs handles inline links with balanced parens in the destination", () => {
-  const tmp = makeRepo();
+test("resolveRefs handles inline links with balanced parens in the destination", (t) => {
+  const tmp = makeRepo(t);
   if (!tmp) return;
   try {
     const skillDir = path.join(tmp, "skill", "alpha");
@@ -109,8 +110,8 @@ test("resolveRefs handles inline links with balanced parens in the destination",
   }
 });
 
-test("resolveRefs handles collapsed reference links [label][]", () => {
-  const tmp = makeRepo();
+test("resolveRefs handles collapsed reference links [label][]", (t) => {
+  const tmp = makeRepo(t);
   if (!tmp) return;
   try {
     const skillDir = path.join(tmp, "skill", "alpha");
@@ -135,8 +136,8 @@ test("resolveRefs handles collapsed reference links [label][]", () => {
   }
 });
 
-test("resolveRefs strips trailing titles from reference-style definitions", () => {
-  const tmp = makeRepo();
+test("resolveRefs strips trailing titles from reference-style definitions", (t) => {
+  const tmp = makeRepo(t);
   if (!tmp) return;
   try {
     const skillDir = path.join(tmp, "skill", "alpha");
@@ -167,8 +168,8 @@ test("resolveRefs strips trailing titles from reference-style definitions", () =
   }
 });
 
-test("resolveRefs ignores links inside fenced code blocks and inline code", () => {
-  const tmp = makeRepo();
+test("resolveRefs ignores links inside fenced code blocks and inline code", (t) => {
+  const tmp = makeRepo(t);
   if (!tmp) return;
   try {
     const skillDir = path.join(tmp, "skill", "alpha");
@@ -200,8 +201,8 @@ test("resolveRefs ignores links inside fenced code blocks and inline code", () =
   }
 });
 
-test("resolveRefs flags out-of-repo paths as missing", () => {
-  const tmp = makeRepo();
+test("resolveRefs flags out-of-repo paths as missing", (t) => {
+  const tmp = makeRepo(t);
   if (!tmp) return;
   try {
     const skillDir = path.join(tmp, "skill", "alpha");
@@ -219,9 +220,9 @@ test("resolveRefs flags out-of-repo paths as missing", () => {
   }
 });
 
-test("listSkillPaths rejects symlinked SKILL.md files", () => {
+test("listSkillPaths rejects symlinked SKILL.md files", (t) => {
   if (process.platform === "win32") return; // skip on Windows symlink perms
-  const tmp = makeRepo();
+  const tmp = makeRepo(t);
   if (!tmp) return;
   try {
     const real = path.join(tmp, "real");
@@ -240,8 +241,8 @@ test("listSkillPaths rejects symlinked SKILL.md files", () => {
   }
 });
 
-test("resolveSkillTarget rejects a slug that matches two bundles under different parents", () => {
-  const tmp = makeRepo();
+test("resolveSkillTarget rejects a slug that matches two bundles under different parents", (t) => {
+  const tmp = makeRepo(t);
   if (!tmp) return;
   try {
     for (const parent of ["skill", "vendor"]) {
@@ -263,8 +264,8 @@ test("resolveSkillTarget rejects a slug that matches two bundles under different
   }
 });
 
-test("collectSharedRefs identifies markdown files referenced by multiple bundles", () => {
-  const tmp = makeRepo();
+test("collectSharedRefs identifies markdown files referenced by multiple bundles", (t) => {
+  const tmp = makeRepo(t);
   if (!tmp) return;
   try {
     const shared = path.join(tmp, "standards");
