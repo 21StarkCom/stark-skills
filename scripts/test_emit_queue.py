@@ -1637,8 +1637,64 @@ class TestDrainToBufferV2:
         qdb.close()
         assert len(rows) == 2
         keys = [r[0] for r in rows]
-        assert any(k.startswith("legacy:") for k in keys)
-        assert "legacy:row-1" in keys
+        # Keys are namespaced by a hash of the source-file path so two
+        # quarantined buffers can't clobber each other's legacy rows.
+        import hashlib
+        source_tag = hashlib.sha256(
+            str(legacy_path).encode("utf-8")
+        ).hexdigest()[:8]
+        assert any(k.startswith(f"legacy:{source_tag}:") for k in keys)
+        assert f"legacy:{source_tag}:row-1" in keys
+
+    def test_legacy_replay_synthesized_keys_dont_collide_across_buffers(
+        self, isolated_queue
+    ):
+        """Two quarantined buffers that happen to contain rows with the same
+        legacy id must end up with DIFFERENT synthesized dedupe keys so a
+        second quarantine's INSERT OR IGNORE doesn't silently drop events."""
+        def make_legacy(path):
+            conn = sqlite3.connect(str(path))
+            conn.executescript(
+                """
+                CREATE TABLE events (
+                    id TEXT PRIMARY KEY,
+                    dedupe_key TEXT,
+                    type TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    user_id TEXT,
+                    project TEXT,
+                    payload TEXT NOT NULL,
+                    synced_at TEXT
+                );
+                """
+            )
+            conn.execute(
+                "INSERT INTO events (id, type, timestamp, payload) "
+                "VALUES ('1', 'skill_invocation', '2026-01-01T00:00:00Z', '{}')"
+            )
+            conn.commit()
+            conn.close()
+
+        first_path = isolated_queue / "buffer.v1-legacy-1.db"
+        second_path = isolated_queue / "buffer.v1-legacy-2.db"
+        make_legacy(first_path)
+        make_legacy(second_path)
+
+        moved_first = emit_queue._replay_legacy_rows_into_queue(first_path)
+        moved_second = emit_queue._replay_legacy_rows_into_queue(second_path)
+        assert moved_first == 1
+        assert moved_second == 1, (
+            "Second quarantine must not be swallowed by INSERT OR IGNORE "
+            "on a colliding synthesized dedupe key"
+        )
+
+        qdb = emit_queue._get_db()
+        keys = {
+            r[0]
+            for r in qdb.execute("SELECT dedupe_key FROM pending").fetchall()
+        }
+        qdb.close()
+        assert len(keys) == 2, keys
 
     def test_legacy_replay_preserves_dedupe_key_in_event_json(self, isolated_queue):
         """Replayed legacy rows must carry their dedupe_key inside the JSON

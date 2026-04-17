@@ -167,6 +167,39 @@ test("resolveRefs strips trailing titles from reference-style definitions", () =
   }
 });
 
+test("resolveRefs ignores links inside fenced code blocks and inline code", () => {
+  const tmp = makeRepo();
+  if (!tmp) return;
+  try {
+    const skillDir = path.join(tmp, "skill", "alpha");
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, "real.md"), "# real\n");
+    const skillPath = path.join(skillDir, "SKILL.md");
+    fs.writeFileSync(
+      skillPath,
+      [
+        "# alpha",
+        "",
+        "[r](./real.md)",
+        "",
+        "Inline `[example](./fake.md)` should not count.",
+        "",
+        "```markdown",
+        "[also-example](./also-fake.md)",
+        "[defn]: ./also-fake.md",
+        "```",
+      ].join("\n"),
+    );
+    const bundle = buildBundle(tmp, skillPath);
+    // Only the real inline link counts; the two code-span mentions are
+    // ignored and therefore don't show up in missingRefs either.
+    assert.deepEqual(bundle.refs, ["skill/alpha/real.md"]);
+    assert.deepEqual(bundle.missingRefs, []);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("resolveRefs flags out-of-repo paths as missing", () => {
   const tmp = makeRepo();
   if (!tmp) return;

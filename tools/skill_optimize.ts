@@ -66,11 +66,17 @@ type BundleRunSummary = {
 // Module-level repoRoot is populated only when `main()` runs. Tests import
 // this file to exercise planProposalApply/commitStagedOps without running
 // the full CLI, so top-level code must not access process.argv / throw on
-// a bad cwd.
+// a bad cwd. Per-run state (file snapshots, mtimes, selection) lives in a
+// local RunState inside main() and flows into helpers as parameters —
+// keeping the optimizer's data-flow explicit instead of leaning on hidden
+// module globals.
 let repoRoot: string;
-const bundleFilesSnapshot = new Map<string, Array<{ path: string; content: string }>>();
-const preRunMtimes = new Map<string, number>();
-let selectedSkillPaths: Set<string> = new Set();
+
+type RunState = {
+  bundleFilesSnapshot: Map<string, Array<{ path: string; content: string }>>;
+  preRunMtimes: Map<string, number>;
+  selectedSkillPaths: Set<string>;
+};
 
 async function main(): Promise<void> {
   repoRoot = findRepoRoot(process.cwd());
@@ -102,7 +108,6 @@ async function main(): Promise<void> {
 
   const bundles = discoverSkillBundles(repoRoot);
   const selectedBundles = selectBundles(bundles, options.skillTargets);
-  selectedSkillPaths = new Set(selectedBundles.map((bundle) => bundle.skillPath));
   const sharedRefOwners = new Map<string, string[]>();
   for (const { ref, skills } of collectSharedRefs(bundles)) {
     sharedRefOwners.set(ref, skills);
@@ -110,14 +115,20 @@ async function main(): Promise<void> {
   // Snapshot every selected bundle's files up front so that an earlier apply
   // pass cannot delete a shared ref that a later bundle still needs to load.
   // Without this, `--apply` across multi-bundle runs can crash mid-iteration.
-  bundleFilesSnapshot.clear();
-  preRunMtimes.clear();
+  const runState: RunState = {
+    bundleFilesSnapshot: new Map(),
+    preRunMtimes: new Map(),
+    selectedSkillPaths: new Set(selectedBundles.map((b) => b.skillPath)),
+  };
   for (const bundle of selectedBundles) {
-    bundleFilesSnapshot.set(bundle.skillPath, loadBundleFiles(repoRoot, bundle));
-    for (const file of bundleFilesSnapshot.get(bundle.skillPath) ?? []) {
+    runState.bundleFilesSnapshot.set(
+      bundle.skillPath,
+      loadBundleFiles(repoRoot, bundle),
+    );
+    for (const file of runState.bundleFilesSnapshot.get(bundle.skillPath) ?? []) {
       const abs = path.join(repoRoot, file.path);
-      if (fs.existsSync(abs) && !preRunMtimes.has(file.path)) {
-        preRunMtimes.set(file.path, fs.statSync(abs).mtimeMs);
+      if (fs.existsSync(abs) && !runState.preRunMtimes.has(file.path)) {
+        runState.preRunMtimes.set(file.path, fs.statSync(abs).mtimeMs);
       }
     }
   }
@@ -126,7 +137,12 @@ async function main(): Promise<void> {
   const pendingProposals: BundleProposalPair[] = [];
 
   for (const bundle of selectedBundles) {
-    const { summary, proposal } = await processBundle(bundle, options, sharedRefOwners);
+    const { summary, proposal } = await processBundle(
+      bundle,
+      options,
+      sharedRefOwners,
+      runState,
+    );
     runSummaries.push(summary);
     if (proposal) {
       pendingProposals.push({ bundle, proposal });
@@ -140,17 +156,20 @@ async function main(): Promise<void> {
     skillPath: p.bundle.skillPath,
     proposal: p.proposal,
   }));
+  const ownerSkillContents = new Map<string, string>();
+  for (const bundle of selectedBundles) {
+    const files = runState.bundleFilesSnapshot.get(bundle.skillPath) ?? [];
+    const skillFile = files.find(
+      (f: { path: string }) => f.path === bundle.skillPath,
+    );
+    if (skillFile) ownerSkillContents.set(bundle.skillPath, skillFile.content);
+  }
   if (pendingEntries.length > 1) {
     assertCrossBundleConsistency(pendingEntries);
-    const ownerSkillContents = new Map<string, string>();
-    for (const bundle of selectedBundles) {
-      const files = bundleFilesSnapshot.get(bundle.skillPath) ?? [];
-      const skillFile = files.find((f) => f.path === bundle.skillPath);
-      if (skillFile) ownerSkillContents.set(bundle.skillPath, skillFile.content);
-    }
     assertSharedDeletedRefsRemoved(pendingEntries, sharedRefOwners, ownerSkillContents);
   }
 
+  // Build ownerSkillContents once in a scope the apply block also reuses.
   if (options.apply && pendingProposals.length > 0) {
     const pendingApplies = pendingProposals;
     // Two-phase apply: stage every write under artifacts/skill-optimizer/
@@ -242,10 +261,11 @@ async function processBundle(
   bundle: SkillBundle,
   options: CliOptions,
   sharedRefOwners: Map<string, string[]>,
+  runState: RunState,
 ): Promise<{ summary: BundleRunSummary; proposal: RewriteProposal | null }> {
   // Use the up-front snapshot so that a prior apply pass cannot affect the
   // file contents visible to this bundle's validation/diff generation.
-  const bundleFiles = bundleFilesSnapshot.get(bundle.skillPath)
+  const bundleFiles = runState.bundleFilesSnapshot.get(bundle.skillPath)
     ?? loadBundleFiles(repoRoot, bundle);
   const artifactDir = path.join(
     repoRoot,
@@ -286,9 +306,15 @@ async function processBundle(
 
   const proposalPath = path.join(artifactDir, "proposal.json");
   const proposal = options.reuseProposal
-    ? loadExistingProposal(proposalPath, bundleFiles)
+    ? loadExistingProposal(proposalPath, bundleFiles, runState.preRunMtimes)
     : await requestProposal(bundle, bundleFiles, options);
-  validateProposal(bundle, proposal, bundleFiles, sharedRefOwners, selectedSkillPaths);
+  validateProposal(
+    bundle,
+    proposal,
+    bundleFiles,
+    sharedRefOwners,
+    runState.selectedSkillPaths,
+  );
   if (!options.reuseProposal) {
     persistProposal(artifactDir, bundle, proposal);
   }
@@ -782,6 +808,7 @@ function buildRewriteRequest(
 function loadExistingProposal(
   proposalPath: string,
   bundleFiles: Array<{ path: string; content: string }>,
+  preRunMtimes: Map<string, number>,
 ): RewriteProposal {
   if (!fs.existsSync(proposalPath)) {
     throw new Error(`No existing proposal found at ${rel(repoRoot, proposalPath)}`);
