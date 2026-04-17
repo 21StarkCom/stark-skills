@@ -72,6 +72,21 @@ class TestValidation:
         errors = emit_queue.validate(_make_event(payload="not a dict"))
         assert any("payload" in e for e in errors)
 
+    def test_v2_event_type_names_are_accepted(self):
+        """The workflow-improvement design doc defines context_compaction,
+        learning_captured, and skill_recommendation. validate() must accept
+        those alongside the pre-v2 aliases so the migration doesn't reject
+        spec-compliant producers."""
+        for event_type in (
+            "context_compaction",
+            "learning_captured",
+            "skill_recommendation",
+            # Legacy aliases stay valid during migration.
+            "learning_capture",
+            "skill_suggestion",
+        ):
+            assert emit_queue.validate(_make_event(type=event_type)) == [], event_type
+
     def test_non_string_required_fields_are_rejected(self):
         """type/timestamp/cli/source must be strings; numbers or dicts were
         previously accepted by the field-presence check and slipped into

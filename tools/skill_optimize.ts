@@ -651,11 +651,16 @@ async function requestProposal(
       );
     }
   }
+  // Honor --api-timeout-ms. Floor at pollIntervalMs so a single fetch has
+  // time to complete even when the remaining budget has dipped below it,
+  // but never more — the old 5s floor blocked every short-budget run on
+  // the POST alone, masking small --api-timeout-ms values.
+  const fetchFloor = Math.max(options.pollIntervalMs, 100);
   let payload = await openaiFetch(responsesBase, {
     method: "POST",
     headers: openAiHeaders(responsesBase),
     body: JSON.stringify(requestBody),
-  }, Math.max(deadline - Date.now(), 5000));
+  }, Math.max(deadline - Date.now(), fetchFloor));
   console.error(
     `[skill_optimize] submitted ${bundle.skillPath} -> ${payload.id} (${payload.status ?? "unknown"})`,
   );
@@ -672,7 +677,7 @@ async function requestProposal(
         method: "GET",
         headers: openAiHeaders(responsesBase),
       },
-      Math.max(deadline - Date.now(), 5000),
+      Math.max(deadline - Date.now(), fetchFloor),
     );
     if (payload.status !== lastStatus) {
       console.error(

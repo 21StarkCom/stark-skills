@@ -949,6 +949,14 @@ def _write_event_to_buffer(buffer_db, dedupe_key, event_json, row_id=None):
         raise ValueError("event is missing required `type` field")
     if not event.get("timestamp"):
         raise ValueError("event is missing required `timestamp` field")
+    if "payload" in event and not isinstance(event["payload"], dict):
+        # Non-dict payload slips past validate() if the row was queued before
+        # stricter type checks existed. Drop to the caller so the row can
+        # dead-letter with source_path='buffer' instead of silently writing
+        # a row with all-NULL lifted columns.
+        raise ValueError(
+            f"payload must be a dict, got: {type(event['payload']).__name__}"
+        )
     # Retry-path fallback must be unique per row: multiple unkeyed rows share
     # the same `drained:retry:<type>` string, so INSERT OR IGNORE drops the
     # 2nd+ and the caller's subsequent DELETE FROM dead_letter loses them.
@@ -1154,7 +1162,13 @@ def retry_buffer_dead_letters() -> int:
         ).fetchall()
         for dl_id, dedupe_key, event_json in rows:
             try:
-                _write_event_to_buffer(buffer_db, dedupe_key, event_json)
+                # Pass dl_id as the stable retry tag so a retry is idempotent:
+                # if a previous attempt inserted the row but the subsequent
+                # DELETE from dead_letter failed, the next retry regenerates
+                # the same synthesized dedupe and INSERT OR IGNORE is a no-op.
+                _write_event_to_buffer(
+                    buffer_db, dedupe_key, event_json, row_id=f"dl{dl_id}",
+                )
             except Exception as exc:
                 _log_drain_failure(
                     exc, f"retry_buffer_dead_letters dl_id={dl_id}",
