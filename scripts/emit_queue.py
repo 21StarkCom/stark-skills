@@ -559,12 +559,17 @@ def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
                     project_lookup[p_row["id"]] = p_row["path"]
         except sqlite3.OperationalError:
             pass
-        where = "WHERE synced_at IS NULL" if "synced_at" in cols else ""
-        rows = legacy.execute(f"SELECT * FROM events {where}").fetchall()
+        # Replay every row — not just unsynced ones. A partial-v2 buffer
+        # may have synced_at set on rows that the sink wrote but never
+        # moved to permanent storage; leaving them behind loses history.
+        # drain_to_buffer uses INSERT OR IGNORE so re-replaying already-
+        # delivered rows is a no-op on the backend side.
+        rows = legacy.execute("SELECT * FROM events").fetchall()
     finally:
         legacy.close()
 
     replayed = 0
+    failed = 0
     queue_db = _get_db()
     try:
         for raw in rows:
@@ -629,10 +634,17 @@ def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
                 if cursor.rowcount > 0:
                     replayed += 1
             except Exception as exc:
+                failed += 1
                 _log_drain_failure(exc, f"legacy-replay dedupe={dedupe_key}")
         queue_db.commit()
     finally:
         queue_db.close()
+    if failed > 0:
+        # Surface partial-replay failures so the caller keeps the legacy
+        # file in place instead of renaming on a half-successful recovery.
+        raise RuntimeError(
+            f"legacy replay failed for {failed} of {len(rows)} rows"
+        )
     return replayed
 
 
@@ -646,7 +658,7 @@ def _quarantine_legacy_buffer(buffer_path: Path) -> Path | None:
     """
     try:
         replayed = _replay_legacy_rows_into_queue(buffer_path)
-    except sqlite3.DatabaseError as exc:
+    except (sqlite3.DatabaseError, RuntimeError) as exc:
         _log_drain_failure(
             exc,
             f"legacy buffer replay failed for {buffer_path}; leaving file in place for retry",
