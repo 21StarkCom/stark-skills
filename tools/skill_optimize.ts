@@ -79,19 +79,18 @@ type RunState = {
 };
 
 async function main(): Promise<void> {
-  repoRoot = findRepoRoot(process.cwd());
-  const options = parseArgs(process.argv.slice(2));
-
-  // Fail closed when the ancestor walk didn't actually find a .git/ — that
-  // means findRepoRoot returned the bogus fallback (cwd). Without this a
-  // caller running from anywhere would pass through the "inside repo root"
-  // check because repoRoot === cwd trivially.
-  if (!fs.existsSync(path.join(repoRoot, ".git"))) {
+  // findRepoRoot returns null when no ancestor has .git/, so the type
+  // system forces an explicit guard here instead of relying on a follow-up
+  // existsSync check that could drift out of sync with the resolver.
+  const resolvedRoot = findRepoRoot(process.cwd());
+  if (resolvedRoot === null) {
     throw new Error(
       `skill_optimize must run from inside a git repository; ` +
         `no .git/ found walking up from ${process.cwd()}.`,
     );
   }
+  repoRoot = resolvedRoot;
+  const options = parseArgs(process.argv.slice(2));
 
   // And the CWD must still be inside that repo root (defense in depth).
   const cwdReal = fs.realpathSync(process.cwd());
@@ -606,7 +605,9 @@ async function requestProposal(
   if (responsesBase !== "https://api.openai.com/v1/responses") {
     const host = (() => {
       try {
-        return new URL(responsesBase).hostname;
+        // URL#hostname wraps IPv6 addresses in brackets (e.g. "[::1]"),
+        // so strip them before comparing to the bare loopback literal.
+        return new URL(responsesBase).hostname.replace(/^\[|\]$/g, "");
       } catch {
         return "";
       }
@@ -973,6 +974,21 @@ export function planProposalApply(
     const outputPath = path.join(repoRoot, change.path);
     if (fs.existsSync(outputPath) && fs.lstatSync(outputPath).isSymbolicLink()) {
       throw new Error(`Refusing to apply: ${change.path} is a symlink`);
+    }
+    // Reject any symlink in the ancestor chain so `skill/alpha -> ../beta`
+    // can't redirect a write on skill/alpha/SKILL.md to skill/beta/SKILL.md.
+    // lstat on each literal ancestor catches directory symlinks that the
+    // final-target check wouldn't see because lstat's final-only semantics
+    // already followed the intermediate.
+    let ancestor = path.dirname(outputPath);
+    while (ancestor.length >= repoRoot.length && ancestor !== path.dirname(ancestor)) {
+      if (fs.existsSync(ancestor) && fs.lstatSync(ancestor).isSymbolicLink()) {
+        throw new Error(
+          `Refusing to apply: ${change.path} has a symlinked ancestor directory (${path.relative(repoRoot, ancestor)}).`,
+        );
+      }
+      if (ancestor === repoRoot) break;
+      ancestor = path.dirname(ancestor);
     }
     let existingAncestor = outputPath;
     const missingParts: string[] = [];

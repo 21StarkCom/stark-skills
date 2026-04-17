@@ -1,8 +1,5 @@
 #!/usr/bin/env node
 
-import fs from "node:fs";
-import path from "node:path";
-
 import {
   collectSharedRefs,
   discoverSkillBundles,
@@ -10,11 +7,11 @@ import {
   hasBrokenRefs,
 } from "./skill_lib.ts";
 
+// findRepoRoot returns null when no ancestor .git/ exists. The narrowed
+// return type forces this check, so we can't accidentally audit a tree
+// that lives outside a repo.
 const repoRoot = findRepoRoot(process.cwd());
-// Mirror skill_optimize's .git guard: findRepoRoot falls back to cwd when no
-// ancestor has a .git/, which would let skill_audit silently audit whatever
-// tree happened to be upward of the working directory.
-if (!fs.existsSync(path.join(repoRoot, ".git"))) {
+if (repoRoot === null) {
   console.error(
     `skill_audit must run from inside a git repository; ` +
       `no .git/ found walking up from ${process.cwd()}.`,

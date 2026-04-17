@@ -20,7 +20,13 @@ const IGNORE_DIRS = new Set([
   "node_modules",
 ]);
 
-export function findRepoRoot(start: string): string {
+/**
+ * Walk up from `start` until a `.git/` entry is found. Returns `null` when
+ * no ancestor has one — prior versions silently returned `path.resolve(start)`
+ * and forced every caller to re-check `.git` independently, which led to the
+ * bypass described in round 24 of the stark-forged review.
+ */
+export function findRepoRoot(start: string): string | null {
   let current = path.resolve(start);
   while (true) {
     if (fs.existsSync(path.join(current, ".git"))) {
@@ -28,7 +34,7 @@ export function findRepoRoot(start: string): string {
     }
     const parent = path.dirname(current);
     if (parent === current) {
-      return path.resolve(start);
+      return null;
     }
     current = parent;
   }
