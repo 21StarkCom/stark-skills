@@ -14,6 +14,44 @@ export type ProposalStalenessResult =
  * multi-bundle run, so an earlier bundle's own apply step can't trigger a
  * spurious stale failure for a later bundle.
  */
+export type BundleProposal = {
+  skillPath: string;
+  proposal: RewriteProposal;
+};
+
+/**
+ * Throws if two selected bundles propose incompatible actions on the same
+ * shared reference (different update content, or one wants update and the
+ * other delete). Prevents a sequential per-bundle apply from silently
+ * clobbering an earlier edit on a shared standards doc.
+ */
+export function assertCrossBundleConsistency(entries: BundleProposal[]): void {
+  type Claim = { skillPath: string; action: RewriteAction; content: string };
+  const byPath = new Map<string, Claim[]>();
+  for (const { skillPath, proposal } of entries) {
+    for (const change of proposal.changes) {
+      if (change.action === "keep") continue;
+      const list = byPath.get(change.path) ?? [];
+      list.push({ skillPath, action: change.action, content: change.content });
+      byPath.set(change.path, list);
+    }
+  }
+  for (const [sharedPath, claims] of byPath) {
+    if (claims.length < 2) continue;
+    const first = claims[0];
+    const disagreement = claims.find(
+      (c) => c.action !== first.action || c.content !== first.content,
+    );
+    if (disagreement) {
+      const owners = claims.map((c) => `${c.skillPath} (${c.action})`).join(", ");
+      throw new Error(
+        `Cross-bundle conflict on ${sharedPath}: ${owners}. ` +
+          "Reconcile the proposals (identical content or matching delete) before applying.",
+      );
+    }
+  }
+}
+
 export function findStaleBundleFile(
   proposalMtimeMs: number,
   bundleFilePaths: string[],

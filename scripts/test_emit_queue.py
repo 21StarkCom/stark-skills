@@ -1153,6 +1153,20 @@ class TestDrainToBufferV2:
             "/home/runner/work/stark-skills/stark-skills"
         ) == "stark-skills"
 
+    @pytest.mark.parametrize("path,expected", [
+        ("/builds/acme/payments", "payments"),
+        ("/builds/acme/payments/subdir", "payments"),
+        ("/srv/evinced/stark-skills", "stark-skills"),
+        ("/github/org/repo", "repo"),
+        ("/github/org/repo/deep/nested", "repo"),
+        ("/workspace/acme/payments", "payments"),
+        ("/home/runner/work/foo/foo", "foo"),
+    ])
+    def test_ci_layouts_resolve_correctly(self, path, expected, isolated_queue):
+        """Every _CI_PATTERNS entry must resolve to the right repo slug."""
+        assert emit_queue._normalize_path_to_repo(path) == expected, path
+        assert emit_queue._derive_workspace_type(path) == "main", path
+
     def test_home_directory_paths_are_not_guessed(self, isolated_queue):
         """Arbitrary /home/<user>/... paths must stay NULL — only known
         CI anchors like /home/runner/work/... get attributed."""
