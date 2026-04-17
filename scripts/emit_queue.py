@@ -332,9 +332,12 @@ def _normalize_path_to_repo(path):
     if path.startswith("/"):
         base = _strip_worktree_suffix(path)
         # Prefer the `/git/<org>/<repo>` convention — handles deeper paths
-        # like `/Users/<user>/git/<org>/<repo>/subdir` reliably.
+        # like `/Users/<user>/git/<org>/<repo>/subdir` reliably. Use the
+        # LAST `/git/` anchor so pathological dev trees such as
+        # `/Users/git/<user>/git/<org>/<repo>` still attribute to <repo>,
+        # not the intermediate "git" segment.
         if "/git/" in base:
-            tail = base.split("/git/", 1)[1]
+            tail = base.rsplit("/git/", 1)[1]
             segs = [s for s in tail.split("/") if s]
             if len(segs) >= 2:
                 return segs[1]
@@ -591,12 +594,19 @@ def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
                     project_lookup[p_row["id"]] = p_row["path"]
         except sqlite3.OperationalError:
             pass
-        # Replay every row — not just unsynced ones. A partial-v2 buffer
-        # may have synced_at set on rows that the sink wrote but never
-        # moved to permanent storage; leaving them behind loses history.
-        # drain_to_buffer uses INSERT OR IGNORE so re-replaying already-
-        # delivered rows is a no-op on the backend side.
-        rows = legacy.execute("SELECT * FROM events").fetchall()
+        # Replay only rows the backend hasn't already ingested. Earlier we
+        # replayed every row (letting the API's dedupe reject duplicates),
+        # but that pushed days of already-delivered history ahead of fresh
+        # events every upgrade and starved the current drain. The original
+        # buffer file is preserved as buffer.legacy.db so an operator can
+        # still inspect synced history without re-delivering it.
+        cols = {row[1] for row in legacy.execute("PRAGMA table_info(events)").fetchall()}
+        if "synced_at" in cols:
+            rows = legacy.execute(
+                "SELECT * FROM events WHERE synced_at IS NULL"
+            ).fetchall()
+        else:
+            rows = legacy.execute("SELECT * FROM events").fetchall()
     finally:
         legacy.close()
 
@@ -1074,13 +1084,16 @@ def dead_letter_count() -> int:
 
 
 def retry_buffer_dead_letters() -> int:
-    """Requeue buffer-path dead letters back to `pending` for another
-    drain_to_buffer attempt. Use after resolving the underlying SQLite
-    failure (readonly FS, missing column, etc.). Returns count moved.
+    """Requeue buffer-path dead letters and drain them to the buffer sink
+    before drain() can see them. Use after resolving the underlying SQLite
+    failure (readonly FS, missing column, etc.). Returns count requeued.
 
-    Separate from retry_dead_letters() so a successful HTTP drain never
-    resurrects a row the buffer sink already rejected — re-posting a bad
-    row to the API would leak it into the backend.
+    The separate source_path filter in retry_dead_letters() keeps the two
+    sinks apart under normal operation; this function runs drain_to_buffer
+    synchronously after requeuing so pending never holds a buffer-quarantined
+    row long enough for an HTTP drain to pick it up (single-process). In a
+    multi-process setup the two drains should still coordinate via the
+    busy_timeout / WAL semantics.
     """
     db = _get_db()
     try:
@@ -1098,9 +1111,11 @@ def retry_buffer_dead_letters() -> int:
             db.execute("DELETE FROM dead_letter WHERE id = ?", (dl_id,))
             moved += 1
         db.commit()
-        return moved
     finally:
         db.close()
+    if moved:
+        drain_to_buffer()
+    return moved
 
 
 def retry_dead_letters() -> int:

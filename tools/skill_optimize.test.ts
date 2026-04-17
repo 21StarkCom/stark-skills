@@ -210,6 +210,94 @@ function startMockResponsesServer(
   });
 }
 
+test("--mode api polls until terminal status", async () => {
+  const repo = makeRepo();
+  if (!repo) return;
+  try {
+    writeSkill(repo, "alpha", "# alpha\n\nOriginal.\n");
+    const completedPayload = {
+      bundle_summary: "polled",
+      global_notes: [],
+      changes: [
+        {
+          path: "skill/alpha/SKILL.md",
+          action: "update",
+          summary: "rewrite",
+          content: "# alpha\n\nPolled result.\n",
+        },
+      ],
+      refs_kept: [],
+      refs_removed: [],
+      contradictions_resolved: [],
+      terminology_normalizations: [],
+      warnings: [],
+    };
+    // Stateful mock: first POST returns in_progress; the first two GETs
+    // keep returning in_progress; subsequent GETs return completed.
+    let getCount = 0;
+    const server = http.createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (c) => chunks.push(c));
+      req.on("end", () => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        if (req.method === "POST") {
+          res.end(JSON.stringify({ id: "poll-1", status: "in_progress" }));
+          return;
+        }
+        getCount += 1;
+        if (getCount < 3) {
+          res.end(JSON.stringify({ id: "poll-1", status: "in_progress" }));
+          return;
+        }
+        res.end(
+          JSON.stringify({
+            id: "poll-1",
+            status: "completed",
+            output_text: JSON.stringify(completedPayload),
+          }),
+        );
+      });
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", () => resolve()),
+    );
+    const port = (server.address() as { port: number }).port;
+    try {
+      const res = await runCliAsync(
+        repo,
+        [
+          "--mode",
+          "api",
+          "--skill",
+          "alpha",
+          // Poll fast so the test isn't paced by the 5s production default.
+          "--poll-interval-ms",
+          "25",
+          "--api-timeout-ms",
+          "10000",
+        ],
+        {
+          OPENAI_API_KEY: "test-key",
+          OPENAI_RESPONSES_BASE: `http://127.0.0.1:${port}/v1/responses`,
+        },
+      );
+      assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+      assert.ok(getCount >= 3, `expected at least 3 polling GETs, got ${getCount}`);
+      const persisted = JSON.parse(
+        fs.readFileSync(
+          path.join(artifactDir(repo, "alpha"), "proposal.json"),
+          "utf8",
+        ),
+      );
+      assert.equal(persisted.bundle_summary, "polled");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("--mode api with mock Responses server submits, parses, and persists a proposal", async () => {
   const repo = makeRepo();
   if (!repo) return;
@@ -496,15 +584,21 @@ test("stagingName preserves the repo-relative structure one-to-one", () => {
 test("bundleArtifactSlug gives distinct slugs for bundles with the same leaf name", () => {
   assert.equal(
     bundleArtifactSlug("skill/alpha/SKILL.md"),
-    "skill__alpha__SKILL_md",
+    "skill__alpha__SKILL.md",
   );
   assert.equal(
     bundleArtifactSlug("vendor/alpha/SKILL.md"),
-    "vendor__alpha__SKILL_md",
+    "vendor__alpha__SKILL.md",
   );
   assert.notEqual(
     bundleArtifactSlug("skill/alpha/SKILL.md"),
     bundleArtifactSlug("vendor/alpha/SKILL.md"),
+  );
+  // Dots must survive so `foo.bar` and `foo_bar` don't collide — replacing
+  // dots with underscores (an earlier mistake) aliased them together.
+  assert.notEqual(
+    bundleArtifactSlug("skill/foo.bar/SKILL.md"),
+    bundleArtifactSlug("skill/foo_bar/SKILL.md"),
   );
 });
 

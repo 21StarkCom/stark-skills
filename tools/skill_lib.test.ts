@@ -89,6 +89,52 @@ test("resolveRefs handles reference-style definitions with angle-bracketed space
   }
 });
 
+test("resolveRefs handles inline links with balanced parens in the destination", () => {
+  const tmp = makeRepo();
+  if (!tmp) return;
+  try {
+    const skillDir = path.join(tmp, "skill", "alpha");
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, "Guide (v2).md"), "# guide\n");
+    const skillPath = path.join(skillDir, "SKILL.md");
+    fs.writeFileSync(
+      skillPath,
+      "# alpha\n\n[g](./Guide (v2).md)\n",
+    );
+    const bundle = buildBundle(tmp, skillPath);
+    assert.deepEqual(bundle.refs, ["skill/alpha/Guide (v2).md"]);
+    assert.deepEqual(bundle.missingRefs, []);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveRefs handles collapsed reference links [label][]", () => {
+  const tmp = makeRepo();
+  if (!tmp) return;
+  try {
+    const skillDir = path.join(tmp, "skill", "alpha");
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, "guide.md"), "# guide\n");
+    const skillPath = path.join(skillDir, "SKILL.md");
+    fs.writeFileSync(
+      skillPath,
+      [
+        "# alpha",
+        "",
+        "See [guide][].",
+        "",
+        "[guide]: ./guide.md",
+      ].join("\n"),
+    );
+    const bundle = buildBundle(tmp, skillPath);
+    assert.deepEqual(bundle.refs, ["skill/alpha/guide.md"]);
+    assert.deepEqual(bundle.missingRefs, []);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("resolveRefs strips trailing titles from reference-style definitions", () => {
   const tmp = makeRepo();
   if (!tmp) return;
