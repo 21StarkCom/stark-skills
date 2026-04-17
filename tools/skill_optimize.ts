@@ -644,8 +644,22 @@ function writeProposalFiles(artifactDir: string, proposal: RewriteProposal): voi
 }
 
 function applyProposal(proposal: RewriteProposal): void {
+  const repoRootReal = fs.realpathSync(repoRoot);
   for (const change of proposal.changes) {
     const outputPath = path.join(repoRoot, change.path);
+    // Reject symlinked targets — fs.realpath escapes to the link target,
+    // so writing/deleting would affect an external file. readlinkSync only
+    // succeeds for actual symlinks, which is exactly what we want to block.
+    if (fs.existsSync(outputPath) && fs.lstatSync(outputPath).isSymbolicLink()) {
+      throw new Error(`Refusing to apply: ${change.path} is a symlink`);
+    }
+    const parentDir = path.dirname(outputPath);
+    if (fs.existsSync(parentDir)) {
+      const parentReal = fs.realpathSync(parentDir);
+      if (!parentReal.startsWith(repoRootReal + path.sep) && parentReal !== repoRootReal) {
+        throw new Error(`Refusing to apply: ${change.path} escapes the repo root`);
+      }
+    }
     if (change.action === "delete") {
       if (fs.existsSync(outputPath)) {
         fs.unlinkSync(outputPath);
@@ -653,7 +667,7 @@ function applyProposal(proposal: RewriteProposal): void {
       continue;
     }
     if (change.action === "update") {
-      fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+      fs.mkdirSync(parentDir, { recursive: true });
       writeUtf8(outputPath, change.content ?? "");
     }
   }

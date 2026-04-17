@@ -181,7 +181,11 @@ function resolveRefs(
       missing.add(rel(repoRoot, resolved));
       continue;
     }
-    if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
+    if (
+      fs.existsSync(resolved) &&
+      fs.lstatSync(resolved).isFile() &&
+      fs.realpathSync(resolved).startsWith(fs.realpathSync(repoRoot) + path.sep)
+    ) {
       found.add(rel(repoRoot, resolved));
     } else {
       missing.add(rel(repoRoot, resolved));

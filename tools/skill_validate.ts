@@ -6,7 +6,10 @@ export type RewriteChange = {
   path: string;
   action: RewriteAction;
   summary: string;
-  content?: string;
+  // Required everywhere: the OpenAI schema marks content required, and
+  // validateProposal rejects non-string values. Optional typing let
+  // callers pass `undefined` past tsc even though runtime always rejects.
+  content: string;
 };
 
 export type RewriteProposal = {

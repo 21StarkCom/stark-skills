@@ -171,6 +171,18 @@ test("permits deleting a shared ref when every owner is in the current run", () 
   );
 });
 
+test("accepts change with empty content when action is delete", () => {
+  validateProposal(
+    bundle,
+    proposal([
+      { path: "skill/alpha/reference.md", action: "delete", summary: "cleanup", content: "" },
+    ]),
+    bundleFiles,
+    new Map(),
+    new Set([bundle.skillPath]),
+  );
+});
+
 test("rejects refs_removed entries that are not in the bundle refs", () => {
   assert.throws(
     () =>
