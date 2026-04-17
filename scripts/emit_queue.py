@@ -404,9 +404,11 @@ _V2_EVENTS_COLUMNS = {
     "prompt_text", "prompt_length", "is_correction", "payload_extra",
     "schema_version", "source", "synced_at",
 }
-_V2_USERS_COLUMNS = {"id", "github_login", "aliases", "created_at"}
+_V2_USERS_COLUMNS = {
+    "id", "github_login", "display_name", "aliases", "created_at",
+}
 _V2_PROJECTS_COLUMNS = {
-    "id", "path", "workspace_type", "parent_project_id",
+    "id", "path", "repo", "workspace_type", "parent_project_id",
     "first_seen_at", "last_seen_at",
 }
 
@@ -451,48 +453,54 @@ def _buffer_is_v2_compatible(buffer_path_str: str) -> bool:
 
 
 def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
-    """Copy unsynced rows out of a legacy v1 buffer back into the pending queue.
+    """Copy unsynced rows out of a pre-upgrade buffer back into the pending queue.
 
-    The v1 buffer held queued events that never reached the API. Without
-    replay they would be invisible to the upgraded drain loop. We re-enqueue
-    via INSERT OR IGNORE on dedupe_key so already-drained rows dedupe cleanly.
+    Handles both v1 schemas (`events(payload, project, ...)`) and partial-v2
+    schemas (`events(payload_extra, project_id, lifted columns, ...)`) by
+    inspecting the columns present and reconstructing a full event dict so
+    drain_to_buffer can re-lift the canonical columns on the next run.
 
-    Raises if the legacy DB is unreadable or the events table is incompatible
-    — the caller is expected to keep the quarantined file in place so the
-    operator can recover the backlog manually.
+    Raises if the DB is unreadable — the caller keeps the quarantined file
+    in place so the operator can recover the backlog manually.
     """
-    replayed = 0
     legacy = sqlite3.connect(str(legacy_path), timeout=10)
+    legacy.row_factory = sqlite3.Row
     try:
         cols = {row[1] for row in legacy.execute("PRAGMA table_info(events)").fetchall()}
-        if not {"payload", "type", "timestamp"}.issubset(cols):
-            # Not a recognizable v1 schema — nothing safe to replay.
+        if not {"type", "timestamp"}.issubset(cols):
             return 0
-        rows = legacy.execute(
-            "SELECT dedupe_key, type, timestamp, cli, user_id, project, "
-            "payload, schema_version, source, session_id FROM events "
-            "WHERE synced_at IS NULL"
-        ).fetchall()
+        if "payload_extra" not in cols and "payload" not in cols:
+            return 0
+        where = "WHERE synced_at IS NULL" if "synced_at" in cols else ""
+        rows = legacy.execute(f"SELECT * FROM events {where}").fetchall()
     finally:
         legacy.close()
 
+    replayed = 0
     queue_db = _get_db()
     try:
-        for (
-            dedupe_key, event_type, timestamp, cli, user_id,
-            project, payload, schema_version, source, session_id,
-        ) in rows:
+        for raw in rows:
+            row = dict(raw)
+            dedupe_key = row.get("dedupe_key")
             try:
+                # Reconstruct a full payload: merge payload_extra (v2) or
+                # payload (v1) with any lifted-column values present.
+                base_json = row.get("payload_extra") or row.get("payload") or "{}"
+                payload = json.loads(base_json) if base_json else {}
+                for lifted in _V2_LIFTED_FIELDS:
+                    value = row.get(lifted)
+                    if value is not None and lifted not in payload:
+                        payload[lifted] = value
                 event = {
-                    "type": event_type or "",
-                    "timestamp": timestamp or "",
-                    "cli": cli,
-                    "user_id": user_id,
-                    "project": project,
-                    "payload": json.loads(payload) if payload else {},
-                    "schema_version": schema_version or 1,
-                    "source": source,
-                    "session_id": session_id,
+                    "type": row.get("type") or "",
+                    "timestamp": row.get("timestamp") or "",
+                    "cli": row.get("cli"),
+                    "user_id": row.get("user_id"),
+                    "project": row.get("project") or row.get("project_id"),
+                    "payload": payload,
+                    "schema_version": row.get("schema_version") or 1,
+                    "source": row.get("source"),
+                    "session_id": row.get("session_id"),
                     # Mirror the dedupe_key into the serialized event so that
                     # if drain() (HTTP path) picks up the replayed row later
                     # the backend still dedupes against the original key.

@@ -744,6 +744,72 @@ class TestDrainToBufferV2:
         partial.close()
         assert emit_queue._buffer_is_v2_compatible(str(buffer_path)) is False
 
+    def test_buffer_probe_rejects_missing_display_name_and_repo(self, isolated_queue):
+        """users.display_name and projects.repo are written by the resolver
+        upserts; a probe that misses them would wedge draining later."""
+        buffer_path = isolated_queue / "buffer.db"
+        partial = sqlite3.connect(str(buffer_path))
+        # users without display_name, projects without repo
+        partial.executescript(
+            V2_BUFFER_SCHEMA
+            .replace("display_name TEXT,", "")
+            .replace("repo TEXT,", "")
+        )
+        partial.commit()
+        partial.close()
+        assert emit_queue._buffer_is_v2_compatible(str(buffer_path)) is False
+
+    def test_legacy_replay_handles_partial_v2_schema(self, isolated_queue):
+        """A partial-v2 buffer with unsynced rows in v2 shape (payload_extra +
+        lifted columns) must still be replayed so drain_to_buffer can re-lift."""
+        legacy_path = isolated_queue / "buffer.v1-partial.db"
+        db = sqlite3.connect(str(legacy_path))
+        # Partial-v2 events table: has payload_extra and some lifted cols,
+        # but projects.repo / users.display_name are missing elsewhere.
+        db.executescript(
+            """
+            CREATE TABLE events (
+                id TEXT PRIMARY KEY,
+                dedupe_key TEXT UNIQUE,
+                type TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                cli TEXT,
+                user_id TEXT,
+                project_id TEXT,
+                skill_name TEXT,
+                duration_ms INTEGER,
+                payload_extra TEXT NOT NULL DEFAULT '{}',
+                schema_version INTEGER DEFAULT 2,
+                source TEXT,
+                synced_at TEXT
+            );
+            """
+        )
+        db.execute(
+            "INSERT INTO events (id, dedupe_key, type, timestamp, cli, user_id, "
+            "skill_name, duration_ms, payload_extra) VALUES "
+            "('p1', 'partial-1', 'skill_invocation', '2026-02-01T00:00:00Z', "
+            "'claude', 'aryeh', 'stark-team-review', 4200, '{\"note\":\"preserved\"}')"
+        )
+        db.commit()
+        db.close()
+
+        replayed = emit_queue._replay_legacy_rows_into_queue(legacy_path)
+        assert replayed == 1
+
+        qdb = emit_queue._get_db()
+        row = qdb.execute(
+            "SELECT dedupe_key, event_json FROM pending WHERE dedupe_key = 'partial-1'"
+        ).fetchone()
+        qdb.close()
+        assert row is not None
+        event = json.loads(row[1])
+        # Lifted columns must round-trip back into payload so drain_to_buffer
+        # can re-lift them into the canonical v2 columns.
+        assert event["payload"]["skill_name"] == "stark-team-review"
+        assert event["payload"]["duration_ms"] == 4200
+        assert event["payload"]["note"] == "preserved"
+
     def test_non_ci_absolute_paths_stay_external(self, isolated_queue):
         """Paths like /Users/alice/src/foo must NOT be misclassified as `main`
         with a fake repo slug — they should stay `external`/NULL."""
