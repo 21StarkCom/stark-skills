@@ -427,7 +427,44 @@ def _log_drain_failure(exc, context):
         pass
 
 
-_V2_EVENTS_COLUMNS = {"project_id", "payload_extra"}
+# Every column drain_to_buffer's INSERT references. If any of these are
+# missing from an existing `events` table the DB is not v2-compatible.
+_V2_EVENTS_COLUMNS = {
+    "id", "dedupe_key", "session_id", "type", "timestamp", "cli",
+    "user_id", "project_id", "tool_name", "skill_name", "duration_ms",
+    "success", "error_text", "pr_number", "repo", "severity",
+    "agent_name", "domain", "action", "passed", "score_value", "won",
+    "prompt_text", "prompt_length", "is_correction", "payload_extra",
+    "schema_version", "source", "synced_at",
+}
+_V2_REQUIRED_TABLES = {"events", "users", "projects"}
+
+
+def _buffer_is_v2_compatible(buffer_path_str: str) -> bool:
+    """Check that the existing buffer.db has the complete v2 surface.
+
+    Returns False if any required table is missing or the `events` table
+    lacks any column the v2 INSERT will write. A False return triggers
+    quarantine + fresh v2 creation.
+    """
+    probe = sqlite3.connect(buffer_path_str, timeout=10)
+    try:
+        tables = {
+            row[0]
+            for row in probe.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if not _V2_REQUIRED_TABLES.issubset(tables):
+            return False
+        events_cols = {
+            row[1] for row in probe.execute("PRAGMA table_info(events)").fetchall()
+        }
+        return _V2_EVENTS_COLUMNS.issubset(events_cols)
+    except sqlite3.DatabaseError:
+        return False
+    finally:
+        probe.close()
 
 
 def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
@@ -436,22 +473,25 @@ def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
     The v1 buffer held queued events that never reached the API. Without
     replay they would be invisible to the upgraded drain loop. We re-enqueue
     via INSERT OR IGNORE on dedupe_key so already-drained rows dedupe cleanly.
+
+    Raises if the legacy DB is unreadable or the events table is incompatible
+    — the caller is expected to keep the quarantined file in place so the
+    operator can recover the backlog manually.
     """
     replayed = 0
+    legacy = sqlite3.connect(str(legacy_path), timeout=10)
     try:
-        legacy = sqlite3.connect(str(legacy_path), timeout=10)
         cols = {row[1] for row in legacy.execute("PRAGMA table_info(events)").fetchall()}
         if not {"payload", "type", "timestamp"}.issubset(cols):
-            legacy.close()
+            # Not a recognizable v1 schema — nothing safe to replay.
             return 0
         rows = legacy.execute(
             "SELECT dedupe_key, type, timestamp, cli, user_id, project, "
             "payload, schema_version, source, session_id FROM events "
             "WHERE synced_at IS NULL"
         ).fetchall()
+    finally:
         legacy.close()
-    except sqlite3.DatabaseError:
-        return 0
 
     queue_db = _get_db()
     try:
@@ -493,9 +533,19 @@ def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
 def _quarantine_legacy_buffer(buffer_path: Path) -> Path | None:
     """Rename a legacy (v1) buffer.db aside so a fresh v2 db can take its place.
 
-    Also replays unsynced rows from the legacy file back into the durable
-    queue so the upgrade doesn't strand them. Returns the new path.
+    Replays unsynced rows from the legacy file back into the durable queue
+    BEFORE the rename so that a replay failure (corrupt or locked DB) leaves
+    the legacy file untouched at its original location — the caller can then
+    retry the upgrade once the DB is readable instead of stranding events.
     """
+    try:
+        replayed = _replay_legacy_rows_into_queue(buffer_path)
+    except sqlite3.DatabaseError as exc:
+        _log_drain_failure(
+            exc,
+            f"legacy buffer replay failed for {buffer_path}; leaving file in place for retry",
+        )
+        raise
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     legacy_path = buffer_path.with_name(f"{buffer_path.stem}.v1-{timestamp}.db")
     buffer_path.rename(legacy_path)
@@ -503,7 +553,6 @@ def _quarantine_legacy_buffer(buffer_path: Path) -> Path | None:
         sidecar_path = buffer_path.with_name(buffer_path.name + sidecar)
         if sidecar_path.exists():
             sidecar_path.rename(legacy_path.with_name(legacy_path.name + sidecar))
-    replayed = _replay_legacy_rows_into_queue(legacy_path)
     _log_drain_failure(
         RuntimeError("legacy v1 buffer quarantined"),
         f"moved {buffer_path} -> {legacy_path}; replayed {replayed} unsynced rows",
@@ -519,22 +568,12 @@ def _get_buffer_db() -> sqlite3.Connection:
     BUFFER_PATH.parent.mkdir(parents=True, exist_ok=True)
     buffer_path = str(BUFFER_PATH)
 
-    # Legacy v1 buffers (events(payload, project, ...)) cannot accept v2
-    # inserts; detect and quarantine before opening.
-    if BUFFER_PATH.exists():
-        probe = sqlite3.connect(buffer_path, timeout=10)
-        try:
-            cols = {
-                row[1]
-                for row in probe.execute("PRAGMA table_info(events)").fetchall()
-            }
-        except sqlite3.DatabaseError:
-            cols = set()
-        finally:
-            probe.close()
-        if cols and not _V2_EVENTS_COLUMNS.issubset(cols):
-            _quarantine_legacy_buffer(BUFFER_PATH)
-            _buffer_db_initialized.pop(buffer_path, None)
+    # Buffers that aren't fully v2-compatible (legacy v1 or any partial
+    # schema) cannot accept v2 inserts. Detect via the full probe and
+    # quarantine before opening.
+    if BUFFER_PATH.exists() and not _buffer_is_v2_compatible(buffer_path):
+        _quarantine_legacy_buffer(BUFFER_PATH)
+        _buffer_db_initialized.pop(buffer_path, None)
 
     db = sqlite3.connect(buffer_path, timeout=10)
     db.execute("PRAGMA journal_mode=WAL")

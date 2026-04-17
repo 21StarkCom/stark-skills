@@ -1161,6 +1161,53 @@ class TestDrainToBufferV2:
         assert paths["/home/ci/git/Evinced/some-repo"] == ("some-repo", "main"), paths
         assert paths["/workspace/acme/payments"] == ("payments", "main"), paths
 
+    def test_buffer_probe_rejects_partial_v2_schema(self, isolated_queue):
+        """A buffer.db that is missing any required v2 column or dimension
+        table must be quarantined rather than treated as compatible."""
+        buffer_path = isolated_queue / "buffer.db"
+        partial = sqlite3.connect(str(buffer_path))
+        # events has project_id + payload_extra but is missing skill_name,
+        # duration_ms, etc. — drain_to_buffer's INSERT would still fail.
+        partial.executescript(
+            """
+            CREATE TABLE users (
+                id TEXT PRIMARY KEY,
+                github_login TEXT NOT NULL UNIQUE,
+                aliases TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE projects (
+                id TEXT PRIMARY KEY,
+                path TEXT NOT NULL UNIQUE,
+                workspace_type TEXT NOT NULL,
+                first_seen_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL
+            );
+            CREATE TABLE events (
+                id TEXT PRIMARY KEY,
+                dedupe_key TEXT UNIQUE,
+                type TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                cli TEXT,
+                user_id TEXT,
+                project_id TEXT,
+                payload_extra TEXT NOT NULL DEFAULT '{}'
+            );
+            """
+        )
+        partial.commit()
+        partial.close()
+        assert emit_queue._buffer_is_v2_compatible(str(buffer_path)) is False
+
+        with patch.object(emit_queue, "BUFFER_PATH", buffer_path):
+            emit_queue._buffer_db_initialized.pop(str(buffer_path), None)
+            emit_queue.enqueue(_make_event(user_id="aryeh"))
+            emit_queue.drain_to_buffer()
+
+        assert list(buffer_path.parent.glob("buffer.v1-*.db")), (
+            "partial-v2 buffer should be quarantined like a legacy v1 buffer"
+        )
+
     def test_drain_quarantines_legacy_v1_buffer(self, isolated_queue):
         """RED: an existing v1 buffer.db must be moved aside so v2 writes
         don't fail forever on the legacy events(payload, project, ...) table."""

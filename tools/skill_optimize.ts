@@ -73,8 +73,18 @@ for (const { ref, skills } of collectSharedRefs(bundles)) {
 // pass cannot delete a shared ref that a later bundle still needs to load.
 // Without this, `--apply` across multi-bundle runs can crash mid-iteration.
 const bundleFilesSnapshot = new Map<string, Array<{ path: string; content: string }>>();
+// Capture the pre-run mtime of every source file so that later bundles'
+// staleness checks compare against the PRE-apply state, not a mtime that
+// was just updated by an earlier bundle's own apply step.
+const preRunMtimes = new Map<string, number>();
 for (const bundle of selectedBundles) {
   bundleFilesSnapshot.set(bundle.skillPath, loadBundleFiles(repoRoot, bundle));
+  for (const file of bundleFilesSnapshot.get(bundle.skillPath) ?? []) {
+    const abs = path.join(repoRoot, file.path);
+    if (fs.existsSync(abs) && !preRunMtimes.has(file.path)) {
+      preRunMtimes.set(file.path, fs.statSync(abs).mtimeMs);
+    }
+  }
 }
 const runSummaries: BundleRunSummary[] = [];
 
@@ -580,14 +590,22 @@ function loadExistingProposal(
     throw new Error(`No existing proposal found at ${rel(repoRoot, proposalPath)}`);
   }
   const proposalMtime = fs.statSync(proposalPath).mtimeMs;
+  // Compare against the pre-run mtime when available so an earlier bundle's
+  // own apply step can't bump the live mtime and trigger a false stale.
   const stale = findStaleBundleFile(
     proposalMtime,
     bundleFiles.map((f) => f.path),
-    (rel) => path.join(repoRoot, rel),
+    (relPath) => {
+      const pre = preRunMtimes.get(relPath);
+      if (pre !== undefined) return pre;
+      const abs = path.join(repoRoot, relPath);
+      return fs.existsSync(abs) ? fs.statSync(abs).mtimeMs : null;
+    },
   );
   if (stale.stale) {
+    const verb = stale.reason === "deleted" ? "was deleted" : "was modified";
     throw new Error(
-      `Refusing to reuse proposal: ${stale.path} was modified after the proposal was generated. ` +
+      `Refusing to reuse proposal: ${stale.path} ${verb} after the proposal was generated. ` +
         "Rerun without --reuse-proposal or regenerate the proposal.",
     );
   }

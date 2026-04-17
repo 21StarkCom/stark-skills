@@ -1,26 +1,31 @@
-import fs from "node:fs";
-
 import type { SkillBundle } from "./skill_lib.ts";
 
 export type ProposalStalenessResult =
   | { stale: false }
-  | { stale: true; path: string };
+  | { stale: true; path: string; reason: "modified" | "deleted" };
 
 /**
  * Returns stale=true when any bundle file has been modified more recently
- * than the proposal file. Used to reject --reuse-proposal when source files
- * have been edited since the proposal was written, which would otherwise
- * silently clobber newer edits.
+ * than the proposal file OR has been deleted since the proposal was written.
+ *
+ * `mtimeFor` is a resolver that returns the mtime (ms) for a relative path,
+ * or `null` if the file no longer exists. Passing a pre-run snapshot lets
+ * the caller evaluate staleness against the state at the START of a
+ * multi-bundle run, so an earlier bundle's own apply step can't trigger a
+ * spurious stale failure for a later bundle.
  */
 export function findStaleBundleFile(
   proposalMtimeMs: number,
   bundleFilePaths: string[],
-  resolve: (relPath: string) => string,
+  mtimeFor: (relPath: string) => number | null,
 ): ProposalStalenessResult {
   for (const relPath of bundleFilePaths) {
-    const abs = resolve(relPath);
-    if (fs.existsSync(abs) && fs.statSync(abs).mtimeMs > proposalMtimeMs) {
-      return { stale: true, path: relPath };
+    const mtime = mtimeFor(relPath);
+    if (mtime === null) {
+      return { stale: true, path: relPath, reason: "deleted" };
+    }
+    if (mtime > proposalMtimeMs) {
+      return { stale: true, path: relPath, reason: "modified" };
     }
   }
   return { stale: false };
