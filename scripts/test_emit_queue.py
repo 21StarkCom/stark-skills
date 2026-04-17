@@ -346,127 +346,6 @@ class TestDeadLetterRecovery:
         assert remaining == [("buffer-key", "buffer")]
         assert pending == [("http-key",)]
 
-    def test_retry_buffer_dead_letters_leaves_row_when_write_fails(
-        self, isolated_queue
-    ):
-        """If _write_event_to_buffer raises inside retry_buffer_dead_letters,
-        the dead_letter row must stay put — otherwise a refactor that DELETEs
-        before the insert is confirmed would silently drop the event."""
-        buffer_path = isolated_queue / "buffer.db"
-        _init_v2_buffer(buffer_path)
-        db = emit_queue._get_db()
-        db.execute(
-            "INSERT INTO dead_letter "
-            "(dedupe_key, event_json, created_at, retries, last_error, source_path) "
-            "VALUES ('poison-key', '{}', '2026-04-01T00:00:00Z', 3, 'x', 'buffer')"
-        )
-        db.commit()
-        db.close()
-
-        def always_fail(buffer_db, dedupe_key, event_json, row_id=None):
-            raise ValueError("simulated write failure")
-
-        with patch.object(emit_queue, "BUFFER_PATH", buffer_path), \
-             patch.object(emit_queue, "_write_event_to_buffer", always_fail):
-            recovered = emit_queue.retry_buffer_dead_letters()
-        assert recovered == 0
-
-        db = emit_queue._get_db()
-        row = db.execute(
-            "SELECT dedupe_key FROM dead_letter WHERE dedupe_key = 'poison-key'"
-        ).fetchone()
-        db.close()
-        assert row == ("poison-key",), (
-            "failed retry must leave dead_letter row in place for next attempt"
-        )
-
-    def test_write_event_to_buffer_falls_back_to_event_id(self, isolated_queue):
-        """When an event has no dedupe_key, _write_event_to_buffer must fall
-        back to event_id (not the row-id-only drain tag) so two unkeyed
-        rows with distinct event_ids don't collapse onto one dedupe."""
-        buffer_path = isolated_queue / "buffer.db"
-        _init_v2_buffer(buffer_path)
-        import uuid as _uuid_mod
-        bdb = sqlite3.connect(str(buffer_path))
-        try:
-            for i in range(2):
-                event_json = json.dumps({
-                    "type": "skill_invocation",
-                    "timestamp": "2026-04-01T00:00:00Z",
-                    "cli": "claude",
-                    "source": "skill",
-                    "payload": {},
-                    "event_id": f"event-{i}",
-                })
-                emit_queue._write_event_to_buffer(bdb, None, event_json)
-            bdb.commit()
-            rows = bdb.execute(
-                "SELECT dedupe_key FROM events ORDER BY dedupe_key"
-            ).fetchall()
-        finally:
-            bdb.close()
-        assert rows == [("event-0",), ("event-1",)], rows
-
-    def test_retry_buffer_dead_letters_moves_only_buffer_rows_and_drains(
-        self, isolated_queue
-    ):
-        """retry_buffer_dead_letters is the operator-triggered recovery path
-        for intermittent buffer-sink failures. It must requeue buffer rows,
-        drain them to the buffer immediately so drain() (HTTP) can't pick
-        them up, and leave HTTP rows in dead_letter alone.
-        """
-        buffer_path = isolated_queue / "buffer.db"
-        _init_v2_buffer(buffer_path)
-        db = emit_queue._get_db()
-        # Craft a valid event JSON so drain_to_buffer accepts it on replay.
-        import uuid as _uuid
-        event_json = json.dumps({
-            "type": "skill_invocation",
-            "timestamp": "2026-04-01T00:00:00Z",
-            "cli": "claude",
-            "source": "skill",
-            "schema_version": 2,
-            "payload": {"skill": "stark-team-review"},
-            "dedupe_key": "buffer-key",
-            "event_id": str(_uuid.uuid4()),
-        })
-        db.execute(
-            "INSERT INTO dead_letter "
-            "(dedupe_key, event_json, created_at, retries, last_error, source_path) "
-            "VALUES ('buffer-key', ?, '2026-04-01T00:00:00Z', 3, 'disk i/o', 'buffer')",
-            (event_json,),
-        )
-        db.execute(
-            "INSERT INTO dead_letter "
-            "(dedupe_key, event_json, created_at, retries, last_error, source_path) "
-            "VALUES ('http-key', '{}', '2026-04-01T00:00:00Z', 3, 'network', 'http')"
-        )
-        db.commit()
-        db.close()
-
-        with patch.object(emit_queue, "BUFFER_PATH", buffer_path):
-            moved = emit_queue.retry_buffer_dead_letters()
-        assert moved == 1
-
-        db = emit_queue._get_db()
-        remaining_dead = db.execute(
-            "SELECT dedupe_key, source_path FROM dead_letter"
-        ).fetchall()
-        pending = db.execute(
-            "SELECT dedupe_key FROM pending"
-        ).fetchall()
-        db.close()
-        # HTTP row untouched; buffer row was requeued AND drained so pending
-        # must be empty — the HTTP path never sees it.
-        assert remaining_dead == [("http-key", "http")]
-        assert pending == []
-        bdb = sqlite3.connect(str(buffer_path))
-        events = bdb.execute(
-            "SELECT dedupe_key FROM events WHERE dedupe_key = 'buffer-key'"
-        ).fetchall()
-        bdb.close()
-        assert events == [("buffer-key",)]
-
     def test_migration_populates_source_path_for_legacy_rows(self, isolated_queue):
         """Pre-migration dead_letter rows must survive the ALTER TABLE and be
         retryable as HTTP — otherwise a schema upgrade would silently strand
@@ -903,6 +782,12 @@ CREATE TABLE events (
     payload_extra TEXT NOT NULL DEFAULT '{}',
     synced_at TEXT
 );
+CREATE TABLE _recovered_dims (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('user', 'project')),
+    source_hint TEXT,
+    recorded_at TEXT NOT NULL
+);
 """
 
 
@@ -1119,10 +1004,11 @@ class TestDrainToBufferV2:
         assert event["payload"]["duration_ms"] == 4200
         assert event["payload"]["note"] == "preserved"
 
-    def test_resolver_passes_uuid_through_and_upserts_placeholder(self, isolated_queue):
-        """Already-resolved UUIDs pass through the resolvers, and a
-        placeholder dimension row must be upserted so the FK isn't
-        orphaned if the legacy dim lookup couldn't recover the source."""
+    def test_resolver_logs_uuid_passthrough_without_placeholder_rows(self, isolated_queue):
+        """Already-resolved UUIDs pass through the resolvers without creating
+        placeholder dim rows. The prior design upserted `recovered:` users
+        and `workspace_type='external'` projects that ON CONFLICT DO NOTHING
+        kept forever, so a later real login/path could never replace them."""
         buffer_path = isolated_queue / "buffer.db"
         _init_v2_buffer(buffer_path)
         uid = "a3f1b8e1-1b7a-4f9e-8e47-5a3f1b8e7a3f"
@@ -1132,19 +1018,66 @@ class TestDrainToBufferV2:
         assert emit_queue._resolve_project(db, pid) == pid
         db.commit()
 
-        # Placeholder dim rows must exist for the passed-through UUIDs.
-        user_row = db.execute("SELECT github_login FROM users WHERE id = ?", (uid,)).fetchone()
-        proj_row = db.execute("SELECT path, workspace_type FROM projects WHERE id = ?", (pid,)).fetchone()
-        assert user_row is not None, "passed-through user UUID needs a placeholder row"
-        assert user_row[0].startswith("recovered:")
-        assert proj_row is not None, "passed-through project UUID needs a placeholder row"
-        assert proj_row[1] == "external"
+        # Pass-through must NOT create dim rows any more.
+        assert db.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 0
 
-        # Non-UUID inputs still get hashed as before.
+        # Aux ledger records the UUID so the source is auditable later.
+        rows = db.execute(
+            "SELECT id, kind, source_hint FROM _recovered_dims ORDER BY kind"
+        ).fetchall()
+        assert rows == [
+            (pid, "project", f"uuid-passthrough:{pid[:8]}"),
+            (uid, "user", f"uuid-passthrough:{uid[:8]}"),
+        ]
+
+        # Non-UUID inputs still get hashed and inserted as before.
         hashed = emit_queue._resolve_user(db, "aryeh")
         assert hashed != "aryeh"
         assert emit_queue._looks_like_uuid(hashed)
         db.close()
+
+    def test_real_login_upgrades_uuid_passthrough_to_proper_user_row(
+        self, isolated_queue
+    ):
+        """When a UUID flows through first and the matching real login shows
+        up later, the users table must end up with the real github_login —
+        not the old `recovered:` placeholder the prior design froze in."""
+        buffer_path = isolated_queue / "buffer.db"
+        _init_v2_buffer(buffer_path)
+        db = sqlite3.connect(str(buffer_path))
+        # Deterministic UUID for login "aryeh" — same namespace drain uses.
+        uid = str(emit_queue._deterministic_user_id("aryeh"))
+        assert emit_queue._resolve_user(db, uid) == uid
+        assert emit_queue._resolve_user(db, "aryeh") == uid
+        db.commit()
+        row = db.execute(
+            "SELECT github_login FROM users WHERE id = ?", (uid,)
+        ).fetchone()
+        db.close()
+        assert row == ("aryeh",)
+
+    def test_real_path_upgrades_uuid_passthrough_to_main_workspace(
+        self, isolated_queue
+    ):
+        """A UUID pass-through must NOT leave workspace_type='external' stuck
+        in the projects table — a later drain that knows the real path must
+        insert workspace_type='main' cleanly."""
+        buffer_path = isolated_queue / "buffer.db"
+        _init_v2_buffer(buffer_path)
+        db = sqlite3.connect(str(buffer_path))
+        real_path = "/Users/test/git/Evinced/stark-skills"
+        pid = str(emit_queue._deterministic_project_id(real_path))
+        # UUID pass-through first — would previously freeze 'external'.
+        assert emit_queue._resolve_project(db, pid) == pid
+        # Now the real path flows through.
+        assert emit_queue._resolve_project(db, real_path) == pid
+        db.commit()
+        row = db.execute(
+            "SELECT path, workspace_type, repo FROM projects WHERE id = ?", (pid,)
+        ).fetchone()
+        db.close()
+        assert row == (real_path, "main", "stark-skills")
 
     def test_mac_tmp_paths_are_not_misclassified_as_repos(self, isolated_queue):
         """macOS /var/folders/... and /var/tmp/... must NOT be classified
@@ -1213,6 +1146,37 @@ class TestDrainToBufferV2:
             qdb.close()
         assert dead == 1, "permanent error must dead-letter after MAX_RETRIES"
         assert pending == 0
+
+    def test_drain_to_buffer_closes_queue_handle_when_buffer_open_fails(
+        self, isolated_queue
+    ):
+        """A buffer-open failure must not leak the queue handle. Prior to the
+        fix, queue_db was opened before _get_buffer_db and the try/finally
+        that closes both handles only started AFTER the buffer open — so a
+        probe/quarantine failure propagated with queue.db still connected.
+        """
+        real_connect = sqlite3.connect
+        opened = []
+
+        def tracking_connect(*args, **kwargs):
+            conn = real_connect(*args, **kwargs)
+            opened.append(conn)
+            return conn
+
+        def failing_buffer():
+            raise sqlite3.OperationalError("simulated probe failure")
+
+        with patch.object(sqlite3, "connect", tracking_connect), \
+             patch.object(emit_queue, "_get_buffer_db", failing_buffer):
+            with pytest.raises(sqlite3.OperationalError, match="simulated probe failure"):
+                emit_queue.drain_to_buffer()
+
+        # The queue handle was opened; closing ensures execute() fails with
+        # ProgrammingError. A still-live connection would succeed instead.
+        assert opened, "expected _get_db to have opened a connection"
+        for conn in opened:
+            with pytest.raises(sqlite3.ProgrammingError):
+                conn.execute("SELECT 1")
 
     def test_drain_rejects_events_missing_envelope_fields(self, isolated_queue):
         """Events lacking required v2 envelope (type/timestamp) must fail

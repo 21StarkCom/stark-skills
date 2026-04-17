@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import type { SkillBundle } from "./skill_lib.ts";
 
 export type ProposalStalenessResult =
@@ -25,6 +27,100 @@ export type BundleProposal = {
  * other delete). Prevents a sequential per-bundle apply from silently
  * clobbering an earlier edit on a shared standards doc.
  */
+/**
+ * When a bundle deletes a shared ref, every OTHER owner's post-rewrite
+ * SKILL.md must also drop its link to that ref — otherwise apply leaves
+ * dangling links in the co-owners. The per-bundle validateProposal can't
+ * catch this because it only sees one proposal at a time; this runs once
+ * after all proposals are loaded, before the first apply.
+ *
+ * `ownerSkillContents` holds the CURRENT SKILL.md text for each owner, used
+ * as a fallback when an owner's proposal doesn't touch its own SKILL.md.
+ */
+export function assertSharedDeletedRefsRemoved(
+  bundleProposals: BundleProposal[],
+  sharedRefOwners: Map<string, string[]>,
+  ownerSkillContents: Map<string, string>,
+): void {
+  const proposalByOwner = new Map(
+    bundleProposals.map((b) => [b.skillPath, b.proposal]),
+  );
+  for (const { skillPath, proposal } of bundleProposals) {
+    for (const change of proposal.changes) {
+      if (change.action !== "delete") continue;
+      const owners = sharedRefOwners.get(change.path);
+      if (!owners || owners.length < 2) continue;
+      for (const otherOwner of owners) {
+        if (otherOwner === skillPath) continue;
+        const postContent = postApplySkillContent(
+          otherOwner,
+          proposalByOwner.get(otherOwner),
+          ownerSkillContents,
+        );
+        if (postContent === null) continue; // owner itself is being deleted
+        if (contentLinksToRef(postContent, otherOwner, change.path)) {
+          throw new Error(
+            `Refusing to delete ${change.path}: ${otherOwner} still links to it ` +
+              `in its post-rewrite SKILL.md. Update every owner's proposal to drop ` +
+              `the link before deleting the shared reference.`,
+          );
+        }
+      }
+    }
+  }
+}
+
+function postApplySkillContent(
+  skillPath: string,
+  proposal: RewriteProposal | undefined,
+  ownerSkillContents: Map<string, string>,
+): string | null {
+  if (proposal) {
+    const change = proposal.changes.find((c) => c.path === skillPath);
+    if (change?.action === "update") return change.content;
+    if (change?.action === "delete") return null;
+  }
+  return ownerSkillContents.get(skillPath) ?? "";
+}
+
+function contentLinksToRef(
+  content: string,
+  ownerSkillPath: string,
+  targetRefPath: string,
+): boolean {
+  const ownerDir = path.posix.dirname(ownerSkillPath);
+  for (const target of extractLocalMarkdownLinks(content)) {
+    const relOnly = target.split("#")[0];
+    if (!relOnly) continue;
+    const resolved = path.posix.normalize(path.posix.join(ownerDir, relOnly));
+    if (resolved === targetRefPath) return true;
+  }
+  return false;
+}
+
+function extractLocalMarkdownLinks(content: string): string[] {
+  const defs = new Map<string, string>();
+  for (const m of content.matchAll(/^\s*\[([^\]]+)\]:\s*(\S+)/gm)) {
+    defs.set(m[1].trim().toLowerCase(), stripAngleWrappers(m[2]));
+  }
+  const targets = new Set<string>();
+  for (const m of content.matchAll(/(?<!!)\[[^\]]+\]\(([^)]+)\)/g)) {
+    const trimmed = m[1].replace(/\s+["'].*$/, "").trim();
+    targets.add(stripAngleWrappers(trimmed));
+  }
+  for (const m of content.matchAll(/\[[^\]]+\]\[([^\]]+)\]/g)) {
+    const ref = defs.get(m[1].trim().toLowerCase());
+    if (ref) targets.add(ref);
+  }
+  return [...targets].filter(
+    (t) => t.toLowerCase().endsWith(".md") || t.toLowerCase().includes(".md#"),
+  );
+}
+
+function stripAngleWrappers(input: string): string {
+  return input.trim().replace(/^<|>$/g, "");
+}
+
 export function assertCrossBundleConsistency(entries: BundleProposal[]): void {
   type Claim = { skillPath: string; action: RewriteAction; content: string };
   const byPath = new Map<string, Claim[]>();

@@ -4,6 +4,7 @@ import { test } from "node:test";
 import type { SkillBundle } from "./skill_lib.ts";
 import {
   assertCrossBundleConsistency,
+  assertSharedDeletedRefsRemoved,
   decodeRewriteProposal,
   extractOutputText,
   findStaleBundleFile,
@@ -388,6 +389,121 @@ test("extractOutputText ignores malformed output entries", () => {
     ],
   };
   assert.equal(extractOutputText(payload), "ok");
+});
+
+test("assertSharedDeletedRefsRemoved rejects when co-owner's rewrite keeps the link", () => {
+  const sharedOwners = new Map<string, string[]>([
+    ["standards/observability.md", ["skill/alpha/SKILL.md", "skill/beta/SKILL.md"]],
+  ]);
+  const currentContents = new Map<string, string>([
+    ["skill/alpha/SKILL.md", "# alpha\n[obs](../../standards/observability.md)\n"],
+    ["skill/beta/SKILL.md", "# beta\n[obs](../../standards/observability.md)\n"],
+  ]);
+  // alpha deletes the shared ref. beta's proposal updates beta/SKILL.md but
+  // keeps the link — that would dangle after apply.
+  const entries = [
+    {
+      skillPath: "skill/alpha/SKILL.md",
+      proposal: proposal([
+        { path: "skill/alpha/SKILL.md", action: "update", summary: "alpha", content: "# alpha\n(link removed)\n" },
+        { path: "standards/observability.md", action: "delete", summary: "cleanup", content: "" },
+      ]),
+    },
+    {
+      skillPath: "skill/beta/SKILL.md",
+      proposal: proposal([
+        {
+          path: "skill/beta/SKILL.md",
+          action: "update",
+          summary: "beta rewrite",
+          content: "# beta\n[obs](../../standards/observability.md)\nEdited body.\n",
+        },
+      ]),
+    },
+  ];
+  assert.throws(
+    () => assertSharedDeletedRefsRemoved(entries, sharedOwners, currentContents),
+    /skill\/beta\/SKILL\.md still links to it/,
+  );
+});
+
+test("assertSharedDeletedRefsRemoved rejects when co-owner has no proposal and current links remain", () => {
+  const sharedOwners = new Map<string, string[]>([
+    ["standards/observability.md", ["skill/alpha/SKILL.md", "skill/beta/SKILL.md"]],
+  ]);
+  const currentContents = new Map<string, string>([
+    ["skill/alpha/SKILL.md", "# alpha\n[obs](../../standards/observability.md)\n"],
+    ["skill/beta/SKILL.md", "# beta\n[obs](../../standards/observability.md)\n"],
+  ]);
+  // alpha deletes, beta has NO proposal at all — so its current SKILL.md
+  // still links to the deleted ref.
+  const entries = [
+    {
+      skillPath: "skill/alpha/SKILL.md",
+      proposal: proposal([
+        { path: "standards/observability.md", action: "delete", summary: "cleanup", content: "" },
+      ]),
+    },
+  ];
+  assert.throws(
+    () => assertSharedDeletedRefsRemoved(entries, sharedOwners, currentContents),
+    /skill\/beta\/SKILL\.md still links to it/,
+  );
+});
+
+test("assertSharedDeletedRefsRemoved accepts when every co-owner drops the link", () => {
+  const sharedOwners = new Map<string, string[]>([
+    ["standards/observability.md", ["skill/alpha/SKILL.md", "skill/beta/SKILL.md"]],
+  ]);
+  const currentContents = new Map<string, string>([
+    ["skill/alpha/SKILL.md", "# alpha\n[obs](../../standards/observability.md)\n"],
+    ["skill/beta/SKILL.md", "# beta\n[obs](../../standards/observability.md)\n"],
+  ]);
+  const entries = [
+    {
+      skillPath: "skill/alpha/SKILL.md",
+      proposal: proposal([
+        { path: "skill/alpha/SKILL.md", action: "update", summary: "drop link", content: "# alpha\nNo ref anymore.\n" },
+        { path: "standards/observability.md", action: "delete", summary: "cleanup", content: "" },
+      ]),
+    },
+    {
+      skillPath: "skill/beta/SKILL.md",
+      proposal: proposal([
+        { path: "skill/beta/SKILL.md", action: "update", summary: "drop link", content: "# beta\nNo ref anymore.\n" },
+      ]),
+    },
+  ];
+  assertSharedDeletedRefsRemoved(entries, sharedOwners, currentContents);
+});
+
+test("assertSharedDeletedRefsRemoved catches ref-style links with title in co-owner content", () => {
+  const sharedOwners = new Map<string, string[]>([
+    ["standards/observability.md", ["skill/alpha/SKILL.md", "skill/beta/SKILL.md"]],
+  ]);
+  const currentContents = new Map<string, string>([
+    ["skill/alpha/SKILL.md", "# alpha\n[obs](../../standards/observability.md)\n"],
+    ["skill/beta/SKILL.md", [
+      "# beta",
+      "",
+      "[obs][O]",
+      "",
+      "[O]: ../../standards/observability.md \"Title\"",
+      "",
+    ].join("\n")],
+  ]);
+  const entries = [
+    {
+      skillPath: "skill/alpha/SKILL.md",
+      proposal: proposal([
+        { path: "standards/observability.md", action: "delete", summary: "cleanup", content: "" },
+      ]),
+    },
+  ];
+  assert.throws(
+    () => assertSharedDeletedRefsRemoved(entries, sharedOwners, currentContents),
+    /skill\/beta\/SKILL\.md still links to it/,
+  );
 });
 
 test("rejects refs_removed entries that are not in the bundle refs", () => {
