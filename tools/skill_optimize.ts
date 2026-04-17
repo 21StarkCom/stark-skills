@@ -176,6 +176,17 @@ async function main(): Promise<void> {
     // error aborts without mutating the repo. A phase-2 error preserves the
     // staging dir so an operator can finish recovery by hand.
     const stagingRoot = path.join(repoRoot, options.outDir, "apply-staging");
+    // A previous failed apply leaves the staging dir in place for manual
+    // recovery and drops a `.recovery` marker. Refuse to wipe it so the
+    // next run can't destroy the only record of partially committed work.
+    const recoveryMarker = path.join(stagingRoot, ".recovery");
+    if (fs.existsSync(recoveryMarker)) {
+      throw new Error(
+        `Refusing to start a new apply: recovery dir from an earlier ` +
+          `failed run exists at ${stagingRoot}. Inspect the contents ` +
+          `and remove ${recoveryMarker} (and the dir) once triaged.`,
+      );
+    }
     fs.rmSync(stagingRoot, { recursive: true, force: true });
     fs.mkdirSync(stagingRoot, { recursive: true });
     let plannedOps: StagedOp[][];
@@ -202,8 +213,27 @@ async function main(): Promise<void> {
       }
     }
     try {
-      commitStagedOps(dedupedOps);
+      commitStagedOps(dedupedOps, repoRoot);
     } catch (error) {
+      // Drop a marker so the next run refuses to wipe this dir until the
+      // operator has actually triaged the partial commit. Marker contents
+      // include the error so "why is this here?" doesn't require grep-ing
+      // stderr logs from a previous run.
+      try {
+        fs.writeFileSync(
+          recoveryMarker,
+          JSON.stringify(
+            {
+              failed_at: new Date().toISOString(),
+              error: (error as Error).message,
+            },
+            null,
+            2,
+          ),
+        );
+      } catch {
+        // If we can't even drop the marker the dir is useless anyway.
+      }
       console.error(
         `[skill_optimize] apply failed mid-commit; staging dir left for ` +
           `manual recovery: ${stagingRoot}`,
@@ -1032,8 +1062,15 @@ export function planProposalApply(
  * A phase-2 error leaves the staging dir in place so an operator can recover
  * the remaining changes manually.
  */
-export function commitStagedOps(ops: StagedOp[]): void {
+export function commitStagedOps(ops: StagedOp[], repoRootForGuard?: string): void {
   for (const op of ops) {
+    // TOCTOU guard: planProposalApply rejected symlink targets and ancestors
+    // at staging time, but a concurrent process could swap a symlink in
+    // between staging and commit. Re-check the target (and its ancestors up
+    // to repoRootForGuard) right before touching the filesystem. Without the
+    // boundary, the walk would reach the system tmpdir which is itself a
+    // symlink on macOS (/var -> /private/var) and trip a false positive.
+    assertNotSymlinked(op.target, repoRootForGuard);
     if (op.kind === "delete") {
       if (fs.existsSync(op.target)) {
         fs.unlinkSync(op.target);
@@ -1051,6 +1088,25 @@ export function commitStagedOps(ops: StagedOp[]): void {
       }
       throw err;
     }
+  }
+}
+
+function assertNotSymlinked(target: string, repoRoot?: string): void {
+  if (fs.existsSync(target) && fs.lstatSync(target).isSymbolicLink()) {
+    throw new Error(
+      `Refusing to commit: ${target} became a symlink between staging and commit`,
+    );
+  }
+  let ancestor = path.dirname(target);
+  while (ancestor && ancestor !== path.dirname(ancestor)) {
+    if (repoRoot && ancestor === repoRoot) break;
+    if (fs.existsSync(ancestor) && fs.lstatSync(ancestor).isSymbolicLink()) {
+      throw new Error(
+        `Refusing to commit: ancestor ${ancestor} became a symlink between staging and commit`,
+      );
+    }
+    if (repoRoot && !ancestor.startsWith(repoRoot)) break;
+    ancestor = path.dirname(ancestor);
   }
 }
 

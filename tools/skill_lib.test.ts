@@ -12,6 +12,7 @@ import {
   buildBundle,
   collectSharedRefs,
   discoverSkillBundles,
+  findRepoRoot,
   listSkillPaths,
   resolveSkillTarget,
 } from "./skill_lib.ts";
@@ -236,6 +237,44 @@ test("listSkillPaths rejects symlinked SKILL.md files", (t) => {
     // The real SKILL.md should be found; the symlinked one must not.
     assert.ok(paths.some((p) => p.endsWith("real/SKILL.md")));
     assert.ok(!paths.some((p) => p.endsWith("evil/SKILL.md")));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("findRepoRoot walks up from a nested cwd inside the repo", (t) => {
+  const tmp = makeRepo(t);
+  if (!tmp) return;
+  try {
+    const nested = path.join(tmp, "skill", "alpha", "deep", "inner");
+    fs.mkdirSync(nested, { recursive: true });
+    // findRepoRoot uses path.resolve (no symlink resolution), so compare
+    // against path.resolve(tmp). On macOS the tmp path itself is already
+    // under /var/folders which is symlinked to /private/var/folders;
+    // realpathSync would report the resolved target, which this function
+    // intentionally doesn't do.
+    assert.equal(findRepoRoot(nested), path.resolve(tmp));
+    assert.notEqual(findRepoRoot(nested), null);
+    // And confirm the null-return on a cwd outside any repo.
+    const sibling = fs.mkdtempSync(path.join(path.dirname(tmp), "no-repo-"));
+    try {
+      // Only reliable when the tmp root itself isn't inside a git repo
+      // (which we verified via makeRepo above). If the ancestor check
+      // finds an outer .git, treat as skip.
+      let check = path.dirname(sibling);
+      while (check && check !== path.dirname(check)) {
+        if (fs.existsSync(path.join(check, ".git"))) {
+          t.diagnostic(
+            "skipping outside-repo assertion: tmp root itself is inside a repo",
+          );
+          return;
+        }
+        check = path.dirname(check);
+      }
+      assert.equal(findRepoRoot(sibling), null);
+    } finally {
+      fs.rmSync(sibling, { recursive: true, force: true });
+    }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
