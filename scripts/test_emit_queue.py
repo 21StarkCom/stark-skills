@@ -72,6 +72,17 @@ class TestValidation:
         errors = emit_queue.validate(_make_event(payload="not a dict"))
         assert any("payload" in e for e in errors)
 
+    def test_non_string_required_fields_are_rejected(self):
+        """type/timestamp/cli/source must be strings; numbers or dicts were
+        previously accepted by the field-presence check and slipped into
+        pending, where the v2 TEXT NOT NULL column would reject them late."""
+        for field in ("type", "timestamp", "cli", "source"):
+            for bad in (42, 3.14, {"nested": "dict"}, ["list"]):
+                event = _make_event()
+                event[field] = bad
+                errors = emit_queue.validate(event)
+                assert any(field in e for e in errors), (field, bad, errors)
+
     def test_empty_required_strings_are_rejected(self):
         """type/timestamp/cli/source present-but-empty must not slip through
         the missing-field check and reach drain(); v2 declares those columns

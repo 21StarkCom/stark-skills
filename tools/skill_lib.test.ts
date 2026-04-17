@@ -111,6 +111,32 @@ test("resolveRefs handles inline links with balanced parens in the destination",
   }
 });
 
+test("resolveRefs handles shortcut reference links [label]", (t) => {
+  const tmp = makeRepo(t);
+  if (!tmp) return;
+  try {
+    const skillDir = path.join(tmp, "skill", "alpha");
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, "guide.md"), "# guide\n");
+    const skillPath = path.join(skillDir, "SKILL.md");
+    fs.writeFileSync(
+      skillPath,
+      [
+        "# alpha",
+        "",
+        "See [guide] for the full workflow.",
+        "",
+        "[guide]: ./guide.md",
+      ].join("\n"),
+    );
+    const bundle = buildBundle(tmp, skillPath);
+    assert.deepEqual(bundle.refs, ["skill/alpha/guide.md"]);
+    assert.deepEqual(bundle.missingRefs, []);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("resolveRefs handles collapsed reference links [label][]", (t) => {
   const tmp = makeRepo(t);
   if (!tmp) return;
