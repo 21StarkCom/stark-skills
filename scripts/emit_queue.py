@@ -297,21 +297,23 @@ def _strip_worktree_suffix(path):
     return path
 
 
-# Specific CI-layout anchors. Each entry matches a prefix and reports
-# which segment index holds the repo slug. More specific patterns win.
-# Without this, a bare /home/<user>/<anything> fallback wrongly turns
-# /home/alice/.config/nvim into repo="alice" and breaks existing
-# per-repo aggregations.
-_CI_PATTERNS: tuple[tuple[tuple[str, ...], int], ...] = (
-    # GitHub Actions: /home/runner/work/<repo>/<repo> → segs[3]
+# Specific CI-layout anchors. The integer strategy takes segs[i] as repo;
+# the string "last" takes segs[-1]. Without these specific matches, a bare
+# /home/<user>/<anything> fallback wrongly turns /home/alice/.config/nvim
+# into repo="alice" and breaks existing per-repo aggregations.
+_CI_PATTERNS: tuple[tuple[tuple[str, ...], object], ...] = (
+    # GitHub Actions: /home/runner/work/<repo>/<repo> → segs[3] (fixed layout)
     (("home", "runner", "work"), 3),
-    # GitLab Runner: /builds/<group>/<project> → segs[2]
-    (("builds",), 2),
-    # Jenkins-like: /workspace/<org>/<repo> → segs[2]
-    (("workspace",), 2),
-    # Generic /srv/<org>/<repo>, /github/<org>/<repo>
-    (("srv",), 2),
-    (("github",), 2),
+    # GitLab Runner: CI_PROJECT_DIR = /builds/<group>[/<subgroup>...]/<project>.
+    # Subgroups are first-class namespaces so the project slug is always the
+    # LAST segment, not a fixed index — the prior segs[2] attribution broke
+    # every subgroup checkout into the subgroup bucket.
+    (("builds",), "last"),
+    # Jenkins-like: /workspace/<org>/<repo>[/<subgroup>/<repo>]
+    (("workspace",), "last"),
+    # Generic /srv/<org>/<repo>, /github/<org>/<repo> and their nested forms.
+    (("srv",), "last"),
+    (("github",), "last"),
 )
 
 
@@ -340,9 +342,16 @@ def _normalize_path_to_repo(path):
         # Match specific CI layout anchors. Arbitrary /home/alice/foo paths
         # stay NULL so we don't invent a repo from random Linux directories.
         segs = [s for s in base.split("/") if s]
-        for prefix, repo_idx in _CI_PATTERNS:
-            if len(segs) > repo_idx and tuple(segs[: len(prefix)]) == prefix:
-                return segs[repo_idx]
+        for prefix, strategy in _CI_PATTERNS:
+            if tuple(segs[: len(prefix)]) != prefix:
+                continue
+            if isinstance(strategy, int):
+                if len(segs) > strategy:
+                    return segs[strategy]
+                return None
+            if strategy == "last" and len(segs) > len(prefix):
+                return segs[-1]
+            return None
         return None
     m = _ORG_REPO_RE.match(path)
     return m.group(1) if m else None
@@ -1065,49 +1074,33 @@ def dead_letter_count() -> int:
 
 
 def retry_buffer_dead_letters() -> int:
-    """Write buffer-path dead letters directly to the v2 buffer and drop
-    them from dead_letter on success. Returns count recovered.
+    """Requeue buffer-path dead letters back to `pending` for another
+    drain_to_buffer attempt. Use after resolving the underlying SQLite
+    failure (readonly FS, missing column, etc.). Returns count moved.
 
-    The recovery path deliberately bypasses `pending` so a concurrent
-    `drain()` (HTTP sink) cannot pick up a row that was already rejected
-    by the buffer sink — that would post the bad row to the API despite
-    `source_path='buffer'`. Rows that still fail are left in dead_letter
-    for the operator to triage.
+    Separate from retry_dead_letters() so a successful HTTP drain never
+    resurrects a row the buffer sink already rejected — re-posting a bad
+    row to the API would leak it into the backend.
     """
-    queue_db = _get_db()
+    db = _get_db()
     try:
-        buffer_db = _get_buffer_db()
-    except BaseException:
-        queue_db.close()
-        raise
-    recovered = 0
-    try:
-        rows = queue_db.execute(
+        rows = db.execute(
             "SELECT id, dedupe_key, event_json FROM dead_letter "
             "WHERE source_path = 'buffer'"
         ).fetchall()
+        moved = 0
         for dl_id, dedupe_key, event_json in rows:
-            try:
-                # Pass dl_id as the stable retry tag so a retry is idempotent:
-                # if a previous attempt inserted the row but the subsequent
-                # DELETE from dead_letter failed, the next retry regenerates
-                # the same synthesized dedupe and INSERT OR IGNORE is a no-op.
-                _write_event_to_buffer(
-                    buffer_db, dedupe_key, event_json, row_id=f"dl{dl_id}",
-                )
-            except Exception as exc:
-                _log_drain_failure(
-                    exc, f"retry_buffer_dead_letters dl_id={dl_id}",
-                )
-                continue
-            queue_db.execute("DELETE FROM dead_letter WHERE id = ?", (dl_id,))
-            recovered += 1
-        buffer_db.commit()
-        queue_db.commit()
+            db.execute(
+                "INSERT OR IGNORE INTO pending (dedupe_key, event_json, retries) "
+                "VALUES (?, ?, 0)",
+                (dedupe_key, event_json),
+            )
+            db.execute("DELETE FROM dead_letter WHERE id = ?", (dl_id,))
+            moved += 1
+        db.commit()
+        return moved
     finally:
-        queue_db.close()
-        buffer_db.close()
-    return recovered
+        db.close()
 
 
 def retry_dead_letters() -> int:
@@ -1116,8 +1109,9 @@ def retry_dead_letters() -> int:
     Buffer-path dead letters (source_path = 'buffer') are quarantined writes,
     not network failures, so re-queuing them would send a bad row to the API
     the next time the HTTP drain succeeds. They stay in dead_letter until an
-    operator triages them directly. Legacy rows (source_path IS NULL) predate
-    the split and are treated as HTTP so pre-existing behavior is preserved.
+    operator triages them directly — use retry_buffer_dead_letters() for
+    that path. Legacy rows (source_path IS NULL) predate the split and are
+    treated as HTTP so pre-existing behavior is preserved.
     """
     db = _get_db()
     try:

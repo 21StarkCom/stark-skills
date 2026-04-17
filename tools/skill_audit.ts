@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+import fs from "node:fs";
+import path from "node:path";
+
 import {
   collectSharedRefs,
   discoverSkillBundles,
@@ -8,6 +11,17 @@ import {
 } from "./skill_lib.ts";
 
 const repoRoot = findRepoRoot(process.cwd());
+// Mirror skill_optimize's .git guard: findRepoRoot falls back to cwd when no
+// ancestor has a .git/, which would let skill_audit silently audit whatever
+// tree happened to be upward of the working directory.
+if (!fs.existsSync(path.join(repoRoot, ".git"))) {
+  console.error(
+    `skill_audit must run from inside a git repository; ` +
+      `no .git/ found walking up from ${process.cwd()}.`,
+  );
+  process.exit(2);
+}
+
 const args = new Set(process.argv.slice(2));
 const asJson = args.has("--json");
 const validateOnly = args.has("--validate");

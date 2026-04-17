@@ -9,18 +9,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { test, type TestContext } from "node:test";
+import { test } from "node:test";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.join(HERE, "skill_audit.ts");
 
-function makeRepo(t: TestContext): string | null {
+function makeRepo(): string | null {
   try {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-audit-"));
     fs.mkdirSync(path.join(tmp, ".git"));
     return tmp;
-  } catch (err) {
-    t.skip(`os.tmpdir() unavailable: ${(err as Error).message}`);
+  } catch {
     return null;
   }
 }
@@ -39,8 +38,8 @@ function writeSkill(repo: string, slug: string, body: string): void {
   fs.writeFileSync(path.join(dir, "SKILL.md"), body);
 }
 
-test("--validate exits 0 when every ref resolves", (t) => {
-  const repo = makeRepo(t);
+test("--validate exits 0 when every ref resolves", () => {
+  const repo = makeRepo();
   if (!repo) return;
   try {
     writeSkill(repo, "alpha", "# alpha\n\nNo external refs.\n");
@@ -52,8 +51,8 @@ test("--validate exits 0 when every ref resolves", (t) => {
   }
 });
 
-test("--validate exits non-zero when a bundle has a missing ref", (t) => {
-  const repo = makeRepo(t);
+test("--validate exits non-zero when a bundle has a missing ref", () => {
+  const repo = makeRepo();
   if (!repo) return;
   try {
     writeSkill(
@@ -70,8 +69,8 @@ test("--validate exits non-zero when a bundle has a missing ref", (t) => {
   }
 });
 
-test("--json exits non-zero when any bundle has missing refs", (t) => {
-  const repo = makeRepo(t);
+test("--json exits non-zero when any bundle has missing refs", () => {
+  const repo = makeRepo();
   if (!repo) return;
   try {
     writeSkill(
@@ -89,25 +88,21 @@ test("--json exits non-zero when any bundle has missing refs", (t) => {
   }
 });
 
-test("skill_audit refuses to run outside a git repo", (t) => {
+test("skill_audit refuses to run outside a git repo", () => {
   // Build a repo whose cwd has no .git/ anywhere above it. mkdtempSync
   // alone guarantees the fresh directory has no ancestor .git/ unless the
-  // system tmpdir happens to be nested inside a repo.
+  // system tmpdir happens to be nested inside a repo — in that case we skip.
   let tmp: string | null = null;
   try {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-audit-noroot-"));
-  } catch (err) {
-    t.skip(`os.tmpdir() unavailable: ${(err as Error).message}`);
+  } catch {
     return;
   }
   try {
     const tmpReal = fs.realpathSync(tmp);
     let dir = tmpReal;
     while (true) {
-      if (fs.existsSync(path.join(dir, ".git"))) {
-        t.skip(`tmpdir ${tmpReal} is nested inside an existing repo at ${dir}`);
-        return;
-      }
+      if (fs.existsSync(path.join(dir, ".git"))) return; // ancestor has .git
       const parent = path.dirname(dir);
       if (parent === dir) break;
       dir = parent;

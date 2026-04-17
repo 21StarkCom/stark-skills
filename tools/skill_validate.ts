@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import type { SkillBundle } from "./skill_lib.ts";
+import { parseMarkdownLinkTargets, type SkillBundle } from "./skill_lib.ts";
 
 export type ProposalStalenessResult =
   | { stale: false }
@@ -99,35 +99,12 @@ function contentLinksToRef(
 }
 
 function extractLocalMarkdownLinks(content: string): string[] {
-  const defs = new Map<string, string>();
-  // Match the same alternation as skill_lib.ts's resolveRefs so that
-  // `[label]: <./My Guide.md> "Title"` is captured with its spaces intact.
-  // The older `\S+` capture truncated at the first internal space, so an
-  // angle-bracketed path disappeared from the validator's view even though
-  // bundle discovery still treated the file as a legitimate reference.
-  for (const m of content.matchAll(
-    /^\s*\[([^\]]+)\]:\s*(?:<([^>]+)>|(\S+))/gm,
-  )) {
-    const dest = m[2] ?? m[3];
-    if (!dest) continue;
-    defs.set(m[1].trim().toLowerCase(), stripAngleWrappers(dest));
-  }
-  const targets = new Set<string>();
-  for (const m of content.matchAll(/(?<!!)\[[^\]]+\]\(([^)]+)\)/g)) {
-    const trimmed = m[1].replace(/\s+["'].*$/, "").trim();
-    targets.add(stripAngleWrappers(trimmed));
-  }
-  for (const m of content.matchAll(/\[[^\]]+\]\[([^\]]+)\]/g)) {
-    const ref = defs.get(m[1].trim().toLowerCase());
-    if (ref) targets.add(ref);
-  }
-  return [...targets].filter(
+  // Reuse skill_lib's shared parser so a future link-syntax fix stays
+  // consistent with bundle discovery. Filter to markdown targets only —
+  // the delete guard is scoped to .md shared refs.
+  return parseMarkdownLinkTargets(content).filter(
     (t) => t.toLowerCase().endsWith(".md") || t.toLowerCase().includes(".md#"),
   );
-}
-
-function stripAngleWrappers(input: string): string {
-  return input.trim().replace(/^<|>$/g, "");
 }
 
 export function assertCrossBundleConsistency(entries: BundleProposal[]): void {
