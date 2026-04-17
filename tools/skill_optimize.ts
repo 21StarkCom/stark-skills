@@ -64,9 +64,18 @@ type BundleRunSummary = {
 const repoRoot = findRepoRoot(process.cwd());
 const options = parseArgs(process.argv.slice(2));
 
-// Fail closed when invoked from a directory that isn't inside the repo
-// whose skills we're about to scan. Otherwise the tool would happily
-// operate on whatever repo findRepoRoot walked up to from CWD.
+// Fail closed when the ancestor walk didn't actually find a .git/ — that
+// means findRepoRoot returned the bogus fallback (cwd). Without this a
+// caller running from anywhere would pass through the "inside repo root"
+// check because repoRoot === cwd trivially.
+if (!fs.existsSync(path.join(repoRoot, ".git"))) {
+  throw new Error(
+    `skill_optimize must run from inside a git repository; ` +
+      `no .git/ found walking up from ${process.cwd()}.`,
+  );
+}
+
+// And the CWD must still be inside that repo root (defense in depth).
 {
   const cwdReal = fs.realpathSync(process.cwd());
   const repoRootReal = fs.realpathSync(repoRoot);

@@ -390,12 +390,21 @@ def _resolve_user(conn, github_login):
     Mirrors stark_insights.dimensions.resolve_user but sync. Returns None
     when the producer didn't supply a login so the events.user_id column
     stays NULL rather than joining everyone under a synthetic user row.
-    Already-resolved UUIDs (from replayed partial-v2 rows) pass straight
-    through instead of being re-hashed as if they were logins.
+
+    Already-resolved UUIDs (from replayed partial-v2 rows) pass through,
+    but we still upsert a placeholder users row so the FK isn't orphaned
+    when the legacy dimension lookup couldn't recover the original login.
     """
     if not github_login:
         return None
     if _looks_like_uuid(github_login):
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            """INSERT INTO users (id, github_login, display_name, aliases, created_at)
+               VALUES (?, ?, NULL, ?, ?)
+               ON CONFLICT(id) DO NOTHING""",
+            (github_login, f"recovered:{github_login[:8]}", json.dumps([]), now),
+        )
         return github_login
     uid = str(_deterministic_user_id(github_login))
     now = datetime.now(timezone.utc).isoformat()
@@ -414,12 +423,22 @@ def _resolve_project(conn, path):
     Mirrors stark_insights.dimensions.resolve_project but sync. Returns
     None when the producer didn't supply a path so the events.project_id
     column stays NULL rather than grouping under a synthetic project row.
-    Already-resolved UUIDs (from replayed partial-v2 rows) pass straight
-    through without being hashed again as a fresh project path.
+
+    Already-resolved UUIDs (from replayed partial-v2 rows) pass through,
+    and we upsert a placeholder projects row so the FK isn't orphaned
+    when the legacy dimension lookup couldn't recover the original path.
     """
     if not path:
         return None
     if _looks_like_uuid(path):
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            """INSERT INTO projects (id, path, repo, workspace_type,
+                                     parent_project_id, first_seen_at, last_seen_at)
+               VALUES (?, ?, NULL, 'external', NULL, ?, ?)
+               ON CONFLICT(id) DO NOTHING""",
+            (path, f"(recovered:{path[:8]})", now, now),
+        )
         return path
     pid = str(_deterministic_project_id(path))
     repo = _normalize_path_to_repo(path)

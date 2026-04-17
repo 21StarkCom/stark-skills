@@ -1119,10 +1119,10 @@ class TestDrainToBufferV2:
         assert event["payload"]["duration_ms"] == 4200
         assert event["payload"]["note"] == "preserved"
 
-    def test_resolver_passes_uuid_through(self, isolated_queue):
-        """Already-resolved UUIDs (from replayed partial-v2 rows) must pass
-        straight through the resolvers instead of being re-hashed as fresh
-        logins/paths, which would corrupt the dimension FKs."""
+    def test_resolver_passes_uuid_through_and_upserts_placeholder(self, isolated_queue):
+        """Already-resolved UUIDs pass through the resolvers, and a
+        placeholder dimension row must be upserted so the FK isn't
+        orphaned if the legacy dim lookup couldn't recover the source."""
         buffer_path = isolated_queue / "buffer.db"
         _init_v2_buffer(buffer_path)
         uid = "a3f1b8e1-1b7a-4f9e-8e47-5a3f1b8e7a3f"
@@ -1130,6 +1130,16 @@ class TestDrainToBufferV2:
         db = sqlite3.connect(str(buffer_path))
         assert emit_queue._resolve_user(db, uid) == uid
         assert emit_queue._resolve_project(db, pid) == pid
+        db.commit()
+
+        # Placeholder dim rows must exist for the passed-through UUIDs.
+        user_row = db.execute("SELECT github_login FROM users WHERE id = ?", (uid,)).fetchone()
+        proj_row = db.execute("SELECT path, workspace_type FROM projects WHERE id = ?", (pid,)).fetchone()
+        assert user_row is not None, "passed-through user UUID needs a placeholder row"
+        assert user_row[0].startswith("recovered:")
+        assert proj_row is not None, "passed-through project UUID needs a placeholder row"
+        assert proj_row[1] == "external"
+
         # Non-UUID inputs still get hashed as before.
         hashed = emit_queue._resolve_user(db, "aryeh")
         assert hashed != "aryeh"
