@@ -16,6 +16,8 @@ import {
   type SkillBundle,
 } from "./skill_lib.ts";
 import {
+  decodeRewriteProposal,
+  extractOutputText,
   validateProposal,
   type RewriteAction,
   type RewriteProposal,
@@ -66,6 +68,13 @@ const sharedRefOwners = new Map<string, string[]>();
 for (const { ref, skills } of collectSharedRefs(bundles)) {
   sharedRefOwners.set(ref, skills);
 }
+// Snapshot every selected bundle's files up front so that an earlier apply
+// pass cannot delete a shared ref that a later bundle still needs to load.
+// Without this, `--apply` across multi-bundle runs can crash mid-iteration.
+const bundleFilesSnapshot = new Map<string, Array<{ path: string; content: string }>>();
+for (const bundle of selectedBundles) {
+  bundleFilesSnapshot.set(bundle.skillPath, loadBundleFiles(repoRoot, bundle));
+}
 const runSummaries: BundleRunSummary[] = [];
 
 for (const bundle of selectedBundles) {
@@ -92,7 +101,10 @@ async function processBundle(
   bundle: SkillBundle,
   options: CliOptions,
 ): Promise<BundleRunSummary> {
-  const bundleFiles = loadBundleFiles(repoRoot, bundle);
+  // Use the up-front snapshot so that a prior apply pass cannot affect the
+  // file contents visible to this bundle's validation/diff generation.
+  const bundleFiles = bundleFilesSnapshot.get(bundle.skillPath)
+    ?? loadBundleFiles(repoRoot, bundle);
   const artifactDir = path.join(
     repoRoot,
     options.outDir,
@@ -128,7 +140,7 @@ async function processBundle(
 
   const proposalPath = path.join(artifactDir, "proposal.json");
   const proposal = options.reuseProposal
-    ? loadExistingProposal(proposalPath)
+    ? loadExistingProposal(proposalPath, bundleFiles)
     : await requestProposal(bundle, bundleFiles, options);
   validateProposal(bundle, proposal, bundleFiles, sharedRefOwners, selectedSkillPaths);
   if (!options.reuseProposal) {
@@ -398,11 +410,13 @@ async function requestProposal(
     );
   }
   const outputText = extractOutputText(payload);
+  let parsed: unknown;
   try {
-    return JSON.parse(outputText) as RewriteProposal;
+    parsed = JSON.parse(outputText);
   } catch (error) {
     throw new Error(`Failed to parse proposal JSON: ${(error as Error).message}\n${outputText}`);
   }
+  return decodeRewriteProposal(parsed);
 }
 
 function generateProposalDiff(
@@ -543,30 +557,26 @@ function buildRewriteRequest(
   return sections.join("\n");
 }
 
-function extractOutputText(payload: any): string {
-  if (typeof payload.output_text === "string" && payload.output_text.trim()) {
-    return payload.output_text;
-  }
-  const parts: string[] = [];
-  for (const item of payload.output ?? []) {
-    for (const content of item.content ?? []) {
-      if (content.type === "output_text" && typeof content.text === "string") {
-        parts.push(content.text);
-      }
-    }
-  }
-  const joined = parts.join("").trim();
-  if (!joined) {
-    throw new Error("Responses API returned no output text");
-  }
-  return joined;
-}
-
-function loadExistingProposal(proposalPath: string): RewriteProposal {
+function loadExistingProposal(
+  proposalPath: string,
+  bundleFiles: Array<{ path: string; content: string }>,
+): RewriteProposal {
   if (!fs.existsSync(proposalPath)) {
     throw new Error(`No existing proposal found at ${rel(repoRoot, proposalPath)}`);
   }
-  return JSON.parse(fs.readFileSync(proposalPath, "utf8")) as RewriteProposal;
+  // Reject stale proposals where any source file has been edited since the
+  // proposal was written — applying them would silently clobber newer work.
+  const proposalMtime = fs.statSync(proposalPath).mtimeMs;
+  for (const file of bundleFiles) {
+    const abs = path.join(repoRoot, file.path);
+    if (fs.existsSync(abs) && fs.statSync(abs).mtimeMs > proposalMtime) {
+      throw new Error(
+        `Refusing to reuse proposal: ${file.path} was modified after the proposal was generated. ` +
+          "Rerun without --reuse-proposal or regenerate the proposal.",
+      );
+    }
+  }
+  return decodeRewriteProposal(JSON.parse(fs.readFileSync(proposalPath, "utf8")));
 }
 
 function diffText(

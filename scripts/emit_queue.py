@@ -286,19 +286,45 @@ _buffer_db_initialized: dict[str, float] = {}
 # MUST match stark_insights.dimensions.NAMESPACE_INSIGHTS — verified by
 # the canonical schema being asserted in tests/test_emit_queue.py.
 NAMESPACE_INSIGHTS = _uuid.UUID("7a3f1b8e-1b7a-4f9e-8e47-5a3f1b8e7a3f")
-_EVINCED_PATH_RE = re.compile(r"^/Users/[^/]+/git/Evinced/([^/]+)(?:/.*)?$")
 _ORG_REPO_RE = re.compile(r"^[A-Za-z0-9._-]+/([A-Za-z0-9._-]+)$")
 _WORKTREE_MARKERS = ("/.worktrees/", "/.claude/worktrees/")
 
 
+def _strip_worktree_suffix(path):
+    for marker in _WORKTREE_MARKERS:
+        if marker in path:
+            return path.split(marker)[0]
+    return path
+
+
 def _normalize_path_to_repo(path):
+    """Extract the repo slug for dimension tables.
+
+    Recognizes three common layouts:
+      * `/…/git/<org>/<repo>[/…]` (macOS/Linux dev + CI with go-style path)
+      * `/<base>/<org>/<repo>` (CI layouts like `/workspace/<org>/<repo>`)
+      * `"<org>/<repo>"` (producers like multi_review.py)
+    Returns None for unrecognized layouts so the dimension stays NULL
+    rather than inventing a bad repo name.
+    """
     if not path:
         return None
-    m = _EVINCED_PATH_RE.match(path)
-    if m:
-        return m.group(1)
-    # Producers like multi_review.py send project="ORG/REPO" — preserve the
-    # repo slug so repo-based aggregations keep working.
+    if path.startswith("/"):
+        base = _strip_worktree_suffix(path)
+        # Prefer the `/git/<org>/<repo>` convention when present — handles
+        # deeper paths like `/Users/<user>/git/<org>/<repo>/subdir`.
+        if "/git/" in base:
+            tail = base.split("/git/", 1)[1]
+            segs = [s for s in tail.split("/") if s]
+            if len(segs) >= 2:
+                return segs[1]
+            return None
+        # Fallback: exactly `/<base>/<org>/<repo>` (3 segments). Anything
+        # deeper is ambiguous — don't guess.
+        segs = [s for s in base.split("/") if s]
+        if len(segs) == 3:
+            return segs[-1]
+        return None
     m = _ORG_REPO_RE.match(path)
     return m.group(1) if m else None
 
@@ -310,9 +336,7 @@ def _derive_workspace_type(path):
         return "worktree"
     if path.startswith("/tmp/") or path.startswith("/private/tmp/"):
         return "tmp"
-    if _EVINCED_PATH_RE.match(path):
-        return "main"
-    if _ORG_REPO_RE.match(path):
+    if _normalize_path_to_repo(path):
         return "main"
     return "external"
 
@@ -439,6 +463,10 @@ def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
                     "schema_version": schema_version or 1,
                     "source": source,
                     "session_id": session_id,
+                    # Mirror the dedupe_key into the serialized event so that
+                    # if drain() (HTTP path) picks up the replayed row later
+                    # the backend still dedupes against the original key.
+                    "dedupe_key": dedupe_key,
                 }
                 event_json = _redact(json.dumps(event, default=str))
                 cursor = queue_db.execute(

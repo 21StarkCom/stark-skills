@@ -3,6 +3,8 @@ import { test } from "node:test";
 
 import type { SkillBundle } from "./skill_lib.ts";
 import {
+  decodeRewriteProposal,
+  extractOutputText,
   validateProposal,
   type RewriteChange,
   type RewriteProposal,
@@ -181,6 +183,95 @@ test("accepts change with empty content when action is delete", () => {
     new Map(),
     new Set([bundle.skillPath]),
   );
+});
+
+test("rejects update of a shared ref owned by another un-selected bundle", () => {
+  const sharedOwners = new Map<string, string[]>([
+    ["standards/observability.md", [bundle.skillPath, "skill/beta/SKILL.md"]],
+  ]);
+  assert.throws(
+    () =>
+      validateProposal(
+        bundle,
+        proposal([
+          {
+            path: "standards/observability.md",
+            action: "update",
+            summary: "tweak",
+            content: "# observability (edited by alpha only)\n",
+          },
+        ]),
+        bundleFiles,
+        sharedOwners,
+        new Set([bundle.skillPath]),
+      ),
+    /Refusing to update standards\/observability\.md: also referenced by skill\/beta\/SKILL\.md/,
+  );
+});
+
+test("decodeRewriteProposal rejects malformed warnings array", () => {
+  const payload = {
+    bundle_summary: "x",
+    global_notes: [],
+    changes: [],
+    refs_kept: [],
+    refs_removed: [],
+    contradictions_resolved: [],
+    terminology_normalizations: [],
+    warnings: "not-an-array",
+  };
+  assert.throws(() => decodeRewriteProposal(payload), /warnings must be string\[\]/);
+});
+
+test("decodeRewriteProposal rejects change with non-string content", () => {
+  const payload = {
+    bundle_summary: "x",
+    global_notes: [],
+    changes: [{ path: "x.md", action: "update", summary: "s", content: 42 }],
+    refs_kept: [],
+    refs_removed: [],
+    contradictions_resolved: [],
+    terminology_normalizations: [],
+    warnings: [],
+  };
+  assert.throws(() => decodeRewriteProposal(payload), /content must be a string/);
+});
+
+test("decodeRewriteProposal rejects non-object input", () => {
+  assert.throws(() => decodeRewriteProposal(null), /not an object/);
+  assert.throws(() => decodeRewriteProposal("hello"), /not an object/);
+});
+
+test("extractOutputText prefers top-level output_text", () => {
+  const text = extractOutputText({ output_text: "hello world", output: [] });
+  assert.equal(text, "hello world");
+});
+
+test("extractOutputText falls back to output[*].content[*].text", () => {
+  const payload = {
+    output_text: "",
+    output: [
+      {
+        content: [
+          { type: "output_text", text: "part A" },
+          { type: "reasoning", text: "skip" },
+          { type: "output_text", text: "part B" },
+        ],
+      },
+    ],
+  };
+  assert.equal(extractOutputText(payload), "part Apart B");
+});
+
+test("extractOutputText throws when no text is present", () => {
+  assert.throws(
+    () => extractOutputText({ output: [{ content: [{ type: "reasoning", text: "x" }] }] }),
+    /no output text/,
+  );
+});
+
+test("extractOutputText throws on non-object input", () => {
+  assert.throws(() => extractOutputText(null), /not an object/);
 });
 
 test("rejects refs_removed entries that are not in the bundle refs", () => {

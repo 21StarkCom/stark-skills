@@ -1038,6 +1038,50 @@ class TestDrainToBufferV2:
             assert wt_row["parent_project_id"] == expected_parent
             assert parent_row is not None and parent_row["id"] == expected_parent
 
+    def test_drain_resolves_claude_worktree_marker(self, isolated_queue):
+        """/.claude/worktrees/ paths must also be classified as worktrees and
+        linked to the parent repo project."""
+        buffer_path = isolated_queue / "buffer.db"
+        _init_v2_buffer(buffer_path)
+        parent = "/Users/test/git/Evinced/some-repo"
+        worktree = f"{parent}/.claude/worktrees/feat-claude"
+        expected_parent = str(emit_queue._deterministic_project_id(parent))
+        with patch.object(emit_queue, "BUFFER_PATH", buffer_path):
+            emit_queue.enqueue(_make_event(project=worktree))
+            emit_queue.drain_to_buffer()
+
+            db = sqlite3.connect(str(buffer_path))
+            db.row_factory = sqlite3.Row
+            wt_row = db.execute(
+                "SELECT workspace_type, repo, parent_project_id FROM projects WHERE path = ?",
+                (worktree,),
+            ).fetchone()
+            db.close()
+        assert wt_row is not None
+        assert wt_row["workspace_type"] == "worktree"
+        assert wt_row["repo"] == "some-repo"
+        assert wt_row["parent_project_id"] == expected_parent
+
+    def test_drain_resolves_linux_checkout(self, isolated_queue):
+        """Linux/CI checkouts (/home/*/git/<org>/<repo>, /workspace/<org>/<repo>)
+        must still populate the repo dimension."""
+        buffer_path = isolated_queue / "buffer.db"
+        _init_v2_buffer(buffer_path)
+        with patch.object(emit_queue, "BUFFER_PATH", buffer_path):
+            emit_queue.enqueue(_make_event(project="/home/ci/git/Evinced/some-repo", dedupe_key="lnx"))
+            emit_queue.enqueue(_make_event(project="/workspace/acme/payments", dedupe_key="ci"))
+            emit_queue.drain_to_buffer()
+
+            db = sqlite3.connect(str(buffer_path))
+            db.row_factory = sqlite3.Row
+            rows = db.execute(
+                "SELECT path, repo, workspace_type FROM projects ORDER BY path"
+            ).fetchall()
+            db.close()
+        paths = {r["path"]: (r["repo"], r["workspace_type"]) for r in rows}
+        assert paths["/home/ci/git/Evinced/some-repo"] == ("some-repo", "main"), paths
+        assert paths["/workspace/acme/payments"] == ("payments", "main"), paths
+
     def test_drain_quarantines_legacy_v1_buffer(self, isolated_queue):
         """RED: an existing v1 buffer.db must be moved aside so v2 writes
         don't fail forever on the legacy events(payload, project, ...) table."""
@@ -1093,6 +1137,50 @@ class TestDrainToBufferV2:
         assert {"new-1", "legacy-1"}.issubset(dedupe_keys), (
             f"expected both legacy and new rows in v2 buffer, got {dedupe_keys}"
         )
+
+    def test_legacy_replay_preserves_dedupe_key_in_event_json(self, isolated_queue):
+        """Replayed legacy rows must carry their dedupe_key inside the JSON
+        payload too (not only in the pending column) so that if drain() hits
+        them later the HTTP backend still dedupes correctly."""
+        legacy_path = isolated_queue / "buffer.v1-legacy.db"
+        legacy = sqlite3.connect(str(legacy_path))
+        legacy.executescript(
+            """
+            CREATE TABLE events (
+                id TEXT PRIMARY KEY,
+                dedupe_key TEXT UNIQUE,
+                session_id TEXT,
+                normalized_session_id TEXT,
+                type TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                cli TEXT,
+                user_id TEXT,
+                project TEXT,
+                payload TEXT NOT NULL,
+                schema_version INTEGER DEFAULT 1,
+                source TEXT,
+                synced_at TEXT
+            );
+            """
+        )
+        legacy.execute(
+            "INSERT INTO events (id, dedupe_key, type, timestamp, payload) "
+            "VALUES ('x1', 'dedupe-key-xyz', 'skill_invocation', '2026-01-01T00:00:00Z', '{}')"
+        )
+        legacy.commit()
+        legacy.close()
+
+        replayed = emit_queue._replay_legacy_rows_into_queue(legacy_path)
+        assert replayed == 1
+
+        qdb = emit_queue._get_db()
+        row = qdb.execute(
+            "SELECT dedupe_key, event_json FROM pending WHERE dedupe_key = 'dedupe-key-xyz'"
+        ).fetchone()
+        qdb.close()
+        assert row is not None
+        event = json.loads(row[1])
+        assert event.get("dedupe_key") == "dedupe-key-xyz", event
 
     def test_drain_dead_letters_poison_rows(self, isolated_queue):
         """Poison rows (malformed JSON) must move to dead_letter after MAX_RETRIES
