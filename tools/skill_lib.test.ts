@@ -8,7 +8,13 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { buildBundle, collectSharedRefs, listSkillPaths } from "./skill_lib.ts";
+import {
+  buildBundle,
+  collectSharedRefs,
+  discoverSkillBundles,
+  listSkillPaths,
+  resolveSkillTarget,
+} from "./skill_lib.ts";
 
 function makeRepo(): string | null {
   try {
@@ -150,6 +156,29 @@ test("listSkillPaths rejects symlinked SKILL.md files", () => {
     // The real SKILL.md should be found; the symlinked one must not.
     assert.ok(paths.some((p) => p.endsWith("real/SKILL.md")));
     assert.ok(!paths.some((p) => p.endsWith("evil/SKILL.md")));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveSkillTarget rejects a slug that matches two bundles under different parents", () => {
+  const tmp = makeRepo();
+  if (!tmp) return;
+  try {
+    for (const parent of ["skill", "vendor"]) {
+      const dir = path.join(tmp, parent, "alpha");
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, "SKILL.md"), "# alpha\n");
+    }
+    const bundles = discoverSkillBundles(tmp);
+    assert.equal(bundles.length, 2);
+    assert.throws(
+      () => resolveSkillTarget(tmp, bundles, "alpha"),
+      /ambiguous/,
+    );
+    // A disambiguated path still resolves deterministically.
+    const resolved = resolveSkillTarget(tmp, bundles, "vendor/alpha/SKILL.md");
+    assert.equal(resolved.skillPath, "vendor/alpha/SKILL.md");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

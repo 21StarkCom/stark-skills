@@ -477,6 +477,97 @@ test("assertSharedDeletedRefsRemoved accepts when every co-owner drops the link"
   assertSharedDeletedRefsRemoved(entries, sharedOwners, currentContents);
 });
 
+test("assertSharedDeletedRefsRemoved catches angle-bracketed spaced reference definitions", () => {
+  const sharedOwners = new Map<string, string[]>([
+    ["standards/My Guide.md", ["skill/alpha/SKILL.md", "skill/beta/SKILL.md"]],
+  ]);
+  const currentContents = new Map<string, string>([
+    ["skill/alpha/SKILL.md", "# alpha\n[g](<../../standards/My Guide.md>)\n"],
+    ["skill/beta/SKILL.md", [
+      "# beta",
+      "",
+      "[g][guide]",
+      "",
+      "[guide]: <../../standards/My Guide.md> \"Title\"",
+      "",
+    ].join("\n")],
+  ]);
+  const entries = [
+    {
+      skillPath: "skill/alpha/SKILL.md",
+      proposal: proposal([
+        { path: "standards/My Guide.md", action: "delete", summary: "cleanup", content: "" },
+      ]),
+    },
+  ];
+  assert.throws(
+    () => assertSharedDeletedRefsRemoved(entries, sharedOwners, currentContents),
+    /skill\/beta\/SKILL\.md still links to it/,
+  );
+});
+
+test("validateProposal rejects deleting a ref when own SKILL.md still links to it", () => {
+  const bundleWithLinks: SkillBundle = {
+    skillPath: "skill/alpha/SKILL.md",
+    refs: ["skill/alpha/reference.md"],
+    missingRefs: [],
+    wordCount: 10,
+    lineCount: 3,
+  };
+  const filesWithLink = [
+    {
+      path: "skill/alpha/SKILL.md",
+      content: "# alpha\n[link](./reference.md)\n",
+    },
+    { path: "skill/alpha/reference.md", content: "# reference\n" },
+  ];
+  assert.throws(
+    () =>
+      validateProposal(
+        bundleWithLinks,
+        proposal([
+          { path: "skill/alpha/reference.md", action: "delete", summary: "drop", content: "" },
+        ]),
+        filesWithLink,
+        new Map(),
+        new Set([bundleWithLinks.skillPath]),
+      ),
+    /skill\/alpha\/SKILL\.md still links to it/,
+  );
+});
+
+test("validateProposal allows deleting a ref when the bundle's own SKILL.md also drops the link", () => {
+  const bundleWithLinks: SkillBundle = {
+    skillPath: "skill/alpha/SKILL.md",
+    refs: ["skill/alpha/reference.md"],
+    missingRefs: [],
+    wordCount: 10,
+    lineCount: 3,
+  };
+  const filesWithLink = [
+    {
+      path: "skill/alpha/SKILL.md",
+      content: "# alpha\n[link](./reference.md)\n",
+    },
+    { path: "skill/alpha/reference.md", content: "# reference\n" },
+  ];
+  validateProposal(
+    bundleWithLinks,
+    proposal([
+      {
+        path: "skill/alpha/SKILL.md",
+        action: "update",
+        summary: "drop link",
+        content: "# alpha\nNo link anymore.\n",
+      },
+      { path: "skill/alpha/reference.md", action: "delete", summary: "drop", content: "" },
+    ]),
+    filesWithLink,
+    new Map(),
+    new Set([bundleWithLinks.skillPath]),
+  );
+});
+
 test("assertSharedDeletedRefsRemoved catches ref-style links with title in co-owner content", () => {
   const sharedOwners = new Map<string, string[]>([
     ["standards/observability.md", ["skill/alpha/SKILL.md", "skill/beta/SKILL.md"]],

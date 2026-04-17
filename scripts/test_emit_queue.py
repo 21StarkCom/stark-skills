@@ -752,8 +752,9 @@ class TestDrainToBufferV2:
 
     def test_drain_lifts_v2_analytics_columns_from_payload(self, isolated_queue):
         """Lifted v2 columns (skill_name, duration_ms, pr_number, severity,
-        agent_name, domain, passed, success, ...) must come out of the payload
-        into their dedicated columns instead of staying NULL."""
+        agent_name, domain, passed, success, prompt_text, prompt_length,
+        is_correction, ...) must come out of the payload into their dedicated
+        columns instead of staying NULL."""
         buffer_path = isolated_queue / "buffer.db"
         _init_v2_buffer(buffer_path)
         payload = {
@@ -770,6 +771,9 @@ class TestDrainToBufferV2:
             "passed": False,
             "won": True,
             "score_value": 0.82,
+            "prompt_text": "Review this PR for correctness.",
+            "prompt_length": 27,
+            "is_correction": True,
             "extra_stuff": "preserved",
         }
         with patch.object(emit_queue, "BUFFER_PATH", buffer_path):
@@ -780,7 +784,8 @@ class TestDrainToBufferV2:
             row = db.execute(
                 "SELECT tool_name, skill_name, duration_ms, success, "
                 "pr_number, repo, severity, agent_name, domain, action, "
-                "passed, score_value, won, payload_extra FROM events"
+                "passed, score_value, won, prompt_text, prompt_length, "
+                "is_correction, payload_extra FROM events"
             ).fetchone()
             db.close()
         assert row is not None
@@ -797,9 +802,15 @@ class TestDrainToBufferV2:
         assert row["passed"] == 0
         assert row["score_value"] == 0.82
         assert row["won"] == 1
+        assert row["prompt_text"] == "Review this PR for correctness."
+        assert row["prompt_length"] == 27
+        assert row["is_correction"] == 1
         # Lifted keys should not also be in payload_extra; unrelated keys must survive.
         extra = json.loads(row["payload_extra"])
         assert "skill_name" not in extra
+        assert "prompt_text" not in extra
+        assert "prompt_length" not in extra
+        assert "is_correction" not in extra
         assert extra.get("extra_stuff") == "preserved"
 
     def test_drain_lifts_legacy_payload_keys(self, isolated_queue):

@@ -122,27 +122,26 @@ async function main(): Promise<void> {
     }
   }
   const runSummaries: BundleRunSummary[] = [];
-  type PendingApply = { bundle: SkillBundle; proposal: RewriteProposal };
-  const pendingApplies: PendingApply[] = [];
+  type BundleProposalPair = { bundle: SkillBundle; proposal: RewriteProposal };
+  const pendingProposals: BundleProposalPair[] = [];
 
   for (const bundle of selectedBundles) {
     const { summary, proposal } = await processBundle(bundle, options, sharedRefOwners);
     runSummaries.push(summary);
-    if (options.apply && proposal) {
-      pendingApplies.push({ bundle, proposal });
+    if (proposal) {
+      pendingProposals.push({ bundle, proposal });
     }
   }
 
-  if (options.apply && pendingApplies.length > 0) {
-    // Cross-bundle consistency check before any disk mutation: two bundles
-    // that share a ref must propose the SAME update content or both agree
-    // on delete.
-    const pendingEntries = pendingApplies.map((p) => ({
-      skillPath: p.bundle.skillPath,
-      proposal: p.proposal,
-    }));
+  // Run cross-bundle invariants regardless of --apply so dry runs surface
+  // multi-bundle conflicts (conflicting shared-ref updates, dangling co-owner
+  // links after a delete) before the user re-runs with --apply.
+  const pendingEntries = pendingProposals.map((p) => ({
+    skillPath: p.bundle.skillPath,
+    proposal: p.proposal,
+  }));
+  if (pendingEntries.length > 1) {
     assertCrossBundleConsistency(pendingEntries);
-    // Shared-ref deletes must not leave dangling links in co-owners' SKILL.md.
     const ownerSkillContents = new Map<string, string>();
     for (const bundle of selectedBundles) {
       const files = bundleFilesSnapshot.get(bundle.skillPath) ?? [];
@@ -150,6 +149,10 @@ async function main(): Promise<void> {
       if (skillFile) ownerSkillContents.set(bundle.skillPath, skillFile.content);
     }
     assertSharedDeletedRefsRemoved(pendingEntries, sharedRefOwners, ownerSkillContents);
+  }
+
+  if (options.apply && pendingProposals.length > 0) {
+    const pendingApplies = pendingProposals;
     // Two-phase apply: stage every write under artifacts/skill-optimizer/
     // apply-staging first, then atomically swap them into place. A phase-1
     // error aborts without mutating the repo. A phase-2 error preserves the
@@ -290,7 +293,18 @@ async function processBundle(
     persistProposal(artifactDir, bundle, proposal);
   }
   const diffPath = path.join(artifactDir, "proposal.diff");
-  const diffText = generateProposalDiff(bundleFiles, proposal);
+  // Best-effort diff. generateProposalDiff shells out to `diff` using a temp
+  // dir under os.tmpdir(); a locked-down sandbox or missing `diff` binary
+  // shouldn't drop the proposal we already persisted in persistProposal.
+  let diffText = "";
+  try {
+    diffText = generateProposalDiff(bundleFiles, proposal);
+  } catch (error) {
+    console.error(
+      `[skill_optimize] diff generation failed for ${bundle.skillPath}: ` +
+        `${(error as Error).message}. Proposal JSON and summary are still on disk.`,
+    );
+  }
   writeUtf8(diffPath, diffText);
 
   if (options.diff && diffText.trim()) {
@@ -944,7 +958,12 @@ export function commitStagedOps(ops: StagedOp[]): void {
 }
 
 export function stagingName(absPath: string, repoRoot: string): string {
-  return path.relative(repoRoot, absPath).replace(/[\\/]/g, "__");
+  // Preserve the repo-relative path segments verbatim. The previous flat
+  // slug (`a/b/c.md` → `a__b__c.md`) aliased distinct targets whenever one
+  // segment contained a literal `__` (e.g. `a__b/c.md` and `a/b__c.md`
+  // both mapped to `a__b__c.md`). Keeping the nested structure under
+  // stagingRoot makes the mapping one-to-one.
+  return path.relative(repoRoot, absPath);
 }
 
 /**

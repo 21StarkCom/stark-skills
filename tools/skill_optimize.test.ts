@@ -92,13 +92,67 @@ function writeProposal(
   return file;
 }
 
-function runCli(repo: string, args: string[]): SpawnSyncReturns<string> {
+function runCli(
+  repo: string,
+  args: string[],
+  env: NodeJS.ProcessEnv = {},
+): SpawnSyncReturns<string> {
   return spawnSync(
     process.execPath,
     ["--experimental-strip-types", CLI, ...args],
-    { cwd: repo, encoding: "utf8" },
+    { cwd: repo, encoding: "utf8", env: { ...process.env, ...env } },
   );
 }
+
+test("diff generation failure is non-fatal — proposal.json and summary are still saved", () => {
+  const repo = makeRepo();
+  if (!repo) return;
+  try {
+    writeSkill(repo, "alpha", "# alpha\n\nOriginal.\n");
+    writeProposal(
+      repo,
+      "alpha",
+      mkProposal([
+        {
+          path: "skill/alpha/SKILL.md",
+          action: "update",
+          summary: "rewrite",
+          content: "# alpha\n\nRewritten.\n",
+        },
+      ]),
+    );
+    // Forcing TMPDIR to a missing directory makes diffText's
+    // fs.mkdtempSync(os.tmpdir()) throw. The CLI must still complete so the
+    // proposal.json + summary we already paid for stay usable.
+    const missingTmp = path.join(repo, "nonexistent-tmpdir");
+    const res = runCli(
+      repo,
+      [
+        "--mode",
+        "api",
+        "--reuse-proposal",
+        "--skill",
+        "alpha",
+      ],
+      { TMPDIR: missingTmp },
+    );
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stderr, /diff generation failed/);
+    const diff = fs.readFileSync(
+      path.join(artifactDir(repo, "alpha"), "proposal.diff"),
+      "utf8",
+    );
+    assert.equal(diff, "");
+    // Original JSON / summary are unaffected by the diff failure.
+    assert.ok(
+      fs.existsSync(
+        path.join(artifactDir(repo, "alpha"), "proposal.json"),
+      ),
+    );
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
 
 test("--mode plan writes bundle manifest and rewrite request", () => {
   const repo = makeRepo();
@@ -310,15 +364,18 @@ test("commitStagedOps atomically swaps staged content over originals and honors 
   }
 });
 
-test("stagingName flattens nested repo paths into a single segment", () => {
-  assert.equal(
-    stagingName("/repo/skill/alpha/SKILL.md", "/repo"),
-    "skill__alpha__SKILL.md",
-  );
-  assert.equal(
-    stagingName("/repo/standards/shared.md", "/repo"),
-    "standards__shared.md",
-  );
+test("stagingName preserves the repo-relative structure one-to-one", () => {
+  const expectedA = path.join("skill", "alpha", "SKILL.md");
+  const expectedB = path.join("standards", "shared.md");
+  assert.equal(stagingName("/repo/skill/alpha/SKILL.md", "/repo"), expectedA);
+  assert.equal(stagingName("/repo/standards/shared.md", "/repo"), expectedB);
+
+  // Two paths that would have collided under the old flat-slug scheme
+  // (`a__b/c.md` and `a/b__c.md` both mapping to `a__b__c.md`) must now map
+  // to distinct strings so staging can never alias them.
+  const nested1 = stagingName("/repo/a__b/c.md", "/repo");
+  const nested2 = stagingName("/repo/a/b__c.md", "/repo");
+  assert.notEqual(nested1, nested2);
 });
 
 test("bundleArtifactSlug gives distinct slugs for bundles with the same leaf name", () => {
@@ -334,6 +391,64 @@ test("bundleArtifactSlug gives distinct slugs for bundles with the same leaf nam
     bundleArtifactSlug("skill/alpha/SKILL.md"),
     bundleArtifactSlug("vendor/alpha/SKILL.md"),
   );
+});
+
+test("dry-run surfaces cross-bundle conflicts on a shared ref", () => {
+  const repo = makeRepo();
+  if (!repo) return;
+  try {
+    fs.mkdirSync(path.join(repo, "standards"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "standards/shared.md"), "Shared v1\n");
+    writeSkill(
+      repo,
+      "alpha",
+      "# alpha\n\n[s](../../standards/shared.md)\n",
+    );
+    writeSkill(
+      repo,
+      "beta",
+      "# beta\n\n[s](../../standards/shared.md)\n",
+    );
+    writeProposal(
+      repo,
+      "alpha",
+      mkProposal([
+        {
+          path: "standards/shared.md",
+          action: "update",
+          summary: "alpha wants X",
+          content: "Shared v2 (alpha flavor)\n",
+        },
+      ]),
+    );
+    writeProposal(
+      repo,
+      "beta",
+      mkProposal([
+        {
+          path: "standards/shared.md",
+          action: "update",
+          summary: "beta wants Y",
+          content: "Shared v2 (beta flavor)\n",
+        },
+      ]),
+    );
+    // Dry run — no --apply. Previously the consistency check was gated on
+    // --apply, so conflicting proposals were silently accepted until the
+    // user re-ran with --apply. Now the check fires whenever 2+ proposals
+    // are in play.
+    const res = runCli(repo, [
+      "--mode",
+      "api",
+      "--reuse-proposal",
+      "--skills",
+      "alpha,beta",
+    ]);
+    assert.notEqual(res.status, 0);
+    assert.match(res.stderr, /Cross-bundle conflict on standards\/shared\.md/);
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
 });
 
 test("--reuse-proposal --apply handles two bundles sharing a ref", () => {

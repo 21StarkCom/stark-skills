@@ -100,8 +100,17 @@ function contentLinksToRef(
 
 function extractLocalMarkdownLinks(content: string): string[] {
   const defs = new Map<string, string>();
-  for (const m of content.matchAll(/^\s*\[([^\]]+)\]:\s*(\S+)/gm)) {
-    defs.set(m[1].trim().toLowerCase(), stripAngleWrappers(m[2]));
+  // Match the same alternation as skill_lib.ts's resolveRefs so that
+  // `[label]: <./My Guide.md> "Title"` is captured with its spaces intact.
+  // The older `\S+` capture truncated at the first internal space, so an
+  // angle-bracketed path disappeared from the validator's view even though
+  // bundle discovery still treated the file as a legitimate reference.
+  for (const m of content.matchAll(
+    /^\s*\[([^\]]+)\]:\s*(?:<([^>]+)>|(\S+))/gm,
+  )) {
+    const dest = m[2] ?? m[3];
+    if (!dest) continue;
+    defs.set(m[1].trim().toLowerCase(), stripAngleWrappers(dest));
   }
   const targets = new Set<string>();
   for (const m of content.matchAll(/(?<!!)\[[^\]]+\]\(([^)]+)\)/g)) {
@@ -308,6 +317,27 @@ export function validateProposal(
         throw new Error(
           `Refusing to ${change.action} ${change.path}: also referenced by ${otherOwners.join(", ")}. ` +
             "Rerun the optimizer including every owner, or keep the shared ref unchanged.",
+        );
+      }
+    }
+    // A delete of a ref owned by this bundle is only safe if the bundle's
+    // own post-rewrite SKILL.md no longer links to that path. The shared-
+    // ref guard handles cross-bundle references; this block catches the
+    // single-owner case where a proposal drops a ref but forgets to remove
+    // the link from its own SKILL.md.
+    if (change.action === "delete" && change.path !== bundle.skillPath) {
+      const selfSkillChange = proposal.changes.find(
+        (c) => c.path === bundle.skillPath,
+      );
+      const postSkillContent =
+        selfSkillChange?.action === "update"
+          ? selfSkillChange.content
+          : currentContent.get(bundle.skillPath) ?? "";
+      if (contentLinksToRef(postSkillContent, bundle.skillPath, change.path)) {
+        throw new Error(
+          `Refusing to delete ${change.path}: ${bundle.skillPath} still links ` +
+            `to it after its own rewrite. Update SKILL.md to drop the link ` +
+            `before deleting the reference.`,
         );
       }
     }
