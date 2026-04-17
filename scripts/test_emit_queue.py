@@ -1163,6 +1163,108 @@ class TestDrainToBufferV2:
         ):
             assert emit_queue._normalize_path_to_repo(p) is None, p
 
+    def test_permanent_sqlite_errors_do_dead_letter(self, isolated_queue):
+        """Non-transient OperationalErrors (e.g. 'attempt to write a readonly
+        database') must count toward retries and eventually dead-letter,
+        otherwise the queue wedges forever when the buffer is truly broken."""
+        buffer_path = isolated_queue / "buffer.db"
+        _init_v2_buffer(buffer_path)
+
+        def permanent_resolve_user(conn, login):
+            raise sqlite3.OperationalError("attempt to write a readonly database")
+
+        with patch.object(emit_queue, "BUFFER_PATH", buffer_path), \
+             patch.object(emit_queue, "_resolve_user", permanent_resolve_user):
+            emit_queue.enqueue(_make_event(dedupe_key="readonly", user_id="aryeh"))
+            for _ in range(emit_queue.MAX_RETRIES):
+                emit_queue.drain_to_buffer()
+
+            qdb = emit_queue._get_db()
+            dead = qdb.execute(
+                "SELECT COUNT(*) FROM dead_letter WHERE dedupe_key = 'readonly'"
+            ).fetchone()[0]
+            pending = qdb.execute(
+                "SELECT COUNT(*) FROM pending WHERE dedupe_key = 'readonly'"
+            ).fetchone()[0]
+            qdb.close()
+        assert dead == 1, "permanent error must dead-letter after MAX_RETRIES"
+        assert pending == 0
+
+    def test_drain_rejects_events_missing_envelope_fields(self, isolated_queue):
+        """Events lacking required v2 envelope (type/timestamp) must fail
+        loudly — not silently populate empty strings."""
+        buffer_path = isolated_queue / "buffer.db"
+        _init_v2_buffer(buffer_path)
+        with patch.object(emit_queue, "BUFFER_PATH", buffer_path):
+            qdb = emit_queue._get_db()
+            qdb.execute(
+                "INSERT INTO pending (dedupe_key, event_json, created_at) "
+                "VALUES (?, ?, ?)",
+                ("malformed", '{"payload":{}}', "2026-04-01T00:00:00Z"),
+            )
+            qdb.commit()
+            qdb.close()
+
+            for _ in range(emit_queue.MAX_RETRIES):
+                emit_queue.drain_to_buffer()
+
+            qdb = emit_queue._get_db()
+            dead = qdb.execute(
+                "SELECT last_error FROM dead_letter WHERE dedupe_key = 'malformed'"
+            ).fetchone()
+            qdb.close()
+            bdb = sqlite3.connect(str(buffer_path))
+            event_count = bdb.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            bdb.close()
+        assert dead is not None, "malformed event must dead-letter"
+        assert "missing required" in dead[0], dead[0]
+        assert event_count == 0, "malformed event must NOT be inserted into buffer"
+
+    def test_partial_v2_replay_preserves_dim_source_identity(self, isolated_queue):
+        """A partial-v2 buffer stores user_id/project_id as UUIDs. Replay must
+        map those UUIDs back to their login/path via the legacy users/projects
+        tables so the new drain re-upserts the dim rows instead of inserting
+        orphan FKs into the fresh v2 buffer."""
+        legacy_path = isolated_queue / "buffer.v1-partial2.db"
+        db = sqlite3.connect(str(legacy_path))
+        db.executescript(V2_BUFFER_SCHEMA)
+        user_uuid = str(emit_queue._deterministic_user_id("aryeh"))
+        project_path = "/Users/test/git/Evinced/some-repo"
+        project_uuid = str(emit_queue._deterministic_project_id(project_path))
+        db.execute(
+            "INSERT INTO users (id, github_login, aliases, created_at) "
+            "VALUES (?, ?, '[]', '2026-01-01T00:00:00Z')",
+            (user_uuid, "aryeh"),
+        )
+        db.execute(
+            "INSERT INTO projects (id, path, workspace_type, first_seen_at, last_seen_at) "
+            "VALUES (?, ?, 'main', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            (project_uuid, project_path),
+        )
+        db.execute(
+            "INSERT INTO events (id, dedupe_key, type, timestamp, user_id, "
+            "project_id, payload_extra, source) VALUES "
+            "('e1', 'dim-replay', 'skill_invocation', '2026-02-01T00:00:00Z', "
+            "?, ?, '{}', 'skill')",
+            (user_uuid, project_uuid),
+        )
+        db.commit()
+        db.close()
+
+        emit_queue._replay_legacy_rows_into_queue(legacy_path)
+
+        qdb = emit_queue._get_db()
+        row = qdb.execute(
+            "SELECT event_json FROM pending WHERE dedupe_key = 'dim-replay'"
+        ).fetchone()
+        qdb.close()
+        assert row is not None
+        event = json.loads(row[0])
+        # The replayed event must carry the ORIGINAL login/path so
+        # drain_to_buffer re-creates the dim rows in the fresh buffer.
+        assert event["user_id"] == "aryeh"
+        assert event["project"] == project_path
+
     def test_transient_sqlite_errors_do_not_burn_retries(self, isolated_queue):
         """OperationalError (e.g. locked/busy) must leave the row pending and
         not increment retries toward dead-letter."""
