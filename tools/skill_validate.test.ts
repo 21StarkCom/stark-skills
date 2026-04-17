@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import type { SkillBundle } from "./skill_lib.ts";
 import {
+  assertCrossBundleConsistency,
   decodeRewriteProposal,
   extractOutputText,
   findStaleBundleFile,
@@ -294,6 +295,82 @@ test("findStaleBundleFile returns not-stale when files are older than proposal",
     (rel) => mtimes.get(rel) ?? null,
   );
   assert.equal(result.stale, false);
+});
+
+test("assertCrossBundleConsistency rejects conflicting update content on a shared ref", () => {
+  const entries = [
+    {
+      skillPath: "skill/alpha/SKILL.md",
+      proposal: proposal([
+        { path: "standards/observability.md", action: "update", summary: "a", content: "VERSION A\n" },
+      ]),
+    },
+    {
+      skillPath: "skill/beta/SKILL.md",
+      proposal: proposal([
+        { path: "standards/observability.md", action: "update", summary: "b", content: "VERSION B\n" },
+      ]),
+    },
+  ];
+  assert.throws(
+    () => assertCrossBundleConsistency(entries),
+    /Cross-bundle conflict on standards\/observability\.md/,
+  );
+});
+
+test("assertCrossBundleConsistency accepts identical update on a shared ref", () => {
+  const content = "# observability (agreed rewrite)\n";
+  const entries = [
+    {
+      skillPath: "skill/alpha/SKILL.md",
+      proposal: proposal([
+        { path: "standards/observability.md", action: "update", summary: "a", content },
+      ]),
+    },
+    {
+      skillPath: "skill/beta/SKILL.md",
+      proposal: proposal([
+        { path: "standards/observability.md", action: "update", summary: "b", content },
+      ]),
+    },
+  ];
+  assertCrossBundleConsistency(entries);
+});
+
+test("assertCrossBundleConsistency rejects update-vs-delete disagreement", () => {
+  const entries = [
+    {
+      skillPath: "skill/alpha/SKILL.md",
+      proposal: proposal([
+        { path: "standards/observability.md", action: "update", summary: "a", content: "# keep\n" },
+      ]),
+    },
+    {
+      skillPath: "skill/beta/SKILL.md",
+      proposal: proposal([
+        { path: "standards/observability.md", action: "delete", summary: "b", content: "" },
+      ]),
+    },
+  ];
+  assert.throws(() => assertCrossBundleConsistency(entries), /update.*delete|delete.*update/);
+});
+
+test("assertCrossBundleConsistency ignores non-overlapping changes", () => {
+  const entries = [
+    {
+      skillPath: "skill/alpha/SKILL.md",
+      proposal: proposal([
+        { path: "skill/alpha/ref.md", action: "update", summary: "a", content: "A\n" },
+      ]),
+    },
+    {
+      skillPath: "skill/beta/SKILL.md",
+      proposal: proposal([
+        { path: "skill/beta/ref.md", action: "update", summary: "b", content: "B\n" },
+      ]),
+    },
+  ];
+  assertCrossBundleConsistency(entries);
 });
 
 test("findStaleBundleFile flags deleted files as stale", () => {

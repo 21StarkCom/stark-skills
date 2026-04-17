@@ -16,6 +16,7 @@ import {
   type SkillBundle,
 } from "./skill_lib.ts";
 import {
+  assertCrossBundleConsistency,
   decodeRewriteProposal,
   extractOutputText,
   findStaleBundleFile,
@@ -62,6 +63,34 @@ type BundleRunSummary = {
 
 const repoRoot = findRepoRoot(process.cwd());
 const options = parseArgs(process.argv.slice(2));
+
+// Fail closed when invoked from a directory that isn't inside the repo
+// whose skills we're about to scan. Otherwise the tool would happily
+// operate on whatever repo findRepoRoot walked up to from CWD.
+{
+  const cwdReal = fs.realpathSync(process.cwd());
+  const repoRootReal = fs.realpathSync(repoRoot);
+  if (
+    !cwdReal.startsWith(repoRootReal + path.sep) &&
+    cwdReal !== repoRootReal
+  ) {
+    throw new Error(
+      `skill_optimize must run from inside the repo root (${repoRootReal}); ` +
+        `current directory is ${cwdReal}.`,
+    );
+  }
+}
+
+// Require --mode api + an explicit --skill target to avoid accidentally
+// uploading every discovered bundle to the Responses API. Plan mode can
+// still operate on all bundles because it never makes a network call.
+if (options.mode === "api" && !options.skillTargets.length) {
+  throw new Error(
+    "--mode api requires at least one --skill or --skills target " +
+      "(prevents uploading every repo skill to the Responses API).",
+  );
+}
+
 const bundles = discoverSkillBundles(repoRoot);
 const selectedBundles = selectBundles(bundles, options.skillTargets);
 const selectedSkillPaths = new Set(selectedBundles.map((bundle) => bundle.skillPath));
@@ -87,10 +116,31 @@ for (const bundle of selectedBundles) {
   }
 }
 const runSummaries: BundleRunSummary[] = [];
+type PendingApply = { bundle: SkillBundle; proposal: RewriteProposal };
+const pendingApplies: PendingApply[] = [];
 
 for (const bundle of selectedBundles) {
-  const summary = await processBundle(bundle, options);
+  const { summary, proposal } = await processBundle(bundle, options);
   runSummaries.push(summary);
+  if (options.apply && proposal) {
+    pendingApplies.push({ bundle, proposal });
+  }
+}
+
+if (options.apply && pendingApplies.length > 0) {
+  // Cross-bundle consistency check before any disk mutation: two bundles
+  // that share a ref must propose the SAME update content or both agree
+  // on delete. Without this a sequential apply silently clobbers the
+  // earlier bundle's edit.
+  assertCrossBundleConsistency(
+    pendingApplies.map((p) => ({ skillPath: p.bundle.skillPath, proposal: p.proposal })),
+  );
+  for (const { proposal } of pendingApplies) {
+    applyProposal(proposal);
+  }
+  for (const summary of runSummaries) {
+    if (summary.proposalPath) summary.applied = true;
+  }
 }
 
 writeRunSummary(repoRoot, options.outDir, options, runSummaries);
@@ -135,7 +185,7 @@ function assertInsideRepo(target: string, label: string): void {
 async function processBundle(
   bundle: SkillBundle,
   options: CliOptions,
-): Promise<BundleRunSummary> {
+): Promise<{ summary: BundleRunSummary; proposal: RewriteProposal | null }> {
   // Use the up-front snapshot so that a prior apply pass cannot affect the
   // file contents visible to this bundle's validation/diff generation.
   const bundleFiles = bundleFilesSnapshot.get(bundle.skillPath)
@@ -164,13 +214,16 @@ async function processBundle(
   if (options.mode === "plan") {
     writeUtf8(path.join(artifactDir, "rewrite-request.md"), buildRewriteRequest(bundle, bundleFiles));
     return {
-      skillPath: bundle.skillPath,
-      artifactDir: rel(repoRoot, artifactDir),
-      mode: options.mode,
-      applied: false,
-      changedFiles: [],
-      refsRemoved: [],
-      warnings: ["Plan mode only: no proposal generated."],
+      summary: {
+        skillPath: bundle.skillPath,
+        artifactDir: rel(repoRoot, artifactDir),
+        mode: options.mode,
+        applied: false,
+        changedFiles: [],
+        refsRemoved: [],
+        warnings: ["Plan mode only: no proposal generated."],
+      },
+      proposal: null,
     };
   }
 
@@ -207,21 +260,22 @@ async function processBundle(
       };
     });
 
-  if (options.apply) {
-    applyProposal(proposal);
-  }
-
+  // Apply is deferred — the top-level loop runs cross-bundle consistency
+  // over every selected bundle's proposal and then applies them together.
   return {
-    skillPath: bundle.skillPath,
-    artifactDir: rel(repoRoot, artifactDir),
-    diffPath: rel(repoRoot, diffPath),
-    mode: options.mode,
-    applied: options.apply,
-    proposalPath: rel(repoRoot, proposalPath),
-    proposalSummaryPath: rel(repoRoot, path.join(artifactDir, "proposal-summary.md")),
-    changedFiles,
-    refsRemoved: proposal.refs_removed,
-    warnings: proposal.warnings,
+    summary: {
+      skillPath: bundle.skillPath,
+      artifactDir: rel(repoRoot, artifactDir),
+      diffPath: rel(repoRoot, diffPath),
+      mode: options.mode,
+      applied: false,
+      proposalPath: rel(repoRoot, proposalPath),
+      proposalSummaryPath: rel(repoRoot, path.join(artifactDir, "proposal-summary.md")),
+      changedFiles,
+      refsRemoved: proposal.refs_removed,
+      warnings: proposal.warnings,
+    },
+    proposal,
   };
 }
 
