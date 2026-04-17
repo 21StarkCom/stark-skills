@@ -402,6 +402,85 @@ test("--mode api surfaces a Responses status: failed as a non-zero exit", async 
   }
 });
 
+test("--mode api surfaces cancelled and incomplete statuses as errors", async (t) => {
+  const repo = makeRepo(t);
+  if (!repo) return;
+  for (const terminalStatus of ["cancelled", "incomplete"] as const) {
+    writeSkill(repo, "alpha", "# alpha\n\nOriginal.\n");
+    const mock = await startMockResponsesServer({
+      id: `mock-${terminalStatus}`,
+      status: terminalStatus,
+      error: { message: `${terminalStatus} run` },
+    });
+    try {
+      const res = await runCliAsync(
+        repo,
+        [
+          "--mode",
+          "api",
+          "--skill",
+          "alpha",
+          "--poll-interval-ms",
+          "25",
+          "--api-timeout-ms",
+          "5000",
+        ],
+        {
+          OPENAI_API_KEY: "test-key",
+          OPENAI_RESPONSES_BASE: `http://127.0.0.1:${mock.port}/v1/responses`,
+        },
+      );
+      assert.notEqual(res.status, 0, `expected failure for ${terminalStatus}`);
+      assert.match(res.stderr, new RegExp(terminalStatus));
+    } finally {
+      await mock.close();
+    }
+  }
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test("--mode api rejects a completed response with malformed output_text", async (t) => {
+  const repo = makeRepo(t);
+  if (!repo) return;
+  try {
+    writeSkill(repo, "alpha", "# alpha\n\nOriginal.\n");
+    const mock = await startMockResponsesServer({
+      id: "mock-malformed-1",
+      status: "completed",
+      output_text: "not valid json {[",
+    });
+    try {
+      const res = await runCliAsync(
+        repo,
+        [
+          "--mode",
+          "api",
+          "--skill",
+          "alpha",
+          "--poll-interval-ms",
+          "25",
+          "--api-timeout-ms",
+          "5000",
+        ],
+        {
+          OPENAI_API_KEY: "test-key",
+          OPENAI_RESPONSES_BASE: `http://127.0.0.1:${mock.port}/v1/responses`,
+        },
+      );
+      assert.notEqual(res.status, 0);
+      assert.match(res.stderr, /Failed to parse proposal JSON|proposal/i);
+      assert.ok(
+        !fs.existsSync(path.join(artifactDir(repo, "alpha"), "proposal.json")),
+        "a malformed completed response must not persist proposal.json",
+      );
+    } finally {
+      await mock.close();
+    }
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("--mode plan writes bundle manifest and rewrite request", (t) => {
   const repo = makeRepo(t);
   if (!repo) return;
@@ -615,6 +694,44 @@ test("planProposalApply does not mutate bundle files when a later proposal's tar
   }
 });
 
+test("commitStagedOps aborts when a target becomes a symlink between stage and commit", (t) => {
+  if (process.platform === "win32") return;
+  const repo = makeRepo(t);
+  if (!repo) return;
+  try {
+    writeSkill(repo, "beta", "# beta\n\nbeta body.\n");
+    writeSkill(repo, "alpha", "# alpha\n\nOriginal alpha.\n");
+    const stagingRoot = fs.mkdtempSync(path.join(repo, "staging-"));
+    const proposal = fullProposal([
+      {
+        path: "skill/alpha/SKILL.md",
+        action: "update",
+        summary: "rewrite",
+        content: "# alpha\n\nShould never land.\n",
+      },
+    ]);
+    const ops = planProposalApply(proposal, stagingRoot, repo);
+    // Attacker swaps the already-staged target into a symlink. Phase-2 must
+    // detect the change and abort instead of following the link and
+    // overwriting skill/beta/SKILL.md.
+    fs.unlinkSync(path.join(repo, "skill/alpha/SKILL.md"));
+    fs.symlinkSync(
+      path.join(repo, "skill/beta/SKILL.md"),
+      path.join(repo, "skill/alpha/SKILL.md"),
+    );
+    assert.throws(
+      () => commitStagedOps(ops, repo),
+      /became a symlink between staging and commit/,
+    );
+    assert.equal(
+      fs.readFileSync(path.join(repo, "skill/beta/SKILL.md"), "utf8"),
+      "# beta\n\nbeta body.\n",
+    );
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("commitStagedOps falls back to copy+unlink when renameSync reports EXDEV", (t) => {
   const repo = makeRepo(t);
   if (!repo) return;
@@ -643,7 +760,7 @@ test("commitStagedOps falls back to copy+unlink when renameSync reports EXDEV", 
       throw err;
     }) as typeof fs.renameSync;
     try {
-      commitStagedOps(ops);
+      commitStagedOps(ops, repo);
     } finally {
       (fs as unknown as { renameSync: typeof fs.renameSync }).renameSync =
         originalRename;
@@ -687,7 +804,7 @@ test("commitStagedOps atomically swaps staged content over originals and honors 
       },
     ]);
     const ops = planProposalApply(proposal, stagingRoot, repo);
-    commitStagedOps(ops);
+    commitStagedOps(ops, repo);
     assert.equal(
       fs.readFileSync(path.join(repo, "skill/alpha/SKILL.md"), "utf8"),
       "# alpha\n\nNew body.\n",

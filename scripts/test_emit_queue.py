@@ -72,6 +72,16 @@ class TestValidation:
         errors = emit_queue.validate(_make_event(payload="not a dict"))
         assert any("payload" in e for e in errors)
 
+    def test_empty_required_strings_are_rejected(self):
+        """type/timestamp/cli/source present-but-empty must not slip through
+        the missing-field check and reach drain(); v2 declares those columns
+        NOT NULL and the backend would reject the POST late."""
+        for field in ("type", "timestamp", "cli", "source"):
+            event = _make_event()
+            event[field] = ""
+            errors = emit_queue.validate(event)
+            assert any(field in e for e in errors), (field, errors)
+
     def test_event_id_when_present_must_be_non_empty_string(self):
         for bad in (42, "", None, []):
             event = _make_event(event_id=bad)
@@ -309,6 +319,67 @@ class TestDeadLetterRecovery:
 
         assert remaining == [("buffer-key", "buffer")]
         assert pending == [("http-key",)]
+
+    def test_retry_buffer_dead_letters_leaves_row_when_write_fails(
+        self, isolated_queue
+    ):
+        """If _write_event_to_buffer raises inside retry_buffer_dead_letters,
+        the dead_letter row must stay put — otherwise a refactor that DELETEs
+        before the insert is confirmed would silently drop the event."""
+        buffer_path = isolated_queue / "buffer.db"
+        _init_v2_buffer(buffer_path)
+        db = emit_queue._get_db()
+        db.execute(
+            "INSERT INTO dead_letter "
+            "(dedupe_key, event_json, created_at, retries, last_error, source_path) "
+            "VALUES ('poison-key', '{}', '2026-04-01T00:00:00Z', 3, 'x', 'buffer')"
+        )
+        db.commit()
+        db.close()
+
+        def always_fail(buffer_db, dedupe_key, event_json, row_id=None):
+            raise ValueError("simulated write failure")
+
+        with patch.object(emit_queue, "BUFFER_PATH", buffer_path), \
+             patch.object(emit_queue, "_write_event_to_buffer", always_fail):
+            recovered = emit_queue.retry_buffer_dead_letters()
+        assert recovered == 0
+
+        db = emit_queue._get_db()
+        row = db.execute(
+            "SELECT dedupe_key FROM dead_letter WHERE dedupe_key = 'poison-key'"
+        ).fetchone()
+        db.close()
+        assert row == ("poison-key",), (
+            "failed retry must leave dead_letter row in place for next attempt"
+        )
+
+    def test_write_event_to_buffer_falls_back_to_event_id(self, isolated_queue):
+        """When an event has no dedupe_key, _write_event_to_buffer must fall
+        back to event_id (not the row-id-only drain tag) so two unkeyed
+        rows with distinct event_ids don't collapse onto one dedupe."""
+        buffer_path = isolated_queue / "buffer.db"
+        _init_v2_buffer(buffer_path)
+        import uuid as _uuid_mod
+        bdb = sqlite3.connect(str(buffer_path))
+        try:
+            for i in range(2):
+                event_json = json.dumps({
+                    "type": "skill_invocation",
+                    "timestamp": "2026-04-01T00:00:00Z",
+                    "cli": "claude",
+                    "source": "skill",
+                    "payload": {},
+                    "event_id": f"event-{i}",
+                })
+                emit_queue._write_event_to_buffer(bdb, None, event_json)
+            bdb.commit()
+            rows = bdb.execute(
+                "SELECT dedupe_key FROM events ORDER BY dedupe_key"
+            ).fetchall()
+        finally:
+            bdb.close()
+        assert rows == [("event-0",), ("event-1",)], rows
 
     def test_retry_buffer_dead_letters_moves_only_buffer_rows_and_drains(
         self, isolated_queue
@@ -1091,6 +1162,35 @@ class TestDrainToBufferV2:
         ).fetchone()
         db.close()
         assert row == ("aryeh",)
+
+    def test_resolve_project_updates_stale_classification_on_reinsert(
+        self, isolated_queue
+    ):
+        """A projects row inserted BEFORE a classification fix (e.g. with
+        workspace_type='external') must pick up the corrected value the next
+        time the same path flows through. Prior versions only refreshed
+        last_seen_at and left stale repo / workspace_type behind forever."""
+        buffer_path = isolated_queue / "buffer.db"
+        _init_v2_buffer(buffer_path)
+        db = sqlite3.connect(str(buffer_path))
+        real_path = "/Users/test/git/Evinced/stark-skills"
+        pid = str(emit_queue._deterministic_project_id(real_path))
+        # Pre-seed a stale row for the same id+path.
+        db.execute(
+            """INSERT INTO projects (id, path, repo, workspace_type,
+                                     parent_project_id, first_seen_at, last_seen_at)
+               VALUES (?, ?, 'wrong-repo', 'external', NULL, '2025-01-01', '2025-01-01')""",
+            (pid, real_path),
+        )
+        db.commit()
+        # Re-resolve with the real path — must refresh repo + workspace_type.
+        assert emit_queue._resolve_project(db, real_path) == pid
+        db.commit()
+        row = db.execute(
+            "SELECT repo, workspace_type FROM projects WHERE id = ?", (pid,)
+        ).fetchone()
+        db.close()
+        assert row == ("stark-skills", "main"), row
 
     def test_real_path_upgrades_uuid_passthrough_to_main_workspace(
         self, isolated_queue

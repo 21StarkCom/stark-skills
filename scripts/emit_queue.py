@@ -91,23 +91,16 @@ def validate(event: dict) -> list[str]:
     if errors:
         return errors
 
-    # Required envelope fields must be non-empty strings. The original
-    # "field present" check accepted empty strings, numbers, and dicts —
-    # v2 events.* declares these NOT NULL TEXT columns, and the HTTP path
-    # POSTs the raw payload, so bad shapes would fail late on the server.
+    # Empty strings for required envelope fields (type, timestamp, cli, source)
+    # used to slip through the "field present" check and could reach drain();
+    # v2 events.* columns declare these NOT NULL and the backend would then
+    # reject the POST body late, so fail loud at enqueue.
     for field in ("type", "timestamp", "cli", "source"):
         value = event.get(field)
-        if not isinstance(value, str):
-            errors.append(
-                f"{field} must be a non-empty string, got: {type(value).__name__}"
-            )
-        elif not value:
+        if isinstance(value, str) and not value:
             errors.append(f"{field} must be a non-empty string")
 
-    # Only run enum checks on string values — the earlier type check will
-    # have already flagged dicts/numbers, and `value not in _SET` on a
-    # non-hashable like a dict would itself raise TypeError.
-    if isinstance(event.get("type"), str) and event["type"] not in _VALID_TYPES:
+    if event["type"] not in _VALID_TYPES:
         errors.append(f"invalid type: {event['type']}")
     if isinstance(event.get("cli"), str) and event["cli"] not in _VALID_CLIS:
         errors.append(f"invalid cli: {event['cli']}")
@@ -467,12 +460,22 @@ def _resolve_project(conn, path):
         if parent_path:
             parent_id = _resolve_project(conn, parent_path)
 
+    # ON CONFLICT refreshes every derived field — earlier versions only
+    # touched last_seen_at, so a project row inserted before classification
+    # fixes shipped would keep a stale repo / workspace_type forever. The
+    # path column is UNIQUE and the id column is deterministic, so replaying
+    # with the same (id, path) is idempotent; replacing repo/workspace_type
+    # with freshly-derived values is the intended upgrade.
     conn.execute(
         """INSERT INTO projects
                (id, path, repo, workspace_type, parent_project_id,
                 first_seen_at, last_seen_at)
            VALUES (?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(id) DO UPDATE SET last_seen_at = excluded.last_seen_at""",
+           ON CONFLICT(id) DO UPDATE SET
+               repo = excluded.repo,
+               workspace_type = excluded.workspace_type,
+               parent_project_id = excluded.parent_project_id,
+               last_seen_at = excluded.last_seen_at""",
         (pid, path, repo, wtype, parent_id, now, now),
     )
     return pid
@@ -917,11 +920,16 @@ def _write_event_to_buffer(buffer_db, dedupe_key, event_json, row_id=None):
         raise ValueError("event is missing required `type` field")
     if not event.get("timestamp"):
         raise ValueError("event is missing required `timestamp` field")
+    # Retry-path fallback must be unique per row: multiple unkeyed rows share
+    # the same `drained:retry:<type>` string, so INSERT OR IGNORE drops the
+    # 2nd+ and the caller's subsequent DELETE FROM dead_letter loses them.
+    # Use a uuid4 suffix when we don't have a row id from the pending path.
+    retry_tag = row_id if row_id is not None else str(_uuid.uuid4())
     resolved_dedupe = (
         dedupe_key
         or event.get("dedupe_key")
         or event.get("event_id")
-        or f"drained:{row_id if row_id is not None else 'retry'}:{event.get('type', '')}"
+        or f"drained:{retry_tag}:{event.get('type', '')}"
     )
     user_uuid = _resolve_user(buffer_db, event.get("user_id"))
     project_id = _resolve_project(buffer_db, event.get("project"))

@@ -55,9 +55,10 @@ If no `--skill` or `--skills` flag is provided, `--mode plan` processes every di
    node tools/skill_optimize.ts --mode api --skill stark-forged-review --diff
    ```
 3. Review artifacts in `artifacts/skill-optimizer/<flat-slug>/`, where
-   `<flat-slug>` encodes the bundle's full repo-relative SKILL.md path
-   (for example, `skill/stark-forged-review/SKILL.md` → `skill__stark-forged-review__SKILL.md`).
-   Two bundles with the same leaf directory name can no longer collide.
+   `<flat-slug>` encodes the bundle's full repo-relative SKILL.md path.
+   The encoder escapes `_` → `_u` first, then substitutes `/` → `_s`, so
+   distinct source paths always produce distinct slugs. Example:
+   `skill/stark-forged-review/SKILL.md` → `skill_sstark-forged-review_sSKILL.md`.
 4. Apply the saved proposal without paying for a second model call:
    ```bash
    node tools/skill_optimize.ts --mode api --skill stark-forged-review --reuse-proposal --apply

@@ -47,7 +47,7 @@ Orchestrator prints one JSON object to stdout, progress to stderr.
 
 ## Handle stdout JSON
 
-Shape: `{status, pr_number, repo, needs_merge_confirmation, message, summary}`. `status` is `clean | dry_run_complete | awaiting_fixes`. All three still emit JSON on stdout — `awaiting_fixes` exits with code 1 but the JSON is valid, so always read stdout before reacting to the exit code. Only codes 2/3 (dispatch / invalid input) skip JSON entirely.
+Shape: `{status, pr_number, repo, needs_merge_confirmation, message, summary}`. `status` is `clean | dry_run_complete | awaiting_fixes`. All three terminal success/fix states emit valid stdout JSON — `awaiting_fixes` exits with code 1 but the JSON is still there, so always try to parse stdout first. **JSON may be absent** on: exit 2/3 (dispatch / invalid input), code 130 (`KeyboardInterrupt`), and any uncaught-exception exit. Treat non-zero + no-JSON as a hard failure; don't claim "awaiting fixes" without parsed output.
 
 - **`clean` + `needs_merge_confirmation: true`** — print summary, ask `Clean. Merge PR #<pr_number>? [Y/n]`. On yes/empty:
 
