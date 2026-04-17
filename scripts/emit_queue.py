@@ -527,6 +527,11 @@ def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
     inspecting the columns present and reconstructing a full event dict so
     drain_to_buffer can re-lift the canonical columns on the next run.
 
+    Partial-v2 rows reference users/projects by UUID. We pre-load those
+    dimension rows and map UUIDs back to their original `github_login` /
+    `path` so the next drain re-upserts them into the fresh v2 buffer
+    instead of inserting orphaned FKs.
+
     Raises if the DB is unreadable — the caller keeps the quarantined file
     in place so the operator can recover the backlog manually.
     """
@@ -538,6 +543,22 @@ def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
             return 0
         if "payload_extra" not in cols and "payload" not in cols:
             return 0
+        # Map UUID -> original login / path so partial-v2 FKs can be
+        # re-resolved into dimension rows on the next drain.
+        user_lookup: dict[str, str] = {}
+        project_lookup: dict[str, str] = {}
+        try:
+            for u_row in legacy.execute("SELECT id, github_login FROM users"):
+                if u_row["id"] and u_row["github_login"]:
+                    user_lookup[u_row["id"]] = u_row["github_login"]
+        except sqlite3.OperationalError:
+            pass
+        try:
+            for p_row in legacy.execute("SELECT id, path FROM projects"):
+                if p_row["id"] and p_row["path"]:
+                    project_lookup[p_row["id"]] = p_row["path"]
+        except sqlite3.OperationalError:
+            pass
         where = "WHERE synced_at IS NULL" if "synced_at" in cols else ""
         rows = legacy.execute(f"SELECT * FROM events {where}").fetchall()
     finally:
@@ -558,12 +579,27 @@ def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
                     value = row.get(lifted)
                     if value is not None and lifted not in payload:
                         payload[lifted] = value
+                # Prefer the original login / path over the UUID FK when we
+                # have it in the dimension tables, so the next drain rebuilds
+                # the users/projects rows in the fresh v2 buffer.
+                raw_user = row.get("user_id")
+                user_value = (
+                    user_lookup.get(raw_user)
+                    if raw_user and _looks_like_uuid(raw_user)
+                    else None
+                ) or raw_user
+                raw_project = row.get("project") or row.get("project_id")
+                project_value = (
+                    project_lookup.get(raw_project)
+                    if raw_project and _looks_like_uuid(raw_project)
+                    else None
+                ) or raw_project
                 event = {
                     "type": row.get("type") or "",
                     "timestamp": row.get("timestamp") or "",
                     "cli": row.get("cli"),
-                    "user_id": row.get("user_id"),
-                    "project": row.get("project") or row.get("project_id"),
+                    "user_id": user_value,
+                    "project": project_value,
                     "payload": payload,
                     "schema_version": row.get("schema_version") or 1,
                     "source": row.get("source"),
@@ -932,6 +968,15 @@ def drain_to_buffer(batch_size: int = DRAIN_BATCH_SIZE) -> dict:
         for row_id, dedupe_key, event_json, created_at, retries in rows:
             try:
                 event = json.loads(event_json)
+                # Reject events that are missing envelope fields the v2
+                # schema requires as NOT NULL. Fail loudly so the row moves
+                # to dead_letter instead of silently populating empty strings.
+                if not isinstance(event, dict):
+                    raise ValueError("event is not a JSON object")
+                if not event.get("type"):
+                    raise ValueError("event is missing required `type` field")
+                if not event.get("timestamp"):
+                    raise ValueError("event is missing required `timestamp` field")
                 # v2 events.dedupe_key is NOT NULL — synthesize from event_id
                 # or queue row_id if the producer didn't set one.
                 resolved_dedupe = (
@@ -982,15 +1027,47 @@ def drain_to_buffer(batch_size: int = DRAIN_BATCH_SIZE) -> dict:
                 deletes.append(row_id)
                 stats["sent"] += 1
             except sqlite3.OperationalError as exc:
-                # Transient DB errors (locked / busy) should not burn retries.
-                # Leave the row pending and let the next drain pick it up.
                 error_text = f"{type(exc).__name__}: {exc}"[:500]
-                _log_drain_failure(exc, f"row_id={row_id} dedupe={dedupe_key} (transient)")
-                queue_db.execute(
-                    "UPDATE pending SET last_error = ? WHERE id = ?",
-                    (error_text, row_id),
+                lower = str(exc).lower()
+                transient = (
+                    "locked" in lower
+                    or "busy" in lower
+                    or "cannot start a transaction" in lower
                 )
-                stats["failed"] += 1
+                if transient:
+                    # Leave the row pending and let the next drain retry.
+                    _log_drain_failure(
+                        exc, f"row_id={row_id} dedupe={dedupe_key} (transient)"
+                    )
+                    queue_db.execute(
+                        "UPDATE pending SET last_error = ? WHERE id = ?",
+                        (error_text, row_id),
+                    )
+                    stats["failed"] += 1
+                else:
+                    # Permanent operational errors (read-only DB, disk I/O,
+                    # schema mismatch) should count against retries so a
+                    # genuinely broken buffer doesn't wedge the queue forever.
+                    _log_drain_failure(
+                        exc, f"row_id={row_id} dedupe={dedupe_key} (permanent)"
+                    )
+                    if retries + 1 >= MAX_RETRIES:
+                        queue_db.execute(
+                            "INSERT INTO dead_letter "
+                            "(dedupe_key, event_json, created_at, retries, last_error) "
+                            "VALUES (?, ?, ?, ?, ?)",
+                            (dedupe_key, event_json, created_at, retries + 1, error_text),
+                        )
+                        queue_db.execute(
+                            "DELETE FROM pending WHERE id = ?", (row_id,)
+                        )
+                        stats["dead_lettered"] += 1
+                    else:
+                        queue_db.execute(
+                            "UPDATE pending SET retries = ?, last_error = ? WHERE id = ?",
+                            (retries + 1, error_text, row_id),
+                        )
+                        stats["failed"] += 1
             except Exception as exc:
                 error_text = f"{type(exc).__name__}: {exc}"[:500]
                 _log_drain_failure(exc, f"row_id={row_id} dedupe={dedupe_key}")

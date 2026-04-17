@@ -108,6 +108,30 @@ console.log(
   ),
 );
 
+function assertInsideRepo(target: string, label: string): void {
+  const repoRootReal = fs.realpathSync(repoRoot);
+  let existingAncestor = target;
+  const missingParts: string[] = [];
+  while (!fs.existsSync(existingAncestor)) {
+    missingParts.unshift(path.basename(existingAncestor));
+    const parent = path.dirname(existingAncestor);
+    if (parent === existingAncestor) break;
+    existingAncestor = parent;
+  }
+  const ancestorReal = fs.existsSync(existingAncestor)
+    ? fs.realpathSync(existingAncestor)
+    : existingAncestor;
+  const resolvedReal = missingParts.length
+    ? path.join(ancestorReal, ...missingParts)
+    : ancestorReal;
+  if (
+    !resolvedReal.startsWith(repoRootReal + path.sep) &&
+    resolvedReal !== repoRootReal
+  ) {
+    throw new Error(`${label} escapes the repo root: ${target}`);
+  }
+}
+
 async function processBundle(
   bundle: SkillBundle,
   options: CliOptions,
@@ -121,6 +145,7 @@ async function processBundle(
     options.outDir,
     path.basename(path.dirname(bundle.skillPath)),
   );
+  assertInsideRepo(artifactDir, "artifact directory");
   fs.mkdirSync(artifactDir, { recursive: true });
 
   const manifest = {
