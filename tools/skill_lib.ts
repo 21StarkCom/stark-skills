@@ -59,10 +59,20 @@ export function countWords(raw: string): number {
 }
 
 export function listSkillPaths(repoRoot: string): string[] {
+  const repoRootReal = fs.realpathSync(repoRoot);
   return walk(repoRoot)
     .filter((file) => {
       const base = path.basename(file);
-      return base === "SKILL.md" || base === "skill.md";
+      if (base !== "SKILL.md" && base !== "skill.md") {
+        return false;
+      }
+      // Reject symlinks and anything whose realpath escapes the repo root;
+      // an in-repo SKILL.md pointing at /etc/shadow would otherwise be
+      // uploaded to the Responses API by skill_optimize --mode api.
+      if (fs.lstatSync(file).isSymbolicLink()) {
+        return false;
+      }
+      return fs.realpathSync(file).startsWith(repoRootReal + path.sep);
     })
     .sort((a, b) => a.localeCompare(b));
 }
