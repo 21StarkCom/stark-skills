@@ -7,15 +7,14 @@ disable-model-invocation: true
 model: opus[1m]
 ---
 
-## Preflight
+See `README.md` for the full behavioral reference, pipeline diagram, and observability details.
 
-Run:
+## Preflight
 
 ```bash
 python3 ~/.claude/code-review/scripts/preflight.py --workflow stark-forged-review --json
 ```
 
-Parse the JSON result:
 - `overall: blocked` — print failing checks and stop.
 - `overall: degraded` — warn and continue.
 - `overall: ready` — continue silently.
@@ -40,43 +39,27 @@ PYTHON  = $SCRIPTS/.venv/bin/python3
 
 ## Run
 
-Invoke the orchestrator:
-
 ```bash
 $PYTHON $SCRIPTS/forged_review.py $ARGUMENTS
 ```
 
-It prints a single JSON object to stdout and progress to stderr. Capture the stdout JSON and the exit code.
+Orchestrator prints one JSON object to stdout, progress to stderr.
 
 ## Handle stdout JSON
 
-Expected shape:
+Shape: `{status, pr_number, repo, needs_merge_confirmation, message, summary}`. `status` is `clean | dry_run_complete | awaiting_fixes`. Failure cases (invalid input, dispatch errors) exit 2 or 3 without stdout JSON — handle non-zero exit codes independently.
 
-```text
-{status, pr_number, repo, needs_merge_confirmation, message, summary}
-```
+- **`clean` + `needs_merge_confirmation: true`** — print summary, ask `Clean. Merge PR #<pr_number>? [Y/n]`. On yes/empty:
 
-`status` is one of `clean | dry_run_complete | awaiting_fixes`.
+  ```bash
+  unset GH_TOKEN && gh pr merge <pr_number> --squash --delete-branch --repo <repo>
+  ```
 
-> **Note:** failure cases (invalid input, dispatch errors) exit with code 2 or 3 and may not produce JSON on stdout. Handle non-zero exit codes independently.
-
-- **`clean` + `needs_merge_confirmation: true`**
-  1. Print the summary.
-  2. Ask `Clean. Merge PR #<pr_number>? [Y/n]`
-  3. On yes/empty, run:
-
-     ```bash
-     unset GH_TOKEN && gh pr merge <pr_number> --squash --delete-branch --repo <repo>
-     ```
-
-  4. On no, print `PR left open at user request` and exit 0.
-- **`clean` + `needs_merge_confirmation: false`** — print the summary and exit 0.
-- **`awaiting_fixes`**
-  - Print the message and findings summary.
-  - Do NOT merge.
-  - Exit with the orchestrator's exit code.
-- **`dry_run_complete`** — print the summary and exit 0.
-- **anything else** — print the summary and exit with the orchestrator's exit code.
+  On no, print `PR left open at user request` and exit 0.
+- **`clean` + `needs_merge_confirmation: false`** — print summary, exit 0.
+- **`awaiting_fixes`** — print message + findings; do NOT merge; exit with orchestrator's code.
+- **`dry_run_complete`** — print summary, exit 0.
+- anything else — print summary, exit with orchestrator's code.
 
 ## Exit codes
 
@@ -86,9 +69,3 @@ Expected shape:
 | 1 | Halted / awaiting fixes |
 | 2 | Dispatch failure |
 | 3 | Invalid input |
-
-## Observability
-
-- Emits `forged_review.*` events via `emit_queue.py`.
-- Records per-run metrics to `~/.claude/code-review/history/forged-review/forged_review_metrics.db`.
-- Prints `[forged-review] …` progress lines to stderr.

@@ -162,8 +162,17 @@ function resolveRefs(
   const skillDir = path.dirname(skillPath);
   const defs = new Map<string, string>();
 
-  for (const match of raw.matchAll(/^\s*\[([^\]]+)\]:\s*(\S+)/gm)) {
-    defs.set(match[1].trim().toLowerCase(), stripWrappers(match[2]));
+  // Reference-style definitions can use angle brackets for destinations
+  // that contain spaces: `[label]: <./My Guide.md> "Optional title"`. The
+  // previous `\S+` capture truncated such targets at the first space and
+  // dropped the bundle dependency. CommonMark forbids internal spaces
+  // unless `<...>` wrapped, so the alternation covers both forms.
+  for (const match of raw.matchAll(
+    /^\s*\[([^\]]+)\]:\s*(?:<([^>]+)>|(\S+))/gm,
+  )) {
+    const destination = match[2] ?? match[3];
+    if (!destination) continue;
+    defs.set(match[1].trim().toLowerCase(), stripWrappers(destination));
   }
 
   const rawRefs = new Set<string>();

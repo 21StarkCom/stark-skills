@@ -154,7 +154,8 @@ def _get_db() -> sqlite3.Connection:
                 created_at  TEXT NOT NULL,
                 failed_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
                 retries     INTEGER NOT NULL,
-                last_error  TEXT
+                last_error  TEXT,
+                source_path TEXT NOT NULL DEFAULT 'http'
             );
             CREATE INDEX IF NOT EXISTS idx_pending_created ON pending(created_at);
             CREATE TABLE IF NOT EXISTS inflight (
@@ -167,6 +168,17 @@ def _get_db() -> sqlite3.Connection:
                 value TEXT NOT NULL
             );
         """)
+        # Migration: older dead_letter tables lack source_path, so a buffer
+        # drain's poison row and an HTTP drain's network failure could share
+        # a dedupe_key and retry_dead_letters would resurrect both into the
+        # HTTP path. Add the column (defaulting legacy rows to 'http', which
+        # preserves pre-split semantics) so retry can filter by sink.
+        columns = {row[1] for row in db.execute("PRAGMA table_info(dead_letter)").fetchall()}
+        if "source_path" not in columns:
+            db.execute(
+                "ALTER TABLE dead_letter ADD COLUMN source_path TEXT NOT NULL DEFAULT 'http'"
+            )
+            db.commit()
         _mark_initialized(db_path, _db_initialized)
     return db
 
@@ -350,23 +362,26 @@ def _resolve_user(conn, github_login):
     when the producer didn't supply a login so the events.user_id column
     stays NULL rather than joining everyone under a synthetic user row.
 
-    Already-resolved UUIDs (from replayed partial-v2 rows) pass through,
-    but we still upsert a placeholder users row so the FK isn't orphaned
-    when the legacy dimension lookup couldn't recover the original login.
+    Already-resolved UUIDs (from replayed partial-v2 rows) pass through
+    WITHOUT creating a placeholder users row. An earlier design upserted
+    `github_login = "recovered:<prefix>"`, but the ON CONFLICT clause made
+    that placeholder permanent: a later drain with the real login could
+    never replace "recovered:..." with the actual handle. We log the UUID
+    to _recovered_dims for observability so the real login wins cleanly
+    on its next drain.
     """
     if not github_login:
         return None
+    now = datetime.now(timezone.utc).isoformat()
     if _looks_like_uuid(github_login):
-        now = datetime.now(timezone.utc).isoformat()
         conn.execute(
-            """INSERT INTO users (id, github_login, display_name, aliases, created_at)
-               VALUES (?, ?, NULL, ?, ?)
-               ON CONFLICT(id) DO NOTHING""",
-            (github_login, f"recovered:{github_login[:8]}", json.dumps([]), now),
+            "INSERT OR IGNORE INTO _recovered_dims "
+            "(id, kind, source_hint, recorded_at) "
+            "VALUES (?, 'user', ?, ?)",
+            (github_login, f"uuid-passthrough:{github_login[:8]}", now),
         )
         return github_login
     uid = str(_deterministic_user_id(github_login))
-    now = datetime.now(timezone.utc).isoformat()
     conn.execute(
         """INSERT INTO users (id, github_login, display_name, aliases, created_at)
            VALUES (?, ?, NULL, ?, ?)
@@ -383,20 +398,22 @@ def _resolve_project(conn, path):
     None when the producer didn't supply a path so the events.project_id
     column stays NULL rather than grouping under a synthetic project row.
 
-    Already-resolved UUIDs (from replayed partial-v2 rows) pass through,
-    and we upsert a placeholder projects row so the FK isn't orphaned
-    when the legacy dimension lookup couldn't recover the original path.
+    Already-resolved UUIDs pass through WITHOUT creating a placeholder
+    projects row. The previous placeholder path set workspace_type='external'
+    and relied on ON CONFLICT DO UPDATE (last_seen_at only), which meant a
+    later drain with the real path could never upgrade the row to
+    workspace_type='main' or populate repo/parent_project_id. We log the
+    UUID to _recovered_dims instead so the real row wins on next drain.
     """
     if not path:
         return None
+    now = datetime.now(timezone.utc).isoformat()
     if _looks_like_uuid(path):
-        now = datetime.now(timezone.utc).isoformat()
         conn.execute(
-            """INSERT INTO projects (id, path, repo, workspace_type,
-                                     parent_project_id, first_seen_at, last_seen_at)
-               VALUES (?, ?, NULL, 'external', NULL, ?, ?)
-               ON CONFLICT(id) DO NOTHING""",
-            (path, f"(recovered:{path[:8]})", now, now),
+            "INSERT OR IGNORE INTO _recovered_dims "
+            "(id, kind, source_hint, recorded_at) "
+            "VALUES (?, 'project', ?, ?)",
+            (path, f"uuid-passthrough:{path[:8]}", now),
         )
         return path
     pid = str(_deterministic_project_id(path))
@@ -409,7 +426,6 @@ def _resolve_project(conn, path):
         if parent_path:
             parent_id = _resolve_project(conn, parent_path)
 
-    now = datetime.now(timezone.utc).isoformat()
     conn.execute(
         """INSERT INTO projects
                (id, path, repo, workspace_type, parent_project_id,
@@ -692,6 +708,19 @@ def _get_buffer_db() -> sqlite3.Connection:
     db = sqlite3.connect(buffer_path, timeout=10)
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA busy_timeout=5000")
+    # _recovered_dims is an aux ledger for UUID pass-throughs. Create it on
+    # every open so pre-existing v2 buffers gain it without a quarantine.
+    # _buffer_is_v2_compatible does NOT require this table — the old code
+    # created placeholder rows in users/projects instead, so omitting the
+    # ledger is not itself a schema drift that justifies quarantining.
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS _recovered_dims ("
+        "id TEXT PRIMARY KEY, "
+        "kind TEXT NOT NULL CHECK (kind IN ('user', 'project')), "
+        "source_hint TEXT, "
+        "recorded_at TEXT NOT NULL"
+        ")"
+    )
     if _needs_init(buffer_path, _buffer_db_initialized):
         db.executescript("""
             CREATE TABLE IF NOT EXISTS users (
@@ -830,8 +859,16 @@ def drain_to_buffer(batch_size: int = DRAIN_BATCH_SIZE) -> dict:
     and counted as retries; rows that fail MAX_RETRIES times are moved
     to dead_letter so poison rows cannot starve the pending window.
     """
+    # Open queue_db first, then buffer_db. If buffer_db opening raises
+    # (quarantine / probe failure), ensure queue_db is closed before
+    # propagating — otherwise the WAL handle leaks and locks later
+    # enqueue/drain attempts during recovery.
     queue_db = _get_db()
-    buffer_db = _get_buffer_db()
+    try:
+        buffer_db = _get_buffer_db()
+    except BaseException:
+        queue_db.close()
+        raise
     stats = {"sent": 0, "failed": 0, "dead_lettered": 0}
     deletes: list[int] = []
 
@@ -931,8 +968,8 @@ def drain_to_buffer(batch_size: int = DRAIN_BATCH_SIZE) -> dict:
                     if retries + 1 >= MAX_RETRIES:
                         queue_db.execute(
                             "INSERT INTO dead_letter "
-                            "(dedupe_key, event_json, created_at, retries, last_error) "
-                            "VALUES (?, ?, ?, ?, ?)",
+                            "(dedupe_key, event_json, created_at, retries, last_error, source_path) "
+                            "VALUES (?, ?, ?, ?, ?, 'buffer')",
                             (dedupe_key, event_json, created_at, retries + 1, error_text),
                         )
                         queue_db.execute(
@@ -951,8 +988,8 @@ def drain_to_buffer(batch_size: int = DRAIN_BATCH_SIZE) -> dict:
                 if retries + 1 >= MAX_RETRIES:
                     queue_db.execute(
                         "INSERT INTO dead_letter "
-                        "(dedupe_key, event_json, created_at, retries, last_error) "
-                        "VALUES (?, ?, ?, ?, ?)",
+                        "(dedupe_key, event_json, created_at, retries, last_error, source_path) "
+                        "VALUES (?, ?, ?, ?, ?, 'buffer')",
                         (dedupe_key, event_json, created_at, retries + 1, error_text),
                     )
                     queue_db.execute("DELETE FROM pending WHERE id = ?", (row_id,))
@@ -999,11 +1036,19 @@ def dead_letter_count() -> int:
 
 
 def retry_dead_letters() -> int:
-    """Move dead-lettered events back to pending for another attempt. Returns count moved."""
+    """Move HTTP-path dead-lettered events back to pending. Returns count moved.
+
+    Buffer-path dead letters (source_path = 'buffer') are quarantined writes,
+    not network failures, so re-queuing them would send a bad row to the API
+    the next time the HTTP drain succeeds. They stay in dead_letter until an
+    operator triages them directly. Legacy rows (source_path IS NULL) predate
+    the split and are treated as HTTP so pre-existing behavior is preserved.
+    """
     db = _get_db()
     try:
         rows = db.execute(
-            "SELECT id, dedupe_key, event_json FROM dead_letter"
+            "SELECT id, dedupe_key, event_json FROM dead_letter "
+            "WHERE source_path = 'http' OR source_path IS NULL"
         ).fetchall()
         moved = 0
         for dl_id, dedupe_key, event_json in rows:
