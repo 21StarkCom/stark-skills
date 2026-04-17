@@ -87,20 +87,27 @@ def validate(event: dict) -> list[str]:
     if errors:
         return errors
 
-    # Empty strings for required envelope fields (type, timestamp, cli, source)
-    # used to slip through the "field present" check and could reach drain();
-    # v2 events.* columns declare these NOT NULL and the backend would then
-    # reject the POST body late, so fail loud at enqueue.
+    # Required envelope fields must be non-empty strings. The original
+    # "field present" check accepted empty strings, numbers, and dicts —
+    # v2 events.* declares these NOT NULL TEXT columns, and the HTTP path
+    # POSTs the raw payload, so bad shapes would fail late on the server.
     for field in ("type", "timestamp", "cli", "source"):
         value = event.get(field)
-        if isinstance(value, str) and not value:
+        if not isinstance(value, str):
+            errors.append(
+                f"{field} must be a non-empty string, got: {type(value).__name__}"
+            )
+        elif not value:
             errors.append(f"{field} must be a non-empty string")
 
-    if event["type"] not in _VALID_TYPES:
+    # Only run enum checks on string values — the earlier type check will
+    # have already flagged dicts/numbers, and `value not in _SET` on a
+    # non-hashable like a dict would itself raise TypeError.
+    if isinstance(event.get("type"), str) and event["type"] not in _VALID_TYPES:
         errors.append(f"invalid type: {event['type']}")
-    if event["cli"] not in _VALID_CLIS:
+    if isinstance(event.get("cli"), str) and event["cli"] not in _VALID_CLIS:
         errors.append(f"invalid cli: {event['cli']}")
-    if event["source"] not in _VALID_SOURCES:
+    if isinstance(event.get("source"), str) and event["source"] not in _VALID_SOURCES:
         errors.append(f"invalid source: {event['source']}")
     if not isinstance(event.get("schema_version"), int) or event["schema_version"] < 1:
         errors.append(f"schema_version must be int >= 1, got: {event.get('schema_version')}")
@@ -581,18 +588,31 @@ def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
         # re-resolved into dimension rows on the next drain.
         user_lookup: dict[str, str] = {}
         project_lookup: dict[str, str] = {}
+        # If a partial-v2 buffer has users / projects tables we can't read,
+        # we still fall through to UUID pass-through (which logs the UUID
+        # in _recovered_dims on the next drain) — but log the failure so
+        # an operator can tell orphaned FKs came from a dim-read crash,
+        # not from a legitimate v1 buffer that never had dim tables.
         try:
             for u_row in legacy.execute("SELECT id, github_login FROM users"):
                 if u_row["id"] and u_row["github_login"]:
                     user_lookup[u_row["id"]] = u_row["github_login"]
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as exc:
+            _log_drain_failure(
+                exc,
+                f"legacy users table unreadable at {legacy_path}; "
+                f"UUID user_ids will fall through to _recovered_dims",
+            )
         try:
             for p_row in legacy.execute("SELECT id, path FROM projects"):
                 if p_row["id"] and p_row["path"]:
                     project_lookup[p_row["id"]] = p_row["path"]
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as exc:
+            _log_drain_failure(
+                exc,
+                f"legacy projects table unreadable at {legacy_path}; "
+                f"UUID project_ids will fall through to _recovered_dims",
+            )
         # Replay only rows the backend hasn't already ingested. Earlier we
         # replayed every row (letting the API's dedupe reject duplicates),
         # but that pushed days of already-delivered history ahead of fresh
@@ -680,11 +700,12 @@ def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
                     "dedupe_key": dedupe_key,
                 }
                 event_json = _redact(json.dumps(event, default=str))
-                # Preserve the legacy created_at so these backlog rows keep
-                # their original position in `ORDER BY created_at`; otherwise
-                # they'd be restamped and risk indefinite overtake by newer
-                # work after every upgrade.
-                created_at = row.get("timestamp") or row.get("created_at")
+                # Preserve the ORIGINAL pending-queue ordering — created_at
+                # on legacy rows is the enqueue time and drain() orders by
+                # created_at. Timestamp is event-time (when the action
+                # happened), which can drift wildly from enqueue time and
+                # would reorder the backlog relative to the original intent.
+                created_at = row.get("created_at") or row.get("timestamp")
                 if created_at:
                     cursor = queue_db.execute(
                         "INSERT OR IGNORE INTO pending (dedupe_key, event_json, created_at) "
@@ -704,11 +725,19 @@ def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
         queue_db.commit()
     finally:
         queue_db.close()
-    if failed > 0:
-        # Surface partial-replay failures so the caller keeps the legacy
-        # file in place instead of renaming on a half-successful recovery.
+    if failed > 0 and replayed == 0:
+        # Raise only when NO row could be replayed — a fully-unreadable file
+        # means the operator still has to triage the whole DB. Partial
+        # failures (one poisoned row among thousands of good ones) are
+        # logged to drain-errors.log and skipped so the quarantine can
+        # still rotate; otherwise one bad row blocks every future drain.
         raise RuntimeError(
-            f"legacy replay failed for {failed} of {len(rows)} rows"
+            f"legacy replay failed for all {failed} rows"
+        )
+    if failed > 0:
+        _log_drain_failure(
+            RuntimeError(f"legacy replay skipped {failed} of {len(rows)} bad rows"),
+            f"replayed={replayed} failed={failed} file={legacy_path}",
         )
     return replayed
 
