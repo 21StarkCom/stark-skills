@@ -1108,6 +1108,33 @@ class TestDrainToBufferV2:
         assert event["payload"]["duration_ms"] == 4200
         assert event["payload"]["note"] == "preserved"
 
+    def test_resolver_passes_uuid_through(self, isolated_queue):
+        """Already-resolved UUIDs (from replayed partial-v2 rows) must pass
+        straight through the resolvers instead of being re-hashed as fresh
+        logins/paths, which would corrupt the dimension FKs."""
+        buffer_path = isolated_queue / "buffer.db"
+        _init_v2_buffer(buffer_path)
+        uid = "a3f1b8e1-1b7a-4f9e-8e47-5a3f1b8e7a3f"
+        pid = "b4e2c9f2-2c8b-4a0f-9f58-6b4e2c9f2b40"
+        db = sqlite3.connect(str(buffer_path))
+        assert emit_queue._resolve_user(db, uid) == uid
+        assert emit_queue._resolve_project(db, pid) == pid
+        # Non-UUID inputs still get hashed as before.
+        hashed = emit_queue._resolve_user(db, "aryeh")
+        assert hashed != "aryeh"
+        assert emit_queue._looks_like_uuid(hashed)
+        db.close()
+
+    def test_mac_tmp_paths_are_not_misclassified_as_repos(self, isolated_queue):
+        """macOS /var/folders/... and /var/tmp/... must NOT be classified
+        as real checkouts with a fake repo slug."""
+        for p in (
+            "/var/folders/k7/tmp.abc/test",
+            "/var/tmp/session-xyz",
+            "/private/tmp/pytest-of-aryeh/test_foo",
+        ):
+            assert emit_queue._normalize_path_to_repo(p) is None, p
+
     def test_non_ci_absolute_paths_stay_external(self, isolated_queue):
         """Paths like /Users/alice/src/foo must NOT be misclassified as `main`
         with a fake repo slug — they should stay `external`/NULL."""

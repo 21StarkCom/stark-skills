@@ -302,8 +302,7 @@ def _strip_worktree_suffix(path):
 # `/Users/alice/src/foo` or `/etc/config`) returns NULL instead of being
 # misattributed as a repo.
 _CHECKOUT_ROOTS = frozenset({
-    "workspace", "runner", "srv", "github", "builds",
-    "home", "var",
+    "workspace", "runner", "srv", "github", "builds", "home",
 })
 
 
@@ -366,15 +365,28 @@ def _deterministic_project_id(path):
     return _uuid.uuid5(NAMESPACE_INSIGHTS, f"project:{path}")
 
 
+_UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+def _looks_like_uuid(value) -> bool:
+    return isinstance(value, str) and bool(_UUID_RE.match(value))
+
+
 def _resolve_user(conn, github_login):
     """Upsert the user row and return the deterministic user_id (UUID str).
 
     Mirrors stark_insights.dimensions.resolve_user but sync. Returns None
     when the producer didn't supply a login so the events.user_id column
     stays NULL rather than joining everyone under a synthetic user row.
+    Already-resolved UUIDs (from replayed partial-v2 rows) pass straight
+    through instead of being re-hashed as if they were logins.
     """
     if not github_login:
         return None
+    if _looks_like_uuid(github_login):
+        return github_login
     uid = str(_deterministic_user_id(github_login))
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
@@ -392,9 +404,13 @@ def _resolve_project(conn, path):
     Mirrors stark_insights.dimensions.resolve_project but sync. Returns
     None when the producer didn't supply a path so the events.project_id
     column stays NULL rather than grouping under a synthetic project row.
+    Already-resolved UUIDs (from replayed partial-v2 rows) pass straight
+    through without being hashed again as a fresh project path.
     """
     if not path:
         return None
+    if _looks_like_uuid(path):
+        return path
     pid = str(_deterministic_project_id(path))
     repo = _normalize_path_to_repo(path)
     wtype = _derive_workspace_type(path)
@@ -548,10 +564,22 @@ def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
                     "dedupe_key": dedupe_key,
                 }
                 event_json = _redact(json.dumps(event, default=str))
-                cursor = queue_db.execute(
-                    "INSERT OR IGNORE INTO pending (dedupe_key, event_json) VALUES (?, ?)",
-                    (dedupe_key, event_json),
-                )
+                # Preserve the legacy created_at so these backlog rows keep
+                # their original position in `ORDER BY created_at`; otherwise
+                # they'd be restamped and risk indefinite overtake by newer
+                # work after every upgrade.
+                created_at = row.get("timestamp") or row.get("created_at")
+                if created_at:
+                    cursor = queue_db.execute(
+                        "INSERT OR IGNORE INTO pending (dedupe_key, event_json, created_at) "
+                        "VALUES (?, ?, ?)",
+                        (dedupe_key, event_json, created_at),
+                    )
+                else:
+                    cursor = queue_db.execute(
+                        "INSERT OR IGNORE INTO pending (dedupe_key, event_json) VALUES (?, ?)",
+                        (dedupe_key, event_json),
+                    )
                 if cursor.rowcount > 0:
                     replayed += 1
             except Exception as exc:
