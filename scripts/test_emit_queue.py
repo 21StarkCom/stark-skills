@@ -72,6 +72,21 @@ class TestValidation:
         errors = emit_queue.validate(_make_event(payload="not a dict"))
         assert any("payload" in e for e in errors)
 
+    def test_v2_event_type_names_are_accepted(self):
+        """The workflow-improvement design doc defines context_compaction,
+        learning_captured, and skill_recommendation. validate() must accept
+        those alongside the pre-v2 aliases so the migration doesn't reject
+        spec-compliant producers."""
+        for event_type in (
+            "context_compaction",
+            "learning_captured",
+            "skill_recommendation",
+            # Legacy aliases stay valid during migration.
+            "learning_capture",
+            "skill_suggestion",
+        ):
+            assert emit_queue.validate(_make_event(type=event_type)) == [], event_type
+
     def test_non_string_required_fields_are_rejected(self):
         """type/timestamp/cli/source must be strings; numbers or dicts were
         previously accepted by the field-presence check and slipped into
@@ -503,6 +518,49 @@ class TestDeadLetterRecovery:
 # ---------------------------------------------------------------------------
 # make_event helper
 # ---------------------------------------------------------------------------
+
+class TestMakeEventDedupe:
+    """ADR-0014 pins source-specific dedupe formulas; make_event's fallback
+    must match them when the producer doesn't pass an explicit dedupe_key."""
+
+    def test_skill_dedupe_uses_skill_session_start_timestamp(self):
+        event = emit_queue.make_event(
+            "skill_invocation",
+            {"skill": "stark-team-review", "start_timestamp": 1700000000},
+            session_id="sess-123",
+            source="skill",
+        )
+        assert event["dedupe_key"] == "stark-team-review:sess-123:1700000000"
+
+    def test_hook_dedupe_uses_cli_session_sequence(self):
+        event = emit_queue.make_event(
+            "tool_usage",
+            {"sequence_number": 42},
+            session_id="sess-1",
+            source="hook",
+            cli="codex",
+        )
+        assert event["dedupe_key"] == "codex:sess-1:42"
+
+    def test_scraper_dedupe_uses_cli_file_offset(self):
+        event = emit_queue.make_event(
+            "ci_signal",
+            {"file_path": "/var/log/ci.log", "byte_offset": 12345},
+            session_id="sess-x",
+            source="scraper",
+            cli="gemini",
+        )
+        assert event["dedupe_key"] == "gemini:/var/log/ci.log:12345"
+
+    def test_skill_dedupe_falls_back_when_payload_missing_skill(self):
+        event = emit_queue.make_event(
+            "skill_invocation",
+            {},  # no `skill`
+            session_id="s",
+            source="skill",
+        )
+        assert event["dedupe_key"].startswith("skill_invocation:s:")
+
 
 class TestMakeEvent:
     def test_defaults(self):

@@ -52,6 +52,10 @@ _VALID_TYPES = {
     "tournament_result",
     "preflight_check", "approach_contract",
     "validation_result", "heal_attempt",
+    # Workflow-improvement v2 spec names (docs/specs/2026-04-03-*.md).
+    "context_compaction", "learning_captured", "skill_recommendation",
+    # Pre-v2 aliases kept for back-compat so existing producers don't break
+    # mid-migration. Prefer the v2 names in new code.
     "learning_capture", "skill_suggestion",
 }
 
@@ -945,6 +949,14 @@ def _write_event_to_buffer(buffer_db, dedupe_key, event_json, row_id=None):
         raise ValueError("event is missing required `type` field")
     if not event.get("timestamp"):
         raise ValueError("event is missing required `timestamp` field")
+    if "payload" in event and not isinstance(event["payload"], dict):
+        # Non-dict payload slips past validate() if the row was queued before
+        # stricter type checks existed. Drop to the caller so the row can
+        # dead-letter with source_path='buffer' instead of silently writing
+        # a row with all-NULL lifted columns.
+        raise ValueError(
+            f"payload must be a dict, got: {type(event['payload']).__name__}"
+        )
     # Retry-path fallback must be unique per row: multiple unkeyed rows share
     # the same `drained:retry:<type>` string, so INSERT OR IGNORE drops the
     # 2nd+ and the caller's subsequent DELETE FROM dead_letter loses them.
@@ -1150,7 +1162,13 @@ def retry_buffer_dead_letters() -> int:
         ).fetchall()
         for dl_id, dedupe_key, event_json in rows:
             try:
-                _write_event_to_buffer(buffer_db, dedupe_key, event_json)
+                # Pass dl_id as the stable retry tag so a retry is idempotent:
+                # if a previous attempt inserted the row but the subsequent
+                # DELETE from dead_letter failed, the next retry regenerates
+                # the same synthesized dedupe and INSERT OR IGNORE is a no-op.
+                _write_event_to_buffer(
+                    buffer_db, dedupe_key, event_json, row_id=f"dl{dl_id}",
+                )
             except Exception as exc:
                 _log_drain_failure(
                     exc, f"retry_buffer_dead_letters dl_id={dl_id}",
@@ -1533,9 +1551,55 @@ def make_event(
     if dedupe_key:
         event["dedupe_key"] = dedupe_key
     else:
-        ts = int(time.time())
-        event["dedupe_key"] = f"{event_type}:{resolved_session_id}:{ts}"
+        event["dedupe_key"] = _default_dedupe_key(
+            event_type=event_type,
+            source=source,
+            cli=cli,
+            session_id=resolved_session_id,
+            payload=payload,
+        )
     return event
+
+
+def _default_dedupe_key(
+    *,
+    event_type: str,
+    source: str,
+    cli: str,
+    session_id: str,
+    payload: dict,
+) -> str:
+    """Synthesize a dedupe key when the caller didn't pass one.
+
+    ADR-0014 pins source-specific formulas so the backend can dedupe
+    replays at the event-semantic level instead of collapsing unrelated
+    events that happened to share event_type + session_id + wall-clock:
+
+    - Skill:   ``{skill}:{session_id}:{start_timestamp}``
+    - Hook:    ``{cli}:{session_id}:{sequence_number}``
+    - Scraper: ``{cli}:{file_path}:{byte_offset}``
+
+    Falls back to the generic `{event_type}:{session_id}:{ts}` form when
+    payload is missing the source-specific fields — better a generic key
+    than no key.
+    """
+    ts = int(time.time())
+    generic = f"{event_type}:{session_id}:{ts}"
+    if source == "skill":
+        skill = payload.get("skill")
+        start_ts = payload.get("start_timestamp") or ts
+        if skill:
+            return f"{skill}:{session_id}:{start_ts}"
+    elif source == "hook":
+        seq = payload.get("sequence_number")
+        if seq is not None:
+            return f"{cli}:{session_id}:{seq}"
+    elif source == "scraper":
+        file_path = payload.get("file_path")
+        byte_offset = payload.get("byte_offset")
+        if file_path is not None and byte_offset is not None:
+            return f"{cli}:{file_path}:{byte_offset}"
+    return generic
 
 
 # ---------------------------------------------------------------------------

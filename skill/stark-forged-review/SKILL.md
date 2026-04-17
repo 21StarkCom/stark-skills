@@ -7,7 +7,7 @@ disable-model-invocation: true
 model: opus[1m]
 ---
 
-See `README.md` for the full behavioral reference, pipeline diagram, and observability details.
+See [README.md](README.md) for the full behavioral reference, pipeline diagram, and observability details.
 
 ## Preflight
 

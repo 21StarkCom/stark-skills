@@ -1013,6 +1013,62 @@ test("dry-run surfaces cross-bundle conflicts on a shared ref", (t) => {
   }
 });
 
+test("single-proposal multi-bundle delete still fires the co-owner link guard", (t) => {
+  const repo = makeRepo(t);
+  if (!repo) return;
+  try {
+    fs.mkdirSync(path.join(repo, "standards"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "standards/shared.md"), "Shared v1\n");
+    writeSkill(
+      repo,
+      "alpha",
+      "# alpha\n\n[s](../../standards/shared.md)\n",
+    );
+    writeSkill(
+      repo,
+      "beta",
+      "# beta\n\n[s](../../standards/shared.md)\n",
+    );
+    // Only alpha has a proposal, and it deletes the shared ref. Beta is
+    // selected but has no proposal, so its SKILL.md still links to the
+    // ref after alpha's rewrite lands. The dry-run guard must catch this
+    // dangling link without requiring a matching proposal on beta.
+    writeProposal(
+      repo,
+      "alpha",
+      mkProposal([
+        {
+          path: "skill/alpha/SKILL.md",
+          action: "update",
+          summary: "drop shared",
+          content: "# alpha\n\nNo shared ref.\n",
+        },
+        {
+          path: "standards/shared.md",
+          action: "delete",
+          summary: "cleanup",
+          content: "",
+        },
+      ]),
+    );
+    // Beta's proposal is a no-op so its SKILL.md still links to the ref.
+    // The cross-bundle guard must still check beta's post-rewrite content
+    // even though only alpha actually touches the shared ref.
+    writeProposal(repo, "beta", mkProposal([]));
+    const res = runCli(repo, [
+      "--mode",
+      "api",
+      "--reuse-proposal",
+      "--skills",
+      "alpha,beta",
+    ]);
+    assert.notEqual(res.status, 0);
+    assert.match(res.stderr, /skill\/beta\/SKILL\.md still links to it/);
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("--reuse-proposal --apply handles two bundles sharing a ref", (t) => {
   const repo = makeRepo(t);
   if (!repo) return;
