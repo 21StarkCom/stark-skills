@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc -p .",
-    "test": "node --experimental-strip-types --test skill_validate.test.ts skill_lib.test.ts"
+    "test": "node --experimental-strip-types --test skill_validate.test.ts skill_lib.test.ts skill_optimize.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",

@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import {
   collectSharedRefs,
@@ -17,6 +18,7 @@ import {
 } from "./skill_lib.ts";
 import {
   assertCrossBundleConsistency,
+  assertSharedDeletedRefsRemoved,
   decodeRewriteProposal,
   extractOutputText,
   findStaleBundleFile,
@@ -61,22 +63,31 @@ type BundleRunSummary = {
   warnings: string[];
 };
 
-const repoRoot = findRepoRoot(process.cwd());
-const options = parseArgs(process.argv.slice(2));
+// Module-level repoRoot is populated only when `main()` runs. Tests import
+// this file to exercise planProposalApply/commitStagedOps without running
+// the full CLI, so top-level code must not access process.argv / throw on
+// a bad cwd.
+let repoRoot: string;
+const bundleFilesSnapshot = new Map<string, Array<{ path: string; content: string }>>();
+const preRunMtimes = new Map<string, number>();
+let selectedSkillPaths: Set<string> = new Set();
 
-// Fail closed when the ancestor walk didn't actually find a .git/ — that
-// means findRepoRoot returned the bogus fallback (cwd). Without this a
-// caller running from anywhere would pass through the "inside repo root"
-// check because repoRoot === cwd trivially.
-if (!fs.existsSync(path.join(repoRoot, ".git"))) {
-  throw new Error(
-    `skill_optimize must run from inside a git repository; ` +
-      `no .git/ found walking up from ${process.cwd()}.`,
-  );
-}
+async function main(): Promise<void> {
+  repoRoot = findRepoRoot(process.cwd());
+  const options = parseArgs(process.argv.slice(2));
 
-// And the CWD must still be inside that repo root (defense in depth).
-{
+  // Fail closed when the ancestor walk didn't actually find a .git/ — that
+  // means findRepoRoot returned the bogus fallback (cwd). Without this a
+  // caller running from anywhere would pass through the "inside repo root"
+  // check because repoRoot === cwd trivially.
+  if (!fs.existsSync(path.join(repoRoot, ".git"))) {
+    throw new Error(
+      `skill_optimize must run from inside a git repository; ` +
+        `no .git/ found walking up from ${process.cwd()}.`,
+    );
+  }
+
+  // And the CWD must still be inside that repo root (defense in depth).
   const cwdReal = fs.realpathSync(process.cwd());
   const repoRootReal = fs.realpathSync(repoRoot);
   if (
@@ -88,84 +99,117 @@ if (!fs.existsSync(path.join(repoRoot, ".git"))) {
         `current directory is ${cwdReal}.`,
     );
   }
-}
 
-// Require --mode api + an explicit --skill target to avoid accidentally
-// uploading every discovered bundle to the Responses API. Plan mode can
-// still operate on all bundles because it never makes a network call.
-if (options.mode === "api" && !options.skillTargets.length) {
-  throw new Error(
-    "--mode api requires at least one --skill or --skills target " +
-      "(prevents uploading every repo skill to the Responses API).",
-  );
-}
-
-const bundles = discoverSkillBundles(repoRoot);
-const selectedBundles = selectBundles(bundles, options.skillTargets);
-const selectedSkillPaths = new Set(selectedBundles.map((bundle) => bundle.skillPath));
-const sharedRefOwners = new Map<string, string[]>();
-for (const { ref, skills } of collectSharedRefs(bundles)) {
-  sharedRefOwners.set(ref, skills);
-}
-// Snapshot every selected bundle's files up front so that an earlier apply
-// pass cannot delete a shared ref that a later bundle still needs to load.
-// Without this, `--apply` across multi-bundle runs can crash mid-iteration.
-const bundleFilesSnapshot = new Map<string, Array<{ path: string; content: string }>>();
-// Capture the pre-run mtime of every source file so that later bundles'
-// staleness checks compare against the PRE-apply state, not a mtime that
-// was just updated by an earlier bundle's own apply step.
-const preRunMtimes = new Map<string, number>();
-for (const bundle of selectedBundles) {
-  bundleFilesSnapshot.set(bundle.skillPath, loadBundleFiles(repoRoot, bundle));
-  for (const file of bundleFilesSnapshot.get(bundle.skillPath) ?? []) {
-    const abs = path.join(repoRoot, file.path);
-    if (fs.existsSync(abs) && !preRunMtimes.has(file.path)) {
-      preRunMtimes.set(file.path, fs.statSync(abs).mtimeMs);
+  const bundles = discoverSkillBundles(repoRoot);
+  const selectedBundles = selectBundles(bundles, options.skillTargets);
+  selectedSkillPaths = new Set(selectedBundles.map((bundle) => bundle.skillPath));
+  const sharedRefOwners = new Map<string, string[]>();
+  for (const { ref, skills } of collectSharedRefs(bundles)) {
+    sharedRefOwners.set(ref, skills);
+  }
+  // Snapshot every selected bundle's files up front so that an earlier apply
+  // pass cannot delete a shared ref that a later bundle still needs to load.
+  // Without this, `--apply` across multi-bundle runs can crash mid-iteration.
+  bundleFilesSnapshot.clear();
+  preRunMtimes.clear();
+  for (const bundle of selectedBundles) {
+    bundleFilesSnapshot.set(bundle.skillPath, loadBundleFiles(repoRoot, bundle));
+    for (const file of bundleFilesSnapshot.get(bundle.skillPath) ?? []) {
+      const abs = path.join(repoRoot, file.path);
+      if (fs.existsSync(abs) && !preRunMtimes.has(file.path)) {
+        preRunMtimes.set(file.path, fs.statSync(abs).mtimeMs);
+      }
     }
   }
-}
-const runSummaries: BundleRunSummary[] = [];
-type PendingApply = { bundle: SkillBundle; proposal: RewriteProposal };
-const pendingApplies: PendingApply[] = [];
+  const runSummaries: BundleRunSummary[] = [];
+  type PendingApply = { bundle: SkillBundle; proposal: RewriteProposal };
+  const pendingApplies: PendingApply[] = [];
 
-for (const bundle of selectedBundles) {
-  const { summary, proposal } = await processBundle(bundle, options);
-  runSummaries.push(summary);
-  if (options.apply && proposal) {
-    pendingApplies.push({ bundle, proposal });
+  for (const bundle of selectedBundles) {
+    const { summary, proposal } = await processBundle(bundle, options, sharedRefOwners);
+    runSummaries.push(summary);
+    if (options.apply && proposal) {
+      pendingApplies.push({ bundle, proposal });
+    }
   }
-}
 
-if (options.apply && pendingApplies.length > 0) {
-  // Cross-bundle consistency check before any disk mutation: two bundles
-  // that share a ref must propose the SAME update content or both agree
-  // on delete. Without this a sequential apply silently clobbers the
-  // earlier bundle's edit.
-  assertCrossBundleConsistency(
-    pendingApplies.map((p) => ({ skillPath: p.bundle.skillPath, proposal: p.proposal })),
+  if (options.apply && pendingApplies.length > 0) {
+    // Cross-bundle consistency check before any disk mutation: two bundles
+    // that share a ref must propose the SAME update content or both agree
+    // on delete.
+    const pendingEntries = pendingApplies.map((p) => ({
+      skillPath: p.bundle.skillPath,
+      proposal: p.proposal,
+    }));
+    assertCrossBundleConsistency(pendingEntries);
+    // Shared-ref deletes must not leave dangling links in co-owners' SKILL.md.
+    const ownerSkillContents = new Map<string, string>();
+    for (const bundle of selectedBundles) {
+      const files = bundleFilesSnapshot.get(bundle.skillPath) ?? [];
+      const skillFile = files.find((f) => f.path === bundle.skillPath);
+      if (skillFile) ownerSkillContents.set(bundle.skillPath, skillFile.content);
+    }
+    assertSharedDeletedRefsRemoved(pendingEntries, sharedRefOwners, ownerSkillContents);
+    // Two-phase apply: stage every write under artifacts/skill-optimizer/
+    // apply-staging first, then atomically swap them into place. A phase-1
+    // error aborts without mutating the repo. A phase-2 error preserves the
+    // staging dir so an operator can finish recovery by hand.
+    const stagingRoot = path.join(repoRoot, options.outDir, "apply-staging");
+    fs.rmSync(stagingRoot, { recursive: true, force: true });
+    fs.mkdirSync(stagingRoot, { recursive: true });
+    let plannedOps: StagedOp[][];
+    try {
+      plannedOps = pendingApplies.map(({ proposal }) =>
+        planProposalApply(proposal, stagingRoot, repoRoot),
+      );
+    } catch (error) {
+      fs.rmSync(stagingRoot, { recursive: true, force: true });
+      throw error;
+    }
+    // Dedupe targets across bundles: cross-bundle consistency has already
+    // verified duplicate writes carry identical content and deletes agree,
+    // so we only commit the first op for each target. Without this two
+    // bundles that share a ref both stage the same file, but the second
+    // rename fails with ENOENT after the first commit consumes the stage.
+    const seenTargets = new Set<string>();
+    const dedupedOps: StagedOp[] = [];
+    for (const ops of plannedOps) {
+      for (const op of ops) {
+        if (seenTargets.has(op.target)) continue;
+        seenTargets.add(op.target);
+        dedupedOps.push(op);
+      }
+    }
+    try {
+      commitStagedOps(dedupedOps);
+    } catch (error) {
+      console.error(
+        `[skill_optimize] apply failed mid-commit; staging dir left for ` +
+          `manual recovery: ${stagingRoot}`,
+      );
+      throw error;
+    }
+    fs.rmSync(stagingRoot, { recursive: true, force: true });
+    for (const summary of runSummaries) {
+      if (summary.proposalPath) summary.applied = true;
+    }
+  }
+
+  writeRunSummary(repoRoot, options.outDir, options, runSummaries);
+
+  console.log(
+    JSON.stringify(
+      {
+        repoRoot,
+        mode: options.mode,
+        apply: options.apply,
+        bundles: runSummaries,
+      },
+      null,
+      2,
+    ),
   );
-  for (const { proposal } of pendingApplies) {
-    applyProposal(proposal);
-  }
-  for (const summary of runSummaries) {
-    if (summary.proposalPath) summary.applied = true;
-  }
 }
-
-writeRunSummary(repoRoot, options.outDir, options, runSummaries);
-
-console.log(
-  JSON.stringify(
-    {
-      repoRoot,
-      mode: options.mode,
-      apply: options.apply,
-      bundles: runSummaries,
-    },
-    null,
-    2,
-  ),
-);
 
 function assertInsideRepo(target: string, label: string): void {
   const repoRootReal = fs.realpathSync(repoRoot);
@@ -194,6 +238,7 @@ function assertInsideRepo(target: string, label: string): void {
 async function processBundle(
   bundle: SkillBundle,
   options: CliOptions,
+  sharedRefOwners: Map<string, string[]>,
 ): Promise<{ summary: BundleRunSummary; proposal: RewriteProposal | null }> {
   // Use the up-front snapshot so that a prior apply pass cannot affect the
   // file contents visible to this bundle's validation/diff generation.
@@ -202,7 +247,7 @@ async function processBundle(
   const artifactDir = path.join(
     repoRoot,
     options.outDir,
-    path.basename(path.dirname(bundle.skillPath)),
+    bundleArtifactSlug(bundle.skillPath),
   );
   assertInsideRepo(artifactDir, "artifact directory");
   fs.mkdirSync(artifactDir, { recursive: true });
@@ -419,6 +464,16 @@ function parseArgs(argv: string[]): CliOptions {
     throw new Error("--poll-interval-ms must be a positive integer");
   }
 
+  // Require --mode api + an explicit --skill target BEFORE auth checks so a
+  // local run without OPENAI_API_KEY still reports the precise guard error
+  // instead of a misleading auth failure. Plan mode can operate on all
+  // bundles because it never makes a network call.
+  if (options.mode === "api" && !options.skillTargets.length) {
+    throw new Error(
+      "--mode api requires at least one --skill or --skills target " +
+        "(prevents uploading every repo skill to the Responses API).",
+    );
+  }
   if (options.mode === "api" && !options.reuseProposal && !process.env.OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is required for --mode api (not needed with --reuse-proposal)");
   }
@@ -806,19 +861,28 @@ function writeProposalFiles(artifactDir: string, proposal: RewriteProposal): voi
   }
 }
 
-function applyProposal(proposal: RewriteProposal): void {
+export type StagedOp =
+  | { kind: "write"; target: string; staged: string }
+  | { kind: "delete"; target: string };
+
+/**
+ * Phase 1: validate every change and stage update content into `stagingRoot`.
+ * If any path validation fails or a staging write throws, no bundle file is
+ * mutated — the caller discards the staging dir and the repo is untouched.
+ */
+export function planProposalApply(
+  proposal: RewriteProposal,
+  stagingRoot: string,
+  repoRoot: string,
+): StagedOp[] {
   const repoRootReal = fs.realpathSync(repoRoot);
+  const ops: StagedOp[] = [];
   for (const change of proposal.changes) {
+    if (change.action === "keep") continue;
     const outputPath = path.join(repoRoot, change.path);
-    // Reject symlinked targets — writing/deleting would affect an external file.
     if (fs.existsSync(outputPath) && fs.lstatSync(outputPath).isSymbolicLink()) {
       throw new Error(`Refusing to apply: ${change.path} is a symlink`);
     }
-    // Walk upward to the first existing ancestor, realpath THAT, and rejoin
-    // the non-existing suffix. Without this, a symlinked intermediate
-    // directory (e.g. `skill/x -> /tmp/evil`) would pass the parent-dir
-    // check when the leaf doesn't exist yet, and mkdirSync(recursive) would
-    // follow the symlink out of the repo before writing.
     let existingAncestor = outputPath;
     const missingParts: string[] = [];
     while (!fs.existsSync(existingAncestor)) {
@@ -840,16 +904,58 @@ function applyProposal(proposal: RewriteProposal): void {
       throw new Error(`Refusing to apply: ${change.path} escapes the repo root`);
     }
     if (change.action === "delete") {
-      if (fs.existsSync(outputPath)) {
-        fs.unlinkSync(outputPath);
+      ops.push({ kind: "delete", target: outputPath });
+      continue;
+    }
+    const stagedPath = path.join(stagingRoot, stagingName(outputPath, repoRoot));
+    fs.mkdirSync(path.dirname(stagedPath), { recursive: true });
+    writeUtf8(stagedPath, change.content ?? "");
+    ops.push({ kind: "write", target: outputPath, staged: stagedPath });
+  }
+  return ops;
+}
+
+/**
+ * Phase 2: commit staged writes and deletes. Uses renameSync so each swap is
+ * atomic on the same filesystem; falls back to copy+unlink across devices.
+ * A phase-2 error leaves the staging dir in place so an operator can recover
+ * the remaining changes manually.
+ */
+export function commitStagedOps(ops: StagedOp[]): void {
+  for (const op of ops) {
+    if (op.kind === "delete") {
+      if (fs.existsSync(op.target)) {
+        fs.unlinkSync(op.target);
       }
       continue;
     }
-    if (change.action === "update") {
-      fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-      writeUtf8(outputPath, change.content ?? "");
+    fs.mkdirSync(path.dirname(op.target), { recursive: true });
+    try {
+      fs.renameSync(op.staged, op.target);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code === "EXDEV") {
+        fs.copyFileSync(op.staged, op.target);
+        fs.unlinkSync(op.staged);
+        continue;
+      }
+      throw err;
     }
   }
+}
+
+export function stagingName(absPath: string, repoRoot: string): string {
+  return path.relative(repoRoot, absPath).replace(/[\\/]/g, "__");
+}
+
+/**
+ * Flatten a bundle's repo-relative SKILL.md path into a single directory
+ * name. Previously each bundle used `basename(dirname(skillPath))`, which
+ * collides when two bundles share a leaf name (e.g. `skill/alpha/SKILL.md`
+ * and `vendor/alpha/SKILL.md`). The flat slug encodes the full path so
+ * distinct bundles always get distinct artifact dirs.
+ */
+export function bundleArtifactSlug(skillPath: string): string {
+  return skillPath.replace(/[\\/]/g, "__").replace(/\./g, "_");
 }
 
 function renderProposalSummary(
@@ -969,4 +1075,11 @@ function readExisting(filePath: string): string {
 function writeUtf8(filePath: string, content: string): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, content, "utf8");
+}
+
+// Run the CLI only when this file is the entry point. Tests import planning
+// and commit helpers without triggering main() and its process.argv parsing.
+const entryUrl = process.argv[1] ? pathToFileURL(process.argv[1]).href : "";
+if (entryUrl === import.meta.url) {
+  await main();
 }

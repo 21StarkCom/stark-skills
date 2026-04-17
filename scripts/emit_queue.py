@@ -391,23 +391,26 @@ def _resolve_user(conn, github_login):
     when the producer didn't supply a login so the events.user_id column
     stays NULL rather than joining everyone under a synthetic user row.
 
-    Already-resolved UUIDs (from replayed partial-v2 rows) pass through,
-    but we still upsert a placeholder users row so the FK isn't orphaned
-    when the legacy dimension lookup couldn't recover the original login.
+    Already-resolved UUIDs (from replayed partial-v2 rows) pass through
+    WITHOUT creating a placeholder users row. An earlier design upserted
+    `github_login = "recovered:<prefix>"`, but the ON CONFLICT clause made
+    that placeholder permanent: a later drain with the real login could
+    never replace "recovered:..." with the actual handle. We log the UUID
+    to _recovered_dims for observability so the real login wins cleanly
+    on its next drain.
     """
     if not github_login:
         return None
+    now = datetime.now(timezone.utc).isoformat()
     if _looks_like_uuid(github_login):
-        now = datetime.now(timezone.utc).isoformat()
         conn.execute(
-            """INSERT INTO users (id, github_login, display_name, aliases, created_at)
-               VALUES (?, ?, NULL, ?, ?)
-               ON CONFLICT(id) DO NOTHING""",
-            (github_login, f"recovered:{github_login[:8]}", json.dumps([]), now),
+            "INSERT OR IGNORE INTO _recovered_dims "
+            "(id, kind, source_hint, recorded_at) "
+            "VALUES (?, 'user', ?, ?)",
+            (github_login, f"uuid-passthrough:{github_login[:8]}", now),
         )
         return github_login
     uid = str(_deterministic_user_id(github_login))
-    now = datetime.now(timezone.utc).isoformat()
     conn.execute(
         """INSERT INTO users (id, github_login, display_name, aliases, created_at)
            VALUES (?, ?, NULL, ?, ?)
@@ -424,20 +427,22 @@ def _resolve_project(conn, path):
     None when the producer didn't supply a path so the events.project_id
     column stays NULL rather than grouping under a synthetic project row.
 
-    Already-resolved UUIDs (from replayed partial-v2 rows) pass through,
-    and we upsert a placeholder projects row so the FK isn't orphaned
-    when the legacy dimension lookup couldn't recover the original path.
+    Already-resolved UUIDs pass through WITHOUT creating a placeholder
+    projects row. The previous placeholder path set workspace_type='external'
+    and relied on ON CONFLICT DO UPDATE (last_seen_at only), which meant a
+    later drain with the real path could never upgrade the row to
+    workspace_type='main' or populate repo/parent_project_id. We log the
+    UUID to _recovered_dims instead so the real row wins on next drain.
     """
     if not path:
         return None
+    now = datetime.now(timezone.utc).isoformat()
     if _looks_like_uuid(path):
-        now = datetime.now(timezone.utc).isoformat()
         conn.execute(
-            """INSERT INTO projects (id, path, repo, workspace_type,
-                                     parent_project_id, first_seen_at, last_seen_at)
-               VALUES (?, ?, NULL, 'external', NULL, ?, ?)
-               ON CONFLICT(id) DO NOTHING""",
-            (path, f"(recovered:{path[:8]})", now, now),
+            "INSERT OR IGNORE INTO _recovered_dims "
+            "(id, kind, source_hint, recorded_at) "
+            "VALUES (?, 'project', ?, ?)",
+            (path, f"uuid-passthrough:{path[:8]}", now),
         )
         return path
     pid = str(_deterministic_project_id(path))
@@ -450,7 +455,6 @@ def _resolve_project(conn, path):
         if parent_path:
             parent_id = _resolve_project(conn, parent_path)
 
-    now = datetime.now(timezone.utc).isoformat()
     conn.execute(
         """INSERT INTO projects
                (id, path, repo, workspace_type, parent_project_id,
@@ -884,126 +888,16 @@ def drain_to_buffer(batch_size: int = DRAIN_BATCH_SIZE) -> dict:
     and counted as retries; rows that fail MAX_RETRIES times are moved
     to dead_letter so poison rows cannot starve the pending window.
     """
-    if not isinstance(payload, dict):
-        lifted = {field: None for field in _V2_LIFTED_FIELDS}
-        return lifted, {}
-    working = dict(payload)
-    consumed: set[str] = set()
-    for legacy_key, canonical in _LEGACY_ALIASES:
-        if canonical in working and working.get(canonical) is not None:
-            # Producer already used the canonical key — drop the alias if
-            # present so we don't duplicate the data into payload_extra.
-            if legacy_key in working:
-                consumed.add(legacy_key)
-            continue
-        if legacy_key in working:
-            value = working.pop(legacy_key)
-            if canonical == "duration_ms" and isinstance(value, (int, float)):
-                # Legacy producers sent seconds; v2 schema expects ms.
-                value = int(round(value * 1000))
-            working[canonical] = value
-            consumed.add(legacy_key)
-    lifted = {}
-    for field in _V2_LIFTED_FIELDS:
-        value = working.get(field)
-        if field in _V2_BOOL_FIELDS:
-            value = _coerce_bool(value)
-        lifted[field] = value
-    extra = {
-        k: v for k, v in working.items()
-        if k not in _V2_LIFTED_FIELDS and k not in consumed
-    }
-    return lifted, extra
-
-
-def _write_event_to_buffer(buffer_db, dedupe_key, event_json, row_id=None):
-    """Parse a queued event JSON and INSERT into buffer.events. Raises on
-    validation failure so callers can decide whether to retry / dead-letter.
-    Shared by drain_to_buffer's pending loop and retry_buffer_dead_letters,
-    which writes directly to the buffer without going through pending.
-    """
-    event = json.loads(event_json)
-    if not isinstance(event, dict):
-        raise ValueError("event is not a JSON object")
-    if not event.get("type"):
-        raise ValueError("event is missing required `type` field")
-    if not event.get("timestamp"):
-        raise ValueError("event is missing required `timestamp` field")
-    if "payload" in event and not isinstance(event["payload"], dict):
-        # Non-dict payload slips past validate() if the row was queued before
-        # stricter type checks existed. Drop to the caller so the row can
-        # dead-letter with source_path='buffer' instead of silently writing
-        # a row with all-NULL lifted columns.
-        raise ValueError(
-            f"payload must be a dict, got: {type(event['payload']).__name__}"
-        )
-    # Retry-path fallback must be unique per row: multiple unkeyed rows share
-    # the same `drained:retry:<type>` string, so INSERT OR IGNORE drops the
-    # 2nd+ and the caller's subsequent DELETE FROM dead_letter loses them.
-    # Use a uuid4 suffix when we don't have a row id from the pending path.
-    retry_tag = row_id if row_id is not None else str(_uuid.uuid4())
-    resolved_dedupe = (
-        dedupe_key
-        or event.get("dedupe_key")
-        or event.get("event_id")
-        or f"drained:{retry_tag}:{event.get('type', '')}"
-    )
-    user_uuid = _resolve_user(buffer_db, event.get("user_id"))
-    project_id = _resolve_project(buffer_db, event.get("project"))
-    payload = event.get("payload") or {}
-    lifted, extra = _lift_v2_columns(payload)
-    buffer_db.execute(
-        """INSERT OR IGNORE INTO events
-           (id, dedupe_key, session_id,
-            type, timestamp, cli, user_id, project_id,
-            tool_name, skill_name, duration_ms, success, error_text,
-            pr_number, repo, severity, agent_name, domain, action,
-            passed, score_value, won, prompt_text, prompt_length,
-            is_correction,
-            payload_extra, schema_version, source, synced_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?,
-                   ?, ?, ?, ?, ?,
-                   ?, ?, ?, ?, ?, ?,
-                   ?, ?, ?, ?, ?, ?,
-                   ?, ?, ?, NULL)""",
-        (
-            str(_uuid.uuid4()),
-            resolved_dedupe,
-            event.get("session_id"),
-            event.get("type", ""),
-            event.get("timestamp", ""),
-            event.get("cli"),
-            user_uuid,
-            project_id,
-            lifted["tool_name"], lifted["skill_name"],
-            lifted["duration_ms"], lifted["success"], lifted["error_text"],
-            lifted["pr_number"], lifted["repo"], lifted["severity"],
-            lifted["agent_name"], lifted["domain"], lifted["action"],
-            lifted["passed"], lifted["score_value"], lifted["won"],
-            lifted["prompt_text"], lifted["prompt_length"],
-            lifted["is_correction"],
-            json.dumps(extra),
-            event.get("schema_version", 2),
-            event.get("source"),
-        ),
-    )
-
-
-def drain_to_buffer(batch_size: int = DRAIN_BATCH_SIZE) -> dict:
-    """Flush pending events from queue.db directly into buffer.db (v2 schema).
-
-    Resolves user_id/project to deterministic UUIDs and writes via lifted
-    columns + payload_extra. Returns {sent, failed, dead_lettered}.
-    Per-row failures are appended to drain-errors.log next to buffer.db
-    and counted as retries; rows that fail MAX_RETRIES times are moved
-    to dead_letter so poison rows cannot starve the pending window.
-    """
     # Open queue_db first, then buffer_db. If buffer_db opening raises
     # (quarantine / probe failure), ensure queue_db is closed before
     # propagating — otherwise the WAL handle leaks and locks later
     # enqueue/drain attempts during recovery.
     queue_db = _get_db()
-    buffer_db = _get_buffer_db()
+    try:
+        buffer_db = _get_buffer_db()
+    except BaseException:
+        queue_db.close()
+        raise
     stats = {"sent": 0, "failed": 0, "dead_lettered": 0}
     deletes: list[int] = []
 
@@ -1103,8 +997,8 @@ def drain_to_buffer(batch_size: int = DRAIN_BATCH_SIZE) -> dict:
                     if retries + 1 >= MAX_RETRIES:
                         queue_db.execute(
                             "INSERT INTO dead_letter "
-                            "(dedupe_key, event_json, created_at, retries, last_error) "
-                            "VALUES (?, ?, ?, ?, ?)",
+                            "(dedupe_key, event_json, created_at, retries, last_error, source_path) "
+                            "VALUES (?, ?, ?, ?, ?, 'buffer')",
                             (dedupe_key, event_json, created_at, retries + 1, error_text),
                         )
                         queue_db.execute(
@@ -1123,8 +1017,8 @@ def drain_to_buffer(batch_size: int = DRAIN_BATCH_SIZE) -> dict:
                 if retries + 1 >= MAX_RETRIES:
                     queue_db.execute(
                         "INSERT INTO dead_letter "
-                        "(dedupe_key, event_json, created_at, retries, last_error) "
-                        "VALUES (?, ?, ?, ?, ?)",
+                        "(dedupe_key, event_json, created_at, retries, last_error, source_path) "
+                        "VALUES (?, ?, ?, ?, ?, 'buffer')",
                         (dedupe_key, event_json, created_at, retries + 1, error_text),
                     )
                     queue_db.execute("DELETE FROM pending WHERE id = ?", (row_id,))
@@ -1222,9 +1116,8 @@ def retry_dead_letters() -> int:
     Buffer-path dead letters (source_path = 'buffer') are quarantined writes,
     not network failures, so re-queuing them would send a bad row to the API
     the next time the HTTP drain succeeds. They stay in dead_letter until an
-    operator triages them directly — use retry_buffer_dead_letters() for
-    that path. Legacy rows (source_path IS NULL) predate the split and are
-    treated as HTTP so pre-existing behavior is preserved.
+    operator triages them directly. Legacy rows (source_path IS NULL) predate
+    the split and are treated as HTTP so pre-existing behavior is preserved.
     """
     db = _get_db()
     try:
