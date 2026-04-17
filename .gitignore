@@ -11,5 +11,7 @@ skill/*-workspace/
 .analysis-parsed/
 .analysis-raw-data/
 scripts/node_modules/
+tools/node_modules/
 .remember/
 *-playground.html
+artifacts/
