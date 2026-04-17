@@ -287,6 +287,7 @@ _buffer_db_initialized: dict[str, float] = {}
 # the canonical schema being asserted in tests/test_emit_queue.py.
 NAMESPACE_INSIGHTS = _uuid.UUID("7a3f1b8e-1b7a-4f9e-8e47-5a3f1b8e7a3f")
 _EVINCED_PATH_RE = re.compile(r"^/Users/[^/]+/git/Evinced/([^/]+)(?:/.*)?$")
+_ORG_REPO_RE = re.compile(r"^[A-Za-z0-9._-]+/([A-Za-z0-9._-]+)$")
 _WORKTREE_MARKERS = ("/.worktrees/", "/.claude/worktrees/")
 
 
@@ -294,6 +295,11 @@ def _normalize_path_to_repo(path):
     if not path:
         return None
     m = _EVINCED_PATH_RE.match(path)
+    if m:
+        return m.group(1)
+    # Producers like multi_review.py send project="ORG/REPO" — preserve the
+    # repo slug so repo-based aggregations keep working.
+    m = _ORG_REPO_RE.match(path)
     return m.group(1) if m else None
 
 
@@ -305,6 +311,8 @@ def _derive_workspace_type(path):
     if path.startswith("/tmp/") or path.startswith("/private/tmp/"):
         return "tmp"
     if _EVINCED_PATH_RE.match(path):
+        return "main"
+    if _ORG_REPO_RE.match(path):
         return "main"
     return "external"
 
@@ -391,13 +399,67 @@ def _log_drain_failure(exc, context):
 _V2_EVENTS_COLUMNS = {"project_id", "payload_extra"}
 
 
+def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
+    """Copy unsynced rows out of a legacy v1 buffer back into the pending queue.
+
+    The v1 buffer held queued events that never reached the API. Without
+    replay they would be invisible to the upgraded drain loop. We re-enqueue
+    via INSERT OR IGNORE on dedupe_key so already-drained rows dedupe cleanly.
+    """
+    replayed = 0
+    try:
+        legacy = sqlite3.connect(str(legacy_path), timeout=10)
+        cols = {row[1] for row in legacy.execute("PRAGMA table_info(events)").fetchall()}
+        if not {"payload", "type", "timestamp"}.issubset(cols):
+            legacy.close()
+            return 0
+        rows = legacy.execute(
+            "SELECT dedupe_key, type, timestamp, cli, user_id, project, "
+            "payload, schema_version, source, session_id FROM events "
+            "WHERE synced_at IS NULL"
+        ).fetchall()
+        legacy.close()
+    except sqlite3.DatabaseError:
+        return 0
+
+    queue_db = _get_db()
+    try:
+        for (
+            dedupe_key, event_type, timestamp, cli, user_id,
+            project, payload, schema_version, source, session_id,
+        ) in rows:
+            try:
+                event = {
+                    "type": event_type or "",
+                    "timestamp": timestamp or "",
+                    "cli": cli,
+                    "user_id": user_id,
+                    "project": project,
+                    "payload": json.loads(payload) if payload else {},
+                    "schema_version": schema_version or 1,
+                    "source": source,
+                    "session_id": session_id,
+                }
+                event_json = _redact(json.dumps(event, default=str))
+                cursor = queue_db.execute(
+                    "INSERT OR IGNORE INTO pending (dedupe_key, event_json) VALUES (?, ?)",
+                    (dedupe_key, event_json),
+                )
+                if cursor.rowcount > 0:
+                    replayed += 1
+            except Exception as exc:
+                _log_drain_failure(exc, f"legacy-replay dedupe={dedupe_key}")
+        queue_db.commit()
+    finally:
+        queue_db.close()
+    return replayed
+
+
 def _quarantine_legacy_buffer(buffer_path: Path) -> Path | None:
     """Rename a legacy (v1) buffer.db aside so a fresh v2 db can take its place.
 
-    Returns the new path on success, None if no events table existed yet.
-    Why: CREATE TABLE IF NOT EXISTS won't alter a pre-v2 table, so inserts
-    against v1 columns would fail forever. Quarantining preserves the raw
-    rows for manual recovery instead of dropping them.
+    Also replays unsynced rows from the legacy file back into the durable
+    queue so the upgrade doesn't strand them. Returns the new path.
     """
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     legacy_path = buffer_path.with_name(f"{buffer_path.stem}.v1-{timestamp}.db")
@@ -406,9 +468,10 @@ def _quarantine_legacy_buffer(buffer_path: Path) -> Path | None:
         sidecar_path = buffer_path.with_name(buffer_path.name + sidecar)
         if sidecar_path.exists():
             sidecar_path.rename(legacy_path.with_name(legacy_path.name + sidecar))
+    replayed = _replay_legacy_rows_into_queue(legacy_path)
     _log_drain_failure(
         RuntimeError("legacy v1 buffer quarantined"),
-        f"moved {buffer_path} -> {legacy_path}",
+        f"moved {buffer_path} -> {legacy_path}; replayed {replayed} unsynced rows",
     )
     return legacy_path
 

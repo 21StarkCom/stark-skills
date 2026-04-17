@@ -988,6 +988,26 @@ class TestDrainToBufferV2:
             assert proj_rows[0]["repo"] == "some-repo"
             assert proj_rows[0]["workspace_type"] == "main"
 
+    def test_drain_resolves_org_repo_project_form(self, isolated_queue):
+        """Producers like multi_review.py send project="ORG/REPO"; the repo
+        dimension must still be populated for those rows."""
+        buffer_path = isolated_queue / "buffer.db"
+        _init_v2_buffer(buffer_path)
+        with patch.object(emit_queue, "BUFFER_PATH", buffer_path):
+            emit_queue.enqueue(_make_event(project="GetEvinced/stark-skills"))
+            emit_queue.drain_to_buffer()
+
+            db = sqlite3.connect(str(buffer_path))
+            db.row_factory = sqlite3.Row
+            proj_row = db.execute(
+                "SELECT repo, workspace_type FROM projects WHERE path = ?",
+                ("GetEvinced/stark-skills",),
+            ).fetchone()
+            db.close()
+        assert proj_row is not None, "ORG/REPO path was not upserted"
+        assert proj_row["repo"] == "stark-skills"
+        assert proj_row["workspace_type"] == "main"
+
     def test_drain_resolves_worktree_project_with_parent(self, isolated_queue):
         """Worktree paths must be classified as workspace_type='worktree' and
         populate parent_project_id pointing at the main repo row."""
@@ -1053,18 +1073,25 @@ class TestDrainToBufferV2:
         with patch.object(emit_queue, "BUFFER_PATH", buffer_path):
             # Reset the initialization cache so the test sees a fresh open.
             emit_queue._buffer_db_initialized.pop(str(buffer_path), None)
-            emit_queue.enqueue(_make_event(user_id="aryeh"))
+            emit_queue.enqueue(_make_event(user_id="aryeh", dedupe_key="new-1"))
             stats = emit_queue.drain_to_buffer()
 
-        assert stats["sent"] == 1, f"drain should succeed post-quarantine, got {stats}"
+        # Both the freshly-enqueued event AND the replayed legacy row drain.
+        assert stats["sent"] == 2, f"drain should replay legacy rows, got {stats}"
         # Legacy file preserved under a v1-* sibling; new buffer.db has v2 cols.
         siblings = list(buffer_path.parent.glob("buffer.v1-*.db"))
         assert siblings, "legacy buffer was not quarantined"
         new_db = sqlite3.connect(str(buffer_path))
         cols = {row[1] for row in new_db.execute("PRAGMA table_info(events)")}
+        dedupe_keys = {
+            row[0] for row in new_db.execute("SELECT dedupe_key FROM events")
+        }
         new_db.close()
         assert {"project_id", "payload_extra"}.issubset(cols), (
             f"new buffer.db is missing v2 columns: {cols}"
+        )
+        assert {"new-1", "legacy-1"}.issubset(dedupe_keys), (
+            f"expected both legacy and new rows in v2 buffer, got {dedupe_keys}"
         )
 
     def test_drain_dead_letters_poison_rows(self, isolated_queue):
