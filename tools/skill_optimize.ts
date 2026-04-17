@@ -267,9 +267,25 @@ function parseArgs(argv: string[]): CliOptions {
       const raw = readValue(argv, ++index, "--out-dir");
       const resolved = path.resolve(repoRoot, raw);
       const repoRootReal = fs.realpathSync(repoRoot);
-      const resolvedReal = fs.existsSync(resolved)
-        ? fs.realpathSync(resolved)
-        : resolved;
+      // Walk upward from resolved until we find an existing ancestor, then
+      // take its realpath and rejoin the non-existing suffix. Without this,
+      // a path like `symlinked-dir/new-run` where `symlinked-dir` is an
+      // in-repo symlink to /tmp would pass by accident because the leaf
+      // doesn't exist yet.
+      let existingAncestor = resolved;
+      const missingParts: string[] = [];
+      while (!fs.existsSync(existingAncestor)) {
+        missingParts.unshift(path.basename(existingAncestor));
+        const parent = path.dirname(existingAncestor);
+        if (parent === existingAncestor) break;
+        existingAncestor = parent;
+      }
+      const ancestorReal = fs.existsSync(existingAncestor)
+        ? fs.realpathSync(existingAncestor)
+        : existingAncestor;
+      const resolvedReal = missingParts.length
+        ? path.join(ancestorReal, ...missingParts)
+        : ancestorReal;
       if (
         !resolvedReal.startsWith(repoRootReal + path.sep) &&
         resolvedReal !== repoRootReal

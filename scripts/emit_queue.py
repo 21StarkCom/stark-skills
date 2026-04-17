@@ -256,13 +256,23 @@ def _strip_worktree_suffix(path):
     return path
 
 
+# Root directories known to host CI/dev checkouts — only paths rooted at
+# one of these get the 3-segment fallback treatment. Anything else (e.g.
+# `/Users/alice/src/foo` or `/etc/config`) returns NULL instead of being
+# misattributed as a repo.
+_CHECKOUT_ROOTS = frozenset({
+    "workspace", "runner", "srv", "github", "builds",
+    "home", "var",
+})
+
+
 def _normalize_path_to_repo(path):
     """Extract the repo slug for dimension tables.
 
-    Recognizes three common layouts:
-      * `/…/git/<org>/<repo>[/…]` (macOS/Linux dev + CI with go-style path)
-      * `/<base>/<org>/<repo>` (CI layouts like `/workspace/<org>/<repo>`)
-      * `"<org>/<repo>"` (producers like multi_review.py)
+    Recognizes three layouts, in order of reliability:
+      * `/…/git/<org>/<repo>[/…]`     (macOS/Linux dev with go-style path)
+      * `/<ci-root>/<org>/<repo>[/…]` (CI layouts; ci-root ∈ _CHECKOUT_ROOTS)
+      * `"<org>/<repo>"`              (producers like multi_review.py)
     Returns None for unrecognized layouts so the dimension stays NULL
     rather than inventing a bad repo name.
     """
@@ -270,20 +280,18 @@ def _normalize_path_to_repo(path):
         return None
     if path.startswith("/"):
         base = _strip_worktree_suffix(path)
-        # Prefer the `/git/<org>/<repo>` convention when present — handles
-        # deeper paths like `/Users/<user>/git/<org>/<repo>/subdir`.
+        # Prefer the `/git/<org>/<repo>` convention — handles deeper paths
+        # like `/Users/<user>/git/<org>/<repo>/subdir` reliably.
         if "/git/" in base:
             tail = base.split("/git/", 1)[1]
             segs = [s for s in tail.split("/") if s]
             if len(segs) >= 2:
                 return segs[1]
             return None
-        # Fallback: treat `/<base>/<org>/<repo>[/…]` as the checkout layout.
-        # Base is a single "root" segment (home, workspace, runner, etc.)
-        # so paths like `/workspace/acme/payments/subdir` still attribute
-        # correctly. `/single` or `/a/b` are rejected to avoid guessing.
+        # Fallback ONLY for known CI/dev-root layouts (`/workspace/<org>/<repo>`,
+        # `/home/<user>/<repo>` etc.). Arbitrary paths stay NULL.
         segs = [s for s in base.split("/") if s]
-        if len(segs) >= 3:
+        if len(segs) >= 3 and segs[0] in _CHECKOUT_ROOTS:
             return segs[2]
         return None
     m = _ORG_REPO_RE.match(path)
@@ -396,15 +404,20 @@ _V2_EVENTS_COLUMNS = {
     "prompt_text", "prompt_length", "is_correction", "payload_extra",
     "schema_version", "source", "synced_at",
 }
-_V2_REQUIRED_TABLES = {"events", "users", "projects"}
+_V2_USERS_COLUMNS = {"id", "github_login", "aliases", "created_at"}
+_V2_PROJECTS_COLUMNS = {
+    "id", "path", "workspace_type", "parent_project_id",
+    "first_seen_at", "last_seen_at",
+}
 
 
 def _buffer_is_v2_compatible(buffer_path_str: str) -> bool:
     """Check that the existing buffer.db has the complete v2 surface.
 
-    Returns False if any required table is missing or the `events` table
-    lacks any column the v2 INSERT will write. A False return triggers
-    quarantine + fresh v2 creation.
+    Returns False if any required table is missing or if any of the events
+    / users / projects tables lack a column the v2 INSERT/UPSERT paths
+    will write. A False return triggers quarantine + fresh v2 creation,
+    so partial-v2 schemas can't wedge drains later.
     """
     probe = sqlite3.connect(buffer_path_str, timeout=10)
     try:
@@ -414,12 +427,23 @@ def _buffer_is_v2_compatible(buffer_path_str: str) -> bool:
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
-        if not _V2_REQUIRED_TABLES.issubset(tables):
-            return False
+        for required in ("events", "users", "projects"):
+            if required not in tables:
+                return False
         events_cols = {
             row[1] for row in probe.execute("PRAGMA table_info(events)").fetchall()
         }
-        return _V2_EVENTS_COLUMNS.issubset(events_cols)
+        users_cols = {
+            row[1] for row in probe.execute("PRAGMA table_info(users)").fetchall()
+        }
+        projects_cols = {
+            row[1] for row in probe.execute("PRAGMA table_info(projects)").fetchall()
+        }
+        return (
+            _V2_EVENTS_COLUMNS.issubset(events_cols)
+            and _V2_USERS_COLUMNS.issubset(users_cols)
+            and _V2_PROJECTS_COLUMNS.issubset(projects_cols)
+        )
     except sqlite3.DatabaseError:
         return False
     finally:
@@ -602,6 +626,17 @@ _V2_LIFTED_FIELDS = (
 
 _V2_BOOL_FIELDS = {"success", "passed", "won", "is_correction"}
 
+# Legacy producers still emit these field names. Preserve v2 attribution
+# by mapping them onto the canonical column when the canonical key isn't
+# present. The original key is dropped from payload_extra to avoid double
+# reporting.
+_LEGACY_ALIASES: tuple[tuple[str, str], ...] = (
+    ("skill", "skill_name"),
+    ("tool", "tool_name"),
+    ("agent", "agent_name"),
+    ("duration_s", "duration_ms"),
+)
+
 
 def _coerce_bool(value):
     if value is None:
@@ -619,19 +654,39 @@ def _lift_v2_columns(payload) -> tuple[dict, dict]:
     Returns (lifted, extra) where `lifted` contains exactly the keys
     declared in _V2_LIFTED_FIELDS (None when missing) and `extra` is
     the remaining payload (preserved for forensic inspection in
-    payload_extra). Without this, the v2 events table would carry
-    NULL for every lifted column even when the producer set them.
+    payload_extra). Legacy aliases (skill → skill_name, duration_s →
+    duration_ms, etc.) are folded onto the canonical column when the
+    canonical key isn't set, so pre-v2 producers keep their attribution.
     """
     if not isinstance(payload, dict):
         lifted = {field: None for field in _V2_LIFTED_FIELDS}
         return lifted, {}
+    working = dict(payload)
+    consumed: set[str] = set()
+    for legacy_key, canonical in _LEGACY_ALIASES:
+        if canonical in working and working.get(canonical) is not None:
+            # Producer already used the canonical key — drop the alias if
+            # present so we don't duplicate the data into payload_extra.
+            if legacy_key in working:
+                consumed.add(legacy_key)
+            continue
+        if legacy_key in working:
+            value = working.pop(legacy_key)
+            if canonical == "duration_ms" and isinstance(value, (int, float)):
+                # Legacy producers sent seconds; v2 schema expects ms.
+                value = int(round(value * 1000))
+            working[canonical] = value
+            consumed.add(legacy_key)
     lifted = {}
     for field in _V2_LIFTED_FIELDS:
-        value = payload.get(field)
+        value = working.get(field)
         if field in _V2_BOOL_FIELDS:
             value = _coerce_bool(value)
         lifted[field] = value
-    extra = {k: v for k, v in payload.items() if k not in _V2_LIFTED_FIELDS}
+    extra = {
+        k: v for k, v in working.items()
+        if k not in _V2_LIFTED_FIELDS and k not in consumed
+    }
     return lifted, extra
 
 
