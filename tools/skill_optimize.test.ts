@@ -7,8 +7,9 @@
 // refuses to create the fixture root.
 
 import { strict as assert } from "node:assert";
-import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { spawn, spawnSync, type SpawnSyncReturns } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -104,6 +105,32 @@ function runCli(
   );
 }
 
+// Async variant for tests that also run a node:http server in the same
+// process. spawnSync blocks the event loop, which would starve the mock
+// server and make the CLI's fetch time out.
+function runCliAsync(
+  repo: string,
+  args: string[],
+  env: NodeJS.ProcessEnv = {},
+): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(
+      process.execPath,
+      ["--experimental-strip-types", CLI, ...args],
+      { cwd: repo, env: { ...process.env, ...env } },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d: Buffer) => {
+      stdout += d.toString("utf8");
+    });
+    child.stderr.on("data", (d: Buffer) => {
+      stderr += d.toString("utf8");
+    });
+    child.on("exit", (code) => resolve({ status: code, stdout, stderr }));
+  });
+}
+
 test("diff generation failure is non-fatal — proposal.json and summary are still saved", () => {
   const repo = makeRepo();
   if (!repo) return;
@@ -149,6 +176,94 @@ test("diff generation failure is non-fatal — proposal.json and summary are sti
         path.join(artifactDir(repo, "alpha"), "proposal.json"),
       ),
     );
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+function startMockResponsesServer(
+  response: Record<string, unknown>,
+): Promise<{ port: number; close: () => Promise<void>; hits: { post: number; get: number } }> {
+  const hits = { post: 0, get: 0 };
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      if (req.method === "POST") hits.post += 1;
+      if (req.method === "GET") hits.get += 1;
+      const chunks: Buffer[] = [];
+      req.on("data", (c) => chunks.push(c));
+      req.on("end", () => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(response));
+      });
+    });
+    server.listen(0, "127.0.0.1", () => {
+      const port = (server.address() as { port: number }).port;
+      resolve({
+        port,
+        hits,
+        close: () =>
+          new Promise<void>((r) => {
+            server.close(() => r());
+          }),
+      });
+    });
+  });
+}
+
+test("--mode api with mock Responses server submits, parses, and persists a proposal", async () => {
+  const repo = makeRepo();
+  if (!repo) return;
+  try {
+    writeSkill(repo, "alpha", "# alpha\n\nOriginal.\n");
+    const proposalPayload = {
+      bundle_summary: "mock rewrite",
+      global_notes: [],
+      changes: [
+        {
+          path: "skill/alpha/SKILL.md",
+          action: "update",
+          summary: "rewrite",
+          content: "# alpha\n\nRewritten by mock.\n",
+        },
+      ],
+      refs_kept: [],
+      refs_removed: [],
+      contradictions_resolved: [],
+      terminology_normalizations: [],
+      warnings: [],
+    };
+    const mock = await startMockResponsesServer({
+      id: "mock-resp-1",
+      status: "completed",
+      output_text: JSON.stringify(proposalPayload),
+    });
+    try {
+      const res = await runCliAsync(
+        repo,
+        ["--mode", "api", "--skill", "alpha"],
+        {
+          OPENAI_API_KEY: "test-key",
+          OPENAI_RESPONSES_BASE: `http://127.0.0.1:${mock.port}/v1/responses`,
+        },
+      );
+      assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+      assert.ok(mock.hits.post >= 1, "mock server should receive a POST");
+      const persisted = JSON.parse(
+        fs.readFileSync(
+          path.join(artifactDir(repo, "alpha"), "proposal.json"),
+          "utf8",
+        ),
+      );
+      assert.equal(persisted.bundle_summary, "mock rewrite");
+      assert.equal(persisted.changes[0].content, "# alpha\n\nRewritten by mock.\n");
+      // Dry-run (no --apply): the source file must NOT yet be rewritten.
+      assert.equal(
+        fs.readFileSync(path.join(repo, "skill/alpha/SKILL.md"), "utf8"),
+        "# alpha\n\nOriginal.\n",
+      );
+    } finally {
+      await mock.close();
+    }
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }

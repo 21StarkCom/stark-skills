@@ -296,6 +296,39 @@ class TestDeadLetterRecovery:
         assert remaining == [("buffer-key", "buffer")]
         assert pending == [("http-key",)]
 
+    def test_retry_buffer_dead_letters_moves_only_buffer_rows_to_pending(self):
+        """retry_buffer_dead_letters is the operator-triggered recovery path
+        for intermittent buffer-sink failures. It must move buffer rows back
+        to pending AND leave HTTP rows behind so the two sinks don't blend.
+        """
+        db = emit_queue._get_db()
+        db.execute(
+            "INSERT INTO dead_letter "
+            "(dedupe_key, event_json, created_at, retries, last_error, source_path) "
+            "VALUES ('buffer-key', '{}', '2026-04-01T00:00:00Z', 3, 'disk i/o', 'buffer')"
+        )
+        db.execute(
+            "INSERT INTO dead_letter "
+            "(dedupe_key, event_json, created_at, retries, last_error, source_path) "
+            "VALUES ('http-key', '{}', '2026-04-01T00:00:00Z', 3, 'network', 'http')"
+        )
+        db.commit()
+        db.close()
+
+        moved = emit_queue.retry_buffer_dead_letters()
+        assert moved == 1
+
+        db = emit_queue._get_db()
+        remaining = db.execute(
+            "SELECT dedupe_key, source_path FROM dead_letter"
+        ).fetchall()
+        pending = db.execute(
+            "SELECT dedupe_key FROM pending"
+        ).fetchall()
+        db.close()
+        assert remaining == [("http-key", "http")]
+        assert pending == [("buffer-key",)]
+
     def test_migration_populates_source_path_for_legacy_rows(self, isolated_queue):
         """Pre-migration dead_letter rows must survive the ALTER TABLE and be
         retryable as HTTP — otherwise a schema upgrade would silently strand
@@ -1016,11 +1049,15 @@ class TestDrainToBufferV2:
 
     @pytest.mark.parametrize("path,expected", [
         ("/builds/acme/payments", "payments"),
-        ("/builds/acme/payments/subdir", "payments"),
+        # GitLab subgroup layout: CI_PROJECT_DIR is /builds/<ns>/<subgroup>/<project>;
+        # the project is always the deepest segment under /builds/.
+        ("/builds/group/subgroup/project", "project"),
         ("/srv/evinced/stark-skills", "stark-skills"),
         ("/github/org/repo", "repo"),
-        ("/github/org/repo/deep/nested", "repo"),
+        # Nested subgroups under /github work the same as /builds.
+        ("/github/org/team/repo", "repo"),
         ("/workspace/acme/payments", "payments"),
+        ("/workspace/acme/team/payments", "payments"),
         ("/home/runner/work/foo/foo", "foo"),
     ])
     def test_ci_layouts_resolve_correctly(self, path, expected, isolated_queue):

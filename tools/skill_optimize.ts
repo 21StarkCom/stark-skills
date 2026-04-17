@@ -570,7 +570,12 @@ async function requestProposal(
   };
 
   const deadline = Date.now() + options.apiTimeoutMs;
-  let payload = await openaiFetch("https://api.openai.com/v1/responses", {
+  // Endpoint override exists so integration tests can point at a local
+  // mock server; production leaves OPENAI_RESPONSES_BASE unset and hits the
+  // real OpenAI API.
+  const responsesBase =
+    process.env.OPENAI_RESPONSES_BASE ?? "https://api.openai.com/v1/responses";
+  let payload = await openaiFetch(responsesBase, {
     method: "POST",
     headers: openAiHeaders(),
     body: JSON.stringify(requestBody),
@@ -586,7 +591,7 @@ async function requestProposal(
     }
     await sleep(Math.min(options.pollIntervalMs, Math.max(deadline - Date.now(), 0)));
     payload = await openaiFetch(
-      `https://api.openai.com/v1/responses/${payload.id}`,
+      `${responsesBase}/${payload.id}`,
       {
         method: "GET",
         headers: openAiHeaders(),
@@ -846,7 +851,14 @@ async function openaiFetch(
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) {
-    throw new Error(`OpenAI API request failed: ${response.status} ${await response.text()}`);
+    // Bound the embedded body so a verbose OpenAI error (or an HTML 502
+    // page from a proxy) doesn't dump kilobytes of raw text — including
+    // any echoed prompt fragments — into the CLI error output.
+    const body = await response.text();
+    const summary = body.length > 500 ? `${body.slice(0, 500)}… [truncated]` : body;
+    throw new Error(
+      `OpenAI API request failed: ${response.status} ${response.statusText} (${summary})`,
+    );
   }
   const json = (await response.json()) as unknown;
   if (typeof json !== "object" || json === null || typeof (json as Record<string, unknown>).id !== "string") {
@@ -1100,5 +1112,17 @@ function writeUtf8(filePath: string, content: string): void {
 // and commit helpers without triggering main() and its process.argv parsing.
 const entryUrl = process.argv[1] ? pathToFileURL(process.argv[1]).href : "";
 if (entryUrl === import.meta.url) {
-  await main();
+  try {
+    await main();
+  } catch (error) {
+    // Print just the message — the full stack trace (with absolute repo
+    // paths and internal file URLs) adds noise to operator-facing errors
+    // without helping diagnosis. Set DEBUG=1 to surface the trace.
+    const message = (error as Error)?.message ?? String(error);
+    console.error(`[skill_optimize] ${message}`);
+    if (process.env.DEBUG) {
+      console.error((error as Error)?.stack ?? "");
+    }
+    process.exit(1);
+  }
 }

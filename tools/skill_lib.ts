@@ -151,6 +151,36 @@ export function resolveSkillTarget(
   return matches[0];
 }
 
+/**
+ * Pure markdown link extractor shared by `resolveRefs` (bundle discovery)
+ * and `assertSharedDeletedRefsRemoved` (cross-owner delete safety). Returns
+ * every destination mentioned by an inline, angle-bracketed, or reference-
+ * style link. Destinations are returned verbatim; callers handle filtering
+ * (e.g. local .md only) and path resolution.
+ */
+export function parseMarkdownLinkTargets(content: string): string[] {
+  const defs = new Map<string, string>();
+  for (const match of content.matchAll(
+    /^\s*\[([^\]]+)\]:\s*(?:<([^>]+)>|(\S+))/gm,
+  )) {
+    const destination = match[2] ?? match[3];
+    if (!destination) continue;
+    defs.set(match[1].trim().toLowerCase(), stripWrappers(destination));
+  }
+  const targets = new Set<string>();
+  for (const match of content.matchAll(/(?<!!)\[[^\]]+\]\(([^)]+)\)/g)) {
+    const trimmed = match[1].replace(/\s+["'].*$/, "").trim();
+    targets.add(stripWrappers(trimmed));
+  }
+  for (const match of content.matchAll(/\[[^\]]+\]\[([^\]]+)\]/g)) {
+    const ref = defs.get(match[1].trim().toLowerCase());
+    if (ref) {
+      targets.add(ref);
+    }
+  }
+  return [...targets];
+}
+
 function resolveRefs(
   repoRoot: string,
   skillPath: string,
@@ -160,38 +190,7 @@ function resolveRefs(
   missing: string[];
 } {
   const skillDir = path.dirname(skillPath);
-  const defs = new Map<string, string>();
-
-  // Reference-style definitions can use angle brackets for destinations
-  // that contain spaces: `[label]: <./My Guide.md> "Optional title"`. The
-  // previous `\S+` capture truncated such targets at the first space and
-  // dropped the bundle dependency. CommonMark forbids internal spaces
-  // unless `<...>` wrapped, so the alternation covers both forms.
-  for (const match of raw.matchAll(
-    /^\s*\[([^\]]+)\]:\s*(?:<([^>]+)>|(\S+))/gm,
-  )) {
-    const destination = match[2] ?? match[3];
-    if (!destination) continue;
-    defs.set(match[1].trim().toLowerCase(), stripWrappers(destination));
-  }
-
-  const rawRefs = new Set<string>();
-
-  for (const match of raw.matchAll(/(?<!!)\[[^\]]+\]\(([^)]+)\)/g)) {
-    // Inline links may carry a title — `[x](path "title")` or `[x](path 'title')`.
-    // Strip everything from the first unquoted whitespace onward so the
-    // destination isn't reported as `path "title"` (a non-existent file).
-    const raw = match[1];
-    const trimmed = raw.replace(/\s+["'].*$/, "").trim();
-    rawRefs.add(stripWrappers(trimmed));
-  }
-
-  for (const match of raw.matchAll(/\[[^\]]+\]\[([^\]]+)\]/g)) {
-    const ref = defs.get(match[1].trim().toLowerCase());
-    if (ref) {
-      rawRefs.add(ref);
-    }
-  }
+  const rawRefs = new Set(parseMarkdownLinkTargets(raw));
 
   const found = new Set<string>();
   const missing = new Set<string>();
