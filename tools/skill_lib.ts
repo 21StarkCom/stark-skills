@@ -159,8 +159,13 @@ export function resolveSkillTarget(
  * (e.g. local .md only) and path resolution.
  */
 export function parseMarkdownLinkTargets(content: string): string[] {
+  // Strip fenced (``` / ~~~) and inline (`...`) code spans before scanning
+  // so example link syntax inside docs doesn't register as live references.
+  // The audit would otherwise flag legitimate example files as missing and
+  // the optimizer could over-aggressively delete shared refs shown in code.
+  const scanned = stripCodeSpans(content);
   const defs = new Map<string, string>();
-  for (const match of content.matchAll(
+  for (const match of scanned.matchAll(
     /^\s*\[([^\]]+)\]:\s*(?:<([^>]+)>|(\S+))/gm,
   )) {
     const destination = match[2] ?? match[3];
@@ -172,20 +177,20 @@ export function parseMarkdownLinkTargets(content: string): string[] {
   // valid per CommonMark (e.g. `./Guide (v2).md`). Match either any non-
   // paren run or a paren-balanced sub-token. The outer non-greedy repeat
   // stops at the first unmatched `)`, which is the link's closing paren.
-  for (const match of content.matchAll(
+  for (const match of scanned.matchAll(
     /(?<!!)\[[^\]]+\]\(((?:[^()]|\([^)]*\))+)\)/g,
   )) {
     const trimmed = match[1].replace(/\s+["'].*$/, "").trim();
     targets.add(stripWrappers(trimmed));
   }
-  for (const match of content.matchAll(/\[[^\]]+\]\[([^\]]+)\]/g)) {
+  for (const match of scanned.matchAll(/\[[^\]]+\]\[([^\]]+)\]/g)) {
     const ref = defs.get(match[1].trim().toLowerCase());
     if (ref) {
       targets.add(ref);
     }
   }
   // Collapsed reference links `[label][]` reuse the label as the lookup key.
-  for (const match of content.matchAll(/\[([^\]]+)\]\[\s*\]/g)) {
+  for (const match of scanned.matchAll(/\[([^\]]+)\]\[\s*\]/g)) {
     const ref = defs.get(match[1].trim().toLowerCase());
     if (ref) {
       targets.add(ref);
@@ -246,4 +251,16 @@ function isLocalMarkdownRef(ref: string): boolean {
 
 function stripWrappers(input: string): string {
   return input.trim().replace(/^<|>$/g, "");
+}
+
+function stripCodeSpans(content: string): string {
+  // Remove fenced blocks (``` or ~~~, optionally tagged) in one pass so
+  // reference-style definitions that appear inside a fence don't pollute
+  // the def table. Then strip single-line inline code spans.
+  let scrubbed = content.replace(
+    /^([ \t]*)(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\1\2[^\n]*$/gm,
+    "",
+  );
+  scrubbed = scrubbed.replace(/`+[^`\n]*`+/g, "");
+  return scrubbed;
 }

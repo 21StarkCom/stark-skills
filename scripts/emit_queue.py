@@ -612,6 +612,12 @@ def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
 
     replayed = 0
     failed = 0
+    # Prefix synthesized keys with a hash of the source-file path so two
+    # different quarantined buffers can both contain a row with id=1 without
+    # colliding on legacy:1. The suffix is stable across replays of the
+    # same file so re-running the replay stays a no-op.
+    import hashlib
+    source_tag = hashlib.sha256(str(legacy_path).encode("utf-8")).hexdigest()[:8]
     queue_db = _get_db()
     try:
         for raw in rows:
@@ -619,14 +625,14 @@ def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
             # Synthesize a stable dedupe_key for legacy rows that didn't have
             # one so already-delivered history isn't re-delivered with a fresh
             # `drained:…` key. Prefer the legacy row.id (primary key); fall
-            # back to a content hash over the envelope fields.
+            # back to a content hash over the envelope fields. Either key is
+            # namespaced by source_tag so quarantines can't clobber each other.
             dedupe_key = row.get("dedupe_key")
             if not dedupe_key:
                 legacy_id = row.get("id")
                 if legacy_id:
-                    dedupe_key = f"legacy:{legacy_id}"
+                    dedupe_key = f"legacy:{source_tag}:{legacy_id}"
                 else:
-                    import hashlib
                     envelope = "|".join([
                         str(row.get("type") or ""),
                         str(row.get("timestamp") or ""),
@@ -634,7 +640,7 @@ def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
                         str(row.get("project") or row.get("project_id") or ""),
                     ])
                     digest = hashlib.sha256(envelope.encode("utf-8")).hexdigest()[:16]
-                    dedupe_key = f"legacy:sha256:{digest}"
+                    dedupe_key = f"legacy:{source_tag}:sha256:{digest}"
             try:
                 # Reconstruct a full payload: merge payload_extra (v2) or
                 # payload (v1) with any lifted-column values present.
@@ -898,6 +904,66 @@ def _lift_v2_columns(payload) -> tuple[dict, dict]:
     return lifted, extra
 
 
+def _write_event_to_buffer(buffer_db, dedupe_key, event_json, row_id=None):
+    """Parse a queued event JSON and INSERT into buffer.events. Raises on
+    validation failure so callers can decide whether to retry / dead-letter.
+    Shared by drain_to_buffer's pending loop and retry_buffer_dead_letters,
+    which writes directly to the buffer without going through pending.
+    """
+    event = json.loads(event_json)
+    if not isinstance(event, dict):
+        raise ValueError("event is not a JSON object")
+    if not event.get("type"):
+        raise ValueError("event is missing required `type` field")
+    if not event.get("timestamp"):
+        raise ValueError("event is missing required `timestamp` field")
+    resolved_dedupe = (
+        dedupe_key
+        or event.get("dedupe_key")
+        or event.get("event_id")
+        or f"drained:{row_id if row_id is not None else 'retry'}:{event.get('type', '')}"
+    )
+    user_uuid = _resolve_user(buffer_db, event.get("user_id"))
+    project_id = _resolve_project(buffer_db, event.get("project"))
+    payload = event.get("payload") or {}
+    lifted, extra = _lift_v2_columns(payload)
+    buffer_db.execute(
+        """INSERT OR IGNORE INTO events
+           (id, dedupe_key, session_id,
+            type, timestamp, cli, user_id, project_id,
+            tool_name, skill_name, duration_ms, success, error_text,
+            pr_number, repo, severity, agent_name, domain, action,
+            passed, score_value, won, prompt_text, prompt_length,
+            is_correction,
+            payload_extra, schema_version, source, synced_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?,
+                   ?, ?, ?, ?, ?,
+                   ?, ?, ?, ?, ?, ?,
+                   ?, ?, ?, ?, ?, ?,
+                   ?, ?, ?, NULL)""",
+        (
+            str(_uuid.uuid4()),
+            resolved_dedupe,
+            event.get("session_id"),
+            event.get("type", ""),
+            event.get("timestamp", ""),
+            event.get("cli"),
+            user_uuid,
+            project_id,
+            lifted["tool_name"], lifted["skill_name"],
+            lifted["duration_ms"], lifted["success"], lifted["error_text"],
+            lifted["pr_number"], lifted["repo"], lifted["severity"],
+            lifted["agent_name"], lifted["domain"], lifted["action"],
+            lifted["passed"], lifted["score_value"], lifted["won"],
+            lifted["prompt_text"], lifted["prompt_length"],
+            lifted["is_correction"],
+            json.dumps(extra),
+            event.get("schema_version", 2),
+            event.get("source"),
+        ),
+    )
+
+
 def drain_to_buffer(batch_size: int = DRAIN_BATCH_SIZE) -> dict:
     """Flush pending events from queue.db directly into buffer.db (v2 schema).
 
@@ -929,63 +995,7 @@ def drain_to_buffer(batch_size: int = DRAIN_BATCH_SIZE) -> dict:
 
         for row_id, dedupe_key, event_json, created_at, retries in rows:
             try:
-                event = json.loads(event_json)
-                # Reject events that are missing envelope fields the v2
-                # schema requires as NOT NULL. Fail loudly so the row moves
-                # to dead_letter instead of silently populating empty strings.
-                if not isinstance(event, dict):
-                    raise ValueError("event is not a JSON object")
-                if not event.get("type"):
-                    raise ValueError("event is missing required `type` field")
-                if not event.get("timestamp"):
-                    raise ValueError("event is missing required `timestamp` field")
-                # v2 events.dedupe_key is NOT NULL — synthesize from event_id
-                # or queue row_id if the producer didn't set one.
-                resolved_dedupe = (
-                    dedupe_key
-                    or event.get("dedupe_key")
-                    or event.get("event_id")
-                    or f"drained:{row_id}:{event.get('type','')}"
-                )
-                user_uuid = _resolve_user(buffer_db, event.get("user_id"))
-                project_id = _resolve_project(buffer_db, event.get("project"))
-                payload = event.get("payload") or {}
-                lifted, extra = _lift_v2_columns(payload)
-                buffer_db.execute(
-                    """INSERT OR IGNORE INTO events
-                       (id, dedupe_key, session_id,
-                        type, timestamp, cli, user_id, project_id,
-                        tool_name, skill_name, duration_ms, success, error_text,
-                        pr_number, repo, severity, agent_name, domain, action,
-                        passed, score_value, won, prompt_text, prompt_length,
-                        is_correction,
-                        payload_extra, schema_version, source, synced_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?,
-                               ?, ?, ?, ?, ?,
-                               ?, ?, ?, ?, ?, ?,
-                               ?, ?, ?, ?, ?, ?,
-                               ?, ?, ?, NULL)""",
-                    (
-                        str(_uuid.uuid4()),
-                        resolved_dedupe,
-                        event.get("session_id"),
-                        event.get("type", ""),
-                        event.get("timestamp", ""),
-                        event.get("cli"),
-                        user_uuid,
-                        project_id,
-                        lifted["tool_name"], lifted["skill_name"],
-                        lifted["duration_ms"], lifted["success"], lifted["error_text"],
-                        lifted["pr_number"], lifted["repo"], lifted["severity"],
-                        lifted["agent_name"], lifted["domain"], lifted["action"],
-                        lifted["passed"], lifted["score_value"], lifted["won"],
-                        lifted["prompt_text"], lifted["prompt_length"],
-                        lifted["is_correction"],
-                        json.dumps(extra),
-                        event.get("schema_version", 2),
-                        event.get("source"),
-                    ),
-                )
+                _write_event_to_buffer(buffer_db, dedupe_key, event_json, row_id=row_id)
                 deletes.append(row_id)
                 stats["sent"] += 1
             except sqlite3.OperationalError as exc:
@@ -1084,38 +1094,43 @@ def dead_letter_count() -> int:
 
 
 def retry_buffer_dead_letters() -> int:
-    """Requeue buffer-path dead letters and drain them to the buffer sink
-    before drain() can see them. Use after resolving the underlying SQLite
-    failure (readonly FS, missing column, etc.). Returns count requeued.
+    """Write buffer-path dead letters directly to the v2 buffer and drop
+    them from dead_letter on success. Returns count recovered.
 
-    The separate source_path filter in retry_dead_letters() keeps the two
-    sinks apart under normal operation; this function runs drain_to_buffer
-    synchronously after requeuing so pending never holds a buffer-quarantined
-    row long enough for an HTTP drain to pick it up (single-process). In a
-    multi-process setup the two drains should still coordinate via the
-    busy_timeout / WAL semantics.
+    The recovery path deliberately bypasses `pending` so a concurrent
+    `drain()` (HTTP sink) cannot pick up a row that was already rejected
+    by the buffer sink — that would post the bad row to the API despite
+    `source_path='buffer'`. Rows that still fail are left in dead_letter
+    for the operator to triage.
     """
-    db = _get_db()
+    queue_db = _get_db()
     try:
-        rows = db.execute(
+        buffer_db = _get_buffer_db()
+    except BaseException:
+        queue_db.close()
+        raise
+    recovered = 0
+    try:
+        rows = queue_db.execute(
             "SELECT id, dedupe_key, event_json FROM dead_letter "
             "WHERE source_path = 'buffer'"
         ).fetchall()
-        moved = 0
         for dl_id, dedupe_key, event_json in rows:
-            db.execute(
-                "INSERT OR IGNORE INTO pending (dedupe_key, event_json, retries) "
-                "VALUES (?, ?, 0)",
-                (dedupe_key, event_json),
-            )
-            db.execute("DELETE FROM dead_letter WHERE id = ?", (dl_id,))
-            moved += 1
-        db.commit()
+            try:
+                _write_event_to_buffer(buffer_db, dedupe_key, event_json)
+            except Exception as exc:
+                _log_drain_failure(
+                    exc, f"retry_buffer_dead_letters dl_id={dl_id}",
+                )
+                continue
+            queue_db.execute("DELETE FROM dead_letter WHERE id = ?", (dl_id,))
+            recovered += 1
+        buffer_db.commit()
+        queue_db.commit()
     finally:
-        db.close()
-    if moved:
-        drain_to_buffer()
-    return moved
+        queue_db.close()
+        buffer_db.close()
+    return recovered
 
 
 def retry_dead_letters() -> int:

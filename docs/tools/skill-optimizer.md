@@ -54,7 +54,10 @@ If no `--skill` or `--skills` flag is provided, `--mode plan` processes every di
    ```bash
    node tools/skill_optimize.ts --mode api --skill stark-forged-review --diff
    ```
-3. Review artifacts in `artifacts/skill-optimizer/<skill-slug>/`.
+3. Review artifacts in `artifacts/skill-optimizer/<flat-slug>/`, where
+   `<flat-slug>` encodes the bundle's full repo-relative SKILL.md path
+   (for example, `skill/stark-forged-review/SKILL.md` → `skill__stark-forged-review__SKILL.md`).
+   Two bundles with the same leaf directory name can no longer collide.
 4. Apply the saved proposal without paying for a second model call:
    ```bash
    node tools/skill_optimize.ts --mode api --skill stark-forged-review --reuse-proposal --apply
@@ -67,7 +70,7 @@ Use `--diff` to print the proposal diff to stderr during the run.
 
 The optimizer also always writes a persistent diff artifact:
 
-- `artifacts/skill-optimizer/<skill-slug>/proposal.diff`
+- `artifacts/skill-optimizer/<flat-slug>/proposal.diff`
 
 This diff compares the current repo file against the proposed rewrite for every changed file in the bundle.
 
