@@ -439,6 +439,57 @@ test("--mode api surfaces cancelled and incomplete statuses as errors", async (t
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
+test("--mode api hits --api-timeout-ms when the background job never terminates", async (t) => {
+  const repo = makeRepo(t);
+  if (!repo) return;
+  try {
+    writeSkill(repo, "alpha", "# alpha\n\nOriginal.\n");
+    // Stateful mock: POST + every GET returns in_progress forever. The CLI
+    // must bail out on --api-timeout-ms instead of hanging.
+    const server = http.createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (c) => chunks.push(c));
+      req.on("end", () => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ id: "stuck-1", status: "in_progress" }));
+      });
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", () => resolve()),
+    );
+    const port = (server.address() as { port: number }).port;
+    try {
+      const res = await runCliAsync(
+        repo,
+        [
+          "--mode",
+          "api",
+          "--skill",
+          "alpha",
+          "--poll-interval-ms",
+          "25",
+          "--api-timeout-ms",
+          "250",
+        ],
+        {
+          OPENAI_API_KEY: "test-key",
+          OPENAI_RESPONSES_BASE: `http://127.0.0.1:${port}/v1/responses`,
+        },
+      );
+      assert.notEqual(res.status, 0);
+      assert.match(res.stderr, /timed out/i);
+      assert.ok(
+        !fs.existsSync(path.join(artifactDir(repo, "alpha"), "proposal.json")),
+        "timed-out runs must not persist proposal.json",
+      );
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("--mode api rejects a completed response with malformed output_text", async (t) => {
   const repo = makeRepo(t);
   if (!repo) return;
@@ -476,6 +527,54 @@ test("--mode api rejects a completed response with malformed output_text", async
     } finally {
       await mock.close();
     }
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("--apply refuses to start when apply-staging has a .recovery marker", (t) => {
+  const repo = makeRepo(t);
+  if (!repo) return;
+  try {
+    writeSkill(repo, "alpha", "# alpha\n\nOriginal.\n");
+    writeProposal(
+      repo,
+      "alpha",
+      mkProposal([
+        {
+          path: "skill/alpha/SKILL.md",
+          action: "update",
+          summary: "x",
+          content: "# alpha\n\nNew body.\n",
+        },
+      ]),
+    );
+    const stagingRoot = path.join(repo, "artifacts/skill-optimizer/apply-staging");
+    fs.mkdirSync(stagingRoot, { recursive: true });
+    const marker = path.join(stagingRoot, ".recovery");
+    fs.writeFileSync(marker, '{"failed_at":"2026-04-17T00:00:00Z"}');
+    // Pre-stage a sentinel file to verify we don't delete it.
+    const sentinel = path.join(stagingRoot, "earlier-staged-content");
+    fs.writeFileSync(sentinel, "do not delete");
+
+    const res = runCli(repo, [
+      "--mode",
+      "api",
+      "--reuse-proposal",
+      "--apply",
+      "--skill",
+      "alpha",
+    ]);
+    assert.notEqual(res.status, 0);
+    assert.match(res.stderr, /recovery dir from an earlier failed run/);
+    // Marker and sentinel both survive — the guard must NOT have wiped the dir.
+    assert.ok(fs.existsSync(marker));
+    assert.equal(fs.readFileSync(sentinel, "utf8"), "do not delete");
+    // And the target SKILL.md is untouched.
+    assert.equal(
+      fs.readFileSync(path.join(repo, "skill/alpha/SKILL.md"), "utf8"),
+      "# alpha\n\nOriginal.\n",
+    );
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }

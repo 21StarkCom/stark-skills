@@ -202,6 +202,17 @@ export function parseMarkdownLinkTargets(content: string): string[] {
       targets.add(ref);
     }
   }
+  // Shortcut reference links: bare `[label]` with a matching `[label]: dest`
+  // definition. Only match a label that isn't immediately followed by `(` or
+  // `[`, to avoid re-capturing inline or full reference links already handled
+  // above, and exclude labels that look like reference-definition lines
+  // themselves (so `[foo]: dest` doesn't trigger).
+  for (const match of scanned.matchAll(/\[([^\]\n]+)\](?!\(|\[|\s*:)/g)) {
+    const ref = defs.get(match[1].trim().toLowerCase());
+    if (ref) {
+      targets.add(ref);
+    }
+  }
   return [...targets];
 }
 

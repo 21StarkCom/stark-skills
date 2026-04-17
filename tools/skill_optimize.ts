@@ -653,7 +653,7 @@ async function requestProposal(
   }
   let payload = await openaiFetch(responsesBase, {
     method: "POST",
-    headers: openAiHeaders(),
+    headers: openAiHeaders(responsesBase),
     body: JSON.stringify(requestBody),
   }, Math.max(deadline - Date.now(), 5000));
   console.error(
@@ -670,7 +670,7 @@ async function requestProposal(
       `${responsesBase}/${payload.id}`,
       {
         method: "GET",
-        headers: openAiHeaders(),
+        headers: openAiHeaders(responsesBase),
       },
       Math.max(deadline - Date.now(), 5000),
     );
@@ -693,7 +693,14 @@ async function requestProposal(
   try {
     parsed = JSON.parse(outputText);
   } catch (error) {
-    throw new Error(`Failed to parse proposal JSON: ${(error as Error).message}\n${outputText}`);
+    // Never echo the full outputText back to stderr — a buggy or malicious
+    // endpoint could reflect the submitted bundle contents. Bound the sample
+    // the same way openaiFetch bounds response bodies (500 chars).
+    const sample =
+      outputText.length > 500
+        ? `${outputText.slice(0, 500)}… [truncated, ${outputText.length - 500} more chars]`
+        : outputText;
+    throw new Error(`Failed to parse proposal JSON: ${(error as Error).message}\n${sample}`);
   }
   return decodeRewriteProposal(parsed);
 }
@@ -903,11 +910,25 @@ function diffText(
   }
 }
 
-function openAiHeaders(): Record<string, string> {
-  return {
-    Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+function openAiHeaders(targetUrl: string): Record<string, string> {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
+  // Only attach the live Bearer token when hitting the real OpenAI host.
+  // A local mock bound on 127.0.0.1 doesn't need real credentials, and any
+  // process bound to that port would otherwise see the key in plaintext.
+  let hostname = "";
+  try {
+    hostname = new URL(targetUrl).hostname.replace(/^\[|\]$/g, "");
+  } catch {
+    hostname = "";
+  }
+  const loopback =
+    hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
+  if (!loopback && process.env.OPENAI_API_KEY) {
+    headers.Authorization = `Bearer ${process.env.OPENAI_API_KEY}`;
+  }
+  return headers;
 }
 
 type ResponsesPayload = {
