@@ -36,12 +36,13 @@ Purpose: inventory a skill bundle, generate a rewrite brief or API-backed rewrit
   ```bash
   node tools/skill_optimize.ts --mode api --skills stark-forged-review,stark-review-plan,stark-team-review
   ```
-- All skills:
+- All skills (plan mode only — API mode requires an explicit target):
   ```bash
-  node tools/skill_optimize.ts --mode api
+  node tools/skill_optimize.ts --mode plan
   ```
 
-If no `--skill` or `--skills` flag is provided, the optimizer processes every discovered skill.
+If no `--skill` or `--skills` flag is provided, `--mode plan` processes every discovered skill.
+`--mode api` **requires** at least one `--skill`/`--skills` target so a bare run cannot upload every bundle to the Responses API by accident.
 
 ## Recommended workflow
 
