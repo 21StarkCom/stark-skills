@@ -939,11 +939,13 @@ class TestDrainToBufferV2:
             db.close()
             assert row is not None
             assert row["source"] == "skill"
-            # payload_extra must carry the NON-lifted fields (custom stays,
-            # skill/duration_s aren't lifted keys so they stay too).
+            # payload_extra carries NON-canonical keys. Legacy aliases
+            # `skill` / `duration_s` now map onto skill_name / duration_ms
+            # so they shouldn't remain in payload_extra either.
             extra = json.loads(row["payload_extra"])
             assert extra.get("custom") == "x"
-            assert extra.get("skill") == "stark-team-review"
+            assert "skill" not in extra, extra
+            assert "duration_s" not in extra, extra
 
     def test_drain_lifts_v2_analytics_columns_from_payload(self, isolated_queue):
         """Lifted v2 columns (skill_name, duration_ms, pr_number, severity,
@@ -996,6 +998,57 @@ class TestDrainToBufferV2:
         extra = json.loads(row["payload_extra"])
         assert "skill_name" not in extra
         assert extra.get("extra_stuff") == "preserved"
+
+    def test_drain_lifts_legacy_payload_keys(self, isolated_queue):
+        """Legacy producers still emit `skill`, `duration_s`, `agent`, `tool`;
+        these must map onto the canonical v2 columns so attribution isn't lost."""
+        buffer_path = isolated_queue / "buffer.db"
+        _init_v2_buffer(buffer_path)
+        with patch.object(emit_queue, "BUFFER_PATH", buffer_path):
+            emit_queue.enqueue(_make_event(
+                user_id="aryeh",
+                payload={
+                    "skill": "stark-team-review",
+                    "duration_s": 4.2,
+                    "agent": "codex",
+                    "tool": "Read",
+                    "extra": "kept",
+                },
+            ))
+            emit_queue.drain_to_buffer()
+            db = sqlite3.connect(str(buffer_path))
+            db.row_factory = sqlite3.Row
+            row = db.execute(
+                "SELECT skill_name, duration_ms, agent_name, tool_name, payload_extra FROM events"
+            ).fetchone()
+            db.close()
+        assert row["skill_name"] == "stark-team-review"
+        assert row["duration_ms"] == 4200
+        assert row["agent_name"] == "codex"
+        assert row["tool_name"] == "Read"
+        extra = json.loads(row["payload_extra"])
+        assert extra == {"extra": "kept"}
+
+    def test_buffer_probe_rejects_partial_users_table(self, isolated_queue):
+        """Users/projects must have full v2 columns too — not just exist."""
+        buffer_path = isolated_queue / "buffer.db"
+        partial = sqlite3.connect(str(buffer_path))
+        # users is missing github_login; events/projects are fully v2.
+        partial.executescript(V2_BUFFER_SCHEMA.replace(
+            "github_login TEXT NOT NULL UNIQUE,",
+            "",
+        ))
+        partial.commit()
+        partial.close()
+        assert emit_queue._buffer_is_v2_compatible(str(buffer_path)) is False
+
+    def test_non_ci_absolute_paths_stay_external(self, isolated_queue):
+        """Paths like /Users/alice/src/foo must NOT be misclassified as `main`
+        with a fake repo slug — they should stay `external`/NULL."""
+        assert emit_queue._normalize_path_to_repo("/Users/alice/src/foo") is None
+        assert emit_queue._derive_workspace_type("/Users/alice/src/foo") == "external"
+        assert emit_queue._normalize_path_to_repo("/etc/config") is None
+        assert emit_queue._derive_workspace_type("/etc/config") == "external"
 
     def test_drain_keeps_user_and_project_null_when_missing(self, isolated_queue):
         """Missing user_id/project must stay NULL on the event — don't coerce
