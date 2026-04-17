@@ -572,9 +572,28 @@ async function requestProposal(
   const deadline = Date.now() + options.apiTimeoutMs;
   // Endpoint override exists so integration tests can point at a local
   // mock server; production leaves OPENAI_RESPONSES_BASE unset and hits the
-  // real OpenAI API.
+  // real OpenAI API. Restrict the override to loopback so a hostile env
+  // var can't redirect the bundle + `Authorization: Bearer` header to an
+  // arbitrary host.
   const responsesBase =
     process.env.OPENAI_RESPONSES_BASE ?? "https://api.openai.com/v1/responses";
+  if (responsesBase !== "https://api.openai.com/v1/responses") {
+    const host = (() => {
+      try {
+        return new URL(responsesBase).hostname;
+      } catch {
+        return "";
+      }
+    })();
+    const loopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
+    if (!loopback) {
+      throw new Error(
+        `OPENAI_RESPONSES_BASE must resolve to a loopback host (127.0.0.1, ` +
+          `localhost, ::1); got ${host || "<invalid URL>"}. ` +
+          `Leave the variable unset in production.`,
+      );
+    }
+  }
   let payload = await openaiFetch(responsesBase, {
     method: "POST",
     headers: openAiHeaders(),
@@ -860,11 +879,30 @@ async function openaiFetch(
       `OpenAI API request failed: ${response.status} ${response.statusText} (${summary})`,
     );
   }
-  const json = (await response.json()) as unknown;
-  if (typeof json !== "object" || json === null || typeof (json as Record<string, unknown>).id !== "string") {
-    throw new Error("Responses API did not return an object with an id");
+  return decodeResponsesPayload(await response.json());
+}
+
+function decodeResponsesPayload(raw: unknown): ResponsesPayload {
+  if (typeof raw !== "object" || raw === null) {
+    throw new Error("Responses API did not return an object");
   }
-  return json as ResponsesPayload;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.id !== "string") {
+    throw new Error("Responses API object is missing a string id");
+  }
+  const status = typeof r.status === "string" ? r.status : undefined;
+  const output_text =
+    typeof r.output_text === "string" ? r.output_text : undefined;
+  const output = Array.isArray(r.output)
+    ? (r.output as ResponsesPayload["output"])
+    : undefined;
+  return {
+    id: r.id,
+    status,
+    error: r.error,
+    output_text,
+    output,
+  };
 }
 
 function isTerminalStatus(status: string | undefined): boolean {
@@ -983,10 +1021,11 @@ export function stagingName(absPath: string, repoRoot: string): string {
  * name. Previously each bundle used `basename(dirname(skillPath))`, which
  * collides when two bundles share a leaf name (e.g. `skill/alpha/SKILL.md`
  * and `vendor/alpha/SKILL.md`). The flat slug encodes the full path so
- * distinct bundles always get distinct artifact dirs.
+ * distinct bundles always get distinct artifact dirs. Dots are preserved —
+ * replacing them aliased `foo.bar` with `foo_bar`.
  */
 export function bundleArtifactSlug(skillPath: string): string {
-  return skillPath.replace(/[\\/]/g, "__").replace(/\./g, "_");
+  return skillPath.replace(/[\\/]/g, "__");
 }
 
 function renderProposalSummary(

@@ -346,16 +346,34 @@ class TestDeadLetterRecovery:
         assert remaining == [("buffer-key", "buffer")]
         assert pending == [("http-key",)]
 
-    def test_retry_buffer_dead_letters_moves_only_buffer_rows_to_pending(self):
+    def test_retry_buffer_dead_letters_moves_only_buffer_rows_and_drains(
+        self, isolated_queue
+    ):
         """retry_buffer_dead_letters is the operator-triggered recovery path
-        for intermittent buffer-sink failures. It must move buffer rows back
-        to pending AND leave HTTP rows behind so the two sinks don't blend.
+        for intermittent buffer-sink failures. It must requeue buffer rows,
+        drain them to the buffer immediately so drain() (HTTP) can't pick
+        them up, and leave HTTP rows in dead_letter alone.
         """
+        buffer_path = isolated_queue / "buffer.db"
+        _init_v2_buffer(buffer_path)
         db = emit_queue._get_db()
+        # Craft a valid event JSON so drain_to_buffer accepts it on replay.
+        import uuid as _uuid
+        event_json = json.dumps({
+            "type": "skill_invocation",
+            "timestamp": "2026-04-01T00:00:00Z",
+            "cli": "claude",
+            "source": "skill",
+            "schema_version": 2,
+            "payload": {"skill": "stark-team-review"},
+            "dedupe_key": "buffer-key",
+            "event_id": str(_uuid.uuid4()),
+        })
         db.execute(
             "INSERT INTO dead_letter "
             "(dedupe_key, event_json, created_at, retries, last_error, source_path) "
-            "VALUES ('buffer-key', '{}', '2026-04-01T00:00:00Z', 3, 'disk i/o', 'buffer')"
+            "VALUES ('buffer-key', ?, '2026-04-01T00:00:00Z', 3, 'disk i/o', 'buffer')",
+            (event_json,),
         )
         db.execute(
             "INSERT INTO dead_letter "
@@ -365,19 +383,28 @@ class TestDeadLetterRecovery:
         db.commit()
         db.close()
 
-        moved = emit_queue.retry_buffer_dead_letters()
+        with patch.object(emit_queue, "BUFFER_PATH", buffer_path):
+            moved = emit_queue.retry_buffer_dead_letters()
         assert moved == 1
 
         db = emit_queue._get_db()
-        remaining = db.execute(
+        remaining_dead = db.execute(
             "SELECT dedupe_key, source_path FROM dead_letter"
         ).fetchall()
         pending = db.execute(
             "SELECT dedupe_key FROM pending"
         ).fetchall()
         db.close()
-        assert remaining == [("http-key", "http")]
-        assert pending == [("buffer-key",)]
+        # HTTP row untouched; buffer row was requeued AND drained so pending
+        # must be empty — the HTTP path never sees it.
+        assert remaining_dead == [("http-key", "http")]
+        assert pending == []
+        bdb = sqlite3.connect(str(buffer_path))
+        events = bdb.execute(
+            "SELECT dedupe_key FROM events WHERE dedupe_key = 'buffer-key'"
+        ).fetchall()
+        bdb.close()
+        assert events == [("buffer-key",)]
 
     def test_migration_populates_source_path_for_legacy_rows(self, isolated_queue):
         """Pre-migration dead_letter rows must survive the ALTER TABLE and be
@@ -1609,6 +1636,102 @@ class TestDrainToBufferV2:
         assert {"new-1", "legacy-1"}.issubset(dedupe_keys), (
             f"expected both legacy and new rows in v2 buffer, got {dedupe_keys}"
         )
+
+    def test_legacy_replay_skips_already_synced_rows(self, isolated_queue):
+        """Rows the backend has already ingested (synced_at IS NOT NULL) must
+        not be replayed into pending. Otherwise every upgrade dumps the full
+        7-day history in front of fresh events and delays current drains."""
+        legacy_path = isolated_queue / "buffer.v1-legacy.db"
+        legacy = sqlite3.connect(str(legacy_path))
+        legacy.executescript(
+            """
+            CREATE TABLE events (
+                id TEXT PRIMARY KEY,
+                dedupe_key TEXT UNIQUE,
+                type TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                synced_at TEXT
+            );
+            """
+        )
+        legacy.execute(
+            "INSERT INTO events (id, dedupe_key, type, timestamp, payload, synced_at) "
+            "VALUES ('synced', 'synced-key', 'skill_invocation', "
+            "'2026-01-01T00:00:00Z', '{}', '2026-01-02T00:00:00Z')"
+        )
+        legacy.execute(
+            "INSERT INTO events (id, dedupe_key, type, timestamp, payload, synced_at) "
+            "VALUES ('unsynced', 'unsynced-key', 'skill_invocation', "
+            "'2026-01-01T00:00:00Z', '{}', NULL)"
+        )
+        legacy.commit()
+        legacy.close()
+
+        replayed = emit_queue._replay_legacy_rows_into_queue(legacy_path)
+        assert replayed == 1
+
+        qdb = emit_queue._get_db()
+        rows = qdb.execute(
+            "SELECT dedupe_key FROM pending ORDER BY dedupe_key"
+        ).fetchall()
+        qdb.close()
+        assert rows == [("unsynced-key",)]
+
+    def test_legacy_replay_synthesizes_stable_dedupe_for_missing_keys(
+        self, isolated_queue
+    ):
+        """Legacy rows without a dedupe_key must be replayed with a stable
+        synthesized key (legacy:<id> or legacy:sha256:...). Re-replaying the
+        same rows on a second pass must NOT create fresh pending entries —
+        otherwise an upgrade loop re-delivers the same events forever."""
+        legacy_path = isolated_queue / "buffer.v1-legacy.db"
+        legacy = sqlite3.connect(str(legacy_path))
+        legacy.executescript(
+            """
+            CREATE TABLE events (
+                id TEXT PRIMARY KEY,
+                dedupe_key TEXT,
+                type TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                user_id TEXT,
+                project TEXT,
+                payload TEXT NOT NULL,
+                synced_at TEXT
+            );
+            """
+        )
+        # Row with id, no dedupe_key → uses legacy:<id>.
+        legacy.execute(
+            "INSERT INTO events (id, type, timestamp, user_id, project, payload) "
+            "VALUES ('row-1', 'skill_invocation', '2026-01-01T00:00:00Z', "
+            "'aryeh', '/Users/aryeh/git/Evinced/stark-skills', '{}')"
+        )
+        # Row with no id and no dedupe_key → uses content-hash fallback.
+        legacy.execute(
+            "INSERT INTO events (type, timestamp, user_id, project, payload) "
+            "VALUES ('skill_invocation', '2026-01-02T00:00:00Z', "
+            "'aryeh', '/Users/aryeh/git/Evinced/stark-skills', '{}')"
+        )
+        legacy.commit()
+        legacy.close()
+
+        first = emit_queue._replay_legacy_rows_into_queue(legacy_path)
+        second = emit_queue._replay_legacy_rows_into_queue(legacy_path)
+        assert first == 2
+        assert second == 0, (
+            "Stable synthesized dedupe keys must make a second replay a no-op"
+        )
+
+        qdb = emit_queue._get_db()
+        rows = qdb.execute(
+            "SELECT dedupe_key FROM pending ORDER BY dedupe_key"
+        ).fetchall()
+        qdb.close()
+        assert len(rows) == 2
+        keys = [r[0] for r in rows]
+        assert any(k.startswith("legacy:") for k in keys)
+        assert "legacy:row-1" in keys
 
     def test_legacy_replay_preserves_dedupe_key_in_event_json(self, isolated_queue):
         """Replayed legacy rows must carry their dedupe_key inside the JSON

@@ -168,11 +168,24 @@ export function parseMarkdownLinkTargets(content: string): string[] {
     defs.set(match[1].trim().toLowerCase(), stripWrappers(destination));
   }
   const targets = new Set<string>();
-  for (const match of content.matchAll(/(?<!!)\[[^\]]+\]\(([^)]+)\)/g)) {
+  // Inline destinations may contain single-level balanced parens, which are
+  // valid per CommonMark (e.g. `./Guide (v2).md`). Match either any non-
+  // paren run or a paren-balanced sub-token. The outer non-greedy repeat
+  // stops at the first unmatched `)`, which is the link's closing paren.
+  for (const match of content.matchAll(
+    /(?<!!)\[[^\]]+\]\(((?:[^()]|\([^)]*\))+)\)/g,
+  )) {
     const trimmed = match[1].replace(/\s+["'].*$/, "").trim();
     targets.add(stripWrappers(trimmed));
   }
   for (const match of content.matchAll(/\[[^\]]+\]\[([^\]]+)\]/g)) {
+    const ref = defs.get(match[1].trim().toLowerCase());
+    if (ref) {
+      targets.add(ref);
+    }
+  }
+  // Collapsed reference links `[label][]` reuse the label as the lookup key.
+  for (const match of content.matchAll(/\[([^\]]+)\]\[\s*\]/g)) {
     const ref = defs.get(match[1].trim().toLowerCase());
     if (ref) {
       targets.add(ref);
