@@ -169,7 +169,12 @@ function resolveRefs(
   const rawRefs = new Set<string>();
 
   for (const match of raw.matchAll(/(?<!!)\[[^\]]+\]\(([^)]+)\)/g)) {
-    rawRefs.add(stripWrappers(match[1]));
+    // Inline links may carry a title — `[x](path "title")` or `[x](path 'title')`.
+    // Strip everything from the first unquoted whitespace onward so the
+    // destination isn't reported as `path "title"` (a non-existent file).
+    const raw = match[1];
+    const trimmed = raw.replace(/\s+["'].*$/, "").trim();
+    rawRefs.add(stripWrappers(trimmed));
   }
 
   for (const match of raw.matchAll(/\[[^\]]+\]\[([^\]]+)\]/g)) {
