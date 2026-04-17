@@ -722,18 +722,34 @@ function applyProposal(proposal: RewriteProposal): void {
   const repoRootReal = fs.realpathSync(repoRoot);
   for (const change of proposal.changes) {
     const outputPath = path.join(repoRoot, change.path);
-    // Reject symlinked targets — fs.realpath escapes to the link target,
-    // so writing/deleting would affect an external file. readlinkSync only
-    // succeeds for actual symlinks, which is exactly what we want to block.
+    // Reject symlinked targets — writing/deleting would affect an external file.
     if (fs.existsSync(outputPath) && fs.lstatSync(outputPath).isSymbolicLink()) {
       throw new Error(`Refusing to apply: ${change.path} is a symlink`);
     }
-    const parentDir = path.dirname(outputPath);
-    if (fs.existsSync(parentDir)) {
-      const parentReal = fs.realpathSync(parentDir);
-      if (!parentReal.startsWith(repoRootReal + path.sep) && parentReal !== repoRootReal) {
-        throw new Error(`Refusing to apply: ${change.path} escapes the repo root`);
-      }
+    // Walk upward to the first existing ancestor, realpath THAT, and rejoin
+    // the non-existing suffix. Without this, a symlinked intermediate
+    // directory (e.g. `skill/x -> /tmp/evil`) would pass the parent-dir
+    // check when the leaf doesn't exist yet, and mkdirSync(recursive) would
+    // follow the symlink out of the repo before writing.
+    let existingAncestor = outputPath;
+    const missingParts: string[] = [];
+    while (!fs.existsSync(existingAncestor)) {
+      missingParts.unshift(path.basename(existingAncestor));
+      const parent = path.dirname(existingAncestor);
+      if (parent === existingAncestor) break;
+      existingAncestor = parent;
+    }
+    const ancestorReal = fs.existsSync(existingAncestor)
+      ? fs.realpathSync(existingAncestor)
+      : existingAncestor;
+    const resolvedReal = missingParts.length
+      ? path.join(ancestorReal, ...missingParts)
+      : ancestorReal;
+    if (
+      !resolvedReal.startsWith(repoRootReal + path.sep) &&
+      resolvedReal !== repoRootReal
+    ) {
+      throw new Error(`Refusing to apply: ${change.path} escapes the repo root`);
     }
     if (change.action === "delete") {
       if (fs.existsSync(outputPath)) {
@@ -742,7 +758,7 @@ function applyProposal(proposal: RewriteProposal): void {
       continue;
     }
     if (change.action === "update") {
-      fs.mkdirSync(parentDir, { recursive: true });
+      fs.mkdirSync(path.dirname(outputPath), { recursive: true });
       writeUtf8(outputPath, change.content ?? "");
     }
   }

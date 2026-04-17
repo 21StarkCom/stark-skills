@@ -256,13 +256,22 @@ def _strip_worktree_suffix(path):
     return path
 
 
-# Root directories known to host CI/dev checkouts — only paths rooted at
-# one of these get the 3-segment fallback treatment. Anything else (e.g.
-# `/Users/alice/src/foo` or `/etc/config`) returns NULL instead of being
-# misattributed as a repo.
-_CHECKOUT_ROOTS = frozenset({
-    "workspace", "runner", "srv", "github", "builds", "home",
-})
+# Specific CI-layout anchors. Each entry matches a prefix and reports
+# which segment index holds the repo slug. More specific patterns win.
+# Without this, a bare /home/<user>/<anything> fallback wrongly turns
+# /home/alice/.config/nvim into repo="alice" and breaks existing
+# per-repo aggregations.
+_CI_PATTERNS: tuple[tuple[tuple[str, ...], int], ...] = (
+    # GitHub Actions: /home/runner/work/<repo>/<repo> → segs[3]
+    (("home", "runner", "work"), 3),
+    # GitLab Runner: /builds/<group>/<project> → segs[2]
+    (("builds",), 2),
+    # Jenkins-like: /workspace/<org>/<repo> → segs[2]
+    (("workspace",), 2),
+    # Generic /srv/<org>/<repo>, /github/<org>/<repo>
+    (("srv",), 2),
+    (("github",), 2),
+)
 
 
 def _normalize_path_to_repo(path):
@@ -287,11 +296,12 @@ def _normalize_path_to_repo(path):
             if len(segs) >= 2:
                 return segs[1]
             return None
-        # Fallback ONLY for known CI/dev-root layouts (`/workspace/<org>/<repo>`,
-        # `/home/<user>/<repo>` etc.). Arbitrary paths stay NULL.
+        # Match specific CI layout anchors. Arbitrary /home/alice/foo paths
+        # stay NULL so we don't invent a repo from random Linux directories.
         segs = [s for s in base.split("/") if s]
-        if len(segs) >= 3 and segs[0] in _CHECKOUT_ROOTS:
-            return segs[2]
+        for prefix, repo_idx in _CI_PATTERNS:
+            if len(segs) > repo_idx and tuple(segs[: len(prefix)]) == prefix:
+                return segs[repo_idx]
         return None
     m = _ORG_REPO_RE.match(path)
     return m.group(1) if m else None
@@ -799,6 +809,16 @@ def drain_to_buffer(batch_size: int = DRAIN_BATCH_SIZE) -> dict:
                 )
                 deletes.append(row_id)
                 stats["sent"] += 1
+            except sqlite3.OperationalError as exc:
+                # Transient DB errors (locked / busy) should not burn retries.
+                # Leave the row pending and let the next drain pick it up.
+                error_text = f"{type(exc).__name__}: {exc}"[:500]
+                _log_drain_failure(exc, f"row_id={row_id} dedupe={dedupe_key} (transient)")
+                queue_db.execute(
+                    "UPDATE pending SET last_error = ? WHERE id = ?",
+                    (error_text, row_id),
+                )
+                stats["failed"] += 1
             except Exception as exc:
                 error_text = f"{type(exc).__name__}: {exc}"[:500]
                 _log_drain_failure(exc, f"row_id={row_id} dedupe={dedupe_key}")

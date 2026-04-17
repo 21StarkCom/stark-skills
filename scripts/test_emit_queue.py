@@ -619,6 +619,17 @@ def _init_v2_buffer(buffer_path: Path) -> None:
 class TestDrainToBufferV2:
     """drain_to_buffer must work against the canonical v2 schema."""
 
+    def test_namespace_matches_canonical_stark_insights_uuid(self):
+        """Pin the exact NAMESPACE_INSIGHTS UUID so a drift versus the
+        stark_insights.dimensions namespace is caught by CI even if the
+        helper-based determinism tests would coincidentally still pass."""
+        assert str(emit_queue.NAMESPACE_INSIGHTS) == "7a3f1b8e-1b7a-4f9e-8e47-5a3f1b8e7a3f"
+        # Also pin the expected hash for a well-known login to guard against
+        # silent regressions in the "user:" / "project:" prefix convention.
+        assert str(emit_queue._deterministic_user_id("aryeh")) == (
+            "db8b8d63-86de-54d4-a518-2e2a73910f95"
+        )
+
     def test_drain_succeeds_against_v2_schema(self, isolated_queue):
         """RED #1: drain INSERT must use v2 columns (payload_extra, project_id)."""
         buffer_path = isolated_queue / "buffer.db"
@@ -836,6 +847,57 @@ class TestDrainToBufferV2:
             "/private/tmp/pytest-of-aryeh/test_foo",
         ):
             assert emit_queue._normalize_path_to_repo(p) is None, p
+
+    def test_github_actions_runner_path_resolves_to_repo(self, isolated_queue):
+        """GitHub Actions layout is /home/runner/work/<repo>/<repo>; the repo
+        slug is the deepest segment, not 'work'."""
+        assert emit_queue._normalize_path_to_repo(
+            "/home/runner/work/stark-skills/stark-skills"
+        ) == "stark-skills"
+
+    def test_home_directory_paths_are_not_guessed(self, isolated_queue):
+        """Arbitrary /home/<user>/... paths must stay NULL — only known
+        CI anchors like /home/runner/work/... get attributed."""
+        for p in (
+            "/home/alice/src/foo",
+            "/home/alice/.config/nvim",
+            "/home/dev/workspace/randomthing",
+        ):
+            assert emit_queue._normalize_path_to_repo(p) is None, p
+
+    def test_transient_sqlite_errors_do_not_burn_retries(self, isolated_queue):
+        """OperationalError (e.g. locked/busy) must leave the row pending and
+        not increment retries toward dead-letter."""
+        buffer_path = isolated_queue / "buffer.db"
+        _init_v2_buffer(buffer_path)
+
+        real_resolve_user = emit_queue._resolve_user
+        call_count = {"n": 0}
+
+        def flaky_resolve_user(conn, login):
+            call_count["n"] += 1
+            if call_count["n"] <= 3:
+                raise sqlite3.OperationalError("database is locked (simulated)")
+            return real_resolve_user(conn, login)
+
+        with patch.object(emit_queue, "BUFFER_PATH", buffer_path), \
+             patch.object(emit_queue, "_resolve_user", flaky_resolve_user):
+            emit_queue.enqueue(_make_event(dedupe_key="flaky", user_id="aryeh"))
+            for _ in range(3):
+                emit_queue.drain_to_buffer()
+
+            qdb = emit_queue._get_db()
+            pending = qdb.execute(
+                "SELECT retries FROM pending WHERE dedupe_key = 'flaky'"
+            ).fetchone()
+            dead = qdb.execute(
+                "SELECT COUNT(*) FROM dead_letter WHERE dedupe_key = 'flaky'"
+            ).fetchone()[0]
+            qdb.close()
+        # Row still pending after 3 transient failures; retries counter is 0.
+        assert pending is not None, "transient row must stay pending, not dead-letter"
+        assert pending[0] == 0, f"retries must not increment for transient errors, got {pending[0]}"
+        assert dead == 0
 
     def test_non_ci_absolute_paths_stay_external(self, isolated_queue):
         """Paths like /Users/alice/src/foo must NOT be misclassified as `main`
