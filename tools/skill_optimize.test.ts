@@ -358,6 +358,50 @@ test("--mode api with mock Responses server submits, parses, and persists a prop
   }
 });
 
+test("--mode api surfaces a Responses status: failed as a non-zero exit", async (t) => {
+  const repo = makeRepo(t);
+  if (!repo) return;
+  try {
+    writeSkill(repo, "alpha", "# alpha\n\nOriginal.\n");
+    const mock = await startMockResponsesServer({
+      id: "mock-failed-1",
+      status: "failed",
+      error: { message: "upstream model timed out" },
+    });
+    try {
+      const res = await runCliAsync(
+        repo,
+        [
+          "--mode",
+          "api",
+          "--skill",
+          "alpha",
+          "--poll-interval-ms",
+          "25",
+          "--api-timeout-ms",
+          "5000",
+        ],
+        {
+          OPENAI_API_KEY: "test-key",
+          OPENAI_RESPONSES_BASE: `http://127.0.0.1:${mock.port}/v1/responses`,
+        },
+      );
+      assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+      assert.match(res.stderr, /did not complete successfully/);
+      assert.match(res.stderr, /failed/);
+      // No proposal should have been persisted for a failed run.
+      assert.ok(
+        !fs.existsSync(path.join(artifactDir(repo, "alpha"), "proposal.json")),
+        "a failed Responses run must not persist proposal.json",
+      );
+    } finally {
+      await mock.close();
+    }
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("--mode plan writes bundle manifest and rewrite request", (t) => {
   const repo = makeRepo(t);
   if (!repo) return;
@@ -571,6 +615,56 @@ test("planProposalApply does not mutate bundle files when a later proposal's tar
   }
 });
 
+test("commitStagedOps falls back to copy+unlink when renameSync reports EXDEV", (t) => {
+  const repo = makeRepo(t);
+  if (!repo) return;
+  try {
+    writeSkill(repo, "alpha", "# alpha\n\nOriginal.\n");
+    const stagingRoot = fs.mkdtempSync(path.join(repo, "staging-"));
+    const proposal = fullProposal([
+      {
+        path: "skill/alpha/SKILL.md",
+        action: "update",
+        summary: "rewrite",
+        content: "# alpha\n\nCross-device content.\n",
+      },
+    ]);
+    const ops = planProposalApply(proposal, stagingRoot, repo);
+    // Simulate a cross-device rename: the first renameSync call throws
+    // EXDEV, so commitStagedOps must fall through to copyFileSync + unlink.
+    const originalRename = fs.renameSync;
+    let renameHits = 0;
+    (fs as unknown as { renameSync: typeof fs.renameSync }).renameSync = ((
+      ...args: Parameters<typeof fs.renameSync>
+    ) => {
+      renameHits += 1;
+      const err = new Error("mock EXDEV") as NodeJS.ErrnoException;
+      err.code = "EXDEV";
+      throw err;
+    }) as typeof fs.renameSync;
+    try {
+      commitStagedOps(ops);
+    } finally {
+      (fs as unknown as { renameSync: typeof fs.renameSync }).renameSync =
+        originalRename;
+    }
+    assert.ok(renameHits > 0, "renameSync should have been attempted first");
+    assert.equal(
+      fs.readFileSync(path.join(repo, "skill/alpha/SKILL.md"), "utf8"),
+      "# alpha\n\nCross-device content.\n",
+    );
+    // Staged file must be unlinked by the fallback path so the staging
+    // dir doesn't hold a stale copy that a retry could confuse with fresh work.
+    const stagedPath = ops.find((o) => o.kind === "write") as {
+      kind: "write";
+      staged: string;
+    };
+    assert.ok(!fs.existsSync(stagedPath.staged));
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("commitStagedOps atomically swaps staged content over originals and honors deletes", (t) => {
   const repo = makeRepo(t);
   if (!repo) return;
@@ -618,24 +712,30 @@ test("stagingName preserves the repo-relative structure one-to-one", (t) => {
   assert.notEqual(nested1, nested2);
 });
 
-test("bundleArtifactSlug gives distinct slugs for bundles with the same leaf name", (t) => {
+test("bundleArtifactSlug gives distinct slugs for bundles with the same leaf name", () => {
   assert.equal(
     bundleArtifactSlug("skill/alpha/SKILL.md"),
-    "skill__alpha__SKILL.md",
+    "skill_salpha_sSKILL.md",
   );
   assert.equal(
     bundleArtifactSlug("vendor/alpha/SKILL.md"),
-    "vendor__alpha__SKILL.md",
+    "vendor_salpha_sSKILL.md",
   );
   assert.notEqual(
     bundleArtifactSlug("skill/alpha/SKILL.md"),
     bundleArtifactSlug("vendor/alpha/SKILL.md"),
   );
-  // Dots must survive so `foo.bar` and `foo_bar` don't collide — replacing
-  // dots with underscores (an earlier mistake) aliased them together.
+  // Dots survive so `foo.bar` and `foo_bar` don't collide.
   assert.notEqual(
     bundleArtifactSlug("skill/foo.bar/SKILL.md"),
     bundleArtifactSlug("skill/foo_bar/SKILL.md"),
+  );
+  // Path separators vs literal underscore must stay distinguishable. The
+  // `_` → `_u` escape precedes the `/` → `_s` substitution so these two
+  // legitimate repo layouts can't produce the same slug.
+  assert.notEqual(
+    bundleArtifactSlug("skill/foo__bar/SKILL.md"),
+    bundleArtifactSlug("skill/foo/bar/SKILL.md"),
   );
 });
 

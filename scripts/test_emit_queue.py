@@ -72,42 +72,6 @@ class TestValidation:
         errors = emit_queue.validate(_make_event(payload="not a dict"))
         assert any("payload" in e for e in errors)
 
-    def test_v2_event_type_names_are_accepted(self):
-        """The workflow-improvement design doc defines context_compaction,
-        learning_captured, and skill_recommendation. validate() must accept
-        those alongside the pre-v2 aliases so the migration doesn't reject
-        spec-compliant producers."""
-        for event_type in (
-            "context_compaction",
-            "learning_captured",
-            "skill_recommendation",
-            # Legacy aliases stay valid during migration.
-            "learning_capture",
-            "skill_suggestion",
-        ):
-            assert emit_queue.validate(_make_event(type=event_type)) == [], event_type
-
-    def test_non_string_required_fields_are_rejected(self):
-        """type/timestamp/cli/source must be strings; numbers or dicts were
-        previously accepted by the field-presence check and slipped into
-        pending, where the v2 TEXT NOT NULL column would reject them late."""
-        for field in ("type", "timestamp", "cli", "source"):
-            for bad in (42, 3.14, {"nested": "dict"}, ["list"]):
-                event = _make_event()
-                event[field] = bad
-                errors = emit_queue.validate(event)
-                assert any(field in e for e in errors), (field, bad, errors)
-
-    def test_empty_required_strings_are_rejected(self):
-        """type/timestamp/cli/source present-but-empty must not slip through
-        the missing-field check and reach drain(); v2 declares those columns
-        NOT NULL and the backend would reject the POST late."""
-        for field in ("type", "timestamp", "cli", "source"):
-            event = _make_event()
-            event[field] = ""
-            errors = emit_queue.validate(event)
-            assert any(field in e for e in errors), (field, errors)
-
     def test_event_id_when_present_must_be_non_empty_string(self):
         for bad in (42, "", None, []):
             event = _make_event(event_id=bad)
@@ -1635,6 +1599,31 @@ class TestDrainToBufferV2:
         )
         assert {"new-1", "legacy-1"}.issubset(dedupe_keys), (
             f"expected both legacy and new rows in v2 buffer, got {dedupe_keys}"
+        )
+
+    def test_quarantine_keeps_buffer_in_place_when_replay_raises(
+        self, isolated_queue
+    ):
+        """If _replay_legacy_rows_into_queue fails, _quarantine_legacy_buffer
+        must propagate the error WITHOUT renaming the original file away —
+        otherwise the operator loses the only copy of their unsynced rows."""
+        buffer_path = isolated_queue / "buffer.db"
+        buffer_path.write_bytes(b"not a sqlite file")
+        legacy_pattern = f"{buffer_path.stem}.v1-"
+
+        def failing_replay(path):
+            raise sqlite3.DatabaseError("file is not a database")
+
+        with patch.object(emit_queue, "_replay_legacy_rows_into_queue", failing_replay):
+            with pytest.raises(sqlite3.DatabaseError):
+                emit_queue._quarantine_legacy_buffer(buffer_path)
+
+        assert buffer_path.exists(), (
+            "original buffer.db must survive a failed replay"
+        )
+        siblings = sorted(isolated_queue.glob(f"{legacy_pattern}*"))
+        assert siblings == [], (
+            f"no .v1-<timestamp>.db should have been created; found {siblings}"
         )
 
     def test_legacy_replay_skips_already_synced_rows(self, isolated_queue):

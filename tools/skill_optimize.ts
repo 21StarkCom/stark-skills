@@ -895,6 +895,10 @@ async function openaiFetch(
 ): Promise<ResponsesPayload> {
   const response = await fetch(url, {
     ...init,
+    // Disallow redirect following: a localhost mock that returned a 307
+    // could otherwise forward the bundle contents + Bearer token to an
+    // arbitrary origin even though the loopback URL check passed.
+    redirect: "error",
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) {
@@ -1061,14 +1065,14 @@ export function stagingName(absPath: string, repoRoot: string): string {
 
 /**
  * Flatten a bundle's repo-relative SKILL.md path into a single directory
- * name. Previously each bundle used `basename(dirname(skillPath))`, which
- * collides when two bundles share a leaf name (e.g. `skill/alpha/SKILL.md`
- * and `vendor/alpha/SKILL.md`). The flat slug encodes the full path so
- * distinct bundles always get distinct artifact dirs. Dots are preserved —
- * replacing them aliased `foo.bar` with `foo_bar`.
+ * name. The encoding escapes `_` first (`_` → `_u`) so the separator
+ * substitution (`/` → `_s`) can't alias with literal underscores in the
+ * source path. Earlier schemes used `__` as a separator, which aliased
+ * `skill/foo__bar/SKILL.md` and `skill/foo/bar/SKILL.md`. Reversibility
+ * also means two bundles that share a leaf directory name stay distinct.
  */
 export function bundleArtifactSlug(skillPath: string): string {
-  return skillPath.replace(/[\\/]/g, "__");
+  return skillPath.replace(/_/g, "_u").replace(/[\\/]/g, "_s");
 }
 
 function renderProposalSummary(
