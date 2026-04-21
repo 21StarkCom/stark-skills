@@ -62,10 +62,6 @@
           {
             "type": "command",
             "command": "/Users/aryeh/git/Evinced/stark-insights/hooks/skill-telemetry-stop.py"
-          },
-          {
-            "type": "command",
-            "command": "/Users/aryeh/git/Evinced/stark-insights/hooks/drain-queue.py"
           }
         ]
       }
@@ -113,6 +109,7 @@
       }
     }
   },
-  "effortLevel": "high",
-  "skipDangerousModePermissionPrompt": true
+  "effortLevel": "low",
+  "skipDangerousModePermissionPrompt": true,
+  "skipAutoPermissionPrompt": true
 }

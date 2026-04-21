@@ -31,6 +31,7 @@ class TestForgeConfigDefaults:
         assert cfg["consensus_threshold"] == 2
         assert cfg["noise_improvement_threshold"] == 0.33
         assert cfg["heuristic_consolidation_threshold"] == 50
+        assert cfg["timeout"] == 900
 
     def test_domain_routing_has_all_12_domains(self):
         assert len(DEFAULT_FORGE["domain_routing"]) == 12
@@ -86,6 +87,13 @@ class TestForgeFixThreshold:
         with patch.object(config_loader, "CONFIG_PATH", config_file):
             cfg = get_forge_config()
         assert cfg["fix_threshold"] == value
+
+    def test_timeout_override_accepted(self, tmp_path):
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"forge": {"timeout": 1200}}))
+        with patch.object(config_loader, "CONFIG_PATH", config_file):
+            cfg = get_forge_config()
+        assert cfg["timeout"] == 1200
 
 
 class TestForgeHaltRound:

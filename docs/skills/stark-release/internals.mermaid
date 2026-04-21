@@ -3,16 +3,16 @@ graph TD
     B --> C{"Clean working tree?"}
     C -- No --> D["Abort: stash or commit first"]
     C -- Yes --> E["Get current version from git tags"]
-    E --> F["Read CHANGELOG.md [Unreleased]"]
-    F --> G{"Has unreleased entries?"}
+    E --> F["Assemble unreleased changes from CHANGELOG or git log"]
+    F --> G{"Anything to release?"}
     G -- No --> H["Abort: nothing to release"]
     G -- Yes --> I{"Bump type provided?"}
     I -- Yes --> J["Use explicit bump type"]
     I -- No --> K["Auto-select: Fixed→patch, Added→minor, Breaking→major"]
     J --> L["Calculate NEXT_VERSION"]
     K --> L
-    L --> M["Update __version__ in __init__.py"]
-    M --> N["Move [Unreleased] to [vX.Y.Z] in CHANGELOG"]
+    L --> M["Update detected version file(s)"]
+    M --> N["Write release section to CHANGELOG"]
     N --> O["git commit -m 'release: vX.Y.Z'"]
     O --> P["git tag -a vX.Y.Z"]
     P --> Q["git push origin main"]

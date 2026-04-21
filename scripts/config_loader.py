@@ -101,6 +101,7 @@ DEFAULT_FORGE = {
     "fix_threshold": "medium",
     "noise_improvement_threshold": 0.33,
     "heuristic_consolidation_threshold": 50,
+    "timeout": 900,
 }
 DEFAULT_FORGED_REVIEW = {
     "forge_threshold": 4,
