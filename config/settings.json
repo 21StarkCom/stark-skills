@@ -62,10 +62,16 @@
           {
             "type": "command",
             "command": "/Users/aryeh/git/Evinced/stark-insights/hooks/skill-telemetry-stop.py"
-          },
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
           {
             "type": "command",
-            "command": "/Users/aryeh/git/Evinced/stark-insights/hooks/drain-queue.py"
+            "command": "mkdir -p \"${CLAUDE_PROJECT_DIR:-.}/.remember/logs\""
           }
         ]
       }
@@ -114,5 +120,6 @@
     }
   },
   "effortLevel": "high",
-  "skipDangerousModePermissionPrompt": true
+  "skipDangerousModePermissionPrompt": true,
+  "skipAutoPermissionPrompt": true
 }

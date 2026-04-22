@@ -1,8 +1,8 @@
 ---
 name: stark-release
 description: >-
-  Cut a release: changelog review, version bump, git tag, GitHub Release. Use for release, tag, bump version.
-argument-hint: [patch|minor|major] (optional — will ask if not provided)
+  Cut a release: changelog review (auto-generating from git log if [Unreleased] is empty), version bump, git tag, GitHub Release. Use for release, tag, bump version.
+argument-hint: [patch|minor|major] (optional — auto-detected if omitted)
 disable-model-invocation: true
 model: sonnet
 ---
@@ -30,9 +30,7 @@ Abort if uncommitted changes or not on main. Stash or commit first.
 ## Versioning Rules
 
 - **Source of truth:** Git tags. Format: `v{major}.{minor}.{patch}` (e.g., `v0.1.3`).
-- **Runtime version:** `src/infra_pulse/__init__.py` (`__version__`) — MUST be bumped to match the tag.
-- **No pyproject.toml changes.** The `version = "0.1.0"` in pyproject.toml is static.
-  If dynamic versioning is needed later, add `setuptools-scm`.
+- **Version file(s):** Auto-detect and update every supported version file found in the repo (Python, Node, Rust). If no version file exists, the git tag alone carries the version.
 - **Baseline:** If no tags exist, baseline is `0.1.0` from pyproject.toml.
 - **Bump semantics:**
   - `patch` — bug fixes, small corrections (0.1.2 → 0.1.3)
@@ -63,36 +61,75 @@ Get the latest tag:
 git tag --sort=-v:refname | head -1
 ```
 
-- If tags exist → parse into `major.minor.patch`.
-- If no tags → baseline is `0.1.0`.
+- If tags exist → parse into `major.minor.patch` and store the tag as `$LAST_TAG`.
+- If no tags → baseline is `0.1.0` and leave `$LAST_TAG` empty.
 
 Store as `$CURRENT_VERSION`.
 
 ---
 
-## Step 3: Review Unreleased Changes
+## Step 3: Gather Unreleased Changes
 
 Read `CHANGELOG.md` and extract the `## [Unreleased]` section.
 
-**If CHANGELOG.md doesn't exist:** Abort — nothing to release. Tell user to run
-`/fix-bug` or manually add CHANGELOG entries first.
+**If CHANGELOG.md doesn't exist:** Abort — tell user to create one or run `/fix-bug` first.
 
-**If `[Unreleased]` section is empty:** Abort — nothing to release.
+**If `[Unreleased]` section has entries:** Use them as-is and skip to presentation below.
 
-Present the changes:
+**If `[Unreleased]` section is empty:** Auto-generate entries from commits since the last tag, or from full repo history if no tag exists yet. Do **NOT** abort.
+
+```bash
+if [ -n "$LAST_TAG" ]; then
+  git log "$LAST_TAG"..HEAD --no-merges --format='%s%n%b%x1e'
+else
+  git log --no-merges --format='%s%n%b%x1e'
+fi
+```
+
+Parse each record as:
+- first line = subject
+- remaining lines = body
+
+Categorize each commit by its Conventional Commits subject prefix:
+
+| Prefix | CHANGELOG category |
+|--------|-------------------|
+| `feat(…)` / `feat:` | `### Added` |
+| `fix(…)` / `fix:` | `### Fixed` |
+| `refactor`, `chore`, `docs`, `style`, `perf`, `build`, `ci`, `test` | `### Changed` |
+| `feat!`, `fix!`, or body contains `BREAKING CHANGE:` | `### Changed` with bullet prefixed `**BREAKING:**` |
+| Anything else (no recognizable prefix) | `### Changed` |
+
+For each commit:
+1. Strip the leading `<type>(<scope>)?!?:\s*` prefix.
+2. Keep any trailing `(#NNN)` PR references intact.
+3. Retain the scope (e.g. `calendar: …`) as a short prefix so readers see which subsystem was touched.
+4. Write as a bullet under the appropriate category.
+
+Example — `feat(calendar): read vacations from personAbsences (#341) (#348)` becomes:
+```
+### Added
+- calendar: read vacations from personAbsences (#341) (#348)
+```
+
+**If both the `[Unreleased]` section AND the git log are empty** → Abort with "No commits to release."
+
+When auto-generated, Step 6 will write these entries directly into the new versioned section and leave `[Unreleased]` empty (same end state as when entries came from the CHANGELOG).
+
+**Present the assembled changes** (whether read from CHANGELOG or generated):
 ```
 Unreleased changes since v${CURRENT_VERSION}:
 ──────────────────────────────────────────────
-
-### Fixed
-- Dashboard scope churn wrong for Core (#42)
-- Sprint report missing committed points (#43)
+[source: CHANGELOG | auto-generated from git log]
 
 ### Added
-- [any feature entries]
+- ...
+
+### Fixed
+- ...
 
 ### Changed
-- [any modification entries]
+- ...
 ```
 
 ---
@@ -229,7 +266,8 @@ Commit:     [hash]
 | Not on main | Prompt to `git checkout main` |
 | Dirty working tree | Prompt to stash or commit |
 | No CHANGELOG.md | Abort — nothing to release |
-| Empty [Unreleased] | Abort — nothing to release |
+| Empty [Unreleased] | Auto-generate entries from git log since last tag (see Step 3) |
+| Empty [Unreleased] AND no commits since last tag | Abort — nothing to release |
 | Tag already exists | Error — that version is taken, suggest next |
 | Push fails | `git pull --rebase origin main`, retry |
 | `gh` auth fails | Verify `gh auth status` — user's PAT must be active |

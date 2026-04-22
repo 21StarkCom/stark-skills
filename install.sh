@@ -76,57 +76,26 @@ provision_infrastructure() {
 
     info "Created local directories"
 
-    python3 - <<'PY'
-from pathlib import Path
+    # Delegate queue.db and buffer.db schema creation to emit_queue.py — the
+    # runtime owns the canonical v2 schemas, so installing via its own
+    # initializers keeps install.sh from drifting (the prior inline schemas
+    # lagged behind and caused freshly-installed buffers to be quarantined
+    # on first write).
+    REPO_DIR="$REPO_DIR" python3 - <<'PY'
 import os
-import sqlite3
+import sys
+from pathlib import Path
 
-queue_db = Path.home() / ".stark-insights" / "queue.db"
-buffer_db = Path.home() / ".stark-insights" / "buffer.db"
+sys.path.insert(0, str(Path(os.environ["REPO_DIR"]) / "scripts"))
+import emit_queue  # noqa: E402
 
-schemas = {
-    queue_db: """
-        PRAGMA journal_mode=WAL;
-        CREATE TABLE IF NOT EXISTS pending(
-            id INTEGER PRIMARY KEY,
-            payload TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            retries INTEGER DEFAULT 0
-        );
-        CREATE TABLE IF NOT EXISTS dead_letter(
-            id INTEGER PRIMARY KEY,
-            payload TEXT NOT NULL,
-            failed_at TEXT NOT NULL,
-            error TEXT
-        );
-        CREATE TABLE IF NOT EXISTS inflight(
-            id INTEGER PRIMARY KEY,
-            payload TEXT NOT NULL,
-            locked_at TEXT NOT NULL,
-            lock_id TEXT
-        );
-    """,
-    buffer_db: """
-        PRAGMA journal_mode=WAL;
-        CREATE TABLE IF NOT EXISTS events(
-            id INTEGER PRIMARY KEY,
-            type TEXT NOT NULL,
-            payload TEXT NOT NULL,
-            timestamp TEXT NOT NULL,
-            session_id TEXT
-        );
-    """,
-}
+for opener in (emit_queue._get_db, emit_queue._get_buffer_db):
+    connection = opener()
+    connection.close()
 
-for db_path, schema in schemas.items():
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(str(db_path))
-    try:
-        connection.executescript(schema)
-        connection.commit()
-    finally:
-        connection.close()
-    os.chmod(db_path, 0o600)
+for db_path in (emit_queue.QUEUE_DB, emit_queue.BUFFER_PATH):
+    if db_path.exists():
+        os.chmod(db_path, 0o600)
 PY
 
     info "Provisioned SQLite databases"

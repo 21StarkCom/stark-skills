@@ -344,6 +344,8 @@ class TestDomainTriage(unittest.TestCase):
 
         mock_build_env.assert_called_once_with("codex", "review")
         self.assertEqual(mock_run.call_args.kwargs["env"], {"GH_TOKEN": "codex-token"})
+        self.assertEqual(mock_run.call_args.kwargs["encoding"], "utf-8")
+        self.assertEqual(mock_run.call_args.kwargs["errors"], "replace")
 
     @patch("domain_triage.get_model_id", return_value="test-model")
     @patch("domain_triage.subprocess.run")
