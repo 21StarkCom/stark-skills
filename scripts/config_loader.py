@@ -236,35 +236,96 @@ def get_red_team_config() -> dict[str, Any]:
     """Return merged red_team config with locked-field override rejection.
 
     Two-layer defense (spec rt1):
-    1. _RED_TEAM_LOCKED_FIELDS (personas, model) cannot be overridden at any
-       config level — overrides are dropped with a stderr warning.
+    1. _RED_TEAM_LOCKED_FIELDS (personas, model) are authoritative in the
+       global config file and cannot be overridden at org/repo levels.
     2. Any top-level override key NOT present in DEFAULT_RED_TEAM is also
        dropped. This prevents an attacker from smuggling unrecognized fields
        into the merged config that future code might inadvertently read.
        Only the explicitly-defined config surface is acceptable.
     """
-    raw_override = load_config().get("red_team") or {}
-    filtered = _strip_locked_fields(raw_override, _RED_TEAM_LOCKED_FIELDS, "red_team")
-    pruned = _prune_unknown_keys(filtered, set(DEFAULT_RED_TEAM.keys()), "red_team")
-    return _merge_dict(DEFAULT_RED_TEAM, pruned)
+    global_cfg = load_config()
+    merged = _merge_dict(DEFAULT_RED_TEAM, global_cfg.get("red_team"))
+
+    for cfg_path in _find_red_team_override_chain():
+        layer = _load_json_file(cfg_path)
+        raw_override = layer.get("red_team")
+        if raw_override is None:
+            continue
+        if not isinstance(raw_override, dict):
+            _warn(
+                f"expected object at red_team in {cfg_path}, got "
+                f"{type(raw_override).__name__!r} — ignoring layer"
+            )
+            continue
+        filtered = _strip_locked_fields(
+            raw_override,
+            _RED_TEAM_LOCKED_FIELDS,
+            "red_team",
+            source=str(cfg_path),
+        )
+        pruned = _prune_unknown_keys(
+            filtered,
+            set(DEFAULT_RED_TEAM.keys()),
+            "red_team",
+            source=str(cfg_path),
+        )
+        merged = _merge_dict(merged, pruned)
+
+    return merged
 
 
 def get_model_rates() -> dict[str, Any]:
     return _get_section("model_rates")
 
 
+def _find_red_team_override_chain(cwd: Path | None = None) -> list[Path]:
+    """Return repo/org .code-review/config.json files for the current cwd.
+
+    The global config at CONFIG_PATH is authoritative for locked red_team
+    fields, so only lower-precedence org/repo layers are returned here.
+    """
+    if cwd is None:
+        cwd = Path.cwd()
+
+    chain: list[Path] = []
+    home = Path.home().resolve()
+    current = cwd.resolve()
+    while current != home and current != current.parent:
+        cfg = current / ".code-review" / "config.json"
+        if cfg.exists():
+            chain.append(cfg)
+        current = current.parent
+    return list(reversed(chain))
+
+
+def _load_json_file(path: Path) -> dict[str, Any]:
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        _warn(f"failed to load {path}: {exc}")
+        return {}
+    if not isinstance(loaded, dict):
+        _warn(f"expected top-level object in {path}")
+        return {}
+    return loaded
+
+
 def _strip_locked_fields(
     override: dict[str, Any],
     locked: frozenset[str],
     section_name: str,
+    *,
+    source: str | None = None,
 ) -> dict[str, Any]:
     """Remove locked fields from an override dict with a warning to stderr."""
     cleaned = {}
     for k, v in override.items():
         if k in locked:
+            source_suffix = f" in {source}" if source else ""
             _warn(
                 f"{section_name}.{k} is locked to global config and cannot be "
-                f"overridden — rejecting override value {v!r}"
+                f"overridden{source_suffix} — rejecting override value {v!r}"
             )
         else:
             cleaned[k] = v
@@ -275,6 +336,8 @@ def _prune_unknown_keys(
     override: dict[str, Any],
     known_keys: set[str],
     section_name: str,
+    *,
+    source: str | None = None,
 ) -> dict[str, Any]:
     """Drop top-level keys not present in the default schema with a warning.
 
@@ -284,9 +347,11 @@ def _prune_unknown_keys(
     cleaned = {}
     for k, v in override.items():
         if k not in known_keys:
+            source_suffix = f" in {source}" if source else ""
             _warn(
                 f"{section_name}.{k} is not a known config key and will be "
-                f"ignored — drop it from your config or add it to the schema"
+                f"ignored{source_suffix} — drop it from your config or add it "
+                f"to the schema"
             )
         else:
             cleaned[k] = v
