@@ -1,56 +1,61 @@
 ---
 name: stark-review
 description: >-
-  [DEPRECATED] Single-agent PR code review: 1 LLM x 9 domains. Use /stark-forged-review instead.
+  [DEPRECATED] Legacy single-agent PR review. Uses triage-selected PR review
+  domains by default, or one forced agent via `--agent`. Prefer
+  /stark-forged-review.
 argument-hint: "[PR_NUMBER] [--agent claude|codex|gemini] [--dry-run] [--repo ORG/REPO]"
 disable-model-invocation: true
 model: opus[1m]
 ---
 
-> **⚠ Deprecated.** This skill is superseded by `/stark-forged-review`, which
-> runs leader + second-opinion per domain with dynamic triage and optional
-> forge-path escalation. `/stark-review` remains functional during the rollout
-> window (see `docs/specs/2026-04-12-stark-forged-review-design.md` §11) and
-> will be removed after validation.
+> **⚠ Deprecated.** `/stark-review` remains functional during the rollout
+> window (see `docs/specs/2026-04-12-stark-forged-review-design.md` §11), but
+> `/stark-forged-review` is the default PR-review path going forward.
+
+Legacy, cheaper PR review path. Keep this skill thin: call the Python
+dispatchers and use their JSON output; do not recreate prompt or dispatch
+logic in `SKILL.md`.
 
 ## Preflight
 
 Run environment validation before proceeding:
+
 ```bash
 python3 ~/.claude/code-review/scripts/preflight.py --workflow stark-review --json
 ```
+
 Parse the JSON result:
-- If `overall` is "blocked": print the failing checks and stop. Do not proceed.
-- If `overall` is "degraded": print a warning with the failing checks, then continue.
-- If `overall` is "ready": continue silently.
 
-# stark-review
-
-Single-agent PR review: 1 LLM × 9 domains dispatched in parallel. Each domain uses its configured default agent (from `domain_agents` in config.json), or an inline override.
-
-For cross-validation across all enabled agents, use `/stark-team-review` instead.
+- If `overall` is `blocked`: print the failing checks and stop.
+- If `overall` is `degraded`: print a warning with the failing checks, then continue.
+- If `overall` is `ready`: continue silently.
 
 ## Arguments
 
-- `<number>` — PR number (e.g., `/stark-review 91`)
-- `--agent <name>` — override agent for all domains: `claude`, `codex`, or `gemini`
-- `--repo ORG/REPO` — override repo detection
-- `--dry-run` — review only, no GitHub posting
-- If number omitted, detect from current branch: `gh pr view --json number --jq .number`
-- If detection fails, list open PRs and ask: `gh pr list --json number,title,headRefName --jq '.[] | "#\(.number) \(.title) (\(.headRefName))"'`
+Raw input: `$ARGUMENTS`
 
-**Raw input:** `$ARGUMENTS`
+- `PR_NUMBER` - optional; detect from current branch with `gh pr view --json number --jq .number`
+- `--agent <name>` - force the same agent across every reviewed domain. Important: for PR reviews, `triage_orchestrator.py` does not propagate PR agent overrides to `multi_review.py`, so this flag must bypass the orchestrator and call `multi_review.py` directly.
+- `--repo ORG/REPO` - override repo detection
+- `--dry-run` - perform the review without PR comments, commits, or pushes
+- If PR detection fails, list open PRs and ask:
+
+  ```bash
+  gh pr list --json number,title,headRefName --jq '.[] | "#\(.number) \(.title) (\(.headRefName))"'
+  ```
 
 ## Constants
 
-```
-SCRIPTS = ~/.claude/code-review/scripts
-PYTHON  = $SCRIPTS/.venv/bin/python3
+```bash
+SCRIPTS=~/.claude/code-review/scripts
+PYTHON=$SCRIPTS/.venv/bin/python3
 ```
 
 ## Configuration
 
-The `domain_agents` map in `config.json` controls which agent reviews each domain:
+When `--agent` is not supplied, `domain_agents` in `config.json` chooses the
+default agent per domain. Example:
 
 ```json
 {
@@ -68,117 +73,183 @@ The `domain_agents` map in `config.json` controls which agent reviews each domai
 }
 ```
 
-This map follows the standard config hierarchy (repo > org > global). Override per-domain in a repo's `.code-review/config.json`:
+This follows the standard config hierarchy (repo > org > global).
 
-```json
-{
-  "domain_agents": {
-    "security": "claude",
-    "correctness": "claude"
-  }
-}
-```
-
-## Phase 1: Setup
+## Setup
 
 1. Verify `gh auth status` succeeds.
-2. Detect or accept `$PR_NUM` and `$REPO`.
-3. Detect base branch: `gh pr view $PR_NUM --json baseRefName --jq .baseRefName`
-4. Create a temporary worktree for the PR branch:
+2. Resolve `PR_NUM`, `REPO`, `BASE`, and `BRANCH`.
+3. Confirm the current checkout matches `REPO`. If `--repo` points at a different repository than the current checkout, stop and ask the user to run from that repo.
+4. Create an isolated worktree from the PR head. Example:
+
    ```bash
-   git push origin HEAD  # ensure remote is up to date
-   BRANCH=$(gh pr view $PR_NUM --json headRefName --jq .headRefName)
+   BRANCH=$(gh pr view "$PR_NUM" --repo "$REPO" --json headRefName --jq .headRefName)
+   BASE=$(gh pr view "$PR_NUM" --repo "$REPO" --json baseRefName --jq .baseRefName)
    WORKTREE=$(mktemp -d)
-   git worktree add "$WORKTREE" "$BRANCH"
+   git fetch origin "$BRANCH"
+   git worktree add --detach "$WORKTREE" "origin/$BRANCH"
+   cd "$WORKTREE"
    ```
 
-## Phase 2: Run Review
+If worktree creation fails, stop. Do not review in the main checkout.
 
-Run the triage orchestrator in single-agent mode (falls back to direct dispatch if orchestrator fails):
+## Dispatch Rules
+
+- Normal mode without `--agent`: use `triage_orchestrator.py --type pr --single --json`. It triages domains and dispatches the actual review.
+- `--agent` supplied: call `multi_review.py --single --agent "$AGENT" --json-only` directly, and append `--dry-run` if requested.
+- `--dry-run` without `--agent`: first run `triage_orchestrator.py --type pr --single --dry-run --json` to get `triage.dispatched_domains`, then run `multi_review.py --single --dry-run --json-only --domains <csv>` using that domain list. `triage_orchestrator.py --dry-run` does not dispatch a review by itself.
+- Never pass `--post-raw` when `--dry-run` is active.
+
+## Phase 1: Run Review
+
+### Normal triaged run
 
 ```bash
-cd "$WORKTREE"
-$PYTHON $SCRIPTS/triage_orchestrator.py --type pr --pr $PR_NUM --single --json || $PYTHON $SCRIPTS/multi_review.py --pr $PR_NUM --single --json-only --post-raw
+$PYTHON $SCRIPTS/triage_orchestrator.py \
+  --type pr \
+  --pr "$PR_NUM" \
+  --repo "$REPO" \
+  --base "$BASE" \
+  --single \
+  --json
 ```
 
-If `--agent` was specified by the user, pass it through:
+If the orchestrator fails, log the failure and fall back to direct single-agent
+dispatch:
 
 ```bash
-$PYTHON $SCRIPTS/triage_orchestrator.py --type pr --pr $PR_NUM --single --json || $PYTHON $SCRIPTS/multi_review.py --pr $PR_NUM --single --agent $AGENT --json-only --post-raw
+$PYTHON $SCRIPTS/multi_review.py \
+  --pr "$PR_NUM" \
+  --repo "$REPO" \
+  --base "$BASE" \
+  --single \
+  --json-only
 ```
 
-If `--dry-run` was specified, add `--dry-run` (no GitHub posting).
+### Forced single-agent override
 
-Parse the JSON output. The orchestrator posts per-agent findings to the PR via the appropriate GitHub App bot.
+Use direct dispatch so the override is honored. Append `--dry-run` here too if
+the user requested it:
+
+```bash
+$PYTHON $SCRIPTS/multi_review.py \
+  --pr "$PR_NUM" \
+  --repo "$REPO" \
+  --base "$BASE" \
+  --single \
+  --agent "$AGENT" \
+  --json-only
+```
+
+### Dry-run with triage-selected domains
+
+First collect the triage decision without dispatch:
+
+```bash
+TRIAGE_JSON=$(
+  $PYTHON $SCRIPTS/triage_orchestrator.py \
+    --type pr \
+    --pr "$PR_NUM" \
+    --repo "$REPO" \
+    --base "$BASE" \
+    --single \
+    --dry-run \
+    --json
+)
+DOMAIN_CSV=$(
+  printf '%s' "$TRIAGE_JSON" | python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)["triage"]["dispatched_domains"]))'
+)
+```
+
+If `DOMAIN_CSV` is empty, report that triage selected zero domains and stop.
+Otherwise run the real review without PR posting:
+
+```bash
+$PYTHON $SCRIPTS/multi_review.py \
+  --pr "$PR_NUM" \
+  --repo "$REPO" \
+  --base "$BASE" \
+  --single \
+  --dry-run \
+  --json-only \
+  --domains "$DOMAIN_CSV"
+```
+
+## Phase 2: Parse Output
+
+Handle whichever payload shape you actually executed:
+
+- `triage_orchestrator.py` returns `{triage, dispatch, findings, summary}`.
+- `multi_review.py` returns `{repo, pr, base, mode, domain_agents, domains, rounds, summary}`.
+
+Flatten findings from:
+
+- `findings` for the triage-orchestrator payload
+- `rounds[*].results[*].findings` for the direct `multi_review.py` payload
+
+Use the actual dispatched domain count from the payload. Do not hard-code `9`.
 
 ## Phase 3: Classify and Present
 
-From the JSON output, classify **every** finding by reading the referenced `file:line` in the worktree:
+Read the referenced `file:line` in the worktree and classify every finding:
 
-| Classification | Criteria |
-|----------------|----------|
-| `fix` | Severity >= medium AND the issue actually exists in the code |
-| `false_positive` | The described problem doesn't exist in the code |
-| `noise` | Subjective, style preference, or not actionable |
-| `ignored` | Below fix threshold (low severity) |
+| Classification | Meaning |
+|----------------|---------|
+| `fix` | Confirmed real issue. Critical/high `fix` findings must be addressed in this run; medium `fix` findings may be fixed immediately or explicitly left as follow-up. |
+| `false_positive` | The described issue does not exist in the code. |
+| `noise` | Subjective, stylistic, or not actionable. |
+| `ignored` | Intentionally not acted on in this run because it is below the action threshold or out of scope. |
 
-For each finding, set `classification` and `classification_reason` (one sentence explaining why).
+Every finding must get both `classification` and `classification_reason`.
 
-Present a summary:
+Present a summary using the actual run data:
 
-```
-Review Complete — {repo} PR #{pr_num}
-──────────────────────────────────────
-Domains:  9 (1 agent each)
+```text
+Review Complete - {repo} PR #{pr_num}
+-------------------------------------
+Domains reviewed: {domain_count}
 Findings: X total (C critical, H high, M medium, L low)
-Agent:    {agent name(s) used}
+Agents used: {agent_names}
 Duration: Xs
 
 Findings to fix:
-  1. [CRITICAL] file:line — title
-  2. [HIGH] file:line — title
+  1. [CRITICAL] file:line - title
+  2. [HIGH] file:line - title
 ```
 
-## Phase 4: Fix Loop (if findings)
+## Phase 4: Fix Loop
 
-If there are critical or high findings:
+- If `--dry-run` was used, stop after presenting findings. Do not edit files, commit, or push.
+- If there are critical or high `fix` findings:
+  1. Fix them in the worktree.
+  2. Run the project's test command (from config or `CLAUDE.md` `## Commands`).
+  3. If tests pass, commit and push back to the PR branch:
 
-1. Fix each finding in the worktree.
-2. Run the project's test command (from config or CLAUDE.md `## Commands`).
-3. If tests pass, commit and push:
-   ```bash
-   git add -A && git commit -m "fix: address review findings"
-   git push origin HEAD
-   ```
-4. Re-run Phase 2 (max 3 rounds total). If still not clean after 3 rounds, present remaining findings and stop.
+     ```bash
+     git add -A
+     git commit -m "fix: address review findings"
+     git push origin HEAD:"$BRANCH"
+     ```
+
+  4. Re-run the review/classification flow. Stop after 3 rounds total.
+- If only medium `fix` findings remain, either fix the low-risk ones now or present them explicitly as remaining follow-up items. Do not silently drop them.
 
 ## Phase 5: Persist History
 
-After each round (including the final one), save classified data using the orchestrator's history functions:
+After each round, persist classified review history.
 
-```python
-from multi_review import save_round_history, save_review_summary
+Prefer calling `save_round_history()` and `save_review_summary()` from
+`multi_review.py` via a short Python snippet so the history schema stays aligned
+with the runtime. If that is impractical, write equivalent JSON to:
 
-# After classifying findings in round N:
-save_round_history(repo, pr_number, round_obj, mode="single", domain_agents=da_map)
+- `~/.claude/code-review/history/{org}/{repo}/{pr}/round-{N}.json`
+- `~/.claude/code-review/history/{org}/{repo}/{pr}/rounds.json`
 
-# After ALL rounds complete:
-save_review_summary(repo, pr_number, base, all_rounds, mode="single", domain_agents=da_map)
-```
+Critical rules:
 
-The skill doesn't call these Python functions directly — instead, it writes the equivalent JSON to:
-- `~/.claude/code-review/history/{org}/{repo}/{pr}/round-{N}.json` — per-round data
-- `~/.claude/code-review/history/{org}/{repo}/{pr}/rounds.json` — full summary
-
-**Critical for optimization:** Every finding MUST have `classification` and `classification_reason` set before saving. Unclassified findings are tracked but cannot improve the system. The `quality.per_agent_domain` section in the summary is what `/stark-metrics` uses to recommend `domain_agents` tuning.
-
-The history schema (v2) includes:
-- `mode`: "single" or "team"
-- `domain_agents`: the agent map used (for single mode)
-- `classification_summary`: fix/noise/false_positive/ignored counts
-- `quality.per_agent`: signal rate per agent
-- `quality.per_agent_domain`: signal rate per agent×domain (the key optimization input)
-- `quality.per_domain`: which agents found real bugs per domain
+- Every saved finding must include `classification` and `classification_reason`.
+- Preserve the actual `domain_agents` map used for the run, or the forced `--agent` override.
+- Save every round, including the final round.
 
 ## Phase 6: Cleanup
 
@@ -189,15 +260,21 @@ git worktree remove "$WORKTREE" --force
 
 ## Observability
 
-Standard observability: timestamped progress logs, record metrics block (PR number, agent used, domains succeeded/failed, findings by severity, fix rounds, duration). Emit completion event via `emit_queue.py`. See [../../standards/observability.md](../../standards/observability.md).
+Standard observability applies: timestamped progress logs, metrics block
+(PR number, agents used, domains succeeded/failed, findings by severity,
+fix rounds, duration), and completion event via `emit_queue.py`.
+
+See [../../standards/observability.md](../../standards/observability.md).
 
 ## Failure Modes
 
 | Failure | Recovery |
 |---------|----------|
-| Agent CLI not installed | Error message: "Install {agent} CLI" |
-| Agent timeout | Log which domain timed out, continue with remaining results |
-| All domains fail | Present error, suggest `--agent <other>` or `/stark-team-review` |
-| PR not found | "PR #{n} not found. Check --repo or run from the correct directory." |
-| Worktree creation fails | Fall back to reviewing in current directory |
-| Tests fail after fix | Count against round limit, continue fixing |
+| `triage_orchestrator.py` fails in normal mode | Log the failure and fall back to direct `multi_review.py --single` |
+| `--agent` override requested | Skip the orchestrator; direct dispatch only |
+| `--dry-run` requested | Do not use orchestrator dispatch; triage first, then run `multi_review.py --dry-run --domains ...` |
+| Triage selects zero domains | Report it and stop cleanly |
+| PR not found | Print `PR #{n} not found. Check --repo or run from the correct directory.` |
+| Worktree creation fails | Stop; do not fall back to the main checkout |
+| Repo mismatch | Stop and ask to run from the matching local checkout |
+| Tests fail after fixes | Present the failure, keep the worktree state, and stop without claiming the PR is clean |
