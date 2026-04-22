@@ -276,6 +276,12 @@ def _dispatch_to_agent(agent: str, prompt: str, timeout: int) -> tuple[str, str 
     model = get_model_id(agent)
     run_kwargs = {
         "capture_output": True,
+        # Triage treats malformed model output as a normal fail-open path.
+        # Decode with replacement so invalid UTF-8 becomes parseable junk
+        # instead of raising before _parse_triage_response can surface a
+        # stable json_parse_error fallback.
+        "encoding": "utf-8",
+        "errors": "replace",
         "text": True,
         "timeout": timeout,
         "cwd": str(Path(__file__).parent),

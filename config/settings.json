@@ -65,6 +65,16 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mkdir -p \"${CLAUDE_PROJECT_DIR:-.}/.remember/logs\""
+          }
+        ]
+      }
     ]
   },
   "statusLine": {
@@ -109,7 +119,7 @@
       }
     }
   },
-  "effortLevel": "low",
+  "effortLevel": "high",
   "skipDangerousModePermissionPrompt": true,
   "skipAutoPermissionPrompt": true
 }
