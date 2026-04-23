@@ -123,6 +123,24 @@ jobs:
           name: graph-review-${{ github.event.pull_request.number }}
           path: ${{ env.ARTIFACT_DIR }}
 
+      - name: Install Linux keychain shim
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v security >/dev/null 2>&1; then
+            exit 0
+          fi
+          shim_dir="$RUNNER_TEMP/stark-keychain-shim"
+          mkdir -p "$shim_dir"
+          cat > "$shim_dir/security" <<'EOF'
+          #!/usr/bin/env bash
+          echo "security: macOS Keychain is unavailable on this runner" >&2
+          exit 1
+          EOF
+          chmod +x "$shim_dir/security"
+          echo "$shim_dir" >> "$GITHUB_PATH"
+
       - name: Post or update graph comment
         env:
           STARK_APP_ID: ${{ secrets.STARK_APP_ID }}
