@@ -28,6 +28,9 @@ if TYPE_CHECKING:
 
 # Hidden HTML comment used to find our comment for idempotent updates
 MARKER = "<!-- stark-graph-comment -->"
+MAX_COMMENT_CHARS = 60_000
+MAX_DETAILS_ITEMS = 100
+MAX_VALIDATION_ITEMS = 100
 
 # Retry / timeout settings
 MAX_TOTAL_SLEEP = 120   # seconds budget per request's retry loop
@@ -46,16 +49,36 @@ def _esc(text: str) -> str:
     return html.escape(str(text))
 
 
-def _details_table(title: str, items: list[str]) -> str:
+def _details_table(title: str, items: list[str], limit: int = MAX_DETAILS_ITEMS) -> str:
     """Render a collapsed <details> block with items as a single-column table."""
     if not items:
         return ""
-    rows = "\n".join(f"| `{_esc(item)}` |" for item in items)
+    shown = items[:limit]
+    rows = "\n".join(f"| `{_esc(item)}` |" for item in shown)
+    if len(items) > limit:
+        rows += f"\n| _... {len(items) - limit} more omitted from comment_ |"
     return (
         f"\n<details><summary>{_esc(title)} ({len(items)})</summary>\n\n"
         f"| ID |\n|----|\n{rows}\n\n"
         f"</details>\n"
     )
+
+
+def _limited_bullets(items: list[str], limit: int = MAX_VALIDATION_ITEMS) -> list[str]:
+    rows = [f"- {_esc(item)}\n" for item in items[:limit]]
+    if len(items) > limit:
+        rows.append(f"- _... {len(items) - limit} more omitted from comment_\n")
+    return rows
+
+
+def _fit_comment(body: str) -> str:
+    if len(body) <= MAX_COMMENT_CHARS:
+        return body
+    suffix = (
+        "\n\n_Comment truncated to stay under GitHub's size limit. "
+        "See uploaded graph artifacts for the full report._\n"
+    )
+    return body[: MAX_COMMENT_CHARS - len(suffix)] + suffix
 
 
 def render_markdown(
@@ -91,14 +114,14 @@ def render_markdown(
         )
         if validation.errors:
             parts.append(f"\n**Errors** ({len(validation.errors)}):\n")
-            parts.extend(f"- {_esc(e)}\n" for e in validation.errors)
+            parts.extend(_limited_bullets(validation.errors))
         if validation.warnings:
             parts.append(f"\n**Warnings** ({len(validation.warnings)}):\n")
-            parts.extend(f"- {_esc(w)}\n" for w in validation.warnings)
+            parts.extend(_limited_bullets(validation.warnings))
         if not validation.errors and not validation.warnings:
             parts.append("\n✅ No errors or warnings.\n")
 
-    return "".join(parts)
+    return _fit_comment("".join(parts))
 
 
 # ── HTTP with retry ──────────────────────────────────────────────────────
