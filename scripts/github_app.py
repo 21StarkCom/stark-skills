@@ -250,8 +250,13 @@ def _get_private_key_from_env() -> tuple[str, str, str]:
     """
     import base64
 
-    private_key = base64.b64decode(os.environ["STARK_PRIVATE_KEY_B64"]).decode()
-    return private_key, os.environ["STARK_APP_ID"], os.environ["STARK_INSTALL_ID"]
+    private_key_b64 = os.environ["STARK_PRIVATE_KEY_B64"]
+    app_id = os.environ["STARK_APP_ID"]
+    installation_id = os.environ["STARK_INSTALL_ID"]
+    if not private_key_b64 or not app_id or not installation_id:
+        raise KeyError("STARK_* env vars must be non-empty")
+    private_key = base64.b64decode(private_key_b64).decode()
+    return private_key, app_id, installation_id
 
 
 def _make_jwt_raw(private_key: str, app_id: str) -> str:
