@@ -379,6 +379,16 @@ class TestGithubAppEnvVarAuth:
         with pytest.raises(KeyError):
             github_app._get_private_key_from_env()
 
+    def test_get_private_key_from_env_raises_key_error_when_empty(self, monkeypatch):
+        import github_app
+
+        monkeypatch.setenv("STARK_PRIVATE_KEY_B64", "")
+        monkeypatch.setenv("STARK_APP_ID", "")
+        monkeypatch.setenv("STARK_INSTALL_ID", "")
+
+        with pytest.raises(KeyError):
+            github_app._get_private_key_from_env()
+
     def test_get_token_falls_back_to_gh_token(self, monkeypatch):
         import github_app
 

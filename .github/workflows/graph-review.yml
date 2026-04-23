@@ -143,16 +143,7 @@ jobs:
 
       - name: Post or update graph comment
         env:
-          STARK_APP_ID: ${{ secrets.STARK_APP_ID }}
-          STARK_INSTALL_ID: ${{ secrets.STARK_INSTALL_ID }}
-          STARK_PRIVATE_KEY_B64: ${{ secrets.STARK_PRIVATE_KEY_B64 }}
-          # Final fallback for github_app.get_token() when STARK_* secrets
-          # aren't configured. The default GITHUB_TOKEN has pull-requests:
-          # write (declared above) — enough to post the comment via REST.
-          # Without this, the keychain → env-var → GH_TOKEN chain runs out
-          # of options on a fresh repo and `Post graph comment` fails for
-          # every PR with "No GitHub auth available".
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           python scripts/graph/pr_commenter.py \
             --repo "$REPO_NAME" \
