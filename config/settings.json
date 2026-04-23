@@ -1,6 +1,23 @@
 {
   "permissions": {
-    "defaultMode": "bypassPermissions"
+    "defaultMode": "bypassPermissions",
+    "allow": [
+      "Bash(git push:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr comment:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr checks:*)"
+    ],
+    "additionalDirectories": [
+      "/Users/aryeh/git/Evinced/stark-data-core"
+    ]
+  },
+  "autoMode": {
+    "allow": [
+      "Pushing branches and opening/merging PRs in /Users/aryeh/git/Evinced/stark-data-core is permitted — it is a trusted sibling repo in Aryeh's workspace alongside stark-night-watch and is covered by the same review workflow."
+    ]
   },
   "model": "opus[1m]",
   "hooks": {
