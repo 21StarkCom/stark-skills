@@ -396,6 +396,23 @@ class TestGithubAppEnvVarAuth:
 
         assert token == "ghp_fallback"
 
+    def test_get_token_falls_back_to_gh_token_when_security_binary_missing(self, monkeypatch):
+        import github_app
+
+        monkeypatch.setenv("GH_TOKEN", "ghp_fallback")
+        monkeypatch.delenv("STARK_PRIVATE_KEY_B64", raising=False)
+        monkeypatch.delenv("STARK_APP_ID", raising=False)
+        monkeypatch.delenv("STARK_INSTALL_ID", raising=False)
+
+        with (
+            patch.object(github_app, "_read_cached_token", return_value=None),
+            patch.object(github_app, "subprocess") as mock_sub,
+        ):
+            mock_sub.run.side_effect = FileNotFoundError("security")
+            token = github_app.get_token()
+
+        assert token == "ghp_fallback"
+
     def test_get_token_keychain_error_raises_keychainerror(self):
         import github_app
 
