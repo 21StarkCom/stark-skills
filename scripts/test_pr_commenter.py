@@ -25,6 +25,7 @@ sys.path.insert(0, str(_scripts))
 from graph.model import BlastRadius, DiffReport, ValidationReport
 from graph.pr_commenter import (
     MARKER,
+    MAX_COMMENT_CHARS,
     _details_table,
     _find_marker_comment_id,
     _request_with_retry,
@@ -153,6 +154,28 @@ class TestDetailsTable:
     def test_item_html_escaped(self):
         out = _details_table("T", ["<xss>"])
         assert "<xss>" not in out
+
+    def test_large_details_table_is_limited(self):
+        out = _details_table("Items", [f"item-{i}" for i in range(105)], limit=100)
+        assert "item-99" in out
+        assert "item-100" not in out
+        assert "5 more omitted" in out
+
+    def test_large_report_stays_under_comment_limit(self):
+        diff = DiffReport(
+            base_ref="a",
+            head_ref="b",
+            added_nodes=[f"node-{i}" for i in range(1000)],
+            added_edges=[f"edge-{i}" for i in range(1000)],
+        )
+        validation = ValidationReport(
+            graph_repo="r",
+            errors=[f"error-{i}" for i in range(1000)],
+            warnings=[f"warning-{i}" for i in range(1000)],
+        )
+        md = render_markdown(diff=diff, validation=validation)
+        assert len(md) <= MAX_COMMENT_CHARS
+        assert "900 more omitted" in md
 
 
 # ── _request_with_retry ───────────────────────────────────────────────────
