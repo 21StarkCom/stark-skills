@@ -486,7 +486,7 @@ def emit_persona_event(subtype: str, payload: dict, dedupe_key: str) -> None:
         # subtype belongs INSIDE payload — EventEnvelope drops unknown
         # top-level fields, and the consumer's PAYLOAD_SCHEMAS["persona_event"]
         # treats subtype as a required payload key.
-        merged_payload = {"subtype": subtype, **payload}
+        merged_payload = {**payload, "subtype": subtype}
         envelope = {
             "type": "persona_event",
             "source": "skill",
