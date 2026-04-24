@@ -1062,11 +1062,13 @@ class TestEmitPersonaEvent:
             assert req.get_header("Content-type") == "application/json"
             body = json.loads(req.data)
             assert body["type"] == "persona_event"
-            assert body["subtype"] == "selection"
             assert body["source"] == "skill"
             assert body["cli"] == "claude"
             assert body["dedupe_key"] == "persona:selection:1:12345"
+            # subtype lives inside payload now (matches stark-insights schema)
+            assert body["payload"]["subtype"] == "selection"
             assert body["payload"]["persona"] == "jules"
+            assert "subtype" not in body  # not at envelope top-level
 
     def test_emit_fails_silently_on_connection_error(self, tmp_path: Path) -> None:
         """Connection refused should log warning but not raise."""
@@ -1139,7 +1141,7 @@ class TestSelectionEmitsEvent:
             mock_urlopen.assert_called_once()
             req = mock_urlopen.call_args[0][0]
             body = json.loads(req.data)
-            assert body["subtype"] == "selection"
+            assert body["payload"]["subtype"] == "selection"
             assert body["payload"]["persona"] == result["persona"]
             assert body["payload"]["session_id"] == result["session_id"]
             assert "dedupe_key" in body
@@ -1173,7 +1175,7 @@ class TestRatingEmitsEvent:
             mock_urlopen.assert_called_once()
             req = mock_urlopen.call_args[0][0]
             body = json.loads(req.data)
-            assert body["subtype"] == "rating"
+            assert body["payload"]["subtype"] == "rating"
             assert body["payload"]["rating"] == "like"
             assert body["payload"]["persona"] == result["persona"]
         conn.close()

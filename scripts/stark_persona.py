@@ -483,13 +483,16 @@ def emit_persona_event(subtype: str, payload: dict, dedupe_key: str) -> None:
             return
 
         token = token_path.read_text().strip()
+        # subtype belongs INSIDE payload — EventEnvelope drops unknown
+        # top-level fields, and the consumer's PAYLOAD_SCHEMAS["persona_event"]
+        # treats subtype as a required payload key.
+        merged_payload = {"subtype": subtype, **payload}
         envelope = {
             "type": "persona_event",
-            "subtype": subtype,
             "source": "skill",
             "cli": "claude",
             "dedupe_key": dedupe_key,
-            "payload": payload,
+            "payload": merged_payload,
         }
         data = json.dumps(envelope).encode()
         req = urllib.request.Request(
