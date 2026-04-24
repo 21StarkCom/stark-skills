@@ -55,9 +55,9 @@ APPS: dict[str, dict] = {
     },
     "stark-codex": {
         "app_id": "3066834",
-        "installation_id": "115650994",  # default (GetEvinced org)
+        "installation_id": "115648800",  # default (GetEvinced org)
         "installations": {
-            "GetEvinced": "115650994",
+            "GetEvinced": "115648800",
         },
         "keychain_service": "STARK_CODEX_PRIVATE_KEY",
     },

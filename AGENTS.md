@@ -139,5 +139,5 @@ All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.Codex/skill
 | App | App ID | Installation ID | Keychain |
 |-----|--------|----------------|----------|
 | stark-Codex | 3066738 | 115648521 | STARK_CLAUDE_PRIVATE_KEY |
-| stark-codex | 3066834 | 115650994 | STARK_CODEX_PRIVATE_KEY |
+| stark-codex | 3066834 | 115648800 | STARK_CODEX_PRIVATE_KEY |
 | stark-gemini | 3066689 | 115648971 | STARK_GEMINI_PRIVATE_KEY |

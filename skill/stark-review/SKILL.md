@@ -1,19 +1,14 @@
 ---
 name: stark-review
 description: >-
-  [DEPRECATED] Legacy single-agent PR review. Uses triage-selected PR review
-  domains by default, or one forced agent via `--agent`. Prefer
-  /stark-forged-review.
+  Single-agent PR review. Uses triage-selected PR review domains by default,
+  or one forced agent via `--agent`.
 argument-hint: "[PR_NUMBER] [--agent claude|codex|gemini] [--dry-run] [--repo ORG/REPO]"
 disable-model-invocation: true
 model: opus[1m]
 ---
 
-> **⚠ Deprecated.** `/stark-review` remains functional during the rollout
-> window (see `docs/specs/2026-04-12-stark-forged-review-design.md` §11), but
-> `/stark-forged-review` is the default PR-review path going forward.
-
-Legacy, cheaper PR review path. Keep this skill thin: call the Python
+Cheaper single-agent PR review path. Keep this skill thin: call the Python
 dispatchers and use their JSON output; do not recreate prompt or dispatch
 logic in `SKILL.md`.
 

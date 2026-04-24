@@ -35,7 +35,7 @@ For each CLAUDE.md, check:
 - **Bot names:** References `stark-claude[bot]`, `stark-codex[bot]`, `stark-gemini[bot]` consistently
 - **Script paths:** References `~/git/Evinced/scripts/.venv/bin/python3` for Python execution
 - **Org name:** Uses `GetEvinced` (not `Evinced`) in API paths
-- **GitHub App IDs:** App IDs and installation IDs match the canonical values (stark-claude: 3066738/115648521, stark-codex: 3066834/115650994, stark-gemini: 3066689/115648971)
+- **GitHub App IDs:** App IDs and installation IDs match the canonical values (stark-claude: 3066738/115648521, stark-codex: 3066834/115648800, stark-gemini: 3066689/115648971)
 
 ### 3. Validate Tool Versions
 

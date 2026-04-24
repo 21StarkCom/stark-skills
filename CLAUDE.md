@@ -92,7 +92,7 @@ All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.claude/skil
 - `/stark-phase-execute <plan-slug> [--dry-run]` — autonomous phase execution: implement all tasks, PR, review, merge, release, dashboard
 - `/stark-autopilot <plan-or-prompt> [--plan-slug SLUG]` — autonomous implementation with tournament at every step (all enabled agents compete in worktrees); issue-driven mode when plan has been decomposed via `/stark-plan-to-tasks`
 - `/stark-forged-review [PR_NUMBER]` — leader + 2nd-opinion PR review with dynamic triage and forge-path escalation (default going forward; replaces `/stark-review`)
-- `/stark-review [PR_NUMBER]` — *[deprecated]* single-agent PR code review (1 LLM × 9 domains, fast/cheap). Use `/stark-forged-review` instead.
+- `/stark-review [PR_NUMBER]` — single-agent PR code review (1 LLM × 9 domains, fast/cheap)
 - `/stark-team-review [PR_NUMBER]` — multi-agent PR code review (all enabled LLMs × 9 domains; default: 2)
 - `/stark-review-improvement [--prompts-dir DIR]` — improve prompts based on review assessment (PR or design/plan review)
 - `/stark-review-design-improvement` — improve design review prompts (wraps /stark-review-improvement with --prompts-dir design-review)
@@ -139,5 +139,5 @@ All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.claude/skil
 | App | App ID | Installation ID | Keychain |
 |-----|--------|----------------|----------|
 | stark-claude | 3066738 | 115648521 | STARK_CLAUDE_PRIVATE_KEY |
-| stark-codex | 3066834 | 115650994 | STARK_CODEX_PRIVATE_KEY |
+| stark-codex | 3066834 | 115648800 | STARK_CODEX_PRIVATE_KEY |
 | stark-gemini | 3066689 | 115648971 | STARK_GEMINI_PRIVATE_KEY |

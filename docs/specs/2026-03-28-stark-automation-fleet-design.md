@@ -258,7 +258,7 @@ New `automation` key in `global/config.json`:
     },
     "github_app_ids": {
       "claude": { "app_id": 3066738, "installation_id": 115648521 },
-      "codex":  { "app_id": 3066834, "installation_id": 115650994 },
+      "codex":  { "app_id": 3066834, "installation_id": 115648800 },
       "gemini": { "app_id": 3066689, "installation_id": 115648971 }
     },
     "model_pins": {

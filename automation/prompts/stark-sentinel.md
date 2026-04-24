@@ -71,7 +71,7 @@ Verify each GitHub App installation is accessible:
 gh api /app/installations/115648521 --jq '.id' 2>/dev/null && echo "stark-claude: PASS" || echo "stark-claude: FAIL"
 ```
 
-Repeat for stark-codex (3066834/115650994) and stark-gemini (3066689/115648971).
+Repeat for stark-codex (3066834/115648800) and stark-gemini (3066689/115648971).
 
 Note: This check may fail if the PAT doesn't have app installation read scope. In that case, log as "SKIP — insufficient scope" not as FAIL.
 
