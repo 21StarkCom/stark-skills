@@ -4,7 +4,7 @@ description: >-
   Single-agent PR review. Uses triage-selected PR review domains by default,
   or one forced agent via `--agent`.
 argument-hint: "[PR_NUMBER] [--agent claude|codex|gemini] [--dry-run] [--repo ORG/REPO]"
-disable-model-invocation: true
+disable-model-invocation: false
 model: opus[1m]
 ---
 
