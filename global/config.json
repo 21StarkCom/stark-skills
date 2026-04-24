@@ -33,7 +33,7 @@
     "max_validation_iterations": 2
   },
   "models": {
-    "claude": { "enabled": true, "model_id": "claude-opus-4-6" },
+    "claude": { "enabled": true, "model_id": "claude-opus-4-7" },
     "codex": { "enabled": true, "model_id": "gpt-5.4" },
     "gemini": { "enabled": true, "model_id": "gemini-3.1-pro-preview" }
   },
@@ -41,8 +41,7 @@
     "lock_ttl_minutes": 30,
     "subagent_env_allowlist": [
       "PATH", "HOME", "USER", "SHELL", "LANG", "TERM",
-      "CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_VERTEX_PROJECT_ID", "CLOUD_ML_REGION",
-      "GOOGLE_APPLICATION_CREDENTIALS"
+      "ANTHROPIC_AGENTS"
     ],
     "max_concurrent_agents": 3,
     "temp_dir_prefix": "stark-env",
@@ -195,7 +194,7 @@
       "input_per_1m_usd": 15.00,
       "output_per_1m_usd": 60.00
     },
-    "claude-opus-4-6": {
+    "claude-opus-4-7": {
       "input_per_1m_usd": 15.00,
       "output_per_1m_usd": 75.00
     },
@@ -209,7 +208,7 @@
     }
   },
   "automation": {
-    "model": "claude-opus-4-6",
+    "model": "claude-opus-4-7",
     "repos": [
       "GetEvinced/stark-skills",
       "GetEvinced/infra-pulse",

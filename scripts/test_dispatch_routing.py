@@ -96,6 +96,54 @@ def test_design_to_plan_codex_uses_agent_specific_env(monkeypatch):
     assert run_kwargs["env"] == {"GH_TOKEN": "codex-token"}
 
 
+def test_design_to_plan_extends_timeout(monkeypatch):
+    """Design-to-plan doubles the base timeout across all agents to avoid
+    non-interactive hangs during long generation."""
+    monkeypatch.setattr(
+        design_to_plan_dispatch,
+        "build_agent_env",
+        lambda agent, operation: {},
+    )
+    captured_homes: list[str] = []
+    monkeypatch.setattr(
+        design_to_plan_dispatch,
+        "setup_gemini_home",
+        lambda *args, **kwargs: captured_homes.append(kwargs.get("approval_mode", "")) or "/tmp/gh",
+    )
+
+    base_timeout = 600
+    for agent in ("claude", "codex", "gemini"):
+        _cmd, run_kwargs, _home = design_to_plan_dispatch._build_cmd_and_kwargs(
+            agent, "prompt", timeout=base_timeout,
+        )
+        assert run_kwargs["timeout"] == base_timeout * 2, f"{agent} must double the timeout"
+
+
+def test_design_to_plan_gemini_uses_yolo_approval(monkeypatch):
+    """Non-interactive Gemini must use yolo approval — plan mode blocks on
+    tool approval and hangs until subprocess timeout."""
+    monkeypatch.setattr(
+        design_to_plan_dispatch,
+        "build_agent_env",
+        lambda agent, operation: {},
+    )
+    captured: dict[str, object] = {}
+
+    def fake_setup(prefix, project_dir, project_label, approval_mode=None):
+        captured["approval_mode"] = approval_mode
+        return "/tmp/gh"
+
+    monkeypatch.setattr(design_to_plan_dispatch, "setup_gemini_home", fake_setup)
+    monkeypatch.setattr(
+        design_to_plan_dispatch,
+        "make_gemini_env",
+        lambda _home: {},
+    )
+
+    design_to_plan_dispatch._build_cmd_and_kwargs("gemini", "prompt")
+    assert captured["approval_mode"] == "yolo"
+
+
 def test_tournament_codex_uses_agent_specific_env(monkeypatch):
     env_calls: list[tuple[str, str]] = []
     seen_envs: list[dict[str, str] | None] = []

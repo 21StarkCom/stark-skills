@@ -10,7 +10,7 @@ def test_check_model_resolution_reports_enabled_and_disabled_agents() -> None:
     with patch(
         "preflight.get_models_config",
         return_value={
-            "claude": {"enabled": True, "model_id": "claude-opus-4-6"},
+            "claude": {"enabled": True, "model_id": "claude-opus-4-7"},
             "codex": {"enabled": True, "model_id": "gpt-5.4"},
             "gemini": {"enabled": False, "model_id": "gemini-2.5-pro"},
         },
@@ -24,7 +24,7 @@ def test_check_model_resolution_reports_enabled_and_disabled_agents() -> None:
 def test_check_model_resolution_fails_when_required_agent_missing() -> None:
     with patch(
         "preflight.get_models_config",
-        return_value={"claude": {"enabled": True, "model_id": "claude-opus-4-6"}},
+        return_value={"claude": {"enabled": True, "model_id": "claude-opus-4-7"}},
     ):
         status, message = preflight.check_model_resolution()
 
@@ -36,7 +36,7 @@ def test_check_model_resolution_fails_when_all_agents_disabled() -> None:
     with patch(
         "preflight.get_models_config",
         return_value={
-            "claude": {"enabled": False, "model_id": "claude-opus-4-6"},
+            "claude": {"enabled": False, "model_id": "claude-opus-4-7"},
             "codex": {"enabled": False, "model_id": "gpt-5.4"},
         },
     ):

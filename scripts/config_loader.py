@@ -11,7 +11,7 @@ from typing import Any
 CONFIG_PATH = Path.home() / ".claude" / "code-review" / "config.json"
 
 DEFAULT_MODELS = {
-    "claude": {"enabled": True, "model_id": "claude-opus-4-6"},
+    "claude": {"enabled": True, "model_id": "claude-opus-4-7"},
     "codex": {"enabled": True, "model_id": "gpt-5.4"},
     "gemini": {"enabled": True, "model_id": "gemini-3.1-pro-preview"},
 }
@@ -24,10 +24,7 @@ DEFAULT_RUNTIME = {
         "SHELL",
         "LANG",
         "TERM",
-        "CLAUDE_CODE_USE_VERTEX",
-        "ANTHROPIC_VERTEX_PROJECT_ID",
-        "CLOUD_ML_REGION",
-        "GOOGLE_APPLICATION_CREDENTIALS",
+        "ANTHROPIC_AGENTS",
     ],
     "max_concurrent_agents": 3,
     "temp_dir_prefix": "stark-env",
@@ -149,7 +146,7 @@ DEFAULT_RED_TEAM = {
 
 DEFAULT_MODEL_RATES = {
     "o3": {"input_per_1m_usd": 15.00, "output_per_1m_usd": 60.00},
-    "claude-opus-4-6": {"input_per_1m_usd": 15.00, "output_per_1m_usd": 75.00},
+    "claude-opus-4-7": {"input_per_1m_usd": 15.00, "output_per_1m_usd": 75.00},
     "gpt-5.4": {"input_per_1m_usd": 5.00, "output_per_1m_usd": 15.00},
     "_fallback": {"input_per_1m_usd": 100.00, "output_per_1m_usd": 300.00},
 }

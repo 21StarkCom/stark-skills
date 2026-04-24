@@ -38,8 +38,19 @@ def get_gemini_model() -> str:
         raise AgentDisabledError("gemini agent is disabled in config")
     return get_model_id("gemini") or GEMINI_MODEL
 
-# Auth files to copy from the real Gemini home to isolated session dirs.
-_AUTH_FILES = ("settings.json", "oauth_creds.json", "google_accounts.json", "installation_id")
+# Files copied from the real Gemini home to isolated session dirs.
+# settings.json is intentionally excluded — we write a fresh Vertex-AI/ADC
+# config in each isolated home (see setup_gemini_home) to avoid inheriting
+# the user's oauth-personal auth selection or a non-global region.
+# oauth_creds.json/google_accounts.json are copied so that if the user does
+# fall back to OAuth in the future the session retains identity.
+_AUTH_FILES = ("oauth_creds.json", "google_accounts.json", "installation_id")
+
+# Vertex AI config for headless Gemini dispatch. ADC is used for auth
+# (~/.config/gcloud/application_default_credentials.json by default).
+# Global region is required for preview models (e.g. gemini-3.1-pro-preview).
+_VERTEX_PROJECT = "infra-ai-platform"
+_VERTEX_LOCATION = "global"
 
 # ── API key fallback ──────────────────────────────────────────────────
 
@@ -89,7 +100,20 @@ def log_api_key_fallback(agent: str, task: str, reason: str) -> None:
 
 
 # Error patterns that indicate Vertex AI auth failure (retryable with API key).
-GEMINI_AUTH_ERROR_PATTERNS = ("ModelNotFound", "403", "PERMISSION_DENIED")
+# Includes ADC failure modes ("DefaultCredentialsError", "RefreshError",
+# "UNAUTHENTICATED", "401") that surface when ADC is missing/expired —
+# the original "403/PERMISSION_DENIED/ModelNotFound" set only caught
+# project-permission errors and missed auth-bootstrap failures.
+GEMINI_AUTH_ERROR_PATTERNS = (
+    "ModelNotFound",
+    "403",
+    "PERMISSION_DENIED",
+    "401",
+    "UNAUTHENTICATED",
+    "DefaultCredentialsError",
+    "RefreshError",
+    "Could not automatically determine credentials",
+)
 
 
 def should_fallback_to_api_key(stderr: str) -> bool:
@@ -104,14 +128,38 @@ def try_gemini_api_key_fallback(
 ) -> bool:
     """Attempt Gemini API key fallback after a Vertex AI auth error.
 
-    Mutates *run_kwargs* in place to inject GEMINI_API_KEY.
+    Mutates *run_kwargs* in place to inject GEMINI_API_KEY and switch the
+    isolated home + env off Vertex auth. Without disabling Vertex the retry
+    would re-use the same broken auth path and fail identically.
+
     Returns True if fallback was applied (caller should retry), False otherwise.
     """
     api_key = get_gemini_api_key()
     if not api_key or "env" not in run_kwargs:
         return False
     log_api_key_fallback("gemini", context_label, stderr_snippet[:120])
-    run_kwargs["env"]["GEMINI_API_KEY"] = api_key
+    env = run_kwargs["env"]
+    env["GEMINI_API_KEY"] = api_key
+    env["GOOGLE_GENAI_USE_VERTEXAI"] = "false"
+    for vertex_var in ("GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION",
+                       "GOOGLE_APPLICATION_CREDENTIALS"):
+        env.pop(vertex_var, None)
+    home = env.get("GEMINI_CLI_HOME")
+    if home:
+        settings_path = os.path.join(home, ".gemini", "settings.json")
+        try:
+            existing: dict = {}
+            if os.path.exists(settings_path):
+                with open(settings_path) as f:
+                    existing = json.load(f)
+            auth = existing.setdefault("security", {}).setdefault("auth", {})
+            auth["selectedType"] = "gemini-api-key"
+            auth.pop("vertexAi", None)
+            existing["selectedAuthType"] = "gemini-api-key"
+            with open(settings_path, "w") as f:
+                json.dump(existing, f)
+        except (OSError, json.JSONDecodeError):
+            pass
     return True
 
 
@@ -149,17 +197,26 @@ def setup_gemini_home(
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(gemini_dir, auth_file))
 
-    # Patch settings.json for headless dispatch:
-    # - Preserve the user's auth config (Vertex AI, API key, etc.) as-is
-    # - Set approval mode if requested
-    # API key fallback is handled by try_gemini_api_key_fallback() on auth errors.
-    settings_path = os.path.join(gemini_dir, "settings.json")
-    settings: dict = {}
-    if os.path.exists(settings_path):
-        with open(settings_path) as f:
-            settings = json.load(f)
+    # Write a fresh settings.json forcing Vertex-AI auth with global region.
+    # The user's real ~/.gemini/settings.json may select oauth-personal or pin
+    # a regional endpoint (us-east1) that lacks preview models — inheriting it
+    # breaks headless ADC dispatch, so we override explicitly.
+    settings: dict = {
+        "security": {
+            "auth": {
+                "selectedType": "vertex-ai",
+                "vertexAi": {
+                    "projectId": _VERTEX_PROJECT,
+                    "region": _VERTEX_LOCATION,
+                },
+            },
+        },
+        # Back-compat flat key — older CLI versions read this shape.
+        "selectedAuthType": "vertex-ai",
+    }
     if approval_mode:
         settings["defaultApprovalMode"] = approval_mode
+    settings_path = os.path.join(gemini_dir, "settings.json")
     with open(settings_path, "w") as f:
         json.dump(settings, f)
 
@@ -186,24 +243,27 @@ def gemini_session(
             shutil.rmtree(home, ignore_errors=True)
 
 
-_BLOCKED_ENV_KEYS = {"ANTHROPIC_API_KEY"}
+_BLOCKED_ENV_KEYS = {"ANTHROPIC_API_KEY", "ANTHROPIC_AGENTS"}
 _BLOCKED_PREFIX = "ANTHROPIC_"
-_ALLOWED_ANTHROPIC_KEYS = {"ANTHROPIC_CODE_CLI", "ANTHROPIC_VERTEX_PROJECT_ID"}
+_ALLOWED_ANTHROPIC_KEYS = {"ANTHROPIC_CODE_CLI"}
+
+
+_DEFAULT_ADC_PATH = os.path.expanduser("~/.config/gcloud/application_default_credentials.json")
 
 
 def make_gemini_env(gemini_home: str) -> dict[str, str]:
-    """Build env dict with GEMINI_CLI_HOME for headless dispatch.
+    """Build env dict for headless Gemini CLI dispatch via Vertex AI + ADC.
 
-    Sets GOOGLE_CLOUD_LOCATION=global so that preview models (e.g.
-    gemini-3.1-pro-preview) are reachable via Vertex AI's global endpoint.
-    Regional endpoints only carry GA models.
+    Forces Vertex AI auth using Application Default Credentials so headless
+    sub-agents don't depend on interactive OAuth. Pins the global endpoint
+    so preview models (gemini-3.1-pro-preview) are reachable. Any host-set
+    region (e.g. us-east1 from ~/.zshrc) is overridden.
 
-    Strips ANTHROPIC_API_KEY and Anthropic-specific vars to match the
-    sanitization applied to Claude/Codex subprocesses.
+    Strips ANTHROPIC_API_KEY, ANTHROPIC_AGENTS, and other Anthropic vars so
+    Claude auth never leaks into the Gemini subprocess.
 
-    Does NOT inject GEMINI_API_KEY by default — the user's configured auth
-    (Vertex AI, OAuth, etc.) is respected as-is. API key injection only
-    happens via try_gemini_api_key_fallback() when the primary auth fails.
+    GEMINI_API_KEY is not injected by default; try_gemini_api_key_fallback()
+    handles last-resort API-key fallback when ADC auth fails.
     """
     env = {
         k: v for k, v in os.environ.items()
@@ -211,7 +271,14 @@ def make_gemini_env(gemini_home: str) -> dict[str, str]:
         and not (k.startswith(_BLOCKED_PREFIX) and k not in _ALLOWED_ANTHROPIC_KEYS)
     }
     env["GEMINI_CLI_HOME"] = gemini_home
-    env["GOOGLE_CLOUD_LOCATION"] = "global"
+    # Vertex AI + ADC. These override any host values (zsh may export a
+    # regional GOOGLE_CLOUD_LOCATION for other tools — we force global here).
+    env["GOOGLE_GENAI_USE_VERTEXAI"] = "true"
+    env["GOOGLE_CLOUD_PROJECT"] = _VERTEX_PROJECT
+    env["GOOGLE_CLOUD_LOCATION"] = _VERTEX_LOCATION
+    # Ensure ADC is discoverable; don't overwrite an explicit host value.
+    if "GOOGLE_APPLICATION_CREDENTIALS" not in env and os.path.exists(_DEFAULT_ADC_PATH):
+        env["GOOGLE_APPLICATION_CREDENTIALS"] = _DEFAULT_ADC_PATH
     return env
 
 

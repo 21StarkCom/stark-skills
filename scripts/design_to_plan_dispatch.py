@@ -169,6 +169,12 @@ def _build_cmd_and_kwargs(
     if not is_agent_enabled(agent):
         raise ValueError(f"Agent disabled: {agent}")
 
+    # Generation with extended reasoning routinely exceeds the review timeout.
+    # Apply the same 2× multiplier across all agents so Claude (opus) and
+    # Gemini (pro-preview) don't time out while Codex finishes comfortably.
+    extended_timeout = timeout * 2
+    run_kwargs["timeout"] = extended_timeout
+
     if agent == "claude":
         cmd = build_claude_cmd()
         run_kwargs["input"] = prompt if stdin_content is None else f"{prompt}\n\n{stdin_content}"
@@ -179,7 +185,6 @@ def _build_cmd_and_kwargs(
         )
 
     elif agent == "codex":
-        effective_timeout = timeout * 2
         cmd = [
             "codex", "exec",
             "-m", _resolve_model("codex"),
@@ -189,7 +194,6 @@ def _build_cmd_and_kwargs(
             "-",
         ]
         run_kwargs["input"] = prompt if stdin_content is None else f"{prompt}\n\n{stdin_content}"
-        run_kwargs["timeout"] = effective_timeout
         run_kwargs["env"] = (
             build_agent_env("codex", "review")
             if build_agent_env is not None
@@ -197,8 +201,10 @@ def _build_cmd_and_kwargs(
         )
 
     elif agent == "gemini":
+        # "yolo" auto-approves tool use; "plan" blocks on tool approval in
+        # non-interactive dispatch and hangs until the subprocess timeout.
         gemini_home = setup_gemini_home(
-            "gemini-d2p-", os.getcwd(), "generate-review", approval_mode="plan",
+            "gemini-d2p-", os.getcwd(), "generate-review", approval_mode="yolo",
         )
         cmd = [
             "gemini",

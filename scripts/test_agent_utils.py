@@ -150,6 +150,23 @@ class TestSetupGeminiHome:
         finally:
             shutil.rmtree(home, ignore_errors=True)
 
+    def test_forces_vertex_auth(self):
+        """Headless dispatch requires Vertex/global; oauth-personal or a
+        regional pin would break preview models."""
+        home = setup_gemini_home("test-", "/tmp/proj", "t")
+        try:
+            with open(os.path.join(home, ".gemini", "settings.json")) as f:
+                settings = json.load(f)
+            # Nested and back-compat flat key must both be vertex-ai.
+            assert settings["security"]["auth"]["selectedType"] == "vertex-ai"
+            assert settings["selectedAuthType"] == "vertex-ai"
+            vertex_ai = settings["security"]["auth"]["vertexAi"]
+            # Must pin global endpoint, not a regional one.
+            assert vertex_ai["region"] == "global"
+            assert vertex_ai["projectId"]
+        finally:
+            shutil.rmtree(home, ignore_errors=True)
+
 
 class TestGeminiSession:
     def test_creates_and_cleans_up(self):
@@ -171,3 +188,21 @@ class TestMakeGeminiEnv:
         env = make_gemini_env("/tmp/h")
         assert env["GEMINI_CLI_HOME"] == "/tmp/h"
         assert "PATH" in env
+
+    def test_forces_vertex_ai_env(self, monkeypatch):
+        """Headless Gemini must use Vertex/ADC; a host regional
+        GOOGLE_CLOUD_LOCATION must not leak through."""
+        monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "us-east1")
+        env = make_gemini_env("/tmp/h")
+        assert env["GOOGLE_GENAI_USE_VERTEXAI"] == "true"
+        assert env["GOOGLE_CLOUD_PROJECT"]
+        # Host regional pin must be overridden to global.
+        assert env["GOOGLE_CLOUD_LOCATION"] == "global"
+
+    def test_strips_anthropic_keys(self, monkeypatch):
+        """Claude auth must not leak into Gemini subprocess."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-leak")
+        monkeypatch.setenv("ANTHROPIC_AGENTS", "sk-ant-src")
+        env = make_gemini_env("/tmp/h")
+        assert "ANTHROPIC_API_KEY" not in env
+        assert "ANTHROPIC_AGENTS" not in env

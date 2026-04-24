@@ -28,7 +28,7 @@ def test_get_model_rates_returns_defaults(tmp_path):
         config_loader.load_config.cache_clear()
         rates = config_loader.get_model_rates()
     assert "o3" in rates
-    assert "claude-opus-4-6" in rates
+    assert "claude-opus-4-7" in rates
     assert rates["o3"]["input_per_1m_usd"] > 0
     assert "_fallback" in rates
 

@@ -22,6 +22,7 @@ import runtime_env  # noqa: E402 — fails until implementation exists
 # ---------------------------------------------------------------------------
 
 FAKE_TOKEN = "ghs_faketoken12345"
+FAKE_AGENT_KEY = "sk-ant-agents-key-from-anthropic-agents"
 
 # A controlled environment with allowlisted + non-allowlisted + blocked vars.
 CONTROLLED_ENV = {
@@ -32,8 +33,11 @@ CONTROLLED_ENV = {
     "SHELL": "/bin/zsh",
     "LANG": "en_US.UTF-8",
     "TERM": "xterm-256color",
-    # Must NEVER appear in returned env, even though it exists in os.environ
-    "ANTHROPIC_API_KEY": "sk-ant-secret-key",
+    # Source var for Claude API key; becomes ANTHROPIC_API_KEY for claude only.
+    "ANTHROPIC_AGENTS": FAKE_AGENT_KEY,
+    # Host's own ANTHROPIC_API_KEY is unreliable — must be stripped, then
+    # re-injected from ANTHROPIC_AGENTS for claude only.
+    "ANTHROPIC_API_KEY": "sk-ant-stale-host-key",
     # Not in allowlist — must not pass through
     "SECRET_TOKEN": "super-secret",
     "MY_CUSTOM_VAR": "custom-value",
@@ -47,10 +51,7 @@ FAKE_RUNTIME_CFG = {
         "SHELL",
         "LANG",
         "TERM",
-        "CLAUDE_CODE_USE_VERTEX",
-        "ANTHROPIC_VERTEX_PROJECT_ID",
-        "CLOUD_ML_REGION",
-        "GOOGLE_APPLICATION_CREDENTIALS",
+        "ANTHROPIC_AGENTS",
     ],
     "temp_dir_prefix": "stark-env",
     "lock_ttl_minutes": 30,
@@ -120,13 +121,29 @@ def test_issue_ops_operation_excludes_gh_token():
     mock_tok.assert_not_called()
 
 
-def test_anthropic_api_key_never_present():
-    """ANTHROPIC_API_KEY must never appear for any operation."""
+def test_claude_gets_api_key_from_anthropic_agents():
+    """For claude ops, ANTHROPIC_API_KEY must be injected from ANTHROPIC_AGENTS."""
     with patch("runtime_env.github_app.get_token", return_value=FAKE_TOKEN):
         for op in ("review", "pr_create", "issue_ops", "unknown_op"):
             env = runtime_env.build_agent_env("claude", op)
+            assert env.get("ANTHROPIC_API_KEY") == FAKE_AGENT_KEY, (
+                f"claude op={op!r} did not get ANTHROPIC_API_KEY from ANTHROPIC_AGENTS"
+            )
+            # The source var must never leak verbatim.
+            assert "ANTHROPIC_AGENTS" not in env
+
+
+@pytest.mark.parametrize("agent", ["codex", "gemini"])
+def test_non_claude_agents_never_see_anthropic_keys(agent: str):
+    """Codex and gemini subprocesses must never see ANTHROPIC_API_KEY or ANTHROPIC_AGENTS."""
+    with patch("runtime_env.github_app.get_token", return_value=FAKE_TOKEN):
+        for op in ("review", "pr_create", "issue_ops"):
+            env = runtime_env.build_agent_env(agent, op)
             assert "ANTHROPIC_API_KEY" not in env, (
-                f"ANTHROPIC_API_KEY leaked for op={op!r}"
+                f"ANTHROPIC_API_KEY leaked to {agent} for op={op!r}"
+            )
+            assert "ANTHROPIC_AGENTS" not in env, (
+                f"ANTHROPIC_AGENTS leaked to {agent} for op={op!r}"
             )
 
 
@@ -137,7 +154,9 @@ def test_only_allowlisted_vars_passed_through():
     # Non-allowlisted vars must not be present
     assert "SECRET_TOKEN" not in env
     assert "MY_CUSTOM_VAR" not in env
-    assert "ANTHROPIC_API_KEY" not in env
+    # ANTHROPIC_AGENTS is allowlisted but translated to ANTHROPIC_API_KEY —
+    # the source var itself must not appear in the subprocess env.
+    assert "ANTHROPIC_AGENTS" not in env
     # Allowlisted vars from CONTROLLED_ENV must be present
     assert env["PATH"] == "/usr/bin:/bin"
     assert env["HOME"] == "/Users/test"

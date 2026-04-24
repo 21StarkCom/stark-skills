@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
-"""Vertex-compatible skill description optimizer.
+"""Local skill description optimizer.
 
 The skill-creator plugin's run_loop.py couples its improvement step to
-`anthropic.Anthropic()`, which requires ANTHROPIC_API_KEY. On Vertex
-(the Evinced stack) that key isn't available, so the loop crashes
-before the first iteration. This script is a local replacement for the
-improve-half of that loop: it takes a skill path and an eval set,
-shells out to `claude -p` for both the scoring and improvement steps
-(which use whatever auth Claude Code is already configured with —
-Vertex, Anthropic direct, or Bedrock), and iterates until either the
+`anthropic.Anthropic()` with its own auth path. This script is a local
+replacement for the improve-half of that loop: it takes a skill path
+and an eval set, shells out to `claude -p` for both the scoring and
+improvement steps (using the stark-skills subprocess env, which sources
+ANTHROPIC_API_KEY from ANTHROPIC_AGENTS), and iterates until either the
 pass rate crosses a threshold or max_iterations is exhausted.
 
 For scoring, it reuses the skill-creator plugin's run_eval.py module
@@ -18,7 +16,7 @@ Usage:
     python3 scripts/optimize_skill_description.py \\
         --skill-path skill/stark-forged-review \\
         --eval-set path/to/trigger_eval.json \\
-        --model claude-opus-4-6 \\
+        --model claude-opus-4-7 \\
         --max-iterations 3 \\
         --out-json /tmp/optimize-results.json
 
@@ -45,6 +43,9 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).parent))
+from claude_utils import make_clean_env  # noqa: E402
 
 # The skill-creator plugin's run_eval module — we import it by path so
 # we don't have to depend on the plugin being on PYTHONPATH.
@@ -132,6 +133,7 @@ def _run_eval(
         capture_output=True,
         text=True,
         timeout=max(timeout * 2, 300),
+        env=make_clean_env(),
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -172,6 +174,7 @@ def _propose_improvement(
     cmd = ["claude", "-p", prompt, "--model", model]
     result = subprocess.run(
         cmd, capture_output=True, text=True, timeout=timeout,
+        env=make_clean_env(),
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -214,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--skill-path", type=Path, required=True)
     parser.add_argument("--eval-set", type=Path, required=True)
-    parser.add_argument("--model", default="claude-opus-4-6")
+    parser.add_argument("--model", default="claude-opus-4-7")
     parser.add_argument("--max-iterations", type=int, default=3)
     parser.add_argument("--runs-per-query", type=int, default=3)
     parser.add_argument("--timeout", type=int, default=180)

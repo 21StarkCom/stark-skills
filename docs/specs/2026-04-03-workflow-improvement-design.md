@@ -104,7 +104,7 @@ Add these top-level blocks to `global/config.json`:
   },
   "runtime": {
     "preflight_required_for": ["stark-session", "stark-team-review", "stark-autopilot", "stark-phase-execute"],
-    "auth_sources": { "claude": "vertex", "codex": "cli", "gemini": "keychain" },
+    "auth_sources": { "claude": "anthropic_api", "codex": "cli", "gemini": "vertex_adc" },
     "subagent_env_allowlist": ["PATH", "HOME", "TMPDIR"],
     "gh_token_injection": {
       "review": "bot_token_per_agent",

@@ -90,7 +90,7 @@ class TestModelFlags:
         multi_review._run_subagent("claude", "architecture", "abc123")
         cmd = mock_run.call_args[0][0]
         assert "--model" in cmd
-        assert "claude-opus-4-6" in cmd
+        assert "claude-opus-4-7" in cmd
         assert "--no-session-persistence" in cmd  # one-shot, no session files
         assert "-" in cmd  # stdin marker
         call_kwargs = mock_run.call_args[1]
@@ -264,7 +264,7 @@ class TestCLIEndToEnd:
     def test_claude_stdin_e2e(self):
         """claude -p - reads prompt from stdin and returns text output."""
         result = subprocess.run(
-            ["claude", "-p", "-", "--output-format", "text", "--model", "claude-opus-4-6"],
+            ["claude", "-p", "-", "--output-format", "text", "--model", "claude-opus-4-7"],
             capture_output=True, text=True, timeout=120,
             input="Return exactly: hello",
         )

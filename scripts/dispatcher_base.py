@@ -25,7 +25,7 @@ from typing import Any
 try:
     from claude_utils import CLAUDE_MODEL
 except ImportError:  # pragma: no cover - available at runtime
-    CLAUDE_MODEL = "claude-opus-4-6"
+    CLAUDE_MODEL = "claude-opus-4-7"
 
 try:
     from codex_utils import CODEX_MODEL
@@ -35,7 +35,7 @@ except ImportError:  # pragma: no cover - available at runtime
 try:
     from gemini_utils import GEMINI_MODEL
 except ImportError:  # pragma: no cover - available at runtime
-    GEMINI_MODEL = "gemini-2.5-pro"
+    GEMINI_MODEL = "gemini-3.1-pro-preview"
 
 try:
     from config_loader import get_model_id as _config_get_model_id, is_agent_enabled

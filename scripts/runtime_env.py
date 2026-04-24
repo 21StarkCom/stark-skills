@@ -3,7 +3,8 @@
 
 Controls which env vars reach CLI subprocesses, injects GitHub App tokens for
 operations that need repo access, manages process-scoped temp dirs, and
-enforces that ANTHROPIC_API_KEY never leaks into subprocesses.
+injects ANTHROPIC_API_KEY (from the ANTHROPIC_AGENTS host var) for the claude
+agent while keeping it out of codex/gemini subprocesses.
 """
 from __future__ import annotations
 
@@ -25,20 +26,19 @@ import github_app
 _GH_TOKEN_OPS: frozenset[str] = frozenset({"review"})
 
 # Operations using the user's native gh auth — no bot token injected.
-_USER_AUTH_OPS: frozenset[str] = frozenset({"pr_create", "issue_ops"})
+# "local" covers Claude callers that never touch GitHub (forge_fix_loop,
+# optimize_skill_description) and just need a sanitized subprocess env.
+_USER_AUTH_OPS: frozenset[str] = frozenset({"pr_create", "issue_ops", "local"})
 
-# Vertex AI config — mirrors claude_utils._VERTEX_ENV to avoid circular import.
-# These are injected unconditionally for the claude agent regardless of
-# whether the vars are already in os.environ.
-# Global region required for latest model versions (opus-4-6, sonnet-4-6).
-_VERTEX_ENV: dict[str, str] = {
-    "CLAUDE_CODE_USE_VERTEX": "1",
-    "ANTHROPIC_VERTEX_PROJECT_ID": "infra-ai-platform",
-    "CLOUD_ML_REGION": "global",
-}
+# Host env var holding the Anthropic API key. Read at dispatch time and
+# passed to the claude subprocess as ANTHROPIC_API_KEY; never reaches
+# codex or gemini subprocesses.
+_API_KEY_SOURCE_VAR = "ANTHROPIC_AGENTS"
 
-# This key must NEVER appear in any subprocess environment.
-_BLOCKED_KEY = "ANTHROPIC_API_KEY"
+# Host env keys that must NEVER appear in subprocess environments as-is.
+# ANTHROPIC_API_KEY: host value is unreliable — we re-inject from the source var.
+# ANTHROPIC_AGENTS: internal; never leaks verbatim.
+_BLOCKED_KEYS: frozenset[str] = frozenset({"ANTHROPIC_API_KEY", _API_KEY_SOURCE_VAR})
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +121,8 @@ def build_agent_env(agent: str, operation: str) -> dict[str, str]:
 
     Returns:
         A dict of env vars safe to pass to subprocess.Popen(env=...).
-        ANTHROPIC_API_KEY is never present.
+        ANTHROPIC_API_KEY is injected for the claude agent (sourced from
+        ANTHROPIC_AGENTS) and absent from codex/gemini envs.
         GH_TOKEN is present only when operation == "review".
     """
     runtime_cfg = get_runtime_config()
@@ -134,12 +135,18 @@ def build_agent_env(agent: str, operation: str) -> dict[str, str]:
     env: dict[str, str] = {
         k: v
         for k, v in os.environ.items()
-        if k in allowlist and k != _BLOCKED_KEY
+        if k in allowlist and k not in _BLOCKED_KEYS
     }
 
-    # Inject Vertex AI vars for the claude agent (unconditional — needed for ADC auth).
+    # Inject ANTHROPIC_API_KEY for the claude agent, sourced from ANTHROPIC_AGENTS.
     if agent == "claude":
-        env.update(_VERTEX_ENV)
+        source_key = os.environ.get(_API_KEY_SOURCE_VAR)
+        if not source_key:
+            raise RuntimeError(
+                f"{_API_KEY_SOURCE_VAR} not set in environment. "
+                "Source your Anthropic key file before dispatching claude."
+            )
+        env["ANTHROPIC_API_KEY"] = source_key
 
     # GH_TOKEN: inject bot token only for review operations.
     if operation in _GH_TOKEN_OPS:
@@ -152,8 +159,11 @@ def build_agent_env(agent: str, operation: str) -> dict[str, str]:
             file=sys.stderr,
         )
 
-    # Final safety rail — strip the API key even if it somehow slipped through.
-    env.pop(_BLOCKED_KEY, None)
+    # Final safety rail — never leak the raw source key var.
+    env.pop(_API_KEY_SOURCE_VAR, None)
+    # For non-claude agents, ensure ANTHROPIC_API_KEY is absent.
+    if agent != "claude":
+        env.pop("ANTHROPIC_API_KEY", None)
 
     # Temp dir lifecycle: create a process-scoped dir and inject its path.
     prefix = runtime_cfg.get("temp_dir_prefix", "stark-env")
