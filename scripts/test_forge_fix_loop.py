@@ -616,6 +616,23 @@ class TestMakeAnthropicClient:
         assert client is not None
         assert isinstance(client, Anthropic)
 
+    def test_returns_direct_client_from_anthropic_agents_source_key(self):
+        """The SDK path must preserve the old Claude dispatch auth contract:
+        local installs source the key as ANTHROPIC_AGENTS, and the old CLI
+        path injected that value as ANTHROPIC_API_KEY via runtime_env."""
+        from anthropic import Anthropic
+        from forge_fix_loop import _make_anthropic_client
+        with patch("forge_fix_loop._vertex_credentials_available", return_value=False), \
+             patch("forge_fix_loop._read_vertex_env", return_value={}), \
+             patch.dict(
+                 "os.environ",
+                 {"ANTHROPIC_AGENTS": "sk-test"},
+                 clear=True,
+             ):
+            client = _make_anthropic_client()
+        assert client is not None
+        assert isinstance(client, Anthropic)
+
     def test_vertex_wins_over_api_key_when_adc_available(self):
         from anthropic import AnthropicVertex
         from forge_fix_loop import _make_anthropic_client
