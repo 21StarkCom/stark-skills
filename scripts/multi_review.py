@@ -497,29 +497,49 @@ def detect_repo(cwd: str | None = None) -> str:
 
 
 def detect_base_branch(cwd: str | None = None) -> str:
-    """Detect the base branch (main or master)."""
+    """Detect the base branch from origin/HEAD or common default branch names."""
     try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--verify", "main"],
+        head_ref = subprocess.run(
+            ["git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
             capture_output=True,
             text=True,
             timeout=5,
             cwd=cwd,
         )
-        if result.returncode == 0:
-            return "main"
-        result = subprocess.run(
-            ["git", "rev-parse", "--verify", "master"],
+        if head_ref.returncode == 0:
+            ref = head_ref.stdout.strip()
+            if ref.startswith("origin/") and ref != "origin/HEAD":
+                return ref.split("/", 1)[1]
+
+        refs_result = subprocess.run(
+            [
+                "git",
+                "for-each-ref",
+                "--format=%(refname:short)",
+                "refs/heads",
+                "refs/remotes/origin",
+            ],
             capture_output=True,
             text=True,
             timeout=5,
             cwd=cwd,
         )
-        if result.returncode == 0:
-            return "master"
+        if refs_result.returncode == 0:
+            refs = {
+                line.strip().split("/", 1)[1] if line.strip().startswith("origin/") else line.strip()
+                for line in refs_result.stdout.splitlines()
+                if line.strip() and line.strip() != "origin/HEAD"
+            }
+            for candidate in ("main", "master", "trunk", "develop", "development"):
+                if candidate in refs:
+                    return candidate
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
-    return "main"
+
+    raise RuntimeError(
+        "Could not detect base branch from origin/HEAD or known default branch names. "
+        "Pass --base explicitly."
+    )
 
 
 def get_open_prs(repo: str) -> list[dict]:
@@ -601,6 +621,10 @@ def post_review(repo: str, pr_number: int, app: str, body: str) -> bool:
 # ── Findings parser ────────────────────────────────────────────────────
 
 
+class FindingsParseError(ValueError):
+    """Raised when reviewer output does not contain a valid findings array."""
+
+
 def _parse_findings(agent: str, domain: str, raw: str) -> list[Finding]:
     """Extract JSON findings from reviewer output."""
     cleaned = raw.strip()
@@ -620,14 +644,7 @@ def _parse_findings(agent: str, domain: str, raw: str) -> list[Finding]:
         except (json.JSONDecodeError, ValueError):
             pass
 
-    match = re.search(r"\[.*\]", cleaned, re.DOTALL)
-    if not match:
-        return []
-
-    try:
-        items = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return []
+    items = _extract_findings_payload(cleaned)
 
     findings = []
     for item in items:
@@ -646,6 +663,29 @@ def _parse_findings(agent: str, domain: str, raw: str) -> list[Finding]:
             )
         )
     return findings
+
+
+def _extract_findings_payload(cleaned: str) -> list[Any]:
+    decoder = json.JSONDecoder()
+
+    if cleaned.startswith("["):
+        try:
+            payload = json.loads(cleaned)
+        except json.JSONDecodeError as exc:
+            raise FindingsParseError(f"invalid JSON array: {exc}") from exc
+        if isinstance(payload, list):
+            return payload
+        raise FindingsParseError(f"expected JSON array, got {type(payload).__name__}")
+
+    for match in re.finditer(r"\[", cleaned):
+        try:
+            payload, _end = decoder.raw_decode(cleaned[match.start():])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, list):
+            return payload
+
+    raise FindingsParseError("no JSON findings array found in reviewer output")
 
 
 def apply_severity_overrides(
@@ -893,7 +933,31 @@ def _run_subagent_inner(
                     duration_s=time.time() - t0,
                 )
 
-            findings = _parse_findings(agent, domain_key, raw)
+            try:
+                findings = _parse_findings(agent, domain_key, raw)
+            except FindingsParseError as exc:
+                print(
+                    f"  [{agent}:{domain_key}] Parse error: {exc}",
+                    file=sys.stderr,
+                )
+                if attempt < max_attempts:
+                    backoff = 5 * attempt
+                    print(
+                        f"    {agent}:{domain_key} retrying after parse failure in {backoff}s "
+                        f"({attempt}/{max_attempts})...",
+                        file=sys.stderr,
+                    )
+                    time.sleep(backoff)
+                    continue
+                return SubAgentResult(
+                    agent=agent,
+                    domain=domain_key,
+                    raw_output=raw,
+                    findings=[],
+                    error=f"parse_error: {exc}",
+                    duration_s=time.time() - t0,
+                    api_key_fallback=used_api_key_fallback,
+                )
             return SubAgentResult(
                 agent=agent,
                 domain=domain_key,
@@ -2105,7 +2169,11 @@ def main() -> None:
         if not repo:
             print("Could not detect repo. Use --repo.", file=sys.stderr)
             sys.exit(1)
-        base = args.base or detect_base_branch(cwd=_git_root)
+        try:
+            base = args.base or detect_base_branch(cwd=_git_root)
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            sys.exit(1)
 
         review_fn = review_pr_single if args.single else review_pr
         review_kwargs: dict[str, Any] = {
@@ -2141,7 +2209,11 @@ def main() -> None:
                 print(f"  Skipping {repo_dir} (no git remote)", file=sys.stderr)
                 continue
 
-            base = detect_base_branch(repo_dir)
+            try:
+                base = detect_base_branch(repo_dir)
+            except RuntimeError as exc:
+                print(f"  Skipping {repo_dir} ({exc})", file=sys.stderr)
+                continue
             print(f"\n  Scanning {repo} for open PRs...")
             prs = get_open_prs(repo)
 

@@ -1,12 +1,21 @@
 import fs from "node:fs";
 import path from "node:path";
 
+export type SkillRefKind = "markdown" | "python";
+
 export type SkillBundle = {
   skillPath: string;
   refs: string[];
   missingRefs: string[];
+  refKinds: Record<string, SkillRefKind>;
   wordCount: number;
   lineCount: number;
+};
+
+export type BundleFile = {
+  path: string;
+  content: string;
+  kind: "markdown" | "python" | "text";
 };
 
 const IGNORE_DIRS = new Set([
@@ -19,6 +28,30 @@ const IGNORE_DIRS = new Set([
   "dist",
   "node_modules",
 ]);
+
+const ROOT_RELATIVE_PREFIXES = [
+  "automation/",
+  "config/",
+  "data/",
+  "docs/",
+  "global/",
+  "org/",
+  "scripts/",
+  "skill/",
+  "standards/",
+  "tests/",
+  "tools/",
+];
+
+const SCRIPT_INSTALL_PREFIXES = [
+  "~/.claude/code-review/scripts/",
+  "$HOME/.claude/code-review/scripts/",
+  "${HOME}/.claude/code-review/scripts/",
+  "$SCRIPTS/",
+  "${SCRIPTS}/",
+];
+
+const ROOT_INSTALL_PREFIXES = ["$ROOT/", "${ROOT}/"];
 
 /**
  * Walk up from `start` until a `.git/` entry is found. Returns `null` when
@@ -85,11 +118,12 @@ export function listSkillPaths(repoRoot: string): string[] {
 
 export function buildBundle(repoRoot: string, skillPath: string): SkillBundle {
   const raw = fs.readFileSync(skillPath, "utf8");
-  const refs = resolveRefs(repoRoot, skillPath, raw);
+  const refs = inspectLocalRefs(repoRoot, skillPath, raw);
   return {
     skillPath: rel(repoRoot, skillPath),
     refs: refs.found,
     missingRefs: refs.missing,
+    refKinds: refs.refKinds,
     wordCount: countWords(raw),
     lineCount: raw.split(/\r?\n/).length,
   };
@@ -123,10 +157,11 @@ export function hasBrokenRefs(bundles: SkillBundle[]): boolean {
 export function loadBundleFiles(
   repoRoot: string,
   bundle: SkillBundle,
-): Array<{ path: string; content: string }> {
+): BundleFile[] {
   return [bundle.skillPath, ...bundle.refs].map((file) => ({
     path: file,
     content: fs.readFileSync(path.join(repoRoot, file), "utf8"),
+    kind: detectFileKind(file),
   }));
 }
 
@@ -155,6 +190,19 @@ export function resolveSkillTarget(
     );
   }
   return matches[0];
+}
+
+export function detectFileKind(
+  filePath: string,
+): "markdown" | "python" | "text" {
+  const lowered = filePath.toLowerCase();
+  if (lowered.endsWith(".md")) {
+    return "markdown";
+  }
+  if (lowered.endsWith(".py")) {
+    return "python";
+  }
+  return "text";
 }
 
 /**
@@ -216,54 +264,183 @@ export function parseMarkdownLinkTargets(content: string): string[] {
   return [...targets];
 }
 
-function resolveRefs(
+export function inspectLocalRefs(
   repoRoot: string,
-  skillPath: string,
+  sourcePath: string,
   raw: string,
+  options?: {
+    fileExists?: (absolutePath: string) => boolean;
+  },
 ): {
   found: string[];
   missing: string[];
+  refKinds: Record<string, SkillRefKind>;
 } {
-  const skillDir = path.dirname(skillPath);
-  const rawRefs = new Set(parseMarkdownLinkTargets(raw));
+  const absoluteSourcePath = path.isAbsolute(sourcePath)
+    ? sourcePath
+    : path.join(repoRoot, sourcePath);
+  const sourceDir = path.dirname(absoluteSourcePath);
+  const fileExists = options?.fileExists ?? defaultFileExists;
+  const candidates = new Map<string, { kind: SkillRefKind; source: "link" | "text" }>();
 
+  for (const rawRef of parseMarkdownLinkTargets(raw)) {
+    addCandidate(candidates, rawRef, "link");
+  }
+  for (const match of raw.matchAll(/([~$./A-Za-z0-9_-]+\/[~$./A-Za-z0-9_-]*\.py)/g)) {
+    addCandidate(candidates, match[1], "text");
+  }
+  for (const match of raw.matchAll(/\b([A-Za-z0-9_.-]+\.py)\b/g)) {
+    addCandidate(candidates, match[1], "text");
+  }
+
+  const repoRootReal = fs.realpathSync(repoRoot);
   const found = new Set<string>();
   const missing = new Set<string>();
+  const refKinds: Record<string, SkillRefKind> = {};
 
-  for (const rawRef of rawRefs) {
-    if (!isLocalMarkdownRef(rawRef)) {
+  for (const [rawRef, candidate] of candidates) {
+    if (!isSupportedLocalRef(rawRef)) {
       continue;
     }
-    const resolved = path.resolve(skillDir, rawRef.split("#", 1)[0]);
-    if (!resolved.startsWith(repoRoot + path.sep) && resolved !== repoRoot) {
-      missing.add(rel(repoRoot, resolved));
+    const resolved = resolveLocalRef(repoRoot, sourceDir, rawRef, candidate.source, fileExists);
+    if (!resolved) {
       continue;
     }
-    if (
-      fs.existsSync(resolved) &&
-      fs.lstatSync(resolved).isFile() &&
-      fs.realpathSync(resolved).startsWith(fs.realpathSync(repoRoot) + path.sep)
-    ) {
-      found.add(rel(repoRoot, resolved));
-    } else {
-      missing.add(rel(repoRoot, resolved));
+    if (!isWithinRepo(repoRoot, resolved)) {
+      continue;
     }
+    const resolvedRel = rel(repoRoot, resolved);
+    if (fileExists(resolved) && fs.realpathSync(resolved).startsWith(repoRootReal + path.sep)) {
+      found.add(resolvedRel);
+      refKinds[resolvedRel] = candidate.kind;
+      continue;
+    }
+    missing.add(resolvedRel);
   }
 
   return {
     found: [...found].sort(),
     missing: [...missing].sort(),
+    refKinds,
   };
 }
 
-function isLocalMarkdownRef(ref: string): boolean {
+function addCandidate(
+  candidates: Map<string, { kind: SkillRefKind; source: "link" | "text" }>,
+  rawRef: string,
+  source: "link" | "text",
+): void {
+  const normalized = stripWrappers(rawRef);
+  const kind = inferRefKind(normalized);
+  if (!kind) {
+    return;
+  }
+  const existing = candidates.get(normalized);
+  if (!existing || existing.source === "text") {
+    candidates.set(normalized, { kind, source });
+  }
+}
+
+function inferRefKind(ref: string): SkillRefKind | null {
+  const lowered = ref.toLowerCase();
+  if (lowered.endsWith(".py")) {
+    return "python";
+  }
+  if (lowered.endsWith(".md") || lowered.includes(".md#")) {
+    return "markdown";
+  }
+  return null;
+}
+
+function isSupportedLocalRef(ref: string): boolean {
   if (!ref || ref.startsWith("#")) {
     return false;
   }
-  if (/^[a-z]+:/i.test(ref)) {
+  if (ref.includes("://")) {
     return false;
   }
-  return ref.toLowerCase().endsWith(".md") || ref.toLowerCase().includes(".md#");
+  const lowered = ref.toLowerCase();
+  return (
+    lowered.endsWith(".md") ||
+    lowered.includes(".md#") ||
+    lowered.endsWith(".py")
+  );
+}
+
+function resolveLocalRef(
+  repoRoot: string,
+  sourceDir: string,
+  rawRef: string,
+  source: "link" | "text",
+  fileExists: (absolutePath: string) => boolean,
+): string | null {
+  const normalized = normalizeRef(rawRef);
+  if (!normalized || normalized.startsWith("/") || normalized.startsWith("~/git/")) {
+    return null;
+  }
+
+  for (const prefix of SCRIPT_INSTALL_PREFIXES) {
+    if (normalized.startsWith(prefix)) {
+      return path.join(repoRoot, "scripts", normalized.slice(prefix.length));
+    }
+  }
+
+  for (const prefix of ROOT_INSTALL_PREFIXES) {
+    if (normalized.startsWith(prefix)) {
+      return path.join(repoRoot, normalized.slice(prefix.length));
+    }
+  }
+
+  if (normalized.startsWith("$") || normalized.startsWith("~/")) {
+    return null;
+  }
+
+  if (normalized.startsWith("./") || normalized.startsWith("../")) {
+    return path.resolve(sourceDir, normalized);
+  }
+
+  if (normalized.startsWith("references/")) {
+    return path.resolve(sourceDir, normalized);
+  }
+
+  if (ROOT_RELATIVE_PREFIXES.some((prefix) => normalized.startsWith(prefix))) {
+    if (source === "text" && !normalized.startsWith("scripts/")) {
+      return null;
+    }
+    return path.join(repoRoot, normalized);
+  }
+
+  if (!normalized.includes("/")) {
+    const localCandidate = path.resolve(sourceDir, normalized);
+    if (source === "link" || fileExists(localCandidate)) {
+      return localCandidate;
+    }
+    if (normalized.toLowerCase().endsWith(".py")) {
+      const scriptCandidate = path.join(repoRoot, "scripts", normalized);
+      if (fileExists(scriptCandidate)) {
+        return scriptCandidate;
+      }
+    }
+    return null;
+  }
+
+  const localCandidate = path.resolve(sourceDir, normalized);
+  if (isWithinRepo(repoRoot, localCandidate) && (source === "link" || fileExists(localCandidate))) {
+    return localCandidate;
+  }
+  return null;
+}
+
+function normalizeRef(rawRef: string): string {
+  return stripWrappers(rawRef).split("#", 1)[0].replace(/^['"`]+|['"`]+$/g, "");
+}
+
+function isWithinRepo(repoRoot: string, absolutePath: string): boolean {
+  return absolutePath === repoRoot || absolutePath.startsWith(repoRoot + path.sep);
+}
+
+function defaultFileExists(absolutePath: string): boolean {
+  return fs.existsSync(absolutePath) && fs.statSync(absolutePath).isFile();
 }
 
 function stripWrappers(input: string): string {
