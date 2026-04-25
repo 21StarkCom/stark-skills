@@ -1359,8 +1359,17 @@ def _history_dir(repo: str, pr_number: int) -> Path:
 
 
 def _next_round_num(repo: str, pr_number: int) -> int:
-    """Return the next unused round number based on existing history files."""
-    d = _history_dir(repo, pr_number)
+    """Return the next unused round number based on existing history files.
+
+    Read-only: does not create the history dir. With persist_history=False
+    callers shouldn't leave an empty directory behind just because they
+    asked for a round number.
+    """
+    parts = repo.split("/")
+    d = HISTORY_DIR / parts[0] / parts[1] / str(pr_number) if len(parts) == 2 \
+        else HISTORY_DIR / repo / str(pr_number)
+    if not d.is_dir():
+        return 1
     nums: list[int] = []
     for p in d.glob("round-*.json"):
         try:

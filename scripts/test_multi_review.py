@@ -559,6 +559,12 @@ class TestHistoryPersistence:
         with patch.object(multi_review, "HISTORY_DIR", tmp_path):
             assert multi_review._next_round_num("GetEvinced/test", 99) == 1
 
+    def test_next_round_num_does_not_create_dir(self, tmp_path):
+        """Auto-detect must not leave an empty history dir behind on miss."""
+        with patch.object(multi_review, "HISTORY_DIR", tmp_path):
+            assert multi_review._next_round_num("GetEvinced/test", 99) == 1
+        assert not (tmp_path / "GetEvinced").exists(), "should not pre-create the org dir"
+
     def test_next_round_num_increments(self, tmp_path):
         with patch.object(multi_review, "HISTORY_DIR", tmp_path):
             d = multi_review._history_dir("GetEvinced/test", 99)
