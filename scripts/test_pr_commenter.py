@@ -25,6 +25,8 @@ sys.path.insert(0, str(_scripts))
 from graph.model import BlastRadius, DiffReport, ValidationReport
 from graph.pr_commenter import (
     MARKER,
+    MAX_BODY_CHARS,
+    MAX_LIST_ITEMS,
     _details_table,
     _find_marker_comment_id,
     _request_with_retry,
@@ -153,6 +155,66 @@ class TestDetailsTable:
     def test_item_html_escaped(self):
         out = _details_table("T", ["<xss>"])
         assert "<xss>" not in out
+
+    def test_caps_visible_rows_at_max_list_items(self):
+        items = [f"item-{i}" for i in range(MAX_LIST_ITEMS + 25)]
+        out = _details_table("Big list", items)
+        # Summary still shows the full count.
+        assert f"({MAX_LIST_ITEMS + 25})" in out
+        # Last visible row is the cap; the row beyond it is hidden.
+        assert f"item-{MAX_LIST_ITEMS - 1}" in out
+        assert f"item-{MAX_LIST_ITEMS}" not in out
+        assert "and 25 more" in out
+
+    def test_no_overflow_marker_when_at_or_below_cap(self):
+        items = [f"item-{i}" for i in range(MAX_LIST_ITEMS)]
+        out = _details_table("Small list", items)
+        assert "more" not in out
+
+
+# ── body truncation ──────────────────────────────────────────────────────
+
+
+class TestBodyTruncation:
+    def test_normal_body_unchanged(self):
+        diff = DiffReport(base_ref="a", head_ref="b", added_nodes=["X"])
+        body = render_markdown(diff=diff)
+        assert len(body) <= MAX_BODY_CHARS
+        assert "truncated" not in body
+
+    def test_per_section_caps_keep_body_under_limit(self):
+        # Many added nodes/edges + many errors/warnings — without caps this
+        # would blow past 65,536 chars (this is the production failure mode).
+        diff = DiffReport(
+            base_ref="main",
+            head_ref="feature",
+            added_nodes=[f"pkg.mod.Class{i}" for i in range(800)],
+            added_edges=[f"pkg.mod.A{i} -> pkg.mod.B{i}:imports" for i in range(2000)],
+        )
+        validation = ValidationReport(
+            graph_repo="org/repo",
+            node_count=10_000,
+            edge_count=25_000,
+            errors=[f"STALE: pkg.mod.Class{i}::method_{i}" for i in range(500)],
+            warnings=[f"MISSING: pkg.mod.helper_{i}" for i in range(3000)],
+        )
+        body = render_markdown(diff=diff, validation=validation)
+        assert len(body) <= MAX_BODY_CHARS
+        # Caps engaged: overflow markers present in each oversized section.
+        assert "and 750 more" in body  # 800 added nodes - 50 cap
+        assert "and 1950 more" in body  # 2000 edges - 50
+        assert "and 450 more" in body  # 500 errors - 50
+        assert "and 2950 more" in body  # 3000 warnings - 50
+
+    def test_pathological_body_falls_back_to_truncation_footer(self):
+        # Single oversized node ID can't be capped by the per-section logic
+        # alone; the final safety net must clamp the body.
+        huge_id = "x" * (MAX_BODY_CHARS * 2)
+        diff = DiffReport(base_ref="a", head_ref="b", added_nodes=[huge_id])
+        body = render_markdown(diff=diff)
+        assert len(body) <= MAX_BODY_CHARS
+        assert "truncated" in body
+        assert MARKER in body  # marker must survive truncation
 
 
 # ── _request_with_retry ───────────────────────────────────────────────────

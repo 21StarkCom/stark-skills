@@ -29,6 +29,15 @@ if TYPE_CHECKING:
 # Hidden HTML comment used to find our comment for idempotent updates
 MARKER = "<!-- stark-graph-comment -->"
 
+# GitHub rejects issue/PR comment bodies > 65,536 chars with HTTP 422. Cap the
+# rendered body well below that and reserve room for a truncation footer.
+MAX_BODY_CHARS = 65_536
+TRUNCATION_BUDGET = MAX_BODY_CHARS - 1024
+# Per-section list cap so the body stays roughly proportional and readable.
+# Beyond this, sections collapse into "…and N more" and rely on the workflow
+# artifact for full data.
+MAX_LIST_ITEMS = 50
+
 # Retry / timeout settings
 MAX_TOTAL_SLEEP = 120   # seconds budget per request's retry loop
 PER_REQUEST_TIMEOUT = 10  # seconds per individual HTTP call
@@ -46,15 +55,41 @@ def _esc(text: str) -> str:
     return html.escape(str(text))
 
 
-def _details_table(title: str, items: list[str]) -> str:
-    """Render a collapsed <details> block with items as a single-column table."""
+def _details_table(title: str, items: list[str], max_items: int = MAX_LIST_ITEMS) -> str:
+    """Render a collapsed <details> block with items as a single-column table.
+
+    Caps visible rows at *max_items* so the comment stays under GitHub's
+    65,536-char body limit; the summary still reflects the true total.
+    """
     if not items:
         return ""
-    rows = "\n".join(f"| `{_esc(item)}` |" for item in items)
+    total = len(items)
+    shown = items[:max_items]
+    rows = "\n".join(f"| `{_esc(item)}` |" for item in shown)
+    if total > max_items:
+        rows += f"\n| _…and {total - max_items} more (see artifact)_ |"
     return (
-        f"\n<details><summary>{_esc(title)} ({len(items)})</summary>\n\n"
+        f"\n<details><summary>{_esc(title)} ({total})</summary>\n\n"
         f"| ID |\n|----|\n{rows}\n\n"
         f"</details>\n"
+    )
+
+
+def _truncate_body(body: str) -> str:
+    """Truncate the rendered body to GitHub's comment limit if necessary.
+
+    The per-list caps in `_details_table` and the errors/warnings lists keep
+    most bodies under the limit. This is a final safety net for pathological
+    cases (e.g., one huge node ID) so we never POST a body that GitHub rejects.
+    """
+    if len(body) <= MAX_BODY_CHARS:
+        return body
+    truncated = body[:TRUNCATION_BUDGET].rsplit("\n", 1)[0]
+    return (
+        truncated
+        + "\n\n_⚠️ Comment body exceeded GitHub's 65,536-char limit and was "
+        + "truncated. Download the `graph-review-<pr>` workflow artifact "
+        + "for the full report._\n"
     )
 
 
@@ -91,14 +126,22 @@ def render_markdown(
         )
         if validation.errors:
             parts.append(f"\n**Errors** ({len(validation.errors)}):\n")
-            parts.extend(f"- {_esc(e)}\n" for e in validation.errors)
+            parts.extend(f"- {_esc(e)}\n" for e in validation.errors[:MAX_LIST_ITEMS])
+            if len(validation.errors) > MAX_LIST_ITEMS:
+                parts.append(
+                    f"- _…and {len(validation.errors) - MAX_LIST_ITEMS} more (see artifact)_\n"
+                )
         if validation.warnings:
             parts.append(f"\n**Warnings** ({len(validation.warnings)}):\n")
-            parts.extend(f"- {_esc(w)}\n" for w in validation.warnings)
+            parts.extend(f"- {_esc(w)}\n" for w in validation.warnings[:MAX_LIST_ITEMS])
+            if len(validation.warnings) > MAX_LIST_ITEMS:
+                parts.append(
+                    f"- _…and {len(validation.warnings) - MAX_LIST_ITEMS} more (see artifact)_\n"
+                )
         if not validation.errors and not validation.warnings:
             parts.append("\n✅ No errors or warnings.\n")
 
-    return "".join(parts)
+    return _truncate_body("".join(parts))
 
 
 # ── HTTP with retry ──────────────────────────────────────────────────────
