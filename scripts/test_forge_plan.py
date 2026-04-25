@@ -508,3 +508,178 @@ class TestPlanReviewFixDispatchNoop:
 
         assert result.status == "completed"
         assert not any(r.get("fix_dispatch_noop") for r in result.rounds)
+
+
+class TestPlanReviewFixTimeoutTiering:
+    """Plan-review fix-dispatch must use ``fix_timeout`` instead of the
+    shared ``timeout`` used for per-domain review dispatches, for the same
+    reason as the design-review path: the rewrite is output-bound on the
+    full plan, not on a per-domain audit."""
+
+    def _dispatch_with_finding(self) -> dict:
+        return {
+            "results": [
+                {
+                    "agent": "claude",
+                    "domain": "general",
+                    "findings": [
+                        {"severity": "high", "title": "Critical gap", "section": "S1"},
+                    ],
+                }
+            ]
+        }
+
+    def test_apply_fixes_receives_fix_timeout_not_review_timeout(
+        self, plan_file, minimal_state, tmp_path
+    ):
+        cfg = {
+            "max_rounds": 2,
+            "fix_threshold": "medium",
+            "timeout": 60,
+            "fix_timeout": 321,
+            "plan_review_routing": {"general": "claude"},
+            "agent_fallback_order": ["claude"],
+        }
+
+        captured_kwargs: dict = {}
+
+        def capture_apply(*args, **kwargs):
+            captured_kwargs.update(kwargs)
+            return ("# new plan body", True)
+
+        with (
+            patch(
+                "forge_plan._dispatch_plan_review",
+                return_value=self._dispatch_with_finding(),
+            ),
+            patch(
+                "forge_plan._discover_plan_review_domains",
+                return_value={
+                    "general": {"order": "01", "filename": "general.md"},
+                },
+            ),
+            patch("forge_plan._git_commit", return_value="sha"),
+            patch("forge_fix_loop.apply_fixes", side_effect=capture_apply),
+        ):
+            run_plan_review(plan_file, minimal_state, cfg, tmp_path)
+
+        assert captured_kwargs.get("timeout") == 321, (
+            "plan-review fix-dispatch must use cfg['fix_timeout'], not cfg['timeout']"
+        )
+
+    def test_fix_timeout_defaults_to_900_when_unset(
+        self, plan_file, minimal_state, tmp_path
+    ):
+        cfg = {
+            "max_rounds": 2,
+            "fix_threshold": "medium",
+            "timeout": 60,
+            # fix_timeout deliberately absent
+            "plan_review_routing": {"general": "claude"},
+            "agent_fallback_order": ["claude"],
+        }
+
+        captured_kwargs: dict = {}
+
+        def capture_apply(*args, **kwargs):
+            captured_kwargs.update(kwargs)
+            return ("# new plan body", True)
+
+        with (
+            patch(
+                "forge_plan._dispatch_plan_review",
+                return_value=self._dispatch_with_finding(),
+            ),
+            patch(
+                "forge_plan._discover_plan_review_domains",
+                return_value={
+                    "general": {"order": "01", "filename": "general.md"},
+                },
+            ),
+            patch("forge_plan._git_commit", return_value="sha"),
+            patch("forge_fix_loop.apply_fixes", side_effect=capture_apply),
+        ):
+            run_plan_review(plan_file, minimal_state, cfg, tmp_path)
+
+        assert captured_kwargs.get("timeout") == 900, (
+            "fix-dispatch should default to 900s when fix_timeout is unset"
+        )
+
+
+class TestPlanReviewReviewTimeoutResolution:
+    """Per-domain plan-review dispatch honors ``review_timeout`` when set,
+    falls back to legacy ``timeout``, and defaults to 300s."""
+
+    def _dispatch_clean(self) -> dict:
+        return {
+            "results": [
+                {"agent": "claude", "domain": "general", "findings": []}
+            ]
+        }
+
+    def _run_and_capture_dispatch_timeout(
+        self, cfg, plan_file, minimal_state, tmp_path,
+    ) -> int | None:
+        captured: dict = {}
+
+        def capture_dispatch(*args, **kwargs):
+            captured["timeout"] = kwargs.get("timeout")
+            return self._dispatch_clean()
+
+        with (
+            patch(
+                "forge_plan._dispatch_plan_review",
+                side_effect=capture_dispatch,
+            ),
+            patch(
+                "forge_plan._discover_plan_review_domains",
+                return_value={
+                    "general": {"order": "01", "filename": "general.md"},
+                },
+            ),
+        ):
+            run_plan_review(plan_file, minimal_state, cfg, tmp_path)
+
+        return captured.get("timeout")
+
+    def test_review_timeout_wins_over_legacy_timeout(
+        self, plan_file, minimal_state, tmp_path,
+    ):
+        cfg = {
+            "max_rounds": 1,
+            "fix_threshold": "medium",
+            "review_timeout": 789,
+            "timeout": 60,
+            "plan_review_routing": {"general": "claude"},
+            "agent_fallback_order": ["claude"],
+        }
+        assert self._run_and_capture_dispatch_timeout(
+            cfg, plan_file, minimal_state, tmp_path,
+        ) == 789
+
+    def test_falls_back_to_legacy_timeout_when_review_timeout_absent(
+        self, plan_file, minimal_state, tmp_path,
+    ):
+        cfg = {
+            "max_rounds": 1,
+            "fix_threshold": "medium",
+            "timeout": 150,
+            "plan_review_routing": {"general": "claude"},
+            "agent_fallback_order": ["claude"],
+        }
+        assert self._run_and_capture_dispatch_timeout(
+            cfg, plan_file, minimal_state, tmp_path,
+        ) == 150
+
+    def test_defaults_to_300_when_neither_key_set(
+        self, plan_file, minimal_state, tmp_path,
+    ):
+        cfg = {
+            "max_rounds": 1,
+            "fix_threshold": "medium",
+            "plan_review_routing": {"general": "claude"},
+            "agent_fallback_order": ["claude"],
+        }
+        assert self._run_and_capture_dispatch_timeout(
+            cfg, plan_file, minimal_state, tmp_path,
+        ) == 300

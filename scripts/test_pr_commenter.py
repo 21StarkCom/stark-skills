@@ -25,6 +25,7 @@ sys.path.insert(0, str(_scripts))
 from graph.model import BlastRadius, DiffReport, ValidationReport
 from graph.pr_commenter import (
     MARKER,
+    MAX_COMMENT_CHARS,
     _details_table,
     _find_marker_comment_id,
     _request_with_retry,
@@ -153,6 +154,28 @@ class TestDetailsTable:
     def test_item_html_escaped(self):
         out = _details_table("T", ["<xss>"])
         assert "<xss>" not in out
+
+    def test_large_details_table_is_limited(self):
+        out = _details_table("Items", [f"item-{i}" for i in range(105)], limit=100)
+        assert "item-99" in out
+        assert "item-100" not in out
+        assert "5 more omitted" in out
+
+    def test_large_report_stays_under_comment_limit(self):
+        diff = DiffReport(
+            base_ref="a",
+            head_ref="b",
+            added_nodes=[f"node-{i}" for i in range(1000)],
+            added_edges=[f"edge-{i}" for i in range(1000)],
+        )
+        validation = ValidationReport(
+            graph_repo="r",
+            errors=[f"error-{i}" for i in range(1000)],
+            warnings=[f"warning-{i}" for i in range(1000)],
+        )
+        md = render_markdown(diff=diff, validation=validation)
+        assert len(md) <= MAX_COMMENT_CHARS
+        assert "900 more omitted" in md
 
 
 # ── _request_with_retry ───────────────────────────────────────────────────
@@ -379,6 +402,16 @@ class TestGithubAppEnvVarAuth:
         with pytest.raises(KeyError):
             github_app._get_private_key_from_env()
 
+    def test_get_private_key_from_env_raises_key_error_when_empty(self, monkeypatch):
+        import github_app
+
+        monkeypatch.setenv("STARK_PRIVATE_KEY_B64", "")
+        monkeypatch.setenv("STARK_APP_ID", "")
+        monkeypatch.setenv("STARK_INSTALL_ID", "")
+
+        with pytest.raises(KeyError):
+            github_app._get_private_key_from_env()
+
     def test_get_token_falls_back_to_gh_token(self, monkeypatch):
         import github_app
 
@@ -392,6 +425,23 @@ class TestGithubAppEnvVarAuth:
             patch.object(github_app, "subprocess") as mock_sub,
         ):
             mock_sub.run.return_value = Mock(returncode=1, stderr="not found")
+            token = github_app.get_token()
+
+        assert token == "ghp_fallback"
+
+    def test_get_token_falls_back_to_gh_token_when_security_binary_missing(self, monkeypatch):
+        import github_app
+
+        monkeypatch.setenv("GH_TOKEN", "ghp_fallback")
+        monkeypatch.delenv("STARK_PRIVATE_KEY_B64", raising=False)
+        monkeypatch.delenv("STARK_APP_ID", raising=False)
+        monkeypatch.delenv("STARK_INSTALL_ID", raising=False)
+
+        with (
+            patch.object(github_app, "_read_cached_token", return_value=None),
+            patch.object(github_app, "subprocess") as mock_sub,
+        ):
+            mock_sub.run.side_effect = FileNotFoundError("security")
             token = github_app.get_token()
 
         assert token == "ghp_fallback"

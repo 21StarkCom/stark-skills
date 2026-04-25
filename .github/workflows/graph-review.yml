@@ -123,18 +123,62 @@ jobs:
           name: graph-review-${{ github.event.pull_request.number }}
           path: ${{ env.ARTIFACT_DIR }}
 
+      - name: Check graph comment size
+        id: graph-comment-size
+        shell: bash
+        run: |
+          set -euo pipefail
+          python <<'PY' >> "$GITHUB_OUTPUT"
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, "scripts")
+          from graph.model import DiffReport, ValidationReport
+          from graph.pr_commenter import render_markdown
+
+          artifact_dir = Path("graph-artifacts")
+          diff = DiffReport.model_validate_json((artifact_dir / "diff_report.json").read_text())
+          validation = ValidationReport.model_validate_json((artifact_dir / "validation_report.json").read_text())
+          body = render_markdown(diff=diff, validation=validation)
+          limit = 60000
+          print(f"body_chars={len(body)}")
+          print(f"limit={limit}")
+          print(f"should_post={'true' if len(body) <= limit else 'false'}")
+          PY
+
+      - name: Skip oversized graph comment
+        if: steps.graph-comment-size.outputs.should_post != 'true'
+        shell: bash
+        run: |
+          {
+            echo "### stark-graph comment skipped"
+            echo
+            echo "Rendered comment was ${{ steps.graph-comment-size.outputs.body_chars }} characters, above the ${{ steps.graph-comment-size.outputs.limit }} character safety limit."
+            echo "Graph artifacts are still uploaded for inspection, and the graph gate result is unaffected."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install Linux keychain shim
+        if: steps.graph-comment-size.outputs.should_post == 'true' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v security >/dev/null 2>&1; then
+            exit 0
+          fi
+          shim_dir="$RUNNER_TEMP/stark-keychain-shim"
+          mkdir -p "$shim_dir"
+          cat > "$shim_dir/security" <<'EOF'
+          #!/usr/bin/env bash
+          echo "security: macOS Keychain is unavailable on this runner" >&2
+          exit 1
+          EOF
+          chmod +x "$shim_dir/security"
+          echo "$shim_dir" >> "$GITHUB_PATH"
+
       - name: Post or update graph comment
+        if: steps.graph-comment-size.outputs.should_post == 'true'
         env:
-          STARK_APP_ID: ${{ secrets.STARK_APP_ID }}
-          STARK_INSTALL_ID: ${{ secrets.STARK_INSTALL_ID }}
-          STARK_PRIVATE_KEY_B64: ${{ secrets.STARK_PRIVATE_KEY_B64 }}
-          # Final fallback for github_app.get_token() when STARK_* secrets
-          # aren't configured. The default GITHUB_TOKEN has pull-requests:
-          # write (declared above) — enough to post the comment via REST.
-          # Without this, the keychain → env-var → GH_TOKEN chain runs out
-          # of options on a fresh repo and `Post graph comment` fails for
-          # every PR with "No GitHub auth available".
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           python scripts/graph/pr_commenter.py \
             --repo "$REPO_NAME" \
