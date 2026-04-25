@@ -396,7 +396,7 @@ def _open_dispatch_log(
 
 
 _FIX_MODEL_ENV = "FORGE_FIX_MODEL"
-_FIX_MODEL_DEFAULT = "claude-opus-4-6"
+_FIX_MODEL_DEFAULT = "claude-opus-4-7"
 _FIX_MAX_TOKENS = 16000
 
 

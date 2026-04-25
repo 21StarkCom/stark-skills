@@ -520,7 +520,7 @@ class TestDispatchFixAgentLogging:
         with patch("forge_fix_loop._make_anthropic_client", return_value=client):
             _dispatch_fix_agent("p", timeout=60)
         call_kwargs = client.messages.create.call_args.kwargs
-        assert call_kwargs["model"] == "claude-opus-4-6"
+        assert call_kwargs["model"] == "claude-opus-4-7"
 
     def test_apply_fixes_passes_log_context_through(self, tmp_path):
         """apply_fixes should derive a default log_dir + log_name from
