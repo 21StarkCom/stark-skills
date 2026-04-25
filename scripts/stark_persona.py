@@ -696,7 +696,10 @@ def _persist_selection(
             "is_combo": is_combo,
             "weight_at_selection": new_weight,
             "date_signal_matched": date_signal_matched,
-            "session_id": session_id,
+            # NOTE: distinct from EventEnvelope.session_id (UUID) — this is
+            # the producer-local sqlite rowid, renamed to avoid shadowing
+            # the canonical column used by stark-insights' aggregation views.
+            "persona_session_id": session_id,
         },
         dedupe_key=_make_dedupe_key("selection", session_id),
     )
@@ -854,7 +857,7 @@ def select_combo(
             "is_combo": True,
             "weight_at_selection": compute_weight(_get_persona_stats(conn, primary.slug)),
             "date_signal_matched": False,
-            "session_id": session_id,
+            "persona_session_id": session_id,
         },
         dedupe_key=_make_dedupe_key("selection", session_id),
     )
@@ -997,7 +1000,7 @@ def record_rating(
         payload={
             "persona": slug,
             "rating": rating,
-            "session_id": session_id,
+            "persona_session_id": session_id,
         },
         dedupe_key=_make_dedupe_key("rating", session_id),
     )
@@ -1076,7 +1079,7 @@ def cmd_deactivate(args: argparse.Namespace) -> int:
         subtype="deactivation",
         payload={
             "persona": persona,
-            "session_id": session_id,
+            "persona_session_id": session_id,
         },
         dedupe_key=_make_dedupe_key("deactivation", session_id),
     )
@@ -1118,7 +1121,7 @@ def record_survey_answer(
         payload={
             "question": question,
             "answer": answer,
-            "session_id": session_id,
+            "persona_session_id": session_id,
         },
         dedupe_key=_make_dedupe_key("survey_response", session_id),
     )
