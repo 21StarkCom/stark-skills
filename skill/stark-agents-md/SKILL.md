@@ -54,55 +54,18 @@ In **review mode**, record the detected state and continue through the analysis 
 
 ### Phase 0b: Apply Migration (authoring or refactor only)
 
-When the user has explicitly asked to create or refactor (not review-only), and after confirming, execute the migration matching the detected state. Each step must be fail-closed — if any sub-step fails, stop and leave the prior file state intact:
+When the user has explicitly asked to create or refactor (not review-only), and after confirming, execute the migration matching the detected state. Every recipe is **fail-closed**: any sub-step failure (or `INT`) restores the pre-migration state. The recipes also refuse to start if any reserved temp/backup path is already taken.
 
-1. **(A)** Offer to create `AGENTS.md` and symlink `CLAUDE.md` to it.
-2. **(B)** Create the symlink: `ln -s AGENTS.md CLAUDE.md`.
-3. **(C)** Migrate with rollback: refuse to start if any reserved path is taken, back up `CLAUDE.md`, stage `AGENTS.md` and the symlink, and on any failure undo every step that already ran so the repo never lands half-converted. Phase 0 already established that `AGENTS.md` does not exist in state (C), so any `AGENTS.md` present at trap time was created by this run and is safe to remove. Concretely:
+| State | Action |
+|-------|--------|
+| (A) Neither exists | Create `AGENTS.md` from Phase 1 answers, then `ln -s AGENTS.md CLAUDE.md` |
+| (B) Only `AGENTS.md` | `ln -s AGENTS.md CLAUDE.md` |
+| (C) Only `CLAUDE.md` | Backup-and-rollback swap into `AGENTS.md` + symlink (see references/migration.md) |
+| (D) `CLAUDE.md` is symlink | No action |
+| (E) equivalent | Backup-and-rollback replace `CLAUDE.md` with symlink (see references/migration.md) |
+| (E) divergent | Stop and surface the diff — do not merge. See [Cross-Tool Compatibility](#cross-tool-compatibility). |
 
-   ```bash
-   set -e
-   for f in AGENTS.md AGENTS.md.tmp CLAUDE.md.tmp CLAUDE.md.bak; do
-     if [ -e "$f" ] || [ -L "$f" ]; then
-       echo "Refusing to migrate: $f already exists" >&2
-       exit 1
-     fi
-   done
-   cp -p CLAUDE.md CLAUDE.md.bak
-   trap '
-     rm -f AGENTS.md.tmp CLAUDE.md.tmp
-     [ -e AGENTS.md ] && rm -f AGENTS.md
-     [ -e CLAUDE.md.bak ] && mv -f CLAUDE.md.bak CLAUDE.md
-     exit 1
-   ' ERR INT
-   cp CLAUDE.md AGENTS.md.tmp
-   ln -s AGENTS.md CLAUDE.md.tmp
-   mv AGENTS.md.tmp AGENTS.md
-   mv -f CLAUDE.md.tmp CLAUDE.md      # overwrites the regular file with the symlink
-   trap - ERR INT
-   rm -f CLAUDE.md.bak
-   ```
-
-   If any step (or an interrupt) fires, the trap removes the staged temp files, deletes `AGENTS.md` if it was already promoted, and restores the original `CLAUDE.md` from the backup, leaving the repo in its pre-migration state.
-4. **(E) equivalent:** swap `CLAUDE.md` for a symlink with the same preflight + backup-and-restore pattern as (C):
-
-   ```bash
-   set -e
-   for f in CLAUDE.md.tmp CLAUDE.md.bak; do
-     if [ -e "$f" ] || [ -L "$f" ]; then
-       echo "Refusing to migrate: $f already exists" >&2
-       exit 1
-     fi
-   done
-   cp -p CLAUDE.md CLAUDE.md.bak
-   trap 'rm -f CLAUDE.md.tmp; [ -e CLAUDE.md.bak ] && mv -f CLAUDE.md.bak CLAUDE.md; exit 1' ERR INT
-   ln -s AGENTS.md CLAUDE.md.tmp
-   mv -f CLAUDE.md.tmp CLAUDE.md      # atomic replace; original still in CLAUDE.md.bak
-   trap - ERR INT
-   rm -f CLAUDE.md.bak
-   ```
-
-   **(E) divergent:** stop and surface the diff — do not silently merge. Divergence is intentional in some repos (e.g., when Claude-specific tooling reads `CLAUDE.md` directly), and merging would collapse working host-specific content. See [Cross-Tool Compatibility](#cross-tool-compatibility) for when keeping divergent files is the right call.
+For the exact shell recipes, see [`references/migration.md`](./references/migration.md).
 
 ### Phase 1: Assess Current State
 
