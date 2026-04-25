@@ -441,6 +441,34 @@ class TestConfigWiring:
         agents_called = {call[0][0] for call in mock_sub.call_args_list}
         assert agents_called == {"claude"}
 
+    @patch("multi_review._run_subagent")
+    @patch("multi_review.discover_config")
+    def test_progress_logs_go_to_out_not_stdout(self, mock_config, mock_sub, capsys):
+        """Run-round progress (Models in use, Round complete) must go to the
+        provided ``out`` stream — never to stdout — so callers using
+        ``--json-only`` can keep stdout pure JSON.
+        """
+        import io
+        mock_config.return_value = {
+            **DEFAULT_CONFIG,
+            "agents": ["claude"],
+            "disabled_domains": [d for d in FAKE_DOMAINS if d != "architecture"],
+        }
+        mock_sub.return_value = multi_review.SubAgentResult(
+            agent="claude", domain="architecture", raw_output="[]",
+            model="claude-opus-4-7",
+        )
+
+        buf = io.StringIO()
+        multi_review.run_review_round("abc123", 1, cwd="/tmp", out=buf)
+        captured = capsys.readouterr()
+
+        # All progress lines land on the explicit out= stream, not stdout.
+        assert "Models in use" in buf.getvalue()
+        assert "Round 1 complete" in buf.getvalue()
+        assert "Models in use" not in captured.out
+        assert "Round" not in captured.out
+
     def test_severity_override_applied(self):
         """severity_overrides should reclassify findings below min_severity."""
         findings = [
@@ -617,6 +645,7 @@ class TestHistoryPersistence:
         ]
         result = SubAgentResult(
             agent="codex", domain="security", raw_output="[]",
+            model="gpt-5.4",
             findings=findings, duration_s=42.5,
         )
         return ReviewRound(round_num=1, results=[result])
@@ -662,6 +691,27 @@ class TestHistoryPersistence:
     def test_next_round_num_empty(self, tmp_path):
         with patch.object(multi_review, "HISTORY_DIR", tmp_path):
             assert multi_review._next_round_num("GetEvinced/test", 99) == 1
+
+    def test_round_history_carries_model_provenance(self, tmp_path):
+        """Round JSON must surface the resolved model id at both top level and per-result."""
+        with patch.object(multi_review, "HISTORY_DIR", tmp_path):
+            rnd = self._make_round(["fix", "ignored"])
+            path = multi_review.save_round_history("GetEvinced/test", 42, rnd, mode="single")
+            data = json.loads(path.read_text())
+            assert data["models"] == {"codex": "gpt-5.4"}
+            assert data["results"][0]["model"] == "gpt-5.4"
+
+    def test_review_summary_carries_model_provenance(self, tmp_path):
+        """rounds.json must surface model id at top level and inside each result."""
+        with patch.object(multi_review, "HISTORY_DIR", tmp_path):
+            rnd = self._make_round(["fix", "noise"])
+            path = multi_review.save_review_summary(
+                "GetEvinced/test", 42, "main", [rnd], mode="single",
+                domain_agents={"security": "codex"},
+            )
+            data = json.loads(path.read_text())
+            assert data["models"] == {"codex": "gpt-5.4"}
+            assert data["rounds"][0]["results"][0]["model"] == "gpt-5.4"
 
     def test_next_round_num_does_not_create_dir(self, tmp_path):
         """Auto-detect must not leave an empty history dir behind on miss."""

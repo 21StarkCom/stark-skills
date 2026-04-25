@@ -530,3 +530,32 @@ class TestParallelDispatch:
         )
         captured = capsys.readouterr()
         assert "Low coverage" in captured.err
+
+    @patch("plan_review_dispatch._run_plan_subagent")
+    def test_dispatch_emits_top_level_models_map(self, mock_sub, tmp_path):
+        """Top-level ``models`` map must list one entry per agent so
+        triage_orchestrator can forward it to stark-insights without scanning
+        every per-result row.
+        """
+        from plan_review_dispatch import PlanSubAgentResult, dispatch_plan_review
+        for agent in ["claude", "codex"]:
+            d = tmp_path / "prompts" / agent
+            d.mkdir(parents=True)
+            (d / "agent.md").write_text("preamble")
+            (d / "00-general.md").write_text("General prompt")
+        def side_effect(agent, domain_key, plan_content, prompt_text="", timeout=300):
+            return PlanSubAgentResult(
+                agent=agent, domain=domain_key, raw_output="[]",
+                model={"claude": "claude-opus-4-7", "codex": "gpt-5.4"}[agent],
+            )
+        mock_sub.side_effect = side_effect
+        result = dispatch_plan_review(
+            plan_content="Test plan", round_num=1,
+            agents=["claude", "codex"],
+            global_prompts_dir=str(tmp_path / "prompts"),
+        )
+        assert "models" in result
+        assert set(result["models"].keys()) == {"claude", "codex"}
+        # Every per-result row also carries its model id.
+        for row in result["results"]:
+            assert "model" in row and row["model"]

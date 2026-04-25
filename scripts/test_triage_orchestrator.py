@@ -370,3 +370,83 @@ def test_round_arg_plumbed_to_dispatch(
     dispatch_argv = mock_run.call_args_list[1].args[0]
     assert "--round" in dispatch_argv
     assert dispatch_argv[dispatch_argv.index("--round") + 1] == "3"
+
+
+def test_extract_dispatch_models_prefers_top_level_map() -> None:
+    """Top-level ``models`` map (emitted by current dispatchers) wins."""
+    payload = {
+        "models": {"claude": "claude-opus-4-7", "codex": "gpt-5.4"},
+        "results": [{"agent": "claude", "model": "stale", "domain": "x"}],
+    }
+    result = triage_orchestrator._extract_dispatch_models(
+        payload, payload["results"]
+    )
+    assert result == {"claude": "claude-opus-4-7", "codex": "gpt-5.4"}
+
+
+def test_extract_dispatch_models_falls_back_to_per_result() -> None:
+    """If a child dispatcher only sets per-result ``model`` fields,
+    ``_extract_dispatch_models`` must still recover the {agent: model} map.
+    """
+    results = [
+        {"agent": "claude", "model": "claude-opus-4-7", "domain": "security"},
+        {"agent": "codex", "model": "gpt-5.4", "domain": "architecture"},
+    ]
+    payload = {"results": results}
+    assert triage_orchestrator._extract_dispatch_models(payload, results) == {
+        "claude": "claude-opus-4-7",
+        "codex": "gpt-5.4",
+    }
+
+
+def test_extract_dispatch_models_handles_empty() -> None:
+    """No model info anywhere → empty dict (no crash)."""
+    payload = {"results": [{"agent": "claude", "domain": "x"}]}
+    assert triage_orchestrator._extract_dispatch_models(payload, payload["results"]) == {}
+
+
+def test_shape_triage_decision_payload_surfaces_dispatch_models() -> None:
+    """``dispatch.models`` from raw payload must reach the triage_decision envelope."""
+    raw = {
+        "review_type": "pr",
+        "repo": "acme/repo",
+        "pr": 42,
+        "triage": {
+            "mode": "aggressive",
+            "agent": "claude",
+            "model": "claude-test",
+            "content_hash": "abc",
+            "input_strategy": "full",
+            "dispatched_domains": ["security"],
+            "skipped_domains": [],
+            "verdicts": [],
+            "duration_s": 0.4,
+            "error": None,
+        },
+        "dispatch": {
+            "models": {"claude": "claude-opus-4-7"},
+            "results": [],
+            "succeeded": 0,
+            "failed": 0,
+        },
+    }
+    shaped = triage_orchestrator._shape_triage_decision_payload(raw)
+    assert shaped["dispatch_models"] == {"claude": "claude-opus-4-7"}
+
+
+def test_build_final_payload_includes_dispatch_models() -> None:
+    """``_build_final_payload`` must echo dispatch_models into the JSON returned."""
+    triage_result = _sample_triage_result()
+    payload = triage_orchestrator._build_final_payload(
+        triage_result,
+        dispatch_results=[],
+        findings=[],
+        succeeded=0,
+        failed=0,
+        total_duration_s=0.5,
+        dispatch_models={"claude": "claude-opus-4-7", "codex": "gpt-5.4"},
+    )
+    assert payload["dispatch"]["models"] == {
+        "claude": "claude-opus-4-7",
+        "codex": "gpt-5.4",
+    }

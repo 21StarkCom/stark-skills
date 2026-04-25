@@ -508,7 +508,8 @@ def dispatch_plan_review(
                 sub_result = future.result()
             except Exception as exc:
                 sub_result = PlanSubAgentResult(
-                    agent=agent, domain=dk, error=str(exc),
+                    agent=agent, domain=dk, model=_agent_model_label(agent),
+                    error=str(exc),
                 )
             results.append(sub_result)
             print(

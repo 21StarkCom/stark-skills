@@ -452,6 +452,10 @@ PAYLOAD_SCHEMAS = {
         "mode": str,                  # "aggressive" | "conservative" | "full"
         "agent": str,                 # "claude" | "codex" (or "none" for full mode)
         "model": str,                 # resolved model ID (or "none" for full mode)
+        "dispatch_models": (dict, type(None)),  # optional {agent: model_id} for dispatched
+                                      #   review sub-agents, distinct from "model" (which
+                                      #   names the triage agent). Optional for backward
+                                      #   compat with old producers.
         "content_hash": str,          # SHA-256 of input content for correlation
         "input_strategy": str,        # "full" | "summary"
         "total_domains": int,         # candidate count AFTER static disabled_domains filtering
