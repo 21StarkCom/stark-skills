@@ -337,3 +337,36 @@ def test_domains_arg_passthrough(
     assert rc == 0
     dispatch_argv = mock_run.call_args_list[1].args[0]
     assert dispatch_argv[dispatch_argv.index("--domains") + 1] == ",".join(dispatched)
+
+
+@patch("triage_orchestrator.urllib.request.urlopen", return_value=_UrlOpenContext())
+@patch("triage_orchestrator.discover_config", return_value=_minimal_config())
+@patch("triage_orchestrator._discover_domains", return_value=_sample_raw_domains())
+@patch("triage_orchestrator.triage_domains", return_value=_sample_triage_result())
+@patch("triage_orchestrator.subprocess.run")
+def test_round_arg_plumbed_to_dispatch(
+    mock_run: MagicMock,
+    _mock_triage: MagicMock,
+    _mock_domains: MagicMock,
+    _mock_config: MagicMock,
+    _mock_urlopen: MagicMock,
+) -> None:
+    """`--round N` on the orchestrator must reach multi_review.py as `--round N`."""
+    dispatched = ["architecture", "security", "testing"]
+    mock_run.side_effect = [
+        _completed(stdout="diff --git a/app.py b/app.py\n+print('hi')\n"),
+        _completed(stdout=json.dumps(_dispatch_payload(dispatched))),
+    ]
+
+    rc, _stdout, _stderr = _run_main(
+        [
+            "triage_orchestrator.py", "--type", "pr",
+            "--pr", "42", "--repo", "acme/repo",
+            "--round", "3", "--plain",
+        ]
+    )
+
+    assert rc == 0
+    dispatch_argv = mock_run.call_args_list[1].args[0]
+    assert "--round" in dispatch_argv
+    assert dispatch_argv[dispatch_argv.index("--round") + 1] == "3"

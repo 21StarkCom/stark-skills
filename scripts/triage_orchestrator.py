@@ -259,7 +259,7 @@ def _build_dispatch_argv(args: argparse.Namespace, repo: str | None, domains: li
         if args.base:
             argv.extend(["--base", args.base])
         if args.round is not None:
-            _log("warning: ignoring --round for PR dispatch; multi_review.py does not support it")
+            argv.extend(["--round", str(args.round)])
         if args.agents:
             _log("warning: ignoring --agents for PR dispatch; multi_review.py does not support it")
         if args.timeout is not None:

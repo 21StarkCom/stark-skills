@@ -38,7 +38,7 @@ class TestJsonOnlyFlag:
         with (
             patch("sys.stdout", captured_stdout),
             patch("sys.stderr", captured_stderr),
-            patch("sys.argv", ["multi_review.py", "--pr", "1", "--json-only", "--dry-run"]),
+            patch("sys.argv", ["multi_review.py", "--pr", "1", "--json-only", "--dry-run", "--no-persist-history"]),
         ):
             multi_review.main()
 
@@ -60,7 +60,7 @@ class TestJsonOnlyFlag:
         with (
             patch("sys.stdout", StringIO()),
             patch("sys.stderr", captured_stderr),
-            patch("sys.argv", ["multi_review.py", "--pr", "1", "--json-only", "--dry-run"]),
+            patch("sys.argv", ["multi_review.py", "--pr", "1", "--json-only", "--dry-run", "--no-persist-history"]),
         ):
             multi_review.main()
 
@@ -554,6 +554,74 @@ class TestHistoryPersistence:
             data = json.loads(path.read_text())
             assert data["summary"]["signal_to_noise_pct"] is None
             assert data["quality"]["per_agent"]["codex"]["unclassified"] == 2
+
+    def test_next_round_num_empty(self, tmp_path):
+        with patch.object(multi_review, "HISTORY_DIR", tmp_path):
+            assert multi_review._next_round_num("GetEvinced/test", 99) == 1
+
+    def test_next_round_num_does_not_create_dir(self, tmp_path):
+        """Auto-detect must not leave an empty history dir behind on miss."""
+        with patch.object(multi_review, "HISTORY_DIR", tmp_path):
+            assert multi_review._next_round_num("GetEvinced/test", 99) == 1
+        assert not (tmp_path / "GetEvinced").exists(), "should not pre-create the org dir"
+
+    def test_next_round_num_increments(self, tmp_path):
+        with patch.object(multi_review, "HISTORY_DIR", tmp_path):
+            d = multi_review._history_dir("GetEvinced/test", 99)
+            (d / "round-1.json").write_text("{}")
+            (d / "round-3.json").write_text("{}")
+            (d / "round-not-a-number.json").write_text("{}")
+            assert multi_review._next_round_num("GetEvinced/test", 99) == 4
+
+    @patch("multi_review.DOMAINS", FAKE_DOMAINS)
+    @patch("multi_review.run_review_round")
+    @patch("multi_review.detect_repo", return_value="GetEvinced/test")
+    def test_main_auto_persists_round(self, mock_repo, mock_round, tmp_path):
+        """main() should write round-N.json by default with no extra flags."""
+        mock_round.return_value = ReviewRound(round_num=1)
+        with (
+            patch.object(multi_review, "HISTORY_DIR", tmp_path),
+            patch("sys.stdout", StringIO()),
+            patch("sys.stderr", StringIO()),
+            patch("sys.argv", ["multi_review.py", "--pr", "7", "--json-only", "--dry-run"]),
+        ):
+            multi_review.main()
+        written = list((tmp_path / "GetEvinced" / "test" / "7").glob("round-*.json"))
+        assert len(written) == 1, f"expected exactly one round file, got {written}"
+
+    @patch("multi_review.DOMAINS", FAKE_DOMAINS)
+    @patch("multi_review.run_review_round")
+    @patch("multi_review.detect_repo", return_value="GetEvinced/test")
+    def test_main_no_persist_flag_skips_write(self, mock_repo, mock_round, tmp_path):
+        """--no-persist-history must skip writing round-N.json."""
+        mock_round.return_value = ReviewRound(round_num=1)
+        with (
+            patch.object(multi_review, "HISTORY_DIR", tmp_path),
+            patch("sys.stdout", StringIO()),
+            patch("sys.stderr", StringIO()),
+            patch("sys.argv", ["multi_review.py", "--pr", "7", "--json-only", "--dry-run", "--no-persist-history"]),
+        ):
+            multi_review.main()
+        # _history_dir is created but no round files should be written
+        d = tmp_path / "GetEvinced" / "test" / "7"
+        if d.exists():
+            assert not list(d.glob("round-*.json"))
+
+    @patch("multi_review.DOMAINS", FAKE_DOMAINS)
+    @patch("multi_review.run_review_round")
+    @patch("multi_review.detect_repo", return_value="GetEvinced/test")
+    def test_main_round_flag_overrides_auto_detect(self, mock_repo, mock_round, tmp_path):
+        """--round N must record the run as round N regardless of history state."""
+        mock_round.return_value = ReviewRound(round_num=99)  # mock returns round_num=99 to verify CLI plumbs through
+        with (
+            patch.object(multi_review, "HISTORY_DIR", tmp_path),
+            patch("sys.stdout", StringIO()),
+            patch("sys.stderr", StringIO()),
+            patch("sys.argv", ["multi_review.py", "--pr", "7", "--round", "99", "--json-only", "--dry-run"]),
+        ):
+            multi_review.main()
+        # run_review_round should have been called with round 99
+        assert mock_round.call_args.args[1] == 99 or mock_round.call_args.kwargs.get("round_num") == 99
 
 
 class TestSingleAgentMode:

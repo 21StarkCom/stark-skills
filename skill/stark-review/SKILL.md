@@ -231,20 +231,21 @@ Findings to fix:
 
 ## Phase 5: Persist History
 
-After each round, persist classified review history.
+`multi_review.py` auto-writes `~/.claude/code-review/history/{org}/{repo}/{pr}/round-{N}.json`
+at the end of every dispatched round (round number is auto-detected from the
+history dir, or set explicitly via `--round N`). Findings land **unclassified**.
 
-Prefer calling `save_round_history()` and `save_review_summary()` from
-`multi_review.py` via a short Python snippet so the history schema stays aligned
-with the runtime. If that is impractical, write equivalent JSON to:
-
-- `~/.claude/code-review/history/{org}/{repo}/{pr}/round-{N}.json`
-- `~/.claude/code-review/history/{org}/{repo}/{pr}/rounds.json`
+After classifying, overwrite the same `round-{N}.json` with the classified
+copy by calling `save_round_history()` from `multi_review.py`, or by writing
+JSON with the same schema. Pass `--round` to a subsequent dispatch when you
+want to re-record the same round number rather than auto-incrementing.
 
 Critical rules:
 
 - Every saved finding must include `classification` and `classification_reason`.
 - Preserve the actual `domain_agents` map used for the run, or the forced `--agent` override.
 - Save every round, including the final round.
+- Pass `--no-persist-history` only when you genuinely don't want an audit trail (rare).
 
 ## Phase 6: Cleanup
 
