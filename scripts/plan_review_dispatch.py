@@ -79,6 +79,7 @@ class PlanSubAgentResult:
     agent: str
     domain: str
     raw_output: str = ""
+    model: str = ""  # resolved model id, e.g. "claude-opus-4-7"
     findings: list[PlanFinding] = field(default_factory=list)
     error: str | None = None
     duration_s: float = 0.0
@@ -237,6 +238,14 @@ def _parse_plan_findings(
     return findings
 
 
+def _agent_model_label(agent: str) -> str:
+    """Return the resolved model id for *agent*, or a sentinel on failure."""
+    try:
+        return _resolve_model(agent)
+    except Exception as exc:  # pragma: no cover - resolution shouldn't fail in practice
+        return f"<unresolved: {exc}>"
+
+
 def _run_plan_subagent(
     agent: str,
     domain_key: str,
@@ -250,7 +259,12 @@ def _run_plan_subagent(
     parses findings JSON, and handles timeouts / missing agents.
     """
     full_prompt = f"{prompt_text}\n\n{plan_content}".strip() if prompt_text else plan_content
-    result = PlanSubAgentResult(agent=agent, domain=domain_key)
+    result = PlanSubAgentResult(agent=agent, domain=domain_key, model=_agent_model_label(agent))
+    print(
+        f"  → start [{agent}:{domain_key}] model={result.model}",
+        file=sys.stderr,
+        flush=True,
+    )
 
     stdin_input = None
     gemini_home = None
@@ -430,6 +444,23 @@ def dispatch_plan_review(
 
     domain_keys = sorted(domains.keys(), key=lambda k: domains[k].get("order", "99"))
 
+    total_subagents = len(agents) * len(domain_keys)
+    print(
+        f"plan_review_dispatch: round {round_num} — "
+        f"{len(agents)} agent(s) × {len(domain_keys)} domain(s) = "
+        f"{total_subagents} sub-agent(s)",
+        file=sys.stderr,
+        flush=True,
+    )
+    print("plan_review_dispatch: models in use:", file=sys.stderr, flush=True)
+    for agent in agents:
+        print(f"  - {agent}: {_agent_model_label(agent)}", file=sys.stderr, flush=True)
+    print(
+        f"plan_review_dispatch: domains: {', '.join(domain_keys)}",
+        file=sys.stderr,
+        flush=True,
+    )
+
     # Build work items: (agent, domain_key, prompt_text)
     work_items = []
     for agent in agents:
@@ -449,6 +480,13 @@ def dispatch_plan_review(
     results: list[PlanSubAgentResult] = []
     total = len(work_items)
     completed = 0
+    dispatch_t0 = time.monotonic()
+    print(
+        f"plan_review_dispatch: launching {total} sub-agent(s) in parallel "
+        f"(timeout={timeout}s, codex 2x)",
+        file=sys.stderr,
+        flush=True,
+    )
 
     with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, total or 1)) as pool:
         futures = {
@@ -475,12 +513,22 @@ def dispatch_plan_review(
             results.append(sub_result)
             print(
                 f"  [{completed}/{total}] {agent}:{dk} "
-                f"({'OK' if not sub_result.error else sub_result.error})",
+                f"({'OK' if not sub_result.error else sub_result.error}) "
+                f"{sub_result.duration_s:.1f}s "
+                f"findings={len(sub_result.findings)}",
                 file=sys.stderr,
+                flush=True,
             )
 
     # Check coverage
     valid_count = sum(1 for r in results if not r.error)
+    print(
+        f"plan_review_dispatch: round {round_num} complete — "
+        f"{valid_count}/{total} succeeded "
+        f"in {time.monotonic() - dispatch_t0:.1f}s",
+        file=sys.stderr,
+        flush=True,
+    )
     if total > 0 and valid_count / total < 0.5:
         print(
             f"  Low coverage warning: only {valid_count}/{total} sub-agents succeeded.",
@@ -519,6 +567,7 @@ def dispatch_plan_review(
     for r in results:
         entry: dict[str, Any] = {
             "agent": r.agent,
+            "model": r.model,
             "domain": r.domain,
             "duration_s": r.duration_s,
             "findings_count": len(r.findings),
@@ -529,9 +578,12 @@ def dispatch_plan_review(
             entry["findings"] = [asdict(f) for f in r.findings]
         serialized_results.append(entry)
 
+    models_in_use = {agent: _agent_model_label(agent) for agent in agents}
+
     return {
         "round": round_num,
         "agents": agents,
+        "models": models_in_use,
         "domains": domain_keys,
         "results": serialized_results,
         "findings": all_findings,

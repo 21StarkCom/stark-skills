@@ -86,6 +86,21 @@ def _discover_domains() -> dict[str, dict[str, Any]]:
     return _base_discover_domains(GLOBAL_PROMPTS_DIR, agents=list(AGENTS))
 
 
+def _agent_model_label(agent: str) -> str:
+    """Resolved model id for *agent*, or a sentinel if resolution fails."""
+    try:
+        return _resolve_model(agent)
+    except Exception as exc:  # pragma: no cover - resolution shouldn't fail in practice
+        return f"<unresolved: {exc}>"
+
+
+def _print_models_in_use(agents: list[str], out: Any) -> None:
+    """Log the resolved model id for each agent about to run."""
+    print("  Models in use:", file=out, flush=True)
+    for agent in agents:
+        print(f"    - {agent}: {_agent_model_label(agent)}", file=out, flush=True)
+
+
 DOMAINS = _discover_domains()
 
 
@@ -380,6 +395,7 @@ class SubAgentResult:
     agent: str
     domain: str
     raw_output: str
+    model: str = ""  # resolved model id, e.g. "claude-opus-4-7"
     findings: list[Finding] = field(default_factory=list)
     error: str | None = None
     duration_s: float = 0.0
@@ -745,7 +761,10 @@ def _run_subagent(
     if agent == "gemini":
         _gemini_semaphore.acquire()
     try:
-        return _run_subagent_inner(agent, domain_key, base, cwd, spec_context, graph_context, override_timeout_s, prompt_cache)
+        result = _run_subagent_inner(agent, domain_key, base, cwd, spec_context, graph_context, override_timeout_s, prompt_cache)
+        if not result.model:
+            result.model = _agent_model_label(agent)
+        return result
     finally:
         if agent == "gemini":
             _gemini_semaphore.release()
@@ -1046,6 +1065,10 @@ def run_review_round(
         print("  No enabled agents available for this round.", file=out)
         return rnd
 
+    _print_models_in_use(agents, out)
+    print(f"  Domains: {', '.join(domains)}", file=out, flush=True)
+    round_t0 = time.monotonic()
+
     # Pre-load all prompts (avoids per-worker file I/O)
     prompt_cache: dict[tuple[str, str], str] = {}
     for agent in agents:
@@ -1067,8 +1090,10 @@ def run_review_round(
                 future = pool.submit(_run_subagent, agent, domain_key, base, cwd, spec_context, domain_graph_context, agent_timeout, prompt_cache)
                 futures[future] = (agent, domain_key)
                 print(
-                    f"  [{agent_cfg['emoji']}] {agent} × {domain_cfg['label']}...",
+                    f"  [{agent_cfg['emoji']}] {agent} × {domain_cfg['label']}... "
+                    f"(model={_agent_model_label(agent)}, timeout={agent_timeout}s)",
                     file=out,
+                    flush=True,
                 )
 
         for future in as_completed(futures):
@@ -1101,8 +1126,16 @@ def run_review_round(
                     f"  [{agent_cfg['emoji']}] {agent} × {domain_key}: "
                     f"{n} findings ({crits}C/{highs}H) [{result.duration_s:.1f}s]",
                     file=out,
+                    flush=True,
                 )
 
+    succeeded = sum(1 for r in rnd.results if not r.error)
+    print(
+        f"  Round {round_num} complete — {succeeded}/{len(rnd.results)} succeeded "
+        f"in {time.monotonic() - round_t0:.1f}s",
+        file=out,
+        flush=True,
+    )
     return rnd
 
 
@@ -1157,6 +1190,17 @@ def run_single_agent_round(
         print("  No enabled agents available for this round.", file=out)
         return rnd
 
+    unique_agents = sorted({a for a in domain_agent_map.values() if a in AGENTS})
+    if unique_agents:
+        _print_models_in_use(unique_agents, out)
+    print(
+        "  Domain → agent: "
+        + ", ".join(f"{d}={a}" for d, a in domain_agent_map.items()),
+        file=out,
+        flush=True,
+    )
+    round_t0 = time.monotonic()
+
     with ThreadPoolExecutor(max_workers=min(total, _max_worker_budget())) as pool:
         futures = {}
         for domain_key, agent in domain_agent_map.items():
@@ -1173,8 +1217,10 @@ def run_single_agent_round(
             future = pool.submit(_run_subagent, agent, domain_key, base, cwd, spec_context, domain_graph_context, agent_timeout)
             futures[future] = (agent, domain_key)
             print(
-                f"  [{agent_cfg['emoji']}] {agent} × {domain_cfg['label']}...",
+                f"  [{agent_cfg['emoji']}] {agent} × {domain_cfg['label']}... "
+                f"(model={_agent_model_label(agent)}, timeout={agent_timeout}s)",
                 file=out,
+                flush=True,
             )
 
         for future in as_completed(futures):
@@ -1207,8 +1253,16 @@ def run_single_agent_round(
                     f"  [{agent_cfg['emoji']}] {agent} × {domain_key}: "
                     f"{n} findings ({crits}C/{highs}H) [{result.duration_s:.1f}s]",
                     file=out,
+                    flush=True,
                 )
 
+    succeeded = sum(1 for r in rnd.results if not r.error)
+    print(
+        f"  Round {round_num} complete — {succeeded}/{len(rnd.results)} succeeded "
+        f"in {time.monotonic() - round_t0:.1f}s",
+        file=out,
+        flush=True,
+    )
     return rnd
 
 
@@ -1560,9 +1614,11 @@ def save_round_history(
         "mode": mode,
         "round": rnd.round_num,
         "domain_agents": domain_agents,
+        "models": {res.agent: res.model for res in rnd.results if res.model},
         "results": [
             {
                 "agent": res.agent,
+                "model": res.model,
                 "domain": res.domain,
                 "duration_s": res.duration_s,
                 "error": res.error,
@@ -1588,7 +1644,7 @@ def save_round_history(
     finding_idx = 0
     for res in rnd.results:
         _emit_event(_make_event("agent_dispatch", {
-            "agent": res.agent, "domain": res.domain,
+            "agent": res.agent, "model": res.model, "domain": res.domain,
             "task": f"{res.domain} review", "round": rnd.round_num,
             "duration_s": res.duration_s,
             "success": res.error is None,
@@ -1702,6 +1758,11 @@ def save_review_summary(
         "mode": mode,
         "domain_agents": domain_agents,
         "agents": agents_seen,
+        "models": {
+            res.agent: res.model
+            for rnd in rounds for res in rnd.results
+            if res.model
+        },
         "domains": list(DOMAINS.keys()),
         "rounds": [
             {
@@ -1709,6 +1770,7 @@ def save_review_summary(
                 "results": [
                     {
                         "agent": res.agent,
+                        "model": res.model,
                         "domain": res.domain,
                         "findings": [asdict(f) for f in res.findings],
                         "error": res.error,
@@ -1865,6 +1927,7 @@ def review_pr_single(
         "base": base,
         "mode": "single",
         "domain_agents": da_map,
+        "models": {res.agent: res.model for res in rnd.results if res.model},
         "domains": active_domains,
         "rounds": [
             {
@@ -1872,6 +1935,7 @@ def review_pr_single(
                 "results": [
                     {
                         "agent": res.agent,
+                        "model": res.model,
                         "domain": res.domain,
                         "findings": [asdict(f) for f in res.findings],
                         "error": res.error,
@@ -2045,6 +2109,11 @@ def review_pr(
         "pr": pr_number,
         "base": base,
         "agents": list(AGENTS.keys()),
+        "models": {
+            res.agent: res.model
+            for r in rounds for res in r.results
+            if res.model
+        },
         "domains": active_domains,
         "rounds": [
             {
@@ -2052,6 +2121,7 @@ def review_pr(
                 "results": [
                     {
                         "agent": res.agent,
+                        "model": res.model,
                         "domain": res.domain,
                         "findings": [asdict(f) for f in res.findings],
                         "error": res.error,

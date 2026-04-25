@@ -16,6 +16,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from dispatcher_base import resolve_model as _resolve_model
 from domain_triage import DomainMeta, TriageResult, triage_domains
 from multi_review import AGENTS, _discover_domains, discover_config
 from plan_review_dispatch import _discover_plan_domains
@@ -38,7 +39,24 @@ STARK_GRAPH = SCRIPTS_DIR / "stark_graph.py"
 
 
 def _log(message: str) -> None:
-    print(f"triage_orchestrator: {message}", file=sys.stderr)
+    print(f"triage_orchestrator: {message}", file=sys.stderr, flush=True)
+
+
+def _safe_resolve_model(agent: str) -> str:
+    try:
+        return _resolve_model(agent)
+    except Exception as exc:
+        return f"<unresolved: {exc}>"
+
+
+def _log_models(label: str, agents: list[str]) -> None:
+    _log(f"{label} models:")
+    for agent in agents:
+        print(
+            f"  - {agent}: {_safe_resolve_model(agent)}",
+            file=sys.stderr,
+            flush=True,
+        )
 
 
 def _split_csv(value: str | None) -> list[str]:
@@ -325,6 +343,29 @@ def _normalize_dispatch_payload(dispatch_data: dict[str, Any]) -> tuple[list[dic
     return results, findings, succeeded, failed
 
 
+def _extract_dispatch_models(
+    dispatch_data: dict[str, Any],
+    dispatch_results: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Build {agent: model_id} from dispatch JSON.
+
+    Prefers a top-level "models" map (emitted by plan_review_dispatch.py and
+    multi_review.py); falls back to scanning per-result "model" fields.
+    """
+    models: dict[str, str] = {}
+    top = dispatch_data.get("models")
+    if isinstance(top, dict):
+        for agent, model in top.items():
+            if isinstance(agent, str) and isinstance(model, str) and model:
+                models[agent] = model
+    for result in dispatch_results:
+        agent = result.get("agent")
+        model = result.get("model")
+        if isinstance(agent, str) and isinstance(model, str) and model and agent not in models:
+            models[agent] = model
+    return models
+
+
 def _count_by_severity(findings: list[dict[str, Any]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for finding in findings:
@@ -360,6 +401,10 @@ def _shape_triage_decision_payload(raw: dict[str, Any]) -> dict[str, Any]:
         agent = str(triage.get("agent") or "")
         model = str(triage.get("model") or "")
         decisions = list(triage.get("verdicts") or [])
+    dispatch = raw.get("dispatch") or {}
+    dispatch_models = dispatch.get("models") if isinstance(dispatch, dict) else {}
+    if not isinstance(dispatch_models, dict):
+        dispatch_models = {}
     return {
         "review_type": str(raw.get("review_type") or ""),
         "repo": str(raw.get("repo") or ""),
@@ -367,6 +412,7 @@ def _shape_triage_decision_payload(raw: dict[str, Any]) -> dict[str, Any]:
         "mode": mode,
         "agent": agent,
         "model": model,
+        "dispatch_models": dispatch_models,
         "content_hash": str(triage.get("content_hash") or ""),
         "input_strategy": str(triage.get("input_strategy") or ""),
         "total_domains": len(dispatched) + len(skipped),
@@ -439,10 +485,12 @@ def _build_final_payload(
     succeeded: int,
     failed: int,
     total_duration_s: float,
+    dispatch_models: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     return {
         "triage": _serialize_triage(triage_result),
         "dispatch": {
+            "models": dispatch_models or {},
             "results": dispatch_results,
             "succeeded": succeeded,
             "failed": failed,
@@ -522,7 +570,12 @@ def main() -> int:
             model="pending",
         )
 
-        _log(f"running triage across {len(candidate_domains)} domains")
+        _log(
+            f"triage start: mode={mode} agent={triage_agent} "
+            f"model={_safe_resolve_model(triage_agent)} "
+            f"domains={len(candidate_domains)} timeout={timeout}s"
+        )
+        triage_t0 = time.monotonic()
         triage_result = triage_domains(
             content=content,
             review_type=args.review_type,
@@ -532,6 +585,11 @@ def main() -> int:
             disabled_domains=disabled_domains,
             timeout=timeout,
             confidence_threshold=confidence_threshold,
+        )
+        _log(
+            f"triage done in {time.monotonic() - triage_t0:.1f}s "
+            f"(dispatched={len(triage_result.dispatched_domains)}, "
+            f"skipped={len(triage_result.skipped_domains)})"
         )
 
         banner = render_banner(
@@ -612,7 +670,17 @@ def main() -> int:
             return 0
 
         dispatch_argv = _build_dispatch_argv(args, repo, triage_result.dispatched_domains)
-        _log(f"dispatching {len(triage_result.dispatched_domains)} domains")
+        dispatch_agents = (
+            args.agents.split(",")
+            if args.agents
+            else list(config.get(f"{args.review_type}_review", {}).get("agents") or config.get("agents") or [])
+        )
+        if dispatch_agents:
+            _log_models("dispatch", dispatch_agents)
+        _log(
+            f"dispatch start: {len(triage_result.dispatched_domains)} domain(s) → "
+            f"{', '.join(triage_result.dispatched_domains)}"
+        )
         for index, domain in enumerate(triage_result.dispatched_domains, start=1):
             agent_label = args.agents or ("single" if args.single else "multi")
             _emit_tui(
@@ -630,6 +698,11 @@ def main() -> int:
         dispatch_started = time.monotonic()
         dispatch_data = _run_dispatch(dispatch_argv)
         dispatch_results, findings, succeeded, failed = _normalize_dispatch_payload(dispatch_data)
+        dispatch_models = _extract_dispatch_models(dispatch_data, dispatch_results)
+        _log(
+            f"dispatch done in {time.monotonic() - dispatch_started:.1f}s "
+            f"(succeeded={succeeded}, failed={failed}, findings={len(findings)})"
+        )
 
         for index, result in enumerate(dispatch_results, start=1):
             finding_list = result.get("findings", [])
@@ -675,6 +748,7 @@ def main() -> int:
             "dispatch_duration_s": round(time.monotonic() - dispatch_started, 3),
             "triage": _serialize_triage(triage_result),
             "dispatch": {
+                "models": dispatch_models,
                 "results": dispatch_results,
                 "succeeded": succeeded,
                 "failed": failed,
@@ -698,6 +772,7 @@ def main() -> int:
                         succeeded=succeeded,
                         failed=failed,
                         total_duration_s=total_duration_s,
+                        dispatch_models=dispatch_models,
                     ),
                     indent=2,
                 )
