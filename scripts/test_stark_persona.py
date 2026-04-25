@@ -1184,4 +1184,8 @@ class TestRatingEmitsEvent:
             assert body["payload"]["subtype"] == "rating"
             assert body["payload"]["rating"] == "like"
             assert body["payload"]["persona"] == result["persona"]
+            assert body["payload"]["persona_session_id"] == result["session_id"]
+            assert "session_id" not in body["payload"], (
+                "persona_event payload must not use the canonical envelope key"
+            )
         conn.close()
