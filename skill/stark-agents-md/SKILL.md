@@ -9,7 +9,7 @@ disable-model-invocation: true
 
 Create and refactor `AGENTS.md` at the repo root following progressive-disclosure principles. Keep the file minimal so it doesn't poison agent context on every request.
 
-`AGENTS.md` is always the source of truth. `CLAUDE.md` must be a symlink to it.
+`AGENTS.md` is the source of truth. By default, `CLAUDE.md` is a symlink to `AGENTS.md`. A repo may intentionally keep `CLAUDE.md` as a standalone, divergent file when it has host-specific content for Claude Code; see [Cross-Tool Compatibility](#cross-tool-compatibility).
 
 ## When to Use
 
@@ -58,29 +58,58 @@ When the user has explicitly asked to create or refactor (not review-only), and 
 
 1. **(A)** Offer to create `AGENTS.md` and symlink `CLAUDE.md` to it.
 2. **(B)** Create the symlink: `ln -s AGENTS.md CLAUDE.md`.
-3. **(C)** Migrate atomically: copy `CLAUDE.md` to `AGENTS.md.tmp`, create the symlink at `CLAUDE.md.tmp`, then swap both into place. Concretely:
+3. **(C)** Migrate with rollback: back up `CLAUDE.md`, stage `AGENTS.md` and the symlink, and on any failure restore the backup so the repo never lands half-converted. Concretely:
 
    ```bash
+   set -e
+   cp -p CLAUDE.md CLAUDE.md.bak
+   trap 'rm -f AGENTS.md.tmp CLAUDE.md.tmp; [ -e CLAUDE.md.bak ] && mv -f CLAUDE.md.bak CLAUDE.md; exit 1' ERR INT
    cp CLAUDE.md AGENTS.md.tmp
-   ln -s AGENTS.md CLAUDE.md.tmp || { rm -f AGENTS.md.tmp CLAUDE.md.tmp; exit 1; }
+   ln -s AGENTS.md CLAUDE.md.tmp
    mv AGENTS.md.tmp AGENTS.md
-   mv CLAUDE.md.tmp CLAUDE.md
+   mv -f CLAUDE.md.tmp CLAUDE.md      # overwrites the regular file with the symlink
+   trap - ERR INT
+   rm -f CLAUDE.md.bak
    ```
 
-   This avoids the half-converted state where the rename succeeds but the symlink doesn't.
-4. **(E)** If the two files are **equivalent**, replace `CLAUDE.md` with the symlink. If they are **divergent** (host-specific install paths, command names, or audience-specific content), stop and surface the diff — do not silently merge. Divergence is intentional in some repos (e.g., when Claude-specific tooling reads `CLAUDE.md` directly), and merging would collapse working host-specific content. See [Cross-Tool Compatibility](#cross-tool-compatibility) for when keeping divergent files is the right call.
+   If any step fails, the trap removes the staged temp files and restores the original `CLAUDE.md` from the backup, leaving the repo in its pre-migration state.
+4. **(E) equivalent:** swap `CLAUDE.md` for a symlink with the same backup-and-restore pattern as (C):
+
+   ```bash
+   set -e
+   cp -p CLAUDE.md CLAUDE.md.bak
+   trap 'rm -f CLAUDE.md.tmp; [ -e CLAUDE.md.bak ] && mv -f CLAUDE.md.bak CLAUDE.md; exit 1' ERR INT
+   ln -s AGENTS.md CLAUDE.md.tmp
+   mv -f CLAUDE.md.tmp CLAUDE.md      # atomic replace; original still in CLAUDE.md.bak
+   trap - ERR INT
+   rm -f CLAUDE.md.bak
+   ```
+
+   **(E) divergent:** stop and surface the diff — do not silently merge. Divergence is intentional in some repos (e.g., when Claude-specific tooling reads `CLAUDE.md` directly), and merging would collapse working host-specific content. See [Cross-Tool Compatibility](#cross-tool-compatibility) for when keeping divergent files is the right call.
 
 ### Phase 1: Assess Current State
 
-**For new repos:**
+Pick the branch matching the state from Phase 0:
+
+**(A) Neither file exists — new repo:**
 - Ask about the project's purpose (one sentence)
 - Ask about package manager (if not npm)
 - Ask about non-standard build commands
 
-**For existing files:**
-- Read the current `AGENTS.md`
+**(B) Only `AGENTS.md` / (D) `CLAUDE.md` is a symlink — existing authoritative file:**
+- Read `AGENTS.md`
 - Count lines and estimate token cost
 - Identify content that belongs elsewhere
+
+**(C) Only `CLAUDE.md` exists — treat `CLAUDE.md` as the current authoritative file:**
+- Read `CLAUDE.md` (there is no `AGENTS.md` yet)
+- Count lines and estimate token cost
+- Identify content that belongs elsewhere; the same analysis will apply once it becomes `AGENTS.md`
+
+**(E) Both exist, `CLAUDE.md` is not a symlink — read both:**
+- Read `AGENTS.md` and `CLAUDE.md` and review the diff captured in Phase 0
+- If equivalent, treat `AGENTS.md` as authoritative and analyze it
+- If divergent, analyze each file on its own terms; do not assume one supersedes the other
 
 ### Phase 2: Apply the Essential Test
 
