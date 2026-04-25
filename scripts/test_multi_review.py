@@ -491,6 +491,57 @@ class TestReturnCodeHandling:
         assert len(result.findings) == 0
 
 
+class TestOutOfDiffFilter:
+    """filter_out_of_diff_findings drops findings referencing files not in the PR diff."""
+
+    def _finding(self, file: str | None, title: str = "issue") -> multi_review.Finding:
+        return multi_review.Finding(
+            agent="codex", domain="security", severity="medium",
+            file=file or "", line=1, title=title,
+            description="...", suggestion="...",
+        )
+
+    def test_filter_keeps_in_diff(self):
+        findings = [self._finding("src/app.py"), self._finding("src/auth.py")]
+        kept, dropped = multi_review.filter_out_of_diff_findings(
+            findings, {"src/app.py", "src/auth.py"}
+        )
+        assert len(kept) == 2
+        assert dropped == []
+
+    def test_filter_drops_out_of_diff(self):
+        findings = [
+            self._finding("src/app.py", "real"),
+            self._finding(".gitattributes", "hallucination"),
+        ]
+        kept, dropped = multi_review.filter_out_of_diff_findings(
+            findings, {"src/app.py"}
+        )
+        assert len(kept) == 1
+        assert kept[0].title == "real"
+        assert len(dropped) == 1
+        assert dropped[0].title == "hallucination"
+
+    def test_filter_keeps_findings_without_file(self):
+        """Domain-level commentary (no file) must be preserved."""
+        findings = [
+            self._finding("", "domain note"),
+            self._finding(None, "another note"),
+        ]
+        kept, dropped = multi_review.filter_out_of_diff_findings(
+            findings, {"src/app.py"}
+        )
+        assert len(kept) == 2
+        assert dropped == []
+
+    def test_filter_disabled_when_changed_files_empty(self):
+        """Empty changed_files (e.g., git failure) keeps all findings — never silently drop on transient failure."""
+        findings = [self._finding("src/app.py"), self._finding("anything.py")]
+        kept, dropped = multi_review.filter_out_of_diff_findings(findings, set())
+        assert len(kept) == 2
+        assert dropped == []
+
+
 class TestHistoryPersistence:
     """save_round_history and save_review_summary write correct schema."""
 

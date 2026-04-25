@@ -289,6 +289,48 @@ def _get_diff_stats(base: str, cwd: str | None = None) -> tuple[int, int]:
         return (0, 0)
 
 
+def _get_changed_files(base: str, cwd: str | None = None) -> set[str]:
+    """Return the set of files changed on HEAD since the merge-base with *base*.
+
+    Uses `git diff --name-only base...HEAD` (three-dot, merge-base relative).
+    Returns an empty set on failure — callers should treat empty as "filter
+    disabled" rather than "all findings invalid".
+    """
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", f"{base}...HEAD"],
+            capture_output=True, text=True, timeout=30,
+            cwd=cwd,
+        )
+        if result.returncode != 0:
+            return set()
+        return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    except (subprocess.TimeoutExpired, OSError):
+        return set()
+
+
+def filter_out_of_diff_findings(
+    findings: list[Finding],
+    changed_files: set[str],
+) -> tuple[list[Finding], list[Finding]]:
+    """Split *findings* into (kept, dropped) by whether `file` is in *changed_files*.
+
+    Findings with no `file` (domain-level commentary) are always kept. If
+    *changed_files* is empty (diff lookup failed), every finding is kept —
+    we don't want a transient git failure to silently discard real review.
+    """
+    if not changed_files:
+        return list(findings), []
+    kept: list[Finding] = []
+    dropped: list[Finding] = []
+    for f in findings:
+        if not f.file or f.file in changed_files:
+            kept.append(f)
+        else:
+            dropped.append(f)
+    return kept, dropped
+
+
 def _adaptive_timeout(agent: str, file_count: int, line_count: int, config: dict) -> int:
     """Determine sub-agent timeout based on PR size and config.
 
@@ -924,6 +966,10 @@ def run_review_round(
     if file_count > 0 or line_count > 0:
         print(f"  [diff] {file_count} files, {line_count} lines changed", file=out)
 
+    # Compute the actual set of files changed in this PR so we can drop
+    # findings that reference files outside the diff (model hallucinations).
+    changed_files = _get_changed_files(base, cwd=cwd)
+
     total = len(agents) * len(domains)
     print(f"\n{'=' * 60}", file=out)
     print(
@@ -965,6 +1011,16 @@ def run_review_round(
             agent, domain_key = futures[future]
             agent_cfg = AGENTS[agent]
             result = future.result()
+
+            kept, dropped = filter_out_of_diff_findings(result.findings, changed_files)
+            if dropped:
+                result.findings = kept
+                dropped_files = sorted({f.file for f in dropped if f.file})
+                print(
+                    f"  [{agent_cfg['emoji']}] {agent} × {domain_key}: "
+                    f"dropped {len(dropped)} out-of-diff finding(s) referencing {dropped_files}",
+                    file=out,
+                )
             rnd.results.append(result)
 
             n = len(result.findings)
@@ -1024,6 +1080,8 @@ def run_single_agent_round(
     if file_count > 0 or line_count > 0:
         print(f"  [diff] {file_count} files, {line_count} lines changed", file=out)
 
+    changed_files = _get_changed_files(base, cwd=cwd)
+
     print(f"\n{'=' * 60}", file=out)
     print(
         f"  Review Round {round_num} — {total} domains (1 agent each)",
@@ -1059,6 +1117,16 @@ def run_single_agent_round(
             agent, domain_key = futures[future]
             agent_cfg = AGENTS[agent]
             result = future.result()
+
+            kept, dropped = filter_out_of_diff_findings(result.findings, changed_files)
+            if dropped:
+                result.findings = kept
+                dropped_files = sorted({f.file for f in dropped if f.file})
+                print(
+                    f"  [{agent_cfg['emoji']}] {agent} × {domain_key}: "
+                    f"dropped {len(dropped)} out-of-diff finding(s) referencing {dropped_files}",
+                    file=out,
+                )
             rnd.results.append(result)
 
             n = len(result.findings)
