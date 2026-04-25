@@ -1321,7 +1321,8 @@ class Tournament:
                     },
                 })
 
-            data = json.dumps({"events": events}).encode()
+            # /events/batch expects a top-level JSON array, not {"events": [...]}.
+            data = json.dumps(events).encode()
             req = urllib.request.Request(
                 "http://127.0.0.1:7420/events/batch",
                 data=data,
