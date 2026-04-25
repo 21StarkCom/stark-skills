@@ -31,6 +31,11 @@ GOLDEN_SKILLS = [
     'stark-release',
 ]
 
+# Skills whose workflow lives outside SKILL.md (e.g. extracted to references/).
+WORKFLOW_PATH_OVERRIDES: dict[str, str] = {
+    'stark-team-review': 'references/workflow.md',
+}
+
 
 def normalize_diagram(diagram: FlowDiagram) -> dict:
     """Convert a FlowDiagram to a dict with rounded coords and sorted keys."""
@@ -44,9 +49,10 @@ def normalize_diagram(diagram: FlowDiagram) -> dict:
 
 def generate_one(skill_name: str) -> dict | None:
     """Extract, layout, and normalize a single skill's flow diagram."""
-    skill_path = SKILL_DIR / skill_name / 'SKILL.md'
+    relpath = WORKFLOW_PATH_OVERRIDES.get(skill_name, 'SKILL.md')
+    skill_path = SKILL_DIR / skill_name / relpath
     if not skill_path.exists():
-        print(f'  SKIP {skill_name}: SKILL.md not found', file=sys.stderr)
+        print(f'  SKIP {skill_name}: {relpath} not found', file=sys.stderr)
         return None
 
     diagram = extract_workflow(skill_path)
