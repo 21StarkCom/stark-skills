@@ -1358,6 +1358,27 @@ def _history_dir(repo: str, pr_number: int) -> Path:
     return d
 
 
+def _next_round_num(repo: str, pr_number: int) -> int:
+    """Return the next unused round number based on existing history files.
+
+    Read-only: does not create the history dir. With persist_history=False
+    callers shouldn't leave an empty directory behind just because they
+    asked for a round number.
+    """
+    parts = repo.split("/")
+    d = HISTORY_DIR / parts[0] / parts[1] / str(pr_number) if len(parts) == 2 \
+        else HISTORY_DIR / repo / str(pr_number)
+    if not d.is_dir():
+        return 1
+    nums: list[int] = []
+    for p in d.glob("round-*.json"):
+        try:
+            nums.append(int(p.stem.split("-", 1)[1]))
+        except (ValueError, IndexError):
+            continue
+    return max(nums) + 1 if nums else 1
+
+
 def _agent_quality(findings: list[Finding], agent: str) -> dict[str, Any]:
     """Compute quality metrics for one agent from classified findings."""
     af = [f for f in findings if f.agent == agent]
@@ -1617,6 +1638,8 @@ def review_pr_single(
     override_agent: str | None = None,
     domains: str | None = None,
     cwd: str | None = None,
+    round_num: int | None = None,
+    persist_history: bool = True,
 ) -> dict[str, Any]:
     """Run single-agent review: 1 agent per domain (from domain_agents config)."""
     out = sys.stderr if json_only else sys.stdout
@@ -1679,11 +1702,19 @@ def review_pr_single(
     if graph_context:
         print(f"  [graph] dependency context built ({len(graph_context)} chars)", file=out)
 
-    rnd = run_single_agent_round(base, 1, da_map, cwd=cwd, out=out, spec_context=spec_context, graph_context=graph_context, enriched_domains=enriched_domains)
+    effective_round = round_num if round_num is not None else _next_round_num(repo, pr_number)
+    rnd = run_single_agent_round(base, effective_round, da_map, cwd=cwd, out=out, spec_context=spec_context, graph_context=graph_context, enriched_domains=enriched_domains)
 
     if sev_overrides:
         for res in rnd.results:
             apply_severity_overrides(res.findings, sev_overrides)
+
+    if persist_history:
+        try:
+            history_path = save_round_history(repo, pr_number, rnd, mode="single", domain_agents=da_map)
+            print(f"  [history] persisted unclassified round to {history_path}", file=out)
+        except Exception as e:
+            print(f"  [history] failed to persist round: {e}", file=sys.stderr)
 
     # Post per-agent findings grouped by the agents actually used
     if not dry_run or post_raw:
@@ -1747,6 +1778,8 @@ def review_pr(
     post_raw: bool = False,
     domains: str | None = None,
     cwd: str | None = None,
+    round_num: int | None = None,
+    persist_history: bool = True,
 ) -> dict[str, Any]:
     """Run the full multi-agent review on a single PR."""
     out = sys.stderr if json_only else sys.stdout
@@ -1816,12 +1849,13 @@ def review_pr(
         print(f"  [graph] dependency context built ({len(graph_context)} chars)", file=out)
 
     rounds: list[ReviewRound] = []
-    round_num = 0
+    base_round = (round_num - 1) if round_num is not None else (_next_round_num(repo, pr_number) - 1)
+    loop_round = base_round
 
     while True:
-        round_num += 1
+        loop_round += 1
         rnd = run_review_round(
-            base, round_num, agents=active_agents, domains=active_domains, cwd=cwd, out=out,
+            base, loop_round, agents=active_agents, domains=active_domains, cwd=cwd, out=out,
             spec_context=spec_context, graph_context=graph_context, enriched_domains=enriched_domains,
         )
         rounds.append(rnd)
@@ -1829,6 +1863,13 @@ def review_pr(
         if sev_overrides:
             for res in rnd.results:
                 apply_severity_overrides(res.findings, sev_overrides)
+
+        if persist_history:
+            try:
+                history_path = save_round_history(repo, pr_number, rnd, mode="team", domain_agents=None)
+                print(f"  [history] persisted unclassified round to {history_path}", file=out)
+            except Exception as e:
+                print(f"  [history] failed to persist round: {e}", file=sys.stderr)
 
         # Post per-agent raw findings to GitHub — one comment per agent under its bot identity.
         # Fires when: (a) not dry_run (normal mode), or (b) --post-raw (orchestrator mode where
@@ -1857,12 +1898,12 @@ def review_pr(
         # Check for actionable findings (critical/high/medium)
         if not has_actionable_findings(rnd):
             print(
-                f"\n  Round {round_num}: No critical/high/medium findings. Review clean.", file=out
+                f"\n  Round {loop_round}: No critical/high/medium findings. Review clean.", file=out
             )
             break
 
         actionable = [f for f in all_findings(rnd) if f.severity in ("critical", "high", "medium")]
-        print(f"\n  Round {round_num}: {len(actionable)} actionable findings to fix.", file=out)
+        print(f"\n  Round {loop_round}: {len(actionable)} actionable findings to fix.", file=out)
         print("  Findings require fixing. Outputting for orchestrator...", file=out)
         break
 
@@ -1964,6 +2005,19 @@ def main() -> None:
         "--domains",
         help="Comma-separated domain slugs to review (overrides discovery)",
     )
+    parser.add_argument(
+        "--round",
+        type=int,
+        dest="round_num",
+        help="Round number to record this run as. Default: auto-detect next from history dir.",
+    )
+    parser.add_argument(
+        "--no-persist-history",
+        action="store_false",
+        dest="persist_history",
+        default=True,
+        help="Skip writing round-N.json to the history dir.",
+    )
 
     args = parser.parse_args()
     if args.agent:
@@ -1996,6 +2050,8 @@ def main() -> None:
             "post_raw": getattr(args, "post_raw", False),
             "domains": args.domains,
             "cwd": _git_root,
+            "round_num": args.round_num,
+            "persist_history": args.persist_history,
         }
         if args.single:
             review_kwargs["override_agent"] = args.agent
