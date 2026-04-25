@@ -20,6 +20,7 @@ _PHASE_RE = re.compile(r'^phase\s+(\d+)(?!\.)\b', re.IGNORECASE)
 _STEP_RE = re.compile(r'^step\s+(\d+)(?!\.)\b', re.IGNORECASE)
 _SUBSTEP_RE = re.compile(r'^(\d+)(?:\.(\d+))+')
 _DIRECTION_RE = re.compile(r'<!--\s*flow-direction:\s*(TB|LR)\s*-->', re.IGNORECASE)
+_WORKFLOW_PATH_RE = re.compile(r'^workflow_path:\s*(\S.*?)\s*$')
 
 _RELEVANT_L2_RE = re.compile(
     r'^(phase\s+\d+\b|step\s+\d+\b|workflow\b|steps\b|failure modes\b|start mode\b|end mode\b)',
@@ -243,12 +244,62 @@ def _detect_direction(content: str) -> Literal['TB', 'LR']:
     return match.group(1).upper()  # type: ignore[return-value]
 
 
+def resolve_workflow_path(skill_root: Path) -> Path:
+    """Return the workflow markdown path for a skill directory.
+
+    Defaults to ``<skill_root>/SKILL.md``. If SKILL.md frontmatter contains
+    ``workflow_path:`` (relative to skill_root), returns that path instead.
+    """
+    skill_md = skill_root / 'SKILL.md'
+    if not skill_md.exists():
+        return skill_md
+    relpath = _read_workflow_path_frontmatter(skill_md)
+    if relpath is None:
+        return skill_md
+    return skill_root / relpath
+
+
+def extract_skill_workflow(
+    skill_root: Path,
+    *,
+    section: str = 'usage',
+) -> FlowDiagram | None:
+    """Resolve a skill's workflow path and extract its diagram.
+
+    Override JSON files are always looked up at ``skill_root`` regardless of
+    where the workflow markdown actually lives.
+    """
+    workflow_path = resolve_workflow_path(skill_root)
+    if not workflow_path.exists():
+        logger.info('Workflow file %s not found for %s', workflow_path, skill_root)
+        return None
+    return extract_workflow(workflow_path, override_dir=skill_root, section=section)
+
+
 def extract_all(skill_dir: Path) -> dict[str, FlowDiagram | None]:
     """Extract workflows for every skill directory under skill/."""
     diagrams: dict[str, FlowDiagram | None] = {}
-    for skill_path in sorted(skill_dir.glob('*/SKILL.md')):
-        diagrams[skill_path.parent.name] = extract_workflow(skill_path)
+    skill_roots = sorted(p for p in skill_dir.iterdir() if p.is_dir() and (p / 'SKILL.md').exists())
+    for skill_root in skill_roots:
+        diagrams[skill_root.name] = extract_skill_workflow(skill_root)
     return diagrams
+
+
+def _read_workflow_path_frontmatter(skill_md: Path) -> str | None:
+    """Parse only the ``workflow_path`` key from SKILL.md YAML frontmatter."""
+    with skill_md.open(encoding='utf-8') as handle:
+        first = handle.readline()
+        if first.strip() != '---':
+            return None
+        for line in handle:
+            stripped = line.rstrip('\n')
+            if stripped.strip() == '---':
+                return None
+            match = _WORKFLOW_PATH_RE.match(stripped)
+            if match:
+                value = match.group(1).strip().strip('"').strip("'")
+                return value or None
+    return None
 
 
 def _is_relevant_heading(heading: str, level: int) -> bool:

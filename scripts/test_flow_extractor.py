@@ -11,7 +11,9 @@ from flow_extractor import (
     _detect_direction,
     _generate_node_id,
     _load_override,
+    extract_skill_workflow,
     extract_workflow,
+    resolve_workflow_path,
 )
 from flow_schema import FlowNode, FlowPosition
 
@@ -23,10 +25,8 @@ def _skill_path(name: str) -> Path:
     return ROOT / 'skill' / name / 'SKILL.md'
 
 
-def _team_review_workflow() -> Path:
-    # stark-team-review's phase content was moved out of SKILL.md into references/
-    # so the markdown-extraction tests must read from the workflow doc directly.
-    return ROOT / 'skill' / 'stark-team-review' / 'references' / 'workflow.md'
+def _skill_root(name: str) -> Path:
+    return ROOT / 'skill' / name
 
 
 def _node(node_id: str, node_type: str, *, category: str | None = None) -> FlowNode:
@@ -40,7 +40,7 @@ def _node(node_id: str, node_type: str, *, category: str | None = None) -> FlowN
 
 
 def test_extract_phase_based_skill():
-    diagram = extract_workflow(_team_review_workflow())
+    diagram = extract_skill_workflow(_skill_root('stark-team-review'))
 
     assert diagram is not None
     assert diagram.direction == 'TB'
@@ -49,6 +49,17 @@ def test_extract_phase_based_skill():
     assert any(node.id == 'phase1' for node in diagram.nodes)
     assert any(node.id == 'phase2' for node in diagram.nodes)
     assert diagram.nodes[-1].type == 'end'
+
+
+def test_resolve_workflow_path_uses_frontmatter_override():
+    # stark-team-review declares workflow_path: references/workflow.md in frontmatter
+    resolved = resolve_workflow_path(_skill_root('stark-team-review'))
+    assert resolved == ROOT / 'skill' / 'stark-team-review' / 'references' / 'workflow.md'
+
+
+def test_resolve_workflow_path_defaults_to_skill_md():
+    resolved = resolve_workflow_path(_skill_root('stark-pr-flow'))
+    assert resolved == ROOT / 'skill' / 'stark-pr-flow' / 'SKILL.md'
 
 
 def test_extract_step_based_skill():
@@ -131,7 +142,7 @@ def test_override_file_explicit_override_dir(tmp_path):
     }
     (tmp_path / 'usage.flow-override.json').write_text(json.dumps(override_data))
 
-    diagram = extract_workflow(_team_review_workflow(), override_dir=tmp_path)
+    diagram = extract_workflow(resolve_workflow_path(_skill_root('stark-team-review')), override_dir=tmp_path)
 
     assert diagram is not None
     assert diagram.direction == 'LR'
@@ -151,7 +162,11 @@ def test_override_internals_section(tmp_path):
     }
     (tmp_path / 'internals.flow-override.json').write_text(json.dumps(override_data))
 
-    diagram = extract_workflow(_team_review_workflow(), override_dir=tmp_path, section='internals')
+    diagram = extract_workflow(
+        resolve_workflow_path(_skill_root('stark-team-review')),
+        override_dir=tmp_path,
+        section='internals',
+    )
 
     assert diagram is not None
     assert diagram.nodes[0].id == 'x'
@@ -161,7 +176,7 @@ def test_override_invalid_json_falls_back(tmp_path):
     """Invalid JSON in override file falls back to extraction."""
     (tmp_path / 'usage.flow-override.json').write_text('{not valid json}')
 
-    diagram = extract_workflow(_team_review_workflow(), override_dir=tmp_path)
+    diagram = extract_workflow(resolve_workflow_path(_skill_root('stark-team-review')), override_dir=tmp_path)
 
     # Falls back to markdown extraction, which succeeds for stark-team-review
     assert diagram is not None
@@ -173,7 +188,7 @@ def test_override_invalid_schema_falls_back(tmp_path):
     bad_data = {'version': 1, 'nodes': [], 'edges': [{'id': 'e1', 'source': 'missing', 'target': 'also_missing'}]}
     (tmp_path / 'usage.flow-override.json').write_text(json.dumps(bad_data))
 
-    diagram = extract_workflow(_team_review_workflow(), override_dir=tmp_path)
+    diagram = extract_workflow(resolve_workflow_path(_skill_root('stark-team-review')), override_dir=tmp_path)
 
     assert diagram is not None
     assert len(diagram.nodes) >= 5
@@ -185,9 +200,8 @@ def test_load_override_nonexistent_dir(tmp_path):
 
 
 def test_no_override_falls_through():
-    """Without override file, stark-team-review extracts normally from markdown."""
-    # The workflow content lives in references/workflow.md, not SKILL.md.
-    diagram = extract_workflow(_team_review_workflow())
+    """Without an override JSON, stark-team-review extracts from its workflow markdown."""
+    diagram = extract_skill_workflow(_skill_root('stark-team-review'))
 
     assert diagram is not None
     assert len(diagram.nodes) >= 5
