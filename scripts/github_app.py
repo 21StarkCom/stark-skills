@@ -214,16 +214,27 @@ class _KeychainError(Exception):
 def _get_private_key(app: str | None = None) -> str:
     """Get private key from macOS Keychain.
 
-    Raises _KeychainError if the key cannot be read (e.g. on Linux/CI).
+    Raises _KeychainError if the key cannot be read (e.g. on Linux/CI,
+    where the `security` binary is missing, or when the entry isn't in
+    the keychain). Callers rely on this error type to fall through to
+    env-var / GH_TOKEN auth — letting the raw FileNotFoundError escape
+    breaks the multi-tier fallback in `get_token`.
     """
     import base64
 
     cfg = _app_config(app)
-    result = subprocess.run(
-        ["security", "find-generic-password", "-s", cfg["keychain_service"], "-w"],
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["security", "find-generic-password", "-s", cfg["keychain_service"], "-w"],
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, OSError) as exc:
+        # `security` only ships on macOS; on Linux runners the binary is
+        # absent and subprocess.run raises before we ever see a returncode.
+        raise _KeychainError(
+            f"Keychain unavailable ({type(exc).__name__}): {exc}"
+        ) from exc
     if result.returncode != 0:
         raise _KeychainError(
             f"Keychain read failed ({cfg['keychain_service']}): {result.stderr.strip()}"

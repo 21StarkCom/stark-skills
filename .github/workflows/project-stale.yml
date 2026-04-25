@@ -16,13 +16,31 @@ jobs:
   stale-check:
     runs-on: ubuntu-latest
     steps:
+      # Same guard as the other project-* workflows — github-script@v7
+      # hard-requires github-token, so an unset PROJECT_TOKEN causes the
+      # scheduled run to fail with "Input required and not supplied:
+      # github-token". Skip cleanly with a warning instead.
+      - name: Check for PROJECT_TOKEN
+        id: token
+        env:
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: |
+          if [ -z "${PROJECT_TOKEN:-}" ]; then
+            echo "::warning::PROJECT_TOKEN not configured; skipping stale detection."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout
+        if: steps.token.outputs.skip != 'true'
         uses: actions/checkout@v4
         with:
           sparse-checkout: .github/project-config.json
           sparse-checkout-cone-mode: false
 
       - name: Detect Stale Items
+        if: steps.token.outputs.skip != 'true'
         uses: actions/github-script@v7
         env:
           PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
