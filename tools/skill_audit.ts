@@ -48,7 +48,7 @@ if (asJson) {
 if (validateOnly) {
   const broken = bundles.filter((bundle) => bundle.missingRefs.length > 0);
   if (!broken.length) {
-    console.log("All local markdown references resolve.");
+    console.log("All local markdown and Python references resolve.");
     process.exit(0);
   }
   for (const bundle of broken) {
