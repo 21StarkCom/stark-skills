@@ -1,2 +1,0 @@
-# Git LFS — track generated PNG screenshots under docs/skills/
-docs/skills/**/*.png filter=lfs diff=lfs merge=lfs -text
