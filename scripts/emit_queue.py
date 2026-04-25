@@ -488,14 +488,19 @@ def _resolve_project(conn, path):
     return pid
 
 
-def _log_drain_failure(exc, context):
+def _log_drain_failure(exc, context, *, log_dir: Path | None = None):
     """Append a failure record to drain-errors.log next to buffer.db.
 
     Silent on its own failure — drain must never raise into the caller.
+
+    ``log_dir`` lets legacy-replay paths (called from tests with tmpdir
+    buffer paths) write into the same directory as the file being processed,
+    so test runs don't pollute the real ~/.stark-insights/drain-errors.log.
     """
     import traceback
     try:
-        log_path = BUFFER_PATH.parent / "drain-errors.log"
+        target_dir = log_dir if log_dir is not None else BUFFER_PATH.parent
+        log_path = target_dir / "drain-errors.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         with log_path.open("a") as f:
             f.write(f"--- {datetime.now(timezone.utc).isoformat()} ---\n")
@@ -606,6 +611,7 @@ def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
                 exc,
                 f"legacy users table unreadable at {legacy_path}; "
                 f"UUID user_ids will fall through to _recovered_dims",
+                log_dir=legacy_path.parent,
             )
         try:
             for p_row in legacy.execute("SELECT id, path FROM projects"):
@@ -616,6 +622,7 @@ def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
                 exc,
                 f"legacy projects table unreadable at {legacy_path}; "
                 f"UUID project_ids will fall through to _recovered_dims",
+                log_dir=legacy_path.parent,
             )
         # Replay only rows the backend hasn't already ingested. Earlier we
         # replayed every row (letting the API's dedupe reject duplicates),
@@ -725,7 +732,11 @@ def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
                     replayed += 1
             except Exception as exc:
                 failed += 1
-                _log_drain_failure(exc, f"legacy-replay dedupe={dedupe_key}")
+                _log_drain_failure(
+                    exc,
+                    f"legacy-replay dedupe={dedupe_key}",
+                    log_dir=legacy_path.parent,
+                )
         queue_db.commit()
     finally:
         queue_db.close()
@@ -742,6 +753,7 @@ def _replay_legacy_rows_into_queue(legacy_path: Path) -> int:
         _log_drain_failure(
             RuntimeError(f"legacy replay skipped {failed} of {len(rows)} bad rows"),
             f"replayed={replayed} failed={failed} file={legacy_path}",
+            log_dir=legacy_path.parent,
         )
     return replayed
 
@@ -760,6 +772,7 @@ def _quarantine_legacy_buffer(buffer_path: Path) -> Path | None:
         _log_drain_failure(
             exc,
             f"legacy buffer replay failed for {buffer_path}; leaving file in place for retry",
+            log_dir=buffer_path.parent,
         )
         raise
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -772,6 +785,7 @@ def _quarantine_legacy_buffer(buffer_path: Path) -> Path | None:
     _log_drain_failure(
         RuntimeError("legacy v1 buffer quarantined"),
         f"moved {buffer_path} -> {legacy_path}; replayed {replayed} unsynced rows",
+        log_dir=buffer_path.parent,
     )
     return legacy_path
 

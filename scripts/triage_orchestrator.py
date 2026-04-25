@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -332,16 +333,95 @@ def _count_by_severity(findings: list[dict[str, Any]]) -> dict[str, int]:
     return counts
 
 
+_INSIGHTS_TOKEN_PATH = Path.home() / ".stark-insights" / "api-token"
+
+
+def _shape_triage_decision_payload(raw: dict[str, Any]) -> dict[str, Any]:
+    """Map orchestrator's nested payload to stark-insights' triage_decision schema.
+
+    The orchestrator builds a tree shape (``triage`` dict + ``dispatch`` +
+    ``summary``); the consumer's PAYLOAD_SCHEMAS["triage_decision"] expects
+    the schema fields at the top of ``payload``. Map what we have, default
+    what we don't, and stash the original tree under ``_extras`` so the
+    orchestrator-side context isn't lost downstream.
+    """
+    triage = raw.get("triage") or {}
+    mode = str(triage.get("mode") or "")
+    dispatched = list(triage.get("dispatched_domains") or [])
+    skipped = list(triage.get("skipped_domains") or [])
+    # Spec (docs/superpowers/specs/2026-04-04-domain-triage-design.md):
+    # full-mode events emit a minimal shape — no LLM was consulted, so
+    # agent/model are "none" and per-domain decisions are empty.
+    if mode == "full":
+        agent = "none"
+        model = "none"
+        decisions: list = []
+    else:
+        agent = str(triage.get("agent") or "")
+        model = str(triage.get("model") or "")
+        decisions = list(triage.get("verdicts") or [])
+    return {
+        "review_type": str(raw.get("review_type") or ""),
+        "repo": str(raw.get("repo") or ""),
+        "pr_number": raw.get("pr") if isinstance(raw.get("pr"), int) else None,
+        "mode": mode,
+        "agent": agent,
+        "model": model,
+        "content_hash": str(triage.get("content_hash") or ""),
+        "input_strategy": str(triage.get("input_strategy") or ""),
+        "total_domains": len(dispatched) + len(skipped),
+        "static_disabled_domains": [],
+        "dispatched_domains": dispatched,
+        "skipped_domains": skipped,
+        "decisions": decisions,
+        "triage_duration_s": float(triage.get("duration_s") or 0.0),
+        "estimated_savings": 0,
+        "error": triage.get("error"),
+        "_extras": {
+            "file": raw.get("file"),
+            "shadow": raw.get("shadow"),
+            "dry_run": raw.get("dry_run"),
+            "dispatch": raw.get("dispatch"),
+            "summary": raw.get("summary"),
+            "zero_domains": raw.get("zero_domains", False),
+            "dispatch_duration_s": raw.get("dispatch_duration_s"),
+        },
+    }
+
+
+_INSIGHTS_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
 def _emit_insights(
     insights_url: str,
     payload: dict[str, Any],
 ) -> tuple[bool, str | None]:
     url = f"{insights_url.rstrip('/')}/events"
-    body = json.dumps({"event_type": "triage_decision", "payload": payload}).encode()
+    headers = {"Content-Type": "application/json"}
+    # Only attach the local insights bearer token when the target host is
+    # loopback. ``insights_url`` is repo/org-configurable, so a malicious
+    # config that points it at an external host would otherwise exfiltrate
+    # the token.
+    host = urllib.parse.urlparse(url).hostname or ""
+    if host in _INSIGHTS_LOCAL_HOSTS:
+        try:
+            token = _INSIGHTS_TOKEN_PATH.read_text().strip()
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+        except OSError:
+            # No token on disk → request will likely 401, but stay fail-open.
+            pass
+    envelope = {
+        "type": "triage_decision",
+        "source": "skill",
+        "cli": "claude",
+        "payload": _shape_triage_decision_payload(payload),
+    }
+    body = json.dumps(envelope).encode()
     request = urllib.request.Request(
         url,
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
     )
     try:
         with urllib.request.urlopen(request, timeout=5):
