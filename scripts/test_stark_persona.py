@@ -1050,7 +1050,7 @@ class TestEmitPersonaEvent:
 
             emit_persona_event(
                 subtype="selection",
-                payload={"persona": "jules", "session_id": 1},
+                payload={"persona": "jules", "persona_session_id": 1},
                 dedupe_key="persona:selection:1:12345",
             )
 
@@ -1143,7 +1143,13 @@ class TestSelectionEmitsEvent:
             body = json.loads(req.data)
             assert body["payload"]["subtype"] == "selection"
             assert body["payload"]["persona"] == result["persona"]
-            assert body["payload"]["session_id"] == result["session_id"]
+            # Producer ships the local sqlite rowid as `persona_session_id`
+            # in the payload — distinct from EventEnvelope.session_id (UUID)
+            # so it doesn't shadow the canonical envelope column.
+            assert body["payload"]["persona_session_id"] == result["session_id"]
+            assert "session_id" not in body["payload"], (
+                "persona_event payload must not use the canonical envelope key"
+            )
             assert "dedupe_key" in body
         conn.close()
 
