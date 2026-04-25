@@ -98,3 +98,48 @@ def test_get_token_falls_through_to_env_when_keychain_missing(monkeypatch):
 
     assert token == "env-token"
     assert minted == [("env-key", "12345", "67890")]
+
+
+def test_get_token_falls_through_to_gh_token_when_stark_envs_empty(monkeypatch):
+    """When STARK_* env vars are present but empty (GitHub Actions exposes
+    unset secrets as empty strings), the env-var path must raise KeyError so
+    the GH_TOKEN fallback fires. Without this, `_get_private_key_from_env`
+    proceeds with empty strings and crashes inside JWT signing with
+    InvalidKeyError. Regression: `Post graph comment` workflow on every PR."""
+    monkeypatch.setattr(github_app, "_active_app", "stark-claude")
+    monkeypatch.setattr(
+        github_app, "_read_cached_token",
+        lambda app=None, installation_id=None: None,
+    )
+
+    def fake_run(*args, **kwargs):
+        raise FileNotFoundError(2, "No such file or directory", "security")
+
+    monkeypatch.setattr(github_app.subprocess, "run", fake_run)
+
+    # Simulate GH Actions: STARK_* secrets are empty, GITHUB_TOKEN is provided
+    monkeypatch.setenv("STARK_PRIVATE_KEY_B64", "")
+    monkeypatch.setenv("STARK_APP_ID", "")
+    monkeypatch.setenv("STARK_INSTALL_ID", "")
+    monkeypatch.setenv("GH_TOKEN", "gha-fallback-token")
+
+    token = github_app.get_token()
+
+    assert token == "gha-fallback-token"
+
+
+def test_get_private_key_from_env_rejects_empty_strings(monkeypatch):
+    """Empty env vars must raise KeyError, not return empty-string tuples."""
+    monkeypatch.setenv("STARK_PRIVATE_KEY_B64", "")
+    monkeypatch.setenv("STARK_APP_ID", "")
+    monkeypatch.setenv("STARK_INSTALL_ID", "")
+    with pytest.raises(KeyError):
+        github_app._get_private_key_from_env()
+
+    # Partially set is also rejected
+    import base64
+    monkeypatch.setenv("STARK_PRIVATE_KEY_B64", base64.b64encode(b"k").decode())
+    monkeypatch.setenv("STARK_APP_ID", "123")
+    monkeypatch.setenv("STARK_INSTALL_ID", "")
+    with pytest.raises(KeyError):
+        github_app._get_private_key_from_env()

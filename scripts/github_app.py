@@ -246,12 +246,22 @@ def _get_private_key_from_env() -> tuple[str, str, str]:
     """Get (private_key, app_id, installation_id) from CI env vars.
 
     Reads STARK_PRIVATE_KEY_B64, STARK_APP_ID, STARK_INSTALL_ID.
-    Raises KeyError if any variable is missing.
+    Treats empty values as missing — GitHub Actions exposes unset secrets as
+    empty strings, not as absent env vars, so a strict ``os.environ[...]``
+    lookup would proceed with garbage and crash inside JWT signing instead of
+    falling through to the GH_TOKEN fallback.
+
+    Raises KeyError if any variable is missing or empty.
     """
     import base64
 
-    private_key = base64.b64decode(os.environ["STARK_PRIVATE_KEY_B64"]).decode()
-    return private_key, os.environ["STARK_APP_ID"], os.environ["STARK_INSTALL_ID"]
+    key_b64 = os.environ.get("STARK_PRIVATE_KEY_B64") or ""
+    app_id = os.environ.get("STARK_APP_ID") or ""
+    install_id = os.environ.get("STARK_INSTALL_ID") or ""
+    if not (key_b64 and app_id and install_id):
+        raise KeyError("STARK_PRIVATE_KEY_B64, STARK_APP_ID, or STARK_INSTALL_ID is missing or empty")
+    private_key = base64.b64decode(key_b64).decode()
+    return private_key, app_id, install_id
 
 
 def _make_jwt_raw(private_key: str, app_id: str) -> str:
