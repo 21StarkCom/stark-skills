@@ -9,11 +9,14 @@ import { pathToFileURL } from "node:url";
 import {
   collectSharedRefs,
   countWords,
+  detectFileKind,
   discoverSkillBundles,
   findRepoRoot,
+  inspectLocalRefs,
   loadBundleFiles,
   rel,
   resolveSkillTarget,
+  type BundleFile,
   type SkillBundle,
 } from "./skill_lib.ts";
 import {
@@ -52,6 +55,8 @@ type BundleRunSummary = {
   applied: boolean;
   proposalPath?: string;
   proposalSummaryPath?: string;
+  validationPath?: string;
+  validationSummaryPath?: string;
   changedFiles: Array<{
     path: string;
     action: RewriteAction;
@@ -61,6 +66,26 @@ type BundleRunSummary = {
   }>;
   refsRemoved: string[];
   warnings: string[];
+};
+
+type ValidationReport = {
+  ok: boolean;
+  frontmatter: Array<{
+    path: string;
+    ok: boolean;
+    missingKeys: string[];
+  }>;
+  refs: Array<{
+    path: string;
+    ok: boolean;
+    missing: string[];
+  }>;
+  pythonSyntax: Array<{
+    path: string;
+    ok: boolean;
+    error?: string;
+  }>;
+  errors: string[];
 };
 
 // Module-level repoRoot is populated only when `main()` runs. Tests import
@@ -73,7 +98,7 @@ type BundleRunSummary = {
 let repoRoot: string;
 
 type RunState = {
-  bundleFilesSnapshot: Map<string, Array<{ path: string; content: string }>>;
+  bundleFilesSnapshot: Map<string, BundleFile[]>;
   preRunMtimes: Map<string, number>;
   selectedSkillPaths: Set<string>;
 };
@@ -309,13 +334,17 @@ async function processBundle(
     skill: bundle.skillPath,
     refs: bundle.refs,
     missingRefs: bundle.missingRefs,
+    refKinds: bundle.refKinds,
     files: bundleFiles.map((file) => ({
       path: file.path,
+      kind: file.kind,
+      refKind: file.path === bundle.skillPath ? "skill" : bundle.refKinds[file.path] ?? null,
       words: countWords(file.content),
       lines: file.content.split(/\r?\n/).length,
     })),
   };
   writeUtf8(path.join(artifactDir, "bundle.json"), JSON.stringify(manifest, null, 2));
+  writeBundleSourceFiles(artifactDir, bundleFiles);
 
   if (options.mode === "plan") {
     writeUtf8(path.join(artifactDir, "rewrite-request.md"), buildRewriteRequest(bundle, bundleFiles));
@@ -344,6 +373,16 @@ async function processBundle(
     sharedRefOwners,
     runState.selectedSkillPaths,
   );
+  const validation = validateGeneratedBundle(bundle, bundleFiles, proposal);
+  const validationPath = path.join(artifactDir, "validation.json");
+  const validationSummaryPath = path.join(artifactDir, "validation.md");
+  writeUtf8(validationPath, JSON.stringify(validation, null, 2));
+  writeUtf8(validationSummaryPath, renderValidationSummary(bundle, validation));
+  if (!validation.ok) {
+    throw new Error(
+      `Proposal validation failed for ${bundle.skillPath}. See ${rel(repoRoot, validationPath)}`,
+    );
+  }
   if (!options.reuseProposal) {
     persistProposal(artifactDir, bundle, proposal);
   }
@@ -394,6 +433,8 @@ async function processBundle(
       applied: false,
       proposalPath: rel(repoRoot, proposalPath),
       proposalSummaryPath: rel(repoRoot, path.join(artifactDir, "proposal-summary.md")),
+      validationPath: rel(repoRoot, validationPath),
+      validationSummaryPath: rel(repoRoot, validationSummaryPath),
       changedFiles,
       refsRemoved: proposal.refs_removed,
       warnings: proposal.warnings,
@@ -405,7 +446,7 @@ async function processBundle(
 function parseArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
     apply: false,
-    apiTimeoutMs: 180000,
+    apiTimeoutMs: 900000,
     diff: false,
     // Default to plan mode so a bare `skill_optimize` invocation never
     // uploads bundle contents off-box. API mode is explicit: `--mode api`.
@@ -577,7 +618,7 @@ function selectBundles(
 
 async function requestProposal(
   bundle: SkillBundle,
-  bundleFiles: Array<{ path: string; content: string }>,
+  bundleFiles: BundleFile[],
   options: CliOptions,
 ): Promise<RewriteProposal> {
   const schema = buildProposalSchema(bundleFiles.map((file) => file.path), bundle.refs);
@@ -600,6 +641,7 @@ async function requestProposal(
               "Keep commands, paths, flags, frontmatter keys, and safety-critical rules exact.",
               "SKILL.md is the authoritative contract; delete redundant references when safe.",
               "Do not invent repo facts or touch paths outside the allowed set.",
+              "Keep included Python files syntactically valid.",
             ].join("\n"),
           },
         ],
@@ -711,7 +753,7 @@ async function requestProposal(
 }
 
 function generateProposalDiff(
-  bundleFiles: Array<{ path: string; content: string }>,
+  bundleFiles: BundleFile[],
   proposal: RewriteProposal,
 ): string {
   const beforeMap = new Map(bundleFiles.map((file) => [file.path, file.content]));
@@ -805,7 +847,7 @@ function buildProposalSchema(allowedPaths: string[], refPaths: string[]): Record
 
 function buildRewriteRequest(
   bundle: SkillBundle,
-  bundleFiles: Array<{ path: string; content: string }>,
+  bundleFiles: BundleFile[],
 ): string {
   const sections = [
     "# Rewrite brief",
@@ -825,6 +867,7 @@ function buildRewriteRequest(
     "- Keep commands, paths, literals, and non-obvious constraints intact.",
     "- If a reference doc is redundant, delete it and absorb the needed content elsewhere in the bundle.",
     "- Keep markdown link targets valid after the rewrite.",
+    "- Keep Python files syntactically valid.",
     "- Prefer imperative instructions over explanation.",
     "",
     "Allowed files:",
@@ -838,7 +881,7 @@ function buildRewriteRequest(
       }
       return [
         `## FILE: ${file.path}`,
-        `${fence}md`,
+        `${fence}${fenceLanguage(file.kind)}`,
         file.content.trimEnd(),
         fence,
         "",
@@ -848,9 +891,221 @@ function buildRewriteRequest(
   return sections.join("\n");
 }
 
+function fenceLanguage(kind: BundleFile["kind"]): string {
+  if (kind === "markdown") {
+    return "md";
+  }
+  if (kind === "python") {
+    return "python";
+  }
+  return "";
+}
+
+function validateGeneratedBundle(
+  bundle: SkillBundle,
+  bundleFiles: BundleFile[],
+  proposal: RewriteProposal,
+): ValidationReport {
+  const finalFiles = materializeBundleFiles(bundleFiles, proposal);
+  const finalFileMap = new Map(finalFiles.map((file) => [file.path, file]));
+  const trackedPaths = new Set([bundle.skillPath, ...bundle.refs]);
+  const fileExists = (absolutePath: string): boolean => {
+    if (absolutePath === repoRoot || absolutePath.startsWith(repoRoot + path.sep)) {
+      const relativePath = rel(repoRoot, absolutePath);
+      if (trackedPaths.has(relativePath)) {
+        return finalFileMap.has(relativePath);
+      }
+    }
+    return fs.existsSync(absolutePath) && fs.statSync(absolutePath).isFile();
+  };
+
+  const frontmatter = bundleFiles
+    .filter((file) => extractFrontmatterKeys(file.content).length > 0)
+    .map((file) => {
+      const finalFile = finalFileMap.get(file.path);
+      if (!finalFile) {
+        return {
+          path: file.path,
+          ok: true,
+          missingKeys: [],
+        };
+      }
+      const originalKeys = extractFrontmatterKeys(file.content);
+      const finalKeys = extractFrontmatterKeys(finalFile.content);
+      const missingKeys = originalKeys.filter((key) => !finalKeys.includes(key));
+      return {
+        path: file.path,
+        ok: missingKeys.length === 0,
+        missingKeys,
+      };
+    });
+
+  const refs = finalFiles
+    .filter((file) => file.kind === "markdown")
+    .map((file) => {
+      const inspection = inspectLocalRefs(
+        repoRoot,
+        path.join(repoRoot, file.path),
+        file.content,
+        { fileExists },
+      );
+      return {
+        path: file.path,
+        ok: inspection.missing.length === 0,
+        missing: inspection.missing,
+      };
+    });
+
+  const pythonSyntax = finalFiles
+    .filter((file) => file.kind === "python")
+    .map((file) => validatePythonSyntax(file));
+
+  const errors = [
+    ...frontmatter
+      .filter((check) => !check.ok)
+      .map(
+        (check) =>
+          `${check.path}: missing frontmatter keys ${check.missingKeys.join(", ")}`,
+      ),
+    ...refs
+      .filter((check) => !check.ok)
+      .map((check) => `${check.path}: broken refs ${check.missing.join(", ")}`),
+    ...pythonSyntax
+      .filter((check) => !check.ok)
+      .map((check) => `${check.path}: ${check.error ?? "python syntax validation failed"}`),
+  ];
+
+  return {
+    ok: errors.length === 0,
+    frontmatter,
+    refs,
+    pythonSyntax,
+    errors,
+  };
+}
+
+function materializeBundleFiles(
+  bundleFiles: BundleFile[],
+  proposal: RewriteProposal,
+): BundleFile[] {
+  const finalFileMap = new Map(
+    bundleFiles.map((file) => [file.path, { ...file }]),
+  );
+
+  for (const change of proposal.changes) {
+    if (change.action === "delete") {
+      finalFileMap.delete(change.path);
+      continue;
+    }
+    if (change.action === "update") {
+      finalFileMap.set(change.path, {
+        path: change.path,
+        content: change.content,
+        kind: detectFileKind(change.path),
+      });
+    }
+  }
+
+  return [...finalFileMap.values()].sort((a, b) => a.path.localeCompare(b.path));
+}
+
+function extractFrontmatterKeys(raw: string): string[] {
+  const lines = raw.split(/\r?\n/);
+  if (!lines.length || lines[0].trim() !== "---") {
+    return [];
+  }
+
+  const keys: string[] = [];
+  for (const line of lines.slice(1)) {
+    if (line.trim() === "---") {
+      break;
+    }
+    const match = line.match(/^([A-Za-z0-9_-]+):/);
+    if (match) {
+      keys.push(match[1]);
+    }
+  }
+  return keys;
+}
+
+function validatePythonSyntax(file: BundleFile): ValidationReport["pythonSyntax"][number] {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "skill-opt-py-"));
+  const tempPath = path.join(tempDir, path.basename(file.path));
+  writeUtf8(tempPath, file.content);
+
+  try {
+    execFileSync("python3", ["-m", "py_compile", tempPath], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return {
+      path: file.path,
+      ok: true,
+    };
+  } catch (error: any) {
+    const detail = `${error?.stderr ?? error?.stdout ?? error?.message ?? "unknown error"}`
+      .trim()
+      .split("\n")
+      .slice(-2)
+      .join(" ");
+    return {
+      path: file.path,
+      ok: false,
+      error: detail,
+    };
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+function renderValidationSummary(
+  bundle: SkillBundle,
+  validation: ValidationReport,
+): string {
+  const lines = [
+    `# Validation: ${bundle.skillPath}`,
+    "",
+    `- Result: ${validation.ok ? "pass" : "fail"}`,
+    "",
+    "## Frontmatter",
+    ...(validation.frontmatter.length
+      ? validation.frontmatter.map((check) =>
+          check.ok
+            ? `- ${check.path}: ok`
+            : `- ${check.path}: missing keys ${check.missingKeys.join(", ")}`,
+        )
+      : ["- No frontmatter-bearing files checked."]),
+    "",
+    "## Local Refs",
+    ...(validation.refs.length
+      ? validation.refs.map((check) =>
+          check.ok
+            ? `- ${check.path}: ok`
+            : `- ${check.path}: missing ${check.missing.join(", ")}`,
+        )
+      : ["- No markdown files checked."]),
+    "",
+    "## Python Syntax",
+    ...(validation.pythonSyntax.length
+      ? validation.pythonSyntax.map((check) =>
+          check.ok
+            ? `- ${check.path}: ok`
+            : `- ${check.path}: ${check.error ?? "failed"}`,
+        )
+      : ["- No python files checked."]),
+    "",
+    "## Errors",
+    ...(validation.errors.length
+      ? validation.errors.map((item) => `- ${item}`)
+      : ["- None."]),
+  ];
+
+  return `${lines.join("\n")}\n`;
+}
+
 function loadExistingProposal(
   proposalPath: string,
-  bundleFiles: Array<{ path: string; content: string }>,
+  bundleFiles: BundleFile[],
   preRunMtimes: Map<string, number>,
 ): RewriteProposal {
   if (!fs.existsSync(proposalPath)) {
@@ -1010,6 +1265,15 @@ function writeProposalFiles(artifactDir: string, proposal: RewriteProposal): voi
     const outputPath = path.join(proposedRoot, change.path);
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     writeUtf8(outputPath, change.content ?? "");
+  }
+}
+
+function writeBundleSourceFiles(artifactDir: string, bundleFiles: BundleFile[]): void {
+  const sourceRoot = path.join(artifactDir, "source");
+  fs.rmSync(sourceRoot, { recursive: true, force: true });
+  for (const file of bundleFiles) {
+    const outputPath = path.join(sourceRoot, file.path);
+    writeUtf8(outputPath, file.content);
   }
 }
 
@@ -1237,6 +1501,12 @@ function writeRunSummary(
     }
     if (bundle.proposalSummaryPath) {
       lines.push(`- Proposal summary: \`${bundle.proposalSummaryPath}\``);
+    }
+    if (bundle.validationPath) {
+      lines.push(`- Validation JSON: \`${bundle.validationPath}\``);
+    }
+    if (bundle.validationSummaryPath) {
+      lines.push(`- Validation summary: \`${bundle.validationSummaryPath}\``);
     }
     if (bundle.diffPath) {
       lines.push(`- Diff: \`${bundle.diffPath}\``);

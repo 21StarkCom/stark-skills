@@ -4,8 +4,9 @@ Purpose: inventory a skill bundle, generate a rewrite brief or API-backed rewrit
 
 ## What it uses
 
-- `tools/skill_audit.ts` inventories skills and validates direct local markdown links.
-- `tools/skill_optimize.ts` rewrites one or more skill bundles.
+- `tools/skill_audit.ts` inventories skills and validates direct local markdown links plus repo-local Python script references mentioned by the skill.
+- `tools/skill_optimize.ts` rewrites one or more skill bundles and validates the generated bundle before apply.
+- `tools/skill_autopilot.ts` wraps the optimizer for one skill and writes a consolidated `skill-upgraded.md` artifact.
 - `gpt-5.4-pro` is used only in `--mode api`.
 
 ## Modes
@@ -80,10 +81,13 @@ This diff compares the current repo file against the proposed rewrite for every 
 Per skill bundle:
 
 - `bundle.json` — discovered files, word counts, and line counts
+- `source/...` — snapshot of the bundle files used for the proposal and validation
 - `rewrite-request.md` — generated only in `--mode plan`
 - `proposal.json` — structured proposal from the API
 - `proposal-summary.md` — human summary of changes, contradictions resolved, and warnings
 - `proposal.diff` — unified diff for changed files
+- `validation.json` — machine-readable validation results for frontmatter, local refs, and Python syntax
+- `validation.md` — human-readable validation summary
 - `proposed/...` — proposed file contents for inspection
 
 Per run:
@@ -109,6 +113,7 @@ If a proposal has already been applied, `proposal.diff` may be empty because the
   - Print diffs during the run.
 - `--api-timeout-ms <ms>`
   - Total time budget for a background rewrite job.
+  - Default: `900000` (15 minutes).
 - `--poll-interval-ms <ms>`
   - Poll interval for background job status.
 - `--max-output-tokens <n>`
@@ -119,7 +124,11 @@ If a proposal has already been applied, `proposal.diff` may be empty because the
 ## Notes on `gpt-5.4-pro`
 
 - Large bundles can take several minutes.
-- For multi-file bundles, use a larger timeout, for example:
+- The optimizer validates the proposal before apply:
+  - preserved YAML frontmatter keys for files that already had frontmatter
+  - local markdown and repo-local Python references still resolve
+  - included Python files still pass `python3 -m py_compile`
+- For especially large bundles, use a larger timeout, for example:
   ```bash
   node tools/skill_optimize.ts --mode api --skill stark-review-plan --api-timeout-ms 900000
   ```

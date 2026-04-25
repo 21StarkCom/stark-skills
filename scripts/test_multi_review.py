@@ -81,6 +81,30 @@ class TestBaseFlag:
         assert mock_review.call_args.kwargs["base"] == "abc1234def"
 
 
+class TestDetectBaseBranch:
+    @patch("multi_review.subprocess.run")
+    def test_uses_origin_head_when_available(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="origin/trunk\n")
+        assert multi_review.detect_base_branch("/tmp/repo") == "trunk"
+
+    @patch("multi_review.subprocess.run")
+    def test_falls_back_to_known_default_branch_names(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=1, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="origin/feature\norigin/develop\ndevelop\n"),
+        ]
+        assert multi_review.detect_base_branch("/tmp/repo") == "develop"
+
+    @patch("multi_review.subprocess.run")
+    def test_raises_when_default_branch_cannot_be_detected(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=1, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="origin/feature\nfeature\n"),
+        ]
+        with pytest.raises(RuntimeError, match="Pass --base explicitly"):
+            multi_review.detect_base_branch("/tmp/repo")
+
+
 class TestModelFlags:
     """Sub-agents must use pinned model flags."""
 
@@ -460,6 +484,16 @@ class TestReturnCodeHandling:
         assert result.error == "empty_output"
         assert len(result.findings) == 0
 
+    @patch("multi_review.time.sleep", return_value=None)
+    @patch("multi_review.subprocess.run")
+    def test_invalid_findings_output_sets_parse_error(self, mock_run, _mock_sleep):
+        mock_run.return_value = MagicMock(stdout="definitely not json", stderr="", returncode=0)
+        result = multi_review._run_subagent("claude", "architecture", "abc123")
+        assert result.error is not None
+        assert result.error.startswith("parse_error:")
+        assert len(result.findings) == 0
+        assert mock_run.call_count == 2
+
     @patch("multi_review.subprocess.run")
     def test_prompt_passed_via_stdin_claude(self, mock_run):
         mock_run.return_value = MagicMock(stdout="[]", stderr="", returncode=0)
@@ -489,6 +523,25 @@ class TestReturnCodeHandling:
         result = multi_review._run_subagent("codex", "architecture", "abc123")
         assert result.error == "cli_error"
         assert len(result.findings) == 0
+
+
+class TestFindingsParser:
+    def test_parses_first_json_array_without_greedy_matching(self):
+        raw = """Reviewer notes:
+
+```json
+[{"severity":"high","file":"app.py","line":7,"title":"oops","description":"broken","suggestion":"fix"}]
+```
+
+done."""
+        findings = multi_review._parse_findings("claude", "architecture", raw)
+        assert len(findings) == 1
+        assert findings[0].file == "app.py"
+        assert findings[0].line == 7
+
+    def test_invalid_output_raises_parse_error(self):
+        with pytest.raises(multi_review.FindingsParseError, match="no JSON findings array found"):
+            multi_review._parse_findings("claude", "architecture", "no findings here")
 
 
 class TestOutOfDiffFilter:
