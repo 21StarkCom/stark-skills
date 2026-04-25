@@ -67,13 +67,13 @@ check_python_deps() {
     echo "Checking Python dependencies..."
     local py="$REPO_DIR/scripts/.venv/bin/python3"
     if [ ! -x "$py" ]; then
-        warn "No venv at scripts/.venv/ — run: python3 -m venv $REPO_DIR/scripts/.venv && $REPO_DIR/scripts/.venv/bin/pip install PyJWT requests anthropic"
+        warn "No venv at scripts/.venv/ — run: python3 -m venv $REPO_DIR/scripts/.venv && $REPO_DIR/scripts/.venv/bin/pip install PyJWT requests anthropic google-auth"
         return 1
     fi
     info "venv: $py"
     local missing=0
-    # anthropic: required by forge_fix_loop SDK dispatch (PR #312).
-    for pair in "PyJWT:jwt" "requests:requests" "anthropic:anthropic"; do
+    # anthropic + google-auth: required by forge_fix_loop SDK dispatch.
+    for pair in "PyJWT:jwt" "requests:requests" "anthropic:anthropic" "google-auth:google.auth"; do
         local pip_name="${pair%%:*}"
         local import_name="${pair##*:}"
         if "$py" -c "import $import_name" 2>/dev/null; then

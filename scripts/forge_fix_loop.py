@@ -304,9 +304,11 @@ def _make_anthropic_client() -> Any:
          Gating on ADC availability (rather than on an env flag) makes
          the API-key fallback reachable on machines without gcloud creds.
       3. Fall back to direct ``Anthropic()`` when ``ANTHROPIC_API_KEY``
-         is set in the real process environment. This path reads
-         ``os.environ`` directly — ``_read_vertex_env()`` strips the key
-         by design, so checking it there would silently skip the fallback.
+         or the repo-standard source key ``ANTHROPIC_AGENTS`` is set in
+         the real process environment. The latter preserves the auth
+         contract from the old Claude CLI path, where ``runtime_env``
+         injected ``ANTHROPIC_AGENTS`` as ``ANTHROPIC_API_KEY`` for the
+         subprocess.
       4. Return ``None`` when no auth path is configured; the caller
          logs and returns "" to halt the round.
 
@@ -332,8 +334,11 @@ def _make_anthropic_client() -> Any:
         region = vertex_env.get("CLOUD_ML_REGION", "global")
         if project_id:
             return AnthropicVertex(project_id=project_id, region=region)
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return Anthropic()
+    api_key = os.environ.get(_ANTHROPIC_API_KEY_ENV) or os.environ.get(
+        _ANTHROPIC_SOURCE_KEY_ENV
+    )
+    if api_key:
+        return Anthropic(api_key=api_key)
     return None
 
 
@@ -396,6 +401,8 @@ def _open_dispatch_log(
 
 
 _FIX_MODEL_ENV = "FORGE_FIX_MODEL"
+_ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY"
+_ANTHROPIC_SOURCE_KEY_ENV = "ANTHROPIC_AGENTS"
 _FIX_MODEL_DEFAULT = "claude-opus-4-7"
 _FIX_MAX_TOKENS = 16000
 
@@ -457,7 +464,7 @@ def _dispatch_fix_agent(
         print(
             "[forge_fix_loop] no Anthropic SDK client available — "
             "set CLAUDE_CODE_USE_VERTEX=1 with ANTHROPIC_VERTEX_PROJECT_ID, "
-            "or set ANTHROPIC_API_KEY.",
+            "or set ANTHROPIC_API_KEY/ANTHROPIC_AGENTS.",
             file=sys.stderr,
         )
         _append_log_result(
