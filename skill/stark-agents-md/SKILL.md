@@ -9,7 +9,7 @@ disable-model-invocation: true
 
 Create and refactor `AGENTS.md` at the repo root following progressive-disclosure principles. Keep the file minimal so it doesn't poison agent context on every request.
 
-`AGENTS.md` is always the source of truth. `CLAUDE.md` must be a symlink to it.
+`AGENTS.md` is the source of truth. By default, `CLAUDE.md` is a symlink to `AGENTS.md`. A repo may intentionally keep `CLAUDE.md` as a standalone, divergent file when it has host-specific content for Claude Code; see [Cross-Tool Compatibility](#cross-tool-compatibility).
 
 ## When to Use
 
@@ -50,28 +50,82 @@ Check the repo root for `AGENTS.md` and `CLAUDE.md` and report one of:
 - **(D)** Both exist; `CLAUDE.md` is a symlink to `AGENTS.md`. (No action needed.)
 - **(E)** Both exist; `CLAUDE.md` is **not** a symlink. Diff the two and report whether content is equivalent or divergent.
 
-If the user invoked the skill in **review mode**, stop here after reporting state — do not mutate any files.
+In **review mode**, record the detected state and continue through the analysis phases. Skip Phase 0b — review mode never mutates files.
 
-### Phase 0b: Apply Migration (only when authoring or refactoring)
+### Phase 0b: Apply Migration (authoring or refactor only)
 
-When the user has explicitly asked to create or refactor (not review-only), and after confirming, execute the migration matching the detected state:
+When the user has explicitly asked to create or refactor (not review-only), and after confirming, execute the migration matching the detected state. Each step must be fail-closed — if any sub-step fails, stop and leave the prior file state intact:
 
 1. **(A)** Offer to create `AGENTS.md` and symlink `CLAUDE.md` to it.
 2. **(B)** Create the symlink: `ln -s AGENTS.md CLAUDE.md`.
-3. **(C)** Rename and symlink: `mv CLAUDE.md AGENTS.md && ln -s AGENTS.md CLAUDE.md`.
-4. **(E)** If the two files are **equivalent**, replace `CLAUDE.md` with the symlink. If they are **divergent** (host-specific install paths, command names, or audience-specific content), stop and surface the diff — do not silently merge. Divergence is intentional in some repos (e.g., when Claude-specific tooling reads `CLAUDE.md` directly), and merging would collapse working host-specific content.
+3. **(C)** Migrate with rollback: refuse to start if any reserved path is taken, back up `CLAUDE.md`, stage `AGENTS.md` and the symlink, and on any failure undo every step that already ran so the repo never lands half-converted. Phase 0 already established that `AGENTS.md` does not exist in state (C), so any `AGENTS.md` present at trap time was created by this run and is safe to remove. Concretely:
+
+   ```bash
+   set -e
+   for f in AGENTS.md AGENTS.md.tmp CLAUDE.md.tmp CLAUDE.md.bak; do
+     if [ -e "$f" ] || [ -L "$f" ]; then
+       echo "Refusing to migrate: $f already exists" >&2
+       exit 1
+     fi
+   done
+   cp -p CLAUDE.md CLAUDE.md.bak
+   trap '
+     rm -f AGENTS.md.tmp CLAUDE.md.tmp
+     [ -e AGENTS.md ] && rm -f AGENTS.md
+     [ -e CLAUDE.md.bak ] && mv -f CLAUDE.md.bak CLAUDE.md
+     exit 1
+   ' ERR INT
+   cp CLAUDE.md AGENTS.md.tmp
+   ln -s AGENTS.md CLAUDE.md.tmp
+   mv AGENTS.md.tmp AGENTS.md
+   mv -f CLAUDE.md.tmp CLAUDE.md      # overwrites the regular file with the symlink
+   trap - ERR INT
+   rm -f CLAUDE.md.bak
+   ```
+
+   If any step (or an interrupt) fires, the trap removes the staged temp files, deletes `AGENTS.md` if it was already promoted, and restores the original `CLAUDE.md` from the backup, leaving the repo in its pre-migration state.
+4. **(E) equivalent:** swap `CLAUDE.md` for a symlink with the same preflight + backup-and-restore pattern as (C):
+
+   ```bash
+   set -e
+   for f in CLAUDE.md.tmp CLAUDE.md.bak; do
+     if [ -e "$f" ] || [ -L "$f" ]; then
+       echo "Refusing to migrate: $f already exists" >&2
+       exit 1
+     fi
+   done
+   cp -p CLAUDE.md CLAUDE.md.bak
+   trap 'rm -f CLAUDE.md.tmp; [ -e CLAUDE.md.bak ] && mv -f CLAUDE.md.bak CLAUDE.md; exit 1' ERR INT
+   ln -s AGENTS.md CLAUDE.md.tmp
+   mv -f CLAUDE.md.tmp CLAUDE.md      # atomic replace; original still in CLAUDE.md.bak
+   trap - ERR INT
+   rm -f CLAUDE.md.bak
+   ```
+
+   **(E) divergent:** stop and surface the diff — do not silently merge. Divergence is intentional in some repos (e.g., when Claude-specific tooling reads `CLAUDE.md` directly), and merging would collapse working host-specific content. See [Cross-Tool Compatibility](#cross-tool-compatibility) for when keeping divergent files is the right call.
 
 ### Phase 1: Assess Current State
 
-**For new repos:**
-- Ask about the project's purpose (one sentence)
-- Ask about package manager (if not npm)
-- Ask about non-standard build commands
+Pick the branch matching the state from Phase 0:
 
-**For existing files:**
-- Read the current `AGENTS.md`
+**(A) Neither file exists:**
+- *Authoring or refactor mode (new repo):* Ask about the project's purpose (one sentence), the package manager (if not npm), and any non-standard build commands.
+- *Review mode:* Skip the rest of Phase 1 — there is nothing to assess. Report "no `AGENTS.md` or `CLAUDE.md` exists" and continue to Phase 6 with that recommendation.
+
+**(B) Only `AGENTS.md` / (D) `CLAUDE.md` is a symlink — existing authoritative file:**
+- Read `AGENTS.md`
 - Count lines and estimate token cost
 - Identify content that belongs elsewhere
+
+**(C) Only `CLAUDE.md` exists — treat `CLAUDE.md` as the current authoritative file:**
+- Read `CLAUDE.md` (there is no `AGENTS.md` yet)
+- Count lines and estimate token cost
+- Identify content that belongs elsewhere; the same analysis will apply once it becomes `AGENTS.md`
+
+**(E) Both exist, `CLAUDE.md` is not a symlink — read both:**
+- Read `AGENTS.md` and `CLAUDE.md` and review the diff captured in Phase 0
+- If equivalent, treat `AGENTS.md` as authoritative and analyze it
+- If divergent, analyze each file on its own terms; do not assume one supersedes the other
 
 ### Phase 2: Apply the Essential Test
 
@@ -209,13 +263,15 @@ Before adding anything to `AGENTS.md`:
 
 `AGENTS.md` is an open standard supported by 20+ tools including GitHub Copilot (Coding Agent), Cursor, Codex (OpenAI), Gemini CLI (Google), Windsurf, Devin (Cognition), Zed, Warp, VS Code, Aider, goose, and RooCode.
 
-**Claude Code** uses `CLAUDE.md`. `AGENTS.md` is always the source of truth. `CLAUDE.md` must always be a symlink to it:
+**Claude Code** uses `CLAUDE.md`. The default ownership model is: `AGENTS.md` is the source of truth, and `CLAUDE.md` is a symlink to it:
 
 ```bash
 ln -s AGENTS.md CLAUDE.md
 ```
 
-Never create a standalone `CLAUDE.md`. Never put content in `CLAUDE.md` that isn't in `AGENTS.md`.
+In this default mode, don't put content in `CLAUDE.md` that isn't in `AGENTS.md` — the symlink would shadow it anyway.
+
+**Divergent mode (exception):** some repos intentionally keep `CLAUDE.md` as a standalone file with host-specific content (install paths, Claude-specific tooling references, audience-specific framing). State (E) in Phase 0 covers this: if a diff shows the two files have meaningfully divergent content, leave them divergent rather than collapsing into a symlink. Treat divergent mode as opt-in, not the default.
 
 ## Resources
 
