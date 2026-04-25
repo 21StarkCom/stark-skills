@@ -99,10 +99,19 @@ jobs:
       REPO_NAME: ${{ github.repository }}
       ARTIFACT_DIR: graph-artifacts
     steps:
-      - name: Checkout trusted base ref
+      # Same-repo PRs use the PR head's commenter so a fix to pr_commenter.py
+      # takes effect on the very PR that introduces it (otherwise the workflow
+      # would always run the base-ref version, leaving every fix one merge
+      # behind reality). Fork PRs fall back to base.sha; for those, GitHub
+      # already downgrades the issued token to read-only regardless of the
+      # `permissions:` block below, so a fork commenter cannot mutate state.
+      - name: Checkout commenter script
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: >-
+            ${{ github.event.pull_request.head.repo.full_name == github.repository
+                && github.event.pull_request.head.sha
+                || github.event.pull_request.base.sha }}
           sparse-checkout: |
             scripts
           sparse-checkout-cone-mode: true
