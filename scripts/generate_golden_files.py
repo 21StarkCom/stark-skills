@@ -15,7 +15,7 @@ import json
 import sys
 from pathlib import Path
 
-from flow_extractor import extract_workflow
+from flow_extractor import extract_skill_workflow
 from flow_layout import compute_layout
 from flow_schema import FlowDiagram
 
@@ -44,31 +44,40 @@ def normalize_diagram(diagram: FlowDiagram) -> dict:
 
 def generate_one(skill_name: str) -> dict | None:
     """Extract, layout, and normalize a single skill's flow diagram."""
-    skill_path = SKILL_DIR / skill_name / 'SKILL.md'
-    if not skill_path.exists():
-        print(f'  SKIP {skill_name}: SKILL.md not found', file=sys.stderr)
-        return None
-
-    diagram = extract_workflow(skill_path)
+    diagram = extract_skill_workflow(SKILL_DIR / skill_name)
     if diagram is None:
-        print(f'  SKIP {skill_name}: no workflow extracted', file=sys.stderr)
+        print(f'  FAIL {skill_name}: no workflow extracted', file=sys.stderr)
         return None
 
     positioned = compute_layout(diagram)
     if positioned is None:
-        print(f'  SKIP {skill_name}: layout failed', file=sys.stderr)
+        print(f'  FAIL {skill_name}: layout failed', file=sys.stderr)
         return None
 
     return normalize_diagram(positioned)
 
 
 def generate_all() -> dict[str, dict]:
-    """Generate golden files for all representative skills."""
+    """Generate golden files for all representative skills.
+
+    Every skill in ``GOLDEN_SKILLS`` is required to produce a diagram. If any
+    fails, exit non-zero — silent skips would let CI green-light a PR that
+    has actually stopped validating one of the configured skills.
+    """
     results: dict[str, dict] = {}
+    missing: list[str] = []
     for name in GOLDEN_SKILLS:
         data = generate_one(name)
-        if data is not None:
+        if data is None:
+            missing.append(name)
+        else:
             results[name] = data
+    if missing:
+        print(
+            f'\nGOLDEN_SKILLS produced no diagram: {", ".join(missing)}',
+            file=sys.stderr,
+        )
+        sys.exit(1)
     return results
 
 

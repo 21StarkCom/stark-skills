@@ -6,6 +6,7 @@ argument-hint: "[PR_NUMBER] [--rounds N] [--dry-run] [--repo ORG/REPO]"
 disable-model-invocation: false
 context: fork
 model: opus[1m]
+workflow_path: references/workflow.md
 ---
 
 ## Preflight
