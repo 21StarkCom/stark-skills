@@ -241,14 +241,22 @@ def test_shadow_mode_dispatches_all(
     ]
 
     rc, stdout, _stderr = _run_main(
-        ["triage_orchestrator.py", "--type", "pr", "--pr", "42", "--repo", "acme/repo", "--shadow", "--plain"]
+        ["triage_orchestrator.py", "--type", "pr", "--pr", "42", "--repo", "acme/repo", "--shadow", "--json", "--plain"]
     )
 
     assert rc == 0
-    assert "Dispatching 3/5 domains" in stdout
-    assert "[5/5] [RUN] multi:performance" in stdout
     dispatch_argv = mock_run.call_args_list[1].args[0]
     assert dispatch_argv[dispatch_argv.index("--domains") + 1] == ",".join(all_domains)
+
+    # Shadow mode dispatches all domains while preserving the original triage
+    # verdicts/skipped_domains so analytics still know which domains *would*
+    # have been skipped — without this, shadow telemetry loses signal.
+    payload = json.loads(stdout)
+    assert payload["triage"]["dispatched_domains"] == all_domains
+    skipped_in_verdicts = [
+        v["domain"] for v in payload["triage"]["verdicts"] if not v["relevant"]
+    ]
+    assert sorted(skipped_in_verdicts) == sorted(["accessibility", "performance"])
 
 
 @patch("triage_orchestrator.discover_config", return_value=_minimal_config())
@@ -432,6 +440,56 @@ def test_shape_triage_decision_payload_surfaces_dispatch_models() -> None:
     }
     shaped = triage_orchestrator._shape_triage_decision_payload(raw)
     assert shaped["dispatch_models"] == {"claude": "claude-opus-4-7"}
+
+
+@patch("triage_orchestrator.urllib.request.urlopen", return_value=_UrlOpenContext())
+@patch("triage_orchestrator.discover_config", return_value=_minimal_config())
+@patch("triage_orchestrator._discover_review_domains")
+@patch("triage_orchestrator.triage_domains", return_value=_sample_triage_result())
+@patch("triage_orchestrator.subprocess.run")
+@patch("triage_orchestrator.Path.read_text", return_value="# spec body")
+def test_design_dispatch_forwards_repo_to_plan_review(
+    _mock_read: MagicMock,
+    mock_run: MagicMock,
+    _mock_triage: MagicMock,
+    mock_discover: MagicMock,
+    _mock_config: MagicMock,
+    _mock_urlopen: MagicMock,
+    tmp_path,
+) -> None:
+    """Design/plan dispatch must forward the detected/forced --repo to
+    plan_review_dispatch.py so emitted agent_dispatch / review_finding
+    events get attributed to the actual repository, not the 'unknown'
+    fallback.
+    """
+    from domain_triage import DomainMeta
+    spec = tmp_path / "spec.md"
+    spec.write_text("# Spec")
+    mock_discover.return_value = {
+        "architecture": DomainMeta(order="01", label="Architecture",
+                                    filename="architecture.md", description=""),
+        "security": DomainMeta(order="02", label="Security",
+                                filename="security.md", description=""),
+        "testing": DomainMeta(order="03", label="Testing",
+                               filename="testing.md", description=""),
+    }
+    mock_run.return_value = _completed(
+        stdout=json.dumps(_dispatch_payload(["architecture", "security", "testing"]))
+    )
+
+    rc, _stdout, _stderr = _run_main([
+        "triage_orchestrator.py", "--type", "design",
+        "--file", str(spec),
+        "--repo", "acme/spec-repo", "--plain",
+    ])
+
+    assert rc == 0
+    dispatch_argv = mock_run.call_args_list[0].args[0]
+    assert "--repo" in dispatch_argv, (
+        "plan_review_dispatch must receive --repo so its telemetry is "
+        "attributed to the source repository"
+    )
+    assert dispatch_argv[dispatch_argv.index("--repo") + 1] == "acme/spec-repo"
 
 
 def test_build_final_payload_includes_dispatch_models() -> None:

@@ -239,11 +239,46 @@ def _parse_plan_findings(
 
 
 def _agent_model_label(agent: str) -> str:
-    """Return the resolved model id for *agent*, or a sentinel on failure."""
+    """Return the resolved model id for *agent*, or ``""`` on failure.
+
+    Empty-string return is the sentinel for "unresolved" so callers can
+    filter it out of model-attribution maps. Returning a string sentinel
+    like "<unresolved: …>" would land in dashboards as if it were a
+    real model id.
+    """
     try:
         return _resolve_model(agent)
     except Exception as exc:  # pragma: no cover - resolution shouldn't fail in practice
-        return f"<unresolved: {exc}>"
+        print(
+            f"  [!] model resolution failed for {agent!r}: {exc}",
+            file=sys.stderr, flush=True,
+        )
+        return ""
+
+
+def _safe_repo_relative(file_path: str, repo_dir: str | None) -> str:
+    """Normalize *file_path* to a repo-relative identifier suitable for
+    PUBLIC-tier telemetry.
+
+    The stark-insights validator hard-rejects absolute paths and parent
+    traversal in `agent_dispatch.file` / `review_finding.file`. Producers
+    must therefore pass a repo-relative path. If repo_dir is known, we
+    use it as the anchor; otherwise we strip a leading "/" and any "../"
+    segments so an inconvenient-but-not-malicious caller path doesn't
+    bring down telemetry for the whole review.
+    """
+    if not file_path:
+        return file_path
+    p = file_path
+    if repo_dir:
+        try:
+            p = os.path.relpath(file_path, repo_dir)
+        except ValueError:
+            pass
+    # Strip any remaining absolute prefix and traversal segments.
+    p = p.lstrip("/")
+    parts = [seg for seg in p.split("/") if seg and seg != ".."]
+    return "/".join(parts) or p
 
 
 def _run_plan_subagent(
@@ -420,65 +455,88 @@ def _emit_plan_dispatch_events(
     review_type: str,
     file_path: str,
     round_num: int,
+    repo: str | None,
+    repo_dir: str | None = None,
 ) -> None:
     """Best-effort emit ``agent_dispatch`` and ``review_finding`` events to
     the stark-insights queue for design/plan reviews so they're first-class
     in dashboards (mirrors what ``multi_review.save_round_history`` does for
     PR reviews).
+
+    Telemetry must never break the review. The whole emission path is
+    wrapped in a broad fail-open handler so any failure (import error,
+    disk full, schema mismatch on a single payload, etc.) logs and
+    returns instead of bubbling out.
+
+    Envelope ``project`` and payload ``repo`` are populated with the
+    actual repo identifier — ``review_type`` lives only in its own
+    dedicated payload field. The dedupe key is repo-scoped so two
+    repos with the same relative doc path don't collide in the queue.
     """
     try:
-        from emit_queue import enqueue
-    except ImportError:
-        return
-
-    import datetime as _dt
-    now_iso = _dt.datetime.now(_dt.timezone.utc).isoformat()
-
-    def _envelope(event_type: str, payload: dict, dedupe_key: str) -> dict:
-        return {
-            "type": event_type,
-            "timestamp": now_iso,
-            "cli": "claude",
-            "source": "skill",
-            "schema_version": 1,
-            "project": review_type,
-            "dedupe_key": dedupe_key,
-            "payload": payload,
-        }
-
-    file_key = f"{review_type}:{file_path}:round-{round_num}"
-    finding_idx = 0
-    for r in results:
         try:
-            enqueue(_envelope("agent_dispatch", {
-                "agent": r.agent,
-                "model": r.model,
-                "task": f"{r.domain} review",
-                "duration_s": r.duration_s,
-                "success": r.error is None,
-                "timeout": "timeout" in (r.error or ""),
-                "finding_count": len(r.findings),
-                "review_type": review_type,
-                "file": file_path,
-            }, f"{file_key}:agent:{r.agent}:{r.domain}"))
-        except Exception as exc:  # pragma: no cover - never block dispatch on telemetry
-            print(f"  [!] Failed to emit agent_dispatch: {exc}", file=sys.stderr)
-        for f in r.findings:
+            from emit_queue import enqueue
+        except ImportError:
+            return
+
+        import datetime as _dt
+        now_iso = _dt.datetime.now(_dt.timezone.utc).isoformat()
+        repo_label = repo or "unknown"
+        safe_file = _safe_repo_relative(file_path, repo_dir)
+
+        def _envelope(event_type: str, payload: dict, dedupe_key: str) -> dict:
+            return {
+                "type": event_type,
+                "timestamp": now_iso,
+                "cli": "claude",
+                "source": "skill",
+                "schema_version": 1,
+                "project": repo_label,
+                "dedupe_key": dedupe_key,
+                "payload": payload,
+            }
+
+        file_key = f"{repo_label}:{review_type}:{safe_file}:round-{round_num}"
+        finding_idx = 0
+        for r in results:
             try:
-                enqueue(_envelope("review_finding", {
-                    "pr_number": None,
-                    "repo": review_type,
-                    "agent": f.agent,
-                    "domain": f.domain,
-                    "severity": f.severity,
-                    "title": f.title,
-                    "description": f.description,
+                enqueue(_envelope("agent_dispatch", {
+                    "agent": r.agent,
+                    "model": r.model,
+                    "domain": r.domain,
+                    "task": f"{r.domain} review",
+                    "round": round_num,
+                    "duration_s": r.duration_s,
+                    "success": r.error is None,
+                    "timeout": "timeout" in (r.error or ""),
+                    "finding_count": len(r.findings),
                     "review_type": review_type,
-                    "file": file_path,
-                }, f"{file_key}:finding:{finding_idx}"))
+                    "file": safe_file,
+                }, f"doc-review:{file_key}:agent:{r.agent}:{r.domain}"))
             except Exception as exc:  # pragma: no cover
-                print(f"  [!] Failed to emit review_finding: {exc}", file=sys.stderr)
-            finding_idx += 1
+                print(f"  [!] Failed to emit agent_dispatch: {exc}", file=sys.stderr)
+            for f in r.findings:
+                try:
+                    enqueue(_envelope("review_finding", {
+                        "pr_number": None,
+                        "repo": repo_label,
+                        "round": round_num,
+                        "agent": f.agent,
+                        "domain": f.domain,
+                        "severity": f.severity,
+                        "title": f.title,
+                        "description": f.description,
+                        "review_type": review_type,
+                        "file": safe_file,
+                    }, f"doc-review:{file_key}:finding:{finding_idx}"))
+                except Exception as exc:  # pragma: no cover
+                    print(f"  [!] Failed to emit review_finding: {exc}", file=sys.stderr)
+                finding_idx += 1
+    except Exception as exc:  # pragma: no cover
+        # Never let telemetry crash a completed review. Catches anything
+        # the inner per-event handlers missed (datetime / import-time
+        # failures other than ImportError, etc.).
+        print(f"  [!] Telemetry emission failed: {exc}", file=sys.stderr)
 
 
 def dispatch_plan_review(
@@ -492,6 +550,7 @@ def dispatch_plan_review(
     timeout: int = DEFAULT_TIMEOUT,
     review_type: str | None = None,
     file_path: str | None = None,
+    repo: str | None = None,
 ) -> dict[str, Any]:
     """Dispatch plan review across agents × domains in parallel.
 
@@ -647,10 +706,21 @@ def dispatch_plan_review(
             entry["findings"] = [asdict(f) for f in r.findings]
         serialized_results.append(entry)
 
-    models_in_use = {agent: _agent_model_label(agent) for agent in agents}
+    # Filter empty model labels — empty string is the "unresolved" sentinel
+    # from _agent_model_label; a stale "<unresolved: ...>" string would
+    # otherwise look like a real model id in {agent: model} maps consumed
+    # downstream by triage_orchestrator and stark-insights.
+    models_in_use = {
+        agent: model
+        for agent in agents
+        if (model := _agent_model_label(agent))
+    }
 
     if review_type and file_path:
-        _emit_plan_dispatch_events(results, review_type, file_path, round_num)
+        _emit_plan_dispatch_events(
+            results, review_type, file_path, round_num,
+            repo=repo, repo_dir=repo_dir,
+        )
 
     return {
         "round": round_num,
@@ -678,6 +748,11 @@ def main():
     parser.add_argument("--round", type=int, default=1, help="Review round number")
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="Per-agent timeout (s)")
     parser.add_argument("--repo-dir", help="Repository root for config/prompt overrides")
+    parser.add_argument(
+        "--repo",
+        help="Repository identifier (e.g. 'owner/name') for telemetry attribution. "
+             "If omitted, falls back to 'unknown' in emitted events.",
+    )
     parser.add_argument("--agents", help="Comma-separated list of agents")
     parser.add_argument("--disabled-domains", help="Comma-separated domains to skip")
     parser.add_argument(
@@ -743,6 +818,7 @@ def main():
         global_prompts_dir=global_prompts_dir,
         review_type=inferred_review_type,
         file_path=args.file if inferred_review_type else None,
+        repo=args.repo,
     )
     print(json.dumps(result, indent=2))
 

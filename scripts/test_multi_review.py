@@ -469,6 +469,34 @@ class TestConfigWiring:
         assert "Models in use" not in captured.out
         assert "Round" not in captured.out
 
+    @patch("multi_review._run_subagent")
+    @patch("multi_review.discover_config")
+    def test_single_agent_round_progress_logs_go_to_out_not_stdout(
+        self, mock_config, mock_sub, capsys,
+    ):
+        """Same stdout-purity guarantee for the single-agent path: callers
+        using ``--single --json-only`` must get pure JSON on stdout.
+        """
+        import io
+        mock_config.return_value = {**DEFAULT_CONFIG, "agents": ["codex"]}
+        mock_sub.return_value = multi_review.SubAgentResult(
+            agent="codex", domain="architecture", raw_output="[]",
+            model="gpt-5.4",
+        )
+
+        buf = io.StringIO()
+        multi_review.run_single_agent_round(
+            "abc123", 1, {"architecture": "codex"}, cwd="/tmp", out=buf,
+        )
+        captured = capsys.readouterr()
+
+        assert "Models in use" in buf.getvalue()
+        assert "Domain → agent" in buf.getvalue()
+        assert "Round 1 complete" in buf.getvalue()
+        assert "Models in use" not in captured.out
+        assert "Domain" not in captured.out
+        assert "Round" not in captured.out
+
     def test_severity_override_applied(self):
         """severity_overrides should reclassify findings below min_severity."""
         findings = [

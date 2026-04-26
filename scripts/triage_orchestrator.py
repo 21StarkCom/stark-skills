@@ -298,6 +298,11 @@ def _build_dispatch_argv(args: argparse.Namespace, repo: str | None, domains: li
         domain_csv,
         "--json-only",
     ]
+    # Forward the detected/forced repo so plan_review_dispatch can attribute
+    # its emitted agent_dispatch / review_finding events to the actual repo
+    # rather than falling back to the "unknown" sentinel.
+    if repo:
+        argv.extend(["--repo", repo])
     if args.round is not None:
         argv.extend(["--round", str(args.round)])
     if args.agents:
