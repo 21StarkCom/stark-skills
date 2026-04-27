@@ -12,8 +12,10 @@ import pytest
 from claude_utils import CLAUDE_MODEL, build_claude_cmd
 from codex_utils import (
     CODEX_MODEL, CODEX_REASONING_EFFORT_HIGH, CODEX_REASONING_EFFORT_MEDIUM,
+    CODEX_REASONING_EFFORT_XHIGH,
     parse_jsonl_output,
 )
+from config_loader import DEFAULT_MODELS
 from gemini_utils import (
     GEMINI_MODEL, GEMINI_AUTH_ERROR_PATTERNS,
     should_fallback_to_api_key, try_gemini_api_key_fallback,
@@ -43,9 +45,11 @@ class TestBuildClaudeCmd:
 class TestCodexConstants:
     def test_model_is_string(self):
         assert isinstance(CODEX_MODEL, str) and CODEX_MODEL
+        assert CODEX_MODEL == DEFAULT_MODELS["codex"]["model_id"]
 
     def test_reasoning_efforts_are_toml(self):
-        assert '"xhigh"' in CODEX_REASONING_EFFORT_HIGH
+        assert '"xhigh"' in CODEX_REASONING_EFFORT_XHIGH
+        assert '"high"' in CODEX_REASONING_EFFORT_HIGH
         assert '"medium"' in CODEX_REASONING_EFFORT_MEDIUM
 
 

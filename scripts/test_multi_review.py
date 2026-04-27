@@ -147,7 +147,7 @@ class TestModelFlags:
 
     @patch("multi_review.build_agent_env", return_value={"GH_TOKEN": "codex-token"})
     @patch("multi_review.subprocess.run")
-    def test_codex_uses_high_reasoning_and_read_only(self, mock_run, mock_build_env):
+    def test_codex_uses_xhigh_reasoning_and_read_only(self, mock_run, mock_build_env):
         mock_run.return_value = MagicMock(stdout="[]", returncode=0)
         multi_review._run_subagent("codex", "architecture", "abc123")
         cmd = mock_run.call_args[0][0]
@@ -156,6 +156,7 @@ class TestModelFlags:
         assert "-m" in cmd  # explicit model
         assert "-c" in cmd
         assert multi_review.CODEX_REASONING_CONFIG in cmd
+        assert 'model_reasoning_effort="xhigh"' in cmd
         assert "--ephemeral" in cmd
         assert "--json" in cmd
         assert "-s" in cmd and "read-only" in cmd  # least-privilege sandbox

@@ -401,7 +401,7 @@ def test_dispatch_codex_builds_command_with_model_override(monkeypatch):
     assert "-m" in captured["cmd"]
     assert "o3" in captured["cmd"]
     assert "-c" in captured["cmd"]
-    assert 'model_reasoning_effort="xhigh"' in captured["cmd"]
+    assert 'model_reasoning_effort="high"' in captured["cmd"]
     assert "-s" in captured["cmd"]
     assert "read-only" in captured["cmd"]
     assert result.error is None

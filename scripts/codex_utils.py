@@ -21,7 +21,7 @@ CODEX_MODEL = "gpt-5.5"
 
 # Reasoning effort config for -c flag (TOML key=value format).
 CODEX_REASONING_EFFORT_XHIGH = 'model_reasoning_effort="xhigh"'
-CODEX_REASONING_EFFORT_HIGH = CODEX_REASONING_EFFORT_XHIGH
+CODEX_REASONING_EFFORT_HIGH = 'model_reasoning_effort="high"'
 CODEX_REASONING_EFFORT_MEDIUM = 'model_reasoning_effort="medium"'
 
 

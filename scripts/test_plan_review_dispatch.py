@@ -266,6 +266,7 @@ class TestSubAgentDispatch:
         assert "review" not in cmd  # avoid triggering built-in review skill
         assert "-c" in cmd
         assert plan_review_dispatch.CODEX_REASONING_CONFIG in cmd
+        assert 'model_reasoning_effort="xhigh"' in cmd
         assert "--ephemeral" in cmd
         assert "--json" in cmd
         assert "-s" in cmd and "read-only" in cmd

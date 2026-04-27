@@ -27,7 +27,7 @@ from typing import Any
 
 from claude_utils import build_claude_cmd, make_clean_env
 from codex_utils import (
-    CODEX_REASONING_EFFORT_HIGH,
+    CODEX_REASONING_EFFORT_XHIGH,
     get_codex_model,
     parse_jsonl_output,
 )
@@ -174,7 +174,7 @@ def run_agent(
                 "-m",
                 get_codex_model(),
                 "-c",
-                CODEX_REASONING_EFFORT_HIGH,
+                CODEX_REASONING_EFFORT_XHIGH,
                 "--ephemeral",
                 "--json",
                 "-s",
