@@ -12,9 +12,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 import time
+import urllib.error
+import urllib.request
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -40,6 +44,30 @@ SEVERITY_RANK: dict[str, int] = {
 }
 
 PROMPTS_ROOT = Path.home() / ".claude" / "code-review" / "prompts" / "red-team"
+
+# Models that route through the OpenAI Responses API (HTTP) instead of the
+# codex CLI. The codex CLI in ChatGPT-auth mode rejects o3 and the *-pro
+# tiers, but the org has Responses-API entitlement to the same models — this
+# parallel transport is what restores the locked `red_team.model` (default
+# `o3`) to working order without weakening the lock or changing codex auth.
+RESPONSES_API_MODELS: frozenset[str] = frozenset({
+    "o3",
+    "o3-mini",
+    "gpt-5.5-pro",
+    "gpt-5.4-pro",
+})
+
+# Per-model valid `reasoning.effort` values for the Responses API. The pro
+# tiers reject "low"; o3 accepts low/medium/high but not "xhigh".
+_RESPONSES_API_REASONING_EFFORT: dict[str, frozenset[str]] = {
+    "o3": frozenset({"low", "medium", "high"}),
+    "o3-mini": frozenset({"low", "medium", "high"}),
+    "gpt-5.5-pro": frozenset({"medium", "high", "xhigh"}),
+    "gpt-5.4-pro": frozenset({"medium", "high", "xhigh"}),
+}
+
+_RESPONSES_API_URL = "https://api.openai.com/v1/responses"
+_RESPONSES_API_DEFAULT_MAX_OUTPUT_TOKENS = 32768
 
 
 @dataclass
@@ -457,6 +485,220 @@ def dispatch_codex(
     )
 
 
+def _resolve_openai_api_key(env: Mapping[str, str]) -> str | None:
+    """Resolve an OpenAI API key from a mapping (typically os.environ).
+
+    Resolution order:
+      1. ``OPENAI_API_KEY`` if non-empty.
+      2. ``OPENAI_API_KEY_FILE`` + ``OPENAI_API_KEY_LABEL``: read the file and
+         return the value for the matching ``LABEL=value`` line.
+      3. ``None`` if neither path yields a key.
+
+    The labeled-file form keeps user-specific paths out of shared code while
+    supporting workflows where the key lives in a non-dotenv format.
+    """
+    direct = env.get("OPENAI_API_KEY")
+    if direct:
+        return direct
+    file_path = env.get("OPENAI_API_KEY_FILE")
+    label = env.get("OPENAI_API_KEY_LABEL")
+    if not file_path or not label:
+        return None
+    try:
+        text = Path(file_path).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        if key.strip() == label:
+            return value.strip()
+    return None
+
+
+def _map_reasoning_effort(model: str, effort: str) -> str:
+    """Map a requested reasoning effort to one valid for the given model.
+
+    Pro-tier models reject ``"low"``; ``o3`` rejects ``"xhigh"``. Passing
+    through the user's value would surface as a 400 from the API; instead we
+    silently round to the nearest valid effort so callers can use a single
+    default (``"high"``) across all Responses-API models.
+    """
+    allowed = _RESPONSES_API_REASONING_EFFORT.get(model)
+    if allowed is None or effort in allowed:
+        return effort
+    if effort == "low" and "medium" in allowed:
+        return "medium"
+    if effort == "xhigh" and "high" in allowed:
+        return "high"
+    if "high" in allowed:
+        return "high"
+    return next(iter(allowed))
+
+
+def _extract_responses_text(payload: dict[str, Any]) -> str:
+    """Pull plain assistant text from a Responses API payload.
+
+    Prefers the top-level ``output_text`` shortcut when present; otherwise
+    walks ``output[*].content[*]`` for ``output_text``-typed parts.
+    """
+    top = payload.get("output_text")
+    if isinstance(top, str) and top:
+        return top
+    parts: list[str] = []
+    output = payload.get("output")
+    if not isinstance(output, list):
+        return ""
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+        content = item.get("content")
+        if not isinstance(content, list):
+            continue
+        for chunk in content:
+            if not isinstance(chunk, dict):
+                continue
+            if chunk.get("type") == "output_text":
+                text = chunk.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+    return "\n".join(parts)
+
+
+def dispatch_responses_api(
+    prompt: str,
+    model: str,
+    timeout_s: int,
+    reasoning_effort: str = "high",
+    env: Mapping[str, str] | None = None,
+    max_output_tokens: int = _RESPONSES_API_DEFAULT_MAX_OUTPUT_TOKENS,
+) -> CodexCallResult:
+    """Dispatch a red-team call via the OpenAI Responses API (HTTP).
+
+    Parallel transport to ``dispatch_codex`` for models the codex CLI cannot
+    reach in ChatGPT-auth mode (``o3``, ``gpt-5.5-pro``, ``gpt-5.4-pro``).
+    Returns a :class:`CodexCallResult` with the same shape so downstream
+    parsing/cost code is unchanged.
+    """
+    t0 = time.time()
+    if env is None:
+        env = os.environ
+
+    api_key = _resolve_openai_api_key(env)
+    if not api_key:
+        return CodexCallResult(
+            raw_output="",
+            duration_s=time.time() - t0,
+            input_tokens=0,
+            output_tokens=0,
+            error=(
+                "no OpenAI API key available — set OPENAI_API_KEY or "
+                "OPENAI_API_KEY_FILE+OPENAI_API_KEY_LABEL"
+            ),
+        )
+
+    body = {
+        "model": model,
+        "input": prompt,
+        "reasoning": {"effort": _map_reasoning_effort(model, reasoning_effort)},
+        "max_output_tokens": max_output_tokens,
+    }
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        _RESPONSES_API_URL,
+        data=data,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            payload_bytes = resp.read()
+    except urllib.error.HTTPError as exc:
+        try:
+            err_body = exc.read().decode("utf-8", errors="replace")
+        except Exception:  # noqa: BLE001 — defensive on already-consumed body
+            err_body = ""
+        return CodexCallResult(
+            raw_output="",
+            duration_s=time.time() - t0,
+            input_tokens=0,
+            output_tokens=0,
+            error=f"responses api http {exc.code}: {err_body[:400]}",
+        )
+    except urllib.error.URLError as exc:
+        return CodexCallResult(
+            raw_output="",
+            duration_s=time.time() - t0,
+            input_tokens=0,
+            output_tokens=0,
+            error=f"responses api error: {exc.reason}",
+        )
+    except (TimeoutError, OSError) as exc:
+        return CodexCallResult(
+            raw_output="",
+            duration_s=time.time() - t0,
+            input_tokens=0,
+            output_tokens=0,
+            error=f"responses api transport error: {exc}",
+        )
+
+    duration = time.time() - t0
+    try:
+        payload = json.loads(payload_bytes.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+        return CodexCallResult(
+            raw_output="",
+            duration_s=duration,
+            input_tokens=0,
+            output_tokens=0,
+            error=f"responses api invalid JSON: {exc}",
+        )
+    if not isinstance(payload, dict):
+        return CodexCallResult(
+            raw_output="",
+            duration_s=duration,
+            input_tokens=0,
+            output_tokens=0,
+            error="responses api returned non-object payload",
+        )
+
+    usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
+    in_tokens = int(usage.get("input_tokens") or 0)
+    # output_tokens already includes reasoning tokens; do NOT add
+    # output_tokens_details.reasoning_tokens or we'd double-count cost.
+    out_tokens = int(usage.get("output_tokens") or 0)
+
+    text = _extract_responses_text(payload)
+    status = payload.get("status")
+    if isinstance(status, str) and status != "completed":
+        err = payload.get("error") or {}
+        try:
+            err_summary = json.dumps(err)
+        except (TypeError, ValueError):
+            err_summary = str(err)
+        return CodexCallResult(
+            raw_output=text,
+            duration_s=duration,
+            input_tokens=in_tokens,
+            output_tokens=out_tokens,
+            error=f"responses api status {status}: {err_summary[:400]}",
+        )
+
+    return CodexCallResult(
+        raw_output=text,
+        duration_s=duration,
+        input_tokens=in_tokens,
+        output_tokens=out_tokens,
+        error=None,
+    )
+
+
 def _resolve_rates(model: str, model_rates: dict[str, Any]) -> dict[str, float]:
     """Look up rates for a model, falling back to _fallback."""
     if model in model_rates:
@@ -499,13 +741,21 @@ def run_red_team(
         max_input_chars=max_input_chars,
     )
 
-    call = dispatch_codex(
-        prompt=prompt,
-        model=model,
-        cwd=cwd,
-        timeout_s=timeout_s,
-        env=env,
-    )
+    if model in RESPONSES_API_MODELS:
+        call = dispatch_responses_api(
+            prompt=prompt,
+            model=model,
+            timeout_s=timeout_s,
+            env=env,
+        )
+    else:
+        call = dispatch_codex(
+            prompt=prompt,
+            model=model,
+            cwd=cwd,
+            timeout_s=timeout_s,
+            env=env,
+        )
 
     rates = _resolve_rates(model, model_rates)
     cost_usd = _cost_for(call.input_tokens, call.output_tokens, rates)
@@ -527,6 +777,31 @@ def run_red_team(
         )
 
     parsed = parse_output(call.raw_output)
+    # rt3 — do not fail open into clean. A non-dict parse (empty raw_output,
+    # or output that isn't valid JSON, or JSON that isn't an object) is
+    # indistinguishable from "0 findings = clean" if we silently fall back
+    # to empty defaults. Surface it as an error so the orchestrator routes
+    # to a degraded/halted path instead of letting a model outage, prompt
+    # drift, or schema mismatch look identical to a successful clean run.
+    if not parsed:
+        excerpt = (call.raw_output or "")[:200]
+        return RedTeamResult(
+            stage=stage,
+            round_num=round_num,
+            synthesis="",
+            findings=[],
+            blocking_count=0,
+            human_review_count=0,
+            raw_output=call.raw_output,
+            duration_s=call.duration_s,
+            cost_usd=cost_usd,
+            error=(
+                "red-team output is empty or not valid JSON — "
+                f"refusing to treat as clean. Raw excerpt: {excerpt!r}"
+            ),
+            input_tokens=call.input_tokens,
+            output_tokens=call.output_tokens,
+        )
     synthesis = parsed.get("synthesis", "")
     raw_findings = parsed.get("findings", []) or []
     findings = validate_findings(raw_findings) if isinstance(raw_findings, list) else []

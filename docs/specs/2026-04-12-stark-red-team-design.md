@@ -105,7 +105,7 @@ Distinct from forge's `operability` domain (which checks runbook completeness) �
 
 ## 4. Mechanics
 
-### 4.1 Topology: single Codex o3 call, 5 personas, synthesis-required output
+### 4.1 Topology: single reasoning-model call, 5 personas, synthesis-required output
 
 One LLM call per red-team invocation. The prompt assembles: preamble → all 5 persona files → design artifact (and source spec, and PR diff if available) → output schema.
 
@@ -118,11 +118,14 @@ The LLM is instructed to:
 
 ### 4.2 Agent + model
 
-- **Agent:** Codex (dispatched via `codex exec`)
-- **Model:** `o3` (per-call override — does not affect the default codex model used by forge/forged-review domain reviewers, which stays at `gpt-5.4`)
+- **Agent:** Codex
+- **Model:** `gpt-5.5-pro` (per-call override — does not affect the default codex model used by forge/forged-review domain reviewers, which stays at `gpt-5.4`)
 - **Reasoning effort:** high (matches other heavy Codex dispatches in the codebase)
+- **Transport:** OpenAI Responses API direct (HTTP via `urllib`). Models in `RESPONSES_API_MODELS` (`{o3, o3-mini, gpt-5.5-pro, gpt-5.4-pro}`) bypass the codex CLI because that CLI rejects them in ChatGPT-auth mode; org-level Responses-API entitlement provides the same models on a parallel path. Other models continue through `codex exec`.
 
-The model override is implemented in the dispatcher by passing `-m o3` to the Codex CLI specifically for red-team calls. All other Codex invocations in the pipeline continue to use the model configured in the top-level `models.codex.model_id`.
+**Why gpt-5.5-pro (changed from o3 in v1.1):** A side-by-side calibration on the spec fixture (`docs/calibration/2026-04-27-red-team-v1-calibration-{o3,gpt-5-5-pro}.findings.json`) showed gpt-5.5-pro catching three structurally important findings o3 missed: a meta-finding about the lock surface itself (rt2 → spec change in §6), a fail-open `clean` semantic in parse-error handling (rt3 → behavior change in `run_red_team`), and a round-local-ID identity bug in human-review acceptance (rt7 → tracked as follow-up). At ~$2/round vs ~$0.60/round for o3, the cost premium is acceptable for a design-stage gate that runs once per spec.
+
+All other Codex invocations in the pipeline continue to use the model configured in the top-level `models.codex.model_id`.
 
 ### 4.3 Iterative refinement loop
 
@@ -302,7 +305,7 @@ class RedTeamResult:
   "red_team": {
     "enabled": true,
     "agent": "codex",
-    "model": "o3",
+    "model": "gpt-5.5-pro",
     "max_rounds": 2,
     "halt_on_unresolved": true,
     "stages": {
@@ -318,7 +321,7 @@ class RedTeamResult:
     ],
     "min_severity_to_block": "high",
     "timeout_s": 900,
-    "per_run_budget_usd": 10.00,
+    "per_run_budget_usd": 15.00,
     "stability_overlap_jaccard_min": 0.4,
     "max_input_chars": 200000,
     "allow_human_review_halt": true
@@ -327,6 +330,14 @@ class RedTeamResult:
     "o3": {
       "input_per_1m_usd": 15.00,
       "output_per_1m_usd": 60.00
+    },
+    "gpt-5.5-pro": {
+      "input_per_1m_usd": 25.00,
+      "output_per_1m_usd": 100.00
+    },
+    "gpt-5.4-pro": {
+      "input_per_1m_usd": 20.00,
+      "output_per_1m_usd": 80.00
     },
     "claude-opus-4-6": {
       "input_per_1m_usd": 15.00,
@@ -344,7 +355,9 @@ class RedTeamResult:
 }
 ```
 
-**Note:** `per_run_budget_usd` defaults to `$10.00` (up from `$3.00` in round 1) because it now covers the full cycle cost (rt_b4): red-team calls + stability verification calls + design regen + inner design-review loop. The $3.00 figure covered only the red-team layer and was misleading.
+**Note:** `per_run_budget_usd` defaults to `$15.00`, sized for `gpt-5.5-pro` at ~$2/round × 2 rounds + verification + design regen with ~50% headroom. The original `o3` default of `$10.00` is below the new model's worst-case envelope; raising the budget alongside the model swap is required to avoid spurious `halted_budget` exits.
+
+**Transport:** as of v1.1 (2026-04-27), `gpt-5.5-pro`, `gpt-5.4-pro`, and `o3` all dispatch through the OpenAI Responses API directly (`urllib`, no new deps), bypassing the codex CLI. The codex CLI rejects these models in ChatGPT-auth mode but the org has Responses-API entitlement to all three. See `RESPONSES_API_MODELS` in `scripts/stark_red_team.py`. Other models still dispatch via codex CLI.
 
 **Placeholder rates:** the `model_rates` values above are illustrative. The Week 0 calibration step (§14) sets the real values based on actual observed cost on a fixture design doc. The `_fallback` row is deliberately high — if a configured model has no rate entry, the preflight check fails and the red team refuses to run rather than silently under-counting cost.
 
@@ -366,18 +379,25 @@ class RedTeamResult:
 | `allow_human_review_halt` | If false, REQUEST_HUMAN_REVIEW findings downgrade to medium advisory rather than halting (rt_b3 escape hatch for repos that can't tolerate halts) |
 | `model_rates` | **Top-level section, not nested in red_team.** Per-model token cost rates used by the cost circuit breaker (rt_b7). Required entry for `red_team.model`; preflight fails if missing. |
 
-### Config override rules (rt1 — prompt-injection defense)
+### Config override rules (rt1 + rt2 — substance-preservation defense)
 
-Standard config hierarchy applies: repo → org → global, but **two fields are LOCKED to global config** and cannot be overridden at the org or repo level:
+Standard config hierarchy applies: repo → org → global, but **seven fields are LOCKED to global config** and cannot be overridden at the org or repo level:
 
 | Locked field | Why |
 |---|---|
 | `personas` | Persona slugs resolve to prompt files in `global/prompts/red-team/personas/`. Allowing a repo to specify arbitrary persona slugs opens a prompt-injection surface where a malicious config points at an attacker-controlled markdown file with injected system instructions. |
-| `model` | Allowing a repo to silently downgrade `o3` to a cheaper/weaker model preserves the "red team ran" appearance while destroying the substance. Downgrading the model must be a global, reviewable, centrally-audited decision. |
+| `model` | Allowing a repo to silently downgrade the locked default to a cheaper/weaker model preserves the "red team ran" appearance while destroying the substance. Downgrading the model must be a global, reviewable, centrally-audited decision. |
+| `enabled` | A repo could turn the gate off entirely while audit logs still showed an intentional configuration change rather than an attempted bypass. Disabling the red team must happen at the global level. (rt2) |
+| `agent` | A repo could swap the agent for a less rigorous one (e.g. a non-reasoning model). Same substance-vs-appearance failure as `model`. (rt2) |
+| `min_severity_to_block` | A repo could raise the blocking floor past every real finding, making the red team always-clean while still appearing to run. (rt2) |
+| `halt_on_unresolved` | A repo could flip the gate to advisory, preserving the appearance of a blocking review while neutering its enforcement. (rt2) |
+| `allow_human_review_halt` | A repo could turn off the human-review halt, downgrading findings to medium advisory and bypassing the explicit "this needs a human" signal personas raise. (rt2) |
 
-All other fields (`enabled`, `max_rounds`, `halt_on_unresolved`, `stages.*.enabled`, `min_severity_to_block`, `per_run_budget_usd`, `timeout_s`, `stability_overlap_jaccard_min`) respect the full hierarchy.
+All other fields (`max_rounds`, `stages.*.enabled`, `per_run_budget_usd`, `timeout_s`, `stability_overlap_jaccard_min`, `max_input_chars`) respect the full hierarchy. These are operational tuning knobs whose worst-case override (e.g. raising the timeout, narrowing the stages list) doesn't compromise the substance of the gate; if the gate fires, it still fires.
 
-**Enforcement:** `get_red_team_config()` in `config_loader.py` checks if the resolved config from org/repo level contains a key in `_RED_TEAM_LOCKED_FIELDS = {"personas", "model"}`. If yes, the value is dropped from the override, a warning is logged to stderr with the locked field name and the source file that tried to set it, and a `red_team.config.override_rejected` event is emitted for audit.
+A repo that needs a *stricter* posture than the global default (e.g. blocking on `medium`) must open a PR against `stark-skills` to set the global default — same friction as a legitimate persona addition. A repo that wants a *weaker* posture is exactly the failure mode this lock prevents.
+
+**Enforcement:** `get_red_team_config()` in `config_loader.py` checks if the resolved config from org/repo level contains a key in `_RED_TEAM_LOCKED_FIELDS`. If yes, the value is dropped from the override, a warning is logged to stderr with the locked field name and the source file that tried to set it, and a `red_team.config.override_rejected` event is emitted for audit.
 
 A repo that genuinely needs a custom persona (e.g., an ML-heavy repo wanting an "ML Systems Architect") must open a PR against `stark-skills` to add the persona file to the global repo. This is by design: customization has the same friction as abuse, so legitimate additions are reviewable.
 
@@ -603,8 +623,8 @@ A persona whose findings are always dismissed is probably badly scoped. A person
 |---|---|
 | `red_team.enabled: false` | Skip entirely. Emit `red_team.skipped` event with reason `disabled`. Pipeline continues. |
 | Codex CLI not available | Skip. Emit `red_team.skipped` with reason `cli_missing`. Pipeline continues. Red team is additive. |
-| `o3` model not available on the Codex CLI | Log warning. Fall back to the agent's default model (from `models.codex.model_id`). Audit the fallback. |
-| Red team output is not valid JSON | Retry once. On second failure, emit `red_team.parse_error`, treat as zero findings for that round (clean), continue. |
+| Locked model not available on the Codex CLI | As of v1.1: `gpt-5.5-pro`, `gpt-5.4-pro`, and `o3` route through the OpenAI Responses API directly, bypassing the codex CLI. Other models log a warning and fall back to the agent's default model (`models.codex.model_id`); the fallback is audited. |
+| Red team output is not valid JSON OR is empty | **(rt3, v1.1):** No longer fails open. Retry once; on second failure, surface as `error` on the `RedTeamResult` (with the raw excerpt for debugging) so the orchestrator routes to a degraded/halted path. The earlier "treat as zero findings = clean" behavior masked model outages and prompt drift as successful clean reviews. Emit `red_team.parse_error` for audit. |
 | Red team returns findings missing `counter_proposal` or `trade_off` | Downgrade those findings to `medium` (advisory), log the schema violation. Do not halt on these. |
 | Persona file missing | Log which persona's file is missing. Drop that persona from the call. Continue with the remaining personas. |
 | `blocking_count == 0` on first round | Skip the loop entirely. Mark status `clean`. Audit as "round 1 only". |

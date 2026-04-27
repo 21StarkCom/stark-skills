@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import stark_red_team as rt
 
 
@@ -462,7 +464,10 @@ def test_run_red_team_happy_path(tmp_path, monkeypatch):
             output_tokens=500,
         )
 
+    # o3 routes through the Responses API; patch both so the routing decision
+    # doesn't silently change which mock the test exercises.
     monkeypatch.setattr(rt, "dispatch_codex", fake_dispatch)
+    monkeypatch.setattr(rt, "dispatch_responses_api", fake_dispatch)
 
     result = rt.run_red_team(
         stage="design",
@@ -504,6 +509,7 @@ def test_run_red_team_dispatch_error_returns_error_result(tmp_path, monkeypatch)
         )
 
     monkeypatch.setattr(rt, "dispatch_codex", fake_dispatch)
+    monkeypatch.setattr(rt, "dispatch_responses_api", fake_dispatch)
 
     result = rt.run_red_team(
         stage="design",
@@ -561,3 +567,377 @@ def test_run_red_team_uses_fallback_rates_for_unknown_model(tmp_path, monkeypatc
     )
     # fallback: (1000*100 + 500*300)/1m = 0.1 + 0.15 = 0.25
     assert abs(result.cost_usd - 0.25) < 1e-6
+
+
+# ----------------------------- Responses API tests -----------------------------
+
+
+def test_responses_api_models_constant():
+    assert "o3" in rt.RESPONSES_API_MODELS
+    assert "gpt-5.5-pro" in rt.RESPONSES_API_MODELS
+    assert "gpt-5.4-pro" in rt.RESPONSES_API_MODELS
+    assert "gpt-5.5" not in rt.RESPONSES_API_MODELS  # routes to codex CLI
+
+
+def test_resolve_openai_api_key_prefers_direct_env(tmp_path):
+    key = rt._resolve_openai_api_key({"OPENAI_API_KEY": "sk-direct"})
+    assert key == "sk-direct"
+
+
+def test_resolve_openai_api_key_reads_labeled_file(tmp_path):
+    f = tmp_path / "keys"
+    f.write_text("OTHER=ignored\nOPEN_AI_AGENTS=sk-from-file\nNEXT=also-ignored\n")
+    key = rt._resolve_openai_api_key({
+        "OPENAI_API_KEY_FILE": str(f),
+        "OPENAI_API_KEY_LABEL": "OPEN_AI_AGENTS",
+    })
+    assert key == "sk-from-file"
+
+
+def test_resolve_openai_api_key_returns_none_when_missing(tmp_path):
+    assert rt._resolve_openai_api_key({}) is None
+    assert rt._resolve_openai_api_key({"OPENAI_API_KEY": ""}) is None
+
+
+def test_resolve_openai_api_key_file_without_label(tmp_path):
+    f = tmp_path / "keys"
+    f.write_text("OPEN_AI_AGENTS=sk-x\n")
+    # Both file and label required; file alone returns None.
+    assert rt._resolve_openai_api_key({"OPENAI_API_KEY_FILE": str(f)}) is None
+
+
+def test_resolve_openai_api_key_missing_label_in_file(tmp_path):
+    f = tmp_path / "keys"
+    f.write_text("OTHER=ignored\n")
+    assert rt._resolve_openai_api_key({
+        "OPENAI_API_KEY_FILE": str(f),
+        "OPENAI_API_KEY_LABEL": "OPEN_AI_AGENTS",
+    }) is None
+
+
+def test_resolve_openai_api_key_direct_takes_precedence(tmp_path):
+    f = tmp_path / "keys"
+    f.write_text("LABEL=sk-from-file\n")
+    key = rt._resolve_openai_api_key({
+        "OPENAI_API_KEY": "sk-direct",
+        "OPENAI_API_KEY_FILE": str(f),
+        "OPENAI_API_KEY_LABEL": "LABEL",
+    })
+    assert key == "sk-direct"
+
+
+def test_map_reasoning_effort_o3_passes_through_valid():
+    assert rt._map_reasoning_effort("o3", "high") == "high"
+    assert rt._map_reasoning_effort("o3", "medium") == "medium"
+    assert rt._map_reasoning_effort("o3", "low") == "low"
+
+
+def test_map_reasoning_effort_pro_rejects_low_maps_to_medium():
+    # gpt-5.5-pro / gpt-5.4-pro do not accept "low"
+    assert rt._map_reasoning_effort("gpt-5.5-pro", "low") == "medium"
+    assert rt._map_reasoning_effort("gpt-5.4-pro", "low") == "medium"
+
+
+def test_map_reasoning_effort_pro_passes_through_high():
+    assert rt._map_reasoning_effort("gpt-5.5-pro", "high") == "high"
+
+
+def test_map_reasoning_effort_unknown_model_passes_through():
+    assert rt._map_reasoning_effort("some-future-model", "high") == "high"
+
+
+class _FakeResponse:
+    def __init__(self, payload: dict):
+        self._body = json.dumps(payload).encode("utf-8")
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _fake_urlopen_factory(payload: dict, captured: dict):
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["headers"] = dict(req.header_items())
+        captured["body"] = json.loads(req.data.decode("utf-8")) if req.data else None
+        captured["timeout"] = timeout
+        return _FakeResponse(payload)
+    return fake_urlopen
+
+
+def test_dispatch_responses_api_success(monkeypatch):
+    payload = {
+        "id": "resp_x",
+        "status": "completed",
+        "output": [
+            {"content": [
+                {"type": "output_text",
+                 "text": '{"synthesis":"S","findings":[]}'},
+            ]},
+        ],
+        "usage": {
+            "input_tokens": 1234,
+            "output_tokens": 567,
+            "output_tokens_details": {"reasoning_tokens": 200},
+        },
+    }
+    captured: dict = {}
+    monkeypatch.setattr(rt.urllib.request, "urlopen", _fake_urlopen_factory(payload, captured))
+
+    result = rt.dispatch_responses_api(
+        prompt="hello",
+        model="o3",
+        timeout_s=60,
+        env={"OPENAI_API_KEY": "sk-test"},
+    )
+    assert result.error is None
+    assert result.raw_output == '{"synthesis":"S","findings":[]}'
+    assert result.input_tokens == 1234
+    # output_tokens already includes reasoning_tokens — don't double-count
+    assert result.output_tokens == 567
+    assert captured["url"] == "https://api.openai.com/v1/responses"
+    assert captured["body"]["model"] == "o3"
+    assert captured["body"]["input"] == "hello"
+    assert captured["body"]["reasoning"]["effort"] == "high"
+    auth = {k.lower(): v for k, v in captured["headers"].items()}
+    assert auth["authorization"] == "Bearer sk-test"
+
+
+def test_dispatch_responses_api_uses_output_text_field(monkeypatch):
+    payload = {
+        "id": "resp_x",
+        "status": "completed",
+        "output_text": "TOP-LEVEL TEXT",
+        "usage": {"input_tokens": 1, "output_tokens": 2},
+    }
+    captured: dict = {}
+    monkeypatch.setattr(rt.urllib.request, "urlopen", _fake_urlopen_factory(payload, captured))
+    result = rt.dispatch_responses_api(
+        prompt="x", model="o3", timeout_s=60, env={"OPENAI_API_KEY": "sk-test"},
+    )
+    assert result.raw_output == "TOP-LEVEL TEXT"
+
+
+def test_dispatch_responses_api_no_key_returns_error_without_dispatching(monkeypatch):
+    called = {"n": 0}
+
+    def fail_urlopen(*a, **kw):
+        called["n"] += 1
+        raise AssertionError("urlopen must not be called when no key is available")
+
+    monkeypatch.setattr(rt.urllib.request, "urlopen", fail_urlopen)
+
+    result = rt.dispatch_responses_api(
+        prompt="x", model="o3", timeout_s=60, env={},
+    )
+    assert called["n"] == 0
+    assert result.error is not None
+    assert "OPENAI_API_KEY" in result.error
+
+
+def test_dispatch_responses_api_error_response(monkeypatch):
+    import urllib.error
+
+    def fake_urlopen(req, timeout=None):
+        raise urllib.error.HTTPError(
+            url=req.full_url, code=400, msg="Bad Request",
+            hdrs=None,
+            fp=__import__("io").BytesIO(b'{"error":{"message":"bad"}}'),
+        )
+
+    monkeypatch.setattr(rt.urllib.request, "urlopen", fake_urlopen)
+
+    result = rt.dispatch_responses_api(
+        prompt="x", model="o3", timeout_s=60, env={"OPENAI_API_KEY": "sk-test"},
+    )
+    assert result.error is not None
+    assert "400" in result.error
+
+
+def test_dispatch_responses_api_reads_labeled_file(monkeypatch, tmp_path):
+    f = tmp_path / "keys"
+    f.write_text("OPEN_AI_AGENTS=sk-from-file\n")
+    captured: dict = {}
+    payload = {
+        "id": "r",
+        "status": "completed",
+        "output": [{"content": [{"type": "output_text", "text": "OK"}]}],
+        "usage": {"input_tokens": 0, "output_tokens": 0},
+    }
+    monkeypatch.setattr(rt.urllib.request, "urlopen", _fake_urlopen_factory(payload, captured))
+
+    result = rt.dispatch_responses_api(
+        prompt="x",
+        model="o3",
+        timeout_s=60,
+        env={
+            "OPENAI_API_KEY_FILE": str(f),
+            "OPENAI_API_KEY_LABEL": "OPEN_AI_AGENTS",
+        },
+    )
+    assert result.error is None
+    auth = {k.lower(): v for k, v in captured["headers"].items()}
+    assert auth["authorization"] == "Bearer sk-from-file"
+
+
+def test_dispatch_responses_api_reasoning_effort_remapped_for_pro(monkeypatch):
+    payload = {
+        "id": "r",
+        "status": "completed",
+        "output": [{"content": [{"type": "output_text", "text": "OK"}]}],
+        "usage": {"input_tokens": 0, "output_tokens": 0},
+    }
+    captured: dict = {}
+    monkeypatch.setattr(rt.urllib.request, "urlopen", _fake_urlopen_factory(payload, captured))
+
+    rt.dispatch_responses_api(
+        prompt="x",
+        model="gpt-5.5-pro",
+        timeout_s=60,
+        reasoning_effort="low",
+        env={"OPENAI_API_KEY": "sk-test"},
+    )
+    # "low" is invalid for gpt-5.5-pro → must surface as a valid effort
+    assert captured["body"]["reasoning"]["effort"] in {"medium", "high", "xhigh"}
+
+
+def test_dispatch_responses_api_failed_status_returns_error(monkeypatch):
+    payload = {
+        "id": "r",
+        "status": "failed",
+        "error": {"code": "rate_limit", "message": "slow down"},
+        "output": [],
+        "usage": {"input_tokens": 0, "output_tokens": 0},
+    }
+    captured: dict = {}
+    monkeypatch.setattr(rt.urllib.request, "urlopen", _fake_urlopen_factory(payload, captured))
+    result = rt.dispatch_responses_api(
+        prompt="x", model="o3", timeout_s=60, env={"OPENAI_API_KEY": "sk-test"},
+    )
+    assert result.error is not None
+    assert "failed" in result.error or "rate_limit" in result.error
+
+
+def test_run_red_team_routes_to_responses_api_for_pro_models(tmp_path, monkeypatch):
+    prompts_root = tmp_path / "red-team"
+    personas_dir = prompts_root / "personas"
+    personas_dir.mkdir(parents=True)
+    (prompts_root / "preamble.md").write_text("p")
+    (prompts_root / "design.md").write_text("d")
+    for slug in rt.VALID_PERSONA_SLUGS:
+        (personas_dir / f"{slug}.md").write_text(f"{slug}")
+    monkeypatch.setattr(rt, "PROMPTS_ROOT", prompts_root)
+
+    routes: list[str] = []
+
+    def fake_codex(**kwargs):
+        routes.append("codex")
+        return rt.CodexCallResult(
+            raw_output='{"synthesis":"s","findings":[]}',
+            duration_s=1.0, input_tokens=1, output_tokens=1,
+        )
+
+    def fake_responses(**kwargs):
+        routes.append("responses")
+        return rt.CodexCallResult(
+            raw_output='{"synthesis":"s","findings":[]}',
+            duration_s=1.0, input_tokens=1, output_tokens=1,
+        )
+
+    monkeypatch.setattr(rt, "dispatch_codex", fake_codex)
+    monkeypatch.setattr(rt, "dispatch_responses_api", fake_responses)
+
+    common = dict(
+        stage="design", artifact="A", source_spec="S", pr_diff=None,
+        personas=list(rt.VALID_PERSONA_SLUGS),
+        model_rates={"_fallback": {"input_per_1m_usd": 0, "output_per_1m_usd": 0}},
+        cwd=None, timeout_s=60,
+        min_severity_to_block="high", max_input_chars=200_000,
+    )
+
+    rt.run_red_team(model="gpt-5.5-pro", **common)
+    rt.run_red_team(model="gpt-5.4-pro", **common)
+    rt.run_red_team(model="o3", **common)
+    rt.run_red_team(model="gpt-5.5", **common)
+
+    assert routes == ["responses", "responses", "responses", "codex"]
+
+
+# --- rt3: malformed output must not silently look like a clean run ---
+
+
+def test_run_red_team_parse_error_surfaces_as_error(tmp_path, monkeypatch):
+    """Non-empty raw_output that doesn't parse to a dict must NOT be treated
+    as zero-findings clean — it must propagate as an error so the orchestrator
+    can route to a degraded/halted state instead of silent clean.
+    """
+    prompts_root = tmp_path / "red-team"
+    personas_dir = prompts_root / "personas"
+    personas_dir.mkdir(parents=True)
+    (prompts_root / "preamble.md").write_text("p")
+    (prompts_root / "design.md").write_text("d")
+    for slug in rt.VALID_PERSONA_SLUGS:
+        (personas_dir / f"{slug}.md").write_text(f"{slug}")
+    monkeypatch.setattr(rt, "PROMPTS_ROOT", prompts_root)
+
+    def fake_dispatch(**kwargs):
+        return rt.CodexCallResult(
+            raw_output="this is plainly not JSON, just prose the model wrote",
+            duration_s=1.0, input_tokens=100, output_tokens=50,
+        )
+
+    monkeypatch.setattr(rt, "dispatch_codex", fake_dispatch)
+    monkeypatch.setattr(rt, "dispatch_responses_api", fake_dispatch)
+
+    result = rt.run_red_team(
+        stage="design",
+        artifact="ART", source_spec="SRC", pr_diff=None,
+        personas=list(rt.VALID_PERSONA_SLUGS),
+        model="gpt-5.5-pro",
+        model_rates={"_fallback": {"input_per_1m_usd": 0, "output_per_1m_usd": 0}},
+        cwd=None, timeout_s=60,
+        min_severity_to_block="high", max_input_chars=200_000,
+    )
+    assert result.error is not None
+    assert "parse" in result.error.lower() or "json" in result.error.lower()
+    # Findings must be empty AND blocking_count must be 0; key insight is
+    # that the orchestrator must not see this as `clean` — it must see the
+    # error string and route to its degraded-status path.
+    assert result.findings == []
+
+
+def test_run_red_team_empty_output_surfaces_as_error(tmp_path, monkeypatch):
+    """Truly empty raw_output (e.g. model returned nothing at all) must also
+    surface as error rather than clean."""
+    prompts_root = tmp_path / "red-team"
+    personas_dir = prompts_root / "personas"
+    personas_dir.mkdir(parents=True)
+    (prompts_root / "preamble.md").write_text("p")
+    (prompts_root / "design.md").write_text("d")
+    for slug in rt.VALID_PERSONA_SLUGS:
+        (personas_dir / f"{slug}.md").write_text(f"{slug}")
+    monkeypatch.setattr(rt, "PROMPTS_ROOT", prompts_root)
+
+    def fake_dispatch(**kwargs):
+        return rt.CodexCallResult(
+            raw_output="", duration_s=1.0, input_tokens=10, output_tokens=0,
+        )
+
+    monkeypatch.setattr(rt, "dispatch_codex", fake_dispatch)
+    monkeypatch.setattr(rt, "dispatch_responses_api", fake_dispatch)
+
+    result = rt.run_red_team(
+        stage="design",
+        artifact="ART", source_spec="SRC", pr_diff=None,
+        personas=list(rt.VALID_PERSONA_SLUGS),
+        model="gpt-5.5-pro",
+        model_rates={"_fallback": {"input_per_1m_usd": 0, "output_per_1m_usd": 0}},
+        cwd=None, timeout_s=60,
+        min_severity_to_block="high", max_input_chars=200_000,
+    )
+    assert result.error is not None

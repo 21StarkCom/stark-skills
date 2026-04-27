@@ -109,9 +109,14 @@ def run_calibration(
     source_spec_path: Path,
     n_runs: int,
     synthetic: bool,
+    model_override: str | None = None,
+    findings_dump_path: Path | None = None,
 ) -> dict:
     cfg = get_red_team_config()
     model_rates = get_model_rates()
+    if model_override:
+        cfg = {**cfg, "model": model_override}
+        print(f"[calibration] model override: {model_override}", file=sys.stderr)
     artifact = fixture_path.read_text(encoding="utf-8")
     source_spec = source_spec_path.read_text(encoding="utf-8")
 
@@ -182,6 +187,45 @@ def run_calibration(
         mean_jaccard = 0.0
         stdev_jaccard = 0.0
     proposed_jaccard_min = max(0.0, round(mean_jaccard - stdev_jaccard, 3))
+
+    if findings_dump_path is not None:
+        dump = {
+            "model": cfg["model"],
+            "fixture": str(fixture_path),
+            "runs": [
+                {
+                    "round_num": r.round_num,
+                    "synthesis": r.synthesis,
+                    "cost_usd": r.cost_usd,
+                    "duration_s": r.duration_s,
+                    "input_tokens": r.input_tokens,
+                    "output_tokens": r.output_tokens,
+                    "blocking_count": r.blocking_count,
+                    "human_review_count": r.human_review_count,
+                    "error": r.error,
+                    "findings": [
+                        {
+                            "id": f.id,
+                            "persona": f.persona,
+                            "severity": f.severity,
+                            "concern": f.concern,
+                            "consequence": f.consequence,
+                            "counter_proposal": f.counter_proposal,
+                            "trade_off": f.trade_off,
+                            "reason_for_uncertainty": f.reason_for_uncertainty,
+                        }
+                        for f in r.findings
+                    ],
+                }
+                for r in results
+            ],
+        }
+        findings_dump_path.parent.mkdir(parents=True, exist_ok=True)
+        findings_dump_path.write_text(
+            json.dumps(dump, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        print(f"[calibration] findings dumped to {findings_dump_path}", file=sys.stderr)
 
     return {
         "n_runs": n_runs,
@@ -281,10 +325,29 @@ def main() -> int:
     parser.add_argument("--runs", type=int, default=20)
     parser.add_argument("--synthetic", action="store_true",
                         help="Mock dispatch_codex with a fixed distribution (no real LLM calls)")
+    parser.add_argument("--model", default=None,
+                        help="Override red_team.model for this calibration run "
+                             "(e.g. o3, gpt-5.5-pro). Used to A/B models without "
+                             "editing the locked global config.")
+    parser.add_argument("--dump-findings", action="store_true",
+                        help="Write each run's full findings + synthesis to a "
+                             "JSON sidecar next to the calibration doc. Useful "
+                             "for substantive A/B comparison across models.")
     args = parser.parse_args()
 
-    summary = run_calibration(args.fixture, args.source_spec, args.runs, args.synthetic)
-    out = Path("docs/calibration") / f"{time.strftime('%Y-%m-%d')}-red-team-v1-calibration.md"
+    model_slug = (args.model or "default").replace(".", "-").replace("/", "-")
+    out = Path("docs/calibration") / (
+        f"{time.strftime('%Y-%m-%d')}-red-team-v1-calibration-{model_slug}.md"
+    )
+    findings_dump_path = (
+        out.with_suffix(".findings.json") if args.dump_findings else None
+    )
+
+    summary = run_calibration(
+        args.fixture, args.source_spec, args.runs, args.synthetic,
+        model_override=args.model,
+        findings_dump_path=findings_dump_path,
+    )
     write_calibration_doc(out, summary, args.fixture)
     print(f"Calibration written to {out}", file=sys.stderr)
     print(json.dumps({
