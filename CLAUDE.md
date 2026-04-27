@@ -86,6 +86,7 @@ All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.claude/skil
 - `/stark-forge <path> [--auto-detect] [--dry-run] [--resume] [--workers N]` — end-to-end design pipeline: classify, review, plan, tasks
 - `/stark-design "prompt" | <path>` — (archived) generate design doc from requirements; use `superpowers:brainstorm` + `/stark-forge` instead
 - `/stark-review-design <path>` — multi-agent design/spec review (N agents × 12 domains, default N=2)
+- `/stark-red-team-design <path> [--source-spec PATH] [--model ID] [--dry-run]` — adversarial committee challenge of a design doc (5 personas × 1 round, default `gpt-5.5-pro`); writes `<design>.red-team.md` sidecar and posts to PR if detected; challenge-only, no fix loop
 - `/stark-design-to-plan <path>` — generate implementation plan from design doc (enabled agents generate, then cross-review before synthesis)
 - `/stark-review-plan <path>` — multi-agent execution plan review (N agents × 10 adversarial domains, default N=2)
 - `/stark-plan-to-tasks <path> [--dry-run] [--cleanup <slug>]` — decompose plan into phased GitHub issues (3 LLM passes)
