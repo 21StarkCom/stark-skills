@@ -6,7 +6,7 @@ Tests multiple dimensions:
   - Sandbox mode: read-only vs full-auto (workspace-write)
   - Output mode: --json (JSONL to stdout) vs -o file (last message to file)
   - Prompt size: small (~20 lines) vs medium (~80 lines)
-  - Model: default (gpt-5.4) vs explicit override
+  - Model: default (gpt-5.5) vs explicit override
 
 Each test case runs Codex with a fixed review prompt + plan fixture,
 measures wall-clock time, exit code, output size, and JSON parseability.

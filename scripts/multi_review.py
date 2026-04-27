@@ -48,7 +48,7 @@ from pathlib import Path
 from typing import Any
 
 from claude_utils import build_claude_cmd, make_clean_env
-from codex_utils import CODEX_REASONING_EFFORT_HIGH, parse_jsonl_output
+from codex_utils import CODEX_REASONING_EFFORT_XHIGH, parse_jsonl_output
 from gemini_utils import (
     setup_gemini_home, make_gemini_env,
     parse_json_output as parse_gemini_output,
@@ -71,14 +71,26 @@ from dispatcher_base import (
 # ── Config ──────────────────────────────────────────────────────────────
 
 SCRIPTS_DIR = Path(__file__).parent
-PYTHON = str(SCRIPTS_DIR / ".venv" / "bin" / "python3")
 GITHUB_APP = str(SCRIPTS_DIR / "github_app.py")
 GLOBAL_PROMPTS_DIR = Path.home() / ".claude" / "code-review" / "prompts"
+
+
+def _resolve_python() -> str:
+    override = os.environ.get("STARK_REVIEW_PYTHON")
+    if override:
+        return override
+    venv_python = SCRIPTS_DIR / ".venv" / "bin" / "python3"
+    if venv_python.exists():
+        return str(venv_python)
+    return sys.executable
+
+
+PYTHON = _resolve_python()
 
 # AGENTS: filtered by is_agent_enabled, sourced from dispatcher_base
 AGENTS = _BASE_AGENTS
 
-CODEX_REASONING_CONFIG = CODEX_REASONING_EFFORT_HIGH  # re-exported for backward compat
+CODEX_REASONING_CONFIG = CODEX_REASONING_EFFORT_XHIGH  # re-exported for backward compat
 
 
 def _discover_domains() -> dict[str, dict[str, Any]]:
@@ -1231,7 +1243,7 @@ def run_review_round(
 
 
 def resolve_domain_agents(
-    config: dict,
+    config: dict[str, Any],
     domains: list[str],
     override_agent: str | None = None,
 ) -> dict[str, str]:
@@ -1239,10 +1251,26 @@ def resolve_domain_agents(
 
     Priority: CLI override > config domain_agents > fallback "codex".
     """
-    if override_agent:
-        return {d: override_agent for d in domains}
+    if override_agent is not None:
+        if not isinstance(override_agent, str) or not override_agent.strip():
+            raise RuntimeError("--agent must be a non-empty string")
+        return {d: override_agent.strip() for d in domains}
+
     da = config.get("domain_agents", {})
-    return {d: da.get(d, "codex") for d in domains}
+    if da is None:
+        da = {}
+    if not isinstance(da, dict):
+        raise RuntimeError("domain_agents must be an object mapping domains to agent names")
+
+    resolved: dict[str, str] = {}
+    for domain in domains:
+        agent = da.get(domain, "codex")
+        if not isinstance(agent, str) or not agent.strip():
+            raise RuntimeError(
+                f"Invalid domain_agents value for {domain!r}: expected a non-empty string"
+            )
+        resolved[domain] = agent.strip()
+    return resolved
 
 
 def run_single_agent_round(
@@ -1942,13 +1970,21 @@ def review_pr_single(
     sev_overrides = config.get("severity_overrides", {})
     da_map = resolve_domain_agents(config, active_domains, override_agent)
 
-    # Determine which agents are actually used (for posting)
-    used_agents = sorted(set(da_map.values()))
+    # Determine which agents are configured for posting. The definitive
+    # dispatch set is recomputed from rnd.results after the round runs so a
+    # malformed domain_agents entry cannot crash posting or masquerade as clean.
+    configured_agents = sorted(set(da_map.values()))
+    invalid_configured_agents = sorted({agent for agent in configured_agents if agent not in AGENTS})
+    if invalid_configured_agents:
+        raise RuntimeError(
+            f"Configured review agent(s) {invalid_configured_agents} are not enabled or unknown. "
+            "Check --agent/domain_agents and models.<agent>.enabled before treating the PR as clean."
+        )
 
     print(f"\n{'#' * 60}", file=out)
     print(f"  Single-Agent Review: {repo} PR #{pr_number}", file=out)
     print(f"  Base: {base}", file=out)
-    print(f"  {len(active_domains)} domains, agents: {', '.join(used_agents)}", file=out)
+    print(f"  {len(active_domains)} domains, agents: {', '.join(configured_agents)}", file=out)
     print(f"{'#' * 60}", file=out)
 
     if not domains_to_review:
@@ -1997,6 +2033,27 @@ def review_pr_single(
         for res in rnd.results:
             apply_severity_overrides(res.findings, sev_overrides)
 
+    unknown_agents = sorted({res.agent for res in rnd.results if res.agent not in AGENTS})
+    if unknown_agents:
+        raise RuntimeError(
+            f"Review results carry unknown agent(s) {unknown_agents}; refusing to post or "
+            "summarize. Check run_single_agent_round and the AGENTS registry."
+        )
+    used_agents = sorted({res.agent for res in rnd.results})
+    if not used_agents:
+        raise RuntimeError(
+            "No review sub-agents produced results. Check --agent/domain_agents, "
+            "models.<agent>.enabled, and prompt discovery before treating the PR as clean."
+        )
+    result_domains = {res.domain for res in rnd.results}
+    missing_domains = [domain for domain in active_domains if domain not in result_domains]
+    if missing_domains:
+        raise RuntimeError(
+            "Review sub-agents did not produce results for domain(s): "
+            + ", ".join(missing_domains)
+            + ". Check --agent/domain_agents and prompt discovery before treating the PR as clean."
+        )
+
     if persist_history:
         try:
             history_path = save_round_history(repo, pr_number, rnd, mode="single", domain_agents=da_map)
@@ -2015,6 +2072,8 @@ def review_pr_single(
                 status = "posted" if ok else "FAILED"
                 print(f"    {agent_cfg['emoji']} {agent} → {status}", file=out)
 
+    deduped_findings = all_findings(rnd)
+    failed_results = sum(1 for res in rnd.results if res.error)
     output = {
         "repo": repo,
         "pr": pr_number,
@@ -2039,13 +2098,15 @@ def review_pr_single(
                 ],
             }
         ],
-        "summary": (lambda deduped: {
-            "total_findings": len(deduped),
-            "critical": sum(1 for f in deduped if f.severity == "critical"),
-            "high": sum(1 for f in deduped if f.severity == "high"),
-            "medium": sum(1 for f in deduped if f.severity == "medium"),
-            "clean": not any(f.severity in ("critical", "high", "medium") for f in deduped),
-        })(all_findings(rnd)),
+        "summary": {
+            "total_findings": len(deduped_findings),
+            "critical": sum(1 for f in deduped_findings if f.severity == "critical"),
+            "high": sum(1 for f in deduped_findings if f.severity == "high"),
+            "medium": sum(1 for f in deduped_findings if f.severity == "medium"),
+            "failed_results": failed_results,
+            "clean": failed_results == 0
+            and not any(f.severity in ("critical", "high", "medium") for f in deduped_findings),
+        },
     }
 
     if not json_output:

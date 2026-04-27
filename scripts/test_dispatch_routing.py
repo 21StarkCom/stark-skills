@@ -90,9 +90,10 @@ def test_design_to_plan_codex_uses_agent_specific_env(monkeypatch):
         lambda agent, operation: {"GH_TOKEN": f"{agent}-token"},
     )
 
-    _cmd, run_kwargs, gemini_home = design_to_plan_dispatch._build_cmd_and_kwargs("codex", "prompt")
+    cmd, run_kwargs, gemini_home = design_to_plan_dispatch._build_cmd_and_kwargs("codex", "prompt")
 
     assert gemini_home is None
+    assert "-c" in cmd and 'model_reasoning_effort="xhigh"' in cmd
     assert run_kwargs["env"] == {"GH_TOKEN": "codex-token"}
 
 

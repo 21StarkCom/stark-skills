@@ -18,7 +18,7 @@ def _patch_models_and_dispatch(models: dict, agents: list[str] | None):
 def test_check_model_resolution_passes_when_dispatch_matches_enabled() -> None:
     models = {
         "claude": {"enabled": True, "model_id": "claude-opus-4-7"},
-        "codex": {"enabled": True, "model_id": "gpt-5.4"},
+        "codex": {"enabled": True, "model_id": "gpt-5.5"},
         "gemini": {"enabled": False, "model_id": "gemini-2.5-pro"},
     }
     p1, p2 = _patch_models_and_dispatch(models, ["claude", "codex"])
@@ -36,7 +36,7 @@ def test_check_model_resolution_warns_when_enabled_agent_excluded_from_rotation(
     advertised gemini as ready. Misalignment must surface as 'warn'."""
     models = {
         "claude": {"enabled": True, "model_id": "claude-opus-4-7"},
-        "codex": {"enabled": True, "model_id": "gpt-5.4"},
+        "codex": {"enabled": True, "model_id": "gpt-5.5"},
         "gemini": {"enabled": True, "model_id": "gemini-3.1-pro-preview"},
     }
     p1, p2 = _patch_models_and_dispatch(models, ["claude", "codex"])
@@ -54,7 +54,7 @@ def test_check_model_resolution_passes_when_rotation_lists_disabled_agent() -> N
     (enabled but excluded from rotation) warrants ``warn``."""
     models = {
         "claude": {"enabled": True, "model_id": "claude-opus-4-7"},
-        "codex": {"enabled": False, "model_id": "gpt-5.4"},
+        "codex": {"enabled": False, "model_id": "gpt-5.5"},
     }
     p1, p2 = _patch_models_and_dispatch(models, ["claude", "codex"])
     with p1, p2:
@@ -70,7 +70,7 @@ def test_check_model_resolution_warns_on_empty_intersection_for_single_agent_wor
     bypass ``config.agents`` and can still dispatch."""
     models = {
         "claude": {"enabled": True, "model_id": "claude-opus-4-7"},
-        "codex": {"enabled": True, "model_id": "gpt-5.4"},
+        "codex": {"enabled": True, "model_id": "gpt-5.5"},
     }
     p1, p2 = _patch_models_and_dispatch(models, ["gemini"])
     with p1, p2:
@@ -87,7 +87,7 @@ def test_check_model_resolution_fails_on_empty_intersection_for_team_workflow() 
     actually passed review."""
     models = {
         "claude": {"enabled": True, "model_id": "claude-opus-4-7"},
-        "codex": {"enabled": True, "model_id": "gpt-5.4"},
+        "codex": {"enabled": True, "model_id": "gpt-5.5"},
     }
     p1, p2 = _patch_models_and_dispatch(models, ["gemini"])
     with p1, p2:
@@ -103,7 +103,7 @@ def test_check_model_resolution_warns_on_malformed_config_agents_for_single_agen
     but a hard ``fail`` for team-review (covered separately)."""
     models = {
         "claude": {"enabled": True, "model_id": "claude-opus-4-7"},
-        "codex": {"enabled": True, "model_id": "gpt-5.4"},
+        "codex": {"enabled": True, "model_id": "gpt-5.5"},
     }
     p1, p2 = _patch_models_and_dispatch(models, "claude,codex")  # type: ignore[arg-type]
     with p1, p2:
@@ -124,7 +124,7 @@ def test_check_model_resolution_fails_on_malformed_config_agents_for_team_review
     zero agents — a clean 0-finding round masquerading as success."""
     models = {
         "claude": {"enabled": True, "model_id": "claude-opus-4-7"},
-        "codex": {"enabled": True, "model_id": "gpt-5.4"},
+        "codex": {"enabled": True, "model_id": "gpt-5.5"},
     }
     p1, p2 = _patch_models_and_dispatch(models, {"not": "a list"})  # type: ignore[arg-type]
     with p1, p2:
@@ -138,7 +138,7 @@ def test_check_model_resolution_warns_on_discover_config_failure() -> None:
     JSON, unreadable file) must not be swallowed."""
     models = {
         "claude": {"enabled": True, "model_id": "claude-opus-4-7"},
-        "codex": {"enabled": True, "model_id": "gpt-5.4"},
+        "codex": {"enabled": True, "model_id": "gpt-5.5"},
     }
     with patch("preflight.get_models_config", return_value=models), \
          patch("dispatcher_base.discover_config", side_effect=RuntimeError("bad config")):
@@ -156,7 +156,7 @@ def test_check_model_resolution_warns_on_transitive_import_error() -> None:
     import sys
     models = {
         "claude": {"enabled": True, "model_id": "claude-opus-4-7"},
-        "codex": {"enabled": True, "model_id": "gpt-5.4"},
+        "codex": {"enabled": True, "model_id": "gpt-5.5"},
     }
     saved = sys.modules.pop("dispatcher_base", None)
 
@@ -186,7 +186,7 @@ def test_check_model_resolution_passes_when_config_agents_absent() -> None:
     valid steady state, not a misalignment."""
     models = {
         "claude": {"enabled": True, "model_id": "claude-opus-4-7"},
-        "codex": {"enabled": True, "model_id": "gpt-5.4"},
+        "codex": {"enabled": True, "model_id": "gpt-5.5"},
     }
     p1, p2 = _patch_models_and_dispatch(models, None)
     with p1, p2:
@@ -276,7 +276,7 @@ def test_check_model_resolution_fails_when_required_agent_missing() -> None:
 def test_check_model_resolution_fails_when_all_agents_disabled() -> None:
     models = {
         "claude": {"enabled": False, "model_id": "claude-opus-4-7"},
-        "codex": {"enabled": False, "model_id": "gpt-5.4"},
+        "codex": {"enabled": False, "model_id": "gpt-5.5"},
     }
     p1, p2 = _patch_models_and_dispatch(models, ["claude", "codex"])
     with p1, p2:
@@ -293,7 +293,7 @@ def test_check_model_resolution_falls_back_when_discover_config_unavailable(monk
     import sys
     models = {
         "claude": {"enabled": True, "model_id": "claude-opus-4-7"},
-        "codex": {"enabled": True, "model_id": "gpt-5.4"},
+        "codex": {"enabled": True, "model_id": "gpt-5.5"},
         "gemini": {"enabled": False, "model_id": "gemini-2.5-pro"},
     }
 

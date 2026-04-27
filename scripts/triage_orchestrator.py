@@ -272,8 +272,10 @@ def _build_dispatch_argv(args: argparse.Namespace, repo: str | None, domains: li
             domain_csv,
             "--json-only",
         ]
-        if args.single:
+        if args.single or args.agent:
             argv.append("--single")
+        if args.agent:
+            argv.extend(["--agent", args.agent])
         if args.base:
             argv.extend(["--base", args.base])
         if args.round is not None:
@@ -305,7 +307,9 @@ def _build_dispatch_argv(args: argparse.Namespace, repo: str | None, domains: li
         argv.extend(["--repo", repo])
     if args.round is not None:
         argv.extend(["--round", str(args.round)])
-    if args.agents:
+    if args.agent:
+        argv.extend(["--agents", args.agent])
+    elif args.agents:
         argv.extend(["--agents", args.agents])
     if args.timeout is not None:
         argv.extend(["--timeout", str(args.timeout)])
@@ -526,9 +530,17 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--json", action="store_true", dest="json_output")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--single", action="store_true", help="Single-agent mode")
+    parser.add_argument(
+        "--agent",
+        choices=list(AGENTS.keys()),
+        help="Force one review agent for every dispatched domain (PR dispatch implies --single)",
+    )
     parser.add_argument("--shadow", action="store_true", help="Triage + dispatch ALL domains")
     parser.add_argument("--round", type=int, help="Review round number (passthrough)")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.agent:
+        args.single = True
+    return args
 
 
 def main() -> int:
@@ -675,11 +687,16 @@ def main() -> int:
             return 0
 
         dispatch_argv = _build_dispatch_argv(args, repo, triage_result.dispatched_domains)
-        dispatch_agents = (
-            args.agents.split(",")
-            if args.agents
-            else list(config.get(f"{args.review_type}_review", {}).get("agents") or config.get("agents") or [])
-        )
+        if args.agent:
+            dispatch_agents = [args.agent]
+        elif args.agents:
+            dispatch_agents = args.agents.split(",")
+        else:
+            dispatch_agents = list(
+                config.get(f"{args.review_type}_review", {}).get("agents")
+                or config.get("agents")
+                or []
+            )
         if dispatch_agents:
             _log_models("dispatch", dispatch_agents)
         _log(
@@ -687,7 +704,7 @@ def main() -> int:
             f"{', '.join(triage_result.dispatched_domains)}"
         )
         for index, domain in enumerate(triage_result.dispatched_domains, start=1):
-            agent_label = args.agents or ("single" if args.single else "multi")
+            agent_label = args.agent or args.agents or ("single" if args.single else "multi")
             _emit_tui(
                 render_dispatch_progress(
                     tui_config,
