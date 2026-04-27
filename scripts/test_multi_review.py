@@ -651,6 +651,91 @@ class TestOutOfDiffFilter:
         assert dropped == []
 
 
+class TestResolveBaseRef:
+    """_resolve_base_ref defeats stale-local-branch diff bloat.
+
+    Regression: a worktree from a fresh ``git fetch origin <pr>`` retains
+    the parent repo's local branch refs, which can lag origin/. Passing
+    ``--base main`` then resolves to ``$(merge-base local-main HEAD)``,
+    sweeping in commits from PRs merged into origin/main *after* the
+    local ref was last updated. Findings that reference those files
+    survive ``filter_out_of_diff_findings`` because they genuinely
+    appear in the (overstated) diff.
+    """
+
+    def test_passthrough_when_base_contains_slash(self):
+        # Already-qualified refs must not be re-prefixed.
+        assert multi_review._resolve_base_ref("origin/main") == "origin/main"
+        assert multi_review._resolve_base_ref("refs/heads/feature") == "refs/heads/feature"
+
+    def test_passthrough_when_base_is_sha(self):
+        assert multi_review._resolve_base_ref("a7730546") == "a7730546"
+        assert multi_review._resolve_base_ref("a7730546f4ab5ee27a153c48857ed4f786aace9c") == \
+            "a7730546f4ab5ee27a153c48857ed4f786aace9c"
+
+    def test_passthrough_when_base_is_empty(self):
+        assert multi_review._resolve_base_ref("") == ""
+
+    def test_prefers_origin_ref_when_available(self, monkeypatch):
+        """Plain ``main`` resolves to ``origin/main`` when the latter exists."""
+        calls: list[list[str]] = []
+
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            if args[:4] == ["git", "rev-parse", "--verify", "--quiet"]:
+                # origin/main exists
+                class R:
+                    returncode = 0
+                    stdout = "abc1234\n"
+                return R()
+            raise AssertionError("unexpected subprocess call")
+
+        monkeypatch.setattr(multi_review.subprocess, "run", fake_run)
+        assert multi_review._resolve_base_ref("main") == "origin/main"
+        assert calls and calls[0][-1] == "origin/main"
+
+    def test_falls_back_to_plain_base_when_origin_missing(self, monkeypatch):
+        """If origin/<base> doesn't exist, return the input as-is."""
+        def fake_run(args, **kwargs):
+            class R:
+                returncode = 1  # rev-parse fails
+                stdout = ""
+            return R()
+
+        monkeypatch.setattr(multi_review.subprocess, "run", fake_run)
+        assert multi_review._resolve_base_ref("main") == "main"
+
+    def test_falls_back_to_plain_base_on_subprocess_error(self, monkeypatch):
+        def fake_run(args, **kwargs):
+            raise OSError("git not found")
+
+        monkeypatch.setattr(multi_review.subprocess, "run", fake_run)
+        assert multi_review._resolve_base_ref("main") == "main"
+
+    def test_get_changed_files_uses_resolved_base(self, monkeypatch):
+        """_get_changed_files resolves ``main`` → ``origin/main`` before diffing.
+
+        The bug being guarded: a stale local ``main`` ref could have
+        ``main...HEAD`` include other PRs' files. Resolving to
+        ``origin/main`` keeps the diff scoped to the PR.
+        """
+        seen_args: list[list[str]] = []
+
+        def fake_run(args, **kwargs):
+            seen_args.append(args)
+            class R:
+                returncode = 0
+                stdout = "src/app.py\n" if args[1] == "diff" else "abc\n"
+            return R()
+
+        monkeypatch.setattr(multi_review.subprocess, "run", fake_run)
+        files = multi_review._get_changed_files("main", cwd="/tmp/wt")
+        assert files == {"src/app.py"}
+        # The diff invocation must use the resolved ref.
+        diff_args = next(a for a in seen_args if a[1] == "diff")
+        assert diff_args[3] == "origin/main...HEAD"
+
+
 class TestHistoryPersistence:
     """save_round_history and save_review_summary write correct schema."""
 

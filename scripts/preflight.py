@@ -165,6 +165,19 @@ def check_working_dir() -> tuple[str, str]:
 
 
 def check_model_resolution() -> tuple[str, str]:
+    """Report the agents that will actually dispatch for a review run.
+
+    There are two knobs that gate dispatch and they don't always agree:
+      - ``models.<agent>.enabled`` — whether the agent's CLI/auth is configured.
+      - ``config.agents`` — the explicit dispatch rotation list.
+
+    The dispatcher only runs an agent when both say yes, so this check
+    reports the intersection (the *dispatched* set) and warns explicitly
+    when the two knobs disagree. Without that, an operator sees
+    "enabled agents: [claude, codex, gemini]" here and is then surprised
+    when a team review produces 0 gemini runs because ``config.agents``
+    excludes it.
+    """
     models = get_models_config()
     expected = ["claude", "codex"]
     missing = [a for a in expected if a not in models]
@@ -182,9 +195,54 @@ def check_model_resolution() -> tuple[str, str]:
         for agent, cfg in models.items()
         if isinstance(cfg, dict) and not cfg.get("enabled")
     )
+
+    # Intersect with the dispatch rotation list (config.agents).
+    # ``discover_config`` may not be importable in older installs; degrade
+    # gracefully to the legacy "enabled" reporting in that case.
+    dispatch_list: list[str] | None = None
+    try:
+        from dispatcher_base import discover_config  # type: ignore[import]
+        cfg = discover_config()
+        agents_list = cfg.get("agents")
+        if isinstance(agents_list, list):
+            dispatch_list = sorted(a for a in agents_list if isinstance(a, str))
+    except Exception:  # pragma: no cover - defense in depth
+        dispatch_list = None
+
+    if dispatch_list is None:
+        if disabled:
+            return "pass", f"enabled agents: {enabled}; disabled agents: {disabled}"
+        return "pass", f"enabled agents: {enabled}"
+
+    enabled_set = set(enabled)
+    rotation_set = set(dispatch_list)
+    dispatched = sorted(enabled_set & rotation_set)
+    enabled_but_not_in_rotation = sorted(enabled_set - rotation_set)
+    in_rotation_but_not_enabled = sorted(rotation_set - enabled_set)
+
+    if not dispatched:
+        return (
+            "fail",
+            "no agents would dispatch — enabled (in models) and rotation "
+            f"(config.agents) don't overlap. enabled={enabled} rotation={dispatch_list}",
+        )
+
+    notes: list[str] = [f"dispatched agents: {dispatched}"]
+    if enabled_but_not_in_rotation:
+        notes.append(
+            f"enabled but excluded from config.agents (silently skipped): "
+            f"{enabled_but_not_in_rotation}"
+        )
+    if in_rotation_but_not_enabled:
+        notes.append(
+            f"in config.agents but not enabled in models (silently skipped): "
+            f"{in_rotation_but_not_enabled}"
+        )
     if disabled:
-        return "pass", f"enabled agents: {enabled}; disabled agents: {disabled}"
-    return "pass", f"enabled agents: {enabled}"
+        notes.append(f"disabled in models: {disabled}")
+
+    status = "warn" if (enabled_but_not_in_rotation or in_rotation_but_not_enabled) else "pass"
+    return status, "; ".join(notes)
 
 
 def check_cost_hard_stop() -> tuple[str, str]:

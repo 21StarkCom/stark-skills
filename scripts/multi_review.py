@@ -279,14 +279,50 @@ MAX_GEMINI_CONCURRENT = 3  # Vertex AI rate-limits under heavy parallel load
 _gemini_semaphore = threading.Semaphore(MAX_GEMINI_CONCURRENT)
 
 
+_SHA_RE = re.compile(r"^[0-9a-f]{4,40}$")
+
+
+def _resolve_base_ref(base: str, cwd: str | None = None) -> str:
+    """Resolve *base* to a ref that's stable across stale local branches.
+
+    Bug-class this exists to defeat: a caller passes ``--base main`` from a
+    worktree whose local ``main`` ref is stale relative to ``origin/main``.
+    ``git diff main...HEAD`` then resolves to the merge-base of the stale
+    local main and HEAD, which silently sweeps in commits from PRs that
+    landed on origin/main *after* the local ref was last updated. Findings
+    that reference files outside the actual PR diff slip past
+    ``filter_out_of_diff_findings`` because those files genuinely appear
+    in the (overstated) diff.
+
+    Resolution rules:
+      - If *base* contains '/' (e.g. ``origin/main``, refs/...), use as-is.
+      - If *base* looks like a SHA, use as-is.
+      - Otherwise, prefer ``origin/<base>`` when it exists locally; fall
+        back to ``<base>`` if not.
+    """
+    if not base or "/" in base or _SHA_RE.fullmatch(base):
+        return base
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"origin/{base}"],
+            capture_output=True, text=True, timeout=10, cwd=cwd,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return f"origin/{base}"
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    return base
+
+
 def _get_diff_stats(base: str, cwd: str | None = None) -> tuple[int, int]:
     """Get diff file count and total changed lines for adaptive timeout.
 
     Returns (file_count, line_count). Returns (0, 0) on failure.
     """
     try:
+        resolved = _resolve_base_ref(base, cwd=cwd)
         result = subprocess.run(
-            ["git", "diff", "--shortstat", f"{base}...HEAD"],
+            ["git", "diff", "--shortstat", f"{resolved}...HEAD"],
             capture_output=True, text=True, timeout=30,
             cwd=cwd,
         )
@@ -307,13 +343,20 @@ def _get_diff_stats(base: str, cwd: str | None = None) -> tuple[int, int]:
 def _get_changed_files(base: str, cwd: str | None = None) -> set[str]:
     """Return the set of files changed on HEAD since the merge-base with *base*.
 
-    Uses `git diff --name-only base...HEAD` (three-dot, merge-base relative).
-    Returns an empty set on failure — callers should treat empty as "filter
-    disabled" rather than "all findings invalid".
+    Uses `git diff --name-only <resolved-base>...HEAD` (three-dot,
+    merge-base relative). The base is resolved through
+    :func:`_resolve_base_ref` so a stale local branch ref doesn't smuggle
+    other PRs' files into the changed set — that bug let alert-rules.yml
+    findings survive ``filter_out_of_diff_findings`` on a docs-only PR
+    (see review of GetEvinced/infra-ai-platform#105).
+
+    Returns an empty set on failure — callers should treat empty as
+    "filter disabled" rather than "all findings invalid".
     """
     try:
+        resolved = _resolve_base_ref(base, cwd=cwd)
         result = subprocess.run(
-            ["git", "diff", "--name-only", f"{base}...HEAD"],
+            ["git", "diff", "--name-only", f"{resolved}...HEAD"],
             capture_output=True, text=True, timeout=30,
             cwd=cwd,
         )
