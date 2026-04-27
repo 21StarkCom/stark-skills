@@ -5,8 +5,8 @@ description: >-
 argument-hint: [patch|minor|major] (optional — auto-detected if omitted)
 disable-model-invocation: true
 model: sonnet
-revision: d0ee05df28e525cde9e2660468f3690eacf07e0c
-revision_date: 2026-04-21T08:57:15+03:00
+revision: 91f90bb0f138e3e1150a39ffe154788744eca55b
+revision_date: 2026-04-27T17:52:45Z
 ---
 
 # Release Management
@@ -53,6 +53,73 @@ git status --porcelain
 ```
 
 If not clean → abort with message to user.
+
+---
+
+## Step 1.5: Pre-tag Terraform drift gate
+
+Skip this step entirely if the repo has no `infra/terraform/` directory.
+
+If commits since `$LAST_TAG` (or all commits if there is no tag yet) touched
+`infra/terraform/`, an un-applied plan will block CD's drift gate AFTER
+the migration has already run — leaving the env in a half-deployed state.
+Catch it here, before the tag exists.
+
+```bash
+if [ -d infra/terraform ]; then
+  # Self-contained: don't depend on $LAST_TAG being set yet (Step 2
+  # owns it). Re-derive locally so the drift gate works even if a
+  # caller runs Step 1.5 standalone.
+  LAST_TAG_LOCAL=$(git tag --sort=-v:refname | head -1)
+  if [ -n "$LAST_TAG_LOCAL" ]; then
+    TF_TOUCHED=$(git diff --name-only "$LAST_TAG_LOCAL"..HEAD -- infra/terraform/ | head -1)
+  else
+    TF_TOUCHED=$(git ls-files infra/terraform/ | head -1)
+  fi
+  if [ -n "$TF_TOUCHED" ]; then
+    echo "TF changes since ${LAST_TAG_LOCAL:-<root>} — running drift check before tagging…"
+    pushd infra/terraform >/dev/null
+    # Mirror the env CD's drift step uses (see .github/workflows/cd.yml
+    # "Terraform drift check"); falling back to repo-detected defaults
+    # when CD-specific TF_VARs aren't already in the env.
+    export TF_IN_AUTOMATION=1 TF_INPUT=0
+    : "${TF_VAR_project_id:=$(gcloud config get-value project 2>/dev/null)}"
+    export TF_VAR_project_id
+    terraform init -input=false >/dev/null
+    set +e
+    terraform plan -detailed-exitcode -input=false -no-color
+    PLAN_EXIT=$?
+    set -e
+    popd >/dev/null
+    # `terraform plan -detailed-exitcode`: 0=clean, 1=error, 2=diff.
+    if [ "$PLAN_EXIT" -eq 2 ]; then
+      cat <<'EOF'
+ABORT: Terraform plan shows un-applied drift in infra/terraform/.
+
+If you tag now, CD's migration step will run against prod, then the
+drift gate will fail and the deploy will be skipped — leaving the DB
+migrated but the app/jobs un-rolled.
+
+Fix:
+  cd infra/terraform
+  terraform apply
+…then re-run /stark-release.
+EOF
+      exit 1
+    fi
+    if [ "$PLAN_EXIT" -ne 0 ]; then
+      echo "ABORT: terraform plan errored (exit $PLAN_EXIT). Investigate before tagging." >&2
+      exit 1
+    fi
+  fi
+fi
+```
+
+Why this is here, not in CD: CD's drift gate runs *after* the
+`alembic upgrade head` step. By the time it fails, the DB is already
+migrated and the only safe recovery is to apply TF and re-run the
+deploy under time pressure (config caches expire in minutes). Catching
+the drift before the tag exists keeps the migration + deploy atomic.
 
 ---
 
@@ -273,6 +340,7 @@ Commit:     [hash]
 | Tag already exists | Error — that version is taken, suggest next |
 | Push fails | `git pull --rebase origin main`, retry |
 | `gh` auth fails | Verify `gh auth status` — user's PAT must be active |
+| TF drift detected (Step 1.5) | `cd infra/terraform && terraform apply`, then re-run `/stark-release`. Do NOT skip — CD will fail the drift gate *after* migrating, leaving the env half-deployed. |
 
 ## Observability
 
