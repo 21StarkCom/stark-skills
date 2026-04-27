@@ -86,7 +86,6 @@ All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.claude/skil
 
 ### Pipeline (end-to-end, in order)
 
-- `/stark-design "prompt" | <path>` — (archived) generate design doc from requirements; use `superpowers:brainstorm` instead
 - `/stark-review-design <path>` — multi-agent design/spec review (N agents × 12 domains, default N=2)
 - `/stark-red-team-design <path> [--source-spec PATH] [--model ID] [--dry-run]` — adversarial committee challenge of a design doc (5 personas × 1 round, default `gpt-5.5-pro`); writes `<design>.red-team.md` sidecar and posts to PR if detected; challenge-only, no fix loop
 - `/stark-design-to-plan <path>` — generate implementation plan from design doc (enabled agents generate, then cross-review before synthesis)

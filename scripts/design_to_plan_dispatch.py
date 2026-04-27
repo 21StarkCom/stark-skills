@@ -7,7 +7,6 @@ Generic orchestrator for enabled-agent generate and cross-review:
 
 Used by:
   - /stark-design-to-plan (design doc → implementation plan)
-  - /stark-design (prompt/requirements → design document)
 
 Prompts are loaded from ~/.claude/code-review/prompts/<prompts-dir>/{agent}/
 where prompts-dir is specified via --prompts-dir.

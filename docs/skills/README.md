@@ -4,25 +4,25 @@ A multi-agent AI engineering system. 28 skills that take you from a napkin idea 
 
 ## The Pipeline
 
-The core of stark-skills is a 7-step pipeline where each skill's output feeds the next. You can enter at any point — if you already have a design, skip straight to step 3.
+The core of stark-skills is a 6-step pipeline where each skill's output feeds the next. You can enter at any point — if you already have a design, skip straight to step 1.
 
 ![Pipeline](pipeline.png)
 
 Two patterns recur throughout. **Generate** skills (blue) dispatch 3 agents to independently produce a document, then have each agent cross-review the other two — 3 competing outputs, 6 adversarial reviews, one synthesized winner. **Review** skills (orange) dispatch N agents across M specialized domains in parallel, classify the findings, fix the document, and repeat until clean.
 
-**Step 1 — `/stark-design`** takes a prompt or requirements file and produces a design document. Three agents each write their own design, then cross-review each other on completeness, clarity, feasibility, extensibility, and security. The orchestrator synthesizes the winner with the best elements from the runners-up.
+Designs are produced by `superpowers:brainstorm` (outside this repo). From there:
 
-**Step 2 — `/stark-review-design`** puts that design through 12 domain specialists (general, completeness, security, scope, api-design, data-modeling, consistency, scalability, extensibility, resilience, accessibility, test-plan) running across 2-3 agents. It fixes issues autonomously for up to 3 rounds, then runs a final review-only pass.
+**Step 1 — `/stark-review-design`** puts that design through 12 domain specialists (general, completeness, security, scope, api-design, data-modeling, consistency, scalability, extensibility, resilience, accessibility, test-plan) running across 2-3 agents. It fixes issues autonomously for up to 3 rounds, then runs a final review-only pass.
 
-**Step 3 — `/stark-design-to-plan`** converts the reviewed design into a phased implementation plan. Same 3-generate + 6-cross-review pattern, but scoring on completeness, feasibility, phasing, risk coverage, and testability.
+**Step 2 — `/stark-design-to-plan`** converts the reviewed design into a phased implementation plan. 3-generate + 6-cross-review pattern, scoring on completeness, feasibility, phasing, risk coverage, and testability.
 
-**Step 4 — `/stark-review-plan`** reviews the implementation plan through 10 adversarial domains (general, completeness, security, feasibility, operability, sequencing, rollback, risk, gates, timeline). It assumes the plan will fail and hunts for where it will break.
+**Step 3 — `/stark-review-plan`** reviews the implementation plan through 10 adversarial domains (general, completeness, security, feasibility, operability, sequencing, rollback, risk, gates, timeline). It assumes the plan will fail and hunts for where it will break.
 
-**Step 5 — `/stark-plan-to-tasks`** decomposes the reviewed plan into phased GitHub issues with story points, risk labels, and confidence scores. Three LLM passes ensure consistency.
+**Step 4 — `/stark-plan-to-tasks`** decomposes the reviewed plan into phased GitHub issues with story points, risk labels, and confidence scores. Three LLM passes ensure consistency.
 
-**Step 6 — `/stark-phase-execute`** picks up those issues and autonomously implements them — for each issue: implement, create PR, run multi-agent review, fix findings, merge. Zero user intervention. For maximum quality, `/stark-autopilot` is the alternative execution mode: all 3 agents compete on every implementation step in parallel git worktrees, with a tournament to pick the winner at each step.
+**Step 5 — `/stark-phase-execute`** picks up those issues and autonomously implements them — for each issue: implement, create PR, run multi-agent review, fix findings, merge. Zero user intervention. For maximum quality, `/stark-autopilot` is the alternative execution mode: all 3 agents compete on every implementation step in parallel git worktrees, with a tournament to pick the winner at each step.
 
-**Step 7 — `/stark-team-review`** is the full PR code review that runs during execution (or standalone). 3 agents × 9 domains = 27 parallel sub-agent reviews, posted to GitHub under the respective bot identities. For a faster manual pass, `/stark-review` runs a single agent across the same 9 domains.
+**Step 6 — `/stark-team-review`** is the full PR code review that runs during execution (or standalone). 3 agents × 9 domains = 27 parallel sub-agent reviews, posted to GitHub under the respective bot identities. For a faster manual pass, `/stark-review` runs a single agent across the same 9 domains.
 
 ## The Ecosystem
 

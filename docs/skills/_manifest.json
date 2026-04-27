@@ -9,11 +9,6 @@
       "usage_quality": "good",
       "internals_quality": "good"
     },
-    "stark-design": {
-      "hash": "d3ebf578db48e1af",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
-    },
     "stark-design-to-plan": {
       "hash": "d2ac1a09b5f929d8",
       "usage_quality": "ok",

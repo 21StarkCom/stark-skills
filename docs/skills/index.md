@@ -4,7 +4,6 @@
 
 | Skill | Description | Docs |
 |-------|-------------|------|
-| `/stark-design` | Generate design doc from requirements — 3 agents generate, 6 cross-review, synthesize winner | [usage](stark-design/usage.md) · [internals](stark-design/internals.md) |
 | `/stark-review-design` | Multi-agent design/spec review — N agents × 12 domains with fix loop | [source](../../skill/stark-review-design/SKILL.md) |
 | `/stark-design-to-plan` | Generate implementation plan from design — 3 agents generate, 6 cross-review, synthesize | [usage](stark-design-to-plan/usage.md) · [internals](stark-design-to-plan/internals.md) |
 | `/stark-red-team-design` | Adversarial 5-persona challenge of a design doc | [source](../../skill/stark-red-team-design/SKILL.md) |

@@ -58,8 +58,7 @@ Turn ideas into tracked, phased GitHub issues, then execute them autonomously.
 
 | Skill | What it does | When to use |
 |-------|-------------|-------------|
-| [`/stark-design`](docs/skills/stark-design/usage.md) | Generate design doc from requirements | Starting a new feature. Enabled agents generate designs, then cross-review one another before synthesis. |
-| [`/stark-design-to-plan`](docs/skills/stark-design-to-plan/usage.md) | Generate implementation plan from design doc | After design is reviewed. Enabled agents generate plans, then cross-review one another before synthesis. |
+| [`/stark-design-to-plan`](docs/skills/stark-design-to-plan/usage.md) | Generate implementation plan from design doc | Starting a new feature. Enabled agents generate plans from a brainstormed design, then cross-review one another before synthesis. |
 | [`/stark-plan-to-tasks`](docs/skills/stark-plan-to-tasks/usage.md) | Decompose a spec into phased GitHub issues | After a spec/plan is reviewed and approved. 3 LLM passes: quality gate → decomposition → validation. |
 | [`/stark-phase-execute`](docs/skills/stark-phase-execute/usage.md) | Autonomously implement all tasks in a phase | When you have GitHub issues ready. Branches, implements, PRs, reviews, merges — zero intervention. |
 | [`/stark-autopilot`](docs/skills/stark-autopilot/usage.md) | Autonomous implementation with tournament | When you want all enabled agents to compete per step in worktrees. Best implementation wins at each step. |

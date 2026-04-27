@@ -83,7 +83,6 @@ All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.Codex/skill
 
 ### Pipeline (end-to-end, in order)
 
-- `/stark-design "prompt" | <path>` — (archived) generate design doc from requirements; use `superpowers:brainstorm` instead
 - `/stark-review-design <path>` — multi-agent design/spec review (N agents × 12 domains, default N=2)
 - `/stark-design-to-plan <path>` — generate implementation plan from design doc (enabled agents generate, then cross-review before synthesis)
 - `/stark-review-plan <path>` — multi-agent execution plan review (N agents × 10 adversarial domains, default N=2)
