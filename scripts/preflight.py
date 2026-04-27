@@ -164,7 +164,32 @@ def check_working_dir() -> tuple[str, str]:
     return "pass", "clean"
 
 
-def check_model_resolution() -> tuple[str, str]:
+_TEAM_REVIEW_WORKFLOWS = frozenset({"stark-team-review"})
+
+
+def check_model_resolution(workflow: str | None = None) -> tuple[str, str]:
+    """Report the agents that will actually dispatch for a review run.
+
+    There are two knobs that gate dispatch and they don't always agree:
+      - ``models.<agent>.enabled`` — whether the agent's CLI/auth is configured.
+      - ``config.agents`` — the explicit dispatch rotation list.
+
+    The dispatcher only runs an agent when both say yes, so this check
+    reports the intersection (the *dispatched* set) and warns when the
+    two knobs disagree in the surprising direction (an agent enabled
+    in models but excluded from the rotation, where preflight had been
+    advertising it as ready and the dispatcher was silently dropping
+    it). The opposite direction — an agent listed in the rotation but
+    disabled in models — is benign because the dispatcher skips it
+    explicitly; we don't warn on that case.
+
+    Empty intersection severity is workflow-aware: ``stark-team-review``
+    relies on the rotation as its only dispatch source, so an empty
+    intersection there is a hard ``fail``. Single-agent workflows
+    (``stark-review`` with ``--agent`` or ``domain_agents``) can still
+    dispatch without going through the rotation, so we only ``warn``
+    there and let the dispatcher itself error if no agent can run.
+    """
     models = get_models_config()
     expected = ["claude", "codex"]
     missing = [a for a in expected if a not in models]
@@ -182,9 +207,119 @@ def check_model_resolution() -> tuple[str, str]:
         for agent, cfg in models.items()
         if isinstance(cfg, dict) and not cfg.get("enabled")
     )
+
+    # Intersect with the dispatch rotation list (``config.agents``).
+    # Failure modes handled distinctly:
+    #   - dispatcher_base genuinely absent (older install): fall back
+    #     to legacy enabled-only reporting. We narrow the catch to
+    #     ImportError-from-this-import specifically so a transitive
+    #     ImportError raised from inside dispatcher_base (its own
+    #     dependencies broken) doesn't fail open.
+    #   - discover_config raising any other exception (malformed JSON,
+    #     unreadable file, transitive ImportError, etc.): surface as
+    #     ``warn`` (or ``fail`` for team-review).
+    #   - ``config.agents`` present but not a list of strings:
+    #     ``warn`` for single-agent / unknown workflows, ``fail`` for
+    #     team-review (the dispatcher would iterate the malformed value
+    #     and produce a clean 0-agent run).
+    is_team_workflow = (workflow or "") in _TEAM_REVIEW_WORKFLOWS
+    dispatch_list: list[str] | None = None
+    discover_warning: str | None = None
+    try:
+        from dispatcher_base import discover_config  # type: ignore[import]
+    except ImportError as exc:
+        # Only treat as legacy fallback if the missing module is
+        # ``dispatcher_base`` itself; transitive ImportErrors should
+        # surface as warnings.
+        if getattr(exc, "name", None) == "dispatcher_base":
+            pass
+        else:
+            discover_warning = f"could not import dispatcher_base ({exc})"
+    else:
+        try:
+            cfg = discover_config()
+        except Exception as exc:  # noqa: BLE001 — intentional broad catch with warning
+            discover_warning = f"could not load review config: {exc}"
+        else:
+            agents_list = cfg.get("agents")
+            if agents_list is None:
+                # No override; the dispatcher will use AGENTS keys (all enabled).
+                dispatch_list = list(enabled)
+            elif isinstance(agents_list, list) and all(isinstance(a, str) for a in agents_list):
+                dispatch_list = sorted(set(agents_list))
+            else:
+                # Don't include the raw value — it goes into preflight.jsonl
+                # and the durable event queue, where a misconfigured agents
+                # entry could leak whatever the operator pasted in.
+                discover_warning = (
+                    f"config.agents is malformed (expected list[str], got "
+                    f"{type(agents_list).__name__})"
+                )
+
+    if discover_warning is not None:
+        msg = f"enabled agents: {enabled}"
+        if disabled:
+            msg += f"; disabled agents: {disabled}"
+        # Team-review dispatches strictly off ``config.agents``; bad
+        # config there means a clean 0-finding run, which is worse
+        # than blocking. Single-agent workflows can still dispatch via
+        # ``--agent`` / ``domain_agents``, so warn-and-continue.
+        severity = "fail" if is_team_workflow else "warn"
+        return severity, f"{discover_warning}; {msg}"
+
+    if dispatch_list is None:
+        # ImportError path — legacy report.
+        if disabled:
+            return "pass", f"enabled agents: {enabled}; disabled agents: {disabled}"
+        return "pass", f"enabled agents: {enabled}"
+
+    enabled_set = set(enabled)
+    rotation_set = set(dispatch_list)
+    dispatched = sorted(enabled_set & rotation_set)
+    enabled_but_not_in_rotation = sorted(enabled_set - rotation_set)
+
+    notes: list[str] = [f"dispatched agents: {dispatched}"]
+    if enabled_but_not_in_rotation:
+        notes.append(
+            f"enabled but excluded from config.agents (silently skipped): "
+            f"{enabled_but_not_in_rotation}"
+        )
+    # Disabled-but-in-rotation is *not* a misalignment worth flagging:
+    # the dispatcher explicitly checks ``is_agent_enabled`` and drops
+    # those, which is exactly the behavior we want. Reporting it as a
+    # warning meant a fresh install that disabled gemini got marked
+    # ``degraded`` despite being in a perfectly healthy steady state.
     if disabled:
-        return "pass", f"enabled agents: {enabled}; disabled agents: {disabled}"
-    return "pass", f"enabled agents: {enabled}"
+        notes.append(f"disabled in models: {disabled}")
+
+    # Empty intersection severity depends on workflow.
+    #
+    # Team-review dispatches strictly off ``config.agents`` — an empty
+    # rotation/enabled overlap means the entire run produces a clean
+    # 0-finding round with no review work done, which is worse than
+    # blocking the run. Hard fail.
+    #
+    # Single-agent workflows (``stark-review`` and friends) can still
+    # dispatch via ``--agent`` or per-domain ``domain_agents`` mappings
+    # that bypass ``config.agents`` entirely. A warn lets the operator
+    # see the misalignment without preventing a perfectly valid run.
+    if not dispatched:
+        if is_team_workflow:
+            return (
+                "fail",
+                "team-review has no dispatchable agents — config.agents "
+                f"({sorted(rotation_set)}) and enabled models "
+                f"({sorted(enabled_set)}) don't overlap. Empty rotation "
+                "would silently produce a clean 0-finding review.",
+            )
+        notes.insert(
+            0,
+            "no agents in the team-review intersection — single-agent dispatch may still work",
+        )
+        return "warn", "; ".join(notes)
+
+    status = "warn" if enabled_but_not_in_rotation else "pass"
+    return status, "; ".join(notes)
 
 
 def check_cost_hard_stop() -> tuple[str, str]:
@@ -268,7 +403,7 @@ def check_red_team_model_rates() -> tuple[str, str]:
 # critical=True → a "fail" status sets overall to "blocked"
 # ---------------------------------------------------------------------------
 
-_CHECKS: list[tuple[str, Callable[[], tuple[str, str]], bool]] = [
+_CHECKS: list[tuple[str, Callable[..., tuple[str, str]], bool]] = [
     ("check_cli_claude",       check_cli_claude,       False),
     ("check_cli_codex",        check_cli_codex,        False),
     ("check_cli_gemini",       check_cli_gemini,       False),
@@ -306,7 +441,18 @@ def run_preflight(workflow: str, skip: set[str] | None = None) -> PreFlightResul
             )
             continue
 
-        status, message, duration_s = _timed(fn)
+        # ``check_model_resolution`` reads the workflow to decide
+        # whether an empty rotation/enabled overlap is a hard fail
+        # (team-review) or a warn (single-agent). Pass workflow
+        # through without overriding the registered function — that
+        # way monkeypatching the registry in tests still takes effect.
+        if name == "check_model_resolution":
+            bound_fn = fn
+            timed_callable = lambda: bound_fn(workflow)
+        else:
+            timed_callable = fn
+
+        status, message, duration_s = _timed(timed_callable)
         results.append(CheckResult(name=name, status=status,
                                    message=message, duration_s=duration_s))
 

@@ -183,9 +183,16 @@ def _build_graph_dependency_context(
 
     Returns None on failure (exit 2, timeout, parse error) — callers degrade gracefully.
     Token budget: ~2000 tokens. Truncates to blast radius edges when exceeded.
+
+    Resolves *base* through :func:`_resolve_base_ref` so blast-radius
+    discovery uses the same merge-base as ``_get_changed_files`` and
+    the agent prompts. Without this, a stale local ``main`` ref could
+    feed architecture/correctness sub-agents dependency nodes from
+    other PRs that already landed on origin/main.
     """
     stark_graph = SCRIPTS_DIR / "stark_graph.py"
-    cmd = [sys.executable, str(stark_graph), "--stage", "diff", "--repo", cwd, "--base", base]
+    resolved_base = _resolve_base_ref(base, cwd=cwd)
+    cmd = [sys.executable, str(stark_graph), "--stage", "diff", "--repo", cwd, "--base", resolved_base]
     if pr_number is not None:
         cmd.extend(["--pr", str(pr_number)])
     try:
@@ -279,14 +286,83 @@ MAX_GEMINI_CONCURRENT = 3  # Vertex AI rate-limits under heavy parallel load
 _gemini_semaphore = threading.Semaphore(MAX_GEMINI_CONCURRENT)
 
 
+_QUALIFIED_REF_PREFIXES = ("refs/", "origin/", "remotes/")
+
+# Symbolic git revs that must NEVER be rewritten to ``origin/<rev>``.
+# ``origin/HEAD`` is a real ref pointing at the remote default branch,
+# so a naive probe would silently retarget the diff. ``FETCH_HEAD`` /
+# ``ORIG_HEAD`` / ``MERGE_HEAD`` are local-only and have no meaningful
+# remote equivalent.
+_GIT_REV_KEYWORDS = frozenset({"HEAD", "FETCH_HEAD", "ORIG_HEAD", "MERGE_HEAD"})
+
+# Characters that mark commit-ish expressions (``HEAD~3``, ``HEAD^``,
+# ``main@{1}``). Any input containing these is treated as a rev
+# expression and passed through unchanged.
+_REV_EXPRESSION_CHARS = ("~", "^", "@{")
+
+
+def _resolve_base_ref(base: str, cwd: str | None = None) -> str:
+    """Resolve *base* to a ref that's stable across stale local branches.
+
+    Bug-class this exists to defeat: a caller passes ``--base main`` from a
+    worktree whose local ``main`` ref is stale relative to ``origin/main``.
+    ``git diff main...HEAD`` then resolves to the merge-base of the stale
+    local main and HEAD, which silently sweeps in commits from PRs that
+    landed on origin/main *after* the local ref was last updated. Findings
+    that reference files outside the actual PR diff slip past
+    ``filter_out_of_diff_findings`` because those files genuinely appear
+    in the (overstated) diff.
+
+    Resolution rules (first match wins):
+      - Empty / falsy → return as-is.
+      - Already qualified (``refs/...``, ``origin/...``, ``remotes/...``)
+        → return as-is.
+      - Symbolic rev (``HEAD``, ``FETCH_HEAD``, ``ORIG_HEAD``,
+        ``MERGE_HEAD``) → return as-is. ``origin/HEAD`` is a real ref,
+        so a naive probe would silently retarget the diff.
+      - Commit-ish expression containing ``~``, ``^``, or ``@{`` →
+        return as-is (e.g. ``HEAD~3``, ``main^``, ``main@{1}``).
+      - Otherwise probe ``origin/<base>``; use it when present.
+        Catches both bare branch names like ``main`` *and*
+        slash-containing branches like ``release/2026.04`` or
+        ``feature/foo``. Hex-looking names that are actually branches
+        (``deadbeef`` as a branch) also benefit.
+      - If ``origin/<base>`` doesn't exist (SHA, deleted branch, etc.),
+        fall through so the caller's git command can still try the
+        original ref.
+    """
+    if not base:
+        return base
+    if base.startswith(_QUALIFIED_REF_PREFIXES):
+        return base
+    if base in _GIT_REV_KEYWORDS:
+        return base
+    if any(ch in base for ch in _REV_EXPRESSION_CHARS):
+        return base
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"origin/{base}"],
+            capture_output=True, text=True, timeout=10, cwd=cwd,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return f"origin/{base}"
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    # No origin/<base>. SHA-like input is fine to pass through; bare
+    # branch names will fall through too and the caller's git diff will
+    # handle the (possibly stale) local ref.
+    return base
+
+
 def _get_diff_stats(base: str, cwd: str | None = None) -> tuple[int, int]:
     """Get diff file count and total changed lines for adaptive timeout.
 
     Returns (file_count, line_count). Returns (0, 0) on failure.
     """
     try:
+        resolved = _resolve_base_ref(base, cwd=cwd)
         result = subprocess.run(
-            ["git", "diff", "--shortstat", f"{base}...HEAD"],
+            ["git", "diff", "--shortstat", f"{resolved}...HEAD"],
             capture_output=True, text=True, timeout=30,
             cwd=cwd,
         )
@@ -307,13 +383,20 @@ def _get_diff_stats(base: str, cwd: str | None = None) -> tuple[int, int]:
 def _get_changed_files(base: str, cwd: str | None = None) -> set[str]:
     """Return the set of files changed on HEAD since the merge-base with *base*.
 
-    Uses `git diff --name-only base...HEAD` (three-dot, merge-base relative).
-    Returns an empty set on failure — callers should treat empty as "filter
-    disabled" rather than "all findings invalid".
+    Uses `git diff --name-only <resolved-base>...HEAD` (three-dot,
+    merge-base relative). The base is resolved through
+    :func:`_resolve_base_ref` so a stale local branch ref doesn't smuggle
+    other PRs' files into the changed set — that bug let alert-rules.yml
+    findings survive ``filter_out_of_diff_findings`` on a docs-only PR
+    (see review of GetEvinced/infra-ai-platform#105).
+
+    Returns an empty set on failure — callers should treat empty as
+    "filter disabled" rather than "all findings invalid".
     """
     try:
+        resolved = _resolve_base_ref(base, cwd=cwd)
         result = subprocess.run(
-            ["git", "diff", "--name-only", f"{base}...HEAD"],
+            ["git", "diff", "--name-only", f"{resolved}...HEAD"],
             capture_output=True, text=True, timeout=30,
             cwd=cwd,
         )
@@ -806,12 +889,20 @@ def _run_subagent_inner(
     parts.append(domain_prompt)
     full_prompt = "\n\n".join(parts)
 
+    # Resolve base once so the agent's `git diff` runs against the same
+    # ref the file-level filter (`_get_changed_files`) uses. Without
+    # this, the agent reads an inflated patch via stale local `main`
+    # while the filter scopes correctly to `origin/main`, and findings
+    # against files in the over-large diff still pass the filter check
+    # because they look "in scope" to the agent but aren't.
+    resolved_base = _resolve_base_ref(base, cwd=cwd)
+
     stdin_input = None
     gemini_home = None
 
     if agent == "claude":
         prompt = (
-            f"Run 'git diff {base}...HEAD' and read all changed files. "
+            f"Run 'git diff {resolved_base}...HEAD' and read all changed files. "
             f"Then review them according to these instructions:\n\n"
             f"{full_prompt}"
         )
@@ -823,7 +914,7 @@ def _run_subagent_inner(
         # Codex's built-in review skill which overrides our domain prompts.
         # --json emits JSONL to stdout; parsed below to extract agent text.
         prompt = (
-            f"Run 'git diff {base}...HEAD' and read all changed files. "
+            f"Run 'git diff {resolved_base}...HEAD' and read all changed files. "
             f"ONLY review files that appear in the diff. "
             f"Then review them according to these instructions:\n\n"
             f"{full_prompt}"
@@ -840,7 +931,7 @@ def _run_subagent_inner(
 
     elif agent == "gemini":
         prompt = (
-            f"Run 'git diff {base}...HEAD' and read all changed files. "
+            f"Run 'git diff {resolved_base}...HEAD' and read all changed files. "
             f"ONLY review files that appear in the diff. "
             f"Then review them according to these instructions:\n\n"
             f"{full_prompt}"
