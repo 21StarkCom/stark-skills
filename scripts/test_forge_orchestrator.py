@@ -15,6 +15,7 @@ from forge_orchestrator import (
     derive_branch_name,
     init_state,
     load_state,
+    main,
     release_lock,
     run_forge,
     write_state_atomic,
@@ -62,6 +63,19 @@ class TestDeriveBranchName:
 
 
 class TestRunForgeMainBranchGuard:
+    def test_rejects_missing_spec_before_git_work(self, tmp_path):
+        missing = tmp_path / "missing.md"
+        with patch("forge_orchestrator._git_current_branch") as mock_branch:
+            code = run_forge(missing)
+        assert code == 3
+        mock_branch.assert_not_called()
+
+    def test_rejects_empty_spec(self, tmp_path):
+        spec = tmp_path / "empty.md"
+        spec.write_text("")
+        code = run_forge(spec)
+        assert code == 3
+
     def test_rejects_main_branch(self, tmp_path):
         spec = tmp_path / "spec.md"
         spec.write_text("# Spec")
@@ -70,6 +84,21 @@ class TestRunForgeMainBranchGuard:
         ):
             code = run_forge(spec)
         assert code == 3
+
+    def test_worktree_setup_failure_returns_dispatch_error(self, tmp_path):
+        spec = tmp_path / "spec.md"
+        spec.write_text("# Spec")
+        with patch(
+            "forge_orchestrator._git_current_branch",
+            return_value="feat/my-feature",
+        ), patch(
+            "forge_orchestrator._git_root", return_value=str(tmp_path)
+        ), patch(
+            "forge_orchestrator._setup_worktree",
+            side_effect=OSError("cannot create worktree"),
+        ):
+            code = run_forge(spec)
+        assert code == 2
 
     def test_rejects_master_branch(self, tmp_path):
         spec = tmp_path / "spec.md"
@@ -360,3 +389,26 @@ class TestForgeProgress:
         summary = progress.summary()
         assert isinstance(summary, dict)
         assert len(summary["events"]) == 2
+
+
+class TestForgeCli:
+    def test_main_parses_flags_and_delegates(self, tmp_path):
+        spec = tmp_path / "spec.md"
+        spec.write_text("# Spec")
+        with patch("forge_orchestrator.run_forge", return_value=0) as mock_run:
+            code = main([
+                str(spec),
+                "--auto-detect",
+                "--dry-run",
+                "--resume",
+                "--workers",
+                "2",
+            ])
+        assert code == 0
+        _, kwargs = mock_run.call_args
+        assert kwargs == {
+            "auto_detect": True,
+            "dry_run": True,
+            "resume": True,
+            "workers": 2,
+        }

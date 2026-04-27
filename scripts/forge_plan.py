@@ -10,10 +10,13 @@ from __future__ import annotations
 import hashlib
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from config_loader import is_agent_enabled
 
 
 # ── Paths ─────────────────────────────────────────────────────────────────
@@ -269,9 +272,65 @@ def _build_routed_agent_groups(
     """
     groups: dict[str, dict[str, dict[str, Any]]] = {}
     for domain_key, domain_meta in domains.items():
-        agent = routing.get(domain_key, fallback_order[0] if fallback_order else "claude")
+        routed = routing.get(domain_key, fallback_order[0] if fallback_order else "claude")
+        agent = _resolve_plan_agent(routed, fallback_order)
+        if agent is None:
+            continue
         groups.setdefault(agent, {})[domain_key] = domain_meta
     return groups
+
+
+def _resolve_plan_agent(
+    routed_agent: str,
+    fallback_order: list[str],
+) -> str | None:
+    """Resolve a plan-review routed agent to an enabled fallback."""
+    if is_agent_enabled(routed_agent):
+        return routed_agent
+    for agent in fallback_order:
+        if agent != routed_agent and is_agent_enabled(agent):
+            return agent
+    return None
+
+
+def _dispatch_plan_agent_groups(
+    plan_text: str,
+    round_num: int,
+    *,
+    global_prompts_dir: str,
+    agent_groups: dict[str, dict[str, dict[str, Any]]],
+    timeout: int,
+    repo_dir: Path,
+    workers: int,
+) -> list[dict[str, Any]]:
+    """Dispatch plan-review agent groups, honoring the forge worker cap."""
+    items = [(agent, domains) for agent, domains in agent_groups.items()]
+    if not items:
+        return []
+
+    def run_one(agent: str, domains: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        return _dispatch_plan_review(
+            plan_text,
+            round_num,
+            global_prompts_dir=global_prompts_dir,
+            agents=[agent],
+            domains=domains,
+            timeout=timeout,
+            repo_dir=str(repo_dir),
+        )
+
+    if workers <= 1 or len(items) == 1:
+        results = [run_one(agent, domains) for agent, domains in items]
+    else:
+        with ThreadPoolExecutor(max_workers=min(workers, len(items))) as pool:
+            futures = [pool.submit(run_one, agent, domains) for agent, domains in items]
+            # Preserve submission order for stable state/test output.
+            results = [future.result() for future in futures]
+
+    findings: list[dict[str, Any]] = []
+    for result in results:
+        findings.extend(_all_findings_from_result(result))
+    return findings
 
 
 def run_plan_review(
@@ -294,6 +353,7 @@ def run_plan_review(
     fix_timeout = cfg.get("fix_timeout", 900)
     plan_review_routing = cfg.get("plan_review_routing", {})
     fallback_order = cfg.get("agent_fallback_order", ["claude", "codex", "gemini"])
+    workers = max(1, int(cfg.get("workers", 1)))
     global_prompts_dir = str(FORGE_PLAN_REVIEW_DIR)
 
     all_domains = _discover_plan_review_domains(global_prompts_dir)
@@ -319,18 +379,17 @@ def run_plan_review(
             file=sys.stderr,
         )
 
-        # Dispatch each agent group
-        for agent, domain_dict in agent_groups.items():
-            dispatch_result = _dispatch_plan_review(
+        round_findings.extend(
+            _dispatch_plan_agent_groups(
                 plan_text,
                 round_num,
                 global_prompts_dir=global_prompts_dir,
-                agents=[agent],
-                domains=domain_dict,
+                agent_groups=agent_groups,
                 timeout=timeout,
-                repo_dir=str(repo_dir),
+                repo_dir=repo_dir,
+                workers=workers,
             )
-            round_findings.extend(_all_findings_from_result(dispatch_result))
+        )
 
         # Classify findings
         actionable = _count_findings_at_or_above(round_findings, fix_threshold)
