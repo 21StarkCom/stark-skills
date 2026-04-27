@@ -560,6 +560,7 @@ interactive() {
     link_dir "$REPO_DIR/global/orchestrator.md" "$CODE_REVIEW_DIR/orchestrator.md" "Orchestrator"
     link_dir "$REPO_DIR/global/prompts" "$CODE_REVIEW_DIR/prompts" "Prompts"
     link_dir "$REPO_DIR/scripts" "$CODE_REVIEW_DIR/scripts" "Scripts"
+    link_dir "$REPO_DIR/tools" "$CODE_REVIEW_DIR/tools" "TS tools"
 
     for script in multi_review.py github_app.py github_projects.py setup_project.py stark_graph.py; do
         if [ -f "$REPO_DIR/scripts/$script" ]; then
@@ -617,6 +618,7 @@ install() {
     link_dir "$REPO_DIR/global/orchestrator.md" "$CODE_REVIEW_DIR/orchestrator.md" "Orchestrator"
     link_dir "$REPO_DIR/global/prompts" "$CODE_REVIEW_DIR/prompts" "Prompts"
     link_dir "$REPO_DIR/scripts" "$CODE_REVIEW_DIR/scripts" "Scripts"
+    link_dir "$REPO_DIR/tools" "$CODE_REVIEW_DIR/tools" "TS tools"
 
     # Verify key scripts are present in the scripts dir
     for script in multi_review.py github_app.py github_projects.py setup_project.py stark_graph.py; do
@@ -797,6 +799,7 @@ uninstall() {
     unlink_dir "$CODE_REVIEW_DIR/orchestrator.md" "Orchestrator"
     unlink_dir "$CODE_REVIEW_DIR/prompts" "Prompts"
     unlink_dir "$CODE_REVIEW_DIR/scripts" "Scripts"
+    unlink_dir "$CODE_REVIEW_DIR/tools" "TS tools"
     unlink_dir "$EVINCED_DIR/.code-review" "Evinced org config"
 
     # Unlink all stark-* skills
@@ -834,6 +837,7 @@ status() {
     check_dir "$CODE_REVIEW_DIR/orchestrator.md" "Orchestrator"
     check_dir "$CODE_REVIEW_DIR/prompts" "Prompts"
     check_dir "$CODE_REVIEW_DIR/scripts" "Scripts"
+    check_dir "$CODE_REVIEW_DIR/tools" "TS tools"
 
     # Verify key scripts are accessible
     for script in multi_review.py github_app.py github_projects.py setup_project.py stark_graph.py; do
