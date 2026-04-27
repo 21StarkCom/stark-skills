@@ -96,18 +96,40 @@ def test_check_model_resolution_fails_on_empty_intersection_for_team_workflow() 
     assert "team-review has no dispatchable agents" in message
 
 
-def test_check_model_resolution_warns_on_malformed_config_agents() -> None:
+def test_check_model_resolution_warns_on_malformed_config_agents_for_single_agent() -> None:
     """A misformatted ``config.agents`` (string instead of list, etc.)
-    must not silently fall through to the legacy "all enabled" report;
-    it should surface as a warning so the operator sees something is wrong."""
+    is a ``warn`` for single-agent flows — they can dispatch via
+    ``--agent`` / ``domain_agents`` even with broken rotation config —
+    but a hard ``fail`` for team-review (covered separately)."""
     models = {
         "claude": {"enabled": True, "model_id": "claude-opus-4-7"},
         "codex": {"enabled": True, "model_id": "gpt-5.4"},
     }
     p1, p2 = _patch_models_and_dispatch(models, "claude,codex")  # type: ignore[arg-type]
     with p1, p2:
-        status, message = preflight.check_model_resolution()
+        status, message = preflight.check_model_resolution(workflow="stark-review")
     assert status == "warn"
+    assert "config.agents is malformed" in message
+    # The raw value must NOT be embedded — it lands in preflight.jsonl
+    # and the durable event queue, where a misconfigured entry could
+    # leak operator paste. Only type info is allowed.
+    assert "claude,codex" not in message
+    assert "expected list[str]" in message
+    assert "got str" in message
+
+
+def test_check_model_resolution_fails_on_malformed_config_agents_for_team_review() -> None:
+    """For team-review, a malformed ``config.agents`` is a hard fail.
+    review_pr() iterates the malformed value and ends up dispatching
+    zero agents — a clean 0-finding round masquerading as success."""
+    models = {
+        "claude": {"enabled": True, "model_id": "claude-opus-4-7"},
+        "codex": {"enabled": True, "model_id": "gpt-5.4"},
+    }
+    p1, p2 = _patch_models_and_dispatch(models, {"not": "a list"})  # type: ignore[arg-type]
+    with p1, p2:
+        status, message = preflight.check_model_resolution(workflow="stark-team-review")
+    assert status == "fail"
     assert "config.agents is malformed" in message
 
 
@@ -124,6 +146,39 @@ def test_check_model_resolution_warns_on_discover_config_failure() -> None:
     assert status == "warn"
     assert "could not load review config" in message
     assert "bad config" in message
+
+
+def test_check_model_resolution_warns_on_transitive_import_error() -> None:
+    """An ImportError raised from inside ``dispatcher_base`` (e.g. one
+    of its own dependencies missing) is NOT the same as
+    ``dispatcher_base`` itself being absent. The legacy fallback only
+    applies when ``dispatcher_base`` itself can't be resolved."""
+    import sys
+    models = {
+        "claude": {"enabled": True, "model_id": "claude-opus-4-7"},
+        "codex": {"enabled": True, "model_id": "gpt-5.4"},
+    }
+    saved = sys.modules.pop("dispatcher_base", None)
+
+    class _BrokenLoader:
+        def find_spec(self, name, *_args, **_kwargs):
+            if name == "dispatcher_base":
+                # Raise ImportError but with name pointing at a *different*
+                # module — the dispatcher_base loader exists but
+                # transitive imports failed.
+                raise ImportError("config_loader missing", name="config_loader")
+            return None
+
+    sys.meta_path.insert(0, _BrokenLoader())
+    try:
+        with patch("preflight.get_models_config", return_value=models):
+            status, message = preflight.check_model_resolution()
+    finally:
+        sys.meta_path.pop(0)
+        if saved is not None:
+            sys.modules["dispatcher_base"] = saved
+    assert status == "warn"
+    assert "could not import dispatcher_base" in message
 
 
 def test_check_model_resolution_passes_when_config_agents_absent() -> None:
@@ -248,7 +303,11 @@ def test_check_model_resolution_falls_back_when_discover_config_unavailable(monk
     class _Blocker:
         def find_spec(self, name, *_args, **_kwargs):
             if name == "dispatcher_base":
-                raise ImportError("simulated absence")
+                # The legacy-fallback path is triggered by an
+                # ImportError whose `name` attribute is exactly
+                # ``dispatcher_base``. Anything else routes through
+                # the transitive-import warn path.
+                raise ImportError("simulated absence", name="dispatcher_base")
             return None
 
     blocker = _Blocker()

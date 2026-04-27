@@ -811,6 +811,36 @@ class TestResolveBaseRef:
         assert multi_review._resolve_base_ref("remotes/upstream/main") == "remotes/upstream/main"
         assert called["n"] == 0
 
+    @pytest.mark.parametrize("rev", ["HEAD", "FETCH_HEAD", "ORIG_HEAD", "MERGE_HEAD"])
+    def test_passthrough_for_symbolic_revs(self, rev, monkeypatch):
+        """``HEAD`` and friends must NOT be rewritten to ``origin/HEAD``.
+
+        ``origin/HEAD`` is a real ref pointing at the remote default
+        branch, so a naive probe would silently retarget the diff
+        when a caller passed ``--base HEAD``.
+        """
+        def fake_run(args, **kwargs):
+            raise AssertionError(f"should not probe origin for symbolic rev: {args}")
+        monkeypatch.setattr(multi_review.subprocess, "run", fake_run)
+        assert multi_review._resolve_base_ref(rev) == rev
+
+    @pytest.mark.parametrize("expr", ["HEAD~3", "HEAD~", "main^", "main^^", "main@{1}", "v1.0~5"])
+    def test_passthrough_for_revspec_expressions(self, expr, monkeypatch):
+        """Commit-ish expressions (``HEAD~3``, ``main^``, ``main@{1}``)
+        are git revs, not branch names — no origin/ probe."""
+        def fake_run(args, **kwargs):
+            raise AssertionError(f"should not probe origin for revspec: {args}")
+        monkeypatch.setattr(multi_review.subprocess, "run", fake_run)
+        assert multi_review._resolve_base_ref(expr) == expr
+
+    def test_falls_back_on_subprocess_timeout(self, monkeypatch):
+        """A hung ``git rev-parse`` must not propagate; fall back to
+        the original base so the caller's diff has a chance to run."""
+        def fake_run(args, **kwargs):
+            raise multi_review.subprocess.TimeoutExpired(cmd=args, timeout=10)
+        monkeypatch.setattr(multi_review.subprocess, "run", fake_run)
+        assert multi_review._resolve_base_ref("main") == "main"
+
 
 class TestSubagentPromptUsesResolvedBase:
     """The agent's `git diff <base>...HEAD` call must use the same

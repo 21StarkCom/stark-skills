@@ -164,11 +164,7 @@ def check_working_dir() -> tuple[str, str]:
     return "pass", "clean"
 
 
-_TEAM_REVIEW_WORKFLOWS = frozenset({
-    "stark-team-review",
-    "team-review",
-    "review",  # legacy alias used by older preflight callers
-})
+_TEAM_REVIEW_WORKFLOWS = frozenset({"stark-team-review"})
 
 
 def check_model_resolution(workflow: str | None = None) -> tuple[str, str]:
@@ -213,21 +209,32 @@ def check_model_resolution(workflow: str | None = None) -> tuple[str, str]:
     )
 
     # Intersect with the dispatch rotation list (``config.agents``).
-    # Three failure modes to handle distinctly:
-    #   - ImportError: older install doesn't ship dispatcher_base. Fall
-    #     back to legacy reporting; this is expected, not broken.
-    #   - Other exceptions (malformed JSON, unreadable file, etc.):
-    #     surface as ``warn`` so the operator sees something is wrong
-    #     instead of silently passing.
-    #   - ``config.agents`` present but not a list of strings: same —
-    #     warn on malformed config rather than fail-open.
+    # Failure modes handled distinctly:
+    #   - dispatcher_base genuinely absent (older install): fall back
+    #     to legacy enabled-only reporting. We narrow the catch to
+    #     ImportError-from-this-import specifically so a transitive
+    #     ImportError raised from inside dispatcher_base (its own
+    #     dependencies broken) doesn't fail open.
+    #   - discover_config raising any other exception (malformed JSON,
+    #     unreadable file, transitive ImportError, etc.): surface as
+    #     ``warn`` (or ``fail`` for team-review).
+    #   - ``config.agents`` present but not a list of strings:
+    #     ``warn`` for single-agent / unknown workflows, ``fail`` for
+    #     team-review (the dispatcher would iterate the malformed value
+    #     and produce a clean 0-agent run).
+    is_team_workflow = (workflow or "") in _TEAM_REVIEW_WORKFLOWS
     dispatch_list: list[str] | None = None
     discover_warning: str | None = None
     try:
         from dispatcher_base import discover_config  # type: ignore[import]
-    except ImportError:
-        # Older install path; legacy reporting is the right answer.
-        pass
+    except ImportError as exc:
+        # Only treat as legacy fallback if the missing module is
+        # ``dispatcher_base`` itself; transitive ImportErrors should
+        # surface as warnings.
+        if getattr(exc, "name", None) == "dispatcher_base":
+            pass
+        else:
+            discover_warning = f"could not import dispatcher_base ({exc})"
     else:
         try:
             cfg = discover_config()
@@ -241,17 +248,24 @@ def check_model_resolution(workflow: str | None = None) -> tuple[str, str]:
             elif isinstance(agents_list, list) and all(isinstance(a, str) for a in agents_list):
                 dispatch_list = sorted(set(agents_list))
             else:
+                # Don't include the raw value — it goes into preflight.jsonl
+                # and the durable event queue, where a misconfigured agents
+                # entry could leak whatever the operator pasted in.
                 discover_warning = (
                     f"config.agents is malformed (expected list[str], got "
-                    f"{type(agents_list).__name__}: {agents_list!r}) — "
-                    f"falling back to enabled-models reporting"
+                    f"{type(agents_list).__name__})"
                 )
 
     if discover_warning is not None:
         msg = f"enabled agents: {enabled}"
         if disabled:
             msg += f"; disabled agents: {disabled}"
-        return "warn", f"{discover_warning}; {msg}"
+        # Team-review dispatches strictly off ``config.agents``; bad
+        # config there means a clean 0-finding run, which is worse
+        # than blocking. Single-agent workflows can still dispatch via
+        # ``--agent`` / ``domain_agents``, so warn-and-continue.
+        severity = "fail" if is_team_workflow else "warn"
+        return severity, f"{discover_warning}; {msg}"
 
     if dispatch_list is None:
         # ImportError path — legacy report.
@@ -290,7 +304,7 @@ def check_model_resolution(workflow: str | None = None) -> tuple[str, str]:
     # that bypass ``config.agents`` entirely. A warn lets the operator
     # see the misalignment without preventing a perfectly valid run.
     if not dispatched:
-        if (workflow or "") in _TEAM_REVIEW_WORKFLOWS:
+        if is_team_workflow:
             return (
                 "fail",
                 "team-review has no dispatchable agents — config.agents "

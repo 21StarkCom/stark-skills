@@ -288,6 +288,18 @@ _gemini_semaphore = threading.Semaphore(MAX_GEMINI_CONCURRENT)
 
 _QUALIFIED_REF_PREFIXES = ("refs/", "origin/", "remotes/")
 
+# Symbolic git revs that must NEVER be rewritten to ``origin/<rev>``.
+# ``origin/HEAD`` is a real ref pointing at the remote default branch,
+# so a naive probe would silently retarget the diff. ``FETCH_HEAD`` /
+# ``ORIG_HEAD`` / ``MERGE_HEAD`` are local-only and have no meaningful
+# remote equivalent.
+_GIT_REV_KEYWORDS = frozenset({"HEAD", "FETCH_HEAD", "ORIG_HEAD", "MERGE_HEAD"})
+
+# Characters that mark commit-ish expressions (``HEAD~3``, ``HEAD^``,
+# ``main@{1}``). Any input containing these is treated as a rev
+# expression and passed through unchanged.
+_REV_EXPRESSION_CHARS = ("~", "^", "@{")
+
 
 def _resolve_base_ref(base: str, cwd: str | None = None) -> str:
     """Resolve *base* to a ref that's stable across stale local branches.
@@ -301,23 +313,31 @@ def _resolve_base_ref(base: str, cwd: str | None = None) -> str:
     ``filter_out_of_diff_findings`` because those files genuinely appear
     in the (overstated) diff.
 
-    Resolution rules:
-      - Empty / falsy: return as-is.
-      - Already qualified (``refs/...``, ``origin/...``, ``remotes/...``):
-        return as-is.
-      - Otherwise, prefer ``origin/<base>`` whenever that ref exists
-        locally — this catches both bare branch names like ``main`` *and*
+    Resolution rules (first match wins):
+      - Empty / falsy → return as-is.
+      - Already qualified (``refs/...``, ``origin/...``, ``remotes/...``)
+        → return as-is.
+      - Symbolic rev (``HEAD``, ``FETCH_HEAD``, ``ORIG_HEAD``,
+        ``MERGE_HEAD``) → return as-is. ``origin/HEAD`` is a real ref,
+        so a naive probe would silently retarget the diff.
+      - Commit-ish expression containing ``~``, ``^``, or ``@{`` →
+        return as-is (e.g. ``HEAD~3``, ``main^``, ``main@{1}``).
+      - Otherwise probe ``origin/<base>``; use it when present.
+        Catches both bare branch names like ``main`` *and*
         slash-containing branches like ``release/2026.04`` or
         ``feature/foo``. Hex-looking names that are actually branches
-        (``deadbeef`` as a branch) also benefit, since we probe
-        ``origin/<base>`` before treating it as a SHA.
-      - If ``origin/<base>`` doesn't exist but the input looks like a
-        SHA or otherwise resolves locally, fall through unchanged so the
-        caller's git command can still succeed.
+        (``deadbeef`` as a branch) also benefit.
+      - If ``origin/<base>`` doesn't exist (SHA, deleted branch, etc.),
+        fall through so the caller's git command can still try the
+        original ref.
     """
     if not base:
         return base
     if base.startswith(_QUALIFIED_REF_PREFIXES):
+        return base
+    if base in _GIT_REV_KEYWORDS:
+        return base
+    if any(ch in base for ch in _REV_EXPRESSION_CHARS):
         return base
     try:
         result = subprocess.run(
