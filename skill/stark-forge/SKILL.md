@@ -5,6 +5,8 @@ description: >-
 argument-hint: '<path> [--auto-detect] [--dry-run] [--resume] [--workers N]'
 disable-model-invocation: true
 model: opus
+revision: 79291ea63a40a57a5e5c07d7d223df96563dd5b3
+revision_date: 2026-04-15T05:58:29+03:00
 ---
 
 ## Preflight

@@ -5,6 +5,8 @@ description: >-
 argument-hint: "<path> [--rounds N] [--dry-run] [--force] [--tournament]"
 disable-model-invocation: true
 model: opus
+revision: 388364ac84d996dc240d75988be2a934d4732e45
+revision_date: 2026-04-10T11:40:44+03:00
 ---
 
 ## Preflight

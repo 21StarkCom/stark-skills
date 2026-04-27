@@ -6,6 +6,8 @@ argument-hint: "<path-to-spec> [--batch <dir>] [--dry-run] [--force]"
 disable-model-invocation: true
 context: fork
 model: opus
+revision: 9efa29cd66815f9f6a46ababc07482910dfe814d
+revision_date: 2026-04-10T20:20:31+03:00
 ---
 
 # stark-extract-docs

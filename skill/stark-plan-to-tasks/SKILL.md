@@ -6,6 +6,8 @@ argument-hint: "<path-to-spec> [--dry-run] [--cleanup <slug>]"
 disable-model-invocation: true
 context: fork
 model: opus
+revision: ea827b2dd463a563417f2dd86c31248eb42b5cfb
+revision_date: 2026-04-10T17:10:53+03:00
 ---
 
 # stark-plan-to-tasks

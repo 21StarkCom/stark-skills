@@ -5,6 +5,8 @@ description: >-
 argument-hint: "<path> [--rounds N] [--dry-run] [--force] [--tournament]"
 disable-model-invocation: true
 model: opus
+revision: 20e4938d267bc672a69f8fe103b0ae7ce4bbf7a6
+revision_date: 2026-04-04T15:27:23+03:00
 ---
 
 # stark-review-plan

@@ -5,6 +5,8 @@ description: >-
 argument-hint: "[PR_NUMBER] [--dry-run] [--repo ORG/REPO] [--resume] [--no-escalate] [--force-escalate]"
 disable-model-invocation: true
 model: opus[1m]
+revision: 77bd1b2f3b884131d4fd2f80e5030ee30d04913a
+revision_date: 2026-04-25T17:12:42+03:00
 ---
 
 See [README.md](README.md) for the full behavioral reference, pipeline diagram, and observability details.

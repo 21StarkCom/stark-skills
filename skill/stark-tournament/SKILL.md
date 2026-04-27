@@ -5,6 +5,8 @@ description: >-
 argument-hint: '"prompt" | --config tournament.yaml [--strategy semantic|visual|test] [--competitors claude,codex,gemini] [--factors correctness=2.0 quality=1.0] [--judge MODEL] [--timeout N] [--json]'
 disable-model-invocation: true
 model: opus
+revision: ea827b2dd463a563417f2dd86c31248eb42b5cfb
+revision_date: 2026-04-10T17:10:53+03:00
 ---
 
 # stark-tournament
