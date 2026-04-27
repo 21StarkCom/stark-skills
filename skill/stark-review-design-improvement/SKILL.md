@@ -5,6 +5,8 @@ description: >-
 argument-hint: (reads assessment from context or design-review history)
 disable-model-invocation: true
 model: opus
+revision: e604960726e99b6a2299def9e33fb258540177e5
+revision_date: 2026-04-03T18:57:42+03:00
 ---
 
 # stark-review-design-improvement

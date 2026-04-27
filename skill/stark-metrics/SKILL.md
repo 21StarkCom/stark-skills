@@ -6,6 +6,8 @@ argument-hint: "[--repo REPO] [--skill SKILL] [--since DATE] [--json]"
 disable-model-invocation: true
 model: haiku
 allowed-tools: Read, Grep, Glob, Bash, Write
+revision: ea827b2dd463a563417f2dd86c31248eb42b5cfb
+revision_date: 2026-04-10T17:10:53+03:00
 ---
 
 # stark-metrics

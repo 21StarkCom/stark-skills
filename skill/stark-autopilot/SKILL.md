@@ -5,6 +5,8 @@ description: >-
 argument-hint: '<plan-or-prompt> [--plan-slug SLUG] [--test-command CMD] [--agents claude,codex,gemini] [--timeout N] [--dry-run]'
 disable-model-invocation: true
 model: opus
+revision: 8929cc3de2507b6780d3274f2b45664266cec4d0
+revision_date: 2026-04-07T07:57:12+03:00
 ---
 
 ## Preflight

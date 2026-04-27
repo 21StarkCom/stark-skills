@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+#
+# stark-skills pre-commit hook.
+#
+# Stamps revision/revision_date in every SKILL.md staged for the upcoming
+# commit so the in-file version snapshot stays useful instead of going stale
+# the moment a skill is edited. The stamped SHA is HEAD's SHA — i.e. the
+# commit being superseded — so `git diff <revision> -- skill/foo/SKILL.md`
+# always shows what this commit changed.
+#
+# To bypass once (e.g. when intentionally squashing a frontmatter-only edit):
+#   git commit --no-verify
+set -euo pipefail
+
+REPO="$(git rev-parse --show-toplevel)"
+HELPER="$REPO/scripts/stamp_skill_revision.py"
+
+# Only run if the helper is present (e.g. on a fresh clone before install).
+[ -x "$HELPER" ] || [ -f "$HELPER" ] || exit 0
+
+# Collect SKILL.md paths that are added or modified in the index.
+mapfile -t STAGED < <(git diff --cached --name-only --diff-filter=AM \
+    -- 'skill/stark-*/SKILL.md')
+
+[ "${#STAGED[@]}" -eq 0 ] && exit 0
+
+python3 "$HELPER" "${STAGED[@]}"
+
+# Re-stage the touched files so the revision bump goes into THIS commit.
+for f in "${STAGED[@]}"; do
+    git add -- "$f"
+done

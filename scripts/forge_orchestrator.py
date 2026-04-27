@@ -8,6 +8,7 @@ progress to the terminal via tui_core primitives.
 from __future__ import annotations
 
 import atexit
+import argparse
 import hashlib
 import json
 import os
@@ -56,6 +57,7 @@ def _git_root() -> str:
 
 # Matches YYYY-MM-DD- prefix
 _DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
+_SUPPORTED_SPEC_SUFFIXES = {".md", ".markdown", ".txt", ".rst"}
 
 
 def derive_branch_name(spec_path: Path) -> str:
@@ -159,6 +161,30 @@ def init_state(spec_path: Path, spec_hash: str) -> dict[str, Any]:
 def _spec_hash(spec_path: Path) -> str:
     """Compute SHA-256 of a spec file's content."""
     return hashlib.sha256(spec_path.read_bytes()).hexdigest()
+
+
+def _validate_spec_path(spec_path: Path) -> tuple[Path | None, str | None]:
+    """Validate and normalize the forge input spec path.
+
+    Returns ``(resolved_path, None)`` when valid, otherwise ``(None, error)``.
+    """
+    candidate = spec_path.expanduser()
+    if not candidate.exists():
+        return None, f"Spec file not found: {spec_path}"
+    if not candidate.is_file():
+        return None, f"Spec path is not a file: {spec_path}"
+    if candidate.suffix.lower() not in _SUPPORTED_SPEC_SUFFIXES:
+        supported = ", ".join(sorted(_SUPPORTED_SPEC_SUFFIXES))
+        return None, f"Unsupported spec type {candidate.suffix!r}; expected one of: {supported}"
+    try:
+        if candidate.stat().st_size == 0:
+            return None, f"Spec file is empty: {spec_path}"
+        # Read a byte to catch permission/read errors before worktree setup.
+        with candidate.open("rb") as handle:
+            handle.read(1)
+    except OSError as exc:
+        return None, f"Spec file is not readable: {spec_path} ({exc})"
+    return candidate.resolve(), None
 
 
 # ── Lock file ─────────────────────────────────────────────────────────
@@ -399,6 +425,7 @@ def _run_pipeline(
     state_path: Path,
     progress: ForgeProgress,
     *,
+    auto_detect: bool = False,
     dry_run: bool = False,
     workers: int = 3,
     backup_dir: Path | None = None,
@@ -410,13 +437,13 @@ def _run_pipeline(
       1 — a phase halted (findings unresolved)
       2 — a phase raised an exception
     """
-    del workers  # honored by individual phases via cfg["workers"]
-
     try:
         from config_loader import get_forge_config  # noqa: PLC0415
-        cfg = get_forge_config()
+        cfg = dict(get_forge_config())
     except ImportError:
         cfg = {}
+    if workers:
+        cfg["workers"] = workers
 
     spec_path = _spec_path_in_worktree(worktree_path, state)
     phases = _phases_to_run(state)
@@ -434,6 +461,7 @@ def _run_pipeline(
                 worktree_path=worktree_path,
                 state=state,
                 cfg=cfg,
+                auto_detect=auto_detect,
                 dry_run=dry_run,
             )
         except Exception as exc:  # noqa: BLE001
@@ -472,7 +500,8 @@ def _dispatch_phase(
     worktree_path: Path,
     state: dict[str, Any],
     cfg: dict[str, Any],
-    dry_run: bool,
+    auto_detect: bool = False,
+    dry_run: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Run a single phase and return ``(status, extra_state)``.
 
@@ -480,11 +509,11 @@ def _dispatch_phase(
     ``extra_state`` holds phase-specific fields to merge into state on exit.
     """
     if phase == "classify":
-        return _dispatch_classify(spec_path, cfg)
+        return _dispatch_classify(spec_path, cfg, auto_detect=auto_detect)
     if phase == "design_review":
-        if dry_run:
-            return "skipped", {"reason": "dry-run"}
-        return _dispatch_design_review(spec_path, state, cfg, worktree_path)
+        return _dispatch_design_review(
+            spec_path, state, cfg, worktree_path, dry_run=dry_run,
+        )
     if phase == "plan":
         return _dispatch_plan(spec_path, state, cfg, worktree_path)
     if phase == "plan_review":
@@ -497,12 +526,12 @@ def _dispatch_phase(
 
 
 def _dispatch_classify(
-    spec_path: Path, cfg: dict[str, Any]
+    spec_path: Path, cfg: dict[str, Any], *, auto_detect: bool
 ) -> tuple[str, dict[str, Any]]:
     from forge_classifier import classify_spec  # noqa: PLC0415
 
     content = spec_path.read_text(encoding="utf-8")
-    result = classify_spec(content, spec_path, auto_detect=True, cfg=cfg)
+    result = classify_spec(content, spec_path, auto_detect=auto_detect, cfg=cfg)
     return "completed", {
         "domains": list(result.domains),
         "skipped_domains": list(result.skipped_domains),
@@ -517,16 +546,22 @@ def _dispatch_design_review(
     state: dict[str, Any],
     cfg: dict[str, Any],
     repo_dir: Path,
+    *,
+    dry_run: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     from forge_review import run_design_review  # noqa: PLC0415
 
-    phase_result = run_design_review(spec_path, state, cfg, repo_dir)
+    phase_result = run_design_review(
+        spec_path, state, cfg, repo_dir, dry_run=dry_run,
+    )
     status = "completed" if phase_result.status == "completed" else "halted"
     extra: dict[str, Any] = {
         "findings_fixed": phase_result.findings_fixed,
         "noise": phase_result.noise,
         "commit_shas": list(phase_result.commit_shas),
     }
+    if dry_run:
+        extra["dry_run"] = True
     if status == "halted":
         extra["reason"] = "design review findings unresolved"
     return status, extra
@@ -624,9 +659,16 @@ def run_forge(
 
     Exit codes:
         0 — success
-        1 — general error
-        3 — main branch guard / lock conflict
+        1 — pipeline halted / general error
+        2 — dispatch or worktree infrastructure failure
+        3 — invalid input / main branch guard / lock conflict
     """
+    resolved_spec, validation_error = _validate_spec_path(spec_path)
+    if validation_error is not None:
+        print(f"[FAIL] {validation_error}", file=sys.stderr)
+        return 3
+    spec_path = resolved_spec or spec_path
+
     # ── Main branch guard ──
     branch = _git_current_branch()
     if branch in ("main", "master"):
@@ -652,9 +694,13 @@ def run_forge(
         worktree_path = _find_existing_worktree(branch_name)
 
     if worktree_path is None:
-        worktree_path, branch_name = _setup_worktree(
-            git_root, branch_name, spec_path
-        )
+        try:
+            worktree_path, branch_name = _setup_worktree(
+                git_root, branch_name, spec_path
+            )
+        except (subprocess.SubprocessError, OSError) as exc:
+            print(f"[FAIL] Failed to set up forge worktree: {exc}", file=sys.stderr)
+            return 2
 
     # ── Lock ──
     lock_path = worktree_path / ".forge-lock"
@@ -694,6 +740,7 @@ def run_forge(
             state,
             state_path,
             progress,
+            auto_detect=auto_detect,
             dry_run=dry_run,
             workers=workers,
             backup_dir=backup_dir,
@@ -714,6 +761,51 @@ def run_forge(
             atexit.unregister(release_lock)
         except Exception:
             pass
+
+
+def _positive_int(raw: str) -> int:
+    value = int(raw)
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be >= 1")
+    return value
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run the stark-forge pipeline")
+    parser.add_argument("path", type=Path, help="Input design spec path")
+    parser.add_argument(
+        "--auto-detect",
+        action="store_true",
+        help="Use heuristic/LLM classifier without interactive confirmation",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run classify plus one non-mutating design-review round, then stop",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume from the existing forge worktree state",
+    )
+    parser.add_argument(
+        "--workers",
+        type=_positive_int,
+        default=3,
+        help="Max concurrent forge worker groups (default: 3)",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_arg_parser().parse_args(argv)
+    return run_forge(
+        args.path,
+        auto_detect=args.auto_detect,
+        dry_run=args.dry_run,
+        resume=args.resume,
+        workers=args.workers,
+    )
 
 
 # ── Red-team integration (v1 design stage) ────────────────────────────
@@ -826,3 +918,7 @@ def run_red_team_design_stage(
     if result.blocking_count > 0:
         return {"status": "halted", "rounds": [result], "halt_reason": "findings_unresolved"}
     return {"status": "clean", "rounds": [result], "halt_reason": None}
+
+
+if __name__ == "__main__":
+    sys.exit(main())

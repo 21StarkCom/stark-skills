@@ -5,6 +5,8 @@ description: >-
 argument-hint: [patch|minor|major] (optional — auto-detected if omitted)
 disable-model-invocation: true
 model: sonnet
+revision: d0ee05df28e525cde9e2660468f3690eacf07e0c
+revision_date: 2026-04-21T08:57:15+03:00
 ---
 
 # Release Management

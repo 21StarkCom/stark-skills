@@ -7,6 +7,8 @@ disable-model-invocation: false
 context: fork
 model: opus[1m]
 workflow_path: references/workflow.md
+revision: 31916a19c29d4dac9f4f4606ecb288cb4810f890
+revision_date: 2026-04-25T11:50:10+03:00
 ---
 
 ## Preflight

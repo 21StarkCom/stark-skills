@@ -6,6 +6,8 @@ description: >-
 argument-hint: "[validate|audit|diff|pr <number>] [--repo PATH] [--dry-run]"
 disable-model-invocation: true
 model: opus[1m]
+revision: 6c5b36c238a467e43b6a29d0cad9e6ec37f641a7
+revision_date: 2026-04-07T23:23:58+03:00
 ---
 
 # stark-graph

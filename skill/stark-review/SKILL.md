@@ -6,6 +6,8 @@ description: >-
 argument-hint: "[PR_NUMBER] [--agent claude|codex|gemini] [--dry-run] [--repo ORG/REPO]"
 disable-model-invocation: false
 model: opus[1m]
+revision: 4f1635240aa7f08faed91a3be304edaa043bb999
+revision_date: 2026-04-27T09:30:40+03:00
 ---
 
 Cheaper single-agent PR review path. Keep this skill thin: call the Python

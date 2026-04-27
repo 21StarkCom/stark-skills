@@ -1,10 +1,12 @@
 ---
 name: stark-forge
 description: >-
-  Multi-phase design pipeline: classify, review design, generate plan, review plan, decompose into GitHub issues. Wraps existing dispatch primitives with domain routing, iron-rule fix loops, and crash-safe state.
+  Multi-phase design pipeline: classify, review design, generate plan, review plan, and decompose into a validated task breakdown for GitHub issues. Wraps existing dispatch primitives with domain routing, iron-rule fix loops, and crash-safe state.
 argument-hint: '<path> [--auto-detect] [--dry-run] [--resume] [--workers N]'
 disable-model-invocation: true
 model: opus
+revision: f73c20330a8abaa3f47450978bfa85903711472e
+revision_date: 2026-04-27T07:29:54Z
 ---
 
 ## Preflight
@@ -20,9 +22,9 @@ Parse the JSON result:
 
 # stark-forge
 
-Pipeline that takes a design spec as input and produces reviewed plans and
-phased GitHub issues — with per-domain agent routing, iron-rule fix loops,
-crash-safe state, and audit metrics collection.
+Pipeline that takes a design spec as input and produces reviewed plans plus a
+validated task breakdown for GitHub issues — with per-domain agent routing,
+iron-rule fix loops, and crash-safe state.
 
 **Pipeline:** classify → design review → plan generation → plan review → tdd (v2) → tasks
 
@@ -40,7 +42,7 @@ GitHub issues. Implementation is handed off to `/stark-phase-execute`.
 
 - `<path>` — path to the input design spec (positional, required)
 - `--auto-detect` — use heuristic classifier without interactive domain confirmation
-- `--dry-run` — run classify + design_review only; stop before plan/plan_review/tasks and skip all commits
+- `--dry-run` — run classify + one non-mutating design-review round; stop before fixes, commits, plan/plan_review/tasks, and issues
 - `--resume` — resume from the last completed phase (reads state from `.forge-state.json`)
 - `--workers N` — max concurrent agent workers (default: from config, typically 3)
 
@@ -52,34 +54,25 @@ If no path is provided, ask: "What should forge build? Provide a spec file path.
 
 ```
 SCRIPTS  = ~/.claude/code-review/scripts
-PYTHON   = $SCRIPTS/.venv/bin/python3
+PYTHON   = $SCRIPTS/.venv/bin/python3 if executable, otherwise python3
 PROMPTS  = ~/.claude/code-review/prompts
 HISTORY  = ~/.claude/code-review/history/forge
 ```
 
 ## Invocation
 
-The pipeline is implemented end-to-end in `forge_orchestrator.run_forge`.
-You do not need to hand-roll a driver:
+The pipeline is implemented end-to-end in `forge_orchestrator.py`. Use the
+argv-based CLI; do not hand-roll `python -c` or interpolate the path into
+Python source.
 
 ```bash
-$PYTHON -c "
-from pathlib import Path
-from forge_orchestrator import run_forge
-import sys
-sys.exit(run_forge(
-    Path('<path>'),
-    auto_detect=<bool>,
-    dry_run=<bool>,
-    resume=<bool>,
-    workers=<int>,
-))
-"
+"$PYTHON" "$SCRIPTS/forge_orchestrator.py" "<path>" [--auto-detect] [--dry-run] [--resume] [--workers N]
 ```
 
-`run_forge` handles: branch guard, worktree setup, lock acquisition, state
-init/load/backup, spec-hash drift warning, phase dispatch, per-phase atomic
-state writes, progress rendering, and JSON summary on stdout when not a TTY.
+`run_forge` handles: input validation, branch guard, worktree setup, lock
+acquisition, state init/load/backup, spec-hash drift warning, phase dispatch,
+per-phase atomic state writes, progress rendering, and JSON summary on stdout
+when not a TTY.
 
 ## Phase 1: Setup
 
@@ -90,8 +83,9 @@ Read the input document at `<path>`. Validate:
 - File is markdown (`.md`) or text
 - File is non-empty
 
-`run_forge` performs its own branch guard (refuses main/master with exit 3)
-and lock-file handling. Do not duplicate those checks.
+`run_forge` performs its own input validation, branch guard (refuses
+main/master with exit 3), and lock-file handling. Do not duplicate those
+checks.
 
 ### 1.2 State schema
 
@@ -163,6 +157,10 @@ State records `domains`, `skipped_domains`, `design_type`, `tier_used`,
 4. Commit fixed rounds with `_commit_round`.
 5. Round `max_rounds + 1` is the halt round: dispatch all domains one last
    time. Any fix/blocked finding → halt.
+
+With `--dry-run`, only round 1 runs. Findings are classified and recorded in
+state, but no fix loop, commit, plan generation, task decomposition, or issue
+creation is attempted.
 
 On halt: `[HALT] design_review: design review findings unresolved`.
 

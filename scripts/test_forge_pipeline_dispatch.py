@@ -117,6 +117,7 @@ class TestDispatchPhaseRouting:
                 worktree_path=tmp_path,
                 state=state,
                 cfg={},
+                auto_detect=True,
                 dry_run=False,
             )
         assert status == "completed"
@@ -124,12 +125,38 @@ class TestDispatchPhaseRouting:
         assert extra["design_type"] == "backend"
         assert extra["tier_used"] == 1
 
-    def test_design_review_dry_run_skips(self, tmp_path):
+    def test_classify_honors_auto_detect_flag(self, tmp_path):
+        from forge_classifier import ClassificationResult
+
         spec = tmp_path / "spec.md"
         spec.write_text("# Spec")
         state = _make_state(tmp_path)
-        # Should NOT call into forge_review when dry-running
-        with patch("forge_review.run_design_review") as mock_run:
+        fake = ClassificationResult(
+            domains=["general"], skipped_domains=[],
+            design_type="general", tier_used=3, confidence=0.5,
+        )
+        with patch("forge_classifier.classify_spec", return_value=fake) as mock_classify:
+            _dispatch_phase(
+                "classify",
+                spec_path=spec,
+                worktree_path=tmp_path,
+                state=state,
+                cfg={},
+                auto_detect=False,
+                dry_run=False,
+            )
+        assert mock_classify.call_args.kwargs["auto_detect"] is False
+
+    def test_design_review_dry_run_runs_non_mutating_review(self, tmp_path):
+        from forge_review import PhaseResult as ReviewPhaseResult
+
+        spec = tmp_path / "spec.md"
+        spec.write_text("# Spec")
+        state = _make_state(tmp_path)
+        completed = ReviewPhaseResult(
+            status="completed", findings_fixed=0, noise=2, commit_shas=[],
+        )
+        with patch("forge_review.run_design_review", return_value=completed) as mock_run:
             status, extra = _dispatch_phase(
                 "design_review",
                 spec_path=spec,
@@ -138,9 +165,10 @@ class TestDispatchPhaseRouting:
                 cfg={},
                 dry_run=True,
             )
-        assert status == "skipped"
-        assert "reason" in extra
-        mock_run.assert_not_called()
+        assert status == "completed"
+        assert extra["dry_run"] is True
+        assert extra["commit_shas"] == []
+        assert mock_run.call_args.kwargs["dry_run"] is True
 
     def test_design_review_propagates_halt(self, tmp_path):
         from forge_review import PhaseResult as ReviewPhaseResult
@@ -337,6 +365,37 @@ class TestRunPipeline:
         loaded = json.loads(state_path.read_text())
         for phase in ("classify", "design_review", "plan", "plan_review", "tdd", "tasks"):
             assert loaded["phases"][phase]["status"] == "completed"
+
+    def test_threads_auto_detect_and_workers_to_phase_dispatch(self, tmp_path):
+        spec = tmp_path / "spec.md"
+        spec.write_text("# Spec")
+        state = init_state(spec, "abc")
+        state_path = tmp_path / ".forge-state.json"
+        write_state_atomic(state_path, state)
+        progress = ForgeProgress(is_tty=False)
+        observed: list[tuple[bool, int]] = []
+
+        def fake_dispatch(_phase, **kwargs):
+            observed.append((kwargs["auto_detect"], kwargs["cfg"]["workers"]))
+            return ("completed", {})
+
+        with patch(
+            "config_loader.get_forge_config", return_value={"workers": 99}
+        ), patch(
+            "forge_orchestrator._dispatch_phase", side_effect=fake_dispatch,
+        ):
+            code = _run_pipeline(
+                tmp_path,
+                state,
+                state_path,
+                progress,
+                auto_detect=True,
+                workers=2,
+            )
+
+        assert code == 0
+        assert observed
+        assert all(value == (True, 2) for value in observed)
 
     def test_halt_in_phase_returns_one(self, tmp_path):
         spec = tmp_path / "spec.md"
