@@ -101,15 +101,16 @@ This follows the standard config hierarchy (repo > org > global).
    ```bash
    REPO_SLUG=$(printf '%s' "$REPO" | tr '[:upper:]/' '[:lower:]-')
    WORKTREE="/tmp/review-${REPO_SLUG}-pr${PR_NUM}-single"
-   git fetch origin "refs/pull/${PR_NUM}/head"
    git fetch origin "$BASE"
+   PR_HEAD_REF="refs/remotes/origin/pr/${PR_NUM}"
+   git fetch origin "refs/pull/${PR_NUM}/head:${PR_HEAD_REF}"
    if git worktree list --porcelain | grep -Fqx "worktree $WORKTREE"; then
      cd "$WORKTREE"
-     # Reused worktrees may be parked on an older PR head; refresh to FETCH_HEAD
+     # Reused worktrees may be parked on an older PR head; refresh to the PR ref
      # before the HEAD_SHA gate below so a stale tree halts cleanly.
-     git checkout --detach FETCH_HEAD
+     git checkout --detach "$PR_HEAD_REF"
    else
-     git worktree add --detach "$WORKTREE" FETCH_HEAD
+     git worktree add --detach "$WORKTREE" "$PR_HEAD_REF"
      cd "$WORKTREE"
    fi
    git rev-parse HEAD

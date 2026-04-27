@@ -1958,6 +1958,12 @@ def review_pr_single(
     # dispatch set is recomputed from rnd.results after the round runs so a
     # malformed domain_agents entry cannot crash posting or masquerade as clean.
     configured_agents = sorted(set(da_map.values()))
+    invalid_configured_agents = sorted({agent for agent in configured_agents if agent not in AGENTS})
+    if invalid_configured_agents:
+        raise RuntimeError(
+            f"Configured review agent(s) {invalid_configured_agents} are not enabled or unknown. "
+            "Check --agent/domain_agents and models.<agent>.enabled before treating the PR as clean."
+        )
 
     print(f"\n{'#' * 60}", file=out)
     print(f"  Single-Agent Review: {repo} PR #{pr_number}", file=out)
@@ -2022,6 +2028,14 @@ def review_pr_single(
         raise RuntimeError(
             "No review sub-agents produced results. Check --agent/domain_agents, "
             "models.<agent>.enabled, and prompt discovery before treating the PR as clean."
+        )
+    result_domains = {res.domain for res in rnd.results}
+    missing_domains = [domain for domain in active_domains if domain not in result_domains]
+    if missing_domains:
+        raise RuntimeError(
+            "Review sub-agents did not produce results for domain(s): "
+            + ", ".join(missing_domains)
+            + ". Check --agent/domain_agents and prompt discovery before treating the PR as clean."
         )
 
     if persist_history:

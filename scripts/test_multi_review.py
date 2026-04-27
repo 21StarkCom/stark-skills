@@ -22,11 +22,24 @@ FAKE_DOMAINS = {
     "architecture": {"order": "01", "label": "Architecture", "filename": "01-architecture.md"},
 }
 
+TWO_FAKE_DOMAINS = {
+    "architecture": {"order": "01", "label": "Architecture", "filename": "01-architecture.md"},
+    "security": {"order": "02", "label": "Security", "filename": "02-security.md"},
+}
+
 
 class TestGithubAppPython:
     def test_resolve_python_prefers_override(self, monkeypatch):
         monkeypatch.setenv("STARK_REVIEW_PYTHON", "/opt/review-python")
         assert multi_review._resolve_python() == "/opt/review-python"
+
+    def test_resolve_python_prefers_local_venv(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("STARK_REVIEW_PYTHON", raising=False)
+        venv_python = tmp_path / ".venv" / "bin" / "python3"
+        venv_python.parent.mkdir(parents=True)
+        venv_python.write_text("#!/bin/sh\n")
+        with patch.object(multi_review, "SCRIPTS_DIR", tmp_path):
+            assert multi_review._resolve_python() == str(venv_python)
 
     def test_resolve_python_falls_back_to_current_interpreter(self, monkeypatch, tmp_path):
         monkeypatch.delenv("STARK_REVIEW_PYTHON", raising=False)
@@ -1188,6 +1201,57 @@ class TestSingleAgentMode:
                     json_output=True,
                     persist_history=False,
                 )
+
+    @patch("multi_review._build_graph_dependency_context", return_value=None)
+    @patch("multi_review.subprocess.run", return_value=MagicMock(returncode=1, stdout="", stderr=""))
+    @patch("multi_review.discover_config", return_value=DEFAULT_CONFIG)
+    @patch("multi_review.DOMAINS", TWO_FAKE_DOMAINS)
+    def test_review_pr_single_errors_when_domain_missing_from_results(
+        self,
+        _mock_config,
+        _mock_run,
+        _mock_graph,
+    ):
+        partial = ReviewRound(
+            round_num=1,
+            results=[
+                SubAgentResult(
+                    agent="codex",
+                    domain="architecture",
+                    raw_output="",
+                )
+            ],
+        )
+        with patch("multi_review.run_single_agent_round", return_value=partial):
+            with pytest.raises(RuntimeError, match="did not produce results for domain"):
+                multi_review.review_pr_single(
+                    "GetEvinced/test",
+                    1,
+                    dry_run=True,
+                    json_output=True,
+                    persist_history=False,
+                )
+
+    @patch("multi_review._build_graph_dependency_context", return_value=None)
+    @patch("multi_review.subprocess.run", return_value=MagicMock(returncode=1, stdout="", stderr=""))
+    @patch("multi_review.discover_config", return_value={"domain_agents": {"architecture": "not-a-real-agent"}})
+    @patch("multi_review.DOMAINS", FAKE_DOMAINS)
+    def test_review_pr_single_rejects_unknown_configured_agent(
+        self,
+        _mock_config,
+        _mock_run,
+        _mock_graph,
+    ):
+        with patch("multi_review.run_single_agent_round") as mock_round:
+            with pytest.raises(RuntimeError, match="not enabled or unknown"):
+                multi_review.review_pr_single(
+                    "GetEvinced/test",
+                    1,
+                    dry_run=True,
+                    json_output=True,
+                    persist_history=False,
+                )
+        mock_round.assert_not_called()
 
     @patch("multi_review.review_pr_single", return_value={"summary": {"clean": True}})
     @patch("multi_review.detect_repo", return_value="GetEvinced/test")
