@@ -98,6 +98,28 @@ def _dispatch_payload(domains: list[str]) -> dict[str, object]:
     }
 
 
+def _round_dispatch_payload(domains: list[str]) -> dict[str, object]:
+    results = [
+        {
+            "agent": "codex",
+            "model": "gpt-5.5",
+            "domain": domain,
+            "findings": [],
+            "error": "cli_error" if index == 1 else None,
+            "duration_s": 0.2 + (index * 0.1),
+        }
+        for index, domain in enumerate(domains)
+    ]
+    return {
+        "models": {"codex": "gpt-5.5"},
+        "rounds": [{"round": 1, "results": results}],
+        "summary": {
+            "failed_results": 1,
+            "clean": False,
+        },
+    }
+
+
 def _completed(stdout: str = "", stderr: str = "", returncode: int = 0) -> SimpleNamespace:
     return SimpleNamespace(stdout=stdout, stderr=stderr, returncode=returncode)
 
@@ -307,6 +329,36 @@ def test_json_output_schema(
     assert payload["triage"]["dispatched_domains"] == dispatched
     assert payload["dispatch"]["succeeded"] == 3
     assert "stark-triage · PR Review" in stderr
+
+
+@patch("triage_orchestrator.urllib.request.urlopen", return_value=_UrlOpenContext())
+@patch("triage_orchestrator.discover_config", return_value=_minimal_config())
+@patch("triage_orchestrator._discover_domains", return_value=_sample_raw_domains())
+@patch("triage_orchestrator.triage_domains", return_value=_sample_triage_result())
+@patch("triage_orchestrator.subprocess.run")
+def test_json_output_counts_failed_round_results(
+    mock_run: MagicMock,
+    _mock_triage: MagicMock,
+    _mock_domains: MagicMock,
+    _mock_config: MagicMock,
+    _mock_urlopen: MagicMock,
+) -> None:
+    dispatched = ["architecture", "security", "testing"]
+    mock_run.side_effect = [
+        _completed(stdout="diff --git a/app.py b/app.py\n+print('hi')\n"),
+        _completed(stdout=json.dumps(_round_dispatch_payload(dispatched))),
+    ]
+
+    rc, stdout, _stderr = _run_main(
+        ["triage_orchestrator.py", "--type", "pr", "--pr", "42", "--repo", "acme/repo", "--json", "--plain"]
+    )
+
+    assert rc == 0
+    payload = json.loads(stdout)
+    assert payload["dispatch"]["succeeded"] == 2
+    assert payload["dispatch"]["failed"] == 1
+    assert payload["dispatch"]["models"] == {"codex": "gpt-5.5"}
+    assert any(result.get("error") == "cli_error" for result in payload["dispatch"]["results"])
 
 
 @patch("triage_orchestrator.urllib.request.urlopen", return_value=_UrlOpenContext())

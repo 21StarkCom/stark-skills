@@ -153,6 +153,7 @@ DEFAULT_RED_TEAM = {
 DEFAULT_MODEL_RATES = {
     "o3": {"input_per_1m_usd": 15.00, "output_per_1m_usd": 60.00},
     "claude-opus-4-7": {"input_per_1m_usd": 15.00, "output_per_1m_usd": 75.00},
+    "gpt-5.4": {"input_per_1m_usd": 5.00, "output_per_1m_usd": 15.00},
     "gpt-5.5": {"input_per_1m_usd": 5.00, "output_per_1m_usd": 15.00},
     "_fallback": {"input_per_1m_usd": 100.00, "output_per_1m_usd": 300.00},
 }

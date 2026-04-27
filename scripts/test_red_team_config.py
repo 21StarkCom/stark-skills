@@ -29,7 +29,9 @@ def test_get_model_rates_returns_defaults(tmp_path):
         rates = config_loader.get_model_rates()
     assert "o3" in rates
     assert "claude-opus-4-7" in rates
+    assert "gpt-5.4" in rates
     assert "gpt-5.5" in rates
+    assert rates["gpt-5.4"]["input_per_1m_usd"] > 0
     assert rates["gpt-5.5"]["input_per_1m_usd"] > 0
     assert rates["o3"]["input_per_1m_usd"] > 0
     assert "_fallback" in rates
