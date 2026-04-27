@@ -639,6 +639,6 @@ def dispatch_red_team_for_stage(
         round_num=1,
     )
     return {
-        "status": "halted" if result.blocking_count > 0 or result.human_review_count > 0 else "clean",
+        "status": _rt.derive_status(result),
         "result": result,
     }

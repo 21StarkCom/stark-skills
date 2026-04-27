@@ -876,11 +876,7 @@ def run_red_team_design_stage(
             "run_id": run_id,
             "stage": "design",
             "rounds_used": 1,
-            "final_status": (
-                "clean"
-                if result.blocking_count == 0 and result.human_review_count == 0
-                else "halted"
-            ),
+            "final_status": _rt.derive_status(result),
             "total_findings": len(result.findings),
             "critical_count": sum(1 for f in result.findings if f.severity == "critical"),
             "high_count": sum(1 for f in result.findings if f.severity == "high"),

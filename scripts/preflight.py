@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -398,6 +399,44 @@ def check_red_team_model_rates() -> tuple[str, str]:
     return "pass", f"rates found for {model}"
 
 
+def check_red_team_transport_auth() -> tuple[str, str]:
+    """Verify the locked default model's transport has the auth it needs.
+
+    Models in `RESPONSES_API_MODELS` route through the OpenAI Responses API,
+    which requires `OPENAI_API_KEY` (or `OPENAI_API_KEY_FILE` +
+    `OPENAI_API_KEY_LABEL`) — *not* the codex-CLI keychain. Without this
+    check, an install with valid Codex auth and no OpenAI key passes
+    preflight and then halts at the design gate with `no OpenAI API key
+    available` — surfacing as an unactionable runtime failure long after
+    setup. (Round-3 finding 11.)
+    """
+    try:
+        from stark_red_team import RESPONSES_API_MODELS, _resolve_openai_api_key
+    except ImportError as exc:
+        return "warn", f"could not import stark_red_team: {exc}"
+
+    try:
+        cfg = get_red_team_config()
+    except Exception as exc:
+        return "warn", f"could not load red_team config: {exc}"
+
+    if not cfg.get("enabled", True):
+        return "skip", "red_team disabled in config"
+
+    model = cfg.get("model")
+    if model not in RESPONSES_API_MODELS:
+        return "skip", f"model {model!r} routes through codex CLI, not Responses API"
+
+    if _resolve_openai_api_key(os.environ) is None:
+        return "fail", (
+            f"red_team.model '{model}' routes through the Responses API but "
+            "no OpenAI API key is available. Set OPENAI_API_KEY, or "
+            "OPENAI_API_KEY_FILE+OPENAI_API_KEY_LABEL, in the environment."
+        )
+
+    return "pass", f"OpenAI API key resolved for {model}"
+
+
 # ---------------------------------------------------------------------------
 # Check registry: (name, fn, is_critical)
 # critical=True → a "fail" status sets overall to "blocked"
@@ -417,6 +456,7 @@ _CHECKS: list[tuple[str, Callable[..., tuple[str, str]], bool]] = [
     ("check_stale_locks",          check_stale_locks,          False),
     ("check_deprecated_config",    check_deprecated_config,    False),
     ("check_red_team_model_rates", check_red_team_model_rates, True),
+    ("check_red_team_transport_auth", check_red_team_transport_auth, True),
 ]
 
 

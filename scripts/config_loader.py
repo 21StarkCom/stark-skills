@@ -10,6 +10,13 @@ from typing import Any
 
 CONFIG_PATH = Path.home() / ".claude" / "code-review" / "config.json"
 
+try:  # emit_queue is best-effort — config loading must not fail if it's
+    # unavailable (e.g. partial install, missing optional dep). Tests
+    # monkeypatch _EMIT_QUEUE to capture events.
+    import emit_queue as _EMIT_QUEUE  # type: ignore[assignment]
+except ImportError:  # pragma: no cover
+    _EMIT_QUEUE = None  # type: ignore[assignment]
+
 DEFAULT_MODELS = {
     "claude": {"enabled": True, "model_id": "claude-opus-4-7"},
     "codex": {"enabled": True, "model_id": "gpt-5.5"},
@@ -128,7 +135,13 @@ DEFAULT_FORGED_REVIEW = {
 DEFAULT_RED_TEAM = {
     "enabled": True,
     "agent": "codex",
-    "model": "o3",
+    # gpt-5.5-pro is the default red-team model (was o3 in v0). Substantive
+    # comparison on the spec fixture: gpt-5.5-pro caught structurally
+    # important findings o3 missed (lock-surface meta-finding, fail-open
+    # `clean` semantics, round-local-ID identity bug). See
+    # docs/calibration/2026-04-27-red-team-v1-calibration-{o3,gpt-5-5-pro}.findings.json
+    # for the side-by-side. Both transports verified live via Responses API.
+    "model": "gpt-5.5-pro",
     "max_rounds": 2,
     "halt_on_unresolved": True,
     "stages": {
@@ -144,7 +157,9 @@ DEFAULT_RED_TEAM = {
     ],
     "min_severity_to_block": "high",
     "timeout_s": 900,
-    "per_run_budget_usd": 10.00,
+    # Sized for gpt-5.5-pro at ~$2/round × 2 rounds + verification + design
+    # regen, with ~50% headroom. Tighten once 5–10 calibration runs land.
+    "per_run_budget_usd": 15.00,
     "stability_overlap_jaccard_min": 0.4,
     "max_input_chars": 200_000,
     "allow_human_review_halt": True,
@@ -155,11 +170,45 @@ DEFAULT_MODEL_RATES = {
     "claude-opus-4-7": {"input_per_1m_usd": 15.00, "output_per_1m_usd": 75.00},
     "gpt-5.4": {"input_per_1m_usd": 5.00, "output_per_1m_usd": 15.00},
     "gpt-5.5": {"input_per_1m_usd": 5.00, "output_per_1m_usd": 15.00},
+    # rt_b7 — pro-tier rates required for red_team preflight when
+    # red_team.model is gpt-5.{4,5}-pro. Placeholders within the published
+    # pro-tier band; verify against OpenAI's pricing page before relying
+    # on cost ceilings.
+    "gpt-5.4-pro": {"input_per_1m_usd": 20.00, "output_per_1m_usd": 80.00},
+    "gpt-5.5-pro": {"input_per_1m_usd": 25.00, "output_per_1m_usd": 100.00},
     "_fallback": {"input_per_1m_usd": 100.00, "output_per_1m_usd": 300.00},
 }
 
-# rt1 — locked fields cannot be overridden below the global config level
-_RED_TEAM_LOCKED_FIELDS: frozenset[str] = frozenset({"personas", "model"})
+# rt1 + rt2 — locked fields cannot be overridden below the global config
+# level. Originally this was just {personas, model} (rt1: prevent silent
+# prompt-source swaps and silent model downgrades). The 2026-04-27 red-team
+# review (rt2) flagged that locking only those two left the substance-vs-
+# appearance failure mode wide open in other dimensions: a compromised repo
+# could still make the gate non-blocking by setting `enabled: false`,
+# `halt_on_unresolved: false`, or raising `min_severity_to_block` past
+# every real finding, while the audit log still showed an intentional
+# configuration change rather than an attempted bypass.
+#
+# Each lock has the same justification as the original two: it preserves
+# substance. A repo that needs a stricter posture (e.g. a security-critical
+# repo wanting to block on "medium") opens a PR against stark-skills to set
+# the global default — same friction as a legitimate persona addition. A
+# repo that wants a *weaker* posture is the failure mode we're locking out.
+_RED_TEAM_LOCKED_FIELDS: frozenset[str] = frozenset({
+    "personas",
+    "model",
+    "enabled",
+    "agent",
+    "min_severity_to_block",
+    "halt_on_unresolved",
+    "allow_human_review_halt",
+    # Locking the whole `stages` dict closes the round-1 review bypass:
+    # without it, a repo could disable a globally-enabled stage via
+    # `stages.design.enabled: false` and skip the gate entirely. Adding a
+    # new stage now requires a global config change — same friction as a
+    # legitimate persona addition.
+    "stages",
+})
 
 
 def _warn(message: str) -> None:
@@ -322,7 +371,16 @@ def _strip_locked_fields(
     *,
     source: str | None = None,
 ) -> dict[str, Any]:
-    """Remove locked fields from an override dict with a warning to stderr."""
+    """Remove locked fields from an override dict.
+
+    Each rejection produces both a stderr warning (operator visibility) and
+    a `red_team.config.override_rejected` audit event (so a downstream
+    audit pipeline can detect bypass attempts that an operator might miss
+    in the noise of routine config loading). The event payload is
+    deliberately minimal and avoids embedding the override value, since
+    that value is attacker-controlled in the threat model and we don't
+    want to round-trip it through the durable event queue.
+    """
     cleaned = {}
     for k, v in override.items():
         if k in locked:
@@ -331,9 +389,29 @@ def _strip_locked_fields(
                 f"{section_name}.{k} is locked to global config and cannot be "
                 f"overridden{source_suffix} — rejecting override value {v!r}"
             )
+            _emit_override_rejected(section_name, k, source)
         else:
             cleaned[k] = v
     return cleaned
+
+
+def _emit_override_rejected(
+    section_name: str, field: str, source: str | None,
+) -> None:
+    if _EMIT_QUEUE is None:
+        return
+    try:
+        event = _EMIT_QUEUE.make_event(
+            "red_team_override_rejected",
+            {
+                "section": section_name,
+                "field": field,
+                "source": source or "",
+            },
+        )
+        _EMIT_QUEUE.enqueue(event)
+    except Exception as exc:  # noqa: BLE001 — emitting must never break load
+        _warn(f"failed to enqueue override_rejected event: {exc}")
 
 
 def _prune_unknown_keys(
