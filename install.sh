@@ -193,6 +193,90 @@ check_dir() {
     fi
 }
 
+# ── Skill version manifest ───────────────────────────────────
+#
+# Per-skill version is git-derived: short SHA + ISO date of the last commit
+# touching skill/<name>/, plus a dirty flag for uncommitted local edits at
+# install time. Stored as a single manifest at $CODE_REVIEW_DIR/skills.manifest.json
+# rather than per-skill sidecars so we don't have to write into the symlinked
+# skill source directories.
+
+SKILL_MANIFEST_PATH="$CODE_REVIEW_DIR/skills.manifest.json"
+
+write_skill_manifest() {
+    mkdir -p "$CODE_REVIEW_DIR"
+    python3 - "$REPO_DIR" "$SKILL_MANIFEST_PATH" <<'PY'
+import json
+import os
+import subprocess
+import sys
+import time
+
+repo, out_path = sys.argv[1], sys.argv[2]
+skills_root = os.path.join(repo, "skill")
+entries: dict[str, dict] = {}
+
+if os.path.isdir(skills_root):
+    for name in sorted(os.listdir(skills_root)):
+        if not name.startswith("stark-"):
+            continue
+        skill_dir = os.path.join(skills_root, name)
+        if not os.path.isdir(skill_dir):
+            continue
+        rel = os.path.relpath(skill_dir, repo)
+        log = subprocess.run(
+            ["git", "-C", repo, "log", "-1", "--format=%h%x09%cI", "--", rel],
+            capture_output=True, text=True,
+        )
+        sha, commit_iso = None, None
+        if log.returncode == 0 and log.stdout.strip():
+            sha, commit_iso = log.stdout.strip().split("\t", 1)
+        diff = subprocess.run(
+            ["git", "-C", repo, "status", "--porcelain", "--", rel],
+            capture_output=True, text=True,
+        )
+        entries[name] = {
+            "sha": sha,
+            "commit_iso": commit_iso,
+            "dirty": bool(diff.stdout.strip()) if diff.returncode == 0 else None,
+        }
+
+repo_head = subprocess.run(
+    ["git", "-C", repo, "rev-parse", "--short", "HEAD"],
+    capture_output=True, text=True,
+).stdout.strip() or None
+
+manifest = {
+    "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    "repo_sha": repo_head,
+    "skills": entries,
+}
+os.makedirs(os.path.dirname(out_path), exist_ok=True)
+with open(out_path, "w") as f:
+    json.dump(manifest, f, indent=2, sort_keys=True)
+    f.write("\n")
+print(f"[manifest] {len(entries)} skill versions → {out_path}", file=sys.stderr)
+PY
+    info "Skill manifest written: $SKILL_MANIFEST_PATH"
+}
+
+read_skill_version() {
+    local name="$1"
+    [ -f "$SKILL_MANIFEST_PATH" ] || return 0
+    python3 - "$SKILL_MANIFEST_PATH" "$name" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    m = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+e = m.get("skills", {}).get(sys.argv[2])
+if not e or not e.get("sha"):
+    sys.exit(0)
+suffix = " (dirty)" if e.get("dirty") else ""
+print(f"{e['sha']} @ {e['commit_iso']}{suffix}")
+PY
+}
+
 # ── TUI: Interactive Skill Selection ─────────────────────────
 
 declare -a TUI_NAMES=()
@@ -416,6 +500,8 @@ tui_apply() {
     echo ""
     info "Skills: ${installed} installed, ${removed} removed, ${unchanged} unchanged"
     [ "$skipped" -gt 0 ] && warn "${skipped} skill(s) skipped (validation failed)"
+
+    write_skill_manifest
 }
 
 interactive() {
@@ -619,6 +705,8 @@ install() {
 
     provision_infrastructure
 
+    write_skill_manifest
+
     echo ""
     info "Note: To enable staleness detection in a repo, copy or reference:"
     info "  $CODE_REVIEW_DIR/standards/workflows/doc-staleness.yml"
@@ -680,6 +768,11 @@ uninstall() {
     unlink_dir "$CLAUDE_DIR/statusline-command.sh" "Status line"
     unlink_dir "$HOME/.local/bin/statusline-setup" "Status line setup CLI"
 
+    if [ -f "$SKILL_MANIFEST_PATH" ]; then
+        rm -f "$SKILL_MANIFEST_PATH"
+        info "Removed skill manifest"
+    fi
+
     echo ""
     echo "Note: $CODE_REVIEW_DIR/history/ was not removed (contains local data)"
     echo ""
@@ -712,6 +805,9 @@ status() {
         local skill_name
         skill_name=$(basename "$skill_dir")
         check_dir "$HOME/.claude/skills/$skill_name/SKILL.md" "Skill: $skill_name"
+        local skill_version
+        skill_version=$(read_skill_version "$skill_name")
+        [ -n "$skill_version" ] && echo -e "      ${DIM}${skill_version}${NC}"
     done
 
     check_dir "$CODE_REVIEW_DIR/standards" "Standards templates"
