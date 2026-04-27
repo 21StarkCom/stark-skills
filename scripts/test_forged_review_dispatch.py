@@ -92,6 +92,38 @@ def test_load_prompt_missing_raises_file_not_found(tmp_path, monkeypatch):
         disp.load_prompt("nope.md")
 
 
+# ── run_agent ──────────────────────────────────────────────────────────
+
+
+def test_run_agent_codex_uses_xhigh_read_only(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class Completed:
+        returncode = 0
+        stdout = "[]"
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return Completed()
+
+    monkeypatch.setattr(disp, "is_agent_enabled", lambda agent: True)
+    monkeypatch.setattr(disp, "get_codex_model", lambda: "gpt-5.5")
+    monkeypatch.setattr(disp, "build_agent_env", lambda agent, purpose: {"GH_TOKEN": "codex-token"})
+    monkeypatch.setattr(disp.subprocess, "run", fake_run)
+
+    result = disp.run_agent("codex", "review this", cwd="/tmp", timeout_s=1)
+
+    cmd = captured["cmd"]
+    assert cmd[:2] == ["codex", "exec"]
+    assert "-m" in cmd and "gpt-5.5" in cmd
+    assert "-c" in cmd and 'model_reasoning_effort="xhigh"' in cmd
+    assert "-s" in cmd and "read-only" in cmd
+    assert captured["kwargs"]["env"] == {"GH_TOKEN": "codex-token"}
+    assert result.error is None
+
+
 # ── _fallback_triage ───────────────────────────────────────────────────
 
 
