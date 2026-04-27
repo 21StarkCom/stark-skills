@@ -306,10 +306,11 @@ export function inspectLocalRefs(
     if (!resolved) {
       continue;
     }
+    const resolvedRel = rel(repoRoot, resolved);
     if (!isWithinRepo(repoRoot, resolved)) {
+      missing.add(resolvedRel);
       continue;
     }
-    const resolvedRel = rel(repoRoot, resolved);
     if (fileExists(resolved) && fs.realpathSync(resolved).startsWith(repoRootReal + path.sep)) {
       found.add(resolvedRel);
       refKinds[resolvedRel] = candidate.kind;
