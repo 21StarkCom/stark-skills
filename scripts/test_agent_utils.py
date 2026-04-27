@@ -45,7 +45,7 @@ class TestCodexConstants:
         assert isinstance(CODEX_MODEL, str) and CODEX_MODEL
 
     def test_reasoning_efforts_are_toml(self):
-        assert '"high"' in CODEX_REASONING_EFFORT_HIGH
+        assert '"xhigh"' in CODEX_REASONING_EFFORT_HIGH
         assert '"medium"' in CODEX_REASONING_EFFORT_MEDIUM
 
 

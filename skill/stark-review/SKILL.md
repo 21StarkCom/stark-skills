@@ -17,7 +17,10 @@ logic in `SKILL.md`.
 Run environment validation before proceeding:
 
 ```bash
-python3 ~/.claude/code-review/scripts/preflight.py --workflow stark-review --json
+SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
+PYTHON="$SCRIPTS/.venv/bin/python3"
+[ -x "$PYTHON" ] || PYTHON=python3
+"$PYTHON" "$SCRIPTS/preflight.py" --workflow stark-review --json
 ```
 
 Parse the JSON result:
@@ -31,7 +34,7 @@ Parse the JSON result:
 Raw input: `$ARGUMENTS`
 
 - `PR_NUMBER` - optional; detect from current branch with `gh pr view --json number --jq .number`
-- `--agent <name>` - force the same agent across every reviewed domain. Important: for PR reviews, `triage_orchestrator.py` does not propagate PR agent overrides to `multi_review.py`, so this flag must bypass the orchestrator and call `multi_review.py` directly.
+- `--agent <name>` - force the same review agent across every triage-selected domain. `triage_orchestrator.py` forwards this to `multi_review.py --single --agent`.
 - `--repo ORG/REPO` - override repo detection
 - `--dry-run` - perform the review without PR comments, commits, or pushes
 - If PR detection fails, list open PRs and ask:
@@ -43,8 +46,9 @@ Raw input: `$ARGUMENTS`
 ## Constants
 
 ```bash
-SCRIPTS=~/.claude/code-review/scripts
-PYTHON=$SCRIPTS/.venv/bin/python3
+SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
+PYTHON="$SCRIPTS/.venv/bin/python3"
+[ -x "$PYTHON" ] || PYTHON=python3
 ```
 
 ## Configuration
@@ -73,26 +77,53 @@ This follows the standard config hierarchy (repo > org > global).
 ## Setup
 
 1. Verify `gh auth status` succeeds.
-2. Resolve `PR_NUM`, `REPO`, `BASE`, and `BRANCH`.
-3. Confirm the current checkout matches `REPO`. If `--repo` points at a different repository than the current checkout, stop and ask the user to run from that repo.
-4. Create an isolated worktree from the PR head. Example:
+2. Resolve `PR_NUM`, `REPO`, `BASE`, `BRANCH`, `HEAD_SHA`, and `IS_FORK` from GitHub:
 
    ```bash
-   BRANCH=$(gh pr view "$PR_NUM" --repo "$REPO" --json headRefName --jq .headRefName)
-   BASE=$(gh pr view "$PR_NUM" --repo "$REPO" --json baseRefName --jq .baseRefName)
-   WORKTREE=$(mktemp -d)
-   git fetch origin "$BRANCH"
-   git worktree add --detach "$WORKTREE" "origin/$BRANCH"
-   cd "$WORKTREE"
+   gh pr view "$PR_NUM" --repo "$REPO" \
+     --json number,headRefName,headRefOid,baseRefName,isCrossRepository,maintainerCanModify
    ```
 
-If worktree creation fails, stop. Do not review in the main checkout.
+3. Confirm the current checkout matches `REPO`:
+
+   ```bash
+   gh repo view --json nameWithOwner --jq .nameWithOwner
+   ```
+
+   If `--repo` points at a different repository than the current checkout,
+   stop and ask the user to run from that repo.
+4. If the current checkout is on the PR branch and has uncommitted or unpushed
+   changes, stop and report that the remote PR head is stale. Do not silently
+   review a different tree than the user expects.
+5. Create or reuse an isolated worktree from the GitHub PR ref, not from a
+   local branch:
+
+   ```bash
+   REPO_SLUG=$(printf '%s' "$REPO" | tr '[:upper:]/' '[:lower:]-')
+   WORKTREE="/tmp/review-${REPO_SLUG}-pr${PR_NUM}-single"
+   git fetch origin "refs/pull/${PR_NUM}/head"
+   git fetch origin "$BASE"
+   if git worktree list --porcelain | grep -Fqx "worktree $WORKTREE"; then
+     cd "$WORKTREE"
+     # Reused worktrees may be parked on an older PR head; refresh to FETCH_HEAD
+     # before the HEAD_SHA gate below so a stale tree halts cleanly.
+     git checkout --detach FETCH_HEAD
+   else
+     git worktree add --detach "$WORKTREE" FETCH_HEAD
+     cd "$WORKTREE"
+   fi
+   git rev-parse HEAD
+   ```
+
+   The `git rev-parse HEAD` value must match `HEAD_SHA` from `gh pr view`. If
+   it does not match, stop. If worktree creation fails, stop. Do not review in
+   the main checkout.
 
 ## Dispatch Rules
 
-- Normal mode without `--agent`: use `triage_orchestrator.py --type pr --single --json`. It triages domains and dispatches the actual review.
-- `--agent` supplied: call `multi_review.py --single --agent "$AGENT" --json-only` directly, and append `--dry-run` if requested.
-- `--dry-run` without `--agent`: first run `triage_orchestrator.py --type pr --single --dry-run --json` to get `triage.dispatched_domains`, then run `multi_review.py --single --dry-run --json-only --domains <csv>` using that domain list. `triage_orchestrator.py --dry-run` does not dispatch a review by itself.
+- Normal mode: use `triage_orchestrator.py --type pr --single --json`. It triages domains and dispatches the actual review.
+- `--agent` supplied: keep the orchestrator path and append `--agent "$AGENT"` so triage still selects domains while `multi_review.py` uses one forced reviewer.
+- `--dry-run`: first run `triage_orchestrator.py --type pr --single --dry-run --json` to get `triage.dispatched_domains`, then run `multi_review.py --single --dry-run --json-only --domains <csv>` using that domain list. Append `--agent "$AGENT"` to the second command if supplied. `triage_orchestrator.py --dry-run` does not dispatch a review by itself.
 - Never pass `--post-raw` when `--dry-run` is active.
 
 ## Phase 1: Run Review
@@ -100,40 +131,31 @@ If worktree creation fails, stop. Do not review in the main checkout.
 ### Normal triaged run
 
 ```bash
-$PYTHON $SCRIPTS/triage_orchestrator.py \
-  --type pr \
-  --pr "$PR_NUM" \
-  --repo "$REPO" \
-  --base "$BASE" \
-  --single \
+review_args=(
+  --type pr
+  --pr "$PR_NUM"
+  --repo "$REPO"
+  --base "$BASE"
+  --single
   --json
+)
+[ -n "${AGENT:-}" ] && review_args+=(--agent "$AGENT")
+"$PYTHON" "$SCRIPTS/triage_orchestrator.py" "${review_args[@]}"
 ```
 
-If the orchestrator fails, log the failure and fall back to direct single-agent
-dispatch:
+If the orchestrator fails before returning JSON, log the failure and fall back
+to direct single-agent dispatch:
 
 ```bash
-$PYTHON $SCRIPTS/multi_review.py \
-  --pr "$PR_NUM" \
-  --repo "$REPO" \
-  --base "$BASE" \
-  --single \
+fallback_args=(
+  --pr "$PR_NUM"
+  --repo "$REPO"
+  --base "$BASE"
+  --single
   --json-only
-```
-
-### Forced single-agent override
-
-Use direct dispatch so the override is honored. Append `--dry-run` here too if
-the user requested it:
-
-```bash
-$PYTHON $SCRIPTS/multi_review.py \
-  --pr "$PR_NUM" \
-  --repo "$REPO" \
-  --base "$BASE" \
-  --single \
-  --agent "$AGENT" \
-  --json-only
+)
+[ -n "${AGENT:-}" ] && fallback_args+=(--agent "$AGENT")
+"$PYTHON" "$SCRIPTS/multi_review.py" "${fallback_args[@]}"
 ```
 
 ### Dry-run with triage-selected domains
@@ -160,14 +182,17 @@ If `DOMAIN_CSV` is empty, report that triage selected zero domains and stop.
 Otherwise run the real review without PR posting:
 
 ```bash
-$PYTHON $SCRIPTS/multi_review.py \
-  --pr "$PR_NUM" \
-  --repo "$REPO" \
-  --base "$BASE" \
-  --single \
-  --dry-run \
-  --json-only \
+dry_review_args=(
+  --pr "$PR_NUM"
+  --repo "$REPO"
+  --base "$BASE"
+  --single
+  --dry-run
+  --json-only
   --domains "$DOMAIN_CSV"
+)
+[ -n "${AGENT:-}" ] && dry_review_args+=(--agent "$AGENT")
+"$PYTHON" "$SCRIPTS/multi_review.py" "${dry_review_args[@]}"
 ```
 
 ## Phase 2: Parse Output
@@ -182,7 +207,16 @@ Flatten findings from:
 - `findings` for the triage-orchestrator payload
 - `rounds[*].results[*].findings` for the direct `multi_review.py` payload
 
-Use the actual dispatched domain count from the payload. Do not hard-code `9`.
+Fail closed before classification if any of these are true:
+
+- stdout is not valid JSON
+- `triage.dispatched_domains` is non-empty but dispatch returned zero result records
+- `dispatch.failed > 0` in triage output
+- direct `multi_review.py` output has `summary.failed_results > 0`
+
+In those cases, print the failed domains/agents and stop. Do not report the PR
+as clean. Use the actual dispatched domain count from the payload; do not
+hard-code `9`.
 
 ## Phase 3: Classify and Present
 
@@ -215,9 +249,10 @@ Findings to fix:
 ## Phase 4: Fix Loop
 
 - If `--dry-run` was used, stop after presenting findings. Do not edit files, commit, or push.
+- If `IS_FORK` is true, stay review-only unless `maintainerCanModify` is true and you have a verified writable remote for the fork. Do not push fixes to `origin` for fork PRs.
 - If there are critical or high `fix` findings:
   1. Fix them in the worktree.
-  2. Run the project's test command (from config or `CLAUDE.md` `## Commands`).
+  2. Run the project's test command (from config, `CLAUDE.md` `## Commands`, or the repo's standard package/test files). If no test command can be identified, say so explicitly.
   3. If tests pass, commit and push back to the PR branch:
 
      ```bash
@@ -227,6 +262,7 @@ Findings to fix:
      ```
 
   4. Re-run the review/classification flow. Stop after 3 rounds total.
+  5. If tests fail, keep the worktree and stop. Do not claim the PR is clean.
 - If only medium `fix` findings remain, either fix the low-risk ones now or present them explicitly as remaining follow-up items. Do not silently drop them.
 
 ## Phase 5: Persist History
@@ -251,8 +287,23 @@ Critical rules:
 
 ```bash
 cd -
-git worktree remove "$WORKTREE" --force
+WORKTREE_HEAD=$(git -C "$WORKTREE" rev-parse HEAD)
+if git -C "$WORKTREE" diff --quiet \
+   && git -C "$WORKTREE" diff --cached --quiet \
+   && [ "$WORKTREE_HEAD" = "$HEAD_SHA" ]; then
+  git worktree remove "$WORKTREE" --force
+else
+  printf 'Leaving review worktree with local changes or commits past PR head: %s\n' "$WORKTREE"
+fi
 ```
+
+`HEAD_SHA` is the value resolved from `gh pr view` in Setup. The head equality
+check guards against fix commits that were never pushed — `git diff` only sees
+the working tree and index, so without it the worktree (and its unpushed
+commits) would be removed.
+
+Clean up only after a clean run or a completed dry-run. On dispatch failure,
+test failure, or unpushed fixes, leave the worktree in place and print its path.
 
 ## Observability
 
@@ -267,10 +318,13 @@ See [../../standards/observability.md](../../standards/observability.md).
 | Failure | Recovery |
 |---------|----------|
 | `triage_orchestrator.py` fails in normal mode | Log the failure and fall back to direct `multi_review.py --single` |
-| `--agent` override requested | Skip the orchestrator; direct dispatch only |
+| `--agent` override requested | Keep orchestrator triage and forward `--agent` to `multi_review.py` |
 | `--dry-run` requested | Do not use orchestrator dispatch; triage first, then run `multi_review.py --dry-run --domains ...` |
+| Zero sub-agents run or all dispatched domains fail | Stop and report dispatch failure; never call it clean |
 | Triage selects zero domains | Report it and stop cleanly |
 | PR not found | Print `PR #{n} not found. Check --repo or run from the correct directory.` |
 | Worktree creation fails | Stop; do not fall back to the main checkout |
 | Repo mismatch | Stop and ask to run from the matching local checkout |
+| Current PR branch has unpushed local changes | Stop and ask for a push/checkpoint before reviewing remote PR head |
+| Fork PR | Review-only unless writable fork remote is verified |
 | Tests fail after fixes | Present the failure, keep the worktree state, and stop without claiming the PR is clean |

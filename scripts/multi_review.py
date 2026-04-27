@@ -1942,13 +1942,15 @@ def review_pr_single(
     sev_overrides = config.get("severity_overrides", {})
     da_map = resolve_domain_agents(config, active_domains, override_agent)
 
-    # Determine which agents are actually used (for posting)
-    used_agents = sorted(set(da_map.values()))
+    # Determine which agents are configured for posting. The definitive
+    # dispatch set is recomputed from rnd.results after the round runs so a
+    # malformed domain_agents entry cannot crash posting or masquerade as clean.
+    configured_agents = sorted(set(da_map.values()))
 
     print(f"\n{'#' * 60}", file=out)
     print(f"  Single-Agent Review: {repo} PR #{pr_number}", file=out)
     print(f"  Base: {base}", file=out)
-    print(f"  {len(active_domains)} domains, agents: {', '.join(used_agents)}", file=out)
+    print(f"  {len(active_domains)} domains, agents: {', '.join(configured_agents)}", file=out)
     print(f"{'#' * 60}", file=out)
 
     if not domains_to_review:
@@ -1997,6 +1999,19 @@ def review_pr_single(
         for res in rnd.results:
             apply_severity_overrides(res.findings, sev_overrides)
 
+    unknown_agents = sorted({res.agent for res in rnd.results if res.agent not in AGENTS})
+    if unknown_agents:
+        raise RuntimeError(
+            f"Review results carry unknown agent(s) {unknown_agents}; refusing to post or "
+            "summarize. Check run_single_agent_round and the AGENTS registry."
+        )
+    used_agents = sorted({res.agent for res in rnd.results})
+    if not used_agents:
+        raise RuntimeError(
+            "No review sub-agents produced results. Check --agent/domain_agents, "
+            "models.<agent>.enabled, and prompt discovery before treating the PR as clean."
+        )
+
     if persist_history:
         try:
             history_path = save_round_history(repo, pr_number, rnd, mode="single", domain_agents=da_map)
@@ -2015,6 +2030,8 @@ def review_pr_single(
                 status = "posted" if ok else "FAILED"
                 print(f"    {agent_cfg['emoji']} {agent} → {status}", file=out)
 
+    deduped_findings = all_findings(rnd)
+    failed_results = sum(1 for res in rnd.results if res.error)
     output = {
         "repo": repo,
         "pr": pr_number,
@@ -2039,13 +2056,15 @@ def review_pr_single(
                 ],
             }
         ],
-        "summary": (lambda deduped: {
-            "total_findings": len(deduped),
-            "critical": sum(1 for f in deduped if f.severity == "critical"),
-            "high": sum(1 for f in deduped if f.severity == "high"),
-            "medium": sum(1 for f in deduped if f.severity == "medium"),
-            "clean": not any(f.severity in ("critical", "high", "medium") for f in deduped),
-        })(all_findings(rnd)),
+        "summary": {
+            "total_findings": len(deduped_findings),
+            "critical": sum(1 for f in deduped_findings if f.severity == "critical"),
+            "high": sum(1 for f in deduped_findings if f.severity == "high"),
+            "medium": sum(1 for f in deduped_findings if f.severity == "medium"),
+            "failed_results": failed_results,
+            "clean": failed_results == 0
+            and not any(f.severity in ("critical", "high", "medium") for f in deduped_findings),
+        },
     }
 
     if not json_output:

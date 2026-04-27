@@ -188,10 +188,10 @@ class TestCLIFlagsSmoke:
 
     @pytest.mark.skipif(not shutil.which("codex"), reason="codex CLI not installed")
     def test_codex_exec_accepts_flags(self):
-        """codex exec -c ... --ephemeral --json --full-auto must not error."""
+        """codex exec accepts the production read-only JSON invocation flags."""
         result = subprocess.run(
             ["codex", "exec", "-c", multi_review.CODEX_REASONING_CONFIG,
-             "--ephemeral", "--json", "--full-auto", "--help"],
+             "--ephemeral", "--json", "-s", "read-only", "--help"],
             capture_output=True, text=True, timeout=10,
         )
         assert result.returncode == 0, f"codex exec rejected flags: {result.stderr}"
@@ -265,7 +265,7 @@ class TestCLIEndToEnd:
         """codex exec with --ephemeral --json --sandbox read-only produces JSONL output."""
         result = subprocess.run(
             ["codex", "exec", "-c", multi_review.CODEX_REASONING_CONFIG,
-             "--ephemeral", "--json", "--full-auto", "-"],
+             "--ephemeral", "--json", "-s", "read-only", "-"],
             capture_output=True, text=True, timeout=120,
             input="Return exactly: []",
         )
@@ -488,7 +488,7 @@ class TestConfigWiring:
         mock_config.return_value = {**DEFAULT_CONFIG, "agents": ["codex"]}
         mock_sub.return_value = multi_review.SubAgentResult(
             agent="codex", domain="architecture", raw_output="[]",
-            model="gpt-5.4",
+            model="gpt-5.5",
         )
 
         buf = io.StringIO()
@@ -936,7 +936,7 @@ class TestHistoryPersistence:
         ]
         result = SubAgentResult(
             agent="codex", domain="security", raw_output="[]",
-            model="gpt-5.4",
+            model="gpt-5.5",
             findings=findings, duration_s=42.5,
         )
         return ReviewRound(round_num=1, results=[result])
@@ -989,8 +989,8 @@ class TestHistoryPersistence:
             rnd = self._make_round(["fix", "ignored"])
             path = multi_review.save_round_history("GetEvinced/test", 42, rnd, mode="single")
             data = json.loads(path.read_text())
-            assert data["models"] == {"codex": "gpt-5.4"}
-            assert data["results"][0]["model"] == "gpt-5.4"
+            assert data["models"] == {"codex": "gpt-5.5"}
+            assert data["results"][0]["model"] == "gpt-5.5"
 
     def test_review_summary_carries_model_provenance(self, tmp_path):
         """rounds.json must surface model id at top level and inside each result."""
@@ -1001,8 +1001,8 @@ class TestHistoryPersistence:
                 domain_agents={"security": "codex"},
             )
             data = json.loads(path.read_text())
-            assert data["models"] == {"codex": "gpt-5.4"}
-            assert data["rounds"][0]["results"][0]["model"] == "gpt-5.4"
+            assert data["models"] == {"codex": "gpt-5.5"}
+            assert data["rounds"][0]["results"][0]["model"] == "gpt-5.5"
 
     def test_next_round_num_does_not_create_dir(self, tmp_path):
         """Auto-detect must not leave an empty history dir behind on miss."""
@@ -1093,6 +1093,90 @@ class TestSingleAgentMode:
         domains = ["security"]
         result = multi_review.resolve_domain_agents(config, domains, override_agent="gemini")
         assert result == {"security": "gemini"}
+
+    @patch("multi_review._build_graph_dependency_context", return_value=None)
+    @patch("multi_review.subprocess.run", return_value=MagicMock(returncode=1, stdout="", stderr=""))
+    @patch("multi_review.run_single_agent_round", return_value=ReviewRound(round_num=1))
+    @patch("multi_review.discover_config", return_value=DEFAULT_CONFIG)
+    @patch("multi_review.DOMAINS", FAKE_DOMAINS)
+    def test_review_pr_single_errors_when_no_subagents_run(
+        self,
+        _mock_config,
+        _mock_round,
+        _mock_run,
+        _mock_graph,
+    ):
+        with pytest.raises(RuntimeError, match="No review sub-agents produced results"):
+            multi_review.review_pr_single(
+                "GetEvinced/test",
+                1,
+                dry_run=True,
+                json_output=True,
+                persist_history=False,
+            )
+
+    @patch("multi_review._build_graph_dependency_context", return_value=None)
+    @patch("multi_review.subprocess.run", return_value=MagicMock(returncode=1, stdout="", stderr=""))
+    @patch("multi_review.discover_config", return_value=DEFAULT_CONFIG)
+    @patch("multi_review.DOMAINS", FAKE_DOMAINS)
+    def test_review_pr_single_is_not_clean_when_dispatch_errors(
+        self,
+        _mock_config,
+        _mock_run,
+        _mock_graph,
+    ):
+        errored = ReviewRound(
+            round_num=1,
+            results=[
+                SubAgentResult(
+                    agent="codex",
+                    domain="architecture",
+                    raw_output="",
+                    error="cli_error",
+                )
+            ],
+        )
+        with patch("multi_review.run_single_agent_round", return_value=errored):
+            result = multi_review.review_pr_single(
+                "GetEvinced/test",
+                1,
+                dry_run=True,
+                json_output=True,
+                persist_history=False,
+            )
+
+        assert result["summary"]["failed_results"] == 1
+        assert result["summary"]["clean"] is False
+
+    @patch("multi_review._build_graph_dependency_context", return_value=None)
+    @patch("multi_review.subprocess.run", return_value=MagicMock(returncode=1, stdout="", stderr=""))
+    @patch("multi_review.discover_config", return_value=DEFAULT_CONFIG)
+    @patch("multi_review.DOMAINS", FAKE_DOMAINS)
+    def test_review_pr_single_rejects_unknown_agent_in_results(
+        self,
+        _mock_config,
+        _mock_run,
+        _mock_graph,
+    ):
+        bogus = ReviewRound(
+            round_num=1,
+            results=[
+                SubAgentResult(
+                    agent="not-a-real-agent",
+                    domain="architecture",
+                    raw_output="",
+                )
+            ],
+        )
+        with patch("multi_review.run_single_agent_round", return_value=bogus):
+            with pytest.raises(RuntimeError, match="unknown agent"):
+                multi_review.review_pr_single(
+                    "GetEvinced/test",
+                    1,
+                    dry_run=True,
+                    json_output=True,
+                    persist_history=False,
+                )
 
     @patch("multi_review.review_pr_single", return_value={"summary": {"clean": True}})
     @patch("multi_review.detect_repo", return_value="GetEvinced/test")

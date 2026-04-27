@@ -400,7 +400,7 @@ def dispatch_codex(
         "-m",
         model,
         "-c",
-        'model_reasoning_effort="high"',
+        'model_reasoning_effort="xhigh"',
         "--ephemeral",
         "--json",
         "-s",

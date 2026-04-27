@@ -634,7 +634,7 @@ class TestParallelDispatch:
         def side_effect(agent, domain_key, plan_content, prompt_text="", timeout=300):
             return PlanSubAgentResult(
                 agent=agent, domain=domain_key, raw_output="[]",
-                model={"claude": "claude-opus-4-7", "codex": "gpt-5.4"}[agent],
+                model={"claude": "claude-opus-4-7", "codex": "gpt-5.5"}[agent],
             )
         mock_sub.side_effect = side_effect
         result = dispatch_plan_review(
@@ -648,7 +648,7 @@ class TestParallelDispatch:
         # string here would silently misattribute downstream telemetry.
         assert result["models"] == {
             "claude": "claude-opus-4-7",
-            "codex": "gpt-5.4",
+            "codex": "gpt-5.5",
         }
         # Top-level map must match the per-result model fields exactly.
         for row in result["results"]:
