@@ -1,0 +1,129 @@
+{
+  "model": "gpt-5.5-pro",
+  "fixture": "docs/specs/2026-04-12-stark-red-team-design.md",
+  "runs": [
+    {
+      "round_num": 1,
+      "synthesis": "The strongest tension is fail-open additivity versus enforceable trust: security and reliability want sandboxing, stable failures, and no silent downgrade, while product and cost concerns push toward advisory behavior, lower friction, and bounded spend. A second tension is observability/data richness versus data minimization: storing raw findings and detailed telemetry enables calibration and operations, but it also creates a new sensitive audit surface that needs ownership, retention, and access controls.",
+      "cost_usd": 1.90095,
+      "duration_s": 464.71024775505066,
+      "input_tokens": 27906,
+      "output_tokens": 12033,
+      "blocking_count": 10,
+      "human_review_count": 0,
+      "error": null,
+      "findings": [
+        {
+          "id": "rt1",
+          "persona": "security-trust",
+          "severity": "critical",
+          "concern": "The design dispatches `codex exec` over attacker-controlled artifact/spec/diff text without defining a hermetic no-tools/no-secrets execution boundary.",
+          "consequence": "Delimiter wrapping protects the model instruction hierarchy, but it does not constrain what the Codex process can read or do if tool execution is available. A prompt injection in a PR diff could turn a bad review verdict into workspace mutation, secret exposure, or lateral movement through inherited environment credentials.",
+          "counter_proposal": "Run red-team calls in a locked sandbox: a temporary directory containing only rendered prompt inputs, read-only filesystem, no shell/tools or an explicit no-tools mode, no inherited repo or host secrets, and network access only to the model endpoint; fail preflight if this boundary cannot be enforced.",
+          "trade_off": "Requires runner/sandbox engineering and reduces Codex's ability to use local repo context or tools.",
+          "reason_for_uncertainty": null
+        },
+        {
+          "id": "rt2",
+          "persona": "security-trust",
+          "severity": "high",
+          "concern": "The config trust boundary locks only `personas` and `model`, leaving enforcement and execution knobs repo-overridable.",
+          "consequence": "A malicious or compromised repo can make the red team non-blocking by changing fields such as `enabled`, `halt_on_unresolved`, `min_severity_to_block`, `allow_human_review_halt`, or possibly `agent`. The audit trail may still show an intentional configuration rather than an attempted bypass, weakening the red team's value as a trust signal.",
+          "counter_proposal": "Define global policy profiles for protected contexts that lock `enabled`, `agent`, `stages`, `min_severity_to_block`, `halt_on_unresolved`, `allow_human_review_halt`, and a minimum budget floor; allow repo overrides only when they are stricter than the global profile.",
+          "trade_off": "Reduces repo autonomy and makes legitimate per-repo rollout exceptions require central approval.",
+          "reason_for_uncertainty": null
+        },
+        {
+          "id": "rt3",
+          "persona": "reliability-distsys",
+          "severity": "critical",
+          "concern": "Malformed red-team outputs fail open into `clean` or medium advisory rather than a degraded state.",
+          "consequence": "Invalid JSON after retry is treated as zero findings, and schema-invalid findings are downgraded instead of making the run visibly unreliable. A model outage, prompt drift, or parser mismatch can therefore look exactly like a clean architecture review and allow plan generation to proceed.",
+          "counter_proposal": "Introduce a distinct `degraded` final status for parse failures, schema violations above a threshold, timeouts, and model fallback; continue only under additive policy, but never mark the run `clean` and always post/audit the degradation.",
+          "trade_off": "Adds state complexity and creates more visible noisy outcomes for users.",
+          "reason_for_uncertainty": null
+        },
+        {
+          "id": "rt4",
+          "persona": "reliability-distsys",
+          "severity": "high",
+          "concern": "The iterative loop's flicker path has contradictory round and terminal-state semantics.",
+          "consequence": "Flicker rounds consume `max_rounds` without producing a durable remediation attempt, and the design gives conflicting stories about whether the result becomes advisory, `clean_after_flicker`, or unresolved halt. Users can see nondeterministic exits even when no stable blocking finding was ever confirmed.",
+          "counter_proposal": "Model the loop as an explicit state machine: record primary and verification outputs before branching, assign each round an outcome of `clean`, `confirmed_blocking`, `flicker`, or `degraded`, do not count flicker as a remediation round, and terminate only through named transitions.",
+          "trade_off": "More orchestration code and potentially more calls when repeated flicker occurs.",
+          "reason_for_uncertainty": null
+        },
+        {
+          "id": "rt5",
+          "persona": "reliability-distsys",
+          "severity": "high",
+          "concern": "Stability verification relies on bag-of-words Jaccard over free-text concerns, which is too weak for a blocking gate.",
+          "consequence": "The same architectural risk can be phrased differently and fail overlap, while unrelated generic concerns can match by vocabulary. That makes regeneration and halt behavior sensitive to wording noise rather than stable risk identity.",
+          "counter_proposal": "Extend the output schema with structured fields such as `risk_key`, `affected_component`, and `failure_mode`, then compute overlap using persona plus structured fields with embedding similarity as a secondary check.",
+          "trade_off": "Adds prompt/schema complexity and may constrain open-ended reviewer language.",
+          "reason_for_uncertainty": null
+        },
+        {
+          "id": "rt6",
+          "persona": "data",
+          "severity": "high",
+          "concern": "The audit design stores raw finding text for 180 days without a sensitivity classification or redaction boundary.",
+          "consequence": "Findings can quote requirements, PR diffs, customer data, secrets, or security architecture details. Reusing `forged_review_metrics.db` turns a metrics database into a sensitive document store with a larger retention and access-control burden.",
+          "counter_proposal": "Classify red-team finding text as sensitive audit data: redact known secrets and PII before insert, encrypt or restrict the database, store hashes/excerpts by default, and require an explicit org/repo policy to retain full raw text.",
+          "trade_off": "Reduces the corpus available for persona tuning and makes debugging individual reviews harder.",
+          "reason_for_uncertainty": null
+        },
+        {
+          "id": "rt7",
+          "persona": "data",
+          "severity": "high",
+          "concern": "Human-review acceptance is keyed by round-local IDs such as `rt3`, which are not stable across reruns.",
+          "consequence": "On resume, a fresh LLM call can renumber or rephrase findings, so `--accept-red-team-human-review rt3` may acknowledge a different concern than the human read. That creates an accidental distributed identity bug between PR comments, state, audit, and CLI input.",
+          "counter_proposal": "Use stable finding keys of the form `{run_id}:{stage}:{round_num}:{persona}:{finding_id}:{concern_hash}` and have the CLI display the matched concern text before accepting it.",
+          "trade_off": "Longer identifiers and a less lightweight command-line UX.",
+          "reason_for_uncertainty": null
+        },
+        {
+          "id": "rt8",
+          "persona": "product-dx",
+          "severity": "high",
+          "concern": "The v1 human-review halt path is not a recoverable user journey.",
+          "consequence": "The design says human-review findings halt unconditionally, but it also says the resume flag is not yet implemented in v1. A user can be stopped by a finding with no supported way to acknowledge it except disabling the feature or editing state manually.",
+          "counter_proposal": "Make `--accept-red-team-human-review` plus a `red-team status` display a v1 release blocker; if that slips, ship v1 with `allow_human_review_halt=false` and advisory comments until resume support lands.",
+          "trade_off": "Either delays v1 or weakens the immediate force of human-review findings.",
+          "reason_for_uncertainty": null
+        },
+        {
+          "id": "rt9",
+          "persona": "product-dx",
+          "severity": "medium",
+          "concern": "Five per-persona PR comments per round duplicate the same synthesis and create avoidable review noise.",
+          "consequence": "At two rounds, a PR can receive ten bot comments before flicker, halt, or resume messages are added. The persona separation helps threading, but the default experience may fragment the conversation enough that reviewers ignore the red-team output.",
+          "counter_proposal": "Post one updatable summary comment per run with collapsible persona sections and deterministic anchors; create separate persona threads only for critical/high findings that need discussion.",
+          "trade_off": "Gives up always-on persona-specific comment threads.",
+          "reason_for_uncertainty": null
+        },
+        {
+          "id": "rt10",
+          "persona": "cost-ops",
+          "severity": "high",
+          "concern": "The default budget is lower than the design's own stated worst-case cost envelope.",
+          "consequence": "The document estimates a worst case of $15-40 for two rounds, but the sample default is $10. Normal blocking runs can therefore halt on budget before the red team has a chance to converge, producing avoidable user escalations and noisy operational data.",
+          "counter_proposal": "Do not enable enforcing budget until Week 0 calibration has committed a p95 x 1.5 default for the full cycle; before that, run budget enforcement in warn-only mode and add per-call token ceilings.",
+          "trade_off": "Allows higher spend during calibration or weakens cost protection temporarily.",
+          "reason_for_uncertainty": null
+        },
+        {
+          "id": "rt11",
+          "persona": "cost-ops",
+          "severity": "high",
+          "concern": "Operational telemetry is run-level, not call-level, so budget and latency incidents will be opaque.",
+          "consequence": "The proposed events do not expose input/output tokens, per-call cost, actual model, prompt size, truncation status, or whether the call was primary, verification, regeneration, or review. An operator cannot quickly tell which phase caused a budget halt, timeout, or latency spike.",
+          "counter_proposal": "Emit `red_team.call.start` and `red_team.call.end` events for every primary, verification, regeneration, and review call with token counts, cost, cumulative cost, budget remaining, actual model, prompt chars, truncation flag, and call type.",
+          "trade_off": "Increases telemetry volume and requires care to avoid leaking sensitive metadata.",
+          "reason_for_uncertainty": null
+        }
+      ]
+    }
+  ]
+}

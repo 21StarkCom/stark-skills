@@ -168,7 +168,7 @@
   "red_team": {
     "enabled": true,
     "agent": "codex",
-    "model": "o3",
+    "model": "gpt-5.5-pro",
     "max_rounds": 2,
     "halt_on_unresolved": true,
     "stages": {
@@ -184,7 +184,7 @@
     ],
     "min_severity_to_block": "high",
     "timeout_s": 900,
-    "per_run_budget_usd": 10.00,
+    "per_run_budget_usd": 15.00,
     "stability_overlap_jaccard_min": 0.416,
     "max_input_chars": 200000,
     "allow_human_review_halt": true
@@ -205,6 +205,14 @@
     "gpt-5.5": {
       "input_per_1m_usd": 5.00,
       "output_per_1m_usd": 15.00
+    },
+    "gpt-5.4-pro": {
+      "input_per_1m_usd": 20.00,
+      "output_per_1m_usd": 80.00
+    },
+    "gpt-5.5-pro": {
+      "input_per_1m_usd": 25.00,
+      "output_per_1m_usd": 100.00
     },
     "_fallback": {
       "input_per_1m_usd": 100.00,

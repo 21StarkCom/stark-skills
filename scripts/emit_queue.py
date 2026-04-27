@@ -57,6 +57,10 @@ _VALID_TYPES = {
     # Pre-v2 aliases kept for back-compat so existing producers don't break
     # mid-migration. Prefer the v2 names in new code.
     "learning_capture", "skill_suggestion",
+    # Red-team config: locked-field override rejection. Spec §6 requires a
+    # durable audit signal so a downstream pipeline can spot bypass attempts
+    # that an operator might miss in stderr noise.
+    "red_team_override_rejected",
 }
 
 # ---------------------------------------------------------------------------

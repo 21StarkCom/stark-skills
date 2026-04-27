@@ -1,0 +1,119 @@
+{
+  "model": "o3",
+  "fixture": "docs/specs/2026-04-12-stark-red-team-design.md",
+  "runs": [
+    {
+      "round_num": 1,
+      "synthesis": "Two main tensions surfaced. 1) Security-trust wants to keep sensitive design artifacts on-prem and even block the build if the red-team layer is unavailable, whereas reliability and product/DX prefer the current SaaS LLM flow because it is simpler and keeps the pipeline moving; changing either direction forces a trade-off between confidentiality and delivery velocity. 2) Cost-ops asks to raise the default budget to avoid noisy halted_budget pages, but that collides with security-trust’s wish to move to a private model (even more expensive) and with product-DX’s concern about PR comment noise and overall cognitive load. The programme will need an explicit decision on whether budget or coverage/confidentiality is the higher priority.",
+      "cost_usd": 0.68787,
+      "duration_s": 45.73748302459717,
+      "input_tokens": 27906,
+      "output_tokens": 4488,
+      "blocking_count": 5,
+      "human_review_count": 0,
+      "error": null,
+      "findings": [
+        {
+          "id": "rt1",
+          "persona": "security-trust",
+          "severity": "critical",
+          "concern": "Entire private design artifacts and PR diffs are sent to the external Codex o3 service without a data-classification or on-prem isolation step.",
+          "consequence": "If the vendor is compromised or changes its data-handling policy, our proprietary architecture and unreleased code details are exposed. Many customers have contractual or regulatory constraints that forbid such disclosure, so shipping this could render the pipeline unusable in regulated environments.",
+          "counter_proposal": "Proxy the red-team call through an internally hosted or VPC-isolated large-language model so that no design content leaves our trust boundary; only token counts and minimal metadata leave the enclave.",
+          "trade_off": "Higher infra cost and likely lower model quality/latency until the internal model is tuned.",
+          "reason_for_uncertainty": null
+        },
+        {
+          "id": "rt2",
+          "persona": "security-trust",
+          "severity": "high",
+          "concern": "Prompt-injection detection is delegated to the same LLM being attacked, relying on the model to self-report malicious instructions inside attacker-controlled blocks.",
+          "consequence": "An attacker could craft inputs that bypass the model’s own heuristics, causing persona rules to be overridden silently and letting malicious instructions leak into findings or downstream prompts.",
+          "counter_proposal": "Add a deterministic pre-scanner that strips or escapes lines starting with recognised control phrases (e.g. \"You are now\", \"Ignore previous\") inside RED_TEAM_INPUT blocks before they ever reach the LLM.",
+          "trade_off": "Legitimate text that resembles control phrases may be mutilated, slightly reducing review fidelity.",
+          "reason_for_uncertainty": null
+        },
+        {
+          "id": "rt3",
+          "persona": "reliability-distsys",
+          "severity": "high",
+          "concern": "If the red-team layer is skipped because the CLI is missing or the model endpoint is down, the pipeline quietly proceeds, losing its architecture gate.",
+          "consequence": "Critical architectural defects could reach plan generation and deployment with zero red-team coverage, undermining the stated purpose of this feature. Operators may not notice until production incidents occur.",
+          "counter_proposal": "Treat unexpected red-team unavailability in mandatory stages (design) as a retryable pipeline failure, unless the caller explicitly sets an `--allow-red-team-skip` flag.",
+          "trade_off": "Builds will block during vendor outages, reducing deployment availability.",
+          "reason_for_uncertainty": null
+        },
+        {
+          "id": "rt4",
+          "persona": "reliability-distsys",
+          "severity": "medium",
+          "concern": "Stability check uses bag-of-words Jaccard ≥ 0.4; small wording changes or synonym substitutions can drop overlap below threshold, classifying identical concerns as flicker.",
+          "consequence": "False negatives will cause real blocking findings to be ignored as advisory, or equally, false positives can drive unnecessary regen cycles, reducing determinism of the pipeline.",
+          "counter_proposal": "Compute concern similarity with sentence-level embeddings (cosine ≥ 0.85) and require that at least 50 % of blocking findings match between the two calls.",
+          "trade_off": "Adds an extra embedding model call per round and a new service dependency, increasing cost.",
+          "reason_for_uncertainty": null
+        },
+        {
+          "id": "rt5",
+          "persona": "data",
+          "severity": "high",
+          "concern": "The narrative promises a `version` column for future schema evolution, but the provided CREATE TABLE statements omit it.",
+          "consequence": "Once data starts flowing, adding the column later will require a blocking migration or back-fill, and queries written against the implicit v1 structure will break.",
+          "counter_proposal": "Include `version INTEGER NOT NULL DEFAULT 1` in all three `red_team_*` tables from v1 and reference it in insert queries.",
+          "trade_off": "Minor refactor of already-written migration tests and sample queries.",
+          "reason_for_uncertainty": null
+        },
+        {
+          "id": "rt6",
+          "persona": "data",
+          "severity": "medium",
+          "concern": "Raw finding text is stored unbounded in SQLite; a malicious or runaway model could emit megabytes per finding, exhausting disk.",
+          "consequence": "Database bloat or corruption could disable audit features and even block the pipeline once file-size limits are reached.",
+          "counter_proposal": "Cap stored finding text at 4 KB, truncate with an explicit marker, and write the full blob to compressed object storage (e.g., S3) keyed by run_id for offline forensics.",
+          "trade_off": "Full-text SQL searches over very long findings become a two-step process.",
+          "reason_for_uncertainty": null
+        },
+        {
+          "id": "rt7",
+          "persona": "product-dx",
+          "severity": "medium",
+          "concern": "Posting one GitHub comment per persona per round can create up to 10 comments (design and plan) cluttering the PR discussion.",
+          "consequence": "Engineers may learn to ignore the bot activity, losing the benefit of targeted discussion threads; notification noise will be high for frequent runs.",
+          "counter_proposal": "Emit a single expandable comment per round that contains collapsible markdown sections for each persona, retaining per-persona headings for replies.",
+          "trade_off": "Less fine-grained notification control; teams that relied on separate comment filtering lose that affordance.",
+          "reason_for_uncertainty": null
+        },
+        {
+          "id": "rt8",
+          "persona": "product-dx",
+          "severity": "medium",
+          "concern": "Requiring users to type `--accept-red-team-human-review rt3,rt7...` with opaque IDs is error-prone and unfriendly.",
+          "consequence": "Developers will either over-accept (copy-pasting all IDs) or forget one, leading to frustrating re-runs and wasted time.",
+          "counter_proposal": "Provide an interactive CLI step that lists pending IDs with checkboxes or arrow-key selection and writes the chosen list to a resume file the pipeline consumes.",
+          "trade_off": "Adds an interactive dependency; non-TTY automation must fall back to the existing flag.",
+          "reason_for_uncertainty": null
+        },
+        {
+          "id": "rt9",
+          "persona": "cost-ops",
+          "severity": "high",
+          "concern": "Default `per_run_budget_usd` is $10 but the design’s own worst-case estimate is $15–40, so most real runs will halt on budget.",
+          "consequence": "On-call engineers will get frequent halted_budget pages, treating expected spend as an error; teams will either disable the budget check or raise it ad-hoc without guidance.",
+          "counter_proposal": "After Week 0 calibration, set the default to 1.5× the 95th-percentile observed cost (likely ~$40) and emit only a warning when spend exceeds 80 % of the budget.",
+          "trade_off": "Higher default spend ceiling increases risk of runaway cost if loops misbehave.",
+          "reason_for_uncertainty": null
+        },
+        {
+          "id": "rt10",
+          "persona": "cost-ops",
+          "severity": "medium",
+          "concern": "Design sends `red_team.halt` events but does not route them to an alerting system; on-call may see only a generic pipeline failure with no context.",
+          "consequence": "Incident triage is lengthened because the responder must dig through logs to find the last synthesis and failing findings, delaying fixes or rollbacks.",
+          "counter_proposal": "Integrate `red_team.halt` with PagerDuty including the run link and synthesis snippet, and add a concise runbook section referenced in the alert.",
+          "trade_off": "Potential alert fatigue if the halt rate is not first reduced.",
+          "reason_for_uncertainty": null
+        }
+      ]
+    }
+  ]
+}
