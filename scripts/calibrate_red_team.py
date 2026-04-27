@@ -109,20 +109,34 @@ def run_calibration(
     source_spec_path: Path,
     n_runs: int,
     synthetic: bool,
+    model_override: str | None = None,
+    findings_dump_path: Path | None = None,
 ) -> dict:
     cfg = get_red_team_config()
     model_rates = get_model_rates()
+    if model_override:
+        cfg = {**cfg, "model": model_override}
+        print(f"[calibration] model override: {model_override}", file=sys.stderr)
     artifact = fixture_path.read_text(encoding="utf-8")
     source_spec = source_spec_path.read_text(encoding="utf-8")
 
     if synthetic:
-        rt.dispatch_codex = _synthetic_dispatch_factory(seed=42)  # type: ignore[assignment]
+        # Patch BOTH dispatchers — the new default model (gpt-5.5-pro) and
+        # o3 route through dispatch_responses_api, so a synthetic mode that
+        # only mocked dispatch_codex would silently hit the live API or
+        # fail for missing OPENAI_API_KEY.
+        synthetic_fn = _synthetic_dispatch_factory(seed=42)
+        rt.dispatch_codex = synthetic_fn  # type: ignore[assignment]
+        rt.dispatch_responses_api = synthetic_fn  # type: ignore[assignment]
         # Also patch PROMPTS_ROOT to the worktree location so assemble_prompt
         # can load prompt files without requiring the install symlink.
         worktree_prompts = Path(__file__).parent.parent / "global" / "prompts" / "red-team"
         if worktree_prompts.exists():
             rt.PROMPTS_ROOT = worktree_prompts  # type: ignore[assignment]
-        print("[calibration] SYNTHETIC mode — dispatch_codex mocked", file=sys.stderr)
+        print(
+            "[calibration] SYNTHETIC mode — dispatch_codex + dispatch_responses_api mocked",
+            file=sys.stderr,
+        )
 
     results: list[rt.RedTeamResult] = []
     print(f"[calibration] Running {n_runs} passes…", file=sys.stderr)
@@ -183,6 +197,45 @@ def run_calibration(
         stdev_jaccard = 0.0
     proposed_jaccard_min = max(0.0, round(mean_jaccard - stdev_jaccard, 3))
 
+    if findings_dump_path is not None:
+        dump = {
+            "model": cfg["model"],
+            "fixture": str(fixture_path),
+            "runs": [
+                {
+                    "round_num": r.round_num,
+                    "synthesis": r.synthesis,
+                    "cost_usd": r.cost_usd,
+                    "duration_s": r.duration_s,
+                    "input_tokens": r.input_tokens,
+                    "output_tokens": r.output_tokens,
+                    "blocking_count": r.blocking_count,
+                    "human_review_count": r.human_review_count,
+                    "error": r.error,
+                    "findings": [
+                        {
+                            "id": f.id,
+                            "persona": f.persona,
+                            "severity": f.severity,
+                            "concern": f.concern,
+                            "consequence": f.consequence,
+                            "counter_proposal": f.counter_proposal,
+                            "trade_off": f.trade_off,
+                            "reason_for_uncertainty": f.reason_for_uncertainty,
+                        }
+                        for f in r.findings
+                    ],
+                }
+                for r in results
+            ],
+        }
+        findings_dump_path.parent.mkdir(parents=True, exist_ok=True)
+        findings_dump_path.write_text(
+            json.dumps(dump, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        print(f"[calibration] findings dumped to {findings_dump_path}", file=sys.stderr)
+
     return {
         "n_runs": n_runs,
         "synthetic": synthetic,
@@ -216,12 +269,20 @@ def write_calibration_doc(output_path: Path, summary: dict, fixture: Path) -> No
 
 | Metric | Value |
 |---|---|
-| Mean cost per run | ${summary['mean_cost_usd']:.4f} |
+| Mean cost per call | ${summary['mean_cost_usd']:.4f} |
 | Stdev | ${summary['stdev_cost_usd']:.4f} |
-| 95th percentile | ${summary['p95_cost_usd']:.4f} |
-| **Proposed `per_run_budget_usd`** | **${summary['proposed_per_run_budget_usd']:.2f}** |
+| 95th percentile (per-call) | ${summary['p95_cost_usd']:.4f} |
+| **Per-call ceiling (p95 × 1.5)** | **${summary['proposed_per_run_budget_usd']:.2f}** |
 
-Raw cost per run (USD): {[round(c, 4) for c in summary['costs']]}
+Raw cost per call (USD): {[round(c, 4) for c in summary['costs']]}
+
+> **Note (round-2 review #4):** `red_team.per_run_budget_usd` is a *total
+> cycle* ceiling: red-team calls + stability verification calls + design
+> regens + inner design-review loop calls. The single-call p95 above is a
+> floor for that ceiling, not the ceiling itself. Multiply by an estimated
+> cycle factor (rule of thumb: `2 × max_rounds + 1` when stability
+> verification fires) before applying to config. For default
+> `max_rounds=2`, treat ~5× the per-call ceiling as the cycle budget.
 
 ## Stability (Jaccard overlap of blocking findings across pairs)
 
@@ -264,7 +325,10 @@ $10.00 placeholder until real calibration data arrives from live o3 runs.
 ```json
 {{
   "red_team": {{
-    "per_run_budget_usd": {summary['proposed_per_run_budget_usd']},
+    // Cycle budget = per-call ceiling × estimated cycle factor.
+    // For default max_rounds=2: ~5× covers worst-case
+    // (2 primary calls + 2 stability verifications + 1 inner review).
+    "per_run_budget_usd": {round(summary['proposed_per_run_budget_usd'] * 5, 2)},
     "stability_overlap_jaccard_min": {summary['proposed_stability_overlap_jaccard_min']}
   }}
 }}
@@ -281,10 +345,38 @@ def main() -> int:
     parser.add_argument("--runs", type=int, default=20)
     parser.add_argument("--synthetic", action="store_true",
                         help="Mock dispatch_codex with a fixed distribution (no real LLM calls)")
+    parser.add_argument("--model", default=None,
+                        help="Override red_team.model for this calibration run "
+                             "(e.g. o3, gpt-5.5-pro). Used to A/B models without "
+                             "editing the locked global config.")
+    parser.add_argument("--dump-findings", action="store_true",
+                        help="Write each run's full findings + synthesis to a "
+                             "JSON sidecar next to the calibration doc. Useful "
+                             "for substantive A/B comparison across models.")
     args = parser.parse_args()
 
-    summary = run_calibration(args.fixture, args.source_spec, args.runs, args.synthetic)
-    out = Path("docs/calibration") / f"{time.strftime('%Y-%m-%d')}-red-team-v1-calibration.md"
+    # Preserve the historical filename (`…-calibration.md`) when --model is
+    # omitted so any consumer that grepped for the v0 path still finds it.
+    # Only suffix the model slug for explicit A/B runs, where avoiding
+    # back-to-back clobber is the whole point of the suffix.
+    if args.model:
+        model_slug = args.model.replace(".", "-").replace("/", "-")
+        out = Path("docs/calibration") / (
+            f"{time.strftime('%Y-%m-%d')}-red-team-v1-calibration-{model_slug}.md"
+        )
+    else:
+        out = Path("docs/calibration") / (
+            f"{time.strftime('%Y-%m-%d')}-red-team-v1-calibration.md"
+        )
+    findings_dump_path = (
+        out.with_suffix(".findings.json") if args.dump_findings else None
+    )
+
+    summary = run_calibration(
+        args.fixture, args.source_spec, args.runs, args.synthetic,
+        model_override=args.model,
+        findings_dump_path=findings_dump_path,
+    )
     write_calibration_doc(out, summary, args.fixture)
     print(f"Calibration written to {out}", file=sys.stderr)
     print(json.dumps({

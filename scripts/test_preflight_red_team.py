@@ -43,3 +43,52 @@ def test_check_red_team_model_rates_skips_when_disabled(monkeypatch):
 
     status, message = preflight.check_red_team_model_rates()
     assert status == "skip"
+
+
+# Round-3 finding 11: locked Responses-API default model needs an OpenAI
+# API key, not just codex-CLI auth. Without this preflight, an install
+# that has only Codex auth passes preflight then halts at the design gate.
+
+
+def test_check_red_team_transport_auth_passes_when_key_set(monkeypatch):
+    def fake_cfg():
+        return {"enabled": True, "model": "gpt-5.5-pro"}
+    monkeypatch.setattr(preflight, "get_red_team_config", fake_cfg, raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    status, _ = preflight.check_red_team_transport_auth()
+    assert status == "pass"
+
+
+def test_check_red_team_transport_auth_fails_when_key_missing(monkeypatch):
+    def fake_cfg():
+        return {"enabled": True, "model": "gpt-5.5-pro"}
+    monkeypatch.setattr(preflight, "get_red_team_config", fake_cfg, raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY_FILE", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY_LABEL", raising=False)
+
+    status, message = preflight.check_red_team_transport_auth()
+    assert status == "fail"
+    assert "OpenAI API key" in message
+
+
+def test_check_red_team_transport_auth_skips_for_codex_cli_models(monkeypatch):
+    """Models not in RESPONSES_API_MODELS (e.g. gpt-5.5) route through the
+    codex CLI, which uses the keychain — this check is irrelevant for them."""
+    def fake_cfg():
+        return {"enabled": True, "model": "gpt-5.5"}
+    monkeypatch.setattr(preflight, "get_red_team_config", fake_cfg, raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    status, _ = preflight.check_red_team_transport_auth()
+    assert status == "skip"
+
+
+def test_check_red_team_transport_auth_skips_when_disabled(monkeypatch):
+    def fake_cfg():
+        return {"enabled": False, "model": "gpt-5.5-pro"}
+    monkeypatch.setattr(preflight, "get_red_team_config", fake_cfg, raising=False)
+
+    status, _ = preflight.check_red_team_transport_auth()
+    assert status == "skip"
