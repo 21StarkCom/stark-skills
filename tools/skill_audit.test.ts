@@ -46,7 +46,7 @@ test("--validate exits 0 when every ref resolves", (t) => {
     writeSkill(repo, "alpha", "# alpha\n\nNo external refs.\n");
     const res = runCli(repo, ["--validate"]);
     assert.equal(res.status, 0, `stderr: ${res.stderr}`);
-    assert.match(res.stdout, /All local markdown references resolve/);
+    assert.match(res.stdout, /All local markdown and Python references resolve/);
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }
