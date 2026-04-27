@@ -1,4 +1,0 @@
-{
-  "doc_content": {},
-  "alt_text": "A clean internal architecture diagram for the stark-pr-flow skill showing a vertical PR workflow from prerequisites through push, diff analysis, PR creation, bot-based self-review, a hard stop for manual approval, an advisory documentation-state check, and final squash-admin merge with branch cleanup. Blue phase nodes form the main path, purple nodes mark approval decisions, green nodes mark configuration and auth boundaries, amber highlights the stop-and-summary output, and red annotations call out abort and recovery paths like dirty worktrees, main-branch misuse, diverged pushes, auth failures, and merge conflicts.\"}}"
-}

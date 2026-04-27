@@ -51,13 +51,16 @@ Multi-agent PR code review system. Claude, Codex, and Gemini are all enabled by 
 
 ### Other
 - `scripts/stark_persona.py` — session persona engine (weighted selection, combos, catchphrases)
-- `scripts/generate_skill_docs.py` — multi-LLM documentation generator with viz competition
-- `scripts/flow_extractor.py` — workflow extraction from SKILL.md files
-- `scripts/flow_layout.py` — dagre layout runner for flow diagrams
-- `scripts/flow_schema.py` — FlowDiagram Pydantic model
-- `scripts/metrics.py` — review performance metrics collection
-- `scripts/pr_status.py` — PR analytics dashboard data
 - `scripts/plan_to_tasks_validate.py` — plan decomposition validation (3 LLM passes)
+
+### TS tools (`tools/`)
+- `tools/skill_lib.ts` — shared skill discovery + reference parsing
+- `tools/skill_audit.ts`, `skill_validate.ts`, `skill_optimize.ts`, `skill_autopilot.ts` — meta-tooling
+- `tools/skill_diet.ts` — duplication linter for shared boilerplate (preflight, dispatch-failure, GH App auth)
+- `tools/release_changelog.ts`, `release_version_bump.ts` — stark-release Steps 3 + 5
+- `tools/review_setup_worktree.ts`, `review_cleanup_worktree.ts` — stark-review worktree provisioning
+- `tools/housekeeping_infra.ts` — stark-housekeeping Phase 5 (sessions, locks, log rotation, archival)
+- `tools/design_review_summary.ts` — stark-review-design Phase 4 markdown renderer
 
 ### Config & prompts
 - `global/config.json` — default config schema (models, runtime, triage, cost, etc.)
@@ -83,8 +86,7 @@ All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.claude/skil
 
 ### Pipeline (end-to-end, in order)
 
-- `/stark-forge <path> [--auto-detect] [--dry-run] [--resume] [--workers N]` — end-to-end design pipeline: classify, review, plan, tasks
-- `/stark-design "prompt" | <path>` — (archived) generate design doc from requirements; use `superpowers:brainstorm` + `/stark-forge` instead
+- `/stark-design "prompt" | <path>` — (archived) generate design doc from requirements; use `superpowers:brainstorm` instead
 - `/stark-review-design <path>` — multi-agent design/spec review (N agents × 12 domains, default N=2)
 - `/stark-red-team-design <path> [--source-spec PATH] [--model ID] [--dry-run]` — adversarial committee challenge of a design doc (5 personas × 1 round, default `gpt-5.5-pro`); writes `<design>.red-team.md` sidecar and posts to PR if detected; challenge-only, no fix loop
 - `/stark-design-to-plan <path>` — generate implementation plan from design doc (enabled agents generate, then cross-review before synthesis)
@@ -92,7 +94,6 @@ All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.claude/skil
 - `/stark-plan-to-tasks <path> [--dry-run] [--cleanup <slug>]` — decompose plan into phased GitHub issues (3 LLM passes)
 - `/stark-phase-execute <plan-slug> [--dry-run]` — autonomous phase execution: implement all tasks, PR, review, merge, release, dashboard
 - `/stark-autopilot <plan-or-prompt> [--plan-slug SLUG]` — autonomous implementation with tournament at every step (all enabled agents compete in worktrees); issue-driven mode when plan has been decomposed via `/stark-plan-to-tasks`
-- `/stark-forged-review [PR_NUMBER]` — leader + 2nd-opinion PR review with dynamic triage and forge-path escalation (default going forward; replaces `/stark-review`)
 - `/stark-review [PR_NUMBER]` — single-agent PR code review (1 LLM × 9 domains, fast/cheap)
 - `/stark-team-review [PR_NUMBER]` — multi-agent PR code review (all enabled LLMs × 9 domains; default: 2)
 - `/stark-review-improvement [--prompts-dir DIR]` — improve prompts based on review assessment (PR or design/plan review)
@@ -100,33 +101,14 @@ All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.claude/skil
 
 ### Workflow & Ops
 
-- `/stark-pr-flow` — end-to-end PR workflow: push, create, review, merge
 - `/stark-session [start|end]` — session management: briefing on start, cleanup on end
 - `/stark-release [patch|minor|major]` — cut a release: changelog, tag, GitHub Release
 - `/stark-housekeeping [--dry-run] [--aggressive]` — audit and clean up stale issues, dead branches, worktree remnants
-- `/stark-tournament "prompt" [--config file.yaml]` — multi-LLM competition with configurable evaluation strategies
 - `/stark-persona` — session character voices with weighted selection, combos, catchphrases, and feedback
 
 ### Project Setup & Docs
 
-- `/stark-onboard-project` — bootstrap new project: git, GitHub, apps, CLAUDE.md
 - `/stark-init-docs [--template|--backfill|--upgrade|--clean]` — scaffold dev docs
-- `/stark-extract-docs <path-to-spec>` — extract knowledge from specs/reviews into ADRs, retrospectives, reference docs
-- `/stark-generate-docs [--skill <name>]` — generate/update skill docs with multi-LLM viz
-
-### Code Intelligence
-
-- `/stark-graph [--stage parse|audit|diff] [--repo PATH]` — dependency graph pipeline: parse docstrings, audit coverage, diff changes, compute blast radius, post PR comments
-
-### Maintenance & Analytics
-
-- `/stark-update-deps` — audit and update dependency versions
-- `/stark-rename-project <old> <new> [--dry-run]` — rename project + update refs
-- `/stark-claude-md-improver` — analyze and improve CLAUDE.md files
-- `/stark-pr-status` — PR analytics dashboard
-- `/stark-metrics` — review performance metrics
-- `/stark-session-insights [--project <name>] [--refresh]` — analyze session history for usage patterns
-- `/stark-skill-analytics [--skill <name>] [--format table|full]` — skill usage and adoption metrics
 
 ## Conventions
 

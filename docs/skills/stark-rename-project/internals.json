@@ -1,4 +1,0 @@
-{
-  "doc_content": {},
-  "alt_text": "Internal architecture visualization for the stark-rename-project skill, showing an eight-phase rename pipeline from validation and resumable state detection through GitHub rename, local directory move, symlink cleanup, reference rewrites in the main and sibling repos, symlink reinstall, verification, and final summary; side panels call out deterministic vs heuristic replacement rules, failure gates, resume states, extension points, and operator-facing outputs.\"}}"
-}

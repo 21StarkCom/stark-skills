@@ -1,4 +1,0 @@
-{
-  "doc_content": {},
-  "alt_text": "A clean internal architecture diagram for the stark-onboard-project skill, showing a vertical workflow from bootstrap context through five phases: git initialization, GitHub repository creation, GitHub App connection, Claude Code setup, and final summary. Blue nodes mark workflow phases, purple nodes mark decision gates like \u201calready a git repo?\u201d and \u201cCLAUDE.md exists?\u201d, amber marks final outputs, red highlights manual recovery for GitHub App scope failures, and gray annotations explain external dependencies such as gh CLI, GitHub APIs, org installation settings, and the Python helper scripts. Supporting sections below summarize architecture notes, configuration surfaces, failure modes, and extension points for modifying the skill safely.\"}}"
-}

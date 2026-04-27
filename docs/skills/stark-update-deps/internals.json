@@ -1,4 +1,0 @@
-{
-  "doc_content": {},
-  "alt_text": "A clean internal architecture page for the stark-update-deps skill showing a vertical execution spine from discovery through reporting, with blue phase nodes, purple decision nodes, amber output nodes, a red recovery path, and a gray external registries node. Surrounding tables and cards explain the normalized dependency inventory, decision matrix states, internal policies like LTS preference and Docker tag skepticism, extension points for new manifest parsers and registry adapters, and failure-mode recovery rules.\"}}"
-}

@@ -72,11 +72,9 @@ Move code from branch to production.
 
 | Skill | What it does | When to use |
 |-------|-------------|-------------|
-| [`/stark-pr-flow`](docs/skills/stark-pr-flow/usage.md) | Push → create PR → self-review → merge | When you want the full PR lifecycle in one command. Includes multi-agent review. |
 | [`/stark-release`](docs/skills/stark-release/usage.md) | CHANGELOG → version bump → tag → GitHub Release | When a set of changes is ready to ship. Reads CHANGELOG.md to determine bump type. |
-| [`/stark-pr-status`](docs/skills/stark-pr-status/usage.md) | PR analytics dashboard | When you want to understand review cycles, merge times, or finding quality for specific PRs. |
 
-**Best practice:** Use `/stark-pr-flow` for routine work. For larger efforts, `/stark-phase-execute` handles PR creation internally. Always run `/stark-release` when shipping — never tag manually.
+**Best practice:** Always run `/stark-release` when shipping — never tag manually.
 
 ### Session Management
 
@@ -86,46 +84,21 @@ Start and end your work sessions with consistent context loading and cleanup.
 |-------|-------------|-------------|
 | [`/stark-session start`](docs/skills/stark-session/usage.md) | Load context, git state, health checks, briefing | Beginning of every work session. Catches stale branches, failing tests, open PRs. |
 | [`/stark-session end`](docs/skills/stark-session/usage.md) | Tests, merge PRs, commit docs, push | End of every work session. Ensures nothing is left dangling. |
-| [`/stark-session-insights`](docs/skills/stark-session-insights/usage.md) | Analyze session history for patterns | Periodically. Shows which skills you use most, common corrections, preference patterns. |
 | [`/stark-persona`](skill/stark-persona/SKILL.md) | Session character voices | Adds personality to sessions. Weighted selection, date-aware combos, catchphrases, feedback loop. |
 
 **Best practice:** Make `/stark-session start` and `/stark-session end` habitual — like opening and closing a shift. The start briefing catches context you'd otherwise miss (someone pushed to your branch, CI is red, a PR needs your review).
 
 ### Documentation
 
-Generate, scaffold, and maintain project documentation.
-
 | Skill | What it does | When to use |
 |-------|-------------|-------------|
 | [`/stark-init-docs`](docs/skills/stark-init-docs/usage.md) | Scaffold docs structure (ADRs, runbooks, etc.) | When starting a new project or adding docs to an existing one. Modes: template, backfill, upgrade, clean. |
-| [`/stark-extract-docs`](docs/skills/stark-extract-docs/usage.md) | Extract knowledge from specs/reviews into ADRs, retros, glossary | After a spec is implemented. Captures decisions and learnings before they're forgotten. |
-| [`/stark-generate-docs`](docs/skills/stark-generate-docs/usage.md) | Generate skill visualizations with multi-LLM competition | After modifying a SKILL.md. Enabled LLM competitors generate candidates, Claude judges screenshots, best wins. |
-| [`/stark-claude-md-improver`](docs/skills/stark-claude-md-improver/usage.md) | Analyze and improve CLAUDE.md files | When CLAUDE.md feels stale or incomplete. Checks for missing conventions, outdated paths, etc. |
-
-**Best practice:** Run `/stark-extract-docs` after every major feature or incident. The specs and review artifacts contain decisions and context that belong in permanent docs — ADRs, runbooks, glossary terms. If you wait, the context is lost.
 
 ### Project Management
 
-Bootstrap, rename, and maintain projects.
-
 | Skill | What it does | When to use |
 |-------|-------------|-------------|
-| [`/stark-onboard-project`](docs/skills/stark-onboard-project/usage.md) | Bootstrap a new project: git, GitHub repo, apps, CLAUDE.md | When creating a new repo. Sets up everything in one shot. |
-| [`/stark-rename-project`](docs/skills/stark-rename-project/usage.md) | Rename project locally + GitHub + sibling repo references | When a project needs renaming. Updates all cross-repo references. |
-| [`/stark-update-deps`](docs/skills/stark-update-deps/usage.md) | Audit and update dependency versions | Monthly, or when you notice stale deps. Checks PyPI, npm, Docker Hub, etc. |
 | [`/stark-housekeeping`](skill/stark-housekeeping/SKILL.md) | Audit stale issues, merged branches, and worktree remnants | When the repo or project board needs a cleanup pass. Supports dry-run and aggressive modes. |
-
-### Analytics
-
-Understand how the system is performing.
-
-| Skill | What it does | When to use |
-|-------|-------------|-------------|
-| [`/stark-metrics`](docs/skills/stark-metrics/usage.md) | Agent scorecards, finding quality, duration trends | After a batch of reviews. Shows which agents find real issues vs. noise. |
-| [`/stark-skill-analytics`](docs/skills/stark-skill-analytics/usage.md) | Skill usage patterns and adoption metrics | Periodically. Shows which skills are used, quality trends, recommendations. |
-| `/stark-tournament` | Multi-LLM competition with configurable evaluation | When you need the best output from competing LLMs. Semantic, visual, or test-based evaluation. |
-
-**Best practice:** Check `/stark-metrics` after every phase execution or batch of reviews. If an agent's noise rate exceeds 20%, run `/stark-review-improvement` to tune its prompts.
 
 ---
 
@@ -148,25 +121,12 @@ Understand how the system is performing.
 ```
 /stark-review 42                    # quick: 1 agent × 9 domains
 /stark-team-review 42               # thorough: enabled agents × 9 domains (default: 2)
-/stark-pr-status 42                 # analytics: rounds, findings, signal quality
 ```
 
 ### Monthly maintenance
 
 ```
-/stark-update-deps                  # check for outdated packages
-/stark-metrics                      # review system performance
-/stark-skill-analytics              # skill adoption trends
-/stark-claude-md-improver           # keep CLAUDE.md current
-/stark-generate-docs --check        # are skill docs stale?
-```
-
-### Onboarding a new repo
-
-```
-cd ~/git/Evinced/new-repo
-/stark-onboard-project              # git init, GitHub repo, apps, CLAUDE.md
-/stark-init-docs --template         # scaffold docs structure
+/stark-housekeeping                 # close stale issues, prune dead branches
 ```
 
 ---
@@ -287,8 +247,6 @@ Every skill has auto-generated documentation with visual workflow diagrams:
 - **[Skill Routing Guide](docs/skills/README.md)** — Mermaid decision trees: "which skill do I use?"
 - **[Skill Index](docs/skills/index.md)** — Full list with links to usage and internals docs
 - **Per-skill docs** — Each skill has `usage.md` (how to use) and `internals.md` (how it works), plus HTML visualizations and PNG screenshots
-
-The docs are generated by [`/stark-generate-docs`](docs/skills/stark-generate-docs/usage.md) — the enabled LLM competitors produce HTML visualizations, Claude judges the screenshots, and the best one wins.
 
 ## Design Specs
 

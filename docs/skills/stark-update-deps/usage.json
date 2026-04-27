@@ -1,4 +1,0 @@
-{
-  "doc_content": {},
-  "alt_text": "A clean single-page workflow diagram for the `stark-update-deps` skill, showing how a user invokes it with phrases like \u201cupdate dependencies,\u201d then moves through Discovery, Research, Compatibility Analysis, Update, Verification, and Final Report. Blue nodes represent workflow phases, a green node marks invocation, a purple node marks classification into Safe, Review, Blocked, and Skip, a red node shows the revert path for unverified versions, and an amber node shows the final output. Supporting tables explain scanned inputs and produced outputs, while cards highlight common workflows such as routine refreshes, major upgrade triage, and Docker tag verification.\"}}"
-}

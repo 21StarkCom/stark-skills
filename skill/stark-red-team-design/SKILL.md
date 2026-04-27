@@ -8,8 +8,8 @@ description: >-
 argument-hint: "<design-path> [--source-spec <path>] [--model <id>] [--dry-run] [--no-pr-comment]"
 disable-model-invocation: true
 model: opus
-revision: c94e868d2dff393ed85b21690fa6078d3e2498e1
-revision_date: 2026-04-27T16:17:05Z
+revision: 119a85b101220376c49cf8db62fac1fc0564725d
+revision_date: 2026-04-27T18:34:08Z
 ---
 
 # stark-red-team-design
@@ -200,8 +200,8 @@ commit the sidecar alongside their next design change.
 | `halted_human_review` | 0 | At least one persona requested human review on a finding too uncertain to counter-propose. |
 | `error` | 2 | Dispatch failed (auth, transport, parse). See `error` field. |
 
-The skill does **not** halt the calling pipeline — that semantics belongs to
-`/stark-forge` and `/stark-forged-review`. Manual invocation is informational.
+The skill does **not** halt the calling pipeline — exit codes are advisory.
+Manual invocation is informational.
 
 ## Notes
 

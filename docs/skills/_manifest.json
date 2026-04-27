@@ -9,11 +9,6 @@
       "usage_quality": "good",
       "internals_quality": "good"
     },
-    "stark-claude-md-improver": {
-      "hash": "452fa73fb2698971",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
-    },
     "stark-design": {
       "hash": "d3ebf578db48e1af",
       "usage_quality": "ok",
@@ -24,28 +19,8 @@
       "usage_quality": "ok",
       "internals_quality": "ok"
     },
-    "stark-extract-docs": {
-      "hash": "5f4c8db4ef260ec2",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
-    },
-    "stark-generate-docs": {
-      "hash": "646b249ccdc1f725",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
-    },
     "stark-init-docs": {
       "hash": "f6829ed4ebf3e57d",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
-    },
-    "stark-metrics": {
-      "hash": "2801e956c280196e",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
-    },
-    "stark-onboard-project": {
-      "hash": "0d8158d9e0683c69",
       "usage_quality": "ok",
       "internals_quality": "ok"
     },
@@ -59,23 +34,8 @@
       "usage_quality": "ok",
       "internals_quality": "ok"
     },
-    "stark-pr-flow": {
-      "hash": "f14694f7debe26d0",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
-    },
-    "stark-pr-status": {
-      "hash": "6d361899b5cd5982",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
-    },
     "stark-release": {
       "hash": "0f430b808dfdadbc",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
-    },
-    "stark-rename-project": {
-      "hash": "f6de79d76c54a900",
       "usage_quality": "ok",
       "internals_quality": "ok"
     },
@@ -101,26 +61,6 @@
     },
     "stark-session": {
       "hash": "b057c20d880d040c",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
-    },
-    "stark-session-insights": {
-      "hash": "db4caab76d3de9d4",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
-    },
-    "stark-skill-analytics": {
-      "hash": "b0f7d7761b506240",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
-    },
-    "stark-tournament": {
-      "hash": "d9e920a24d6e132c",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
-    },
-    "stark-update-deps": {
-      "hash": "e2654f1808d306ee",
       "usage_quality": "ok",
       "internals_quality": "ok"
     }

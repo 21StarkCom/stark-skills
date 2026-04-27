@@ -5,8 +5,8 @@ description: >-
 argument-hint: "[start|end]"
 disable-model-invocation: true
 model: opus
-revision: 8a249169623b83c1677dcda2bee230a3dd9fa8d1
-revision_date: 2026-04-27T18:17:48Z
+revision: 119a85b101220376c49cf8db62fac1fc0564725d
+revision_date: 2026-04-27T18:34:08Z
 ---
 
 ## Preflight
@@ -261,7 +261,7 @@ See [../../standards/observability.md](../../standards/observability.md).
 
 | Failure | Recovery |
 |---------|----------|
-| No CLAUDE.md | Note in briefing — suggest `/stark-onboard-project` |
+| No CLAUDE.md | Note in briefing — suggest creating one |
 | No memory files | "No previous session context" — not an error |
 | `gh` auth fails | Skip PR sections — show git state only |
 | Not a git repo | Skip git and PR sections |

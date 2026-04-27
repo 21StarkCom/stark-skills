@@ -28,10 +28,10 @@ SKILL_USAGE_PATH = Path.home() / ".claude" / "code-review" / "history" / "skill-
 VALID_CONTEXTS = {"review", "implementation", "session", "debug"}
 
 CONTEXT_SKILLS: dict[str, list[str]] = {
-    "review":         ["stark-review-improvement", "stark-metrics", "stark-session-insights"],
-    "implementation": ["stark-init-docs", "stark-extract-docs", "stark-update-deps"],
-    "session":        ["stark-housekeeping", "stark-skill-analytics", "stark-session-insights"],
-    "debug":          ["stark-review", "stark-metrics"],
+    "review":         ["stark-review-improvement"],
+    "implementation": ["stark-init-docs"],
+    "session":        ["stark-housekeeping"],
+    "debug":          ["stark-review"],
 }
 
 # ---------------------------------------------------------------------------
