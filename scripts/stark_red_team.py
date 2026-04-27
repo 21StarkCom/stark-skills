@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from codex_utils import CODEX_REASONING_EFFORT_HIGH
+
 REQUEST_HUMAN_REVIEW = "REQUEST_HUMAN_REVIEW"
 
 VALID_PERSONA_SLUGS: frozenset[str] = frozenset({
@@ -400,7 +402,7 @@ def dispatch_codex(
         "-m",
         model,
         "-c",
-        'model_reasoning_effort="high"',
+        CODEX_REASONING_EFFORT_HIGH,
         "--ephemeral",
         "--json",
         "-s",

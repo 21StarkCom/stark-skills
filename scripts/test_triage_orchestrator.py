@@ -98,6 +98,28 @@ def _dispatch_payload(domains: list[str]) -> dict[str, object]:
     }
 
 
+def _round_dispatch_payload(domains: list[str]) -> dict[str, object]:
+    results = [
+        {
+            "agent": "codex",
+            "model": "gpt-5.5",
+            "domain": domain,
+            "findings": [],
+            "error": "cli_error" if index == 1 else None,
+            "duration_s": 0.2 + (index * 0.1),
+        }
+        for index, domain in enumerate(domains)
+    ]
+    return {
+        "models": {"codex": "gpt-5.5"},
+        "rounds": [{"round": 1, "results": results}],
+        "summary": {
+            "failed_results": 1,
+            "clean": False,
+        },
+    }
+
+
 def _completed(stdout: str = "", stderr: str = "", returncode: int = 0) -> SimpleNamespace:
     return SimpleNamespace(stdout=stdout, stderr=stderr, returncode=returncode)
 
@@ -314,6 +336,36 @@ def test_json_output_schema(
 @patch("triage_orchestrator._discover_domains", return_value=_sample_raw_domains())
 @patch("triage_orchestrator.triage_domains", return_value=_sample_triage_result())
 @patch("triage_orchestrator.subprocess.run")
+def test_json_output_counts_failed_round_results(
+    mock_run: MagicMock,
+    _mock_triage: MagicMock,
+    _mock_domains: MagicMock,
+    _mock_config: MagicMock,
+    _mock_urlopen: MagicMock,
+) -> None:
+    dispatched = ["architecture", "security", "testing"]
+    mock_run.side_effect = [
+        _completed(stdout="diff --git a/app.py b/app.py\n+print('hi')\n"),
+        _completed(stdout=json.dumps(_round_dispatch_payload(dispatched))),
+    ]
+
+    rc, stdout, _stderr = _run_main(
+        ["triage_orchestrator.py", "--type", "pr", "--pr", "42", "--repo", "acme/repo", "--json", "--plain"]
+    )
+
+    assert rc == 0
+    payload = json.loads(stdout)
+    assert payload["dispatch"]["succeeded"] == 2
+    assert payload["dispatch"]["failed"] == 1
+    assert payload["dispatch"]["models"] == {"codex": "gpt-5.5"}
+    assert any(result.get("error") == "cli_error" for result in payload["dispatch"]["results"])
+
+
+@patch("triage_orchestrator.urllib.request.urlopen", return_value=_UrlOpenContext())
+@patch("triage_orchestrator.discover_config", return_value=_minimal_config())
+@patch("triage_orchestrator._discover_domains", return_value=_sample_raw_domains())
+@patch("triage_orchestrator.triage_domains", return_value=_sample_triage_result())
+@patch("triage_orchestrator.subprocess.run")
 def test_domains_arg_passthrough(
     mock_run: MagicMock,
     _mock_triage: MagicMock,
@@ -352,6 +404,85 @@ def test_domains_arg_passthrough(
 @patch("triage_orchestrator._discover_domains", return_value=_sample_raw_domains())
 @patch("triage_orchestrator.triage_domains", return_value=_sample_triage_result())
 @patch("triage_orchestrator.subprocess.run")
+def test_agent_arg_plumbed_to_pr_dispatch(
+    mock_run: MagicMock,
+    _mock_triage: MagicMock,
+    _mock_domains: MagicMock,
+    _mock_config: MagicMock,
+    _mock_urlopen: MagicMock,
+) -> None:
+    """`--agent` should keep triage-selected domains and force one PR reviewer."""
+    dispatched = ["architecture", "security", "testing"]
+    mock_run.side_effect = [
+        _completed(stdout="diff --git a/app.py b/app.py\n+print('hi')\n"),
+        _completed(stdout=json.dumps(_dispatch_payload(dispatched))),
+    ]
+
+    rc, _stdout, _stderr = _run_main(
+        [
+            "triage_orchestrator.py",
+            "--type",
+            "pr",
+            "--pr",
+            "42",
+            "--repo",
+            "acme/repo",
+            "--agent",
+            "codex",
+            "--plain",
+        ]
+    )
+
+    assert rc == 0
+    dispatch_argv = mock_run.call_args_list[1].args[0]
+    assert "--single" in dispatch_argv
+    assert dispatch_argv[dispatch_argv.index("--agent") + 1] == "codex"
+    assert dispatch_argv[dispatch_argv.index("--domains") + 1] == ",".join(dispatched)
+
+
+@patch("triage_orchestrator.urllib.request.urlopen", return_value=_UrlOpenContext())
+@patch("triage_orchestrator.discover_config", return_value=_minimal_config())
+@patch("triage_orchestrator._discover_plan_domains", return_value=_sample_raw_domains())
+@patch("triage_orchestrator.triage_domains", return_value=_sample_triage_result())
+@patch("triage_orchestrator.subprocess.run", return_value=_completed(stdout=json.dumps(_dispatch_payload(["architecture", "security", "testing"]))))
+def test_agent_arg_plumbed_to_design_dispatch(
+    mock_run: MagicMock,
+    _mock_triage: MagicMock,
+    _mock_domains: MagicMock,
+    _mock_config: MagicMock,
+    _mock_urlopen: MagicMock,
+) -> None:
+    """`--agent` should force one design/plan reviewer through --agents."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        doc_path = Path(tmpdir) / "design.md"
+        doc_path.write_text("# Design\n\ncontent\n", encoding="utf-8")
+
+        rc, _stdout, _stderr = _run_main(
+            [
+                "triage_orchestrator.py",
+                "--type",
+                "design",
+                "--file",
+                str(doc_path),
+                "--agent",
+                "codex",
+                "--plain",
+            ]
+        )
+
+    assert rc == 0
+    dispatch_argv = mock_run.call_args.args[0]
+    assert "--agents" in dispatch_argv
+    assert dispatch_argv[dispatch_argv.index("--agents") + 1] == "codex"
+    assert "--agent" not in dispatch_argv
+    assert "--single" not in dispatch_argv
+
+
+@patch("triage_orchestrator.urllib.request.urlopen", return_value=_UrlOpenContext())
+@patch("triage_orchestrator.discover_config", return_value=_minimal_config())
+@patch("triage_orchestrator._discover_domains", return_value=_sample_raw_domains())
+@patch("triage_orchestrator.triage_domains", return_value=_sample_triage_result())
+@patch("triage_orchestrator.subprocess.run")
 def test_round_arg_plumbed_to_dispatch(
     mock_run: MagicMock,
     _mock_triage: MagicMock,
@@ -383,13 +514,13 @@ def test_round_arg_plumbed_to_dispatch(
 def test_extract_dispatch_models_prefers_top_level_map() -> None:
     """Top-level ``models`` map (emitted by current dispatchers) wins."""
     payload = {
-        "models": {"claude": "claude-opus-4-7", "codex": "gpt-5.4"},
+        "models": {"claude": "claude-opus-4-7", "codex": "gpt-5.5"},
         "results": [{"agent": "claude", "model": "stale", "domain": "x"}],
     }
     result = triage_orchestrator._extract_dispatch_models(
         payload, payload["results"]
     )
-    assert result == {"claude": "claude-opus-4-7", "codex": "gpt-5.4"}
+    assert result == {"claude": "claude-opus-4-7", "codex": "gpt-5.5"}
 
 
 def test_extract_dispatch_models_falls_back_to_per_result() -> None:
@@ -398,12 +529,12 @@ def test_extract_dispatch_models_falls_back_to_per_result() -> None:
     """
     results = [
         {"agent": "claude", "model": "claude-opus-4-7", "domain": "security"},
-        {"agent": "codex", "model": "gpt-5.4", "domain": "architecture"},
+        {"agent": "codex", "model": "gpt-5.5", "domain": "architecture"},
     ]
     payload = {"results": results}
     assert triage_orchestrator._extract_dispatch_models(payload, results) == {
         "claude": "claude-opus-4-7",
-        "codex": "gpt-5.4",
+        "codex": "gpt-5.5",
     }
 
 
@@ -502,9 +633,9 @@ def test_build_final_payload_includes_dispatch_models() -> None:
         succeeded=0,
         failed=0,
         total_duration_s=0.5,
-        dispatch_models={"claude": "claude-opus-4-7", "codex": "gpt-5.4"},
+        dispatch_models={"claude": "claude-opus-4-7", "codex": "gpt-5.5"},
     )
     assert payload["dispatch"]["models"] == {
         "claude": "claude-opus-4-7",
-        "codex": "gpt-5.4",
+        "codex": "gpt-5.5",
     }

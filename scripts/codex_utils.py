@@ -17,9 +17,10 @@ except ImportError:  # pragma: no cover - backward compat for older installs
         return True
 
 # Default model — pinned to avoid silent changes from CLI updates.
-CODEX_MODEL = "gpt-5.4"
+CODEX_MODEL = "gpt-5.5"
 
 # Reasoning effort config for -c flag (TOML key=value format).
+CODEX_REASONING_EFFORT_XHIGH = 'model_reasoning_effort="xhigh"'
 CODEX_REASONING_EFFORT_HIGH = 'model_reasoning_effort="high"'
 CODEX_REASONING_EFFORT_MEDIUM = 'model_reasoning_effort="medium"'
 

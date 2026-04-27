@@ -29,6 +29,10 @@ def test_get_model_rates_returns_defaults(tmp_path):
         rates = config_loader.get_model_rates()
     assert "o3" in rates
     assert "claude-opus-4-7" in rates
+    assert "gpt-5.4" in rates
+    assert "gpt-5.5" in rates
+    assert rates["gpt-5.4"]["input_per_1m_usd"] > 0
+    assert rates["gpt-5.5"]["input_per_1m_usd"] > 0
     assert rates["o3"]["input_per_1m_usd"] > 0
     assert "_fallback" in rates
 
@@ -51,7 +55,7 @@ def test_get_red_team_config_allows_locked_fields_in_global_config(tmp_path, cap
     cfg_file.write_text(json.dumps({
         "red_team": {
             "personas": ["ml-systems"],
-            "model": "gpt-5.4",
+            "model": "gpt-5.5",
             "max_rounds": 3,
         }
     }))
@@ -60,7 +64,7 @@ def test_get_red_team_config_allows_locked_fields_in_global_config(tmp_path, cap
         cfg = config_loader.get_red_team_config()
     assert cfg["max_rounds"] == 3
     assert cfg["personas"] == ["ml-systems"]
-    assert cfg["model"] == "gpt-5.4"
+    assert cfg["model"] == "gpt-5.5"
     err = capsys.readouterr().err
     assert "locked to global config" not in err
 

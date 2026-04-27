@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from claude_utils import build_claude_cmd, make_clean_env
-from codex_utils import CODEX_REASONING_EFFORT_HIGH, parse_jsonl_output
+from codex_utils import CODEX_REASONING_EFFORT_XHIGH, parse_jsonl_output
 from gemini_utils import (
     setup_gemini_home, make_gemini_env,
     parse_json_output as parse_gemini_output,
@@ -59,7 +59,7 @@ FINDINGS_FORMAT = (
 )
 
 DEFAULT_TIMEOUT = 300
-CODEX_REASONING_CONFIG = CODEX_REASONING_EFFORT_HIGH
+CODEX_REASONING_CONFIG = CODEX_REASONING_EFFORT_XHIGH
 
 
 
