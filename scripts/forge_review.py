@@ -15,6 +15,7 @@ import hashlib
 import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -102,6 +103,46 @@ def _dispatch_review(
         )
     except ImportError:
         return {"findings": [], "summary": {"total_findings": 0}}
+
+
+def _dispatch_agent_groups(
+    spec_text: str,
+    round_num: int,
+    *,
+    repo_dir: Path,
+    prompts_dir: str,
+    agent_groups: dict[str, dict[str, dict[str, Any]]],
+    timeout: int,
+    workers: int,
+) -> list[dict[str, Any]]:
+    """Dispatch non-consensus agent groups, honoring the forge worker cap."""
+    items = [(agent, domains) for agent, domains in agent_groups.items()]
+    if not items:
+        return []
+
+    def run_one(agent: str, domains: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        return _dispatch_review(
+            spec_text,
+            round_num,
+            repo_dir=str(repo_dir),
+            prompts_dir=prompts_dir,
+            agents=[agent],
+            domains=domains,
+            timeout=timeout,
+        )
+
+    if workers <= 1 or len(items) == 1:
+        results = [run_one(agent, domains) for agent, domains in items]
+    else:
+        with ThreadPoolExecutor(max_workers=min(workers, len(items))) as pool:
+            futures = [pool.submit(run_one, agent, domains) for agent, domains in items]
+            # Preserve submission order for stable state/test output.
+            results = [future.result() for future in futures]
+
+    findings: list[dict[str, Any]] = []
+    for result in results:
+        findings.extend(result.get("findings", []))
+    return findings
 
 
 # ── Agent routing ────────────────────────────────────────────────────
@@ -399,11 +440,15 @@ def run_design_review(
     state: dict[str, Any],
     cfg: dict[str, Any],
     repo_dir: Path,
+    *,
+    dry_run: bool = False,
 ) -> PhaseResult:
     """Run the design review iron-rule loop.
 
     Rounds 1..max_rounds: dispatch -> classify -> fix -> commit
     Halt round (max_rounds+1): dispatch ALL domains, any fix/blocked -> HALT
+    In dry-run mode, run only round 1 and report findings without rewriting
+    or committing the spec.
     """
     max_rounds = cfg.get("max_rounds", 3)
     halt_round = max_rounds + 1
@@ -414,6 +459,7 @@ def run_design_review(
     consensus_threshold = cfg.get("consensus_threshold", 2)
     timeout = cfg.get("review_timeout", cfg.get("timeout", 300))
     fix_timeout = cfg.get("fix_timeout", 900)
+    workers = max(1, int(cfg.get("workers", 1)))
     prompts_dir = str(FORGE_PROMPTS_DIR)
 
     spec_text = spec_path.read_text(encoding="utf-8")
@@ -463,18 +509,17 @@ def run_design_review(
 
         all_findings: list[dict[str, Any]] = []
 
-        # Dispatch each agent group
-        for agent, domains_dict in agent_groups.items():
-            dispatch_result = _dispatch_review(
+        all_findings.extend(
+            _dispatch_agent_groups(
                 spec_text,
                 round_num,
-                repo_dir=str(repo_dir),
+                repo_dir=repo_dir,
                 prompts_dir=prompts_dir,
-                agents=[agent],
-                domains=domains_dict,
+                agent_groups=agent_groups,
                 timeout=timeout,
+                workers=workers,
             )
-            all_findings.extend(dispatch_result.get("findings", []))
+        )
 
         # Dispatch consensus domains to multiple agents
         for cd in consensus_domains:
@@ -532,6 +577,17 @@ def run_design_review(
 
         result.rounds.append(round_record)
         result.noise += noise_count
+
+        if dry_run:
+            round_record["dry_run"] = True
+            print(
+                f"[forge_review] Dry run round {round_num}: "
+                f"{fix_count} actionable, {noise_count} noise, "
+                f"{blocked_count} blocked. No fixes or commits applied.",
+                file=sys.stderr,
+            )
+            result.status = "completed"
+            break
 
         # Halt round logic
         if is_halt:

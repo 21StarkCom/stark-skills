@@ -3,6 +3,8 @@ name: stark-agents-md
 description: >-
   Create, refactor, or review AGENTS.md files using progressive disclosure. Use for agents.md/claude.md authoring or when a repo is missing AGENTS.md.
 disable-model-invocation: true
+revision: fc00645dab4dfbd912c68aecf52fd7aeb5eed3bd
+revision_date: 2026-04-25T14:06:09+03:00
 ---
 
 # AGENTS.md Skill

@@ -5,6 +5,8 @@ description: >-
   /stark-persona.
 disable-model-invocation: true
 model: opus
+revision: 6b87ca62ee8dd55dc36bf48842dc93d2db763258
+revision_date: 2026-04-02T14:29:50+03:00
 ---
 
 # stark-persona

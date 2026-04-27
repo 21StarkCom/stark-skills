@@ -10,6 +10,7 @@ from forge_plan import (  # pyright: ignore[reportMissingImports]
     _all_findings_from_result,
     _build_routed_agent_groups,
     _count_findings_at_or_above,
+    _dispatch_plan_agent_groups,
     run_plan_phase,
     run_plan_review,
 )
@@ -55,6 +56,12 @@ def minimal_cfg():
         },
         "agent_fallback_order": ["claude", "codex"],
     }
+
+
+@pytest.fixture(autouse=True)
+def _agents_enabled_by_default():
+    with patch("forge_plan.is_agent_enabled", return_value=True):
+        yield
 
 
 # ── _count_findings_at_or_above ────────────────────────────────────────────
@@ -131,19 +138,79 @@ class TestBuildRoutedAgentGroups:
             "security": {"order": "02", "filename": "security.md"},
             "risk": {"order": "03", "filename": "risk.md"},
         }
-        groups = _build_routed_agent_groups(routing, domains, ["claude", "codex"])
+        with patch("forge_plan.is_agent_enabled", return_value=True):
+            groups = _build_routed_agent_groups(routing, domains, ["claude", "codex"])
         assert set(groups["claude"].keys()) == {"general", "risk"}
         assert set(groups["codex"].keys()) == {"security"}
 
     def test_unknown_domain_uses_fallback(self):
         routing = {}
         domains = {"general": {"order": "01", "filename": "general.md"}}
-        groups = _build_routed_agent_groups(routing, domains, ["claude"])
+        with patch("forge_plan.is_agent_enabled", return_value=True):
+            groups = _build_routed_agent_groups(routing, domains, ["claude"])
         assert "general" in groups["claude"]
 
+    def test_disabled_routed_agent_uses_enabled_fallback(self):
+        routing = {"security": "codex"}
+        domains = {"security": {"order": "02", "filename": "security.md"}}
+
+        def fake_enabled(agent):
+            return agent == "claude"
+
+        with patch("forge_plan.is_agent_enabled", side_effect=fake_enabled):
+            groups = _build_routed_agent_groups(routing, domains, ["codex", "claude"])
+
+        assert "security" in groups["claude"]
+        assert "codex" not in groups
+
     def test_empty_domains(self):
-        groups = _build_routed_agent_groups({}, {}, ["claude"])
+        with patch("forge_plan.is_agent_enabled", return_value=True):
+            groups = _build_routed_agent_groups({}, {}, ["claude"])
         assert groups == {}
+
+
+# ── _dispatch_plan_agent_groups ────────────────────────────────────────────
+
+
+class TestDispatchPlanAgentGroups:
+    def test_dispatches_all_agent_groups_with_worker_cap(self, tmp_path):
+        groups = {
+            "claude": {"general": {"order": "01"}},
+            "codex": {"security": {"order": "02"}},
+        }
+        calls: list[str] = []
+
+        def fake_dispatch(_text, _round, **kwargs):
+            agent = kwargs["agents"][0]
+            calls.append(agent)
+            return {
+                "results": [
+                    {
+                        "agent": agent,
+                        "findings": [
+                            {
+                                "agent": agent,
+                                "domain": next(iter(kwargs["domains"])),
+                                "severity": "low",
+                            }
+                        ],
+                    }
+                ]
+            }
+
+        with patch("forge_plan._dispatch_plan_review", side_effect=fake_dispatch):
+            findings = _dispatch_plan_agent_groups(
+                "plan",
+                1,
+                global_prompts_dir="prompts",
+                agent_groups=groups,
+                timeout=60,
+                repo_dir=tmp_path,
+                workers=2,
+            )
+
+        assert calls == ["claude", "codex"]
+        assert [finding["agent"] for finding in findings] == ["claude", "codex"]
 
 
 # ── run_plan_phase ─────────────────────────────────────────────────────────

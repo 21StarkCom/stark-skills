@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from forge_review import (  # pyright: ignore[reportMissingImports]
     PhaseResult,
+    _dispatch_agent_groups,
     _apply_consensus,
     _group_domains_by_agent,
     _map_changed_sections_to_domains,
@@ -121,6 +122,44 @@ class TestResolveAgent:
     def test_returns_none_when_all_disabled(self):
         with patch("forge_review.is_agent_enabled", return_value=False):
             assert _resolve_agent("claude", ["claude", "codex"]) is None
+
+
+class TestDispatchAgentGroups:
+    def test_dispatches_all_agent_groups_with_worker_cap(self, tmp_path):
+        groups = {
+            "claude": {"general": {"order": "01"}},
+            "codex": {"security": {"order": "02"}},
+        }
+        calls: list[str] = []
+
+        def fake_dispatch(_text, _round, **kwargs):
+            agent = kwargs["agents"][0]
+            calls.append(agent)
+            return {
+                "findings": [
+                    {
+                        "agent": agent,
+                        "domain": next(iter(kwargs["domains"])),
+                        "section": "## S",
+                        "title": f"{agent} finding",
+                        "severity": "low",
+                    }
+                ]
+            }
+
+        with patch("forge_review._dispatch_review", side_effect=fake_dispatch):
+            findings = _dispatch_agent_groups(
+                "spec",
+                1,
+                repo_dir=tmp_path,
+                prompts_dir="prompts",
+                agent_groups=groups,
+                timeout=60,
+                workers=2,
+            )
+
+        assert calls == ["claude", "codex"]
+        assert [finding["agent"] for finding in findings] == ["claude", "codex"]
 
 
 class TestGroupDomainsByAgent:
@@ -665,6 +704,46 @@ class TestRunDesignReview:
 
         assert result.status == "completed"
         assert result.commit_shas == []
+
+    def test_dry_run_reports_round_one_without_fixing_or_committing(
+        self, spec_file, minimal_state, minimal_cfg, tmp_path
+    ):
+        """Dry run dispatches round 1 but never applies fixes or commits."""
+        high_finding = {
+            "agent": "claude",
+            "domain": "general",
+            "section": "## Solution",
+            "title": "Missing retry",
+            "severity": "high",
+            "description": "Add retry",
+        }
+        with (
+            patch(
+                "forge_review._dispatch_review",
+                return_value=self._make_dispatch_result([high_finding]),
+            ) as mock_dispatch,
+            patch(
+                "forge_review._discover_forge_domains",
+                return_value={
+                    "general": {"order": "01", "filename": "01-general.md"},
+                },
+            ),
+            patch("forge_review.is_agent_enabled", return_value=True),
+            patch("forge_review._commit_round") as mock_commit,
+            patch("forge_fix_loop.apply_fixes") as mock_apply,
+        ):
+            result = run_design_review(
+                spec_file, minimal_state, minimal_cfg, tmp_path, dry_run=True,
+            )
+
+        assert result.status == "completed"
+        assert result.findings_fixed == 0
+        assert result.commit_shas == []
+        assert result.rounds[0]["dry_run"] is True
+        assert result.rounds[0]["fix"] == 1
+        assert mock_dispatch.call_count == 1
+        mock_apply.assert_not_called()
+        mock_commit.assert_not_called()
 
     def test_commit_made_when_findings_fixed(
         self, spec_file, minimal_state, tmp_path
