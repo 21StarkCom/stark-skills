@@ -5,21 +5,13 @@ description: >-
 argument-hint: "<path> [--rounds N] [--dry-run] [--force] [--tournament]"
 disable-model-invocation: true
 model: opus
-revision: 388364ac84d996dc240d75988be2a934d4732e45
-revision_date: 2026-04-10T11:40:44+03:00
+revision: 8a249169623b83c1677dcda2bee230a3dd9fa8d1
+revision_date: 2026-04-27T18:17:48Z
 ---
 
 ## Preflight
 
-Run environment validation before proceeding:
-```bash
-python3 ~/.claude/code-review/scripts/preflight.py --workflow stark-review-design --json
-```
-Parse the JSON result:
-- If `overall` is "blocked": print the failing checks and stop. Do not proceed.
-- If `overall` is "degraded": print a warning with the failing checks, then continue.
-- If `overall` is "ready": continue silently.
-- In non-interactive automation contexts, a blocked preflight must emit a `preflight_check` event with `status=blocked`, append an entry to `~/.claude/code-review/alerts.jsonl`, and exit non-zero so the trigger is marked failed.
+Run [standard preflight](../../standards/preflight.md) with `--workflow stark-review-design`.
 
 # stark-review-design
 
@@ -191,18 +183,13 @@ This creates a per-round commit trail. Researchers can `git log --oneline -- <pa
 
 ### 2d. Early termination check
 
-First, check dispatch health from the JSON output's `summary` field:
-- If `summary.succeeded == 0` (all sub-agents failed): this is a **dispatch failure**, not a clean design. Run diagnostics:
-  ```bash
-  which claude codex gemini  # verify CLIs are installed
-  $PYTHON $SCRIPTS/plan_review_dispatch.py --prompts-dir design-review --file "$path" --round $round --agents claude --timeout 60  # single-agent probe
-  ```
-  Report the failure with stderr details. Do NOT treat zero findings as "clean." Skip remaining rounds and Phase 3 (re-dispatching will hit the same failure). Go directly to Phase 4 with a dispatch-failure summary.
-- If `summary.succeeded > 0` but `summary.succeeded / summary.total_sub_agents < 0.5`: warn "Low coverage — only N/M sub-agents succeeded. Results may be incomplete." Continue normally.
+Run the [shared dispatch-failure check](../../standards/dispatch-failure.md)
+against the round's `summary`. `<prompts-dir>` for the diagnostic probe is
+`design-review`. On dispatch failure, jump straight to Phase 4 with the
+dispatch-failure summary template.
 
-If dispatch was healthy and this round produced zero findings classified as `fix` or `recurring`:
-- Skip remaining fix rounds
-- Go directly to Phase 3 (final review)
+If dispatch was healthy and this round produced zero findings classified as
+`fix` or `recurring`, skip remaining fix rounds and go to Phase 3.
 
 ### 2e. Persist round (optional)
 
@@ -225,86 +212,33 @@ This round is review-only — no fixes applied. The findings represent the final
 
 ## Phase 4: Summary
 
-Generate a consolidated markdown summary with these sections:
+Build a `SummaryInput` JSON envelope from the round payloads (one entry per
+round, each carrying `summary`, `findings` with the skill's `classification`
+overlay, and optional `results` for the dispatch-failure path) plus the design
+file's `git diff` if any fix commits landed:
 
-**If dispatch failure occurred**, use this template instead of the normal summary:
-
-```markdown
-## Design Review — Dispatch Failure
-
-**File:** {path}
-**Status:** Review could not complete — {succeeded}/{total} sub-agents succeeded.
-
-### Error Details
-| Agent | Domain | Error | Stderr (truncated) |
-|-------|--------|-------|-------------------|
-(one row per failed sub-agent from the dispatch JSON)
-
-### Diagnostics
-- CLI availability: claude={yes/no}, codex={yes/no}, gemini={yes/no}
-- Single-agent probe: {result of diagnostic dispatch}
-
-### Recommendation
-{e.g., "Check API keys/auth", "CLI not installed", "Network issue"}
+```bash
+TOOLS="$HOME/.claude/code-review/tools"
+SUMMARY_MD=$(node --experimental-strip-types "$TOOLS/design_review_summary.ts" \
+  --input rounds.json)
 ```
 
-**Otherwise, use the normal summary:**
+The tool emits the full Phase 4 markdown:
 
-### 4a. Headline Counts
+- **4a Headline counts** — issues vs noise vs ignored, signal-to-noise %.
+- **4b All findings table** — sorted by round then severity, with classification.
+- **4c Fixed** — grouped by round.
+- **4d Recurring** — bucketed by `(section, domain)` across rounds.
+- **4e Unresolved** — fix/recurring findings remaining in the final round.
+- **4f Noise & false positives** — one line per finding with the recorded reason.
+- **4g Misalignment Analysis** — emits a placeholder table; **the skill fills in counts and improvement actions** (LLM judgment required).
+- **4h Changes Made** — fenced `git diff` of the design file across fix rounds (skipped if no diff).
+- **4i Prompt Improvement Assessment** — emits a placeholder table; **the skill recommends levels (Global/Repo/Config)** based on patterns it observed.
 
-**Issues and noise are counted separately.** The headline reflects only real issues.
-
-```markdown
-**Issues found:** {fix + recurring count} | **Noise:** {noise + false_positive count} | **Ignored:** {ignored count}
-**Signal-to-noise:** {issues / (issues + noise) * 100}%
-```
-
-- **Issues** = findings classified as `fix` or `recurring` (real problems in the design)
-- **Noise** = `false_positive` or `noise` (not real problems — do not count as issues)
-- **Ignored** = below fix_threshold
-
-### 4b. All Findings Table
-
-| # | Round | Agent(s) | Domain | Severity | Section | Title | Outcome |
-|---|-------|----------|--------|----------|---------|-------|---------|
-
-### 4c. Fixed — findings addressed, grouped by round.
-
-### 4d. Recurring — findings in 2+ rounds. Which round resolved them.
-
-### 4e. Unresolved — findings from the final round that remain.
-
-### 4f. Noise & False Positives — one-line reasoning per finding.
-
-### 4g. Misalignment Analysis
-
-For each noise/false_positive finding, analyze **why** the reviewer flagged it and what context was missing. Group into root causes:
-
-| Root Cause | Count | Improvement Action |
-|------------|-------|--------------------|
-| **Missing context in design** | N | Design didn't explain rationale for choice X → add a "## Design Decisions" or "## Rationale" section |
-| **Overly aggressive prompt** | N | Domain prompt flags pattern X which is valid for this design type → tune prompt |
-| **Scope mismatch** | N | Reviewer applied production-system criteria to prototype → add context-awareness to prompt |
-| **Already addressed elsewhere** | N | Finding refers to something covered in a different section → improve cross-references in the design |
-
-For each root cause, provide a concrete action: what to add to the design, which prompt to tune, or what config to change.
-
-### 4h. Changes Made
-
-Diff of design changes across all fix rounds. Compare `original_content` with current file content.
-
-### 4i. Prompt Improvement Assessment
-
-Analyze patterns across all rounds:
-
-| Signal | Recommended Level | File |
-|--------|-------------------|------|
-| Agent X false positives in domain Y across designs | **Global** | `global/prompts/design-review/{agent}/{domain}.md` |
-| Agent X false positives only for this repo | **Repo** | `{repo}/.code-review/design-prompts/{agent}/{domain}.md` |
-| All agents miss same issue found during fixing | **Global** (all agents) | `global/prompts/design-review/*/{domain}.md` |
-| Findings irrelevant to design type | **Repo config** | `disabled_domains` in config |
-
-Recommend only — do NOT modify prompts.
+If any round has `summary.succeeded == 0`, the tool swaps in the
+**dispatch-failure template** (file path, per-agent error rows, CLI
+availability if provided) and the skill should fill in the recommendation
+line from its diagnostic probe.
 
 ## Phase 5: Output & Persist
 

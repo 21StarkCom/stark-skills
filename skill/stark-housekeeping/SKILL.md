@@ -5,8 +5,8 @@ description: >-
 argument-hint: "[--dry-run] [--repo ORG/REPO] [--aggressive]"
 disable-model-invocation: true
 model: sonnet
-revision: ea827b2dd463a563417f2dd86c31248eb42b5cfb
-revision_date: 2026-04-10T17:10:53+03:00
+revision: 8a249169623b83c1677dcda2bee230a3dd9fa8d1
+revision_date: 2026-04-27T18:17:48Z
 ---
 
 # stark-housekeeping
@@ -168,54 +168,30 @@ Unreleased commits: {N} since {last_tag}
 
 ## Phase 5: Infrastructure Cleanup
 
-### 5.1 Session file cleanup
-
-Find and remove `~/.claude/code-review/sessions/*.json` files older than 30 days. Present list. If `--dry-run` → stop here. Otherwise delete.
-
-### 5.2 Checkpoint cleanup
-
-Find and remove `~/.claude/code-review/sessions/**/checkpoint-*.md` files older than 7 days. Present list. If `--dry-run` → stop here. Otherwise delete.
-
-### 5.3 Stale lock cleanup
-
-Use `lock_helpers.is_lock_stale()` to identify stale `.lock` files in `~/.claude/code-review/` and `/tmp/`:
 ```bash
-$PYTHON -c "
-import sys, pathlib; sys.path.insert(0, '$SCRIPTS')
-import lock_helpers
-for d in [pathlib.Path.home()/'.claude/code-review', pathlib.Path('/tmp')]:
-    for f in (d.glob('*.lock') if d.exists() else []):
-        if lock_helpers.is_lock_stale(str(f)): print(f)
-" 2>/dev/null
-```
-Present list. If `--dry-run` → stop. Otherwise delete.
-
-### 5.4 Log rotation
-
-Keep the last 1000 lines of each log file if it exceeds that length:
-- `~/.claude/code-review/healer.jsonl`
-- `~/.claude/code-review/preflight.jsonl`
-- `~/.claude/code-review/approach-contracts.jsonl`
-
-For each: `tail -1000 "$LOG" > "${LOG}.tmp" && mv "${LOG}.tmp" "$LOG"`. If `--dry-run`, report files with > 1000 lines without modifying.
-
-### 5.5 Validation log cleanup
-
-Find and remove `~/.claude/code-review/logs/*.stderr` files older than 14 days. Present list. If `--dry-run` → stop. Otherwise delete.
-
-### 5.6 Artifact archival
-
-Archive files older than 30 days from `automation/logs/` and `~/.claude/code-review/history/autopilot/` into `~/.claude/code-review/archives/{source-slug}-{YYYY-MM}.tar.gz` (one per source per month). Group by month of last modification. Use `tar -rf` to append to existing archives.
-
-```bash
-ARCHIVE_DIR=~/.claude/code-review/archives && mkdir -p "$ARCHIVE_DIR"
-# For each source and month group:
-tar -czf "$ARCHIVE_DIR/{slug}-{YYYY-MM}.tar.gz" -C <parent> <files...>
-tar -tzf "$ARCHIVE_DIR/{slug}-{YYYY-MM}.tar.gz" > /dev/null  # verify
-rm <files...>  # only after successful verification
+TOOLS="$HOME/.claude/code-review/tools"
+INFRA_JSON=$(node --experimental-strip-types "$TOOLS/housekeeping_infra.ts" \
+  ${DRY_RUN:+--dry-run} --json)
 ```
 
-If archive creation or verification fails, leave originals and report the error.
+The tool runs all six sub-phases in one pass, returning a receipt the skill
+renders into the Phase 4 summary block:
+
+| Sub-phase | Target | Threshold |
+|-----------|--------|-----------|
+| 5.1 | `~/.claude/code-review/sessions/*.json` | 30 days |
+| 5.2 | `~/.claude/code-review/sessions/**/checkpoint-*.md` | 7 days |
+| 5.3 | Stale `.lock` files in `~/.claude/code-review/` and `/tmp/` | TS port of `lock_helpers.is_lock_stale` (TTL + PID alive + start_time match) |
+| 5.4 | `healer.jsonl`, `preflight.jsonl`, `approach-contracts.jsonl` | keep last 1000 lines |
+| 5.5 | `~/.claude/code-review/logs/*.stderr` | 14 days |
+| 5.6 | `automation/logs/` and `~/.claude/code-review/history/autopilot/` | tar.gz files older than 30 days, grouped by YYYY-MM into `~/.claude/code-review/archives/` |
+
+Receipt: `{ dryRun, sessionsRemoved[], checkpointsRemoved[],
+staleLocksRemoved[], validationLogsRemoved[], logsRotated[],
+artifactsArchived[{archive, files[]}], errors[] }`. Exit code is non-zero
+only when `errors` is non-empty (e.g. an unlink permission error). Tar
+archive creation verifies via `tar -tzf` before unlinking originals; on
+verification failure the originals are left in place and `errors` notes it.
 
 ---
 

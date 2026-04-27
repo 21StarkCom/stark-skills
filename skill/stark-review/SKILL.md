@@ -6,8 +6,8 @@ description: >-
 argument-hint: "[PR_NUMBER] [--agent claude|codex|gemini] [--dry-run] [--repo ORG/REPO]"
 disable-model-invocation: false
 model: opus[1m]
-revision: 4f1635240aa7f08faed91a3be304edaa043bb999
-revision_date: 2026-04-27T09:30:40+03:00
+revision: 8a249169623b83c1677dcda2bee230a3dd9fa8d1
+revision_date: 2026-04-27T18:17:48Z
 ---
 
 Cheaper single-agent PR review path. Keep this skill thin: call the Python
@@ -16,20 +16,7 @@ logic in `SKILL.md`.
 
 ## Preflight
 
-Run environment validation before proceeding:
-
-```bash
-SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
-PYTHON="$SCRIPTS/.venv/bin/python3"
-[ -x "$PYTHON" ] || PYTHON=python3
-"$PYTHON" "$SCRIPTS/preflight.py" --workflow stark-review --json
-```
-
-Parse the JSON result:
-
-- If `overall` is `blocked`: print the failing checks and stop.
-- If `overall` is `degraded`: print a warning with the failing checks, then continue.
-- If `overall` is `ready`: continue silently.
+Run [standard preflight](../../standards/preflight.md) with `--workflow stark-review`.
 
 ## Arguments
 
@@ -79,54 +66,26 @@ This follows the standard config hierarchy (repo > org > global).
 ## Setup
 
 1. Verify `gh auth status` succeeds.
-2. Resolve `PR_NUM`, `REPO`, `BASE`, `BRANCH`, `HEAD_SHA`, and `IS_FORK` from GitHub:
+2. Provision the review worktree:
 
    ```bash
-   gh pr view "$PR_NUM" --repo "$REPO" \
-     --json number,headRefName,headRefOid,baseRefName,isCrossRepository,maintainerCanModify
+   TOOLS="$HOME/.claude/code-review/tools"
+   SETUP_JSON=$(node --experimental-strip-types "$TOOLS/review_setup_worktree.ts" \
+     --pr "$PR_NUM" --repo "$REPO" --mode single --json)
    ```
 
-3. Confirm the current checkout matches `REPO`:
+   The tool runs `gh pr view` to resolve `branch`, `headSha`, `base`, `isFork`,
+   and `maintainerCanModify`; cross-checks the current checkout matches
+   `--repo`; force-fetches the base branch and the GitHub PR head ref; and
+   creates (or validates-and-reuses) `/tmp/review-<repo-slug>-pr<N>-single`.
+   Receipt: `{ worktreePath, pr: {number, branch, headSha, base, isFork,
+   maintainerCanModify}, reused }`.
 
-   ```bash
-   gh repo view --json nameWithOwner --jq .nameWithOwner
-   ```
+   Exit codes (skill must surface the message and stop on any non-zero):
+   `2` gh-cli-failure, `3` repo-mismatch, `4` worktree-dirty,
+   `5` worktree-head-mismatch, `6` git-failure.
 
-   If `--repo` points at a different repository than the current checkout,
-   stop and ask the user to run from that repo.
-4. If the current checkout is on the PR branch and has uncommitted or unpushed
-   changes, stop and report that the remote PR head is stale. Do not silently
-   review a different tree than the user expects.
-5. Create or reuse an isolated worktree from the GitHub PR ref, not from a
-   local branch:
-
-   ```bash
-   REPO_SLUG=$(printf '%s' "$REPO" | tr '[:upper:]/' '[:lower:]-')
-   WORKTREE="/tmp/review-${REPO_SLUG}-pr${PR_NUM}-single"
-   git fetch origin "+${BASE}:refs/remotes/origin/${BASE}"
-   PR_HEAD_REF="refs/remotes/origin/pr/${PR_NUM}"
-   git fetch origin "+refs/pull/${PR_NUM}/head:${PR_HEAD_REF}"
-   if git worktree list --porcelain | grep -Fqx "worktree $WORKTREE"; then
-     cd "$WORKTREE"
-     EXISTING_HEAD=$(git rev-parse HEAD)
-     if ! git diff --quiet \
-        || ! git diff --cached --quiet \
-        || [ "$EXISTING_HEAD" != "$HEAD_SHA" ]; then
-       printf 'Existing review worktree is not reusable: %s\n' "$WORKTREE" >&2
-       printf 'Clean it up manually or choose a fresh worktree path.\n' >&2
-       exit 1
-     fi
-     git checkout --detach "$PR_HEAD_REF"
-   else
-     git worktree add --detach "$WORKTREE" "$PR_HEAD_REF"
-     cd "$WORKTREE"
-   fi
-   git rev-parse HEAD
-   ```
-
-   The `git rev-parse HEAD` value must match `HEAD_SHA` from `gh pr view`. If
-   it does not match, stop. If worktree creation fails, stop. Do not review in
-   the main checkout.
+3. `cd "$WORKTREE_PATH"` (from the receipt) before any review work.
 
 ## Dispatch Rules
 
@@ -301,23 +260,20 @@ Critical rules:
 
 ```bash
 cd -
-WORKTREE_HEAD=$(git -C "$WORKTREE" rev-parse HEAD)
-if git -C "$WORKTREE" diff --quiet \
-   && git -C "$WORKTREE" diff --cached --quiet \
-   && [ "$WORKTREE_HEAD" = "$HEAD_SHA" ]; then
-  git worktree remove "$WORKTREE" --force
-else
-  printf 'Leaving review worktree with local changes or commits past PR head: %s\n' "$WORKTREE"
-fi
+node --experimental-strip-types "$TOOLS/review_cleanup_worktree.ts" \
+  --worktree "$WORKTREE_PATH" --head-sha "$HEAD_SHA" --json
 ```
 
-`HEAD_SHA` is the value resolved from `gh pr view` in Setup. The head equality
-check guards against fix commits that were never pushed — `git diff` only sees
-the working tree and index, so without it the worktree (and its unpushed
-commits) would be removed.
+The tool refuses to delete the worktree on any of: unstaged changes, staged
+changes, or HEAD drift from the original PR head. The `head-drift` check
+specifically guards against fix commits that were never pushed — without it,
+the worktree (and its unpushed commits) would be silently removed. Receipt:
+`{ removed, reason: removed | no-such-worktree | unstaged-changes |
+staged-changes | head-drift, worktreePath, expectedHead, observedHead }`.
 
-Clean up only after a clean run or a completed dry-run. On dispatch failure,
-test failure, or unpushed fixes, leave the worktree in place and print its path.
+The tool always exits 0; a `removed: false` receipt is a deliberate safety
+decision, not a tool failure. Skip cleanup entirely on dispatch failure,
+test failure, or unpushed fixes — surface the path and let the user inspect.
 
 ## Observability
 

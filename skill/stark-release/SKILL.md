@@ -5,8 +5,8 @@ description: >-
 argument-hint: [patch|minor|major] (optional — auto-detected if omitted)
 disable-model-invocation: true
 model: sonnet
-revision: 91f90bb0f138e3e1150a39ffe154788744eca55b
-revision_date: 2026-04-27T17:52:45Z
+revision: 8a249169623b83c1677dcda2bee230a3dd9fa8d1
+revision_date: 2026-04-27T18:17:48Z
 ---
 
 # Release Management
@@ -139,67 +139,28 @@ Store as `$CURRENT_VERSION`.
 
 ## Step 3: Gather Unreleased Changes
 
-Read `CHANGELOG.md` and extract the `## [Unreleased]` section.
-
-**If CHANGELOG.md doesn't exist:** Abort — tell user to create one or run `/fix-bug` first.
-
-**If `[Unreleased]` section has entries:** Use them as-is and skip to presentation below.
-
-**If `[Unreleased]` section is empty:** Auto-generate entries from commits since the last tag, or from full repo history if no tag exists yet. Do **NOT** abort.
-
 ```bash
-if [ -n "$LAST_TAG" ]; then
-  git log "$LAST_TAG"..HEAD --no-merges --format='%s%n%b%x1e'
-else
-  git log --no-merges --format='%s%n%b%x1e'
-fi
+TOOLS="$HOME/.claude/code-review/tools"
+CHANGES_JSON=$(node --experimental-strip-types "$TOOLS/release_changelog.ts" --json)
 ```
 
-Parse each record as:
-- first line = subject
-- remaining lines = body
+The tool reads `CHANGELOG.md`, then falls back to `git log <last-tag>..HEAD`
+when `[Unreleased]` is empty, and categorizes commits by Conventional Commits
+prefix into Added / Fixed / Changed (with `**BREAKING:**` markers for breaking
+changes). It also returns a `recommendedBump` field that Step 4 can use
+directly.
 
-Categorize each commit by its Conventional Commits subject prefix:
+JSON shape: `{ source, lastTag, added[], fixed[], changed[], hasBreaking,
+totalEntries, recommendedBump }`. Source values: `changelog` (used existing
+entries), `git-log` (auto-generated), `empty` (nothing to release).
 
-| Prefix | CHANGELOG category |
-|--------|-------------------|
-| `feat(…)` / `feat:` | `### Added` |
-| `fix(…)` / `fix:` | `### Fixed` |
-| `refactor`, `chore`, `docs`, `style`, `perf`, `build`, `ci`, `test` | `### Changed` |
-| `feat!`, `fix!`, or body contains `BREAKING CHANGE:` | `### Changed` with bullet prefixed `**BREAKING:**` |
-| Anything else (no recognizable prefix) | `### Changed` |
+- If CHANGELOG.md is missing → tool exits 2 with the missing-file message; abort.
+- If `source == "empty"` → abort with "No commits to release."
+- Otherwise present the categorized sections from the JSON.
 
-For each commit:
-1. Strip the leading `<type>(<scope>)?!?:\s*` prefix.
-2. Keep any trailing `(#NNN)` PR references intact.
-3. Retain the scope (e.g. `calendar: …`) as a short prefix so readers see which subsystem was touched.
-4. Write as a bullet under the appropriate category.
-
-Example — `feat(calendar): read vacations from personAbsences (#341) (#348)` becomes:
-```
-### Added
-- calendar: read vacations from personAbsences (#341) (#348)
-```
-
-**If both the `[Unreleased]` section AND the git log are empty** → Abort with "No commits to release."
-
-When auto-generated, Step 6 will write these entries directly into the new versioned section and leave `[Unreleased]` empty (same end state as when entries came from the CHANGELOG).
-
-**Present the assembled changes** (whether read from CHANGELOG or generated):
-```
-Unreleased changes since v${CURRENT_VERSION}:
-──────────────────────────────────────────────
-[source: CHANGELOG | auto-generated from git log]
-
-### Added
-- ...
-
-### Fixed
-- ...
-
-### Changed
-- ...
-```
+When `source == "git-log"`, Step 6 will write these entries directly into the
+new versioned section and leave `[Unreleased]` empty (same end state as when
+entries came from the CHANGELOG).
 
 ---
 
@@ -218,30 +179,25 @@ Calculate `$NEXT_VERSION` accordingly. Do NOT ask for confirmation — proceed a
 
 ## Step 5: Bump Version in Source
 
-Auto-detect the project's version file and update it. Check in this order (stop at first match):
-
-| Ecosystem | File Pattern | Version Pattern |
-|-----------|-------------|-----------------|
-| Python | `src/*/__init__.py` or `*/__init__.py` with `__version__` | `__version__ = "X.Y.Z"` |
-| Python | `pyproject.toml` with `version = "X.Y.Z"` (only if `[tool.setuptools-scm]` is NOT present) | `version = "X.Y.Z"` |
-| Node | `package.json` with `"version"` | `"version": "X.Y.Z"` |
-| Rust | `Cargo.toml` with `version =` | `version = "X.Y.Z"` |
-| Go | No version file bump needed — Go uses git tags exclusively | skip |
-
 ```bash
-# Python: search for __version__
-grep -rl '__version__' src/ *.py 2>/dev/null | head -1
-
-# Node: check package.json
-[ -f package.json ] && grep -q '"version"' package.json && echo "package.json"
-
-# Rust: check Cargo.toml
-[ -f Cargo.toml ] && grep -q '^version' Cargo.toml && echo "Cargo.toml"
+BUMP_JSON=$(node --experimental-strip-types "$TOOLS/release_version_bump.ts" \
+  --version "$NEXT_VERSION" --json)
 ```
 
-Update the detected file to `${NEXT_VERSION}`. If no version file is found, warn: "No version file detected — only the git tag will carry the version." and skip this step.
+The tool auto-detects every supported version file and rewrites each one:
 
-If multiple version files exist (e.g., both `__init__.py` and `package.json` in a monorepo), update ALL of them for consistency.
+- `src/*/__init__.py` or `*/__init__.py` containing `__version__` (Python)
+- `pyproject.toml` with `version = "X.Y.Z"` (skipped when `[tool.setuptools-scm]` is present)
+- `package.json` with `"version"` (Node — preserves indentation)
+- `Cargo.toml` `[package]` `version =` (Rust — does NOT touch dep versions)
+- Go projects have no version file; the git tag alone carries the version.
+
+Receipt shape: `{ version, dryRun, filesUpdated[{path, ecosystem, previous}],
+filesSkipped[{path, reason}] }`. If `filesUpdated` is empty AND `filesSkipped`
+is empty, warn: "No version file detected — only the git tag will carry the
+version." and continue.
+
+For monorepos the tool updates ALL detected files for consistency.
 
 ---
 

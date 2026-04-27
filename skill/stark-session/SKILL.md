@@ -5,16 +5,13 @@ description: >-
 argument-hint: "[start|end]"
 disable-model-invocation: true
 model: opus
-revision: ea827b2dd463a563417f2dd86c31248eb42b5cfb
-revision_date: 2026-04-10T17:10:53+03:00
+revision: 8a249169623b83c1677dcda2bee230a3dd9fa8d1
+revision_date: 2026-04-27T18:17:48Z
 ---
 
 ## Preflight
 
-```bash
-python3 ~/.claude/code-review/scripts/preflight.py --workflow stark-session --json
-```
-Parse JSON: blocked → print failing checks and stop; degraded → warn and continue; ready → continue silently.
+Run [standard preflight](../../standards/preflight.md) with `--workflow stark-session`.
 
 # stark-session
 

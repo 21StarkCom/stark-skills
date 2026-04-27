@@ -7,21 +7,13 @@ disable-model-invocation: false
 context: fork
 model: opus[1m]
 workflow_path: references/workflow.md
-revision: 31916a19c29d4dac9f4f4606ecb288cb4810f890
-revision_date: 2026-04-25T11:50:10+03:00
+revision: 8a249169623b83c1677dcda2bee230a3dd9fa8d1
+revision_date: 2026-04-27T18:17:48Z
 ---
 
 ## Preflight
 
-Run environment validation before proceeding:
-```bash
-python3 ~/.claude/code-review/scripts/preflight.py --workflow stark-team-review --json
-```
-Parse the JSON result:
-- If `overall` is "blocked": print the failing checks and stop. Do not proceed.
-- If `overall` is "degraded": print a warning with the failing checks, then continue.
-- If `overall` is "ready": continue silently.
-- In non-interactive automation contexts, a blocked preflight must emit a `preflight_check` event with `status=blocked`, append an entry to `~/.claude/code-review/alerts.jsonl`, and exit non-zero so the trigger is marked failed.
+Run [standard preflight](../../standards/preflight.md) with `--workflow stark-team-review`.
 
 # stark-team-review
 

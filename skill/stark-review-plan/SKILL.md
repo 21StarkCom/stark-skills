@@ -5,8 +5,8 @@ description: >-
 argument-hint: "<path> [--rounds N] [--dry-run] [--force] [--tournament]"
 disable-model-invocation: true
 model: opus
-revision: 20e4938d267bc672a69f8fe103b0ae7ce4bbf7a6
-revision_date: 2026-04-04T15:27:23+03:00
+revision: 8a249169623b83c1677dcda2bee230a3dd9fa8d1
+revision_date: 2026-04-27T18:17:48Z
 ---
 
 # stark-review-plan
@@ -119,18 +119,13 @@ Edit the plan file directly to address all `fix` and `recurring` findings:
 
 ### 2d. Early termination check
 
-First, check dispatch health from the JSON output's `summary` field:
-- If `summary.succeeded == 0` (all sub-agents failed): this is a **dispatch failure**, not a clean plan. Run diagnostics:
-  ```bash
-  which claude codex gemini  # verify CLIs are installed
-  $PYTHON $SCRIPTS/plan_review_dispatch.py --prompts-dir plan-review --file "$path" --round $round --agents claude --timeout 60  # single-agent probe
-  ```
-  Report the failure with stderr details. Do NOT treat zero findings as "clean." Skip remaining rounds and Phase 3 (re-dispatching will hit the same failure). Go directly to Phase 4 with a dispatch-failure summary.
-- If `summary.succeeded > 0` but `summary.succeeded / summary.total_sub_agents < 0.5`: warn "Low coverage — only N/M sub-agents succeeded. Results may be incomplete." Continue normally.
+Run the [shared dispatch-failure check](../../standards/dispatch-failure.md)
+against the round's `summary`. `<prompts-dir>` for the diagnostic probe is
+`plan-review`. On dispatch failure, jump straight to Phase 4 with the
+dispatch-failure summary template.
 
-If dispatch was healthy and this round produced zero findings classified as `fix` or `recurring`:
-- Skip remaining fix rounds
-- Go directly to Phase 3 (final review)
+If dispatch was healthy and this round produced zero findings classified as
+`fix` or `recurring`, skip remaining fix rounds and go to Phase 3.
 
 ### 2e. Persist round (optional)
 
