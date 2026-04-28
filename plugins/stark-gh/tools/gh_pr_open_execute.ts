@@ -105,8 +105,9 @@ export function pushBranch(input: { branch: string; repo: { owner: string; name:
 export function assembleBody(input: { bodyFile: string; closesLines: string[]; refsLines: string[] }): string {
   const body = fs.readFileSync(input.bodyFile, "utf8").replace(/\s+$/g, "");
   const lines = [...input.closesLines, ...input.refsLines];
-  if (lines.length === 0) return input.bodyFile;
-  const merged = body + "\n\n" + lines.join("\n") + "\n";
+  const merged = lines.length === 0 ? body + "\n" : body + "\n\n" + lines.join("\n") + "\n";
+  // Always write to a fresh tempfile. Returning input.bodyFile would mean the
+  // execute cleanup path unlinks the user's --body-file argument.
   const out = mktempInRuntime("stark-gh-body-XXXXXX.md");
   fs.writeFileSync(out, merged, { mode: 0o600 });
   return out;
@@ -223,10 +224,6 @@ function main(): never {
   } catch (e) {
     die(Exit.STATE_DRIFT, String((e as Error).message));
   }
-  const fresh = fetchBase(plan.baseBranch);
-  if (fresh.baseOid !== plan.baseOid) {
-    die(Exit.BASE_OID_DRIFT, `base branch moved upstream (was ${plan.baseOid}, now ${fresh.baseOid}); rerun /stark-gh:pr-open`);
-  }
 
   try {
     stageChanges(plan);
@@ -278,6 +275,19 @@ function main(): never {
   let prNumber = plan.existingPr?.number ?? null;
   let prUrl = plan.existingPr?.url ?? "";
   let mergedBodyFile: string | null = null;
+
+  // Per spec rt6-r3: re-fetch and verify baseOid immediately before the
+  // mutating gh call, not earlier. Stage/commit/push can take seconds and
+  // the remote base can move during them.
+  if (plan.stage3.action !== "push-only") {
+    const fresh = fetchBase(plan.baseBranch);
+    if (fresh.baseOid !== plan.baseOid) {
+      die(
+        Exit.BASE_OID_DRIFT,
+        `base branch moved upstream (was ${plan.baseOid}, now ${fresh.baseOid}); rerun /stark-gh:pr-open`,
+      );
+    }
+  }
 
   if (plan.stage3.action === "create") {
     try {

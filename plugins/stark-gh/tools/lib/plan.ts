@@ -83,23 +83,68 @@ function requirePlan(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(`invalid plan-file: ${msg}`);
 }
 
+function isObj(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
 export function validatePlan(p: unknown): asserts p is Plan {
-  requirePlan(typeof p === "object" && p !== null, "not an object");
+  requirePlan(isObj(p), "not an object");
   const o = p as Record<string, unknown>;
   requirePlan(o.schemaVersion === 1, "schemaVersion must be 1");
-  for (const f of ["branch", "baseBranch", "remote", "createdAt"]) {
+  for (const f of ["branch", "baseBranch", "remote", "createdAt", "baseOid"]) {
     requirePlan(typeof o[f] === "string", `${f} must be string`);
   }
-  requirePlan(typeof o.baseOid === "string", "baseOid must be string");
   requirePlan(o.baseOidSource === "remote" || o.baseOidSource === "local", "baseOidSource invalid");
-  requirePlan(typeof o.repo === "object" && o.repo !== null, "repo missing");
-  requirePlan(typeof o.stateFingerprint === "object" && o.stateFingerprint !== null, "stateFingerprint missing");
-  requirePlan(typeof o.tree === "object" && o.tree !== null, "tree missing");
-  requirePlan(typeof o.candidateIssues === "object" && o.candidateIssues !== null, "candidateIssues missing");
-  requirePlan("preflight" in (o.candidateIssues as object), "candidateIssues.preflight missing");
-  requirePlan(typeof o.userArgs === "object" && o.userArgs !== null, "userArgs missing");
-  requirePlan(typeof o.stage2 === "object" && o.stage2 !== null, "stage2 missing");
-  requirePlan(typeof o.stage3 === "object" && o.stage3 !== null, "stage3 missing");
+
+  requirePlan(isObj(o.repo), "repo missing");
+  const repo = o.repo as Record<string, unknown>;
+  for (const f of ["host", "owner", "name", "nameWithOwner"]) {
+    requirePlan(typeof repo[f] === "string", `repo.${f} must be string`);
+  }
+
+  requirePlan(isObj(o.stateFingerprint), "stateFingerprint missing");
+  const fp = o.stateFingerprint as Record<string, unknown>;
+  for (const f of ["headOid", "indexHash", "worktreeHash", "baseOid", "branch", "repoNameWithOwner"]) {
+    requirePlan(typeof fp[f] === "string", `stateFingerprint.${f} must be string`);
+  }
+
+  requirePlan(isObj(o.tree), "tree missing");
+  const tree = o.tree as Record<string, unknown>;
+  requirePlan(typeof tree.dirty === "boolean", "tree.dirty must be boolean");
+  requirePlan(isObj(tree.dirtyFiles), "tree.dirtyFiles missing");
+  for (const f of ["staged", "unstaged", "untracked"]) {
+    const arr = (tree.dirtyFiles as Record<string, unknown>)[f];
+    requirePlan(Array.isArray(arr) && arr.every(s => typeof s === "string"), `tree.dirtyFiles.${f} must be string[]`);
+  }
+
+  requirePlan(isObj(o.candidateIssues), "candidateIssues missing");
+  requirePlan(Array.isArray((o.candidateIssues as Record<string, unknown>).preflight), "candidateIssues.preflight must be array");
+
+  requirePlan(isObj(o.userArgs), "userArgs missing");
+  const ua = o.userArgs as Record<string, unknown>;
+  for (const f of ["commitAll", "fullContext", "noWatch", "draft", "allowSecretCommit", "allowSecretToLlm"]) {
+    requirePlan(typeof ua[f] === "boolean", `userArgs.${f} must be boolean`);
+  }
+  for (const f of ["reviewer", "label", "assignee"]) {
+    requirePlan(Array.isArray(ua[f]), `userArgs.${f} must be array`);
+  }
+
+  requirePlan(isObj(o.stage2), "stage2 missing");
+  const s2 = o.stage2 as Record<string, unknown>;
+  for (const f of ["needTitle", "needBody", "needCommitMessage", "skip"]) {
+    requirePlan(typeof s2[f] === "boolean", `stage2.${f} must be boolean`);
+  }
+  requirePlan(isObj(s2.outputs), "stage2.outputs missing");
+
+  requirePlan(isObj(o.stage3), "stage3 missing");
+  const s3 = o.stage3 as Record<string, unknown>;
+  requirePlan(s3.action === "create" || s3.action === "edit" || s3.action === "push-only", "stage3.action invalid");
+  requirePlan(s3.commitStrategy === "staged-only" || s3.commitStrategy === "commit-all", "stage3.commitStrategy invalid");
+  for (const f of ["willCommit", "willPush", "willEditTitle", "willEditBody"]) {
+    requirePlan(typeof s3[f] === "boolean", `stage3.${f} must be boolean`);
+  }
+
+  requirePlan(isObj(o.untrustedInputs), "untrustedInputs missing");
 }
 
 export function writePlan(filepath: string, plan: Plan): void {

@@ -164,6 +164,9 @@ export function collectState(
 ): CollectedState {
   if (!gitLib.isGitRepo(opts)) throw new Error("not a git repo");
   const branch = gitLib.currentBranch(opts);
+  if (branch === "HEAD" || branch === "") {
+    throw new Error("refuse: detached HEAD; checkout a feature branch first");
+  }
   const repo = ghLib.repoView(opts);
   const baseBranch = opts.baseOverride ?? repo.defaultBranch;
   if (branch === baseBranch) {
@@ -271,8 +274,12 @@ function decideStage2(input: {
 function decideStage3(input: { existingPr: ghLib.ExistingPr | null; dirty: boolean; userArgs: UserArgs }): Plan["stage3"] {
   const T = input.userArgs.title !== null;
   const B = input.userArgs.body !== null || input.userArgs.bodyFile !== null;
+  const meta =
+    input.userArgs.reviewer.length > 0 ||
+    input.userArgs.label.length > 0 ||
+    input.userArgs.assignee.length > 0;
   const pr = input.existingPr !== null;
-  const action: "create" | "edit" | "push-only" = pr ? (T || B ? "edit" : "push-only") : "create";
+  const action: "create" | "edit" | "push-only" = pr ? (T || B || meta ? "edit" : "push-only") : "create";
   return {
     action,
     willCommit: input.dirty,
@@ -302,12 +309,20 @@ export function buildPlan(input: BuildPlanInput): Plan {
     COMMITS_CAP,
   );
 
+  const userBodyForScan = userArgs.body ?? (userArgs.bodyFile ? fs.readFileSync(userArgs.bodyFile, "utf8") : "");
+  const userCommitForScan =
+    userArgs.commitMessage ?? (userArgs.commitMessageFile ? fs.readFileSync(userArgs.commitMessageFile, "utf8") : "");
+  const prTemplateForScan = readPrTemplate() ?? "";
   const scanTargets = [
     committedDiff.text,
     stagedDiff.text,
     unstagedDiff?.text ?? "",
     ...(untrackedFiles ?? []).map(u => u.content ?? ""),
     commitMessages,
+    userArgs.title ?? "",
+    userBodyForScan,
+    userCommitForScan,
+    prTemplateForScan,
   ].join("\n");
   const hits = scanSecrets(scanTargets);
   if (hits.length > 0 && !userArgs.allowSecretCommit && !userArgs.allowSecretToLlm) {
@@ -374,11 +389,22 @@ export function buildPlan(input: BuildPlanInput): Plan {
   const cap = userArgs.fullContext ? BUDGET_CAP_FULL : BUDGET_CAP_DEFAULT;
   let estimated = estimateTokens(allInputs);
   let summarized = false;
+  let llmCommittedDiff = committedDiffText;
+  let llmStagedDiff = stagedDiffText;
+  let llmUnstagedDiff = unstagedDiffText;
+  let llmCommitMessages = commitMessagesText;
   if (!withinBudget(estimated, cap)) {
     const summary = summarizeDiff(committedDiffText + "\n" + stagedDiffText);
-    estimated = estimateTokens(summary + (prTemplate ?? "") + commitMessagesText.split("\n").slice(0, 50).join("\n"));
+    const trimmedCommits = commitMessagesText.split("\n").slice(0, 50).join("\n");
+    estimated = estimateTokens(summary + (prTemplate ?? "") + trimmedCommits);
     summarized = true;
     if (!withinBudget(estimated, cap)) throw new Error("prompt budget exceeded even after summarization");
+    // The fields handed to Stage 2 must reflect the summarized payload, not
+    // the original full diffs. Otherwise the prompt will overshoot the cap.
+    llmCommittedDiff = summary;
+    llmStagedDiff = "";
+    llmUnstagedDiff = null;
+    llmCommitMessages = trimmedCommits;
   }
 
   const worktreeContentBytes = userArgs.commitAll
@@ -422,13 +448,13 @@ export function buildPlan(input: BuildPlanInput): Plan {
     promptBudget: { estimatedInputTokens: estimated, cap, summarized },
     untrustedInputs: {
       combinedStat,
-      committedDiff: committedDiffText,
-      stagedDiff: stagedDiffText,
-      unstagedDiff: unstagedDiffText,
+      committedDiff: llmCommittedDiff,
+      stagedDiff: llmStagedDiff,
+      unstagedDiff: llmUnstagedDiff,
       untrackedFiles: untrackedFilesForLlm,
       diffTruncated: committedDiff.truncated || stagedDiff.truncated,
       prTemplate,
-      commitMessages: commitMessagesText,
+      commitMessages: llmCommitMessages,
       userBody,
     },
     userArgs,

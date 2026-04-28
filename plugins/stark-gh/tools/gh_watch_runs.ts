@@ -26,6 +26,7 @@ export function acquireLock(
   filepath: string,
   args: { headSha: string },
 ): { acquired: boolean; alreadyRunning?: boolean; ownerToken?: string } {
+  // Inspect first; if a live owner holds it for our headSha, defer.
   if (fs.existsSync(filepath)) {
     try {
       const c: LockFileContent = JSON.parse(fs.readFileSync(filepath, "utf8"));
@@ -35,7 +36,6 @@ export function acquireLock(
     } catch {
       // Malformed lock is stale.
     }
-    fs.unlinkSync(filepath);
   }
   const ownerToken = crypto.randomUUID();
   const content: LockFileContent = {
@@ -45,10 +45,35 @@ export function acquireLock(
     command: "gh-watch-runs",
     ownerToken,
   };
-  const tmp = filepath + ".tmp";
+  // Per-process tempfile to avoid two concurrent acquirers stomping the same
+  // .tmp path; then atomic O_EXCL link to win the race deterministically.
+  const tmp = `${filepath}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(content), { mode: 0o600 });
-  fs.renameSync(tmp, filepath);
-  return { acquired: true, ownerToken };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      fs.linkSync(tmp, filepath);
+      fs.unlinkSync(tmp);
+      return { acquired: true, ownerToken };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
+        try { fs.unlinkSync(tmp); } catch { /* best-effort */ }
+        throw err;
+      }
+      // Re-read existing lock; defer if still held by a live owner.
+      try {
+        const c: LockFileContent = JSON.parse(fs.readFileSync(filepath, "utf8"));
+        if (c.command === "gh-watch-runs" && c.headSha === args.headSha && pidAlive(c.pid)) {
+          fs.unlinkSync(tmp);
+          return { acquired: false, alreadyRunning: true };
+        }
+      } catch {
+        // Malformed: fall through to take it over.
+      }
+      try { fs.unlinkSync(filepath); } catch { /* race ok */ }
+    }
+  }
+  try { fs.unlinkSync(tmp); } catch { /* best-effort */ }
+  return { acquired: false };
 }
 
 export function releaseLockIfOwner(filepath: string, ownerToken: string): void {
