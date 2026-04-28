@@ -1,6 +1,5 @@
 {
   "permissions": {
-    "defaultMode": "bypassPermissions",
     "allow": [
       "Bash(git push:*)",
       "Bash(gh pr create:*)",
@@ -10,13 +9,9 @@
       "Bash(gh pr list:*)",
       "Bash(gh pr checks:*)"
     ],
+    "defaultMode": "bypassPermissions",
     "additionalDirectories": [
       "/Users/aryeh/git/Evinced/stark-data-core"
-    ]
-  },
-  "autoMode": {
-    "allow": [
-      "Pushing branches and opening/merging PRs in /Users/aryeh/git/Evinced/stark-data-core is permitted — it is a trusted sibling repo in Aryeh's workspace alongside stark-night-watch and is covered by the same review workflow."
     ]
   },
   "model": "opus[1m]",
@@ -118,9 +113,7 @@
     "security-guidance@claude-plugins-official": true,
     "commit-commands@claude-plugins-official": true,
     "playground@claude-plugins-official": true,
-    "gopls-lsp@claude-plugins-official": true,
-    "remember@claude-plugins-official": true,
-    "followrabbit@claude-plugins-official": true
+    "gopls-lsp@claude-plugins-official": true
   },
   "extraKnownMarketplaces": {
     "claude-code-lsps": {
@@ -134,9 +127,22 @@
         "source": "github",
         "repo": "anthropics/claude-plugins-official"
       }
+    },
+    "superpowers-marketplace": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/obra/superpowers-marketplace.git"
+      }
     }
   },
   "effortLevel": "high",
   "skipDangerousModePermissionPrompt": true,
-  "skipAutoPermissionPrompt": true
+  "remoteControlAtStartup": false,
+  "agentPushNotifEnabled": true,
+  "skipAutoPermissionPrompt": true,
+  "autoMode": {
+    "allow": [
+      "Pushing branches and opening/merging PRs in /Users/aryeh/git/Evinced/stark-data-core is permitted — it is a trusted sibling repo in Aryeh's workspace alongside stark-night-watch and is covered by the same review workflow."
+    ]
+  }
 }
