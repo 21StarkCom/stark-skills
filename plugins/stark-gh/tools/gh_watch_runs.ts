@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as crypto from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { stateFile, lockFile, latestPointer, ensurePrDir, atomicWriteJson } from "./lib/watcher_paths.ts";
 import * as ghLib from "./lib/gh.ts";
+import { fetchRequiredCheckRollup, summarizeVerdict } from "./lib/checks_graphql.ts";
+import { resolveCallback } from "./lib/watcher_callbacks.ts";
+import { readPrMergePlan, type PrMergePlan } from "./lib/plan.ts";
 
 export interface LockFileContent {
   pid: number;
@@ -302,9 +306,252 @@ async function mainAsync(): Promise<void> {
   }
 }
 
-if (process.argv[1]?.endsWith("gh_watch_runs.ts")) {
-  mainAsync().catch(e => {
-    process.stderr.write(String(e) + "\n");
-    process.exit(1);
-  });
+// =============================================================================
+// pr-merge watcher mode (--on-green callback). Coexists with legacy mode.
+// Triggered when --on-green <name> is present.
+// =============================================================================
+
+interface PrMergeWatchArgs {
+  callbackName: string;
+  planFile: string;
+  watchTimeoutHours: number;
+  pollSeconds: number;
 }
+
+function parsePrMergeArgs(argv: string[]): PrMergeWatchArgs | null {
+  const onGreenIdx = argv.indexOf("--on-green");
+  if (onGreenIdx < 0) return null;
+  const callbackName = argv[onGreenIdx + 1];
+  if (!callbackName) throw new Error("--on-green requires a value");
+  const planIdx = argv.indexOf("--plan-file");
+  if (planIdx < 0) throw new Error("--on-green requires --plan-file");
+  const planFile = argv[planIdx + 1];
+  if (!planFile) throw new Error("--plan-file requires a value");
+  const wtIdx = argv.indexOf("--watch-timeout");
+  const watchTimeoutHours = wtIdx >= 0 ? Number(argv[wtIdx + 1]) : 6;
+  const pollIdx = argv.indexOf("--poll-seconds");
+  const pollSeconds = pollIdx >= 0 ? Number(argv[pollIdx + 1]) : 30;
+  return { callbackName, planFile, watchTimeoutHours, pollSeconds };
+}
+
+function jitter(seconds: number, pct = 0.2): number {
+  const delta = seconds * pct;
+  return Math.max(1, seconds + (Math.random() * 2 - 1) * delta);
+}
+
+interface PollOutcome {
+  kind: "wait" | "ready" | "head_moved" | "fatal";
+  reason?: string;
+}
+
+// Pure function: maps a rollup result (mismatch | contexts) + plan policy
+// into a PollOutcome. Easy to unit-test.
+export function evaluateRollup(
+  rollup: { mismatch: boolean; contexts: any[] | null; headRefOid: string },
+  policy: { allowNoRequiredChecks: boolean },
+): PollOutcome {
+  if (rollup.mismatch) return { kind: "head_moved", reason: `headRefOid=${rollup.headRefOid}` };
+  const v = summarizeVerdict(rollup.contexts!);
+  if (v.vacuous) {
+    if (policy.allowNoRequiredChecks) return { kind: "ready", reason: "vacuous-allowed" };
+    return { kind: "wait", reason: "no required checks observed yet" };
+  }
+  if (v.anyFailing) return { kind: "fatal", reason: `failing checks: ${v.failing}` };
+  if (v.allPassing) return { kind: "ready", reason: "all required passing" };
+  return { kind: "wait", reason: `pending: ${v.pending}` };
+}
+
+async function pollOnce(plan: PrMergePlan): Promise<PollOutcome> {
+  const r = await fetchRequiredCheckRollup({
+    owner: plan.pr.headRepositoryOwner,
+    repo: plan.pr.headRepositoryName,
+    prNumber: plan.pr.number,
+    expectedHeadOid: plan.pushedHeadOid!,
+  });
+  return evaluateRollup(r as any, { allowNoRequiredChecks: plan.execute.allowNoRequiredChecks });
+}
+
+interface BackoffState {
+  consecErrors: number;
+  rateLimitDelaySec: number;
+}
+
+function classifyError(err: Error): { rateLimit: boolean; secondaryRateLimit: boolean; transient: boolean } {
+  const msg = err.message;
+  if (/X-RateLimit-Remaining: 0/i.test(msg) || /\b429\b/.test(msg)) return { rateLimit: true, secondaryRateLimit: false, transient: false };
+  if (/secondary rate limit/i.test(msg)) return { rateLimit: false, secondaryRateLimit: true, transient: false };
+  if (/\b50[0-9]\b/.test(msg)) return { rateLimit: false, secondaryRateLimit: false, transient: true };
+  return { rateLimit: false, secondaryRateLimit: false, transient: false };
+}
+
+function backoffDelaySeconds(state: BackoffState, base: number): number {
+  // Capped exponential: base * 2^consecErrors, cap 15 min.
+  const exp = Math.min(15 * 60, base * Math.pow(2, Math.max(0, state.consecErrors - 1)));
+  return jitter(exp);
+}
+
+function spawnCallback(callbackPath: string, planFile: string): { pid: number } {
+  // Detached spawn so the watcher's exit doesn't kill the callback.
+  const child = spawn("node", ["--experimental-strip-types", callbackPath, "--plan-file", planFile], {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+  return { pid: child.pid ?? -1 };
+}
+
+async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
+  const plan = readPrMergePlan(args.planFile);
+  if (!plan.pushedHeadOid) {
+    process.stderr.write("watcher: plan.pushedHeadOid is null; nothing to watch\n");
+    return 1;
+  }
+  const callbackPath = resolveCallback(args.callbackName);
+  if (!callbackPath) {
+    process.stderr.write(`watcher: unknown callback name '${args.callbackName}'; refused before spawn\n`);
+    return 2;
+  }
+
+  const host = "github.com"; // pr-merge uses the same default
+  ensurePrDir(host, plan.pr.headRepositoryOwner, plan.pr.headRepositoryName, plan.pr.number);
+  const sf = stateFile(host, plan.pr.headRepositoryOwner, plan.pr.headRepositoryName, plan.pr.number, plan.pushedHeadOid);
+  const lf = lockFile(host, plan.pr.headRepositoryOwner, plan.pr.headRepositoryName, plan.pr.number, plan.pushedHeadOid);
+  const lock = acquireLock(lf, { headSha: plan.pushedHeadOid });
+  if (lock.alreadyRunning) {
+    process.stderr.write(`watcher already running for PR #${plan.pr.number} @ ${plan.pushedHeadOid}\n`);
+    return 0;
+  }
+  const ownerToken = lock.ownerToken!;
+  const startedAt = new Date().toISOString();
+
+  atomicWriteJson(sf, {
+    schemaVersion: 1,
+    command: "stark-gh-pr-merge-watch",
+    host,
+    repo: plan.pr.nameWithOwner,
+    pr: plan.pr.number,
+    headSha: plan.pushedHeadOid,
+    status: "watching",
+    startedAt,
+    pid: process.pid,
+    hostname: os.hostname(),
+    consecutiveGreen: 0,
+    lastPolledAt: null,
+    lastError: null,
+  });
+
+  const start = Date.now();
+  const maxMs = args.watchTimeoutHours * 60 * 60 * 1000;
+  const backoff: BackoffState = { consecErrors: 0, rateLimitDelaySec: 0 };
+  let consecutiveGreen = 0;
+  const REQUIRED_GREEN = 2; // PR4-claude H13 debounce
+
+  const writeStatus = (extras: Record<string, unknown>): void => {
+    let cur: Record<string, unknown> = {};
+    try { cur = JSON.parse(fs.readFileSync(sf, "utf8")); } catch { /* keep empty */ }
+    atomicWriteJson(sf, { ...cur, ...extras, lastPolledAt: new Date().toISOString() });
+    // Heartbeat: touch latest.json's mtime each poll.
+    try { fs.utimesSync(sf, new Date(), new Date()); } catch { /* best-effort */ }
+  };
+
+  while (true) {
+    const elapsedMs = Date.now() - start;
+    if (elapsedMs > maxMs) {
+      writeStatus({ status: "watch_timeout", finishedAt: new Date().toISOString() });
+      releaseLockIfOwner(lf, ownerToken);
+      return 0;
+    }
+
+    let outcome: PollOutcome | null = null;
+    let pollErr: Error | null = null;
+    try {
+      outcome = await pollOnce(plan);
+    } catch (err) {
+      pollErr = err as Error;
+    }
+
+    if (pollErr) {
+      backoff.consecErrors++;
+      const cls = classifyError(pollErr);
+      let delay: number;
+      if (cls.rateLimit || cls.secondaryRateLimit) {
+        delay = Math.min(15 * 60, args.pollSeconds * Math.pow(2, backoff.consecErrors));
+      } else if (cls.transient) {
+        delay = args.pollSeconds * backoff.consecErrors;
+      } else {
+        if (backoff.consecErrors >= 3) {
+          writeStatus({ status: "auth_failed", lastError: pollErr.message, finishedAt: new Date().toISOString() });
+          releaseLockIfOwner(lf, ownerToken);
+          return 1;
+        }
+        delay = args.pollSeconds;
+      }
+      writeStatus({ lastError: pollErr.message, consecErrors: backoff.consecErrors });
+      await new Promise(r => setTimeout(r, jitter(delay) * 1000));
+      continue;
+    }
+    backoff.consecErrors = 0;
+
+    if (outcome!.kind === "head_moved") {
+      writeStatus({ status: "head_moved", finishedAt: new Date().toISOString(), reason: outcome!.reason });
+      atomicWriteJson(latestPointer(host, plan.pr.headRepositoryOwner, plan.pr.headRepositoryName, plan.pr.number), {
+        headSha: plan.pushedHeadOid,
+        status: "head_moved",
+        updatedAt: new Date().toISOString(),
+      });
+      releaseLockIfOwner(lf, ownerToken);
+      return 0;
+    }
+    if (outcome!.kind === "fatal") {
+      writeStatus({ status: "checks_failed", finishedAt: new Date().toISOString(), reason: outcome!.reason });
+      releaseLockIfOwner(lf, ownerToken);
+      return 0;
+    }
+    if (outcome!.kind === "ready") {
+      consecutiveGreen++;
+      writeStatus({ consecutiveGreen, status: "watching" });
+      if (consecutiveGreen >= REQUIRED_GREEN) {
+        // Fire callback. Spawn detached so its lifetime is independent.
+        const { pid } = spawnCallback(callbackPath, args.planFile);
+        writeStatus({
+          status: "callback_dispatched",
+          callbackName: args.callbackName,
+          callbackPid: pid,
+          finishedAt: new Date().toISOString(),
+        });
+        releaseLockIfOwner(lf, ownerToken);
+        return 0;
+      }
+    } else {
+      consecutiveGreen = 0;
+      writeStatus({ consecutiveGreen, status: "watching" });
+    }
+    await new Promise(r => setTimeout(r, jitter(args.pollSeconds) * 1000));
+  }
+}
+
+if (process.argv[1]?.endsWith("gh_watch_runs.ts")) {
+  // Branch on --on-green: pr-merge mode vs legacy pr-open mode.
+  const argv = process.argv.slice(2);
+  let prMergeArgs: PrMergeWatchArgs | null = null;
+  try {
+    prMergeArgs = parsePrMergeArgs(argv);
+  } catch (err) {
+    process.stderr.write(`${(err as Error).message}\n`);
+    process.exit(2);
+  }
+  if (prMergeArgs) {
+    prMergeWatchLoop(prMergeArgs).then(c => process.exit(c)).catch(e => {
+      process.stderr.write(String(e) + "\n");
+      process.exit(1);
+    });
+  } else {
+    mainAsync().catch(e => {
+      process.stderr.write(String(e) + "\n");
+      process.exit(1);
+    });
+  }
+}
+
+// Exports for tests
+export { parsePrMergeArgs, classifyError, jitter, pollOnce };
