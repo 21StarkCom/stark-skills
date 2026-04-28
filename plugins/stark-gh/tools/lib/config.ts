@@ -40,7 +40,10 @@ export interface DraftOverrides {
 
 export function resolveDraftConfig(overrides: DraftOverrides): DraftConfig {
   const fileCfg = loadJsonConfig();
-  const merged: DraftConfig = { ...DEFAULTS, ...fileCfg, ...overrides } as DraftConfig;
+  const definedOverrides = Object.fromEntries(
+    Object.entries(overrides).filter(([, v]) => v !== undefined),
+  );
+  const merged: DraftConfig = { ...DEFAULTS, ...fileCfg, ...definedOverrides } as DraftConfig;
   if (/haiku/i.test(merged.model)) {
     throw new Error(`stark-gh refuses to use Haiku models: '${merged.model}' is forbidden by config policy`);
   }
