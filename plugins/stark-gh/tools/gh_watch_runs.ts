@@ -72,26 +72,29 @@ export function* backoffSchedule(initial: number, cap: number): Generator<number
   while (true) yield cap;
 }
 
-interface CheckSuite {
-  check_runs?: { status: string; conclusion: string | null }[];
+interface CheckRecord {
+  state?: string;
+  conclusion?: string | null;
+  headSha?: string;
 }
 
-export function isTerminal(suites: CheckSuite[]): boolean {
-  if (suites.length === 0) return false;
-  const all = suites.flatMap(s => s.check_runs ?? []);
-  if (all.length === 0) return false;
-  return all.every(r => r.status === "completed" && r.conclusion !== null);
+export function isTerminal(checks: CheckRecord[]): boolean {
+  if (checks.length === 0) return false;
+  return checks.every(c => {
+    const state = String(c.state ?? c.conclusion ?? "").toUpperCase();
+    return state !== "" && !["PENDING", "QUEUED", "IN_PROGRESS", "EXPECTED", "WAITING"].includes(state);
+  });
 }
 
-export function summarize(suites: CheckSuite[]) {
-  const all = suites.flatMap(s => s.check_runs ?? []);
-  const counts = { total: all.length, success: 0, failure: 0, cancelled: 0, skipped: 0, neutral: 0 };
-  for (const r of all) {
-    if (r.conclusion === "success") counts.success++;
-    else if (r.conclusion === "failure") counts.failure++;
-    else if (r.conclusion === "cancelled") counts.cancelled++;
-    else if (r.conclusion === "skipped") counts.skipped++;
-    else if (r.conclusion === "neutral") counts.neutral++;
+export function summarize(checks: CheckRecord[]) {
+  const counts = { total: checks.length, success: 0, failure: 0, cancelled: 0, skipped: 0, neutral: 0 };
+  for (const r of checks) {
+    const state = String(r.state ?? r.conclusion ?? "").toUpperCase();
+    if (state === "SUCCESS" || state === "PASS") counts.success++;
+    else if (state === "FAILURE" || state === "FAIL" || state === "ERROR" || state === "ACTION_REQUIRED" || state === "TIMED_OUT") counts.failure++;
+    else if (state === "CANCELLED" || state === "CANCELED") counts.cancelled++;
+    else if (state === "SKIPPED") counts.skipped++;
+    else if (state === "NEUTRAL") counts.neutral++;
   }
   return counts;
 }
@@ -191,9 +194,11 @@ async function mainAsync(): Promise<void> {
       process.exit(0);
     }
 
-    let suites: unknown[] = [];
+    let checks: CheckRecord[] = [];
     try {
-      suites = ghLib.checkSuites(args.host, args.owner, args.repo, args.headSha);
+      const raw = ghLib.prChecks(args.pr, args.owner, args.repo) as CheckRecord[];
+      const withSha = raw.filter(c => typeof c.headSha === "string");
+      checks = withSha.length > 0 ? withSha.filter(c => c.headSha === args.headSha) : raw;
       consecErrors = 0;
     } catch (e) {
       consecErrors++;
@@ -210,7 +215,7 @@ async function mainAsync(): Promise<void> {
       }
     }
 
-    if (suites.length > 0) firstSeenAt ??= Date.now();
+    if (checks.length > 0) firstSeenAt ??= Date.now();
     if (firstSeenAt === null && elapsedMin > args.noChecksGraceMinutes) {
       const cur = JSON.parse(fs.readFileSync(sf, "utf8"));
       atomicWriteJson(sf, { ...cur, status: "no-checks-observed", finishedAt: new Date().toISOString() });
@@ -223,14 +228,14 @@ async function mainAsync(): Promise<void> {
       process.exit(0);
     }
 
-    if (isTerminal(suites as CheckSuite[])) {
-      const sum = summarize(suites as CheckSuite[]);
+    if (isTerminal(checks)) {
+      const sum = summarize(checks);
       const cur = JSON.parse(fs.readFileSync(sf, "utf8"));
       atomicWriteJson(sf, {
         ...cur,
         status: "done",
         finishedAt: new Date().toISOString(),
-        checks: suites,
+        checks,
         summary: sum,
       });
       atomicWriteJson(latestPointer(args.host, args.owner, args.repo, args.pr), {
@@ -249,7 +254,7 @@ async function mainAsync(): Promise<void> {
       ...cur,
       lastPolledAt: new Date().toISOString(),
       nextPollAt: new Date(Date.now() + sleepSec * 1000).toISOString(),
-      checks: suites,
+      checks,
     });
     await new Promise(r => setTimeout(r, sleepSec * 1000));
   }

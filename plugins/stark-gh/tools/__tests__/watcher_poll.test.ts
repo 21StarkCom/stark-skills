@@ -15,12 +15,12 @@ test("backoffSchedule yields 15s x 5 then doubles to cap", () => {
   assert.equal(seq[9], 240);
 });
 
-test("isTerminal true when all check-runs completed", () => {
-  const suites = [{ check_runs: [{ status: "completed", conclusion: "success" }, { status: "completed", conclusion: "failure" }] }];
-  assert.equal(isTerminal(suites), true);
+test("isTerminal true when all gh pr checks are terminal", () => {
+  const checks = [{ state: "SUCCESS" }, { state: "FAILURE" }];
+  assert.equal(isTerminal(checks), true);
 });
 
-test("isTerminal false when any still in_progress", () => {
-  const suites = [{ check_runs: [{ status: "completed", conclusion: "success" }, { status: "in_progress", conclusion: null }] }];
-  assert.equal(isTerminal(suites), false);
+test("isTerminal false when any gh pr check is pending", () => {
+  const checks = [{ state: "SUCCESS" }, { state: "PENDING" }];
+  assert.equal(isTerminal(checks), false);
 });

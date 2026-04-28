@@ -95,11 +95,20 @@ export function prView(number: number, opts: { exec?: ExecFn } = {}): { url: str
   return JSON.parse(out);
 }
 
-export function checkSuites(host: string, owner: string, repo: string, headSha: string, opts: { exec?: ExecFn } = {}): unknown[] {
-  void host;
-  const out = gh(["api", `repos/${owner}/${repo}/commits/${headSha}/check-suites`], opts);
-  const j = JSON.parse(out);
-  return j.check_suites ?? [];
+export function prChecks(pr: number, owner: string, repo: string, opts: { exec?: ExecFn } = {}): unknown[] {
+  const out = gh(
+    [
+      "pr",
+      "checks",
+      String(pr),
+      "--repo",
+      `${owner}/${repo}`,
+      "--json",
+      "bucket,name,state,link,workflow,startedAt,completedAt",
+    ],
+    opts,
+  );
+  return JSON.parse(out);
 }
 
 export function isAuthed(opts: { exec?: ExecFn } = {}): boolean {
