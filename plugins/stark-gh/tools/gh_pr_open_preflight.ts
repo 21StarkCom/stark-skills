@@ -14,6 +14,7 @@ import { estimateTokens, summarizeDiff, truncateDiffByFile, truncateLeading, wit
 import { writePlan, type Plan } from "./lib/plan.ts";
 import { mktempInRuntime } from "./lib/runtime.ts";
 import { redactSecrets } from "./lib/redact.ts";
+import { appendSecretOverride } from "./lib/audit.ts";
 
 export interface UserArgs {
   title: string | null;
@@ -219,7 +220,13 @@ export interface BuildPlanInput {
 
 function readPrTemplate(): string | null {
   for (const p of [".github/PULL_REQUEST_TEMPLATE.md", ".github/pull_request_template.md", "PULL_REQUEST_TEMPLATE.md"]) {
-    if (fs.existsSync(p)) return fs.readFileSync(p, "utf8");
+    if (!fs.existsSync(p)) continue;
+    // Refuse to follow symlinks: a branch could otherwise point a "template"
+    // at ~/.ssh/id_rsa or another local file and have its contents shipped to
+    // Codex via the Stage 2 prompt.
+    const st = fs.lstatSync(p);
+    if (st.isSymbolicLink()) continue;
+    return fs.readFileSync(p, "utf8");
   }
   return null;
 }
@@ -227,7 +234,12 @@ function readPrTemplate(): string | null {
 function listUntracked(paths: string[]): { path: string; size: number; content: string | null }[] {
   return paths.map(p => {
     try {
-      const st = fs.statSync(p);
+      const st = fs.lstatSync(p);
+      // Don't read symlinked untracked entries — they could resolve to
+      // arbitrary local files (~/.aws/credentials, ~/.ssh/*).
+      if (st.isSymbolicLink() || !st.isFile()) {
+        return { path: p, size: st.size, content: null };
+      }
       const content = st.size <= 4 * 1024 ? fs.readFileSync(p, "utf8") : null;
       return { path: p, size: st.size, content };
     } catch {
@@ -329,6 +341,19 @@ export function buildPlan(input: BuildPlanInput): Plan {
     const cats = [...new Set(hits.map(h => h.category))].join(", ");
     throw new Error(`secret-scan-hit:${cats}`);
   }
+  // Spec rt2-r2: every override use is appended to a durable audit log
+  // before the plan-file is written, so the record survives plan unlink.
+  if (hits.length > 0 && (userArgs.allowSecretCommit || userArgs.allowSecretToLlm)) {
+    appendSecretOverride({
+      timestamp: new Date().toISOString(),
+      stage: "preflight",
+      allowSecretCommit: userArgs.allowSecretCommit,
+      allowSecretToLlm: userArgs.allowSecretToLlm,
+      branch: state.branch,
+      repoNameWithOwner: state.repo.nameWithOwner,
+      hits: hits.map(h => ({ category: h.category, location: `line ${h.lineNumber}` })),
+    });
+  }
 
   const shouldRedact = userArgs.allowSecretCommit && !userArgs.allowSecretToLlm;
   const redactionsAccum: { category: string; spans: number }[] = [];
@@ -378,6 +403,9 @@ export function buildPlan(input: BuildPlanInput): Plan {
   }));
   const { closesLines, refsLines } = emitLines(finalCandidates, baseRepoMeta);
 
+  const untrackedForBudget = (untrackedFilesForLlm ?? [])
+    .map(u => (u.content ?? ""))
+    .join("");
   const allInputs =
     combinedStat +
     committedDiffText +
@@ -385,7 +413,8 @@ export function buildPlan(input: BuildPlanInput): Plan {
     (unstagedDiffText ?? "") +
     (prTemplate ?? "") +
     commitMessagesText +
-    (userBody ?? "");
+    (userBody ?? "") +
+    untrackedForBudget;
   const cap = userArgs.fullContext ? BUDGET_CAP_FULL : BUDGET_CAP_DEFAULT;
   let estimated = estimateTokens(allInputs);
   let summarized = false;
@@ -413,7 +442,9 @@ export function buildPlan(input: BuildPlanInput): Plan {
   const fingerprint = fingerprintFromInputs({
     headOid: state.headOid,
     indexBytes: state.cachedDiff,
-    worktreeBytes: state.dirty ? gitLib.statusPorcelain({ exec: input.exec }) : "",
+    // Always include status so a clean->dirty change between preflight and
+    // execute is detected as drift (not just dirty->different-dirty).
+    worktreeBytes: gitLib.statusPorcelain({ exec: input.exec }),
     worktreeContentBytes,
     existingPrSha: state.existingPr?.headRefOid ?? null,
     baseOid,

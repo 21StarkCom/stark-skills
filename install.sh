@@ -825,6 +825,18 @@ uninstall() {
         rmdir "$skill_dir" 2>/dev/null || true
     done
 
+    # Unlink all stark-* plugins. Symmetrical with the install loop.
+    for plugin_dir in "$REPO_DIR"/plugins/*/; do
+        [ -d "$plugin_dir" ] || continue
+        [ -f "$plugin_dir/.claude-plugin/plugin.json" ] || continue
+        local plugin_name
+        plugin_name=$(basename "${plugin_dir%/}")
+        local plugin_target="$HOME/.claude/plugins/$plugin_name"
+        if [ -L "$plugin_target" ]; then
+            unlink_dir "$plugin_target" "Plugin: $plugin_name"
+        fi
+    done
+
     unlink_dir "$CODE_REVIEW_DIR/standards" "Standards templates"
     unlink_dir "$CLAUDE_DIR/settings.json" "Settings"
     unlink_dir "$CLAUDE_DIR/statusline-command.sh" "Status line"
@@ -873,6 +885,15 @@ status() {
         local skill_version
         skill_version=$(read_skill_version "$skill_name")
         [ -n "$skill_version" ] && echo -e "      ${DIM}${skill_version}${NC}"
+    done
+
+    # Plugin status — symmetrical with install/uninstall loops.
+    for plugin_dir in "$REPO_DIR"/plugins/*/; do
+        [ -d "$plugin_dir" ] || continue
+        [ -f "$plugin_dir/.claude-plugin/plugin.json" ] || continue
+        local plugin_name
+        plugin_name=$(basename "${plugin_dir%/}")
+        check_dir "$HOME/.claude/plugins/$plugin_name" "Plugin: $plugin_name"
     done
 
     check_dir "$CODE_REVIEW_DIR/standards" "Standards templates"

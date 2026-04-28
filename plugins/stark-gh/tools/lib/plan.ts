@@ -118,7 +118,21 @@ export function validatePlan(p: unknown): asserts p is Plan {
   }
 
   requirePlan(isObj(o.candidateIssues), "candidateIssues missing");
-  requirePlan(Array.isArray((o.candidateIssues as Record<string, unknown>).preflight), "candidateIssues.preflight must be array");
+  const ci = o.candidateIssues as Record<string, unknown>;
+  requirePlan(Array.isArray(ci.preflight), "candidateIssues.preflight must be array");
+  for (const c of ci.preflight as unknown[]) {
+    requirePlan(isObj(c), "candidate not object");
+    const cc = c as Record<string, unknown>;
+    requirePlan(typeof cc.number === "number", "candidate.number");
+    requirePlan(typeof cc.owner === "string" && typeof cc.repo === "string", "candidate.owner/repo");
+    requirePlan(cc.relation === "Closes" || cc.relation === "Refs", "candidate.relation");
+  }
+
+  for (const k of ["closesLines", "refsLines"]) {
+    requirePlan(isObj(o[k]), `${k} missing`);
+    const v = (o[k] as Record<string, unknown>).preflight;
+    requirePlan(Array.isArray(v) && v.every(s => typeof s === "string"), `${k}.preflight must be string[]`);
+  }
 
   requirePlan(isObj(o.userArgs), "userArgs missing");
   const ua = o.userArgs as Record<string, unknown>;
@@ -135,6 +149,10 @@ export function validatePlan(p: unknown): asserts p is Plan {
     requirePlan(typeof s2[f] === "boolean", `stage2.${f} must be boolean`);
   }
   requirePlan(isObj(s2.outputs), "stage2.outputs missing");
+  const outs = s2.outputs as Record<string, unknown>;
+  for (const f of ["titleFile", "bodyFile", "commitMessageFile"]) {
+    requirePlan(outs[f] === null || typeof outs[f] === "string", `stage2.outputs.${f} must be string|null`);
+  }
 
   requirePlan(isObj(o.stage3), "stage3 missing");
   const s3 = o.stage3 as Record<string, unknown>;
@@ -145,6 +163,15 @@ export function validatePlan(p: unknown): asserts p is Plan {
   }
 
   requirePlan(isObj(o.untrustedInputs), "untrustedInputs missing");
+  const ui = o.untrustedInputs as Record<string, unknown>;
+  for (const f of ["combinedStat", "committedDiff", "stagedDiff", "commitMessages"]) {
+    requirePlan(typeof ui[f] === "string", `untrustedInputs.${f} must be string`);
+  }
+  for (const f of ["unstagedDiff", "prTemplate", "userBody"]) {
+    requirePlan(ui[f] === null || typeof ui[f] === "string", `untrustedInputs.${f} must be string|null`);
+  }
+  requirePlan(typeof ui.diffTruncated === "boolean", "untrustedInputs.diffTruncated must be boolean");
+  requirePlan(ui.untrackedFiles === null || Array.isArray(ui.untrackedFiles), "untrustedInputs.untrackedFiles");
 }
 
 export function writePlan(filepath: string, plan: Plan): void {

@@ -125,11 +125,17 @@ export function isAuthed(opts: { exec?: ExecFn } = {}): boolean {
   }
 }
 
-export function originMatches(plan: { owner: string; name: string }, originUrl: string): boolean {
+export function originMatches(plan: { owner: string; name: string; host?: string }, originUrl: string): boolean {
   const cleaned = originUrl.replace(/\.git$/, "");
-  const httpsMatch = cleaned.match(/^https?:\/\/[^/]+\/(.+)$/);
-  const sshMatch = cleaned.match(/^git@[^:]+:(.+)$/);
-  const repoPath = httpsMatch?.[1] ?? sshMatch?.[1];
-  if (!repoPath) return false;
-  return repoPath === `${plan.owner}/${plan.name}`;
+  const httpsMatch = cleaned.match(/^https?:\/\/([^/]+)\/(.+)$/);
+  const sshMatch = cleaned.match(/^git@([^:]+):(.+)$/);
+  const host = httpsMatch?.[1] ?? sshMatch?.[1];
+  const repoPath = httpsMatch?.[2] ?? sshMatch?.[2];
+  if (!host || !repoPath) return false;
+  if (repoPath !== `${plan.owner}/${plan.name}`) return false;
+  // Reject any host that doesn't match plan.repo.host. Without this check an
+  // origin like https://attacker.example/<owner>/<repo>.git would silently
+  // receive the push even though PR metadata is resolved against GitHub.
+  if (plan.host && host !== plan.host) return false;
+  return true;
 }

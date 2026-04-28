@@ -53,6 +53,11 @@ export interface CodexCallInput {
 export function callCodex(input: CodexCallInput): string {
   const exec = input.exec ?? defaultExec;
   const argv = buildCodexArgv(input.cfg);
-  const buf = exec("codex", argv, { input: input.prompt });
+  // timeoutSeconds gates a hung Codex subprocess. execFileSync sends SIGTERM
+  // and throws when the timer fires; the caller's retry loop handles it.
+  const buf = exec("codex", argv, {
+    input: input.prompt,
+    timeout: input.cfg.timeoutSeconds * 1000,
+  } as never);
   return parseCodexJsonl(buf.toString("utf8"));
 }

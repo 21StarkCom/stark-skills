@@ -15,6 +15,7 @@ import { downgradeLlmCloses, extractCandidates, formatLine } from "./lib/issue.t
 import { scanSecrets } from "./lib/secret.ts";
 import { mktempInRuntime } from "./lib/runtime.ts";
 import { fetchBase } from "./gh_pr_open_preflight.ts";
+import { appendSecretOverride } from "./lib/audit.ts";
 
 export function reverifyState(plan: Plan, opts: { exec?: ExecFn } = {}): void {
   const headOid = gitLib.headOid(opts);
@@ -29,7 +30,9 @@ export function reverifyState(plan: Plan, opts: { exec?: ExecFn } = {}): void {
   const actual = fingerprintFromInputs({
     headOid,
     indexBytes,
-    worktreeBytes: plan.tree.dirty ? status : "",
+    // Always hash the live worktree status so a clean -> dirty transition
+    // between preflight and execute is detected as drift.
+    worktreeBytes: status,
     worktreeContentBytes,
     existingPrSha,
     baseOid: plan.baseOid,
@@ -54,10 +57,22 @@ export function stageChanges(plan: Plan, opts: { exec?: ExecFn } = {}): void {
 export function postStageSecretScan(plan: Plan, opts: { exec?: ExecFn } = {}): void {
   const cached = gitLib.diffCached(opts);
   const hits = scanSecrets(cached);
-  if (hits.length > 0 && !plan.userArgs.allowSecretCommit) {
+  if (hits.length === 0) return;
+  if (!plan.userArgs.allowSecretCommit) {
     const cats = [...new Set(hits.map(h => h.category))].join(", ");
     throw new Error(`post-stage-secret-hit:${cats}`);
   }
+  // Override is in effect: append a durable audit record so the bypass
+  // survives plan-file deletion (spec rt2-r2).
+  appendSecretOverride({
+    timestamp: new Date().toISOString(),
+    stage: "post-stage",
+    allowSecretCommit: plan.userArgs.allowSecretCommit,
+    allowSecretToLlm: plan.userArgs.allowSecretToLlm,
+    branch: plan.branch,
+    repoNameWithOwner: plan.repo.nameWithOwner,
+    hits: hits.map(h => ({ category: h.category, location: `line ${h.lineNumber}` })),
+  });
 }
 
 export interface LateLines {
@@ -93,10 +108,16 @@ export function extractLateLines(
   return { closesLines, refsLines, lateCandidates: fresh };
 }
 
-export function pushBranch(input: { branch: string; repo: { owner: string; name: string } }, opts: { exec?: ExecFn } = {}): string {
+export function pushBranch(
+  input: { branch: string; repo: { owner: string; name: string; host?: string } },
+  opts: { exec?: ExecFn } = {},
+): string {
   const url = gitLib.originUrl(opts);
   if (!url || !ghLib.originMatches(input.repo, url)) {
-    throw new Error(`origin URL '${url ?? "(none)"}' doesn't match expected '${input.repo.owner}/${input.repo.name}'`);
+    const expected = input.repo.host
+      ? `${input.repo.host}/${input.repo.owner}/${input.repo.name}`
+      : `${input.repo.owner}/${input.repo.name}`;
+    throw new Error(`origin URL '${url ?? "(none)"}' doesn't match expected '${expected}'`);
   }
   gitLib.pushExplicit(input.branch, opts);
   return gitLib.headOid(opts);
@@ -263,7 +284,10 @@ function main(): never {
   let headSha = gitLib.headOid();
   if (plan.stage3.willPush) {
     try {
-      headSha = pushBranch({ branch: plan.branch, repo: { owner: plan.repo.owner, name: plan.repo.name } });
+      headSha = pushBranch({
+        branch: plan.branch,
+        repo: { owner: plan.repo.owner, name: plan.repo.name, host: plan.repo.host },
+      });
     } catch (e) {
       if (/origin URL/.test(String((e as Error).message))) die(Exit.ORIGIN_MISMATCH, String((e as Error).message));
       die(Exit.PUSH_FAILED, String((e as Error).message));
