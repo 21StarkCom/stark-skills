@@ -139,7 +139,7 @@ async function main(argv: string[]): Promise<number> {
 // Exports for tests
 export { buildRunbook, watcherStatePathForPlan };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1]?.endsWith("gh_pr_merge_complete.ts")) {
   main(process.argv.slice(2)).then(c => process.exit(c)).catch(err => {
     process.stderr.write(`callback: ${err?.message || err}\n`);
     process.exit(1);
