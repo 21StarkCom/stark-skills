@@ -44,7 +44,9 @@ Local cleanup (checkout main, delete local branch) is **not** automated by this 
 | State integrity | Preflight captures `baseOid`, `originalHeadOid`, and `rebasedHeadOid`. Execute re-verifies before force-push. Watcher on-green re-verifies `baseOid` and `pushedHeadOid` immediately before `gh pr merge` (rt4) |
 | Working-tree cleanliness | Preflight refuses if `git status --porcelain` is non-empty or any in-progress git operation marker exists (`.git/rebase-*`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `BISECT_LOG`). Records the user's starting ref (`HEAD` symbolic name) for restoration on rebase abort. Exit `13` |
 | Runtime tempdir | Same as pr-open: `~/.claude/code-review/stark-gh/runtime/` |
-| Output validation | TS validates Stage 2 output: subject ≤ 72 chars (squash-commit convention), body ≤ 16 KB, bullet must start with `- ` and be a single line ≤ 200 chars; rejects `Closes`/`Refs` lines (issue linking is pr-open's responsibility) |
+| Output validation | TS validates Stage 2 output against fixed JSON Schema (R3-claude/api-design): `{ "subject": string ≤72, "body": string ≤16KB, "changelog_bullet": string matching `^- .{1,198}$` (single line, no embedded newlines) }`. No additional properties. Rejects `Closes`/`Refs` lines in any field (issue linking is pr-open's responsibility). Schema lives at `plugins/stark-gh/tools/lib/draft_schema.json` and is loaded by both `gh_pr_merge_draft.ts` (Codex prompt + post-validation) and tests |
+| Override audit (R3-codex/security) | Each invocation of `--force`, `--allow-secret-commit`, or `--allow-secret-to-llm` writes a JSON line to `~/.claude/code-review/stark-gh/audit/pr-merge.log` (mode `0600`) with `{timestamp, runId, pr, flag, user, hostname, reason?}`. `--allow-secret-to-llm` additionally prints a stderr warning: "WARNING: secret material is being sent to an external LLM provider; review provider data-handling policies" |
+| Pagination (R3-codex/api-design) | GraphQL check-rollup query requests `contexts(first:100)`. If `pageInfo.hasNextPage`, paginate via `after:` cursor. Aggregate all pages before applying `isCheckPassing` predicate. Tests assert correct multi-page handling |
 
 ## Gate Matrix
 
@@ -136,7 +138,7 @@ Authoritative table reconciling Decisions and Stage 1. `--force` only affects th
      Atomic write.
 6. Stage and commit changelog: `git add CHANGELOG.md && git commit -m "chore(changelog): <bullet text>"`. Capture `changelogCommitOid`. If `git diff --cached` is empty (file byte-identical from step 5), skip the commit and reuse `changelogCommitOid` from the plan-file.
 7. Verify origin URL matches PR's `nameWithOwner`; else exit `31`.
-8. **Explicit-OID force-push (rt5):** `git push --force-with-lease=refs/heads/<headRef>:<originalHeadOid> origin HEAD:refs/heads/<headRef>`. Exit `31` on rejection.
+8. **Explicit-OID force-push (rt5):** `git push --force-with-lease=refs/heads/<headRef>:<originalHeadOid> origin HEAD:refs/heads/<headRef>`. **On rejection (R3-claude/resilience):** roll back the local changelog commit via `git reset --hard <originalHeadOid + rebase result>` (i.e., `rebasedHeadOid` captured in step 11 of preflight); restore CHANGELOG.md from object store; print rejection reason; exit `31`. Local branch is left in the rebased state without the changelog commit, so retry is clean.
 9. Capture `pushedHeadOid = HEAD SHA` and atomic-update plan-file with `changelogCommitOid` and `pushedHeadOid` (rt7).
 10. If `--no-watch` (R2-H8/H9):
     - Run shared OID re-verify helper (`lib/verify_oids.ts`): re-fetch `origin/<baseRef>`; `gh api graphql` for PR `headRefOid`; require `baseOid` and `pushedHeadOid` unchanged. Else exit `30`.
@@ -144,8 +146,9 @@ Authoritative table reconciling Decisions and Stage 1. `--force` only affects th
     - Run `gh pr merge --squash --subject-file <f> --body-file <f> --delete-branch <pr#>`. Exit `32` on failure.
     - Print merge SHA + PR URL. `--delete-branch` deletes only the **remote** branch.
 11. Else (default):
-    - Spawn `gh_watch_runs.ts --on-green pr-merge-complete --plan-file <path>` in background. The `pr-merge-complete` callback name is resolved against the registry in `lib/watcher_callbacks.ts` (H11). Exit `33` on spawn failure.
-    - Print PR URL + watcher state-file path.
+    - Spawn `gh_watch_runs.ts --on-green pr-merge-complete --plan-file <path>` in background. The `pr-merge-complete` callback name is resolved against the registry in `lib/watcher_callbacks.ts` (H11).
+    - **Spawn-fail recovery (R3-codex/completeness):** if spawn fails, the force-push has already landed (post-rollback-window). Plan-file is retained on disk. Print: PR URL, plan-file path, and instruction "Watcher spawn failed; rerun `/stark-gh:pr-merge --pr <N>` to retry watcher-only (preflight detects the existing plan-file and resumes from Stage 3 step 10 with a fresh spawn attempt)." Exit `33`. Preflight resume path: if plan-file exists for this PR with `pushedHeadOid` set and no terminal watcher state, skip Stage 1 mutations and proceed directly to spawn.
+    - On spawn success: print PR URL + watcher state-file path.
 12. **Plan-file lifecycle (H14):** in `--no-watch` mode, unlink plan-file on success. In background mode, **plan-file is retained** until the watcher writes a terminal state; the watcher (or `gh_pr_merge_complete.ts`) is responsible for the final unlink.
 
 ### Watcher merge callback
@@ -331,7 +334,9 @@ Mirror pr-open's per-unit + per-stage + integration layout. **Every rt mitigatio
 
 ### Stage 2 — Draft
 - `merge_draft.test.ts` — codex stub, output validation, tempfile placement
-- `merge_draft_validation.test.ts` — subject > 72 chars rejected; body > 16 KB rejected; bullet without `- ` prefix rejected; `Closes`/`Refs` lines rejected; retry-once on validation failure
+- `merge_draft_validation.test.ts` (R3-claude/api-design) — JSON Schema validation: subject > 72 chars rejected; body > 16 KB rejected; bullet without `- ` prefix rejected; bullet with embedded newline rejected; bullet > 200 chars rejected; `Closes`/`Refs` lines rejected; additional properties rejected; retry-once on validation failure
+- `checks_graphql_pagination.test.ts` (R3-codex/api-design) — 100+ contexts paginated correctly; `pageInfo.hasNextPage` followed; full aggregation before predicate evaluation
+- `override_audit.test.ts` (R3-codex/security) — each override flag writes a structured audit line; `--allow-secret-to-llm` prints stderr warning; audit file mode `0600`
 
 ### Stage 3 — Execute
 - `merge_execute_secret_scan.test.ts` (H18) — pre-commit scan blocking + redaction:
@@ -340,11 +345,14 @@ Mirror pr-open's per-unit + per-stage + integration layout. **Every rt mitigatio
   - secret in changelog bullet → exits `28`
   - with `--allow-secret-commit`: spans redacted in all three artifacts; tempfiles rewritten before any file mutation; CHANGELOG.md not touched until after redaction
 - `merge_execute_changelog.test.ts` — covered by `changelog_lib.test.ts`; this asserts the call ordering (scan → redact → write → commit)
-- `merge_execute_push.test.ts` (H20) — explicit-OID lease assertions (rt5):
+- `merge_execute_push.test.ts` (H20, R3-claude/resilience) — explicit-OID lease + rollback assertions:
   - push command literal-string-contains `--force-with-lease=refs/heads/<headRef>:<originalHeadOid>` with the captured pre-rebase OID
-  - push rejected → exits `31`
+  - push rejected → exits `31`; CHANGELOG commit rolled back (HEAD == `rebasedHeadOid`); CHANGELOG.md content restored from object store
   - push rejected does NOT degrade to implicit lease
-  - origin URL mismatch → exits `31`
+  - origin URL mismatch → exits `31` (no commit happens, no rollback needed)
+- `merge_execute_spawn_fail.test.ts` (R3-codex/completeness) — watcher spawn failure:
+  - simulate spawn failure post-push; assert exit `33`, plan-file retained, instruction message printed
+  - rerun: preflight detects plan-file with `pushedHeadOid` set, skips Stage 1 mutations, proceeds to fresh spawn attempt
 - `merge_execute_no_watch.test.ts` (R2-H8/H9) — `--no-watch` with non-green checks exits `12`; with green checks invokes `gh pr merge --squash --delete-branch` and exits `0`; OID re-verify helper invoked before merge — `baseOid` mismatch → exit `30`, `pushedHeadOid` mismatch → exit `30`; assertion that the same helper is shared with `gh_pr_merge_complete.ts`
 - `merge_execute_idempotency.test.ts` (H21) — rt7 rerun safety:
   - rerun with same bullet text + existing marker: changelog unchanged, no new commit, plan retains `changelogCommitOid`
@@ -389,6 +397,15 @@ Mirror pr-open's per-unit + per-stage + integration layout. **Every rt mitigatio
 | Dirty working tree on rebase | H02: Stage 1 step 2 refuses non-empty `git status --porcelain` or any in-progress git op marker before any mutation; `startingRef` recorded for post-abort restoration |
 | Unconstrained `--on-green-tool` subprocess sink | H11: replaced with `--on-green <name>` resolved against `lib/watcher_callbacks.ts` registry; arbitrary paths refused |
 | Watcher signals on stale check runs from pre-rebase OID | H13: SHA-match contract — on-green only fires when checks targeting `pushedHeadOid` are observed and pass |
+
+## Considered & Rejected (round 3, 2026-04-28)
+
+| ID | Persona | Concern (summary) | Disposition |
+|----|---------|-------------------|-------------|
+| R3-codex/scope | scope | Mandatory CHANGELOG mutation over-scopes the merge command; should be optional | **Rejected.** Fundamental design choice (B + Update ChangeLog) made in brainstorming. CHANGELOG entry is the value-add of pr-merge; making it optional reverts to plain `gh pr merge` |
+| R3-codex/security | security | Watcher's secret rescan fails open with `--allow-secret-commit` set | **By design.** The override flag means the user has explicitly accepted the risk; rescan with override is informational only (logged to audit file) |
+| R3 wording-only consistency drift | consistency | Multiple findings citing predicate-name drift / two-phrasings-of-same-rule | **Accepted as polish.** Substantive contradictions resolved in rounds 1–2; remaining items are wording-only and can be tightened during implementation |
+| R3-claude/test-plan | test-plan | No load/concurrency test for changelog marker contention | **Deferred to v2** (same as R2-H13 / rt6 — concurrent-merge bottleneck) |
 
 ## Considered & Rejected (round 2, 2026-04-28)
 
