@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "stark-gh:pr-merge Codex draft output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["subject", "body", "changelog_bullet"],
+  "properties": {
+    "subject": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 72,
+      "description": "Squash commit subject. Single line, no embedded newlines."
+    },
+    "body": {
+      "type": "string",
+      "maxLength": 16384,
+      "description": "Squash commit body. Markdown allowed."
+    },
+    "changelog_bullet": {
+      "type": "string",
+      "pattern": "^- [^\\n]{1,198}$",
+      "description": "Single bullet line for CHANGELOG.md, starting with '- ' and ≤200 chars."
+    }
+  }
+}
