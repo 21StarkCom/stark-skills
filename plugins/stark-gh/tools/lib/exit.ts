@@ -1,0 +1,27 @@
+// Stable exit codes. See the design spec for user-facing meaning.
+export const Exit = {
+  OK: 0,
+  GENERIC: 1,
+  NOT_GIT_REPO: 10,
+  ON_DEFAULT_BRANCH: 11,
+  INVALID_BRANCH_NAME: 12,
+  GH_NOT_AUTHED: 13,
+  NO_REMOTE: 14,
+  CANNOT_RESOLVE_BASE: 15,
+  SECRET_HIT_PREFLIGHT: 16,
+  UNRECOGNIZED_FLAG: 17,
+  PROMPT_BUDGET_EXCEEDED: 18,
+  UNSTAGED_ONLY: 19,
+  GH_PR_CREATE_FAILED: 21,
+  GH_PR_EDIT_FAILED: 22,
+  PUSH_FAILED: 23,
+  STATE_DRIFT: 25,
+  PLAN_FILE_INVALID: 26,
+  NOTHING_STAGED: 27,
+  SECRET_HIT_POST_STAGE: 28,
+  ORIGIN_MISMATCH: 29,
+  DRAFT_INVALID_OUTPUT: 30,
+  BASE_OID_DRIFT: 31,
+} as const;
+
+export type ExitCode = (typeof Exit)[keyof typeof Exit];
