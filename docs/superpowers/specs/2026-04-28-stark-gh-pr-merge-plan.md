@@ -72,7 +72,7 @@ Runtime provisioning (code-owned, not manual):
 
 4. **Add reusable git/GitHub helpers.**
    - Modify `plugins/stark-gh/tools/lib/git.ts`: add `revParse(ref)`, `fetchRefs(remote, refs)`, `checkout(ref)`, `rebase(onto)`, `abortRebase()`, `commitMessage(subject)`, `resetHard(oid)`, and explicit-lease push helper. Build the lease via `argv` (no shell quoting; codex risk).
-   - Modify `plugins/stark-gh/tools/lib/gh.ts`: add merge PR metadata fetch, authenticated `gh api graphql` wrapper, `mergeSquashPr({prNumber, subjectFile, bodyFile})` that internally reads the subject tempfile and passes `--subject <text>` (NOT `--subject-file`) and `--body-file <file>` via argv (no shell quoting; no `--delete-branch`), and `deleteRemoteBranch({owner, repo, headRef})` using `gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/{headRef}`. **Both Phase 5 (`--no-watch` path) and Phase 7 (watcher callback) call the same shared helpers** — single source of truth for the merge invocation shape (PR2-claude/feasibility critical fix).
+   - Modify `plugins/stark-gh/tools/lib/gh.ts`: add merge PR metadata fetch, authenticated `gh api graphql` wrapper, and `mergeSquashPr({prNumber, subjectFile, bodyFile})` — reads the subject tempfile and passes `--subject <text>` (NOT `--subject-file`) and `--body-file <file>` via argv (no shell quoting; no `--delete-branch`). **Both Phase 5 (`--no-watch` path) and Phase 7 (watcher callback) call the same shared helper** — single source of truth for the merge invocation shape (PR2-claude/feasibility). Remote branch deletion is **not** in v1's lib/gh.ts surface — deferred to `/stark-gh:cleanup` per PR3-codex/rollback.
    - Done when helpers are unit-testable through `ExecFn`.
 
 5. **Persist override-flag audit-key dependency on runId.**
@@ -200,10 +200,11 @@ node --experimental-strip-types --test \
    - Exit `16` without `--allow-secret-to-llm`. **Important:** runs before any branch mutation so a failed scan leaves the user's branch untouched.
    - Tests `merge_preflight_secret_scan.test.ts`: one case per input stream → exit `16`; `--allow-secret-to-llm` waives only pre-LLM, not pre-commit.
 
-8. **Capture pre-edit CHANGELOG.md content (PR1-claude/risk + claude/feasibility).**
+8. **Capture pre-edit CHANGELOG.md content (PR1-claude/risk + claude/feasibility, fixed PR3-claude/feasibility critical).**
    - Read current `CHANGELOG.md` content before any mutation.
-   - Compute `originalChangelogSha = git hash-object CHANGELOG.md` (the blob OID is durable in git's object store and survives crashes).
+   - Compute and **persist** the blob: `originalChangelogSha = git hash-object -w CHANGELOG.md`. The `-w` flag writes the blob into the object store; without it, the SHA is computed but the blob is not actually stored, and rollback via `git cat-file blob` would fail.
    - Persist `originalChangelogSha` in plan-file. Phase 5's rollback uses `git cat-file blob <sha>` to restore content; no in-memory cache.
+   - Test `merge_execute_push.test.ts` rollback case: assert `git cat-file -e <originalChangelogSha>` succeeds before push attempt; rollback path verifies recovered content matches pre-edit byte-for-byte.
 
 9. **Rebase safely.**
    - `git fetch --no-tags origin <baseRef> <headRef>`.
@@ -322,8 +323,8 @@ node --experimental-strip-types --test \
    - Call `lib/checks_graphql.ts:fetchRequiredCheckRollup` with `expectedHeadOid=pushedHeadOid`; mismatch → exit `30`.
    - Apply `isCheckPassing` to all required contexts. If any not passing → exit `12` (always-enforced; `--force` does NOT bypass per round-4 critical fix).
    - Vacuous pass (zero required) → proceed.
-   - **Merge call (PR1-codex/feasibility — critical fix):** `gh pr merge --squash --subject "$(cat <subject-file>)" --body-file <body-file> <pr#>`. The `gh` CLI does NOT support `--subject-file`; `lib/gh.ts` reads the subject tempfile in TS and passes it via `--subject <text>` argv (no shell interpolation). `--body-file` is supported and used directly.
-   - **Branch deletion:** `gh pr merge --delete-branch` deletes BOTH local and remote branches per the GitHub CLI docs — this is incompatible with our local-cleanup-deferred-to-`/stark-gh:cleanup` design. Therefore: do NOT pass `--delete-branch`. After successful merge, delete the **remote** branch via `gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/{headRef}` (or equivalent GraphQL); local branch remains untouched.
+   - **Merge call (PR1-codex/feasibility):** `lib/gh.ts:mergeSquashPr({prNumber, subjectFile, bodyFile})` reads the subject tempfile and passes `--subject <text>` (NOT `--subject-file`) and `--body-file <file>` via argv (no shell interpolation; no `--delete-branch`).
+   - **Branch deletion deferred (PR3-codex/rollback critical):** v1 does NOT delete the remote branch. The branch remains as a recovery anchor (the squash commit is single-parent; the only way to recover the original PR commits post-merge is via the un-deleted remote branch). Branch deletion becomes `/stark-gh:cleanup`'s responsibility. The cleanup hint printed in the watcher state remains `Run /stark-gh:cleanup --pr N` (covers branch + local checkout in one operation).
    - On success: print merge SHA + PR URL; unlink plan-file and prose tempfiles.
    - On failure: exit `32`.
 
@@ -408,9 +409,9 @@ node --experimental-strip-types --test \
    - Read plan-file.
    - Call `lib/verify_oids.ts:verifyMergeOids`. On mismatch, write terminal state `base_moved` or `head_moved` (callback owns these states).
    - **Pre-merge secret rescan:** read subject/body tempfiles; re-run `lib/secret.ts`. If secret found AND `--allow-secret-commit` not in plan, write terminal state `secret_in_prose` and exit. With override, proceed (already redacted).
-   - Run merge via `lib/gh.ts:mergeSquashPr({prNumber, subjectFile, bodyFile})` — **the same shared helper used by Phase 5 task 6**. The helper internally reads the subject tempfile and passes `--subject <text>` (not `--subject-file`); it does NOT pass `--delete-branch`. Branch deletion is the next step.
-   - On success: capture merge SHA. Then call `lib/gh.ts:deleteRemoteBranch({owner, repo, headRef})` which uses `gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/{headRef}` (remote-only).
-   - Write final state `merged` with merge SHA + cleanup hint `Run: /stark-gh:cleanup --pr <N>` (slash-command form, never raw shell).
+   - Run merge via `lib/gh.ts:mergeSquashPr({prNumber, subjectFile, bodyFile})` — **the same shared helper used by Phase 5 task 6**. The helper passes `--subject <text>` (not `--subject-file`); it does NOT pass `--delete-branch`. Branch deletion is deferred to `/stark-gh:cleanup` per PR3-codex/rollback critical.
+   - On success: capture merge SHA. **Remote branch is NOT deleted** — left as recovery anchor (squash commit is single-parent; un-deleted branch is the only post-merge path back to original commits).
+   - Write final state `merged` with merge SHA + cleanup hint `Run: /stark-gh:cleanup --pr <N>` (covers branch deletion + local cleanup).
    - On failure: write terminal state `merge_failed`, surface stderr, retain plan-file + tempfiles for diagnosis.
 
 2. **Stage 3 default-watch in `gh_pr_merge_execute.ts`.**
@@ -579,7 +580,7 @@ git push --force-with-lease=refs/heads/<headRef>:$PUSHED \
 
 1. **Capture the merge commit SHA** from the watcher's terminal state file (`status: merged`, `merge_sha`).
 2. **Revert via PR:** `git revert <merge_sha>` on a fresh branch off `baseRef`, then `gh pr create --base <baseRef> --title "Revert: <orig title>" --body "Reverts #<orig PR>"`.
-3. **Original PR branch is unrecoverable** from the squash commit alone (single-parent — no link to pre-squash commits). Mitigation: the watcher's terminal state file retains `pushedHeadOid`, so for a finite window after merge (before GitHub's reflog GCs the orphaned ref), forensics can fetch the orphaned commits via `gh api repos/{owner}/{repo}/git/commits/{pushedHeadOid}`. **Operators who anticipate needing the original branch must capture it before invoking `/stark-gh:pr-merge`.** Document this constraint in `plugins/stark-gh/README.md`.
+3. **Original PR branch remains as recovery anchor in v1** (PR3-codex/rollback fix): pr-merge does NOT delete the remote branch; `/stark-gh:cleanup` does, and only when the operator explicitly invokes it. The branch ref `refs/heads/<headRef>` continues pointing at `pushedHeadOid` after merge, so the original commits stay reachable for as long as the branch exists. Recovery: simply `git fetch origin <headRef>` and inspect/cherry-pick from `origin/<headRef>`. After the operator runs `/stark-gh:cleanup`, the branch is deleted and the commits become reachable only via `gh api repos/{owner}/{repo}/git/commits/{pushedHeadOid}` for a finite GC window.
 
 Treat the merge call as an irreversible boundary requiring operator readiness.
 
