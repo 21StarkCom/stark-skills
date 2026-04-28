@@ -3,6 +3,9 @@ import * as os from "node:os";
 import * as fs from "node:fs";
 
 export function watcherDir(): string {
+  if (process.env.CODEX_SANDBOX) {
+    return path.join(os.tmpdir(), "stark-gh", "watchers");
+  }
   return path.join(os.homedir(), ".claude", "code-review", "stark-gh", "watchers");
 }
 

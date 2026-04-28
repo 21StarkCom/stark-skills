@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
 import * as crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { stateFile, lockFile, latestPointer, ensurePrDir, atomicWriteJson } from "./lib/watcher_paths.ts";
+import * as ghLib from "./lib/gh.ts";
 
 export interface LockFileContent {
   pid: number;
@@ -91,4 +94,170 @@ export function summarize(suites: CheckSuite[]) {
     else if (r.conclusion === "neutral") counts.neutral++;
   }
   return counts;
+}
+
+interface CliArgs {
+  host: string;
+  owner: string;
+  repo: string;
+  pr: number;
+  headSha: string;
+  maxMinutes: number;
+  initialPollSeconds: number;
+  maxPollSeconds: number;
+  noChecksGraceMinutes: number;
+}
+
+function parseArgs(argv: string[]): CliArgs {
+  const get = (flag: string, def?: string): string => {
+    const i = argv.indexOf(flag);
+    if (i < 0) {
+      if (def !== undefined) return def;
+      throw new Error(`missing ${flag}`);
+    }
+    return argv[i + 1]!;
+  };
+  const repo = get("--repo");
+  const [owner, repoName] = repo.split("/");
+  return {
+    host: get("--host"),
+    owner: owner!,
+    repo: repoName!,
+    pr: Number(get("--pr")),
+    headSha: get("--head-sha"),
+    maxMinutes: Number(get("--max-minutes", "30")),
+    initialPollSeconds: Number(get("--initial-poll-seconds", "15")),
+    maxPollSeconds: Number(get("--max-poll-seconds", "240")),
+    noChecksGraceMinutes: Number(get("--no-checks-grace-minutes", "5")),
+  };
+}
+
+function notifyDone(summary: ReturnType<typeof summarize>, pr: number): void {
+  try {
+    const msg = `PR #${pr}: ${summary.success} success, ${summary.failure} failure, ${summary.cancelled} cancelled`;
+    execFileSync("osascript", ["-e", `display notification "${msg.replace(/"/g, "")}" with title "stark-gh"`], {
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+  } catch {
+    // Best effort only.
+  }
+}
+
+async function mainAsync(): Promise<void> {
+  const args = parseArgs(process.argv.slice(2));
+  ensurePrDir(args.host, args.owner, args.repo, args.pr);
+
+  const sf = stateFile(args.host, args.owner, args.repo, args.pr, args.headSha);
+  const lf = lockFile(args.host, args.owner, args.repo, args.pr, args.headSha);
+  const lock = acquireLock(lf, { headSha: args.headSha });
+  if (lock.alreadyRunning) {
+    process.stderr.write(`watcher already running for PR #${args.pr} @ ${args.headSha}\n`);
+    process.exit(0);
+  }
+  const ownerToken = lock.ownerToken!;
+
+  atomicWriteJson(sf, {
+    schemaVersion: 1,
+    command: "gh-watch-runs",
+    host: args.host,
+    repo: `${args.owner}/${args.repo}`,
+    pr: args.pr,
+    headSha: args.headSha,
+    status: "watching",
+    startedAt: new Date().toISOString(),
+    lastPolledAt: null,
+    nextPollAt: new Date().toISOString(),
+    lastError: null,
+    checks: [],
+    summary: null,
+  });
+
+  const start = Date.now();
+  const sched = backoffSchedule(args.initialPollSeconds, args.maxPollSeconds);
+  let consecErrors = 0;
+  let firstSeenAt: number | null = null;
+
+  while (true) {
+    const elapsedMin = (Date.now() - start) / 60000;
+    if (elapsedMin > args.maxMinutes) {
+      const cur = JSON.parse(fs.readFileSync(sf, "utf8"));
+      atomicWriteJson(sf, { ...cur, status: "timeout", finishedAt: new Date().toISOString() });
+      atomicWriteJson(latestPointer(args.host, args.owner, args.repo, args.pr), {
+        headSha: args.headSha,
+        status: "timeout",
+        updatedAt: new Date().toISOString(),
+      });
+      releaseLockIfOwner(lf, ownerToken);
+      process.exit(0);
+    }
+
+    let suites: unknown[] = [];
+    try {
+      suites = ghLib.checkSuites(args.host, args.owner, args.repo, args.headSha);
+      consecErrors = 0;
+    } catch (e) {
+      consecErrors++;
+      if (consecErrors >= 5) {
+        const cur = JSON.parse(fs.readFileSync(sf, "utf8"));
+        atomicWriteJson(sf, {
+          ...cur,
+          status: "error",
+          lastError: String((e as Error).message),
+          finishedAt: new Date().toISOString(),
+        });
+        releaseLockIfOwner(lf, ownerToken);
+        process.exit(1);
+      }
+    }
+
+    if (suites.length > 0) firstSeenAt ??= Date.now();
+    if (firstSeenAt === null && elapsedMin > args.noChecksGraceMinutes) {
+      const cur = JSON.parse(fs.readFileSync(sf, "utf8"));
+      atomicWriteJson(sf, { ...cur, status: "no-checks-observed", finishedAt: new Date().toISOString() });
+      atomicWriteJson(latestPointer(args.host, args.owner, args.repo, args.pr), {
+        headSha: args.headSha,
+        status: "no-checks-observed",
+        updatedAt: new Date().toISOString(),
+      });
+      releaseLockIfOwner(lf, ownerToken);
+      process.exit(0);
+    }
+
+    if (isTerminal(suites as CheckSuite[])) {
+      const sum = summarize(suites as CheckSuite[]);
+      const cur = JSON.parse(fs.readFileSync(sf, "utf8"));
+      atomicWriteJson(sf, {
+        ...cur,
+        status: "done",
+        finishedAt: new Date().toISOString(),
+        checks: suites,
+        summary: sum,
+      });
+      atomicWriteJson(latestPointer(args.host, args.owner, args.repo, args.pr), {
+        headSha: args.headSha,
+        status: "done",
+        updatedAt: new Date().toISOString(),
+      });
+      notifyDone(sum, args.pr);
+      releaseLockIfOwner(lf, ownerToken);
+      process.exit(0);
+    }
+
+    const sleepSec = sched.next().value as number;
+    const cur = JSON.parse(fs.readFileSync(sf, "utf8"));
+    atomicWriteJson(sf, {
+      ...cur,
+      lastPolledAt: new Date().toISOString(),
+      nextPollAt: new Date(Date.now() + sleepSec * 1000).toISOString(),
+      checks: suites,
+    });
+    await new Promise(r => setTimeout(r, sleepSec * 1000));
+  }
+}
+
+if (process.argv[1]?.endsWith("gh_watch_runs.ts")) {
+  mainAsync().catch(e => {
+    process.stderr.write(String(e) + "\n");
+    process.exit(1);
+  });
 }
