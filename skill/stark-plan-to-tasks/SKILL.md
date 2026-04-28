@@ -2,12 +2,12 @@
 name: stark-plan-to-tasks
 description: >-
   Decompose spec/plan into phased GitHub issues with story points and risk labels. Use for plan to tasks, decompose plan.
-argument-hint: "<path-to-spec> [--dry-run] [--cleanup <slug>]"
+argument-hint: "<path-to-spec> [--dry-run] [--cleanup <slug>] [--agents codex,gemini]"
 disable-model-invocation: true
 context: fork
 model: opus
-revision: ea827b2dd463a563417f2dd86c31248eb42b5cfb
-revision_date: 2026-04-10T17:10:53+03:00
+revision: 2e8a3bda91763c4b23612b1de7e1cc9c313fea0f
+revision_date: 2026-04-28T17:28:09Z
 ---
 
 # stark-plan-to-tasks
@@ -19,6 +19,7 @@ Decompose a spec/design document into phased GitHub issues. Three LLM passes: qu
 - `<path-to-spec>` — path to spec/plan markdown file (required, must be `.md`)
 - `--dry-run` — run all three passes, preview issue payloads, write to `/tmp/stark-plan-to-tasks-preview-{plan-slug}.md`, stop before creating issues or modifying files
 - `--cleanup <plan-slug>` — find all issues with `plan:{slug}` label, list them, and offer to close with a "Cleaned up by stark-plan-to-tasks" comment
+- `--agents <list>` — comma-separated subset of `codex`, `gemini` for the Pass 3 validation agent. Overrides `validation_agents` from config (default: `codex`). Pass 1 (quality gate) and Pass 2 (decomposition) are always run by Claude as orchestrator and are not affected by this flag.
 
 **Raw input:** `$ARGUMENTS`
 
@@ -69,7 +70,11 @@ Fail if non-zero exit or empty token. Check that key `STARK_CLAUDE_PRIVATE_KEY` 
 
 ### 1.6 Validation agent CLI check
 
-Read `validation_agents` from config hierarchy (global → org → repo). Default: `["codex"]`. Verify each agent is in PATH. Fail with install instructions if missing.
+Parse `$ARGUMENTS` for `--agents <list>`. If supplied, validate each entry is one of `codex`, `gemini` (Claude is the orchestrator and not a valid Pass 3 agent); abort with a clear error on any unknown name. Store the normalized list in `$VALIDATION_AGENTS`.
+
+If `--agents` was not supplied, read `validation_agents` from config hierarchy (global → org → repo). Default: `["codex"]`.
+
+Verify each resolved agent is in PATH. Fail with install instructions if missing.
 
 ### 1.7 Re-run detection
 
@@ -169,10 +174,12 @@ Verify plan file SHA-256 still matches `plan_hash`. If changed → re-run Phase 
 Build validation envelope JSON (plan_markdown + breakdown + plan_hash), write to temp file (`chmod 600`). Dispatch:
 
 ```bash
-$PYTHON $SCRIPTS/plan_to_tasks_validate.py "$PLAN_FILE" "$BREAKDOWN_FILE" --timeout 300
+agents_args=()
+[ -n "${VALIDATION_AGENTS:-}" ] && agents_args=(--agents "$VALIDATION_AGENTS")
+$PYTHON $SCRIPTS/plan_to_tasks_validate.py "$PLAN_FILE" "$BREAKDOWN_FILE" --timeout 300 "${agents_args[@]}"
 ```
 
-This script handles envelope construction, agent dispatch (configured `validation_agents`), output normalization, and structured JSON output. Expect output: `{"schema_version": 1, "approved": true|false, "issues": [...]}`. If malformed, retry once with stronger prompt. If still malformed → treat as validation failure.
+This script handles envelope construction, agent dispatch (uses `--agents` when supplied, otherwise falls back to configured `validation_agents`), output normalization, and structured JSON output. Expect output: `{"schema_version": 1, "approved": true|false, "issues": [...]}`. If malformed, retry once with stronger prompt. If still malformed → treat as validation failure.
 
 **Validation checks:** Coverage (all requirements have tasks), self-containment (each issue stands alone), dependency correctness (no circular deps, no orphan knowledge), overlap, sizing, review sufficiency, metric sanity.
 
