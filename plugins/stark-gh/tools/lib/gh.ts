@@ -95,6 +95,11 @@ export function prView(number: number, opts: { exec?: ExecFn } = {}): { url: str
   return JSON.parse(out);
 }
 
+export function prHeadOid(number: number, owner: string, repo: string, opts: { exec?: ExecFn } = {}): string {
+  const out = gh(["pr", "view", String(number), "--repo", `${owner}/${repo}`, "--json", "headRefOid"], opts);
+  return JSON.parse(out).headRefOid as string;
+}
+
 export function prChecks(pr: number, owner: string, repo: string, opts: { exec?: ExecFn } = {}): unknown[] {
   const out = gh(
     [

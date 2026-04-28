@@ -330,6 +330,9 @@ export function buildPlan(input: BuildPlanInput): Plan {
   const commitMessagesText = maybeRedact(commitMessages)!;
   const userBodyRaw = userArgs.body ?? (userArgs.bodyFile ? fs.readFileSync(userArgs.bodyFile, "utf8") : null);
   const userBody = maybeRedact(userBodyRaw);
+  const untrackedFilesForLlm = untrackedFiles
+    ? untrackedFiles.map(u => ({ ...u, content: maybeRedact(u.content) }))
+    : null;
   const secretScan = {
     scanned: true,
     hits: hits.map(h => ({ category: h.category, location: `line ${h.lineNumber}` })),
@@ -379,7 +382,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
   }
 
   const worktreeContentBytes = userArgs.commitAll
-    ? gitLib.git(["diff", "--binary"], { exec: input.exec }) + (untrackedFiles ?? []).map(u => gitLib.sha256(u.content ?? "")).join("")
+    ? gitLib.git(["diff", "--binary"], { exec: input.exec }) + (untrackedFiles ?? []).map(u => gitLib.hashUntrackedFile(u.path)).join("")
     : null;
   const fingerprint = fingerprintFromInputs({
     headOid: state.headOid,
@@ -422,7 +425,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
       committedDiff: committedDiffText,
       stagedDiff: stagedDiffText,
       unstagedDiff: unstagedDiffText,
-      untrackedFiles,
+      untrackedFiles: untrackedFilesForLlm,
       diffTruncated: committedDiff.truncated || stagedDiff.truncated,
       prTemplate,
       commitMessages: commitMessagesText,
