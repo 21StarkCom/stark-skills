@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import { sha256 } from "./git.ts";
 import type { Candidate } from "./types.ts";
 import type { StateFingerprint } from "./state.ts";
+import type { ReasoningEffort } from "./config.ts";
 
 // Backwards-compat alias: existing pr-open plans are PrOpenPlan. New plans
 // MAY include a `command` discriminator; absent means pr-open.
@@ -234,7 +235,7 @@ export interface PrMergePlan {
     bodyFile: string | null;
     changelogBulletFile: string | null;
     model: string;
-    reasoningEffort: "low" | "medium" | "high";
+    reasoningEffort: ReasoningEffort;
   };
   execute: {
     watch: boolean;
@@ -287,7 +288,7 @@ export function validatePrMergePlan(p: unknown): asserts p is PrMergePlan {
     requirePlan(s2[f] === null || typeof s2[f] === "string", `stage2.${f} must be string|null`);
   }
   requirePlan(typeof s2.model === "string", "stage2.model must be string");
-  requirePlan(s2.reasoningEffort === "low" || s2.reasoningEffort === "medium" || s2.reasoningEffort === "high",
+  requirePlan(s2.reasoningEffort === "medium" || s2.reasoningEffort === "high" || s2.reasoningEffort === "xhigh",
     "stage2.reasoningEffort invalid");
 
   requirePlan(isObj(o.execute), "execute missing");

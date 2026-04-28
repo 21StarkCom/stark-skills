@@ -90,11 +90,17 @@ fi
 EXECUTE_RC=$?
 ```
 
-The push happens inside execute. Once it has succeeded, the trap is disarmed
-because there is no remote rollback to perform from the wrapper:
+The push happens inside execute. Once force-push has succeeded, execute prints
+a sentinel `{"event":"pushed",...}` line on stdout *before* the post-push
+sanity check, --no-watch verify/merge, or watcher spawn run. The wrapper must
+disarm the restore trap based on that sentinel — not on `EXECUTE_RC` — because
+post-push failures (HEAD drift, --no-watch check failure, watcher spawn fail)
+exit non-zero but the remote has already been force-pushed and `restore_branch`
+would only roll back local state, re-creating divergence the user has to clean
+up by hand:
 
 ```bash
-if [ $EXECUTE_RC -eq 0 ]; then
+if printf '%s' "$EXECUTE_OUT" | grep -q '"event":"pushed"'; then
   trap - EXIT
 fi
 exit $EXECUTE_RC

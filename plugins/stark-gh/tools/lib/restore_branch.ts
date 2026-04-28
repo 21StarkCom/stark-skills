@@ -38,7 +38,22 @@ export function restoreBranchFromPlan(planFilePath: string, opts: { exec?: ExecF
     warnings: [],
   };
 
-  // Step 1: update-ref the head branch back to originalHeadOid (only if it differs).
+  // Determine the user's current symbolic ref up front; the restore strategy
+  // differs depending on whether they were on the PR head branch (where the
+  // rebase happened) or somewhere else.
+  let currentSymRef = "";
+  try {
+    currentSymRef = exec("git", ["symbolic-ref", "--short", "HEAD"], {}).toString("utf8").trim();
+  } catch {
+    // detached HEAD — fall through
+  }
+
+  // Step 1: undo the rebase on the head branch back to originalHeadOid.
+  // If the user is currently checked out on the head branch, a bare
+  // `update-ref` would leave HEAD->branch->originalHeadOid but the index
+  // and worktree still at the rebased tree — invariants broken. Use
+  // `git reset --hard` in that case so HEAD, index, and worktree all move
+  // together.
   let currentBranchSha = "";
   try {
     currentBranchSha = exec("git", ["rev-parse", `refs/heads/${plan.pr.headRef}`], {}).toString("utf8").trim();
@@ -46,21 +61,24 @@ export function restoreBranchFromPlan(planFilePath: string, opts: { exec?: ExecF
     result.warnings.push(`could not rev-parse refs/heads/${plan.pr.headRef}; skipping update-ref`);
   }
   if (currentBranchSha && currentBranchSha !== plan.originalHeadOid) {
-    try {
-      exec("git", ["update-ref", `refs/heads/${plan.pr.headRef}`, plan.originalHeadOid], {});
-      result.branchUpdated = true;
-    } catch (err) {
-      result.warnings.push(`update-ref failed: ${(err as Error).message}`);
+    if (currentSymRef === plan.pr.headRef) {
+      try {
+        exec("git", ["reset", "--hard", plan.originalHeadOid], {});
+        result.branchUpdated = true;
+      } catch (err) {
+        result.warnings.push(`reset --hard failed: ${(err as Error).message}`);
+      }
+    } else {
+      try {
+        exec("git", ["update-ref", `refs/heads/${plan.pr.headRef}`, plan.originalHeadOid], {});
+        result.branchUpdated = true;
+      } catch (err) {
+        result.warnings.push(`update-ref failed: ${(err as Error).message}`);
+      }
     }
   }
 
   // Step 2: checkout startingRef (only if not already there).
-  let currentSymRef = "";
-  try {
-    currentSymRef = exec("git", ["symbolic-ref", "--short", "HEAD"], {}).toString("utf8").trim();
-  } catch {
-    // detached HEAD — fall through to checkout
-  }
   if (currentSymRef !== plan.startingRef) {
     try {
       exec("git", ["checkout", plan.startingRef], {});

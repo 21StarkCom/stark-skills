@@ -48,7 +48,7 @@ test("collectState refuses on default branch", () => {
 
 test("fetchBase records remote source after successful fetch", () => {
   const exec = fakeExec({
-    "git fetch --no-tags --quiet origin main": "",
+    "git fetch --no-tags --quiet origin +refs/heads/main:refs/remotes/origin/main": "",
     "git rev-parse origin/main": "base123\n",
   });
   assert.deepEqual(fetchBase("main", { exec }), { baseOid: "base123", source: "remote" });

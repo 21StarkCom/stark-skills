@@ -25,7 +25,7 @@ test("buildPlan emits a valid plan with TS-emitted refs line", () => {
     "gh pr list --head feat/123-foo --state open --json number,url,title,body,headRefOid": "[]",
     "git diff --cached": "diff --git a/src/foo.ts b/src/foo.ts\n+x\n",
     "git diff": "",
-    "git fetch --no-tags --quiet origin main": "",
+    "git fetch --no-tags --quiet origin +refs/heads/main:refs/remotes/origin/main": "",
     "git rev-parse origin/main": "baseoid\n",
     "git diff origin/main...HEAD": "diff --git a/src/foo.ts b/src/foo.ts\n+y\n",
     "git diff --stat origin/main...HEAD": " src/foo.ts | 2 +-\n",
