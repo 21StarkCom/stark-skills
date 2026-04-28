@@ -18,19 +18,6 @@ verbatim as a single quoted `--raw-args` value to preflight.
 YOU MUST NOT draft any prose. Stage 2 owns drafting via the TypeScript draft
 tool, which subprocess-calls `codex exec` with a scrubbed env.
 
-## Kill switch
-
-This command is opt-in for v1. Refuse to run unless either:
-- `STARK_GH_PR_MERGE_ENABLE=1` is set in the environment, or
-- `~/.claude/code-review/stark-gh/release/enabled.flag` exists.
-
-```bash
-if [ "$STARK_GH_PR_MERGE_ENABLE" != "1" ] && [ ! -f "$HOME/.claude/code-review/stark-gh/release/enabled.flag" ]; then
-  echo "ERROR: /stark-gh:pr-merge is gated for v1. Set STARK_GH_PR_MERGE_ENABLE=1 or touch ~/.claude/code-review/stark-gh/release/enabled.flag to enable." >&2
-  exit 36
-fi
-```
-
 ## Constants
 
 ```bash

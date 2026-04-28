@@ -65,33 +65,6 @@ test("integration: validatePrMergePlan + writePlan + readPlan round-trips throug
   delete process.env.CODEX_SANDBOX;
 });
 
-test("integration: kill-switch gate refuses without env or flag", () => {
-  // Simulate the slash-body kill-switch shell snippet:
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "stark-ks-"));
-  process.env.HOME = dir;
-  delete process.env.STARK_GH_PR_MERGE_ENABLE;
-
-  const flagPath = path.join(dir, ".claude/code-review/stark-gh/release/enabled.flag");
-  // No env, no flag → should "refuse"
-  const enabled = process.env.STARK_GH_PR_MERGE_ENABLE === "1" || fs.existsSync(flagPath);
-  assert.equal(enabled, false);
-
-  // With env: enabled
-  process.env.STARK_GH_PR_MERGE_ENABLE = "1";
-  const enabled2 = process.env.STARK_GH_PR_MERGE_ENABLE === "1" || fs.existsSync(flagPath);
-  assert.equal(enabled2, true);
-
-  delete process.env.STARK_GH_PR_MERGE_ENABLE;
-
-  // With flag: enabled
-  fs.mkdirSync(path.dirname(flagPath), { recursive: true });
-  fs.writeFileSync(flagPath, "");
-  const enabled3 = process.env.STARK_GH_PR_MERGE_ENABLE === "1" || fs.existsSync(flagPath);
-  assert.equal(enabled3, true);
-
-  fs.rmSync(dir, { recursive: true });
-});
-
 test("integration: plugin.json registers pr-merge command", () => {
   // Verify the plugin metadata file lists pr-merge so install.sh exposes it.
   const repoRoot = path.resolve(import.meta.dirname ?? __dirname, "../../../../");
@@ -125,8 +98,8 @@ test("integration: commands/pr-merge.md is zero-LLM-logic body", () => {
   assert.match(content, /--raw-args "\$ARGUMENTS"/);
   // Must invoke from install path.
   assert.match(content, /\$HOME\/\.claude\/plugins\/stark-gh\/tools/);
-  // Must include kill-switch gate.
-  assert.match(content, /STARK_GH_PR_MERGE_ENABLE/);
+  // Kill-switch removed (operator opted in); must NOT contain the gate any more.
+  assert.doesNotMatch(content, /STARK_GH_PR_MERGE_ENABLE/);
   // Must install cross-stage cleanup trap.
   assert.match(content, /trap.*restore_branch\.ts/);
 });
