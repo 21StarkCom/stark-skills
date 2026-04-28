@@ -441,7 +441,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--agents",
-        help="Comma-separated list of agents to use (default: from config, typically codex).",
+        help="Comma-separated list of agents to use (default: from config, typically codex). "
+             "Supported: codex, gemini. Claude is the orchestrator and is not a valid Pass 3 agent.",
     )
     parser.add_argument(
         "--timeout",
@@ -461,6 +462,14 @@ def main() -> int:
     agents: list[str] = (
         args.agents.split(",") if args.agents else config.get("validation_agents", ["codex"])
     )
+    SUPPORTED_VALIDATION_AGENTS = {"codex", "gemini"}
+    invalid = [a for a in agents if a not in SUPPORTED_VALIDATION_AGENTS]
+    if invalid:
+        parser.error(
+            f"unsupported validation agent(s): {','.join(invalid)}. "
+            f"Supported: {','.join(sorted(SUPPORTED_VALIDATION_AGENTS))}. "
+            "Claude is the orchestrator and is not a valid Pass 3 agent."
+        )
     timeout: int = (
         args.timeout if args.timeout != DEFAULT_TIMEOUT else config.get("timeout", DEFAULT_TIMEOUT)
     )

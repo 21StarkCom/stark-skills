@@ -5,8 +5,8 @@ description: >-
 argument-hint: "<path> [--rounds N] [--dry-run] [--force] [--tournament] [--agents claude,codex,gemini]"
 disable-model-invocation: true
 model: opus
-revision: 079d99d7b1f1ad6bf83bfd7866603db4ef41255f
-revision_date: 2026-04-28T17:25:12Z
+revision: 5bae9fae09f143b1e4134f06a268384aa3d24080
+revision_date: 2026-04-28T17:30:41Z
 ---
 
 # stark-review-plan
@@ -147,12 +147,14 @@ Each agent independently reviews the full document across ALL 10 domains in a si
 
 ### 2T.a. Dispatch full-document reviews
 
-1. Determine the agent set: if `--agents <list>` was supplied, use that list; otherwise use the default tournament roster (`claude`, `codex`, `gemini`).
-2. Combine all 10 domain prompts into a single comprehensive prompt per agent
-3. Dispatch each selected agent ONCE with the combined prompt (directly via CLI, not via plan_review_dispatch.py)
-4. Collect one full review document per dispatched agent
-
-Output: one structured review document per agent in the tournament roster. Tournament mode requires at least 2 agents — if `--agents` resolves to a single agent, abort with an error suggesting normal mode instead.
+1. Determine the agent set: if `--agents <list>` was supplied, use that list; otherwise use the default tournament roster (`claude`, `codex`, `gemini`). Tournament mode requires at least 2 agents — if `--agents` resolves to a single agent, abort with an error suggesting normal mode instead.
+2. Build a single combined prompt per agent by concatenating all 10 domain prompt files from `~/.claude/code-review/prompts/plan-review/{agent}/` (preceded by `agent.md` preamble if present), then appending the plan content.
+3. Dispatch each selected agent ONCE with the combined prompt. Use the same per-agent CLI shape as `_run_plan_subagent` in `scripts/plan_review_dispatch.py` (model, env, prompt-vs-stdin convention) — do not invent a new invocation:
+   - **claude**: `build_claude_cmd()` with prompt on stdin; env from `build_agent_env("claude", "review")`.
+   - **codex**: `codex exec -m $(_resolve_model codex) -c "$CODEX_REASONING_CONFIG" --ephemeral --json -s read-only -` with prompt on stdin; env from `build_agent_env("codex", "review")`. Use 2× the configured timeout (codex reasoning is slower).
+   - **gemini**: `gemini -m $(_resolve_model gemini) -p "<combined-prompt>" -o json` with plan content on stdin; env from `make_gemini_env(setup_gemini_home("gemini-tournament-", cwd, "review", approval_mode="plan"))`. Clean up the temp Gemini home after dispatch.
+4. Resolve models via `_resolve_model(agent)` (or fall back to `claude_utils`/`codex_utils`/`gemini_utils` constants on failure) so the tournament honors the same model pinning as normal-mode dispatch.
+5. Collect one full review document per dispatched agent.
 
 ### 2T.b. Judge evaluation
 
