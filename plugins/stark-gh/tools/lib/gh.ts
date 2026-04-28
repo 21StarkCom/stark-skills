@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import * as fs from "node:fs";
 import type { ExecFn } from "./types.ts";
 
 const defaultExec: ExecFn = (cmd, args, opts) =>
@@ -123,6 +124,113 @@ export function isAuthed(opts: { exec?: ExecFn } = {}): boolean {
   } catch {
     return false;
   }
+}
+
+// =============================================================================
+// pr-merge helpers (additive).
+// =============================================================================
+
+export interface MergePrMetadata {
+  number: number;
+  url: string;
+  isDraft: boolean;
+  state: "OPEN" | "CLOSED" | "MERGED";
+  mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN";
+  reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | "" | null;
+  headRefName: string;
+  baseRefName: string;
+  headRefOid: string;
+  isCrossRepository: boolean;
+  headRepositoryOwner: { login: string } | null;
+  headRepository: { name: string } | null;
+  labels: { name: string }[];
+  files: { path: string }[];
+  nameWithOwner: string;
+}
+
+const MERGE_PR_FIELDS = [
+  "number",
+  "url",
+  "isDraft",
+  "state",
+  "mergeable",
+  "reviewDecision",
+  "headRefName",
+  "baseRefName",
+  "headRefOid",
+  "isCrossRepository",
+  "headRepositoryOwner",
+  "headRepository",
+  "labels",
+  "files",
+].join(",");
+
+export function fetchMergePrByNumber(prNumber: number, repoSlug: string, opts: { exec?: ExecFn } = {}): MergePrMetadata {
+  const out = gh(["pr", "view", String(prNumber), "--repo", repoSlug, "--json", MERGE_PR_FIELDS], opts);
+  const j = JSON.parse(out);
+  return { ...j, nameWithOwner: repoSlug };
+}
+
+export function fetchMergePrForCurrentBranch(opts: { exec?: ExecFn } = {}): MergePrMetadata | null {
+  try {
+    const out = gh(["pr", "view", "--json", `${MERGE_PR_FIELDS},nameWithOwner`], opts);
+    const j = JSON.parse(out);
+    return j;
+  } catch {
+    return null;
+  }
+}
+
+// Authenticated GraphQL passthrough.
+export function apiGraphql(query: string, vars: Record<string, unknown>, opts: { exec?: ExecFn } = {}): unknown {
+  const argv = ["api", "graphql", "-f", `query=${query}`];
+  for (const [k, v] of Object.entries(vars)) {
+    if (typeof v === "number") argv.push("-F", `${k}=${v}`);
+    else argv.push("-f", `${k}=${String(v)}`);
+  }
+  const out = gh(argv, opts);
+  return JSON.parse(out);
+}
+
+// Squash-merge a PR. Reads subject tempfile in TS and passes via --subject;
+// passes --body-file directly. Does NOT pass --delete-branch (deferred to
+// /stark-gh:cleanup so the branch remains as a recovery anchor).
+// Includes --match-head-commit <expectedHeadOid> for atomic SHA-bound merge.
+//
+// Subject-flag fallback: gh pr merge supports --subject in modern versions.
+// Caller may pre-detect via `gh pr merge --help | grep -- '--subject string'`
+// at first use. v1 assumes --subject is supported; if missing, mergeSquashPr
+// throws and the operator must upgrade gh.
+export function mergeSquashPr(args: {
+  prNumber: number;
+  subjectFile: string;
+  bodyFile: string;
+  expectedHeadOid: string;
+  repoSlug?: string;            // optional; for cross-repo invocation
+}, opts: { exec?: ExecFn } = {}): { mergeSha: string } {
+  // Read subject in TS and pass as --subject <text> (no shell interpolation).
+  const subject = fs.readFileSync(args.subjectFile, "utf8").replace(/\n+$/, "");
+  const argv = [
+    "pr", "merge", String(args.prNumber),
+    "--squash",
+    "--subject", subject,
+    "--body-file", args.bodyFile,
+    "--match-head-commit", args.expectedHeadOid,
+  ];
+  if (args.repoSlug) argv.push("--repo", args.repoSlug);
+  // gh pr merge prints nothing useful on success; capture merge SHA via prView.
+  gh(argv, opts);
+  // Re-fetch to capture merge commit SHA for terminal state.
+  const view = gh(
+    [
+      "pr", "view", String(args.prNumber),
+      ...(args.repoSlug ? ["--repo", args.repoSlug] : []),
+      "--json", "mergeCommit",
+    ],
+    opts,
+  );
+  const parsed = JSON.parse(view);
+  return { mergeSha: parsed.mergeCommit?.oid ?? "" };
 }
 
 export function originMatches(plan: { owner: string; name: string; host?: string }, originUrl: string): boolean {

@@ -1,7 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
-import { writePlan, readPlan, validatePlan, type Plan } from "../lib/plan.ts";
+import {
+  writePlan, readPlan, validatePlan, type Plan,
+  validatePrMergePlan, isPrMergePlan, readPrMergePlan, writePrMergePlan,
+  type PrMergePlan,
+} from "../lib/plan.ts";
 
 const minimal: Plan = {
   schemaVersion: 1,
@@ -97,6 +101,111 @@ test("write/read round trip", () => {
     writePlan(tmpfile, minimal);
     const round = readPlan(tmpfile);
     assert.deepEqual(round, minimal);
+  } finally {
+    fs.unlinkSync(tmpfile);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// PrMergePlan tests
+// ---------------------------------------------------------------------------
+
+const minimalMerge: PrMergePlan = {
+  command: "pr-merge",
+  schemaVersion: 1,
+  createdAt: "2026-04-28T00:00:00Z",
+  runId: "00000000-0000-0000-0000-000000000000",
+  pr: {
+    number: 123,
+    headRef: "feat/foo",
+    baseRef: "main",
+    url: "https://github.com/evinced/x/pull/123",
+    nameWithOwner: "evinced/x",
+    headRepositoryOwner: "evinced",
+    headRepositoryName: "x",
+    isCrossRepository: false,
+  },
+  baseOid: "base-sha",
+  originalHeadOid: "orig-sha",
+  rebasedHeadOid: "rebased-sha",
+  changelogCommitOid: null,
+  pushedHeadOid: null,
+  originalChangelogPath: "/runtime/runId-changelog-pre-edit.md",
+  changelog: {
+    filePath: "/abs/CHANGELOG.md",
+    section: "Added",
+    markerComment: "<!-- stark-gh:pr-merge pr=123 runId=00000000-0000-0000-0000-000000000000 -->",
+  },
+  startingRef: "feat/foo",
+  forceReason: null,
+  stage2: {
+    skip: false,
+    subjectFile: null,
+    bodyFile: null,
+    changelogBulletFile: null,
+    model: "gpt-5.5",
+    reasoningEffort: "medium",
+  },
+  execute: {
+    watch: true,
+    force: false,
+    watchTimeoutHours: 6,
+    secretOverrides: { commit: false, toLlm: false },
+    allowNoRequiredChecks: false,
+  },
+};
+
+test("validatePrMergePlan accepts minimal plan", () => {
+  validatePrMergePlan(minimalMerge);
+});
+
+test("isPrMergePlan discriminates correctly", () => {
+  assert.equal(isPrMergePlan(minimalMerge), true);
+  assert.equal(isPrMergePlan(minimal), false);
+  assert.equal(isPrMergePlan({}), false);
+  assert.equal(isPrMergePlan(null), false);
+});
+
+test("validatePrMergePlan rejects missing command", () => {
+  const bad = { ...minimalMerge } as Record<string, unknown>;
+  delete bad.command;
+  assert.throws(() => validatePrMergePlan(bad), /command must be 'pr-merge'/);
+});
+
+test("validatePrMergePlan rejects bad section", () => {
+  const bad = { ...minimalMerge, changelog: { ...minimalMerge.changelog, section: "Bogus" as never } };
+  assert.throws(() => validatePrMergePlan(bad), /changelog.section/);
+});
+
+test("validatePrMergePlan rejects non-integer pr.number", () => {
+  const bad = { ...minimalMerge, pr: { ...minimalMerge.pr, number: 12.5 } };
+  assert.throws(() => validatePrMergePlan(bad), /pr.number/);
+});
+
+test("validatePrMergePlan rejects zero/negative watchTimeoutHours", () => {
+  const bad = { ...minimalMerge, execute: { ...minimalMerge.execute, watchTimeoutHours: 0 } };
+  assert.throws(() => validatePrMergePlan(bad), /watchTimeoutHours/);
+});
+
+test("validatePrMergePlan requires forceReason when force=true", () => {
+  const bad = { ...minimalMerge, execute: { ...minimalMerge.execute, force: true }, forceReason: null };
+  assert.throws(() => validatePrMergePlan(bad), /forceReason required/);
+
+  const ok = { ...minimalMerge, execute: { ...minimalMerge.execute, force: true }, forceReason: "emergency hotfix" };
+  validatePrMergePlan(ok);
+});
+
+test("validatePrMergePlan accepts pushedHeadOid as string when set", () => {
+  const ok = { ...minimalMerge, pushedHeadOid: "pushed-sha" };
+  validatePrMergePlan(ok);
+});
+
+test("PrMergePlan write/read round trip", () => {
+  const tmpfile = `/tmp/pr-merge-plan-test-${Date.now()}.json`;
+  try {
+    writePrMergePlan(tmpfile, minimalMerge);
+    const round = readPrMergePlan(tmpfile);
+    assert.deepEqual(round, minimalMerge);
   } finally {
     fs.unlinkSync(tmpfile);
   }

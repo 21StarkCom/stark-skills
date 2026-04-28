@@ -3,7 +3,12 @@ import { sha256 } from "./git.ts";
 import type { Candidate } from "./types.ts";
 import type { StateFingerprint } from "./state.ts";
 
-export interface Plan {
+// Backwards-compat alias: existing pr-open plans are PrOpenPlan. New plans
+// MAY include a `command` discriminator; absent means pr-open.
+export type Plan = PrOpenPlan;
+
+export interface PrOpenPlan {
+  command?: "pr-open";       // optional for backwards compat with pre-discriminator plans
   schemaVersion: 1;
   createdAt: string;
   branch: string;
@@ -189,4 +194,131 @@ export function readPlan(filepath: string): Plan {
 
 export function planChecksum(plan: Plan): string {
   return sha256(JSON.stringify(plan));
+}
+
+// =============================================================================
+// PrMergePlan — pr-merge plan-file schema. Discriminated by command === "pr-merge".
+// =============================================================================
+
+export interface PrMergePlan {
+  command: "pr-merge";
+  schemaVersion: 1;
+  createdAt: string;
+  runId: string;
+  pr: {
+    number: number;
+    headRef: string;
+    baseRef: string;
+    url: string;
+    nameWithOwner: string;
+    headRepositoryOwner: string;
+    headRepositoryName: string;
+    isCrossRepository: boolean;
+  };
+  baseOid: string;
+  originalHeadOid: string;
+  rebasedHeadOid: string;
+  changelogCommitOid: string | null;
+  pushedHeadOid: string | null;
+  originalChangelogPath: string;     // absolute path to durable tempfile copy
+  changelog: {
+    filePath: string;
+    section: "Added" | "Changed" | "Fixed" | "Removed" | "Deprecated" | "Security";
+    markerComment: string;
+  };
+  startingRef: string;
+  forceReason: string | null;
+  stage2: {
+    skip: boolean;
+    subjectFile: string | null;
+    bodyFile: string | null;
+    changelogBulletFile: string | null;
+    model: string;
+    reasoningEffort: "low" | "medium" | "high";
+  };
+  execute: {
+    watch: boolean;
+    force: boolean;
+    watchTimeoutHours: number;       // default 6
+    secretOverrides: { commit: boolean; toLlm: boolean };
+    allowNoRequiredChecks: boolean;
+  };
+}
+
+export function isPrMergePlan(p: unknown): p is PrMergePlan {
+  return isObj(p) && (p as Record<string, unknown>).command === "pr-merge";
+}
+
+const CHANGELOG_SECTIONS = new Set(["Added", "Changed", "Fixed", "Removed", "Deprecated", "Security"]);
+
+export function validatePrMergePlan(p: unknown): asserts p is PrMergePlan {
+  requirePlan(isObj(p), "not an object");
+  const o = p as Record<string, unknown>;
+  requirePlan(o.command === "pr-merge", "command must be 'pr-merge'");
+  requirePlan(o.schemaVersion === 1, "schemaVersion must be 1");
+  for (const f of ["createdAt", "runId", "baseOid", "originalHeadOid", "rebasedHeadOid",
+    "originalChangelogPath", "startingRef"]) {
+    requirePlan(typeof o[f] === "string", `${f} must be string`);
+  }
+  for (const f of ["changelogCommitOid", "pushedHeadOid", "forceReason"]) {
+    requirePlan(o[f] === null || typeof o[f] === "string", `${f} must be string|null`);
+  }
+
+  requirePlan(isObj(o.pr), "pr missing");
+  const pr = o.pr as Record<string, unknown>;
+  requirePlan(typeof pr.number === "number" && Number.isInteger(pr.number), "pr.number must be integer");
+  for (const f of ["headRef", "baseRef", "url", "nameWithOwner", "headRepositoryOwner", "headRepositoryName"]) {
+    requirePlan(typeof pr[f] === "string", `pr.${f} must be string`);
+  }
+  requirePlan(typeof pr.isCrossRepository === "boolean", "pr.isCrossRepository must be boolean");
+
+  requirePlan(isObj(o.changelog), "changelog missing");
+  const cl = o.changelog as Record<string, unknown>;
+  for (const f of ["filePath", "markerComment"]) {
+    requirePlan(typeof cl[f] === "string", `changelog.${f} must be string`);
+  }
+  requirePlan(typeof cl.section === "string" && CHANGELOG_SECTIONS.has(cl.section as string),
+    "changelog.section must be one of Added|Changed|Fixed|Removed|Deprecated|Security");
+
+  requirePlan(isObj(o.stage2), "stage2 missing");
+  const s2 = o.stage2 as Record<string, unknown>;
+  requirePlan(typeof s2.skip === "boolean", "stage2.skip must be boolean");
+  for (const f of ["subjectFile", "bodyFile", "changelogBulletFile"]) {
+    requirePlan(s2[f] === null || typeof s2[f] === "string", `stage2.${f} must be string|null`);
+  }
+  requirePlan(typeof s2.model === "string", "stage2.model must be string");
+  requirePlan(s2.reasoningEffort === "low" || s2.reasoningEffort === "medium" || s2.reasoningEffort === "high",
+    "stage2.reasoningEffort invalid");
+
+  requirePlan(isObj(o.execute), "execute missing");
+  const ex = o.execute as Record<string, unknown>;
+  for (const f of ["watch", "force", "allowNoRequiredChecks"]) {
+    requirePlan(typeof ex[f] === "boolean", `execute.${f} must be boolean`);
+  }
+  requirePlan(typeof ex.watchTimeoutHours === "number" && (ex.watchTimeoutHours as number) > 0,
+    "execute.watchTimeoutHours must be positive number");
+  requirePlan(isObj(ex.secretOverrides), "execute.secretOverrides missing");
+  const so = ex.secretOverrides as Record<string, unknown>;
+  for (const f of ["commit", "toLlm"]) {
+    requirePlan(typeof so[f] === "boolean", `execute.secretOverrides.${f} must be boolean`);
+  }
+
+  // forceReason required when force=true (audit invariant).
+  if (ex.force === true) {
+    requirePlan(typeof o.forceReason === "string" && (o.forceReason as string).trim().length > 0,
+      "forceReason required when execute.force=true");
+  }
+}
+
+export function readPrMergePlan(filepath: string): PrMergePlan {
+  const raw = fs.readFileSync(filepath, "utf8");
+  const parsed = JSON.parse(raw);
+  validatePrMergePlan(parsed);
+  return parsed;
+}
+
+export function writePrMergePlan(filepath: string, plan: PrMergePlan): void {
+  const tmp = filepath + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(plan, null, 2), { mode: 0o600 });
+  fs.renameSync(tmp, filepath);
 }

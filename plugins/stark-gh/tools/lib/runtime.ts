@@ -37,3 +37,29 @@ export function mktempInRuntime(template = "stark-gh-XXXXXX"): string {
   fs.writeFileSync(p, "", { mode: 0o600, flag: "wx" });
   return p;
 }
+
+// pr-merge runtime layout: runtime/, audit/, watchers/. ensureRuntimeDirs()
+// creates all three idempotently with mode 0700. Call before any first write.
+export function auditDir(): string {
+  if (process.env.CODEX_SANDBOX) return path.join(os.tmpdir(), "stark-gh", "audit");
+  return path.join(os.homedir(), ".claude", "code-review", "stark-gh", "audit");
+}
+
+export function watchersDir(): string {
+  if (process.env.CODEX_SANDBOX) return path.join(os.tmpdir(), "stark-gh", "watchers");
+  return path.join(os.homedir(), ".claude", "code-review", "stark-gh", "watchers");
+}
+
+export function releaseDir(): string {
+  if (process.env.CODEX_SANDBOX) return path.join(os.tmpdir(), "stark-gh", "release");
+  return path.join(os.homedir(), ".claude", "code-review", "stark-gh", "release");
+}
+
+export function ensureRuntimeDirs(): { runtime: string; audit: string; watchers: string; release: string } {
+  return {
+    runtime: ensureRuntimeDir(),
+    audit: ensureDir(auditDir()),
+    watchers: ensureDir(watchersDir()),
+    release: ensureDir(releaseDir()),
+  };
+}
