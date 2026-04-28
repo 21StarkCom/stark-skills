@@ -13,6 +13,9 @@
 
 import * as fs from "node:fs";
 import * as os from "node:os";
+import * as path from "node:path";
+import * as url from "node:url";
+import { spawn } from "node:child_process";
 import { MergeExit } from "./lib/exit.ts";
 import { die } from "./lib/output.ts";
 import { readPrMergePlan, writePrMergePlan, type PrMergePlan } from "./lib/plan.ts";
@@ -280,14 +283,48 @@ async function runNoWatch(plan: PrMergePlan, planFile: string): Promise<number> 
 }
 
 function spawnWatcher(plan: PrMergePlan, planFile: string): number {
-  // Phase 7 wires this. v1 placeholder: print the args that would spawn.
   ensureRuntimeDirs();
+  // Resolve gh_watch_runs.ts path relative to this tool.
+  const here = url.fileURLToPath(import.meta.url);
+  const watcherPath = path.join(path.dirname(here), "gh_watch_runs.ts");
+  if (!fs.existsSync(watcherPath)) {
+    die(MergeExit.SPAWN_FAILED, `watcher tool not found at ${watcherPath}`);
+  }
+
+  const argv = [
+    "--experimental-strip-types", watcherPath,
+    "--on-green", "pr-merge-complete",
+    "--plan-file", planFile,
+    "--watch-timeout", String(plan.execute.watchTimeoutHours),
+  ];
+  let child;
+  try {
+    child = spawn("node", argv, {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+  } catch (err) {
+    die(MergeExit.SPAWN_FAILED,
+      `watcher spawn failed: ${(err as Error).message}; rerun /stark-gh:pr-merge --pr ${plan.pr.number} to resume from spawn`);
+  }
+  // Compute deterministic watcher state-file path (same as callback's).
+  const dirs = ensureRuntimeDirs();
+  const stateFilePath = path.join(
+    dirs.watchers,
+    "github.com",
+    plan.pr.headRepositoryOwner,
+    plan.pr.headRepositoryName,
+    `pr-${plan.pr.number}`,
+    `${plan.pushedHeadOid}.json`,
+  );
   process.stdout.write(JSON.stringify({
     prUrl: plan.pr.url,
     pushedHeadOid: plan.pushedHeadOid,
     pushed: true,
-    watcherPlanFile: planFile,
-    note: "default-watch spawn implemented in Phase 7",
+    watcherPid: child.pid,
+    watcherStateFile: stateFilePath,
+    watchTimeoutHours: plan.execute.watchTimeoutHours,
   }) + "\n");
   return 0;
 }
