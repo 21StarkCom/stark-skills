@@ -9,18 +9,22 @@ const minimal: Plan = {
   branch: "feat/1-x",
   baseBranch: "main",
   remote: "origin",
+  baseOid: "base-sha",
+  baseOidSource: "remote",
   repo: { host: "github.com", owner: "evinced", name: "x", nameWithOwner: "evinced/x" },
   stateFingerprint: {
     headOid: "a",
     indexHash: "b",
     worktreeHash: "c",
+    worktreeContentHash: null,
     existingPrSha: null,
+    baseOid: "base-sha",
     branch: "feat/1-x",
     repoNameWithOwner: "evinced/x",
   },
   tree: { dirty: false, dirtyFiles: { staged: [], unstaged: [], untracked: [] }, hasUpstream: false, unpushedCommits: 0 },
   existingPr: null,
-  secretScan: { scanned: true, hits: [], allowedOverride: false },
+  secretScan: { scanned: true, hits: [], allowedCommit: false, allowedToLlm: false, redactions: [] },
   candidateIssues: { preflight: [] },
   closesLines: { preflight: [] },
   refsLines: { preflight: [] },
@@ -49,7 +53,9 @@ const minimal: Plan = {
     commitAll: false,
     fullContext: false,
     noWatch: false,
-    allowSecrets: false,
+    draft: false,
+    allowSecretCommit: false,
+    allowSecretToLlm: false,
   },
   stage2: {
     needTitle: false,
@@ -77,6 +83,12 @@ test("validatePlan accepts minimal plan", () => {
 
 test("validatePlan rejects wrong schemaVersion", () => {
   assert.throws(() => validatePlan({ ...minimal, schemaVersion: 2 } as unknown as Plan));
+});
+
+test("validatePlan rejects missing baseOid", () => {
+  const bad = { ...minimal } as Record<string, unknown>;
+  delete bad.baseOid;
+  assert.throws(() => validatePlan(bad), /baseOid/);
 });
 
 test("write/read round trip", () => {
