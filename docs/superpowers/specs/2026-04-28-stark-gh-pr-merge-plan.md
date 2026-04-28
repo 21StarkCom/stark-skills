@@ -386,7 +386,7 @@ node --experimental-strip-types --test \
      - Only stale pre-rebase OID rows present → wait.
      - `pushedHeadOid` rows present, at least one pending → wait.
      - All required passing on `pushedHeadOid` AND **2 consecutive polls observed all-passing** (debounce; PR4-claude H13) → fire callback.
-   - Vacuous pass (zero required) → fire immediately. (Note: in `--no-watch` mode the bake gate refuses vacuous; here in default-watch it's permitted because the watcher has already observed at least one poll.)
+   - Vacuous pass (zero required contexts on `pushedHeadOid`) is **refused in default-watch too** (PR5-codex/gates critical) unless `--allow-no-required-checks` is set in the plan. Without the override, watcher waits up to `--watch-timeout` for at least one required context to appear; if none does, terminal state `no_required_checks` (not `merged`). Same predicate as `--no-watch` — single canonical rule, no path-specific gap.
 
 4. **Max-wait timeout + heartbeat (PR4-claude H21).**
    - On expiry: write terminal state `watch_timeout` with last observed check states; unlink prose tempfiles; print cleanup hint.
