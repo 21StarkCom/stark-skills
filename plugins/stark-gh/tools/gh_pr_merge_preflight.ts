@@ -371,18 +371,28 @@ async function main(argv: string[]): Promise<number> {
   }
   const rebasedHeadOid = gitLib.headOid();
 
+  // Restore helper used by every post-rebase failure path. We are currently
+  // checked out on pr.headRefName (Step 10), so a bare `update-ref +
+  // checkout startingRef` would leave the worktree+index at the rebased
+  // state when startingRef equals the PR branch (parity with the F4 fix in
+  // restore_branch.ts). Use `git reset --hard` to atomically move HEAD,
+  // index, and worktree, then checkout startingRef only if it differs.
+  const restoreToOriginalHead = (): void => {
+    gitLib.resetHard(pr.headRefOid);
+    if (startingRef !== pr.headRefName) {
+      try { gitLib.checkout(startingRef); } catch { /* best-effort */ }
+    }
+  };
+
   // Step 11: capture pre-edit CHANGELOG.md to durable tempfile
   const changelogPath = path.resolve("CHANGELOG.md");
   if (!fs.existsSync(changelogPath)) {
-    // Restore branch on failure
-    gitLib.updateRef(`refs/heads/${pr.headRefName}`, pr.headRefOid);
-    gitLib.checkout(startingRef);
+    restoreToOriginalHead();
     die(MergeExit.NO_CHANGELOG, `CHANGELOG.md not found at repo root`);
   }
   const changelogContent = fs.readFileSync(changelogPath, "utf8");
   if (!/^## \[Unreleased\]\s*$/m.test(changelogContent)) {
-    gitLib.updateRef(`refs/heads/${pr.headRefName}`, pr.headRefOid);
-    gitLib.checkout(startingRef);
+    restoreToOriginalHead();
     die(MergeExit.NO_CHANGELOG, `CHANGELOG.md missing '## [Unreleased]' section`);
   }
   const preEditPath = path.join(dirs.runtime, `${runId}-changelog-pre-edit.md`);
@@ -395,8 +405,7 @@ async function main(argv: string[]): Promise<number> {
   gitLib.fetchRefs("origin", [pr.baseRefName]);
   const baseOidRecheck = gitLib.revParse(`refs/remotes/origin/${pr.baseRefName}`);
   if (baseOidRecheck !== baseOid) {
-    gitLib.updateRef(`refs/heads/${pr.headRefName}`, pr.headRefOid);
-    gitLib.checkout(startingRef);
+    restoreToOriginalHead();
     fs.unlinkSync(preEditPath);
     die(MergeExit.BASE_OID_MOVED,
       `base ${pr.baseRefName} moved during preflight (${baseOid} → ${baseOidRecheck}); rerun`);
