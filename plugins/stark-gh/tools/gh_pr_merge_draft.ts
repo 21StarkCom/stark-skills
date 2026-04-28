@@ -233,7 +233,7 @@ async function main(argv: string[]): Promise<number> {
   return 0;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1]?.endsWith("gh_pr_merge_draft.ts")) {
   main(process.argv.slice(2)).then(c => process.exit(c)).catch(err => {
     process.stderr.write(`draft: ${err?.message || err}\n`);
     process.exit(1);

@@ -329,7 +329,7 @@ function spawnWatcher(plan: PrMergePlan, planFile: string): number {
   return 0;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1]?.endsWith("gh_pr_merge_execute.ts")) {
   main(process.argv.slice(2)).then(c => process.exit(c)).catch(err => {
     process.stderr.write(`execute: ${err?.message || err}\n`);
     process.exit(1);
