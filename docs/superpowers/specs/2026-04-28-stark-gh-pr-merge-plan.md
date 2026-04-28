@@ -7,7 +7,14 @@ Source spec: `2026-04-28-stark-gh-pr-merge-design.md`.
 
 Build `/stark-gh:pr-merge` as the second command in `plugins/stark-gh`, extending the existing pr-open three-stage TypeScript pipeline. Phases 1–2 add shared merge primitives without altering pr-open behavior; Phase 3 implements preflight; Phase 4 adds Codex drafting; Phase 5 implements the execute stage with the synchronous `--no-watch` path proving the merge-call shape end-to-end before the asynchronous Phase 6 watcher work; Phase 7 wires the slash command and docs; Phase 8 covers integration smoke. **Runtime maintenance/GC is excluded from v1** (flagged as scope creep by both claude and gemini reviewers; tracked in a follow-up plan).
 
-**Trusted control plane (PR1-codex/security):** all stark-gh tool code runs from the **installed plugin path** (`$HOME/.claude/plugins/stark-gh/tools/...`) — never from the PR's working tree. The install symlink resolves to the repo, but the slash command body invokes node with the install path explicitly. This prevents a malicious PR from replacing tool code (e.g., disabling the secret scan) before it executes. Phase 3 additionally **refuses any PR whose diff touches `plugins/stark-gh/**` or `scripts/**`** with exit `19` — these PRs must be merged via plain `gh pr merge` after manual review.
+**Trust model (PR2-codex/sequencing + feasibility — known v1 limitation):** the install path `$HOME/.claude/plugins/stark-gh/` is currently a **symlink to the repo working tree** (matches all other stark-skills plugins). When `/stark-gh:pr-merge` runs against a PR that has been checked out into that same working tree, the slash body's `node ...` invocations resolve through the symlink to the PR's mutated tool code. **The self-modifying-PR refuse gate (Phase 3 step 6, exit 19) runs from this same potentially-mutated code, so it is defense-in-depth, not an authoritative trust boundary.** A determined attacker who modifies the gate code in their PR can disable it.
+
+Mitigations applied in v1:
+1. **Refuse gate** (defense-in-depth) catches accidental misuse and unsophisticated attackers.
+2. **Documentation:** README will explicitly state "do not run `/stark-gh:pr-merge` against PRs that modify `plugins/stark-gh/**`; merge those manually via `gh pr merge`."
+3. **Operator awareness:** the gate's exit `19` message names the policy explicitly so users are reminded.
+
+Authoritative fix is out of v1 scope: **install-by-copy** (instead of symlink) plus a content-hash manifest verified on each invocation. Tracked separately as a stark-skills-wide hardening initiative — applies equally to pr-open, every other skill, and the broader plugin loader. See "Considered & Rejected — plan-review round 2" for full rationale.
 
 ## 2. Prerequisites
 
@@ -65,7 +72,7 @@ Runtime provisioning (code-owned, not manual):
 
 4. **Add reusable git/GitHub helpers.**
    - Modify `plugins/stark-gh/tools/lib/git.ts`: add `revParse(ref)`, `fetchRefs(remote, refs)`, `checkout(ref)`, `rebase(onto)`, `abortRebase()`, `commitMessage(subject)`, `resetHard(oid)`, and explicit-lease push helper. Build the lease via `argv` (no shell quoting; codex risk).
-   - Modify `plugins/stark-gh/tools/lib/gh.ts`: add merge PR metadata fetch, authenticated `gh api graphql` wrapper, and `gh pr merge --squash --subject-file --body-file --delete-branch`.
+   - Modify `plugins/stark-gh/tools/lib/gh.ts`: add merge PR metadata fetch, authenticated `gh api graphql` wrapper, `mergeSquashPr({prNumber, subjectFile, bodyFile})` that internally reads the subject tempfile and passes `--subject <text>` (NOT `--subject-file`) and `--body-file <file>` via argv (no shell quoting; no `--delete-branch`), and `deleteRemoteBranch({owner, repo, headRef})` using `gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/{headRef}`. **Both Phase 5 (`--no-watch` path) and Phase 7 (watcher callback) call the same shared helpers** — single source of truth for the merge invocation shape (PR2-claude/feasibility critical fix).
    - Done when helpers are unit-testable through `ExecFn`.
 
 5. **Persist override-flag audit-key dependency on runId.**
@@ -205,7 +212,7 @@ node --experimental-strip-types --test \
    - Capture `baseOid = origin/<baseRef>` SHA.
    - Checkout `headRef`, rebase onto `origin/<baseRef>`. On conflict: `git rebase --abort`, restore `startingRef`, exit `13`.
    - Capture `rebasedHeadOid = HEAD` SHA.
-   - **Cleanup-on-later-failure invariant (PR1-codex/general):** Stage 1 from this step onward installs an error handler that, on any later non-zero exit, restores `startingRef` (`git checkout` back). The user is never left on a rebased branch after a gate fails.
+   - **Cleanup-on-later-failure invariant (PR1-codex/general + PR2-claude/general):** Stage 1 from this step onward installs an error handler that, on any later non-zero exit, performs a **two-step restore**: (a) `git update-ref refs/heads/<headRef> <originalHeadOid>` to undo the rebase on the head branch (just resetting `HEAD` doesn't revert the branch ref when starting on `headRef`), then (b) `git checkout <startingRef>` to put the user back on their original symbolic ref. The user is never left on a rebased branch with rewritten history after a gate fails.
 
 10. **Changelog section resolution.**
    - `--changelog-section` flag if provided; else label-inferred (`bug`/`fix` label → Fixed; else Added).
@@ -354,10 +361,12 @@ node --experimental-strip-types --test \
    - Update lock format to `{pid, startedAt, hostname, ownerToken}`.
    - Per-poll HTTP timeout: 30s.
 
-2. **pr-open backward-compat verification (codex weakness).**
+2. **pr-open backward-compat AND in-flight-watcher migration (codex weakness + PR2-claude/general critical).**
    - Run existing pr-open watcher tests against the new lock format.
-   - If pr-open lock-reading code expected the old shape, add a one-time migration helper or document the lock-format change in `pr-open` spec.
-   - Test in `watcher_pr_open_compat.test.ts`: pr-open watcher writes/reads new lock format; existing watcher state files (already-running pr-open watchers) are not corrupted.
+   - **Lock-format reader is tolerant:** `lib/watcher_lock.ts:readLock` accepts both old shape (whatever pr-open writes today) and new shape `{pid, startedAt, hostname, ownerToken}`. On reading an old-format lock from an in-flight watcher: log a warning, treat as live (conservative), require operator to wait for the in-flight watcher to terminate naturally before next run uses the new format.
+   - **Lock-format writer always emits new shape** so the next run upgrades the format.
+   - Document the upgrade-window behavior: in-flight pr-open watchers continue running on the old format until they terminate; new watchers (post-upgrade) write new format. No watcher is killed by the upgrade.
+   - Tests in `watcher_pr_open_compat.test.ts`: (a) reader accepts old format; (b) writer emits new format; (c) old-format lock file present on-disk does not corrupt new run; (d) old-format lock with live PID exits `34` (treat as live).
 
 3. **SHA-match contract.**
    - In callback mode, read `pushedHeadOid` from plan.
@@ -399,8 +408,9 @@ node --experimental-strip-types --test \
    - Read plan-file.
    - Call `lib/verify_oids.ts:verifyMergeOids`. On mismatch, write terminal state `base_moved` or `head_moved` (callback owns these states).
    - **Pre-merge secret rescan:** read subject/body tempfiles; re-run `lib/secret.ts`. If secret found AND `--allow-secret-commit` not in plan, write terminal state `secret_in_prose` and exit. With override, proceed (already redacted).
-   - Run `gh pr merge --squash --subject-file <f> --body-file <f> --delete-branch <pr#>` via `lib/gh.ts`.
-   - On success: capture merge SHA; write final state `merged` with merge SHA + cleanup hint `Run: /stark-gh:cleanup --pr <N>` (slash-command form, never raw shell).
+   - Run merge via `lib/gh.ts:mergeSquashPr({prNumber, subjectFile, bodyFile})` — **the same shared helper used by Phase 5 task 6**. The helper internally reads the subject tempfile and passes `--subject <text>` (not `--subject-file`); it does NOT pass `--delete-branch`. Branch deletion is the next step.
+   - On success: capture merge SHA. Then call `lib/gh.ts:deleteRemoteBranch({owner, repo, headRef})` which uses `gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/{headRef}` (remote-only).
+   - Write final state `merged` with merge SHA + cleanup hint `Run: /stark-gh:cleanup --pr <N>` (slash-command form, never raw shell).
    - On failure: write terminal state `merge_failed`, surface stderr, retain plan-file + tempfiles for diagnosis.
 
 2. **Stage 3 default-watch in `gh_pr_merge_execute.ts`.**
@@ -565,13 +575,19 @@ git push --force-with-lease=refs/heads/<headRef>:$PUSHED \
 
 ### Operational rollback — post-merge defect (PR1-codex/rollback critical 2)
 
-`gh pr merge --squash` is irreversible (squash commit lands on base, original PR commits are detached). Recovery procedure:
+`gh pr merge --squash` is irreversible: the squash commit is a **single-parent commit on the base branch**; the original PR commit graph is **not** referenced by the squash commit and becomes orphaned once the remote branch is deleted (PR2-claude/feasibility critical fix). Recovery procedure:
 
-1. Capture the merge commit SHA from the watcher's terminal state file (`status: merged`, `merge_sha`).
-2. Open a revert PR: `gh pr create --base <baseRef> --title "Revert: <orig title>" --body "Reverts #<orig PR>"` after `git revert <merge_sha>`.
-3. The remote branch was deleted by Phase 5's post-merge step; **branches are not auto-restored**. If the original branch is needed for forensics, recreate from the merge commit's first parent: `git push origin <merge_sha>^2:refs/heads/recovered-<headRef>` (squash-merge's second parent is the squashed PR head).
+1. **Capture the merge commit SHA** from the watcher's terminal state file (`status: merged`, `merge_sha`).
+2. **Revert via PR:** `git revert <merge_sha>` on a fresh branch off `baseRef`, then `gh pr create --base <baseRef> --title "Revert: <orig title>" --body "Reverts #<orig PR>"`.
+3. **Original PR branch is unrecoverable** from the squash commit alone (single-parent — no link to pre-squash commits). Mitigation: the watcher's terminal state file retains `pushedHeadOid`, so for a finite window after merge (before GitHub's reflog GCs the orphaned ref), forensics can fetch the orphaned commits via `gh api repos/{owner}/{repo}/git/commits/{pushedHeadOid}`. **Operators who anticipate needing the original branch must capture it before invoking `/stark-gh:pr-merge`.** Document this constraint in `plugins/stark-gh/README.md`.
 
-Document this procedure in `plugins/stark-gh/README.md`. Treat the merge call as an irreversible boundary requiring operator readiness.
+Treat the merge call as an irreversible boundary requiring operator readiness.
+
+## Considered & Rejected — plan-review round 2 (2026-04-28)
+
+| ID | Persona | Concern (summary) | Disposition |
+|----|---------|-------------------|-------------|
+| PR2-codex/sequencing + feasibility (3 criticals) | security | Self-modifying-PR refuse gate is sequenced after tool code is loaded; install symlink is not a trusted control plane | **Acknowledged — v1 known limitation.** The refuse gate is defense-in-depth (catches accidental misuse, not determined attackers). Authoritative fix requires install-by-copy + content-hash manifest verified on each invocation, which is a stark-skills-wide hardening initiative covering all plugins (pr-open, every other skill). Out of scope for pr-merge v1; tracked separately. v1 mitigation: refuse gate + explicit README documentation + operator-readable exit-19 message |
 
 ## Considered & Rejected — plan-review round 1 (2026-04-28)
 
