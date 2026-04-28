@@ -75,7 +75,6 @@ export function* backoffSchedule(initial: number, cap: number): Generator<number
 interface CheckRecord {
   state?: string;
   conclusion?: string | null;
-  headSha?: string;
 }
 
 export function isTerminal(checks: CheckRecord[]): boolean {
@@ -195,19 +194,39 @@ async function mainAsync(): Promise<void> {
     }
 
     let checks: CheckRecord[] = [];
+    let pollError: Error | null = null;
     try {
+      const currentHead = ghLib.prHeadOid(args.pr, args.owner, args.repo);
+      if (currentHead !== args.headSha) {
+        const cur = JSON.parse(fs.readFileSync(sf, "utf8"));
+        atomicWriteJson(sf, {
+          ...cur,
+          status: "superseded",
+          supersededBy: currentHead,
+          finishedAt: new Date().toISOString(),
+        });
+        atomicWriteJson(latestPointer(args.host, args.owner, args.repo, args.pr), {
+          headSha: currentHead,
+          status: "superseded",
+          updatedAt: new Date().toISOString(),
+        });
+        releaseLockIfOwner(lf, ownerToken);
+        process.exit(0);
+      }
       const raw = ghLib.prChecks(args.pr, args.owner, args.repo) as CheckRecord[];
-      const withSha = raw.filter(c => typeof c.headSha === "string");
-      checks = withSha.length > 0 ? withSha.filter(c => c.headSha === args.headSha) : raw;
+      checks = raw;
       consecErrors = 0;
     } catch (e) {
+      pollError = e as Error;
+    }
+    if (pollError !== null) {
       consecErrors++;
       if (consecErrors >= 5) {
         const cur = JSON.parse(fs.readFileSync(sf, "utf8"));
         atomicWriteJson(sf, {
           ...cur,
           status: "error",
-          lastError: String((e as Error).message),
+          lastError: String(pollError.message),
           finishedAt: new Date().toISOString(),
         });
         releaseLockIfOwner(lf, ownerToken);

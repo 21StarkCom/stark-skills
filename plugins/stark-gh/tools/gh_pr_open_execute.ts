@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
+import * as path from "node:path";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { Exit } from "./lib/exit.ts";
+import { stateFile, lockFile, ensurePrDir } from "./lib/watcher_paths.ts";
 import { die, printJson } from "./lib/output.ts";
 import { readPlan, writePlan, type Plan } from "./lib/plan.ts";
 import { diffFingerprints, fingerprintFromInputs, fingerprintsMatch } from "./lib/state.ts";
@@ -20,7 +24,7 @@ export function reverifyState(plan: Plan, opts: { exec?: ExecFn } = {}): void {
   const repo = ghLib.repoView(opts);
   const existingPrSha = plan.existingPr ? ghLib.prView(plan.existingPr.number, opts).headRefOid : null;
   const worktreeContentBytes = plan.userArgs.commitAll
-    ? gitLib.git(["diff", "--binary"], opts) + plan.tree.dirtyFiles.untracked.map(p => hashFileContent(p)).join("")
+    ? gitLib.git(["diff", "--binary"], opts) + plan.tree.dirtyFiles.untracked.map(p => gitLib.hashUntrackedFile(p)).join("")
     : null;
   const actual = fingerprintFromInputs({
     headOid,
@@ -35,14 +39,6 @@ export function reverifyState(plan: Plan, opts: { exec?: ExecFn } = {}): void {
   if (!fingerprintsMatch(plan.stateFingerprint, actual)) {
     const fields = diffFingerprints(plan.stateFingerprint, actual).join(", ");
     throw new Error(`state changed between preflight and execute (${fields}); rerun /stark-gh:pr-open`);
-  }
-}
-
-function hashFileContent(path: string): string {
-  try {
-    return gitLib.sha256(fs.readFileSync(path, "utf8"));
-  } catch {
-    return gitLib.sha256("");
   }
 }
 
@@ -144,8 +140,61 @@ function bodyFileFromPlan(plan: Plan): string | null {
   return null;
 }
 
-function spawnWatcherPlaceholder(): { pid: number | null; stateFile: string | null; alreadyRunning: boolean } {
-  return { pid: null, stateFile: null, alreadyRunning: false };
+export type SpawnFn = (
+  command: string,
+  argv: readonly string[],
+  options: { detached: boolean; stdio: "ignore" },
+) => { pid?: number; unref(): void };
+
+export function spawnWatcher(
+  args: {
+    host: string;
+    owner: string;
+    repo: string;
+    pr: number;
+    headSha: string;
+  },
+  deps: { spawnFn?: SpawnFn } = {},
+): { pid: number | null; stateFile: string | null; alreadyRunning: boolean } {
+  ensurePrDir(args.host, args.owner, args.repo, args.pr);
+  const sf = stateFile(args.host, args.owner, args.repo, args.pr, args.headSha);
+  const lf = lockFile(args.host, args.owner, args.repo, args.pr, args.headSha);
+  if (fs.existsSync(lf)) {
+    try {
+      const lock = JSON.parse(fs.readFileSync(lf, "utf8"));
+      if (lock?.headSha === args.headSha && typeof lock.pid === "number") {
+        try {
+          process.kill(lock.pid, 0);
+          return { pid: null, stateFile: sf, alreadyRunning: true };
+        } catch {
+          // Stale lock; gh_watch_runs will reclaim it.
+        }
+      }
+    } catch {
+      // Malformed lock; gh_watch_runs will reclaim it.
+    }
+  }
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const watcher = path.join(here, "gh_watch_runs.ts");
+  const spawnFn = deps.spawnFn ?? ((cmd, argv, options) => spawn(cmd, argv as string[], options));
+  const child = spawnFn(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      watcher,
+      "--host",
+      args.host,
+      "--repo",
+      `${args.owner}/${args.repo}`,
+      "--pr",
+      String(args.pr),
+      "--head-sha",
+      args.headSha,
+    ],
+    { detached: true, stdio: "ignore" },
+  );
+  child.unref();
+  return { pid: child.pid ?? null, stateFile: sf, alreadyRunning: false };
 }
 
 function cleanupFile(p?: string | null): void {
@@ -278,7 +327,22 @@ function main(): never {
     prUrl = v.url;
   }
 
-  const watcher = plan.userArgs.noWatch ? { pid: null, stateFile: null, alreadyRunning: false } : spawnWatcherPlaceholder();
+  if (prNumber === null) {
+    die(
+      Exit.PR_NOT_RESOLVED,
+      `gh pr create reported success but no open PR was found for branch '${plan.branch}'; cannot start watcher or report URL`,
+    );
+  }
+
+  const watcher = plan.userArgs.noWatch
+    ? { pid: null, stateFile: null, alreadyRunning: false }
+    : spawnWatcher({
+        host: plan.repo.host,
+        owner: plan.repo.owner,
+        repo: plan.repo.name,
+        pr: prNumber,
+        headSha,
+      });
   printJson({
     action: plan.stage3.action === "create" ? "created" : plan.stage3.action === "edit" ? "updated" : "pushed-only",
     prNumber,

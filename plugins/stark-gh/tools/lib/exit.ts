@@ -22,6 +22,7 @@ export const Exit = {
   ORIGIN_MISMATCH: 29,
   DRAFT_INVALID_OUTPUT: 30,
   BASE_OID_DRIFT: 31,
+  PR_NOT_RESOLVED: 32,
 } as const;
 
 export type ExitCode = (typeof Exit)[keyof typeof Exit];

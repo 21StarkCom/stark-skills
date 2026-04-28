@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import * as crypto from "node:crypto";
+import * as fs from "node:fs";
 import type { ExecFn } from "./types.ts";
 
 const defaultExec: ExecFn = (cmd, args, opts) =>
@@ -97,4 +98,15 @@ export function originUrl(opts: { exec?: ExecFn } = {}): string | null {
 
 export function sha256(input: string): string {
   return crypto.createHash("sha256").update(input).digest("hex");
+}
+
+// Binary-safe untracked-file hash. Used by both preflight and execute reverify
+// so the worktree-content fingerprint stays symmetric regardless of file size.
+export function hashUntrackedFile(absPath: string): string {
+  try {
+    const buf = fs.readFileSync(absPath);
+    return crypto.createHash("sha256").update(buf).digest("hex");
+  } catch {
+    return crypto.createHash("sha256").update("").digest("hex");
+  }
 }
