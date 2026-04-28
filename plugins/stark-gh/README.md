@@ -3,26 +3,12 @@
 Claude Code plugin housing GitHub workflow slash commands.
 
 - v1: `/stark-gh:pr-open`
-- v1: `/stark-gh:pr-merge` *(gated; see kill switch below)*
+- v1: `/stark-gh:pr-merge`
 
 Design specs:
 - `docs/superpowers/specs/2026-04-28-stark-gh-pr-open-design.md`
 - `docs/superpowers/specs/2026-04-28-stark-gh-pr-merge-design.md`
 - `docs/superpowers/specs/2026-04-28-stark-gh-pr-merge-plan.md`
-
-## /stark-gh:pr-merge — kill switch
-
-This command is gated for v1 to require operator opt-in. Enable in either way:
-
-```bash
-export STARK_GH_PR_MERGE_ENABLE=1
-# or persistent:
-mkdir -p ~/.claude/code-review/stark-gh/release
-touch ~/.claude/code-review/stark-gh/release/enabled.flag
-```
-
-After two operators have exercised the disposable-PR smoke runbook below, the
-gate is removed in v1.1.
 
 ## /stark-gh:pr-merge — disposable-PR smoke runbook
 
@@ -38,16 +24,15 @@ repo or a sandbox repo, not main.**
    git push -u origin HEAD
    gh pr create --base main --title "smoke: pr-merge" --body "Disposable smoke target"
    ```
-3. Enable kill switch (see above).
-4. From the PR's checkout, run `/stark-gh:pr-merge`.
-5. Expect: rebase, codex draft, force-push, watcher spawn, eventual squash-merge.
-6. Inspect terminal state:
+3. From the PR's checkout, run `/stark-gh:pr-merge`.
+4. Expect: rebase, codex draft, force-push, watcher spawn, eventual squash-merge.
+5. Inspect terminal state:
    ```bash
    cat ~/.claude/code-review/stark-gh/watchers/github.com/<owner>/<repo>/pr-<N>/<sha>.json
    ```
    Expect `status: merged`, a `mergeSha`, and a `runbook` block with operator
    recovery hints.
-7. Cleanup (once /stark-gh:cleanup ships): `/stark-gh:cleanup --pr <N>`. For now:
+6. Cleanup (once /stark-gh:cleanup ships): `/stark-gh:cleanup --pr <N>`. For now:
    ```bash
    gh api -X DELETE repos/<owner>/<repo>/git/refs/heads/<headRef>
    git checkout main && git branch -D smoke/pr-merge-<timestamp>
