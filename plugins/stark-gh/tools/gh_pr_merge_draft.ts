@@ -12,6 +12,7 @@ import { execFileSync } from "node:child_process";
 import { MergeExit } from "./lib/exit.ts";
 import { die } from "./lib/output.ts";
 import { readPrMergePlan, writePrMergePlan, type PrMergePlan } from "./lib/plan.ts";
+import type { ReasoningEffort } from "./lib/config.ts";
 import { buildCodexArgv, parseCodexJsonl } from "./lib/codex.ts";
 import { validateDraft, type CodexDraft } from "./lib/draft_schema.ts";
 import { mktempInRuntime } from "./lib/runtime.ts";
@@ -144,7 +145,7 @@ export async function driveDraft(
 
 interface CallableCodexOptions {
   model: string;
-  reasoningEffort: "low" | "medium" | "high";
+  reasoningEffort: ReasoningEffort;
   timeoutSeconds: number;
   scrubEnv: boolean;
 }

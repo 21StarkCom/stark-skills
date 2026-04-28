@@ -90,9 +90,23 @@ export function acquireLock(
 // just lose its fast-path attach signal.
 export function mirrorLockToLatest(latestLockPath: string, perShaLockContent: LockFileContent): void {
   try {
+    // The mirror lock is consumed by lib/watcher_lock.ts.evaluateLockLiveness,
+    // which compares `startedAt` to `ps -o lstart= -p <pid>`. We must write the
+    // ps lstart string here — not an ISO timestamp — or every live watcher
+    // looks like PID reuse and preflight always re-spawns instead of attaching.
+    const lstart = (() => {
+      try {
+        return execFileSync("ps", ["-o", "lstart=", "-p", String(perShaLockContent.pid)], {
+          stdio: ["pipe", "pipe", "pipe"],
+        }).toString("utf8").trim();
+      } catch {
+        return "";
+      }
+    })();
+    if (!lstart) return; // Without lstart the mirror can't pass liveness — skip.
     const record = {
       pid: perShaLockContent.pid,
-      startedAt: perShaLockContent.startedAt,
+      startedAt: lstart,
       hostname: os.hostname(),
       ownerToken: perShaLockContent.ownerToken,
     };
