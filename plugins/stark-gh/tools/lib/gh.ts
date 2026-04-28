@@ -64,11 +64,13 @@ export function prCreate(args: {
   reviewers?: string[];
   labels?: string[];
   assignees?: string[];
+  draft?: boolean;
 }, opts: { exec?: ExecFn } = {}): void {
   const argv = ["pr", "create", "--title", args.title, "--body-file", args.bodyFile, "--base", args.base];
   if (args.reviewers?.length) argv.push("--reviewer", args.reviewers.join(","));
   if (args.labels?.length) argv.push("--label", args.labels.join(","));
   if (args.assignees?.length) argv.push("--assignee", args.assignees.join(","));
+  if (args.draft) argv.push("--draft");
   gh(argv, opts);
 }
 
