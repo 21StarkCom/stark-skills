@@ -9,6 +9,8 @@ export interface Plan {
   branch: string;
   baseBranch: string;
   remote: string;
+  baseOid: string;
+  baseOidSource: "remote" | "local";
   repo: { host: string; owner: string; name: string; nameWithOwner: string };
   stateFingerprint: StateFingerprint;
   tree: {
@@ -18,7 +20,13 @@ export interface Plan {
     unpushedCommits: number;
   };
   existingPr: null | { number: number; url: string; title: string; body: string; headRefOid: string };
-  secretScan: { scanned: boolean; hits: { category: string; location: string }[]; allowedOverride: boolean };
+  secretScan: {
+    scanned: boolean;
+    hits: { category: string; location: string }[];
+    allowedCommit: boolean;
+    allowedToLlm: boolean;
+    redactions: { category: string; spans: number }[];
+  };
   candidateIssues: { preflight: Candidate[]; lateFromCommitMessage?: Candidate[] };
   closesLines: { preflight: string[]; late?: string[] };
   refsLines: { preflight: string[]; late?: string[] };
@@ -47,7 +55,9 @@ export interface Plan {
     commitAll: boolean;
     fullContext: boolean;
     noWatch: boolean;
-    allowSecrets: boolean;
+    draft: boolean;
+    allowSecretCommit: boolean;
+    allowSecretToLlm: boolean;
   };
   stage2: {
     needTitle: boolean;
@@ -80,6 +90,8 @@ export function validatePlan(p: unknown): asserts p is Plan {
   for (const f of ["branch", "baseBranch", "remote", "createdAt"]) {
     requirePlan(typeof o[f] === "string", `${f} must be string`);
   }
+  requirePlan(typeof o.baseOid === "string", "baseOid must be string");
+  requirePlan(o.baseOidSource === "remote" || o.baseOidSource === "local", "baseOidSource invalid");
   requirePlan(typeof o.repo === "object" && o.repo !== null, "repo missing");
   requirePlan(typeof o.stateFingerprint === "object" && o.stateFingerprint !== null, "stateFingerprint missing");
   requirePlan(typeof o.tree === "object" && o.tree !== null, "tree missing");
