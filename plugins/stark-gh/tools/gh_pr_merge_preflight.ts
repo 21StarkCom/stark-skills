@@ -31,6 +31,8 @@ import { ensureRuntimeDirs, mktempInRuntime } from "./lib/runtime.ts";
 import { scanSecrets } from "./lib/secret.ts";
 import { evaluateLockLiveness, readLock, watcherLockPath, watcherStateLatestPath } from "./lib/watcher_lock.ts";
 import { appendPrMergeOverride, SECRET_TO_LLM_WARNING } from "./lib/audit.ts";
+import { resolveDraftConfig } from "./lib/config.ts";
+import { fetchRequiredCheckRollup, summarizeVerdict } from "./lib/checks_graphql.ts";
 
 export interface MergeUserArgs {
   pr: number | null;                    // --pr N
@@ -256,14 +258,19 @@ async function main(argv: string[]): Promise<number> {
     process.stderr.write(`stale watcher lock taken over: ${liveness.reason}\n`);
   }
 
-  // Step 6: fetch with explicit destination refspecs
-  gitLib.fetchRefs("origin", [pr.baseRefName, pr.headRefName]);
-
-  // Step 7: PR identity + local sync
-  const remoteHeadOid = gitLib.revParse(`refs/remotes/origin/${pr.headRefName}`);
+  // Step 6: reject fork PRs BEFORE fetch (gate matrix v1).
+  // Fetching pr.headRefName from origin would fail with a generic git error
+  // for fork PRs because origin doesn't have the head ref; rejecting first
+  // produces the spec-mandated FORK_OR_HEAD_MISMATCH exit code.
   if (pr.isCrossRepository) {
     die(MergeExit.FORK_OR_HEAD_MISMATCH, `cross-repository (fork) PRs unsupported in v1`);
   }
+
+  // Step 7: fetch with explicit destination refspecs
+  gitLib.fetchRefs("origin", [pr.baseRefName, pr.headRefName]);
+
+  // Step 8: PR identity + local sync
+  const remoteHeadOid = gitLib.revParse(`refs/remotes/origin/${pr.headRefName}`);
   if (remoteHeadOid !== pr.headRefOid) {
     die(MergeExit.FORK_OR_HEAD_MISMATCH,
       `origin/${pr.headRefName} (${remoteHeadOid}) != PR headRefOid (${pr.headRefOid}); rerun after fetch settles`);
@@ -297,19 +304,55 @@ async function main(argv: string[]): Promise<number> {
     die(MergeExit.PR_GATE, `PR has CHANGES_REQUESTED; pass --force --force-reason to override`);
   }
 
+  // Gate Matrix row "Any required check failing": query the rollup against the
+  // pre-rebase head OID and reject up front if any required check is in a
+  // failing state. This is --force-bypassable per the gate matrix. Pending
+  // checks are tolerated here (default-watch will wait; --no-watch enforces a
+  // green requirement at execute time per spec section 145).
+  try {
+    const preflightRollup = await fetchRequiredCheckRollup({
+      owner: pr.headRepositoryOwner?.login ?? repoInfo.owner,
+      repo: pr.headRepository?.name ?? repoInfo.name,
+      prNumber: pr.number,
+      expectedHeadOid: pr.headRefOid,
+    });
+    if (!preflightRollup.mismatch && preflightRollup.contexts) {
+      const verdict = summarizeVerdict(preflightRollup.contexts);
+      if (verdict.anyFailing && !userArgs.force) {
+        die(MergeExit.CHECK_FAIL,
+          `required checks failing on ${pr.headRefOid} (failing=${verdict.failing}); pass --force --force-reason to override`);
+      }
+    }
+    // mismatch (PR head moved between gh-pr-view and the rollup query) is
+    // benign here — the head-identity gate above already enforces parity, and
+    // the --no-watch path re-verifies post-push.
+  } catch (err) {
+    // GraphQL transport / auth errors. Without --force, surface and stop —
+    // silently bypassing the gate would defeat its purpose. With --force the
+    // operator is overriding gate-matrix rejections anyway, so a network
+    // hiccup should not block them.
+    if (!userArgs.force) {
+      die(MergeExit.CHECK_FAIL,
+        `required-check rollup query failed: ${(err as Error).message}; rerun once GitHub API is reachable, or pass --force to bypass`);
+    }
+    process.stderr.write(`required-check rollup query failed (--force in effect; continuing): ${(err as Error).message}\n`);
+  }
+
   const baseOid = gitLib.revParse(`refs/remotes/origin/${pr.baseRefName}`);
 
   // Step 9: pre-LLM secret scan (BEFORE rebase per H08/H32)
   // We scan against just-fetched refs so failure leaves user's branch untouched.
+  // Title/body are now part of MergePrMetadata, so scanning them is a free
+  // per-spec inclusion — a token pasted into the PR description is otherwise
+  // sent to Codex via the Stage 2 prompt without --allow-secret-to-llm.
   const commitMessages = gitLib.logMessages(`origin/${pr.baseRefName}`, `origin/${pr.headRefName}`);
   const diff = gitLib.diffRange(`origin/${pr.baseRefName}`, `origin/${pr.headRefName}`);
   const scanInputs = [
     pr.headRefName,           // benign in practice; scan anyway for symmetry with pr-open
+    pr.title,
+    pr.body,
     commitMessages,
     diff,
-    // PR title/body would require additional gh fetches; skip for v1 — scanner
-    // will catch the same secrets in the diff/messages it almost always also
-    // appears in.
   ].join("\n\n");
   const llmHits = scanSecrets(scanInputs);
   if (llmHits.length > 0 && !userArgs.allowSecretToLlm) {
@@ -385,14 +428,23 @@ async function main(argv: string[]): Promise<number> {
     changelog: { filePath: changelogPath, section, markerComment },
     startingRef,
     forceReason: userArgs.forceReason,
-    stage2: {
-      skip: false,
-      subjectFile: null,
-      bodyFile: null,
-      changelogBulletFile: null,
-      model: process.env.STARK_GH_MODEL || "gpt-5.5",
-      reasoningEffort: (process.env.STARK_GH_REASONING || "medium") as "low" | "medium" | "high",
-    },
+    stage2: (() => {
+      // Resolve via shared draft config so pr-open and pr-merge get identical
+      // model/reasoning validation (Haiku interlock, valid-effort enum, etc.).
+      // Env-var overrides remain supported for backwards compat.
+      const draftCfg = resolveDraftConfig({
+        model: process.env.STARK_GH_MODEL,
+        reasoningEffort: process.env.STARK_GH_REASONING,
+      });
+      return {
+        skip: false,
+        subjectFile: null,
+        bodyFile: null,
+        changelogBulletFile: null,
+        model: draftCfg.model,
+        reasoningEffort: draftCfg.reasoningEffort,
+      };
+    })(),
     execute: {
       watch: !userArgs.noWatch,
       force: userArgs.force,

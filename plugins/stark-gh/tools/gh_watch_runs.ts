@@ -5,7 +5,7 @@ import * as crypto from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { stateFile, lockFile, latestPointer, ensurePrDir, atomicWriteJson } from "./lib/watcher_paths.ts";
 import * as ghLib from "./lib/gh.ts";
-import { fetchRequiredCheckRollup, summarizeVerdict } from "./lib/checks_graphql.ts";
+import { fetchRequiredCheckRollup, summarizeVerdict, type Context } from "./lib/checks_graphql.ts";
 import { resolveCallback } from "./lib/watcher_callbacks.ts";
 import { readPrMergePlan, type PrMergePlan } from "./lib/plan.ts";
 
@@ -78,6 +78,42 @@ export function acquireLock(
   }
   try { fs.unlinkSync(tmp); } catch { /* best-effort */ }
   return { acquired: false };
+}
+
+// Mirror an active per-SHA lock to the per-PR latest.json.lock pointer in the
+// LockRecord shape that lib/watcher_lock.ts (used by pr-merge preflight)
+// expects. This bridges the two lock contracts so preflight's recovery check
+// can detect a live watcher without having to enumerate per-SHA locks.
+//
+// Best-effort: if the mirror write fails (disk full, permissions), the
+// per-SHA lock still protects against a duplicate watcher; preflight will
+// just lose its fast-path attach signal.
+export function mirrorLockToLatest(latestLockPath: string, perShaLockContent: LockFileContent): void {
+  try {
+    const record = {
+      pid: perShaLockContent.pid,
+      startedAt: perShaLockContent.startedAt,
+      hostname: os.hostname(),
+      ownerToken: perShaLockContent.ownerToken,
+    };
+    const tmp = `${latestLockPath}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(record), { mode: 0o600 });
+    try { fs.unlinkSync(latestLockPath); } catch { /* may not exist */ }
+    fs.renameSync(tmp, latestLockPath);
+  } catch {
+    // Best-effort mirror; per-SHA lock remains the source of truth.
+  }
+}
+
+export function releaseMirrorLatestLock(latestLockPath: string, ownerToken: string): void {
+  if (!fs.existsSync(latestLockPath)) return;
+  try {
+    const c = JSON.parse(fs.readFileSync(latestLockPath, "utf8")) as { ownerToken?: string };
+    if (c.ownerToken === ownerToken) fs.unlinkSync(latestLockPath);
+  } catch {
+    // Malformed mirror lock — leave it; preflight's liveness check will treat
+    // unknown shapes as live (conservative) which is fine for one stale write.
+  }
 }
 
 export function releaseLockIfOwner(filepath: string, ownerToken: string): void {
@@ -186,6 +222,20 @@ async function mainAsync(): Promise<void> {
     process.exit(0);
   }
   const ownerToken = lock.ownerToken!;
+  // Mirror to latest.json.lock so pr-merge preflight's recovery check sees us.
+  const latestLockMain = latestPointer(args.host, args.owner, args.repo, args.pr) + ".lock";
+  mirrorLockToLatest(latestLockMain, {
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    headSha: args.headSha,
+    command: "gh-watch-runs",
+    ownerToken,
+  });
+  // Wrapper to release per-SHA + mirror locks together at every exit point.
+  const releaseAll = (): void => {
+    releaseLockIfOwner(lf, ownerToken);
+    releaseMirrorLatestLock(latestLockMain, ownerToken);
+  };
 
   atomicWriteJson(sf, {
     schemaVersion: 1,
@@ -218,7 +268,7 @@ async function mainAsync(): Promise<void> {
         status: "timeout",
         updatedAt: new Date().toISOString(),
       });
-      releaseLockIfOwner(lf, ownerToken);
+      releaseAll();
       process.exit(0);
     }
 
@@ -237,7 +287,7 @@ async function mainAsync(): Promise<void> {
         // Do not touch latest.json: the newer watcher (or its caller) owns
         // that pointer for currentHead. Overwriting from here would clobber
         // a fresher status with our terminal "superseded" record.
-        releaseLockIfOwner(lf, ownerToken);
+        releaseAll();
         process.exit(0);
       }
       const raw = ghLib.prChecks(args.pr, args.owner, args.repo) as CheckRecord[];
@@ -256,7 +306,7 @@ async function mainAsync(): Promise<void> {
           lastError: String(pollError.message),
           finishedAt: new Date().toISOString(),
         });
-        releaseLockIfOwner(lf, ownerToken);
+        releaseAll();
         process.exit(1);
       }
     }
@@ -270,7 +320,7 @@ async function mainAsync(): Promise<void> {
         status: "no-checks-observed",
         updatedAt: new Date().toISOString(),
       });
-      releaseLockIfOwner(lf, ownerToken);
+      releaseAll();
       process.exit(0);
     }
 
@@ -290,7 +340,7 @@ async function mainAsync(): Promise<void> {
         updatedAt: new Date().toISOString(),
       });
       notifyDone(sum, args.pr);
-      releaseLockIfOwner(lf, ownerToken);
+      releaseAll();
       process.exit(0);
     }
 
@@ -347,7 +397,7 @@ interface PollOutcome {
 // Pure function: maps a rollup result (mismatch | contexts) + plan policy
 // into a PollOutcome. Easy to unit-test.
 export function evaluateRollup(
-  rollup: { mismatch: boolean; contexts: any[] | null; headRefOid: string },
+  rollup: { mismatch: boolean; contexts: Context[] | null; headRefOid: string },
   policy: { allowNoRequiredChecks: boolean },
 ): PollOutcome {
   if (rollup.mismatch) return { kind: "head_moved", reason: `headRefOid=${rollup.headRefOid}` };
@@ -423,6 +473,21 @@ async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
   }
   const ownerToken = lock.ownerToken!;
   const startedAt = new Date().toISOString();
+  // Mirror to per-PR latest.json.lock so pr-merge preflight's recovery check
+  // can detect us at a stable, SHA-independent path (the per-SHA lock above
+  // can't be found by a recovery query that doesn't yet know the SHA).
+  const latestLockMerge = latestPointer(host, plan.pr.headRepositoryOwner, plan.pr.headRepositoryName, plan.pr.number) + ".lock";
+  mirrorLockToLatest(latestLockMerge, {
+    pid: process.pid,
+    startedAt,
+    headSha: plan.pushedHeadOid,
+    command: "gh-watch-runs",
+    ownerToken,
+  });
+  const releaseAllMerge = (): void => {
+    releaseLockIfOwner(lf, ownerToken);
+    releaseMirrorLatestLock(latestLockMerge, ownerToken);
+  };
 
   atomicWriteJson(sf, {
     schemaVersion: 1,
@@ -458,7 +523,7 @@ async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
     const elapsedMs = Date.now() - start;
     if (elapsedMs > maxMs) {
       writeStatus({ status: "watch_timeout", finishedAt: new Date().toISOString() });
-      releaseLockIfOwner(lf, ownerToken);
+      releaseAllMerge();
       return 0;
     }
 
@@ -481,7 +546,7 @@ async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
       } else {
         if (backoff.consecErrors >= 3) {
           writeStatus({ status: "auth_failed", lastError: pollErr.message, finishedAt: new Date().toISOString() });
-          releaseLockIfOwner(lf, ownerToken);
+          releaseAllMerge();
           return 1;
         }
         delay = args.pollSeconds;
@@ -499,12 +564,12 @@ async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
         status: "head_moved",
         updatedAt: new Date().toISOString(),
       });
-      releaseLockIfOwner(lf, ownerToken);
+      releaseAllMerge();
       return 0;
     }
     if (outcome!.kind === "fatal") {
       writeStatus({ status: "checks_failed", finishedAt: new Date().toISOString(), reason: outcome!.reason });
-      releaseLockIfOwner(lf, ownerToken);
+      releaseAllMerge();
       return 0;
     }
     if (outcome!.kind === "ready") {
@@ -519,7 +584,7 @@ async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
           callbackPid: pid,
           finishedAt: new Date().toISOString(),
         });
-        releaseLockIfOwner(lf, ownerToken);
+        releaseAllMerge();
         return 0;
       }
     } else {

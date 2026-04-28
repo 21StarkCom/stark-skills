@@ -206,7 +206,14 @@ export function collectState(
 
 export function fetchBase(base: string, opts: { exec?: ExecFn } = {}): { baseOid: string; source: "remote" | "local" } {
   try {
-    gitLib.git(["fetch", "--no-tags", "--quiet", "origin", base], opts);
+    // Use an explicit refspec so the remote-tracking branch (origin/<base>)
+    // is updated. Bare `git fetch origin <base>` only writes FETCH_HEAD; the
+    // subsequent `rev-parse origin/<base>` then reads a stale ref and the
+    // base-drift check downstream becomes a no-op.
+    gitLib.git(
+      ["fetch", "--no-tags", "--quiet", "origin", `+refs/heads/${base}:refs/remotes/origin/${base}`],
+      opts,
+    );
     return { baseOid: gitLib.git(["rev-parse", `origin/${base}`], opts).trim(), source: "remote" };
   } catch {
     return { baseOid: gitLib.git(["rev-parse", base], opts).trim(), source: "local" };

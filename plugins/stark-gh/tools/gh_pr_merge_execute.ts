@@ -70,13 +70,23 @@ export function bulletToSubject(bullet: string): string {
   return bullet.replace(/^- /, "").trim();
 }
 
-// Normalize SSH/HTTPS origin URL to "owner/repo" for comparison with nameWithOwner.
+// Normalize SSH/HTTPS origin URL to "owner/repo" for comparison with
+// nameWithOwner. Rejects (returns null) any host other than github.com so a
+// remote like `https://attacker.example/Evinced/stark-skills.git` cannot pass
+// the owner/repo check and receive a force-push before the GitHub-side SHA
+// fence in `gh pr merge --match-head-commit` rejects the merge.
 export function normalizeOriginUrl(originUrl: string): string | null {
   const cleaned = originUrl.replace(/\.git$/, "");
-  const httpsMatch = cleaned.match(/^https?:\/\/[^/]+\/(.+)$/);
-  if (httpsMatch) return httpsMatch[1];
-  const sshMatch = cleaned.match(/^git@[^:]+:(.+)$/);
-  if (sshMatch) return sshMatch[1];
+  const httpsMatch = cleaned.match(/^https?:\/\/([^/]+)\/(.+)$/);
+  if (httpsMatch) {
+    if (httpsMatch[1].toLowerCase() !== "github.com") return null;
+    return httpsMatch[2];
+  }
+  const sshMatch = cleaned.match(/^git@([^:]+):(.+)$/);
+  if (sshMatch) {
+    if (sshMatch[1].toLowerCase() !== "github.com") return null;
+    return sshMatch[2];
+  }
   return null;
 }
 
@@ -213,6 +223,16 @@ async function main(argv: string[]): Promise<number> {
     writePrMergePlan(planFile, plan);
     die(MergeExit.PUSH_REJECTED, `force-push rejected: ${(err as Error).message}; local rolled back`);
   }
+
+  // Force-push succeeded. Emit a sentinel marker immediately so the slash
+  // wrapper can disarm the restore trap even if a later step (HEAD-drift
+  // sanity check, --no-watch verify/merge, watcher spawn) dies — the remote
+  // has already moved and `restore_branch` would only roll back local state,
+  // re-creating divergence the user has to clean up by hand.
+  process.stdout.write(JSON.stringify({
+    event: "pushed",
+    pushedHeadOid: aboutToPushSha,
+  }) + "\n");
 
   // Sanity: HEAD should still match what we recorded as pushedHeadOid.
   const headAfterPush = gitLib.headOid();

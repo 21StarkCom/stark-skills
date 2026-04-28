@@ -133,6 +133,8 @@ export function isAuthed(opts: { exec?: ExecFn } = {}): boolean {
 export interface MergePrMetadata {
   number: number;
   url: string;
+  title: string;
+  body: string;
   isDraft: boolean;
   state: "OPEN" | "CLOSED" | "MERGED";
   mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN";
@@ -151,6 +153,8 @@ export interface MergePrMetadata {
 const MERGE_PR_FIELDS = [
   "number",
   "url",
+  "title",
+  "body",
   "isDraft",
   "state",
   "mergeable",
@@ -182,11 +186,28 @@ export function fetchMergePrForCurrentBranch(opts: { exec?: ExecFn } = {}): Merg
 }
 
 // Authenticated GraphQL passthrough.
+//
+// gh CLI variable flags:
+//   -f  STRING (string body)
+//   -F  TYPED  (number / true / false / null literal — when value is "null"
+//              gh forwards a real JSON null)
+// We must NOT use `-f key=null` for a null cursor: that sends the literal
+// string "null" to GitHub, breaking pagination/filter queries that expect
+// `String` (not nullable string-or-null). For null we drop the variable;
+// for booleans and the explicit `null` sentinel we use -F so gh forwards a
+// real JSON value.
 export function apiGraphql(query: string, vars: Record<string, unknown>, opts: { exec?: ExecFn } = {}): unknown {
   const argv = ["api", "graphql", "-f", `query=${query}`];
   for (const [k, v] of Object.entries(vars)) {
-    if (typeof v === "number") argv.push("-F", `${k}=${v}`);
-    else argv.push("-f", `${k}=${String(v)}`);
+    if (v === null || v === undefined) {
+      // Skip; GraphQL treats omitted variables as null.
+      continue;
+    }
+    if (typeof v === "number" || typeof v === "boolean") {
+      argv.push("-F", `${k}=${v}`);
+    } else {
+      argv.push("-f", `${k}=${String(v)}`);
+    }
   }
   const out = gh(argv, opts);
   return JSON.parse(out);
