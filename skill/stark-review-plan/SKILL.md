@@ -2,11 +2,11 @@
 name: stark-review-plan
 description: >-
   Multi-agent plan review: multi-LLM x 10 adversarial domains with fix loop. Use for review plan, audit deployment plan.
-argument-hint: "<path> [--rounds N] [--dry-run] [--force] [--tournament]"
+argument-hint: "<path> [--rounds N] [--dry-run] [--force] [--tournament] [--agents claude,codex,gemini]"
 disable-model-invocation: true
 model: opus
-revision: 8a249169623b83c1677dcda2bee230a3dd9fa8d1
-revision_date: 2026-04-27T18:17:48Z
+revision: 079d99d7b1f1ad6bf83bfd7866603db4ef41255f
+revision_date: 2026-04-28T17:25:12Z
 ---
 
 # stark-review-plan
@@ -30,6 +30,7 @@ For domain definitions, finding classification criteria, and coverage matrix vec
 - `--dry-run` — review only, no fixes, no PR posting, no review file
 - `--force` — proceed even if plan has uncommitted changes
 - `--tournament` — tournament mode: 3 full-document reviews evaluated by a judge
+- `--agents <list>` — comma-separated subset of `claude`, `codex`, `gemini` (e.g. `--agents codex` for one agent, `--agents claude,gemini` for two). Overrides `plan_review.agents` from config. Applies to both normal and tournament modes.
 
 **Raw input:** `$ARGUMENTS`
 
@@ -48,6 +49,8 @@ To call tournament.py: `$PYTHON $SCRIPTS/tournament.py <args>`
 
 ### 1.1 Validate input
 
+- Parse `$ARGUMENTS` for flags: `--rounds N`, `--dry-run`, `--force`, `--tournament`, `--agents <list>`. The first non-flag positional is `<path>`.
+- For `--agents`, accept a comma-separated list. Validate each entry is one of `claude`, `codex`, `gemini`; abort with a clear error on any unknown name. Store the normalized list in `$AGENTS` (empty when not supplied so config defaults apply).
 - Confirm `<path>` argument was provided. If not, error: "Usage: /stark-review-plan <path>"
 - Confirm file exists and is readable. If not found and path looks like a partial name (no directory separator), search for candidates:
   ```bash
@@ -96,8 +99,13 @@ For round = 1 to max_rounds:
 
 ### 2a. Dispatch sub-agents
 
+If `--agents <list>` was supplied, append `--agents "$AGENTS"` to both commands below. Otherwise omit it and the dispatch falls back to `plan_review.agents` from config.
+
 ```bash
-$PYTHON $SCRIPTS/triage_orchestrator.py --type plan --file "$path" --round $round --json || $PYTHON $SCRIPTS/plan_review_dispatch.py --prompts-dir plan-review --file "$path" --round $round --timeout 300
+agents_args=()
+[ -n "${AGENTS:-}" ] && agents_args=(--agents "$AGENTS")
+$PYTHON $SCRIPTS/triage_orchestrator.py --type plan --file "$path" --round $round "${agents_args[@]}" --json \
+  || $PYTHON $SCRIPTS/plan_review_dispatch.py --prompts-dir plan-review --file "$path" --round $round --timeout 300 "${agents_args[@]}"
 ```
 
 Capture stdout as JSON. The triage orchestrator runs domain triage first, then dispatches only relevant domains. If the orchestrator fails, the `||` fallback calls `plan_review_dispatch.py` directly with all domains (N agents × 10 domains, default N=2).
@@ -137,17 +145,18 @@ Write a temporary `in-progress.json` to `~/.claude/code-review/history/plan-revi
 
 Each agent independently reviews the full document across ALL 10 domains in a single comprehensive prompt. No domain splitting — each agent gets one combined prompt. Tournament mode does NOT use `plan_review_dispatch.py`'s normal per-domain dispatch pattern. Instead:
 
-### 2T.a. Dispatch 3 full-document reviews
+### 2T.a. Dispatch full-document reviews
 
-1. Combine all 10 domain prompts into a single comprehensive prompt per agent
-2. Dispatch each agent ONCE with the combined prompt (directly via CLI, not via plan_review_dispatch.py)
-3. Collect 3 full review documents (one per agent)
+1. Determine the agent set: if `--agents <list>` was supplied, use that list; otherwise use the default tournament roster (`claude`, `codex`, `gemini`).
+2. Combine all 10 domain prompts into a single comprehensive prompt per agent
+3. Dispatch each selected agent ONCE with the combined prompt (directly via CLI, not via plan_review_dispatch.py)
+4. Collect one full review document per dispatched agent
 
-Each agent receives a combined prompt that merges all 10 domain prompts. Output: 3 structured review documents (one per agent).
+Output: one structured review document per agent in the tournament roster. Tournament mode requires at least 2 agents — if `--agents` resolves to a single agent, abort with an error suggesting normal mode instead.
 
 ### 2T.b. Judge evaluation
 
-Call `evaluate_review()` from `tournament.py` (Python API, not CLI) with the plan content and all 3 reviews. Judge runs twice with swapped order (position bias control). For evaluation criteria and tie handling, see [references/domain-definitions.md](references/domain-definitions.md).
+Call `evaluate_review()` from `tournament.py` (Python API, not CLI) with the plan content and all collected reviews. Judge runs twice with swapped order (position bias control). For evaluation criteria and tie handling, see [references/domain-definitions.md](references/domain-definitions.md).
 
 ### 2T.c. Synthesize winner
 
@@ -167,7 +176,7 @@ Output: single synthesized review document. Skip Phase 3 (no fix rounds in tourn
 Otherwise, run one more dispatch:
 
 ```bash
-$PYTHON $SCRIPTS/plan_review_dispatch.py --prompts-dir plan-review --file "$path" --round $((max_rounds + 1)) --timeout 300
+$PYTHON $SCRIPTS/plan_review_dispatch.py --prompts-dir plan-review --file "$path" --round $((max_rounds + 1)) --timeout 300 "${agents_args[@]}"
 ```
 
 This round is review-only — no fixes applied. The findings represent the final state of the plan.
