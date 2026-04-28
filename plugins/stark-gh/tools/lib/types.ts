@@ -7,6 +7,7 @@ export type ExecFn = (
 export type Confidence = "high" | "low";
 export type Relation = "Closes" | "Refs";
 export type IssueSource = "branch" | "commit-keyword" | "commit-mention" | "cross-repo";
+export type Provenance = "branch" | "pre-existing-history" | "user-provided" | "llm-drafted";
 
 export interface Candidate {
   number: number;
@@ -14,5 +15,6 @@ export interface Candidate {
   repo: string;
   source: IssueSource;
   relation: Relation;
+  provenance: Provenance;
   verified?: boolean;
 }

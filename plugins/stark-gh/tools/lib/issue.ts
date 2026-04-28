@@ -1,4 +1,4 @@
-import type { Candidate, ExecFn } from "./types.ts";
+import type { Candidate, ExecFn, Provenance } from "./types.ts";
 import * as gh from "./gh.ts";
 
 const BRANCH_RE = /^(feat|fix|chore|docs|refactor|test|perf|ci|build|style|revert)\/(\d+)-/;
@@ -10,6 +10,11 @@ export interface ExtractInput {
   branch: string;
   commits: string;
   baseRepo: { owner: string; name: string };
+  provenance: Provenance;
+}
+
+function provenanceRank(p: Provenance): number {
+  return ({ "user-provided": 3, "pre-existing-history": 2, branch: 1, "llm-drafted": 0 } as const)[p];
 }
 
 export function extractCandidates(input: ExtractInput): Candidate[] {
@@ -23,7 +28,11 @@ export function extractCandidates(input: ExtractInput): Candidate[] {
       map.set(k, c);
       return;
     }
-    if (prev.relation === "Refs" && c.relation === "Closes") map.set(k, { ...c });
+    const prevRank = provenanceRank(prev.provenance);
+    const nextRank = provenanceRank(c.provenance);
+    if (nextRank > prevRank || (nextRank === prevRank && prev.relation === "Refs" && c.relation === "Closes")) {
+      map.set(k, { ...c });
+    }
   };
 
   const m = BRANCH_RE.exec(input.branch);
@@ -34,6 +43,7 @@ export function extractCandidates(input: ExtractInput): Candidate[] {
       repo: input.baseRepo.name,
       source: "branch",
       relation: "Refs",
+      provenance: input.provenance,
     });
   }
   for (const cm of input.commits.matchAll(CROSS_REPO_RE)) {
@@ -43,6 +53,7 @@ export function extractCandidates(input: ExtractInput): Candidate[] {
       repo: cm[2]!,
       source: "cross-repo",
       relation: "Refs",
+      provenance: input.provenance,
     });
   }
   for (const cm of input.commits.matchAll(CLOSE_KEYWORD_RE)) {
@@ -52,6 +63,7 @@ export function extractCandidates(input: ExtractInput): Candidate[] {
       repo: input.baseRepo.name,
       source: "commit-keyword",
       relation: "Closes",
+      provenance: input.provenance,
     });
   }
   for (const cm of input.commits.matchAll(PLAIN_NUM_RE)) {
@@ -61,9 +73,16 @@ export function extractCandidates(input: ExtractInput): Candidate[] {
       repo: input.baseRepo.name,
       source: "commit-mention",
       relation: "Refs",
+      provenance: input.provenance,
     });
   }
   return [...map.values()];
+}
+
+export function downgradeLlmCloses(candidates: Candidate[]): Candidate[] {
+  return candidates.map(c =>
+    c.provenance === "llm-drafted" && c.relation === "Closes" ? { ...c, relation: "Refs" } : c,
+  );
 }
 
 export async function verify(candidates: Candidate[], opts: { exec?: ExecFn } = {}): Promise<Candidate[]> {
