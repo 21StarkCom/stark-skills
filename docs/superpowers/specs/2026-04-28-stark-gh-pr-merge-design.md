@@ -29,11 +29,17 @@ Local cleanup (checkout main, delete local branch) is **not** automated by this 
 | Args policy | Slash body forwards `$ARGUMENTS` as one quoted `--raw-args` to preflight (same as pr-open) |
 | Watcher | Background by default; `gh_watch_runs.ts` gains `--on-green <name>` flag where `name` is resolved against a registry in `lib/watcher_callbacks.ts` (whitelist; arbitrary tool paths forbidden). `--no-watch` requires checks already green at push time |
 | Watcher cadence | Inherits pr-open's existing `gh_watch_runs.ts`: 15s × 5 → 30s → 60s → 120s → 240s, capped at 240s. No new cadence introduced for pr-merge |
+| Watcher max-wait | Default 6h total wallclock from `--on-green` spawn, overridable via `--watch-timeout <hours>` (R2-H4/H12). On expiry: terminal state `watch_timeout` with last observed check states; plan-file unlinked; cleanup hint printed. Per-poll HTTP timeout: 30s |
+| Watcher liveness | Lock format `{pid, startedAt, hostname, ownerToken}` (matches pr-open). On rerun, preflight (R2-H11): (a) read lock; (b) verify hostname matches; (c) `kill -0 <pid>` to confirm process alive; (d) verify process start-time matches `startedAt` (defends against PID reuse). If any check fails, treat lock as stale, log takeover, proceed. If all checks pass, exit `34` (watcher already running) |
 | Watcher SHA filter | On-green is signaled only when (a) at least one check run targeting `pushedHeadOid` is observed, and (b) all required checks on `pushedHeadOid` are `success`. Stale check runs against pre-rebase OIDs are ignored |
 | Watcher recovery | Plan-file is **not** unlinked when ownership passes to the watcher; persists until watcher writes terminal state (`merged`, `merge_failed`, `base_moved`, `head_moved`, `aborted`). On rerun, preflight detects existing watcher lock + state file and offers to attach (print state-file path) instead of starting a new run |
-| Required-check source | `gh pr checks <N> --json name,state,bucket,isRequired` — same source as pr-open's watcher. Required checks: `isRequired == true`. Pass: `state ∈ {SUCCESS, NEUTRAL, SKIPPED}`. Fail: `state ∈ {FAILURE, ERROR, CANCELLED, TIMED_OUT, ACTION_REQUIRED, STARTUP_FAILURE}`. Pending: anything else |
+| Required-check source | **GraphQL** via `gh api graphql` (R2-H1/H2/H10): query `repository.pullRequest.commits(last:1).nodes.commit.statusCheckRollup.contexts` for the PR. The query returns per-check `name`, `conclusion` (CheckRun) or `state` (StatusContext), and `isRequired(pullRequestNumber:N)`. The query also returns `pullRequest.headRefOid`, which **must equal `pushedHeadOid`** before the rollup is consumed (SHA-match enforced at the source). `gh pr checks` is rejected — it omits both head SHA and `isRequired` |
+| Required-check pass predicate | Single canonical predicate `isCheckPassing(c)` reused across preflight, `--no-watch`, watcher SHA-match, and on-green callback (R2-H6): `c.isRequired == true` AND (CheckRun: `conclusion ∈ {SUCCESS, NEUTRAL, SKIPPED}`; StatusContext: `state == SUCCESS`). NEUTRAL and SKIPPED count as passing per GitHub's branch-protection semantics. Failing: any required check whose conclusion/state is in the explicit failure set (FAILURE, ERROR, CANCELLED, TIMED_OUT, ACTION_REQUIRED, STARTUP_FAILURE, STALE). Pending: required check that is neither passing nor failing |
+| Vacuous-pass policy | If GraphQL returns zero contexts where `isRequired == true` for the PR, "all required checks pass" is **vacuously true** — preflight, `--no-watch`, and watcher all proceed (R2-H15). Watcher SHA-match contract is satisfied immediately when zero required checks exist |
 | Local cleanup | Not automated. Watcher final state file prints `/stark-gh:cleanup --pr N` (rt3) — never raw shell containing untrusted ref names. Note: `gh pr merge --delete-branch` deletes the **remote** branch only; local branch cleanup is `/stark-gh:cleanup`'s job |
-| Idempotency (rt7) | Plan-file holds `runId`, `originalHeadOid`, `changelogCommitOid`, `pushedHeadOid`. The CHANGELOG.md entry is wrapped in an HTML-comment marker `<!-- stark-gh:pr-merge pr=N runId=UUID -->` (sentinel-comment idiom) so reruns find the tool's own entry deterministically — not by hash collision. Reruns **update in place**: replace the bullet text between the matching marker and the next blank line |
+| Idempotency (rt7) | Plan-file holds `runId`, `originalHeadOid`, `changelogCommitOid`, `pushedHeadOid`. The CHANGELOG.md entry is wrapped in an HTML-comment marker `<!-- stark-gh:pr-merge pr=N runId=UUID -->` (sentinel-comment idiom) so reruns find the tool's own entry deterministically. **Canonical update algorithm (R2-H5/H7):** match marker by **PR number only** (`runId` is informational); locate the marker line and the **single bullet line immediately following it**; if the new bullet text is byte-identical to the existing bullet, **leave both lines unchanged** (no `runId` update, no commit); else replace the bullet line and update the marker's `runId` to current run |
+| Local branch sync (R2-H3) | Preflight verifies that local `<headRef>` SHA equals `origin/<headRef>` SHA (no unpushed local commits). If divergent, exit `18` instructing user to push or reset. Rebases happen on the synced branch, never on a branch with unpushed local commits |
+| `--no-watch` contract (R2-H8/H9) | After force-push, CI re-runs against `pushedHeadOid`; required checks for the new head are typically **pending**, not green. `--no-watch` therefore exits `12` in the common case. Useful only when (a) force-push is a no-op rebase (no SHA change — but explicit-OID lease still applies), (b) checks already complete on the new SHA before merge attempt, or (c) zero required checks (vacuous pass). Recommendation in user docs: prefer default-watch. The `--no-watch` path runs the **same OID re-verify helper** (R2-H9) used by the on-green callback before invoking `gh pr merge`; mismatches map to exit `30` (sync) instead of terminal state files |
 | Secret scan | Reuse pr-open's two-point scan + override flags (`--allow-secret-commit`, `--allow-secret-to-llm`). Pre-commit scan runs over drafted subject + body + changelog bullet **before** the CHANGELOG.md write; on `--allow-secret-commit`, redact spans in all three artifacts and continue. Watcher's on-green callback re-runs the pre-merge scan over the same prose tempfiles before invoking `gh pr merge`; failure writes terminal state `secret_in_prose` (no merge) |
 | State integrity | Preflight captures `baseOid`, `originalHeadOid`, and `rebasedHeadOid`. Execute re-verifies before force-push. Watcher on-green re-verifies `baseOid` and `pushedHeadOid` immediately before `gh pr merge` (rt4) |
 | Working-tree cleanliness | Preflight refuses if `git status --porcelain` is non-empty or any in-progress git operation marker exists (`.git/rebase-*`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `BISECT_LOG`). Records the user's starting ref (`HEAD` symbolic name) for restoration on rebase abort. Exit `13` |
@@ -49,6 +55,7 @@ Authoritative table reconciling Decisions and Stage 1. `--force` only affects th
 | `state != OPEN` (closed / merged) | ✓ | | 11 |
 | `isCrossRepository == true` | ✓ | | 17 |
 | `origin/<headRef>` ≠ PR `headRefOid` | ✓ | | 17 |
+| Local `<headRef>` ≠ `origin/<headRef>` (unpushed local commits) | ✓ | | 18 |
 | `mergeable == CONFLICTING` | ✓ | | 13 |
 | Working tree dirty / git op in progress | ✓ | | 13 |
 | `CHANGELOG.md` missing or no `[Unreleased]` | ✓ | | 15 |
@@ -87,6 +94,7 @@ Authoritative table reconciling Decisions and Stage 1. `--force` only affects th
 6. Apply gate matrix (see Gate Matrix above). Force-bypassable gates skipped if `--force`.
 7. `git fetch --no-tags origin <baseRef> <headRef>`.
 8. **Verify head identity (rt1):** `git rev-parse origin/<headRef>` must equal `originalHeadOid`. Else exit `17` (PR head moved or local fetch is stale).
+8a. **Local sync gate (R2-H3):** verify `git rev-parse <headRef>` (local) equals `git rev-parse origin/<headRef>`. Else exit `18` — user has unpushed local commits on the PR branch and must push or reset before merging.
 9. Capture `baseOid = origin/<baseRef> SHA`.
 10. Local rebase: check out `headRef`, run `git rebase origin/<baseRef>`. On conflict: `git rebase --abort`, restore `startingRef`, exit `13`.
 11. Capture `rebasedHeadOid = HEAD SHA`.
@@ -115,24 +123,26 @@ Authoritative table reconciling Decisions and Stage 1. `--force` only affects th
 2. Verify `baseOid` unchanged and `origin/<headRef>` still equals `originalHeadOid`; else exit `30`.
 3. Verify local `HEAD` SHA matches `rebasedHeadOid`; else exit `30` (working tree moved).
 4. **Pre-commit secret scan (H05/H16):** scan drafted subject + drafted body + drafted changelog bullet. Exit `28` if found and `--allow-secret-commit` not set; else if override set, redact matching spans in all three artifacts (rewrite tempfiles atomically) before any file mutation.
-5. **Apply changelog edit via `lib/changelog.ts`:**
+5. **Apply changelog edit via `lib/changelog.ts`** (canonical algorithm — single source of truth for the marker contract):
    - Read `CHANGELOG.md`.
-   - Search for marker comment `<!-- stark-gh:pr-merge pr=<N> runId=<UUID> -->` inside `## [Unreleased]` (any subsection). The marker uses **PR number only** for matching (`runId` is informational), so re-runs of pr-merge against the same PR find their own entry deterministically across runs (H09/H10).
-   - **If marker found** (rerun): replace the bullet line that immediately follows the marker with the new bullet text. Update `runId` in marker to current run.
+   - Search for marker comment `<!-- stark-gh:pr-merge pr=<N> ` inside `## [Unreleased]` (match on PR number prefix; ignore `runId` for matching).
+   - **If marker found** AND new bullet byte-identical to existing bullet: leave file unchanged (no `runId` update). Goto step 6.
+   - **If marker found** AND new bullet differs: replace the single bullet line immediately following the marker; rewrite the marker line with current `runId`. Atomic write.
    - **If marker not found** (first run): locate or create `### <Section>` under `[Unreleased]`. Insert at top of subsection:
      ```
      <!-- stark-gh:pr-merge pr=<N> runId=<UUID> -->
      - <bullet text>
      ```
-   - Atomic write.
-6. Stage and commit changelog: `git add CHANGELOG.md && git commit -m "chore(changelog): <bullet text>"`. Capture `changelogCommitOid`. If the changelog content is byte-identical (rerun with no bullet change), skip the commit and reuse the existing `changelogCommitOid` from the plan-file.
+     Atomic write.
+6. Stage and commit changelog: `git add CHANGELOG.md && git commit -m "chore(changelog): <bullet text>"`. Capture `changelogCommitOid`. If `git diff --cached` is empty (file byte-identical from step 5), skip the commit and reuse `changelogCommitOid` from the plan-file.
 7. Verify origin URL matches PR's `nameWithOwner`; else exit `31`.
 8. **Explicit-OID force-push (rt5):** `git push --force-with-lease=refs/heads/<headRef>:<originalHeadOid> origin HEAD:refs/heads/<headRef>`. Exit `31` on rejection.
 9. Capture `pushedHeadOid = HEAD SHA` and atomic-update plan-file with `changelogCommitOid` and `pushedHeadOid` (rt7).
-10. If `--no-watch`:
-    - Re-fetch PR. Run `gh pr checks <N>` (per Required-check source decision); require all required checks `success`. Else exit `12`.
+10. If `--no-watch` (R2-H8/H9):
+    - Run shared OID re-verify helper (`lib/verify_oids.ts`): re-fetch `origin/<baseRef>`; `gh api graphql` for PR `headRefOid`; require `baseOid` and `pushedHeadOid` unchanged. Else exit `30`.
+    - Query GraphQL rollup (per Required-check source decision); apply `isCheckPassing` predicate. Require all required checks passing (vacuous-true if zero required). Else exit `12`. **Note:** force-push typically restarts CI; `--no-watch` exits `12` in the common case. Use default-watch unless you have a specific reason.
     - Run `gh pr merge --squash --subject-file <f> --body-file <f> --delete-branch <pr#>`. Exit `32` on failure.
-    - Print merge SHA + PR URL. Note `--delete-branch` deletes only the **remote** branch (H07).
+    - Print merge SHA + PR URL. `--delete-branch` deletes only the **remote** branch.
 11. Else (default):
     - Spawn `gh_watch_runs.ts --on-green pr-merge-complete --plan-file <path>` in background. The `pr-merge-complete` callback name is resolved against the registry in `lib/watcher_callbacks.ts` (H11). Exit `33` on spawn failure.
     - Print PR URL + watcher state-file path.
@@ -157,7 +167,7 @@ Arbitrary tool paths are forbidden — the watcher refuses unknown names. This c
 For pr-merge, the on-green tool (`gh_pr_merge_complete.ts`) does:
 
 1. Read plan-file.
-2. **OID re-verify (rt4):** `git fetch --no-tags origin <baseRef>` and `gh pr view --json headRefOid,baseRefOid`. If `baseOid` differs from plan, write terminal state `base_moved` and exit (no merge). If PR `headRefOid` differs from `pushedHeadOid` in plan, write terminal state `head_moved` and exit.
+2. **OID re-verify (rt4)** via shared `lib/verify_oids.ts` (R2-H9): re-fetch `origin/<baseRef>`; `gh api graphql` for PR `headRefOid`. If `baseOid` differs from plan, write terminal state `base_moved` and exit. If PR `headRefOid` differs from `pushedHeadOid`, write terminal state `head_moved` and exit. The same helper is invoked by Stage 3 step 10 (`--no-watch` path) — single canonical comparison logic.
 3. **Pre-merge secret rescan (H01):** read drafted subject + body tempfiles and re-run `lib/secret.ts` over them. If a secret is found AND `--allow-secret-commit` was not set in the plan, write terminal state `secret_in_prose` and exit (no merge). With override, proceed (spans were already redacted in execute step 4).
 4. Run `gh pr merge --squash --subject-file <f> --body-file <f> --delete-branch <pr#>`. Note this deletes only the **remote** branch.
 5. Capture merge SHA.
@@ -234,7 +244,8 @@ Reuse pr-open's stable codes where applicable; merge-specific codes added:
 | 15 | preflight | CHANGELOG.md missing or has no `[Unreleased]` section |
 | 16 | preflight | secret in pre-LLM scan, no `--allow-secret-to-llm` |
 | 17 | preflight | cross-repository (fork) PR — unsupported in v1 (rt1); or `origin/<headRef>` != PR's `headRefOid` |
-| 34 | preflight | watcher already running for this PR (recovery hint printed) |
+| 18 | preflight | local `<headRef>` has unpushed commits or diverges from `origin/<headRef>` (R2-H3) |
+| 34 | preflight | watcher already running for this PR — liveness verified by PID + start-time + hostname; recovery hint printed |
 | 20 | draft | codex error / invalid output after retry |
 | 28 | execute | secret in pre-commit scan, no `--allow-secret-commit` |
 | 30 | execute | base OID or rebased HEAD moved between push and merge |
@@ -258,6 +269,8 @@ plugins/stark-gh/
 │   ├── lib/
 │   │   ├── changelog.ts              # NEW: marker-comment insert/update under [Unreleased] → <Section>
 │   │   ├── watcher_callbacks.ts      # NEW: registry of allowed --on-green callback names
+│   │   ├── verify_oids.ts            # NEW: shared base/head OID re-verify helper (--no-watch + on-green)
+│   │   ├── checks_graphql.ts         # NEW: GraphQL query for PR check rollup with isRequired + headRefOid
 │   │   ├── plan.ts                   # MODIFIED: extend schema for pr-merge
 │   │   └── (rest reused unchanged)
 │   └── __tests__/
@@ -312,7 +325,9 @@ Mirror pr-open's per-unit + per-stage + integration layout. **Every rt mitigatio
   - `mergeable == CONFLICTING` always exits `13` even with `--force`
   - missing CHANGELOG.md → exits `15`; CHANGELOG without `[Unreleased]` → exits `15`
 - `merge_preflight_rebase.test.ts` — rebase success + conflict abort + `startingRef` restoration
-- `merge_preflight_watcher_recovery.test.ts` (H12/H14) — existing live watcher state exits `34`; terminal-state files do not block
+- `merge_preflight_watcher_recovery.test.ts` (H12/H14, R2-H11) — existing live watcher state exits `34`; terminal-state files do not block; stale lock (PID dead, hostname mismatch, or start-time mismatch) is treated as stale and run proceeds; takeover is logged
+- `merge_preflight_local_sync.test.ts` (R2-H3) — exit `18` when local `<headRef>` SHA differs from `origin/<headRef>` SHA; happy path proceeds when synced
+- `merge_preflight_secret_scan.test.ts` (R2-H17) — pre-LLM scan blocks on each input stream (PR title, PR body, commit messages, diff vs base) → exit `16`; `--allow-secret-to-llm` waives only the pre-LLM scan, not the pre-commit scan
 
 ### Stage 2 — Draft
 - `merge_draft.test.ts` — codex stub, output validation, tempfile placement
@@ -330,17 +345,20 @@ Mirror pr-open's per-unit + per-stage + integration layout. **Every rt mitigatio
   - push rejected → exits `31`
   - push rejected does NOT degrade to implicit lease
   - origin URL mismatch → exits `31`
-- `merge_execute_no_watch.test.ts` — `--no-watch` with non-green checks exits `12`; with green checks invokes `gh pr merge --squash --delete-branch` and exits `0`
+- `merge_execute_no_watch.test.ts` (R2-H8/H9) — `--no-watch` with non-green checks exits `12`; with green checks invokes `gh pr merge --squash --delete-branch` and exits `0`; OID re-verify helper invoked before merge — `baseOid` mismatch → exit `30`, `pushedHeadOid` mismatch → exit `30`; assertion that the same helper is shared with `gh_pr_merge_complete.ts`
 - `merge_execute_idempotency.test.ts` (H21) — rt7 rerun safety:
   - rerun with same bullet text + existing marker: changelog unchanged, no new commit, plan retains `changelogCommitOid`
   - rerun with different bullet text + existing marker: bullet replaced in place; new commit
   - rerun matches by PR number even when `runId` differs
 
 ### Watcher mode
-- `watcher_on_green.test.ts` (H13) — callback name registry resolution:
+- `watcher_on_green.test.ts` (H13, R2-H15/H16) — callback name registry resolution + SHA-match states:
   - `--on-green pr-merge-complete` resolves and dispatches
   - `--on-green <unknown>` is rejected at parse time (no subprocess execution)
-  - SHA-match contract: stale check runs against pre-rebase OID are filtered; on-green only fires when checks against `pushedHeadOid` are all `success`
+  - SHA-match contract three states: (a) only stale pre-rebase OID rows present → wait; (b) `pushedHeadOid` rows present with at least one pending → wait; (c) all required passing on `pushedHeadOid` → fire callback
+  - Vacuous-pass: zero `isRequired==true` contexts → fires immediately (R2-H15)
+  - `isCheckPassing` predicate: NEUTRAL and SKIPPED count as passing; FAILURE/ERROR/CANCELLED/TIMED_OUT/ACTION_REQUIRED/STARTUP_FAILURE/STALE count as failing
+- `watcher_max_wait.test.ts` (R2-H4/H12) — watcher exits with terminal state `watch_timeout` after `--watch-timeout` elapses; default 6h; per-poll HTTP timeout 30s
 - `merge_complete_oid_reverify.test.ts` (rt4) — base/head re-verify in `gh_pr_merge_complete.ts`:
   - `baseOid` mismatch → terminal state `base_moved`, no merge invoked
   - PR `headRefOid` ≠ plan `pushedHeadOid` → terminal state `head_moved`, no merge invoked
@@ -371,6 +389,15 @@ Mirror pr-open's per-unit + per-stage + integration layout. **Every rt mitigatio
 | Dirty working tree on rebase | H02: Stage 1 step 2 refuses non-empty `git status --porcelain` or any in-progress git op marker before any mutation; `startingRef` recorded for post-abort restoration |
 | Unconstrained `--on-green-tool` subprocess sink | H11: replaced with `--on-green <name>` resolved against `lib/watcher_callbacks.ts` registry; arbitrary paths refused |
 | Watcher signals on stale check runs from pre-rebase OID | H13: SHA-match contract — on-green only fires when checks targeting `pushedHeadOid` are observed and pass |
+
+## Considered & Rejected (round 2, 2026-04-28)
+
+Two findings deferred from the round-2 design review:
+
+| ID | Persona | Concern (summary) | Disposition |
+|----|---------|-------------------|-------------|
+| **R2-H13** | scalability | CHANGELOG.md is a serial merge bottleneck under concurrent pr-merge runs | **Deferred to v2.** Same as red-team rt6 — already deferred. If concurrent-merge contention becomes real, switch to per-PR fragment files. v1 acceptable for current usage |
+| **R2-H14** | security | Codex subprocess boundary not sandboxed (env, FS, network) | **Deferred to v2.** Codex CLI invocation pattern is shared with pr-open and stark-review across the entire stark-skills repo; sandboxing is a cross-cutting hardening project, not pr-merge's scope. Tracked separately |
 
 ## Considered & Rejected (red-team v1, 2026-04-28)
 
