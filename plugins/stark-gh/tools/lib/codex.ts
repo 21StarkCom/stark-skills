@@ -13,6 +13,7 @@ export function buildCodexArgv(cfg: { model: string; reasoningEffort: string }):
     "--json",
     "-s",
     "read-only",
+    "--skip-git-repo-check",
     "-",
   ];
 }

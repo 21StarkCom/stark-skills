@@ -322,6 +322,20 @@ async function main(argv: string[]): Promise<number> {
         die(MergeExit.CHECK_FAIL,
           `required checks failing on ${pr.headRefOid} (failing=${verdict.failing}); pass --force --force-reason to override`);
       }
+      // Catch the watcher-hang trap upfront: if branch protection lists no
+      // required checks for this PR's base, the rollup is vacuous and the
+      // watcher's REQUIRED_GREEN gate can never advance — every merge run
+      // would silently poll until the 6h timeout. Surface it now with an
+      // actionable error instead of trapping the operator.
+      if (verdict.vacuous && !userArgs.allowNoRequiredChecks && !userArgs.force) {
+        die(MergeExit.CHECK_FAIL,
+          `no required checks configured for ${pr.baseRefName} on ${repoInfo.owner}/${repoInfo.name} ` +
+          `(rollup reports ${preflightRollup.contexts.length} context(s), 0 marked isRequired). ` +
+          `The watcher would hang waiting for required checks that do not exist. ` +
+          `Fix the configuration (add a branch protection rule / ruleset on ${pr.baseRefName} ` +
+          `that requires the relevant CheckRun) or pass --allow-no-required-checks to acknowledge ` +
+          `the vacuous-pass and proceed.`);
+      }
     }
     // mismatch (PR head moved between gh-pr-view and the rollup query) is
     // benign here — the head-identity gate above already enforces parity, and
