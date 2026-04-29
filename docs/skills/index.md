@@ -8,6 +8,7 @@
 | `/stark-design-to-plan` | Generate implementation plan from design — 3 agents generate, 6 cross-review, synthesize | [usage](stark-design-to-plan/usage.md) · [internals](stark-design-to-plan/internals.md) |
 | `/stark-red-team-design` | Adversarial 5-persona challenge of a design doc | [source](../../skill/stark-red-team-design/SKILL.md) |
 | `/stark-review-plan` | Multi-agent plan review — N agents × 10 adversarial domains with fix loop | [usage](stark-review-plan/usage.md) · [internals](stark-review-plan/internals.md) |
+| `/stark-red-team-plan` | Adversarial 5-persona challenge of an execution plan | [source](../../skill/stark-red-team-plan/SKILL.md) |
 | `/stark-plan-to-tasks` | Decompose plan into phased GitHub issues with story points | [usage](stark-plan-to-tasks/usage.md) · [internals](stark-plan-to-tasks/internals.md) |
 | `/stark-phase-execute` | Autonomous phase execution — implement, PR, review, merge | [usage](stark-phase-execute/usage.md) · [internals](stark-phase-execute/internals.md) |
 | `/stark-autopilot` | Tournament implementation — agents compete per step in worktrees | [usage](stark-autopilot/usage.md) · [internals](stark-autopilot/internals.md) |
