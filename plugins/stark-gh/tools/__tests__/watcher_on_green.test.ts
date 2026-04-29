@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parsePrMergeArgs, classifyError, jitter, evaluateRollup } from "../gh_watch_runs.ts";
+import {
+  parsePrMergeArgs,
+  classifyError,
+  jitter,
+  evaluateRollup,
+  decideHeadMovedTransition,
+  HEAD_MOVED_REQUIRED_RECONFIRMS,
+} from "../gh_watch_runs.ts";
 
 test("parsePrMergeArgs: returns null when --on-green absent", () => {
   assert.equal(parsePrMergeArgs([]), null);
@@ -114,6 +121,31 @@ test("evaluateRollup: pending → wait", () => {
   ];
   const r = evaluateRollup({ mismatch: false, contexts: ctx, headRefOid: "sha" }, { allowNoRequiredChecks: false });
   assert.equal(r.kind, "wait");
+});
+
+test("decideHeadMovedTransition: first observation is reconfirm (transient)", () => {
+  // Tolerates GraphQL replication lag right after force-push: very first
+  // poll often observes the pre-push OID and must NOT exit the watcher.
+  assert.equal(decideHeadMovedTransition(1), "reconfirm");
+});
+
+test("decideHeadMovedTransition: below required threshold is reconfirm", () => {
+  for (let n = 1; n < HEAD_MOVED_REQUIRED_RECONFIRMS; n++) {
+    assert.equal(decideHeadMovedTransition(n), "reconfirm", `n=${n}`);
+  }
+});
+
+test("decideHeadMovedTransition: at-or-above threshold is terminal", () => {
+  assert.equal(decideHeadMovedTransition(HEAD_MOVED_REQUIRED_RECONFIRMS), "terminal");
+  assert.equal(decideHeadMovedTransition(HEAD_MOVED_REQUIRED_RECONFIRMS + 1), "terminal");
+});
+
+test("decideHeadMovedTransition: required defaults to 3 so single observation is never terminal", () => {
+  // The whole point of the debounce — one stale GraphQL response from
+  // post-push replication lag must never end the watcher. Pinned to the
+  // literal 3 so weakening the configured debounce (e.g. dropping to 2)
+  // is caught here instead of silently passing.
+  assert.equal(HEAD_MOVED_REQUIRED_RECONFIRMS, 3);
 });
 
 test("evaluateRollup: not-required contexts ignored", () => {

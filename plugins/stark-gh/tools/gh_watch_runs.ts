@@ -408,6 +408,21 @@ interface PollOutcome {
   reason?: string;
 }
 
+// Constants exported for the unit-test of decideHeadMovedTransition.
+export const HEAD_MOVED_REQUIRED_RECONFIRMS = 3;
+export const HEAD_MOVED_RECONFIRM_DELAY_SEC = 5;
+
+// Pure: given the running head_moved counter, decide whether to reconfirm
+// (transient — likely GraphQL replication lag right after force-push) or
+// declare the head_moved terminal. consecutiveCount is the post-increment
+// value, so the very first head_moved seen passes 1.
+export function decideHeadMovedTransition(
+  consecutiveCount: number,
+  required: number = HEAD_MOVED_REQUIRED_RECONFIRMS,
+): "reconfirm" | "terminal" {
+  return consecutiveCount < required ? "reconfirm" : "terminal";
+}
+
 // Pure function: maps a rollup result (mismatch | contexts) + plan policy
 // into a PollOutcome. Easy to unit-test.
 export function evaluateRollup(
@@ -524,6 +539,15 @@ async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
   const backoff: BackoffState = { consecErrors: 0, rateLimitDelaySec: 0 };
   let consecutiveGreen = 0;
   const REQUIRED_GREEN = 2; // PR4-claude H13 debounce
+  // Tolerate transient head-OID mismatch right after force-push: GitHub's
+  // GraphQL `pullRequest.headRefOid` can lag the push receiver by hundreds
+  // of milliseconds, so the very first poll often observes the pre-push
+  // OID and would otherwise exit the watcher 500ms after spawn. Require
+  // HEAD_MOVED_REQUIRED_RECONFIRMS consecutive head_moved outcomes (with
+  // a short reconfirm delay between them) before declaring a terminal
+  // head_moved. A real intervening force-push survives all reconfirms;
+  // replication lag resolves within seconds.
+  let consecutiveHeadMoved = 0;
 
   const writeStatus = (extras: Record<string, unknown>): void => {
     let cur: Record<string, unknown> = {};
@@ -572,6 +596,23 @@ async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
     backoff.consecErrors = 0;
 
     if (outcome!.kind === "head_moved") {
+      consecutiveHeadMoved++;
+      if (decideHeadMovedTransition(consecutiveHeadMoved) === "reconfirm") {
+        // Likely GraphQL replication lag right after force-push; reconfirm
+        // with a short delay before treating as terminal. Reset the green
+        // debounce: a transient head_moved invalidates any in-flight green
+        // streak, otherwise one ready poll before the mismatch plus one
+        // after could dispatch the merge after only one post-mismatch green.
+        consecutiveGreen = 0;
+        writeStatus({
+          status: "watching",
+          consecutiveHeadMoved,
+          consecutiveGreen,
+          lastWarning: `head_moved (transient ${consecutiveHeadMoved}/${HEAD_MOVED_REQUIRED_RECONFIRMS}): ${outcome!.reason}`,
+        });
+        await new Promise(r => setTimeout(r, jitter(HEAD_MOVED_RECONFIRM_DELAY_SEC) * 1000));
+        continue;
+      }
       writeStatus({ status: "head_moved", finishedAt: new Date().toISOString(), reason: outcome!.reason });
       atomicWriteJson(latestPointer(host, plan.pr.headRepositoryOwner, plan.pr.headRepositoryName, plan.pr.number), {
         headSha: plan.pushedHeadOid,
@@ -581,6 +622,9 @@ async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
       releaseAllMerge();
       return 0;
     }
+    // Any non-head_moved outcome resets the consecutive counter so a stray
+    // mismatch followed by recovery doesn't accumulate toward terminal.
+    consecutiveHeadMoved = 0;
     if (outcome!.kind === "fatal") {
       writeStatus({ status: "checks_failed", finishedAt: new Date().toISOString(), reason: outcome!.reason });
       releaseAllMerge();
