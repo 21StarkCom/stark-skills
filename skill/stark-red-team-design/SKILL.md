@@ -8,8 +8,8 @@ description: >-
 argument-hint: "<design-path> [--source-spec <path>] [--model <id>] [--dry-run] [--no-pr-comment]"
 disable-model-invocation: true
 model: opus
-revision: d25bc97cf19f68c2cadb2dca4af778b3fe1fbe54
-revision_date: 2026-04-29T07:22:10Z
+revision: 3ac5ebee8c3a2c462c17de30c68222d59a8285b6
+revision_date: 2026-04-29T07:29:06Z
 ---
 
 # stark-red-team-design
@@ -187,22 +187,34 @@ If posting fails, warn and continue.
 
 ### 4.3 Commit sidecar
 
-Skip if `--dry-run` or no sidecar was written. Otherwise commit the sidecar
-so the findings are durable alongside the design:
+Skip if `--dry-run` or no sidecar was written. Otherwise commit only the
+sidecar so the findings are durable alongside the design — even if the user
+has unrelated changes staged or in the working tree:
 
 ```bash
-git add "$sidecar_path"
-git commit -m "docs(red-team): findings for $(basename "$design_path")
+git commit -m "docs(red-team): findings for $(basename -- "$design_path")
 
 $total_findings findings ($blocking_count blocking, $human_review_count human-review)
-Model: $model · Run: $run_id"
+Model: $model · Run: $run_id" \
+  -- "$sidecar_path"
 ```
 
-If the working tree has unrelated staged changes, stage and commit only
-`$sidecar_path` (use `git commit -- "$sidecar_path"` style or reset other
-paths from the index first). If the commit fails (hook rejection, nothing
-to commit because the sidecar is unchanged, etc.), warn and continue —
-the sidecar file is already on disk.
+The path-pathspec form (`git commit ... -- <path>`) commits exactly that path
+regardless of what is otherwise staged, and the leading `--` ensures sidecar
+paths starting with `-` are not parsed as flags. Do **not** use `git add`
+followed by an unscoped `git commit` — that would sweep in unrelated staged
+changes.
+
+If the design file itself has uncommitted changes
+(`git diff --quiet -- "$design_path"` is non-zero, or it appears in
+`git status --porcelain`), skip the commit and warn the user that the
+findings reference a working-tree version of the design that is not in
+history; let them commit the design first and re-run, or commit the
+sidecar manually.
+
+If the commit fails for any other reason (hook rejection, nothing to commit
+because the sidecar is unchanged, etc.), warn and continue — the sidecar
+file is already on disk.
 
 Do not push. The user controls when the branch goes up.
 
