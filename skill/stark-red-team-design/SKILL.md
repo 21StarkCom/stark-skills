@@ -8,8 +8,8 @@ description: >-
 argument-hint: "<design-path> [--source-spec <path>] [--model <id>] [--dry-run] [--no-pr-comment]"
 disable-model-invocation: true
 model: opus
-revision: 119a85b101220376c49cf8db62fac1fc0564725d
-revision_date: 2026-04-27T18:34:08Z
+revision: 19b0b215c4178f7f6dc8f391c7b78a7823fd1b92
+revision_date: 2026-04-29T07:33:01Z
 ---
 
 # stark-red-team-design
@@ -185,11 +185,41 @@ $PYTHON $SCRIPTS/github_app.py --app stark-claude pr review $pr_number \
 
 If posting fails, warn and continue.
 
-### 4.3 Commit (optional, only if user asks)
+### 4.3 Commit sidecar
 
-The skill does **not** auto-commit the sidecar. Adversarial findings often
-spark discussion before being recorded; let the user decide whether to
-commit the sidecar alongside their next design change.
+Skip if `--dry-run` or no sidecar was written. Otherwise commit only the
+sidecar so the findings are durable alongside the design — even if the user
+has unrelated changes staged or in the working tree:
+
+```bash
+git add -- "$sidecar_path"
+git commit -m "docs(red-team): findings for $(basename -- "$design_path")
+
+$total_findings findings ($blocking_count blocking, $human_review_count human-review)
+Model: $model · Run: $run_id" \
+  -- "$sidecar_path"
+```
+
+The scoped `git add -- "$sidecar_path"` puts the sidecar (including
+first-run, never-tracked files) into the index without touching anything
+else, and the path-pathspec form on `git commit ... -- <path>` commits
+exactly that path regardless of what else is otherwise staged. The leading
+`--` on both commands ensures sidecar paths starting with `-` are not parsed
+as flags. Do **not** use an unscoped `git commit -a` or omit the `-- <path>`
+on commit — either would sweep in unrelated staged changes.
+
+If the design file itself has uncommitted changes
+(`git diff --quiet -- "$design_path"` is non-zero, or it appears in
+`git status --porcelain`), skip the commit and warn the user that the
+findings reference a working-tree version of the design that is not in
+history; let them commit the design first and re-run, or commit the
+sidecar manually.
+
+If the commit fails for any other reason (hook rejection, nothing to commit
+because the sidecar is unchanged, etc.), warn and continue — the sidecar
+file is already on disk.
+
+Do not push. The user controls when the branch goes up.
 
 ## Output Contract
 
