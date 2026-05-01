@@ -8,8 +8,8 @@ description: >-
 argument-hint: "<design-path> [--source-spec <path>] [--model <id>] [--dry-run] [--no-pr-comment]"
 disable-model-invocation: true
 model: opus
-revision: 3cc43756563410ba36234eb63f1196061ea60638
-revision_date: 2026-05-01T08:12:39Z
+revision: f5d4be2d01787579d5fcfe09d1bef452eb50c668
+revision_date: 2026-05-01T09:39:44Z
 ---
 
 # stark-red-team-design
@@ -199,11 +199,20 @@ rendered as skipped and no second LLM call is made.
 
 ### 4.2 PR comment (skipped if `--dry-run`, `--no-pr-comment`, or no PR)
 
-Post the rendered markdown summary as `stark-claude[bot]`:
+Post the rendered markdown summary as `stark-claude[bot]`. The body MUST
+go through `red_team_dispatch_common.truncate_pr_comment` before posting
+so the design-§4.2 cascade applies (truncate `notes` first, then each
+move's `rationale` to 200 chars, then a hard `[TRUNCATED — see sidecar]`
+marker) before GitHub's 65 KB cap rejects the request:
 
 ```bash
+body=$("$PYTHON" -c "
+import sys; sys.path.insert(0, '$SCRIPTS')
+from red_team_dispatch_common import truncate_pr_comment
+print(truncate_pr_comment(sys.stdin.read()), end='')
+" <<<"$summary")
 $PYTHON $SCRIPTS/github_app.py --app stark-claude pr review $pr_number \
-    --comment --body "$summary"
+    --comment --body "$body"
 ```
 
 If posting fails, warn and continue.
