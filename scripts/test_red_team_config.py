@@ -20,7 +20,62 @@ def test_get_red_team_config_returns_defaults(tmp_path):
     assert cfg["stages"]["plan"]["enabled"] is False
     assert len(cfg["personas"]) == 5
     assert "security-trust" in cfg["personas"]
-    assert cfg["per_run_budget_usd"] == 15.00
+    assert cfg["per_run_budget_usd"] == 30.00
+    assert cfg["fix_plan"] == {
+        "enabled": False,
+        "model": "gpt-5.5-pro",
+        "reasoning_effort": "xhigh",
+        "timeout_s": 1200,
+        "min_moves": 2,
+        "max_moves": 6,
+        "max_input_chars": 200_000,
+    }
+
+
+def test_get_red_team_config_backfills_fix_plan_defaults_for_pre_v12_config(tmp_path):
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(json.dumps({
+        "red_team": {
+            "enabled": True,
+            "model": "gpt-5.5-pro",
+            "per_run_budget_usd": 15.0,
+        }
+    }))
+    with patch.object(config_loader, "CONFIG_PATH", cfg_file):
+        config_loader.load_config.cache_clear()
+        cfg = config_loader.get_red_team_config()
+    assert cfg["fix_plan"]["model"] == "gpt-5.5-pro"
+    assert cfg["fix_plan"] == {
+        "enabled": False,
+        "model": "gpt-5.5-pro",
+        "reasoning_effort": "xhigh",
+        "timeout_s": 1200,
+        "min_moves": 2,
+        "max_moves": 6,
+        "max_input_chars": 200_000,
+    }
+
+
+def test_get_red_team_config_merges_partial_v12_fix_plan_config(tmp_path):
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(json.dumps({
+        "red_team": {
+            "fix_plan": {
+                "enabled": True,
+                "timeout_s": 900,
+            }
+        }
+    }))
+    with patch.object(config_loader, "CONFIG_PATH", cfg_file):
+        config_loader.load_config.cache_clear()
+        cfg = config_loader.get_red_team_config()
+    assert cfg["fix_plan"]["enabled"] is True
+    assert cfg["fix_plan"]["timeout_s"] == 900
+    assert cfg["fix_plan"]["model"] == "gpt-5.5-pro"
+    assert cfg["fix_plan"]["reasoning_effort"] == "xhigh"
+    assert cfg["fix_plan"]["min_moves"] == 2
+    assert cfg["fix_plan"]["max_moves"] == 6
+    assert cfg["fix_plan"]["max_input_chars"] == 200_000
 
 
 def test_get_model_rates_returns_defaults(tmp_path):
@@ -246,7 +301,23 @@ def test_locked_override_emits_audit_event(tmp_path, capsys, monkeypatch):
     repo_cfg = repo_dir / ".code-review" / "config.json"
     repo_cfg.parent.mkdir(parents=True)
     repo_cfg.write_text(json.dumps({
-        "red_team": {"model": "gpt-3.5-turbo", "enabled": False},
+        "red_team": {
+            "personas": ["bypass"],
+            "model": "gpt-3.5-turbo",
+            "enabled": False,
+            "agent": "claude",
+            "min_severity_to_block": "critical",
+            "halt_on_unresolved": False,
+            "allow_human_review_halt": False,
+            "stages": {"design": {"enabled": False}},
+            "fix_plan": {
+                "enabled": True,
+                "model": "gpt-5.5",
+                "reasoning_effort": "low",
+                "min_moves": 1,
+                "max_moves": 99,
+            },
+        },
     }))
     monkeypatch.chdir(repo_dir)
     with patch.object(config_loader, "CONFIG_PATH", global_cfg):
@@ -260,8 +331,39 @@ def test_locked_override_emits_audit_event(tmp_path, capsys, monkeypatch):
         for e in captured
         if e["type"] == "red_team_override_rejected"
     }
-    assert "model" in rejected_fields
-    assert "enabled" in rejected_fields
+    assert {
+        "personas",
+        "model",
+        "enabled",
+        "agent",
+        "min_severity_to_block",
+        "halt_on_unresolved",
+        "allow_human_review_halt",
+        "stages",
+        "reasoning_effort",
+        "min_moves",
+        "max_moves",
+    }.issubset(rejected_fields)
+    rejected_paths = {
+        e["payload"]["path"]
+        for e in captured
+        if e["type"] == "red_team_override_rejected"
+    }
+    assert {
+        "personas",
+        "model",
+        "enabled",
+        "agent",
+        "min_severity_to_block",
+        "halt_on_unresolved",
+        "allow_human_review_halt",
+        "stages",
+        "fix_plan.enabled",
+        "fix_plan.model",
+        "fix_plan.reasoning_effort",
+        "fix_plan.min_moves",
+        "fix_plan.max_moves",
+    }.issubset(rejected_paths)
     # Source path is captured for audit forensics.
     sources = {
         e["payload"]["source"]
@@ -269,6 +371,62 @@ def test_locked_override_emits_audit_event(tmp_path, capsys, monkeypatch):
         if e["type"] == "red_team_override_rejected"
     }
     assert any(str(repo_cfg) in s for s in sources)
+
+
+@pytest.mark.parametrize(
+    ("key", "global_value", "repo_attempted_value"),
+    [
+        ("enabled", False, True),
+        ("model", "gpt-5.5-pro", "gpt-5.5"),
+        ("reasoning_effort", "xhigh", "low"),
+        ("min_moves", 2, 1),
+        ("max_moves", 6, 20),
+    ],
+)
+def test_get_red_team_config_rejects_locked_fix_plan_overrides(
+    tmp_path, capsys, monkeypatch, key, global_value, repo_attempted_value,
+):
+    import emit_queue
+
+    captured: list[dict] = []
+
+    def capture_enqueue(event, *_, **__):
+        errors = emit_queue.validate(event)
+        assert errors == [], f"event failed real validate(): {errors}"
+        captured.append(event)
+        return True
+
+    monkeypatch.setattr(emit_queue, "enqueue", capture_enqueue)
+    monkeypatch.setattr(config_loader, "_EMIT_QUEUE", emit_queue)
+
+    global_cfg = tmp_path / "global.json"
+    global_cfg.write_text(json.dumps({"red_team": {"fix_plan": {key: global_value}}}))
+    repo_dir = tmp_path / "repo"
+    repo_cfg = repo_dir / ".code-review" / "config.json"
+    repo_cfg.parent.mkdir(parents=True)
+    repo_cfg.write_text(json.dumps({
+        "red_team": {
+            "fix_plan": {
+                key: repo_attempted_value,
+                "timeout_s": 777,
+            }
+        },
+    }))
+    monkeypatch.chdir(repo_dir)
+    with patch.object(config_loader, "CONFIG_PATH", global_cfg):
+        config_loader.load_config.cache_clear()
+        cfg = config_loader.get_red_team_config()
+
+    assert cfg["fix_plan"][key] == global_value
+    assert cfg["fix_plan"]["timeout_s"] == 777
+    err = capsys.readouterr().err
+    assert f"fix_plan.{key}" in err
+    paths = [
+        e["payload"]["path"]
+        for e in captured
+        if e["type"] == "red_team_override_rejected"
+    ]
+    assert f"fix_plan.{key}" in paths
 
 
 def test_get_red_team_config_warns_on_falsey_non_dict_repo_override(tmp_path, capsys, monkeypatch):

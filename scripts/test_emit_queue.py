@@ -97,6 +97,14 @@ class TestValidation:
         ):
             assert emit_queue.validate(_make_event(type=event_type)) == [], event_type
 
+    def test_red_team_event_type_names_are_accepted(self):
+        for event_type in (
+            "red_team_run",
+            "red_team_finding",
+            "red_team_fix_plan",
+        ):
+            assert emit_queue.validate(_make_event(type=event_type)) == [], event_type
+
     def test_non_string_required_fields_are_rejected(self):
         """type/timestamp/cli/source must be strings; numbers or dicts were
         previously accepted by the field-presence check and slipped into

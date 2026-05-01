@@ -61,6 +61,7 @@ _VALID_TYPES = {
     # durable audit signal so a downstream pipeline can spot bypass attempts
     # that an operator might miss in stderr noise.
     "red_team_override_rejected",
+    "red_team_run", "red_team_finding", "red_team_fix_plan",
 }
 
 # ---------------------------------------------------------------------------

@@ -21,14 +21,17 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import time
-import uuid
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 import stark_red_team as rt
-from config_loader import get_model_rates, get_red_team_config
+from red_team_dispatch_common import (
+    execute_dispatch,
+    final_status,
+    render_sidecar_markdown as _render_sidecar_markdown,
+    sidecar_commit_message,
+    truncate_pr_comment,
+)
 
 
 def _read_text(path: Path) -> str:
@@ -36,13 +39,7 @@ def _read_text(path: Path) -> str:
 
 
 def _final_status(result: rt.RedTeamResult) -> str:
-    if result.error:
-        return "error"
-    if result.human_review_count > 0:
-        return "halted_human_review"
-    if result.blocking_count > 0:
-        return "halted"
-    return "clean"
+    return final_status(result)
 
 
 def _audit_run(
@@ -95,9 +92,6 @@ def _audit_run(
         pass
 
 
-_SEVERITY_BADGE = {"critical": "🛑", "high": "🔴", "medium": "🟡"}
-
-
 def render_sidecar_markdown(
     *,
     design_path: Path,
@@ -105,101 +99,20 @@ def render_sidecar_markdown(
     result: rt.RedTeamResult,
     model: str,
     run_id: str,
+    fix_plan_status: str | None = None,
+    fix_plan: rt.RedTeamFixPlan | None = None,
 ) -> str:
     """Build the human-readable `<design>.red-team.md` sidecar."""
-    timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    status = _final_status(result)
-    blocking = result.blocking_count
-    human_review = result.human_review_count
-
-    findings_sorted = sorted(
-        result.findings,
-        key=lambda f: (-rt.SEVERITY_RANK.get(f.severity, 0), f.persona, f.id),
+    return _render_sidecar_markdown(
+        artifact_path=design_path,
+        source_spec_path=source_spec_path,
+        result=result,
+        model=model,
+        run_id=run_id,
+        stage="design",
+        fix_plan_status=fix_plan_status,
+        fix_plan=fix_plan,
     )
-
-    lines: list[str] = []
-    lines.append(f"# Red-team review — {design_path.name}")
-    lines.append("")
-    lines.append(f"- **Date:** {timestamp}")
-    lines.append(f"- **Run ID:** `{run_id}`")
-    lines.append(f"- **Model:** `{model}`")
-    lines.append(f"- **Source spec:** `{source_spec_path}`" if source_spec_path else "- **Source spec:** (design used as its own spec)")
-    lines.append(f"- **Status:** **{status}**")
-    lines.append(
-        f"- **Findings:** {len(result.findings)} total — "
-        f"{blocking} blocking (≥ high), {human_review} human-review"
-    )
-    lines.append(
-        f"- **Cost:** ${result.cost_usd:.4f} | **Duration:** {result.duration_s:.1f}s | "
-        f"**Tokens:** in={result.input_tokens} out={result.output_tokens}"
-    )
-    lines.append("")
-
-    if result.error:
-        lines.append("## Error")
-        lines.append("")
-        lines.append("```")
-        lines.append(result.error.strip())
-        lines.append("```")
-        lines.append("")
-        excerpt = (result.raw_output or "").strip()
-        if excerpt:
-            lines.append("### Raw output excerpt")
-            lines.append("")
-            lines.append("```")
-            lines.append(excerpt[:2000])
-            lines.append("```")
-            lines.append("")
-        return "\n".join(lines)
-
-    if result.synthesis:
-        lines.append("## Synthesis")
-        lines.append("")
-        lines.append(result.synthesis.strip())
-        lines.append("")
-
-    if not findings_sorted:
-        lines.append("## Findings")
-        lines.append("")
-        lines.append("_No findings._ The committee did not raise blocking or human-review concerns.")
-        lines.append("")
-        return "\n".join(lines)
-
-    lines.append("## Findings")
-    lines.append("")
-    lines.append("| # | Severity | Persona | ID | Concern |")
-    lines.append("|---|----------|---------|----|---------|")
-    for i, f in enumerate(findings_sorted, 1):
-        badge = _SEVERITY_BADGE.get(f.severity, "")
-        concern_short = f.concern.replace("\n", " ").strip()
-        if len(concern_short) > 140:
-            concern_short = concern_short[:137] + "..."
-        lines.append(f"| {i} | {badge} {f.severity} | {f.persona} | `{f.id}` | {concern_short} |")
-    lines.append("")
-
-    lines.append("## Detail")
-    lines.append("")
-    for i, f in enumerate(findings_sorted, 1):
-        badge = _SEVERITY_BADGE.get(f.severity, "")
-        lines.append(f"### {i}. {badge} `{f.id}` — {f.persona} ({f.severity})")
-        lines.append("")
-        lines.append(f"**Concern.** {f.concern.strip()}")
-        lines.append("")
-        lines.append(f"**Consequence.** {f.consequence.strip()}")
-        lines.append("")
-        if f.counter_proposal == rt.REQUEST_HUMAN_REVIEW:
-            lines.append("**Counter-proposal.** _Requests human review._")
-            if f.reason_for_uncertainty:
-                lines.append("")
-                lines.append(f"**Reason.** {f.reason_for_uncertainty.strip()}")
-        else:
-            lines.append(f"**Counter-proposal.** {f.counter_proposal.strip()}")
-            if f.trade_off:
-                lines.append("")
-                lines.append(f"**Trade-off.** {f.trade_off.strip()}")
-        lines.append("")
-
-    return "\n".join(lines)
 
 
 def run_dispatch(
@@ -210,80 +123,19 @@ def run_dispatch(
     write_sidecar: bool,
     audit: bool,
     cwd: str | None,
+    enable_fix_plan_for_calibration: bool = False,
 ) -> dict[str, Any]:
     """Run the red-team and return a dict shaped for the skill."""
-    if not design_path.exists():
-        return {"status": "error", "error": f"design file not found: {design_path}"}
-
-    cfg = get_red_team_config()
-    model_rates = get_model_rates()
-    model = model_override or cfg["model"]
-
-    artifact = _read_text(design_path)
-    if source_spec_path is not None:
-        if not source_spec_path.exists():
-            return {"status": "error", "error": f"source-spec file not found: {source_spec_path}"}
-        source_spec = _read_text(source_spec_path)
-    else:
-        # Use the design as its own source spec — matches forge_orchestrator
-        # behavior when only one artifact is supplied.
-        source_spec = artifact
-
-    result = rt.run_red_team(
+    return execute_dispatch(
         stage="design",
-        artifact=artifact,
-        source_spec=source_spec,
-        pr_diff=None,
-        personas=cfg["personas"],
-        model=model,
-        model_rates=model_rates,
+        artifact_path=design_path,
+        source_spec_path=source_spec_path,
+        model_override=model_override,
+        write_sidecar=write_sidecar,
+        audit=audit,
         cwd=cwd,
-        timeout_s=cfg["timeout_s"],
-        min_severity_to_block=cfg["min_severity_to_block"],
-        max_input_chars=cfg["max_input_chars"],
-        round_num=1,
+        enable_fix_plan_for_calibration=enable_fix_plan_for_calibration,
     )
-
-    run_id = f"manual-{uuid.uuid4().hex[:12]}"
-
-    if audit:
-        _audit_run(run_id=run_id, result=result, model=model)
-
-    sidecar_path: Path | None = None
-    if write_sidecar:
-        sidecar_path = design_path.with_suffix(design_path.suffix + ".red-team.md")
-        # If design ends in `.md`, prefer `<stem>.red-team.md` (sibling, not `.md.red-team.md`)
-        if design_path.suffix == ".md":
-            sidecar_path = design_path.with_name(design_path.stem + ".red-team.md")
-        sidecar_path.write_text(
-            render_sidecar_markdown(
-                design_path=design_path,
-                source_spec_path=source_spec_path,
-                result=result,
-                model=model,
-                run_id=run_id,
-            ),
-            encoding="utf-8",
-        )
-
-    return {
-        "status": _final_status(result),
-        "run_id": run_id,
-        "model": model,
-        "design_path": str(design_path),
-        "source_spec_path": str(source_spec_path) if source_spec_path else None,
-        "sidecar_path": str(sidecar_path) if sidecar_path else None,
-        "blocking_count": result.blocking_count,
-        "human_review_count": result.human_review_count,
-        "total_findings": len(result.findings),
-        "duration_s": result.duration_s,
-        "cost_usd": result.cost_usd,
-        "input_tokens": result.input_tokens,
-        "output_tokens": result.output_tokens,
-        "error": result.error,
-        "synthesis": result.synthesis,
-        "findings": [asdict(f) for f in result.findings],
-    }
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -317,6 +169,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit a single JSON object on stdout (machine-readable).",
     )
+    p.add_argument(
+        "--enable-fix-plan-for-calibration",
+        action="store_true",
+        help="Dispatcher-only calibration override for red_team.fix_plan.enabled.",
+    )
     return p
 
 
@@ -332,6 +189,7 @@ def main(argv: list[str] | None = None) -> int:
         write_sidecar=not args.no_sidecar,
         audit=not args.no_audit,
         cwd=None,
+        enable_fix_plan_for_calibration=args.enable_fix_plan_for_calibration,
     )
 
     if args.json:

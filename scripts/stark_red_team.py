@@ -102,6 +102,58 @@ class RedTeamResult:
     output_tokens: int = 0
 
 
+@dataclass(frozen=True)
+class RedTeamRunContext:
+    """Shared identity and runtime context for one red-team invocation."""
+
+    run_id: str
+    stage: str
+    caller: str
+    repo: str
+    artifact_relative_path: str | None
+    cwd: str | None
+    env: dict[str, str]
+    model_rates: dict[str, Any]
+    cfg_red_team: dict[str, Any]
+    per_run_budget_usd: float
+    pr_number: int | None
+    started_at_iso: str
+
+
+@dataclass
+class FixPlanMove:
+    """One design-level move in a red-team fix plan."""
+
+    id: str
+    title: str
+    rationale: str
+    sections_touched: list[str]
+    addressed_finding_ids: list[str]
+    new_trade_off: str
+
+
+@dataclass
+class RedTeamFixPlan:
+    """Validated proposed fix plan for blocking red-team findings."""
+
+    summary: str
+    moves: list[FixPlanMove]
+    unaddressed_finding_ids: list[str]
+    orphan_finding_ids: list[str]
+    notes: str
+    input_truncated: bool
+    input_omitted_finding_ids: list[str]
+    warnings: list[str]
+    raw_output: str
+    duration_s: float
+    cost_usd: float
+    input_tokens: int
+    output_tokens: int
+    model: str
+    reasoning_effort: str
+    error: str | None = None
+
+
 _DELIMITER_OPEN_FRAGMENT = "<<<RED_TEAM_INPUT"
 _DELIMITER_CLOSE_FRAGMENT = "<<<END_RED_TEAM_INPUT"
 _ESCAPED_OPEN = "&lt;&lt;&lt;RED_TEAM_INPUT"
@@ -139,6 +191,10 @@ def _wrap_input(name: str, text: str, max_chars: int) -> str:
         f"{truncated}\n"
         f'<<<END_RED_TEAM_INPUT name="{name}">>>'
     )
+
+
+def is_human_review(f: RedTeamFinding) -> bool:
+    return f.counter_proposal == REQUEST_HUMAN_REVIEW
 
 
 def assemble_prompt(
@@ -184,6 +240,107 @@ def assemble_prompt(
     return "\n\n".join(parts)
 
 
+def _finding_to_envelope_dict(f: RedTeamFinding) -> dict[str, Any]:
+    return {
+        "id": f.id,
+        "persona": f.persona,
+        "severity": f.severity,
+        "concern": f.concern,
+        "consequence": f.consequence,
+        "counter_proposal": f.counter_proposal,
+        "trade_off": f.trade_off,
+        "reason_for_uncertainty": f.reason_for_uncertainty,
+    }
+
+
+def serialize_findings_envelope(
+    findings: list[RedTeamFinding],
+    max_chars: int,
+) -> tuple[str, list[str], bool]:
+    """Serialize findings for fix-plan input without cutting partial JSON.
+
+    Returns ``(envelope_json, omitted_ids, fits_safely)``. ``fits_safely`` is
+    false only when a blocking finding was omitted by the size cap.
+    """
+    sorted_findings = sorted(
+        findings,
+        key=lambda f: (-SEVERITY_RANK.get(f.severity, 0), is_human_review(f), f.id),
+    )
+    kept: list[dict[str, Any]] = []
+    omitted_ids: list[str] = []
+    omitted_blocking = False
+
+    def _dump(truncated: bool, ids: list[str], rows: list[dict[str, Any]]) -> str:
+        return json.dumps(
+            {
+                "truncated": truncated,
+                "omitted_finding_ids": ids,
+                "findings": rows,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    for finding in sorted_findings:
+        candidate_ids = [*omitted_ids]
+        candidate_rows = [*kept, _finding_to_envelope_dict(finding)]
+        candidate_json = _dump(bool(candidate_ids), candidate_ids, candidate_rows)
+        if len(candidate_json) <= max_chars:
+            kept = candidate_rows
+            continue
+        omitted_ids.append(finding.id)
+        if not is_human_review(finding) and SEVERITY_RANK.get(finding.severity, 0) >= SEVERITY_RANK["high"]:
+            omitted_blocking = True
+
+    envelope_json = _dump(bool(omitted_ids), omitted_ids, kept)
+    return envelope_json, omitted_ids, not omitted_blocking
+
+
+def preflight_findings_envelope(
+    findings: list[RedTeamFinding],
+    max_chars: int,
+) -> tuple[str, bool, list[str]]:
+    envelope, omitted_ids, fits_safely = serialize_findings_envelope(findings, max_chars)
+    return envelope, fits_safely, omitted_ids
+
+
+def _assemble_fix_plan_prompt_from_envelope(
+    stage: str,
+    artifact: str,
+    source_spec: str,
+    findings_envelope: str,
+    synthesis: str,
+    max_input_chars: int,
+) -> str:
+    fix_plan_prompt = _load_file(PROMPTS_ROOT / "fix-plan.md")
+    inputs = [
+        _wrap_input("artifact", artifact, max_input_chars),
+        _wrap_input("source_spec", source_spec, max_input_chars),
+        _wrap_input("findings_envelope", findings_envelope, max_input_chars),
+        _wrap_input("synthesis", synthesis, max_input_chars),
+    ]
+    return "\n\n".join([fix_plan_prompt, f"Stage: {stage}", *inputs])
+
+
+def assemble_fix_plan_prompt(
+    stage: str,
+    artifact: str,
+    source_spec: str,
+    findings: list[RedTeamFinding],
+    synthesis: str,
+    max_input_chars: int,
+) -> str:
+    envelope, _fits_safely, _omitted_ids = preflight_findings_envelope(findings, max_input_chars)
+    return _assemble_fix_plan_prompt_from_envelope(
+        stage=stage,
+        artifact=artifact,
+        source_spec=source_spec,
+        findings_envelope=envelope,
+        synthesis=synthesis,
+        max_input_chars=max_input_chars,
+    )
+
+
 def parse_output(raw: str) -> dict[str, Any]:
     """Best-effort JSON extraction from a red-team raw output.
 
@@ -226,6 +383,212 @@ def parse_output(raw: str) -> dict[str, Any]:
             pass
 
     return {}
+
+
+def parse_fix_plan_output(raw: str) -> dict[str, Any]:
+    return parse_output(raw)
+
+
+_CAP_MARKER = "...[CAP]"
+
+
+def _empty_fix_plan(
+    *,
+    error: str | None,
+    warnings: list[str] | None = None,
+    raw_output: str = "",
+    duration_s: float = 0.0,
+    cost_usd: float = 0.0,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    model: str = "",
+    reasoning_effort: str = "",
+    input_truncated: bool = False,
+    input_omitted_finding_ids: list[str] | None = None,
+) -> RedTeamFixPlan:
+    return RedTeamFixPlan(
+        summary="",
+        moves=[],
+        unaddressed_finding_ids=[],
+        orphan_finding_ids=[],
+        notes="",
+        input_truncated=input_truncated,
+        input_omitted_finding_ids=input_omitted_finding_ids or [],
+        warnings=warnings or [],
+        raw_output=raw_output,
+        duration_s=duration_s,
+        cost_usd=cost_usd,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        error=error,
+    )
+
+
+def _cap_text(value: str, limit: int, warnings: list[str]) -> str:
+    if len(value) <= limit:
+        return value
+    if "field_capped" not in warnings:
+        warnings.append("field_capped")
+    return value[: max(0, limit - len(_CAP_MARKER))] + _CAP_MARKER
+
+
+def _unique_move_id(raw_id: str, used: set[str], fallback_num: int) -> str:
+    candidate = raw_id if re.fullmatch(r"m\d+", raw_id) else f"m{fallback_num}"
+    if candidate and candidate not in used:
+        used.add(candidate)
+        return candidate
+    idx = fallback_num
+    while True:
+        candidate = f"m{idx}"
+        if candidate not in used:
+            used.add(candidate)
+            return candidate
+        idx += 1
+
+
+def validate_fix_plan(
+    raw_dict: dict[str, Any],
+    blocking_finding_ids: list[str],
+    cfg: dict[str, Any],
+) -> RedTeamFixPlan:
+    """Validate model JSON into a bounded RedTeamFixPlan. Never raises."""
+    warnings: list[str] = []
+    try:
+        min_moves = int(cfg.get("min_moves", 2))
+        max_moves = int(cfg.get("max_moves", 6))
+        blocking_ids = list(dict.fromkeys(str(fid) for fid in blocking_finding_ids))
+        blocking_set = set(blocking_ids)
+
+        if not isinstance(raw_dict, dict):
+            return _empty_fix_plan(error="fix-plan output is not a JSON object")
+        raw_moves = raw_dict.get("moves")
+        if not isinstance(raw_moves, list):
+            return _empty_fix_plan(error="fix-plan output missing required 'moves' list")
+        raw_count = len(raw_moves)
+        if raw_count < min_moves or raw_count > max_moves * 2:
+            return _empty_fix_plan(
+                error=f"fix-plan returned {raw_count} moves; expected {min_moves}..{max_moves}",
+            )
+
+        parsed_moves: list[tuple[int, FixPlanMove]] = []
+        used_ids: set[str] = set()
+        for idx, raw_move in enumerate(raw_moves, start=1):
+            if not isinstance(raw_move, dict):
+                continue
+            required = ("id", "title", "rationale", "new_trade_off")
+            values: dict[str, str] = {}
+            invalid = False
+            for key in required:
+                value = raw_move.get(key)
+                if not isinstance(value, str) or not value.strip():
+                    invalid = True
+                    break
+                values[key] = value.strip()
+            if invalid:
+                continue
+            sections_raw = raw_move.get("sections_touched")
+            ids_raw = raw_move.get("addressed_finding_ids")
+            if not isinstance(sections_raw, list) or not isinstance(ids_raw, list):
+                continue
+
+            sections: list[str] = []
+            for item in sections_raw[:20]:
+                if isinstance(item, str):
+                    sections.append(_cap_text(item.strip(), 100, warnings))
+            if len(sections_raw) > 20 and "field_capped" not in warnings:
+                warnings.append("field_capped")
+
+            addressed: list[str] = []
+            invented = False
+            for item in ids_raw:
+                if not isinstance(item, str):
+                    invented = True
+                    continue
+                if item not in blocking_set:
+                    invented = True
+                    continue
+                if item not in addressed:
+                    addressed.append(item)
+            if invented and "ids_invented" not in warnings:
+                warnings.append("ids_invented")
+            if not addressed and not sections:
+                continue
+
+            move_id = _unique_move_id(values["id"], used_ids, idx)
+            parsed_moves.append((
+                idx,
+                FixPlanMove(
+                    id=move_id,
+                    title=_cap_text(values["title"], 200, warnings),
+                    rationale=_cap_text(values["rationale"], 1000, warnings),
+                    sections_touched=sections,
+                    addressed_finding_ids=addressed,
+                    new_trade_off=_cap_text(values["new_trade_off"], 500, warnings),
+                ),
+            ))
+
+        if len(parsed_moves) < min_moves:
+            return _empty_fix_plan(
+                error=f"fix-plan returned {len(parsed_moves)} valid moves after validation; expected at least {min_moves}",
+                warnings=warnings,
+            )
+
+        if len(parsed_moves) > max_moves:
+            parsed_moves = sorted(
+                parsed_moves,
+                key=lambda pair: (-len(pair[1].addressed_finding_ids), pair[0]),
+            )[:max_moves]
+            parsed_moves = sorted(parsed_moves, key=lambda pair: pair[0])
+            if "move_cap_hit" not in warnings:
+                warnings.append("move_cap_hit")
+
+        moves = [move for _idx, move in parsed_moves]
+        addressed_set: set[str] = set()
+        for move in moves:
+            addressed_set.update(move.addressed_finding_ids)
+
+        raw_unaddressed = raw_dict.get("unaddressed_finding_ids", [])
+        if not isinstance(raw_unaddressed, list):
+            raw_unaddressed = []
+        model_unaddressed: list[str] = []
+        for item in raw_unaddressed:
+            if isinstance(item, str) and item in blocking_set and item not in addressed_set and item not in model_unaddressed:
+                model_unaddressed.append(item)
+        orphan_ids = [
+            fid
+            for fid in blocking_ids
+            if fid not in addressed_set and fid not in set(model_unaddressed)
+        ]
+
+        summary = raw_dict.get("summary", "")
+        notes = raw_dict.get("notes", "")
+        if not isinstance(summary, str):
+            summary = ""
+        if not isinstance(notes, str):
+            notes = ""
+
+        return RedTeamFixPlan(
+            summary=_cap_text(summary, 1000, warnings),
+            moves=moves,
+            unaddressed_finding_ids=model_unaddressed,
+            orphan_finding_ids=orphan_ids,
+            notes=_cap_text(notes, 3000, warnings),
+            input_truncated=False,
+            input_omitted_finding_ids=[],
+            warnings=warnings,
+            raw_output="",
+            duration_s=0.0,
+            cost_usd=0.0,
+            input_tokens=0,
+            output_tokens=0,
+            model="",
+            reasoning_effort="",
+            error=None,
+        )
+    except Exception as exc:  # pragma: no cover - defensive no-raise contract
+        return _empty_fix_plan(error=f"fix-plan validation error: {exc}", warnings=warnings)
 
 
 def validate_findings(raw_findings: list[dict[str, Any]]) -> list[RedTeamFinding]:
@@ -320,13 +683,13 @@ def count_blocking(
     return sum(
         1
         for f in findings
-        if f.counter_proposal != REQUEST_HUMAN_REVIEW
+        if not is_human_review(f)
         and SEVERITY_RANK.get(f.severity, 0) >= floor
     )
 
 
 def count_human_review(findings: list[RedTeamFinding]) -> int:
-    return sum(1 for f in findings if f.counter_proposal == REQUEST_HUMAN_REVIEW)
+    return sum(1 for f in findings if is_human_review(f))
 
 
 _WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9']*")
@@ -355,9 +718,9 @@ def _overlap(
     calls that don't overlap are treated as flicker and the round is
     downgraded to advisory.
     """
-    blocking_a = [f for f in rt_a.findings if f.counter_proposal != REQUEST_HUMAN_REVIEW
+    blocking_a = [f for f in rt_a.findings if not is_human_review(f)
                   and SEVERITY_RANK.get(f.severity, 0) >= SEVERITY_RANK["high"]]
-    blocking_b = [f for f in rt_b.findings if f.counter_proposal != REQUEST_HUMAN_REVIEW
+    blocking_b = [f for f in rt_b.findings if not is_human_review(f)
                   and SEVERITY_RANK.get(f.severity, 0) >= SEVERITY_RANK["high"]]
     if not blocking_a or not blocking_b:
         return False
@@ -889,3 +1252,112 @@ def run_red_team(
         input_tokens=call.input_tokens,
         output_tokens=call.output_tokens,
     )
+
+
+def run_red_team_fix_plan(
+    ctx: RedTeamRunContext,
+    *,
+    artifact: str,
+    source_spec: str,
+    challenge_findings: list[RedTeamFinding],
+    synthesis: str,
+    challenge_cost_usd: float,
+) -> RedTeamFixPlan:
+    """Run one fix-plan attempt for blocking challenge findings.
+
+    The dispatcher gate should call ``preflight_findings_envelope`` with the
+    same filtered findings before deciding whether to dispatch. This function
+    repeats that single serialization decision internally so direct callers get
+    identical skip/error behavior and prompt contents.
+    """
+    del challenge_cost_usd  # Cost budget handling is a dispatcher concern.
+    fix_cfg = ctx.cfg_red_team.get("fix_plan", {})
+    model = str(fix_cfg.get("model", ""))
+    reasoning_effort = str(fix_cfg.get("reasoning_effort", ""))
+    max_input_chars = int(fix_cfg.get("max_input_chars", _DEFAULT_MAX_INPUT_CHARS))
+    timeout_s = int(fix_cfg.get("timeout_s", 1200))
+
+    filtered_findings = [f for f in challenge_findings if not is_human_review(f)]
+    envelope, fits_safely, omitted_ids = preflight_findings_envelope(filtered_findings, max_input_chars)
+    input_truncated = bool(omitted_ids)
+    if not fits_safely:
+        return _empty_fix_plan(
+            error="findings JSON cannot be safely truncated",
+            model=model,
+            reasoning_effort=reasoning_effort,
+            input_truncated=input_truncated,
+            input_omitted_finding_ids=omitted_ids,
+        )
+
+    if model not in RESPONSES_API_MODELS:
+        return _empty_fix_plan(
+            error=f"fix-plan requires a Responses-API model; got {model}",
+            model=model,
+            reasoning_effort=reasoning_effort,
+            input_truncated=input_truncated,
+            input_omitted_finding_ids=omitted_ids,
+        )
+
+    prompt = _assemble_fix_plan_prompt_from_envelope(
+        stage=ctx.stage,
+        artifact=artifact,
+        source_spec=source_spec,
+        findings_envelope=envelope,
+        synthesis=synthesis,
+        max_input_chars=max_input_chars,
+    )
+    call = dispatch_responses_api(
+        prompt=prompt,
+        model=model,
+        timeout_s=timeout_s,
+        reasoning_effort=reasoning_effort,
+        env=ctx.env,
+        max_output_tokens=_RESPONSES_API_DEFAULT_MAX_OUTPUT_TOKENS,
+    )
+    rates = _resolve_rates(model, ctx.model_rates)
+    cost_usd = _cost_for(call.input_tokens, call.output_tokens, rates)
+    if call.error is not None:
+        return _empty_fix_plan(
+            error=call.error,
+            raw_output=call.raw_output,
+            duration_s=call.duration_s,
+            cost_usd=cost_usd,
+            input_tokens=call.input_tokens,
+            output_tokens=call.output_tokens,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            input_truncated=input_truncated,
+            input_omitted_finding_ids=omitted_ids,
+        )
+
+    parsed = parse_fix_plan_output(call.raw_output)
+    if not parsed:
+        return _empty_fix_plan(
+            error="fix-plan output empty or not valid JSON",
+            raw_output=call.raw_output,
+            duration_s=call.duration_s,
+            cost_usd=cost_usd,
+            input_tokens=call.input_tokens,
+            output_tokens=call.output_tokens,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            input_truncated=input_truncated,
+            input_omitted_finding_ids=omitted_ids,
+        )
+
+    blocking_ids = [
+        f.id
+        for f in filtered_findings
+        if SEVERITY_RANK.get(f.severity, 0) >= SEVERITY_RANK["high"]
+    ]
+    plan = validate_fix_plan(parsed, blocking_ids, fix_cfg)
+    plan.raw_output = call.raw_output
+    plan.duration_s = call.duration_s
+    plan.cost_usd = cost_usd
+    plan.input_tokens = call.input_tokens
+    plan.output_tokens = call.output_tokens
+    plan.model = model
+    plan.reasoning_effort = reasoning_effort
+    plan.input_truncated = input_truncated
+    plan.input_omitted_finding_ids = omitted_ids
+    return plan

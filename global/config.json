@@ -184,10 +184,19 @@
     ],
     "min_severity_to_block": "high",
     "timeout_s": 900,
-    "per_run_budget_usd": 15.00,
+    "per_run_budget_usd": 30.00,
     "stability_overlap_jaccard_min": 0.416,
     "max_input_chars": 200000,
-    "allow_human_review_halt": true
+    "allow_human_review_halt": true,
+    "fix_plan": {
+      "enabled": false,
+      "model": "gpt-5.5-pro",
+      "reasoning_effort": "xhigh",
+      "timeout_s": 1200,
+      "min_moves": 2,
+      "max_moves": 6,
+      "max_input_chars": 200000
+    }
   },
   "model_rates": {
     "o3": {

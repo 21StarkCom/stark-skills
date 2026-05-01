@@ -159,10 +159,19 @@ DEFAULT_RED_TEAM = {
     "timeout_s": 900,
     # Sized for gpt-5.5-pro at ~$2/round × 2 rounds + verification + design
     # regen, with ~50% headroom. Tighten once 5–10 calibration runs land.
-    "per_run_budget_usd": 15.00,
+    "per_run_budget_usd": 30.00,
     "stability_overlap_jaccard_min": 0.4,
     "max_input_chars": 200_000,
     "allow_human_review_halt": True,
+    "fix_plan": {
+        "enabled": False,
+        "model": "gpt-5.5-pro",
+        "reasoning_effort": "xhigh",
+        "timeout_s": 1200,
+        "min_moves": 2,
+        "max_moves": 6,
+        "max_input_chars": 200_000,
+    },
 }
 
 DEFAULT_MODEL_RATES = {
@@ -194,20 +203,25 @@ DEFAULT_MODEL_RATES = {
 # repo wanting to block on "medium") opens a PR against stark-skills to set
 # the global default — same friction as a legitimate persona addition. A
 # repo that wants a *weaker* posture is the failure mode we're locking out.
-_RED_TEAM_LOCKED_FIELDS: frozenset[str] = frozenset({
-    "personas",
-    "model",
-    "enabled",
-    "agent",
-    "min_severity_to_block",
-    "halt_on_unresolved",
-    "allow_human_review_halt",
+_RED_TEAM_LOCKED_FIELDS: frozenset[tuple[str, ...]] = frozenset({
+    ("personas",),
+    ("model",),
+    ("enabled",),
+    ("agent",),
+    ("min_severity_to_block",),
+    ("halt_on_unresolved",),
+    ("allow_human_review_halt",),
     # Locking the whole `stages` dict closes the round-1 review bypass:
     # without it, a repo could disable a globally-enabled stage via
     # `stages.design.enabled: false` and skip the gate entirely. Adding a
     # new stage now requires a global config change — same friction as a
     # legitimate persona addition.
-    "stages",
+    ("stages",),
+    ("fix_plan", "enabled"),
+    ("fix_plan", "model"),
+    ("fix_plan", "reasoning_effort"),
+    ("fix_plan", "min_moves"),
+    ("fix_plan", "max_moves"),
 })
 
 
@@ -312,7 +326,6 @@ def get_red_team_config() -> dict[str, Any]:
             continue
         filtered = _strip_locked_fields(
             raw_override,
-            _RED_TEAM_LOCKED_FIELDS,
             "red_team",
             source=str(cfg_path),
         )
@@ -366,7 +379,6 @@ def _load_json_file(path: Path) -> dict[str, Any]:
 
 def _strip_locked_fields(
     override: dict[str, Any],
-    locked: frozenset[str],
     section_name: str,
     *,
     source: str | None = None,
@@ -381,22 +393,58 @@ def _strip_locked_fields(
     that value is attacker-controlled in the threat model and we don't
     want to round-trip it through the durable event queue.
     """
-    cleaned = {}
-    for k, v in override.items():
-        if k in locked:
-            source_suffix = f" in {source}" if source else ""
-            _warn(
-                f"{section_name}.{k} is locked to global config and cannot be "
-                f"overridden{source_suffix} — rejecting override value {v!r}"
-            )
-            _emit_override_rejected(section_name, k, source)
-        else:
-            cleaned[k] = v
+    cleaned, rejected_paths = _drop_locked_overrides(override)
+    for path in rejected_paths:
+        source_suffix = f" in {source}" if source else ""
+        _warn(
+            f"{section_name}.{path} is locked to global config and cannot be "
+            f"overridden{source_suffix}"
+        )
+        _emit_override_rejected(section_name, path.split(".")[-1], source, path=path)
     return cleaned
 
 
+_RED_TEAM_LOCKED_PARENTS: frozenset[tuple[str, ...]] = frozenset(
+    p[: i + 1]
+    for p in _RED_TEAM_LOCKED_FIELDS
+    for i in range(len(p) - 1)
+)
+
+
+def _drop_locked_overrides(
+    override: dict[str, Any],
+    base_path: tuple[str, ...] = (),
+) -> tuple[dict[str, Any], list[str]]:
+    """Drop locked dotted paths from a lower-precedence red_team override.
+
+    A locked PARENT (e.g. ``fix_plan``) whose override value is not a dict
+    is also rejected: a non-dict override would replace the entire locked
+    structure (and its locked children) wholesale, defeating the lock.
+    """
+    cleaned: dict[str, Any] = {}
+    rejected_paths: list[str] = []
+    for key, value in override.items():
+        path = (*base_path, key)
+        if path in _RED_TEAM_LOCKED_FIELDS:
+            rejected_paths.append(".".join(path))
+            continue
+        if path in _RED_TEAM_LOCKED_PARENTS and not isinstance(value, dict):
+            # e.g. setting `fix_plan: "off"` would replace the dict and
+            # bypass the per-leaf lock checks that follow. Reject the
+            # entire override at this path.
+            rejected_paths.append(".".join(path))
+            continue
+        if isinstance(value, dict):
+            nested, nested_rejected = _drop_locked_overrides(value, path)
+            cleaned[key] = nested
+            rejected_paths.extend(nested_rejected)
+        else:
+            cleaned[key] = value
+    return cleaned, rejected_paths
+
+
 def _emit_override_rejected(
-    section_name: str, field: str, source: str | None,
+    section_name: str, field: str, source: str | None, *, path: str | None = None,
 ) -> None:
     if _EMIT_QUEUE is None:
         return
@@ -406,6 +454,7 @@ def _emit_override_rejected(
             {
                 "section": section_name,
                 "field": field,
+                "path": path or field,
                 "source": source or "",
             },
         )
