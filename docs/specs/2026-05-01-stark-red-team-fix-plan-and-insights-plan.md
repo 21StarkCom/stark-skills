@@ -39,15 +39,15 @@ test -n "$OPENAI_API_KEY" || (echo "OPENAI_API_KEY not set; required for Respons
 
 # Actual install: install.sh symlinks files but does NOT create scripts/.venv —
 # the venv is the dispatcher's runtime interpreter and must be provisioned
-# explicitly before install.sh's --status check passes green.
+# explicitly. There is no requirements.txt; install.sh's `_check_venv` warns
+# with the canonical pip command (see scripts/.venv check at install.sh:70).
 ./install.sh
-test -x ~/.claude/code-review/scripts/.venv/bin/python3 || (
-  cd ~/.claude/code-review/scripts \
-    && python3 -m venv .venv \
-    && ./.venv/bin/pip install --quiet --upgrade pip \
-    && ./.venv/bin/pip install --quiet -r requirements.txt
-)
-./install.sh --status     # NOW it should report green
+if [ ! -x scripts/.venv/bin/python3 ]; then
+  python3 -m venv scripts/.venv
+  scripts/.venv/bin/pip install --quiet --upgrade pip
+  scripts/.venv/bin/pip install --quiet PyJWT requests anthropic google-auth
+fi
+./install.sh --status     # NOW it should report green (or specific drift identified)
 
 # Verify the runtime paths the rest of the plan depends on
 test -x ~/.claude/code-review/scripts/.venv/bin/python3 || (echo "venv missing"; exit 1)
@@ -258,7 +258,29 @@ python3 -m pytest scripts/test_red_team_fix_plan.py -v
    - The v1.2 dispatcher always calls `record_red_team_run` with `fix_plan_status="pending"` at step 5.1 of the Phase 5 ordering, then calls `record_fix_plan` at step 5.5 to update `fix_plan_status` to the resolved value. This two-step write means a crash leaves the row visible to backfill recovery.
    - **Done when:** existing v1 caller test still passes; new test inserts a row with all v1.2 fields and round-trips; a test asserts the "pending" sentinel survives a crash-and-recover cycle via `--scope=forward` backfill.
 
-3. **Add `record_fix_plan` helper** — UPDATE keyed by `run_id`. Always called for every dispatcher invocation (success, error, skipped — see Phase 5 Task 7 ordering):
+3. **Add `record_finding` helper** — INSERT into the existing `red_team_findings` table (already created by v1's `init_red_team_tables`). Used by Phase 5 Task 7 step 2 to durably record a finding before its event is emitted:
+   ```python
+   def record_finding(
+       *,
+       run_id: str,
+       stage: str,
+       round_num: int,
+       finding_id: str,
+       persona: str,
+       severity: str,
+       concern: str,
+       consequence: str,
+       counter_proposal: str,
+       trade_off: str | None,
+       reason_for_uncertainty: str | None,
+       db_path: str | None = None,
+   ) -> None:
+       """INSERT INTO red_team_findings (...) — explicit columns; commits."""
+   ```
+   - **No new table** — the v1 `red_team_findings` table already exists and has the right columns.
+   - **Done when:** integration test inserts then SELECTs a finding row; an `emit_finding` test that runs after `record_finding` proves the durable row exists with the same `(run_id, finding_id)` keys used in the event payload.
+
+4. **Add `record_fix_plan` helper** — UPDATE keyed by `run_id`. Always called for every dispatcher invocation (success, error, skipped — see Phase 5 Task 7 ordering):
    ```python
    def record_fix_plan(
        run_id: str,
@@ -483,7 +505,7 @@ python3 -m pytest scripts/test_red_team_insights.py scripts/test_emit_queue.py -
 
 7. **Wire emit_* timing precisely — emit AFTER local audit writes commit** (resolves round-1 high + round-2 highs: insights emission must be sequenced after durable audit writes for ALL paths, including skipped/error):
    - **Order of operations** (top-to-bottom, no skipping; applies to success, skip, and error paths):
-     1. `record_red_team_run(...)` inserts the parent `red_team_runs` row with `final_status` from challenge AND a provisional `fix_plan_status="pending"`. Commits before any emission. **Always runs**, even when the fix-plan call will be skipped.
+     1. `record_red_team_run(...)` inserts the parent `red_team_runs` row with `final_status` from challenge (NEVER mutated again) AND a provisional `fix_plan_status="pending"` (mutated in step 5). Commits before any emission. **Always runs**, even when the fix-plan call will be skipped. **Invariant clarification:** `final_status` is challenge-derived and immutable after this insert; `fix_plan_status` is a SEPARATE column whose state machine (`pending → resolved`) is orthogonal to the design §10 invariant about `final_status`. The two columns must not be conflated in code or in queries.
      2. `record_finding(...)` for each challenge finding into a (Phase 3 task: also add) `red_team_findings` insert. Commits.
      3. `emit_finding(ctx, finding=f, round_num=1)` fires for each finding (durable local row already exists, so backfill recovery has a source-of-truth).
      4. Run the fix-plan gate (Task 2). Resolve `fix_plan_status` to one of: `success` / `error` / `skipped_*`.
@@ -756,7 +778,9 @@ curl -sS -X POST http://127.0.0.1:7420/events \
 
 **Goal:** Prove v1.2 ships safely with `fix_plan.enabled: false` and no second LLM call by default.
 
-**Dependencies:** Phases 1–7 implemented on the v1.2 branch. **Runs PRE-merge** to gate the v1.2 PR (resolves round-1 high: Phase 9 vs Phase 10 ordering contradiction). The v1.2 PR description must reference both Phase 9 (disabled-default) and Phase 10 (calibration) results before merge.
+**Dependencies:** Phases 1–7 implemented on the v1.2 branch AND Phase 8 (Track B `PAYLOAD_SCHEMAS`) deployed to whatever stark-insights instance the launchd drainer is pointed at. Without Phase 8 deployed, the disabled-default invocations queue events that drain to a stark-insights endpoint that will reject them with `Unknown event type` and dead-letter — even when fix-plan is `skipped_disabled` and the only events are `red_team_run` + `red_team_finding` (resolves round-3 critical: Phase 9 drains red_team_* events to cloud before Phase 8 deploys). **Runs PRE-merge** of the v1.2 producer PR; the v1.2 PR description references both Phase 9 (disabled-default) and Phase 10 (calibration) results.
+
+**Track B deployment hard-precedes Phase 9 in production.** Locally, `~/.stark-insights/queue.db` is durable; if Phase 8 is not yet deployed, the operator can either (a) stop the launchd drainer for the duration of Phase 9 testing (events accumulate locally; drain after Phase 8 deploy), or (b) point the local launchd service at a Phase-8-loaded staging stark-insights instance.
 
 **Estimated effort:** M
 
@@ -906,7 +930,19 @@ sqlite3 ~/.claude/code-review/history/forged-review/forged_review_metrics.db \
    python3 scripts/red_team_backfill.py --scope legacy --manifest /tmp/backfill-manifest.json
    ```
 
-4. **Server-side dedupe-key verification** (resolves design §6.3 + rt7):
+4. **Server-side source-to-target reconciliation** (round-3 critical: manifest verification only checks expected keys, not source fidelity):
+   - Compute the EXPECTED set of dedupe keys deterministically from the local SQLite source rows (independent of what the script emitted):
+     ```bash
+     python3 -c "
+     import sqlite3
+     db = sqlite3.connect('~/.claude/code-review/history/forged-review/forged_review_metrics.db')
+     run_keys = [f'red-team:run:{r[0]}:{r[1]}' for r in db.execute('SELECT stage, run_id FROM red_team_runs WHERE fix_plan_status IS NULL')]
+     find_keys = [f'red-team:finding:{r[0]}:{r[1]}:{r[2]}:{r[3]}' for r in db.execute('SELECT stage, run_id, round_num, finding_id FROM red_team_findings WHERE run_id IN (SELECT run_id FROM red_team_runs WHERE fix_plan_status IS NULL)')]
+     print(f'expected runs={len(run_keys)} findings={len(find_keys)}')
+     " > /tmp/expected-counts.txt
+     ```
+   - Compare expected counts to actual counts in cloud `events` filtered by the same dedupe-key set. Any drift (expected > actual) signals events stuck in pending/dead_letter; expected < actual signals duplicate emission (should be impossible if cloud `UNIQUE(dedupe_key)` is in place — assert).
+   - The manifest from Task 3 is one input; the local-DB-derived expected set is an INDEPENDENT input. Both must agree.
    ```sql
    -- Compute the expected set from the manifest, then verify each appears EXACTLY once.
    WITH expected_keys(k) AS (VALUES <list-from-manifest>)
