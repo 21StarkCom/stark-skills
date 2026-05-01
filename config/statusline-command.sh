@@ -13,7 +13,6 @@ eval "$(jq -r <<<"$input" '{
   ctx_size:     (.context_window.context_window_size // ""),
   vim_mode:     (.vim.mode // ""),
   session_name: (.session_name // ""),
-  session_id:   (.session_id // ""),
   week_pct:     (.rate_limits.seven_day.used_percentage // ""),
   week_reset:   (.rate_limits.seven_day.resets_at // ""),
   five_pct:     (.rate_limits.five_hour.used_percentage // ""),
@@ -133,12 +132,7 @@ if [ -n "$cwd" ]; then
   fi
 fi
 
-# ── Context trend + cost formatting ─────────────────────────────────────
-ctx_trend=""
-if [ -n "$used_pct" ]; then
-  ctx_trend=$("$HOME/.claude/statusline-ctx-trend.ts" "$used_pct" 2>/dev/null)
-fi
-
+# ── Cost formatting ─────────────────────────────────────────────────────
 # cost.total_cost_usd is computed correctly client-side by Claude Code,
 # accounting for cache reads (10%), cache writes (1.25x/2x), and tier
 # pricing (Opus 4 1M context >200K = 2x). Use it directly.
@@ -193,14 +187,6 @@ if [ -f "$f" ]; then
   q_pending=${q_pending:-0} q_dead=${q_dead:-0}
 fi
 
-session_start=""
-if [ -n "$session_id" ]; then
-  f="$HOME/.stark-insights/session-start-${session_id}"
-  [ ! -f "$f" ] && printf '%s\n' "$NOW" > "$f" 2>/dev/null
-  read -r ts < "$f" 2>/dev/null
-  [ -n "$ts" ] && printf -v session_start '%(%H:%M)T' "$ts" 2>/dev/null
-fi
-
 # ═════════════════════════════════════════════════════════════════════════
 # Line 1: repo · branch · model · operational
 # ═════════════════════════════════════════════════════════════════════════
@@ -225,16 +211,10 @@ _on q_pending && [ "$q_pending" -gt 5 ] 2>/dev/null && seg "${MAR}\U0001fab2 ${q
 _on q_dead && [ "$q_dead" -gt 0 ] 2>/dev/null && seg "${RED}\U0001f41e ${q_dead}${R}"
 _on session_name && [ -n "$session_name" ] && seg "${DIM}${session_name}${R}"
 _on vim_mode && [ -n "$vim_mode" ] && { [ "$vim_mode" = "NORMAL" ] && seg "${YEL}N${R}" || seg "${DIM}I${R}"; }
-_on session_start && [ -n "$session_start" ] && seg "\U0001f182 ${RED}${session_start}${R}"
 
 if _on api_ratio && [ -n "$total_dur_ms" ] && [ -n "$api_dur_ms" ] && [ "$total_dur_ms" -gt 0 ] 2>/dev/null; then
   ratio=$(( api_dur_ms * 100 / total_dur_ms ))
   seg "$(tcolor "$ratio" 80 50)\u2699\ufe0f ${ratio}%${R}"
-fi
-
-if _on end_time && [ -n "$lt_ts" ] && [ "$lt_ts" -gt 0 ] 2>/dev/null; then
-  printf -v _et '%(%H:%M)T' "$lt_ts" 2>/dev/null || printf -v _et '%(%H:%M)T' -1
-  seg "\U0001f174 ${GRN}${_et}${R}"
 fi
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -242,14 +222,37 @@ fi
 # ═════════════════════════════════════════════════════════════════════════
 l2=""
 
+# Context capacity gauge — how full is the window. 🧠 (brain) since the
+# context is what the model thinks with.
 if _on ctx_usage && [ -n "$used_pct" ]; then
-  ctx=$(printf "%.0f" "$used_pct"); c=$(tcolor "$ctx" 80 50)
-  s="${c}\U0001f3ac ${ctx}%${R}"
-  if [ -n "$ctx_trend" ]; then
-    tc=$YEL; [ "$ctx" -ge 80 ] 2>/dev/null && tc=$RED
-    s="${s}${tc}${ctx_trend}${R}"
-  fi
-  seg2 "$s"
+  ctx=$(printf "%.0f" "$used_pct")
+  seg2 "$(tcolor "$ctx" 80 50)\U0001f9e0 ${ctx}%${R}"
+fi
+
+# Turn flow — what flowed in/out on the last API call, read as one
+# narrative connected with arrows:
+#   ⬆ fresh   = input + cache_creation (full price + cache-write surcharge)
+#   📖 cache  = cache_read with hit% (10% price)
+#   ⬇ out    = generated output
+if _on tokens && [ -n "$cur_in" ]; then
+  cin=${cur_in:-0} ccw=${cur_cw:-0} ccr=${cur_cr:-0} cot=${cur_out:-0}
+  fresh=$(( cin + ccw ))
+  total_in=$(( fresh + ccr ))
+  hit=0
+  [ "$total_in" -gt 0 ] && hit=$(( ccr * 100 / total_in ))
+  tok="${SAP}\u2b06 $(fmt_n $fresh)${R}"
+  [ "$ccr" -gt 0 ] && tok="${tok} ${DIM}\u2192 ${GRN}\U0001f4d6 $(fmt_n $ccr) ${hit}%${R}"
+  [ "$cot" -gt 0 ] && tok="${tok} ${DIM}\u2192 ${PEACH}\u2b07 $(fmt_n $cot)${R}"
+  seg2 "$tok"
+fi
+
+# Cumulative session tokens — opt-in (off by default; can mislead because
+# every API call's full input is summed, including cache rereads).
+# Cost: real session cost + per-hour burn rate, merged into one segment.
+if _on cost && [ -n "$session_cost" ]; then
+  c="${PEACH}\U0001f4b0 ${session_cost}${R}"
+  [ -n "$cost_rate" ] && c="${c} ${DIM}· ${cost_rate}${R}"
+  seg2 "$c"
 fi
 
 _on session_dur && [ -n "$total_dur_ms" ] && [ "$total_dur_ms" -gt 0 ] 2>/dev/null && \
@@ -258,36 +261,9 @@ _on session_dur && [ -n "$total_dur_ms" ] && [ "$total_dur_ms" -gt 0 ] 2>/dev/nu
 _on five_hour_rl && rate_seg "\U0001f6dd" "$five_pct" "$five_reset" "\\u23f3"
 _on weekly_rl && rate_seg "\U0001f4c5" "$week_pct" "$week_reset" "\\U0001f570\\ufe0f"
 
-# Per-turn token breakdown from current_usage (last API call):
-#   fresh = input_tokens + cache_creation_input_tokens — wire bytes sent as
-#           new content (full price + cache-write surcharge).
-#   read  = cache_read_input_tokens — referenced from cache (10% price).
-#   out   = output_tokens — generated.
-# Cache hit % = read / (fresh + read) — high = efficient session.
-if _on tokens && [ -n "$cur_in" ]; then
-  cin=${cur_in:-0} ccw=${cur_cw:-0} ccr=${cur_cr:-0} cot=${cur_out:-0}
-  fresh=$(( cin + ccw ))
-  total_in=$(( fresh + ccr ))
-  hit=0
-  [ "$total_in" -gt 0 ] && hit=$(( ccr * 100 / total_in ))
-  tok="${SAP}\u2b06 $(fmt_n $fresh)${R}"
-  [ "$ccr" -gt 0 ] && tok="${tok} ${GRN}\U0001f4d6 $(fmt_n $ccr)${DIM} ${hit}%${R}"
-  [ "$cot" -gt 0 ] && tok="${tok} ${PEACH}\u2b07 $(fmt_n $cot)${R}"
-  seg2 "$tok"
-fi
+_on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}\u26a0\ufe0f 1M-tier${R}"
 
-# "How much of context is being read each turn" — total per-turn input vs
-# context window size. When this stays high while ctx_usage is flat, you're
-# paying to re-process a lot of cached context every turn.
-if _on ctx_per_turn && [ -n "$cur_in" ] && [ -n "$ctx_size" ] && [ "$ctx_size" -gt 0 ] 2>/dev/null; then
-  pt=$(( ${cur_in:-0} + ${cur_cw:-0} + ${cur_cr:-0} ))
-  if [ "$pt" -gt 0 ]; then
-    ptp=$(( pt * 100 / ctx_size ))
-    seg2 "$(tcolor "$ptp" 80 50)\U0001f9e0 $(fmt_n $pt)/turn ${ptp}%${R}"
-  fi
-fi
-
-# Cumulative session tokens — opt-in (off by default; can mislead because
+# Cumulative session tokens \u2014 opt-in (off by default; misleading because
 # every API call's full input is summed, including cache rereads).
 if _on tokens_total && { [ -n "$tokens_in" ] || [ -n "$tokens_out" ]; }; then
   tok=""
@@ -296,15 +272,11 @@ if _on tokens_total && { [ -n "$tokens_in" ] || [ -n "$tokens_out" ]; }; then
   seg2 "$tok"
 fi
 
-_on cost && [ -n "$session_cost" ] && seg2 "${PEACH}\U0001f4b0 ${session_cost}${R}"
-_on cost_rate && [ -n "$cost_rate" ] && seg2 "${DIM}${cost_rate}${R}"
-_on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}\u26a0\ufe0f 1M-tier${R}"
-
 if _on code_churn; then
   churn=""
   [ -n "$s_added" ]  && [ "$s_added" -gt 0 ]  2>/dev/null && churn="${GRN}+${s_added}${R}"
   [ -n "$s_removed" ] && [ "$s_removed" -gt 0 ] 2>/dev/null && { [ -n "$churn" ] && churn="${churn} "; churn="${churn}${RED}-${s_removed}${R}"; }
-  [ -n "$churn" ] && seg2 "\u270f\ufe0f ${churn}"
+  [ -n "$churn" ] && seg2 "${DIM}\u270f\ufe0f${R} ${churn}"
 fi
 
 printf "%b\n" "${out}\n${l2}"
