@@ -476,7 +476,9 @@ def test_render_fix_plan_section_escapes_untrusted_content_and_ids():
     assert "`rt1`" in md
     assert "bad-id" not in md
     assert "`rt2`" in md
-    assert "\n```text\n```` four ticks\n```" in md
+    # Content with a 4-tick run gets a 5-tick fence so the inner run
+    # cannot close the outer fence (review-round security fix).
+    assert "\n`````text\n```` four ticks\n`````" in md
 
 
 def test_render_fix_plan_section_error_retry_hint_and_cap():

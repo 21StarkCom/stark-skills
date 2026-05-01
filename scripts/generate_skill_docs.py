@@ -1,8 +1,17 @@
-"""Skill documentation generation helpers.
+"""Skill documentation generation — minimal compatibility shim.
 
-Only the small public surface used by tournament dispatch is required in this
-worktree: data containers for skill metadata / visualization results plus the
-prompt and response parsing helpers.
+The full multi-LLM documentation generator that lived here was removed in
+commit ``fdb1856`` (chore: remove 16 unused skills and their infrastructure).
+This module survives as a SHIM so two pre-existing callers can still import
+their data contracts: ``scripts/tournament.py`` (which pulls in ``VizResult``
+plus the prompt/response helpers via a lazy import) and
+``scripts/test_dispatch_routing.py`` (which references ``SkillData``,
+``build_generation_prompt``, and ``_parse_viz_response`` for routing tests).
+
+It is NOT a public CLI, NOT the original generator, and SHOULD NOT be used
+as a starting point for re-implementing the tool. If a future change needs
+the full generator back, treat this file as a contract surface and put the
+real implementation in a separate module.
 """
 
 from __future__ import annotations

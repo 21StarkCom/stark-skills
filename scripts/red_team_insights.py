@@ -206,10 +206,17 @@ def emit_run(
     ctx: rt.RedTeamRunContext,
     *,
     result: rt.RedTeamResult,
+    model: str,
     fix_plan_status: str | None,
     run_warnings: list[str] | None,
 ) -> None:
-    """Best-effort enqueue of one ``red_team_run`` event."""
+    """Best-effort enqueue of one ``red_team_run`` event.
+
+    ``model`` is the resolved dispatch model (challenge call's actual model
+    after any ``--model`` override), NOT ``ctx.cfg_red_team['model']``. The
+    audit row, sidecar, JSON output, and this event must agree on the
+    model that actually ran.
+    """
     try:
         envelope = build_run_envelope(
             run_id=ctx.run_id,
@@ -217,7 +224,7 @@ def emit_run(
             repo=ctx.repo,
             artifact_relative_path=ctx.artifact_relative_path,
             pr_number=ctx.pr_number,
-            model=str(ctx.cfg_red_team.get("model", "")),
+            model=model,
             caller=ctx.caller,
             final_status=rt.derive_status(result),
             worst_severity=_worst_severity(result),

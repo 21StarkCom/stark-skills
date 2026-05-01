@@ -364,6 +364,7 @@ def test_emitters_isolate_enqueue_exceptions(monkeypatch, capsys):
     insights.emit_run(
         _ctx(),
         result=_result(),
+        model="gpt-5.5-pro",
         fix_plan_status="success",
         run_warnings=[],
     )

@@ -286,9 +286,30 @@ def _needs_fence(text: str) -> bool:
     return bool(re.search(r"```|````|<\w+", text or ""))
 
 
+def _max_backtick_run(text: str) -> int:
+    """Return the longest run of consecutive backticks in *text*."""
+    longest = 0
+    current = 0
+    for ch in text or "":
+        if ch == "`":
+            current += 1
+            if current > longest:
+                longest = current
+        else:
+            current = 0
+    return longest
+
+
 def _render_text(label: str, value: str) -> list[str]:
     if _needs_fence(value):
-        return [f"**{label}.**", "", "```text", value.strip(), "```"]
+        # A static three-backtick fence can be closed by attacker-controlled
+        # content that itself contains ```; widen the fence to one more
+        # backtick than any run inside the value so the close marker is
+        # unambiguous. (≥ 3 backticks; CommonMark requires the close fence
+        # to be at least as long as the open.)
+        fence_len = max(3, _max_backtick_run(value) + 1)
+        fence = "`" * fence_len
+        return [f"**{label}.**", "", f"{fence}text", value.strip(), fence]
     return [f"**{label}.** {value.strip()}"]
 
 
@@ -633,6 +654,7 @@ def execute_dispatch(
             red_team_insights.emit_run(
                 ctx,
                 result=result,
+                model=model,
                 fix_plan_status=fix_plan_status,
                 run_warnings=run_warnings,
             )
