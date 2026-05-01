@@ -13,6 +13,10 @@ eval "$(jq -r <<<"$input" '{
   ctx_size:     (.context_window.context_window_size // ""),
   vim_mode:     (.vim.mode // ""),
   session_name: (.session_name // ""),
+  effort:       (.effort.level // ""),
+  thinking:     (.thinking.enabled // false),
+  agent_name:   (.agent.name // ""),
+  out_style:    (.output_style.name // ""),
   week_pct:     (.rate_limits.seven_day.used_percentage // ""),
   week_reset:   (.rate_limits.seven_day.resets_at // ""),
   five_pct:     (.rate_limits.five_hour.used_percentage // ""),
@@ -204,6 +208,31 @@ if _on git_branch && [ -n "$git_branch" ]; then
 fi
 
 _on model && [ -n "$model" ] && seg "${SAP}$(sed -E 's/ [0-9]+\.[0-9]+//; s/ \(([0-9]+[KMG]) context\)/ \1/' <<<"$model")${R}"
+
+# Reasoning effort \u2014 Lo / Me / Hi / Xh / Mx \u2014 grouped with model since
+# it materially affects both output token volume and cost.
+if _on effort && [ -n "$effort" ]; then
+  case "$effort" in
+    low)    _ec="$DIM";   _el="Lo";;
+    medium) _ec="$DIM";   _el="Me";;
+    high)   _ec="$YEL";   _el="Hi";;
+    xhigh)  _ec="$PEACH"; _el="Xh";;
+    max)    _ec="$RED";   _el="Mx";;
+    *)      _ec="$DIM";   _el="${effort:0:2}";;
+  esac
+  seg "${_ec}${_el}${R}"
+fi
+
+# Extended thinking \u2014 only show when enabled (off is the default state).
+_on thinking && [ "$thinking" = "true" ] && seg "${YEL}\U0001f4ad${R}"
+
+# Active subagent (--agent foo or via agent settings).
+_on agent && [ -n "$agent_name" ] && seg "${TEAL}\U0001f916 ${agent_name}${R}"
+
+# Non-default output style (Explanatory / Learning / custom user style).
+_on out_style && [ -n "$out_style" ] && [ "$out_style" != "default" ] && \
+  [ "$out_style" != "Default" ] && seg "${DIM}\U0001f3a8 ${out_style}${R}"
+
 _on inflight && [ "$inflight" -gt 0 ] 2>/dev/null && seg "${SKY}\u26a1\ufe0f ${inflight}${R}"
 _on longest_tool && [ "$longest_s" -gt 60 ] 2>/dev/null && seg "$(tcolor "$longest_s" 180 60)\u23f3 ${longest_tool} $(( longest_s / 60 ))m${R}"
 _on last_tool && [ -n "$last_tool" ] && seg "${TEAL}\u23f1\ufe0f ${last_tool}${R}"
