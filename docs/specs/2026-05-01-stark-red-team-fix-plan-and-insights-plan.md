@@ -316,7 +316,7 @@ python3 -m pytest scripts/test_red_team_audit.py -v
 
 **Dependencies:** Phases 1 and 3.
 
-**Note:** Phase 8 (stark-insights lifters) MAY start in parallel as soon as the §5.2 canonical payload schemas in this phase are locked. The producer-first deployment is safe — see §4 Integration Points.
+**Note:** Phase 8 (stark-insights `PAYLOAD_SCHEMAS` + lifters) can DEVELOP in parallel with this phase as soon as the §5.2 canonical payload schemas are locked. **It must DEPLOY before any forward-emission events from Track A drain to cloud** — `EventEnvelope.model_validate` rejects unknown event types. Track B deployment is enforced by Phase 11 Task 1 as a hard prerequisite of any post-Phase-8-required Track A operation. (See §4 Integration Points and Phase 8 header for the canonical statement.)
 
 **Estimated effort:** M
 
