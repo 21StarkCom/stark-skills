@@ -437,6 +437,74 @@ def check_red_team_transport_auth() -> tuple[str, str]:
     return "pass", f"OpenAI API key resolved for {model}"
 
 
+def check_red_team_sandbox() -> tuple[str, str]:
+    """Verify the FU-rt1 hermetic sandbox primitives function on this host.
+
+    The sandbox only guards the codex-CLI fallback path; Responses-API
+    models (``o3``, ``gpt-5.5-pro``, etc.) have no local tool surface to
+    constrain, so the check skips cleanly when the configured model
+    routes through HTTP (PR #430 review finding #5).
+
+    For codex-CLI models, the check fails closed: a silently-no-op
+    sandbox would defeat the rt1 boundary entirely. The criticality flag
+    in the registry is sourced from :func:`red_team_sandbox_check_is_critical`
+    so a hard fail for a codex-CLI install actually blocks rather than
+    only warning (PR #430 review finding #7).
+    """
+    try:
+        cfg = get_red_team_config()
+    except Exception as exc:
+        return "warn", f"could not load red_team config: {exc}"
+
+    if not cfg.get("enabled", True):
+        return "skip", "red_team disabled in config"
+
+    try:
+        from stark_red_team import RESPONSES_API_MODELS
+    except ImportError as exc:
+        return "warn", f"could not import stark_red_team: {exc}"
+
+    model = cfg.get("model")
+    if model in RESPONSES_API_MODELS:
+        return "skip", (
+            f"model {model!r} uses Responses API — codex-CLI sandbox unused"
+        )
+
+    try:
+        from red_team_sandbox import preflight_sandbox
+    except ImportError as exc:
+        return "warn", f"could not import red_team_sandbox: {exc}"
+
+    status, message = preflight_sandbox()
+    if status == "ready":
+        return "pass", message
+    if status == "degraded":
+        return "warn", message
+    return "fail", message
+
+
+def _red_team_sandbox_is_critical() -> bool:
+    """Resolve criticality dynamically: critical only for codex-CLI models.
+
+    Responses-only installs see ``status=skip`` from the check itself; the
+    criticality flag here ensures that a hard ``fail`` on a codex-CLI
+    install actually blocks rather than only warning. Failures during
+    config load fall back to non-critical so a broken config doesn't
+    silently elevate other unrelated gating.
+    """
+    try:
+        cfg = get_red_team_config()
+    except Exception:
+        return False
+    if not cfg.get("enabled", True):
+        return False
+    try:
+        from stark_red_team import RESPONSES_API_MODELS
+    except ImportError:
+        return False
+    return cfg.get("model") not in RESPONSES_API_MODELS
+
+
 # ---------------------------------------------------------------------------
 # Check registry: (name, fn, is_critical)
 # critical=True → a "fail" status sets overall to "blocked"
@@ -457,6 +525,15 @@ _CHECKS: list[tuple[str, Callable[..., tuple[str, str]], bool]] = [
     ("check_deprecated_config",    check_deprecated_config,    False),
     ("check_red_team_model_rates", check_red_team_model_rates, True),
     ("check_red_team_transport_auth", check_red_team_transport_auth, True),
+    # FU-rt1 sandbox check criticality is dynamic: critical for codex-CLI
+    # models (a broken sandbox there silently disables the rt1 boundary),
+    # non-critical for Responses-API-only installs (the check itself
+    # returns ``skip`` and there's nothing to block on).
+    (
+        "check_red_team_sandbox",
+        check_red_team_sandbox,
+        _red_team_sandbox_is_critical(),
+    ),
 ]
 
 

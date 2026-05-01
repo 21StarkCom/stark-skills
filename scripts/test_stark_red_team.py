@@ -377,6 +377,237 @@ def test_overlap_returns_false_when_one_is_empty():
     assert rt._overlap(a, b, jaccard_min=0.4) is False
 
 
+# ---------------------------------------------------------------------------
+# FU-rt5 — structured fields + structured-overlap stability gate
+# ---------------------------------------------------------------------------
+
+
+def test_validate_findings_promotes_structured_fields():
+    raw = [{
+        "id": "rt1",
+        "persona": "data",
+        "severity": "high",
+        "risk_key": "Schema Migration No Backfill",
+        "affected_component": "migrations/0042-users",
+        "failure_mode": "data-loss",
+        "concern": "X",
+        "consequence": "Y",
+        "counter_proposal": "Z",
+        "trade_off": "W",
+    }]
+    result = rt.validate_findings(raw)
+    assert len(result) == 1
+    f = result[0]
+    assert f.risk_key == "schema-migration-no-backfill"
+    assert f.affected_component == "migrations-0042-users"
+    assert f.failure_mode == "data-loss"
+    assert f.concern_hash  # populated, non-empty
+
+
+def test_validate_findings_drops_unknown_failure_mode():
+    raw = [{
+        "id": "rt1",
+        "persona": "data",
+        "severity": "high",
+        "risk_key": "x",
+        "affected_component": "y",
+        "failure_mode": "earth-shattering",
+        "concern": "X",
+        "consequence": "Y",
+        "counter_proposal": "Z",
+        "trade_off": "W",
+    }]
+    result = rt.validate_findings(raw)
+    # Finding still accepted; failure_mode collapses to None (unknown).
+    assert len(result) == 1
+    assert result[0].failure_mode is None
+
+
+def test_validate_findings_concern_hash_is_stable_across_rephrasings():
+    """Two identical risks, different wording, must hash-collide.
+
+    FU-rt5 + FU-rt7 design: structured identity (persona + risk_key +
+    affected_component) IS the identity. Genuinely different prose for
+    the same underlying risk must produce the same concern_hash so an
+    operator's acceptance carries across reruns where the model rewords.
+
+    PR #430 review finding #12 strengthened this from "trivial case +
+    whitespace" to "genuinely different sentences".
+    """
+    base = {
+        "id": "rt1",
+        "persona": "data",
+        "severity": "high",
+        "risk_key": "schema-migration-no-backfill",
+        "affected_component": "migrations/0042-users",
+        "failure_mode": "data-loss",
+        "consequence": "Y",
+        "counter_proposal": "Z",
+        "trade_off": "W",
+    }
+    a = rt.validate_findings([
+        {**base, "concern": "Schema migration has no backfill plan."}
+    ])
+    b = rt.validate_findings([
+        {**base, "concern": "The migration adds NOT NULL without populating existing rows."},
+    ])
+    assert a[0].concern_hash == b[0].concern_hash, (
+        "structured-identity findings must hash-match across genuine rephrasings"
+    )
+
+
+def test_validate_findings_concern_hash_legacy_fallback_uses_concern_text():
+    """When the model omits risk_key (pre-FU-rt5 producers), the hash
+    falls back to persona + normalized concern text so two unrelated
+    concerns from the same persona stay distinguishable."""
+    base = {
+        "id": "rt1",
+        "persona": "data",
+        "severity": "high",
+        # No risk_key / affected_component / failure_mode → legacy path
+        "consequence": "Y",
+        "counter_proposal": "Z",
+        "trade_off": "W",
+    }
+    a = rt.validate_findings([{**base, "concern": "Concern A about cache"}])
+    b = rt.validate_findings([{**base, "concern": "Concern B about queue"}])
+    assert a[0].concern_hash != b[0].concern_hash
+
+
+def test_validate_findings_concern_hash_differs_across_risks():
+    raw = [
+        {
+            "id": "rt1",
+            "persona": "data",
+            "severity": "high",
+            "risk_key": "schema-migration-no-backfill",
+            "affected_component": "migrations/0042-users",
+            "failure_mode": "data-loss",
+            "concern": "Backfill missing",
+            "consequence": "Y",
+            "counter_proposal": "Z",
+            "trade_off": "W",
+        },
+        {
+            "id": "rt2",
+            "persona": "data",
+            "severity": "high",
+            "risk_key": "retry-storm",
+            "affected_component": "queue",
+            "failure_mode": "availability",
+            "concern": "Backfill missing",
+            "consequence": "Y",
+            "counter_proposal": "Z",
+            "trade_off": "W",
+        },
+    ]
+    result = rt.validate_findings(raw)
+    assert result[0].concern_hash != result[1].concern_hash
+
+
+def test_overlap_uses_structured_fields_when_available():
+    """Different concern text, same risk_key + persona = overlap."""
+    a = _mk_result([
+        rt.RedTeamFinding(
+            "rt1", "data", "high",
+            "Schema migration has no backfill", "c", "cp", "to", None,
+            risk_key="schema-migration-no-backfill",
+            affected_component="m",
+            failure_mode="data-loss",
+            concern_hash="abc",
+        ),
+    ])
+    b = _mk_result([
+        rt.RedTeamFinding(
+            "rt1", "data", "high",
+            "totally unrelated wording", "c", "cp", "to", None,
+            risk_key="schema-migration-no-backfill",
+            affected_component="m",
+            failure_mode="data-loss",
+            concern_hash="def",
+        ),
+    ])
+    assert rt._overlap(a, b, jaccard_min=0.4) is True
+
+
+def test_overlap_falls_back_to_jaccard_when_no_structured_identity():
+    """Back-compat: pre-FU-rt5 producers without risk_key still gate via Jaccard."""
+    a = _mk_result([
+        rt.RedTeamFinding(
+            "rt1", "data", "high",
+            "schema migration has no backfill plan", "c", "cp", "to", None,
+        ),
+    ])
+    b = _mk_result([
+        rt.RedTeamFinding(
+            "rt1", "data", "high",
+            "the schema migration lacks a backfill plan", "c", "cp", "to", None,
+        ),
+    ])
+    assert rt._overlap(a, b, jaccard_min=0.3) is True
+
+
+def test_overlap_no_match_when_risk_keys_differ():
+    a = _mk_result([
+        rt.RedTeamFinding(
+            "rt1", "data", "high", "x", "c", "cp", "to", None,
+            risk_key="schema-migration-no-backfill",
+        ),
+    ])
+    b = _mk_result([
+        rt.RedTeamFinding(
+            "rt1", "data", "high", "x", "c", "cp", "to", None,
+            risk_key="retry-storm",
+        ),
+    ])
+    assert rt._overlap(a, b, jaccard_min=0.4) is False
+
+
+# ---------------------------------------------------------------------------
+# FU-rt7 — stable finding key composition
+# ---------------------------------------------------------------------------
+
+
+def test_compute_stable_key_format():
+    key = rt.compute_stable_key(
+        run_id="manual-abc123",
+        stage="design",
+        round_num=1,
+        persona="data",
+        finding_id="rt3",
+        concern_hash="deadbeef0001",
+    )
+    assert key == "manual-abc123:design:1:data:rt3:deadbeef0001"
+
+
+def test_compute_stable_key_distinguishes_findings_with_same_slot():
+    """Same run/stage/round/persona/finding_id but different concern → different key.
+
+    This is the FU-rt7 invariant: a rerun that renumbers slot rt3 to a new
+    concern produces a NEW stable_key, so an operator's accept-flag input
+    against the OLD key no longer matches.
+    """
+    common = dict(
+        run_id="manual-abc123",
+        stage="design",
+        round_num=1,
+        persona="data",
+        finding_id="rt3",
+    )
+    key_a = rt.compute_stable_key(concern_hash="aaa", **common)  # type: ignore[arg-type]
+    key_b = rt.compute_stable_key(concern_hash="bbb", **common)  # type: ignore[arg-type]
+    assert key_a != key_b
+
+
+def test_compute_concern_hash_independent_of_id_and_round():
+    """Hash should be identity over (persona, structured fields, concern only)."""
+    h1 = rt.compute_concern_hash("data", "rk", "ac", "Concern text")
+    h2 = rt.compute_concern_hash("data", "rk", "ac", "Concern text")
+    assert h1 == h2
+    h3 = rt.compute_concern_hash("data", "different", "ac", "Concern text")
+    assert h1 != h3
+
+
 import subprocess as _subprocess
 
 

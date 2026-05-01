@@ -8,8 +8,8 @@ description: >-
 argument-hint: "<plan-path> [--source-spec <path>] [--model <id>] [--dry-run] [--no-pr-comment]"
 disable-model-invocation: true
 model: opus
-revision: f5d4be2d01787579d5fcfe09d1bef452eb50c668
-revision_date: 2026-05-01T09:39:44Z
+revision: b1ebb989cde8f5fa8ae9a606a9973b738c664c10
+revision_date: 2026-05-01T16:17:03Z
 ---
 
 # stark-red-team-plan
@@ -199,23 +199,54 @@ rendered as skipped and no second LLM call is made.
 
 ### 4.2 PR comment (skipped if `--dry-run`, `--no-pr-comment`, or no PR)
 
-Post the rendered markdown summary as `stark-claude[bot]`. The body MUST
-go through `red_team_dispatch_common.truncate_pr_comment` before posting
-so the design-§4.2 cascade applies (truncate `notes` first, then each
-move's `rationale` to 200 chars, then a hard `[TRUNCATED — see sidecar]`
-marker) before GitHub's 65 KB cap rejects the request:
+Post the dispatcher-rendered `pr_comment_body` (FU-rt9). It is a single
+collapsible-per-persona summary with a critical/high "Highlights" section
+on top, deterministic anchors for every finding, and an HTML-comment
+marker (`<!-- stark-red-team: stage=plan artifact=... -->`) at the head
+so a re-run edits the existing comment in place instead of stacking a
+new one per round. The marker is keyed by stage + artifact path (NOT
+`run_id`); the dispatcher exposes the exact string as `pr_comment_marker`
+in its JSON output, so the lookup below copies the dispatcher's contract
+verbatim.
+
+The flow is **find-by-marker, edit-or-create** (FU-rt9 invariant — "one
+updatable comment per run"):
 
 ```bash
-body=$("$PYTHON" -c "
-import sys; sys.path.insert(0, '$SCRIPTS')
-from red_team_dispatch_common import truncate_pr_comment
-print(truncate_pr_comment(sys.stdin.read()), end='')
-" <<<"$summary")
-$PYTHON $SCRIPTS/github_app.py --app stark-claude pr review $pr_number \
-    --comment --body "$body"
+body=$(echo "$output" | "$PYTHON" -c "import sys, json; print(json.load(sys.stdin)['pr_comment_body'], end='')")
+marker=$(echo "$output" | "$PYTHON" -c "import sys, json; print(json.load(sys.stdin)['pr_comment_marker'])")
+
+# Keyed on stage + artifact path (NOT run_id) so a fresh dispatcher run still
+# matches the prior comment and "edit-or-create" actually edits.
+existing_id=$(
+  gh api "repos/$REPO/issues/$pr_number/comments" --paginate \
+    --jq ".[] | select(.body | contains(\"$marker\")) | .id" \
+    | head -n1
+)
+if [ -n "$existing_id" ]; then
+  gh api -X PATCH "repos/$REPO/issues/comments/$existing_id" \
+    -f body="$body" >/dev/null
+else
+  # Issue comment (NOT a PR review). Reviews live in /pulls/N/reviews and
+  # would never show up in the issues-comments API used for the lookup
+  # above, so a `pr review --comment` create branch silently broke the
+  # FU-rt9 "one updatable comment per run" invariant on every rerun.
+  $PYTHON $SCRIPTS/github_app.py --app stark-claude pr comment "$pr_number" \
+    --body "$body"
+fi
 ```
 
+The dispatcher already runs `truncate_pr_comment` on the body before
+returning it, so the GitHub 65 KB cap is honored without a second pass.
 If posting fails, warn and continue.
+
+### 4.2.1 Accepting human-review halts
+
+If the run exits `halted_human_review`, the operator can acknowledge a
+specific concern with `red_team_accept.py STABLE_KEY` (shown in the
+sidecar, the PR comment, and the `red_team_status.py` display). Accepted
+keys persist in the audit DB so subsequent runs no longer halt on the
+same concern.
 
 ### 4.3 Insights audit
 

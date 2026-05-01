@@ -176,6 +176,22 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Dispatcher-only calibration override for red_team.fix_plan.enabled.",
     )
+    p.add_argument(
+        "--accept-red-team-human-review",
+        action="append",
+        default=[],
+        metavar="STABLE_KEY",
+        help=(
+            "Accept a human-review halt by stable key before running. May "
+            "be repeated. Each key triggers an interactive confirmation "
+            "unless --no-confirm is set."
+        ),
+    )
+    p.add_argument(
+        "--no-confirm",
+        action="store_true",
+        help="Skip the interactive accept confirmation (for scripted use).",
+    )
     return p
 
 
@@ -183,6 +199,24 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     plan_path = Path(args.plan).resolve()
     source_spec_path = Path(args.source_spec).resolve() if args.source_spec else None
+
+    # FU-rt8 — Accept any human-review halts before dispatching.
+    #
+    # PR-#430 round-3 fix #6: confirmation/match output goes to stderr so the
+    # ``--accept ... --json`` combination still emits a single parseable JSON
+    # object on stdout.
+    if args.accept_red_team_human_review:
+        from red_team_accept import accept_one
+        for key in args.accept_red_team_human_review:
+            rc = accept_one(
+                key,
+                note=None,
+                accepted_by=None,
+                confirm=not args.no_confirm,
+                out=sys.stderr,
+            )
+            if rc != 0:
+                return rc
 
     out = run_dispatch(
         plan_path=plan_path,

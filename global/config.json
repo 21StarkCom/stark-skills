@@ -196,6 +196,10 @@
       "min_moves": 2,
       "max_moves": 6,
       "max_input_chars": 200000
+    },
+    "audit": {
+      "retain_full_text": false,
+      "excerpt_max_chars": 240
     }
   },
   "model_rates": {

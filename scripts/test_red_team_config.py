@@ -246,6 +246,23 @@ import pytest
             {"design": {"enabled": True}, "plan": {"enabled": False}},
             {"design": {"enabled": False}, "plan": {"enabled": False}},
         ),
+        # PR #430 review finding #16 — FU-rt6 audit retention lock. A repo
+        # flipping retain_full_text back to True would silently turn the
+        # metrics DB into a sensitive-document store. This test would have
+        # caught a future nested-lock regression that lets repo config win.
+        (
+            "audit",
+            {"retain_full_text": False, "excerpt_max_chars": 240},
+            {"retain_full_text": True, "excerpt_max_chars": 240},
+        ),
+        # PR #430 review finding #8 — excerpt_max_chars is also locked, so
+        # a repo can't crank the cap up to 999_999 and persist nearly-full
+        # raw text under "excerpt" mode (defeating the redaction split).
+        (
+            "audit",
+            {"retain_full_text": False, "excerpt_max_chars": 240},
+            {"retain_full_text": False, "excerpt_max_chars": 999_999},
+        ),
     ],
 )
 def test_get_red_team_config_rejects_security_critical_overrides(
