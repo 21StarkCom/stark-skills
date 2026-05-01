@@ -62,6 +62,12 @@ _VALID_TYPES = {
     # that an operator might miss in stderr noise.
     "red_team_override_rejected",
     "red_team_run", "red_team_finding", "red_team_fix_plan",
+    # FU-rt11 — Per-call telemetry. Run-level events hide phase attribution
+    # (was the budget halt at primary, verification, regen, or inner-review?
+    # which model actually ran post-fallback? was the prompt truncated?).
+    # call.start fires before each call so latency-spike forensics can pair
+    # against call.end on the orchestrator side.
+    "red_team_call_start", "red_team_call_end",
 }
 
 # ---------------------------------------------------------------------------

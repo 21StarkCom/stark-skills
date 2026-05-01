@@ -22,6 +22,85 @@ import stark_red_team as rt
 from config_loader import get_model_rates, get_red_team_config
 
 GH_COMMENT_LIMIT = 65_536
+
+
+class _InsightsTelemetrySink(rt.CallTelemetrySink):
+    """Live telemetry sink for FU-rt11.
+
+    Forwards per-call ``start`` / ``end`` events into ``red_team_insights``,
+    threading cumulative cost so the operator can read budget remaining at
+    every call boundary. The cumulative-cost reference is mutated in place
+    so all calls in one orchestrator invocation share state.
+    """
+
+    def __init__(self, ctx: rt.RedTeamRunContext) -> None:
+        self.ctx = ctx
+        self.cumulative_cost_usd: float = 0.0
+        # Keep a tiny in-memory record of the most recent call's start time
+        # so phase-aware audits (e.g. "primary started at T, ended at T+x")
+        # can reconstruct the timeline. Keyed by call_id so concurrent calls
+        # don't clobber each other.
+        self._call_start_iso: dict[str, str] = {}
+
+    def _now(self) -> str:
+        return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    def start(
+        self,
+        *,
+        call_id: str,
+        call_phase: str,
+        round_num: int,
+        configured_model: str,
+        prompt_chars: int,
+        truncated: bool,
+    ) -> None:
+        import red_team_insights
+
+        ts = self._now()
+        self._call_start_iso[call_id] = ts
+        red_team_insights.emit_call_start(
+            self.ctx,
+            call_id=call_id,
+            call_phase=call_phase,
+            round_num=round_num,
+            configured_model=configured_model,
+            prompt_chars=prompt_chars,
+            truncated=truncated,
+            cumulative_cost_usd=self.cumulative_cost_usd,
+            per_run_budget_usd=self.ctx.per_run_budget_usd,
+            timestamp_iso=ts,
+        )
+
+    def end(self, record: rt.CallTelemetryRecord) -> None:
+        import red_team_insights
+
+        # Snapshot pre-call cumulative cost so the end event can carry both
+        # ``cumulative_cost_usd`` (running total INCLUDING this call) and
+        # ``budget_remaining_usd`` derived from it. Snapshot BEFORE bumping
+        # so the math in ``build_call_end_envelope`` is deterministic.
+        cumulative_before = self.cumulative_cost_usd
+        self.cumulative_cost_usd += record.cost_usd
+        red_team_insights.emit_call_end(
+            self.ctx,
+            call_id=record.call_id,
+            call_phase=record.call_phase,
+            round_num=record.round_num,
+            configured_model=record.configured_model,
+            actual_model=record.actual_model,
+            transport=record.transport,
+            prompt_chars=record.prompt_chars,
+            truncated=record.truncated,
+            input_tokens=record.input_tokens,
+            output_tokens=record.output_tokens,
+            duration_s=record.duration_s,
+            cost_usd=record.cost_usd,
+            cumulative_cost_usd=cumulative_before,
+            per_run_budget_usd=self.ctx.per_run_budget_usd,
+            error=record.error,
+            request_id=record.request_id,
+            timestamp_iso=self._now(),
+        )
 FIX_PLAN_SECTION_LIMIT = 12 * 1024
 _RT_ID_RE = re.compile(r"^rt\d+$")
 _KILL_SWITCH_WARNED = False
@@ -627,6 +706,153 @@ def _fix_plan_json(fix_plan: rt.RedTeamFixPlan | None) -> str | None:
     return json.dumps(asdict(fix_plan), sort_keys=True, separators=(",", ":"))
 
 
+def _run_one_call(
+    *,
+    stage: str,
+    artifact: str,
+    source_spec: str,
+    cfg: dict[str, Any],
+    model: str,
+    model_rates: dict[str, Any],
+    cwd: str | None,
+    telemetry: rt.CallTelemetrySink | None,
+    round_num: int,
+    call_phase: str,
+    env: dict[str, str],
+) -> rt.RedTeamResult:
+    """Run a single ``rt.run_red_team`` call with the given phase label.
+
+    Centralizes the long argument list so the iterative loop body stays
+    focused on state-machine transitions rather than dispatch plumbing.
+    """
+    return rt.run_red_team(
+        stage=stage,
+        artifact=artifact,
+        source_spec=source_spec,
+        pr_diff=None,
+        personas=cfg["personas"],
+        model=model,
+        model_rates=model_rates,
+        cwd=cwd,
+        timeout_s=cfg["timeout_s"],
+        min_severity_to_block=cfg["min_severity_to_block"],
+        max_input_chars=cfg["max_input_chars"],
+        round_num=round_num,
+        env=env,
+        telemetry=telemetry,
+        call_phase=call_phase,
+    )
+
+
+def _run_iterative(
+    *,
+    ctx: rt.RedTeamRunContext,
+    stage: str,
+    artifact: str,
+    source_spec: str,
+    cfg: dict[str, Any],
+    model: str,
+    model_rates: dict[str, Any],
+    cwd: str | None,
+    telemetry: rt.CallTelemetrySink | None,
+) -> tuple[rt.RedTeamResult, list[Any]]:
+    """Drive the FU-rt4 state machine over up to ``max_rounds`` rounds.
+
+    Each iteration runs a primary call, classifies the round, and (if the
+    primary saw blocking findings) runs a verification call. The state
+    machine in :mod:`red_team_state_machine` decides whether the round
+    consumed a remediation slot, whether to terminate, and what transition
+    label to log. Flicker rounds repeat without consuming a slot — the
+    explicit fix for the contradictory v1 semantics.
+
+    Returns ``(final_result, history)``. ``history`` is the FU-rt4 audit
+    log: an ordered list of ``RoundRecord`` instances. Callers that need
+    only the result can ignore it.
+
+    ``max_rounds == 1`` (or budget exhaustion) collapses to a single
+    primary-only call, preserving v1 behavior for installs that haven't
+    enabled iterative refinement.
+    """
+    import red_team_state_machine as sm
+
+    max_rounds = max(1, int(cfg.get("max_rounds", 1)))
+    state = sm.IterativeRunState(max_rounds=max_rounds)
+
+    # Round-1 always runs at minimum, even when max_rounds=1.
+    round_num = 1
+    last_good_result: rt.RedTeamResult | None = None
+    while True:
+        primary = _run_one_call(
+            stage=stage,
+            artifact=artifact,
+            source_spec=source_spec,
+            cfg=cfg,
+            model=model,
+            model_rates=model_rates,
+            cwd=cwd,
+            telemetry=telemetry,
+            round_num=round_num,
+            call_phase="primary",
+            env=ctx.env,
+        )
+
+        # Verification is only required when the primary returned blocking
+        # findings — the stability gate has nothing to verify against if
+        # the primary said clean.
+        verification: rt.RedTeamResult | None = None
+        if (
+            primary.error is None
+            and primary.blocking_count > 0
+            and max_rounds > 1
+        ):
+            verification = _run_one_call(
+                stage=stage,
+                artifact=artifact,
+                source_spec=source_spec,
+                cfg=cfg,
+                model=model,
+                model_rates=model_rates,
+                cwd=cwd,
+                telemetry=telemetry,
+                round_num=round_num,
+                call_phase="verification",
+                env=ctx.env,
+            )
+
+        outcome = sm.classify_round(
+            primary,
+            verification,
+            overlap=lambda a, b: rt._overlap(
+                a, b, jaccard_min=float(cfg.get("stability_overlap_jaccard_min", 0.4))
+            ),
+            has_prior_good_round=last_good_result is not None,
+        )
+        if outcome != sm.RoundOutcome.error:
+            last_good_result = primary
+
+        terminate, transition = sm.should_terminate(state, outcome)
+        sm.record_round(
+            state,
+            round_num=round_num,
+            primary=primary,
+            verification=verification,
+            outcome=outcome,
+            transition=transition or "",
+        )
+        if terminate:
+            sm.mark_terminated(state, transition or "terminate.unknown")
+            return primary, state.history
+
+        # Flicker without budget exhaustion: re-run the same round_num so
+        # rounds_used accounting stays consistent with the state machine.
+        if outcome == sm.RoundOutcome.flicker:
+            continue
+        round_num += 1
+        if round_num > max_rounds:
+            sm.mark_terminated(state, "terminate.budget_exhausted")
+            return primary, state.history
+
+
 def execute_dispatch(
     *,
     stage: str,
@@ -668,21 +894,19 @@ def execute_dispatch(
     if enable_fix_plan_for_calibration:
         print("red_team.fix_plan.calibration_override", file=sys.stderr)
 
-    result = rt.run_red_team(
+    telemetry = _InsightsTelemetrySink(ctx) if audit else None
+    result, history = _run_iterative(
+        ctx=ctx,
         stage=stage,
         artifact=artifact,
         source_spec=source_spec,
-        pr_diff=None,
-        personas=cfg["personas"],
+        cfg=cfg,
         model=model,
         model_rates=model_rates,
         cwd=cwd,
-        timeout_s=cfg["timeout_s"],
-        min_severity_to_block=cfg["min_severity_to_block"],
-        max_input_chars=cfg["max_input_chars"],
-        round_num=1,
-        env=ctx.env,
+        telemetry=telemetry,
     )
+    del history  # FU-rt4 transition log; insights events already capture per-round outcomes.
 
     fix_plan_status = "pending"
     fix_plan: rt.RedTeamFixPlan | None = None

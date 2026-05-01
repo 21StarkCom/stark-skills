@@ -13,7 +13,7 @@ from typing import Any
 
 import stark_red_team as rt
 
-_DEDUPE_PREFIXES = {"run", "finding", "fix_plan"}
+_DEDUPE_PREFIXES = {"run", "finding", "fix_plan", "call"}
 
 
 def make_dedupe_key(
@@ -23,6 +23,8 @@ def make_dedupe_key(
     run_id: str,
     round_num: int | None = None,
     finding_id: str | None = None,
+    call_id: str | None = None,
+    phase: str | None = None,
 ) -> str:
     """Return the canonical red-team insights dedupe key."""
     if kind not in _DEDUPE_PREFIXES:
@@ -31,6 +33,13 @@ def make_dedupe_key(
         if round_num is None or not finding_id:
             raise ValueError("finding dedupe key requires round_num and finding_id")
         return f"red-team:finding:{stage}:{run_id}:{round_num}:{finding_id}"
+    if kind == "call":
+        # Per-call dedupe key (FU-rt11). ``call_id`` is unique per orchestrator
+        # invocation; ``phase`` discriminates start vs. end so a single call
+        # can emit both events without collision.
+        if not call_id or not phase:
+            raise ValueError("call dedupe key requires call_id and phase")
+        return f"red-team:call:{stage}:{run_id}:{call_id}:{phase}"
     if kind in {"run", "fix_plan"} and (round_num is not None or finding_id is not None):
         raise ValueError(f"{kind} dedupe key does not accept round_num or finding_id")
     return f"red-team:{kind}:{stage}:{run_id}"
@@ -345,6 +354,193 @@ def emit_fix_plan(
         _enqueue(envelope, "red_team_fix_plan")
     except Exception as exc:  # pragma: no cover - defensive fail-open wrapper
         print(f"  [!] Failed to emit red_team_fix_plan: {exc}", file=sys.stderr)
+
+
+# ---------------------------------------------------------------------------
+# FU-rt11 — Per-call telemetry
+# ---------------------------------------------------------------------------
+
+# Phase IDs used by the orchestrator. Pinned here so producer + consumer
+# (Looker / dashboards / cost forensics) share one vocabulary.
+CALL_PHASE_PRIMARY = "primary"
+CALL_PHASE_VERIFICATION = "verification"
+CALL_PHASE_REGENERATION = "regeneration"
+CALL_PHASE_INNER_REVIEW = "inner_review"
+CALL_PHASE_FIX_PLAN = "fix_plan"
+
+_VALID_CALL_PHASES: frozenset[str] = frozenset({
+    CALL_PHASE_PRIMARY,
+    CALL_PHASE_VERIFICATION,
+    CALL_PHASE_REGENERATION,
+    CALL_PHASE_INNER_REVIEW,
+    CALL_PHASE_FIX_PLAN,
+})
+
+
+def build_call_start_envelope(
+    *,
+    run_id: str,
+    stage: str,
+    repo: str | None,
+    pr_number: int | None,
+    call_id: str,
+    call_phase: str,
+    round_num: int,
+    configured_model: str,
+    prompt_chars: int,
+    truncated: bool,
+    cumulative_cost_usd: float,
+    per_run_budget_usd: float,
+    timestamp_iso: str,
+) -> dict[str, Any]:
+    """Emitted before every primary / verification / regen / review call.
+
+    Operators triaging "where did the budget go before halting?" need a
+    pre-call signal that records the as-attempted state — including the
+    cumulative cost going INTO this call and the truncation flag (the model
+    cap might have already silently dropped the most relevant artifact).
+    """
+    if call_phase not in _VALID_CALL_PHASES:
+        raise ValueError(f"invalid call_phase: {call_phase}")
+    repo_label = repo or "unknown"
+    payload = {
+        "run_id": run_id,
+        "stage": stage,
+        "call_id": call_id,
+        "call_phase": call_phase,
+        "round_num": round_num,
+        "configured_model": configured_model,
+        "prompt_chars": prompt_chars,
+        "truncated": truncated,
+        "cumulative_cost_usd": cumulative_cost_usd,
+        "per_run_budget_usd": per_run_budget_usd,
+        "budget_remaining_usd": max(0.0, per_run_budget_usd - cumulative_cost_usd),
+        "repo": repo_label,
+        "pr_number": pr_number,
+    }
+    return _envelope(
+        "red_team_call_start",
+        timestamp_iso=timestamp_iso,
+        repo=repo_label,
+        dedupe_key=make_dedupe_key(
+            "call",
+            stage=stage,
+            run_id=run_id,
+            call_id=call_id,
+            phase="start",
+        ),
+        payload=payload,
+    )
+
+
+def build_call_end_envelope(
+    *,
+    run_id: str,
+    stage: str,
+    repo: str | None,
+    pr_number: int | None,
+    call_id: str,
+    call_phase: str,
+    round_num: int,
+    configured_model: str,
+    actual_model: str,
+    transport: str,
+    prompt_chars: int,
+    truncated: bool,
+    input_tokens: int,
+    output_tokens: int,
+    duration_s: float,
+    cost_usd: float,
+    cumulative_cost_usd: float,
+    per_run_budget_usd: float,
+    error: str | None,
+    request_id: str | None,
+    timestamp_iso: str,
+) -> dict[str, Any]:
+    """Emitted after every primary / verification / regen / review call.
+
+    Pairs with ``red_team_call_start`` via ``call_id``. Records the actual
+    model that ran (``actual_model`` vs. ``configured_model``) so a silent
+    codex-CLI fallback to a different tier doesn't get lost in run-level
+    aggregates. The ``request_id`` field threads the Responses-API request
+    id when available so OpenAI-side support can correlate.
+    """
+    if call_phase not in _VALID_CALL_PHASES:
+        raise ValueError(f"invalid call_phase: {call_phase}")
+    repo_label = repo or "unknown"
+    cumulative_after = cumulative_cost_usd + cost_usd
+    payload = {
+        "run_id": run_id,
+        "stage": stage,
+        "call_id": call_id,
+        "call_phase": call_phase,
+        "round_num": round_num,
+        "configured_model": configured_model,
+        "actual_model": actual_model,
+        "transport": transport,
+        "prompt_chars": prompt_chars,
+        "truncated": truncated,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "duration_s": duration_s,
+        "cost_usd": cost_usd,
+        "cumulative_cost_usd": cumulative_after,
+        "per_run_budget_usd": per_run_budget_usd,
+        "budget_remaining_usd": max(0.0, per_run_budget_usd - cumulative_after),
+        "error": error,
+        "request_id": request_id,
+        "repo": repo_label,
+        "pr_number": pr_number,
+    }
+    return _envelope(
+        "red_team_call_end",
+        timestamp_iso=timestamp_iso,
+        repo=repo_label,
+        dedupe_key=make_dedupe_key(
+            "call",
+            stage=stage,
+            run_id=run_id,
+            call_id=call_id,
+            phase="end",
+        ),
+        payload=payload,
+    )
+
+
+def emit_call_start(
+    ctx: rt.RedTeamRunContext,
+    **kwargs: Any,
+) -> None:
+    """Best-effort enqueue of one ``red_team_call_start`` event."""
+    try:
+        envelope = build_call_start_envelope(
+            run_id=ctx.run_id,
+            stage=ctx.stage,
+            repo=ctx.repo,
+            pr_number=ctx.pr_number,
+            **kwargs,
+        )
+        _enqueue(envelope, "red_team_call_start")
+    except Exception as exc:  # pragma: no cover - defensive fail-open wrapper
+        print(f"  [!] Failed to emit red_team_call_start: {exc}", file=sys.stderr)
+
+
+def emit_call_end(
+    ctx: rt.RedTeamRunContext,
+    **kwargs: Any,
+) -> None:
+    """Best-effort enqueue of one ``red_team_call_end`` event."""
+    try:
+        envelope = build_call_end_envelope(
+            run_id=ctx.run_id,
+            stage=ctx.stage,
+            repo=ctx.repo,
+            pr_number=ctx.pr_number,
+            **kwargs,
+        )
+        _enqueue(envelope, "red_team_call_end")
+    except Exception as exc:  # pragma: no cover - defensive fail-open wrapper
+        print(f"  [!] Failed to emit red_team_call_end: {exc}", file=sys.stderr)
 
 
 def _envelope(

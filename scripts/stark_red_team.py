@@ -1286,6 +1286,83 @@ def _cost_for(input_tokens: int, output_tokens: int, rates: dict[str, float]) ->
     ) / 1_000_000
 
 
+@dataclass
+class CallTelemetryRecord:
+    """One call's measurable footprint, for FU-rt11 telemetry sinks.
+
+    The orchestrator-facing ``CallTelemetrySink`` receives this on every
+    dispatched call (primary, verification, regen, inner-review, fix-plan).
+    Fields are the union of what cost/budget forensics, transport-fallback
+    detection, and Responses-API correlation need.
+    """
+
+    call_id: str
+    call_phase: str  # primary | verification | regeneration | inner_review | fix_plan
+    round_num: int
+    configured_model: str
+    actual_model: str  # post-fallback (codex-CLI may swap)
+    transport: str  # "responses_api" | "codex_cli"
+    prompt_chars: int
+    truncated: bool
+    input_tokens: int
+    output_tokens: int
+    duration_s: float
+    cost_usd: float
+    error: str | None
+    request_id: str | None  # Responses-API id when available
+
+
+class CallTelemetrySink:
+    """Hook surface injected by the orchestrator. Default = no-op.
+
+    Two methods, fired around each call:
+
+    - ``start(call_id, call_phase, round_num, configured_model, prompt_chars,
+      truncated)``
+    - ``end(record)`` with the populated :class:`CallTelemetryRecord`
+
+    A live implementation translates these into ``red_team_call_start`` /
+    ``red_team_call_end`` insight events; the in-tree default is silent so
+    unit tests that build ``RedTeamRunContext`` without a telemetry hook
+    don't break.
+    """
+
+    def start(
+        self,
+        *,
+        call_id: str,
+        call_phase: str,
+        round_num: int,
+        configured_model: str,
+        prompt_chars: int,
+        truncated: bool,
+    ) -> None:  # pragma: no cover - default no-op
+        del call_id, call_phase, round_num, configured_model, prompt_chars, truncated
+
+    def end(self, record: CallTelemetryRecord) -> None:  # pragma: no cover
+        del record
+
+
+_NULL_TELEMETRY = CallTelemetrySink()
+
+
+def _new_call_id() -> str:
+    """Short opaque ID for one dispatch call. Used to pair start/end events."""
+    import uuid
+    return uuid.uuid4().hex[:12]
+
+
+def _prompt_was_truncated(prompt: str) -> bool:
+    """Heuristic: ``_wrap_input`` injects a ``[TRUNCATED to N chars]`` marker
+    into any block that exceeded the cap. Presence of that marker means the
+    prompt was truncated *somewhere*.
+
+    Used by FU-rt11 telemetry so an operator triaging a flicker / bad result
+    can see at a glance whether the relevant artifact made it into the call.
+    """
+    return "[TRUNCATED to " in prompt
+
+
 def run_red_team(
     stage: str,
     artifact: str,
@@ -1300,11 +1377,19 @@ def run_red_team(
     max_input_chars: int,
     round_num: int = 1,
     env: dict[str, str] | None = None,
+    telemetry: CallTelemetrySink | None = None,
+    call_phase: str = "primary",
 ) -> RedTeamResult:
     """Run one red-team call. Returns a RedTeamResult.
 
     Does not retry — the orchestrator handles retry policy.
+
+    The optional ``telemetry`` sink fires per-call ``start`` / ``end`` events
+    around dispatch. ``call_phase`` lets the orchestrator label primary vs.
+    verification vs. regeneration vs. inner-review without changing the
+    return shape (FU-rt11).
     """
+    sink = telemetry or _NULL_TELEMETRY
     prompt = assemble_prompt(
         stage=stage,
         personas=personas,
@@ -1313,8 +1398,22 @@ def run_red_team(
         pr_diff=pr_diff,
         max_input_chars=max_input_chars,
     )
+    prompt_chars = len(prompt)
+    truncated = _prompt_was_truncated(prompt)
+    call_id = _new_call_id()
 
+    sink.start(
+        call_id=call_id,
+        call_phase=call_phase,
+        round_num=round_num,
+        configured_model=model,
+        prompt_chars=prompt_chars,
+        truncated=truncated,
+    )
+
+    transport: str
     if model in RESPONSES_API_MODELS:
+        transport = "responses_api"
         call = dispatch_responses_api(
             prompt=prompt,
             model=model,
@@ -1322,6 +1421,7 @@ def run_red_team(
             env=env,
         )
     else:
+        transport = "codex_cli"
         call = dispatch_codex(
             prompt=prompt,
             model=model,
@@ -1332,6 +1432,28 @@ def run_red_team(
 
     rates = _resolve_rates(model, model_rates)
     cost_usd = _cost_for(call.input_tokens, call.output_tokens, rates)
+    sink.end(
+        CallTelemetryRecord(
+            call_id=call_id,
+            call_phase=call_phase,
+            round_num=round_num,
+            configured_model=model,
+            # ``actual_model`` differs from ``configured_model`` only if a
+            # downstream layer fell back; today both transports honor the
+            # configured ID, so they match. Tracked separately so the
+            # invariant is observable when fallback paths grow.
+            actual_model=model,
+            transport=transport,
+            prompt_chars=prompt_chars,
+            truncated=truncated,
+            input_tokens=call.input_tokens,
+            output_tokens=call.output_tokens,
+            duration_s=call.duration_s,
+            cost_usd=cost_usd,
+            error=call.error,
+            request_id=None,
+        )
+    )
 
     if call.error is not None:
         return RedTeamResult(
