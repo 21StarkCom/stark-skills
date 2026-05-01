@@ -70,6 +70,157 @@ _RESPONSES_API_URL = "https://api.openai.com/v1/responses"
 _RESPONSES_API_DEFAULT_MAX_OUTPUT_TOKENS = 32768
 
 
+_VALID_FAILURE_MODES: frozenset[str] = frozenset({
+    "data-loss",
+    "availability",
+    "cost",
+    "security",
+    "correctness",
+    "compliance",
+    "performance",
+    "operability",
+})
+
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _slugify(value: str, max_len: int = 64) -> str:
+    """Normalize a free-text string to a deterministic slug.
+
+    Used for `risk_key` and `affected_component` so two different wordings of
+    the same identity collapse to the same slug. ``"Schema migration"`` and
+    ``"schema-migration"`` both become ``"schema-migration"``.
+    """
+    slug = _SLUG_RE.sub("-", (value or "").lower()).strip("-")
+    return slug[:max_len]
+
+
+def _normalize_concern(text: str) -> str:
+    """Lowercase + collapse whitespace for stable hashing.
+
+    Two phrasings that differ only in case or whitespace produce the same
+    ``concern_hash``. Bigger semantic differences are still captured by the
+    structured ``risk_key``/``affected_component``/``failure_mode`` triple.
+    """
+    return " ".join((text or "").lower().split())
+
+
+def compute_concern_hash(
+    persona: str,
+    risk_key: str | None,
+    affected_component: str | None,
+    concern: str,
+    failure_mode: str | None = None,
+) -> str:
+    """SHA-256 fingerprint of a finding's stable identity (FU-rt5 + FU-rt7).
+
+    Two paths, picked based on structured-identity availability:
+
+    1. **Structured-identity path:** when ``risk_key`` is set, the hash is
+       ``persona|risk_key|affected_component|failure_mode`` — concern prose
+       is deliberately NOT in the hash. The same risk re-surfaced in different
+       wording produces the same fingerprint, which is what FU-rt5's
+       "structured fields are the identity" promises and what makes cross-run
+       acceptance work even when the model rewords. ``failure_mode`` is
+       included so two findings on the same component but different failure
+       categories (data-loss vs compliance, say) do not collide on the
+       accept key (PR-#430 round-3 review finding #10).
+    2. **Back-compat path:** when ``risk_key`` is absent (legacy pre-FU-rt5
+       producers), fall back to ``persona|normalized_concern``. Without
+       structured fields, the prose is the only signal we have; collapsing
+       on persona alone would mute every future finding from the same
+       persona once one was accepted.
+
+    PR #430 review finding #12 strengthened the structured-path test to
+    cover genuinely different rephrasings of the same risk.
+    """
+    if risk_key:
+        canonical = "|".join([
+            persona or "",
+            risk_key,
+            affected_component or "",
+            failure_mode or "",
+        ])
+    else:
+        canonical = "|".join([
+            persona or "",
+            "",
+            affected_component or "",
+            _normalize_concern(concern),
+        ])
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+def compute_stable_key(
+    *,
+    run_id: str,
+    stage: str,
+    round_num: int,
+    persona: str,
+    finding_id: str,
+    concern_hash: str,
+) -> str:
+    """Build the canonical stable AUDIT key for one finding occurrence.
+
+    Format: ``{run_id}:{stage}:{round_num}:{persona}:{finding_id}:{concern_hash}``.
+    Identifies one specific occurrence in audit rows / PR-comment anchors so a
+    reviewer can copy a key and have it pin to that exact row. The trailing
+    ``concern_hash`` is what makes the audit key collision-resistant across
+    reruns where the model may renumber slot-3 with a different concern
+    (FU-rt7).
+
+    For human-review halt recovery (FU-rt8), use :func:`compute_accept_key`
+    instead — the audit key embeds run / round / finding-id slot fields that
+    are not stable across reruns.
+    """
+    return f"{run_id}:{stage}:{round_num}:{persona}:{finding_id}:{concern_hash}"
+
+
+def compute_accept_key(
+    *,
+    stage: str,
+    persona: str,
+    concern_hash: str,
+    repo: str | None = None,
+) -> str:
+    """Build the cross-run ACCEPT key for human-review halt recovery (FU-rt8).
+
+    Format: ``{repo}:{stage}:{persona}:{concern_hash}``. Drops ``run_id``,
+    ``round_num``, and ``finding_id`` so the same risk surfaced under a
+    fresh run / new finding-id slot still matches an operator's prior
+    acceptance. ``concern_hash`` already carries the structured identity
+    (persona + risk_key + affected_component + failure_mode, see
+    :func:`compute_concern_hash`), so a finding that has the same hash IS
+    the same concern by FU-rt5's definition.
+
+    PR-#430 review fix #10: repo prefix added so accepting a concern in
+    one repository cannot silently suppress a matching halt in a different
+    repository (the audit DB is shared across the operator's full
+    workspace).
+
+    PR-#430 round-3 review fix #21: refuse to construct an accept key when
+    ``repo`` is unresolved (``None``, empty, or the legacy ``"unknown"``
+    sentinel produced by :func:`build_run_context` on git failure). The
+    earlier fallback to a single literal ``"unknown"`` prefix collapsed
+    every unresolved-repo run on every machine into one shared accept
+    namespace — an accept from operator A's broken-git checkout could then
+    suppress a halt in operator B's checkout. A round-2 cwd-hash fallback
+    swapped the cross-machine collision for ambient ``os.getcwd()``
+    dependency, which made the key non-deterministic across the same
+    operator's terminals (round-3 review). Failing closed instead lets
+    the operator fix repo resolution explicitly before any accept is
+    persisted.
+    """
+    if not repo or repo == "unknown":
+        raise ValueError(
+            "compute_accept_key requires a resolved repository identifier; "
+            f"got {repo!r}. Accept keys are repo-scoped to prevent cross-repo "
+            "collisions; fix repo detection (e.g., run inside the target git "
+            "checkout, or pass --repo) before accepting human-review halts."
+        )
+    return f"{repo}:{stage}:{persona}:{concern_hash}"
+
+
 @dataclass
 class RedTeamFinding:
     """One finding from one persona in one round."""
@@ -82,6 +233,16 @@ class RedTeamFinding:
     counter_proposal: str
     trade_off: str | None
     reason_for_uncertainty: str | None
+    # FU-rt5 — Structured fields. Optional during the prompt-rollout window;
+    # once prompts in production routinely emit them, validate_findings will
+    # promote these to required for non-human-review findings.
+    risk_key: str | None = None
+    affected_component: str | None = None
+    failure_mode: str | None = None
+    # FU-rt7 — Stable identity. Computed from persona + structured fields +
+    # normalized concern text by ``validate_findings``; never read from the
+    # model. Two reruns of the same risk produce identical hashes.
+    concern_hash: str = ""
 
 
 @dataclass
@@ -591,6 +752,28 @@ def validate_fix_plan(
         return _empty_fix_plan(error=f"fix-plan validation error: {exc}", warnings=warnings)
 
 
+def _extract_structured_field(raw: dict[str, Any], key: str) -> str | None:
+    """Read an optional structured field, slugifying free-text values.
+
+    Returns ``None`` for missing/empty/non-string values so callers can
+    distinguish "model omitted this field" (back-compat path) from "model
+    provided a slug" (FU-rt5 stability gate path).
+    """
+    value = raw.get(key)
+    if not isinstance(value, str):
+        return None
+    slug = _slugify(value)
+    return slug or None
+
+
+def _extract_failure_mode(raw: dict[str, Any]) -> str | None:
+    value = raw.get("failure_mode")
+    if not isinstance(value, str):
+        return None
+    slug = _slugify(value)
+    return slug if slug in _VALID_FAILURE_MODES else None
+
+
 def validate_findings(raw_findings: list[dict[str, Any]]) -> list[RedTeamFinding]:
     """Convert raw dicts to RedTeamFinding, dropping invalid entries.
 
@@ -601,6 +784,13 @@ def validate_findings(raw_findings: list[dict[str, Any]]) -> list[RedTeamFinding
     - Either (a) concrete counter_proposal + trade_off (string), or
              (b) counter_proposal == REQUEST_HUMAN_REVIEW + reason_for_uncertainty (string)
     - Invalid entries are silently dropped
+
+    Optional structured fields (FU-rt5): ``risk_key``, ``affected_component``,
+    ``failure_mode``. These flow through when present (slugified) and feed the
+    stability gate's structured-overlap check; absent values fall back to the
+    Jaccard concern-text gate. ``concern_hash`` is always computed from
+    persona + structured fields + normalized concern text and stamped on the
+    finding for downstream stable-key composition (FU-rt7).
     """
     out: list[RedTeamFinding] = []
     for raw in raw_findings:
@@ -621,6 +811,17 @@ def validate_findings(raw_findings: list[dict[str, Any]]) -> list[RedTeamFinding
         if any(not isinstance(raw.get(k), str) or not raw.get(k) for k in required_strs):
             continue
 
+        risk_key = _extract_structured_field(raw, "risk_key")
+        affected_component = _extract_structured_field(raw, "affected_component")
+        failure_mode = _extract_failure_mode(raw)
+        concern_hash = compute_concern_hash(
+            persona=persona,
+            risk_key=risk_key,
+            affected_component=affected_component,
+            concern=raw["concern"],
+            failure_mode=failure_mode,
+        )
+
         if counter_proposal == REQUEST_HUMAN_REVIEW:
             reason = raw.get("reason_for_uncertainty")
             if not isinstance(reason, str) or not reason:
@@ -634,6 +835,10 @@ def validate_findings(raw_findings: list[dict[str, Any]]) -> list[RedTeamFinding
                 counter_proposal=REQUEST_HUMAN_REVIEW,
                 trade_off=None,
                 reason_for_uncertainty=reason,
+                risk_key=risk_key,
+                affected_component=affected_component,
+                failure_mode=failure_mode,
+                concern_hash=concern_hash,
             ))
         else:
             trade_off = raw.get("trade_off")
@@ -648,6 +853,10 @@ def validate_findings(raw_findings: list[dict[str, Any]]) -> list[RedTeamFinding
                 counter_proposal=counter_proposal,
                 trade_off=trade_off,
                 reason_for_uncertainty=None,
+                risk_key=risk_key,
+                affected_component=affected_component,
+                failure_mode=failure_mode,
+                concern_hash=concern_hash,
             ))
     return out
 
@@ -705,18 +914,59 @@ def _jaccard(a: set[str], b: set[str]) -> float:
     return len(a & b) / len(a | b)
 
 
+def _structured_overlap(fa: RedTeamFinding, fb: RedTeamFinding) -> bool:
+    """Two findings overlap iff they share persona + the full structured triple.
+
+    The structured triple ``(risk_key, affected_component, failure_mode)``
+    carries the risk identity. PR-#430 review (#6) tightened this from
+    "match on risk_key alone" to "match on the full triple": two
+    findings from the same persona with the same generic ``risk_key``
+    (e.g. ``security-issue``) but different ``affected_component`` /
+    ``failure_mode`` were being reported as stably-blocking when they were
+    in fact unrelated. Persona is checked at the call site so we don't
+    re-test it here, but we do guard against partial-identity cases.
+    """
+    if fa.persona != fb.persona:
+        return False
+    if not fa.risk_key or fa.risk_key != fb.risk_key:
+        return False
+    if not fa.affected_component or fa.affected_component != fb.affected_component:
+        return False
+    # ``failure_mode`` may be None for legacy producers. Match if both
+    # populated; treat one-sided None as a match (the triple's risk_key +
+    # component already pin the identity).
+    if fa.failure_mode and fb.failure_mode and fa.failure_mode != fb.failure_mode:
+        return False
+    return True
+
+
+def _has_structured_identity(f: RedTeamFinding) -> bool:
+    """A finding has structured identity if at least ``risk_key`` is set.
+
+    ``affected_component`` alone isn't enough — two unrelated risks against
+    the same component would falsely match.
+    """
+    return bool(f.risk_key)
+
+
 def _overlap(
     rt_a: "RedTeamResult",
     rt_b: "RedTeamResult",
     jaccard_min: float = 0.4,
 ) -> bool:
-    """Return True iff at least one blocking finding in each output shares
-    the same persona and has a concern text Jaccard >= jaccard_min.
+    """Return True iff at least one blocking finding pair overlaps stably.
 
-    Used by the stability check (rt2 + rt_b2). Two calls that find overlapping
-    blocking findings under this definition are considered stably-blocking;
-    calls that don't overlap are treated as flicker and the round is
-    downgraded to advisory.
+    Stability test, in order of preference (FU-rt5):
+
+    1. **Structured-fields path:** if both findings have ``risk_key``,
+       require persona + structured-identity match (``_structured_overlap``).
+       This is the canonical path once prompts emit structured fields.
+    2. **Jaccard fallback:** if either finding lacks structured identity
+       (back-compat with v1 outputs and the prompt-rollout window), fall
+       back to persona + concern-text Jaccard ≥ ``jaccard_min``.
+
+    Calls that overlap under one of these tests are stably blocking; calls
+    that don't are treated as flicker and the round is downgraded to advisory.
     """
     blocking_a = [f for f in rt_a.findings if not is_human_review(f)
                   and SEVERITY_RANK.get(f.severity, 0) >= SEVERITY_RANK["high"]]
@@ -726,12 +976,14 @@ def _overlap(
         return False
 
     for fa in blocking_a:
-        tok_a = _tokenize(fa.concern)
         for fb in blocking_b:
             if fa.persona != fb.persona:
                 continue
-            tok_b = _tokenize(fb.concern)
-            if _jaccard(tok_a, tok_b) >= jaccard_min:
+            if _has_structured_identity(fa) and _has_structured_identity(fb):
+                if _structured_overlap(fa, fb):
+                    return True
+                continue
+            if _jaccard(_tokenize(fa.concern), _tokenize(fb.concern)) >= jaccard_min:
                 return True
     return False
 
@@ -745,6 +997,10 @@ class CodexCallResult:
     input_tokens: int
     output_tokens: int
     error: str | None = None
+    # FU-rt11 — Responses API ``id`` field (present only on the HTTP path).
+    # Threaded through into ``CallTelemetryRecord`` so an operator paging
+    # through telemetry can correlate against OpenAI-side logs / dashboards.
+    request_id: str | None = None
 
 
 def _parse_codex_jsonl_tokens(raw: str) -> tuple[int, int]:
@@ -802,8 +1058,19 @@ def dispatch_codex(
     cwd: str | None,
     timeout_s: int,
     env: dict[str, str] | None = None,
+    *,
+    sandbox: bool = True,
 ) -> CodexCallResult:
-    """Run codex with the given model override. Returns CodexCallResult."""
+    """Run codex with the given model override. Returns CodexCallResult.
+
+    When ``sandbox=True`` (the FU-rt1 default), the codex subprocess runs
+    from an empty temp directory with a scrubbed env. This contains the
+    blast radius if attacker-controlled artifact / spec / PR-diff text in
+    the prompt manages to coax codex into a tool call: there's no repo
+    to read, no secrets to exfiltrate, and codex's own ``-s read-only``
+    flag still blocks writes. Pass ``sandbox=False`` only for paths that
+    have already isolated cwd / env upstream.
+    """
     t0 = time.time()
     cmd = [
         "codex",
@@ -818,6 +1085,71 @@ def dispatch_codex(
         "read-only",
         "-",
     ]
+
+    if sandbox:
+        from red_team_sandbox import (
+            isolate_workdir,
+            scrub_env,
+            synthetic_home,
+            wrap_command,
+        )
+
+        scrubbed_env = scrub_env(env)
+        wrapped_cmd = wrap_command(cmd)
+        # Pair the env scrub with a synthetic ``$HOME`` containing only a
+        # symlink to ``~/.codex`` so codex auth still works while
+        # everything else under the operator's real home stays unreachable
+        # from the attacker-influenced child (PR-#430 round-3 review fix
+        # #7).
+        with isolate_workdir() as tmp, synthetic_home() as fake_home:
+            scrubbed_env["HOME"] = str(fake_home)
+            try:
+                proc = subprocess.run(
+                    wrapped_cmd,
+                    input=prompt,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_s,
+                    cwd=str(tmp),
+                    env=scrubbed_env,
+                )
+            except subprocess.TimeoutExpired:
+                return CodexCallResult(
+                    raw_output="",
+                    duration_s=time.time() - t0,
+                    input_tokens=0,
+                    output_tokens=0,
+                    error=f"codex timeout after {timeout_s}s",
+                )
+            except (OSError, FileNotFoundError) as exc:
+                return CodexCallResult(
+                    raw_output="",
+                    duration_s=time.time() - t0,
+                    input_tokens=0,
+                    output_tokens=0,
+                    error=f"codex dispatch error: {exc}",
+                )
+
+            duration = time.time() - t0
+            if proc.returncode != 0:
+                return CodexCallResult(
+                    raw_output=proc.stdout or "",
+                    duration_s=duration,
+                    input_tokens=0,
+                    output_tokens=0,
+                    error=f"codex exit {proc.returncode}: {(proc.stderr or '').strip()[:400]}",
+                )
+
+            in_tokens, out_tokens = _parse_codex_jsonl_tokens(proc.stdout or "")
+            raw_text = _extract_codex_assistant_text(proc.stdout or "")
+            return CodexCallResult(
+                raw_output=raw_text,
+                duration_s=duration,
+                input_tokens=in_tokens,
+                output_tokens=out_tokens,
+                error=None,
+            )
+
     try:
         proc = subprocess.run(
             cmd,
@@ -1053,7 +1385,8 @@ def dispatch_responses_api(
             error="responses api returned non-object payload",
         )
 
-    usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
+    raw_usage = payload.get("usage")
+    usage: dict[str, Any] = raw_usage if isinstance(raw_usage, dict) else {}
     # output_tokens already includes reasoning tokens; do NOT add
     # output_tokens_details.reasoning_tokens or we'd double-count cost.
     # Coerce defensively — schema drift (string instead of int) shouldn't
@@ -1068,6 +1401,10 @@ def dispatch_responses_api(
     out_tokens = _safe_int(usage.get("output_tokens"))
 
     text = _extract_responses_text(payload)
+    # FU-rt11 (PR #430 review #20) — capture the Responses-API ``id`` so
+    # downstream telemetry can correlate against OpenAI-side logs.
+    raw_request_id = payload.get("id")
+    request_id = raw_request_id if isinstance(raw_request_id, str) and raw_request_id else None
     status = payload.get("status")
     if isinstance(status, str) and status != "completed":
         # Provider error objects can echo rejected prompt content into
@@ -1084,6 +1421,7 @@ def dispatch_responses_api(
             input_tokens=in_tokens,
             output_tokens=out_tokens,
             error=f"responses api status {status}{code_suffix}",
+            request_id=request_id,
         )
 
     return CodexCallResult(
@@ -1092,6 +1430,7 @@ def dispatch_responses_api(
         input_tokens=in_tokens,
         output_tokens=out_tokens,
         error=None,
+        request_id=request_id,
     )
 
 
@@ -1109,6 +1448,83 @@ def _cost_for(input_tokens: int, output_tokens: int, rates: dict[str, float]) ->
     ) / 1_000_000
 
 
+@dataclass
+class CallTelemetryRecord:
+    """One call's measurable footprint, for FU-rt11 telemetry sinks.
+
+    The orchestrator-facing ``CallTelemetrySink`` receives this on every
+    dispatched call (primary, verification, regen, inner-review, fix-plan).
+    Fields are the union of what cost/budget forensics, transport-fallback
+    detection, and Responses-API correlation need.
+    """
+
+    call_id: str
+    call_phase: str  # primary | verification | regeneration | inner_review | fix_plan
+    round_num: int
+    configured_model: str
+    actual_model: str  # post-fallback (codex-CLI may swap)
+    transport: str  # "responses_api" | "codex_cli"
+    prompt_chars: int
+    truncated: bool
+    input_tokens: int
+    output_tokens: int
+    duration_s: float
+    cost_usd: float
+    error: str | None
+    request_id: str | None  # Responses-API id when available
+
+
+class CallTelemetrySink:
+    """Hook surface injected by the orchestrator. Default = no-op.
+
+    Two methods, fired around each call:
+
+    - ``start(call_id, call_phase, round_num, configured_model, prompt_chars,
+      truncated)``
+    - ``end(record)`` with the populated :class:`CallTelemetryRecord`
+
+    A live implementation translates these into ``red_team_call_start`` /
+    ``red_team_call_end`` insight events; the in-tree default is silent so
+    unit tests that build ``RedTeamRunContext`` without a telemetry hook
+    don't break.
+    """
+
+    def start(
+        self,
+        *,
+        call_id: str,
+        call_phase: str,
+        round_num: int,
+        configured_model: str,
+        prompt_chars: int,
+        truncated: bool,
+    ) -> None:  # pragma: no cover - default no-op
+        del call_id, call_phase, round_num, configured_model, prompt_chars, truncated
+
+    def end(self, record: CallTelemetryRecord) -> None:  # pragma: no cover
+        del record
+
+
+_NULL_TELEMETRY = CallTelemetrySink()
+
+
+def _new_call_id() -> str:
+    """Short opaque ID for one dispatch call. Used to pair start/end events."""
+    import uuid
+    return uuid.uuid4().hex[:12]
+
+
+def _prompt_was_truncated(prompt: str) -> bool:
+    """Heuristic: ``_wrap_input`` injects a ``[TRUNCATED to N chars]`` marker
+    into any block that exceeded the cap. Presence of that marker means the
+    prompt was truncated *somewhere*.
+
+    Used by FU-rt11 telemetry so an operator triaging a flicker / bad result
+    can see at a glance whether the relevant artifact made it into the call.
+    """
+    return "[TRUNCATED to " in prompt
+
+
 def run_red_team(
     stage: str,
     artifact: str,
@@ -1123,11 +1539,19 @@ def run_red_team(
     max_input_chars: int,
     round_num: int = 1,
     env: dict[str, str] | None = None,
+    telemetry: CallTelemetrySink | None = None,
+    call_phase: str = "primary",
 ) -> RedTeamResult:
     """Run one red-team call. Returns a RedTeamResult.
 
     Does not retry — the orchestrator handles retry policy.
+
+    The optional ``telemetry`` sink fires per-call ``start`` / ``end`` events
+    around dispatch. ``call_phase`` lets the orchestrator label primary vs.
+    verification vs. regeneration vs. inner-review without changing the
+    return shape (FU-rt11).
     """
+    sink = telemetry or _NULL_TELEMETRY
     prompt = assemble_prompt(
         stage=stage,
         personas=personas,
@@ -1136,8 +1560,22 @@ def run_red_team(
         pr_diff=pr_diff,
         max_input_chars=max_input_chars,
     )
+    prompt_chars = len(prompt)
+    truncated = _prompt_was_truncated(prompt)
+    call_id = _new_call_id()
 
+    sink.start(
+        call_id=call_id,
+        call_phase=call_phase,
+        round_num=round_num,
+        configured_model=model,
+        prompt_chars=prompt_chars,
+        truncated=truncated,
+    )
+
+    transport: str
     if model in RESPONSES_API_MODELS:
+        transport = "responses_api"
         call = dispatch_responses_api(
             prompt=prompt,
             model=model,
@@ -1145,6 +1583,7 @@ def run_red_team(
             env=env,
         )
     else:
+        transport = "codex_cli"
         call = dispatch_codex(
             prompt=prompt,
             model=model,
@@ -1155,6 +1594,30 @@ def run_red_team(
 
     rates = _resolve_rates(model, model_rates)
     cost_usd = _cost_for(call.input_tokens, call.output_tokens, rates)
+    sink.end(
+        CallTelemetryRecord(
+            call_id=call_id,
+            call_phase=call_phase,
+            round_num=round_num,
+            configured_model=model,
+            # ``actual_model`` differs from ``configured_model`` only if a
+            # downstream layer fell back; today both transports honor the
+            # configured ID, so they match. Tracked separately so the
+            # invariant is observable when fallback paths grow.
+            actual_model=model,
+            transport=transport,
+            prompt_chars=prompt_chars,
+            truncated=truncated,
+            input_tokens=call.input_tokens,
+            output_tokens=call.output_tokens,
+            duration_s=call.duration_s,
+            cost_usd=cost_usd,
+            error=call.error,
+            # FU-rt11: Responses API attaches an ``id`` to every payload;
+            # codex-CLI dispatch leaves this None.
+            request_id=call.request_id,
+        )
+    )
 
     if call.error is not None:
         return RedTeamResult(
@@ -1262,6 +1725,7 @@ def run_red_team_fix_plan(
     challenge_findings: list[RedTeamFinding],
     synthesis: str,
     challenge_cost_usd: float,
+    telemetry: CallTelemetrySink | None = None,
 ) -> RedTeamFixPlan:
     """Run one fix-plan attempt for blocking challenge findings.
 
@@ -1269,8 +1733,13 @@ def run_red_team_fix_plan(
     same filtered findings before deciding whether to dispatch. This function
     repeats that single serialization decision internally so direct callers get
     identical skip/error behavior and prompt contents.
+
+    The optional ``telemetry`` sink fires per-call ``start`` / ``end`` events
+    with ``call_phase="fix_plan"`` around the Responses-API dispatch (PR #430
+    review fix for FU-rt11 finding #19).
     """
     del challenge_cost_usd  # Cost budget handling is a dispatcher concern.
+    sink = telemetry or _NULL_TELEMETRY
     fix_cfg = ctx.cfg_red_team.get("fix_plan", {})
     model = str(fix_cfg.get("model", ""))
     reasoning_effort = str(fix_cfg.get("reasoning_effort", ""))
@@ -1306,6 +1775,17 @@ def run_red_team_fix_plan(
         synthesis=synthesis,
         max_input_chars=max_input_chars,
     )
+    call_id = _new_call_id()
+    prompt_chars = len(prompt)
+    truncated = _prompt_was_truncated(prompt)
+    sink.start(
+        call_id=call_id,
+        call_phase="fix_plan",
+        round_num=0,
+        configured_model=model,
+        prompt_chars=prompt_chars,
+        truncated=truncated,
+    )
     call = dispatch_responses_api(
         prompt=prompt,
         model=model,
@@ -1316,6 +1796,24 @@ def run_red_team_fix_plan(
     )
     rates = _resolve_rates(model, ctx.model_rates)
     cost_usd = _cost_for(call.input_tokens, call.output_tokens, rates)
+    sink.end(
+        CallTelemetryRecord(
+            call_id=call_id,
+            call_phase="fix_plan",
+            round_num=0,
+            configured_model=model,
+            actual_model=model,
+            transport="responses_api",
+            prompt_chars=prompt_chars,
+            truncated=truncated,
+            input_tokens=call.input_tokens,
+            output_tokens=call.output_tokens,
+            duration_s=call.duration_s,
+            cost_usd=cost_usd,
+            error=call.error,
+            request_id=call.request_id,
+        )
+    )
     if call.error is not None:
         return _empty_fix_plan(
             error=call.error,

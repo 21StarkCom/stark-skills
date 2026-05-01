@@ -13,7 +13,7 @@ from typing import Any
 
 import stark_red_team as rt
 
-_DEDUPE_PREFIXES = {"run", "finding", "fix_plan"}
+_DEDUPE_PREFIXES = {"run", "finding", "fix_plan", "call"}
 
 
 def make_dedupe_key(
@@ -23,6 +23,8 @@ def make_dedupe_key(
     run_id: str,
     round_num: int | None = None,
     finding_id: str | None = None,
+    call_id: str | None = None,
+    phase: str | None = None,
 ) -> str:
     """Return the canonical red-team insights dedupe key."""
     if kind not in _DEDUPE_PREFIXES:
@@ -31,6 +33,13 @@ def make_dedupe_key(
         if round_num is None or not finding_id:
             raise ValueError("finding dedupe key requires round_num and finding_id")
         return f"red-team:finding:{stage}:{run_id}:{round_num}:{finding_id}"
+    if kind == "call":
+        # Per-call dedupe key (FU-rt11). ``call_id`` is unique per orchestrator
+        # invocation; ``phase`` discriminates start vs. end so a single call
+        # can emit both events without collision.
+        if not call_id or not phase:
+            raise ValueError("call dedupe key requires call_id and phase")
+        return f"red-team:call:{stage}:{run_id}:{call_id}:{phase}"
     if kind in {"run", "fix_plan"} and (round_num is not None or finding_id is not None):
         raise ValueError(f"{kind} dedupe key does not accept round_num or finding_id")
     return f"red-team:{kind}:{stage}:{run_id}"
@@ -60,6 +69,8 @@ def build_run_envelope(
     fix_plan_status: str | None,
     warnings: list[str] | None,
     started_at_iso: str,
+    round_outcomes: list[dict[str, Any]] | None = None,
+    terminal_transition: str | None = None,
 ) -> dict[str, Any]:
     repo_label = repo or "unknown"
     payload = {
@@ -84,6 +95,15 @@ def build_run_envelope(
         "pr_number": pr_number,
         "fix_plan_status": fix_plan_status,
         "warnings": list(warnings or []),
+        # FU-rt4 — named transition log. Each entry is one round outcome;
+        # ``terminal_transition`` is the labelled exit edge (terminate.clean,
+        # terminate.cost_budget_exhausted, …). PR-#430 round-3 review fix
+        # #13: the loop used to compute these, then immediately ``del``ete
+        # them, so the audit / JSON / metrics surface couldn't tell why a
+        # run halted vs. exited cleanly. Surfacing them here keeps the
+        # state-machine semantics observable downstream.
+        "round_outcomes": list(round_outcomes or []),
+        "terminal_transition": terminal_transition,
     }
     return _envelope(
         "red_team_run",
@@ -104,13 +124,24 @@ def build_finding_envelope(
     finding_id: str,
     persona: str,
     severity: str,
-    concern: str,
-    consequence: str,
+    concern: str | None,
+    consequence: str | None,
     counter_proposal: str,
     trade_off: str | None,
     reason_for_uncertainty: str | None,
     is_human_review: bool,
     timestamp_iso: str,
+    stable_key: str = "",
+    concern_hash: str = "",
+    risk_key: str | None = None,
+    affected_component: str | None = None,
+    failure_mode: str | None = None,
+    retention_mode: str = "full",
+    concern_excerpt_hash: str | None = None,
+    consequence_excerpt_hash: str | None = None,
+    counter_proposal_excerpt_hash: str | None = None,
+    trade_off_excerpt_hash: str | None = None,
+    reason_for_uncertainty_excerpt_hash: str | None = None,
 ) -> dict[str, Any]:
     repo_label = repo or "unknown"
     payload = {
@@ -120,11 +151,37 @@ def build_finding_envelope(
         "finding_id": finding_id,
         "persona": persona,
         "severity": severity,
+        # FU-rt7 — stable_key + concern_hash anchor this finding to the same
+        # identity as the audit row, the PR-comment anchor, and the CLI
+        # accept-flag input. Empty string is the back-compat fallback when an
+        # older producer hasn't been re-deployed.
+        "stable_key": stable_key,
+        "concern_hash": concern_hash,
+        # FU-rt5 — structured identity. Null when the model-output rollout
+        # hasn't reached this producer yet.
+        "risk_key": risk_key,
+        "affected_component": affected_component,
+        "failure_mode": failure_mode,
+        # FU-rt6 retention — when ``retention_mode == "excerpt"`` (default),
+        # the free-text fields below carry a redacted excerpt rather than
+        # the verbatim model output, and the SHA-256 of the original text
+        # rides alongside in ``*_excerpt_hash`` so two reruns of the same
+        # concern still match by hash without re-disclosing the text.
+        # PR-#430 round-3 review fix #20: the durable metrics queue used to
+        # ignore retention and embed the original full text regardless,
+        # which silently bypassed the excerpt default and turned the
+        # metrics surface into a sensitive-document store.
+        "retention_mode": retention_mode,
         "concern": concern,
         "consequence": consequence,
         "counter_proposal": counter_proposal,
         "trade_off": trade_off,
         "reason_for_uncertainty": reason_for_uncertainty,
+        "concern_excerpt_hash": concern_excerpt_hash,
+        "consequence_excerpt_hash": consequence_excerpt_hash,
+        "counter_proposal_excerpt_hash": counter_proposal_excerpt_hash,
+        "trade_off_excerpt_hash": trade_off_excerpt_hash,
+        "reason_for_uncertainty_excerpt_hash": reason_for_uncertainty_excerpt_hash,
         "is_human_review": is_human_review,
         "repo": repo_label,
         "pr_number": pr_number,
@@ -209,6 +266,8 @@ def emit_run(
     model: str,
     fix_plan_status: str | None,
     run_warnings: list[str] | None,
+    round_outcomes: list[dict[str, Any]] | None = None,
+    terminal_transition: str | None = None,
 ) -> None:
     """Best-effort enqueue of one ``red_team_run`` event.
 
@@ -216,6 +275,11 @@ def emit_run(
     after any ``--model`` override), NOT ``ctx.cfg_red_team['model']``. The
     audit row, sidecar, JSON output, and this event must agree on the
     model that actually ran.
+
+    ``round_outcomes`` and ``terminal_transition`` carry the FU-rt4 named
+    transition log up from the dispatcher's iterative loop so consumers
+    can tell, after the fact, whether a run exited via ``terminate.clean``
+    or ``terminate.cost_budget_exhausted``.
     """
     try:
         envelope = build_run_envelope(
@@ -241,6 +305,8 @@ def emit_run(
             fix_plan_status=fix_plan_status,
             warnings=run_warnings,
             started_at_iso=ctx.started_at_iso,
+            round_outcomes=round_outcomes,
+            terminal_transition=terminal_transition,
         )
         _enqueue(envelope, "red_team_run")
     except Exception as exc:  # pragma: no cover - defensive fail-open wrapper
@@ -253,8 +319,43 @@ def emit_finding(
     finding: rt.RedTeamFinding,
     round_num: int,
 ) -> None:
-    """Best-effort enqueue of one ``red_team_finding`` event."""
+    """Best-effort enqueue of one ``red_team_finding`` event.
+
+    PR-#430 round-3 review fix #20: free-text fields go through the same
+    FU-rt6 retention policy used for SQLite audit rows. Default is excerpt
+    mode, so the durable metrics queue no longer stores verbatim model
+    output for concern / consequence / counter_proposal / trade_off /
+    reason_for_uncertainty. ``retain_full_text=true`` opts back into full
+    text everywhere — audit DB and metrics queue stay aligned.
+    """
     try:
+        import red_team_audit_text
+
+        policy = red_team_audit_text.policy_from_config(
+            (ctx.cfg_red_team or {}).get("audit")
+        )
+        retained = {
+            "concern": red_team_audit_text.apply_to_field(finding.concern, policy),
+            "consequence": red_team_audit_text.apply_to_field(
+                finding.consequence, policy
+            ),
+            "counter_proposal": red_team_audit_text.apply_to_field(
+                finding.counter_proposal, policy
+            ),
+            "trade_off": red_team_audit_text.apply_to_field(finding.trade_off, policy),
+            "reason_for_uncertainty": red_team_audit_text.apply_to_field(
+                finding.reason_for_uncertainty, policy
+            ),
+        }
+
+        stable_key = rt.compute_stable_key(
+            run_id=ctx.run_id,
+            stage=ctx.stage,
+            round_num=round_num,
+            persona=finding.persona,
+            finding_id=finding.id,
+            concern_hash=finding.concern_hash,
+        )
         envelope = build_finding_envelope(
             run_id=ctx.run_id,
             stage=ctx.stage,
@@ -264,13 +365,26 @@ def emit_finding(
             finding_id=finding.id,
             persona=finding.persona,
             severity=finding.severity,
-            concern=finding.concern,
-            consequence=finding.consequence,
-            counter_proposal=finding.counter_proposal,
-            trade_off=finding.trade_off,
-            reason_for_uncertainty=finding.reason_for_uncertainty,
+            concern=retained["concern"].stored,
+            consequence=retained["consequence"].stored,
+            counter_proposal=(
+                retained["counter_proposal"].stored or finding.counter_proposal
+            ),
+            trade_off=retained["trade_off"].stored,
+            reason_for_uncertainty=retained["reason_for_uncertainty"].stored,
             is_human_review=rt.is_human_review(finding),
             timestamp_iso=ctx.started_at_iso,
+            stable_key=stable_key,
+            concern_hash=finding.concern_hash,
+            risk_key=finding.risk_key,
+            affected_component=finding.affected_component,
+            failure_mode=finding.failure_mode,
+            retention_mode=policy.mode,
+            concern_excerpt_hash=retained["concern"].hash,
+            consequence_excerpt_hash=retained["consequence"].hash,
+            counter_proposal_excerpt_hash=retained["counter_proposal"].hash,
+            trade_off_excerpt_hash=retained["trade_off"].hash,
+            reason_for_uncertainty_excerpt_hash=retained["reason_for_uncertainty"].hash,
         )
         _enqueue(envelope, "red_team_finding")
     except Exception as exc:  # pragma: no cover - defensive fail-open wrapper
@@ -316,6 +430,193 @@ def emit_fix_plan(
         _enqueue(envelope, "red_team_fix_plan")
     except Exception as exc:  # pragma: no cover - defensive fail-open wrapper
         print(f"  [!] Failed to emit red_team_fix_plan: {exc}", file=sys.stderr)
+
+
+# ---------------------------------------------------------------------------
+# FU-rt11 — Per-call telemetry
+# ---------------------------------------------------------------------------
+
+# Phase IDs used by the orchestrator. Pinned here so producer + consumer
+# (Looker / dashboards / cost forensics) share one vocabulary.
+CALL_PHASE_PRIMARY = "primary"
+CALL_PHASE_VERIFICATION = "verification"
+CALL_PHASE_REGENERATION = "regeneration"
+CALL_PHASE_INNER_REVIEW = "inner_review"
+CALL_PHASE_FIX_PLAN = "fix_plan"
+
+_VALID_CALL_PHASES: frozenset[str] = frozenset({
+    CALL_PHASE_PRIMARY,
+    CALL_PHASE_VERIFICATION,
+    CALL_PHASE_REGENERATION,
+    CALL_PHASE_INNER_REVIEW,
+    CALL_PHASE_FIX_PLAN,
+})
+
+
+def build_call_start_envelope(
+    *,
+    run_id: str,
+    stage: str,
+    repo: str | None,
+    pr_number: int | None,
+    call_id: str,
+    call_phase: str,
+    round_num: int,
+    configured_model: str,
+    prompt_chars: int,
+    truncated: bool,
+    cumulative_cost_usd: float,
+    per_run_budget_usd: float,
+    timestamp_iso: str,
+) -> dict[str, Any]:
+    """Emitted before every primary / verification / regen / review call.
+
+    Operators triaging "where did the budget go before halting?" need a
+    pre-call signal that records the as-attempted state — including the
+    cumulative cost going INTO this call and the truncation flag (the model
+    cap might have already silently dropped the most relevant artifact).
+    """
+    if call_phase not in _VALID_CALL_PHASES:
+        raise ValueError(f"invalid call_phase: {call_phase}")
+    repo_label = repo or "unknown"
+    payload = {
+        "run_id": run_id,
+        "stage": stage,
+        "call_id": call_id,
+        "call_phase": call_phase,
+        "round_num": round_num,
+        "configured_model": configured_model,
+        "prompt_chars": prompt_chars,
+        "truncated": truncated,
+        "cumulative_cost_usd": cumulative_cost_usd,
+        "per_run_budget_usd": per_run_budget_usd,
+        "budget_remaining_usd": max(0.0, per_run_budget_usd - cumulative_cost_usd),
+        "repo": repo_label,
+        "pr_number": pr_number,
+    }
+    return _envelope(
+        "red_team_call_start",
+        timestamp_iso=timestamp_iso,
+        repo=repo_label,
+        dedupe_key=make_dedupe_key(
+            "call",
+            stage=stage,
+            run_id=run_id,
+            call_id=call_id,
+            phase="start",
+        ),
+        payload=payload,
+    )
+
+
+def build_call_end_envelope(
+    *,
+    run_id: str,
+    stage: str,
+    repo: str | None,
+    pr_number: int | None,
+    call_id: str,
+    call_phase: str,
+    round_num: int,
+    configured_model: str,
+    actual_model: str,
+    transport: str,
+    prompt_chars: int,
+    truncated: bool,
+    input_tokens: int,
+    output_tokens: int,
+    duration_s: float,
+    cost_usd: float,
+    cumulative_cost_usd: float,
+    per_run_budget_usd: float,
+    error: str | None,
+    request_id: str | None,
+    timestamp_iso: str,
+) -> dict[str, Any]:
+    """Emitted after every primary / verification / regen / review call.
+
+    Pairs with ``red_team_call_start`` via ``call_id``. Records the actual
+    model that ran (``actual_model`` vs. ``configured_model``) so a silent
+    codex-CLI fallback to a different tier doesn't get lost in run-level
+    aggregates. The ``request_id`` field threads the Responses-API request
+    id when available so OpenAI-side support can correlate.
+    """
+    if call_phase not in _VALID_CALL_PHASES:
+        raise ValueError(f"invalid call_phase: {call_phase}")
+    repo_label = repo or "unknown"
+    cumulative_after = cumulative_cost_usd + cost_usd
+    payload = {
+        "run_id": run_id,
+        "stage": stage,
+        "call_id": call_id,
+        "call_phase": call_phase,
+        "round_num": round_num,
+        "configured_model": configured_model,
+        "actual_model": actual_model,
+        "transport": transport,
+        "prompt_chars": prompt_chars,
+        "truncated": truncated,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "duration_s": duration_s,
+        "cost_usd": cost_usd,
+        "cumulative_cost_usd": cumulative_after,
+        "per_run_budget_usd": per_run_budget_usd,
+        "budget_remaining_usd": max(0.0, per_run_budget_usd - cumulative_after),
+        "error": error,
+        "request_id": request_id,
+        "repo": repo_label,
+        "pr_number": pr_number,
+    }
+    return _envelope(
+        "red_team_call_end",
+        timestamp_iso=timestamp_iso,
+        repo=repo_label,
+        dedupe_key=make_dedupe_key(
+            "call",
+            stage=stage,
+            run_id=run_id,
+            call_id=call_id,
+            phase="end",
+        ),
+        payload=payload,
+    )
+
+
+def emit_call_start(
+    ctx: rt.RedTeamRunContext,
+    **kwargs: Any,
+) -> None:
+    """Best-effort enqueue of one ``red_team_call_start`` event."""
+    try:
+        envelope = build_call_start_envelope(
+            run_id=ctx.run_id,
+            stage=ctx.stage,
+            repo=ctx.repo,
+            pr_number=ctx.pr_number,
+            **kwargs,
+        )
+        _enqueue(envelope, "red_team_call_start")
+    except Exception as exc:  # pragma: no cover - defensive fail-open wrapper
+        print(f"  [!] Failed to emit red_team_call_start: {exc}", file=sys.stderr)
+
+
+def emit_call_end(
+    ctx: rt.RedTeamRunContext,
+    **kwargs: Any,
+) -> None:
+    """Best-effort enqueue of one ``red_team_call_end`` event."""
+    try:
+        envelope = build_call_end_envelope(
+            run_id=ctx.run_id,
+            stage=ctx.stage,
+            repo=ctx.repo,
+            pr_number=ctx.pr_number,
+            **kwargs,
+        )
+        _enqueue(envelope, "red_team_call_end")
+    except Exception as exc:  # pragma: no cover - defensive fail-open wrapper
+        print(f"  [!] Failed to emit red_team_call_end: {exc}", file=sys.stderr)
 
 
 def _envelope(

@@ -174,6 +174,23 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Dispatcher-only calibration override for red_team.fix_plan.enabled.",
     )
+    p.add_argument(
+        "--accept-red-team-human-review",
+        action="append",
+        default=[],
+        metavar="STABLE_KEY",
+        help=(
+            "Accept a human-review halt by stable key before running. May "
+            "be repeated. Each key triggers an interactive confirmation "
+            "unless --no-confirm is set. After acceptance, the matching "
+            "human-review finding will not halt this run or future runs."
+        ),
+    )
+    p.add_argument(
+        "--no-confirm",
+        action="store_true",
+        help="Skip the interactive accept confirmation (for scripted use).",
+    )
     return p
 
 
@@ -181,6 +198,26 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     design_path = Path(args.design).resolve()
     source_spec_path = Path(args.source_spec).resolve() if args.source_spec else None
+
+    # FU-rt8 — Accept any human-review halts before dispatching. Failed
+    # accepts (unknown key, non-human-review key) abort the run so the
+    # operator sees the error before paying for an LLM call.
+    #
+    # PR-#430 round-3 fix #5: route confirmation/match output to stderr so
+    # ``--accept-red-team-human-review ... --json`` still produces a single
+    # parseable JSON object on stdout.
+    if args.accept_red_team_human_review:
+        from red_team_accept import accept_one
+        for key in args.accept_red_team_human_review:
+            rc = accept_one(
+                key,
+                note=None,
+                accepted_by=None,
+                confirm=not args.no_confirm,
+                out=sys.stderr,
+            )
+            if rc != 0:
+                return rc
 
     out = run_dispatch(
         design_path=design_path,

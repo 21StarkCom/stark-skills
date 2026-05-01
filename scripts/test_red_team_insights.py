@@ -160,6 +160,8 @@ def test_build_run_envelope_matches_design_contract_field_by_field():
             "pr_number": 428,
             "fix_plan_status": "success",
             "warnings": [],
+            "round_outcomes": [],
+            "terminal_transition": None,
         },
     }
     _assert_schema_valid(envelope)
@@ -199,17 +201,118 @@ def test_build_finding_envelope_matches_design_contract_field_by_field():
             "finding_id": "rt3",
             "persona": "reliability-distsys",
             "severity": "high",
+            "stable_key": "",
+            "concern_hash": "",
+            "risk_key": None,
+            "affected_component": None,
+            "failure_mode": None,
+            "retention_mode": "full",
             "concern": "Producer events can drain before lifters accept them.",
             "consequence": "The queue dead-letters valid red-team telemetry.",
             "counter_proposal": "Split the deploy gate from the producer merge.",
             "trade_off": "Requires a deployment gate.",
             "reason_for_uncertainty": None,
+            "concern_excerpt_hash": None,
+            "consequence_excerpt_hash": None,
+            "counter_proposal_excerpt_hash": None,
+            "trade_off_excerpt_hash": None,
+            "reason_for_uncertainty_excerpt_hash": None,
             "is_human_review": False,
             "repo": "evinced/stark-skills",
             "pr_number": 428,
         },
     }
     _assert_schema_valid(envelope)
+
+
+def test_build_call_start_envelope_carries_budget_and_truncation_fields():
+    """FU-rt11: pre-call event captures cumulative cost + truncation flag."""
+    envelope = insights.build_call_start_envelope(
+        run_id="manual-abc123",
+        stage="design",
+        repo="evinced/stark-skills",
+        pr_number=428,
+        call_id="c1abcd",
+        call_phase=insights.CALL_PHASE_VERIFICATION,
+        round_num=2,
+        configured_model="gpt-5.5-pro",
+        prompt_chars=18000,
+        truncated=True,
+        cumulative_cost_usd=4.25,
+        per_run_budget_usd=15.00,
+        timestamp_iso=TS,
+    )
+    assert envelope["type"] == "red_team_call_start"
+    assert envelope["dedupe_key"] == "red-team:call:design:manual-abc123:c1abcd:start"
+    payload = envelope["payload"]
+    assert payload["call_phase"] == "verification"
+    assert payload["round_num"] == 2
+    assert payload["configured_model"] == "gpt-5.5-pro"
+    assert payload["prompt_chars"] == 18000
+    assert payload["truncated"] is True
+    assert payload["cumulative_cost_usd"] == 4.25
+    assert payload["per_run_budget_usd"] == 15.0
+    assert payload["budget_remaining_usd"] == 10.75
+
+
+def test_build_call_end_envelope_records_actual_model_and_transport():
+    """FU-rt11: end event captures actual_model post-fallback + transport."""
+    envelope = insights.build_call_end_envelope(
+        run_id="manual-abc123",
+        stage="design",
+        repo="evinced/stark-skills",
+        pr_number=428,
+        call_id="c1abcd",
+        call_phase=insights.CALL_PHASE_PRIMARY,
+        round_num=1,
+        configured_model="gpt-5.5-pro",
+        actual_model="gpt-5.5-pro",
+        transport="responses_api",
+        prompt_chars=18000,
+        truncated=False,
+        input_tokens=12000,
+        output_tokens=2400,
+        duration_s=18.4,
+        cost_usd=0.50,
+        cumulative_cost_usd=4.25,
+        per_run_budget_usd=15.00,
+        error=None,
+        request_id="resp_abc123",
+        timestamp_iso=TS,
+    )
+    assert envelope["type"] == "red_team_call_end"
+    assert envelope["dedupe_key"] == "red-team:call:design:manual-abc123:c1abcd:end"
+    payload = envelope["payload"]
+    assert payload["actual_model"] == "gpt-5.5-pro"
+    assert payload["transport"] == "responses_api"
+    assert payload["request_id"] == "resp_abc123"
+    assert payload["cost_usd"] == 0.50
+    # cumulative_cost_usd in the END event includes this call (4.25 + 0.50).
+    assert payload["cumulative_cost_usd"] == 4.75
+    assert payload["budget_remaining_usd"] == 10.25
+
+
+def test_build_call_envelope_rejects_unknown_phase():
+    try:
+        insights.build_call_start_envelope(
+            run_id="r",
+            stage="design",
+            repo="x",
+            pr_number=None,
+            call_id="c",
+            call_phase="not-a-phase",
+            round_num=1,
+            configured_model="m",
+            prompt_chars=0,
+            truncated=False,
+            cumulative_cost_usd=0,
+            per_run_budget_usd=0,
+            timestamp_iso=TS,
+        )
+    except ValueError as exc:
+        assert "invalid call_phase" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for unknown phase")
 
 
 def test_build_fix_plan_envelope_matches_design_contract_field_by_field():

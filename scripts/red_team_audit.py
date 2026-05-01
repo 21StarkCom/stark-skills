@@ -82,13 +82,24 @@ CREATE TABLE IF NOT EXISTS red_team_findings (
     trade_off TEXT,
     reason_for_uncertainty TEXT,
     version INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    -- v1.3 (FU-rt5 / FU-rt7): structured identity + stable key columns. New
+    -- rows always populate these; legacy rows have NULL.
+    stable_key TEXT,
+    concern_hash TEXT,
+    risk_key TEXT,
+    affected_component TEXT,
+    failure_mode TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_red_team_findings_run
     ON red_team_findings(run_id, round_num);
 CREATE INDEX IF NOT EXISTS idx_red_team_findings_persona
     ON red_team_findings(persona, severity);
+-- The stable_key index is created by ``_migrate_red_team_findings_v13`` AFTER
+-- the column-add migration runs, so legacy v1 tables (no ``stable_key``
+-- column yet) don't fail this script with "no such column" on the very
+-- first init pass (PR #430 review finding #14).
 """
 
 _RED_TEAM_RUNS_V12_COLUMNS = (
@@ -101,11 +112,30 @@ _RED_TEAM_RUNS_V12_COLUMNS = (
     ("fix_plan_cost_usd", "REAL"),
 )
 
+_RED_TEAM_FINDINGS_V13_COLUMNS = (
+    ("stable_key", "TEXT"),
+    ("concern_hash", "TEXT"),
+    ("risk_key", "TEXT"),
+    ("affected_component", "TEXT"),
+    ("failure_mode", "TEXT"),
+    # v1.3 (FU-rt6): hashed/excerpt mode of raw text retention. When the
+    # caller passes ``retain_full_text=False`` (default), concern/consequence/
+    # counter_proposal/trade_off/reason_for_uncertainty rows hold redacted
+    # excerpts and the SHA-256 of the original lives in *_hash columns.
+    ("concern_excerpt_hash", "TEXT"),
+    ("consequence_excerpt_hash", "TEXT"),
+    ("counter_proposal_excerpt_hash", "TEXT"),
+    ("trade_off_excerpt_hash", "TEXT"),
+    ("reason_for_uncertainty_excerpt_hash", "TEXT"),
+    ("retention_mode", "TEXT"),  # "full" | "excerpt"
+)
+
 
 def init_red_team_tables(db_path: str | Path = DEFAULT_DB_PATH) -> None:
     """Create and migrate the red_team tables if they don't exist."""
     audit_base.init_db(db_path, _CREATE_TABLES)
     _migrate_red_team_runs_v12(db_path)
+    _migrate_red_team_findings_v13(db_path)
 
 
 def _migrate_red_team_runs_v12(db_path: str | Path) -> None:
@@ -119,6 +149,35 @@ def _migrate_red_team_runs_v12(db_path: str | Path) -> None:
             if name not in existing:
                 conn.execute(f"ALTER TABLE red_team_runs ADD COLUMN {name} {decl}")
                 existing.add(name)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _migrate_red_team_findings_v13(db_path: str | Path) -> None:
+    """Add v1.3 red_team_findings columns one-by-one for idempotent recovery.
+
+    Covers the FU-rt5 structured-identity columns, the FU-rt7 stable_key, and
+    the FU-rt6 retention-mode + per-field excerpt-hash columns.
+    """
+    conn = audit_base.connect(db_path)
+    try:
+        existing = {
+            row[1] for row in conn.execute("PRAGMA table_info(red_team_findings)").fetchall()
+        }
+        for name, decl in _RED_TEAM_FINDINGS_V13_COLUMNS:
+            if name not in existing:
+                conn.execute(f"ALTER TABLE red_team_findings ADD COLUMN {name} {decl}")
+                existing.add(name)
+        try:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_red_team_findings_stable_key "
+                "ON red_team_findings(stable_key)"
+            )
+        except Exception:
+            # ALTER TABLE ... ADD COLUMN doesn't bring the original CREATE
+            # INDEX with it on legacy DBs; ignore if it already exists.
+            pass
         conn.commit()
     finally:
         conn.close()
@@ -199,6 +258,78 @@ def record_red_team_run(
         conn.close()
 
 
+_FINDING_INSERT_SQL = (
+    "INSERT INTO red_team_findings ("
+    "run_id, stage, round_num, finding_id, "
+    "persona, severity, concern, consequence, counter_proposal, "
+    "trade_off, reason_for_uncertainty, "
+    "stable_key, concern_hash, risk_key, affected_component, failure_mode, "
+    "concern_excerpt_hash, consequence_excerpt_hash, "
+    "counter_proposal_excerpt_hash, trade_off_excerpt_hash, "
+    "reason_for_uncertainty_excerpt_hash, retention_mode"
+    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+)
+
+
+def _resolve_audit_policy(policy: Any) -> Any:
+    """Lazy-resolve a retention policy without forcing module-load order.
+
+    Tests construct a policy directly; production callers pass ``None`` and
+    let the helper resolve via ``config_loader`` + ``red_team_audit_text``.
+    Importing those at module top would create an audit_base ↔ config_loader
+    cycle.
+    """
+    if policy is not None:
+        return policy
+    from config_loader import get_red_team_config
+    from red_team_audit_text import policy_from_config
+
+    return policy_from_config(get_red_team_config().get("audit"))
+
+
+def _finding_insert_row(f: dict[str, Any], policy: Any) -> tuple[Any, ...]:
+    """Apply retention policy + assemble one INSERT row tuple.
+
+    Free-text fields (``concern``, ``consequence``, ``counter_proposal``,
+    ``trade_off``, ``reason_for_uncertainty``) flow through the FU-rt6
+    policy: ``stored`` lands in the original text column; ``hash`` lands in
+    the paired ``*_excerpt_hash`` column. The structured FU-rt5 columns and
+    FU-rt7 ``stable_key`` are passed through unchanged.
+    """
+    from red_team_audit_text import apply_to_field
+
+    concern = apply_to_field(f.get("concern"), policy)
+    consequence = apply_to_field(f.get("consequence"), policy)
+    counter_proposal = apply_to_field(f.get("counter_proposal"), policy)
+    trade_off = apply_to_field(f.get("trade_off"), policy)
+    reason = apply_to_field(f.get("reason_for_uncertainty"), policy)
+
+    return (
+        f["run_id"],
+        f["stage"],
+        f["round_num"],
+        f["finding_id"],
+        f["persona"],
+        f["severity"],
+        concern.stored,
+        consequence.stored,
+        counter_proposal.stored,
+        trade_off.stored,
+        reason.stored,
+        f.get("stable_key"),
+        f.get("concern_hash"),
+        f.get("risk_key"),
+        f.get("affected_component"),
+        f.get("failure_mode"),
+        concern.hash,
+        consequence.hash,
+        counter_proposal.hash,
+        trade_off.hash,
+        reason.hash,
+        policy.mode,
+    )
+
+
 def record_finding(
     *,
     run_id: str,
@@ -212,30 +343,44 @@ def record_finding(
     counter_proposal: str,
     trade_off: str | None,
     reason_for_uncertainty: str | None,
+    stable_key: str | None = None,
+    concern_hash: str | None = None,
+    risk_key: str | None = None,
+    affected_component: str | None = None,
+    failure_mode: str | None = None,
     db_path: str | Path = DEFAULT_DB_PATH,
+    policy: Any = None,
 ) -> None:
-    """Insert one durable red_team_findings row."""
+    """Insert one durable red_team_findings row.
+
+    Free-text fields are passed through the FU-rt6 retention policy. The
+    structured FU-rt5 fields and FU-rt7 ``stable_key`` are stored verbatim.
+    """
+    resolved = _resolve_audit_policy(policy)
+    row = _finding_insert_row(
+        {
+            "run_id": run_id,
+            "stage": stage,
+            "round_num": round_num,
+            "finding_id": finding_id,
+            "persona": persona,
+            "severity": severity,
+            "concern": concern,
+            "consequence": consequence,
+            "counter_proposal": counter_proposal,
+            "trade_off": trade_off,
+            "reason_for_uncertainty": reason_for_uncertainty,
+            "stable_key": stable_key,
+            "concern_hash": concern_hash,
+            "risk_key": risk_key,
+            "affected_component": affected_component,
+            "failure_mode": failure_mode,
+        },
+        resolved,
+    )
     conn = audit_base.connect(db_path)
     try:
-        conn.execute(
-            "INSERT INTO red_team_findings (run_id, stage, round_num, finding_id, "
-            "persona, severity, concern, consequence, counter_proposal, "
-            "trade_off, reason_for_uncertainty) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                run_id,
-                stage,
-                round_num,
-                finding_id,
-                persona,
-                severity,
-                concern,
-                consequence,
-                counter_proposal,
-                trade_off,
-                reason_for_uncertainty,
-            ),
-        )
+        conn.execute(_FINDING_INSERT_SQL, row)
         conn.commit()
     finally:
         conn.close()
@@ -244,30 +389,14 @@ def record_finding(
 def record_findings(
     findings: list[dict[str, Any]],
     db_path: str | Path = DEFAULT_DB_PATH,
+    policy: Any = None,
 ) -> None:
-    """Insert raw finding rows."""
+    """Insert raw finding rows under the FU-rt6 retention policy."""
+    resolved = _resolve_audit_policy(policy)
     conn = audit_base.connect(db_path)
     try:
         for f in findings:
-            conn.execute(
-                "INSERT INTO red_team_findings (run_id, stage, round_num, finding_id, "
-                "persona, severity, concern, consequence, counter_proposal, "
-                "trade_off, reason_for_uncertainty) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    f["run_id"],
-                    f["stage"],
-                    f["round_num"],
-                    f["finding_id"],
-                    f["persona"],
-                    f["severity"],
-                    f["concern"],
-                    f["consequence"],
-                    f["counter_proposal"],
-                    f.get("trade_off"),
-                    f.get("reason_for_uncertainty"),
-                ),
-            )
+            conn.execute(_FINDING_INSERT_SQL, _finding_insert_row(f, resolved))
         conn.commit()
     finally:
         conn.close()

@@ -71,6 +71,9 @@ Return ONE JSON object, no other text, matching this shape:
       "id": "rt1",
       "persona": "security-trust",
       "severity": "critical",
+      "risk_key": "short-stable-slug",
+      "affected_component": "subsystem-or-path-slug",
+      "failure_mode": "data-loss",
       "concern": "One-sentence statement of what's wrong.",
       "consequence": "2-3 sentences on what breaks if this ships as-is.",
       "counter_proposal": "Concrete alternative OR the string REQUEST_HUMAN_REVIEW",
@@ -83,6 +86,18 @@ Return ONE JSON object, no other text, matching this shape:
 
 - `id` values must be stable within your output (`rt1`, `rt2`, ...).
 - `persona` must be one of: `security-trust`, `reliability-distsys`, `data`, `product-dx`, `cost-ops`.
+- `risk_key` must be a short, stable slug (lowercase, hyphenated) that names
+  the underlying risk independent of wording — e.g. `unauthenticated-admin-api`,
+  `schema-migration-no-backfill`, `retry-storm-on-503`. The same risk surfaced
+  twice should produce the same `risk_key`. This is what makes findings
+  comparable across reruns; vague slugs like `security-issue` defeat the gate.
+- `affected_component` must be a slug for the component, file, or subsystem the
+  risk attaches to — e.g. `auth-middleware`, `migrations/0042-users`,
+  `forge-orchestrator`. Use `unknown` only when the artifact does not name a
+  component.
+- `failure_mode` must be one of: `data-loss`, `availability`, `cost`,
+  `security`, `correctness`, `compliance`, `performance`, `operability`.
+  Pick the dominant one — what fails first, in production, when this ships.
 - Do not include `file:line` fields — stay at the design level, not the code level.
 - Cross-persona synthesis is required. An empty or copy-pasted synthesis is a schema violation.
 

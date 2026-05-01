@@ -110,6 +110,88 @@ def test_init_red_team_tables_migrates_runs_schema_idempotently(tmp_path):
     assert _schema_bytes(partial) == expected
 
 
+def _create_v1_findings_table(db):
+    """Create the legacy red_team_findings schema (pre-FU-rt5/rt7/rt6 columns)."""
+    conn = sqlite3.connect(str(db))
+    try:
+        conn.executescript(
+            """\
+CREATE TABLE red_team_findings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    round_num INTEGER NOT NULL,
+    finding_id TEXT NOT NULL,
+    persona TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    concern TEXT NOT NULL,
+    consequence TEXT NOT NULL,
+    counter_proposal TEXT NOT NULL,
+    trade_off TEXT,
+    reason_for_uncertainty TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+"""
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_init_red_team_tables_migrates_findings_schema_idempotently(tmp_path):
+    """v1.3 added stable_key + structured-identity + retention columns to
+    red_team_findings. PR #430 review finding #14: a regression in this
+    migration would only surface as the first audit insert against an
+    upgraded DB raising — not as a failing test. This test forces the
+    migration path and asserts both new columns and the index appear.
+    """
+    db = tmp_path / "v1-findings.db"
+    _create_v1_findings_table(db)
+    # Run migration twice — must be idempotent.
+    red_team_audit.init_red_team_tables(db)
+    red_team_audit.init_red_team_tables(db)
+    conn = sqlite3.connect(str(db))
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(red_team_findings)").fetchall()}
+        indexes = {
+            row[1]
+            for row in conn.execute("PRAGMA index_list(red_team_findings)").fetchall()
+        }
+    finally:
+        conn.close()
+    expected_new = {
+        "stable_key", "concern_hash", "risk_key",
+        "affected_component", "failure_mode",
+        "concern_excerpt_hash", "consequence_excerpt_hash",
+        "counter_proposal_excerpt_hash", "trade_off_excerpt_hash",
+        "reason_for_uncertainty_excerpt_hash", "retention_mode",
+    }
+    assert expected_new.issubset(cols), f"missing columns after migration: {expected_new - cols}"
+    assert "idx_red_team_findings_stable_key" in indexes
+
+    # And a record_finding INSERT against the migrated table must succeed.
+    red_team_audit.record_finding(
+        run_id="r1",
+        stage="design",
+        round_num=1,
+        finding_id="rt1",
+        persona="data",
+        severity="high",
+        concern="x",
+        consequence="y",
+        counter_proposal="z",
+        trade_off="w",
+        reason_for_uncertainty=None,
+        stable_key="r1:design:1:data:rt1:abc",
+        concern_hash="abc",
+        risk_key="rk",
+        affected_component="ac",
+        failure_mode="data-loss",
+        db_path=db,
+    )
+
+
 def test_record_red_team_run_writes_run_row(tmp_path):
     db = tmp_path / "rt.db"
     red_team_audit.init_red_team_tables(db)
@@ -225,6 +307,127 @@ def test_record_findings_persists_raw_text(tmp_path):
     assert len(rows) == 1
     assert rows[0] == ("security-trust", "critical", "SQL injection in user handler",
                        "Use parameterized queries via the ORM.")
+
+
+def test_record_finding_round_trips_stable_key_and_structured_fields(tmp_path):
+    """FU-rt5 + FU-rt7: structured-identity columns and stable_key persist."""
+    db = tmp_path / "rt.db"
+    red_team_audit.init_red_team_tables(db)
+    red_team_audit.record_finding(
+        run_id="run1",
+        stage="design",
+        round_num=1,
+        finding_id="rt7",
+        persona="data",
+        severity="high",
+        concern="Backfill missing for users.email",
+        consequence="Y",
+        counter_proposal="Add backfill",
+        trade_off="One-shot job runtime",
+        reason_for_uncertainty=None,
+        stable_key="run1:design:1:data:rt7:abc123",
+        concern_hash="abc123",
+        risk_key="schema-migration-no-backfill",
+        affected_component="migrations-0042-users",
+        failure_mode="data-loss",
+        db_path=db,
+    )
+    conn = sqlite3.connect(str(db))
+    try:
+        row = conn.execute(
+            "SELECT stable_key, concern_hash, risk_key, affected_component, "
+            "failure_mode FROM red_team_findings"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row == (
+        "run1:design:1:data:rt7:abc123",
+        "abc123",
+        "schema-migration-no-backfill",
+        "migrations-0042-users",
+        "data-loss",
+    )
+
+
+def test_record_finding_excerpt_mode_redacts_secrets_and_stores_hash(tmp_path):
+    """FU-rt6: default policy redacts free-text and pairs with hash columns."""
+    db = tmp_path / "rt.db"
+    red_team_audit.init_red_team_tables(db)
+    secret_concern = (
+        "Token sk-deadbeefdeadbeefdeadbeefdeadbeef appears in the artifact"
+    )
+    red_team_audit.record_finding(
+        run_id="run1",
+        stage="design",
+        round_num=1,
+        finding_id="rt1",
+        persona="security-trust",
+        severity="critical",
+        concern=secret_concern,
+        consequence="Y",
+        counter_proposal="Z",
+        trade_off="W",
+        reason_for_uncertainty=None,
+        db_path=db,
+        policy=red_team_audit._resolve_audit_policy(None),
+    )
+    conn = sqlite3.connect(str(db))
+    try:
+        row = conn.execute(
+            "SELECT concern, concern_excerpt_hash, retention_mode "
+            "FROM red_team_findings"
+        ).fetchone()
+    finally:
+        conn.close()
+    stored, excerpt_hash, mode = row
+    assert mode == "excerpt"
+    assert "sk-deadbeefdeadbeefdeadbeefdeadbeef" not in stored
+    assert excerpt_hash  # SHA-256 of original concern
+    # Hash matches the original (pre-redaction) text — re-deriving the hash
+    # from the redacted excerpt would NOT match.
+    import hashlib
+    expected = hashlib.sha256(secret_concern.encode("utf-8")).hexdigest()
+    assert excerpt_hash == expected
+
+
+def test_record_finding_full_text_mode_stores_verbatim(tmp_path):
+    """FU-rt6: opt-in full-text retention stores the original (still redacted)
+    and clears the paired excerpt-hash columns."""
+    from red_team_audit_text import AuditRetentionPolicy
+
+    db = tmp_path / "rt.db"
+    red_team_audit.init_red_team_tables(db)
+    text = (
+        "Long-form concern text describing a real risk in the design with "
+        "enough breaks to avoid matching the base64-secret regex. " * 4
+    )
+    red_team_audit.record_finding(
+        run_id="run1",
+        stage="design",
+        round_num=1,
+        finding_id="rt1",
+        persona="data",
+        severity="high",
+        concern=text,
+        consequence="Y",
+        counter_proposal="Z",
+        trade_off="W",
+        reason_for_uncertainty=None,
+        db_path=db,
+        policy=AuditRetentionPolicy(retain_full_text=True, excerpt_max_chars=240),
+    )
+    conn = sqlite3.connect(str(db))
+    try:
+        row = conn.execute(
+            "SELECT concern, concern_excerpt_hash, retention_mode "
+            "FROM red_team_findings"
+        ).fetchone()
+    finally:
+        conn.close()
+    stored, excerpt_hash, mode = row
+    assert mode == "full"
+    assert stored == text
+    assert excerpt_hash is None
 
 
 def test_record_findings_handles_human_review_form(tmp_path):
