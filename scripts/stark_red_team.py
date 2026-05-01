@@ -111,19 +111,38 @@ def compute_concern_hash(
     affected_component: str | None,
     concern: str,
 ) -> str:
-    """SHA-256 fingerprint of a finding's stable identity components.
+    """SHA-256 fingerprint of a finding's stable identity (FU-rt5 + FU-rt7).
 
-    Only ``persona`` + the structured fields + the normalized concern text
-    feed the hash. ``id``, ``round_num``, ``run_id``, and the model's prose
-    severity are deliberately excluded so the same risk discovered twice
-    produces the same fingerprint.
+    Two paths, picked based on structured-identity availability:
+
+    1. **Structured-identity path:** when ``risk_key`` is set, the hash is
+       ``persona|risk_key|affected_component`` — concern prose is deliberately
+       NOT in the hash. The same risk re-surfaced in different wording
+       produces the same fingerprint, which is what FU-rt5's "structured
+       fields are the identity" promises and what makes cross-run
+       acceptance work even when the model rewords.
+    2. **Back-compat path:** when ``risk_key`` is absent (legacy pre-FU-rt5
+       producers), fall back to ``persona|normalized_concern``. Without
+       structured fields, the prose is the only signal we have; collapsing
+       on persona alone would mute every future finding from the same
+       persona once one was accepted.
+
+    PR #430 review finding #12 strengthened the structured-path test to
+    cover genuinely different rephrasings of the same risk.
     """
-    canonical = "|".join([
-        persona or "",
-        risk_key or "",
-        affected_component or "",
-        _normalize_concern(concern),
-    ])
+    if risk_key:
+        canonical = "|".join([
+            persona or "",
+            risk_key,
+            affected_component or "",
+        ])
+    else:
+        canonical = "|".join([
+            persona or "",
+            "",
+            affected_component or "",
+            _normalize_concern(concern),
+        ])
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
@@ -136,14 +155,41 @@ def compute_stable_key(
     finding_id: str,
     concern_hash: str,
 ) -> str:
-    """Build the canonical stable finding key.
+    """Build the canonical stable AUDIT key for one finding occurrence.
 
     Format: ``{run_id}:{stage}:{round_num}:{persona}:{finding_id}:{concern_hash}``.
-    The trailing ``concern_hash`` is what makes the key collision-resistant
-    across reruns where the model may renumber slot-3 with a different concern
+    Identifies one specific occurrence in audit rows / PR-comment anchors so a
+    reviewer can copy a key and have it pin to that exact row. The trailing
+    ``concern_hash`` is what makes the audit key collision-resistant across
+    reruns where the model may renumber slot-3 with a different concern
     (FU-rt7).
+
+    For human-review halt recovery (FU-rt8), use :func:`compute_accept_key`
+    instead — the audit key embeds run / round / finding-id slot fields that
+    are not stable across reruns.
     """
     return f"{run_id}:{stage}:{round_num}:{persona}:{finding_id}:{concern_hash}"
+
+
+def compute_accept_key(
+    *,
+    stage: str,
+    persona: str,
+    concern_hash: str,
+) -> str:
+    """Build the cross-run ACCEPT key for human-review halt recovery (FU-rt8).
+
+    Format: ``{stage}:{persona}:{concern_hash}``. Drops ``run_id``, ``round_num``,
+    and ``finding_id`` so the same risk surfaced under a fresh run / new
+    finding-id slot still matches an operator's prior acceptance. The
+    ``concern_hash`` already carries the structured identity (persona +
+    risk_key + affected_component + normalized concern, see
+    :func:`compute_concern_hash`), so a finding that has the same hash IS
+    the same concern by FU-rt5's definition. A NEW concern (different
+    risk_key / different affected_component / materially different wording)
+    produces a different hash and the halt gate re-engages.
+    """
+    return f"{stage}:{persona}:{concern_hash}"
 
 
 @dataclass
@@ -921,6 +967,10 @@ class CodexCallResult:
     input_tokens: int
     output_tokens: int
     error: str | None = None
+    # FU-rt11 — Responses API ``id`` field (present only on the HTTP path).
+    # Threaded through into ``CallTelemetryRecord`` so an operator paging
+    # through telemetry can correlate against OpenAI-side logs / dashboards.
+    request_id: str | None = None
 
 
 def _parse_codex_jsonl_tokens(raw: str) -> tuple[int, int]:
@@ -1310,6 +1360,10 @@ def dispatch_responses_api(
     out_tokens = _safe_int(usage.get("output_tokens"))
 
     text = _extract_responses_text(payload)
+    # FU-rt11 (PR #430 review #20) — capture the Responses-API ``id`` so
+    # downstream telemetry can correlate against OpenAI-side logs.
+    raw_request_id = payload.get("id")
+    request_id = raw_request_id if isinstance(raw_request_id, str) and raw_request_id else None
     status = payload.get("status")
     if isinstance(status, str) and status != "completed":
         # Provider error objects can echo rejected prompt content into
@@ -1326,6 +1380,7 @@ def dispatch_responses_api(
             input_tokens=in_tokens,
             output_tokens=out_tokens,
             error=f"responses api status {status}{code_suffix}",
+            request_id=request_id,
         )
 
     return CodexCallResult(
@@ -1334,6 +1389,7 @@ def dispatch_responses_api(
         input_tokens=in_tokens,
         output_tokens=out_tokens,
         error=None,
+        request_id=request_id,
     )
 
 
@@ -1516,7 +1572,9 @@ def run_red_team(
             duration_s=call.duration_s,
             cost_usd=cost_usd,
             error=call.error,
-            request_id=None,
+            # FU-rt11: Responses API attaches an ``id`` to every payload;
+            # codex-CLI dispatch leaves this None.
+            request_id=call.request_id,
         )
     )
 
@@ -1626,6 +1684,7 @@ def run_red_team_fix_plan(
     challenge_findings: list[RedTeamFinding],
     synthesis: str,
     challenge_cost_usd: float,
+    telemetry: CallTelemetrySink | None = None,
 ) -> RedTeamFixPlan:
     """Run one fix-plan attempt for blocking challenge findings.
 
@@ -1633,8 +1692,13 @@ def run_red_team_fix_plan(
     same filtered findings before deciding whether to dispatch. This function
     repeats that single serialization decision internally so direct callers get
     identical skip/error behavior and prompt contents.
+
+    The optional ``telemetry`` sink fires per-call ``start`` / ``end`` events
+    with ``call_phase="fix_plan"`` around the Responses-API dispatch (PR #430
+    review fix for FU-rt11 finding #19).
     """
     del challenge_cost_usd  # Cost budget handling is a dispatcher concern.
+    sink = telemetry or _NULL_TELEMETRY
     fix_cfg = ctx.cfg_red_team.get("fix_plan", {})
     model = str(fix_cfg.get("model", ""))
     reasoning_effort = str(fix_cfg.get("reasoning_effort", ""))
@@ -1670,6 +1734,17 @@ def run_red_team_fix_plan(
         synthesis=synthesis,
         max_input_chars=max_input_chars,
     )
+    call_id = _new_call_id()
+    prompt_chars = len(prompt)
+    truncated = _prompt_was_truncated(prompt)
+    sink.start(
+        call_id=call_id,
+        call_phase="fix_plan",
+        round_num=0,
+        configured_model=model,
+        prompt_chars=prompt_chars,
+        truncated=truncated,
+    )
     call = dispatch_responses_api(
         prompt=prompt,
         model=model,
@@ -1680,6 +1755,24 @@ def run_red_team_fix_plan(
     )
     rates = _resolve_rates(model, ctx.model_rates)
     cost_usd = _cost_for(call.input_tokens, call.output_tokens, rates)
+    sink.end(
+        CallTelemetryRecord(
+            call_id=call_id,
+            call_phase="fix_plan",
+            round_num=0,
+            configured_model=model,
+            actual_model=model,
+            transport="responses_api",
+            prompt_chars=prompt_chars,
+            truncated=truncated,
+            input_tokens=call.input_tokens,
+            output_tokens=call.output_tokens,
+            duration_s=call.duration_s,
+            cost_usd=cost_usd,
+            error=call.error,
+            request_id=call.request_id,
+        )
+    )
     if call.error is not None:
         return _empty_fix_plan(
             error=call.error,

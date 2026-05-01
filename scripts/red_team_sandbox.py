@@ -45,14 +45,20 @@ import tempfile
 from collections.abc import Generator
 from pathlib import Path
 
-# Minimum environment codex CLI needs to operate.
-# - PATH: locate codex itself + any helper binaries
-# - HOME: codex stores its auth state under $HOME/.codex
-# - LANG / LC_ALL: locale handling for prompt unicode
-# - TMPDIR: where codex writes ephemeral work
-# - OPENAI_API_KEY / OPENAI_API_KEY_FILE / OPENAI_API_KEY_LABEL: forwarded
-#   for the dispatch_responses_api fallback path that may be invoked from
-#   inside the same orchestrator
+# Minimum environment the codex CLI subprocess needs to reach the model.
+#
+# Scope is deliberately narrow: PATH (find the codex binary), HOME (codex
+# CLI auth state lives under ``$HOME/.codex``), locale, and TMPDIR. Model
+# credentials (``OPENAI_API_KEY``, ``CHATGPT_AUTH_TOKEN``, etc.) are NOT in
+# the allowlist — the parent orchestrator runs Responses-API calls
+# in-process, so the codex child is the attacker-influenced surface and
+# must not see those secrets even if a tool-execution shim reads its env.
+#
+# This is the FU-rt1 fix from the PR-#430 review (finding #6): a "sandbox"
+# that still hands OpenAI / ChatGPT credentials to the attacker-influenced
+# codex child defeats the whole point of sandboxing it. Codex CLI in
+# ChatGPT-auth mode reads its credential from ``$HOME/.codex``; that path
+# stays reachable via ``HOME`` so legitimate codex auth still works.
 _DEFAULT_ENV_ALLOWLIST: frozenset[str] = frozenset({
     "PATH",
     "HOME",
@@ -61,13 +67,6 @@ _DEFAULT_ENV_ALLOWLIST: frozenset[str] = frozenset({
     "LANG",
     "LC_ALL",
     "TMPDIR",
-    "OPENAI_API_KEY",
-    "OPENAI_API_KEY_FILE",
-    "OPENAI_API_KEY_LABEL",
-    # codex CLI's own auth — without this, ChatGPT-auth installs cannot
-    # dispatch even though the call is in-scope for sandboxing.
-    "CODEX_HOME",
-    "CHATGPT_AUTH_TOKEN",
 })
 
 

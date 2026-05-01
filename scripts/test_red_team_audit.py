@@ -110,6 +110,88 @@ def test_init_red_team_tables_migrates_runs_schema_idempotently(tmp_path):
     assert _schema_bytes(partial) == expected
 
 
+def _create_v1_findings_table(db):
+    """Create the legacy red_team_findings schema (pre-FU-rt5/rt7/rt6 columns)."""
+    conn = sqlite3.connect(str(db))
+    try:
+        conn.executescript(
+            """\
+CREATE TABLE red_team_findings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    round_num INTEGER NOT NULL,
+    finding_id TEXT NOT NULL,
+    persona TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    concern TEXT NOT NULL,
+    consequence TEXT NOT NULL,
+    counter_proposal TEXT NOT NULL,
+    trade_off TEXT,
+    reason_for_uncertainty TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+"""
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_init_red_team_tables_migrates_findings_schema_idempotently(tmp_path):
+    """v1.3 added stable_key + structured-identity + retention columns to
+    red_team_findings. PR #430 review finding #14: a regression in this
+    migration would only surface as the first audit insert against an
+    upgraded DB raising — not as a failing test. This test forces the
+    migration path and asserts both new columns and the index appear.
+    """
+    db = tmp_path / "v1-findings.db"
+    _create_v1_findings_table(db)
+    # Run migration twice — must be idempotent.
+    red_team_audit.init_red_team_tables(db)
+    red_team_audit.init_red_team_tables(db)
+    conn = sqlite3.connect(str(db))
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(red_team_findings)").fetchall()}
+        indexes = {
+            row[1]
+            for row in conn.execute("PRAGMA index_list(red_team_findings)").fetchall()
+        }
+    finally:
+        conn.close()
+    expected_new = {
+        "stable_key", "concern_hash", "risk_key",
+        "affected_component", "failure_mode",
+        "concern_excerpt_hash", "consequence_excerpt_hash",
+        "counter_proposal_excerpt_hash", "trade_off_excerpt_hash",
+        "reason_for_uncertainty_excerpt_hash", "retention_mode",
+    }
+    assert expected_new.issubset(cols), f"missing columns after migration: {expected_new - cols}"
+    assert "idx_red_team_findings_stable_key" in indexes
+
+    # And a record_finding INSERT against the migrated table must succeed.
+    red_team_audit.record_finding(
+        run_id="r1",
+        stage="design",
+        round_num=1,
+        finding_id="rt1",
+        persona="data",
+        severity="high",
+        concern="x",
+        consequence="y",
+        counter_proposal="z",
+        trade_off="w",
+        reason_for_uncertainty=None,
+        stable_key="r1:design:1:data:rt1:abc",
+        concern_hash="abc",
+        risk_key="rk",
+        affected_component="ac",
+        failure_mode="data-loss",
+        db_path=db,
+    )
+
+
 def test_record_red_team_run_writes_run_row(tmp_path):
     db = tmp_path / "rt.db"
     red_team_audit.init_red_team_tables(db)

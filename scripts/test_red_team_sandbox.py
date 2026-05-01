@@ -37,19 +37,33 @@ def test_scrub_env_strips_gh_token_and_aws_creds():
         assert key not in out, f"{key} leaked through scrub_env"
 
 
-def test_scrub_env_keeps_openai_key_for_dispatch():
-    """OpenAI key vars are needed by the in-process Responses-API fallback
-    that a sandboxed codex-CLI run may end up routing through."""
+def test_scrub_env_strips_model_credentials():
+    """Model credentials must NOT leak into the codex sandbox.
+
+    Earlier the default allowlist included OPENAI_API_KEY / CHATGPT_AUTH_TOKEN
+    on the theory the in-process Responses-API fallback might need them —
+    but that fallback runs in the PARENT, not the codex subprocess. The
+    codex child is the attacker-influenced surface; passing model
+    credentials into it lets a prompt-injected tool call exfiltrate them.
+    Fixed in PR #430 review (rt1 finding #6).
+    """
     inputs = {
         "PATH": "/usr/bin",
         "OPENAI_API_KEY": "sk-real",
         "OPENAI_API_KEY_FILE": "/tmp/keys",
         "OPENAI_API_KEY_LABEL": "stark",
+        "CHATGPT_AUTH_TOKEN": "chat-secret",
+        "CODEX_HOME": "/Users/x/.codex",
     }
     out = sb.scrub_env(inputs)
-    assert out.get("OPENAI_API_KEY") == "sk-real"
-    assert out.get("OPENAI_API_KEY_FILE") == "/tmp/keys"
-    assert out.get("OPENAI_API_KEY_LABEL") == "stark"
+    for key in (
+        "OPENAI_API_KEY",
+        "OPENAI_API_KEY_FILE",
+        "OPENAI_API_KEY_LABEL",
+        "CHATGPT_AUTH_TOKEN",
+        "CODEX_HOME",
+    ):
+        assert key not in out, f"{key} leaked through scrub_env"
 
 
 def test_scrub_env_allow_extra():

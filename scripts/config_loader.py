@@ -232,10 +232,13 @@ _RED_TEAM_LOCKED_FIELDS: frozenset[tuple[str, ...]] = frozenset({
     ("fix_plan", "min_moves"),
     ("fix_plan", "max_moves"),
     # FU-rt6 — Lock retention posture. A compromised repo flipping
-    # `audit.retain_full_text` back to True would silently turn the metrics
-    # DB into a sensitive-document store; the substance-vs-appearance lock
-    # is the same shape as the rt2 round-1 lock on `min_severity_to_block`.
+    # ``audit.retain_full_text`` back to True would silently turn the
+    # metrics DB into a sensitive-document store. ``excerpt_max_chars``
+    # is locked alongside (PR #430 review finding #8) — without it, a
+    # repo could set the cap to 999_999 and persist nearly-full raw text
+    # under "excerpt" mode, defeating the redaction split.
     ("audit", "retain_full_text"),
+    ("audit", "excerpt_max_chars"),
 })
 
 

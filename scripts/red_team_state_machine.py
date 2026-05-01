@@ -88,9 +88,20 @@ class IterativeRunState:
 
     max_rounds: int
     rounds_used: int = 0
+    # FU-rt4 fix (PR #430 review): flicker rounds don't bump ``rounds_used``
+    # but they DO consume budget — this counter caps total rounds attempted
+    # (including flicker) so a primary/verification pair that keeps disagreeing
+    # eventually terminates with ``terminate.budget_exhausted_flicker`` rather
+    # than spinning forever. Defaults to ``max_rounds * 2 + 1`` so a single
+    # remediation cycle can still flicker once and recover.
+    flicker_attempts: int = 0
     history: list[RoundRecord] = field(default_factory=list)
     terminated: bool = False
     final_transition: str | None = None
+
+    @property
+    def max_flicker_attempts(self) -> int:
+        return max(1, self.max_rounds * 2 + 1)
 
 
 def classify_round(
@@ -139,10 +150,13 @@ def record_round(
 ) -> None:
     """Append the round to ``state.history`` and bump counters per FU-rt4.
 
-    Only ``clean``, ``confirmed_blocking``, ``degraded``, and ``error``
-    consume a remediation round. ``flicker`` is recorded but does NOT bump
-    ``rounds_used`` — that's the explicit rule the prior loop kept getting
-    wrong.
+    - ``clean`` / ``confirmed_blocking`` / ``degraded`` / ``error`` consume a
+      remediation round (``rounds_used`` += 1).
+    - ``flicker`` does NOT consume a remediation round but DOES consume a
+      flicker attempt (``flicker_attempts`` += 1). The PR-#430 review fix:
+      tracking flicker separately is what bounds the otherwise-unbounded
+      flicker loop while preserving the spec's "don't burn max_rounds on
+      flicker" rule.
     """
     state.history.append(
         RoundRecord(
@@ -153,7 +167,9 @@ def record_round(
             transition=transition,
         )
     )
-    if outcome != RoundOutcome.flicker:
+    if outcome == RoundOutcome.flicker:
+        state.flicker_attempts += 1
+    else:
         state.rounds_used += 1
 
 
@@ -184,9 +200,17 @@ def should_terminate(
         return True, "terminate.error"
     if outcome == RoundOutcome.degraded:
         return True, "terminate.degraded"
-    # flicker
+    # flicker — bound by flicker_attempts (which record_round will bump). We
+    # check against the flicker cap; the legacy ``rounds_used >= max_rounds``
+    # check stays so a flicker after every remediation slot is exhausted
+    # also exits.
     if state.rounds_used >= state.max_rounds:
         return True, "terminate.budget_exhausted_flicker"
+    if state.flicker_attempts + 1 >= state.max_flicker_attempts:
+        # ``+ 1`` because record_round hasn't bumped flicker_attempts yet at
+        # the moment should_terminate is called — checking the post-record
+        # value here keeps the exit deterministic.
+        return True, "terminate.flicker_attempts_exhausted"
     return False, "continue.flicker"
 
 

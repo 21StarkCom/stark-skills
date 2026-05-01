@@ -67,7 +67,11 @@ def test_accept_finding_persists_one_row(tmp_path):
         accepted_by="alice",
         db_path=db,
     )
-    assert hr.is_accepted("run1:design:1:data:rt3:abc", db_path=db) is True
+    # Lookup by accept_key (cross-run identity) — the canonical path.
+    accept_key = rt.compute_accept_key(stage="design", persona="data", concern_hash="abc")
+    assert hr.is_accepted(accept_key, db_path=db) is True
+    # Per-occurrence lookup by stable_key still works for audit-trail tooling.
+    assert hr.is_accepted(stable_key="run1:design:1:data:rt3:abc", db_path=db) is True
 
 
 def test_accept_finding_is_idempotent(tmp_path):
@@ -113,6 +117,7 @@ def test_accept_finding_is_idempotent(tmp_path):
 
 
 def test_filter_human_review_findings_drops_accepted_keys(tmp_path):
+    """A finding accepted in run-A is filtered out for run-B (cross-run match)."""
     db = tmp_path / "rt.db"
     stable_key = "run1:design:1:data:rt3:abc"
     _seed_finding(db, stable_key=stable_key)
@@ -129,8 +134,11 @@ def test_filter_human_review_findings_drops_accepted_keys(tmp_path):
         db_path=db,
     )
 
+    # The fresh dispatcher run sees the SAME concern under a different
+    # run_id and a different finding_id slot. The accept_key (which only
+    # depends on stage + persona + concern_hash) should still match.
     finding = rt.RedTeamFinding(
-        id="rt3",
+        id="rt7",  # different slot than the accepted finding's "rt3"
         persona="data",
         severity="high",
         concern="Schema migration may break readers",
@@ -145,13 +153,52 @@ def test_filter_human_review_findings_drops_accepted_keys(tmp_path):
     )
     unaccepted, matched = hr.filter_human_review_findings(
         [finding],
-        run_id="run1",
         stage="design",
-        round_num=1,
         db_path=db,
     )
     assert unaccepted == []
-    assert matched == [stable_key]
+    expected_accept_key = rt.compute_accept_key(
+        stage="design", persona="data", concern_hash="abc"
+    )
+    assert matched == [expected_accept_key]
+
+
+def test_filter_human_review_findings_does_not_match_different_concern(tmp_path):
+    """A NEW concern (different concern_hash) must not be auto-accepted."""
+    db = tmp_path / "rt.db"
+    _seed_finding(db, stable_key="run1:design:1:data:rt3:abc")
+    hr.accept_finding(
+        "run1:design:1:data:rt3:abc",
+        run_id="run1",
+        stage="design",
+        round_num=1,
+        persona="data",
+        finding_id="rt3",
+        concern_hash="abc",
+        concern_excerpt="x",
+        accepted_by="alice",
+        db_path=db,
+    )
+    # Same persona but a different risk → different concern_hash → halt
+    new_finding = rt.RedTeamFinding(
+        id="rt1",
+        persona="data",
+        severity="high",
+        concern="Different risk",
+        consequence="x",
+        counter_proposal="REQUEST_HUMAN_REVIEW",
+        trade_off=None,
+        reason_for_uncertainty="y",
+        risk_key="other-risk",
+        affected_component="other",
+        failure_mode="cost",
+        concern_hash="zzz",  # different hash
+    )
+    unaccepted, matched = hr.filter_human_review_findings(
+        [new_finding], stage="design", db_path=db
+    )
+    assert len(unaccepted) == 1
+    assert matched == []
 
 
 def test_list_pending_halts_excludes_accepted(tmp_path):

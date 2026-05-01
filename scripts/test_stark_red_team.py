@@ -424,7 +424,16 @@ def test_validate_findings_drops_unknown_failure_mode():
 
 
 def test_validate_findings_concern_hash_is_stable_across_rephrasings():
-    """Two identical risks, different wording, must hash-collide."""
+    """Two identical risks, different wording, must hash-collide.
+
+    FU-rt5 + FU-rt7 design: structured identity (persona + risk_key +
+    affected_component) IS the identity. Genuinely different prose for
+    the same underlying risk must produce the same concern_hash so an
+    operator's acceptance carries across reruns where the model rewords.
+
+    PR #430 review finding #12 strengthened this from "trivial case +
+    whitespace" to "genuinely different sentences".
+    """
     base = {
         "id": "rt1",
         "persona": "data",
@@ -436,11 +445,33 @@ def test_validate_findings_concern_hash_is_stable_across_rephrasings():
         "counter_proposal": "Z",
         "trade_off": "W",
     }
-    a = rt.validate_findings([{**base, "concern": "Schema migration has no backfill"}])
-    b = rt.validate_findings([
-        {**base, "concern": "schema migration has no backfill   "},
+    a = rt.validate_findings([
+        {**base, "concern": "Schema migration has no backfill plan."}
     ])
-    assert a[0].concern_hash == b[0].concern_hash
+    b = rt.validate_findings([
+        {**base, "concern": "The migration adds NOT NULL without populating existing rows."},
+    ])
+    assert a[0].concern_hash == b[0].concern_hash, (
+        "structured-identity findings must hash-match across genuine rephrasings"
+    )
+
+
+def test_validate_findings_concern_hash_legacy_fallback_uses_concern_text():
+    """When the model omits risk_key (pre-FU-rt5 producers), the hash
+    falls back to persona + normalized concern text so two unrelated
+    concerns from the same persona stay distinguishable."""
+    base = {
+        "id": "rt1",
+        "persona": "data",
+        "severity": "high",
+        # No risk_key / affected_component / failure_mode → legacy path
+        "consequence": "Y",
+        "counter_proposal": "Z",
+        "trade_off": "W",
+    }
+    a = rt.validate_findings([{**base, "concern": "Concern A about cache"}])
+    b = rt.validate_findings([{**base, "concern": "Concern B about queue"}])
+    assert a[0].concern_hash != b[0].concern_hash
 
 
 def test_validate_findings_concern_hash_differs_across_risks():

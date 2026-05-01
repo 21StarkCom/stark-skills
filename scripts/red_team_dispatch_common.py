@@ -325,6 +325,7 @@ def resolve_fix_plan(
     artifact: str,
     source_spec: str,
     enable_fix_plan_for_calibration: bool,
+    telemetry: rt.CallTelemetrySink | None = None,
 ) -> tuple[str, rt.RedTeamFixPlan | None, list[str]]:
     run_warnings: list[str] = []
     fix_plan: rt.RedTeamFixPlan | None = None
@@ -354,6 +355,7 @@ def resolve_fix_plan(
 
     fix_plan = rt.run_red_team_fix_plan(
         ctx,
+        telemetry=telemetry,
         artifact=artifact,
         source_spec=source_spec,
         challenge_findings=challenge.findings,
@@ -1008,6 +1010,48 @@ def _run_iterative(
     max_rounds = max(1, int(cfg.get("max_rounds", 1)))
     state = sm.IterativeRunState(max_rounds=max_rounds)
 
+    # Aggregated cost / duration / token totals so the verification call's
+    # cost is reflected in the run's audit row, JSON output, and fix-plan
+    # budget check (PR #430 review finding #11). Without aggregation, an
+    # operator triaging an over-budget halt would see only the primary
+    # cost and miss the verification calls that pushed the run over.
+    total_cost_usd = 0.0
+    total_duration_s = 0.0
+    total_input_tokens = 0
+    total_output_tokens = 0
+
+    def _accumulate(r: rt.RedTeamResult | None) -> None:
+        nonlocal total_cost_usd, total_duration_s, total_input_tokens, total_output_tokens
+        if r is None:
+            return
+        total_cost_usd += r.cost_usd
+        total_duration_s += r.duration_s
+        total_input_tokens += r.input_tokens
+        total_output_tokens += r.output_tokens
+
+    def _finalize(primary: rt.RedTeamResult) -> rt.RedTeamResult:
+        """Return a result that surfaces aggregated totals.
+
+        The findings / synthesis / status fields stay sourced from the
+        primary call (the gate decision is made on primary + verification
+        overlap, not on a synthesized result). Cost / duration / tokens
+        roll up so downstream readers see the run-level totals.
+        """
+        return rt.RedTeamResult(
+            stage=primary.stage,
+            round_num=primary.round_num,
+            synthesis=primary.synthesis,
+            findings=primary.findings,
+            blocking_count=primary.blocking_count,
+            human_review_count=primary.human_review_count,
+            raw_output=primary.raw_output,
+            duration_s=total_duration_s,
+            cost_usd=total_cost_usd,
+            error=primary.error,
+            input_tokens=total_input_tokens,
+            output_tokens=total_output_tokens,
+        )
+
     # Round-1 always runs at minimum, even when max_rounds=1.
     round_num = 1
     last_good_result: rt.RedTeamResult | None = None
@@ -1025,6 +1069,7 @@ def _run_iterative(
             call_phase="primary",
             env=ctx.env,
         )
+        _accumulate(primary)
 
         # Verification is only required when the primary returned blocking
         # findings — the stability gate has nothing to verify against if
@@ -1048,6 +1093,7 @@ def _run_iterative(
                 call_phase="verification",
                 env=ctx.env,
             )
+            _accumulate(verification)
 
         outcome = sm.classify_round(
             primary,
@@ -1071,7 +1117,7 @@ def _run_iterative(
         )
         if terminate:
             sm.mark_terminated(state, transition or "terminate.unknown")
-            return primary, state.history
+            return _finalize(primary), state.history
 
         # Flicker without budget exhaustion: re-run the same round_num so
         # rounds_used accounting stays consistent with the state machine.
@@ -1080,7 +1126,7 @@ def _run_iterative(
         round_num += 1
         if round_num > max_rounds:
             sm.mark_terminated(state, "terminate.budget_exhausted")
-            return primary, state.history
+            return _finalize(primary), state.history
 
 
 def execute_dispatch(
@@ -1148,9 +1194,7 @@ def execute_dispatch(
 
             unaccepted, accepted_keys = red_team_human_review.filter_human_review_findings(
                 result.findings,
-                run_id=ctx.run_id,
                 stage=stage,
-                round_num=result.round_num,
             )
             del accepted_keys  # JSON output already exposes findings; keys aren't returned.
             if not unaccepted and len(unaccepted) < result.human_review_count:
@@ -1192,6 +1236,7 @@ def execute_dispatch(
         artifact=artifact,
         source_spec=source_spec,
         enable_fix_plan_for_calibration=enable_fix_plan_for_calibration,
+        telemetry=telemetry,
     )
     if fix_plan_status == "success" and fix_plan is not None:
         fix_plan_md = render_fix_plan_section(fix_plan_status=fix_plan_status, fix_plan=fix_plan)

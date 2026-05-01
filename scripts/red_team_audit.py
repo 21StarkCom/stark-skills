@@ -96,8 +96,10 @@ CREATE INDEX IF NOT EXISTS idx_red_team_findings_run
     ON red_team_findings(run_id, round_num);
 CREATE INDEX IF NOT EXISTS idx_red_team_findings_persona
     ON red_team_findings(persona, severity);
-CREATE INDEX IF NOT EXISTS idx_red_team_findings_stable_key
-    ON red_team_findings(stable_key);
+-- The stable_key index is created by ``_migrate_red_team_findings_v13`` AFTER
+-- the column-add migration runs, so legacy v1 tables (no ``stable_key``
+-- column yet) don't fail this script with "no such column" on the very
+-- first init pass (PR #430 review finding #14).
 """
 
 _RED_TEAM_RUNS_V12_COLUMNS = (

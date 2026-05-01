@@ -8,8 +8,8 @@ description: >-
 argument-hint: "<plan-path> [--source-spec <path>] [--model <id>] [--dry-run] [--no-pr-comment]"
 disable-model-invocation: true
 model: opus
-revision: 6b5438ee63c05c6bf139d5a10c6697855f9d0ff8
-revision_date: 2026-05-01T12:51:04Z
+revision: 1ea435c3690c11c564c6ed2b36feaf299c60e359
+revision_date: 2026-05-01T13:25:45Z
 ---
 
 # stark-red-team-plan
@@ -202,13 +202,30 @@ rendered as skipped and no second LLM call is made.
 Post the dispatcher-rendered `pr_comment_body` (FU-rt9). It is a single
 collapsible-per-persona summary with a critical/high "Highlights" section
 on top, deterministic anchors for every finding, and an HTML-comment
-marker (`<!-- stark-red-team: run_id=... -->`) so a downstream watcher
-can edit the existing comment instead of stacking a new one per round:
+marker (`<!-- stark-red-team: run_id=... -->`) at the head so a re-run
+edits the existing comment in place instead of stacking a new one per
+round.
+
+The flow is **find-by-marker, edit-or-create** (FU-rt9 invariant — "one
+updatable comment per run"):
 
 ```bash
 body=$(echo "$output" | "$PYTHON" -c "import sys, json; print(json.load(sys.stdin)['pr_comment_body'], end='')")
-$PYTHON $SCRIPTS/github_app.py --app stark-claude pr review $pr_number \
+run_id=$(echo "$output" | "$PYTHON" -c "import sys, json; print(json.load(sys.stdin)['run_id'])")
+marker="<!-- stark-red-team: run_id=$run_id -->"
+
+existing_id=$(
+  gh api "repos/$REPO/issues/$pr_number/comments" --paginate \
+    --jq ".[] | select(.body | contains(\"$marker\")) | .id" \
+    | head -n1
+)
+if [ -n "$existing_id" ]; then
+  gh api -X PATCH "repos/$REPO/issues/comments/$existing_id" \
+    -f body="$body" >/dev/null
+else
+  $PYTHON $SCRIPTS/github_app.py --app stark-claude pr review $pr_number \
     --comment --body "$body"
+fi
 ```
 
 The dispatcher already runs `truncate_pr_comment` on the body before
