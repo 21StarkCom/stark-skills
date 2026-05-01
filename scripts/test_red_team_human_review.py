@@ -130,13 +130,14 @@ def test_filter_human_review_findings_drops_accepted_keys(tmp_path):
         finding_id="rt3",
         concern_hash="abc",
         concern_excerpt="x",
+        repo="evinced/stark-skills",
         accepted_by="alice",
         db_path=db,
     )
 
     # The fresh dispatcher run sees the SAME concern under a different
-    # run_id and a different finding_id slot. The accept_key (which only
-    # depends on stage + persona + concern_hash) should still match.
+    # run_id and a different finding_id slot. The accept_key (repo +
+    # stage + persona + concern_hash) should still match.
     finding = rt.RedTeamFinding(
         id="rt7",  # different slot than the accepted finding's "rt3"
         persona="data",
@@ -154,13 +155,51 @@ def test_filter_human_review_findings_drops_accepted_keys(tmp_path):
     unaccepted, matched = hr.filter_human_review_findings(
         [finding],
         stage="design",
+        repo="evinced/stark-skills",
         db_path=db,
     )
     assert unaccepted == []
     expected_accept_key = rt.compute_accept_key(
-        stage="design", persona="data", concern_hash="abc"
+        stage="design", persona="data", concern_hash="abc",
+        repo="evinced/stark-skills",
     )
     assert matched == [expected_accept_key]
+
+
+def test_filter_human_review_findings_does_not_match_different_repo(tmp_path):
+    """PR-#430 review fix #10: cross-repo match must NOT happen."""
+    db = tmp_path / "rt.db"
+    _seed_finding(db, stable_key="run1:design:1:data:rt3:abc")
+    # Accept under repo-A
+    hr.accept_finding(
+        "run1:design:1:data:rt3:abc",
+        run_id="run1",
+        stage="design",
+        round_num=1,
+        persona="data",
+        finding_id="rt3",
+        concern_hash="abc",
+        concern_excerpt="x",
+        repo="repo-a",
+        accepted_by="alice",
+        db_path=db,
+    )
+    finding = rt.RedTeamFinding(
+        id="rt1", persona="data", severity="high",
+        concern="Same concern", consequence="x",
+        counter_proposal="REQUEST_HUMAN_REVIEW",
+        trade_off=None, reason_for_uncertainty="y",
+        risk_key="schema-migration-rollback",
+        affected_component="migrations",
+        failure_mode="data-loss",
+        concern_hash="abc",
+    )
+    # Filter under repo-B → should NOT match
+    unaccepted, matched = hr.filter_human_review_findings(
+        [finding], stage="design", repo="repo-b", db_path=db,
+    )
+    assert len(unaccepted) == 1
+    assert matched == []
 
 
 def test_filter_human_review_findings_does_not_match_different_concern(tmp_path):
@@ -176,6 +215,7 @@ def test_filter_human_review_findings_does_not_match_different_concern(tmp_path)
         finding_id="rt3",
         concern_hash="abc",
         concern_excerpt="x",
+        repo="evinced/stark-skills",
         accepted_by="alice",
         db_path=db,
     )
@@ -195,7 +235,7 @@ def test_filter_human_review_findings_does_not_match_different_concern(tmp_path)
         concern_hash="zzz",  # different hash
     )
     unaccepted, matched = hr.filter_human_review_findings(
-        [new_finding], stage="design", db_path=db
+        [new_finding], stage="design", repo="evinced/stark-skills", db_path=db,
     )
     assert len(unaccepted) == 1
     assert matched == []
@@ -207,6 +247,8 @@ def test_list_pending_halts_excludes_accepted(tmp_path):
     pending = hr.list_pending_halts(db_path=db)
     assert len(pending) == 1
     assert pending[0].stable_key == "run1:design:1:data:rt3:abc"
+    # Accept with the SAME repo as the seeded finding (evinced/stark-skills);
+    # the repo-scoped accept_key is what makes list_pending_halts exclude it.
     hr.accept_finding(
         "run1:design:1:data:rt3:abc",
         run_id="run1",
@@ -216,11 +258,36 @@ def test_list_pending_halts_excludes_accepted(tmp_path):
         finding_id="rt3",
         concern_hash="abc",
         concern_excerpt="x",
+        repo="evinced/stark-skills",
         accepted_by="alice",
         db_path=db,
     )
     pending = hr.list_pending_halts(db_path=db)
     assert pending == []
+
+
+def test_list_pending_halts_does_not_exclude_accept_from_different_repo(tmp_path):
+    """PR-#430 review fix #10: an accept in repo A must NOT suppress a halt
+    in repo B. The accept_key includes a repo prefix so cross-repo
+    suppression is structurally impossible."""
+    db = tmp_path / "rt.db"
+    _seed_finding(db, stable_key="run1:design:1:data:rt3:abc")
+    # Accept under a DIFFERENT repo
+    hr.accept_finding(
+        "run1:design:1:data:rt3:abc",
+        run_id="run1",
+        stage="design",
+        round_num=1,
+        persona="data",
+        finding_id="rt3",
+        concern_hash="abc",
+        concern_excerpt="x",
+        repo="other/repo",
+        accepted_by="alice",
+        db_path=db,
+    )
+    pending = hr.list_pending_halts(db_path=db)
+    assert len(pending) == 1, "cross-repo accept must not suppress this repo's halt"
 
 
 def test_list_pending_halts_filters_by_repo_and_stage(tmp_path):

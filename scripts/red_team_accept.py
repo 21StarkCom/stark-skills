@@ -90,6 +90,7 @@ def accept_one(
         finding_id=meta["finding_id"],
         concern_hash=meta["concern_hash"],
         concern_excerpt=meta.get("concern_excerpt"),
+        repo=meta.get("repo"),
         accepted_by=accepted_by,
         note=note,
     )

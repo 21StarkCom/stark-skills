@@ -176,20 +176,25 @@ def compute_accept_key(
     stage: str,
     persona: str,
     concern_hash: str,
+    repo: str | None = None,
 ) -> str:
     """Build the cross-run ACCEPT key for human-review halt recovery (FU-rt8).
 
-    Format: ``{stage}:{persona}:{concern_hash}``. Drops ``run_id``, ``round_num``,
-    and ``finding_id`` so the same risk surfaced under a fresh run / new
-    finding-id slot still matches an operator's prior acceptance. The
-    ``concern_hash`` already carries the structured identity (persona +
-    risk_key + affected_component + normalized concern, see
-    :func:`compute_concern_hash`), so a finding that has the same hash IS
-    the same concern by FU-rt5's definition. A NEW concern (different
-    risk_key / different affected_component / materially different wording)
-    produces a different hash and the halt gate re-engages.
+    Format: ``{repo}:{stage}:{persona}:{concern_hash}``. Drops ``run_id``,
+    ``round_num``, and ``finding_id`` so the same risk surfaced under a
+    fresh run / new finding-id slot still matches an operator's prior
+    acceptance. ``concern_hash`` already carries the structured identity
+    (persona + risk_key + affected_component, see :func:`compute_concern_hash`),
+    so a finding that has the same hash IS the same concern by FU-rt5's
+    definition.
+
+    PR-#430 review fix #10: repo prefix added so accepting a concern in
+    one repository cannot silently suppress a matching halt in a different
+    repository (the audit DB is shared across the operator's full
+    workspace). ``repo=None`` falls back to a literal ``unknown`` prefix
+    so legacy callers pre-fix still produce a deterministic value.
     """
-    return f"{stage}:{persona}:{concern_hash}"
+    return f"{repo or 'unknown'}:{stage}:{persona}:{concern_hash}"
 
 
 @dataclass
@@ -885,29 +890,29 @@ def _jaccard(a: set[str], b: set[str]) -> float:
 
 
 def _structured_overlap(fa: RedTeamFinding, fb: RedTeamFinding) -> bool:
-    """Two findings overlap if they share persona + structured identity.
+    """Two findings overlap iff they share persona + the full structured triple.
 
     The structured triple ``(risk_key, affected_component, failure_mode)``
-    carries the risk identity. A match on persona plus any of the structured
-    fields is a strong signal that two reruns surfaced the same concern under
-    different wording — which is exactly what the Jaccard gate kept missing
-    (FU-rt5).
+    carries the risk identity. PR-#430 review (#6) tightened this from
+    "match on risk_key alone" to "match on the full triple": two
+    findings from the same persona with the same generic ``risk_key``
+    (e.g. ``security-issue``) but different ``affected_component`` /
+    ``failure_mode`` were being reported as stably-blocking when they were
+    in fact unrelated. Persona is checked at the call site so we don't
+    re-test it here, but we do guard against partial-identity cases.
     """
     if fa.persona != fb.persona:
         return False
-    if fa.risk_key and fb.risk_key and fa.risk_key == fb.risk_key:
-        return True
-    if (
-        fa.affected_component
-        and fb.affected_component
-        and fa.affected_component == fb.affected_component
-        and (
-            (fa.failure_mode and fa.failure_mode == fb.failure_mode)
-            or (fa.risk_key and fb.risk_key and fa.risk_key == fb.risk_key)
-        )
-    ):
-        return True
-    return False
+    if not fa.risk_key or fa.risk_key != fb.risk_key:
+        return False
+    if not fa.affected_component or fa.affected_component != fb.affected_component:
+        return False
+    # ``failure_mode`` may be None for legacy producers. Match if both
+    # populated; treat one-sided None as a match (the triple's risk_key +
+    # component already pin the identity).
+    if fa.failure_mode and fb.failure_mode and fa.failure_mode != fb.failure_mode:
+        return False
+    return True
 
 
 def _has_structured_identity(f: RedTeamFinding) -> bool:

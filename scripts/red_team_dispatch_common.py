@@ -400,7 +400,16 @@ def _escape_inline(text: str) -> str:
 
 
 def _needs_fence(text: str) -> bool:
-    return bool(re.search(r"```|````|<\w+", text or ""))
+    """Detect markdown content that must be fenced rather than inlined.
+
+    PR-#430 review fix #11 widened the trigger from "fenced-block markers
+    or opening HTML tags" to also catch closing HTML tags
+    (``</details>``) and inline-markdown link constructs (``[text](url)``,
+    ``![alt](url)``). Without those triggers, attacker-influenced finding
+    text could break out of the surrounding ``<details>`` block in the
+    PR comment or render misleading clickable links.
+    """
+    return bool(re.search(r"```|````|<\w+|</\w+|!?\[[^\]]*\]\(", text or ""))
 
 
 def _max_backtick_run(text: str) -> int:
@@ -648,17 +657,33 @@ def _persona_anchor(stable_key: str) -> str:
     return f"rt-{digest}"
 
 
-_PR_COMMENT_RUN_MARKER_PREFIX = "<!-- stark-red-team: run_id="
+_PR_COMMENT_MARKER_PREFIX = "<!-- stark-red-team: stage="
 
 
-def pr_comment_run_marker(run_id: str) -> str:
-    """Return the HTML-comment marker that anchors a PR comment to a run.
+def pr_comment_marker(stage: str, artifact_relative_path: str | None) -> str:
+    """Return the stable HTML-comment marker for a red-team PR comment.
 
-    Skill scripts use this to find an existing comment for the same run_id
-    and edit it (FU-rt9: one updatable summary comment per run) instead of
-    posting a fresh comment.
+    Keyed by ``stage`` + artifact path (NOT ``run_id``). The PR-#430-review
+    fix for finding #1/#18: every dispatcher run gets a fresh ``run_id``,
+    so a marker keyed by run_id would never match the prior comment and
+    "edit-or-create" silently degenerates to "always create". Keying by
+    artifact identity is what makes "one updatable per-run comment per
+    artifact" actually deliver. The active ``run_id`` still appears in
+    the rendered body as visible metadata for the audit trail.
     """
-    return f"{_PR_COMMENT_RUN_MARKER_PREFIX}{run_id} -->"
+    artifact = artifact_relative_path or "(no-artifact)"
+    return f"{_PR_COMMENT_MARKER_PREFIX}{stage} artifact={artifact} -->"
+
+
+# Back-compat alias: the older symbol name stays exported for callers that
+# imported it before the marker scheme changed. New code should use
+# ``pr_comment_marker`` directly.
+def pr_comment_run_marker(run_id: str) -> str:  # pragma: no cover
+    del run_id
+    raise RuntimeError(
+        "pr_comment_run_marker is deprecated — use pr_comment_marker(stage, "
+        "artifact_relative_path) so the marker stays stable across reruns."
+    )
 
 
 def _highlights_section(
@@ -803,6 +828,7 @@ def render_pr_comment_body(
     model: str,
     run_id: str,
     stage: str,
+    artifact_relative_path: str | None = None,
     fix_plan_status: str | None = None,
     fix_plan: rt.RedTeamFixPlan | None = None,
 ) -> str:
@@ -816,8 +842,10 @@ def render_pr_comment_body(
     - Highlights block at top surfaces critical / high findings without
       forcing reviewers to expand persona sections.
     - HTML-comment marker at the head identifies the comment as belonging
-      to a specific run, so callers can find-and-edit instead of posting
-      a fresh comment per round.
+      to a specific (stage, artifact path) so callers can find-and-edit
+      instead of posting a fresh comment per round. The marker is
+      explicitly NOT keyed by ``run_id`` — every dispatcher run gets a
+      fresh run_id, which would defeat the find-by-marker lookup.
 
     Sidecar markdown (file on disk) keeps the flat layout — collapsibles
     don't render in plain-markdown viewers and the file is read offline.
@@ -827,7 +855,7 @@ def render_pr_comment_body(
     findings = result.findings
 
     lines: list[str] = [
-        pr_comment_run_marker(run_id),
+        pr_comment_marker(stage, artifact_relative_path or str(artifact_path.name)),
         f"# Red-team review — {artifact_path.name}",
         "",
         f"- **Date:** {timestamp}",
@@ -1029,14 +1057,32 @@ def _run_iterative(
         total_input_tokens += r.input_tokens
         total_output_tokens += r.output_tokens
 
-    def _finalize(primary: rt.RedTeamResult) -> rt.RedTeamResult:
-        """Return a result that surfaces aggregated totals.
+    def _finalize(
+        primary: rt.RedTeamResult,
+        *,
+        terminal_transition: str | None,
+    ) -> rt.RedTeamResult:
+        """Return a result that surfaces aggregated totals + terminal outcome.
 
-        The findings / synthesis / status fields stay sourced from the
-        primary call (the gate decision is made on primary + verification
-        overlap, not on a synthesized result). Cost / duration / tokens
-        roll up so downstream readers see the run-level totals.
+        The findings / synthesis fields stay sourced from the primary
+        call. Cost / duration / tokens roll up so downstream readers see
+        the run-level totals. PR-#430 review fix (#2 / #5): when the
+        state machine exits in a degraded or flicker-exhausted state,
+        the error field is set so ``derive_status`` returns ``error``
+        (not ``halted``) — the gate cannot vouch for a finding's
+        stability if verification didn't agree.
         """
+        result_error = primary.error
+        if not result_error and terminal_transition in {
+            "terminate.degraded",
+            "terminate.flicker_attempts_exhausted",
+            "terminate.budget_exhausted_flicker",
+        }:
+            result_error = (
+                f"red-team gate could not confirm stability: state machine "
+                f"exited via {terminal_transition}. The primary findings "
+                "(see raw_output) were never verified by a second call."
+            )
         return rt.RedTeamResult(
             stage=primary.stage,
             round_num=primary.round_num,
@@ -1047,7 +1093,7 @@ def _run_iterative(
             raw_output=primary.raw_output,
             duration_s=total_duration_s,
             cost_usd=total_cost_usd,
-            error=primary.error,
+            error=result_error,
             input_tokens=total_input_tokens,
             output_tokens=total_output_tokens,
         )
@@ -1102,6 +1148,7 @@ def _run_iterative(
                 a, b, jaccard_min=float(cfg.get("stability_overlap_jaccard_min", 0.4))
             ),
             has_prior_good_round=last_good_result is not None,
+            verification_required=max_rounds > 1,
         )
         if outcome != sm.RoundOutcome.error:
             last_good_result = primary
@@ -1117,7 +1164,7 @@ def _run_iterative(
         )
         if terminate:
             sm.mark_terminated(state, transition or "terminate.unknown")
-            return _finalize(primary), state.history
+            return _finalize(primary, terminal_transition=transition), state.history
 
         # Flicker without budget exhaustion: re-run the same round_num so
         # rounds_used accounting stays consistent with the state machine.
@@ -1126,7 +1173,10 @@ def _run_iterative(
         round_num += 1
         if round_num > max_rounds:
             sm.mark_terminated(state, "terminate.budget_exhausted")
-            return _finalize(primary), state.history
+            return (
+                _finalize(primary, terminal_transition="terminate.budget_exhausted"),
+                state.history,
+            )
 
 
 def execute_dispatch(
@@ -1185,16 +1235,23 @@ def execute_dispatch(
     del history  # FU-rt4 transition log; insights events already capture per-round outcomes.
 
     # FU-rt8 — Demote human-review halts when the operator has already
-    # accepted the same stable_key. Accepts persist in the audit DB so the
-    # next dispatcher invocation honors them. Only human-review counts move;
-    # blocking findings still halt regardless.
-    if audit and result.error is None and result.human_review_count > 0:
+    # accepted the same concern. Accepts persist in the audit DB so the
+    # next dispatcher invocation honors them. Only human-review counts
+    # move; blocking findings still halt regardless.
+    #
+    # PR-#430 review fix #3: this lookup is INDEPENDENT of ``audit`` mode.
+    # ``--no-audit`` / dry-run was previously short-circuiting accept
+    # filtering, so a known-accepted concern still halted those runs.
+    # The ``audit`` flag now only gates *writing* audit rows, not reading
+    # them.
+    if result.error is None and result.human_review_count > 0:
         try:
             import red_team_human_review
 
             unaccepted, accepted_keys = red_team_human_review.filter_human_review_findings(
                 result.findings,
                 stage=stage,
+                repo=ctx.repo,
             )
             del accepted_keys  # JSON output already exposes findings; keys aren't returned.
             if not unaccepted and len(unaccepted) < result.human_review_count:
@@ -1293,6 +1350,7 @@ def execute_dispatch(
         result=result,
         model=model,
         run_id=ctx.run_id,
+        artifact_relative_path=ctx.artifact_relative_path,
         stage=stage,
         fix_plan_status=fix_plan_status,
         fix_plan=fix_plan,

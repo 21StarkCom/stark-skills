@@ -110,11 +110,20 @@ def classify_round(
     *,
     overlap: "Callable[[RedTeamResult, RedTeamResult], bool]",
     has_prior_good_round: bool,
+    verification_required: bool = True,
 ) -> RoundOutcome:
     """Classify one round given its primary + optional verification result.
 
     Pure function — no state mutation. ``overlap`` is the stability gate
     (typically ``stark_red_team._overlap``); injected so tests can stub it.
+
+    ``verification_required`` (default True) signals whether a verification
+    call SHOULD have been made for this round. When the orchestrator
+    runs in single-call mode (``max_rounds == 1``), verification is
+    intentionally absent and a missing verification result must not
+    surface as ``degraded``. Set ``False`` for that path so the
+    classifier returns ``confirmed_blocking`` directly when the primary
+    has blocking findings.
 
     Decision order:
 
@@ -123,15 +132,19 @@ def classify_round(
        surface).
     2. ``primary.blocking_count == 0`` → ``clean``. No verification needed
        to confirm "nothing to confirm".
-    3. Verification missing or errored → ``degraded``. The gate cannot
+    3. ``verification_required=False`` → trust the primary result and
+       return ``confirmed_blocking`` directly.
+    4. Verification missing or errored → ``degraded``. The gate cannot
        judge stability without a verification call.
-    4. ``overlap(primary, verification)`` is True → ``confirmed_blocking``.
-    5. Otherwise → ``flicker``.
+    5. ``overlap(primary, verification)`` is True → ``confirmed_blocking``.
+    6. Otherwise → ``flicker``.
     """
     if primary.error is not None:
         return RoundOutcome.degraded if has_prior_good_round else RoundOutcome.error
     if primary.blocking_count == 0:
         return RoundOutcome.clean
+    if not verification_required:
+        return RoundOutcome.confirmed_blocking
     if verification is None or verification.error is not None:
         return RoundOutcome.degraded
     if overlap(primary, verification):

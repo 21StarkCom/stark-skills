@@ -138,22 +138,27 @@ def accept_finding(
     finding_id: str,
     concern_hash: str,
     concern_excerpt: str | None,
+    repo: str | None = None,
     accepted_by: str | None = None,
     note: str | None = None,
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> None:
     """Record an operator acceptance for one human-review finding.
 
-    Persists by ``accept_key`` (cross-run identity) — re-accepting the same
-    concern from a different run is a no-op (INSERT OR IGNORE keeps the
-    original timestamp). The original ``stable_key`` is stored alongside so
-    an auditor can see which run/round/finding-id slot the operator
-    acknowledged.
+    Persists by ``accept_key`` (cross-run, repo-scoped identity) —
+    re-accepting the same concern from a different run is a no-op
+    (INSERT OR IGNORE keeps the original timestamp). The original
+    ``stable_key`` is stored alongside so an auditor can see which
+    run/round/finding-id slot the operator acknowledged.
+
+    PR-#430 review fix #10: ``repo`` is now part of the accept key so an
+    accept in repo A cannot suppress a halt in repo B (the audit DB is
+    shared across the operator's workspace).
     """
     import stark_red_team as rt
 
     accept_key = rt.compute_accept_key(
-        stage=stage, persona=persona, concern_hash=concern_hash
+        stage=stage, persona=persona, concern_hash=concern_hash, repo=repo
     )
     init_table(db_path)
     conn = audit_base.connect(db_path)
@@ -218,22 +223,21 @@ def filter_human_review_findings(
     findings: list[Any],
     *,
     stage: str,
+    repo: str | None = None,
     db_path: str | Path = DEFAULT_DB_PATH,
     run_id: str | None = None,
     round_num: int | None = None,
 ) -> tuple[list[Any], list[str]]:
     """Split findings into ``(unaccepted, accepted_keys)`` using cross-run lookup.
 
-    Matches accepted findings by ``accept_key`` (``stage:persona:concern_hash``)
-    so a key persisted from a prior run still matches the same concern in a
-    fresh dispatcher invocation. ``run_id`` / ``round_num`` are accepted for
-    backward compatibility but are no longer part of the match — they only
-    flow through to the audit row when this gets called from a live
-    dispatch.
+    Matches accepted findings by ``accept_key`` (``repo:stage:persona:concern_hash``)
+    so a key persisted from a prior run still matches the same concern in
+    a fresh dispatcher invocation, while an accept in a different repo
+    cannot suppress this repo's halt (PR-#430 review fix #10).
 
-    A finding's ``concern_hash`` is what makes the key collision-resistant:
-    a NEW concern (different ``risk_key`` / ``affected_component`` / wording)
-    produces a different hash and the gate re-engages.
+    ``run_id`` / ``round_num`` are accepted for backward compatibility but
+    are no longer part of the match — they only flow through to the audit
+    row when this gets called from a live dispatch.
     """
     import stark_red_team as rt
 
@@ -260,6 +264,7 @@ def filter_human_review_findings(
             stage=stage,
             persona=f.persona,
             concern_hash=f.concern_hash,
+            repo=repo,
         )
         if accept_key in all_accepted:
             matched_keys.append(accept_key)
@@ -293,9 +298,13 @@ def list_pending_halts(
         params.append(stage)
     # FU-rt8: exclude already-accepted concerns by reconstructing the same
     # accept_key the dispatcher would compute for each finding row, then
-    # NOT-IN-filtering against the persisted accepts table.
+    # NOT-IN-filtering against the persisted accepts table. PR-#430 review
+    # fix #10 added the repo prefix; finding rows that don't carry a repo
+    # (legacy) fall back to the literal "unknown" prefix to mirror
+    # ``compute_accept_key(repo=None)``.
     accept_key_expr = (
-        "(f.stage || ':' || f.persona || ':' || COALESCE(f.concern_hash, ''))"
+        "(COALESCE(r.repo, 'unknown') || ':' || f.stage || ':' || f.persona "
+        "|| ':' || COALESCE(f.concern_hash, ''))"
     )
     sql = (
         "SELECT f.stable_key, f.run_id, f.stage, f.round_num, f.persona, "
@@ -366,10 +375,13 @@ def lookup_finding_metadata(
     conn = audit_base.connect(db_path)
     try:
         row = conn.execute(
-            "SELECT stable_key, run_id, stage, round_num, persona, finding_id, "
-            "concern_hash, concern, severity, counter_proposal "
-            "FROM red_team_findings WHERE stable_key = ? "
-            "ORDER BY id DESC LIMIT 1",
+            "SELECT f.stable_key, f.run_id, f.stage, f.round_num, f.persona, "
+            "f.finding_id, f.concern_hash, f.concern, f.severity, "
+            "f.counter_proposal, r.repo "
+            "FROM red_team_findings f "
+            "LEFT JOIN red_team_runs r ON r.run_id = f.run_id "
+            "WHERE f.stable_key = ? "
+            "ORDER BY f.id DESC LIMIT 1",
             (stable_key,),
         ).fetchone()
     finally:
@@ -385,6 +397,7 @@ def lookup_finding_metadata(
         "finding_id": row[5],
         "concern_hash": row[6],
         "concern_excerpt": row[7],
+        "repo": row[10],
         "severity": row[8],
         "counter_proposal": row[9],
     }

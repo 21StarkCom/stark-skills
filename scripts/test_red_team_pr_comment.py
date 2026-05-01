@@ -44,7 +44,10 @@ def _result(findings):
     )
 
 
-def test_pr_comment_marker_is_run_keyed():
+def test_pr_comment_marker_is_keyed_by_stage_and_artifact():
+    """PR-#430 review fix #1/#18: marker is keyed by stage + artifact path
+    (stable across reruns), NOT by run_id. The find-and-edit flow
+    requires the marker to be the same on the second dispatch run."""
     body = common.render_pr_comment_body(
         artifact_path=Path("design.md"),
         source_spec_path=None,
@@ -52,10 +55,35 @@ def test_pr_comment_marker_is_run_keyed():
         model="gpt-5.5-pro",
         run_id="manual-abc123",
         stage="design",
+        artifact_relative_path="docs/design.md",
     )
-    assert "<!-- stark-red-team: run_id=manual-abc123 -->" in body
-    # Marker is the first non-empty line so a watcher can splice the comment.
-    assert body.lstrip().startswith("<!-- stark-red-team: run_id=manual-abc123 -->")
+    assert "<!-- stark-red-team: stage=design artifact=docs/design.md -->" in body
+    assert body.lstrip().startswith("<!-- stark-red-team: stage=design")
+
+
+def test_pr_comment_marker_stable_across_reruns():
+    """Same artifact + stage → same marker. Different run_id is irrelevant."""
+    body_a = common.render_pr_comment_body(
+        artifact_path=Path("design.md"),
+        source_spec_path=None,
+        result=_result([]),
+        model="gpt-5.5-pro",
+        run_id="manual-aaa",
+        stage="design",
+        artifact_relative_path="docs/design.md",
+    )
+    body_b = common.render_pr_comment_body(
+        artifact_path=Path("design.md"),
+        source_spec_path=None,
+        result=_result([]),
+        model="gpt-5.5-pro",
+        run_id="manual-bbb",  # different run, same artifact
+        stage="design",
+        artifact_relative_path="docs/design.md",
+    )
+    marker_a = body_a.split("\n", 1)[0]
+    marker_b = body_b.split("\n", 1)[0]
+    assert marker_a == marker_b
 
 
 def test_pr_comment_groups_findings_into_collapsible_persona_blocks():

@@ -123,14 +123,21 @@ def preflight_sandbox() -> tuple[str, str]:
     Fails closed: any check that can't be verified surfaces as ``failed``
     so the operator hears about it before a real run.
 
+    The caller (``preflight.check_red_team_sandbox``) is responsible for
+    skipping this entirely on Responses-API installs — by the time we
+    reach this function we assume codex CLI IS the active dispatch path,
+    so a missing codex binary is a hard failure (PR-#430 review fix
+    #17). Earlier behavior returned ``degraded`` for missing codex,
+    which the registry mapped to a warning even on installs that needed
+    codex CLI to dispatch.
+
     Status values:
     - ``ready`` — sandbox primitives function, codex honors read-only.
-    - ``degraded`` — codex CLI absent (no fallback path needed today, but
-      a heads-up so a future install gap doesn't bite during dispatch).
-    - ``failed`` — a primitive the sandbox depends on is broken.
+    - ``failed`` — a primitive the sandbox depends on is broken or
+      missing entirely.
     """
     if shutil.which("codex") is None:
-        return ("degraded", "codex CLI not on PATH; sandbox is unused for Responses-API dispatch")
+        return ("failed", "codex CLI not on PATH — codex-CLI red-team dispatch cannot enforce sandbox boundary")
 
     # 1. workdir isolation works
     try:
