@@ -3,9 +3,11 @@
 // then a small integration test runs cleanInfra() end-to-end.
 
 import { strict as assert } from "node:assert";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { test, type TestContext } from "node:test";
 
 import {
@@ -347,6 +349,33 @@ test("cleanInfra surfaces unlink errors but keeps going", (t) => {
       tarRunner: () => "",
     });
     assert.equal(receipt.errors.length, 0);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// Regression: under Node 25's --experimental-strip-types, the entry-point
+// gate goes silent when the script is invoked through a symlink (e.g.
+// ~/.claude/code-review/tools/ → stark-skills/tools/). See
+// review_setup_worktree for the full root cause. Guard by invoking through
+// a real symlink and asserting the CLI parser actually runs.
+test("CLI runs when invoked through a symlink (Node 25 strip-types regression)", (t) => {
+  const tmp = makeTmp(t);
+  if (!tmp) return;
+  const realScript = fileURLToPath(
+    new URL("./housekeeping_infra.ts", import.meta.url),
+  );
+  const linkedScript = path.join(tmp, "housekeeping_infra.ts");
+  try {
+    fs.symlinkSync(realScript, linkedScript);
+    const stdout = execFileSync(
+      process.execPath,
+      ["--experimental-strip-types", linkedScript, "--dry-run", "--json"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    );
+    // --dry-run --json prints a JSON receipt; empty stdout means the gate
+    // misfired and main() never ran.
+    assert.ok(stdout.trim().length > 0, "expected JSON receipt, got empty stdout");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

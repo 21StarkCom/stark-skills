@@ -326,3 +326,39 @@ test("CLI --json wraps the markdown payload", (t) => {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// Regression: under Node 25's --experimental-strip-types, the entry-point
+// gate goes silent when the script is invoked through a symlink (e.g.
+// ~/.claude/code-review/tools/ → stark-skills/tools/). See
+// review_setup_worktree for the full root cause. Guard by invoking through
+// a real symlink and asserting the CLI parser actually runs.
+test("CLI runs when invoked through a symlink (Node 25 strip-types regression)", (t) => {
+  let tmpDir: string;
+  try {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "design-summary-symlink-"));
+  } catch (err) {
+    t.skip(`os.tmpdir() unavailable: ${(err as Error).message}`);
+    return;
+  }
+  const realScript = fileURLToPath(
+    new URL("./design_review_summary.ts", import.meta.url),
+  );
+  const linkedScript = path.join(tmpDir, "design_review_summary.ts");
+  try {
+    fs.symlinkSync(realScript, linkedScript);
+    const res = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", linkedScript, "--help"],
+      { encoding: "utf8" },
+    );
+    // --help isn't wired (no parser flag for it); the script reads stdin or
+    // --input. The point is to prove main() ran — any non-empty stderr (the
+    // input-required error) confirms the gate fired.
+    assert.ok(
+      res.stdout.length > 0 || res.stderr.length > 0,
+      `expected output, got empty stdout+stderr (gate misfired). exit=${res.status}`,
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

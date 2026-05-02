@@ -270,3 +270,38 @@ test("CLI --check exits 0 when every skill links to the standard", (t) => {
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+// Regression: under Node 25's --experimental-strip-types, the entry-point
+// gate goes silent when the script is invoked through a symlink (e.g.
+// ~/.claude/code-review/tools/ → stark-skills/tools/). See
+// review_setup_worktree for the full root cause. Guard by invoking through
+// a real symlink and asserting the CLI parser actually runs.
+test("CLI runs when invoked through a symlink (Node 25 strip-types regression)", (t) => {
+  let tmp: string;
+  try {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-diet-symlink-"));
+  } catch (err) {
+    t.skip(`os.tmpdir() unavailable: ${(err as Error).message}`);
+    return;
+  }
+  const realScript = fileURLToPath(
+    new URL("./skill_diet.ts", import.meta.url),
+  );
+  const linkedScript = path.join(tmp, "skill_diet.ts");
+  try {
+    fs.symlinkSync(realScript, linkedScript);
+    const res = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", linkedScript, "--json"],
+      { encoding: "utf8" },
+    );
+    // --json always prints a summary line; empty stdout means the gate
+    // misfired and main() never ran.
+    assert.ok(
+      res.stdout.length > 0,
+      `expected JSON output, got empty stdout (gate misfired). exit=${res.status}, stderr=${res.stderr}`,
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

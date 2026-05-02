@@ -7,9 +7,18 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 
 import { cleanupWorktree, type Runner } from "./review_cleanup_worktree.ts";
+
+function makeTmp(t: TestContext): string | null {
+  try {
+    return fs.mkdtempSync(path.join(os.tmpdir(), "review-cleanup-symlink-"));
+  } catch (err) {
+    t.skip(`os.tmpdir() unavailable: ${(err as Error).message}`);
+    return null;
+  }
+}
 
 function fakeRunner(opts: {
   worktreeExists?: boolean;
@@ -134,11 +143,12 @@ test("cleanupWorktree removes a clean worktree at the expected HEAD", () => {
 // code-review/tools/ → stark-skills/tools/). Symptom was empty stdout +
 // exit 0. Guard by invoking the script through a real symlink and asserting
 // the CLI parser actually runs.
-test("CLI runs when invoked through a symlink (Node 25 strip-types regression)", () => {
+test("CLI runs when invoked through a symlink (Node 25 strip-types regression)", (t) => {
+  const tmpDir = makeTmp(t);
+  if (!tmpDir) return;
   const realScript = fileURLToPath(
     new URL("./review_cleanup_worktree.ts", import.meta.url),
   );
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "review-cleanup-symlink-"));
   const linkedScript = path.join(tmpDir, "review_cleanup_worktree.ts");
   try {
     fs.symlinkSync(realScript, linkedScript);
