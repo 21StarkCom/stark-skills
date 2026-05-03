@@ -41,10 +41,3 @@
 
 **Domain manifest** — JSON file (`global/prompts/triage/domains.json`) mapping review types (pr-review, design-review, plan-review) to their domain catalogues with slugs, labels, filenames, and semantic descriptions. Used by the triage engine to construct LLM prompts.
 
-**stark-graph** -- Staged Python pipeline that analyzes dependency relationships in source code via AST parsing and docstring metadata extraction. Produces Graph, ValidationReport, and DiffReport artifacts consumed by the PR review pipeline for dependency-aware code review.
-
-**Blast radius** -- In the stark-graph differ, the set of nodes transitively affected by a code change, computed via reverse BFS from changed nodes following incoming dependency edges. Reported as "confirmed minimum" counts at direct (depth 1) and transitive (up to configurable depth cap) levels.
-
-**Graph gate mode** -- Config key (`graph_gate_mode`) controlling how the stark-graph pipeline integrates with the PR review dispatcher. Values: `disabled` (skip graph entirely, kill switch), `shadow` (run graph, log results, never block), `blocking` (honor exit codes, exit 1 stops review). Loaded via `discover_config()` hierarchy.
-
-**Drift validator** -- Component of stark-graph (`scripts/graph/drift_validator.py`) that compares docstring `Depends:` entries against AST-derived import edges. Emits finding types: STALE (docstring contradicts AST), MISSING (AST import not in docstring), NO_DOCSTRING (node has no docstring), RUNTIME_ONLY (docstring dep with no matching AST import, informational).
