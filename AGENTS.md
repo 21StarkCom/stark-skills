@@ -41,7 +41,6 @@ Multi-agent PR code review system. Codex, Codex, and Gemini are all enabled by d
 - `scripts/github_projects.py` — GitHub Projects V2 GraphQL utility (13 public functions)
 - `scripts/emit_queue.py` — SQLite-backed durable event queue with dead-letter
 - `scripts/session_state.py` — persistent session state management
-- `scripts/stark_graph.py` — dependency graph pipeline (parse, diff, blast radius, PR commenting)
 
 ### TUI & session
 - `scripts/tui_core.py` — shared TUI rendering primitives (box, table, progress)

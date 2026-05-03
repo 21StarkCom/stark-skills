@@ -169,111 +169,6 @@ def resolve_context_files(patterns: list[str], cwd: str) -> str | None:
     return "## Context Files\nThe following files from the repo provide architectural context:\n\n" + "\n\n---\n\n".join(sections)
 
 
-# ── Graph dependency context ──────────────────────────────────────────────
-
-_GRAPH_SAFE_RE = re.compile(r'^[a-zA-Z0-9_:./-]+$')
-_GRAPH_TOKEN_BUDGET = 2000  # target max tokens for graph context section
-
-
-def _sanitize_graph_field(value: str) -> str:
-    """Allowlist filter for repo-derived fields (prompt injection protection)."""
-    if _GRAPH_SAFE_RE.match(value):
-        return value
-    return re.sub(r'[^a-zA-Z0-9_:./-]', '', value)
-
-
-def _build_graph_dependency_context(
-    cwd: str,
-    base: str,
-    pr_number: int | None,
-    config: dict,
-) -> str | None:
-    """Run stark_graph.py --stage diff and return a formatted dependency context string.
-
-    Returns None on failure (exit 2, timeout, parse error) — callers degrade gracefully.
-    Token budget: ~2000 tokens. Truncates to blast radius edges when exceeded.
-
-    Resolves *base* through :func:`_resolve_base_ref` so blast-radius
-    discovery uses the same merge-base as ``_get_changed_files`` and
-    the agent prompts. Without this, a stale local ``main`` ref could
-    feed architecture/behavior sub-agents dependency nodes from
-    other PRs that already landed on origin/main.
-    """
-    stark_graph = SCRIPTS_DIR / "stark_graph.py"
-    resolved_base = _resolve_base_ref(base, cwd=cwd)
-    cmd = [sys.executable, str(stark_graph), "--stage", "diff", "--repo", cwd, "--base", resolved_base]
-    if pr_number is not None:
-        cmd.extend(["--pr", str(pr_number)])
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, cwd=cwd)
-    except subprocess.TimeoutExpired:
-        print("  [graph] diff timed out — skipping dependency context", file=sys.stderr)
-        return None
-    except OSError as exc:
-        print(f"  [graph] diff failed to start: {exc} — skipping dependency context", file=sys.stderr)
-        return None
-    if result.returncode == 2:
-        print("  [graph] diff exit 2 (setup error) — skipping dependency context", file=sys.stderr)
-        return None
-    if not result.stdout.strip():
-        return None
-    try:
-        report = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return None
-    return _format_graph_context(report)
-
-
-def _format_graph_context(report: dict) -> str:
-    """Format a DiffReport dict as a dependency-context section for prompt injection."""
-    added_nodes = [_sanitize_graph_field(n) for n in report.get("added_nodes", []) if n]
-    removed_nodes = [_sanitize_graph_field(n) for n in report.get("removed_nodes", []) if n]
-    added_edges = [_sanitize_graph_field(e) for e in report.get("added_edges", []) if e]
-    removed_edges = [_sanitize_graph_field(e) for e in report.get("removed_edges", []) if e]
-    blast = report.get("blast_radius", {})
-    direct = [_sanitize_graph_field(n) for n in blast.get("direct", []) if n]
-    transitive = [_sanitize_graph_field(n) for n in blast.get("transitive", []) if n]
-    depth_cap = blast.get("depth_cap_reached", False)
-    event_subscribers = [_sanitize_graph_field(n) for n in blast.get("event_subscribers", []) if n]
-
-    lines = ["## Dependency Context", "", "<dependency-context>"]
-    if added_nodes:
-        lines.append(f"Added nodes: {', '.join(added_nodes)}")
-    if removed_nodes:
-        lines.append(f"Removed nodes: {', '.join(removed_nodes)}")
-    if added_edges:
-        lines.append(f"Added edges: {', '.join(added_edges)}")
-    if removed_edges:
-        lines.append(f"Removed edges: {', '.join(removed_edges)}")
-    lines.append("")
-    lines.append("Blast radius:")
-    if direct:
-        lines.append(f"  Direct dependents: {', '.join(direct)}")
-    if transitive:
-        cap_note = " (depth cap reached)" if depth_cap else ""
-        lines.append(f"  Transitive dependents{cap_note}: {', '.join(transitive)}")
-    if event_subscribers:
-        lines.append(f"  Event subscribers: {', '.join(event_subscribers)}")
-    if not direct and not transitive and not event_subscribers:
-        lines.append("  No dependents found.")
-    lines.append("</dependency-context>")
-
-    full_text = "\n".join(lines)
-    # Token budget: ~2000 tokens ≈ 8000 chars (4 chars/token avg)
-    if len(full_text) // 4 > _GRAPH_TOKEN_BUDGET:
-        edge_lines = [
-            "## Dependency Context",
-            "",
-            "<dependency-context>",
-            "Blast radius (truncated to direct dependents due to token budget):",
-        ]
-        if direct:
-            edge_lines.append(f"  Direct dependents: {', '.join(direct[:50])}")
-        edge_lines.append("</dependency-context>")
-        return "\n".join(edge_lines)
-    return full_text
-
-
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 SEVERITY_ICONS = {
     "critical": "\U0001f534",
@@ -845,7 +740,6 @@ def _run_subagent(
     base: str,
     cwd: str | None = None,
     spec_context: str | None = None,
-    graph_context: str | None = None,
     override_timeout_s: int | None = None,
     prompt_cache: dict[tuple[str, str], str] | None = None,
 ) -> SubAgentResult:
@@ -853,7 +747,7 @@ def _run_subagent(
     if agent == "gemini":
         _gemini_semaphore.acquire()
     try:
-        result = _run_subagent_inner(agent, domain_key, base, cwd, spec_context, graph_context, override_timeout_s, prompt_cache)
+        result = _run_subagent_inner(agent, domain_key, base, cwd, spec_context, override_timeout_s, prompt_cache)
         if not result.model:
             result.model = _agent_model_label(agent)
         return result
@@ -868,7 +762,6 @@ def _run_subagent_inner(
     base: str,
     cwd: str | None = None,
     spec_context: str | None = None,
-    graph_context: str | None = None,
     override_timeout_s: int | None = None,
     prompt_cache: dict[tuple[str, str], str] | None = None,
 ) -> SubAgentResult:
@@ -893,8 +786,6 @@ def _run_subagent_inner(
         parts.append(preamble)
     if spec_context:
         parts.append(spec_context)
-    if graph_context:
-        parts.append(graph_context)
     parts.append(domain_prompt)
     full_prompt = "\n\n".join(parts)
 
@@ -1128,8 +1019,6 @@ def run_review_round(
     cwd: str | None = None,
     out: Any = None,
     spec_context: str | None = None,
-    graph_context: str | None = None,
-    enriched_domains: list[str] | None = None,
 ) -> ReviewRound:
     """Run one round of parallel reviews: agents × domains."""
     if out is None:
@@ -1142,7 +1031,6 @@ def run_review_round(
         disabled = set(config.get("disabled_domains", []))
         domains = [d for d in DOMAINS if d not in disabled]
     rnd = ReviewRound(round_num=round_num)
-    enriched_set = set(enriched_domains or [])
 
     # Adaptive timeout for large PRs
     file_count, line_count = _get_diff_stats(base, cwd=cwd)
@@ -1186,8 +1074,7 @@ def run_review_round(
             agent_timeout = _adaptive_timeout(agent, file_count, line_count, config)
             for domain_key in domains:
                 domain_cfg = DOMAINS.get(domain_key, {"label": domain_key})
-                domain_graph_context = graph_context if domain_key in enriched_set else None
-                future = pool.submit(_run_subagent, agent, domain_key, base, cwd, spec_context, domain_graph_context, agent_timeout, prompt_cache)
+                future = pool.submit(_run_subagent, agent, domain_key, base, cwd, spec_context, agent_timeout, prompt_cache)
                 futures[future] = (agent, domain_key)
                 print(
                     f"  [{agent_cfg['emoji']}] {agent} × {domain_cfg['label']}... "
@@ -1277,15 +1164,12 @@ def run_single_agent_round(
     cwd: str | None = None,
     out: Any = None,
     spec_context: str | None = None,
-    graph_context: str | None = None,
-    enriched_domains: list[str] | None = None,
 ) -> ReviewRound:
     """Run one round dispatching exactly 1 agent per domain."""
     if out is None:
         out = sys.stdout
     config = discover_config(cwd=cwd)
     rnd = ReviewRound(round_num=round_num)
-    enriched_set = set(enriched_domains or [])
     total = len(domain_agent_map)
 
     # Adaptive timeout for large PRs
@@ -1329,8 +1213,7 @@ def run_single_agent_round(
             agent_cfg = AGENTS[agent]
             agent_timeout = _adaptive_timeout(agent, file_count, line_count, config)
             domain_cfg = DOMAINS.get(domain_key, {"label": domain_key})
-            domain_graph_context = graph_context if domain_key in enriched_set else None
-            future = pool.submit(_run_subagent, agent, domain_key, base, cwd, spec_context, domain_graph_context, agent_timeout)
+            future = pool.submit(_run_subagent, agent, domain_key, base, cwd, spec_context, agent_timeout)
             futures[future] = (agent, domain_key)
             print(
                 f"  [{agent_cfg['emoji']}] {agent} × {domain_cfg['label']}... "
@@ -2017,14 +1900,8 @@ def review_pr_single(
     if ctx_files_content:
         spec_context = f"{spec_context}\n\n{ctx_files_content}" if spec_context else ctx_files_content
 
-    # Build graph dependency context for enriched domains
-    enriched_domains = config.get("graph_enriched_domains", ["architecture", "behavior"])
-    graph_context = _build_graph_dependency_context(effective_cwd, base, pr_number, config) if enriched_domains else None
-    if graph_context:
-        print(f"  [graph] dependency context built ({len(graph_context)} chars)", file=out)
-
     effective_round = round_num if round_num is not None else _next_round_num(repo, pr_number)
-    rnd = run_single_agent_round(base, effective_round, da_map, cwd=cwd, out=out, spec_context=spec_context, graph_context=graph_context, enriched_domains=enriched_domains)
+    rnd = run_single_agent_round(base, effective_round, da_map, cwd=cwd, out=out, spec_context=spec_context)
 
     if sev_overrides:
         for res in rnd.results:
@@ -2190,12 +2067,6 @@ def review_pr(
     if ctx_files_content:
         spec_context = f"{spec_context}\n\n{ctx_files_content}" if spec_context else ctx_files_content
 
-    # Build graph dependency context for enriched domains
-    enriched_domains = config.get("graph_enriched_domains", ["architecture", "behavior"])
-    graph_context = _build_graph_dependency_context(effective_cwd, base, pr_number, config) if enriched_domains else None
-    if graph_context:
-        print(f"  [graph] dependency context built ({len(graph_context)} chars)", file=out)
-
     rounds: list[ReviewRound] = []
     base_round = (round_num - 1) if round_num is not None else (_next_round_num(repo, pr_number) - 1)
     loop_round = base_round
@@ -2204,7 +2075,7 @@ def review_pr(
         loop_round += 1
         rnd = run_review_round(
             base, loop_round, agents=active_agents, domains=active_domains, cwd=cwd, out=out,
-            spec_context=spec_context, graph_context=graph_context, enriched_domains=enriched_domains,
+            spec_context=spec_context,
         )
         rounds.append(rnd)
 

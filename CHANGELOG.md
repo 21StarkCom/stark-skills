@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **stark-graph** code, tests, workflows, docs, and config keys (`graph_enriched_domains`, `graph_gate_mode`, `graph_max_parse_workers`, `graph_coverage_threshold`).
+
 ## [v0.6.2] - 2026-04-24
 
 ### Added

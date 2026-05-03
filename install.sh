@@ -562,7 +562,7 @@ interactive() {
     link_dir "$REPO_DIR/scripts" "$CODE_REVIEW_DIR/scripts" "Scripts"
     link_dir "$REPO_DIR/tools" "$CODE_REVIEW_DIR/tools" "TS tools"
 
-    for script in multi_review.py github_app.py github_projects.py stark_graph.py; do
+    for script in multi_review.py github_app.py github_projects.py; do
         if [ -f "$REPO_DIR/scripts/$script" ]; then
             info "  Script: $script"
         else
@@ -621,7 +621,7 @@ install() {
     link_dir "$REPO_DIR/tools" "$CODE_REVIEW_DIR/tools" "TS tools"
 
     # Verify key scripts are present in the scripts dir
-    for script in multi_review.py github_app.py github_projects.py stark_graph.py; do
+    for script in multi_review.py github_app.py github_projects.py; do
         if [ -f "$REPO_DIR/scripts/$script" ]; then
             info "  Script: $script"
         else
@@ -866,7 +866,7 @@ status() {
     check_dir "$CODE_REVIEW_DIR/tools" "TS tools"
 
     # Verify key scripts are accessible
-    for script in multi_review.py github_app.py github_projects.py stark_graph.py; do
+    for script in multi_review.py github_app.py github_projects.py; do
         if [ -f "$CODE_REVIEW_DIR/scripts/$script" ]; then
             info "  Script: $script"
         else

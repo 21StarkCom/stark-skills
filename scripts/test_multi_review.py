@@ -922,35 +922,6 @@ class TestSubagentPromptUsesResolvedBase:
         assert "git diff main...HEAD" not in prompt
 
 
-class TestGraphContextUsesResolvedBase:
-    """``_build_graph_dependency_context`` must run stark_graph with
-    the resolved base. Otherwise architecture/correctness sub-agents
-    receive blast-radius data from a stale local ``main``, which can
-    inject out-of-PR dependency nodes even when the agent's own diff
-    and the file filter both scope correctly to ``origin/main``."""
-
-    @patch("multi_review.subprocess.run")
-    def test_graph_context_uses_resolved_base(self, mock_run):
-        seen_args: list[list[str]] = []
-        def fake_run(args, **kwargs):
-            seen_args.append(list(args))
-            class R:
-                returncode = 0
-                stdout = "abc1234\n"
-                stderr = ""
-            return R()
-        mock_run.side_effect = fake_run
-        multi_review._build_graph_dependency_context(
-            cwd="/tmp/wt", base="main", pr_number=1, config={},
-        )
-        graph_calls = [a for a in seen_args if "stark_graph.py" in " ".join(a)]
-        assert graph_calls, "expected at least one stark_graph invocation"
-        # The --base argument follows the --base flag.
-        last = graph_calls[-1]
-        idx = last.index("--base")
-        assert last[idx + 1] == "origin/main"
-
-
 class TestHistoryPersistence:
     """save_round_history and save_review_summary write correct schema."""
 
@@ -1140,7 +1111,6 @@ class TestSingleAgentMode:
         with pytest.raises(RuntimeError, match="domain_agents must be an object"):
             multi_review.resolve_domain_agents({"domain_agents": ["codex"]}, ["security"])
 
-    @patch("multi_review._build_graph_dependency_context", return_value=None)
     @patch("multi_review.subprocess.run", return_value=MagicMock(returncode=1, stdout="", stderr=""))
     @patch("multi_review.run_single_agent_round", return_value=ReviewRound(round_num=1))
     @patch("multi_review.discover_config", return_value=DEFAULT_CONFIG)
@@ -1150,7 +1120,6 @@ class TestSingleAgentMode:
         _mock_config,
         _mock_round,
         _mock_run,
-        _mock_graph,
     ):
         with pytest.raises(RuntimeError, match="No review sub-agents produced results"):
             multi_review.review_pr_single(
@@ -1161,7 +1130,6 @@ class TestSingleAgentMode:
                 persist_history=False,
             )
 
-    @patch("multi_review._build_graph_dependency_context", return_value=None)
     @patch("multi_review.subprocess.run", return_value=MagicMock(returncode=1, stdout="", stderr=""))
     @patch("multi_review.discover_config", return_value=DEFAULT_CONFIG)
     @patch("multi_review.DOMAINS", FAKE_DOMAINS)
@@ -1169,7 +1137,6 @@ class TestSingleAgentMode:
         self,
         _mock_config,
         _mock_run,
-        _mock_graph,
     ):
         errored = ReviewRound(
             round_num=1,
@@ -1194,7 +1161,6 @@ class TestSingleAgentMode:
         assert result["summary"]["failed_results"] == 1
         assert result["summary"]["clean"] is False
 
-    @patch("multi_review._build_graph_dependency_context", return_value=None)
     @patch("multi_review.subprocess.run", return_value=MagicMock(returncode=1, stdout="", stderr=""))
     @patch("multi_review.discover_config", return_value=DEFAULT_CONFIG)
     @patch("multi_review.DOMAINS", FAKE_DOMAINS)
@@ -1202,7 +1168,6 @@ class TestSingleAgentMode:
         self,
         _mock_config,
         _mock_run,
-        _mock_graph,
     ):
         bogus = ReviewRound(
             round_num=1,
@@ -1224,7 +1189,6 @@ class TestSingleAgentMode:
                     persist_history=False,
                 )
 
-    @patch("multi_review._build_graph_dependency_context", return_value=None)
     @patch("multi_review.subprocess.run", return_value=MagicMock(returncode=1, stdout="", stderr=""))
     @patch("multi_review.discover_config", return_value=DEFAULT_CONFIG)
     @patch("multi_review.DOMAINS", TWO_FAKE_DOMAINS)
@@ -1232,7 +1196,6 @@ class TestSingleAgentMode:
         self,
         _mock_config,
         _mock_run,
-        _mock_graph,
     ):
         partial = ReviewRound(
             round_num=1,
@@ -1254,7 +1217,6 @@ class TestSingleAgentMode:
                     persist_history=False,
                 )
 
-    @patch("multi_review._build_graph_dependency_context", return_value=None)
     @patch("multi_review.subprocess.run", return_value=MagicMock(returncode=1, stdout="", stderr=""))
     @patch("multi_review.discover_config", return_value={"domain_agents": {"architecture": "not-a-real-agent"}})
     @patch("multi_review.DOMAINS", FAKE_DOMAINS)
@@ -1262,7 +1224,6 @@ class TestSingleAgentMode:
         self,
         _mock_config,
         _mock_run,
-        _mock_graph,
     ):
         with patch("multi_review.run_single_agent_round") as mock_round:
             with pytest.raises(RuntimeError, match="not enabled or unknown"):
@@ -1275,7 +1236,6 @@ class TestSingleAgentMode:
                 )
         mock_round.assert_not_called()
 
-    @patch("multi_review._build_graph_dependency_context", return_value=None)
     @patch("multi_review.subprocess.run", return_value=MagicMock(returncode=1, stdout="", stderr=""))
     @patch("multi_review.discover_config", return_value={"domain_agents": {"architecture": None}})
     @patch("multi_review.DOMAINS", FAKE_DOMAINS)
@@ -1283,7 +1243,6 @@ class TestSingleAgentMode:
         self,
         _mock_config,
         _mock_run,
-        _mock_graph,
     ):
         with patch("multi_review.run_single_agent_round") as mock_round:
             with pytest.raises(RuntimeError, match="Invalid domain_agents value"):
