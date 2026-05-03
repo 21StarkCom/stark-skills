@@ -439,7 +439,7 @@ def get_token(app: str | None = None, *, owner: str | None = None) -> str:
     gh_token = os.environ.get("GH_TOKEN")
     if gh_token:
         logging.warning(
-            "stark-graph: using GH_TOKEN fallback (App auth unavailable — "
+            "github_app: using GH_TOKEN fallback (App auth unavailable — "
             "Keychain failed and STARK_* env vars are not set)"
         )
         return gh_token
