@@ -1,13 +1,23 @@
-# Correctness & Logic Bugs
+# Behavior — Correctness & Regression
 
 First, run these commands:
-1. Run `git diff <base>...HEAD` to see what changed
+1. `git diff <base>...HEAD` to see what changed
 2. Read each changed file in full
-3. Read related files to understand how changed code is consumed
+3. For renamed/removed exports, search the codebase: `grep -r "import.*{OldName}" --include="*.ts" --include="*.tsx"`
+4. For changed function signatures, find all callers
+5. Read related files to understand how changed code is consumed
 
-> **Scope:** Only report findings specific to correctness and logic bugs. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, security, accessibility, types, or test coverage, skip it — a dedicated reviewer covers that domain.
+> **Scope:** Only report findings about runtime behavior. Skip architecture, security, types, test coverage, or spec conformance — dedicated reviewers cover those.
 
-Then review for correctness issues:
+**Critical rules:**
+- **Prefer fail-fast over silent fallbacks, retries, or compatibility shims.** Self-use tooling, single environment, full control: a clear error today beats a silently-wrong result tomorrow. Flag added try/except-and-continue, default fallbacks that mask config errors, and v1/v2 shims kept for hypothetical migrations.
+- **For pure additions (new files only, no edits to existing code), skip the regression checklist** — additions cannot regress existing behavior.
+- **When changing existing code, think about callers.** A renamed export breaks every consumer.
+- **Do NOT flag test-only changes** as regressions.
+
+Then review for behavioral defects:
+
+## New-code bugs
 
 **Runtime Errors**
 - Null/undefined access without guards
@@ -55,11 +65,31 @@ Then review for correctness issues:
 - Function signature changed but callers not updated
 - Database enum columns guarantee value validity at the storage layer — do not flag Python enum construction from DB enum values as unsafe coercion
 
-Severities:
-- critical: Runtime crash, visually broken in common case
-- high: Subtle bug, CSS inheritance broken
-- medium: Edge case not handled
-- low: Defensive improvement
+## Existing-code regressions
+
+**API Surface**
+- Renamed or removed exports
+- Changed function signatures (new required params, removed params, changed types)
+- Changed return types or shapes
+- Changed default values
+- Changed error types or messages
+
+**Behavioral Changes**
+- Different behavior for same input
+- Changed ordering of operations
+- New or removed side effects
+- Schema changes without migration
+
+**Integration Points**
+- Changed URL paths, query params, event names
+- Changed CSS class names or selectors
+- Changed CLI flags or argument parsing
+
+**Severity:**
+- critical: Runtime crash, visually broken, removed public export, changed return type of widely-used function, schema change without migration
+- high: Subtle bug, CSS inheritance broken, changed default, changed error behavior, new required parameter
+- medium: Edge case not handled, changed operation ordering, changed event payload, renamed CSS class
+- low: Defensive improvement, changed internal-only behavior with narrow blast radius
 
 IMPORTANT: Output ONLY a raw JSON array. Do NOT wrap it in markdown code fences. Do NOT add any text before or after the array.
 

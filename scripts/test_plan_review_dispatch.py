@@ -484,9 +484,9 @@ class TestParallelDispatch:
             d = tmp_path / "prompts" / agent
             d.mkdir(parents=True)
             (d / "agent.md").write_text(f"{agent} preamble")
-            (d / "00-general.md").write_text("General prompt")
-            (d / "01-feasibility.md").write_text("Feasibility prompt")
-        mock_sub.return_value = PlanSubAgentResult(agent="claude", domain="general", raw_output="[]")
+            (d / "01-completeness.md").write_text("Completeness prompt")
+            (d / "04-viability.md").write_text("Viability prompt")
+        mock_sub.return_value = PlanSubAgentResult(agent="claude", domain="completeness", raw_output="[]")
         result = dispatch_plan_review(
             plan_content="Test plan", round_num=1,
             global_prompts_dir=str(tmp_path / "prompts"),
@@ -501,7 +501,7 @@ class TestParallelDispatch:
             d = tmp_path / "prompts" / agent
             d.mkdir(parents=True)
             (d / "agent.md").write_text(f"{agent} preamble")
-            (d / "00-general.md").write_text("General prompt")
+            (d / "01-completeness.md").write_text("Completeness prompt")
         def side_effect(agent, domain_key, plan_content, prompt_text="", timeout=300):
             if agent == "codex":
                 return PlanSubAgentResult(agent=agent, domain=domain_key, error="timeout")
@@ -522,9 +522,9 @@ class TestParallelDispatch:
             d = tmp_path / "prompts" / agent
             d.mkdir(parents=True)
             (d / "agent.md").write_text(f"{agent} preamble")
-            (d / "00-general.md").write_text("General prompt")
+            (d / "01-completeness.md").write_text("Completeness prompt")
         # All fail
-        mock_sub.return_value = PlanSubAgentResult(agent="claude", domain="general", error="timeout")
+        mock_sub.return_value = PlanSubAgentResult(agent="claude", domain="completeness", error="timeout")
         result = dispatch_plan_review(
             plan_content="Test plan", round_num=1,
             global_prompts_dir=str(tmp_path / "prompts"),
@@ -546,14 +546,14 @@ class TestParallelDispatch:
             d = tmp_path / "prompts" / agent
             d.mkdir(parents=True)
             (d / "agent.md").write_text("preamble")
-            (d / "00-general.md").write_text("General prompt")
+            (d / "01-completeness.md").write_text("Completeness prompt")
         finding = PlanFinding(
-            agent="claude", domain="general", severity="high",
+            agent="claude", domain="completeness", severity="high",
             section="API", title="Missing rate limit",
             description="No rate limiting on /events", suggestion="Add it",
         )
         mock_sub.return_value = PlanSubAgentResult(
-            agent="claude", domain="general", raw_output="[]",
+            agent="claude", domain="completeness", raw_output="[]",
             model="claude-opus-4-7", findings=[finding], duration_s=1.5,
         )
         with patch("emit_queue.enqueue") as mock_enqueue:
@@ -606,9 +606,9 @@ class TestParallelDispatch:
             d = tmp_path / "prompts" / agent
             d.mkdir(parents=True)
             (d / "agent.md").write_text("preamble")
-            (d / "00-general.md").write_text("General prompt")
+            (d / "01-completeness.md").write_text("Completeness prompt")
         mock_sub.return_value = PlanSubAgentResult(
-            agent="claude", domain="general", raw_output="[]",
+            agent="claude", domain="completeness", raw_output="[]",
             model="claude-opus-4-7",
         )
         with patch("emit_queue.enqueue") as mock_enqueue:
@@ -631,7 +631,7 @@ class TestParallelDispatch:
             d = tmp_path / "prompts" / agent
             d.mkdir(parents=True)
             (d / "agent.md").write_text("preamble")
-            (d / "00-general.md").write_text("General prompt")
+            (d / "01-completeness.md").write_text("Completeness prompt")
         def side_effect(agent, domain_key, plan_content, prompt_text="", timeout=300):
             return PlanSubAgentResult(
                 agent=agent, domain=domain_key, raw_output="[]",

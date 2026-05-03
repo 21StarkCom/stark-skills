@@ -223,29 +223,29 @@ class TestDiscoverDomains:
     def test_merges_agent_and_shared_domains(self, tmp_path):
         """Agent dir has some domains, shared domains/ has others — both merged.
 
-        Reproduces the design-review layout where 10-accessibility.md and
-        11-test-plan.md stay per-agent while 00-09 are in domains/.
+        Reproduces the design-review layout where 07-accessibility.md and
+        08-test-plan.md stay per-agent while 01-06 are in domains/.
         """
         claude_dir = tmp_path / "claude"
         claude_dir.mkdir()
-        (claude_dir / "10-accessibility.md").write_text("a11y")
-        (claude_dir / "11-test-plan.md").write_text("tests")
+        (claude_dir / "07-accessibility.md").write_text("a11y")
+        (claude_dir / "08-test-plan.md").write_text("tests")
         (claude_dir / "agent.md").write_text("preamble")
 
         shared = tmp_path / "domains"
         shared.mkdir()
-        (shared / "00-general.md").write_text("general")
         (shared / "01-completeness.md").write_text("completeness")
-        (shared / "09-resilience.md").write_text("resilience")
+        (shared / "02-security.md").write_text("security")
+        (shared / "06-consistency.md").write_text("consistency")
 
         result = discover_domains(tmp_path, agents=["claude"])
         # Agent-specific domains
         assert "accessibility" in result
         assert "test-plan" in result
         # Shared domains
-        assert "general" in result
         assert "completeness" in result
-        assert "resilience" in result
+        assert "security" in result
+        assert "consistency" in result
         # Total: 5 domains discovered
         assert len(result) == 5
 

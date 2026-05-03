@@ -2,14 +2,11 @@
   "agents": ["claude", "codex"],
   "domain_agents": {
     "architecture": "codex",
-    "accessibility": "codex",
-    "correctness": "codex",
+    "behavior": "codex",
     "type-safety": "codex",
     "security": "codex",
     "test-coverage": "codex",
-    "spec-conformance": "codex",
-    "ui-design-conformance": "codex",
-    "regression-prevention": "codex"
+    "spec-conformance": "codex"
   },
   "fix_threshold": "medium",
   "verify_before_clean": true,
@@ -77,7 +74,7 @@
     "max_checkpoint_size_kb": 50,
     "include_file_summaries": true
   },
-  "graph_enriched_domains": ["architecture", "correctness", "regression-prevention"],
+  "graph_enriched_domains": ["architecture", "behavior"],
   "graph_gate_mode": "disabled",
   "graph_max_parse_workers": 1,
   "graph_coverage_threshold": 80,
@@ -110,30 +107,20 @@
   },
   "forge": {
     "domain_routing": {
-      "general": "claude",
       "completeness": "claude",
       "security": "codex",
       "scope": "claude",
       "api-design": "codex",
       "data-modeling": "codex",
       "consistency": "claude",
-      "scalability": "codex",
-      "extensibility": "claude",
-      "resilience": "codex",
-      "accessibility": "codex",
-      "implementation-feasibility": "codex"
+      "accessibility": "claude",
+      "test-plan": "codex"
     },
     "plan_review_routing": {
-      "general": "claude",
       "completeness": "claude",
       "security": "codex",
-      "feasibility": "codex",
-      "operability": "codex",
       "sequencing": "claude",
-      "rollback": "codex",
-      "risk": "claude",
-      "gates": "claude",
-      "timeline": "codex"
+      "viability": "codex"
     },
     "agent_fallback_order": ["claude", "codex", "gemini"],
     "consensus_domains": ["security"],
@@ -150,16 +137,13 @@
     "max_rounds": 3,
     "domain_pairs": {
       "architecture":          { "leader": "claude", "second": "codex" },
-      "accessibility":         { "leader": "claude", "second": "gemini" },
-      "correctness":           { "leader": "codex",  "second": "claude" },
+      "behavior":              { "leader": "codex",  "second": "claude" },
       "type-safety":           { "leader": "codex",  "second": "gemini" },
       "security":              { "leader": "gemini", "second": "codex" },
       "test-coverage":         { "leader": "codex",  "second": "gemini" },
-      "spec-conformance":      { "leader": "claude", "second": "codex" },
-      "ui-design-conformance": { "leader": "gemini", "second": "claude" },
-      "regression-prevention": { "leader": "gemini", "second": "claude" }
+      "spec-conformance":      { "leader": "claude", "second": "codex" }
     },
-    "always_on_domains": ["correctness", "regression-prevention"],
+    "always_on_domains": ["behavior"],
     "triage_agent": "claude",
     "delta_rereview": true,
     "auto_merge_when_clean": true,

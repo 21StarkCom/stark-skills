@@ -1,27 +1,24 @@
 #!/usr/bin/env python3
 """Multi-agent PR review orchestrator.
 
-Runs up to 3 CLI agents (Claude, Codex, Gemini) across 9 domain
+Runs up to 3 CLI agents (Claude, Codex, Gemini) across 6 domain
 specializations. Each agent posts a consolidated review via its GitHub App,
 grouped by domain.
 
 Architecture:
     multi_review.py (orchestrator)
-    ├── claude × 9 domains  → stark-claude bot
-    ├── codex  × 9 domains  → stark-codex bot
-    └── gemini × 9 domains  → stark-gemini bot
+    ├── claude × 6 domains  → stark-claude bot
+    ├── codex  × 6 domains  → stark-codex bot
+    └── gemini × 6 domains  → stark-gemini bot
 
 Prompts loaded from ~/.claude/code-review/prompts/{agent}/ (with repo/org overrides):
-    agent.md          Agent-specific preamble
-    01-architecture   Architecture & design patterns
-    02-accessibility   WCAG 2.1 AA compliance
-    03-correctness    Correctness & logic bugs
-    04-type-safety    TypeScript types & API surface
-    05-security       Security & error handling
-    06-test-coverage  Test coverage & quality
-    07-spec-conformance  Spec and acceptance criteria alignment
-    08-ui-design-conformance  UI design system and interaction consistency
-    09-regression-prevention  Backward compatibility and change safety
+    agent.md             Agent-specific preamble
+    01-architecture      Architecture & design patterns
+    02-behavior          Correctness, logic bugs, and regressions in existing callers
+    03-type-safety       TypeScript types & API surface
+    04-security          Security & error handling
+    05-test-coverage     Test coverage & quality
+    06-spec-conformance  Spec and acceptance criteria alignment
 
 Usage:
     multi_review.py --pr 10
