@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 import stark_red_team as rt
 
@@ -1052,6 +1053,40 @@ def test_dispatch_responses_api_failed_status_returns_error(monkeypatch):
     )
     assert result.error is not None
     assert "failed" in result.error or "rate_limit" in result.error
+
+
+def test_dispatch_responses_api_wall_clock_timeout(monkeypatch):
+    """A slow-streaming server can't keep urllib's per-socket-op timeout from
+    firing forever. Verify the wall-clock deadline aborts the call regardless.
+    """
+    import threading
+
+    started = threading.Event()
+
+    def slow_urlopen(*_a, **_kw):
+        started.set()
+        # Block longer than the test's wall-clock budget. If the wall-clock
+        # guard works, dispatch_responses_api returns before this finishes.
+        time.sleep(5)
+        raise AssertionError("wall-clock guard did not abort the call")
+
+    monkeypatch.setattr(rt.urllib.request, "urlopen", slow_urlopen)
+
+    t0 = time.time()
+    result = rt.dispatch_responses_api(
+        prompt="x",
+        model="o3",
+        timeout_s=1,
+        env={"OPENAI_API_KEY": "sk-test"},
+    )
+    elapsed = time.time() - t0
+
+    assert started.is_set(), "worker thread never ran"
+    assert result.error is not None
+    assert "wall-clock timeout" in result.error
+    # Allow generous slack for slow CI; the point is it returned well before
+    # the worker's 5s sleep.
+    assert elapsed < 3.0, f"dispatch did not abort promptly: {elapsed:.1f}s"
 
 
 def test_run_red_team_routes_to_responses_api_for_pro_models(tmp_path, monkeypatch):

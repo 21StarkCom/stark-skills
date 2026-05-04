@@ -10,6 +10,7 @@ See design spec §4 for the full flow.
 
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -1334,36 +1335,67 @@ def dispatch_responses_api(
         },
     )
 
-    try:
+    # urllib's `timeout` is per-socket-op (recv/connect), not wall-clock
+    # total. The Responses API can keep the connection open while the
+    # model reasons and dribble a few bytes at a time, which resets the
+    # socket timeout indefinitely and causes runs to hang far past
+    # `timeout_s`. Enforce a real wall-clock deadline by running the
+    # urlopen+read on a worker thread and aborting if it exceeds the
+    # budget. The orphaned thread is left to die with the process — we
+    # cannot interrupt urllib mid-read safely.
+    def _do_request() -> bytes:
         with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            payload_bytes = resp.read()
-    except urllib.error.HTTPError as exc:
-        # Provider response bodies can echo rejected prompt content; status
-        # code is enough for triage. The body is intentionally not embedded
-        # in `error` because that string lands in audit logs and run state.
-        return CodexCallResult(
-            raw_output="",
-            duration_s=time.time() - t0,
-            input_tokens=0,
-            output_tokens=0,
-            error=f"responses api http {exc.code} {exc.reason or ''}".strip(),
-        )
-    except urllib.error.URLError as exc:
-        return CodexCallResult(
-            raw_output="",
-            duration_s=time.time() - t0,
-            input_tokens=0,
-            output_tokens=0,
-            error=f"responses api error: {exc.reason}",
-        )
-    except (TimeoutError, OSError) as exc:
-        return CodexCallResult(
-            raw_output="",
-            duration_s=time.time() - t0,
-            input_tokens=0,
-            output_tokens=0,
-            error=f"responses api transport error: {exc}",
-        )
+            return resp.read()
+
+    # `shutdown(wait=False)` so a hung worker doesn't block the function
+    # from returning. The thread is daemon-style — it dies with the
+    # interpreter; abandoning it leaks a file descriptor at worst.
+    pool = concurrent.futures.ThreadPoolExecutor(
+        max_workers=1, thread_name_prefix="responses-api"
+    )
+    future = pool.submit(_do_request)
+    try:
+        try:
+            payload_bytes = future.result(timeout=timeout_s)
+        except concurrent.futures.TimeoutError:
+            return CodexCallResult(
+                raw_output="",
+                duration_s=time.time() - t0,
+                input_tokens=0,
+                output_tokens=0,
+                error=f"responses api wall-clock timeout after {timeout_s}s",
+            )
+        except urllib.error.HTTPError as exc:
+            # Provider response bodies can echo rejected prompt content;
+            # status code is enough for triage.
+            return CodexCallResult(
+                raw_output="",
+                duration_s=time.time() - t0,
+                input_tokens=0,
+                output_tokens=0,
+                error=f"responses api http {exc.code} {exc.reason or ''}".strip(),
+            )
+        except urllib.error.URLError as exc:
+            return CodexCallResult(
+                raw_output="",
+                duration_s=time.time() - t0,
+                input_tokens=0,
+                output_tokens=0,
+                error=f"responses api error: {exc.reason}",
+            )
+        except (TimeoutError, OSError) as exc:
+            return CodexCallResult(
+                raw_output="",
+                duration_s=time.time() - t0,
+                input_tokens=0,
+                output_tokens=0,
+                error=f"responses api transport error: {exc}",
+            )
+    finally:
+        # `wait=False` so a hung worker doesn't block our return. The
+        # orphaned thread will die with the interpreter; a leaked socket
+        # is the price of escaping a server-side stall.
+        pool.shutdown(wait=False)
 
     duration = time.time() - t0
     try:
