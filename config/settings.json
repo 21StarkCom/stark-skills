@@ -1,20 +1,20 @@
 {
+  "env": {
+    "CLAUDE_CODE_USE_VERTEX": "0",
+    "ANTHROPIC_VERTEX_PROJECT_ID": "infra-ai-platform",
+    "CLOUD_ML_REGION": "global"
+  },
   "permissions": {
     "allow": [
-      "Bash(git push:*)",
-      "Bash(gh pr create:*)",
-      "Bash(gh pr view:*)",
-      "Bash(gh pr comment:*)",
-      "Bash(gh pr merge:*)",
-      "Bash(gh pr list:*)",
-      "Bash(gh pr checks:*)"
+      "Bash(git *)",
+      "Bash(gh *)"
     ],
     "defaultMode": "bypassPermissions",
     "additionalDirectories": [
-      "/Users/aryeh/git/Evinced/stark-data-core"
+      "/Users/aryeh/git/Evinced"
     ]
   },
-  "model": "opus[1m]",
+  "model": "claude-opus-4-7",
   "hooks": {
     "PreToolUse": [
       {
@@ -56,17 +56,6 @@
         ]
       }
     ],
-    "Notification": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/aryeh/git/Evinced/stark-insights/hooks/hook-emit.py prompt"
-          }
-        ]
-      }
-    ],
     "Stop": [
       {
         "matcher": "",
@@ -74,6 +63,15 @@
           {
             "type": "command",
             "command": "/Users/aryeh/git/Evinced/stark-insights/hooks/skill-telemetry-stop.py"
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/aryeh/git/Evinced/stark-insights/hooks/hook-emit.py session_end"
           }
         ]
       }
@@ -84,6 +82,59 @@
           {
             "type": "command",
             "command": "mkdir -p \"${CLAUDE_PROJECT_DIR:-.}/.remember/logs\""
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/aryeh/git/Evinced/stark-insights/hooks/hook-emit.py session_start"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/aryeh/git/Evinced/stark-insights/hooks/hook-emit.py prompt"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/aryeh/git/Evinced/stark-insights/hooks/hook-emit.py notification"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/aryeh/git/Evinced/stark-insights/hooks/hook-emit.py subagent_stop"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/aryeh/git/Evinced/stark-insights/hooks/hook-emit.py compaction"
           }
         ]
       }
@@ -135,14 +186,16 @@
       }
     }
   },
-  "effortLevel": "high",
+  "outputStyle": "Concrete",
+  "effortLevel": "medium",
   "skipDangerousModePermissionPrompt": true,
   "remoteControlAtStartup": false,
   "agentPushNotifEnabled": true,
   "skipAutoPermissionPrompt": true,
+  "useAutoModeDuringPlan": false,
   "autoMode": {
     "allow": [
-      "Pushing branches and opening/merging PRs in /Users/aryeh/git/Evinced/stark-data-core is permitted — it is a trusted sibling repo in Aryeh's workspace alongside stark-night-watch and is covered by the same review workflow."
+      "Pushing branches and opening/merging PRs in /Users/aryeh/git/Evinced/stark-data-core is permitted \u2014 it is a trusted sibling repo in Aryeh's workspace alongside stark-night-watch and is covered by the same review workflow."
     ]
   }
 }
