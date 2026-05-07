@@ -5,8 +5,8 @@ description: >-
 argument-hint: '<plan-or-prompt> [--plan-slug SLUG] [--test-command CMD] [--lead claude|codex|gemini] [--wing claude|codex|gemini] [--max-rounds N] [--timeout N] [--dry-run]'
 disable-model-invocation: true
 model: opus
-revision: 6a876df0bd7f09205302528654ccf07e5b4c3efd
-revision_date: 2026-05-07T05:24:00Z
+revision: cb87cdbd58eefd19a2ed55f1a870d05de6cb90d0
+revision_date: 2026-05-07T05:33:57Z
 ---
 
 ## Preflight
@@ -29,21 +29,26 @@ which has every enabled agent compete in a tournament per step, copilot uses two
 - **Lead** (default `claude`) — implements the step in a git worktree
 - **Wing** (default `codex`) — reviews the lead's diff and either approves or returns blocking findings
 
-Each step runs a review→fix loop until the wing approves or `--max-rounds` is reached.
+Each step runs a review→fix loop until the wing approves or `--max-rounds` fix rounds are exhausted.
 This is the cheaper, lower-variance sibling of autopilot — paired engineering instead of competition.
+
+This skill is thin: it orchestrates `copilot_dispatch.py`, which owns the worktree,
+the lead/wing dispatch, the review→fix loop, and the JSON verdict parsing. Do not
+re-implement that logic here.
 
 ## Arguments
 
 - `<plan-or-prompt>` — path to implementation plan, or inline task description
 - `--plan-slug SLUG` — fetch issues labeled `plan:{SLUG}` from GitHub and use as steps (alternative to plan file)
-- `--test-command CMD` — test command to run after each step (e.g., `npm test`, `pytest`)
+- `--test-command CMD` — test command to run after each lead pass (e.g., `npm test`, `pytest`)
 - `--lead AGENT` — lead implementer agent ID (default: `claude`). One of `claude`, `codex`, `gemini`.
 - `--wing AGENT` — wing reviewer agent ID (default: `codex`). Must differ from `--lead`.
-- `--max-rounds N` — maximum review→fix rounds per step (default: `2`)
-- `--timeout N` — per-agent timeout in seconds (default: 900)
+- `--max-rounds N` — maximum **fix** rounds after the initial implement (default: `2`). The wing reviews up to `N+1` times.
+- `--timeout N` — per-lead-invocation timeout in seconds (default: 900)
+- `--wing-timeout N` — per-wing-invocation timeout in seconds (default: 600)
 - `--dry-run` — show what would happen without executing
 
-If `--lead` and `--wing` are equal, error and stop:
+If `--lead` and `--wing` resolve to the same agent, error and stop:
 > Error: --lead and --wing must be different agents.
 
 If no input provided, ask: "What should I build?"
@@ -93,14 +98,15 @@ Three input modes, resolved in this order:
 
 **Inline prompt:** If input is a description (not a file path, no `--plan-slug`), decompose into steps yourself.
 
-When a plan file path is available, retain it as `plan_path` for the approach contract step.
+When a plan file path is available, retain it as `plan_path` for the approach contract step. When in inline mode, leave `plan_path` unset.
 
 ### 1.2 Extract steps
 
 Same as `/stark-autopilot` §1.2 (issue-driven, plan-file, and inline modes). Each step contains:
 - `step_id` — phase slug
 - `title` — phase name
-- `prompt` — composed implementation prompt
+- `task` — the raw step task description (issue body sections concatenated, or the parsed plan section, or the inline prompt). Saved to `step-$step_id-task.md` for the dispatcher.
+- `prompt` — the lead's full implement prompt (composed from the agent-specific `implement.md` template + previous-step context + `task`). Saved to `step-$step_id-implement.md`.
 - `issue_numbers` — issue numbers covered by the step
 
 Skip closed and human-led tasks with the same warnings as autopilot.
@@ -118,9 +124,9 @@ Mode:         issue-driven (plan:widget-system, 12 tasks across 4 phases)
 Steps:        4
 Lead:         claude   (implementer)
 Wing:         codex    (reviewer)
-Max rounds:   2
+Max rounds:   2 fix rounds (up to 3 reviews per step)
 Test command: pytest
-Timeout:      900s per agent
+Timeout:      900s lead / 600s wing
 
 Step 1: Data Model & Storage (#37, #38, #39)
 Step 2: API Layer (#40, #41, #42)
@@ -135,9 +141,10 @@ If `--dry-run`, stop here.
 
 ### 1.5 Approach Contract
 
-Before dispatching agents, confirm the approach:
+Only when `plan_path` is set (plan-file or issue-driven mode that originated from a plan file). Inline mode skips this step.
+
 ```bash
-python3 ~/.claude/code-review/scripts/approach_contract.py --plan-file <plan_path> --force-confirm
+[ -n "$plan_path" ] && python3 ~/.claude/code-review/scripts/approach_contract.py --plan-file "$plan_path" --force-confirm
 ```
 
 ## Phase 2: Execute Steps
@@ -148,155 +155,137 @@ For each step (sequentially — each builds on the previous step's merged result
 
 Update issue status and project board. For commands, see [autopilot's references/issue-management.md](../stark-autopilot/references/issue-management.md).
 
-### 2a. Build implement prompt
+### 2a. Stage prompt files
 
-Combine:
-1. The lead's implementation prompt from `global/prompts/copilot/{LEAD}/implement.md`
-2. Context: what was already implemented in previous steps (file list + key decisions)
-3. The step's specific task description
-4. The test command if available
+Write three files for the dispatcher (replace `$$` with the orchestration PID or any unique tag):
 
-Write the combined prompt to `/tmp/stark-copilot-$$/step-$step_id-implement.md`.
+- `/tmp/stark-copilot-$$/step-$step_id-implement.md` — the lead's full implement prompt (composed from `global/prompts/copilot/{LEAD}/implement.md` + previous-step context + step task)
+- `/tmp/stark-copilot-$$/step-$step_id-review.md` — the wing's review prompt template (verbatim copy of `global/prompts/copilot/{WING}/review.md`)
+- `/tmp/stark-copilot-$$/step-$step_id-task.md` — the step's raw task description (used by the dispatcher to build the wing's review payload and the lead's fix prompts)
 
-### 2b. Dispatch lead in worktree
-
-Reuse the autopilot dispatcher with `--agents` filtered to the lead only:
+### 2b. Dispatch the copilot loop
 
 ```bash
-$PYTHON $SCRIPTS/autopilot_dispatch.py \
+$PYTHON $SCRIPTS/copilot_dispatch.py \
   --repo-root $REPO_ROOT \
   --step-id "$step_id" \
-  --prompt-file /tmp/stark-copilot-$$/step-$step_id-implement.md \
-  --agents "$LEAD" \
-  --timeout $timeout \
+  --implement-prompt-file /tmp/stark-copilot-$$/step-$step_id-implement.md \
+  --review-prompt-file /tmp/stark-copilot-$$/step-$step_id-review.md \
+  --step-task-file /tmp/stark-copilot-$$/step-$step_id-task.md \
+  --lead "$LEAD" \
+  --wing "$WING" \
+  --max-rounds "$max_rounds" \
+  --timeout "$timeout" \
   [--test-command "$test_command"]
 ```
 
-Capture JSON output. The lead's worktree path, diff, files changed, and test result are in the result block under `agents[0]`.
+The dispatcher owns the loop. It runs the lead in a worktree (round 1), then up to
+`max_rounds` review→fix iterations: wing reviews → if `revise`, lead re-runs in the
+same worktree with the wing's blocking findings → wing reviews the new diff. It exits
+on the first `approve`, on `block`, on `--max-rounds` exhaustion, on an empty-diff
+revision (lead made no changes between rounds), or on any unrecoverable agent error.
 
-If the lead errored or produced an empty diff, log the failure and abort the step (see [failure-modes](../stark-autopilot/references/failure-modes.md)).
+The exit code is `0` only when `final_verdict == "approved"`.
 
-### 2c. Review→fix loop
+### 2c. Parse dispatcher output
 
-Set `round = 1`. Loop while `round <= max_rounds`:
-
-#### 2c.i Build review prompt
-
-Combine:
-1. The wing's review prompt from `global/prompts/copilot/{WING}/review.md`
-2. The step's task description and acceptance criteria
-3. The lead's diff (from §2b output)
-4. Test results (pass/fail + output, if available)
-5. Any prior round's wing findings and lead responses (for context across rounds)
-
-Write to `/tmp/stark-copilot-$$/step-$step_id-review-r$round.md`.
-
-#### 2c.ii Dispatch wing reviewer
-
-The wing reviews the diff out-of-tree (does not modify code). Dispatch the wing as a one-shot review using its CLI:
-
-- **Wing = claude:** dispatch via `claude_utils.build_claude_cmd` with `--print` and the review prompt on stdin. Use the configured Claude model from `config.json`.
-- **Wing = codex:** dispatch via `codex exec` with reasoning effort `medium`; parse JSONL output via `codex_utils.parse_jsonl_output`.
-- **Wing = gemini:** dispatch via `gemini_utils` (with API key fallback if needed).
-
-The wing must return a structured verdict. Require this trailing JSON block in its output:
+The dispatcher prints a JSON object with this shape:
 
 ```json
 {
-  "verdict": "approve" | "revise" | "block",
-  "blocking_findings": ["..."],
-  "non_blocking_suggestions": ["..."],
-  "summary": "one paragraph"
+  "step_id": "...",
+  "lead": "claude",
+  "wing": "codex",
+  "worktree_path": "/.../.worktrees/autopilot-claude-...",
+  "final_verdict": "approved | blocked | aborted | max_rounds_unresolved | unresolved",
+  "error": null,
+  "duration_s": 123.4,
+  "rounds": [
+    {
+      "round": 1,
+      "files_changed": ["..."],
+      "lines_added": 42,
+      "lines_removed": 7,
+      "diff_length": 1234,
+      "test_passed": true,
+      "verdict": "revise",
+      "blocking_findings": ["..."],
+      "non_blocking_suggestions": ["..."],
+      "summary": "...",
+      "parse_retry_used": false,
+      "duration_s": 60.1,
+      "error": null
+    }
+  ],
+  "final_diff": "..."
 }
 ```
 
-- `approve` — diff is good as-is; exit the loop.
-- `revise` — there are blocking issues the lead can address; continue to §2c.iii.
-- `block` — the diff is fundamentally wrong (architectural mismatch, scope creep, security risk); abort the step and surface the wing's reasoning. Do not silently retry.
+Read the lead's diff from `final_diff`. The worktree path is at `worktree_path`.
+Per-round metadata (verdict, findings, parse retries) lives in `rounds[]` for the
+audit trail (Phase 4).
 
-If the wing fails to produce a parseable verdict after one retry, treat it as `revise` with finding "wing review failed to parse — manual inspection required" and continue.
+### 2d. Handle terminal verdicts
 
-#### 2c.iii If verdict == approve
+| `final_verdict` | Action |
+|---|---|
+| `approved` | Continue to §2e (verify gates → apply diff → commit). |
+| `blocked` | Stop the run. Print the wing's `summary` and `blocking_findings` from the last round. Do not retry. Clean up worktree (§2g). |
+| `aborted` | Lead's first round failed (timeout, empty diff, or CLI error). Stop the run, surface the round-1 `error`. Clean up worktree. |
+| `max_rounds_unresolved` | Wing did not approve within `--max-rounds` fix rounds. Stop the run, print all rounds' findings. Clean up worktree. |
+| `unresolved` | Loop terminated for another reason (wing parse retry exhausted, empty-diff revision, mid-loop lead failure). Stop the run, surface the `error` field and the latest findings. Clean up worktree. |
 
-Exit the loop. Proceed to §2d.
+In every non-`approved` case, do **not** apply the diff or commit. Surface what's
+needed to address the failure manually, then exit.
 
-#### 2c.iv If verdict == revise and round < max_rounds
+### 2e. Verify approved diff (MANDATORY — do not skip)
 
-Build a fix prompt that includes:
-1. The lead's `implement.md` prompt (with a "REVISION ROUND" framing)
-2. The original step task
-3. The wing's blocking findings (verbatim)
-4. The current diff (so the lead resumes from where it left off)
+Before applying, the approved diff must pass the import, SDK API, and cross-module
+gates. For procedures, see [autopilot's references/verification-gates.md](../stark-autopilot/references/verification-gates.md).
 
-Re-dispatch the lead in the **same worktree** (do not create a new one):
+Run the gates against the lead's worktree (use `worktree_path` from §2c). If a gate fails:
 
-```bash
-$PYTHON $SCRIPTS/autopilot_dispatch.py \
-  --repo-root $REPO_ROOT \
-  --step-id "$step_id" \
-  --prompt-file /tmp/stark-copilot-$$/step-$step_id-fix-r$round.md \
-  --agents "$LEAD" \
-  --resume-worktree \
-  --timeout $timeout \
-  [--test-command "$test_command"]
-```
+- If the run still has fix budget remaining (i.e., the dispatcher exited with `final_verdict == "approved"` before round `max_rounds + 1`, **and** you choose to invest one more round), append the gate failure to the wing's findings format and re-invoke `copilot_dispatch.py` with `--max-rounds 1` and the wing's prior findings included in the implement prompt's "REVISION" framing. This burns one additional dispatcher invocation; surface that explicitly.
+- Otherwise, stop the run with the gate failure surfaced. Do not silently fall back. The user must address the gate finding manually or rerun with a higher `--max-rounds`.
 
-If `autopilot_dispatch.py` does not yet support `--resume-worktree`, fall back to running the lead's CLI directly inside the existing worktree path (captured from §2b). The goal is: the lead picks up its prior work and addresses the wing's findings.
+### 2f. Apply approved diff
 
-Increment `round`. Re-collect diff and test results. Go back to §2c.i.
-
-#### 2c.v If round > max_rounds and verdict still != approve
-
-Surface the unresolved findings and stop the run (do not silently merge):
-> Step {step_id}: wing did not approve after {max_rounds} rounds. Blocking findings:
-> - ...
-> Run terminated. Address findings manually or rerun with `--max-rounds N` raised.
-
-#### 2c.vi If verdict == block at any round
-
-Stop immediately. Print the wing's reasoning. Do not increment rounds.
-
-### 2d. Verify approved diff (MANDATORY — do not skip)
-
-Before applying, the approved diff must pass import checks, SDK API verification, and cross-module interface checks. For all gate details, see [autopilot's references/verification-gates.md](../stark-autopilot/references/verification-gates.md).
-
-If a gate fails: do **not** silently fall back. Re-dispatch one more wing review with the gate failure included as a finding, then run one more lead fix round (counts against `--max-rounds`). If it still fails, stop the run.
-
-### 2e. Apply approved diff
-
-Apply the lead's final diff to the main working tree:
+Apply the dispatcher's `final_diff` to the main working tree:
 
 ```bash
-git apply --3way <<< "$lead_diff"
+git apply --3way <<< "$final_diff"
 ```
 
-If the diff fails to apply cleanly, fall back to copying files from the lead's worktree.
+If the diff fails to apply cleanly (rare — the worktree was branched from main's HEAD), fall back to copying changed files from `worktree_path` over to `$REPO_ROOT`.
 
-### 2f. Commit step
+### 2g. Commit step
 
 ```bash
 git add -A
-git commit -m "feat: [step title] (copilot: $LEAD impl, $WING review, $rounds rounds)"
+git commit -m "feat: [step title] (copilot: $LEAD impl, $WING review, $rounds_count rounds)"
 ```
 
-### 2f1. Transition issues to Done
+`$rounds_count` is `len(rounds)` from §2c.
+
+### 2g1. Transition issues to Done
 
 Close issues with commit reference and update project board. For commands, see [autopilot's references/issue-management.md](../stark-autopilot/references/issue-management.md).
 
-### 2g. Clean up worktrees
+### 2h. Clean up worktree
 
 ```bash
-$PYTHON $SCRIPTS/autopilot_dispatch.py \
+$PYTHON $SCRIPTS/copilot_dispatch.py \
   --repo-root $REPO_ROOT \
   --step-id "$step_id" \
+  --lead "$LEAD" \
   --cleanup
 ```
 
-### 2h. Log and continue
+### 2i. Log and continue
 
-Print step summary (lead, wing, rounds, files changed, test result), then move to next step.
+Print step summary (lead, wing, rounds count, final verdict, files changed, test result). Move to the next step.
 
-### 2i. Session state update
+### 2j. Session state update
 
 After each step completes:
 ```bash
@@ -309,15 +298,15 @@ python3 ~/.claude/code-review/scripts/context_compactor.py --json 2>/dev/null ||
 
 ## Phase 2.5: End-of-Run Verification (MANDATORY)
 
-After ALL steps complete, run full import chain test, smoke test, and SDK API spot-check. For procedures, see [autopilot's references/verification-gates.md](../stark-autopilot/references/verification-gates.md).
+After ALL steps complete, run the full import chain test, smoke test, and SDK API spot-check. For procedures, see [autopilot's references/verification-gates.md](../stark-autopilot/references/verification-gates.md).
 
 If ANY check fails, fix before proceeding to Phase 3.
 
 ## Phase 3: Summary
 
 Print:
-- Per-step results: step_id, title, rounds, wing verdict, test pass/fail, files changed
-- Aggregate: total rounds, average rounds per step, lead/wing identities, total duration
+- Per-step results: step_id, title, rounds count, final verdict, test pass/fail, files changed
+- Aggregate: total rounds across all steps, average rounds per step, lead/wing identities, total duration
 - Code stats: lines added/removed, files touched
 
 ## Phase 4: Persist
@@ -329,13 +318,21 @@ mkdir -p ~/.claude/code-review/history/copilot/{task-slug}
 ```
 
 Write:
-- `steps.json` — per-step results, rounds, wing verdicts, diffs
+- `steps.json` — per-step dispatcher results (the full JSON from §2c, one per step)
 - `summary.md` — human-readable summary
-- `review-log.jsonl` — per-round wing review verdicts and findings (audit trail)
+- `review-log.jsonl` — flatten every round across every step into a JSONL audit trail with `{step_id, round, verdict, blocking_findings, summary, parse_retry_used}`
 
 ### 4b. Post to PR (if PR detected)
 
-Post the summary as a PR comment under the lead's GitHub App identity (e.g., stark-claude when lead=claude).
+If the working tree is on a branch with an open PR (detect via `gh pr view --json number,headRefName --jq .number 2>/dev/null`), post the summary as a PR comment under the lead's GitHub App identity:
+
+| Lead | App identity |
+|---|---|
+| `claude` | stark-claude |
+| `codex` | stark-codex |
+| `gemini` | stark-gemini |
+
+Use the same `gh api` posting flow autopilot uses. For the snippet, see [autopilot's references/issue-management.md](../stark-autopilot/references/issue-management.md).
 
 ## Observability
 
@@ -343,13 +340,14 @@ Reuse autopilot's task templates, log line formats, and metrics block format wit
 
 ## Failure Modes
 
-Most autopilot failure modes apply here too — see [autopilot's references/failure-modes.md](../stark-autopilot/references/failure-modes.md). Copilot-specific additions:
+Most autopilot failure modes apply here too — see [autopilot's references/failure-modes.md](../stark-autopilot/references/failure-modes.md). Copilot-specific additions (the dispatcher already handles most of these — listed for orchestrator awareness):
 
-| Scenario | Recovery |
-|---|---|
-| Lead times out on initial implement | Abort step. No wing dispatch. Surface the timeout. |
-| Wing times out reviewing | Retry wing once with same prompt; if still fails, treat as `revise` with synthetic finding "wing review timed out". |
-| Wing returns malformed JSON verdict | Retry once with explicit "respond with the JSON block only" suffix; if still malformed, treat as `revise`. |
-| `--lead` == `--wing` | Refuse to start; error in §1.0. |
-| Lead's revision round produces empty diff (no changes from prior round) | Treat as "lead unable to address findings"; stop the run with the wing's last findings. |
-| Wing returns `block` verdict | Stop immediately; do not retry. The wing's reasoning is surfaced verbatim. |
+| Scenario | Dispatcher behavior | Orchestrator action |
+|---|---|---|
+| Lead times out / errors on round 1 | `final_verdict=aborted`, `error` set | Stop the run; surface error |
+| Wing times out reviewing | Dispatcher retries once; if still fails, treats as `unresolved` with `error=wing_error:timeout` | Stop the run; surface error |
+| Wing returns malformed JSON verdict | Dispatcher retries once with explicit "JSON only" suffix; if still malformed, treats as `revise` and continues the fix loop | Trust the dispatcher; review `parse_retry_used` in audit log |
+| `--lead` == `--wing` | `error=lead_eq_wing` returned immediately | Refuse before dispatch in §1; never reach dispatcher |
+| Lead's revision round produces empty diff vs prior round | `final_verdict=unresolved`, `error=lead_fix_round_no_change` | Stop the run; surface findings — lead is stuck |
+| Wing returns `block` verdict | `final_verdict=blocked`, `error=wing_blocked` | Stop the run; print wing's `summary` and `blocking_findings` |
+| Verification gate fails after wing approval (§2e) | (Out of dispatcher scope) | Either burn one extra dispatcher round with the gate failure as a finding, or stop the run |
