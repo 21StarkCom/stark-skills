@@ -124,16 +124,29 @@ def _normalize_verdict(obj: dict) -> tuple[str, list[str], list[str], str]:
 
 
 def _snapshot_worktree(worktree_path: str) -> tuple[str, str]:
-    """Capture (HEAD sha, working-tree status) for a defensive read-only check."""
+    """Capture (HEAD sha, content-hash of full worktree) for a read-only check.
+
+    The content hash is `git write-tree` after staging every file with
+    `git add -A`. This produces a deterministic SHA that changes whenever
+    *any* tracked or previously-untracked file's content changes — including
+    the case where a reviewer modifies an already-staged file and re-stages
+    it (which leaves `git status --porcelain` byte-identical).
+    """
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"],
         capture_output=True, text=True, cwd=worktree_path,
     ).stdout.strip()
-    status = subprocess.run(
-        ["git", "status", "--porcelain=v1", "-uall"],
+    # Stage everything (lead's diff is already staged; this is idempotent and
+    # ensures untracked files get hashed into the tree object).
+    subprocess.run(
+        ["git", "add", "-A"],
         capture_output=True, text=True, cwd=worktree_path,
-    ).stdout
-    return head, status
+    )
+    tree = subprocess.run(
+        ["git", "write-tree"],
+        capture_output=True, text=True, cwd=worktree_path,
+    ).stdout.strip()
+    return head, tree
 
 
 def _restore_worktree(worktree_path: str, snapshot: tuple[str, str]) -> None:
@@ -179,12 +192,16 @@ def _run_wing_review(
         stdin_input = review_payload
     elif wing == "gemini":
         # Plan approval mode = read-only; do NOT use --yolo for review.
+        # --skip-trust is required for headless dispatch into the lead's
+        # worktree (the directory is not in the user's trustedFolders list,
+        # so without this flag Gemini exits 55 before any review runs).
         gemini_home = setup_gemini_home(
             "gemini-copilot-wing-", cwd, "copilot", approval_mode="plan",
         )
         cmd = [
             "gemini",
             "-m", _resolve_model("gemini"),
+            "--skip-trust",
             "-p", review_payload,
         ]
     else:
