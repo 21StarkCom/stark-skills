@@ -4,9 +4,9 @@ description: >-
   Audit and clean up stale issues, dead branches, and worktree remnants. Use for cleanup, housekeeping, close stale issues.
 argument-hint: "[--dry-run] [--repo ORG/REPO] [--aggressive]"
 disable-model-invocation: true
-model: sonnet
-revision: 8a249169623b83c1677dcda2bee230a3dd9fa8d1
-revision_date: 2026-04-27T18:17:48Z
+model: claude-sonnet-4-6
+revision: 3b1d15b47ebc4d56effb999ba52a7c621b6c9220
+revision_date: 2026-05-07T10:51:41Z
 ---
 
 # stark-housekeeping
