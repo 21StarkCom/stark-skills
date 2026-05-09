@@ -5,11 +5,8 @@ description: >-
   invocations to dodge per-user GraphQL/REST rate limits. Tokens live in macOS
   Keychain (service `stark-gh-token`).
 argument-hint: "[show|primary|secondary|swap|limits] [--kind fine|classic|auto]"
-disable-model-invocation: true
-handler: handler.sh
-model: haiku
-revision: 114c857e1649e9745372cf9a5acbfd5cc44d9e0b
-revision_date: 2026-05-09T12:56:13Z
+revision: 4b006a079c0abfed2a332bb38f70e5180bfdfec1
+revision_date: 2026-05-09T12:58:43Z
 ---
 
 # stark-gh-user
@@ -107,7 +104,9 @@ If a keychain entry is missing, render `MISSING` in place of the numbers and con
 - `runtime_env.py` overrides `GH_TOKEN` for review subprocesses with the matching App installation token, so review-posting still goes through the correct bot.
 - To revert to the OS keychain auth: `unset GH_TOKEN GITHUB_TOKEN STARK_GH_USER`.
 
-## Handler
+## How It Works
+
+Run `~/.claude/skills/stark-gh-user/handler.sh` with the subcommand as an argument. The handler resolves the script path, parses arguments, and delegates to `user_token.py` or runs `gh api` calls.
 
 ```bash
 #!/bin/bash
