@@ -71,11 +71,13 @@ function buildMinimalEnv(): Record<string, string> {
  */
 export function buildCommand(prompt: string, model?: string, _ctx?: BuildContext): BuiltCommand {
   const modelFlags = model ? ["-m", model] : [];
+  // codex-cli 0.128.0+ removed the `--reasoning-effort` argument; reasoning
+  // effort is now a config override applied via `-c key=value`.
   const args = [
     "exec",
     "--json",
-    "--reasoning-effort",
-    "high",
+    "-c",
+    `model_reasoning_effort="high"`,
     ...modelFlags,
   ];
   return {

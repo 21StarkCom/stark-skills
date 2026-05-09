@@ -2042,7 +2042,7 @@ export async function runFixer(opts: RunFixerOpts): Promise<RunFixerResult> {
   try {
     const env = pickAllowlistedEnv(process.env, allowlist);
     env.TMPDIR = tempDir;
-    const args = ["exec", "--json", "--reasoning-effort", "high", "-C", opts.worktree];
+    const args = ["exec", "--json", "-c", `model_reasoning_effort="high"`, "-C", opts.worktree];
     if (opts.model) args.push("-m", opts.model);
     args.push(promptText);
     const sp = await (opts.spawnFn ?? spawnCollect)("codex", args, {
