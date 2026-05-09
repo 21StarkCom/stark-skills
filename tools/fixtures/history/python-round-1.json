@@ -1,0 +1,57 @@
+{
+  "schema_version": 2,
+  "timestamp": "2026-04-15T00:00:00.000000+00:00",
+  "repo": "owner/repo",
+  "pr": 100,
+  "mode": "team",
+  "round": 1,
+  "domain_agents": {
+    "security": "codex",
+    "architecture": "claude"
+  },
+  "models": {
+    "codex": "gpt-5.5-pro",
+    "claude": "claude-opus-4-7"
+  },
+  "results": [
+    {
+      "agent": "codex",
+      "model": "gpt-5.5-pro",
+      "domain": "security",
+      "duration_s": 12.5,
+      "error": null,
+      "api_key_fallback": false,
+      "findings": [
+        {
+          "id": "sec-001",
+          "domain": "security",
+          "agent": "codex",
+          "severity": "high",
+          "file": "src/api/handler.ts",
+          "line": 42,
+          "title": "Unvalidated input forwarded to query builder",
+          "body": "The handler reads req.query.id and passes it directly to db.raw(...). Validate or parameterize.",
+          "classification": "fix",
+          "classification_reason": "concrete vulnerability with reproducible path"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "model": "claude-opus-4-7",
+      "domain": "architecture",
+      "duration_s": 18.2,
+      "error": null,
+      "api_key_fallback": false,
+      "findings": []
+    }
+  ],
+  "classification_summary": {
+    "fix": 1,
+    "noise": 0,
+    "false_positive": 0,
+    "ignored": 0,
+    "unclassified": 0,
+    "total": 1
+  }
+}
