@@ -454,9 +454,33 @@ export function progressEnabled(): boolean {
   return Boolean((process.stderr as NodeJS.WriteStream).isTTY);
 }
 
+// Strip ASCII control characters (incl. ANSI/OSC escapes) from any text that
+// might end up interpolated into a progress() line. PR titles, agent error
+// messages, and domain slugs are all attacker-influenceable surfaces, so any
+// terminal output of those values is sanitized first.
+export function stripControl(s: string): string {
+  // Removes C0 (0x00–0x1F except \t/\n/\r are also dropped) and DEL (0x7F).
+  // Progress lines are single-line, so we drop tabs/newlines too — the caller
+  // shouldn't be passing them in.
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/[\x00-\x1F\x7F]/g, "");
+}
+
+// Defensive: even String(err) can throw for exotic thrown values (e.g. an
+// object whose `Symbol.toPrimitive` throws). Wrap it so the catch-path is
+// guaranteed not to throw recursively.
+export function safeStringify(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  try {
+    return String(err);
+  } catch {
+    return "<unrepresentable error>";
+  }
+}
+
 function progress(msg: string): void {
   if (!progressEnabled()) return;
-  process.stderr.write(`stark-review: ${msg}\n`);
+  process.stderr.write(`stark-review: ${stripControl(msg)}\n`);
 }
 
 export function fmtDuration(ms: number): string {
@@ -755,7 +779,7 @@ export async function dispatchDomains(opts: DispatchOptions): Promise<DispatchRe
         };
         progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  ok    ${parsed.findings.length} findings  ${fmtDuration(Date.now() - start)}`);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = safeStringify(err);
         progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  ${message.slice(0, 80)}  ${fmtDuration(Date.now() - start)}`);
         results[idx] = {
           domain: a.domain, agent: a.agent, ok: false,

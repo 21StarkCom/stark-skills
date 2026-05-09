@@ -19,6 +19,8 @@ import {
   findExistingMarker,
   fmtDuration,
   progressEnabled,
+  safeStringify,
+  stripControl,
   historyDir,
   nextRoundNumber,
   parseCli,
@@ -468,7 +470,11 @@ test("progressEnabled: TTY default when neither env var is set", () => {
 
 test("progress output goes only to stderr when verbose, never stdout", async () => {
   // dispatchDomains exercises the full progress() chain across multiple calls.
-  const prev = { v: process.env.STARK_REVIEW_VERBOSE };
+  const prev = {
+    v: process.env.STARK_REVIEW_VERBOSE,
+    q: process.env.STARK_REVIEW_QUIET,
+  };
+  delete process.env.STARK_REVIEW_QUIET;
   const stdoutChunks: string[] = [];
   const stderrChunks: string[] = [];
   const origStdoutWrite = process.stdout.write.bind(process.stdout);
@@ -499,6 +505,7 @@ test("progress output goes only to stderr when verbose, never stdout", async () 
     process.stdout.write = origStdoutWrite;
     process.stderr.write = origStderrWrite;
     if (prev.v === undefined) delete process.env.STARK_REVIEW_VERBOSE; else process.env.STARK_REVIEW_VERBOSE = prev.v;
+    if (prev.q === undefined) delete process.env.STARK_REVIEW_QUIET; else process.env.STARK_REVIEW_QUIET = prev.q;
   }
   const stderrAll = stderrChunks.join("");
   const stdoutAll = stdoutChunks.join("");
@@ -538,6 +545,26 @@ test("runFixer codex argv: -c model_reasoning_effort=high, NO --skip-git-repo-ch
   const cwdIdx = captured.args.indexOf("-C");
   assert.ok(cwdIdx >= 0, "missing -C");
   assert.equal(captured.args[cwdIdx + 1], tmp);
+});
+
+test("stripControl removes ASCII control characters incl. ANSI escapes", () => {
+  assert.equal(stripControl("plain"), "plain");
+  assert.equal(stripControl("\x1B[31mred\x1B[0m"), "[31mred[0m");
+  assert.equal(stripControl("hi\x1B]0;evil\x07"), "hi]0;evil");
+  assert.equal(stripControl("a\tb\nc\rd"), "abcd");
+  assert.equal(stripControl("x\x7Fy"), "xy");
+  assert.equal(stripControl("a\x00b"), "ab");
+});
+
+test("safeStringify handles Error, primitives, and exotic throws", () => {
+  assert.equal(safeStringify(new Error("boom")), "boom");
+  assert.equal(safeStringify("string-throw"), "string-throw");
+  assert.equal(safeStringify(42), "42");
+  assert.equal(safeStringify(null), "null");
+  // Object whose Symbol.toPrimitive throws — must not throw, must fall back.
+  const evil: Record<symbol, unknown> = {};
+  evil[Symbol.toPrimitive] = () => { throw new Error("nope"); };
+  assert.equal(safeStringify(evil), "<unrepresentable error>");
 });
 
 test("dispatchDomains catch path normalizes non-Error throws (no TypeError)", async () => {
