@@ -421,11 +421,14 @@ test("partitionInlineVsBody: classification!='fix' demoted to body, never droppe
   assert.equal(part.bodyFindings.length, 3);
 });
 
-test("fmtDuration: ms / s / m s formatting", () => {
+test("fmtDuration: ms / s / m s formatting + carry on rounding", () => {
   assert.equal(fmtDuration(450), "450ms");
   assert.equal(fmtDuration(1500), "1.5s");
   assert.equal(fmtDuration(75_000), "1m 15s");
   assert.equal(fmtDuration(60_000), "1m 0s");
+  // 119.5s would naively render as "1m 60s"; verify the carry to 2m 0s.
+  assert.equal(fmtDuration(119_500), "2m 0s");
+  assert.equal(fmtDuration(3_599_500), "60m 0s");
 });
 
 test("progressEnabled: STARK_REVIEW_QUIET=1 wins over VERBOSE=1", () => {
@@ -440,6 +443,83 @@ test("progressEnabled: STARK_REVIEW_QUIET=1 wins over VERBOSE=1", () => {
     if (prev.q === undefined) delete process.env.STARK_REVIEW_QUIET; else process.env.STARK_REVIEW_QUIET = prev.q;
     if (prev.v === undefined) delete process.env.STARK_REVIEW_VERBOSE; else process.env.STARK_REVIEW_VERBOSE = prev.v;
   }
+});
+
+test("progressEnabled: TTY default when neither env var is set", () => {
+  const prev = {
+    q: process.env.STARK_REVIEW_QUIET,
+    v: process.env.STARK_REVIEW_VERBOSE,
+    isTTY: (process.stderr as NodeJS.WriteStream).isTTY,
+  };
+  try {
+    delete process.env.STARK_REVIEW_QUIET;
+    delete process.env.STARK_REVIEW_VERBOSE;
+    Object.defineProperty(process.stderr, "isTTY", { value: true, configurable: true });
+    assert.equal(progressEnabled(), true, "TTY=true should enable progress");
+    Object.defineProperty(process.stderr, "isTTY", { value: false, configurable: true });
+    assert.equal(progressEnabled(), false, "TTY=false should disable progress");
+  } finally {
+    Object.defineProperty(process.stderr, "isTTY", { value: prev.isTTY, configurable: true });
+    if (prev.q !== undefined) process.env.STARK_REVIEW_QUIET = prev.q;
+    if (prev.v !== undefined) process.env.STARK_REVIEW_VERBOSE = prev.v;
+  }
+});
+
+test("progress output goes only to stderr when verbose, never stdout", async () => {
+  // dispatchDomains exercises the full progress() chain across multiple calls.
+  const prev = { v: process.env.STARK_REVIEW_VERBOSE };
+  const stdoutChunks: string[] = [];
+  const stderrChunks: string[] = [];
+  const origStdoutWrite = process.stdout.write.bind(process.stdout);
+  const origStderrWrite = process.stderr.write.bind(process.stderr);
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    stdoutChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+    return true;
+  }) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    stderrChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    process.env.STARK_REVIEW_VERBOSE = "1";
+    const port: AgentPort = {
+      buildCommand: () => ({ cmd: "true", args: [], stdin: "", env: {} }),
+      parseOutput: () => ({ findings: [], parseErrors: [] }),
+    };
+    await dispatchDomains({
+      assignments: [{ domain: "x", agent: "codex", prompt: "p" }],
+      ports: new Map([["codex", port]]),
+      config: {
+        default_agent: "codex", domain_agents: {}, severity_overrides: {}, fix_threshold: "medium",
+      } as never,
+      spawnFn: async () => ({ stdout: "", stderr: "", status: 0 }),
+    });
+  } finally {
+    process.stdout.write = origStdoutWrite;
+    process.stderr.write = origStderrWrite;
+    if (prev.v === undefined) delete process.env.STARK_REVIEW_VERBOSE; else process.env.STARK_REVIEW_VERBOSE = prev.v;
+  }
+  const stderrAll = stderrChunks.join("");
+  const stdoutAll = stdoutChunks.join("");
+  assert.ok(stderrAll.includes("stark-review:"), "expected progress on stderr");
+  assert.ok(!stdoutAll.includes("stark-review:"), "progress must not leak to stdout");
+});
+
+test("dispatchDomains catch path normalizes non-Error throws (no TypeError)", async () => {
+  const port: AgentPort = {
+    buildCommand: () => { throw "string-throw" as unknown as Error; },
+    parseOutput: () => ({ findings: [], parseErrors: [] }),
+  };
+  const results = await dispatchDomains({
+    assignments: [{ domain: "x", agent: "codex", prompt: "p" }],
+    ports: new Map([["codex", port]]),
+    config: {
+      default_agent: "codex", domain_agents: {}, severity_overrides: {}, fix_threshold: "medium",
+    } as never,
+    spawnFn: async () => ({ stdout: "", stderr: "", status: 0 }),
+  });
+  assert.equal(results[0].ok, false);
+  assert.equal(results[0].error, "string-throw");
 });
 
 test("partitionInlineVsBody: inline + body sorted critical → high → medium → low", () => {

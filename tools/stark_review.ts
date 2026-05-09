@@ -463,8 +463,11 @@ export function fmtDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   const s = ms / 1000;
   if (s < 60) return `${s.toFixed(1)}s`;
-  const m = Math.floor(s / 60);
-  const rs = Math.round(s - m * 60);
+  // Round to whole seconds first so a value like 119.5s carries cleanly into
+  // 2m 0s instead of producing "1m 60s".
+  const total = Math.round(s);
+  const m = Math.floor(total / 60);
+  const rs = total - m * 60;
   return `${m}m ${rs}s`;
 }
 
@@ -752,11 +755,12 @@ export async function dispatchDomains(opts: DispatchOptions): Promise<DispatchRe
         };
         progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  ok    ${parsed.findings.length} findings  ${fmtDuration(Date.now() - start)}`);
       } catch (err) {
-        progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  ${(err as Error).message.slice(0, 80)}  ${fmtDuration(Date.now() - start)}`);
+        const message = err instanceof Error ? err.message : String(err);
+        progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  ${message.slice(0, 80)}  ${fmtDuration(Date.now() - start)}`);
         results[idx] = {
           domain: a.domain, agent: a.agent, ok: false,
           findings: [], parseErrors: [],
-          error: (err as Error).message,
+          error: message,
           durationMs: Date.now() - start,
         };
       } finally {
