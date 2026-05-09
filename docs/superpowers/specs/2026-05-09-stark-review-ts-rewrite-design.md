@@ -53,6 +53,15 @@ This is a hard rule, not a guideline.
    default), AND
 3. `--no-fix-loop` was not passed.
 
+Denial behavior:
+
+- If the user did **not** explicitly request the fix loop (default invocation
+  with no `--no-fix-loop`): denial is **soft** — emit a `fix_loop_skipped`
+  event with the failing gate condition, finish posting findings, exit 0.
+- If the user explicitly opted in via `--allow-untrusted-fix-loop`: denial is
+  **terminal** — exit non-zero with `error.code: "auth_denied"` so the user
+  knows their opt-in was rejected.
+
 Otherwise the tool reports findings and stops without editing files.
 
 **Fork PRs.** Posting review comments on fork PRs uses the GitHub App token
@@ -142,9 +151,15 @@ that order: `--domains` wins; otherwise `--quick`; otherwise default.
 **Agent selection precedence.** Per-domain, the agent for a domain `D` is:
 
 1. `--agent <name>` if passed → forces all domains to this agent.
+   `config.domain_agents` is bypassed entirely.
 2. Else `config.domain_agents[D]` if set → use that.
 3. Else `config.default_agent` → use that.
 4. Hard-coded fallback: `codex`.
+
+Per-domain resolution happens once at startup; the resolved map is included
+in the receipt as `agents_resolved`. In V1 only `codex` is implemented in
+the TS path (see Architecture phasing); resolving to `claude` or `gemini`
+fails fast with the documented stub error before any dispatch runs.
 
 The "default agent codex" claim earlier in the spec refers to step 3/4: if
 neither `--agent` nor a per-domain mapping resolves, the agent is codex.
@@ -611,8 +626,29 @@ Python files and `/stark-team-review` are untouched.
   `global/config.json`, so adding `quick_domains` is additive — Python ignores
   unknown fields (`config_loader.py` deep-merges without schema validation).
 
+## Deferred to the implementation plan
+
+These were raised during design review and consciously deferred to the plan
+rather than the spec:
+
+- Exact classifier prompt text (per agent).
+- Reviewer-prompt schema contract: the existing per-domain prompts already
+  request a JSON shape; the plan codifies the canonical schema as a snippet
+  prepended to each prompt at render time, so agents emit against an
+  explicit contract rather than implicit convention.
+- Fixer agent output contract (V1.1): how the fixer reports which files it
+  touched so we can stage explicit paths.
+- Sandbox depth: §"Trust" uses env allowlist + temp dir. The plan decides
+  whether to add `unshare`/`firejail`/Docker on Linux for harder isolation,
+  or accept process-level only. V1 ships process-level; sandbox upgrade is
+  a follow-up.
+- History writer Python-schema parity: the plan includes a fixture-based
+  test that loads a `multi_review.py`-produced `round-N.json` and asserts
+  field-for-field match with the TS writer's output.
+- Inline review anchor edge cases: GitHub's Reviews API has nuances around
+  `position` vs `line`, multi-line comments, and unchanged-context anchors.
+  The plan enumerates each case with the exact payload shape.
+
 ## Open questions
 
-None for the spec — design is settled. Implementation plan will surface details
-(e.g., exact prompt text for the classifier, fork-PR maintainer detection
-mechanics).
+None blocking. The spec is approved-pending-user-review.
