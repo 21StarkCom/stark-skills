@@ -26,6 +26,7 @@ import {
   pickAllowlistedEnv,
   postReview,
   pruneHistory,
+  runFixer,
   renderHumanSummary,
   runClassifier,
   validatePathContainment,
@@ -503,6 +504,40 @@ test("progress output goes only to stderr when verbose, never stdout", async () 
   const stdoutAll = stdoutChunks.join("");
   assert.ok(stderrAll.includes("stark-review:"), "expected progress on stderr");
   assert.ok(!stdoutAll.includes("stark-review:"), "progress must not leak to stdout");
+});
+
+test("runFixer codex argv: -c model_reasoning_effort=high, NO --skip-git-repo-check (security pin)", async () => {
+  // The fixer runs in opts.worktree (a real PR checkout). --skip-git-repo-check
+  // would bypass codex's untrusted-directory guard and is reserved for the
+  // dispatcher's ephemeral temp cwds only. This test pins the contract.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fixer-test-"));
+  const promptPath = path.join(tmp, "fixer.md");
+  fs.writeFileSync(promptPath, "fixer prompt body");
+  const captured: { cmd: string; args: string[] } = { cmd: "", args: [] };
+  const fakeSpawn = async (cmd: string, args: string[]) => {
+    captured.cmd = cmd;
+    captured.args = args;
+    return { stdout: '{"modified_files":[],"summary":"noop"}', stderr: "", status: 0 };
+  };
+  await runFixer({
+    worktree: tmp,
+    findings: [],
+    fixerPromptPath: promptPath,
+    config: { runtime: { subagent_env_allowlist: ["PATH"], temp_dir_prefix: "test" } } as never,
+    spawnFn: fakeSpawn as never,
+  });
+  assert.equal(captured.cmd, "codex");
+  assert.ok(captured.args.includes("-c"), "missing -c");
+  const cIdx = captured.args.indexOf("-c");
+  assert.equal(captured.args[cIdx + 1], `model_reasoning_effort="high"`);
+  assert.ok(
+    !captured.args.includes("--skip-git-repo-check"),
+    "fixer must NOT use --skip-git-repo-check (PR worktree, not temp cwd)",
+  );
+  // Sanity: -C opts.worktree present
+  const cwdIdx = captured.args.indexOf("-C");
+  assert.ok(cwdIdx >= 0, "missing -C");
+  assert.equal(captured.args[cwdIdx + 1], tmp);
 });
 
 test("dispatchDomains catch path normalizes non-Error throws (no TypeError)", async () => {

@@ -2046,7 +2046,14 @@ export async function runFixer(opts: RunFixerOpts): Promise<RunFixerResult> {
   try {
     const env = pickAllowlistedEnv(process.env, allowlist);
     env.TMPDIR = tempDir;
-    const args = ["exec", "--json", "--skip-git-repo-check", "-c", `model_reasoning_effort="high"`, "-C", opts.worktree];
+    // The fixer runs in `opts.worktree` — a real PR checkout. Codex's
+    // untrusted-directory guard applies and we deliberately do NOT pass
+    // `--skip-git-repo-check` here (that flag is only safe for the agent
+    // dispatcher's ephemeral temp cwds, never for a PR checkout that may
+    // contain adversarial code from a fork). If a PR worktree isn't on
+    // codex's trusted list, the operator is expected to either trust it
+    // explicitly or run the fixer in a sandboxed temp checkout.
+    const args = ["exec", "--json", "-c", `model_reasoning_effort="high"`, "-C", opts.worktree];
     if (opts.model) args.push("-m", opts.model);
     args.push(promptText);
     const sp = await (opts.spawnFn ?? spawnCollect)("codex", args, {
