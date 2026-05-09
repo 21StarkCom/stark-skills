@@ -1,0 +1,38 @@
+#!/usr/bin/env node
+// Fake `codex` binary used by stark-review tests.
+//
+// Driven by env vars:
+//   STARK_TEST_FIXTURE  — directory holding canned response files
+//   STARK_TEST_LOG      — optional path; one line per invocation appended (JSON)
+//
+// Behavior for `codex exec --json`:
+//   Reads <fixture>/codex-output.jsonl and emits it on stdout. Falls back to
+//   an empty event stream so tests that only need a successful exit can run
+//   without specifying a fixture.
+import fs from "node:fs";
+import path from "node:path";
+
+const argv = process.argv.slice(2);
+const fixtureDir = process.env.STARK_TEST_FIXTURE;
+const logPath = process.env.STARK_TEST_LOG;
+
+if (logPath) {
+  try {
+    fs.appendFileSync(logPath, JSON.stringify({ bin: "codex", argv, ts: Date.now() }) + "\n");
+  } catch (_e) { /* swallow */ }
+}
+
+if (argv[0] === "exec" && argv.includes("--json")) {
+  let body = "";
+  if (fixtureDir) {
+    try {
+      body = fs.readFileSync(path.join(fixtureDir, "codex-output.jsonl"), "utf8");
+    } catch {
+      body = "";
+    }
+  }
+  if (body) process.stdout.write(body);
+  process.exit(0);
+}
+
+process.exit(0);

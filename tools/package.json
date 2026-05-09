@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc -p .",
-    "test": "node --experimental-strip-types --test *.test.ts"
+    "rest-only": "./check-rest-only.sh",
+    "test": "./check-rest-only.sh && node --experimental-strip-types --test *.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
