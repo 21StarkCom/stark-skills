@@ -99,3 +99,12 @@
 - **Summary:** Replace the plain text briefing in `/stark-session start` and `/stark-session end` with structured, color-coded terminal output. Extract shared rendering primitives from `triage_tui.py` into `tui_core.py` (TUIConfig, ANSI helpers, banners, section headers, sanitize_text, slugify). Build `session_tui.py` as a pure rendering layer with TypedDict inputs. Add `session_tui_cli.py` as a CLI bridge with ThreadPoolExecutor data collection (45s budget, 15s per source), error redaction, and graceful degradation. Extend `session_state.py` with optional `name` and `start_head` fields for session identity and scoped diffs. Session naming uses priority order: merged PRs → closed issues → branch name → commit prefix → fallback. Same NO_COLOR/non-TTY/--plain behavior as triage TUI. Zero triage behavior regression gated by byte-for-byte parity.
 - **Knowledge extracted to:** `docs/decisions.md`
 
+
+## 2026-05-09 — TypeScript /stark-review Rewrite (REST-only, V1+V1.1)
+
+- **Date:** 2026-05-09
+- **Status:** Decomposed → issues created
+- **Tracking:** #438, #439, #440, #441, #442, #443, #444, #445, #446
+- **Story Points:** 170 total (43 tasks across 9 phases)
+- **Summary:** Rewrite single-agent /stark-review as a TypeScript pipeline (`tools/stark_review.ts` + `tools/stark_review_lib.ts` + `tools/agent_*.ts`). V1 ships REST-only GitHub interactions (no GraphQL), Codex-only dispatch with claude/gemini fail-fast stubs, classifier stage with path validation and 5-error abort, idempotency lock with O_EXCL + heartbeat + run-hash marker, anchor-rejection 422 fallback (demote to body, never drop), structured receipts, history schema-compatible with multi_review.py, and the SKILL.md wrapper migration that captures CONFIG_ROOT before worktree setup. V1.1 adds Claude/Gemini ports, per-agent GitHub App token resolution for poster identity, and an authorization-gated fix loop with explicit-path staging, trusted test_command (config-only, never PR-controlled), GIT_ASKPASS-based fork pushes (no URL-embedded tokens, no extraheader argv), and append-only audit log. Enforcement: `tools/check-rest-only.sh` greps `tools/stark_review*.ts`+`tools/agent_*.ts` for `gh api graphql|/graphql`, wired into `npm test`.
+- **Knowledge extracted to:** `docs/adr/0019-rest-only-stark-review-with-trusted-config-and-askpass.md`
