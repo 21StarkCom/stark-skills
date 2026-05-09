@@ -208,6 +208,28 @@ export function severityMeetsThreshold(severity: Severity, threshold: Severity):
   return SEVERITY_RANK[severity] >= SEVERITY_RANK[threshold];
 }
 
+export function severityRank(severity: Severity): number {
+  return SEVERITY_RANK[severity];
+}
+
+/** Compare two findings so the higher-severity one sorts first. Ties break by
+ * (domain, file, line) for stable, predictable rendering. */
+export function compareSeverityDesc<
+  T extends { severity: Severity; domain?: string; file?: string | null; line?: number | null },
+>(a: T, b: T): number {
+  const sev = SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity];
+  if (sev !== 0) return sev;
+  const da = a.domain ?? "";
+  const db = b.domain ?? "";
+  if (da !== db) return da < db ? -1 : 1;
+  const fa = a.file ?? "";
+  const fb = b.file ?? "";
+  if (fa !== fb) return fa < fb ? -1 : 1;
+  const la = a.line ?? 0;
+  const lb = b.line ?? 0;
+  return la - lb;
+}
+
 /**
  * Stable 12-hex-char id derived from sha256(domain|agent|normalized-title).
  * Title normalization: lowercase, strip ASCII punctuation, collapse whitespace.

@@ -12,6 +12,7 @@ import {
   renderReviewPrompt,
   resolveAgentsForDomains,
   resolvePromptSources,
+  compareSeverityDesc,
   selectDomains,
   severityMeetsThreshold,
   type AgentName,
@@ -76,6 +77,28 @@ test("severityMeetsThreshold ordering", () => {
   assert.equal(severityMeetsThreshold("medium", "high"), false);
   assert.equal(severityMeetsThreshold("low", "low"), true);
   assert.equal(severityMeetsThreshold("low", "medium"), false);
+});
+
+test("compareSeverityDesc orders critical → high → medium → low, ties by domain/file/line", () => {
+  const items = [
+    { severity: "low" as const,      domain: "a", file: "z.ts", line: 1 },
+    { severity: "critical" as const, domain: "a", file: "z.ts", line: 1 },
+    { severity: "medium" as const,   domain: "a", file: "z.ts", line: 1 },
+    { severity: "high" as const,     domain: "a", file: "z.ts", line: 1 },
+  ];
+  const sorted = [...items].sort(compareSeverityDesc);
+  assert.deepEqual(sorted.map((i) => i.severity), ["critical", "high", "medium", "low"]);
+  // Ties broken by (domain, file, line)
+  const ties = [
+    { severity: "high" as const, domain: "b", file: "a.ts", line: 9 },
+    { severity: "high" as const, domain: "a", file: "z.ts", line: 1 },
+    { severity: "high" as const, domain: "a", file: "a.ts", line: 9 },
+    { severity: "high" as const, domain: "a", file: "a.ts", line: 1 },
+  ].sort(compareSeverityDesc);
+  assert.deepEqual(
+    ties.map((t) => `${t.domain}/${t.file}:${t.line}`),
+    ["a/a.ts:1", "a/a.ts:9", "a/z.ts:1", "b/a.ts:9"],
+  );
 });
 
 // ─── Task 2-3: selectDomains & resolveAgentsForDomains ──────────────────────

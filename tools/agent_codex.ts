@@ -71,11 +71,16 @@ function buildMinimalEnv(): Record<string, string> {
  */
 export function buildCommand(prompt: string, model?: string, _ctx?: BuildContext): BuiltCommand {
   const modelFlags = model ? ["-m", model] : [];
+  // codex-cli 0.128.0+ removed the `--reasoning-effort` argument; reasoning
+  // effort is now a config override applied via `-c key=value`. The dispatcher
+  // spawns codex in a fresh temp cwd outside the user's trusted-directory list,
+  // so we also need `--skip-git-repo-check` or codex refuses to start.
   const args = [
     "exec",
     "--json",
-    "--reasoning-effort",
-    "high",
+    "--skip-git-repo-check",
+    "-c",
+    `model_reasoning_effort="high"`,
     ...modelFlags,
   ];
   return {

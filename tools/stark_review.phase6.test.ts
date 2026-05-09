@@ -515,11 +515,11 @@ test("runClassifier: emits classifier_failed event with reason on bad output", a
 // ─── Smoke: codex command construction (already covered, re-pin here for the
 // "twelve listed cases" enumeration in the phase spec) ──────────────────────
 
-test("codex buildCommand argv: exec --json --reasoning-effort high (Phase 6 pin)", async () => {
+test("codex buildCommand argv: exec --json -c model_reasoning_effort=\"high\" (Phase 6 pin)", async () => {
   const codex = await import("./agent_codex.ts");
   const built = codex.buildCommand("hi");
   assert.equal(built.cmd, "codex");
-  assert.deepEqual(built.args, ["exec", "--json", "--reasoning-effort", "high"]);
+  assert.deepEqual(built.args, ["exec", "--json", "--skip-git-repo-check", "-c", `model_reasoning_effort="high"`]);
 });
 
 // ─── Lock ordering test — sanity: execFileSync available (silences unused
