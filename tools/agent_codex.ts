@@ -194,6 +194,17 @@ export function parseOutput(stdout: string): ParseResult {
       continue;
     }
 
+    // A finding MUST have severity and title. If the line has neither, it's not
+    // an attempted finding — treat as framing chatter (status updates, reasoning
+    // objects, summaries the model emits between findings) and skip silently.
+    // Otherwise validate strictly so genuinely malformed findings are flagged.
+    if (
+      !Object.prototype.hasOwnProperty.call(parsed, "severity") &&
+      !Object.prototype.hasOwnProperty.call(parsed, "title")
+    ) {
+      continue;
+    }
+
     const severity = parsed.severity;
     if (typeof severity !== "string" || !VALID_SEVERITIES.has(severity as Severity)) {
       parseErrors.push({

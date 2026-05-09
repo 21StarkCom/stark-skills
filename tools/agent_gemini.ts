@@ -143,6 +143,15 @@ export function parseOutput(stdout: string): ParseResult {
       parseErrors.push({ line, reason: "record is not a JSON object" });
       continue;
     }
+    // A finding MUST have severity and title. Lines with neither are framing
+    // chatter (status/reasoning/summary objects the model emits between
+    // findings) — skip silently. See agent_codex.ts for the full rationale.
+    if (
+      !Object.prototype.hasOwnProperty.call(parsed, "severity") &&
+      !Object.prototype.hasOwnProperty.call(parsed, "title")
+    ) {
+      continue;
+    }
     const severity = parsed.severity;
     if (typeof severity !== "string" || !VALID_SEVERITIES.has(severity as Severity)) {
       parseErrors.push({ line, reason: `invalid or missing severity (got ${JSON.stringify(severity)})` });
