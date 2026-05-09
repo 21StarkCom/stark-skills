@@ -1,5 +1,10 @@
 {
   "agents": ["claude", "codex"],
+  "quick_domains": [],
+  "default_agent": "codex",
+  "test_command": null,
+  "untrusted_fix_loop": false,
+  "history_retention_days": 90,
   "domain_agents": {
     "architecture": "codex",
     "behavior": "codex",

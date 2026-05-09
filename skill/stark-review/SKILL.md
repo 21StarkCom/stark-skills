@@ -3,16 +3,18 @@ name: stark-review
 description: >-
   Single-agent PR review. Uses triage-selected PR review domains by default,
   or one forced agent via `--agent`.
-argument-hint: "[PR_NUMBER] [--agent claude|codex|gemini] [--dry-run] [--repo ORG/REPO]"
+argument-hint: "[PR_NUMBER] [--agent claude|codex|gemini] [--quick] [--domains a,b,c] [--dry-run] [--repo ORG/REPO]"
 disable-model-invocation: false
 model: opus[1m]
-revision: ea7268a18edb159e040db78148f2ab9cb324d76a
-revision_date: 2026-05-03T06:43:43Z
+revision: e2e10b69ca34151b7dda427461495f04ef4c55e3
+revision_date: 2026-05-09T08:31:45Z
 ---
 
-Cheaper single-agent PR review path. Keep this skill thin: call the Python
-dispatchers and use their JSON output; do not recreate prompt or dispatch
-logic in `SKILL.md`.
+Single-agent PR review path. Keep this skill thin: do preflight, capture the
+trusted config root, set up the worktree, then hand off to the TS dispatcher
+(`tools/stark_review.ts`). All review logic — domain selection, agent dispatch,
+finding parsing, classification, posting, history — lives in the TS tool. Read
+its `--json` receipt and surface failures.
 
 ## Preflight
 
@@ -22,20 +24,24 @@ Run [standard preflight](../../standards/preflight.md) with `--workflow stark-re
 
 Raw input: `$ARGUMENTS`
 
-- `PR_NUMBER` - optional; detect from current branch with `gh pr view --json number --jq .number`
-- `--agent <name>` - force the same review agent across every triage-selected domain. `triage_orchestrator.py` forwards this to `multi_review.py --single --agent`.
-- `--repo ORG/REPO` - override repo detection
-- `--dry-run` - perform the review without PR comments, commits, or pushes
-- If PR detection fails, list open PRs and ask:
+- `PR_NUMBER` — optional; detect from current branch with `gh pr view --json number --jq .number`
+- `--agent <name>` — force a single agent (claude|codex|gemini) across every selected domain
+- `--repo ORG/REPO` — override repo detection
+- `--quick` — use the `quick_domains` list from `config.json` (small fast subset). Errors out if `quick_domains` is empty in the resolved config
+- `--domains a,b,c` — escape hatch: explicit comma-separated domain slugs. Beats `--quick`. Use this when you want a surgical review on specific domains (e.g. `--domains security,test-coverage`)
+- `--dry-run` — run the full pipeline but skip GitHub posting; the receipt records what would have been posted
 
-  ```bash
-  gh pr list --json number,title,headRefName --jq '.[] | "#\(.number) \(.title) (\(.headRefName))"'
-  ```
+If PR detection fails, list open PRs and ask:
+
+```bash
+gh pr list --json number,title,headRefName --jq '.[] | "#\(.number) \(.title) (\(.headRefName))"'
+```
 
 ## Constants
 
 ```bash
 SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
+TOOLS="${STARK_REVIEW_TOOLS:-$HOME/.claude/code-review/tools}"
 PYTHON="$SCRIPTS/.venv/bin/python3"
 [ -x "$PYTHON" ] || PYTHON=python3
 ```
@@ -58,240 +64,242 @@ default agent per domain. Example:
 }
 ```
 
-This follows the standard config hierarchy (repo > org > global).
+This follows the standard config hierarchy (repo > org > global). The TS
+dispatcher reads it from `--config-root`.
+
+`--quick` reads the optional `quick_domains` array from the same config. If
+that list is empty or absent, the TS tool exits with `bad_args` rather than
+silently dispatching every domain.
 
 ## Setup
 
-1. Verify `gh auth status` succeeds.
-2. Provision the review worktree:
+### 1. Capture trusted config root FIRST
 
-   ```bash
-   TOOLS="$HOME/.claude/code-review/tools"
-   SETUP_JSON=$(node --experimental-strip-types "$TOOLS/review_setup_worktree.ts" \
-     --pr "$PR_NUM" --repo "$REPO" --mode single --json)
-   ```
+Capture the config root from the **current** working directory **before any
+worktree setup runs**. The TS dispatcher uses this path to resolve `config.json`
+and prompt files; if you capture it after `cd`-ing into the worktree it will
+read prompts from inside the PR head, which is an injection vector.
 
-   The tool runs `gh pr view` to resolve `branch`, `headSha`, `base`, `isFork`,
-   and `maintainerCanModify`; cross-checks the current checkout matches
-   `--repo`; force-fetches the base branch and the GitHub PR head ref; and
-   creates (or validates-and-reuses) `/tmp/review-<repo-slug>-pr<N>-single`.
-   Receipt: `{ worktreePath, pr: {number, branch, headSha, base, isFork,
-   maintainerCanModify}, reused }`.
+```bash
+CONFIG_ROOT="$(pwd)"
+```
 
-   Exit codes (skill must surface the message and stop on any non-zero):
-   `2` gh-cli-failure, `3` repo-mismatch, `4` worktree-dirty,
-   `5` worktree-head-mismatch, `6` git-failure.
+### 2. Provision a GitHub token (only if unset)
 
-3. `cd "$WORKTREE_PATH"` (from the receipt) before any review work.
+The TS tool authenticates via `gh api`, which uses `GH_TOKEN` if set. Provision
+a stark-claude installation token only when the caller has not already supplied
+one — never overwrite a caller-provided token.
 
-## Dispatch Rules
+```bash
+if [ -z "${GH_TOKEN:-}" ]; then
+    if GH_TOKEN_TMP=$("$PYTHON" "$SCRIPTS/github_app.py" --app stark-claude token 2>/dev/null); then
+        export GH_TOKEN="$GH_TOKEN_TMP"
+    else
+        if [ -n "${DRY_RUN:-}" ]; then
+            warn "GH_TOKEN not set and github_app.py token failed; --dry-run continues without posting auth"
+        else
+            error "GH_TOKEN not set and github_app.py token failed; cannot post review"
+            exit 1
+        fi
+    fi
+fi
+```
 
-- Normal mode: use `triage_orchestrator.py --type pr --single --json`. It triages domains and dispatches the actual review.
-- `--agent` supplied: keep the orchestrator path and append `--agent "$AGENT"` so triage still selects domains while `multi_review.py` uses one forced reviewer.
-- `--dry-run`: first run `triage_orchestrator.py --type pr --single --dry-run --json` to get `triage.dispatched_domains`, then run `multi_review.py --single --dry-run --json-only --domains <csv>` using that domain list. Append `--agent "$AGENT"` to the second command if supplied. `triage_orchestrator.py --dry-run` does not dispatch a review by itself.
-- Never pass `--post-raw` when `--dry-run` is active.
+### 3. Verify gh and provision the worktree
+
+```bash
+if [ -n "${GH_TOKEN:-}" ]; then
+    gh auth status
+elif [ -n "${DRY_RUN:-}" ]; then
+    warn "skipping 'gh auth status' (no GH_TOKEN provisioned; --dry-run continues)"
+else
+    gh auth status
+fi
+
+SETUP_JSON=$(node --experimental-strip-types "$TOOLS/review_setup_worktree.ts" \
+    --pr "$PR_NUM" --repo "$REPO" --mode single --json)
+WORKTREE_PATH=$(printf '%s' "$SETUP_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["worktreePath"])')
+HEAD_SHA=$(printf '%s'   "$SETUP_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["pr"]["headSha"])')
+BASE=$(printf '%s'        "$SETUP_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["pr"]["base"])')
+IS_FORK=$(printf '%s'     "$SETUP_JSON" | python3 -c 'import json,sys; print(str(json.load(sys.stdin)["pr"]["isFork"]).lower())')
+```
+
+`review_setup_worktree.ts` runs `gh pr view` to resolve `branch`, `headSha`,
+`base`, `isFork`, `maintainerCanModify`; cross-checks the current checkout
+matches `--repo`; force-fetches the base branch and the PR head ref; and
+creates (or validates-and-reuses) `/tmp/review-<repo-slug>-pr<N>-single`.
+
+Exit codes (skill must surface the message and stop on any non-zero):
+`2` gh-cli-failure, `3` repo-mismatch, `4` worktree-dirty,
+`5` worktree-head-mismatch, `6` git-failure.
 
 ## Phase 1: Run Review
 
-### Normal triaged run
+Invoke the TS dispatcher with the captured `--config-root` and the worktree
+path. Always pass `--json` so the wrapper can parse the receipt; use shell
+parameter expansion `${X:+--x}` so missing optional flags don't expand to empty
+arguments.
 
 ```bash
 review_args=(
-  --type pr
-  --pr "$PR_NUM"
-  --repo "$REPO"
-  --base "$BASE"
-  --single
-  --json
-)
-[ -n "${AGENT:-}" ] && review_args+=(--agent "$AGENT")
-"$PYTHON" "$SCRIPTS/triage_orchestrator.py" "${review_args[@]}"
-```
-
-If the orchestrator fails before returning JSON, log the failure and fall back
-to direct single-agent dispatch:
-
-```bash
-fallback_args=(
-  --pr "$PR_NUM"
-  --repo "$REPO"
-  --base "$BASE"
-  --single
-  --json-only
-)
-[ -n "${AGENT:-}" ] && fallback_args+=(--agent "$AGENT")
-"$PYTHON" "$SCRIPTS/multi_review.py" "${fallback_args[@]}"
-```
-
-### Dry-run with triage-selected domains
-
-First collect the triage decision without dispatch:
-
-```bash
-TRIAGE_JSON=$(
-  $PYTHON $SCRIPTS/triage_orchestrator.py \
-    --type pr \
-    --pr "$PR_NUM" \
-    --repo "$REPO" \
-    --base "$BASE" \
-    --single \
-    --dry-run \
+    --pr "$PR_NUM"
+    --repo "$REPO"
+    --base "$BASE"
+    --worktree "$WORKTREE_PATH"
+    --config-root "$CONFIG_ROOT"
     --json
 )
-DOMAIN_CSV=$(
-  printf '%s' "$TRIAGE_JSON" | python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)["triage"]["dispatched_domains"]))'
-)
+[ -n "${AGENT:-}"   ] && review_args+=(--agent "$AGENT")
+[ -n "${QUICK:-}"   ] && review_args+=(--quick)
+[ -n "${DOMAINS:-}" ] && review_args+=(--domains "$DOMAINS")
+[ -n "${DRY_RUN:-}" ] && review_args+=(--dry-run)
+
+set +e
+RECEIPT_JSON=$(node --experimental-strip-types "$TOOLS/stark_review.ts" "${review_args[@]}")
+TS_EXIT=$?
+set -e
 ```
 
-If `DOMAIN_CSV` is empty, report that triage selected zero domains and stop.
-Otherwise run the real review without PR posting:
+The TS tool emits the receipt as a single JSON object on **stdout** and a
+human summary on **stderr** (terminal-friendly). It exits:
+
+- `0` — `ok=true` AND no failed results AND no unposted reviews
+- `1` — `ok=false` (terminal failure) OR `ok=true` with non-empty
+  `failed_results` / `unposted_reviews` (partial failure)
+
+## Phase 2: Surface failures from the receipt
+
+Parse the receipt JSON. Each of the three failure conditions below independently
+forces a non-zero exit. Print specifics for each so the user can act.
 
 ```bash
-dry_review_args=(
-  --pr "$PR_NUM"
-  --repo "$REPO"
-  --base "$BASE"
-  --single
-  --dry-run
-  --json-only
-  --domains "$DOMAIN_CSV"
-)
-[ -n "${AGENT:-}" ] && dry_review_args+=(--agent "$AGENT")
-"$PYTHON" "$SCRIPTS/multi_review.py" "${dry_review_args[@]}"
+parse() { printf '%s' "$RECEIPT_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); $1"; }
+
+OK=$(parse 'print(str(d.get("ok")).lower())')
+ERR_CODE=$(parse 'e=d.get("error") or {}; print(e.get("code","") or "")')
+ERR_MSG=$(parse 'e=d.get("error") or {}; print(e.get("message","") or "")')
+FAILED_LIST=$(parse '
+rounds = d.get("rounds") or []
+items = []
+for r in rounds:
+    rd = r.get("round")
+    for f in (r.get("failed_results") or []):
+        items.append("round {}: {}/{} — {}".format(rd, f.get("agent"), f.get("domain"), f.get("error")))
+print("\n".join(items))
+')
+UNPOSTED_LIST=$(parse '
+items = []
+for u in (d.get("unposted_reviews") or []):
+    items.append("round {}: {} status={}".format(u.get("round"), u.get("reason"), u.get("status","")))
+print("\n".join(items))
+')
+
+failed=0
+
+# (a) terminal failure
+if [ "$OK" = "false" ]; then
+    error "Review failed: $ERR_CODE — $ERR_MSG"
+    failed=1
+fi
+
+# (b) any round had failed_results
+if [ -n "$FAILED_LIST" ]; then
+    error "Some domain/agent dispatches failed:"
+    printf '  %s\n' "$FAILED_LIST" >&2
+    failed=1
+fi
+
+# (c) any review failed to post
+if [ -n "$UNPOSTED_LIST" ]; then
+    error "Some reviews could not be posted:"
+    printf '  %s\n' "$UNPOSTED_LIST" >&2
+    failed=1
+fi
+
+if [ "$failed" -ne 0 ]; then
+    exit 1
+fi
 ```
 
-## Phase 2: Parse Output
+If the TS tool's exit code is non-zero but none of (a)/(b)/(c) is parseable
+(e.g. malformed JSON or empty stdout), treat it as a hard failure: print the
+captured stderr and exit non-zero.
 
-Handle whichever payload shape you actually executed:
+## Phase 3: Success summary
 
-- `triage_orchestrator.py` returns `{triage, dispatch, findings, summary}`.
-- `multi_review.py` returns `{repo, pr, base, mode, domain_agents, domains, rounds, summary}`.
-
-Flatten findings from:
-
-- `findings` for the triage-orchestrator payload
-- `rounds[*].results[*].findings` for the direct `multi_review.py` payload
-
-Fail closed before classification if any of these are true:
-
-- the review command exits non-zero, even if it printed JSON
-- stdout is not valid JSON
-- `triage.dispatched_domains` is non-empty but dispatch returned zero result records
-- `dispatch.failed > 0` in triage output
-- direct `multi_review.py` output has `summary.failed_results > 0`
-
-If `triage.error` is set but dispatch produced result records and
-`dispatch.failed == 0`, treat it as a fail-open triage warning rather than a
-cleanliness blocker.
-
-In those cases, print the failed domains/agents and stop. Do not report the PR
-as clean. Use the actual dispatched domain count from the payload; do not
-hard-code `9`.
-
-## Phase 3: Classify and Present
-
-Read the referenced `file:line` in the worktree and classify every finding:
-
-| Classification | Meaning |
-|----------------|---------|
-| `fix` | Confirmed real issue. Critical/high `fix` findings must be addressed in this run; medium `fix` findings may be fixed immediately or explicitly left as follow-up. |
-| `false_positive` | The described issue does not exist in the code. |
-| `noise` | Subjective, stylistic, or not actionable. |
-| `ignored` | Intentionally not acted on in this run because it is below the action threshold or out of scope. |
-
-Every finding must get both `classification` and `classification_reason`.
-
-Present a summary using the actual run data:
+On success, print the human-readable summary using the receipt fields. Do not
+re-derive counts the TS tool already computed.
 
 ```text
-Review Complete - {repo} PR #{pr_num}
--------------------------------------
-Domains reviewed: {domain_count}
-Findings: X total (C critical, H high, M medium, L low)
-Agents used: {agent_names}
-Duration: Xs
-
-Findings to fix:
-  1. [CRITICAL] file:line - title
-  2. [HIGH] file:line - title
+Review Complete - {repo} PR #{pr}
+---------------------------------
+Domains reviewed: {len(domains)}
+Rounds: {len(rounds)}
+  round 1: {findings} findings (fix={fix} noise={noise} fp={false_positive}) — {duration_ms}ms
+  ...
+Comments posted: {comments_posted}
+Fixes pushed: {fixes_pushed}
+History: {len(history_files)} round file(s)
 ```
+
+Findings classification (`fix` / `noise` / `false_positive` / `ignored`) is
+performed by the TS tool's classifier stage. The wrapper does not re-classify.
 
 ## Phase 4: Fix Loop
 
-- If `--dry-run` was used, stop after presenting findings. Do not edit files, commit, or push.
-- If `IS_FORK` is true, stay review-only unless `maintainerCanModify` is true and you have a verified writable remote for the fork. Do not push fixes to `origin` for fork PRs.
-- If there are critical or high `fix` findings:
-  1. Fix them in the worktree.
-  2. Run the project's test command (from config, `CLAUDE.md` `## Commands`, or the repo's standard package/test files). If no test command can be identified, say so explicitly.
-  3. If tests pass, commit and push back to the PR branch:
+Fix-loop is disabled in V1 — the TS tool does not push commits. If the receipt
+shows critical or high `fix` findings that need code changes, the user is
+expected to address them in a follow-up commit. `--allow-untrusted-fix-loop`
+is currently inert.
 
-     ```bash
-     git add -A
-     git commit -m "fix: address review findings"
-     git push origin HEAD:"$BRANCH"
-     ```
-
-  4. Re-run the review/classification flow. Stop after 3 rounds total.
-  5. If tests fail, keep the worktree and stop. Do not claim the PR is clean.
-- If only medium `fix` findings remain, either fix the low-risk ones now or present them explicitly as remaining follow-up items. Do not silently drop them.
+For fork PRs (`IS_FORK=true`), the review is read-only regardless of
+`maintainerCanModify`.
 
 ## Phase 5: Persist History
 
-`multi_review.py` auto-writes `~/.claude/code-review/history/{org}/{repo}/{pr}/round-{N}.json`
-at the end of every dispatched round (round number is auto-detected from the
-history dir, or set explicitly via `--round N`). Findings land **unclassified**.
-
-After classifying, overwrite the same `round-{N}.json` with the classified
-copy by calling `save_round_history()` from `multi_review.py`, or by writing
-JSON with the same schema. Pass `--round` to a subsequent dispatch when you
-want to re-record the same round number rather than auto-incrementing.
-
-Critical rules:
-
-- Every saved finding must include `classification` and `classification_reason`.
-- Preserve the actual `domain_agents` map used for the run, or the forced `--agent` override.
-- Save every round, including the final round.
-- Pass `--no-persist-history` only when you genuinely don't want an audit trail (rare).
+The TS dispatcher writes history JSON to
+`~/.claude/code-review/history/{org}/{repo}/{pr}/round-{N}.json` itself. The
+receipt's `history_files` field lists the paths written. The wrapper does not
+manage history.
 
 ## Phase 6: Cleanup
 
 ```bash
-cd -
+cd - >/dev/null
+
 node --experimental-strip-types "$TOOLS/review_cleanup_worktree.ts" \
-  --worktree "$WORKTREE_PATH" --head-sha "$HEAD_SHA" --json
+    --worktree "$WORKTREE_PATH" --head-sha "$HEAD_SHA" --json
 ```
 
-The tool refuses to delete the worktree on any of: unstaged changes, staged
-changes, or HEAD drift from the original PR head. The `head-drift` check
-specifically guards against fix commits that were never pushed — without it,
-the worktree (and its unpushed commits) would be silently removed. Receipt:
-`{ removed, reason: removed | no-such-worktree | unstaged-changes |
-staged-changes | head-drift, worktreePath, expectedHead, observedHead }`.
+The cleanup tool refuses to delete the worktree on unstaged changes, staged
+changes, or HEAD drift. The `head-drift` check guards against fix commits that
+were never pushed. Receipt: `{ removed, reason: removed | no-such-worktree |
+unstaged-changes | staged-changes | head-drift, worktreePath, expectedHead,
+observedHead }`.
 
 The tool always exits 0; a `removed: false` receipt is a deliberate safety
-decision, not a tool failure. Skip cleanup entirely on dispatch failure,
-test failure, or unpushed fixes — surface the path and let the user inspect.
+decision, not a tool failure. Skip cleanup on dispatch failure or unpushed
+state — surface the path and let the user inspect.
 
 ## Observability
 
 Standard observability applies: timestamped progress logs, metrics block
 (PR number, agents used, domains succeeded/failed, findings by severity,
-fix rounds, duration), and completion event via `emit_queue.py`.
+duration), and completion event via `emit_queue.py`.
 
 See [../../standards/observability.md](../../standards/observability.md).
 
 ## Failure Modes
 
-| Failure | Recovery |
-|---------|----------|
-| `triage_orchestrator.py` fails in normal mode | Log the failure and fall back to direct `multi_review.py --single` |
-| `--agent` override requested | Keep orchestrator triage and forward `--agent` to `multi_review.py` |
-| `--dry-run` requested | Do not use orchestrator dispatch; triage first, then run `multi_review.py --dry-run --domains ...` |
-| Zero sub-agents run or all dispatched domains fail | Stop and report dispatch failure; never call it clean |
-| Triage selects zero domains | Report it and stop cleanly |
-| PR not found | Print `PR #{n} not found. Check --repo or run from the correct directory.` |
-| Worktree creation fails | Stop; do not fall back to the main checkout |
-| Repo mismatch | Stop and ask to run from the matching local checkout |
-| Current PR branch has unpushed local changes | Stop and ask for a push/checkpoint before reviewing remote PR head |
-| Fork PR | Review-only unless writable fork remote is verified |
-| Tests fail after fixes | Present the failure, keep the worktree state, and stop without claiming the PR is clean |
+| Failure                                          | Recovery |
+|--------------------------------------------------|----------|
+| Receipt `ok=false`                               | Print `error.code` + `error.message`, exit non-zero |
+| Receipt has `failed_results` non-empty           | Print round/agent/domain/error list, exit non-zero |
+| Receipt has `unposted_reviews` non-empty         | Print round/reason/status, exit non-zero |
+| TS tool exits non-zero with unparseable stdout   | Print stderr, exit non-zero |
+| `--quick` with empty `quick_domains` in config   | TS tool exits with `bad_args`; surface the message |
+| PR not found                                     | Print `PR #{n} not found. Check --repo or run from the correct directory.` |
+| Worktree creation fails                          | Stop; do not fall back to the main checkout |
+| Repo mismatch                                    | Stop and ask to run from the matching local checkout |
+| Fork PR                                          | Review-only; no fix-loop |
+| `GH_TOKEN` unset and `github_app.py token` fails | `--dry-run` continues with a warning; otherwise stop |
