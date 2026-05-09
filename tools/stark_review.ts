@@ -18,13 +18,17 @@ import {
   type ResolvedConfig,
   type Severity,
 } from "./stark_review_lib.ts";
-import type { BuiltCommand, ParseError, ParseResult } from "./agent_codex.ts";
+import type { BuildContext, BuiltCommand, ParseError, ParseResult } from "./agent_codex.ts";
 
 // ─── Agent port loader (Phase 3, preserved) ─────────────────────────────────
 
 export interface AgentPort {
-  buildCommand(prompt: string, model?: string): BuiltCommand;
+  buildCommand(prompt: string, model?: string, ctx?: BuildContext): BuiltCommand;
   parseOutput(stdout: string): ParseResult;
+  /** Unwrap any agent-specific envelope (e.g. `{"response":"..."}` for gemini)
+   * to expose the raw assistant text. Optional — callers fall back to the
+   * raw stdout when absent. */
+  normalizeOutput?: (stdout: string) => string;
 }
 
 const AGENT_MODULE_PATHS: Readonly<Record<AgentName, string>> = Object.freeze({
@@ -62,6 +66,9 @@ export async function loadAgentPort(agent: AgentName): Promise<AgentPort> {
     return {
       buildCommand: mod.buildCommand as AgentPort["buildCommand"],
       parseOutput: mod.parseOutput as AgentPort["parseOutput"],
+      ...(typeof mod.normalizeOutput === "function"
+        ? { normalizeOutput: mod.normalizeOutput as (s: string) => string }
+        : {}),
     };
   });
 
@@ -81,16 +88,6 @@ export async function resolveAgentPorts(
   const out = new Map<AgentName, AgentPort>();
   for (const agent of unique) {
     const port = await loadAgentPort(agent);
-    try {
-      port.buildCommand("");
-    } catch (err) {
-      throw Object.assign(
-        new Error(
-          `agent '${agent}' is not supported by the TS pipeline yet: ${(err as Error).message}`,
-        ),
-        { code: "agent_not_supported" as const, cause: err },
-      );
-    }
     out.set(agent, port);
   }
   return out;
@@ -346,6 +343,10 @@ export interface GhJsonOpts {
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   body?: unknown;
   paginate?: boolean;
+  /** Optional env keys merged into the gh subprocess env. Used by Task 8-3
+   * to inject a per-agent GitHub App token at POST time without polluting
+   * process.env. */
+  envOverride?: Record<string, string>;
 }
 
 export interface GhJsonResult {
@@ -375,8 +376,56 @@ function rejectGraphqlPath(p: string): void {
   }
 }
 
-function buildGhEnv(): NodeJS.ProcessEnv {
-  return { ...process.env };
+function buildGhEnv(envOverride?: Record<string, string>): NodeJS.ProcessEnv {
+  if (!envOverride) return { ...process.env };
+  return { ...process.env, ...envOverride };
+}
+
+// ─── Per-agent GitHub App token resolution (Task 8-3) ───────────────────────
+
+/** Resolve the GitHub App installation token for a specific agent identity
+ * (stark-claude / stark-codex / stark-gemini). Cached per process for the
+ * agent's ~1h token lifetime. Tokens are NEVER injected into the agent CLI
+ * environment — only into the gh transport that POSTs the review. */
+const tokenCache: Map<AgentName, string> = new Map();
+
+export function _resetTokenCacheForTests(): void {
+  tokenCache.clear();
+}
+
+export interface TokenForAgentOpts {
+  repo?: string;
+  scriptsDir?: string;
+  spawnFn?: typeof spawnCollect;
+  pythonBin?: string;
+}
+
+export async function tokenForAgent(
+  agent: AgentName,
+  opts: TokenForAgentOpts = {},
+): Promise<string> {
+  const cached = tokenCache.get(agent);
+  if (cached) return cached;
+  const scripts = opts.scriptsDir ?? path.join(os.homedir(), ".claude", "code-review", "scripts");
+  const py = opts.pythonBin ?? "python3";
+  const args = [
+    path.join(scripts, "github_app.py"),
+    "--app", `stark-${agent}`,
+  ];
+  if (opts.repo) args.push("--repo", opts.repo);
+  args.push("token");
+  const sp = await (opts.spawnFn ?? spawnCollect)(py, args, { env: process.env });
+  if (sp.status !== 0) {
+    throw new Error(
+      `tokenForAgent(${agent}) failed (exit ${sp.status}): ${sp.stderr.slice(0, 400)}`,
+    );
+  }
+  const token = sp.stdout.trim();
+  if (!token) {
+    throw new Error(`tokenForAgent(${agent}) returned empty token`);
+  }
+  tokenCache.set(agent, token);
+  return token;
 }
 
 interface SpawnResult { stdout: string; stderr: string; status: number }
@@ -425,7 +474,7 @@ export async function ghJsonOnce(p: string, opts: GhJsonOpts = {}): Promise<GhJs
   args.push(p);
   const input = opts.body !== undefined ? JSON.stringify(opts.body) : undefined;
   if (input !== undefined) args.push("--input", "-");
-  const res = await spawnCollect("gh", args, { input, env: buildGhEnv() });
+  const res = await spawnCollect("gh", args, { input, env: buildGhEnv(opts.envOverride) });
   const { headers, body, status } = parseHttpStream(res.stdout);
   if (status === 0) {
     throw new GhError(-1, res.stderr || res.stdout, {}, `gh api ${p} failed: ${res.stderr.slice(0, 400)}`);
@@ -610,17 +659,20 @@ export async function dispatchDomains(opts: DispatchOptions): Promise<DispatchRe
       }
       let tempDir: string | null = null;
       try {
-        const built = port.buildCommand(a.prompt, a.model);
+        // Create the cwd FIRST so per-agent setup (e.g. Gemini's
+        // GEMINI_CLI_HOME / projects.json) can register it before spawn.
+        tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `${tempPrefix}-`));
+        const built = port.buildCommand(a.prompt, a.model, { cwd: tempDir });
         const env = pickAllowlistedEnv(process.env, allowlist);
         for (const [k, v] of Object.entries(built.env)) {
           if (!FORBIDDEN_ENV_KEYS.includes(k as (typeof FORBIDDEN_ENV_KEYS)[number])) {
             env[k] = v;
           }
         }
-        tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `${tempPrefix}-`));
         env.TMPDIR = tempDir;
+        const cwd = built.cwd ?? tempDir;
         const sp = await spawner(built.cmd, built.args, {
-          input: built.stdin, env, cwd: tempDir,
+          input: built.stdin, env, cwd,
         });
         if (sp.status !== 0) {
           results[idx] = {
@@ -767,19 +819,25 @@ async function classifyOne(
   const spawner = opts.spawnFn ?? spawnCollect;
   let tempDir: string | null = null;
   try {
-    const built = port.buildCommand(prompt);
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `${tempPrefix}-cls-`));
+    const built = port.buildCommand(prompt, undefined, { cwd: tempDir });
     const env = pickAllowlistedEnv(process.env, allowlist);
     for (const [k, v] of Object.entries(built.env)) {
       if (!FORBIDDEN_ENV_KEYS.includes(k as (typeof FORBIDDEN_ENV_KEYS)[number])) env[k] = v;
     }
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `${tempPrefix}-cls-`));
     env.TMPDIR = tempDir;
-    const sp = await spawner(built.cmd, built.args, { input: built.stdin, env, cwd: tempDir });
+    const cwd = built.cwd ?? tempDir;
+    const sp = await spawner(built.cmd, built.args, { input: built.stdin, env, cwd });
     if (sp.status !== 0) {
       return { classification: "fix", reason: `classifier_failed: exit ${sp.status}`, ok: false };
     }
+    // Unwrap any agent-specific framing (e.g. Gemini's `{"response":"..."}`
+    // envelope) before scanning for the classification JSON. Without this,
+    // gemini-as-classifier would always fail with classifier_failed because
+    // the regex never sees the embedded `"classification"` key.
+    const normalized = port.normalizeOutput ? port.normalizeOutput(sp.stdout) : sp.stdout;
     const parsed = port.parseOutput(sp.stdout);
-    const m = sp.stdout.match(/\{[^{}]*"classification"[^{}]*\}/);
+    const m = normalized.match(/\{[^{}]*"classification"[^{}]*\}/);
     if (!m) {
       if (parsed.findings.length > 0 && parsed.findings[0].classification) {
         return {
@@ -1146,12 +1204,53 @@ export function partitionInlineVsBody(
   return { inline, bodyFindings };
 }
 
+/** Render the per-domain agent assignment as a markdown list. Used in the
+ * review body for mixed-agent runs so a reader can tell which agent produced
+ * each finding even when only one bot identity owns the posted review. */
+export function renderAgentsResolvedSummary(
+  agentsResolved: Record<string, AgentName>,
+): string {
+  const entries = Object.entries(agentsResolved).sort(([a], [b]) => a.localeCompare(b));
+  if (entries.length === 0) return "";
+  const lines: string[] = ["## agents_resolved", ""];
+  for (const [domain, agent] of entries) {
+    lines.push(`- \`${domain}\` → \`${agent}\``);
+  }
+  return lines.join("\n");
+}
+
+/** Choose the agent that owns the posted review when findings span multiple
+ * agents. Strategy: agent with the most findings; ties broken by
+ * lexicographic order on agent name. Returns null when findings is empty —
+ * caller should fall back to the dispatcher's default agent. */
+export function selectPostingAgent(findings: Finding[]): AgentName | null {
+  if (findings.length === 0) return null;
+  const counts = new Map<AgentName, number>();
+  for (const f of findings) counts.set(f.agent, (counts.get(f.agent) ?? 0) + 1);
+  let best: AgentName | null = null;
+  let bestCount = -1;
+  for (const [agent, count] of [...counts.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    if (count > bestCount) {
+      best = agent;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
 export function buildReviewBody(
   marker: string,
   humanSummary: string,
   bodyFindings: Finding[],
+  opts: {
+    agentsResolved?: Record<string, AgentName>;
+    postingAgentNote?: string;
+  } = {},
 ): string {
   const lines: string[] = [marker, "", humanSummary];
+  if (opts.postingAgentNote) {
+    lines.push("", opts.postingAgentNote);
+  }
   if (bodyFindings.length > 0) {
     lines.push("", "## Cross-cutting / out-of-diff findings", "");
     for (const f of bodyFindings) {
@@ -1161,6 +1260,17 @@ export function buildReviewBody(
         const indented = f.body.split("\n").map((l) => `  ${l}`).join("\n");
         lines.push(indented);
       }
+    }
+  }
+  // Always render the per-domain `agents_resolved` summary when more than one
+  // distinct agent is assigned across domains, even if only one of them
+  // produced findings. Mixed `domain_agents` runs must remain debuggable from
+  // the posted review alone (Task 8-4).
+  if (opts.agentsResolved) {
+    const distinct = new Set(Object.values(opts.agentsResolved));
+    if (distinct.size > 1) {
+      const summary = renderAgentsResolvedSummary(opts.agentsResolved);
+      if (summary) lines.push("", summary);
     }
   }
   return lines.join("\n");
@@ -1219,6 +1329,16 @@ export interface PostReviewOpts {
   humanSummary: string;
   prHeadSha: string;
   dryRun: boolean;
+  /** Per-domain agent assignment; rendered into the review body for
+   * mixed-agent runs (Task 8-4). */
+  agentsResolved?: Record<string, AgentName>;
+  /** When set, included as a body note explaining which bot identity owns
+   * the posted review (used for mixed-agent finding rounds, Task 8-3). */
+  postingAgentNote?: string;
+  /** Per-agent GitHub App installation token. When set, the gh transport
+   * runs with GH_TOKEN set to this value so the posted review appears under
+   * stark-<agent>[bot] (Task 8-3). The token never reaches agent CLIs. */
+  posterToken?: string;
   /** Retrying GH transport, used for the marker GET. Defaults to {@link ghJson}. */
   ghJsonFn?: typeof ghJson;
   /** Non-retrying GH transport, used for the POST itself so the outer
@@ -1267,7 +1387,10 @@ function demoteInlineToFinding(c: InlineComment, agent: AgentName): Finding {
 export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult> {
   const part = partitionInlineVsBody(opts.findings, opts.changedFiles, opts.fixThreshold);
   const marker = buildMarker(opts.round, opts.agent, opts.runHash);
-  let body = buildReviewBody(marker, opts.humanSummary, part.bodyFindings);
+  let body = buildReviewBody(marker, opts.humanSummary, part.bodyFindings, {
+    agentsResolved: opts.agentsResolved,
+    postingAgentNote: opts.postingAgentNote,
+  });
   let inline = [...part.inline];
   const result: PostReviewResult = {
     posted: false,
@@ -1276,12 +1399,21 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
     payloadSummary: { inlineCount: inline.length, bodyFindingsCount: part.bodyFindings.length, bodyChars: body.length },
   };
   if (opts.dryRun) return result;
-  const gh = opts.ghJsonFn ?? ghJson;
+  // Inject the per-agent App token so the posted review is owned by the
+  // matching bot identity (Task 8-3). The override never reaches process.env
+  // and never reaches agent CLIs — only the gh subprocess sees it.
+  const tokenEnv: Record<string, string> | undefined = opts.posterToken
+    ? { GH_TOKEN: opts.posterToken, GITHUB_TOKEN: opts.posterToken }
+    : undefined;
+  const wrap = (fn: typeof ghJson) =>
+    (p: string, o: GhJsonOpts = {}) =>
+      fn(p, tokenEnv ? { ...o, envOverride: { ...(o.envOverride ?? {}), ...tokenEnv } } : o);
+  const gh = wrap(opts.ghJsonFn ?? ghJson);
   // POST transport must NOT retry internally — the outer retry below re-checks
   // the marker before each retry to guarantee idempotency on 5xx. If both inner
   // (ghJson) and outer retried, a successful-but-unacknowledged POST could be
   // re-sent before the marker check ran, double-posting the review.
-  const ghPost = opts.ghJsonOnceFn ?? opts.ghJsonFn ?? ghJsonOnce;
+  const ghPost = wrap(opts.ghJsonOnceFn ?? opts.ghJsonFn ?? ghJsonOnce);
   const retry = opts.retryFn ?? withRetry;
 
   const checkMarker = async (): Promise<{ stopReason?: string } | void> => {
@@ -1349,7 +1481,10 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
         }
       }
       inline = keep;
-      body = buildReviewBody(marker, opts.humanSummary, [...part.bodyFindings, ...demote]);
+      body = buildReviewBody(marker, opts.humanSummary, [...part.bodyFindings, ...demote], {
+        agentsResolved: opts.agentsResolved,
+        postingAgentNote: opts.postingAgentNote,
+      });
       result.fallbacksApplied++;
       result.attempts.push({ inline: inline.length + offenders.size, status: "fallback", httpStatus: 422 });
       try {
@@ -1369,7 +1504,10 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
     for (const c of part.inline) {
       allBody.push(demoteInlineToFinding(c, opts.agent));
     }
-    body = buildReviewBody(marker, opts.humanSummary, allBody);
+    body = buildReviewBody(marker, opts.humanSummary, allBody, {
+      agentsResolved: opts.agentsResolved,
+      postingAgentNote: opts.postingAgentNote,
+    });
     result.fallbacksApplied++;
     result.attempts.push({ inline: 0, status: "body_only", httpStatus: 422 });
     try {
@@ -1921,12 +2059,23 @@ export async function main(
     });
     historyFiles.push(allocated.path);
 
+    // ── Resolve posting bot identity (must match marker tuple) ────────────
+    // The marker tuple (round, agent, runHash) MUST match the one postReview
+    // uses to build the body; otherwise reruns scan for the wrong marker and
+    // can double-post. Compute postingAgent BEFORE the marker check.
+    //
+    // Majority is calculated over allFindings (same set the body renders),
+    // so the X/Y note in the body matches the actual findings in the round.
+    const findingAgents = new Set(allFindings.map((f) => f.agent));
+    const majorityAgent = selectPostingAgent(allFindings) ?? classifierAgent;
+    const postingAgent: AgentName = majorityAgent;
+    const mixedFindingAgents = findingAgents.size > 1;
+    const postingAgentNote = mixedFindingAgents
+      ? `_Posted under stark-${postingAgent}[bot] (majority of findings: ${allFindings.filter((f) => f.agent === postingAgent).length}/${allFindings.length}); per-domain agents in agents_resolved._`
+      : undefined;
+
     // ── Idempotency marker check (after round allocation) ─────────────────
-    // The marker MUST use the same (round, agent, runHash) tuple that postReview
-    // will use for the body; otherwise we'd scan for the wrong marker and could
-    // double-post. Round comes from allocateAndWriteRoundHistory above; agent
-    // is the classifierAgent resolved at start of run.
-    const marker = buildMarker(allocated.round, classifierAgent, runHash);
+    const marker = buildMarker(allocated.round, postingAgent, runHash);
     let alreadyPosted = false;
     try {
       alreadyPosted = await findExistingMarker({ repo, pr, marker, ghJsonFn: ghJsonD });
@@ -1944,10 +2093,30 @@ export async function main(
     if (alreadyPosted) {
       // Idempotent skip — duplicate_detected already implied by marker presence.
     } else {
-      try {
+      // Skip token resolution entirely in dry-run; no POST is attempted, so
+      // requiring App credentials would change dry-run semantics.
+      let posterToken: string | undefined;
+      if (!cli.dryRun) {
+        try {
+          posterToken = await tokenForAgent(postingAgent, {
+            repo,
+            ...(spawnD ? { spawnFn: spawnD } : {}),
+          });
+        } catch (err) {
+          unposted.push({
+            round: allocated.round,
+            reason: `token_resolution_failed: ${(err as Error).message}`,
+          });
+        }
+      }
+      if (!posterToken && !cli.dryRun) {
+        // No silent degrade to inherited GH_TOKEN — that would post under the
+        // wrong identity. Surface as unposted_reviews and skip the POST.
+      } else {
+        try {
         const pr_ = await postReview({
           repo, pr, round: allocated.round,
-          agent: classifierAgent,
+          agent: postingAgent,
           runHash,
           findings: allFindings,
           changedFiles,
@@ -1955,6 +2124,9 @@ export async function main(
           humanSummary: `stark-review TS dispatcher: ${allFindings.length} findings`,
           prHeadSha,
           dryRun: cli.dryRun,
+          agentsResolved,
+          postingAgentNote,
+          posterToken,
           ghJsonFn: ghJsonD,
           ghJsonOnceFn: ghJsonOnceD,
         });
@@ -1964,6 +2136,7 @@ export async function main(
         }
       } catch (err) {
         unposted.push({ round: allocated.round, reason: (err as Error).message });
+      }
       }
     }
 

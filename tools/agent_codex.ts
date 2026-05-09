@@ -6,6 +6,17 @@ export interface BuiltCommand {
   args: string[];
   stdin: string;
   env: Record<string, string>;
+  /** When set, the dispatcher uses this cwd instead of creating its own.
+   * Used by agents that need to register the cwd in pre-spawn config files
+   * (e.g. Gemini's projects.json). */
+  cwd?: string;
+}
+
+/** Optional context passed to buildCommand. The dispatcher creates the
+ * temp working directory before calling buildCommand and passes it in
+ * as cwd, so per-agent setup (e.g. Gemini projects.json) can register it. */
+export interface BuildContext {
+  cwd?: string;
 }
 
 export interface ParseError {
@@ -58,7 +69,7 @@ function buildMinimalEnv(): Record<string, string> {
  * high reasoning effort, prompt delivered on stdin. Model flag is included only
  * when the caller supplies one — otherwise the CLI's pinned default is used.
  */
-export function buildCommand(prompt: string, model?: string): BuiltCommand {
+export function buildCommand(prompt: string, model?: string, _ctx?: BuildContext): BuiltCommand {
   const modelFlags = model ? ["-m", model] : [];
   const args = [
     "exec",
@@ -118,6 +129,13 @@ function extractAgentText(raw: string): string {
     }
   }
   return parts.length > 0 ? parts.join("\n") : raw;
+}
+
+/** Normalize raw stdout to the unwrapped agent text. Exposed so callers
+ * (e.g. classifyOne) can extract structured data without re-parsing the
+ * agent's framing. */
+export function normalizeOutput(stdout: string): string {
+  return extractAgentText(stdout);
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {

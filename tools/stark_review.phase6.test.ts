@@ -164,7 +164,11 @@ test("lock ordering through main(): acquire before GET, release after POST", asy
   // codex JSONL, then for the classifier dispatch return an empty stream so
   // it falls open to "fix" without aborting.
   let spawnInvocations = 0;
-  const spawnMock = async () => {
+  const spawnMock = async (cmd: string) => {
+    // tokenForAgent calls python3 scripts/github_app.py — return a dummy token.
+    if (cmd === "python3") {
+      return { stdout: "ghs_test_token_phase6\n", stderr: "", status: 0 };
+    }
     spawnInvocations += 1;
     if (spawnInvocations === 1) {
       // Review dispatch
