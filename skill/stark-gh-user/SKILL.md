@@ -6,9 +6,10 @@ description: >-
   Keychain (service `stark-gh-token`).
 argument-hint: "[show|primary|secondary|swap|limits] [--kind fine|classic|auto]"
 disable-model-invocation: true
+handler: handler.sh
 model: haiku
-revision: 35fa2eb9fefed0eb4a615abd519466aeadf35fd9
-revision_date: 2026-05-09T12:45:31Z
+revision: 114c857e1649e9745372cf9a5acbfd5cc44d9e0b
+revision_date: 2026-05-09T12:56:13Z
 ---
 
 # stark-gh-user
