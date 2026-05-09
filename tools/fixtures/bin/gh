@@ -1,0 +1,90 @@
+#!/usr/bin/env node
+// Fake `gh` binary used by stark-review tests.
+//
+// Driven by env vars:
+//   STARK_TEST_FIXTURE  — directory holding canned response files
+//   STARK_TEST_LOG      — optional path; one line per invocation appended (JSON)
+//
+// Behavior:
+//   gh api <PATH> [...]        → emits "HTTP/1.1 200 OK\r\n\r\n<JSON>" from
+//                                 <fixture>/api_<slug>.json. Honors --paginate
+//                                 (no-op; we always emit the full canned body).
+//   gh pr view <N> --json ...  → emits <fixture>/pr-view.json
+//   gh pr diff <N> [...]       → emits <fixture>/pr-diff.txt
+//
+// All other invocations exit 0 with empty stdout. The fake NEVER calls the
+// real gh binary — tests rely on PATH ordering as the safety net.
+import fs from "node:fs";
+import path from "node:path";
+
+const argv = process.argv.slice(2);
+const fixtureDir = process.env.STARK_TEST_FIXTURE;
+const logPath = process.env.STARK_TEST_LOG;
+
+if (logPath) {
+  try {
+    const lockPath = process.env.STARK_TEST_LOCK_PATH;
+    const lockExists = lockPath ? fs.existsSync(lockPath) : null;
+    fs.appendFileSync(
+      logPath,
+      JSON.stringify({ bin: "gh", argv, ts: Date.now(), lock_exists: lockExists }) + "\n",
+    );
+  } catch (_e) { /* swallow */ }
+}
+
+function read(file, fallback) {
+  if (!fixtureDir) return fallback;
+  const p = path.join(fixtureDir, file);
+  try { return fs.readFileSync(p, "utf8"); } catch { return fallback; }
+}
+
+function emitHttp(status, bodyJson) {
+  const body = bodyJson === undefined ? "[]" : bodyJson;
+  process.stdout.write(`HTTP/1.1 ${status} OK\r\n`);
+  process.stdout.write(`Content-Type: application/json\r\n`);
+  process.stdout.write(`\r\n`);
+  process.stdout.write(body);
+}
+
+function pathToFile(restPath) {
+  const slug = restPath.replace(/^\//, "").replace(/[^A-Za-z0-9._-]+/g, "_");
+  return `api_${slug}.json`;
+}
+
+const sub = argv[0];
+
+if (sub === "api") {
+  // gh api invocation:
+  //   gh api --paginate -X GET -H "Accept: ..." -i /repos/owner/repo/...
+  // Walk argv and pick the path token (starts with "/" or is the literal
+  // graphql endpoint name); skip flag values.
+  let restPath = "/";
+  const flagsThatTakeValue = new Set(["-X", "-H", "-F", "-f", "-q", "--input", "--method", "--header"]);
+  for (let i = 1; i < argv.length; i++) {
+    const a = argv[i];
+    if (flagsThatTakeValue.has(a)) { i++; continue; }
+    if (a.startsWith("-")) continue;
+    if (a.startsWith("/") || /^[a-z]+$/.test(a)) { restPath = a; break; }
+  }
+  let body = read(pathToFile(restPath), undefined);
+  if (body === undefined) body = read("default-api.json", "[]");
+  emitHttp(200, body);
+  process.exit(0);
+}
+
+if (sub === "pr") {
+  const action = argv[1];
+  if (action === "view") {
+    const body = read("pr-view.json", "{}");
+    process.stdout.write(body);
+    process.exit(0);
+  }
+  if (action === "diff") {
+    const body = read("pr-diff.txt", "");
+    process.stdout.write(body);
+    process.exit(0);
+  }
+}
+
+// Default: exit 0 with empty stdout.
+process.exit(0);

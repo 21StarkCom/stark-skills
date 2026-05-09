@@ -1,0 +1,1 @@
+{"type":"item.completed","item":{"type":"agent_message","text":"{\"id\":\"sec-001\",\"domain\":\"security\",\"agent\":\"codex\",\"severity\":\"high\",\"file\":\"src/handler.ts\",\"line\":12,\"title\":\"Unvalidated input\",\"body\":\"Validate or parameterize.\"}"}}

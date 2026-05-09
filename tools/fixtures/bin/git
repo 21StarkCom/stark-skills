@@ -1,0 +1,82 @@
+#!/usr/bin/env node
+// Fake `git` binary used by stark-review tests.
+//
+// Driven by env vars:
+//   STARK_TEST_FIXTURE  — directory holding canned response files
+//   STARK_TEST_LOG      — optional path; one line per invocation appended (JSON)
+//
+// Behavior:
+//   git -C <dir> rev-parse --show-toplevel  → echoes <dir>
+//   git -C <dir> show <ref>:<path>          → reads <fixture>/git-show/<ref>__<path-mangled>
+//                                              or exits 1 if missing
+//   git -C <dir> ls-tree --name-only <ref>:<dir>
+//                                            → reads <fixture>/git-lstree/<ref>__<dir-mangled>
+//                                              one filename per line
+//   git add | commit | push                 → no-op, exit 0 (records via STARK_TEST_LOG)
+//
+// All other invocations exit 0 with empty output. The fake never modifies
+// real repos; commit/push are no-ops by design.
+import fs from "node:fs";
+import path from "node:path";
+
+const argv = process.argv.slice(2);
+const fixtureDir = process.env.STARK_TEST_FIXTURE;
+const logPath = process.env.STARK_TEST_LOG;
+
+if (logPath) {
+  try {
+    fs.appendFileSync(logPath, JSON.stringify({ bin: "git", argv, ts: Date.now() }) + "\n");
+  } catch (_e) { /* swallow */ }
+}
+
+let cwdHint = process.cwd();
+const args = [...argv];
+if (args[0] === "-C") {
+  cwdHint = args[1];
+  args.splice(0, 2);
+}
+
+const sub = args[0];
+
+function mangle(s) {
+  return s.replace(/[^A-Za-z0-9._-]+/g, "_");
+}
+
+function readFixture(rel) {
+  if (!fixtureDir) return null;
+  const p = path.join(fixtureDir, rel);
+  try { return fs.readFileSync(p, "utf8"); } catch { return null; }
+}
+
+if (sub === "rev-parse" && args[1] === "--show-toplevel") {
+  process.stdout.write(cwdHint + "\n");
+  process.exit(0);
+}
+
+if (sub === "show") {
+  const spec = args[1] || "";
+  const m = spec.match(/^([^:]+):(.*)$/);
+  if (!m) process.exit(1);
+  const [, ref, p] = m;
+  const body = readFixture(`git-show/${mangle(ref)}__${mangle(p)}`);
+  if (body === null) process.exit(1);
+  process.stdout.write(body);
+  process.exit(0);
+}
+
+if (sub === "ls-tree" && args[1] === "--name-only") {
+  const spec = args[2] || "";
+  const m = spec.match(/^([^:]+):(.*)$/);
+  if (!m) process.exit(0);
+  const [, ref, p] = m;
+  const body = readFixture(`git-lstree/${mangle(ref)}__${mangle(p)}`);
+  if (body === null) process.exit(0);
+  process.stdout.write(body);
+  process.exit(0);
+}
+
+if (sub === "add" || sub === "commit" || sub === "push") {
+  process.exit(0);
+}
+
+process.exit(0);
