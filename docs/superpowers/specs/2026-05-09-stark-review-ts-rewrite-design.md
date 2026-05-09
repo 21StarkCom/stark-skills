@@ -19,14 +19,79 @@ Three motivating constraints from the user:
 - Not migrating `/stark-team-review` or any other skill.
 - Not porting triage logic — `/stark-review` drops triage entirely.
 - Not replacing the `claude` / `codex` / `gemini` CLIs with native SDK calls. The TS tool still shells out to the agent CLI.
-- Not changing prompt files in `global/prompts/<agent>/`.
+- Not changing the existing per-domain prompt files in `global/prompts/<agent>/NN-*.md`. (A new `classifier.md` per agent is added — see §6.)
+
+## Trust and security model
+
+PR-author-controllable inputs and reviewer infrastructure are kept separate.
+This is a hard rule, not a guideline.
+
+**Trusted inputs (sourced from outside the PR head):**
+
+- `~/.claude/code-review/global/config.json` (installed via `install.sh` from this repo).
+- Prompt files under `~/.claude/code-review/prompts/<agent>/`.
+- Org-level overrides under `<git-root>/.code-review/` resolved by walking up
+  to `$HOME` from the **invoker's CWD before the worktree was created** — never
+  from inside the worktree.
+- Test command resolution from `config.test_command` only. **Not from
+  `CLAUDE.md` `## Commands`** (PR-controllable) and not from `package.json`
+  `scripts.test` (PR-controllable). If `config.test_command` is unset and the
+  PR is not from the repo's own collaborator-write set, the fix loop is
+  disabled for that run.
+
+**Untrusted inputs (PR-controllable, never executed or used to resolve config):**
+
+- The PR diff, PR body, and any file content read from the worktree.
+- `.code-review/`, `CLAUDE.md`, `package.json`, and any other file that may
+  exist on the PR head.
+
+**Fix-loop authorization gate.** The fix loop runs only when **all** of:
+
+1. `config.test_command` is set (trusted source), AND
+2. The PR head is not a fork (`head.repo.fork === false`) **or** the user
+   passed `--allow-untrusted-fix-loop` explicitly (escape hatch, off by
+   default), AND
+3. `--no-fix-loop` was not passed.
+
+Otherwise the tool reports findings and stops without editing files.
+
+**Fork PRs.** Posting review comments on fork PRs uses the GitHub App token
+against the upstream repo (always allowed). Pushing fix commits to a fork
+requires both `head.repo.fork === true` + `maintainer_can_modify === true` +
+the explicit gate above; otherwise fixes are skipped, not pushed.
+
+**Prompt-injection containment.** The PR diff and body are concatenated into
+review prompts but never into the **fix-loop prompt** (see §9) — the fixer
+agent receives only the structured `Finding` records the reviewer produced,
+plus the file contents the agent itself reads via its tools. This breaks the
+"attacker-text → fix prompt" path.
+
+**Subprocess isolation.** Each agent CLI invocation runs with an env
+allowlist (`runtime.subagent_env_allowlist` from the trusted config) and a
+per-invocation temp dir under `runtime.temp_dir_prefix`. The worktree path is
+passed as an argument; we never `cd` to a path that came from the PR.
 
 ## Architecture
 
-One new file pair under `tools/`:
+New files under `tools/`:
 
-- `tools/stark_review.ts` — the dispatcher.
+- `tools/stark_review.ts` — the dispatcher and pipeline owner.
 - `tools/stark_review.test.ts` — node:test tests.
+- `tools/agent_codex.ts` — TS port of `scripts/codex_utils.py` (build CLI args, parse JSONL).
+- `tools/agent_claude.ts` — TS port of `scripts/claude_utils.py`.
+- `tools/agent_gemini.ts` — TS port of `scripts/gemini_utils.py`.
+- `tools/stark_review_lib.ts` — pure helpers (config merge, domain selection,
+  prompt rendering, severity comparison) for unit-testability.
+
+(Total: 6 new files. The three agent ports are intentionally tiny, ≤100 LOC
+each — see §4 — and would otherwise be inlined and untestable.)
+
+**Phasing.** `agent_codex.ts` is the only one required for V1, since codex is
+the default agent and the only one routed to by the shipped `domain_agents`
+config. `agent_claude.ts` and `agent_gemini.ts` are stubs that throw a
+"not yet implemented in TS path; use /stark-team-review" error when invoked
+via `--agent claude` / `--agent gemini`. They land fully implemented in a
+follow-up PR. This bounds V1 scope while keeping the public CLI stable.
 
 `SKILL.md` becomes a thin wrapper (~80 lines):
 preflight → arg parse → `review_setup_worktree.ts` → `stark_review.ts` → `review_cleanup_worktree.ts`.
@@ -50,8 +115,19 @@ node --experimental-strip-types tools/stark_review.ts \
 `--quick`, `--domains`, and the default ("all enabled") are mutually exclusive in
 that order: `--domains` wins; otherwise `--quick`; otherwise default.
 
-Default agent is **codex** (matches today's `domain_agents` config which routes
-the six PR-review domains to Codex).
+**Agent selection precedence.** Per-domain, the agent for a domain `D` is:
+
+1. `--agent <name>` if passed → forces all domains to this agent.
+2. Else `config.domain_agents[D]` if set → use that.
+3. Else `config.default_agent` → use that.
+4. Hard-coded fallback: `codex`.
+
+The "default agent codex" claim earlier in the spec refers to step 3/4: if
+neither `--agent` nor a per-domain mapping resolves, the agent is codex.
+`--agent` overrides everything. There is no other source of truth.
+
+`--allow-untrusted-fix-loop` opts into the fix loop on fork PRs (see Trust
+section). Off by default.
 
 ## Pipeline
 
@@ -62,6 +138,10 @@ The tool owns the full pipeline. Each stage emits a structured event for the JSO
 Read `~/.claude/code-review/global/config.json`, then deep-merge org override
 (`<git-root>/.code-review/config.json` walking up to `$HOME`), then repo override
 (`<repo-root>/.code-review/config.json`). Same precedence as `dispatcher_base.py`.
+
+**Resolved from the invoker's CWD before the worktree was created**, never
+from inside the worktree (see Trust model). The skill captures the original
+CWD and passes it to the tool as `--config-root <path>`.
 
 Fields consumed:
 
@@ -74,8 +154,13 @@ Fields consumed:
 | `fix_threshold` | `"critical"\|"high"\|"medium"\|"low"` | Lowest severity that triggers a fix. |
 | `runtime.max_concurrent_agents` | `number` | Concurrency cap. Default 3. |
 | `quick_domains` | `string[]` | **NEW.** Domains used by `--quick`. |
+| `default_agent` | `string` | **NEW.** Used when neither `--agent` nor `domain_agents[D]` resolves. Defaults to `"codex"`. |
+| `test_command` | `string \| null` | **NEW.** Trusted source for the fix-loop test command. |
+| `untrusted_fix_loop` | `bool` | **NEW.** Org-level toggle for `--allow-untrusted-fix-loop` default. Defaults `false`. |
 
-Schema bump: add `quick_domains: []` to `global/config.json`. Empty by default.
+Schema bump: add `quick_domains: []`, `default_agent: "codex"`,
+`test_command: null`, `untrusted_fix_loop: false` to `global/config.json`.
+`quick_domains` is empty by default — repos/orgs override.
 
 ### 2. Pick domains
 
@@ -118,19 +203,31 @@ Schema:
 
 ```ts
 type Finding = {
+  id: string;                      // sha256(domain|agent|file|line|title) prefix-12, stable across rounds
   domain: string;
   agent: "claude" | "codex" | "gemini";
   severity: "critical" | "high" | "medium" | "low";
-  file: string;
-  line: number;
+  file: string | null;             // null for cross-cutting findings (no file anchor)
+  line: number | null;             // null when file is null OR finding is file-level
   title: string;
   body: string;
 };
 ```
 
+`file: null` findings are accepted (e.g. cross-cutting architecture concerns).
+They land in history and the receipt but **are not posted as inline review
+comments** — they go in the review's top-level `body` instead (see §8).
+
 **Fail closed** if any agent invocation exits non-zero or stdout is not valid
-JSON/JSONL. Surface failed `(domain, agent)` pairs in the receipt and exit
-non-zero. Never report the PR as clean on partial failure.
+JSON/JSONL. Surface failed `(domain, agent)` pairs in the receipt's
+`failed_results[]` array and exit non-zero. Never report the PR as clean on
+partial failure.
+
+The reviewer prompts already ask for the schema above; if an agent emits
+fields the parser doesn't recognize, they are preserved in `extra` and the
+finding is still accepted. If required fields (`severity`, `title`, `domain`)
+are missing, the parse fails for that domain only and that domain is added
+to `failed_results[]`.
 
 Apply `severity_overrides[domain]` after parse.
 
@@ -138,11 +235,26 @@ Apply `severity_overrides[domain]` after parse.
 
 For each finding:
 
-1. Read `±20` lines around `file:line` from the worktree.
-2. Single agent call (same agent, short prompt) returns `{classification, classification_reason}` where classification ∈ `fix | false_positive | noise | ignored`.
+1. If `file && line`: read `±20` lines around `file:line` from the worktree.
+   If `file: null`: skip the file read; pass only the finding body.
+2. Single agent call (same agent, short prompt) returns
+   `{classification, classification_reason}` where
+   classification ∈ `fix | false_positive | noise | ignored`.
 3. Attach to finding.
 
-Classifier prompt lives at `global/prompts/<agent>/classifier.md` (new file, ~30 lines per agent). Override resolution same as domain prompts.
+**Classifier failure handling** (resolves the conflict with §5's fail-closed
+contract): if the classifier call fails or returns malformed JSON, the
+finding is attached with `classification: "fix"` and
+`classification_reason: "classifier_failed: <error>"`. This is fail-safe
+(default to "treat as real"), not fail-closed (don't kill the run for a
+classifier hiccup). The error is logged and surfaced in the receipt's
+`classifier_errors` field. Five or more classifier errors in one round abort
+the run.
+
+Classifier prompt lives at `global/prompts/<agent>/classifier.md` (new file,
+~30 lines per agent — added in this PR). Override resolution same as domain
+prompts. (This is the one prompt-file change permitted by the non-goals; the
+existing per-domain `NN-*.md` prompts are untouched.)
 
 ### 7. Persist history
 
@@ -168,66 +280,168 @@ Round number = max existing `round-N.json` in that dir + 1.
 
 ### 8. Post comments (REST only)
 
-For each `fix` finding with severity ≥ `fix_threshold`, build a review with inline
-comments and POST it:
+For each `fix` finding with severity ≥ `fix_threshold` AND `file && line`,
+build a review with inline comments and POST it. File-anchored findings whose
+`file` is not in the PR's changed-file set are demoted to top-level body
+items (commenting on unchanged files is rejected by the API). Cross-cutting
+findings (`file: null`) and out-of-diff findings appear in the review body.
+
+**Idempotency.** Each round POSTs at most one review. Before posting round N,
+the tool calls `GET /repos/{o}/{r}/pulls/{n}/reviews` (paginated) and looks
+for a previous review whose body contains the marker
+`<!-- stark-review:round=<N>:agent=<agent> -->`. If found, we DELETE/PATCH
+nothing — we just skip posting, and log a duplicate-detected event. New
+rounds get new markers, so successive fix-loop rounds each post once.
 
 ```
 gh api -X POST /repos/{owner}/{repo}/pulls/{n}/reviews \
-  -f event=COMMENT \
-  -f body="..." \
-  -f comments='[{"path":"…","line":…,"body":"…"}, …]'
+  --input -  <<JSON
+{
+  "event": "COMMENT",
+  "body":  "<!-- stark-review:round=1:agent=codex -->\n\n<summary>\n\n<cross-cutting findings>",
+  "comments": [
+    { "path": "src/foo.ts", "line": 42, "side": "RIGHT", "body": "..." }
+  ]
+}
+JSON
 ```
 
-Skip when `--dry-run`. For fork PRs (detected via `GET /repos/{o}/{r}/pulls/{n}` →
-`head.repo.fork === true`), skip unless `maintainer_can_modify === true`.
+Use `--input -` with stdin JSON (not `-f comments='[...]'` shell
+interpolation) to avoid shell-escape brittleness with finding bodies that
+contain quotes or newlines.
+
+`line`/`side` follow the GitHub Reviews API rules: `side: "RIGHT"` plus the
+new file's line number for additions; `side: "LEFT"` for deletions. The
+`file:line` we receive from the agent is always against the PR head, so
+`side: "RIGHT"`.
+
+**Pagination** is handled for every list endpoint: `gh api --paginate`
+follows `Link: rel="next"` automatically. Used for both
+`/pulls/{n}/files` and `/pulls/{n}/reviews`.
+
+**Rate limits / 5xx.** Retry on `403` with `X-RateLimit-Remaining: 0`,
+`429`, and `5xx` with exponential backoff (1s, 4s, 16s; 3 attempts max).
+Secondary rate-limit (`Retry-After` header) is honored. After the cap, the
+post is skipped and recorded in the receipt's `unposted_reviews[]`.
+
+Skip all posting when `--dry-run`. For fork PRs (detected via
+`GET /repos/{o}/{r}/pulls/{n}` → `head.repo.fork === true`), posting still
+works under the GitHub App token (the upstream repo grants permission), so
+fork detection only gates the *fix-loop push*, not the review post.
 
 GitHub endpoints used (REST only — no GraphQL):
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| GET | `/repos/{o}/{r}/pulls/{n}` | PR meta, fork detection, base sha |
-| GET | `/repos/{o}/{r}/pulls/{n}/files` | Filter findings to changed files |
+| GET | `/repos/{o}/{r}/pulls/{n}` | PR meta, fork detection, base sha, branch name |
+| GET | `/repos/{o}/{r}/pulls/{n}/files` | Filter findings to changed files (paginated) |
+| GET | `/repos/{o}/{r}/pulls/{n}/reviews` | Idempotency check (paginated) |
 | POST | `/repos/{o}/{r}/pulls/{n}/reviews` | Post review with inline comments |
 
 `gh pr view` and `gh pr diff` stay (already REST under the hood per `gh` source).
 
 ### 9. Fix loop
 
-If any `fix` finding has severity ≥ `critical` or `high`:
+Authorization: see "Fix-loop authorization gate" in the Trust section. The
+loop is skipped (not failed) when the gate denies it.
 
-1. Edit files in the worktree to address them. (For now: spawn the agent CLI with a "fix this finding" prompt per finding; serial.)
-2. Run the project test command. Resolution order:
-   - `config.test_command` if set
-   - `CLAUDE.md` `## Commands` first command containing `test`
-   - `package.json` `scripts.test` → `npm test`
-   - else: report "no test command" and stop without committing.
-3. If tests pass: `git add -A && git commit -m "fix: address review findings" && git push origin HEAD:<branch>`.
-4. Re-run from step 3 (Render prompts). Cap at `--max-rounds` (default 3).
-5. If tests fail: keep worktree, exit non-zero, do not claim clean.
+If authorized AND any `fix` finding has severity ≥ `critical` or `high`:
+
+1. **Build the fix prompt from structured findings only.** For each finding
+   the fixer agent receives `{file, line, severity, title, body}` plus the
+   agent reading the file via its own tools. The PR diff and PR body are
+   **not** included in the fix prompt (prompt-injection containment).
+2. Spawn the agent CLI serially per finding to edit the worktree.
+3. **Stage explicit paths only** — never `git add -A`. The tool collects the
+   set of `file` paths from the findings being fixed plus any path the agent
+   reports it modified, validates each is inside the worktree (no `..`
+   traversal, no symlink-out-of-tree), and stages only those:
+   ```
+   git add -- <file1> <file2> ...
+   ```
+4. **Resolve branch and remote.** From step 1's `GET /pulls/{n}` response we
+   already have `head.ref` (branch) and `head.repo.full_name`. Push target:
+   `origin HEAD:<head.ref>`. For forks, see Trust section — push is gated.
+5. Run `config.test_command` (only trusted source — see Trust section).
+   If unset, the fix loop is disabled by the auth gate above and we never
+   reach this step.
+6. If tests pass: `git commit -m "fix: address review findings (round N)"
+   && git push <remote> HEAD:<branch>`.
+7. Re-run from step 3 of the pipeline (Render prompts). Cap at `--max-rounds`
+   (default 3).
+8. If tests fail: keep worktree, exit non-zero, do not claim clean.
 
 `--no-fix-loop` short-circuits this stage entirely.
 
+**Audit log.** Every fix-loop action — file edits, stages, commits, pushes,
+posted reviews — is appended to `~/.claude/code-review/audit/{org}/{repo}/{pr}.jsonl`
+with `{ts, action, round, files?, sha?, review_id?}`. This is in addition to
+the per-round JSON.
+
 ### 10. Output
 
-Stdout receipt (JSON when `--json`):
+Stdout receipt (JSON when `--json`). Two shapes — success and failure — share
+the same envelope; `ok` distinguishes them. Consumers should branch on `ok`
+before reading `rounds`/`error`.
+
+**Success:**
 
 ```json
 {
   "ok": true,
-  "repo": "…",
+  "schema_version": 1,
+  "repo": "owner/name",
   "pr": 123,
   "agent": "codex",
-  "domains": ["…"],
+  "agents_resolved": { "security": "codex", "behavior": "codex" },
+  "domains": ["security", "behavior"],
   "rounds": [
-    { "round": 1, "findings": [...], "summary": {...}, "duration_ms": 12345 }
+    {
+      "round": 1,
+      "findings": [...],
+      "summary": { "total": N, "critical": N, "high": N, "medium": N, "low": N },
+      "failed_results": [],
+      "classifier_errors": [],
+      "duration_ms": 12345
+    }
   ],
   "fixes_pushed": false,
   "comments_posted": 7,
+  "unposted_reviews": [],
   "history_files": ["~/.claude/code-review/history/…/round-1.json"]
 }
 ```
 
-Plus a human-readable summary block on stderr (matching today's "Review Complete" format).
+**Failure** (any non-recoverable error — dispatch failure, repeated parse
+failure, fix-loop gate denied when fix-loop was requested explicitly, push
+failure):
+
+```json
+{
+  "ok": false,
+  "schema_version": 1,
+  "repo": "owner/name",
+  "pr": 123,
+  "error": {
+    "code": "dispatch_failure" | "parse_failure" | "push_failure"
+          | "auth_denied" | "config_missing" | "test_failure",
+    "message": "human-readable",
+    "domain": "security",      // optional
+    "agent": "codex",           // optional
+    "stage": "dispatch",        // pipeline stage 1–10
+    "details": {}               // free-form
+  },
+  "rounds": [...]               // partial rounds completed before failure
+}
+```
+
+`failed_results[]` (per round) and top-level `error` (terminal failure) are
+distinct. A round with `failed_results` non-empty + non-zero exit code is a
+recoverable-classification (the run continues if other domains succeeded);
+a top-level `error` is terminal.
+
+Plus a human-readable summary block on stderr (matching today's "Review
+Complete" format).
 
 ## SKILL.md changes
 
@@ -247,26 +461,62 @@ Plus a human-readable summary block on stderr (matching today's "Review Complete
 
 ```json
 {
-  "quick_domains": ["security", "behavior"],
-  "test_command": null
+  "quick_domains": [],
+  "default_agent": "codex",
+  "test_command": null,
+  "untrusted_fix_loop": false,
+  "history_retention_days": 90
 }
 ```
 
-`quick_domains` empty by default — repos/orgs override. Missing or empty + `--quick` → tool errors with a pointer to the config field.
+- `quick_domains`: empty by default — repos/orgs override. Missing or empty
+  combined with `--quick` → tool errors with a pointer to the config field.
+- `default_agent`: used when `--agent` is omitted and `domain_agents[D]` has
+  no entry for the domain.
+- `test_command`: trusted source for the fix-loop test runner (see Trust
+  model). Missing → fix loop is disabled.
+- `untrusted_fix_loop`: org-level default for `--allow-untrusted-fix-loop`.
+- `history_retention_days`: per-PR history dirs older than this are pruned
+  on tool startup (best-effort `find -mtime`); 0 disables pruning.
 
 ## Testing
 
-`tools/stark_review.test.ts` covers:
+`tools/stark_review.test.ts` and `tools/stark_review_lib.test.ts` cover:
 
+**Unit (lib):**
 - Config merge (global/org/repo precedence).
-- Domain selection: default, `--quick` (populated and empty), `--domains`.
-- Prompt rendering: override resolution.
-- Agent dispatch: mock spawn, assert correct CLI args per agent.
-- Finding parse: valid JSONL, malformed JSONL fails closed, non-zero exit fails closed.
-- Classification: attaches fields, handles agent error.
-- History write: round-N auto-increment, schema match.
-- Comment posting: dry-run skips, fork-without-maintainer-modify skips, REST payload shape.
-- Fix loop: stops at `--max-rounds`, stops on test failure, `--no-fix-loop`.
+- Domain selection: default, `--quick` (populated and empty → error), `--domains`.
+- Agent precedence: `--agent` > `domain_agents[D]` > `default_agent` > `"codex"`.
+- Prompt rendering: override resolution (repo > global > shared `domains/`).
+- Severity comparison vs `fix_threshold`.
+- Finding ID derivation is stable across rounds.
+
+**Unit (per-stage with mocks):**
+- Agent dispatch: mock spawn, assert correct CLI args per agent (codex only
+  for V1; claude/gemini just assert the "not implemented" guard fires).
+- Finding parse: valid JSONL; malformed JSONL → that domain in `failed_results[]`,
+  others continue; non-zero exit → terminal `error.code: "dispatch_failure"`.
+- Classifier: malformed response → `classifier_failed:` reason, finding kept;
+  ≥5 errors → terminal abort.
+- Comment posting: dry-run skips, fork detection still posts review (only push
+  is gated), REST payload shape uses `--input -` JSON, idempotency marker
+  detection skips re-posts of the same `(round, agent)`.
+- Pagination: `gh api --paginate` is called for `/files` and `/reviews`.
+- Rate-limit retry: 429 + Retry-After + 5xx exponential backoff (mocked clock).
+- Fix loop: stops at `--max-rounds`, stops on test failure, `--no-fix-loop`,
+  trust gate denial (no `test_command`, fork without `--allow-untrusted-fix-loop`)
+  → loop skipped not failed; `git add` only stages whitelisted paths
+  (asserted via fake git binary on $PATH).
+- Receipt: success and failure shapes both validate against the schema in §10.
+- History: round-N auto-increment; schema fields exactly match
+  `multi_review.py`'s `save_round_history()` output (asserted by loading a
+  recorded fixture).
+
+**Integration (gated by env, opt-in):**
+- `STARK_REVIEW_E2E=1` enables a single end-to-end run against a sandbox
+  fixture PR (recorded `gh api` responses replayed via a stub `gh` on
+  `$PATH`). One happy path, one fix-loop-denied path, one dispatch-failure
+  path. Skipped in normal `npm test`; run weekly in CI.
 
 Existing tool test pattern (see `tools/review_setup_worktree.test.ts`) is the
 template — node:test, no extra runner.
