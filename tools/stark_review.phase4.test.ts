@@ -17,6 +17,8 @@ import {
   dispatchDomains,
   emitReceipt,
   findExistingMarker,
+  fmtDuration,
+  progressEnabled,
   historyDir,
   nextRoundNumber,
   parseCli,
@@ -417,6 +419,48 @@ test("partitionInlineVsBody: classification!='fix' demoted to body, never droppe
   const part = partitionInlineVsBody(findings, new Set(["a.ts"]), "medium");
   assert.equal(part.inline.length, 1);
   assert.equal(part.bodyFindings.length, 3);
+});
+
+test("fmtDuration: ms / s / m s formatting", () => {
+  assert.equal(fmtDuration(450), "450ms");
+  assert.equal(fmtDuration(1500), "1.5s");
+  assert.equal(fmtDuration(75_000), "1m 15s");
+  assert.equal(fmtDuration(60_000), "1m 0s");
+});
+
+test("progressEnabled: STARK_REVIEW_QUIET=1 wins over VERBOSE=1", () => {
+  const prev = { q: process.env.STARK_REVIEW_QUIET, v: process.env.STARK_REVIEW_VERBOSE };
+  try {
+    process.env.STARK_REVIEW_QUIET = "1";
+    process.env.STARK_REVIEW_VERBOSE = "1";
+    assert.equal(progressEnabled(), false);
+    delete process.env.STARK_REVIEW_QUIET;
+    assert.equal(progressEnabled(), true);
+  } finally {
+    if (prev.q === undefined) delete process.env.STARK_REVIEW_QUIET; else process.env.STARK_REVIEW_QUIET = prev.q;
+    if (prev.v === undefined) delete process.env.STARK_REVIEW_VERBOSE; else process.env.STARK_REVIEW_VERBOSE = prev.v;
+  }
+});
+
+test("partitionInlineVsBody: inline + body sorted critical → high → medium → low", () => {
+  const findings: Finding[] = [
+    makeFinding({ id: "f-low",  severity: "low",      file: "a.ts", line: 5, title: "low-a" }),
+    makeFinding({ id: "f-crit", severity: "critical", file: "a.ts", line: 9, title: "crit-a" }),
+    makeFinding({ id: "f-med",  severity: "medium",   file: "a.ts", line: 7, title: "med-a" }),
+    makeFinding({ id: "f-high", severity: "high",     file: "a.ts", line: 2, title: "high-a" }),
+    // body-side (different file, will demote)
+    makeFinding({ id: "b-low",  severity: "low",      file: "x.ts", line: 1, title: "low-x" }),
+    makeFinding({ id: "b-crit", severity: "critical", file: "x.ts", line: 1, title: "crit-x" }),
+  ];
+  const part = partitionInlineVsBody(findings, new Set(["a.ts"]), "low");
+  assert.deepEqual(
+    part.inline.map((c) => c.origin!.severity),
+    ["critical", "high", "medium", "low"],
+  );
+  assert.deepEqual(
+    part.bodyFindings.map((f) => f.severity),
+    ["critical", "low"],
+  );
 });
 
 test("buildReviewBody: marker is the first line", () => {

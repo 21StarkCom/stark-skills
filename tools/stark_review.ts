@@ -15,6 +15,7 @@ import {
   resolvePromptSources,
   selectDomains,
   resolveAgentsForDomains,
+  compareSeverityDesc,
   severityMeetsThreshold,
   validateStagePaths,
   type AgentName,
@@ -442,6 +443,31 @@ export async function tokenForAgent(
   return token;
 }
 
+// ─── Progress logging ───────────────────────────────────────────────────────
+// Writes to stderr so it doesn't pollute the JSON receipt on stdout.
+// On by default when stderr is a TTY; force via STARK_REVIEW_VERBOSE=1; silence
+// via STARK_REVIEW_QUIET=1.
+
+export function progressEnabled(): boolean {
+  if (process.env.STARK_REVIEW_QUIET === "1") return false;
+  if (process.env.STARK_REVIEW_VERBOSE === "1") return true;
+  return Boolean((process.stderr as NodeJS.WriteStream).isTTY);
+}
+
+function progress(msg: string): void {
+  if (!progressEnabled()) return;
+  process.stderr.write(`stark-review: ${msg}\n`);
+}
+
+export function fmtDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  const rs = Math.round(s - m * 60);
+  return `${m}m ${rs}s`;
+}
+
 interface SpawnResult { stdout: string; stderr: string; status: number }
 
 async function spawnCollect(
@@ -655,12 +681,14 @@ export async function dispatchDomains(opts: DispatchOptions): Promise<DispatchRe
   const results: DispatchResult[] = new Array(queue.length);
   let nextIdx = 0;
 
+  const total = queue.length;
   async function worker(): Promise<void> {
     while (true) {
       const idx = nextIdx++;
       if (idx >= queue.length) return;
       const a = queue[idx];
       const start = Date.now();
+      progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  starting…`);
       const port = opts.ports.get(a.agent);
       if (!port) {
         results[idx] = {
@@ -669,6 +697,7 @@ export async function dispatchDomains(opts: DispatchOptions): Promise<DispatchRe
           error: `agent_not_supported: ${a.agent}`,
           durationMs: Date.now() - start,
         };
+        progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  agent_not_supported  ${fmtDuration(Date.now() - start)}`);
         continue;
       }
       let tempDir: string | null = null;
@@ -695,6 +724,7 @@ export async function dispatchDomains(opts: DispatchOptions): Promise<DispatchRe
             error: `agent exit ${sp.status}: ${sp.stderr.slice(0, 400)}`,
             durationMs: Date.now() - start,
           };
+          progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  exit=${sp.status}  ${fmtDuration(Date.now() - start)}`);
           continue;
         }
         const parsed = port.parseOutput(sp.stdout);
@@ -711,6 +741,7 @@ export async function dispatchDomains(opts: DispatchOptions): Promise<DispatchRe
             error: `unparseable agent stdout (${sp.stdout.length} bytes, no findings)`,
             durationMs: Date.now() - start,
           };
+          progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  unparseable  ${fmtDuration(Date.now() - start)}`);
           continue;
         }
         results[idx] = {
@@ -719,7 +750,9 @@ export async function dispatchDomains(opts: DispatchOptions): Promise<DispatchRe
           parseErrors: parsed.parseErrors,
           durationMs: Date.now() - start,
         };
+        progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  ok    ${parsed.findings.length} findings  ${fmtDuration(Date.now() - start)}`);
       } catch (err) {
+        progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  ${(err as Error).message.slice(0, 80)}  ${fmtDuration(Date.now() - start)}`);
         results[idx] = {
           domain: a.domain, agent: a.agent, ok: false,
           findings: [], parseErrors: [],
@@ -1215,6 +1248,9 @@ export function partitionInlineVsBody(
       bodyFindings.push(f);
     }
   }
+  // origin is set above for every push; non-null assertion is safe here.
+  inline.sort((a, b) => compareSeverityDesc(a.origin!, b.origin!));
+  bodyFindings.sort(compareSeverityDesc);
   return { inline, bodyFindings };
 }
 
@@ -2292,6 +2328,7 @@ export async function main(
   argv: string[],
   deps: MainDeps = {},
 ): Promise<{ receipt: Receipt; exitCode: number }> {
+  const mainStart = Date.now();
   const ghJsonD = deps.ghJsonFn ?? ghJson;
   const ghTextD = deps.ghTextFn ?? ghText;
   const ghJsonOnceD = deps.ghJsonOnceFn ?? ghJsonOnce;
@@ -2572,6 +2609,7 @@ export async function main(
         rounds: receiptRounds,
       };
       emitReceipt(r, cli.json);
+      progress(`done  fail=${terminalCode.code}  ${fmtDuration(Date.now() - mainStart)}`);
       return { receipt: r, exitCode: 1 };
     }
 
@@ -2588,6 +2626,7 @@ export async function main(
       // commentsPosted included; nothing else to merge.
     }
     emitReceipt(receipt, cli.json);
+    progress(`done  posted=${commentsPosted}  fixes_pushed=${fixesPushed}  ${fmtDuration(Date.now() - mainStart)}`);
     return { receipt, exitCode: computeExitCode(receipt) };
   } finally {
     try { lock.release(); } catch { /* */ }
@@ -2714,6 +2753,9 @@ async function runReviewPass(ctx: PassCtx, deps: PassDeps): Promise<PassResult> 
   } catch (err) {
     return { kind: "terminal", code: "agent_port_load_failed", message: (err as Error).message };
   }
+  progress(
+    `pr #${pr} (${repo}) • ${assignments.length} assignment(s) across ${domains.length} domain(s) • max_concurrent=${config.runtime?.max_concurrent_agents ?? 3}`,
+  );
   const results = await dispatchDomains({
     assignments, ports, config,
     ...(deps.spawnFn ? { spawnFn: deps.spawnFn } : {}),
@@ -2727,6 +2769,7 @@ async function runReviewPass(ctx: PassCtx, deps: PassDeps): Promise<PassResult> 
     allFindings.push(...r.findings);
   }
   allFindings = applySeverityOverrides(allFindings, config.severity_overrides);
+  progress(`dispatch done: ${allFindings.length} findings, ${failedResults.length} failed domain(s)`);
   const tier = classifyDispatchTier(results);
   if (tier === "tier2_total") {
     return { kind: "terminal", code: "dispatch_failure", message: "all domains failed" };
@@ -2737,6 +2780,7 @@ async function runReviewPass(ctx: PassCtx, deps: PassDeps): Promise<PassResult> 
       ports.set(classifierAgent, await loadAgentPort(classifierAgent));
     } catch { /* */ }
   }
+  progress(`classifying ${allFindings.length} finding(s)…`);
   const cls = await runClassifier(allFindings, {
     worktree: cli.worktree,
     classifierAgent,
@@ -2747,6 +2791,13 @@ async function runReviewPass(ctx: PassCtx, deps: PassDeps): Promise<PassResult> 
   });
   classifierEvents.push(...cls.events);
   allFindings = cls.findings;
+  {
+    const tally: Record<string, number> = { fix: 0, noise: 0, false_positive: 0, ignored: 0, unclassified: 0 };
+    for (const f of allFindings) tally[f.classification ?? "unclassified"]++;
+    progress(
+      `classified  fix=${tally.fix} noise=${tally.noise} false_positive=${tally.false_positive} ignored=${tally.ignored} unclassified=${tally.unclassified}`,
+    );
+  }
 
   const allocated = allocateAndWriteRoundHistory({
     home,
@@ -2798,6 +2849,7 @@ async function runReviewPass(ctx: PassCtx, deps: PassDeps): Promise<PassResult> 
       }
     }
     if ((posterToken || cli.dryRun) && !unpostedReason) {
+      progress(`posting as stark-${postingAgent}${cli.dryRun ? "  [dry-run]" : ""}`);
       try {
         const pr_ = await postReview({
           repo, pr, round: allocated.round,
@@ -2821,8 +2873,12 @@ async function runReviewPass(ctx: PassCtx, deps: PassDeps): Promise<PassResult> 
             action: "post", round: allocated.round,
             ...(pr_.reviewId ? { reason: `review_id=${pr_.reviewId}` } : {}),
           }, { home, repo, pr });
+          progress(`posted  ${pr_.payloadSummary.inlineCount} inline + ${pr_.payloadSummary.bodyFindingsCount} body${pr_.reviewId ? `  review_id=${pr_.reviewId}` : ""}`);
         }
-        if (pr_.unposted) unpostedReason = pr_.unpostedReason ?? "post failed";
+        if (pr_.unposted) {
+          unpostedReason = pr_.unpostedReason ?? "post failed";
+          progress(`unposted: ${unpostedReason}`);
+        }
       } catch (err) {
         unpostedReason = (err as Error).message;
       }
