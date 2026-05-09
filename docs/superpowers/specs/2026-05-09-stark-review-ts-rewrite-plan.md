@@ -9,7 +9,17 @@
 Build a new TypeScript-only `/stark-review` pipeline that reuses the existing
 worktree setup/cleanup tools, removes Python from the single-agent hot path,
 uses GitHub REST-only interactions through `gh api`, and adds configurable
-`--quick` domain selection. Delivery is split into V1 and V1.1:
+`--quick` domain selection.
+
+**REST-only definition (binding for the whole plan).** "REST-only" means the
+*wire protocol* is REST. Allowed: `gh api <REST_PATH>` (any non-graphql path),
+`gh pr view --json ...`, `gh pr diff`. Forbidden: `gh api graphql`, any
+`/graphql` URL, any GraphQL query. CI guard runs in Phase 4 verification.
+This rule is restated in §4 Integration Points; if you find tension between
+"REST-only" and `gh pr` usage anywhere else in this document, this paragraph
+is authoritative.
+
+Delivery is split into V1 and V1.1:
 
 - **V1** implements config/domain resolution, Codex-only dispatch,
   classification, REST review posting, history persistence, JSON receipts,
@@ -112,8 +122,6 @@ uses GitHub REST-only interactions through `gh api`, and adds configurable
 node -e 'JSON.parse(require("fs").readFileSync("global/config.json","utf8")); console.log("ok")'
 
 # Verify Python deep-merge accepts new fields end-to-end via multi_review.py
-# (claude review weakness #4: don't just check config_loader; exercise the
-# real consumer to catch deep-merge or warn-on-unknown regressions)
 SCRIPTS=~/.claude/code-review/scripts
 PYTHON="$SCRIPTS/.venv/bin/python3"
 "$PYTHON" "$SCRIPTS/multi_review.py" --help >/dev/null 2>&1
@@ -126,6 +134,15 @@ for f in ("quick_domains","default_agent","test_command","untrusted_fix_loop","h
     assert f in cfg, f"missing {f}"
 print("ok: all new fields present, no warnings")
 PY
+
+# Verify default_agent does NOT silently change /stark-team-review behavior.
+# multi_review.py has its own per-agent default; the new field should be
+# inert for the Python path. Run a dry-run team review and assert the agents
+# resolved are the same as before this change.
+"$PYTHON" "$SCRIPTS/multi_review.py" --pr 0 --repo OWNER/REPO --base main \
+  --json-only --dry-run --domains architecture 2>/dev/null \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); print("team-review domain_agents:", d.get("domain_agents", {}))'
+# Compare against `git show HEAD~:global/config.json` baseline; agents must match.
 ```
 
 ## Phase 2: Core Library Helpers
@@ -166,10 +183,26 @@ PY
      // Receiving it as an arg invites callers to pass a worktree path.
    }): ResolvedConfig
    ```
-   `repoRoot` is derived as `git -C $configRoot rev-parse --show-toplevel`
-   and validated to be **outside** the worktree (`!worktree.startsWith(repoRoot)`
-   AND `!repoRoot.startsWith(worktree)`); if either check fails, throw
-   `Error("config root resolves into worktree; refusing to read PR-controlled config")`.
+   `repoRoot` is derived as `git -C $configRoot rev-parse --show-toplevel`,
+   then both `repoRoot` and `worktree` are passed through `fs.realpathSync`
+   to defeat symlink-to-worktree tricks. The validation:
+
+   ```ts
+   const r = fs.realpathSync(repoRoot);
+   const w = fs.realpathSync(worktree);
+   const sep = path.sep;
+   const rWithSep = r.endsWith(sep) ? r : r + sep;
+   const wWithSep = w.endsWith(sep) ? w : w + sep;
+   // Reject equal paths AND prefix-with-separator (so /foo and /foo-bar don't collide).
+   if (r === w || w.startsWith(rWithSep) || r.startsWith(wWithSep)) {
+     throw new Error("config root resolves into or equals worktree; refusing to read PR-controlled config");
+   }
+   ```
+
+   This catches three escape attempts: (1) configRoot inside worktree,
+   (2) worktree inside configRoot's repo, (3) symlink from configRoot
+   resolving into worktree. The trailing-separator check prevents
+   `/foo` matching against `/foo-bar`.
 
    Read global from `~/.claude/code-review/config.json`, walk org overrides
    from `configRoot` upward to `$HOME`, read repo override from
@@ -366,6 +399,11 @@ node --test tools/stark_review.test.ts --test-name-pattern='agent dispatch'
    Round number = max existing + 1. Schema matches spec exactly. Written
    even in dry-run.
 
+   **Concurrency** — the round-N allocation (`max + 1`) runs INSIDE the
+   per-PR review lock (§4 task 9 step 1) so two parallel invocations on
+   the same PR don't both pick the same round number. Move history-writer
+   invocation into the same lock scope as POST.
+
 7. **Implement history retention pruning** — on startup, read
    `history_retention_days`. If `0`, skip. Otherwise prune per-PR history
    dirs older than N days under `~/.claude/code-review/history`. Best-effort;
@@ -409,14 +447,20 @@ node --test tools/stark_review.test.ts --test-name-pattern='agent dispatch'
    inline comment has an invalid anchor — e.g. `line` not in the diff hunk).
    On a `422 Unprocessable Entity` response from the POST:
    - Parse the error body. GitHub returns `errors[*]` referencing the bad
-     `comments[i]` index.
-   - Demote the offending comments to body items (append to the same
-     "Cross-cutting / out-of-diff findings" section with their `file:line`
-     for context) and remove them from `comments[]`.
+     comments. **Defensive parsing**: GitHub's error shape is documented but
+     not contractually stable — error entries may use `field`, `code`,
+     `message`, or `index` to reference comments, and may omit indices
+     entirely for batch validation failures. The parser tries (in order):
+     `errors[*].index`, then numeric extraction from `errors[*].field`
+     (e.g., `"comments/3/line"`), then `errors[*].message` regex for
+     `comments\[(\d+)\]`. If none yield indices, treat as "all comments
+     suspect" and skip directly to the body-only fallback below.
+   - When indices are extracted: demote the offending comments to body
+     items (append to the "Cross-cutting / out-of-diff findings" section
+     with their `file:line` for context) and remove them from `comments[]`.
    - Retry the POST once with the reduced payload.
-   - If a second 422 occurs (or no specific comment indices were returned),
-     fall back to a body-only review (`comments: []`) so reviewers still see
-     the findings.
+   - If a second 422 occurs OR no indices were extracted, fall back to a
+     body-only review (`comments: []`) so reviewers still see the findings.
 
    This guarantees one valid review per round — never zero — even when the
    agent invents a line number.
@@ -424,10 +468,24 @@ node --test tools/stark_review.test.ts --test-name-pattern='agent dispatch'
 9. **Implement idempotency lock with explicit ordering** (claude review weakness #1):
    ```
    sequence:
-     1. acquire flock at ~/.claude/code-review/locks/{org}-{repo}-{pr}.lock
-        (blocking ≤30s; fail with error.code: "lock_held" if exceeded;
-         on EIO/ENOSPC/EROFS or other filesystem errors, fail with
-         error.code: "lock_io"; never fall through unlocked)
+     1. acquire lock at ~/.claude/code-review/locks/{org}-{repo}-{pr}.lock
+        Implementation (no new npm dep): use `fs.openSync(lockPath,
+        constants.O_CREAT | constants.O_EXCL | constants.O_RDWR, 0o600)`
+        as the acquisition primitive. On EEXIST, read the file's mtime;
+        if older than `runtime.lock_ttl_minutes` (config, default 30), the
+        lock is stale — `unlinkSync` it and retry once. Otherwise sleep
+        500ms and retry until 30s total elapsed.
+
+        On clean exit, hold the FD open for the lock's lifetime, write the
+        current pid+hostname to it for diagnostics, and `unlinkSync` +
+        close the FD in a `try/finally`. On crash, the file remains; the
+        TTL+stale-lock dance reclaims it. This is portable across darwin
+        and linux without `flock(2)` or `proper-lockfile`.
+
+        Failure modes:
+        - timeout (30s) → `error.code: "lock_held"`, exit non-zero
+        - EIO/ENOSPC/EROFS → `error.code: "lock_io"`, exit non-zero
+        - never fall through unlocked
      2. GET /repos/{o}/{r}/pulls/{n}/reviews (paginated)
      3. scan for marker (see Run hash composition below)
      4. if marker found → record duplicate_detected event, skip POST
@@ -811,24 +869,49 @@ GH_TOKEN="${GH_TOKEN:?required}" node --experimental-strip-types tools/stark_rev
    - any subsequent `git remote -v` invocation in the worktree
    - crash before remote-remove leaves a long-lived authed remote on disk
 
-   Use `http.extraheader` per-invocation instead, scoped to a single push:
+   **Token must NOT appear in argv.** `git -c http.extraheader=Bearer XYZ`
+   exposes the token in the process listing (`ps auxe`). Use `GIT_ASKPASS`
+   instead — token lives in env (not visible to other users on standard
+   Linux/macOS) and the askpass script reads it from env at push time:
+
    ```ts
-   // Add the un-authed remote (clone_url has no credentials).
+   // Write a one-line askpass script to a temp file with mode 0700.
+   const askpassPath = await mkdtemp(...) + "/askpass.sh";
+   await writeFile(askpassPath, '#!/bin/sh\nprintf "%s" "$STARK_PUSH_TOKEN"\n', { mode: 0o700 });
+
+   // Add un-authed remote (clone_url has no credentials).
    await git(["remote", "add", "stark-fork-push", head.repo.clone_url]);
    try {
-     // Token lives only in the spawn-time arg list, not in any persisted
-     // git config or remote URL. -c overrides apply only to this invocation.
-     const authHeader = `AUTHORIZATION: Bearer ${GH_TOKEN}`;
-     await git([
-       "-c", `http.https://github.com/.extraheader=${authHeader}`,
-       "push", "stark-fork-push", `HEAD:${head.ref}`
-     ], { redactInLogs: [GH_TOKEN] });
+     await git(
+       ["push", "stark-fork-push", `HEAD:${head.ref}`],
+       {
+         env: {
+           ...allowlistedEnv,
+           GIT_ASKPASS: askpassPath,
+           GIT_TERMINAL_PROMPT: "0",
+           STARK_PUSH_TOKEN: GH_TOKEN,  // env, not argv
+         },
+         redactInLogs: [GH_TOKEN],
+       }
+     );
    } finally {
      await git(["remote", "remove", "stark-fork-push"]);
+     await rm(askpassPath, { force: true });
+     await rmdir(path.dirname(askpassPath), { recursive: true });
    }
    ```
-   Even with `-c`, ensure the spawn wrapper redacts `GH_TOKEN` from stderr
-   capture. Audit log records `head.repo.full_name` + `head.ref` only.
+
+   Audit log records `head.repo.full_name` + `head.ref` only — never the
+   token, never the askpass path. The askpass file lives only for the
+   duration of the push and has no other readers (mode 0700, parent dir
+   is a per-invocation `mkdtemp`).
+
+   **Note on env-var visibility.** On Linux, `/proc/<pid>/environ` is
+   readable only by the same UID. On macOS, `ps -E` requires the same UID.
+   This is sufficient for our threat model (untrusted PR code can't read
+   another user's env). Users running on shared multi-user systems where
+   the runner UID is shared across roles would need a different mechanism
+   (out of scope for V1).
 
    **Crash-recovery cleanup** — on tool startup, after acquiring the
    per-PR review lock, scan the worktree (if it still exists from a prior
@@ -896,6 +979,18 @@ GH_TOKEN="${GH_TOKEN:?required}" gh api \
   buildCommand(prompt: string, model?: string)
   parseOutput(stdout: string): { findings: Finding[]; parseErrors: string[] }
   ```
+- **GitHub App token identity.** V1 uses `stark-claude` for all API calls
+  regardless of which agent produced the findings. This is a known
+  simplification — comments will appear under `stark-claude[bot]` even when
+  Codex authored them. V1.1 (Phase 8) introduces per-agent token resolution
+  so reviews from Codex/Gemini are posted under their respective bots.
+  Receipt always records the actual `agents_resolved` map so consumers see
+  which agent did the review even when the bot identity is uniform.
+- **GitHub App token lifetime.** App tokens expire ~1 hour after issue.
+  Single-pass V1 reviews are well under this. V1.1 fix loops that may run
+  multiple rounds reissue the token at the start of each round (call
+  `github_app.py --app stark-claude token` again before each POST).
+  Document in Phase 9.
 - GitHub REST contract:
   - `/pulls/{n}` — PR metadata, fork detection
   - `/pulls/{n}/files` — changed files (paginated; drives inline-vs-body routing)
