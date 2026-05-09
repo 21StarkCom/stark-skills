@@ -41,7 +41,7 @@ uses GitHub REST-only interactions through `gh api`, and adds configurable
   - `tools/review_setup_worktree.ts`
   - `tools/review_cleanup_worktree.ts`
 - Trusted config install path available:
-  - `~/.claude/code-review/global/config.json`
+  - `~/.claude/code-review/config.json` (symlinked from `global/config.json`)
   - `~/.claude/code-review/prompts/<agent>/`
 - Writable runtime dirs:
   ```bash
@@ -91,6 +91,15 @@ uses GitHub REST-only interactions through `gh api`, and adds configurable
    export const FINDING_SCHEMA_PROMPT = `Return JSONL findings with fields: ...`;
    ```
    Prepended at prompt-render time. Existing `NN-*.md` files untouched.
+
+   **Compatibility check before merge:** existing per-domain prompts already
+   instruct agents to emit a JSON shape. Audit `global/prompts/{claude,codex,gemini}/NN-*.md`
+   and ensure the new `FINDING_SCHEMA_PROMPT` is *additive* — same field names,
+   same nullability rules — not contradictory. If any existing prompt
+   specifies a different shape (e.g. requires `file`, forbids `extra`), the
+   plan PR also patches that prompt to match the new contract. Done when
+   `grep -nE 'JSON|fields|schema' global/prompts/*/NN-*.md` is reviewed and
+   all conflicts are reconciled.
 
 ### Risks
 
@@ -152,12 +161,18 @@ PY
    ```ts
    export function loadTrustedConfig(args: {
      home: string;
-     configRoot: string;   // invoker's CWD before worktree
-     repoRoot: string;     // git -C $configRoot rev-parse --show-toplevel
+     configRoot: string;   // invoker's CWD before worktree (trusted)
+     // repoRoot is DERIVED inside the function from configRoot, NOT received.
+     // Receiving it as an arg invites callers to pass a worktree path.
    }): ResolvedConfig
    ```
-   Read global from `~/.claude/code-review/global/config.json`, walk org
-   overrides from `configRoot` upward to `$HOME`, read repo override from
+   `repoRoot` is derived as `git -C $configRoot rev-parse --show-toplevel`
+   and validated to be **outside** the worktree (`!worktree.startsWith(repoRoot)`
+   AND `!repoRoot.startsWith(worktree)`); if either check fails, throw
+   `Error("config root resolves into worktree; refusing to read PR-controlled config")`.
+
+   Read global from `~/.claude/code-review/config.json`, walk org overrides
+   from `configRoot` upward to `$HOME`, read repo override from
    `<repoRoot>/.code-review/config.json`. **Never** resolve config from
    inside PR-controlled worktree content.
 
@@ -320,11 +335,28 @@ node --test tools/stark_review.test.ts --test-name-pattern='agent dispatch'
    ```ts
    async function classifyFinding(finding: Finding, ctx: ClassifierContext): Promise<Finding>
    ```
-   If `file && line`, read ±20 lines from worktree. If `file === null`, pass
-   only structured finding data. On classifier failure, attach
-   `classification: "fix"`, `classification_reason: "classifier_failed: <err>"`.
-   Abort terminally if classifier errors ≥ 5 in one round. Classifier never
+   If `file && line`, read ±20 lines from worktree. **Validate `finding.file`
+   first** — `finding.file` is agent-supplied (model-controlled) and could
+   contain `..`, absolute paths, or symlinks. Use the same path containment
+   logic as Phase 9 task 4 (`validateStagePaths`): `realpath(worktree/file)`
+   must start with `realpath(worktree)`. If validation fails, treat the file
+   as `null` (pass only structured data) and log a `path_rejected` event in
+   the receipt.
+
+   If `file === null` (after validation or originally), pass only structured
+   finding data. On classifier failure, attach `classification: "fix"`,
+   `classification_reason: "classifier_failed: <err>"`. Classifier never
    receives raw PR diff/body.
+
+   **Classifier abort semantics** — when classifier errors ≥ 5 in one round:
+   - Stop further classifier calls.
+   - Mark all unclassified findings with `classification: "fix"`,
+     `classification_reason: "classifier_aborted_after_5_errors"`.
+   - Skip the POST stage for this round (don't post a partial review).
+   - Write history with the classified+aborted state.
+   - Set receipt `error.code: "classifier_aborted"`, exit non-zero.
+
+   Posting and history state are NOT left undefined.
 
 6. **Implement history writer**:
    ```ts
@@ -338,6 +370,14 @@ node --test tools/stark_review.test.ts --test-name-pattern='agent dispatch'
    `history_retention_days`. If `0`, skip. Otherwise prune per-PR history
    dirs older than N days under `~/.claude/code-review/history`. Best-effort;
    failures become receipt events, not terminal errors.
+
+   **Concurrency:** acquire a dedicated pruning lock at
+   `~/.claude/code-review/locks/prune.lock` with non-blocking flock. If the
+   lock is held (another tool invocation is pruning), skip pruning entirely
+   for this run and continue. Per-PR review locks (acquired in §4 task 9)
+   protect specific PR dirs; the prune lock prevents two prune passes from
+   colliding. Pruning never deletes a PR dir whose review lock is currently
+   held.
 
 8. **Implement REST review posting**:
    ```ts
@@ -365,35 +405,74 @@ node --test tools/stark_review.test.ts --test-name-pattern='agent dispatch'
    Payload uses `event: "COMMENT"`, `body`, `comments[]`. `--dry-run` skips
    POST but records intended payload summary in receipt.
 
+   **Anchor-rejection fallback** (GitHub rejects the entire review when ANY
+   inline comment has an invalid anchor — e.g. `line` not in the diff hunk).
+   On a `422 Unprocessable Entity` response from the POST:
+   - Parse the error body. GitHub returns `errors[*]` referencing the bad
+     `comments[i]` index.
+   - Demote the offending comments to body items (append to the same
+     "Cross-cutting / out-of-diff findings" section with their `file:line`
+     for context) and remove them from `comments[]`.
+   - Retry the POST once with the reduced payload.
+   - If a second 422 occurs (or no specific comment indices were returned),
+     fall back to a body-only review (`comments: []`) so reviewers still see
+     the findings.
+
+   This guarantees one valid review per round — never zero — even when the
+   agent invents a line number.
+
 9. **Implement idempotency lock with explicit ordering** (claude review weakness #1):
    ```
    sequence:
      1. acquire flock at ~/.claude/code-review/locks/{org}-{repo}-{pr}.lock
-        (blocking ≤30s; fail with error.code: "lock_held" if exceeded)
+        (blocking ≤30s; fail with error.code: "lock_held" if exceeded;
+         on EIO/ENOSPC/EROFS or other filesystem errors, fail with
+         error.code: "lock_io"; never fall through unlocked)
      2. GET /repos/{o}/{r}/pulls/{n}/reviews (paginated)
-     3. scan for marker:
-        <!-- stark-review:round=N:agent=A:run=HASH -->
+     3. scan for marker (see Run hash composition below)
      4. if marker found → record duplicate_detected event, skip POST
         if not found → POST review
-     5. release flock
+        if POST returns 5xx and we retry → re-run steps 2–3 before each
+          retry (a concurrent invoker may have posted between attempts)
+     5. release flock (always, including on POST exception — use try/finally)
    ```
-   The lock MUST be acquired before step 2 and released after step 4. This
-   is the ordering that collapses the GET→POST race.
+   The lock MUST be acquired before step 2 and released after step 4.
+
+   **Cross-host scope.** This flock is host-local. Two CI runners reviewing
+   the same PR on different hosts will both bypass the local lock and rely
+   ONLY on the remote-marker check (step 3). That window is acceptable for
+   our use case (CCR triggers run on a single host); cross-host
+   serialization would require a remote lock service and is explicitly out
+   of scope for V1.
+
+   **Lock cleanup safety** — flock auto-releases on process exit, including
+   SIGKILL. Stale lock *files* on disk are normal and harmless; the kernel
+   handles ownership.
 
    **Run hash composition** (claude review weakness #3) — `HASH` is computed
    over exactly these fields, sorted and JSON-stringified:
    ```
    HASH = sha256(json.stringify({
+     pr_head_sha: head.sha,         // forces re-review when PR gets new commits
      domains: agents_resolved keys, sorted,
      agents_resolved,
      severity_overrides,
      fix_threshold
    }))
    ```
+   Including `pr_head_sha` means a fix commit (which changes the head sha)
+   produces a new hash, so the next round posts even though the marker
+   format is otherwise identical. Without it, fix-loop rounds 2/3 would
+   look like duplicates and be skipped.
+
    Unrelated config fields (cost, runtime knobs, observability) do NOT feed
-   the hash. This makes legitimate re-runs with the same review-affecting
-   config produce the same hash (so duplicate detection works) while config
-   edits to actual review parameters force a new review.
+   the hash.
+
+   **Marker scope acknowledgement** — this idempotency only deduplicates
+   *prior stark-review posts*. A human review or a different bot's review
+   on the same PR is not detected and not deduplicated against. That's the
+   correct behavior (we shouldn't suppress our review based on someone
+   else's), but it's documented here so reviewers understand the boundary.
 
 10. **Implement retry policy** — retry POST and list endpoints on:
     - `403` with `X-RateLimit-Remaining: 0`
@@ -401,7 +480,16 @@ node --test tools/stark_review.test.ts --test-name-pattern='agent dispatch'
     - `5xx`
 
     Backoff: 1s, 4s, 16s. Honor `Retry-After`. After 3 attempts, append to
-    `unposted_reviews[]` and continue.
+    `unposted_reviews[]` and **set receipt exit code to non-zero** (don't
+    silently succeed when posting failed). The receipt remains `ok: true`
+    in shape since other rounds may have posted successfully, but
+    `unposted_reviews.length > 0` triggers non-zero exit so the SKILL.md
+    failure handler sees it.
+
+    **POST-retry idempotency** — between POST attempts that get 5xx, re-do
+    the GET-marker check (step 3 of task 9) before retrying. A previous
+    attempt may have actually posted before failing to read the response
+    (network hiccup); retrying blindly would double-post.
 
 11. **Implement receipts and stderr summary** — JSON success shape:
     ```json
@@ -455,16 +543,28 @@ GH_TOKEN="${GH_TOKEN:?required}" node --experimental-strip-types tools/stark_rev
 ## Phase 5: Skill Wrapper Migration
 
 **Goal:** Replace `/stark-review` Python orchestration with the TS tool while preserving setup and cleanup behavior.
-**Dependencies:** Phase 4
+**Dependencies:** Phases 4 AND 6 (tests must land before migration; see "Sequencing rationale" below).
 **Estimated effort:** M
+
+**Sequencing rationale:** Phase 6 lands tests for the TS tool BEFORE Phase 5
+flips the default. Migrating the user-facing skill wrapper to a TS tool that
+hasn't been test-locked is a regression risk we explicitly avoid. Phase 7
+(smoke) then proves the wired-up combination on a sandbox PR before release
+notes go out.
 
 ### Tasks
 
 1. **Rewrite `skill/stark-review/SKILL.md`** — keep preflight, PR arg parsing,
    repo detection, base branch detection. Capture original trusted CWD
-   **before** worktree setup runs:
+   **before** worktree setup runs and provision the GitHub App token:
    ```bash
    CONFIG_ROOT="$(pwd)"
+   # Provision token before invoking the tool — multi_review.py used to do this.
+   if ! GH_TOKEN=$("$PYTHON" "$SCRIPTS/github_app.py" --app stark-claude token 2>/dev/null); then
+     echo "warn: stark-claude GitHub App token unavailable; PR posting will be skipped" >&2
+     # Tool tolerates missing token in dry-run; in normal mode it errors with auth_denied.
+   fi
+   export GH_TOKEN
    # ... then setup worktree ...
    node --experimental-strip-types "$TOOLS/stark_review.ts" \
      --pr "$PR_NUM" \
@@ -515,7 +615,7 @@ GH_TOKEN="${GH_TOKEN:?required}" node --experimental-strip-types tools/stark_rev
 ## Phase 6: Test Suite And Fixtures
 
 **Goal:** Lock the behavior with focused node:test coverage and recorded integration fixtures.
-**Dependencies:** Phases 2–5
+**Dependencies:** Phases 2–4 (NOT Phase 5 — tests land before SKILL.md migration; see Phase 5 sequencing rationale).
 **Estimated effort:** L
 
 ### Tasks
@@ -704,22 +804,37 @@ GH_TOKEN="${GH_TOKEN:?required}" node --experimental-strip-types tools/stark_rev
    git -C "$WORKTREE" push origin HEAD:"$HEAD_REF"
    ```
 
-   Fork PR with maintainer-can-modify — construct authed clone URL
-   carefully and never log it:
+   Fork PR with maintainer-can-modify — **do NOT inject the token into the
+   remote URL**. URL-embedded tokens leak via:
+   - `git config --get remote.stark-fork-push.url` (persisted in `.git/config`)
+   - process listing on the host (`ps auxe`)
+   - any subsequent `git remote -v` invocation in the worktree
+   - crash before remote-remove leaves a long-lived authed remote on disk
+
+   Use `http.extraheader` per-invocation instead, scoped to a single push:
    ```ts
-   // Construct in-process; never echo, never write to a shell variable.
-   const authedCloneUrl = `https://x-access-token:${GH_TOKEN}@github.com/${head.repo.full_name}.git`;
-   // Pass via process spawn args, not via shell expansion.
-   await git(["remote", "add", "stark-fork-push", authedCloneUrl]);
+   // Add the un-authed remote (clone_url has no credentials).
+   await git(["remote", "add", "stark-fork-push", head.repo.clone_url]);
    try {
-     await git(["push", "stark-fork-push", `HEAD:${head.ref}`]);
+     // Token lives only in the spawn-time arg list, not in any persisted
+     // git config or remote URL. -c overrides apply only to this invocation.
+     const authHeader = `AUTHORIZATION: Bearer ${GH_TOKEN}`;
+     await git([
+       "-c", `http.https://github.com/.extraheader=${authHeader}`,
+       "push", "stark-fork-push", `HEAD:${head.ref}`
+     ], { redactInLogs: [GH_TOKEN] });
    } finally {
      await git(["remote", "remove", "stark-fork-push"]);
    }
    ```
-   The audit log records the action with `head.repo.full_name` and
-   `head.ref` only — **never the authed URL**. Token redaction in any
-   stderr capture is mandatory.
+   Even with `-c`, ensure the spawn wrapper redacts `GH_TOKEN` from stderr
+   capture. Audit log records `head.repo.full_name` + `head.ref` only.
+
+   **Crash-recovery cleanup** — on tool startup, after acquiring the
+   per-PR review lock, scan the worktree (if it still exists from a prior
+   crashed run) for a remote named `stark-fork-push` and remove it before
+   any other operation. Stale auth state from a crashed predecessor is
+   thereby cleared even though the kernel auto-released the flock.
 
    Non-fast-forward push → terminal `error.code: "push_conflict"`. Never
    `--force`.
@@ -762,9 +877,17 @@ GH_TOKEN="${GH_TOKEN:?required}" gh api \
 
 ## 4. Integration Points
 
+- **REST-only contract clarification.** "REST-only" means *the wire protocol
+  is REST*, not that we avoid `gh pr` subcommands. `gh pr view` and
+  `gh pr diff` are permitted because their underlying transport is REST
+  (`/repos/{o}/{r}/pulls/{n}` and `/repos/{o}/{r}/pulls/{n}.diff`); they
+  never call `/graphql`. The hard rule is: never `gh api graphql ...`. CI
+  guard in Phase 4 verification asserts `grep -RE "gh api graphql|/graphql"
+  tools/stark_review*.ts tools/agent_*.ts` returns nothing.
 - `skill/stark-review/SKILL.md` owns user-facing command parsing, worktree
   setup, and cleanup. **Must capture trusted `--config-root` before worktree
-  setup.**
+  setup** AND **provision `GH_TOKEN` via `github_app.py` before invoking
+  the tool** (Phase 5 task 1).
 - `tools/stark_review.ts` owns the full review pipeline after worktree setup.
 - `tools/stark_review_lib.ts` is the shared contract for config, prompts,
   findings, receipts, and history. Drift here breaks tests and dispatcher.
