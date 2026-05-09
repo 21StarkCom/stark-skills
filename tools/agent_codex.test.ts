@@ -9,6 +9,7 @@ test("buildCommand: emits codex exec --json with high reasoning effort via -c", 
   assert.deepEqual(built.args, [
     "exec",
     "--json",
+    "--skip-git-repo-check",
     "-c",
     `model_reasoning_effort="high"`,
   ]);

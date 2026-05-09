@@ -2042,7 +2042,7 @@ export async function runFixer(opts: RunFixerOpts): Promise<RunFixerResult> {
   try {
     const env = pickAllowlistedEnv(process.env, allowlist);
     env.TMPDIR = tempDir;
-    const args = ["exec", "--json", "-c", `model_reasoning_effort="high"`, "-C", opts.worktree];
+    const args = ["exec", "--json", "--skip-git-repo-check", "-c", `model_reasoning_effort="high"`, "-C", opts.worktree];
     if (opts.model) args.push("-m", opts.model);
     args.push(promptText);
     const sp = await (opts.spawnFn ?? spawnCollect)("codex", args, {
@@ -2964,13 +2964,15 @@ async function tryAcquireLock(
 }
 
 // Run main() when invoked directly (not when imported as a module).
+// Resolve symlinks on both sides — the install path is symlinked (e.g.
+// ~/.claude/code-review/tools → repo/tools) and a naive path comparison would
+// silently treat a direct invocation as an import and exit 0 with no output.
 const isDirectRun = (() => {
   try {
     if (typeof process === "undefined" || !process.argv?.[1]) return false;
-    const entry = path.resolve(process.argv[1]);
-    // import.meta.url is a file:// URL; convert to path.
-    const here = new URL(import.meta.url).pathname;
-    return path.resolve(here) === entry;
+    const entry = fs.realpathSync(path.resolve(process.argv[1]));
+    const here = fs.realpathSync(new URL(import.meta.url).pathname);
+    return here === entry;
   } catch {
     return false;
   }

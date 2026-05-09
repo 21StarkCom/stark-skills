@@ -519,7 +519,7 @@ test("codex buildCommand argv: exec --json -c model_reasoning_effort=\"high\" (P
   const codex = await import("./agent_codex.ts");
   const built = codex.buildCommand("hi");
   assert.equal(built.cmd, "codex");
-  assert.deepEqual(built.args, ["exec", "--json", "-c", `model_reasoning_effort="high"`]);
+  assert.deepEqual(built.args, ["exec", "--json", "--skip-git-repo-check", "-c", `model_reasoning_effort="high"`]);
 });
 
 // ─── Lock ordering test — sanity: execFileSync available (silences unused
