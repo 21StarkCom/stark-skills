@@ -106,6 +106,7 @@ All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.claude/skil
 - `/stark-release [patch|minor|major]` — cut a release: changelog, tag, GitHub Release
 - `/stark-housekeeping [--dry-run] [--aggressive]` — audit and clean up stale issues, dead branches, worktree remnants
 - `/stark-persona` — session character voices with weighted selection, combos, catchphrases, and feedback
+- `/stark-gh-user [show|primary|secondary|swap|limits]` — switch GitHub user identity for `gh` calls (rate-limit relief); tokens in macOS Keychain (service `stark-gh-token`); resolver = `scripts/user_token.py`
 
 ### Project Setup & Docs
 

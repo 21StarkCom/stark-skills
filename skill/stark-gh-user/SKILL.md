@@ -1,0 +1,107 @@
+---
+name: stark-gh-user
+description: >-
+  Switch the active GitHub user identity (primary ↔ secondary) for `gh`
+  invocations to dodge per-user GraphQL/REST rate limits. Tokens live in macOS
+  Keychain (service `stark-gh-token`).
+argument-hint: "[show|primary|secondary|swap|limits] [--kind fine|classic|auto]"
+disable-model-invocation: true
+model: haiku
+revision: 6d1edd3cd7292ab20928e8c0e40cd1acffcf7d1d
+revision_date: 2026-05-09T12:41:56Z
+---
+
+# stark-gh-user
+
+Toggle the GitHub user identity used by `gh` so rate-limited GraphQL/REST traffic can flow under a second admin account.
+
+- **primary** → `aryeh-evinced`
+- **secondary** → `aryeh-admin`
+
+Bot calls (App installation tokens minted by `github_app.py`) are unaffected — they get their own pool per app.
+
+## Arguments
+
+**Raw input:** `$ARGUMENTS`
+
+- `/stark-gh-user` or `/stark-gh-user show` — show active user + remaining rate limits
+- `/stark-gh-user primary` — print export lines for the primary identity
+- `/stark-gh-user secondary` — print export lines for the secondary identity
+- `/stark-gh-user swap` — flip whichever is currently active
+- `/stark-gh-user limits` — show rate limits for both identities side-by-side
+- `--kind fine|classic|auto` — token kind (default: auto = fine-grained, fall back to classic)
+
+The token-printing modes do not mutate the user's shell. They emit `export …` lines the user is expected to wrap in `eval "$(…)"` to apply.
+
+## Resolver
+
+The single source of truth is `scripts/user_token.py` (installed at `~/.claude/code-review/scripts/user_token.py`). It reads from macOS Keychain entries:
+
+- `stark-gh-token / primary-fine`
+- `stark-gh-token / primary-classic`
+- `stark-gh-token / secondary-fine`
+- `stark-gh-token / secondary-classic`
+
+`STARK_GH_USER` env var (`primary` | `secondary`) and `STARK_GH_TOKEN_KIND` (`fine` | `classic` | `auto`) are honored when no flag is passed.
+
+## Behavior
+
+Resolve the script path (worktree-relative `scripts/user_token.py`, falling back to `~/.claude/code-review/scripts/user_token.py`).
+
+Parse `$ARGUMENTS` into a subcommand and optional `--kind` flag. Default subcommand: `show`.
+
+### `show`
+
+1. Read `$STARK_GH_USER` (default `primary`).
+2. Run `python3 <script> --user <active>` to confirm a token is reachable. If it raises, surface the keychain account name that's missing.
+3. Spawn `gh api rate_limit --jq '.resources | {core, graphql}'` with `GH_TOKEN` set to that token.
+4. Print: active user, login (`gh api user --jq .login`), core remaining/limit, graphql remaining/limit.
+
+### `primary` / `secondary`
+
+1. Resolve token via `python3 <script> --user <name> --kind <kind>`.
+2. Print three lines exactly (no markdown, no commentary), so the user can `eval` them:
+   ```
+   export STARK_GH_USER=<name>
+   export GH_TOKEN=<token>
+   export GITHUB_TOKEN=<token>
+   ```
+3. After the block, print a one-line hint: `# eval "$(claude /stark-gh-user <name>)" to apply` — but only if the user invoked via Claude Code where slash output is not auto-evaluated. If you can't tell, omit the hint.
+
+### `swap`
+
+Run `python3 <script> --swap` (forwarding `--kind` if provided). Pass through stdout verbatim. The script already emits the three export lines plus a `#` comment indicating the direction of the swap.
+
+### `limits`
+
+For each of `primary`, `secondary`:
+1. Resolve the token (auto kind).
+2. Spawn `gh api rate_limit` with that token. Capture core + graphql remaining.
+
+Render a compact two-row table:
+
+```
+identity   core         graphql      login
+primary    4982 / 5000  4998 / 5000  aryeh-evinced
+secondary  5000 / 5000  5000 / 5000  aryeh-admin
+```
+
+If a keychain entry is missing, render `MISSING` in place of the numbers and continue with the other identity.
+
+## Output rules
+
+- For `primary` / `secondary` / `swap`: print **only** the export lines (and the trailing `#` comment if any). No prose. The user is going to `eval "$(…)"`.
+- For `show` / `limits`: human-readable, single short paragraph or a compact table. No emoji unless the user asked for it.
+- Never echo the token value in `show` / `limits` output. Truncate to first 12 chars + `…` if you must reference it.
+
+## Failure modes
+
+- **Keychain entry missing:** tell the user which entry (`stark-gh-token / <account>`) and the `security add-generic-password -U -s stark-gh-token -a <account> -w '<token>'` command to add it.
+- **`gh` not installed:** report and stop; don't try to test rate limits.
+- **`security` not available (non-macOS):** surface and stop. This skill is macOS-only by design.
+
+## Notes
+
+- `gh` honors `GH_TOKEN` over the keychain auth, so once the user `eval`s the export block, every subsequent `gh` call in that shell — including ones spawned by `multi_review.py`, `triage_orchestrator.py`, `github_projects.py`, and the TS tools in `tools/` — uses the chosen identity automatically. No call-site edits.
+- `runtime_env.py` overrides `GH_TOKEN` for review subprocesses with the matching App installation token, so review-posting still goes through the correct bot.
+- To revert to the OS keychain auth: `unset GH_TOKEN GITHUB_TOKEN STARK_GH_USER`.
