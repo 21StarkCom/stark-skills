@@ -167,6 +167,17 @@ export function findLegacyMarkers(rendered: string): string[] {
   return hits;
 }
 
+// ─── Review-marker helper ───────────────────────────────────────────────────
+
+/**
+ * Build the HTML-comment marker that prefixes every posted review body. The
+ * dispatcher uses this same string for both the POST payload and the GET-marker
+ * idempotency check, so the format must be a single source of truth.
+ */
+export function buildMarker(round: number, agent: AgentName, runHash: string): string {
+  return `<!-- stark-review:round=${round}:agent=${agent}:run=${runHash} -->`;
+}
+
 // ─── Severity & finding-id helpers ──────────────────────────────────────────
 
 const SEVERITY_RANK: Readonly<Record<Severity, number>> = Object.freeze({
