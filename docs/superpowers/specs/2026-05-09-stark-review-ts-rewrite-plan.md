@@ -19,6 +19,22 @@ This rule is restated in §4 Integration Points; if you find tension between
 "REST-only" and `gh pr` usage anywhere else in this document, this paragraph
 is authoritative.
 
+**Enforcement is a CI gate, not a manual check.** Phase 6 adds a `package.json`
+script `tools/check-rest-only.sh` (or equivalent shell-out from a node:test)
+that greps the entire `tools/stark_review*.ts` + `tools/agent_*.ts` set for
+`gh api graphql` and `/graphql`, exiting non-zero on hit. This script runs in
+the same `npm test` invocation that runs node:test, so a violation breaks the
+test suite. The Phase 4 verification is just a developer-time grep; the test
+gate is the real enforcement.
+
+**`gh pr` opacity acknowledgement.** A future `gh` release could in
+principle switch `gh pr view` or `gh pr diff` to GraphQL internally. We
+accept this risk because (a) `gh` upstream has explicitly committed to
+REST for these subcommands in their public docs, and (b) the CI grep guard
+catches our own code regardless of what `gh` does. If `gh` ever flips,
+our wire-protocol claim becomes inaccurate but our code still doesn't
+*write* GraphQL — and an `nm`-style audit would catch it before release.
+
 Delivery is split into V1 and V1.1:
 
 - **V1** implements config/domain resolution, Codex-only dispatch,
@@ -183,26 +199,53 @@ PY
      // Receiving it as an arg invites callers to pass a worktree path.
    }): ResolvedConfig
    ```
-   `repoRoot` is derived as `git -C $configRoot rev-parse --show-toplevel`,
-   then both `repoRoot` and `worktree` are passed through `fs.realpathSync`
-   to defeat symlink-to-worktree tricks. The validation:
+   `repoRoot` is derived as `git -C $configRoot rev-parse --show-toplevel`.
+
+   **Repo-override config is read from the base branch, not from disk.**
+   The worktree is allowed to be inside the configRoot's repo (this repo's
+   own layout puts worktrees at `<repo>/.claude/worktrees/<slug>/` — a
+   path-prefix containment check would falsely reject this standard
+   layout). Instead, we fetch `<repoRoot>/.code-review/config.json` as it
+   exists on the trusted **base branch**, never from the on-disk worktree
+   copy:
 
    ```ts
-   const r = fs.realpathSync(repoRoot);
-   const w = fs.realpathSync(worktree);
-   const sep = path.sep;
-   const rWithSep = r.endsWith(sep) ? r : r + sep;
-   const wWithSep = w.endsWith(sep) ? w : w + sep;
-   // Reject equal paths AND prefix-with-separator (so /foo and /foo-bar don't collide).
-   if (r === w || w.startsWith(rWithSep) || r.startsWith(wWithSep)) {
-     throw new Error("config root resolves into or equals worktree; refusing to read PR-controlled config");
+   // Trusted: read from base branch via git show; pure git-object access,
+   // bypasses the working tree and any PR edits.
+   const baseRef = args.baseRef; // e.g. "origin/main", passed in
+   const repoOverrideConfig = await git([
+     "-C", repoRoot,
+     "show", `${baseRef}:.code-review/config.json`
+   ]).catch(() => null); // missing file is fine; just no override
+
+   // Same pattern for repo-level prompt overrides:
+   //   git show ${baseRef}:.code-review/prompts/<agent>/<file>
+   ```
+
+   Because the read is via `git show <base>:<path>`, no PR-controlled
+   working-tree file can influence the config — the bytes come from the
+   base-branch git object database. This sidesteps the path-containment
+   problem entirely: the worktree can be anywhere, even inside the repo
+   it reviews, because we never read config files from the worktree's
+   on-disk content.
+
+   **Realpath guard remains for one case:** `configRoot` itself must not
+   be a symlink that resolves *into* the worktree (an attacker who can
+   create a symlink in the configRoot before the skill runs could redirect
+   the git invocation). Validate:
+
+   ```ts
+   const cfgReal = fs.realpathSync(configRoot);
+   const wReal = fs.realpathSync(worktree);
+   const wWithSep = wReal.endsWith(path.sep) ? wReal : wReal + path.sep;
+   if (cfgReal === wReal || cfgReal.startsWith(wWithSep)) {
+     throw new Error("configRoot resolves inside worktree; refusing to invoke git there");
    }
    ```
 
-   This catches three escape attempts: (1) configRoot inside worktree,
-   (2) worktree inside configRoot's repo, (3) symlink from configRoot
-   resolving into worktree. The trailing-separator check prevents
-   `/foo` matching against `/foo-bar`.
+   We DO NOT check the reverse (worktree inside repoRoot) because that's
+   the standard layout. The base-branch read mechanism makes that direction
+   safe.
 
    Read global from `~/.claude/code-review/config.json`, walk org overrides
    from `configRoot` upward to `$HOME`, read repo override from
@@ -354,6 +397,20 @@ node --test tools/stark_review.test.ts --test-name-pattern='agent dispatch'
    allowlisted env only, temp dir under `runtime.temp_dir_prefix`, worktree
    path as arg/context (never as cwd).
 
+   **Token isolation.** `GH_TOKEN` is **NOT** in `runtime.subagent_env_allowlist`
+   and MUST stay out of it. The agent CLIs review code; they do not need
+   GitHub credentials. Any attempt to add `GH_TOKEN` to the allowlist
+   should be rejected in code review. The dispatcher constructs the agent
+   env explicitly:
+   ```ts
+   const agentEnv = pickAllowlisted(process.env, config.runtime.subagent_env_allowlist);
+   delete agentEnv.GH_TOKEN;          // belt-and-braces
+   delete agentEnv.GITHUB_TOKEN;
+   delete agentEnv.STARK_PUSH_TOKEN;  // Phase 9 askpass token
+   ```
+   This isolates the token from any prompt-injected agent that might try
+   to exfiltrate it via tool use.
+
 4. **Implement finding parsing semantics** — apply `severity_overrides[domain]`
    after parse. Required fields: `severity`, `title`, `domain`. Failure tiers:
    - Tier 1 (per-domain partial): non-zero exit OR unparseable stdout for one
@@ -443,6 +500,18 @@ node --test tools/stark_review.test.ts --test-name-pattern='agent dispatch'
    Payload uses `event: "COMMENT"`, `body`, `comments[]`. `--dry-run` skips
    POST but records intended payload summary in receipt.
 
+   **The marker is written into `body` as the first line:**
+   ```
+   <!-- stark-review:round=N:agent=A:run=HASH -->
+   ```
+   followed by two newlines and the human-readable review summary. The
+   marker is what the idempotency check (task 9) scans for. POST and check
+   reference the same string constant from `stark_review_lib.ts`:
+   ```ts
+   export const buildMarker = (round: number, agent: AgentName, runHash: string) =>
+     `<!-- stark-review:round=${round}:agent=${agent}:run=${runHash} -->`;
+   ```
+
    **Anchor-rejection fallback** (GitHub rejects the entire review when ANY
    inline comment has an invalid anchor — e.g. `line` not in the diff hunk).
    On a `422 Unprocessable Entity` response from the POST:
@@ -481,6 +550,16 @@ node --test tools/stark_review.test.ts --test-name-pattern='agent dispatch'
         close the FD in a `try/finally`. On crash, the file remains; the
         TTL+stale-lock dance reclaims it. This is portable across darwin
         and linux without `flock(2)` or `proper-lockfile`.
+
+        **Heartbeat the lock during long ops.** A long classify chain
+        (≥ 5 min per finding × many findings) plus a rate-limit retry
+        chain (16s × 3 = 48s + Retry-After) can exceed the default 30-min
+        TTL. The lock holder updates the file's mtime every 5 minutes
+        (`fs.utimesSync(lockPath, now, now)`) for the duration of the
+        operation. Stale-lock reclaim only triggers when mtime is older
+        than `lock_ttl_minutes` AND the recorded pid is not running
+        (`process.kill(pid, 0)` fails with ESRCH). Both signals required —
+        avoids breaking active posters during legitimate slow runs.
 
         Failure modes:
         - timeout (30s) → `error.code: "lock_held"`, exit non-zero
@@ -617,12 +696,15 @@ notes go out.
    **before** worktree setup runs and provision the GitHub App token:
    ```bash
    CONFIG_ROOT="$(pwd)"
-   # Provision token before invoking the tool — multi_review.py used to do this.
-   if ! GH_TOKEN=$("$PYTHON" "$SCRIPTS/github_app.py" --app stark-claude token 2>/dev/null); then
-     echo "warn: stark-claude GitHub App token unavailable; PR posting will be skipped" >&2
-     # Tool tolerates missing token in dry-run; in normal mode it errors with auth_denied.
+   # Provision token only if not already set by the caller — never overwrite
+   # a token the user/automation deliberately exported.
+   if [ -z "${GH_TOKEN:-}" ]; then
+     if ! GH_TOKEN=$("$PYTHON" "$SCRIPTS/github_app.py" --app stark-claude token 2>/dev/null); then
+       echo "warn: stark-claude GitHub App token unavailable; PR posting will be skipped" >&2
+       # Tool tolerates missing token in dry-run; in normal mode it errors with auth_denied.
+     fi
+     export GH_TOKEN
    fi
-   export GH_TOKEN
    # ... then setup worktree ...
    node --experimental-strip-types "$TOOLS/stark_review.ts" \
      --pr "$PR_NUM" \
@@ -640,10 +722,14 @@ notes go out.
 2. **Add `--quick` parsing** — recognize `--quick`, pass through to TS tool.
    Document `--domains` escape hatch in args section.
 
-3. **Update failure handling** — parse receipt `ok`. If `ok === false`, surface
-   `error.code`, `error.message`, exit non-zero. If any
-   `rounds[*].failed_results` non-empty, surface domains/agents and exit
-   non-zero. Otherwise print review summary.
+3. **Update failure handling** — parse receipt:
+   - `ok === false` → surface `error.code`, `error.message`, exit non-zero.
+   - any `rounds[*].failed_results` non-empty → surface domains/agents,
+     exit non-zero.
+   - **`unposted_reviews` non-empty → surface the unposted entries (round,
+     reason, status code), exit non-zero.** A review the tool generated
+     but couldn't post is a posting failure, not a clean run.
+   - Otherwise print review summary.
 
 4. **Confirm `install.sh` behavior** — run `./install.sh --status`. If
    `tools/` is already symlinked, no change needed.
@@ -673,7 +759,7 @@ GH_TOKEN="${GH_TOKEN:?required}" node --experimental-strip-types tools/stark_rev
 ## Phase 6: Test Suite And Fixtures
 
 **Goal:** Lock the behavior with focused node:test coverage and recorded integration fixtures.
-**Dependencies:** Phases 2–4 (NOT Phase 5 — tests land before SKILL.md migration; see Phase 5 sequencing rationale).
+**Dependencies:** Phases 2–4. Phase 5 (SKILL.md migration) depends on Phase 6, not the reverse — sequence is: 1 → 2 → 3 → 4 → 6 → 5 → 7. There is no circular dependency.
 **Estimated effort:** L
 
 ### Tasks
