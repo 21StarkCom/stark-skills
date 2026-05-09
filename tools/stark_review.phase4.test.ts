@@ -17,6 +17,10 @@ import {
   dispatchDomains,
   emitReceipt,
   findExistingMarker,
+  fmtDuration,
+  progressEnabled,
+  safeStringify,
+  stripControl,
   historyDir,
   nextRoundNumber,
   parseCli,
@@ -24,6 +28,7 @@ import {
   pickAllowlistedEnv,
   postReview,
   pruneHistory,
+  runFixer,
   renderHumanSummary,
   runClassifier,
   validatePathContainment,
@@ -417,6 +422,187 @@ test("partitionInlineVsBody: classification!='fix' demoted to body, never droppe
   const part = partitionInlineVsBody(findings, new Set(["a.ts"]), "medium");
   assert.equal(part.inline.length, 1);
   assert.equal(part.bodyFindings.length, 3);
+});
+
+test("fmtDuration: ms / s / m s formatting + carry on rounding", () => {
+  assert.equal(fmtDuration(450), "450ms");
+  assert.equal(fmtDuration(1500), "1.5s");
+  assert.equal(fmtDuration(75_000), "1m 15s");
+  assert.equal(fmtDuration(60_000), "1m 0s");
+  // 119.5s would naively render as "1m 60s"; verify the carry to 2m 0s.
+  assert.equal(fmtDuration(119_500), "2m 0s");
+  assert.equal(fmtDuration(3_599_500), "60m 0s");
+});
+
+test("progressEnabled: STARK_REVIEW_QUIET=1 wins over VERBOSE=1", () => {
+  const prev = { q: process.env.STARK_REVIEW_QUIET, v: process.env.STARK_REVIEW_VERBOSE };
+  try {
+    process.env.STARK_REVIEW_QUIET = "1";
+    process.env.STARK_REVIEW_VERBOSE = "1";
+    assert.equal(progressEnabled(), false);
+    delete process.env.STARK_REVIEW_QUIET;
+    assert.equal(progressEnabled(), true);
+  } finally {
+    if (prev.q === undefined) delete process.env.STARK_REVIEW_QUIET; else process.env.STARK_REVIEW_QUIET = prev.q;
+    if (prev.v === undefined) delete process.env.STARK_REVIEW_VERBOSE; else process.env.STARK_REVIEW_VERBOSE = prev.v;
+  }
+});
+
+test("progressEnabled: TTY default when neither env var is set", () => {
+  const prev = {
+    q: process.env.STARK_REVIEW_QUIET,
+    v: process.env.STARK_REVIEW_VERBOSE,
+    isTTY: (process.stderr as NodeJS.WriteStream).isTTY,
+  };
+  try {
+    delete process.env.STARK_REVIEW_QUIET;
+    delete process.env.STARK_REVIEW_VERBOSE;
+    Object.defineProperty(process.stderr, "isTTY", { value: true, configurable: true });
+    assert.equal(progressEnabled(), true, "TTY=true should enable progress");
+    Object.defineProperty(process.stderr, "isTTY", { value: false, configurable: true });
+    assert.equal(progressEnabled(), false, "TTY=false should disable progress");
+  } finally {
+    Object.defineProperty(process.stderr, "isTTY", { value: prev.isTTY, configurable: true });
+    if (prev.q !== undefined) process.env.STARK_REVIEW_QUIET = prev.q;
+    if (prev.v !== undefined) process.env.STARK_REVIEW_VERBOSE = prev.v;
+  }
+});
+
+test("progress output goes only to stderr when verbose, never stdout", async () => {
+  // dispatchDomains exercises the full progress() chain across multiple calls.
+  const prev = {
+    v: process.env.STARK_REVIEW_VERBOSE,
+    q: process.env.STARK_REVIEW_QUIET,
+  };
+  delete process.env.STARK_REVIEW_QUIET;
+  const stdoutChunks: string[] = [];
+  const stderrChunks: string[] = [];
+  const origStdoutWrite = process.stdout.write.bind(process.stdout);
+  const origStderrWrite = process.stderr.write.bind(process.stderr);
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    stdoutChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+    return true;
+  }) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    stderrChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    process.env.STARK_REVIEW_VERBOSE = "1";
+    const port: AgentPort = {
+      buildCommand: () => ({ cmd: "true", args: [], stdin: "", env: {} }),
+      parseOutput: () => ({ findings: [], parseErrors: [] }),
+    };
+    await dispatchDomains({
+      assignments: [{ domain: "x", agent: "codex", prompt: "p" }],
+      ports: new Map([["codex", port]]),
+      config: {
+        default_agent: "codex", domain_agents: {}, severity_overrides: {}, fix_threshold: "medium",
+      } as never,
+      spawnFn: async () => ({ stdout: "", stderr: "", status: 0 }),
+    });
+  } finally {
+    process.stdout.write = origStdoutWrite;
+    process.stderr.write = origStderrWrite;
+    if (prev.v === undefined) delete process.env.STARK_REVIEW_VERBOSE; else process.env.STARK_REVIEW_VERBOSE = prev.v;
+    if (prev.q === undefined) delete process.env.STARK_REVIEW_QUIET; else process.env.STARK_REVIEW_QUIET = prev.q;
+  }
+  const stderrAll = stderrChunks.join("");
+  const stdoutAll = stdoutChunks.join("");
+  assert.ok(stderrAll.includes("stark-review:"), "expected progress on stderr");
+  assert.ok(!stdoutAll.includes("stark-review:"), "progress must not leak to stdout");
+});
+
+test("runFixer codex argv: -c model_reasoning_effort=high, NO --skip-git-repo-check (security pin)", async () => {
+  // The fixer runs in opts.worktree (a real PR checkout). --skip-git-repo-check
+  // would bypass codex's untrusted-directory guard and is reserved for the
+  // dispatcher's ephemeral temp cwds only. This test pins the contract.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fixer-test-"));
+  const promptPath = path.join(tmp, "fixer.md");
+  fs.writeFileSync(promptPath, "fixer prompt body");
+  const captured: { cmd: string; args: string[] } = { cmd: "", args: [] };
+  const fakeSpawn = async (cmd: string, args: string[]) => {
+    captured.cmd = cmd;
+    captured.args = args;
+    return { stdout: '{"modified_files":[],"summary":"noop"}', stderr: "", status: 0 };
+  };
+  await runFixer({
+    worktree: tmp,
+    findings: [],
+    fixerPromptPath: promptPath,
+    config: { runtime: { subagent_env_allowlist: ["PATH"], temp_dir_prefix: "test" } } as never,
+    spawnFn: fakeSpawn as never,
+  });
+  assert.equal(captured.cmd, "codex");
+  assert.ok(captured.args.includes("-c"), "missing -c");
+  const cIdx = captured.args.indexOf("-c");
+  assert.equal(captured.args[cIdx + 1], `model_reasoning_effort="high"`);
+  assert.ok(
+    !captured.args.includes("--skip-git-repo-check"),
+    "fixer must NOT use --skip-git-repo-check (PR worktree, not temp cwd)",
+  );
+  // Sanity: -C opts.worktree present
+  const cwdIdx = captured.args.indexOf("-C");
+  assert.ok(cwdIdx >= 0, "missing -C");
+  assert.equal(captured.args[cwdIdx + 1], tmp);
+});
+
+test("stripControl removes ASCII control characters incl. ANSI escapes", () => {
+  assert.equal(stripControl("plain"), "plain");
+  assert.equal(stripControl("\x1B[31mred\x1B[0m"), "[31mred[0m");
+  assert.equal(stripControl("hi\x1B]0;evil\x07"), "hi]0;evil");
+  assert.equal(stripControl("a\tb\nc\rd"), "abcd");
+  assert.equal(stripControl("x\x7Fy"), "xy");
+  assert.equal(stripControl("a\x00b"), "ab");
+});
+
+test("safeStringify handles Error, primitives, and exotic throws", () => {
+  assert.equal(safeStringify(new Error("boom")), "boom");
+  assert.equal(safeStringify("string-throw"), "string-throw");
+  assert.equal(safeStringify(42), "42");
+  assert.equal(safeStringify(null), "null");
+  // Object whose Symbol.toPrimitive throws — must not throw, must fall back.
+  const evil: Record<symbol, unknown> = {};
+  evil[Symbol.toPrimitive] = () => { throw new Error("nope"); };
+  assert.equal(safeStringify(evil), "<unrepresentable error>");
+});
+
+test("dispatchDomains catch path normalizes non-Error throws (no TypeError)", async () => {
+  const port: AgentPort = {
+    buildCommand: () => { throw "string-throw" as unknown as Error; },
+    parseOutput: () => ({ findings: [], parseErrors: [] }),
+  };
+  const results = await dispatchDomains({
+    assignments: [{ domain: "x", agent: "codex", prompt: "p" }],
+    ports: new Map([["codex", port]]),
+    config: {
+      default_agent: "codex", domain_agents: {}, severity_overrides: {}, fix_threshold: "medium",
+    } as never,
+    spawnFn: async () => ({ stdout: "", stderr: "", status: 0 }),
+  });
+  assert.equal(results[0].ok, false);
+  assert.equal(results[0].error, "string-throw");
+});
+
+test("partitionInlineVsBody: inline + body sorted critical → high → medium → low", () => {
+  const findings: Finding[] = [
+    makeFinding({ id: "f-low",  severity: "low",      file: "a.ts", line: 5, title: "low-a" }),
+    makeFinding({ id: "f-crit", severity: "critical", file: "a.ts", line: 9, title: "crit-a" }),
+    makeFinding({ id: "f-med",  severity: "medium",   file: "a.ts", line: 7, title: "med-a" }),
+    makeFinding({ id: "f-high", severity: "high",     file: "a.ts", line: 2, title: "high-a" }),
+    // body-side (different file, will demote)
+    makeFinding({ id: "b-low",  severity: "low",      file: "x.ts", line: 1, title: "low-x" }),
+    makeFinding({ id: "b-crit", severity: "critical", file: "x.ts", line: 1, title: "crit-x" }),
+  ];
+  const part = partitionInlineVsBody(findings, new Set(["a.ts"]), "low");
+  assert.deepEqual(
+    part.inline.map((c) => c.origin!.severity),
+    ["critical", "high", "medium", "low"],
+  );
+  assert.deepEqual(
+    part.bodyFindings.map((f) => f.severity),
+    ["critical", "low"],
+  );
 });
 
 test("buildReviewBody: marker is the first line", () => {

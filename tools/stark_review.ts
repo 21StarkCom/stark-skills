@@ -15,6 +15,7 @@ import {
   resolvePromptSources,
   selectDomains,
   resolveAgentsForDomains,
+  compareSeverityDesc,
   severityMeetsThreshold,
   validateStagePaths,
   type AgentName,
@@ -442,6 +443,58 @@ export async function tokenForAgent(
   return token;
 }
 
+// ─── Progress logging ───────────────────────────────────────────────────────
+// Writes to stderr so it doesn't pollute the JSON receipt on stdout.
+// On by default when stderr is a TTY; force via STARK_REVIEW_VERBOSE=1; silence
+// via STARK_REVIEW_QUIET=1.
+
+export function progressEnabled(): boolean {
+  if (process.env.STARK_REVIEW_QUIET === "1") return false;
+  if (process.env.STARK_REVIEW_VERBOSE === "1") return true;
+  return Boolean((process.stderr as NodeJS.WriteStream).isTTY);
+}
+
+// Strip ASCII control characters (incl. ANSI/OSC escapes) from any text that
+// might end up interpolated into a progress() line. PR titles, agent error
+// messages, and domain slugs are all attacker-influenceable surfaces, so any
+// terminal output of those values is sanitized first.
+export function stripControl(s: string): string {
+  // Removes C0 (0x00–0x1F except \t/\n/\r are also dropped) and DEL (0x7F).
+  // Progress lines are single-line, so we drop tabs/newlines too — the caller
+  // shouldn't be passing them in.
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/[\x00-\x1F\x7F]/g, "");
+}
+
+// Defensive: even String(err) can throw for exotic thrown values (e.g. an
+// object whose `Symbol.toPrimitive` throws). Wrap it so the catch-path is
+// guaranteed not to throw recursively.
+export function safeStringify(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  try {
+    return String(err);
+  } catch {
+    return "<unrepresentable error>";
+  }
+}
+
+function progress(msg: string): void {
+  if (!progressEnabled()) return;
+  process.stderr.write(`stark-review: ${stripControl(msg)}\n`);
+}
+
+export function fmtDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)}s`;
+  // Round to whole seconds first so a value like 119.5s carries cleanly into
+  // 2m 0s instead of producing "1m 60s".
+  const total = Math.round(s);
+  const m = Math.floor(total / 60);
+  const rs = total - m * 60;
+  return `${m}m ${rs}s`;
+}
+
 interface SpawnResult { stdout: string; stderr: string; status: number }
 
 async function spawnCollect(
@@ -655,12 +708,14 @@ export async function dispatchDomains(opts: DispatchOptions): Promise<DispatchRe
   const results: DispatchResult[] = new Array(queue.length);
   let nextIdx = 0;
 
+  const total = queue.length;
   async function worker(): Promise<void> {
     while (true) {
       const idx = nextIdx++;
       if (idx >= queue.length) return;
       const a = queue[idx];
       const start = Date.now();
+      progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  starting…`);
       const port = opts.ports.get(a.agent);
       if (!port) {
         results[idx] = {
@@ -669,6 +724,7 @@ export async function dispatchDomains(opts: DispatchOptions): Promise<DispatchRe
           error: `agent_not_supported: ${a.agent}`,
           durationMs: Date.now() - start,
         };
+        progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  agent_not_supported  ${fmtDuration(Date.now() - start)}`);
         continue;
       }
       let tempDir: string | null = null;
@@ -695,6 +751,7 @@ export async function dispatchDomains(opts: DispatchOptions): Promise<DispatchRe
             error: `agent exit ${sp.status}: ${sp.stderr.slice(0, 400)}`,
             durationMs: Date.now() - start,
           };
+          progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  exit=${sp.status}  ${fmtDuration(Date.now() - start)}`);
           continue;
         }
         const parsed = port.parseOutput(sp.stdout);
@@ -711,6 +768,7 @@ export async function dispatchDomains(opts: DispatchOptions): Promise<DispatchRe
             error: `unparseable agent stdout (${sp.stdout.length} bytes, no findings)`,
             durationMs: Date.now() - start,
           };
+          progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  unparseable  ${fmtDuration(Date.now() - start)}`);
           continue;
         }
         results[idx] = {
@@ -719,11 +777,14 @@ export async function dispatchDomains(opts: DispatchOptions): Promise<DispatchRe
           parseErrors: parsed.parseErrors,
           durationMs: Date.now() - start,
         };
+        progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  ok    ${parsed.findings.length} findings  ${fmtDuration(Date.now() - start)}`);
       } catch (err) {
+        const message = safeStringify(err);
+        progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  ${message.slice(0, 80)}  ${fmtDuration(Date.now() - start)}`);
         results[idx] = {
           domain: a.domain, agent: a.agent, ok: false,
           findings: [], parseErrors: [],
-          error: (err as Error).message,
+          error: message,
           durationMs: Date.now() - start,
         };
       } finally {
@@ -1215,6 +1276,9 @@ export function partitionInlineVsBody(
       bodyFindings.push(f);
     }
   }
+  // origin is set above for every push; non-null assertion is safe here.
+  inline.sort((a, b) => compareSeverityDesc(a.origin!, b.origin!));
+  bodyFindings.sort(compareSeverityDesc);
   return { inline, bodyFindings };
 }
 
@@ -2006,7 +2070,14 @@ export async function runFixer(opts: RunFixerOpts): Promise<RunFixerResult> {
   try {
     const env = pickAllowlistedEnv(process.env, allowlist);
     env.TMPDIR = tempDir;
-    const args = ["exec", "--json", "--reasoning-effort", "high", "-C", opts.worktree];
+    // The fixer runs in `opts.worktree` — a real PR checkout. Codex's
+    // untrusted-directory guard applies and we deliberately do NOT pass
+    // `--skip-git-repo-check` here (that flag is only safe for the agent
+    // dispatcher's ephemeral temp cwds, never for a PR checkout that may
+    // contain adversarial code from a fork). If a PR worktree isn't on
+    // codex's trusted list, the operator is expected to either trust it
+    // explicitly or run the fixer in a sandboxed temp checkout.
+    const args = ["exec", "--json", "-c", `model_reasoning_effort="high"`, "-C", opts.worktree];
     if (opts.model) args.push("-m", opts.model);
     args.push(promptText);
     const sp = await (opts.spawnFn ?? spawnCollect)("codex", args, {
@@ -2292,6 +2363,7 @@ export async function main(
   argv: string[],
   deps: MainDeps = {},
 ): Promise<{ receipt: Receipt; exitCode: number }> {
+  const mainStart = Date.now();
   const ghJsonD = deps.ghJsonFn ?? ghJson;
   const ghTextD = deps.ghTextFn ?? ghText;
   const ghJsonOnceD = deps.ghJsonOnceFn ?? ghJsonOnce;
@@ -2572,6 +2644,7 @@ export async function main(
         rounds: receiptRounds,
       };
       emitReceipt(r, cli.json);
+      progress(`done  fail=${terminalCode.code}  ${fmtDuration(Date.now() - mainStart)}`);
       return { receipt: r, exitCode: 1 };
     }
 
@@ -2588,6 +2661,7 @@ export async function main(
       // commentsPosted included; nothing else to merge.
     }
     emitReceipt(receipt, cli.json);
+    progress(`done  posted=${commentsPosted}  fixes_pushed=${fixesPushed}  ${fmtDuration(Date.now() - mainStart)}`);
     return { receipt, exitCode: computeExitCode(receipt) };
   } finally {
     try { lock.release(); } catch { /* */ }
@@ -2714,6 +2788,9 @@ async function runReviewPass(ctx: PassCtx, deps: PassDeps): Promise<PassResult> 
   } catch (err) {
     return { kind: "terminal", code: "agent_port_load_failed", message: (err as Error).message };
   }
+  progress(
+    `pr #${pr} (${repo}) • ${assignments.length} assignment(s) across ${domains.length} domain(s) • max_concurrent=${config.runtime?.max_concurrent_agents ?? 3}`,
+  );
   const results = await dispatchDomains({
     assignments, ports, config,
     ...(deps.spawnFn ? { spawnFn: deps.spawnFn } : {}),
@@ -2727,6 +2804,7 @@ async function runReviewPass(ctx: PassCtx, deps: PassDeps): Promise<PassResult> 
     allFindings.push(...r.findings);
   }
   allFindings = applySeverityOverrides(allFindings, config.severity_overrides);
+  progress(`dispatch done: ${allFindings.length} findings, ${failedResults.length} failed domain(s)`);
   const tier = classifyDispatchTier(results);
   if (tier === "tier2_total") {
     return { kind: "terminal", code: "dispatch_failure", message: "all domains failed" };
@@ -2737,6 +2815,7 @@ async function runReviewPass(ctx: PassCtx, deps: PassDeps): Promise<PassResult> 
       ports.set(classifierAgent, await loadAgentPort(classifierAgent));
     } catch { /* */ }
   }
+  progress(`classifying ${allFindings.length} finding(s)…`);
   const cls = await runClassifier(allFindings, {
     worktree: cli.worktree,
     classifierAgent,
@@ -2747,6 +2826,13 @@ async function runReviewPass(ctx: PassCtx, deps: PassDeps): Promise<PassResult> 
   });
   classifierEvents.push(...cls.events);
   allFindings = cls.findings;
+  {
+    const tally: Record<string, number> = { fix: 0, noise: 0, false_positive: 0, ignored: 0, unclassified: 0 };
+    for (const f of allFindings) tally[f.classification ?? "unclassified"]++;
+    progress(
+      `classified  fix=${tally.fix} noise=${tally.noise} false_positive=${tally.false_positive} ignored=${tally.ignored} unclassified=${tally.unclassified}`,
+    );
+  }
 
   const allocated = allocateAndWriteRoundHistory({
     home,
@@ -2798,6 +2884,7 @@ async function runReviewPass(ctx: PassCtx, deps: PassDeps): Promise<PassResult> 
       }
     }
     if ((posterToken || cli.dryRun) && !unpostedReason) {
+      progress(`posting as stark-${postingAgent}${cli.dryRun ? "  [dry-run]" : ""}`);
       try {
         const pr_ = await postReview({
           repo, pr, round: allocated.round,
@@ -2821,8 +2908,12 @@ async function runReviewPass(ctx: PassCtx, deps: PassDeps): Promise<PassResult> 
             action: "post", round: allocated.round,
             ...(pr_.reviewId ? { reason: `review_id=${pr_.reviewId}` } : {}),
           }, { home, repo, pr });
+          progress(`posted  ${pr_.payloadSummary.inlineCount} inline + ${pr_.payloadSummary.bodyFindingsCount} body${pr_.reviewId ? `  review_id=${pr_.reviewId}` : ""}`);
         }
-        if (pr_.unposted) unpostedReason = pr_.unpostedReason ?? "post failed";
+        if (pr_.unposted) {
+          unpostedReason = pr_.unpostedReason ?? "post failed";
+          progress(`unposted: ${unpostedReason}`);
+        }
       } catch (err) {
         unpostedReason = (err as Error).message;
       }
@@ -2908,13 +2999,15 @@ async function tryAcquireLock(
 }
 
 // Run main() when invoked directly (not when imported as a module).
+// Resolve symlinks on both sides — the install path is symlinked (e.g.
+// ~/.claude/code-review/tools → repo/tools) and a naive path comparison would
+// silently treat a direct invocation as an import and exit 0 with no output.
 const isDirectRun = (() => {
   try {
     if (typeof process === "undefined" || !process.argv?.[1]) return false;
-    const entry = path.resolve(process.argv[1]);
-    // import.meta.url is a file:// URL; convert to path.
-    const here = new URL(import.meta.url).pathname;
-    return path.resolve(here) === entry;
+    const entry = fs.realpathSync(path.resolve(process.argv[1]));
+    const here = fs.realpathSync(new URL(import.meta.url).pathname);
+    return here === entry;
   } catch {
     return false;
   }

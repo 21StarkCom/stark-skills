@@ -3,14 +3,15 @@ import { test } from "node:test";
 
 import { buildCommand, parseOutput } from "./agent_codex.ts";
 
-test("buildCommand: emits codex exec --json with high reasoning effort", () => {
+test("buildCommand: emits codex exec --json with high reasoning effort via -c", () => {
   const built = buildCommand("hello prompt");
   assert.equal(built.cmd, "codex");
   assert.deepEqual(built.args, [
     "exec",
     "--json",
-    "--reasoning-effort",
-    "high",
+    "--skip-git-repo-check",
+    "-c",
+    `model_reasoning_effort="high"`,
   ]);
   assert.equal(built.stdin, "hello prompt");
   assert.equal(typeof built.env, "object");
@@ -24,8 +25,10 @@ test("buildCommand: model flag included only when caller passes one", () => {
   const i = withModel.args.indexOf("-m");
   assert.ok(i >= 0, "expected -m flag");
   assert.equal(withModel.args[i + 1], "gpt-5.5-pro");
-  // model flags appended after reasoning-effort
-  assert.ok(i > withModel.args.indexOf("--reasoning-effort"));
+  // model flags appended after the reasoning-effort `-c` override
+  const cIdx = withModel.args.indexOf("-c");
+  assert.ok(cIdx >= 0, "expected -c flag");
+  assert.ok(i > cIdx);
 });
 
 test("buildCommand: env contains only allowlisted keys", () => {
