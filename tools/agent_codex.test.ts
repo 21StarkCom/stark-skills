@@ -172,3 +172,36 @@ test("parseOutput: derives id when not provided", () => {
   const { findings } = parseOutput(JSON.stringify(f));
   assert.match(findings[0].id, /^[0-9a-f]{12}$/);
 });
+
+test("parseOutput: silently skips non-finding JSON noise (no severity, no title)", () => {
+  // Agents under high reasoning effort sometimes emit reasoning/status/summary
+  // JSON objects between actual findings. These have no severity and no title.
+  // They are NOT malformed findings — they're framing chatter — so they must
+  // not pollute parseErrors.
+  const finding = { domain: "d", severity: "high", title: "real finding", body: "details" };
+  const lines = [
+    JSON.stringify({ thought: "Looking at the diff..." }),
+    JSON.stringify(finding),
+    JSON.stringify({ summary: "Found 1 issue" }),
+    JSON.stringify({ status: "analyzing" }),
+    JSON.stringify({ reasoning: "The change looks suspicious" }),
+    JSON.stringify({ phase: 2, step: "check security" }),
+  ].join("\n");
+  const { findings, parseErrors } = parseOutput(lines);
+  assert.equal(findings.length, 1);
+  assert.equal(parseErrors.length, 0, `expected 0 parse errors, got ${parseErrors.map((e) => e.reason).join("; ")}`);
+});
+
+test("parseOutput: still flags malformed findings (has title or severity)", () => {
+  // Lines that DO have a finding-shaped key (severity or title) must still be
+  // strictly validated, so genuine typos don't slip through.
+  const lines = [
+    JSON.stringify({ severity: "high" }),                        // has severity, missing title
+    JSON.stringify({ title: "x" }),                              // has title, missing severity
+    JSON.stringify({ severity: "high", title: "x" }),            // has both, missing domain
+    JSON.stringify({ severity: "bogus", title: "x", domain: "d" }), // invalid severity enum
+  ].join("\n");
+  const { findings, parseErrors } = parseOutput(lines);
+  assert.equal(findings.length, 0);
+  assert.equal(parseErrors.length, 4);
+});

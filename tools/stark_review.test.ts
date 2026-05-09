@@ -8,6 +8,7 @@ import {
   _resetAgentPortCacheForTests,
   _resetTokenCacheForTests,
   buildReviewBody,
+  extractClassificationJson,
   loadAgentPort,
   renderAgentsResolvedSummary,
   resolveAgentPorts,
@@ -341,6 +342,165 @@ test("classifyOne: parses classification through claude --output-format json env
       },
     });
     assert.equal(result.findings[0].classification, "noise");
+  } finally {
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+// ─── extractClassificationJson: brace-balanced extractor (replaces brittle regex) ─
+
+test("extractClassificationJson: extracts plain JSON object", () => {
+  const text = '{"classification":"fix","classification_reason":"real bug"}';
+  const obj = extractClassificationJson(text);
+  assert.ok(obj);
+  assert.equal(obj?.classification, "fix");
+  assert.equal(obj?.classification_reason, "real bug");
+});
+
+test("extractClassificationJson: handles JSON with nested objects (regex used to fail here)", () => {
+  // The previous regex `\{[^{}]*"classification"[^{}]*\}` rejected this shape
+  // because `[^{}]` forbade nested braces. We see this in practice when the
+  // classifier model includes structured detail in the response.
+  const text = '{"classification":"fix","classification_reason":"see details","details":{"file":"x.ts","line":42}}';
+  const obj = extractClassificationJson(text);
+  assert.ok(obj);
+  assert.equal(obj?.classification, "fix");
+});
+
+test("extractClassificationJson: handles JSON with braces inside string values", () => {
+  const text = '{"classification":"noise","classification_reason":"Suggested rename of foo() {}"}';
+  const obj = extractClassificationJson(text);
+  assert.ok(obj);
+  assert.equal(obj?.classification, "noise");
+});
+
+test("extractClassificationJson: extracts from prose-wrapped output", () => {
+  const text = 'Here is my classification:\n\n{"classification":"false_positive","classification_reason":"Guard already excludes branch"}\n\nDone.';
+  const obj = extractClassificationJson(text);
+  assert.ok(obj);
+  assert.equal(obj?.classification, "false_positive");
+});
+
+test("extractClassificationJson: extracts from markdown-fenced output", () => {
+  const text = '```json\n{"classification":"ignored","classification_reason":"Out of scope"}\n```';
+  const obj = extractClassificationJson(text);
+  assert.ok(obj);
+  assert.equal(obj?.classification, "ignored");
+});
+
+test("extractClassificationJson: ignores non-classification objects, finds the right one", () => {
+  const text = '{"thought":"thinking..."}\n{"classification":"fix","classification_reason":"yes"}';
+  const obj = extractClassificationJson(text);
+  assert.ok(obj);
+  assert.equal(obj?.classification, "fix");
+});
+
+test("extractClassificationJson: rejects invalid classification values", () => {
+  const text = '{"classification":"bogus","classification_reason":"x"}';
+  const obj = extractClassificationJson(text);
+  assert.equal(obj, null);
+});
+
+test("extractClassificationJson: returns null when no balanced JSON found", () => {
+  assert.equal(extractClassificationJson("just prose, no JSON here"), null);
+  assert.equal(extractClassificationJson(""), null);
+  assert.equal(extractClassificationJson("{ this is not valid json"), null);
+});
+
+test("classifyOne: accepts classification_reason field name (prompt's preferred name)", async () => {
+  const { runClassifier } = await import("./stark_review.ts");
+  const port = await loadAgentPort("claude");
+  const finding: Finding = {
+    id: "f1", domain: "security", agent: "codex",
+    severity: "high", file: null, line: null,
+    title: "title", body: "body",
+  };
+  // Note: classifier prompt asks for `classification_reason` (not `reason`).
+  // Older code only read `reason`, leaving classification_reason content empty.
+  const fakeSpawn = async () => ({
+    stdout: JSON.stringify({
+      type: "result", subtype: "success",
+      result: JSON.stringify({
+        classification: "fix",
+        classification_reason: "Real defect: storage failures map to 404",
+      }),
+    }),
+    stderr: "", status: 0,
+  });
+  const wt = fs.mkdtempSync(path.join(os.tmpdir(), "wt-"));
+  try {
+    const result = await runClassifier([finding], {
+      worktree: wt,
+      classifierAgent: "claude",
+      ports: new Map([["claude", port]]),
+      classifierPrompt: "classify",
+      spawnFn: fakeSpawn,
+      config: {
+        quick_domains: [], default_agent: "claude",
+        domain_agents: {}, severity_overrides: {}, fix_threshold: "medium",
+        runtime: {
+          lock_ttl_minutes: 30, subagent_env_allowlist: ["PATH", "HOME"],
+          max_concurrent_agents: 1, temp_dir_prefix: "stark-test",
+          large_pr_file_threshold: 40, large_pr_line_threshold: 3000,
+          large_pr_timeout_s: 1800,
+        },
+        test_command: null, untrusted_fix_loop: false,
+        history_retention_days: 0, lock_ttl_minutes: 30,
+      },
+    });
+    assert.equal(result.findings[0].classification, "fix");
+    assert.equal(result.findings[0].classification_reason, "Real defect: storage failures map to 404");
+    assert.equal(result.events.length, 0);
+  } finally {
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test("classifyOne: handles classifier output with nested objects in details", async () => {
+  // Reproduces the failure that was masked by the brittle regex: when the
+  // classifier (correctly) emits a JSON containing nested objects, the old
+  // regex skipped it and emitted "no classification in output".
+  const { runClassifier } = await import("./stark_review.ts");
+  const port = await loadAgentPort("codex");
+  const finding: Finding = {
+    id: "f1", domain: "security", agent: "codex",
+    severity: "high", file: null, line: null,
+    title: "title", body: "body",
+  };
+  const fakeSpawn = async () => ({
+    stdout: JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "agent_message",
+        text: '{"classification":"fix","classification_reason":"see details","details":{"file":"x.ts","line":42}}',
+      },
+    }),
+    stderr: "", status: 0,
+  });
+  const wt = fs.mkdtempSync(path.join(os.tmpdir(), "wt-"));
+  try {
+    const result = await runClassifier([finding], {
+      worktree: wt,
+      classifierAgent: "codex",
+      ports: new Map([["codex", port]]),
+      classifierPrompt: "classify",
+      spawnFn: fakeSpawn,
+      config: {
+        quick_domains: [], default_agent: "codex",
+        domain_agents: {}, severity_overrides: {}, fix_threshold: "medium",
+        runtime: {
+          lock_ttl_minutes: 30, subagent_env_allowlist: ["PATH", "HOME"],
+          max_concurrent_agents: 1, temp_dir_prefix: "stark-test",
+          large_pr_file_threshold: 40, large_pr_line_threshold: 3000,
+          large_pr_timeout_s: 1800,
+        },
+        test_command: null, untrusted_fix_loop: false,
+        history_retention_days: 0, lock_ttl_minutes: 30,
+      },
+    });
+    assert.equal(result.findings[0].classification, "fix");
+    assert.equal(result.findings[0].classification_reason, "see details");
+    assert.equal(result.events.length, 0, `expected 0 events, got: ${result.events.map((e) => e.reason).join("; ")}`);
   } finally {
     fs.rmSync(wt, { recursive: true, force: true });
   }

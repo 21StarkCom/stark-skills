@@ -34,9 +34,7 @@ Focus your deepest analysis on highest-priority files. For lower-priority files,
 You are one of several domain-specific reviewers running in parallel. If a finding primarily belongs to another domain (e.g., a security issue found while reviewing test coverage), **do not report it** — the specialized domain reviewer will catch it. Only report findings that are squarely within your assigned domain. When in doubt, omit rather than duplicate.
 
 ## Output Rules
-- Output ONLY a JSON array of findings
-- No preamble, no summary, no markdown — just `[...]`
-- If no issues: `[]`
+The exact output format (JSONL, fields, no preamble) is specified in the "Reviewer Output Contract" appended below — follow it strictly.
 
 ## PR Description Context
 Before flagging behavioral changes as regressions or missing features, read the PR title and description for stated intent. If the PR description explains why something was removed, renamed, or changed, do not flag the same change as a regression or issue — it is intentional. This applies especially to cleanup PRs, dead code removal, and rename operations.

@@ -890,7 +890,7 @@ async function classifyOne(
     title: finding.title,
     body: finding.body,
   };
-  const prompt = `${opts.classifierPrompt}\n\nFinding to classify:\n\`\`\`json\n${JSON.stringify(safeFinding, null, 2)}\n\`\`\`\n\nRespond with a single JSON object: {"classification":"fix|false_positive|noise|ignored","reason":"..."}`;
+  const prompt = `${opts.classifierPrompt}\n\nFinding to classify:\n\`\`\`json\n${JSON.stringify(safeFinding, null, 2)}\n\`\`\`\n\nRespond with a single JSON object: {"classification":"fix|false_positive|noise|ignored","classification_reason":"..."}`;
   const spawner = opts.spawnFn ?? spawnCollect;
   let tempDir: string | null = null;
   try {
@@ -909,11 +909,13 @@ async function classifyOne(
     // Unwrap any agent-specific framing (e.g. Gemini's `{"response":"..."}`
     // envelope) before scanning for the classification JSON. Without this,
     // gemini-as-classifier would always fail with classifier_failed because
-    // the regex never sees the embedded `"classification"` key.
+    // the scanner never sees the embedded `"classification"` key.
     const normalized = port.normalizeOutput ? port.normalizeOutput(sp.stdout) : sp.stdout;
-    const parsed = port.parseOutput(sp.stdout);
-    const m = normalized.match(/\{[^{}]*"classification"[^{}]*\}/);
-    if (!m) {
+    const obj = extractClassificationJson(normalized);
+    if (!obj) {
+      // Last-ditch fallback: maybe the agent emitted findings JSONL with
+      // `classification` already populated (some agents over-deliver).
+      const parsed = port.parseOutput(sp.stdout);
       if (parsed.findings.length > 0 && parsed.findings[0].classification) {
         return {
           classification: parsed.findings[0].classification,
@@ -923,20 +925,13 @@ async function classifyOne(
       }
       return { classification: "fix", reason: "classifier_failed: no classification in output", ok: false };
     }
-    let obj: unknown;
-    try {
-      obj = JSON.parse(m[0]);
-    } catch (err) {
-      return { classification: "fix", reason: `classifier_failed: ${(err as Error).message}`, ok: false };
-    }
-    if (typeof obj !== "object" || obj === null) {
-      return { classification: "fix", reason: "classifier_failed: bad shape", ok: false };
-    }
-    const c = (obj as Record<string, unknown>).classification;
+    const c = obj.classification;
     if (c !== "fix" && c !== "false_positive" && c !== "noise" && c !== "ignored") {
       return { classification: "fix", reason: `classifier_failed: bad classification ${JSON.stringify(c)}`, ok: false };
     }
-    const reasonRaw = (obj as Record<string, unknown>).reason;
+    // Accept both `classification_reason` (the prompt's name) and the legacy
+    // `reason` field — some prompt revisions used the shorter name.
+    const reasonRaw = obj.classification_reason ?? obj.reason;
     const reason = typeof reasonRaw === "string" ? reasonRaw : "";
     return { classification: c, reason, ok: true };
   } catch (err) {
@@ -946,6 +941,71 @@ async function classifyOne(
       try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* */ }
     }
   }
+}
+
+/**
+ * Find the first balanced JSON object in `text` that has a `classification`
+ * field of one of the four enum values. Tolerates surrounding prose, markdown
+ * fences, nested braces, and string-escaped braces.
+ *
+ * Replaces the previous regex (`/\{[^{}]*"classification"[^{}]*\}/`) which
+ * silently failed on JSONs containing nested objects (e.g. `extra`, `details`).
+ *
+ * Strategy: scan for `{` characters and use a brace-balancing parser that
+ * respects JSON string escaping (so `{` inside a string doesn't increment the
+ * depth). When a balanced `{...}` is found, attempt JSON.parse and check the
+ * shape. Returns the first matching object, or null.
+ */
+export function extractClassificationJson(text: string): Record<string, unknown> | null {
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== "{") continue;
+    const end = findBalancedJsonEnd(text, i);
+    if (end < 0) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text.slice(i, end + 1));
+    } catch {
+      continue;
+    }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+    const obj = parsed as Record<string, unknown>;
+    const c = obj.classification;
+    if (c === "fix" || c === "false_positive" || c === "noise" || c === "ignored") {
+      return obj;
+    }
+  }
+  return null;
+}
+
+/** Returns the index of the matching `}` for the `{` at `start`, or -1 if
+ * unbalanced. Honors JSON string escaping so braces inside strings are ignored. */
+function findBalancedJsonEnd(text: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escape) {
+        escape = false;
+      } else if (ch === "\\") {
+        escape = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === "{") {
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0) return i;
+      if (depth < 0) return -1;
+    }
+  }
+  return -1;
 }
 
 export async function runClassifier(
