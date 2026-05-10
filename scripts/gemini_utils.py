@@ -251,7 +251,7 @@ _ALLOWED_ANTHROPIC_KEYS = {"ANTHROPIC_CODE_CLI"}
 _DEFAULT_ADC_PATH = os.path.expanduser("~/.config/gcloud/application_default_credentials.json")
 
 
-def make_gemini_env(gemini_home: str) -> dict[str, str]:
+def make_gemini_env(gemini_home: str, *, trust_workspace: bool = False) -> dict[str, str]:
     """Build env dict for headless Gemini CLI dispatch via Vertex AI + ADC.
 
     Forces Vertex AI auth using Application Default Credentials so headless
@@ -271,6 +271,10 @@ def make_gemini_env(gemini_home: str) -> dict[str, str]:
         and not (k.startswith(_BLOCKED_PREFIX) and k not in _ALLOWED_ANTHROPIC_KEYS)
     }
     env["GEMINI_CLI_HOME"] = gemini_home
+    if trust_workspace:
+        # Only callers running Gemini from a generated, controlled dispatch
+        # directory should bypass the non-interactive trust prompt.
+        env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
     # Vertex AI + ADC. These override any host values (zsh may export a
     # regional GOOGLE_CLOUD_LOCATION for other tools — we force global here).
     env["GOOGLE_GENAI_USE_VERTEXAI"] = "true"

@@ -17,6 +17,10 @@ const bundle: SkillBundle = {
   skillPath: "skill/alpha/SKILL.md",
   refs: ["skill/alpha/reference.md", "standards/observability.md"],
   missingRefs: [],
+  refKinds: {
+    "skill/alpha/reference.md": "markdown",
+    "standards/observability.md": "markdown",
+  },
   wordCount: 42,
   lineCount: 10,
 };
@@ -511,6 +515,7 @@ test("validateProposal rejects deleting a ref when own SKILL.md still links to i
     skillPath: "skill/alpha/SKILL.md",
     refs: ["skill/alpha/reference.md"],
     missingRefs: [],
+    refKinds: { "skill/alpha/reference.md": "markdown" },
     wordCount: 10,
     lineCount: 3,
   };
@@ -541,6 +546,7 @@ test("validateProposal allows deleting a ref when the bundle's own SKILL.md also
     skillPath: "skill/alpha/SKILL.md",
     refs: ["skill/alpha/reference.md"],
     missingRefs: [],
+    refKinds: { "skill/alpha/reference.md": "markdown" },
     wordCount: 10,
     lineCount: 3,
   };

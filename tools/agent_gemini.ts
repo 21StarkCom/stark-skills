@@ -23,8 +23,9 @@ const ENV_ALLOWLIST = ["PATH", "HOME", "LANG", "LC_ALL", "TMPDIR"] as const;
 /** Mirror scripts/gemini_utils.py:setup_gemini_home. Creates a per-call temp
  * GEMINI_CLI_HOME with .gemini/{settings.json, projects.json} so that
  * (a) auth defaults to Vertex AI + global region (or API-key when forced)
- * and (b) the dispatch cwd is registered, avoiding the CLI's first-run
- * project-trust prompt that would otherwise block headless runs.
+ * and (b) the dispatch cwd is registered. Workspace trust is bypassed only
+ * when this module or the dispatcher created the scratch dir, never for
+ * arbitrary caller-supplied review worktrees.
  *
  * Caller passes the dispatcher cwd in projectDir; we register it. The home
  * lives under <projectDir>/.gemini-home so it is cleaned up when the
@@ -52,13 +53,26 @@ export function setupGeminiHome(projectDir: string, useApiKey: boolean): string 
   return home;
 }
 
-function buildEnv(geminiHome: string, apiKey: string | null): Record<string, string> {
+function shouldTrustWorkspace(projectDir: string, ctx?: BuildContext): boolean {
+  const createdHere = ctx?.cwd === undefined;
+  const createdByDispatcher = ctx?.trustedGeneratedCwd === true;
+  if (!createdHere && !createdByDispatcher) return false;
+  try {
+    const st = fs.lstatSync(projectDir);
+    return st.isDirectory() && !st.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+function buildEnv(geminiHome: string, apiKey: string | null, trustWorkspace: boolean): Record<string, string> {
   const env: Record<string, string> = {};
   for (const key of ENV_ALLOWLIST) {
     const v = process.env[key];
     if (typeof v === "string") env[key] = v;
   }
   env.GEMINI_CLI_HOME = geminiHome;
+  if (trustWorkspace) env.GEMINI_CLI_TRUST_WORKSPACE = "true";
   if (apiKey) {
     // API-key mode: disable Vertex so the CLI does not retry against ADC.
     env.GEMINI_API_KEY = apiKey;
@@ -86,11 +100,12 @@ export function buildCommand(prompt: string, model?: string, ctx?: BuildContext)
   const projectDir = ctx?.cwd ?? fs.mkdtempSync(path.join(os.tmpdir(), "stark-gemini-"));
   const apiKey = process.env.GEMINI_API_KEY ?? null;
   const home = setupGeminiHome(projectDir, apiKey !== null);
+  const trustWorkspace = shouldTrustWorkspace(projectDir, ctx);
   return {
     cmd: "gemini",
     args: ["-o", "json", "-m", m, "-p", "-"],
     stdin: prompt,
-    env: buildEnv(home, apiKey),
+    env: buildEnv(home, apiKey, trustWorkspace),
     cwd: projectDir,
   };
 }

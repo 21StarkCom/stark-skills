@@ -10,6 +10,8 @@ import {
   findingId,
   loadTrustedConfig,
   renderReviewPrompt,
+  resolveBaseRef,
+  resolvePromptRoot,
   resolveAgentsForDomains,
   resolvePromptSources,
   compareSeverityDesc,
@@ -229,6 +231,61 @@ test("resolveAgentsForDomains falls back to codex when default_agent missing", (
     config: cfg,
   });
   assert.deepEqual(out, { security: "codex" });
+});
+
+// ─── Base ref resolution ────────────────────────────────────────────────────
+
+test("resolveBaseRef prefers origin/<base> for bare branch names", () => {
+  const repo = makeTmpDir("stark-base-ref-");
+  gitInit(repo);
+  fs.writeFileSync(path.join(repo, "README.md"), "old\n");
+  gitCommitAll(repo, "old main");
+  const oldSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
+
+  fs.writeFileSync(path.join(repo, "README.md"), "new\n");
+  gitCommitAll(repo, "new origin main");
+  const newSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
+  execFileSync("git", ["update-ref", "refs/remotes/origin/main", newSha], { cwd: repo });
+
+  // Simulate a linked review worktree sharing a stale local main: origin/main
+  // is fresh, but the local branch still points at the old base.
+  execFileSync("git", ["checkout", "--detach", newSha], { cwd: repo });
+  execFileSync("git", ["branch", "-f", "main", oldSha], { cwd: repo });
+
+  assert.equal(resolveBaseRef("main", repo), "origin/main");
+  assert.equal(resolveBaseRef("origin/main", repo), "origin/main");
+  assert.equal(resolveBaseRef("HEAD", repo), "HEAD");
+  assert.equal(resolveBaseRef("main^", repo), "main^");
+});
+
+test("resolvePromptRoot prefers explicit source checkout layout over installed prompts", () => {
+  const home = makeTmpDir("stark-prompt-home-");
+  const checkout = makeTmpDir("stark-prompt-checkout-");
+  const installed = path.join(home, ".claude", "code-review", "prompts");
+  const sourceLayout = path.join(checkout, "global", "prompts");
+  fs.mkdirSync(installed, { recursive: true });
+  fs.mkdirSync(sourceLayout, { recursive: true });
+
+  assert.equal(resolvePromptRoot({ configRoot: checkout, home }), sourceLayout);
+});
+
+test("resolvePromptRoot falls back to installed prompts when config root has none", () => {
+  const home = makeTmpDir("stark-prompt-home-");
+  const checkout = makeTmpDir("stark-prompt-checkout-");
+  const installed = path.join(home, ".claude", "code-review", "prompts");
+  fs.mkdirSync(installed, { recursive: true });
+
+  assert.equal(resolvePromptRoot({ configRoot: checkout, home }), installed);
+});
+
+test("resolvePromptRoot supports direct prompts layout for isolated tests", () => {
+  const home = makeTmpDir("stark-prompt-home-");
+  const configRoot = makeTmpDir("stark-prompt-root-");
+  const direct = path.join(configRoot, "prompts");
+  fs.mkdirSync(path.join(home, ".claude", "code-review", "prompts"), { recursive: true });
+  fs.mkdirSync(direct, { recursive: true });
+
+  assert.equal(resolvePromptRoot({ configRoot, home }), direct);
 });
 
 // ─── Task 2-2: loadTrustedConfig ────────────────────────────────────────────

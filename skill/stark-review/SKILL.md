@@ -6,8 +6,8 @@ description: >-
 argument-hint: "[PR_NUMBER] [--agent claude|codex|gemini] [--quick] [--domains a,b,c] [--dry-run] [--repo ORG/REPO]"
 disable-model-invocation: false
 model: opus[1m]
-revision: e2e10b69ca34151b7dda427461495f04ef4c55e3
-revision_date: 2026-05-09T08:31:45Z
+revision: e5630476fa2ba17d3b7d04e7f547cb248c105d45
+revision_date: 2026-05-10T06:40:44Z
 ---
 
 Single-agent PR review path. Keep this skill thin: do preflight, capture the
@@ -169,7 +169,7 @@ human summary on **stderr** (terminal-friendly). It exits:
 
 ## Phase 2: Surface failures from the receipt
 
-Parse the receipt JSON. Each of the three failure conditions below independently
+Parse the receipt JSON. Each failure condition below independently
 forces a non-zero exit. Print specifics for each so the user can act.
 
 ```bash
@@ -185,6 +185,18 @@ for r in rounds:
     rd = r.get("round")
     for f in (r.get("failed_results") or []):
         items.append("round {}: {}/{} — {}".format(rd, f.get("agent"), f.get("domain"), f.get("error")))
+print("\n".join(items))
+')
+PARSE_ERROR_LIST=$(parse '
+import re
+def clean(v):
+    return re.sub(r"[\x00-\x1f\x7f]", "", str(v or ""))[:160]
+rounds = d.get("rounds") or []
+items = []
+for r in rounds:
+    rd = r.get("round")
+    for e in (r.get("parse_errors") or []):
+        items.append("round {}: {} — {}".format(rd, clean(e.get("reason")), clean(e.get("line"))))
 print("\n".join(items))
 ')
 UNPOSTED_LIST=$(parse '
@@ -209,7 +221,14 @@ if [ -n "$FAILED_LIST" ]; then
     failed=1
 fi
 
-# (c) any review failed to post
+# (c) any agent output had parser errors
+if [ -n "$PARSE_ERROR_LIST" ]; then
+    error "Some domain/agent outputs had parser errors:"
+    printf '  %s\n' "$PARSE_ERROR_LIST" >&2
+    failed=1
+fi
+
+# (d) any review failed to post
 if [ -n "$UNPOSTED_LIST" ]; then
     error "Some reviews could not be posted:"
     printf '  %s\n' "$UNPOSTED_LIST" >&2
@@ -295,6 +314,7 @@ See [../../standards/observability.md](../../standards/observability.md).
 |--------------------------------------------------|----------|
 | Receipt `ok=false`                               | Print `error.code` + `error.message`, exit non-zero |
 | Receipt has `failed_results` non-empty           | Print round/agent/domain/error list, exit non-zero |
+| Receipt has `parse_errors` non-empty             | Print round/reason/line snippet, exit non-zero |
 | Receipt has `unposted_reviews` non-empty         | Print round/reason/status, exit non-zero |
 | TS tool exits non-zero with unparseable stdout   | Print stderr, exit non-zero |
 | `--quick` with empty `quick_domains` in config   | TS tool exits with `bad_args`; surface the message |

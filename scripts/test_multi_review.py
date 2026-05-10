@@ -260,16 +260,23 @@ class TestCLIFlagsSmoke:
         Any other non-zero exit means the dir setup is broken.
         """
         import tempfile
-        cwd = os.getcwd()
+        workspace = tempfile.mkdtemp(prefix="stark-gemini-cwd-")
         gemini_home = tempfile.mkdtemp(prefix="gemini-test-")
         gemini_dir = os.path.join(gemini_home, ".gemini")
         os.makedirs(gemini_dir, exist_ok=True)
-        # Gemini's ProjectRegistry needs the cwd registered in projects.json
+        # Gemini's ProjectRegistry needs the cwd registered in projects.json.
+        # Use a generated workspace so the explicit trust opt-in does not apply
+        # to the repo checkout itself.
         import json as _json
-        projects = {"projects": {cwd: "test"}}
+        projects = {"projects": {workspace: "test"}}
         with open(os.path.join(gemini_dir, "projects.json"), "w") as f:
             _json.dump(projects, f)
-        env = {**os.environ, "GEMINI_CLI_HOME": gemini_home, "GEMINI_API_KEY": "invalid"}
+        env = {
+            **os.environ,
+            "GEMINI_CLI_HOME": gemini_home,
+            "GEMINI_CLI_TRUST_WORKSPACE": "true",
+            "GEMINI_API_KEY": "invalid",
+        }
         # Write plan mode into settings.json (--approval-mode is not a CLI flag)
         import json as _json2
         settings_path = os.path.join(gemini_dir, "settings.json")
@@ -277,9 +284,10 @@ class TestCLIFlagsSmoke:
             _json2.dump({"defaultApprovalMode": "plan"}, f)
         result = subprocess.run(
             ["gemini", "-p", "test", "-o", "json"],
-            capture_output=True, text=True, timeout=30, env=env,
+            capture_output=True, text=True, timeout=30, env=env, cwd=workspace,
         )
         shutil.rmtree(gemini_home, ignore_errors=True)
+        shutil.rmtree(workspace, ignore_errors=True)
         # Auth-related exit codes (expected with invalid key):
         # 41 = fatal auth error, 144 = API call failed (invalid key rejected by server)
         # Any other non-zero = filesystem or flag issue (the bug we're testing for).
@@ -313,14 +321,16 @@ class TestCLIEndToEnd:
     def test_gemini_json_output_e2e(self, tmp_path):
         """gemini -o json returns a JSON envelope with 'response' key."""
         from gemini_utils import setup_gemini_home, make_gemini_env
+        workspace = str(tmp_path / "gemini-workspace")
+        os.makedirs(workspace, exist_ok=True)
         gemini_home = setup_gemini_home(
-            "gemini-test-", os.getcwd(), "test", approval_mode="plan",
+            "gemini-test-", workspace, "test", approval_mode="plan",
         )
-        env = make_gemini_env(gemini_home)
+        env = make_gemini_env(gemini_home, trust_workspace=True)
         from gemini_utils import GEMINI_MODEL
         result = subprocess.run(
             ["gemini", "-m", GEMINI_MODEL, "-p", "Return exactly: []", "-o", "json"],
-            capture_output=True, text=True, timeout=120, env=env,
+            capture_output=True, text=True, timeout=120, env=env, cwd=workspace,
         )
         shutil.rmtree(gemini_home, ignore_errors=True)
         assert result.returncode == 0, f"gemini failed: {result.stderr[:500]}"
