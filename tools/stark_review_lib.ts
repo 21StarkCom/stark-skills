@@ -335,6 +335,64 @@ export function resolveAgentsForDomains(opts: {
   return out;
 }
 
+// ─── Git ref resolution ─────────────────────────────────────────────────────
+
+const QUALIFIED_REF_PREFIXES = ["refs/", "origin/", "remotes/"] as const;
+const GIT_REV_KEYWORDS = new Set(["HEAD", "FETCH_HEAD", "ORIG_HEAD", "MERGE_HEAD"]);
+const REV_EXPRESSION_MARKERS = ["~", "^", "@{"] as const;
+
+/**
+ * Resolve a user/base-branch ref to the remote-tracking ref when one exists.
+ *
+ * The review worktree is detached at the PR head and may share a common git
+ * dir with an operator checkout whose local `main` is stale. Using bare
+ * `main` for trusted `git show main:.code-review/config.json` or prompt
+ * overrides can silently read outdated config. `review_setup_worktree.ts`
+ * force-fetches the PR base into `refs/remotes/origin/<base>`, so prefer that
+ * ref for plain branch names while leaving commit-ish expressions untouched.
+ */
+export function resolveBaseRef(base: string, cwd?: string): string {
+  if (!base) return base;
+  if (QUALIFIED_REF_PREFIXES.some((prefix) => base.startsWith(prefix))) return base;
+  if (GIT_REV_KEYWORDS.has(base)) return base;
+  if (REV_EXPRESSION_MARKERS.some((marker) => base.includes(marker))) return base;
+
+  const candidate = `origin/${base}`;
+  try {
+    const out = execFileSync("git", ["-C", cwd ?? process.cwd(), "rev-parse", "--verify", "--quiet", candidate], {
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8",
+      timeout: 10_000,
+      maxBuffer: 1024 * 1024,
+    }).trim();
+    if (out) return candidate;
+  } catch {
+    // Fall through: callers may have passed a SHA, tag, deleted branch, or a
+    // repo without remotes. Let the later git command handle the original ref.
+  }
+  return base;
+}
+
+/**
+ * Resolve the filesystem root for global prompt files.
+ *
+ * `configRoot` is the caller's explicit trusted config walk root. Honor prompt
+ * files there first, then fall back to the installed code-review prompt tree so
+ * a normal target repo without top-level `prompts/` still reviews domains.
+ */
+export function resolvePromptRoot(opts: { configRoot: string; home: string }): string {
+  const direct = path.join(opts.configRoot, "prompts");
+  if (fs.existsSync(direct)) return direct;
+
+  const sourceLayout = path.join(opts.configRoot, "global", "prompts");
+  if (fs.existsSync(sourceLayout)) return sourceLayout;
+
+  const installed = path.join(opts.home, ".claude", "code-review", "prompts");
+  if (fs.existsSync(installed)) return installed;
+
+  return installed;
+}
+
 // ─── Trusted config loading ─────────────────────────────────────────────────
 
 function readJsonIfExists(p: string): Record<string, unknown> {

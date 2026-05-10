@@ -246,6 +246,161 @@ test("lock ordering through main(): acquire before GET, release after POST", asy
   }
 });
 
+test("main(): bare base ref resolves to origin/base before trusted config reads", async () => {
+  const home = tmpDir("home-");
+  const repo = tmpDir("repo-");
+  const reviewWt = tmpDir("review-wt-");
+  fs.rmSync(reviewWt, { recursive: true, force: true });
+
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repo });
+  execFileSync("git", ["config", "user.name", "test"], { cwd: repo });
+  execFileSync("git", ["config", "commit.gpgsign", "false"], { cwd: repo });
+
+  const writeBaseConfig = (defaultAgent: "codex" | "gemini") => {
+    fs.mkdirSync(path.join(repo, ".code-review"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, ".code-review", "config.json"),
+      JSON.stringify({
+        default_agent: defaultAgent,
+        quick_domains: [],
+        domain_agents: {},
+        severity_overrides: {},
+        fix_threshold: "medium",
+        runtime: {
+          lock_ttl_minutes: 30,
+          subagent_env_allowlist: ["PATH", "HOME"],
+          max_concurrent_agents: 1,
+          temp_dir_prefix: "stark-base-ref",
+          large_pr_file_threshold: 40,
+          large_pr_line_threshold: 3000,
+          large_pr_timeout_s: 60,
+        },
+        test_command: null,
+        untrusted_fix_loop: false,
+        history_retention_days: 0,
+        lock_ttl_minutes: 30,
+      }),
+    );
+  };
+
+  writeBaseConfig("gemini");
+  execFileSync("git", ["add", ".code-review/config.json"], { cwd: repo });
+  execFileSync("git", ["commit", "-q", "-m", "stale local main config"], { cwd: repo });
+  const staleMain = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
+
+  writeBaseConfig("codex");
+  execFileSync("git", ["add", ".code-review/config.json"], { cwd: repo });
+  execFileSync("git", ["commit", "-q", "-m", "fresh origin main config"], { cwd: repo });
+  const freshOriginMain = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
+  execFileSync("git", ["update-ref", "refs/remotes/origin/main", freshOriginMain], { cwd: repo });
+  execFileSync("git", ["checkout", "--detach", freshOriginMain], { cwd: repo });
+  execFileSync("git", ["branch", "-f", "main", staleMain], { cwd: repo });
+  execFileSync("git", ["worktree", "add", "--detach", reviewWt, freshOriginMain], { cwd: repo });
+
+  // Filesystem prompts exist only for codex. If main() used stale local `main`,
+  // default_agent=gemini would make prompt resolution fail and the run would be
+  // a dispatch_failure. Resolving to origin/main selects codex and succeeds.
+  fs.mkdirSync(path.join(repo, "prompts", "codex"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "prompts", "codex", "agent.md"), "agent");
+  fs.writeFileSync(path.join(repo, "prompts", "codex", "04-security.md"), "security");
+
+  const ghMock = async (p: string, opts?: { method?: string; body?: unknown }) => {
+    if (opts?.method === "POST") return { status: 200, data: { id: 1 }, headers: {} };
+    if (p === "/repos/owner/repo/pulls/9") {
+      return {
+        status: 200,
+        data: {
+          head: {
+            sha: freshOriginMain,
+            ref: "feature",
+            repo: { fork: false, full_name: "owner/repo", clone_url: "https://github.com/owner/repo.git" },
+          },
+          title: "t",
+          body: "b",
+          maintainer_can_modify: true,
+        },
+        headers: {},
+      };
+    }
+    if (p === "/repos/owner/repo/pulls/9/files") {
+      return { status: 200, data: [{ filename: "src/x.ts" }], headers: {} };
+    }
+    return { status: 200, data: [], headers: {} };
+  };
+  const ghTextMock = async () => "diff --git a/src/x.ts b/src/x.ts\n";
+  const spawnMock = async () => ({
+    stdout: JSON.stringify({ no_findings: true, domain: "security", agent: "codex" }),
+    stderr: "",
+    status: 0,
+  });
+
+  const origHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const { receipt, exitCode } = await main(
+      [
+        "--pr", "9",
+        "--repo", "owner/repo",
+        "--base", "main",
+        "--worktree", reviewWt,
+        "--config-root", repo,
+        "--domains", "security",
+        "--dry-run",
+        "--json",
+      ],
+      {
+        ghJsonFn: ghMock as unknown as NonNullable<Parameters<typeof main>[1]>["ghJsonFn"],
+        ghJsonOnceFn: ghMock as unknown as NonNullable<Parameters<typeof main>[1]>["ghJsonOnceFn"],
+        ghTextFn: ghTextMock as unknown as NonNullable<Parameters<typeof main>[1]>["ghTextFn"],
+        spawnFn: spawnMock as unknown as NonNullable<Parameters<typeof main>[1]>["spawnFn"],
+      },
+    );
+    assert.equal(exitCode, 0, JSON.stringify(receipt));
+    assert.equal(receipt.ok, true, JSON.stringify(receipt));
+    if (receipt.ok) {
+      assert.deepEqual(receipt.agents_resolved, { security: "codex" });
+      assert.equal(receipt.rounds[0].failed_results.length, 0);
+    }
+  } finally {
+    if (origHome === undefined) delete process.env.HOME;
+    else process.env.HOME = origHome;
+    try { execFileSync("git", ["worktree", "remove", "--force", reviewWt], { cwd: repo }); } catch { /* */ }
+  }
+});
+
+test("main(): zero selected domains is an explicit domain_selection_failed receipt", async () => {
+  const home = tmpDir("home-");
+  const configRoot = tmpDir("config-root-");
+  const worktree = tmpDir("review-wt-");
+  fs.mkdirSync(path.join(home, ".claude", "code-review"), { recursive: true });
+  fs.writeFileSync(
+    path.join(home, ".claude", "code-review", "config.json"),
+    JSON.stringify(bareConfig({ domain_agents: { security: "codex" } })),
+  );
+
+  const origHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const { receipt, exitCode } = await main([
+      "--pr", "3",
+      "--repo", "owner/repo",
+      "--base", "HEAD",
+      "--worktree", worktree,
+      "--config-root", configRoot,
+      "--dry-run",
+      "--json",
+    ]);
+    assert.equal(exitCode, 1);
+    assert.equal(receipt.ok, false);
+    assert.equal((receipt as FailureReceipt).error.code, "domain_selection_failed");
+    assert.match((receipt as FailureReceipt).error.message, /no review domains selected/);
+  } finally {
+    if (origHome === undefined) delete process.env.HOME;
+    else process.env.HOME = origHome;
+  }
+});
+
 // ─── Lock ordering (helper-level, retained as a unit-level pin) ─────────────
 
 test("lock ordering (helpers): acquire BEFORE marker GET, release AFTER POST", async () => {
@@ -423,9 +578,7 @@ test("FailureReceipt schema: ok=false, schema_version=1, error.code/message", ()
 test("dispatchDomains: malformed JSONL is captured in parseErrors, not findings", async () => {
   const config = bareConfig();
   // Use the real codex parseOutput so the contract is exercised end-to-end.
-  const codexPort: AgentPort = await (await import("./agent_codex.ts")).default
-    ? (await import("./agent_codex.ts"))
-    : await import("./agent_codex.ts");
+  const codexPort = await import("./agent_codex.ts");
   const ports = new Map([["codex" as const, codexPort as unknown as AgentPort]]);
   // Spawn returns a JSONL stream containing one valid agent_message + a
   // malformed line. The codex parser must split into findings + parseErrors.

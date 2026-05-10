@@ -200,7 +200,12 @@ class TestMakeGeminiEnv:
     def test_keys(self):
         env = make_gemini_env("/tmp/h")
         assert env["GEMINI_CLI_HOME"] == "/tmp/h"
+        assert "GEMINI_CLI_TRUST_WORKSPACE" not in env
         assert "PATH" in env
+
+    def test_trust_workspace_opt_in(self):
+        env = make_gemini_env("/tmp/h", trust_workspace=True)
+        assert env["GEMINI_CLI_TRUST_WORKSPACE"] == "true"
 
     def test_forces_vertex_ai_env(self, monkeypatch):
         """Headless Gemini must use Vertex/ADC; a host regional

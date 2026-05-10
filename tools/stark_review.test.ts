@@ -105,9 +105,12 @@ test("agent_claude: parseOutput tolerates malformed records", () => {
 // ─── Task 8-2: agent_gemini.ts port ─────────────────────────────────────────
 
 test("agent_gemini: buildCommand emits gemini -o json with model and stdin prompt", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gemtest-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "stark-gemtest-"));
   try {
-    const built = agentGemini.buildCommand("hi", "gemini-3.1-pro-preview", { cwd: tmp });
+    const built = agentGemini.buildCommand("hi", "gemini-3.1-pro-preview", {
+      cwd: tmp,
+      trustedGeneratedCwd: true,
+    });
     assert.equal(built.cmd, "gemini");
     assert.deepEqual(built.args, ["-o", "json", "-m", "gemini-3.1-pro-preview", "-p", "-"]);
     assert.equal(built.stdin, "hi");
@@ -120,6 +123,7 @@ test("agent_gemini: buildCommand emits gemini -o json with model and stdin promp
     // Project dir registered in projects.json under GEMINI_CLI_HOME.
     const home = built.env.GEMINI_CLI_HOME;
     assert.ok(home, "GEMINI_CLI_HOME must be set");
+    assert.equal(built.env.GEMINI_CLI_TRUST_WORKSPACE, "true");
     const projects = JSON.parse(
       fs.readFileSync(path.join(home, ".gemini", "projects.json"), "utf8"),
     );
@@ -140,8 +144,28 @@ test("agent_gemini: buildCommand emits gemini -o json with model and stdin promp
   }
 });
 
+test("agent_gemini: workspace trust requires an explicit generated-cwd mark", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "review-worktree-"));
+  try {
+    const built = agentGemini.buildCommand("hi", undefined, { cwd: tmp });
+    assert.ok(!("GEMINI_CLI_TRUST_WORKSPACE" in built.env));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("agent_gemini: stark-named non-temp cwd is not trusted by name", () => {
+  const tmp = fs.mkdtempSync(path.join(process.cwd(), "stark-outside-"));
+  try {
+    const built = agentGemini.buildCommand("hi", undefined, { cwd: tmp });
+    assert.ok(!("GEMINI_CLI_TRUST_WORKSPACE" in built.env));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("agent_gemini: API-key fallback disables Vertex env", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gemtest-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "stark-gemtest-"));
   const originalKey = process.env.GEMINI_API_KEY;
   process.env.GEMINI_API_KEY = "test-key-xyz";
   try {

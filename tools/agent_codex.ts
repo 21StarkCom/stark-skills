@@ -17,6 +17,8 @@ export interface BuiltCommand {
  * as cwd, so per-agent setup (e.g. Gemini projects.json) can register it. */
 export interface BuildContext {
   cwd?: string;
+  /** True only when the dispatcher just created cwd as an isolated scratch dir. */
+  trustedGeneratedCwd?: boolean;
 }
 
 export interface ParseError {

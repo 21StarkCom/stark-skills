@@ -272,21 +272,46 @@ test("dispatchDomains: non-empty stdout WITHOUT sentinel still trips unparseable
   });
   assert.equal(results.length, 1);
   assert.equal(results[0].ok, false);
-  assert.match(results[0].error ?? "", /unparseable/);
+  assert.match(results[0].error ?? "", /no_findings sentinel/);
+});
+
+test("dispatchDomains: empty stdout WITHOUT sentinel is a dispatch failure", async () => {
+  const config = bareConfig();
+  const silentPort: AgentPort = {
+    buildCommand: (prompt: string) => ({ cmd: "/bin/echo", args: [], stdin: prompt, env: {} }),
+    parseOutput: () => ({ findings: [], parseErrors: [] }),
+  };
+  const ports = new Map([["codex" as const, silentPort]]);
+  const fakeSpawn = async () => ({ stdout: "", stderr: "", status: 0 });
+  const results = await dispatchDomains({
+    assignments: [{ domain: "behavior", agent: "codex", prompt: "p" }],
+    ports, config,
+    spawnFn: fakeSpawn as unknown as typeof fakeSpawn,
+  });
+  assert.equal(results.length, 1);
+  assert.equal(results[0].ok, false);
+  assert.match(results[0].error ?? "", /no_findings sentinel/);
 });
 
 test("dispatchDomains: failure of one domain does not abort siblings", async () => {
   const config = bareConfig();
   const fakePort: AgentPort = {
     buildCommand: (prompt: string) => ({ cmd: "/bin/echo", args: [], stdin: prompt, env: {} }),
-    parseOutput: () => ({ findings: [], parseErrors: [] }),
+    parseOutput: (stdout: string) =>
+      stdout.includes("no_findings")
+        ? { findings: [], parseErrors: [], noFindingsAck: true }
+        : { findings: [], parseErrors: [] },
   };
   const ports = new Map([["codex" as const, fakePort]]);
   let calls = 0;
   const fakeSpawn = async () => {
     calls++;
     if (calls === 1) return { stdout: "", stderr: "boom", status: 7 };
-    return { stdout: "", stderr: "", status: 0 };
+    return {
+      stdout: JSON.stringify({ no_findings: true, domain: "b", agent: "codex" }),
+      stderr: "",
+      status: 0,
+    };
   };
   const results = await dispatchDomains({
     assignments: [
@@ -612,6 +637,11 @@ test("safeStringify handles Error, primitives, and exotic throws", () => {
   const evil: Record<symbol, unknown> = {};
   evil[Symbol.toPrimitive] = () => { throw new Error("nope"); };
   assert.equal(safeStringify(evil), "<unrepresentable error>");
+  const evilError = new Error("hidden");
+  Object.defineProperty(evilError, "message", {
+    get() { throw new Error("no message"); },
+  });
+  assert.equal(safeStringify(evilError), "<unrepresentable error>");
 });
 
 test("dispatchDomains catch path normalizes non-Error throws (no TypeError)", async () => {
@@ -856,6 +886,18 @@ test("computeExitCode: 0 only when ok, no failures, no unposted", () => {
   };
   assert.equal(computeExitCode(base), 0);
   assert.equal(computeExitCode({ ...base, unposted_reviews: [{ round: 1, reason: "5xx" }] }), 1);
+  const withParseError: Receipt = {
+    ...base,
+    rounds: [{
+      round: 1, findings: 1,
+      summary: { fix: 1, noise: 0, false_positive: 0, ignored: 0, unclassified: 0, total: 1 },
+      failed_results: [],
+      parse_errors: [{ line: "{\"severity\":\"critical\"}", reason: "missing title" }],
+      classifier_errors: [],
+      duration_ms: 1,
+    }],
+  };
+  assert.equal(computeExitCode(withParseError), 1);
   const withFailure: Receipt = {
     ...base,
     rounds: [{

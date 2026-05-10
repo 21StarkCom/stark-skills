@@ -12,6 +12,8 @@ import {
   loadTrustedConfig,
   PathRejectedError,
   renderReviewPrompt,
+  resolveBaseRef,
+  resolvePromptRoot,
   resolvePromptSources,
   selectDomains,
   resolveAgentsForDomains,
@@ -470,8 +472,8 @@ export function stripControl(s: string): string {
 // object whose `Symbol.toPrimitive` throws). Wrap it so the catch-path is
 // guaranteed not to throw recursively.
 export function safeStringify(err: unknown): string {
-  if (err instanceof Error) return err.message;
   try {
+    if (err instanceof Error) return String(err.message);
     return String(err);
   } catch {
     return "<unrepresentable error>";
@@ -732,7 +734,10 @@ export async function dispatchDomains(opts: DispatchOptions): Promise<DispatchRe
         // Create the cwd FIRST so per-agent setup (e.g. Gemini's
         // GEMINI_CLI_HOME / projects.json) can register it before spawn.
         tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `${tempPrefix}-`));
-        const built = port.buildCommand(a.prompt, a.model, { cwd: tempDir });
+        const built = port.buildCommand(a.prompt, a.model, {
+          cwd: tempDir,
+          trustedGeneratedCwd: true,
+        });
         const env = pickAllowlistedEnv(process.env, allowlist);
         for (const [k, v] of Object.entries(built.env)) {
           if (!FORBIDDEN_ENV_KEYS.includes(k as (typeof FORBIDDEN_ENV_KEYS)[number])) {
@@ -755,24 +760,22 @@ export async function dispatchDomains(opts: DispatchOptions): Promise<DispatchRe
           continue;
         }
         const parsed = port.parseOutput(sp.stdout);
-        // Tier 1 detection: non-empty stdout that yields no findings AND no
-        // parse errors AND no explicit no-findings sentinel is unparseable
-        // prose — route to failed_results, not a silent ok. The sentinel
-        // (`{"no_findings":true,...}`) is the agent's explicit clean-review
-        // ack and is the ONLY way to signal "I reviewed and found nothing".
+        // Tier 1 detection: stdout that yields no findings, no parse errors,
+        // and no explicit no-findings sentinel is not a clean review. This
+        // includes empty stdout: the prompt contract requires either findings
+        // or the sentinel, so silence must not become a silent "0 findings".
         if (
           parsed.findings.length === 0 &&
           parsed.parseErrors.length === 0 &&
-          !parsed.noFindingsAck &&
-          sp.stdout.trim().length > 0
+          !parsed.noFindingsAck
         ) {
           results[idx] = {
             domain: a.domain, agent: a.agent, ok: false,
             findings: [], parseErrors: [],
-            error: `unparseable agent stdout (${sp.stdout.length} bytes, no findings)`,
+            error: `no parseable findings and no no_findings sentinel (${sp.stdout.length} stdout bytes)`,
             durationMs: Date.now() - start,
           };
-          progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  unparseable  ${fmtDuration(Date.now() - start)}`);
+          progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  no-sentinel  ${fmtDuration(Date.now() - start)}`);
           continue;
         }
         results[idx] = {
@@ -899,7 +902,10 @@ async function classifyOne(
   let tempDir: string | null = null;
   try {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `${tempPrefix}-cls-`));
-    const built = port.buildCommand(prompt, undefined, { cwd: tempDir });
+    const built = port.buildCommand(prompt, undefined, {
+      cwd: tempDir,
+      trustedGeneratedCwd: true,
+    });
     const env = pickAllowlistedEnv(process.env, allowlist);
     for (const [k, v] of Object.entries(built.env)) {
       if (!FORBIDDEN_ENV_KEYS.includes(k as (typeof FORBIDDEN_ENV_KEYS)[number])) env[k] = v;
@@ -1922,6 +1928,9 @@ export function renderHumanSummary(r: Receipt): string {
       if (rd.failed_results.length > 0) {
         lines.push(`      failed: ${rd.failed_results.map((f) => `${f.agent}/${f.domain}`).join(", ")}`);
       }
+      if (rd.parse_errors.length > 0) {
+        lines.push(`      parse_errors: ${rd.parse_errors.length}`);
+      }
     }
     lines.push(`  comments_posted: ${r.comments_posted}, fixes_pushed: ${r.fixes_pushed}`);
     if (r.unposted_reviews.length > 0) {
@@ -1937,13 +1946,17 @@ export function renderHumanSummary(r: Receipt): string {
 
 /**
  * Compute the final exit code per the spec:
- *   0 only when ok:true AND failed_results=[] AND unposted_reviews=[]
- *   1 partial (ok:true with failures or unposted) or terminal (ok:false)
+ *   0 only when ok:true AND failed_results=[] AND parse_errors=[]
+ *     AND unposted_reviews=[]
+ *   1 partial (ok:true with failures, parse errors, or unposted) or terminal
+ *     (ok:false)
  */
 export function computeExitCode(r: Receipt): number {
   if (!r.ok) return 1;
   const anyFailed = r.rounds.some((rd) => rd.failed_results.length > 0);
   if (anyFailed) return 1;
+  const anyParseErrors = r.rounds.some((rd) => rd.parse_errors.length > 0);
+  if (anyParseErrors) return 1;
   if (r.unposted_reviews.length > 0) return 1;
   return 0;
 }
@@ -2383,6 +2396,8 @@ export {
   buildMarker,
   evaluateFixLoopGate,
   loadTrustedConfig,
+  resolveBaseRef,
+  resolvePromptRoot,
   selectDomains,
   resolveAgentsForDomains,
   renderReviewPrompt,
@@ -2443,9 +2458,14 @@ export async function main(
     process.stderr.write(HELP_TEXT);
     return { receipt: terminalReceipt("o/r", 0, "bad_args", parsed.errors.join("; ")), exitCode: 1 };
   }
-  const cli = parsed.config;
+  let cli = parsed.config;
   const repo = cli.repo;
   const pr = cli.pr;
+  const resolvedBase = resolveBaseRef(cli.base, cli.worktree);
+  if (resolvedBase !== cli.base) {
+    progress(`resolved base ${cli.base} -> ${resolvedBase}`);
+    cli = { ...cli, base: resolvedBase };
+  }
 
   let config: ResolvedConfig;
   try {
@@ -2459,7 +2479,7 @@ export async function main(
     return finalizeFailure(repo, pr, "config_load_failed", (err as Error).message, cli.json);
   }
 
-  const promptRoot = path.join(cli.configRoot, "prompts");
+  const promptRoot = resolvePromptRoot({ configRoot: cli.configRoot, home: os.homedir() });
   let domains: string[];
   try {
     const mode = cli.domains ? "explicit" : cli.quick ? "quick" : "default";
@@ -2470,6 +2490,11 @@ export async function main(
       promptRoot,
       agentResolver: (d) => cli.agent ?? config.domain_agents?.[d] ?? config.default_agent ?? "codex",
     });
+    if (domains.length === 0) {
+      throw new Error(
+        `selectDomains: no review domains selected (prompt root ${promptRoot})`,
+      );
+    }
   } catch (err) {
     return finalizeFailure(repo, pr, "domain_selection_failed", (err as Error).message, cli.json);
   }
