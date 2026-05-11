@@ -4,7 +4,15 @@ import * as fs from "node:fs";
 import type { ExecFn } from "./types.ts";
 
 const defaultExec: ExecFn = (cmd, args, opts) =>
-  execFileSync(cmd, args, { ...opts, stdio: ["pipe", "pipe", "pipe"] });
+  execFileSync(cmd, args, {
+    ...opts,
+    stdio: ["pipe", "pipe", "pipe"],
+    // Node's default maxBuffer is 1 MiB; large feature-branch diffs
+    // (e.g. >100 file changes, >1 MiB combined patch) trip ENOBUFS on
+    // `git diff`/`git log -p`. 64 MiB is comfortable headroom while
+    // still bounded against accidental runaway output.
+    maxBuffer: 64 * 1024 * 1024,
+  });
 
 export function git(args: string[], opts: { exec?: ExecFn; input?: string } = {}): string {
   const exec = opts.exec ?? defaultExec;
