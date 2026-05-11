@@ -19,7 +19,7 @@ A Go CLI with Bubble Tea TUI for multi-provider image generation. Interactive te
 ## Repository Structure
 
 ```
-~/git/Evinced/stark-tools/
+~/Code/Playground/stark-tools/
   cmd/stark-tools/
     main.go                 # Entry point, CLI arg parsing
   internal/
@@ -229,7 +229,7 @@ clean:
 
 ## Migration Plan
 
-1. Create `~/git/Evinced/stark-tools` repo
+1. Create `~/Code/Playground/stark-tools` repo
 2. Build the Go TUI with both providers
 3. Port prompt augmentation logic from `image_gen.py`
 4. Port reference docs (prompting.md, sample-prompts.md) as embedded resources or docs/

@@ -6,8 +6,8 @@ AI-powered development workflow system for Claude Code. 28 skills covering the f
 
 ```bash
 # Clone and install
-git clone git@github.com:GetEvinced/stark-skills.git ~/git/Evinced/stark-skills
-cd ~/git/Evinced/stark-skills
+git clone git@github.com:GetEvinced/stark-skills.git ~/Code/Playground/stark-skills
+cd ~/Code/Playground/stark-skills
 ./install.sh
 
 # Start a work session (context loading, health checks, briefing)
@@ -172,7 +172,7 @@ stark-skills/
 ├── data/                         ← persona roster, review coverage, showcase pages
 ├── automation/                   ← CCR automation fleet (12 triggers, logs, costs)
 ├── .github/workflows/            ← GitHub Actions (project sync, gate checks, heartbeat)
-├── org/evinced/                  ← → ~/git/Evinced/.code-review/
+├── org/evinced/                  ← → ~/Code/.code-review/
 ├── docs/
 │   ├── skills/                   ← generated skill docs (Markdown, Mermaid, JSON, and PNG artifacts)
 │   ├── adr/                      ← architectural decision records
@@ -190,7 +190,7 @@ The installer creates symlinks — files stay in this repo. `git pull` updates e
 | `global/orchestrator.md` | `~/.claude/code-review/orchestrator.md` | Fix-review loop |
 | `global/prompts/` | `~/.claude/code-review/prompts/` | Agent × domain prompts |
 | `scripts/` | `~/.claude/code-review/scripts/` | Python scripts |
-| `org/evinced/` | `~/git/Evinced/.code-review/` | Org config |
+| `org/evinced/` | `~/Code/.code-review/` | Org config |
 
 ```bash
 ./install.sh              # install (symlink)
@@ -204,8 +204,8 @@ Same merge pattern as CLAUDE.md — most specific wins:
 
 ```
 ~/.claude/code-review/config.json          ← global (from this repo)
-~/git/Evinced/.code-review/config.json     ← org override (from this repo)
-~/git/Evinced/some-repo/.code-review/      ← repo override (in each repo)
+~/Code/.code-review/config.json     ← org override (from this repo)
+~/Code/some-repo/.code-review/      ← repo override (in each repo)
   ├── config.json
   ├── prompts/                             ← per-agent prompt overrides
   └── domains/                             ← repo-specific domains (shared)
@@ -224,8 +224,8 @@ touch global/prompts/codex/07-performance.md
 touch global/prompts/gemini/07-performance.md
 
 # Repo-specific domain (shared across agents)
-mkdir -p ~/git/Evinced/some-repo/.code-review/domains
-touch ~/git/Evinced/some-repo/.code-review/domains/07-db-migrations.md
+mkdir -p ~/Code/some-repo/.code-review/domains
+touch ~/Code/some-repo/.code-review/domains/07-db-migrations.md
 ```
 
 Domains are auto-discovered at startup.

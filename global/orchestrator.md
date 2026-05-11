@@ -40,14 +40,14 @@ Each domain prompt is in `~/.claude/code-review/prompts/{agent}/`. Every agent g
 ## Tools
 
 ```bash
-PYTHON=~/git/Evinced/scripts/.venv/bin/python3
-REVIEW="$PYTHON ~/git/Evinced/scripts/multi_review.py"
+PYTHON=~/Code/scripts/.venv/bin/python3
+REVIEW="$PYTHON ~/Code/scripts/multi_review.py"
 
 # Single PR in current repo
 $REVIEW --pr <N> --json
 
 # All open PRs across repos
-$REVIEW --all-repos ~/git/Evinced/repo1 ~/git/Evinced/repo2 --json
+$REVIEW --all-repos ~/Code/repo1 ~/Code/repo2 --json
 
 # Dry run (no GitHub posts)
 $REVIEW --pr <N> --dry-run --json

@@ -23,7 +23,7 @@ Prompts loaded from ~/.claude/code-review/prompts/{agent}/ (with repo/org overri
 Usage:
     multi_review.py --pr 10
     multi_review.py --pr 10 --repo GetEvinced/design-system-core --base main
-    multi_review.py --all-repos ~/git/Evinced/design-system-core ~/git/Evinced/infra-pulse
+    multi_review.py --all-repos ~/Code/Playground/design-system-core ~/Code/infra-pulse
     multi_review.py --pr 10 --dry-run
     multi_review.py --pr 10 --json
 """
@@ -406,7 +406,7 @@ def _find_repo_root(cwd: str | None = None) -> str | None:
     Returns the first directory that contains a `.code-review/prompts/`
     subdirectory, or ``None`` if none is found.  This preserves the legacy
     walk that picks up org-level prompt overrides (e.g.
-    ``~/git/Evinced/.code-review/prompts/``).
+    ``~/Code/.code-review/prompts/``).
     """
     if cwd is None:
         cwd = os.getcwd()
@@ -2186,7 +2186,7 @@ def main() -> None:
             "  %(prog)s --pr 10                     Review PR #10 in current repo\n"
             "  %(prog)s --pr 10 --dry-run            Review without posting to GitHub\n"
             "  %(prog)s --pr 10 --json               Output JSON for Claude Code\n"
-            "  %(prog)s --all-repos ~/git/Evinced/*   Review all open PRs in repos\n"
+            "  %(prog)s --all-repos ~/Code/*   Review all open PRs in repos\n"
         ),
     )
 

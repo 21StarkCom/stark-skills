@@ -19,7 +19,7 @@
 
 - Python interpreter: `~/.claude/code-review/scripts/.venv/bin/python3` (system Python lacks deps — ALWAYS use the venv)
 - Test runner: `~/.claude/code-review/scripts/.venv/bin/python3 -m pytest scripts/<test_file>.py -q`
-- Repo root: `/Users/aryeh/git/Evinced/stark-skills`
+- Repo root: `/Users/aryeh/Code/Playground/stark-skills`
 - Existing patterns to mirror:
   - `scripts/forged_review_audit.py` — a clean example of a module using `audit_base` with its own table schema
   - `scripts/forged_review_engine.py` — pure logic with unit tests, no I/O in core functions
@@ -81,7 +81,7 @@ def test_cost_accumulator_initial_state():
 - [ ] **Step 2: Run the test to verify it fails**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills
+cd /Users/aryeh/Code/Playground/stark-skills
 ~/.claude/code-review/scripts/.venv/bin/python3 -m pytest scripts/test_audit_base.py::test_cost_accumulator_add_call_updates_total -v
 ```
 
@@ -895,7 +895,7 @@ Expected: `config OK`
 - [ ] **Step 4: Verify the config_loader sees the override**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills
+cd /Users/aryeh/Code/Playground/stark-skills
 ~/.claude/code-review/scripts/.venv/bin/python3 -c "
 import sys; sys.path.insert(0, 'scripts')
 from config_loader import get_red_team_config, get_model_rates
@@ -933,7 +933,7 @@ EOF
 - [ ] **Step 1: Create the preamble file**
 
 ```bash
-mkdir -p /Users/aryeh/git/Evinced/stark-skills/global/prompts/red-team/personas
+mkdir -p /Users/aryeh/Code/Playground/stark-skills/global/prompts/red-team/personas
 ```
 
 Create `global/prompts/red-team/preamble.md`:
@@ -3738,7 +3738,7 @@ on stable blocking findings or human-review requests or budget exceedance.
 - [ ] **Step 2: Run the calibration script**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills
+cd /Users/aryeh/Code/Playground/stark-skills
 ~/.claude/code-review/scripts/.venv/bin/python3 scripts/calibrate_red_team.py \
   docs/specs/2026-04-12-stark-red-team-design.md \
   docs/specs/red-team-fixture-source-spec.md \

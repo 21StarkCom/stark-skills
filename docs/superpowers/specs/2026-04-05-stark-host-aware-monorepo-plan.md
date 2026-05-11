@@ -66,7 +66,7 @@ Total estimated: 10–16 weeks for one engineer. Phases 4+5 parallelizable if st
 Setup:
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills
+cd /Users/aryeh/Code/Playground/stark-skills
 python3 -m venv scripts/.venv
 source scripts/.venv/bin/activate
 pip install --upgrade pip setuptools wheel

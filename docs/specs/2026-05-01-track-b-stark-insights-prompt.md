@@ -32,7 +32,7 @@ After implementing, list:
 
 ## Context
 
-You are working inside the **stark-insights** repository at `/Users/aryeh/git/Evinced/stark-insights/`. This is the consumer side of a cross-repo feature whose producer side already shipped in **stark-skills PR #429**.
+You are working inside the **stark-insights** repository at `/Users/aryeh/Code/Playground/stark-insights/`. This is the consumer side of a cross-repo feature whose producer side already shipped in **stark-skills PR #429**.
 
 The producer started emitting three new event types via `emit_queue.enqueue()` → `~/.stark-insights/queue.db` → drained to `POST /events` → `EventEnvelope.model_validate()`:
 
@@ -349,7 +349,7 @@ Add three additional standalone test functions at the bottom of `tests/test_lift
 ## Test command
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-insights
+cd /Users/aryeh/Code/Playground/stark-insights
 uv sync --extra dev    # ensure dev deps are present
 uv run pytest tests/test_models.py tests/test_lifting.py -v
 ```
@@ -410,10 +410,10 @@ done
 ```bash
 PYTHON="$HOME/.claude/code-review/scripts/.venv/bin/python3"
 SCRIPTS="$HOME/.claude/code-review/scripts"
-PROMPT="/Users/aryeh/git/Evinced/stark-skills/docs/specs/2026-05-01-track-b-stark-insights-prompt.md"
+PROMPT="/Users/aryeh/Code/Playground/stark-skills/docs/specs/2026-05-01-track-b-stark-insights-prompt.md"
 
 "$PYTHON" "$SCRIPTS/autopilot_dispatch.py" \
-  --repo-root /Users/aryeh/git/Evinced/stark-insights \
+  --repo-root /Users/aryeh/Code/Playground/stark-insights \
   --step-id track-b-phase-8 \
   --prompt-file "$PROMPT" \
   --agents codex \
@@ -421,4 +421,4 @@ PROMPT="/Users/aryeh/git/Evinced/stark-skills/docs/specs/2026-05-01-track-b-star
   --test-command "uv run pytest tests/test_models.py tests/test_lifting.py -q"
 ```
 
-The orchestrator creates `/Users/aryeh/git/Evinced/stark-insights/.worktrees/autopilot-codex-track-b-phase-8`, runs codex against this prompt, captures the diff and test result, and reports back. After verification, apply the diff to a feature branch and open a PR.
+The orchestrator creates `/Users/aryeh/Code/Playground/stark-insights/.worktrees/autopilot-codex-track-b-phase-8`, runs codex against this prompt, captures the diff and test result, and reports back. After verification, apply the diff to a feature branch and open a PR.

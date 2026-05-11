@@ -28,7 +28,7 @@ A Claude Code skill at `~/.claude/skills/stark-review/SKILL.md` that:
 
 - `PR_NUMBER` — auto-detected from current branch via `gh pr view --json number --jq .number` if omitted. If that fails, error: "No open PR for current branch. Specify a PR number."
 - `--rounds N` — max review-fix cycles, default 3. Skill-only flag (not passed to multi_review.py).
-- `--repo ORG/REPO` — override repo detection. The skill still needs a local clone to create a worktree from; if no local clone exists under `~/git/`, error with instructions.
+- `--repo ORG/REPO` — override repo detection. The skill still needs a local clone to create a worktree from; if no local clone exists under `~/Code/`, error with instructions.
 - `--dry-run` — review only, no fixes, no GitHub posting, no commits
 
 ## Workflow
@@ -183,7 +183,7 @@ from github_app import pr_review
 pr_review("org/repo", PR_NUMBER, event="COMMENT", body=summary_body)
 ```
 
-`SCRIPTS_DIR` = `~/.claude/code-review/scripts/` (installed by this repo). No dependency on external `~/git/Evinced/scripts/stark_claude.py`.
+`SCRIPTS_DIR` = `~/.claude/code-review/scripts/` (installed by this repo). No dependency on external `~/Code/scripts/stark_claude.py`.
 
 If posting fails, print the summary to terminal and warn. Do not fail the entire skill.
 
@@ -228,7 +228,7 @@ The skill file — narrative instructions for Claude Code to follow when `/stark
 
 ### 2. Update: `scripts/multi_review.py`
 
-**a) Fix PROMPTS_DIR.** Currently hardcoded to `~/git/Personal/Prompts/CodeReviews` (line 50). Must resolve via config hierarchy:
+**a) Fix PROMPTS_DIR.** Currently hardcoded to `~/Code/Personal/Prompts/CodeReviews` (line 50). Must resolve via config hierarchy:
 
 ```python
 # Resolution order (first match wins, per agent × domain):

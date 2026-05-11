@@ -18,7 +18,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `global/` — global config + prompts, installed to `~/.Codex/code-review/`
 - `scripts/` — Python orchestrator + GitHub App auth, installed to `~/.Codex/code-review/scripts/`
 - `skill/` — all skills (`skill/stark-*/SKILL.md`, 30 skills), symlinked to Claude and copied to `~/.codex/skills/`
-- `org/evinced/` — Evinced org config, installed to `~/git/Evinced/.code-review/`
+- `org/evinced/` — Evinced org config, installed to `~/Code/.code-review/`
 - `data/` — persona roster, review coverage HTML, generated showcase pages
 - `automation/` — CCR automation fleet: 12 triggers, prompts, logs, cost tracking, reports
 - `.github/workflows/` — GitHub Actions: project sync, gate checks, stale detection, heartbeat

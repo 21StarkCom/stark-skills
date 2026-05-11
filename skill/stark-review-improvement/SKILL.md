@@ -5,8 +5,8 @@ description: >-
 argument-hint: "[--prompts-dir design-review] (reads assessment from context or latest history)"
 disable-model-invocation: true
 model: opus
-revision: ea7268a18edb159e040db78148f2ab9cb324d76a
-revision_date: 2026-05-03T06:43:43Z
+revision: 1fb8e969f0d9dc707bc7ea951293fa5cc0c93926
+revision_date: 2026-05-11T08:41:29Z
 ---
 
 # stark-review-improvement
@@ -25,7 +25,7 @@ Closes the feedback loop on stark-skills: reads the prompt improvement assessmen
 ## Constants
 
 ```
-STARK_REPO  = ~/git/Evinced/stark-skills
+STARK_REPO  = ~/Code/Playground/stark-skills
 PROMPTS     = $STARK_REPO/global/prompts
 SCRIPTS     = $STARK_REPO/scripts
 CONFIG      = $STARK_REPO/global/config.json

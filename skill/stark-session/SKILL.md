@@ -5,8 +5,8 @@ description: >-
 argument-hint: "[start|end]"
 disable-model-invocation: true
 model: opus
-revision: 119a85b101220376c49cf8db62fac1fc0564725d
-revision_date: 2026-04-27T18:34:08Z
+revision: 1fb8e969f0d9dc707bc7ea951293fa5cc0c93926
+revision_date: 2026-05-11T08:41:29Z
 ---
 
 ## Preflight
@@ -110,7 +110,7 @@ python3 ~/.claude/code-review/scripts/emit_queue.py --health 2>/dev/null || true
 Display `queue_depth` and `last_event_timestamp`. Also check for dead-lettered events:
 ```bash
 python3 -c "
-import sys; sys.path.insert(0, '$HOME/git/Evinced/stark-skills/scripts')
+import sys; sys.path.insert(0, '$HOME/Code/Playground/stark-skills/scripts')
 from emit_queue import pending_count, dead_letter_count
 p, d = pending_count(), dead_letter_count()
 if d > 0: print(f'WARN: {d} dead-lettered events, {p} pending')
@@ -221,8 +221,8 @@ If branch has upstream or on main ahead of origin: `git push`. On failure: repor
 
 ```bash
 $PYTHON -c "import sys; sys.path.insert(0, '$SCRIPTS'); from emit_queue import drain_to_buffer; print(drain_to_buffer(batch_size=500))"
-SYNC_SCRIPT=~/git/Evinced/stark-insights/scripts/sync_buffer.py
-if [ -f "$SYNC_SCRIPT" ]; then ~/git/Evinced/stark-insights/.venv/bin/python3 "$SYNC_SCRIPT" 2>/dev/null; fi
+SYNC_SCRIPT=~/Code/Playground/stark-insights/scripts/sync_buffer.py
+if [ -f "$SYNC_SCRIPT" ]; then ~/Code/Playground/stark-insights/.venv/bin/python3 "$SYNC_SCRIPT" 2>/dev/null; fi
 ```
 If sync fails, note "Telemetry: buffered locally".
 

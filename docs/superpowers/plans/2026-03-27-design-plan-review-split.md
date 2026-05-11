@@ -133,7 +133,7 @@ def test_dispatch_uses_custom_prompts_dir(tmp_path):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-skills && python -m pytest scripts/test_plan_review_dispatch.py::test_prompts_dir_flag_accepted scripts/test_plan_review_dispatch.py::test_dispatch_uses_custom_prompts_dir -v`
+Run: `cd /Users/aryeh/Code/Playground/stark-skills && python -m pytest scripts/test_plan_review_dispatch.py::test_prompts_dir_flag_accepted scripts/test_plan_review_dispatch.py::test_dispatch_uses_custom_prompts_dir -v`
 Expected: Tests should pass for the first one (the function already accepts `global_prompts_dir`), but we need to verify the CLI flag exists.
 
 - [ ] **Step 3: Add --prompts-dir CLI flag**
@@ -204,7 +204,7 @@ def test_cli_accepts_prompts_dir_flag():
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-skills && python -m pytest scripts/test_plan_review_dispatch.py -v -k "prompts_dir or cli_accepts"`
+Run: `cd /Users/aryeh/Code/Playground/stark-skills && python -m pytest scripts/test_plan_review_dispatch.py -v -k "prompts_dir or cli_accepts"`
 Expected: PASS
 
 - [ ] **Step 6: Commit**
@@ -1324,7 +1324,7 @@ def test_evaluate_review_returns_scores():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-skills && python -m pytest scripts/test_tournament.py::test_evaluate_review_returns_scores -v`
+Run: `cd /Users/aryeh/Code/Playground/stark-skills && python -m pytest scripts/test_tournament.py::test_evaluate_review_returns_scores -v`
 Expected: FAIL with ImportError
 
 - [ ] **Step 3: Implement evaluate_review**
@@ -1504,7 +1504,7 @@ def _parse_review_judge_output(raw: str) -> dict[str, Any] | None:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/aryeh/git/Evinced/stark-skills && python -m pytest scripts/test_tournament.py -v -k "evaluate_review"`
+Run: `cd /Users/aryeh/Code/Playground/stark-skills && python -m pytest scripts/test_tournament.py -v -k "evaluate_review"`
 Expected: PASS (may fail if no `claude` CLI available — test should mock or skip)
 
 - [ ] **Step 5: Commit**
@@ -1614,7 +1614,7 @@ git commit -m "docs: update CLAUDE.md, config for design/plan review split"
 Update the parent Evinced CLAUDE.md to reflect the new skill names.
 
 **Files:**
-- Modify: `/Users/aryeh/git/Evinced/CLAUDE.md` — update skill table
+- Modify: `/Users/aryeh/Code/CLAUDE.md` — update skill table
 
 - [ ] **Step 1: Update skill table**
 
@@ -1629,7 +1629,7 @@ Remove the `stark-review-deployment-plan` row.
 - [ ] **Step 2: Commit**
 
 ```bash
-cd /Users/aryeh/git/Evinced && git add CLAUDE.md && git commit -m "docs: update skill table for design/plan review split"
+cd /Users/aryeh/Code/Evinced && git add CLAUDE.md && git commit -m "docs: update skill table for design/plan review split"
 ```
 
 ---
@@ -1661,7 +1661,7 @@ REST API backed by PostgreSQL. Deployed on Kubernetes.
 EOF
 
 # Test dispatch with design-review prompts
-cd /Users/aryeh/git/Evinced/stark-skills
+cd /Users/aryeh/Code/Playground/stark-skills
 $PYTHON $SCRIPTS/plan_review_dispatch.py --file /tmp/test-design.md --prompts-dir design-review --agents claude --timeout 60
 ```
 
@@ -1685,7 +1685,7 @@ cat > /tmp/test-plan.md << 'EOF'
 4. Deploy to production
 EOF
 
-cd /Users/aryeh/git/Evinced/stark-skills
+cd /Users/aryeh/Code/Playground/stark-skills
 $PYTHON $SCRIPTS/plan_review_dispatch.py --file /tmp/test-plan.md --prompts-dir plan-review --agents claude --timeout 60
 ```
 
@@ -1694,7 +1694,7 @@ Verify: JSON output with domains from plan-review (general, completeness, securi
 - [ ] **Step 3: Run existing tests**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills
+cd /Users/aryeh/Code/Playground/stark-skills
 python -m pytest scripts/test_plan_review_dispatch.py scripts/test_tournament.py -v
 ```
 

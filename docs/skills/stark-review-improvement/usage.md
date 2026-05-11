@@ -1,6 +1,6 @@
 # stark-review-improvement
 
-Improve stark-skills prompts based on the Prompt Improvement Assessment from a completed /stark-review run. Reads the assessment from conversation context (or history files), edits the relevant prompt files in ~/git/Evinced/stark-skills/, patches multi_review.py if needed, and logs the learning. Use when the user says "improve review prompts", "start review improvement", "fix review prompts", or invokes /stark-review-improvement.
+Improve stark-skills prompts based on the Prompt Improvement Assessment from a completed /stark-review run. Reads the assessment from conversation context (or history files), edits the relevant prompt files in ~/Code/Playground/stark-skills/, patches multi_review.py if needed, and logs the learning. Use when the user says "improve review prompts", "start review improvement", "fix review prompts", or invokes /stark-review-improvement.
 
 ## Workflow Overview
 
@@ -52,11 +52,11 @@ graph TD
 
 ## When to Use
 
-Improve stark-skills prompts based on the Prompt Improvement Assessment from a completed /stark-review run. Reads the assessment from conversation context (or history files), edits the relevant prompt files in ~/git/Evinced/stark-skills/, patches multi_review.py if needed, and logs the learning. Use when the user says "improve review prompts", "start review improvement", "fix review prompts", or invokes /stark-review-improvement.
+Improve stark-skills prompts based on the Prompt Improvement Assessment from a completed /stark-review run. Reads the assessment from conversation context (or history files), edits the relevant prompt files in ~/Code/Playground/stark-skills/, patches multi_review.py if needed, and logs the learning. Use when the user says "improve review prompts", "start review improvement", "fix review prompts", or invokes /stark-review-improvement.
 
 ## Prerequisites
 
-A completed `/stark-review` run that produced a Prompt Improvement Assessment. The stark-skills repo must be cloned at `~/git/Evinced/stark-skills/`. No additional installation needed beyond the standard stark-skills setup.
+A completed `/stark-review` run that produced a Prompt Improvement Assessment. The stark-skills repo must be cloned at `~/Code/Playground/stark-skills/`. No additional installation needed beyond the standard stark-skills setup.
 
 ## Arguments
 

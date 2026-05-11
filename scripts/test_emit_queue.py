@@ -1881,13 +1881,13 @@ class TestDrainToBufferV2:
         legacy.execute(
             "INSERT INTO events (id, type, timestamp, user_id, project, payload) "
             "VALUES ('row-1', 'skill_invocation', '2026-01-01T00:00:00Z', "
-            "'aryeh', '/Users/aryeh/git/Evinced/stark-skills', '{}')"
+            "'aryeh', '/Users/aryeh/Code/Playground/stark-skills', '{}')"
         )
         # Row with no id and no dedupe_key → uses content-hash fallback.
         legacy.execute(
             "INSERT INTO events (type, timestamp, user_id, project, payload) "
             "VALUES ('skill_invocation', '2026-01-02T00:00:00Z', "
-            "'aryeh', '/Users/aryeh/git/Evinced/stark-skills', '{}')"
+            "'aryeh', '/Users/aryeh/Code/Playground/stark-skills', '{}')"
         )
         legacy.commit()
         legacy.close()
