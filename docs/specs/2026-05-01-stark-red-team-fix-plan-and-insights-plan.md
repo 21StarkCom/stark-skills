@@ -25,7 +25,7 @@ Invariants the implementation MUST preserve:
 `./install.sh --status` only REPORTS state — it does not create symlinks, the scripts venv, the prompt install paths, or the audit/queue DBs. From a clean machine, every later phase that loads a prompt via `~/.claude/code-review/prompts/...` or queries `~/.stark-insights/queue.db` will fail. Run actual install + DB initialization first:
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills
+cd /Users/aryeh/Code/Playground/stark-skills
 
 # Repo state
 git status --short
@@ -56,7 +56,7 @@ test -d ~/.claude/skills/stark-red-team-design || (echo "skills not symlinked"; 
 
 # Initialize the audit DB so Phase 3 has a place to migrate
 ~/.claude/code-review/scripts/.venv/bin/python3 -c "
-import sys; sys.path.insert(0, '/Users/aryeh/git/Evinced/stark-skills/scripts')
+import sys; sys.path.insert(0, '/Users/aryeh/Code/Playground/stark-skills/scripts')
 import red_team_audit as a
 a.init_red_team_tables(a.DEFAULT_DB_PATH)
 print('audit db ready')
@@ -64,7 +64,7 @@ print('audit db ready')
 
 # Initialize the insights queue DB (lazy-init on first enqueue but easier to verify upfront)
 ~/.claude/code-review/scripts/.venv/bin/python3 -c "
-import sys; sys.path.insert(0, '/Users/aryeh/git/Evinced/stark-skills/scripts')
+import sys; sys.path.insert(0, '/Users/aryeh/Code/Playground/stark-skills/scripts')
 import emit_queue as q
 q._get_db().close()
 print('queue db ready')
@@ -73,9 +73,9 @@ ls ~/.stark-insights/queue.db
 ls ~/.claude/code-review/history/forged-review/forged_review_metrics.db
 
 # stark-insights repo (Track B)
-test -d /Users/aryeh/git/Evinced/stark-insights \
-  || git clone https://github.com/Evinced/stark-insights.git /Users/aryeh/git/Evinced/stark-insights
-export STARK_INSIGHTS_REPO=/Users/aryeh/git/Evinced/stark-insights
+test -d /Users/aryeh/Code/Playground/stark-insights \
+  || git clone https://github.com/Evinced/stark-insights.git /Users/aryeh/Code/Playground/stark-insights
+export STARK_INSIGHTS_REPO=/Users/aryeh/Code/Playground/stark-insights
 
 # Baseline: existing tests pass before edits
 python3 -m pytest scripts/test_stark_red_team.py scripts/test_red_team_audit.py
@@ -788,7 +788,7 @@ curl -sS -X POST http://127.0.0.1:7420/events \
 
 1. **Run the full unit suite**:
    ```bash
-   cd /Users/aryeh/git/Evinced/stark-skills
+   cd /Users/aryeh/Code/Playground/stark-skills
    python3 -m pytest scripts/test_red_team_fix_plan.py \
                      scripts/test_red_team_insights.py \
                      scripts/test_red_team_backfill.py \

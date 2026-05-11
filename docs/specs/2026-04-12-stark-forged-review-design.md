@@ -155,7 +155,7 @@ Re-run only the domains that had actionable findings in the previous round, scop
   "repo": "GetEvinced/foo",
   "branch": "feature/bar",
   "base": "main",
-  "worktree": "/Users/aryeh/git/Evinced/foo/.worktrees/forged-review-pr123-1712900000",
+  "worktree": "/Users/aryeh/Code/foo/.worktrees/forged-review-pr123-1712900000",
   "path": "light|forge|undecided",
   "triage": {
     "selected_domains": ["correctness", "security", "regression-prevention"],

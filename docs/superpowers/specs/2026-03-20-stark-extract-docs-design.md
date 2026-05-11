@@ -44,7 +44,7 @@ If `extract-docs` detects that `plan-to-tasks` already ran on the same spec, it 
 | `--no-commit` | No | Write files but don't commit |
 | `--force` | No | Re-extract even if history file exists for this spec |
 | `--include-low` | No | Include low-confidence extractions (normally skipped) |
-| `--target-repo <path>` | No | Override target repo detection with a local path (e.g., `~/git/Evinced/widget-system`) |
+| `--target-repo <path>` | No | Override target repo detection with a local path (e.g., `~/Code/widget-system`) |
 
 **Input resolution:** Given a spec path, the skill locates associated artifacts by naming convention:
 
@@ -63,8 +63,8 @@ All associations are optional. A spec with no review still has ADR-worthy decisi
 
 **Filesystem resolution** (steps 2-3): An `org/repo` identifier must be resolved to a local checkout. Resolution strategy:
 
-- Check sibling directories under the same parent as the current repo. E.g., if running from `~/git/Evinced/stark-skills`, look for `~/git/Evinced/{repo-name}`.
-- If not found as a sibling, check `~/git/{org}/{repo-name}`.
+- Check sibling directories under the same parent as the current repo. E.g., if running from `~/Code/Playground/stark-skills`, look for `~/Code/{repo-name}`.
+- If not found as a sibling, check `~/Code/{org}/{repo-name}`.
 - If still not found, fail with: `"Target repo {org}/{repo} not found locally. Clone it or use --target-repo <path>."`
 - Do NOT clone repos automatically — that's a side effect the user should control.
 

@@ -81,7 +81,7 @@ Auth via `github_app.py --app <name> token`. Per-app token caching at `~/.cache/
 ### Org level (optional)
 
 ```
-~/git/Evinced/
+~/Code/
 └── .code-review/
     ├── config.json                        ← org overrides
     └── prompts/                           ← org prompt overrides (optional)
@@ -92,7 +92,7 @@ Auth via `github_app.py --app <name> token`. Per-app token caching at `~/.cache/
 ### Repo level (optional)
 
 ```
-~/git/Evinced/design-system-core/
+~/Code/Playground/design-system-core/
 └── .code-review/
     ├── config.json                        ← repo overrides
     ├── prompts/                           ← per-agent prompt overrides
@@ -140,7 +140,7 @@ Each LLM responds differently to the same instructions:
 ### Org config (overrides only)
 
 ```jsonc
-// ~/git/Evinced/.code-review/config.json
+// ~/Code/.code-review/config.json
 {
   "severity_overrides": {
     "accessibility": { "min_severity": "critical" }
@@ -152,7 +152,7 @@ Each LLM responds differently to the same instructions:
 ### Repo config (overrides only)
 
 ```jsonc
-// ~/git/Evinced/design-system-core/.code-review/config.json
+// ~/Code/Playground/design-system-core/.code-review/config.json
 {
   "extra_domains": ["token-integrity"],
   "test_command": "pnpm test",
@@ -288,8 +288,8 @@ Written automatically after each review round to `~/.claude/code-review/history/
   "duration_s": 272,
   "config_sources": [
     "~/.claude/code-review/config.json",
-    "~/git/Evinced/.code-review/config.json",
-    "~/git/Evinced/design-system-core/.code-review/config.json"
+    "~/Code/.code-review/config.json",
+    "~/Code/Playground/design-system-core/.code-review/config.json"
   ],
   "rounds": [
     {
@@ -530,19 +530,19 @@ Only the orchestrating agent (Claude Code) fixes code. The sub-agents only revie
 
 | Current location | New location |
 |-----------------|-------------|
-| `~/git/Personal/Prompts/CodeReviews/scripts/multi_review.py` | `~/.claude/code-review/scripts/multi_review.py` |
-| `~/git/Personal/Prompts/CodeReviews/scripts/github_app.py` | `~/.claude/code-review/scripts/github_app.py` |
-| `~/git/Personal/Prompts/CodeReviews/{claude,codex,gemini}/` | `~/.claude/code-review/prompts/{claude,codex,gemini}/` |
-| `~/git/Personal/Prompts/CodeReviews/orchestrator.md` | `~/.claude/code-review/orchestrator.md` |
-| `~/git/Evinced/scripts/multi_review.py` | Deleted (was a deployed copy) |
-| `~/git/Evinced/scripts/github_app.py` | Remains (used by other tools), but code-review uses its own copy |
+| `~/Code/Personal/Prompts/CodeReviews/scripts/multi_review.py` | `~/.claude/code-review/scripts/multi_review.py` |
+| `~/Code/Personal/Prompts/CodeReviews/scripts/github_app.py` | `~/.claude/code-review/scripts/github_app.py` |
+| `~/Code/Personal/Prompts/CodeReviews/{claude,codex,gemini}/` | `~/.claude/code-review/prompts/{claude,codex,gemini}/` |
+| `~/Code/Personal/Prompts/CodeReviews/orchestrator.md` | `~/.claude/code-review/orchestrator.md` |
+| `~/Code/scripts/multi_review.py` | Deleted (was a deployed copy) |
+| `~/Code/scripts/github_app.py` | Remains (used by other tools), but code-review uses its own copy |
 
-**Single runtime location:** `~/.claude/code-review/scripts/` is the only location `multi_review.py` runs from. It bundles its own `github_app.py` so it works on a fresh machine without any repo cloned. The copy at `~/git/Evinced/scripts/github_app.py` continues to exist for other tools (stark_claude.py, etc.) but is not imported by the review system.
+**Single runtime location:** `~/.claude/code-review/scripts/` is the only location `multi_review.py` runs from. It bundles its own `github_app.py` so it works on a fresh machine without any repo cloned. The copy at `~/Code/scripts/github_app.py` continues to exist for other tools (stark_claude.py, etc.) but is not imported by the review system.
 
 ### What's new
 
 - `~/.claude/code-review/config.json` — global config (doesn't exist yet)
-- `~/git/Evinced/.code-review/config.json` — org config (doesn't exist yet)
+- `~/Code/.code-review/config.json` — org config (doesn't exist yet)
 - Config merge logic in `multi_review.py`
 - Prompt hierarchy resolution in `multi_review.py`
 - History file writing after each review round

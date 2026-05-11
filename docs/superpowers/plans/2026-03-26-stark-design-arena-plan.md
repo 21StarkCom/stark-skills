@@ -114,7 +114,7 @@ def test_plan_factors_have_weights():
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills && python -m pytest scripts/test_design_arena.py -v
+cd /Users/aryeh/Code/Playground/stark-skills && python -m pytest scripts/test_design_arena.py -v
 ```
 
 - [ ] **Step 3: Implement core engine**

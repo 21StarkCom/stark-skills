@@ -24,7 +24,7 @@
 
 ## File Map
 
-### stark-signals repo (`~/git/Evinced/stark-signals`)
+### stark-signals repo (`~/Code/stark-signals`)
 
 | Action | Path | Purpose |
 |--------|------|---------|
@@ -67,7 +67,7 @@
 | Create | `infra/terraform/variables.tf` | Terraform variables |
 | Create | `CLAUDE.md` | Repo conventions |
 
-### stark-skills repo (`~/git/Evinced/stark-skills`)
+### stark-skills repo (`~/Code/Playground/stark-skills`)
 
 | Action | Path | Purpose |
 |--------|------|---------|
@@ -84,7 +84,7 @@
 | Modify | `global/config.json` | Add `signal_store` config section |
 | Modify | `CLAUDE.md` | Add tournament skill to skills list |
 
-### infra-ai-platform repo (`~/git/Evinced/infra-ai-platform`)
+### infra-ai-platform repo (`~/Code/Playground/infra-ai-platform`)
 
 | Action | Path | Purpose |
 |--------|------|---------|
@@ -97,12 +97,12 @@
 ### Task 1: Register stark-signals in infra-ai-platform registry
 
 **Files:**
-- Modify: `~/git/Evinced/infra-ai-platform/infra/registry.tf`
+- Modify: `~/Code/Playground/infra-ai-platform/infra/registry.tf`
 
 - [ ] **Step 1: Read current registry**
 
 ```bash
-cat ~/git/Evinced/infra-ai-platform/infra/registry.tf
+cat ~/Code/Playground/infra-ai-platform/infra/registry.tf
 ```
 
 - [ ] **Step 2: Add stark-signals entry**
@@ -145,7 +145,7 @@ to:
 - [ ] **Step 4: Validate and commit**
 
 ```bash
-cd ~/git/Evinced/infra-ai-platform
+cd ~/Code/Playground/infra-ai-platform
 terraform fmt infra/registry.tf
 terraform validate -chdir=infra/
 git add infra/registry.tf
@@ -162,18 +162,18 @@ git commit -m "registry: add stark-signals service (subnet 10.5.0.0/24, dev port
 ### Task 2: Terraform — Cloud Run + Cloud SQL database + IAP
 
 **Files:**
-- Create: `~/git/Evinced/stark-signals/infra/terraform/main.tf`
-- Create: `~/git/Evinced/stark-signals/infra/terraform/variables.tf`
+- Create: `~/Code/stark-signals/infra/terraform/main.tf`
+- Create: `~/Code/stark-signals/infra/terraform/variables.tf`
 
 - [ ] **Step 1: Create repo and infra directory**
 
 ```bash
-mkdir -p ~/git/Evinced/stark-signals/infra/terraform
+mkdir -p ~/Code/stark-signals/infra/terraform
 ```
 
 - [ ] **Step 2: Create variables.tf**
 
-Write to `~/git/Evinced/stark-signals/infra/terraform/variables.tf`:
+Write to `~/Code/stark-signals/infra/terraform/variables.tf`:
 
 ```hcl
 variable "gcp_project" {
@@ -224,7 +224,7 @@ variable "docker_image" {
 
 - [ ] **Step 3: Create main.tf**
 
-Write to `~/git/Evinced/stark-signals/infra/terraform/main.tf`:
+Write to `~/Code/stark-signals/infra/terraform/main.tf`:
 
 ```hcl
 terraform {
@@ -545,7 +545,7 @@ output "service_account_email" {
 - [ ] **Step 4: Validate format**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 terraform fmt infra/terraform/
 ```
 
@@ -560,22 +560,22 @@ terraform fmt infra/terraform/
 ### Task 3: Scaffold stark-signals repo
 
 **Files:**
-- Create: `~/git/Evinced/stark-signals/pyproject.toml`
-- Create: `~/git/Evinced/stark-signals/Dockerfile`
-- Create: `~/git/Evinced/stark-signals/docker-compose.yml`
-- Create: `~/git/Evinced/stark-signals/.env.example`
+- Create: `~/Code/stark-signals/pyproject.toml`
+- Create: `~/Code/stark-signals/Dockerfile`
+- Create: `~/Code/stark-signals/docker-compose.yml`
+- Create: `~/Code/stark-signals/.env.example`
 
 - [ ] **Step 1: Initialize repo**
 
 ```bash
-mkdir -p ~/git/Evinced/stark-signals
-cd ~/git/Evinced/stark-signals
+mkdir -p ~/Code/stark-signals
+cd ~/Code/stark-signals
 git init
 ```
 
 - [ ] **Step 2: Create pyproject.toml**
 
-Write to `~/git/Evinced/stark-signals/pyproject.toml`:
+Write to `~/Code/stark-signals/pyproject.toml`:
 
 ```toml
 [build-system]
@@ -627,7 +627,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 - [ ] **Step 3: Create Dockerfile**
 
-Write to `~/git/Evinced/stark-signals/Dockerfile`:
+Write to `~/Code/stark-signals/Dockerfile`:
 
 ```dockerfile
 # ── Build frontend (Phase 2+) ─────────────────────────────────────────
@@ -671,7 +671,7 @@ CMD ["uvicorn", "stark_signals.api.main:app", "--host", "0.0.0.0", "--port", "80
 
 - [ ] **Step 4: Create docker-compose.yml and .env.example**
 
-Write to `~/git/Evinced/stark-signals/docker-compose.yml`:
+Write to `~/Code/stark-signals/docker-compose.yml`:
 
 ```yaml
 services:
@@ -707,7 +707,7 @@ volumes:
   pgdata:
 ```
 
-Write to `~/git/Evinced/stark-signals/.env.example`:
+Write to `~/Code/stark-signals/.env.example`:
 
 ```
 DATABASE_URL=postgresql+asyncpg://stark_signals:localdev@localhost:5432/stark_signals
@@ -720,7 +720,7 @@ SERVICE_URL=http://localhost:8000
 - [ ] **Step 5: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 git add pyproject.toml Dockerfile docker-compose.yml .env.example
 git commit -m "chore: scaffold stark-signals repo (pyproject, Dockerfile, docker-compose)"
 ```
@@ -735,22 +735,22 @@ git commit -m "chore: scaffold stark-signals repo (pyproject, Dockerfile, docker
 ### Task 4: Create Python package skeleton + enums + config + db
 
 **Files:**
-- Create: `~/git/Evinced/stark-signals/src/stark_signals/__init__.py`
-- Create: `~/git/Evinced/stark-signals/src/stark_signals/enums.py`
-- Create: `~/git/Evinced/stark-signals/src/stark_signals/config.py`
-- Create: `~/git/Evinced/stark-signals/src/stark_signals/db.py`
+- Create: `~/Code/stark-signals/src/stark_signals/__init__.py`
+- Create: `~/Code/stark-signals/src/stark_signals/enums.py`
+- Create: `~/Code/stark-signals/src/stark_signals/config.py`
+- Create: `~/Code/stark-signals/src/stark_signals/db.py`
 
 - [ ] **Step 1: Create package directories**
 
 ```bash
-mkdir -p ~/git/Evinced/stark-signals/src/stark_signals/models
-mkdir -p ~/git/Evinced/stark-signals/src/stark_signals/api
-mkdir -p ~/git/Evinced/stark-signals/tests
+mkdir -p ~/Code/stark-signals/src/stark_signals/models
+mkdir -p ~/Code/stark-signals/src/stark_signals/api
+mkdir -p ~/Code/stark-signals/tests
 ```
 
 - [ ] **Step 2: Create __init__.py**
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/__init__.py`:
+Write to `~/Code/stark-signals/src/stark_signals/__init__.py`:
 
 ```python
 """stark-signals — LLM consensus voting, tournament execution & adaptive training."""
@@ -760,7 +760,7 @@ __version__ = "0.1.0"
 
 - [ ] **Step 3: Create enums.py**
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/enums.py`:
+Write to `~/Code/stark-signals/src/stark_signals/enums.py`:
 
 ```python
 """Canonical enums — single source of truth for database, API, and client."""
@@ -822,7 +822,7 @@ class ProposalStatus(str, Enum):
 
 - [ ] **Step 4: Create config.py**
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/config.py`:
+Write to `~/Code/stark-signals/src/stark_signals/config.py`:
 
 ```python
 """Application settings via pydantic-settings."""
@@ -866,7 +866,7 @@ def get_settings() -> Settings:
 
 - [ ] **Step 5: Create db.py**
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/db.py`:
+Write to `~/Code/stark-signals/src/stark_signals/db.py`:
 
 ```python
 """SQLAlchemy engine and session factory — lazy initialization."""
@@ -941,7 +941,7 @@ def get_sync_session() -> Session:
 - [ ] **Step 6: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 git add src/
 git commit -m "feat: add package skeleton with enums, config, and db module"
 ```
@@ -957,14 +957,14 @@ git commit -m "feat: add package skeleton with enums, config, and db module"
 ### Task 5: Create SQLAlchemy models (all 8 tables)
 
 **Files:**
-- Create: `~/git/Evinced/stark-signals/src/stark_signals/models/base.py`
-- Create: `~/git/Evinced/stark-signals/src/stark_signals/models/agents.py`
-- Create: `~/git/Evinced/stark-signals/src/stark_signals/models/reviews.py`
-- Create: `~/git/Evinced/stark-signals/src/stark_signals/models/tournaments.py`
+- Create: `~/Code/stark-signals/src/stark_signals/models/base.py`
+- Create: `~/Code/stark-signals/src/stark_signals/models/agents.py`
+- Create: `~/Code/stark-signals/src/stark_signals/models/reviews.py`
+- Create: `~/Code/stark-signals/src/stark_signals/models/tournaments.py`
 
 - [ ] **Step 1: Create base.py**
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/models/base.py`:
+Write to `~/Code/stark-signals/src/stark_signals/models/base.py`:
 
 ```python
 from sqlalchemy.orm import DeclarativeBase
@@ -978,7 +978,7 @@ class Base(DeclarativeBase):
 
 - [ ] **Step 2: Create agents.py**
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/models/agents.py`:
+Write to `~/Code/stark-signals/src/stark_signals/models/agents.py`:
 
 ```python
 """Agent and AgentDomainWeight models."""
@@ -1038,7 +1038,7 @@ class AgentDomainWeight(Base):
 
 - [ ] **Step 3: Create reviews.py**
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/models/reviews.py`:
+Write to `~/Code/stark-signals/src/stark_signals/models/reviews.py`:
 
 ```python
 """ReviewRun, Finding, and Vote models."""
@@ -1137,7 +1137,7 @@ class Vote(Base):
 
 - [ ] **Step 4: Create tournaments.py and signals.py**
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/models/tournaments.py`:
+Write to `~/Code/stark-signals/src/stark_signals/models/tournaments.py`:
 
 ```python
 """TournamentRun and TournamentImplementation models."""
@@ -1209,7 +1209,7 @@ class TournamentImplementation(Base):
     tournament_run: Mapped[TournamentRun] = relationship(back_populates="implementations")
 ```
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/models/signals.py`:
+Write to `~/Code/stark-signals/src/stark_signals/models/signals.py`:
 
 ```python
 """Signal and WeightUpdateProposal models."""
@@ -1270,7 +1270,7 @@ class WeightUpdateProposal(Base):
     )
 ```
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/models/__init__.py`:
+Write to `~/Code/stark-signals/src/stark_signals/models/__init__.py`:
 
 ```python
 """Model exports."""
@@ -1298,7 +1298,7 @@ __all__ = [
 - [ ] **Step 5: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 git add src/stark_signals/models/
 git commit -m "feat: add SQLAlchemy models for all 8 tables"
 ```
@@ -1314,13 +1314,13 @@ git commit -m "feat: add SQLAlchemy models for all 8 tables"
 ### Task 6: Alembic initial migration with all tables
 
 **Files:**
-- Create: `~/git/Evinced/stark-signals/alembic.ini`
-- Create: `~/git/Evinced/stark-signals/alembic/env.py`
-- Create: `~/git/Evinced/stark-signals/alembic/versions/001_initial_schema.py`
+- Create: `~/Code/stark-signals/alembic.ini`
+- Create: `~/Code/stark-signals/alembic/env.py`
+- Create: `~/Code/stark-signals/alembic/versions/001_initial_schema.py`
 
 - [ ] **Step 1: Create alembic.ini**
 
-Write to `~/git/Evinced/stark-signals/alembic.ini`:
+Write to `~/Code/stark-signals/alembic.ini`:
 
 ```ini
 [alembic]
@@ -1364,10 +1364,10 @@ datefmt = %H:%M:%S
 - [ ] **Step 2: Create alembic/env.py**
 
 ```bash
-mkdir -p ~/git/Evinced/stark-signals/alembic/versions
+mkdir -p ~/Code/stark-signals/alembic/versions
 ```
 
-Write to `~/git/Evinced/stark-signals/alembic/env.py`:
+Write to `~/Code/stark-signals/alembic/env.py`:
 
 ```python
 import os
@@ -1418,7 +1418,7 @@ else:
 
 - [ ] **Step 3: Create initial migration**
 
-Write to `~/git/Evinced/stark-signals/alembic/versions/001_initial_schema.py`:
+Write to `~/Code/stark-signals/alembic/versions/001_initial_schema.py`:
 
 ```python
 """Initial schema — all 9 tables (agents, agent_domain_weights, review_runs, findings, votes, tournament_runs, tournament_implementations, signals, weight_update_proposals).
@@ -1683,7 +1683,7 @@ def downgrade() -> None:
 - [ ] **Step 4: Test migration against local postgres**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 docker compose up -d db
 sleep 3
 DATABASE_URL_SYNC=postgresql+psycopg2://stark_signals:localdev@localhost:5432/stark_signals \
@@ -1704,7 +1704,7 @@ Expected: 9 tables listed, 3 agent rows (claude, codex, gemini)
 - [ ] **Step 6: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 git add alembic.ini alembic/
 git commit -m "feat: add Alembic initial migration with all 9 tables (agents, agent_domain_weights, review_runs, findings, votes, tournament_runs, tournament_implementations, signals, weight_update_proposals) and seed data"
 ```
@@ -1727,17 +1727,17 @@ git commit -m "feat: add Alembic initial migration with all 9 tables (agents, ag
 ### Task 7: Server-side consensus engine
 
 **Files:**
-- Create: `~/git/Evinced/stark-signals/src/stark_signals/consensus.py`
-- Create: `~/git/Evinced/stark-signals/tests/test_consensus.py`
+- Create: `~/Code/stark-signals/src/stark_signals/consensus.py`
+- Create: `~/Code/stark-signals/tests/test_consensus.py`
 
 - [ ] **Step 1: Write test first**
 
-Write to `~/git/Evinced/stark-signals/tests/__init__.py`:
+Write to `~/Code/stark-signals/tests/__init__.py`:
 
 ```python
 ```
 
-Write to `~/git/Evinced/stark-signals/tests/conftest.py`:
+Write to `~/Code/stark-signals/tests/conftest.py`:
 
 ```python
 """Shared test fixtures."""
@@ -1830,7 +1830,7 @@ def make_coverage(
     }
 ```
 
-Write to `~/git/Evinced/stark-signals/tests/test_consensus.py`:
+Write to `~/Code/stark-signals/tests/test_consensus.py`:
 
 ```python
 """Tests for consensus engine."""
@@ -1982,7 +1982,7 @@ class TestRunConsensus:
 - [ ] **Step 2: Verify tests fail**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 pip install -e ".[dev]" aiosqlite
 pytest tests/test_consensus.py -x 2>&1 | head -20
 ```
@@ -1991,7 +1991,7 @@ Expected: `ModuleNotFoundError: No module named 'stark_signals.consensus'`
 
 - [ ] **Step 3: Implement consensus.py**
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/consensus.py`:
+Write to `~/Code/stark-signals/src/stark_signals/consensus.py`:
 
 ```python
 """Server-side consensus engine — voting protocol for multi-agent review findings."""
@@ -2299,7 +2299,7 @@ def run_consensus(
 - [ ] **Step 4: Run tests**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 pytest tests/test_consensus.py -v
 ```
 
@@ -2308,7 +2308,7 @@ Expected: All tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 git add src/stark_signals/consensus.py tests/
 git commit -m "feat: add server-side consensus engine with weighted majority voting"
 ```
@@ -2325,21 +2325,21 @@ git commit -m "feat: add server-side consensus engine with weighted majority vot
 ### Task 8: FastAPI app skeleton + health + deps
 
 **Files:**
-- Create: `~/git/Evinced/stark-signals/src/stark_signals/api/__init__.py`
-- Create: `~/git/Evinced/stark-signals/src/stark_signals/api/main.py`
-- Create: `~/git/Evinced/stark-signals/src/stark_signals/api/deps.py`
-- Create: `~/git/Evinced/stark-signals/src/stark_signals/api/schemas.py`
+- Create: `~/Code/stark-signals/src/stark_signals/api/__init__.py`
+- Create: `~/Code/stark-signals/src/stark_signals/api/main.py`
+- Create: `~/Code/stark-signals/src/stark_signals/api/deps.py`
+- Create: `~/Code/stark-signals/src/stark_signals/api/schemas.py`
 
 - [ ] **Step 1: Create api __init__.py**
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/api/__init__.py`:
+Write to `~/Code/stark-signals/src/stark_signals/api/__init__.py`:
 
 ```python
 ```
 
 - [ ] **Step 2: Create deps.py**
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/api/deps.py`:
+Write to `~/Code/stark-signals/src/stark_signals/api/deps.py`:
 
 ```python
 """Dependency injection for FastAPI routes."""
@@ -2420,7 +2420,7 @@ async def require_admin(request: Request) -> str:
 
 - [ ] **Step 3: Create schemas.py**
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/api/schemas.py`:
+Write to `~/Code/stark-signals/src/stark_signals/api/schemas.py`:
 
 ```python
 """Pydantic request/response schemas for all API endpoints."""
@@ -2795,7 +2795,7 @@ class LeaderboardResponse(BaseModel):
 
 - [ ] **Step 4: Create main.py**
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/api/main.py`:
+Write to `~/Code/stark-signals/src/stark_signals/api/main.py`:
 
 ```python
 """FastAPI application — stark-signals API + dashboard."""
@@ -2902,7 +2902,7 @@ if os.path.isdir(static_dir):
 - [ ] **Step 5: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 git add src/stark_signals/api/
 git commit -m "feat: add FastAPI app skeleton with schemas, deps, health endpoint"
 ```
@@ -2918,12 +2918,12 @@ git commit -m "feat: add FastAPI app skeleton with schemas, deps, health endpoin
 ### Task 9: Ingest endpoints (review, tournament, signal)
 
 **Files:**
-- Create: `~/git/Evinced/stark-signals/src/stark_signals/api/routes_ingest.py`
-- Create: `~/git/Evinced/stark-signals/tests/test_routes_ingest.py`
+- Create: `~/Code/stark-signals/src/stark_signals/api/routes_ingest.py`
+- Create: `~/Code/stark-signals/tests/test_routes_ingest.py`
 
 - [ ] **Step 1: Write test first**
 
-Write to `~/git/Evinced/stark-signals/tests/test_routes_ingest.py`:
+Write to `~/Code/stark-signals/tests/test_routes_ingest.py`:
 
 ```python
 """Tests for ingest endpoints."""
@@ -3079,7 +3079,7 @@ class TestIngestSignal:
 - [ ] **Step 2: Verify tests fail**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 pytest tests/test_routes_ingest.py -x 2>&1 | head -5
 ```
 
@@ -3087,7 +3087,7 @@ Expected: ImportError or test failures
 
 - [ ] **Step 3: Implement routes_ingest.py**
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/api/routes_ingest.py`:
+Write to `~/Code/stark-signals/src/stark_signals/api/routes_ingest.py`:
 
 ```python
 """Ingest endpoints — review, tournament, and signal data collection."""
@@ -3391,7 +3391,7 @@ async def ingest_signal(req: SignalIngestRequest, db: AsyncSession = Depends(get
 - [ ] **Step 4: Run tests**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 pytest tests/test_routes_ingest.py -v
 ```
 
@@ -3400,7 +3400,7 @@ Expected: All tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 git add src/stark_signals/api/routes_ingest.py tests/test_routes_ingest.py
 git commit -m "feat: add ingest endpoints for reviews, tournaments, and signals"
 ```
@@ -3416,12 +3416,12 @@ git commit -m "feat: add ingest endpoints for reviews, tournaments, and signals"
 ### Task 10: Read endpoints (agents, reviews, tournaments, signals, weights, dashboard)
 
 **Files:**
-- Create: `~/git/Evinced/stark-signals/src/stark_signals/api/routes_read.py`
-- Create: `~/git/Evinced/stark-signals/tests/test_routes_read.py`
+- Create: `~/Code/stark-signals/src/stark_signals/api/routes_read.py`
+- Create: `~/Code/stark-signals/tests/test_routes_read.py`
 
 - [ ] **Step 1: Write test first**
 
-Write to `~/git/Evinced/stark-signals/tests/test_routes_read.py`:
+Write to `~/Code/stark-signals/tests/test_routes_read.py`:
 
 ```python
 """Tests for read endpoints."""
@@ -3507,7 +3507,7 @@ class TestWeightProposals:
 
 - [ ] **Step 2: Implement routes_read.py**
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/api/routes_read.py`:
+Write to `~/Code/stark-signals/src/stark_signals/api/routes_read.py`:
 
 ```python
 """Read endpoints — agents, reviews, tournaments, signals, dashboard."""
@@ -3952,7 +3952,7 @@ async def dashboard_leaderboard(db: AsyncSession = Depends(get_db)):
 - [ ] **Step 3: Run tests**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 pytest tests/test_routes_read.py -v
 ```
 
@@ -3961,7 +3961,7 @@ Expected: All tests pass.
 - [ ] **Step 4: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 git add src/stark_signals/api/routes_read.py tests/test_routes_read.py
 git commit -m "feat: add read endpoints for agents, reviews, tournaments, signals, dashboard"
 ```
@@ -3977,11 +3977,11 @@ git commit -m "feat: add read endpoints for agents, reviews, tournaments, signal
 ### Task 11: Mutation endpoints (weight proposal approve/reject)
 
 **Files:**
-- Create: `~/git/Evinced/stark-signals/src/stark_signals/api/routes_mutations.py`
+- Create: `~/Code/stark-signals/src/stark_signals/api/routes_mutations.py`
 
 - [ ] **Step 1: Implement routes_mutations.py**
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/api/routes_mutations.py`:
+Write to `~/Code/stark-signals/src/stark_signals/api/routes_mutations.py`:
 
 ```python
 """Mutation endpoints — weight proposal approve/reject (admin only)."""
@@ -4139,7 +4139,7 @@ async def reject_proposal(
 - [ ] **Step 2: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 git add src/stark_signals/api/routes_mutations.py
 git commit -m "feat: add mutation endpoints for proposal approve/reject with admin guard"
 ```
@@ -4155,12 +4155,12 @@ git commit -m "feat: add mutation endpoints for proposal approve/reject with adm
 ### Task 12: Webhook endpoint (GitHub, no IAP, signature verification)
 
 **Files:**
-- Create: `~/git/Evinced/stark-signals/src/stark_signals/api/routes_webhooks.py`
-- Create: `~/git/Evinced/stark-signals/tests/test_routes_webhooks.py`
+- Create: `~/Code/stark-signals/src/stark_signals/api/routes_webhooks.py`
+- Create: `~/Code/stark-signals/tests/test_routes_webhooks.py`
 
 - [ ] **Step 1: Write test first**
 
-Write to `~/git/Evinced/stark-signals/tests/test_routes_webhooks.py`:
+Write to `~/Code/stark-signals/tests/test_routes_webhooks.py`:
 
 ```python
 """Tests for GitHub webhook handler."""
@@ -4259,7 +4259,7 @@ class TestWebhookIssues:
 
 - [ ] **Step 2: Implement routes_webhooks.py**
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/api/routes_webhooks.py`:
+Write to `~/Code/stark-signals/src/stark_signals/api/routes_webhooks.py`:
 
 ```python
 """GitHub webhook handler — regression detection for silver signals."""
@@ -4496,7 +4496,7 @@ async def _handle_push(payload: dict, db: AsyncSession) -> Response:
 - [ ] **Step 3: Run tests**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 pytest tests/test_routes_webhooks.py -v
 ```
 
@@ -4505,7 +4505,7 @@ Expected: All tests pass.
 - [ ] **Step 4: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 git add src/stark_signals/api/routes_webhooks.py tests/test_routes_webhooks.py
 git commit -m "feat: add GitHub webhook handler for regression detection (silver signals)"
 ```
@@ -4522,12 +4522,12 @@ git commit -m "feat: add GitHub webhook handler for regression detection (silver
 ### Task 13: signal_client.py in stark-skills
 
 **Files:**
-- Create: `~/git/Evinced/stark-skills/scripts/signal_client.py`
-- Create: `~/git/Evinced/stark-skills/scripts/test_signal_client.py`
+- Create: `~/Code/Playground/stark-skills/scripts/signal_client.py`
+- Create: `~/Code/Playground/stark-skills/scripts/test_signal_client.py`
 
 - [ ] **Step 1: Write test first**
 
-Write to `~/git/Evinced/stark-skills/scripts/test_signal_client.py`:
+Write to `~/Code/Playground/stark-skills/scripts/test_signal_client.py`:
 
 ```python
 """Tests for signal_client.py."""
@@ -4617,7 +4617,7 @@ class TestDefaultWeights:
 - [ ] **Step 2: Verify tests fail**
 
 ```bash
-cd ~/git/Evinced/stark-skills
+cd ~/Code/Playground/stark-skills
 python3 -m pytest scripts/test_signal_client.py -x 2>&1 | head -5
 ```
 
@@ -4625,7 +4625,7 @@ Expected: `ModuleNotFoundError: No module named 'signal_client'`
 
 - [ ] **Step 3: Implement signal_client.py**
 
-Write to `~/git/Evinced/stark-skills/scripts/signal_client.py`:
+Write to `~/Code/Playground/stark-skills/scripts/signal_client.py`:
 
 ```python
 """Signal store client — writes to stark-signals API with local spool fallback.
@@ -4912,7 +4912,7 @@ def is_enabled() -> bool:
 - [ ] **Step 4: Run tests**
 
 ```bash
-cd ~/git/Evinced/stark-skills
+cd ~/Code/Playground/stark-skills
 python3 -m pytest scripts/test_signal_client.py -v
 ```
 
@@ -4921,7 +4921,7 @@ Expected: All tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-skills
+cd ~/Code/Playground/stark-skills
 git add scripts/signal_client.py scripts/test_signal_client.py
 git commit -m "feat: add signal_client.py with API writes, spool fallback, weight caching"
 ```
@@ -4937,16 +4937,16 @@ git commit -m "feat: add signal_client.py with API writes, spool fallback, weigh
 ### Task 14: Add signal_store config + update multi_review.py + create consensus wrapper
 
 **Files:**
-- Modify: `~/git/Evinced/stark-skills/global/config.json`
-- Modify: `~/git/Evinced/stark-skills/scripts/multi_review.py`
-- Create: `~/git/Evinced/stark-skills/scripts/consensus.py`
+- Modify: `~/Code/Playground/stark-skills/global/config.json`
+- Modify: `~/Code/Playground/stark-skills/scripts/multi_review.py`
+- Create: `~/Code/Playground/stark-skills/scripts/consensus.py`
 
 > **Note:** `scripts/consensus.py` is the thin client-side wrapper that calls the server-side consensus endpoint. When `signal_store.enabled` is true, it sends raw findings + coverage to `POST /api/v1/ingest/review` and returns the consensus results. When disabled, it falls back to the local classification logic in `multi_review.py`.
 
 - [ ] **Step 1: Read current config.json**
 
 ```bash
-cat ~/git/Evinced/stark-skills/global/config.json
+cat ~/Code/Playground/stark-skills/global/config.json
 ```
 
 - [ ] **Step 2: Add signal_store config section**
@@ -5036,7 +5036,7 @@ _send_to_signal_store(
 - [ ] **Step 5: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-skills
+cd ~/Code/Playground/stark-skills
 git add global/config.json scripts/multi_review.py
 git commit -m "feat: integrate signal_client into multi_review with feature flag"
 ```
@@ -5051,14 +5051,14 @@ git commit -m "feat: integrate signal_client into multi_review with feature flag
 ### Task 15: Update stark-review and stark-review-plan SKILL.md files
 
 **Files:**
-- Modify: `~/git/Evinced/stark-skills/skill/stark-review/SKILL.md`
-- Modify: `~/git/Evinced/stark-skills/skill/stark-review-plan/SKILL.md`
+- Modify: `~/Code/Playground/stark-skills/skill/stark-review/SKILL.md`
+- Modify: `~/Code/Playground/stark-skills/skill/stark-review-plan/SKILL.md`
 
 - [ ] **Step 1: Read current SKILL.md files**
 
 ```bash
-head -50 ~/git/Evinced/stark-skills/skill/stark-review/SKILL.md
-head -50 ~/git/Evinced/stark-skills/skill/stark-review-plan/SKILL.md
+head -50 ~/Code/Playground/stark-skills/skill/stark-review/SKILL.md
+head -50 ~/Code/Playground/stark-skills/skill/stark-review-plan/SKILL.md
 ```
 
 - [ ] **Step 2: Add consensus output section to stark-review**
@@ -5087,7 +5087,7 @@ Add the same consensus section to `skill/stark-review-plan/SKILL.md`.
 - [ ] **Step 4: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-skills
+cd ~/Code/Playground/stark-skills
 git add skill/stark-review/SKILL.md skill/stark-review-plan/SKILL.md
 git commit -m "docs: add consensus output section to stark-review and stark-review-plan skills"
 ```
@@ -5102,12 +5102,12 @@ git commit -m "docs: add consensus output section to stark-review and stark-revi
 ### Task 16: Sentinel onboarding (Prometheus metrics, structured logging)
 
 **Files:**
-- Create: `~/git/Evinced/stark-signals/src/stark_signals/observability.py`
-- Modify: `~/git/Evinced/stark-signals/src/stark_signals/api/main.py`
+- Create: `~/Code/stark-signals/src/stark_signals/observability.py`
+- Modify: `~/Code/stark-signals/src/stark_signals/api/main.py`
 
 - [ ] **Step 1: Create observability.py**
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/observability.py`:
+Write to `~/Code/stark-signals/src/stark_signals/observability.py`:
 
 ```python
 """Observability — Prometheus metrics and structured logging for infra-sentinel."""
@@ -5200,7 +5200,7 @@ def configure_logging() -> None:
 
 - [ ] **Step 2: Add metrics endpoint and middleware to main.py**
 
-Add to `~/git/Evinced/stark-signals/src/stark_signals/api/main.py` after the CORS middleware:
+Add to `~/Code/stark-signals/src/stark_signals/api/main.py` after the CORS middleware:
 
 ```python
 from stark_signals.observability import MetricsMiddleware, configure_logging
@@ -5219,7 +5219,7 @@ Update the lifespan to call `configure_logging()`.
 - [ ] **Step 3: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 git add src/stark_signals/observability.py src/stark_signals/api/main.py
 git commit -m "feat: add Prometheus metrics, structured logging for infra-sentinel"
 ```
@@ -5236,12 +5236,12 @@ git commit -m "feat: add Prometheus metrics, structured logging for infra-sentin
 ### Task 17: tournament.py — worktree management
 
 **Files:**
-- Create: `~/git/Evinced/stark-skills/scripts/tournament.py`
-- Create: `~/git/Evinced/stark-skills/scripts/test_tournament.py`
+- Create: `~/Code/Playground/stark-skills/scripts/tournament.py`
+- Create: `~/Code/Playground/stark-skills/scripts/test_tournament.py`
 
 - [ ] **Step 1: Write test first**
 
-Write to `~/git/Evinced/stark-skills/scripts/test_tournament.py`:
+Write to `~/Code/Playground/stark-skills/scripts/test_tournament.py`:
 
 ```python
 """Tests for tournament.py."""
@@ -5352,7 +5352,7 @@ class TestWinnerSelection:
 
 - [ ] **Step 2: Implement tournament.py**
 
-Write to `~/git/Evinced/stark-skills/scripts/tournament.py`:
+Write to `~/Code/Playground/stark-skills/scripts/tournament.py`:
 
 ```python
 """Tournament runner — parallel LLM implementation competition.
@@ -5688,7 +5688,7 @@ def run_tests(
 - [ ] **Step 3: Run tests**
 
 ```bash
-cd ~/git/Evinced/stark-skills
+cd ~/Code/Playground/stark-skills
 python3 -m pytest scripts/test_tournament.py -v
 ```
 
@@ -5697,7 +5697,7 @@ Expected: All tests pass.
 - [ ] **Step 4: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-skills
+cd ~/Code/Playground/stark-skills
 git add scripts/tournament.py scripts/test_tournament.py
 git commit -m "feat: add tournament runner with worktree management, scoring, winner selection"
 ```
@@ -5713,17 +5713,17 @@ git commit -m "feat: add tournament runner with worktree management, scoring, wi
 ### Task 18: stark-phase-execute-tournament SKILL.md
 
 **Files:**
-- Create: `~/git/Evinced/stark-skills/skill/stark-phase-execute-tournament/SKILL.md`
+- Create: `~/Code/Playground/stark-skills/skill/stark-phase-execute-tournament/SKILL.md`
 
 - [ ] **Step 1: Create skill directory**
 
 ```bash
-mkdir -p ~/git/Evinced/stark-skills/skill/stark-phase-execute-tournament
+mkdir -p ~/Code/Playground/stark-skills/skill/stark-phase-execute-tournament
 ```
 
 - [ ] **Step 2: Write SKILL.md**
 
-Write to `~/git/Evinced/stark-skills/skill/stark-phase-execute-tournament/SKILL.md`:
+Write to `~/Code/Playground/stark-skills/skill/stark-phase-execute-tournament/SKILL.md`:
 
 ```markdown
 ---
@@ -5919,7 +5919,7 @@ running agents. Validates plan structure and issue availability.
 
 - [ ] **Step 3: Update CLAUDE.md skills table**
 
-Add to the skills table in `~/git/Evinced/stark-skills/CLAUDE.md`:
+Add to the skills table in `~/Code/Playground/stark-skills/CLAUDE.md`:
 
 ```
 | `/stark-phase-execute-tournament` | Execute tasks via 3-agent tournament competition |
@@ -5928,7 +5928,7 @@ Add to the skills table in `~/git/Evinced/stark-skills/CLAUDE.md`:
 - [ ] **Step 4: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-skills
+cd ~/Code/Playground/stark-skills
 git add skill/stark-phase-execute-tournament/ CLAUDE.md
 git commit -m "feat: add stark-phase-execute-tournament skill"
 ```
@@ -5944,21 +5944,21 @@ git commit -m "feat: add stark-phase-execute-tournament skill"
 ### Task 19: React dashboard scaffold
 
 **Files:**
-- Create: `~/git/Evinced/stark-signals/frontend/package.json`
-- Create: `~/git/Evinced/stark-signals/frontend/vite.config.ts`
-- Create: `~/git/Evinced/stark-signals/frontend/tsconfig.json`
-- Create: `~/git/Evinced/stark-signals/frontend/src/main.tsx`
+- Create: `~/Code/stark-signals/frontend/package.json`
+- Create: `~/Code/stark-signals/frontend/vite.config.ts`
+- Create: `~/Code/stark-signals/frontend/tsconfig.json`
+- Create: `~/Code/stark-signals/frontend/src/main.tsx`
 
 - [ ] **Step 1: Scaffold frontend**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 mkdir -p frontend/src/pages frontend/src/components frontend/src/lib
 ```
 
 - [ ] **Step 2: Create package.json**
 
-Write to `~/git/Evinced/stark-signals/frontend/package.json`:
+Write to `~/Code/stark-signals/frontend/package.json`:
 
 ```json
 {
@@ -5995,7 +5995,7 @@ Write to `~/git/Evinced/stark-signals/frontend/package.json`:
 
 - [ ] **Step 3: Create vite.config.ts**
 
-Write to `~/git/Evinced/stark-signals/frontend/vite.config.ts`:
+Write to `~/Code/stark-signals/frontend/vite.config.ts`:
 
 ```typescript
 import { defineConfig } from "vite";
@@ -6019,7 +6019,7 @@ export default defineConfig({
 
 - [ ] **Step 4: Create main.tsx and App**
 
-Write to `~/git/Evinced/stark-signals/frontend/src/main.tsx`:
+Write to `~/Code/stark-signals/frontend/src/main.tsx`:
 
 ```tsx
 import { StrictMode } from "react";
@@ -6046,7 +6046,7 @@ createRoot(document.getElementById("root")!).render(
 );
 ```
 
-Write to `~/git/Evinced/stark-signals/frontend/src/App.tsx`:
+Write to `~/Code/stark-signals/frontend/src/App.tsx`:
 
 ```tsx
 import { Routes, Route, NavLink } from "react-router-dom";
@@ -6102,13 +6102,13 @@ export default function App() {
 }
 ```
 
-Write to `~/git/Evinced/stark-signals/frontend/src/index.css`:
+Write to `~/Code/stark-signals/frontend/src/index.css`:
 
 ```css
 @import "tailwindcss";
 ```
 
-Write to `~/git/Evinced/stark-signals/frontend/src/lib/api.ts`:
+Write to `~/Code/stark-signals/frontend/src/lib/api.ts`:
 
 ```typescript
 const API_BASE = "/api/v1";
@@ -6138,7 +6138,7 @@ export interface PaginatedResponse<T> {
 
 - [ ] **Step 5: Create placeholder pages**
 
-Write to `~/git/Evinced/stark-signals/frontend/src/pages/Overview.tsx`:
+Write to `~/Code/stark-signals/frontend/src/pages/Overview.tsx`:
 
 ```tsx
 import { useQuery } from "@tanstack/react-query";
@@ -6199,7 +6199,7 @@ function StatCard({ label, value }: { label: string; value: number }) {
 
 Write placeholder pages for `AgentDetail.tsx`, `Tournaments.tsx`, `Reviews.tsx`, `Signals.tsx`:
 
-Write to `~/git/Evinced/stark-signals/frontend/src/pages/AgentDetail.tsx`:
+Write to `~/Code/stark-signals/frontend/src/pages/AgentDetail.tsx`:
 
 ```tsx
 export default function AgentDetail() {
@@ -6212,7 +6212,7 @@ export default function AgentDetail() {
 }
 ```
 
-Write to `~/git/Evinced/stark-signals/frontend/src/pages/Tournaments.tsx`:
+Write to `~/Code/stark-signals/frontend/src/pages/Tournaments.tsx`:
 
 ```tsx
 export default function Tournaments() {
@@ -6225,7 +6225,7 @@ export default function Tournaments() {
 }
 ```
 
-Write to `~/git/Evinced/stark-signals/frontend/src/pages/Reviews.tsx`:
+Write to `~/Code/stark-signals/frontend/src/pages/Reviews.tsx`:
 
 ```tsx
 export default function Reviews() {
@@ -6238,7 +6238,7 @@ export default function Reviews() {
 }
 ```
 
-Write to `~/git/Evinced/stark-signals/frontend/src/pages/Signals.tsx`:
+Write to `~/Code/stark-signals/frontend/src/pages/Signals.tsx`:
 
 ```tsx
 export default function Signals() {
@@ -6253,7 +6253,7 @@ export default function Signals() {
 
 - [ ] **Step 6: Create tsconfig.json and index.html**
 
-Write to `~/git/Evinced/stark-signals/frontend/tsconfig.json`:
+Write to `~/Code/stark-signals/frontend/tsconfig.json`:
 
 ```json
 {
@@ -6279,7 +6279,7 @@ Write to `~/git/Evinced/stark-signals/frontend/tsconfig.json`:
 }
 ```
 
-Write to `~/git/Evinced/stark-signals/frontend/index.html`:
+Write to `~/Code/stark-signals/frontend/index.html`:
 
 ```html
 <!doctype html>
@@ -6299,7 +6299,7 @@ Write to `~/git/Evinced/stark-signals/frontend/index.html`:
 - [ ] **Step 7: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 git add frontend/
 git commit -m "feat: scaffold React dashboard with routing, Overview page, API client"
 ```
@@ -6321,7 +6321,7 @@ Tasks 20-25 implement the remaining dashboard pages. Each follows the same patte
 ### Task 20: Dashboard Overview page — full leaderboard + charts
 
 **Files:**
-- Modify: `~/git/Evinced/stark-signals/frontend/src/pages/Overview.tsx`
+- Modify: `~/Code/stark-signals/frontend/src/pages/Overview.tsx`
 
 Add to the Overview page:
 - Winner distribution pie chart (Recharts PieChart)
@@ -6447,7 +6447,7 @@ function StatCard({ label, value }: { label: string; value: number }) {
 - [ ] **Step 2: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 git add frontend/src/pages/Overview.tsx
 git commit -m "feat: enhance Overview page with charts (winner distribution, findings trend)"
 ```
@@ -6492,12 +6492,12 @@ git commit -m "feat: enhance Overview page with charts (winner distribution, fin
 ### Task 26: Recalibration engine
 
 **Files:**
-- Create: `~/git/Evinced/stark-signals/src/stark_signals/recalibration.py`
-- Create: `~/git/Evinced/stark-signals/tests/test_recalibration.py`
+- Create: `~/Code/stark-signals/src/stark_signals/recalibration.py`
+- Create: `~/Code/stark-signals/tests/test_recalibration.py`
 
 - [ ] **Step 1: Write test first**
 
-Write to `~/git/Evinced/stark-signals/tests/test_recalibration.py`:
+Write to `~/Code/stark-signals/tests/test_recalibration.py`:
 
 ```python
 """Tests for recalibration engine."""
@@ -6575,7 +6575,7 @@ class TestConfidence:
 
 - [ ] **Step 2: Implement recalibration.py**
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/recalibration.py`:
+Write to `~/Code/stark-signals/src/stark_signals/recalibration.py`:
 
 ```python
 """Recalibration engine — compute weight update proposals from signals.
@@ -6795,7 +6795,7 @@ if __name__ == "__main__":
 - [ ] **Step 3: Run tests**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 pytest tests/test_recalibration.py -v
 ```
 
@@ -6804,7 +6804,7 @@ Expected: All tests pass.
 - [ ] **Step 4: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 git add src/stark_signals/recalibration.py tests/test_recalibration.py
 git commit -m "feat: add recalibration engine with divergence guard and proposal workflow"
 ```
@@ -6821,7 +6821,7 @@ git commit -m "feat: add recalibration engine with divergence guard and proposal
 ### Task 27: Bronze signal capture during consensus
 
 **Files:**
-- Modify: `~/git/Evinced/stark-signals/src/stark_signals/consensus.py`
+- Modify: `~/Code/stark-signals/src/stark_signals/consensus.py`
 
 - [ ] **Step 1: Add bronze signal generation to run_consensus**
 
@@ -6900,7 +6900,7 @@ Add `"bronze_signals"` to each result in `run_consensus()`.
 - [ ] **Step 2: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 git add src/stark_signals/consensus.py
 git commit -m "feat: add bronze signal generation during consensus voting"
 ```
@@ -6916,11 +6916,11 @@ git commit -m "feat: add bronze signal generation during consensus voting"
 ### Task 28: GCS archival job
 
 **Files:**
-- Create: `~/git/Evinced/stark-signals/src/stark_signals/archival.py`
+- Create: `~/Code/stark-signals/src/stark_signals/archival.py`
 
 - [ ] **Step 1: Implement archival.py**
 
-Write to `~/git/Evinced/stark-signals/src/stark_signals/archival.py`:
+Write to `~/Code/stark-signals/src/stark_signals/archival.py`:
 
 ```python
 """GCS archival job — export old records to Parquet files.
@@ -7084,7 +7084,7 @@ if __name__ == "__main__":
 - [ ] **Step 2: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 git add src/stark_signals/archival.py
 git commit -m "feat: add GCS archival job for records older than 12 months"
 ```
@@ -7100,11 +7100,11 @@ git commit -m "feat: add GCS archival job for records older than 12 months"
 ### Task 29: stark-signals CLAUDE.md
 
 **Files:**
-- Create: `~/git/Evinced/stark-signals/CLAUDE.md`
+- Create: `~/Code/stark-signals/CLAUDE.md`
 
 - [ ] **Step 1: Write CLAUDE.md**
 
-Write to `~/git/Evinced/stark-signals/CLAUDE.md`:
+Write to `~/Code/stark-signals/CLAUDE.md`:
 
 ```markdown
 # CLAUDE.md — stark-signals
@@ -7173,7 +7173,7 @@ python -m stark_signals.archival
 - [ ] **Step 2: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-signals
+cd ~/Code/stark-signals
 git add CLAUDE.md
 git commit -m "docs: add CLAUDE.md with repo layout, commands, design decisions"
 ```
@@ -7188,11 +7188,11 @@ git commit -m "docs: add CLAUDE.md with repo layout, commands, design decisions"
 ### Task 30: Update stark-skills CLAUDE.md with tournament skill
 
 **Files:**
-- Modify: `~/git/Evinced/stark-skills/CLAUDE.md`
+- Modify: `~/Code/Playground/stark-skills/CLAUDE.md`
 
 - [ ] **Step 1: Add tournament skill to skills table**
 
-In the skills table in `~/git/Evinced/stark-skills/CLAUDE.md`, add:
+In the skills table in `~/Code/Playground/stark-skills/CLAUDE.md`, add:
 
 ```markdown
 | `/stark-phase-execute-tournament` | Execute tasks via 3-agent tournament competition |
@@ -7201,7 +7201,7 @@ In the skills table in `~/git/Evinced/stark-skills/CLAUDE.md`, add:
 - [ ] **Step 2: Commit**
 
 ```bash
-cd ~/git/Evinced/stark-skills
+cd ~/Code/Playground/stark-skills
 git add CLAUDE.md
 git commit -m "docs: add stark-phase-execute-tournament to CLAUDE.md skills list"
 ```

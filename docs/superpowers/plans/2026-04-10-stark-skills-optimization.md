@@ -67,7 +67,7 @@ Design-review and plan-review domain files are byte-identical across all 3 agent
 - [ ] **Step 1: Verify all design-review domains are identical across agents**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills
+cd /Users/aryeh/Code/Playground/stark-skills
 for f in global/prompts/design-review/claude/[0-9]*.md; do
   base=$(basename "$f")
   diff -q "$f" "global/prompts/design-review/codex/$base" && \
@@ -225,7 +225,7 @@ def test_resolve_plan_prompt_shared_domain(tmp_path):
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 ../.venv/bin/python3 -m pytest test_plan_review_dispatch.py::test_resolve_plan_prompt_shared_domain -v
 ```
 
@@ -323,7 +323,7 @@ def _discover_plan_domains(
 - [ ] **Step 5: Run test to verify it passes**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 ../.venv/bin/python3 -m pytest test_plan_review_dispatch.py -v
 ```
 
@@ -379,7 +379,7 @@ def _load_prompt(
 - [ ] **Step 3: Run existing tests**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 ../.venv/bin/python3 -m pytest test_plan_review_dispatch.py test_multi_review.py -v
 ```
 
@@ -439,7 +439,7 @@ def _load_domain_prompt(agent: str, domain_key: str, cwd: str | None = None) -> 
 - [ ] **Step 2: Run tests**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 ../.venv/bin/python3 -m pytest test_multi_review.py -v
 ```
 
@@ -474,7 +474,7 @@ Expected:
 - [ ] **Step 2: Run full test suite**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 ../.venv/bin/python3 -m pytest -x -v
 ```
 
@@ -818,7 +818,7 @@ def test_resolve_model_defaults():
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 ../.venv/bin/python3 -m pytest test_dispatcher_base.py -v
 ```
 
@@ -1042,7 +1042,7 @@ def discover_domains(
 - [ ] **Step 4: Run tests**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 ../.venv/bin/python3 -m pytest test_dispatcher_base.py -v
 ```
 
@@ -1080,7 +1080,7 @@ In `scripts/multi_review.py`:
 - [ ] **Step 2: Run existing tests**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 ../.venv/bin/python3 -m pytest test_multi_review.py -v
 ```
 
@@ -1110,7 +1110,7 @@ Removes ~80 lines of duplicated config loading logic."
 - [ ] **Step 2: Run tests**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 ../.venv/bin/python3 -m pytest test_plan_review_dispatch.py -v
 ```
 
@@ -1137,7 +1137,7 @@ Removes ~60 lines of duplicated config/prompt/domain loading."
 - [ ] **Step 2: Run tests**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 ../.venv/bin/python3 -m pytest -v
 ```
 
@@ -1164,7 +1164,7 @@ Same pattern as previous migrations: replace model resolution, config loading, a
 - [ ] **Step 3: Run tests**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 ../.venv/bin/python3 -m pytest -v
 ```
 
@@ -1237,7 +1237,7 @@ def run_review_round(...) -> ReviewRound:
 - [ ] **Step 4: Run tests**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 ../.venv/bin/python3 -m pytest test_multi_review.py -v
 ```
 
@@ -1281,7 +1281,7 @@ For any other bare `except: pass` in worker threads, add `sys.stderr` logging so
 - [ ] **Step 3: Run tests**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 ../.venv/bin/python3 -m pytest test_multi_review.py -v
 ```
 
@@ -1334,7 +1334,7 @@ This avoids re-running DDL on every connection while keeping the connection-per-
 - [ ] **Step 3: Run tests**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 ../.venv/bin/python3 -m pytest test_emit_queue.py -v
 ```
 
@@ -1382,7 +1382,7 @@ If it already caps at 3 from config, this is fine. If not, enforce it. The confi
 - [ ] **Step 1: Run all tests**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 ../.venv/bin/python3 -m pytest -x -v 2>&1 | tail -30
 ```
 
@@ -1481,7 +1481,7 @@ Not all "unreferenced by SKILL.md" modules are stale. Utility modules (claude_ut
 - [ ] **Step 1: Find modules not imported by any active script**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 
 # For each non-test Python file, check if it's imported anywhere
 for f in *.py; do
@@ -1529,7 +1529,7 @@ mkdir -p scripts/archive
 - [ ] **Step 5: Verify nothing breaks**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 ../.venv/bin/python3 -m pytest -x -v 2>&1 | tail -20
 ```
 
@@ -1565,7 +1565,7 @@ No changes needed if the install is a directory symlink. If it symlinks individu
 - [ ] **Step 1: Run full test suite**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 ../.venv/bin/python3 -m pytest -v 2>&1 | tail -30
 ```
 

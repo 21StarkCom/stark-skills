@@ -216,7 +216,7 @@ Location: `~/.claude/code-review/sessions/{session_id}.json` (one file per activ
       "signal": "User said 'use IAP not Firebase'",
       "pattern": "gcp_auth_approach",
       "target": "claude_md",
-      "target_path": "~/git/Evinced/CLAUDE.md",
+      "target_path": "~/Code/CLAUDE.md",
       "proposed_change": "## GCP / Infrastructure\nPrefer IAP over custom auth..."
     }
   ]
@@ -431,7 +431,7 @@ def build_agent_env(agent: str, operation: str) -> dict:
         pass  # no GH_TOKEN — uses native gh auth (Aryeh as actor)
     return env
 ```
-This ensures review sub-agents get bot tokens and PR operations use native auth, matching the existing auth split documented in `~/git/Evinced/CLAUDE.md`.
+This ensures review sub-agents get bot tokens and PR operations use native auth, matching the existing auth split documented in `~/Code/CLAUDE.md`.
 
 ### Credential Rotation
 - Add `last_secret_rotation_check` and `auth_status` fields to `automation/registry.json`.

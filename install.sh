@@ -13,7 +13,7 @@ set -euo pipefail
 # What it does:
 #   1. ~/.claude/code-review/         ← symlink to repo's global/
 #   2. ~/.claude/code-review/scripts/ ← symlink to repo's scripts/
-#   3. ~/git/Evinced/.code-review/    ← symlink to repo's org/evinced/
+#   3. ~/Code/.code-review/    ← symlink to repo's org/evinced/
 #
 # Files stay in the repo — symlinks point to them. Updating the repo
 # updates the installed system. No copying, no drift.
@@ -29,7 +29,7 @@ if [ -z "${REPO_DIR:-}" ]; then
 fi
 CLAUDE_DIR="$HOME/.claude"
 CODE_REVIEW_DIR="$CLAUDE_DIR/code-review"
-EVINCED_DIR="$HOME/git/Evinced"
+EVINCED_DIR="$HOME/Code/Evinced"
 
 # Colors
 RED='\033[0;31m'
@@ -633,7 +633,7 @@ install() {
     mkdir -p "$CODE_REVIEW_DIR/history"
     info "History dir: $CODE_REVIEW_DIR/history/"
 
-    # 3. Org: ~/git/Evinced/.code-review/ → repo/org/evinced/
+    # 3. Org: ~/Code/.code-review/ → repo/org/evinced/
     if [ -d "$EVINCED_DIR" ]; then
         link_dir "$REPO_DIR/org/evinced" "$EVINCED_DIR/.code-review" "Evinced org config"
     else

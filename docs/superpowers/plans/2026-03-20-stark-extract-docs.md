@@ -146,9 +146,9 @@ Resolution order:
 PARENT_DIR=$(dirname "$(git rev-parse --show-toplevel)")
 if [ -d "$PARENT_DIR/{repo-name}" ]; then
     TARGET_DIR="$PARENT_DIR/{repo-name}"
-# Check ~/git/{org}/{repo-name}
-elif [ -d "$HOME/git/{org}/{repo-name}" ]; then
-    TARGET_DIR="$HOME/git/{org}/{repo-name}"
+# Check ~/Code/{org}/{repo-name}
+elif [ -d "$HOME/Code/{org}/{repo-name}" ]; then
+    TARGET_DIR="$HOME/Code/{org}/{repo-name}"
 else
     # Error and abort
     echo "Target repo {org}/{repo} not found locally. Clone it or use --target-repo <path>."
