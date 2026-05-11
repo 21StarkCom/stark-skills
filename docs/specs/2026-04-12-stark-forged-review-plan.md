@@ -216,7 +216,7 @@ Add preflight workflow mapping for `stark-forged-review`.
 
 **Files to modify.**
 - `install.sh` — add symlinks for `skill/stark-forged-review` → `~/.claude/skills/stark-forged-review` and for the new `global/prompts/forged-review/` directory
-- `CLAUDE.md` (root `/Users/aryeh/git/Evinced/CLAUDE.md`) — add `/stark-forged-review` row to the Global Skills table; mark `/stark-review` as deprecated
+- `CLAUDE.md` (root `/Users/aryeh/Code/CLAUDE.md`) — add `/stark-forged-review` row to the Global Skills table; mark `/stark-review` as deprecated
 - `stark-skills/CLAUDE.md` — add `/stark-forged-review` row to skills sections; mark `/stark-review` as deprecated
 - `skill/stark-review/SKILL.md` — add a deprecation notice at the top pointing to `/stark-forged-review` (do NOT delete the skill; keep functional per rollout plan §11)
 

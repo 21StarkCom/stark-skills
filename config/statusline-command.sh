@@ -117,7 +117,7 @@ _, pct_s, mid, tin, tout = sys.argv
 trend = ""
 if pct_s:
     try:
-        sys.path.insert(0, os.path.expanduser("~/git/Evinced/stark-skills/scripts"))
+        sys.path.insert(0, os.path.expanduser("~/Code/Playground/stark-skills/scripts"))
         from emit_queue import record_context_pct
         trend = record_context_pct(float(pct_s))
     except Exception:

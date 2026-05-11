@@ -224,7 +224,7 @@ The implementation refactors `triage_tui.py` to extract shared rendering primiti
 ### Verification
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 python3 -m pytest test_triage_tui.py -x -q     # MUST show: 4 passed
 python3 -m pytest test_tui_core.py -x -q       # MUST show: 17 passed
 python3 -c "from tui_core import make_config, format_banner; c = make_config(plain=True); print(format_banner(c, ['hello', 'world']))"
@@ -454,7 +454,7 @@ python3 -c "from tui_core import make_config, format_banner; c = make_config(pla
 ### Verification
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 python3 -m pytest test_session_tui.py -x -q     # MUST show: 18 passed
 # Smoke test the composition helpers:
 python3 -c "
@@ -545,7 +545,7 @@ print(render_start_briefing(c, banner, {'branch': 'main', 'ahead': 0, 'behind': 
 ### Verification
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 python3 -m pytest test_session_state.py -x -q   # ALL tests pass (new + existing)
 ```
 
@@ -764,7 +764,7 @@ Expected: End banner with session name, receipt checklist with ✅/❌/⚠️ it
 **Run order matters:** Always run in this sequence to catch regressions early:
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills/scripts
+cd /Users/aryeh/Code/Playground/stark-skills/scripts
 
 # Phase 1 gate:
 python3 -m pytest test_triage_tui.py -x -q      # 4 tests — must pass before proceeding

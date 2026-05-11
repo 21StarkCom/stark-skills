@@ -56,7 +56,7 @@ Right-sized to the stark-insights spec, not OpenTelemetry:
   "timestamp": "2026-04-01T14:30:00Z",
   "cli": "claude",
   "user_id": "aryeh-stark",
-  "project": "/Users/aryeh/git/Evinced/widget-system",
+  "project": "/Users/aryeh/Code/widget-system",
   "session_id": "abc123",
   "source": "skill",
   "schema_version": 1,

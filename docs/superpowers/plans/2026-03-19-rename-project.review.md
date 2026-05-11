@@ -17,7 +17,7 @@
 3. **Case-only rename idempotency** — Compare name field AND repo ID (GitHub API is case-insensitive)
 4. **Repo ID never fetched** — `CURRENT_REPO_ID` stored during validation for collision/idempotency
 5. **sed treats `.` as regex** — Switched to Perl `\Q...\E` for literal matching
-6. **Fallback symlink cleanup too narrow** — Now scans `~/git/Evinced/.code-review` too
+6. **Fallback symlink cleanup too narrow** — Now scans `~/Code/.code-review` too
 7. **Symlink path match too broad** — Exact path or child (`OLD_ABS/` prefix), not substring
 8. **Unquoted file lists** — Arrays with `git add -- "${files[@]}"`
 9. **Skill path exclusions** — `~/.claude/skills/stark-review/` and install.sh labels excluded from replacement

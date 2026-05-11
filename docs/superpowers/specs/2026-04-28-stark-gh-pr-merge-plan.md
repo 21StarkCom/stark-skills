@@ -19,7 +19,7 @@ Authoritative fix is out of v1 scope: **install-by-copy** (instead of symlink) p
 ## 2. Prerequisites
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills
+cd /Users/aryeh/Code/Playground/stark-skills
 git status --short
 gh auth status
 node --version

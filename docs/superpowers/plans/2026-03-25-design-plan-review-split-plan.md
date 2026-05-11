@@ -104,7 +104,7 @@ def test_always_on_plan_domains():
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills && python -m pytest scripts/test_content_scan.py -v
+cd /Users/aryeh/Code/Playground/stark-skills && python -m pytest scripts/test_content_scan.py -v
 ```
 
 Expected: ImportError
@@ -789,7 +789,7 @@ git commit -m "feat: narrow /stark-review-plan — plan-specific domains, priori
 
 **Files:**
 - Modify: `CLAUDE.md`
-- Modify: `~/git/Evinced/CLAUDE.md`
+- Modify: `~/Code/CLAUDE.md`
 - Verify: `install.sh` picks up new skill and prompt directories
 
 - [ ] **Step 1: Add /stark-review-design to stark-skills CLAUDE.md skills table**

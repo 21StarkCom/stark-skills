@@ -317,7 +317,7 @@ if [ "$HAS_UNINSTALL" = "true" ]; then
 else
     # Fallback: find stale symlinks across ALL known install destinations
     OLD_ABS="$PARENT/$OLD_NAME"
-    for search_dir in ~/.claude ~/git/Evinced/.code-review; do
+    for search_dir in ~/.claude ~/Code/.code-review; do
         [ -d "$search_dir" ] || continue
         find "$search_dir" -type l | while IFS= read -r link; do
             target=$(python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "$link")
