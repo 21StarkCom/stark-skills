@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { buildCommand, parseOutput } from "./agent_codex.ts";
+import { buildCommand, extractLastAgentText, parseOutput } from "./agent_codex.ts";
 
 test("buildCommand: emits codex exec --json with high reasoning effort via -c", () => {
   const built = buildCommand("hello prompt");
@@ -233,4 +233,36 @@ test("parseOutput: empty stdout → no ack set", () => {
   assert.equal(r.findings.length, 0);
   assert.equal(r.parseErrors.length, 0);
   assert.equal(r.noFindingsAck, undefined);
+});
+
+test("extractLastAgentText: returns only the final agent_message, dropping reasoning preambles", () => {
+  const ev = (text: string) => JSON.stringify({
+    type: "item.completed",
+    item: { type: "agent_message", text },
+  });
+  const stdout = [
+    ev("Reading the affected files..."),
+    ev("Now planning the fix..."),
+    ev('{"modified_files":["a.ts"],"summary":"done"}'),
+  ].join("\n");
+  assert.equal(
+    extractLastAgentText(stdout),
+    '{"modified_files":["a.ts"],"summary":"done"}',
+  );
+});
+
+test("extractLastAgentText: handles legacy message/output_text shape", () => {
+  const ev = (text: string) => JSON.stringify({
+    type: "item.completed",
+    item: { type: "message", content: [{ type: "output_text", text }] },
+  });
+  const stdout = [
+    ev("intermediate"),
+    ev("final answer"),
+  ].join("\n");
+  assert.equal(extractLastAgentText(stdout), "final answer");
+});
+
+test("extractLastAgentText: returns raw input when no JSONL framing is present", () => {
+  assert.equal(extractLastAgentText("plain text"), "plain text");
 });

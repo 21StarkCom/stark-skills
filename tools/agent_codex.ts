@@ -149,6 +149,45 @@ export function normalizeOutput(stdout: string): string {
   return extractAgentText(stdout);
 }
 
+/** Return only the LAST assistant message's text. Use this when a caller needs
+ * the final answer alone (e.g. the fixer's single-JSON-object contract) and
+ * cannot tolerate codex's intermediate reasoning preambles concatenated in. */
+export function extractLastAgentText(raw: string): string {
+  let last: string | null = null;
+  for (const rawLine of raw.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    let ev: unknown;
+    try {
+      ev = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!isPlainObject(ev)) continue;
+    if (ev.type !== "item.completed") continue;
+    const item = ev.item;
+    if (!isPlainObject(item)) continue;
+    const itype = item.type;
+    if (itype === "agent_message") {
+      const text = item.text;
+      if (typeof text === "string" && text) last = text;
+    } else if (itype === "message") {
+      const content = item.content;
+      if (Array.isArray(content)) {
+        const buf: string[] = [];
+        for (const c of content) {
+          if (!isPlainObject(c)) continue;
+          if (c.type === "output_text" && typeof c.text === "string") {
+            buf.push(c.text);
+          }
+        }
+        if (buf.length) last = buf.join("\n");
+      }
+    }
+  }
+  return last !== null ? last : raw;
+}
+
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }

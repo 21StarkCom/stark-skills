@@ -2165,10 +2165,13 @@ export async function runFixer(opts: RunFixerOpts): Promise<RunFixerResult> {
     if (sp.status !== 0) {
       throw new FixerParseError(`fixer exited ${sp.status}: ${sp.stderr.slice(0, 300)}`);
     }
-    // Codex JSONL framing — extract assistant text via the codex agent port's
-    // normalizer for robustness.
+    // Codex JSONL framing — extract ONLY the final assistant message. At
+    // higher reasoning effort codex emits intermediate "agent_message" events
+    // as reasoning preambles; concatenating them all (as normalizeOutput
+    // does for finding parsing) would violate the fixer's single-JSON-object
+    // output contract. We want the last message — the model's final answer.
     const codex = await import("./agent_codex.ts");
-    const text = (codex as { normalizeOutput?: (s: string) => string }).normalizeOutput?.(sp.stdout) ?? sp.stdout;
+    const text = (codex as { extractLastAgentText?: (s: string) => string }).extractLastAgentText?.(sp.stdout) ?? sp.stdout;
     const output = parseFixerOutput(text);
     return { output, durationMs: Date.now() - start };
   } finally {
