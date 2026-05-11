@@ -376,7 +376,7 @@ function resolveLocalRef(
   fileExists: (absolutePath: string) => boolean,
 ): string | null {
   const normalized = normalizeRef(rawRef);
-  if (!normalized || normalized.startsWith("/") || normalized.startsWith("~/git/")) {
+  if (!normalized || normalized.startsWith("/") || normalized.startsWith("~/Code/")) {
     return null;
   }
 

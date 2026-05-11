@@ -774,7 +774,7 @@ What changes:
 - `install.sh` currently creates `~/.stark-insights/`. The new `stark_install.py` does **not** create or manage it — that remains `stark-insights`'s own installer responsibility.
 - Skills that emit to `stark-insights` via HTTP POST continue to do so. The V1 telemetry (`events.jsonl`) is a parallel local store, not a replacement for the insights pipeline.
 - If `stark-insights` is down, events go to `events.jsonl` only. If `stark-insights` is up, events go to both. The two stores are independent and may be reconciled later if needed.
-- `config/settings.json` hooks that reference `~/git/Evinced/stark-insights/` are host-specific install config (Claude adapter) and move to `hosts/claude/install/` during Phase B.
+- `config/settings.json` hooks that reference `~/Code/Playground/stark-insights/` are host-specific install config (Claude adapter) and move to `hosts/claude/install/` during Phase B.
 
 ### Why this is necessary
 

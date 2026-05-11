@@ -9,7 +9,7 @@ Auto-detects the current repo from `git remote -v` so it works in any
 GetEvinced repo without configuration.
 
 Usage as token provider (for gh CLI):
-    export GH_TOKEN=$(python ~/git/Evinced/scripts/github_app.py token)
+    export GH_TOKEN=$(python ~/Code/scripts/github_app.py token)
     gh pr list
 
 Usage as direct CLI:

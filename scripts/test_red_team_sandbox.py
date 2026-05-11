@@ -216,7 +216,7 @@ def test_dispatch_codex_sandbox_path_scrubs_env_and_uses_temp_cwd(monkeypatch):
     rt.dispatch_codex(
         prompt="hi",
         model="o3",
-        cwd="/Users/aryeh/git/Evinced/stark-skills",  # caller's repo
+        cwd="/Users/aryeh/Code/Playground/stark-skills",  # caller's repo
         timeout_s=60,
         env=leaky_env,
         sandbox=True,
@@ -224,7 +224,7 @@ def test_dispatch_codex_sandbox_path_scrubs_env_and_uses_temp_cwd(monkeypatch):
 
     # cwd swapped to an empty temp dir, NOT the caller's repo
     cwd = captured["cwd"]
-    assert cwd != "/Users/aryeh/git/Evinced/stark-skills"
+    assert cwd != "/Users/aryeh/Code/Playground/stark-skills"
     assert cwd is not None and Path(cwd).name.startswith("stark-rt-")
 
     # leaky env scrubbed: PATH retained, secrets dropped

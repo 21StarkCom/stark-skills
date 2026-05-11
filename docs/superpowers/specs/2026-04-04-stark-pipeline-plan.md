@@ -35,7 +35,7 @@ Key constraints from the design:
 ## Prerequisites
 
 ```bash
-cd /Users/aryeh/git/Evinced/stark-skills
+cd /Users/aryeh/Code/Playground/stark-skills
 ./install.sh --status || ./install.sh
 PYTHON=scripts/.venv/bin/python3
 $PYTHON -c "import rich, pytest; print('python deps ok')"
