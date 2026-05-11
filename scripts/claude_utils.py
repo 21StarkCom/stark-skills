@@ -42,7 +42,7 @@ def _get_api_key() -> str:
         raise AgentDisabledError(
             f"{_API_KEY_SOURCE_VAR} not set in environment. "
             "Source your Anthropic key file (e.g. "
-            "`source \"$HOME/git/Private/API Keys/.anthropic.key\"`) "
+            "`source \"$HOME/Code/.private/API Keys/.anthropic.key\"`) "
             "before running Claude sub-agents."
         )
     return key
