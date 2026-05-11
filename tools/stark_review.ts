@@ -148,8 +148,9 @@ Options:
   --quick                   Use config.quick_domains
   --domains <a,b,c>         Comma-separated domain slugs (overrides --quick)
   --dry-run                 Skip POST; record intended payload in receipt
-  --no-fix-loop             Disabled in V1 (default)
-  --allow-untrusted-fix-loop  Inert in V1 (warning emitted)
+  --no-fix-loop             Skip the fix loop for this run (review still posts)
+  --allow-untrusted-fix-loop  Opt in to fork-PR fix loop without maintainer_can_modify;
+                              ALSO requires config.untrusted_fix_loop=true
   --max-rounds <int>        Max rounds (default 3, ceiling 5)
   --json                    Emit machine receipt to stdout
   --help                    Show this help

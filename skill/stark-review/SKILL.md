@@ -6,8 +6,8 @@ description: >-
 argument-hint: "[PR_NUMBER] [--agent claude|codex|gemini] [--quick] [--domains a,b,c] [--dry-run] [--repo ORG/REPO]"
 disable-model-invocation: false
 model: opus[1m]
-revision: e5630476fa2ba17d3b7d04e7f547cb248c105d45
-revision_date: 2026-05-10T06:40:44Z
+revision: 7023bdbd1979bd76ee6d674b92600f1882f2b3e7
+revision_date: 2026-05-11T18:07:40Z
 ---
 
 Single-agent PR review path. Keep this skill thin: do preflight, capture the
@@ -266,13 +266,55 @@ performed by the TS tool's classifier stage. The wrapper does not re-classify.
 
 ## Phase 4: Fix Loop
 
-Fix-loop is disabled in V1 — the TS tool does not push commits. If the receipt
-shows critical or high `fix` findings that need code changes, the user is
-expected to address them in a follow-up commit. `--allow-untrusted-fix-loop`
-is currently inert.
+The TS dispatcher runs the fix loop between review rounds when the
+authorization gate allows it (Phase 9 — see `tools/stark_review_lib.ts`
+`evaluateFixLoopGate`). The wrapper does not orchestrate the loop itself;
+it surfaces what the TS tool reports in the receipt (`fixes_pushed`,
+audit-log entries under `~/.claude/code-review/history/<org>/<repo>/<pr>/`).
 
-For fork PRs (`IS_FORK=true`), the review is read-only regardless of
-`maintainerCanModify`.
+### Authorization
+
+The gate allows the fix loop when ALL of:
+
+- `config.test_command` is non-empty (sourced from trusted config only — never
+  CLAUDE.md or package.json or any PR-controlled file).
+- The PR is same-repo, OR fork-with-`maintainerCanModify`, OR the operator
+  passed `--allow-untrusted-fix-loop` AND `config.untrusted_fix_loop=true`
+  (both opt-ins required for untrusted fork pushes).
+- `--no-fix-loop` was not passed.
+
+If any condition fails, the review still posts; the fix loop is soft-skipped
+with an audit-log `reason` (`no_test_command`, `fork_no_mcm`, `no_fix_loop`)
+or surfaces a terminal `auth_denied` when CLI opt-in conflicts with config.
+
+### Severity threshold
+
+`config.fix_threshold` filters which findings the fixer attempts. Severity
+ladder (high → low): `critical` > `high` > `medium` > `low`. Setting
+`fix_threshold: "low"` includes every severity through nits; `"medium"`
+excludes nits. The default in `global/config.json` is `"low"` — every
+classified `fix` finding from Critical down to nits enters the loop.
+
+### Step sequence (per round, after review POST lands)
+
+1. Filter `pass.allFindings` to `classification === "fix"` AND severity ≥ `fix_threshold`.
+2. Resolve and validate the push target (`resolvePushTarget` — bails terminally if
+   the flow can't push, BEFORE the fixer touches files).
+3. Run the fixer agent (Codex by default) with the filtered findings against the
+   review worktree.
+4. Stage the fixer's `modified_files` via `stageFiles` (explicit paths only —
+   never `git add -A`).
+5. Run the trusted `test_command` with a sandboxed env allowlist (`stark_review_lib.ts`
+   `runTrustedTest`). Non-zero exit → terminal `test_failure`.
+6. Commit + push to the resolved push target. Commit SHA + audit entry land in
+   the receipt; the next round re-runs the review against the new HEAD.
+
+`--max-rounds` caps the loop; the default ceiling is enforced in
+`stark_review.ts` to prevent runaway sessions.
+
+For fork PRs without `maintainerCanModify`, the loop is read-only unless both
+`--allow-untrusted-fix-loop` (CLI) and `config.untrusted_fix_loop=true` are
+set — see Authorization above.
 
 ## Phase 5: Persist History
 

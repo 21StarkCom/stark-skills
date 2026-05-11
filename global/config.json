@@ -13,7 +13,7 @@
     "test-coverage": "codex",
     "spec-conformance": "codex"
   },
-  "fix_threshold": "medium",
+  "fix_threshold": "low",
   "verify_before_clean": true,
   "disabled_domains": [],
   "extra_domains": [],
