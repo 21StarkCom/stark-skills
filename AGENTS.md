@@ -4,18 +4,27 @@
 
 Multi-agent PR code review system. Codex, Codex, and Gemini are all enabled by default. Hierarchical config (global → org → repo). Self-improving prompts via review history analysis.
 
+## Operating Principles
+
+This is a **personal playground**, not production. No customers depend on it; the only user is the author.
+
+- **No rollout ceremony.** Skip soaking, gating, smoking, canary, and gradual-rollout patterns. Ship straight to main.
+- **Language preference:** Go for backend, TypeScript for scripts. **Avoid Python at all costs** — do not introduce new Python; when touching existing Python (orchestrators under `scripts/`), prefer rewriting in TypeScript (`tools/`) over extending the Python.
+- **Test live.** Local-only verification is not enough. If a flow touches GCP, exercise the real GCP surface.
+- **Always update documentation.** Any change that affects behavior, structure, commands, env vars, or operations must update the relevant docs (this file and `CLAUDE.md` included) in the same change.
+
 ## Repo Layout
 
 - `global/` — global config + prompts, installed to `~/.Codex/code-review/`
 - `scripts/` — Python orchestrator + GitHub App auth, installed to `~/.Codex/code-review/scripts/`
-- `skill/` — all skills (`skill/stark-*/SKILL.md`, 30 skills), installed as symlinks to `~/.Codex/skills/`
+- `skill/` — all skills (`skill/stark-*/SKILL.md`, 30 skills), symlinked to Claude and copied to `~/.codex/skills/`
 - `org/evinced/` — Evinced org config, installed to `~/git/Evinced/.code-review/`
 - `data/` — persona roster, review coverage HTML, generated showcase pages
 - `automation/` — CCR automation fleet: 12 triggers, prompts, logs, cost tracking, reports
 - `.github/workflows/` — GitHub Actions: project sync, gate checks, stale detection, heartbeat
 - `docs/` — specs, plans, ADRs, retrospectives, generated skill docs
 - `standards/` — org-wide doc templates and workflows, installed to `~/.Codex/code-review/standards/`
-- `install.sh` — symlinks repo contents to install locations
+- `install.sh` — symlinks repo contents to Claude/config locations and copies Codex skills
 
 ## Key Files
 
@@ -71,14 +80,14 @@ Multi-agent PR code review system. Codex, Codex, and Gemini are all enabled by d
 ## Commands
 
 ```bash
-./install.sh              # install (symlink to ~/.Codex/code-review/)
+./install.sh              # install symlinks/copies
 ./install.sh --status     # check installation
-./install.sh --uninstall  # remove symlinks
+./install.sh --uninstall  # remove installed symlinks/copies
 ```
 
 ## Skills
 
-All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.Codex/skills/` via install.sh.
+All skills live in `skill/stark-*/SKILL.md`; `install.sh` symlinks them for Claude and copies full skill directories to `~/.codex/skills/` for Codex.
 
 ### Pipeline (end-to-end, in order)
 
