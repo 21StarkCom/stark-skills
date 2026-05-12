@@ -15,6 +15,28 @@ test("parseRawArgs: defaults", () => {
   assert.equal(a.allowNoRequiredChecks, false);
 });
 
+test("bare integer sets pr", () => {
+  const a = parseRawArgs("540");
+  assert.equal(a.pr, 540);
+});
+
+test("bare integer + --pr conflicts", () => {
+  assert.throws(() => parseRawArgs("540 --pr 541"), /--pr already set/);
+  assert.throws(() => parseRawArgs("--pr 540 541"), /--pr already set/);
+});
+
+test("'0' rejected", () => {
+  assert.throws(() => parseRawArgs("0"), /bare PR number must be a positive integer/);
+});
+
+test("'-5' rejected", () => {
+  assert.throws(() => parseRawArgs("-5"), /bare PR number must be a positive integer|unknown flag/);
+});
+
+test("'abc' still rejected as unknown flag", () => {
+  assert.throws(() => parseRawArgs("abc"), /unknown flag/);
+});
+
 test("parseRawArgs: --pr accepts positive integer", () => {
   const a = parseRawArgs("--pr 123");
   assert.equal(a.pr, 123);

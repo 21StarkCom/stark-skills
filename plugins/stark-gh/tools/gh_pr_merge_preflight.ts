@@ -79,8 +79,16 @@ export function parseRawArgs(raw: string): MergeUserArgs {
   };
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]!;
+    if (/^-?\d+$/.test(t)) {
+      if (a.pr !== null) throw new Error(`--pr already set; cannot also pass bare PR number ${t}`);
+      const v = Number(t);
+      if (!Number.isInteger(v) || v <= 0) throw new Error(`bare PR number must be a positive integer; got ${t}`);
+      a.pr = v;
+      continue;
+    }
     switch (t) {
       case "--pr": {
+        if (a.pr !== null) throw new Error(`--pr already set; cannot also pass --pr`);
         const v = Number(need(++i, t));
         if (!Number.isInteger(v) || v <= 0) throw new Error(`--pr must be a positive integer; got ${tokens[i]}`);
         a.pr = v;

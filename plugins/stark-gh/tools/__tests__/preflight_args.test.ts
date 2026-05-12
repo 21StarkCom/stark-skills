@@ -4,6 +4,7 @@ import { parseRawArgs } from "../gh_pr_open_preflight.ts";
 
 test("parse empty raw-args", () => {
   assert.deepEqual(parseRawArgs(""), {
+    pr: null,
     title: null,
     body: null,
     bodyFile: null,
@@ -20,6 +21,30 @@ test("parse empty raw-args", () => {
     allowSecretCommit: false,
     allowSecretToLlm: false,
   });
+});
+
+test("bare integer sets pr", () => {
+  const a = parseRawArgs("540 --title foo");
+  assert.equal(a.pr, 540);
+  assert.equal(a.title, "foo");
+});
+
+test("bare integer + --pr conflicts", () => {
+  assert.throws(() => parseRawArgs("540 --pr 541"), /--pr already set/);
+  assert.throws(() => parseRawArgs("--pr 540 541"), /--pr already set/);
+});
+
+test("'0' rejected", () => {
+  assert.throws(() => parseRawArgs("0"), /bare PR number must be a positive integer/);
+});
+
+test("'-5' rejected", () => {
+  // It falls through to the switch and throws unrecognized flag, or matches and throws.
+  assert.throws(() => parseRawArgs("-5"), /bare PR number must be a positive integer|unrecognized flag/);
+});
+
+test("'abc' still rejected as unknown flag", () => {
+  assert.throws(() => parseRawArgs("abc"), /unrecognized flag/);
 });
 
 test("parse simple flags", () => {

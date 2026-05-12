@@ -17,6 +17,7 @@ import { redactSecrets } from "./lib/redact.ts";
 import { appendSecretOverride } from "./lib/audit.ts";
 
 export interface UserArgs {
+  pr: number | null;
   title: string | null;
   body: string | null;
   bodyFile: string | null;
@@ -45,6 +46,7 @@ const BUDGET_CAP_FULL = 100_000;
 export function parseRawArgs(raw: string): UserArgs {
   const tokens = tokenize(raw);
   const a: UserArgs = {
+    pr: null,
     title: null,
     body: null,
     bodyFile: null,
@@ -74,7 +76,21 @@ export function parseRawArgs(raw: string): UserArgs {
   };
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]!;
+    if (/^-?\d+$/.test(t)) {
+      if (a.pr !== null) throw new Error(`--pr already set; cannot also pass bare PR number ${t}`);
+      const v = Number(t);
+      if (!Number.isInteger(v) || v <= 0) throw new Error(`bare PR number must be a positive integer; got ${t}`);
+      a.pr = v;
+      continue;
+    }
     switch (t) {
+      case "--pr": {
+        if (a.pr !== null) throw new Error(`--pr already set; cannot also pass --pr`);
+        const v = Number(need(++i, t));
+        if (!Number.isInteger(v) || v <= 0) throw new Error(`--pr must be a positive integer; got ${tokens[i]}`);
+        a.pr = v;
+        break;
+      }
       case "--title":
         a.title = need(++i, t);
         break;

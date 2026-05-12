@@ -26,6 +26,8 @@ TOOLS="${CLAUDE_PLUGIN_ROOT}/tools"
 
 ## Stage 1 — Preflight
 
+The raw arg may be a bare PR number OR a flag list — the parser accepts both.
+
 ```bash
 PREFLIGHT_OUT=$(node --experimental-strip-types "$TOOLS/gh_pr_merge_preflight.ts" \
   --raw-args "$ARGUMENTS" \
