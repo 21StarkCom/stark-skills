@@ -21,7 +21,7 @@ tool, which subprocess-calls `codex exec` with a scrubbed env.
 ## Constants
 
 ```bash
-TOOLS="$HOME/.claude/plugins/stark-gh/tools"
+TOOLS="${CLAUDE_PLUGIN_ROOT}/tools"
 ```
 
 ## Stage 1 — Preflight

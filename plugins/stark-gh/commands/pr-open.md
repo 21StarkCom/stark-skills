@@ -22,7 +22,7 @@ tool, which subprocess-calls `codex exec`.
 ## Constants
 
 ```bash
-TOOLS="$HOME/.claude/plugins/stark-gh/tools"
+TOOLS="${CLAUDE_PLUGIN_ROOT}/tools"
 ```
 
 ## Stage 1 - Preflight
