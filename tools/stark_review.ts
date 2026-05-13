@@ -119,6 +119,7 @@ export interface CliConfig {
   noFixLoop: boolean;
   allowUntrustedFixLoop: boolean;
   maxRounds: number;
+  maxRoundsExplicit: boolean;
   json: boolean;
 }
 
@@ -131,7 +132,7 @@ export interface ParseCliResult {
 
 /** Hard ceiling for --max-rounds. Fix loops are bounded to prevent runaway
  * sessions; values above this are rejected with a CLI error. */
-export const MAX_ROUNDS_CEILING = 5;
+export const MAX_ROUNDS_CEILING = 10;
 
 export const HELP_TEXT = `Usage: stark_review --pr <N> --repo <owner/repo> --base <branch> \\
                       --worktree <abs path> --config-root <abs path> [options]
@@ -151,7 +152,7 @@ Options:
   --no-fix-loop             Skip the fix loop for this run (review still posts)
   --allow-untrusted-fix-loop  Opt in to fork-PR fix loop without maintainer_can_modify;
                               ALSO requires config.untrusted_fix_loop=true
-  --max-rounds <int>        Max rounds (default 3, ceiling 5)
+  --max-rounds <int>        Max rounds (default from config.max_rounds, else 3; ceiling 10)
   --json                    Emit machine receipt to stdout
   --help                    Show this help
 `;
@@ -184,6 +185,7 @@ export function parseCli(argv: string[]): ParseCliResult {
   let noFixLoop = false;
   let allowUntrustedFixLoop = false;
   let maxRounds = 3;
+  let maxRoundsExplicit = false;
   let json = false;
 
   let i = 0;
@@ -287,6 +289,7 @@ export function parseCli(argv: string[]): ParseCliResult {
             );
           } else {
             maxRounds = n;
+            maxRoundsExplicit = true;
           }
           i = next;
           break;
@@ -350,6 +353,7 @@ export function parseCli(argv: string[]): ParseCliResult {
       noFixLoop,
       allowUntrustedFixLoop,
       maxRounds,
+      maxRoundsExplicit,
       json,
     },
   };
@@ -2481,6 +2485,25 @@ export async function main(
     });
   } catch (err) {
     return finalizeFailure(repo, pr, "config_load_failed", (err as Error).message, cli.json);
+  }
+
+  if (!cli.maxRoundsExplicit && typeof config.max_rounds === "number") {
+    const n = config.max_rounds;
+    if (!Number.isInteger(n) || n <= 0) {
+      return finalizeFailure(
+        repo, pr, "config_load_failed",
+        `config.max_rounds must be a positive integer (got ${JSON.stringify(n)})`,
+        cli.json,
+      );
+    }
+    if (n > MAX_ROUNDS_CEILING) {
+      return finalizeFailure(
+        repo, pr, "config_load_failed",
+        `config.max_rounds=${n} exceeds sane ceiling of ${MAX_ROUNDS_CEILING}; fix loops are bounded to prevent runaway sessions`,
+        cli.json,
+      );
+    }
+    cli = { ...cli, maxRounds: n };
   }
 
   const promptRoot = resolvePromptRoot({ configRoot: cli.configRoot, home: os.homedir() });
