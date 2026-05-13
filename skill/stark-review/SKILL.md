@@ -6,8 +6,8 @@ description: >-
 argument-hint: "[PR_NUMBER] [--agent claude|codex|gemini] [--quick] [--domains a,b,c] [--dry-run] [--repo ORG/REPO]"
 disable-model-invocation: false
 model: opus[1m]
-revision: 7023bdbd1979bd76ee6d674b92600f1882f2b3e7
-revision_date: 2026-05-11T18:07:40Z
+revision: 10cf64168d96fde54c2af16f434e31a4d296f97b
+revision_date: 2026-05-13T07:18:37Z
 ---
 
 Single-agent PR review path. Keep this skill thin: do preflight, capture the
@@ -309,8 +309,10 @@ classified `fix` finding from Critical down to nits enters the loop.
 6. Commit + push to the resolved push target. Commit SHA + audit entry land in
    the receipt; the next round re-runs the review against the new HEAD.
 
-`--max-rounds` caps the loop; the default ceiling is enforced in
-`stark_review.ts` to prevent runaway sessions.
+`--max-rounds` caps the loop. Resolution order: explicit `--max-rounds` →
+`config.max_rounds` (global/org/repo merge) → built-in default `3`. The hard
+ceiling `MAX_ROUNDS_CEILING` in `stark_review.ts` (currently `10`) rejects
+larger values from either source to prevent runaway sessions.
 
 For fork PRs without `maintainerCanModify`, the loop is read-only unless both
 `--allow-untrusted-fix-loop` (CLI) and `config.untrusted_fix_loop=true` are

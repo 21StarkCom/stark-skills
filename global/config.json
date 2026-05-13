@@ -14,6 +14,7 @@
     "spec-conformance": "codex"
   },
   "fix_threshold": "low",
+  "max_rounds": 3,
   "verify_before_clean": true,
   "disabled_domains": [],
   "extra_domains": [],
