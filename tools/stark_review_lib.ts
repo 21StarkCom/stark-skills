@@ -69,6 +69,10 @@ export interface ResolvedConfig {
   untrusted_fix_loop: boolean;
   history_retention_days: number;
   lock_ttl_minutes: number;
+  /** Optional global/org/repo override for the fix-loop round cap. CLI
+   * `--max-rounds` still wins; absent → fall back to the CLI default (3).
+   * Validated against MAX_ROUNDS_CEILING at consumption time. */
+  max_rounds?: number;
 }
 
 /**
