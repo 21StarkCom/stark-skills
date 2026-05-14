@@ -38,7 +38,7 @@
   "models": {
     "claude": { "enabled": true, "model_id": "claude-opus-4-7" },
     "codex": { "enabled": true, "model_id": "gpt-5.5" },
-    "gemini": { "enabled": true, "model_id": "gemini-3.1-pro-preview" }
+    "gemini": { "enabled": false, "model_id": "gemini-3.1-pro-preview" }
   },
   "runtime": {
     "lock_ttl_minutes": 30,
@@ -124,7 +124,7 @@
       "sequencing": "claude",
       "viability": "codex"
     },
-    "agent_fallback_order": ["claude", "codex", "gemini"],
+    "agent_fallback_order": ["claude", "codex"],
     "consensus_domains": ["security"],
     "consensus_threshold": 2,
     "max_rounds": 3,
@@ -140,9 +140,9 @@
     "domain_pairs": {
       "architecture":          { "leader": "claude", "second": "codex" },
       "behavior":              { "leader": "codex",  "second": "claude" },
-      "type-safety":           { "leader": "codex",  "second": "gemini" },
-      "security":              { "leader": "gemini", "second": "codex" },
-      "test-coverage":         { "leader": "codex",  "second": "gemini" },
+      "type-safety":           { "leader": "codex",  "second": "claude" },
+      "security":              { "leader": "codex",  "second": "claude" },
+      "test-coverage":         { "leader": "codex",  "second": "claude" },
       "spec-conformance":      { "leader": "claude", "second": "codex" }
     },
     "always_on_domains": ["behavior"],

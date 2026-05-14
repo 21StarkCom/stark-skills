@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Multi-agent PR code review system. Codex, Codex, and Gemini are all enabled by default. Hierarchical config (global → org → repo). Self-improving prompts via review history analysis.
+Multi-agent PR code review system. Claude and Codex are enabled by default; Gemini is disabled (opt-in via `models.gemini.enabled`). Hierarchical config (global → org → repo). Self-improving prompts via review history analysis.
 
 ## Operating Principles
 
