@@ -5,8 +5,8 @@ description: >-
 argument-hint: "[--dry-run] [--repo ORG/REPO] [--aggressive]"
 disable-model-invocation: true
 model: claude-sonnet-4-6
-revision: 3b1d15b47ebc4d56effb999ba52a7c621b6c9220
-revision_date: 2026-05-07T10:51:41Z
+revision: 7c91ffda1c063674729d3d8dddcf530bb937db53
+revision_date: 2026-05-14T07:49:39Z
 ---
 
 # stark-housekeeping
@@ -25,9 +25,10 @@ Audits and cleans up project state: closes stale issues, deletes merged branches
 
 ## Constants
 
-```
-SCRIPTS = ~/.claude/code-review/scripts
-PYTHON  = $SCRIPTS/.venv/bin/python3
+```bash
+SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
+PYTHON="$SCRIPTS/.venv/bin/python3"
+[ -x "$PYTHON" ] || PYTHON=python3
 ```
 
 Detect repo (or use `--repo` override): parse `org/repo` from `git remote get-url origin`.
