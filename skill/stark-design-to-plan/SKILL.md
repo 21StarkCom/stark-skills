@@ -5,8 +5,8 @@ description: >-
 argument-hint: "<path> [--agents claude,codex,gemini] [--timeout N] [--dry-run] [--force]"
 disable-model-invocation: true
 model: opus
-revision: ea827b2dd463a563417f2dd86c31248eb42b5cfb
-revision_date: 2026-04-10T17:10:53+03:00
+revision: 7c91ffda1c063674729d3d8dddcf530bb937db53
+revision_date: 2026-05-14T07:49:39Z
 ---
 
 ## Preflight
@@ -41,9 +41,10 @@ Fills the pipeline gap: `/stark-review-design` â†’ **`/stark-design-to-plan`** â
 
 ## Constants
 
-```
-SCRIPTS = ~/.claude/code-review/scripts
-PYTHON  = $SCRIPTS/.venv/bin/python3
+```bash
+SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
+PYTHON="$SCRIPTS/.venv/bin/python3"
+[ -x "$PYTHON" ] || PYTHON=python3
 ```
 
 ## Phase 1: Setup

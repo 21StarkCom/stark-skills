@@ -5,8 +5,8 @@ description: >-
 argument-hint: "[start|end]"
 disable-model-invocation: true
 model: opus
-revision: 1fb8e969f0d9dc707bc7ea951293fa5cc0c93926
-revision_date: 2026-05-11T08:41:29Z
+revision: 7c91ffda1c063674729d3d8dddcf530bb937db53
+revision_date: 2026-05-14T07:49:39Z
 ---
 
 ## Preflight
@@ -28,9 +28,10 @@ Session lifecycle management: **start** (context load + briefing) and **end** (t
 
 ## Constants
 
-```
-SCRIPTS = ~/.claude/code-review/scripts
-PYTHON  = $SCRIPTS/.venv/bin/python3
+```bash
+SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
+PYTHON="$SCRIPTS/.venv/bin/python3"
+[ -x "$PYTHON" ] || PYTHON=python3
 ```
 
 ## Config

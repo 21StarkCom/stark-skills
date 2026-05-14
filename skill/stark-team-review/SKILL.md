@@ -7,8 +7,8 @@ disable-model-invocation: false
 context: fork
 model: opus[1m]
 workflow_path: references/workflow.md
-revision: ea7268a18edb159e040db78148f2ab9cb324d76a
-revision_date: 2026-05-03T06:43:43Z
+revision: 7c91ffda1c063674729d3d8dddcf530bb937db53
+revision_date: 2026-05-14T07:49:39Z
 ---
 
 ## Preflight
@@ -32,9 +32,10 @@ Multi-agent PR review: all enabled LLMs across 6 domain specializations dispatch
 
 ## Constants
 
-```
-SCRIPTS = ~/.claude/code-review/scripts
-PYTHON  = $SCRIPTS/.venv/bin/python3
+```bash
+SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
+PYTHON="$SCRIPTS/.venv/bin/python3"
+[ -x "$PYTHON" ] || PYTHON=python3
 ```
 
 To call github_app.py: `$PYTHON $SCRIPTS/github_app.py <args>`

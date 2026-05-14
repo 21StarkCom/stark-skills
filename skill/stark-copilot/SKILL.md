@@ -5,8 +5,8 @@ description: >-
 argument-hint: '<plan-or-prompt> [--plan-slug SLUG] [--test-command CMD] [--lead claude|codex|gemini] [--wing claude|codex|gemini] [--max-rounds N] [--timeout N] [--dry-run]'
 disable-model-invocation: true
 model: opus
-revision: f1653ea1d3dec16590431ad558264face446b81b
-revision_date: 2026-05-07T08:23:47Z
+revision: 7c91ffda1c063674729d3d8dddcf530bb937db53
+revision_date: 2026-05-14T07:49:39Z
 ---
 
 ## Preflight
@@ -57,12 +57,13 @@ If no input provided, ask: "What should I build?"
 
 ## Constants
 
-```
-SCRIPTS = ~/.claude/code-review/scripts
-PYTHON  = $SCRIPTS/.venv/bin/python3
-REPO_ROOT = $(git rev-parse --show-toplevel)
-LEAD    = (resolved from --lead, default claude)
-WING    = (resolved from --wing, default codex)
+```bash
+SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
+PYTHON="$SCRIPTS/.venv/bin/python3"
+[ -x "$PYTHON" ] || PYTHON=python3
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+# LEAD  — resolved from --lead, default claude
+# WING  — resolved from --wing, default codex
 ```
 
 ## Phase 1: Setup

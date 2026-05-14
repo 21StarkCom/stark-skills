@@ -6,8 +6,8 @@ argument-hint: "<path-to-spec> [--dry-run] [--cleanup <slug>] [--agents codex,ge
 disable-model-invocation: true
 context: fork
 model: opus
-revision: 2e8a3bda91763c4b23612b1de7e1cc9c313fea0f
-revision_date: 2026-04-28T17:28:09Z
+revision: 7c91ffda1c063674729d3d8dddcf530bb937db53
+revision_date: 2026-05-14T07:49:39Z
 ---
 
 # stark-plan-to-tasks
@@ -25,9 +25,10 @@ Decompose a spec/design document into phased GitHub issues. Three LLM passes: qu
 
 ## Constants
 
-```
-SCRIPTS = ~/.claude/code-review/scripts
-PYTHON  = $SCRIPTS/.venv/bin/python3
+```bash
+SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
+PYTHON="$SCRIPTS/.venv/bin/python3"
+[ -x "$PYTHON" ] || PYTHON=python3
 ```
 
 This skill uses only the `stark-claude` GitHub App (not all three like `stark-team-review`).
