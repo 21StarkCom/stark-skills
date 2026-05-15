@@ -74,6 +74,15 @@
             "command": "/Users/aryeh/Code/Playground/stark-insights/hooks/hook-emit.py session_end"
           }
         ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/aryeh/Code/.persona-memory-backup/backup-personas.sh >/dev/null 2>&1 &"
+          }
+        ]
       }
     ],
     "SessionStart": [
@@ -164,7 +173,8 @@
     "security-guidance@claude-plugins-official": true,
     "commit-commands@claude-plugins-official": true,
     "playground@claude-plugins-official": true,
-    "gopls-lsp@claude-plugins-official": true
+    "gopls-lsp@claude-plugins-official": true,
+    "stark-gh@stark-skills": true
   },
   "extraKnownMarketplaces": {
     "claude-code-lsps": {
@@ -187,7 +197,7 @@
     }
   },
   "outputStyle": "Concrete",
-  "effortLevel": "medium",
+  "effortLevel": "high",
   "skipDangerousModePermissionPrompt": true,
   "remoteControlAtStartup": false,
   "agentPushNotifEnabled": true,
@@ -195,7 +205,7 @@
   "useAutoModeDuringPlan": false,
   "autoMode": {
     "allow": [
-      "Pushing branches and opening/merging PRs in /Users/aryeh/Code/Playground/stark-data-core is permitted \u2014 it is a trusted sibling repo in Aryeh's workspace alongside stark-night-watch and is covered by the same review workflow."
+      "Pushing branches and opening/merging PRs in /Users/aryeh/Code/Playground/stark-data-core is permitted — it is a trusted sibling repo in Aryeh's workspace alongside stark-night-watch and is covered by the same review workflow."
     ]
   }
 }
