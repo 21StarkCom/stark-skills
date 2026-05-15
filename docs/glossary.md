@@ -35,7 +35,7 @@
 
 **Triage mode** — One of three modes controlling domain triage behavior: `full` (skip triage, dispatch all domains), `conservative` (only skip domains the LLM is confidently sure are irrelevant, threshold 0.8), `aggressive` (only dispatch domains the LLM explicitly marks as relevant). Default starts as `conservative` and promotes to `aggressive` after shadow validation.
 
-**Triage orchestrator** — Central script (`scripts/triage_orchestrator.py`) that owns the triage → dispatch → TUI → telemetry flow. Single entry point called by all four review skills (stark-review, stark-team-review, stark-review-design, stark-review-plan) with || fallback to direct dispatch.
+**Triage orchestrator** — Central script (`scripts/triage_orchestrator.py`) that owns the triage → dispatch → TUI → telemetry flow. Single entry point called by the review skills (stark-review, stark-review-design, stark-review-plan) with || fallback to direct dispatch.
 
 **Shadow mode** — Triage validation mode (`--shadow`) that dispatches all domains regardless of triage verdict but annotates each finding with `triage_would_skip: bool`. Used during shadow validation to measure triage accuracy without affecting review quality.
 

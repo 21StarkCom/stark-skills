@@ -7,7 +7,7 @@
 # Skills call this instead of building bespoke stark-emit invocations.
 #
 # Examples:
-#   skill-telemetry.sh stark-team-review 120 true pr_number=42 findings_total=7
+#   skill-telemetry.sh stark-review 120 true pr_number=42 findings_total=7
 #   skill-telemetry.sh stark-release 45 true version=1.2.0 bump_type=patch
 #   skill-telemetry.sh stark-session 30 true args=start branch=main
 

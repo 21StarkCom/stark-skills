@@ -6,8 +6,8 @@ argument-hint: "<path-to-spec> [--dry-run] [--cleanup <slug>] [--agents codex,ge
 disable-model-invocation: true
 context: fork
 model: opus
-revision: 7c91ffda1c063674729d3d8dddcf530bb937db53
-revision_date: 2026-05-14T07:49:39Z
+revision: e504ba02a12b6dd779ebd026fa4c07df76697ff2
+revision_date: 2026-05-15T18:20:11Z
 ---
 
 # stark-plan-to-tasks
@@ -31,7 +31,7 @@ PYTHON="$SCRIPTS/.venv/bin/python3"
 [ -x "$PYTHON" ] || PYTHON=python3
 ```
 
-This skill uses only the `stark-claude` GitHub App (not all three like `stark-team-review`).
+This skill uses only the `stark-claude` GitHub App.
 
 ## Phase 1: Setup
 

@@ -12,7 +12,6 @@
 | `/stark-plan-to-tasks` | Decompose plan into phased GitHub issues with story points | [usage](stark-plan-to-tasks/usage.md) · [internals](stark-plan-to-tasks/internals.md) |
 | `/stark-phase-execute` | Autonomous phase execution — implement, PR, review, merge | [usage](stark-phase-execute/usage.md) · [internals](stark-phase-execute/internals.md) |
 | `/stark-autopilot` | Tournament implementation — agents compete per step in worktrees | [usage](stark-autopilot/usage.md) · [internals](stark-autopilot/internals.md) |
-| `/stark-team-review` | Multi-agent PR code review — N agents × 9 domains with fix loop | [usage](stark-team-review/usage.md) · [internals](stark-team-review/internals.md) |
 
 ## Workflow & Ops
 
