@@ -76,7 +76,7 @@ If ANY provider has a newer model than the current pin:
    ### Next Steps
    1. Review release notes for breaking changes
    2. Update model pin in scripts/{provider}_utils.py
-   3. Run /stark-team-review on a sample PR to validate
+   3. Run /stark-review on a sample PR to validate
    4. V2: run benchmark suite (not yet implemented)"
    ```
 

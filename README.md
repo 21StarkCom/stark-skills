@@ -13,11 +13,8 @@ cd ~/Code/Playground/stark-skills
 # Start a work session (context loading, health checks, briefing)
 /stark-session start
 
-# Quick review (1 LLM × 9 domains)
+# PR review (1 LLM × 9 domains, triage-selected)
 /stark-review 42
-
-# Thorough review (all enabled LLMs × 9 domains; default: 2)
-/stark-team-review 42
 
 # End the session (tests, cleanup, push)
 /stark-session end
@@ -43,14 +40,13 @@ Review artifacts before they ship. Each review skill dispatches the enabled LLM 
 
 | Skill | What it reviews | When to use |
 |-------|----------------|-------------|
-| `/stark-review` | PR code changes | Quick review. 1 LLM × 9 domains — fast, cheap, default agent configurable per domain. |
-| [`/stark-team-review`](docs/skills/stark-team-review/usage.md) | PR code changes | Thorough review. All enabled LLMs × 9 domains (2 by default), autonomous fix loop. |
+| `/stark-review` | PR code changes | Triage-selected domains, 1 LLM × N domains — fast, cheap, default agent configurable per domain. |
 | [`/stark-review-design`](skill/stark-review-design/SKILL.md) | Architecture and design docs | Before committing to a design. Reviews across 12 domains (completeness, security, scalability, etc.). |
 | [`/stark-review-plan`](docs/skills/stark-review-plan/usage.md) | Execution plans and deployment plans | Before executing. Adversarial SRE review across 10 failure vectors — assumes the plan will break. |
 | [`/stark-review-improvement`](docs/skills/stark-review-improvement/usage.md) | Review prompt effectiveness | After reviews produce too many false positives. Tunes agent prompts based on assessment data. |
 | [`/stark-review-design-improvement`](skill/stark-review-design-improvement/SKILL.md) | Design review prompt effectiveness | After design reviews produce too many false positives. Wraps `/stark-review-improvement` with design-review prompts. |
 
-**Best practice:** Run `/stark-review-plan` on specs *before* implementation starts. It's cheaper to fix a plan than to fix code. Use `/stark-team-review` on every PR — the autonomous fix loop handles most findings without human intervention.
+**Best practice:** Run `/stark-review-plan` on specs *before* implementation starts. It's cheaper to fix a plan than to fix code. Use `/stark-review` on every PR.
 
 ### Planning and Execution
 
@@ -118,8 +114,7 @@ Start and end your work sessions with consistent context loading and cleanup.
 ### Reviewing someone else's PR
 
 ```
-/stark-review 42                    # quick: 1 agent × 9 domains
-/stark-team-review 42               # thorough: enabled agents × 9 domains (default: 2)
+/stark-review 42                    # PR review: 1 agent × triage-selected domains
 ```
 
 ### Monthly maintenance
@@ -155,7 +150,7 @@ Each agent posts a consolidated review via its own GitHub App bot:
 stark-skills/
 ├── install.sh                    ← symlinks everything to install locations
 ├── skill/                        ← → ~/.claude/skills/
-│   ├── stark-team-review/SKILL.md  ← one dir per skill (28 total)
+│   ├── stark-review/SKILL.md       ← one dir per skill
 │   ├── stark-persona/SKILL.md
 │   └── ...
 ├── scripts/                      ← → ~/.claude/code-review/scripts/
