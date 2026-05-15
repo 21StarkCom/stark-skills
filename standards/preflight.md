@@ -12,7 +12,7 @@ PYTHON="$SCRIPTS/.venv/bin/python3"
 "$PYTHON" "$SCRIPTS/preflight.py" --workflow <skill-slug> --json
 ```
 
-The skill provides its own `<skill-slug>` (e.g. `stark-review`, `stark-team-review`).
+The skill provides its own `<skill-slug>` (e.g. `stark-review`, `stark-review-plan`).
 
 ## Result handling
 

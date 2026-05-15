@@ -5,8 +5,8 @@ description: >-
 argument-hint: "[--prompts-dir design-review] (reads assessment from context or latest history)"
 disable-model-invocation: true
 model: opus
-revision: 1fb8e969f0d9dc707bc7ea951293fa5cc0c93926
-revision_date: 2026-05-11T08:41:29Z
+revision: e504ba02a12b6dd779ebd026fa4c07df76697ff2
+revision_date: 2026-05-15T18:20:11Z
 ---
 
 # stark-review-improvement
@@ -56,7 +56,7 @@ HISTORY_SUB  = (org/repo/pr structure)
 
 Look in the **current conversation context** for either:
 
-- A "Prompt Improvement Assessment" section (from a `/stark-team-review` or `/stark-review-design` run)
+- A "Prompt Improvement Assessment" section (from a `/stark-review` or `/stark-review-design` run)
 - A `prompt-assessment.md` or `*.design-review.md` file path referenced in conversation
 
 If neither exists, check the most recent history directory for the matching review type:

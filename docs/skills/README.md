@@ -22,7 +22,7 @@ Designs are produced by `superpowers:brainstorm` (outside this repo). From there
 
 **Step 5 — `/stark-phase-execute`** picks up those issues and autonomously implements them — for each issue: implement, create PR, run multi-agent review, fix findings, merge. Zero user intervention. For maximum quality, `/stark-autopilot` is the alternative execution mode: all 3 agents compete on every implementation step in parallel git worktrees, with a tournament to pick the winner at each step.
 
-**Step 6 — `/stark-team-review`** is the full PR code review that runs during execution (or standalone). 3 agents × 9 domains = 27 parallel sub-agent reviews, posted to GitHub under the respective bot identities. For a faster manual pass, `/stark-review` runs a single agent across the same 9 domains.
+**Step 6 — `/stark-review`** is the PR code review that runs during execution (or standalone). One agent across triage-selected domains, posted to GitHub under the agent's bot identity.
 
 ## The Ecosystem
 

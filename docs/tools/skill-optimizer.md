@@ -35,7 +35,7 @@ Purpose: inventory a skill bundle, generate a rewrite brief or API-backed rewrit
   ```
 - Multiple skills with one comma-separated flag:
   ```bash
-  node tools/skill_optimize.ts --mode api --skills stark-forged-review,stark-review-plan,stark-team-review
+  node tools/skill_optimize.ts --mode api --skills stark-forged-review,stark-review-plan,stark-review
   ```
 - All skills (plan mode only — API mode requires an explicit target):
   ```bash

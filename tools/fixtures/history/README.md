@@ -9,7 +9,7 @@ emits.
 ## Why
 
 The TS pipeline (`/stark-review` after Phase 5) and the Python pipeline
-(`/stark-review` and `/stark-team-review` until the cut-over) both write to the
+(`/stark-review` until the cut-over) both write to the
 same `~/.claude/code-review/history/<org>/<repo>/<pr>/round-N.json` location.
 Downstream consumers — the review-history dashboard, `/stark-review-improvement`,
 analytics queries, and any future tooling — read these files as a single
