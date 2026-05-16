@@ -17,14 +17,24 @@ from typing import Any
 
 import audit_base
 
-DEFAULT_DB_PATH = (
-    Path.home()
-    / ".claude"
-    / "code-review"
-    / "history"
-    / "forged-review"
-    / "forged_review_metrics.db"
+# Single source of truth — the canonical CLI owns the constant and the
+# resolver. Importing from there (rather than redefining a parallel copy
+# here) is the "no parallel resolution allowed" Phase 0 contract.
+from red_team_audit_cli import (  # noqa: E402  (intentional re-export)
+    DEFAULT_DB_PATH,
+    resolve_db as _resolve_db_envelope,
 )
+
+
+def resolve_db_path(cli_db: str | Path | None = None) -> Path:
+    """Return the canonical audit DB path with full resolver precedence.
+
+    Thin wrapper over ``red_team_audit_cli.resolve_db`` that returns just
+    the :class:`Path` — callers that need the source provenance should hit
+    the CLI directly. Dispatchers use this to honor env / config overrides
+    in the same way the TS Phase 1 dispatcher will via shell-out.
+    """
+    return _resolve_db_envelope(cli_db).db_path
 
 
 _CREATE_TABLES = """\
