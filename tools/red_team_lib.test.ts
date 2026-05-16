@@ -14,9 +14,11 @@ import { test } from "node:test";
 
 import {
   AUDIT_CLI,
+  DEFAULT_FIX_PLAN_CONFIG,
   PROMPTS_DIR,
   REPO_ROOT,
   VALID_PERSONAS,
+  assembleFixPlanPrompt,
   assemblePrompt,
   buildResultFromTranscript,
   buildRunContext,
@@ -27,17 +29,29 @@ import {
   deriveStatus,
   dispatch,
   extractClassification,
+  killSwitchActive,
   loadPersonaPrompts,
   parseCodexJsonl,
+  parseFixPlanOutput,
   preDispatchSensitiveGate,
   recordRun,
   redact,
+  renderFixPlanSection,
   renderSidecarMarkdown,
   resolveDbPath,
+  resolveFixPlan,
   scrubEnv,
+  serializeFindingsEnvelope,
   sidecarPathFor,
   updateRunStatus,
   validateFindings,
+  validateFixPlan,
+} from "./red_team_lib.ts";
+import type {
+  FixPlanConfig,
+  RedTeamFinding,
+  RedTeamResult,
+  RedTeamRunContext,
 } from "./red_team_lib.ts";
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -678,4 +692,423 @@ test("renderSidecarMarkdown applies redaction to free-text fields", () => {
   });
   assert.doesNotMatch(md, /sk-abcdefghijklmnopqrstuvwx/);
   assert.match(md, /sk-\[REDACTED\]/);
+});
+
+// ── Fix-plan coverage ─────────────────────────────────────────────────
+
+function mkFinding(over: Partial<RedTeamFinding> = {}): RedTeamFinding {
+  return {
+    id: "rt1",
+    persona: "security-trust",
+    severity: "high",
+    concern: "Schema migration risks data loss",
+    consequence: "Customer rows deleted",
+    counter_proposal: "Add a backfill step with verification",
+    trade_off: "Adds one deploy step",
+    reason_for_uncertainty: null,
+    risk_key: null,
+    affected_component: null,
+    failure_mode: null,
+    concern_hash: "deadbeefdeadbeef",
+    ...over,
+  };
+}
+
+function mkChallenge(over: Partial<RedTeamResult> = {}): RedTeamResult {
+  return {
+    stage: "design",
+    round_num: 1,
+    synthesis: "synthesis text",
+    findings: [],
+    blocking_count: 0,
+    human_review_count: 0,
+    raw_output: "",
+    duration_s: 1.0,
+    cost_usd: 0,
+    error: null,
+    input_tokens: 0,
+    output_tokens: 0,
+    ...over,
+  };
+}
+
+function mkCtx(): RedTeamRunContext {
+  return {
+    run_id: "test-run",
+    stage: "design",
+    artifact_path: "/tmp/doc.md",
+    source_spec_path: null,
+    repo: null,
+    artifact_relative_path: "doc.md",
+    pr_number: null,
+    db_path: "/tmp/nonexistent.db",
+    started_at: "2026-05-16T00:00:00Z",
+  };
+}
+
+test("killSwitchActive honors documented env values", () => {
+  assert.equal(killSwitchActive({}), false);
+  assert.equal(killSwitchActive({ STARK_RED_TEAM_FIX_PLAN_KILL: "" }), false);
+  assert.equal(killSwitchActive({ STARK_RED_TEAM_FIX_PLAN_KILL: "0" }), false);
+  assert.equal(killSwitchActive({ STARK_RED_TEAM_FIX_PLAN_KILL: "false" }), false);
+  assert.equal(killSwitchActive({ STARK_RED_TEAM_FIX_PLAN_KILL: "1" }), true);
+  assert.equal(killSwitchActive({ STARK_RED_TEAM_FIX_PLAN_KILL: "true" }), true);
+  assert.equal(killSwitchActive({ STARK_RED_TEAM_FIX_PLAN_KILL: "TRUE" }), true);
+  assert.equal(killSwitchActive({ STARK_RED_TEAM_FIX_PLAN_KILL: "yes" }), true);
+});
+
+test("serializeFindingsEnvelope packs everything under the cap", () => {
+  const findings = [mkFinding({ id: "rt1" }), mkFinding({ id: "rt2", severity: "medium" })];
+  const out = serializeFindingsEnvelope(findings, 100_000);
+  assert.equal(out.omittedIds.length, 0);
+  assert.equal(out.fitsSafely, true);
+  const parsed = JSON.parse(out.envelopeJson) as {
+    truncated: boolean;
+    findings: Array<{ id: string }>;
+  };
+  assert.equal(parsed.truncated, false);
+  assert.equal(parsed.findings.length, 2);
+  // Sort: high before medium.
+  assert.equal(parsed.findings[0]!.id, "rt1");
+  assert.equal(parsed.findings[1]!.id, "rt2");
+});
+
+test("serializeFindingsEnvelope returns fitsSafely=false when a blocking finding is omitted", () => {
+  // 800-char concern × 5 high findings will overflow a 1000-char cap.
+  const long = "x".repeat(800);
+  const findings = [
+    mkFinding({ id: "rt1", concern: long }),
+    mkFinding({ id: "rt2", concern: long }),
+    mkFinding({ id: "rt3", concern: long }),
+  ];
+  const out = serializeFindingsEnvelope(findings, 1000);
+  assert.equal(out.fitsSafely, false);
+  assert.ok(out.omittedIds.length > 0);
+});
+
+test("parseFixPlanOutput extracts JSON from raw / fenced / brace-bracketed forms", () => {
+  assert.deepEqual(parseFixPlanOutput('{"a":1}'), { a: 1 });
+  assert.deepEqual(parseFixPlanOutput("```json\n{\"a\":2}\n```"), { a: 2 });
+  assert.deepEqual(parseFixPlanOutput("leading prose {\"a\":3} trailing"), { a: 3 });
+  assert.deepEqual(parseFixPlanOutput("totally invalid"), {});
+  assert.deepEqual(parseFixPlanOutput(""), {});
+});
+
+const VALID_PLAN_JSON = {
+  summary: "Address schema risks with a phased rollout.",
+  moves: [
+    {
+      id: "m1",
+      title: "Stage migration behind a flag",
+      rationale: "Decouples deploy from cutover so we can roll back fast.",
+      sections_touched: ["§4.2"],
+      addressed_finding_ids: ["rt1"],
+      new_trade_off: "One extra deploy step.",
+    },
+    {
+      id: "m2",
+      title: "Add backfill verifier",
+      rationale: "Catches partial backfill before cutover.",
+      sections_touched: ["§5"],
+      addressed_finding_ids: ["rt2"],
+      new_trade_off: "Adds 10 min to migration window.",
+    },
+  ],
+  unaddressed_finding_ids: [],
+  notes: "",
+};
+
+test("validateFixPlan accepts a clean plan", () => {
+  const out = validateFixPlan(VALID_PLAN_JSON, ["rt1", "rt2"], DEFAULT_FIX_PLAN_CONFIG);
+  assert.equal(out.error, null);
+  assert.equal(out.moves.length, 2);
+  assert.deepEqual(out.unaddressed_finding_ids, []);
+  assert.deepEqual(out.orphan_finding_ids, []);
+});
+
+test("validateFixPlan errors on missing 'moves' list", () => {
+  const out = validateFixPlan({ summary: "x" }, ["rt1", "rt2"], DEFAULT_FIX_PLAN_CONFIG);
+  assert.match(out.error ?? "", /missing required 'moves'/);
+});
+
+test("validateFixPlan flags invented IDs and caps move count", () => {
+  const overflow = {
+    moves: Array.from({ length: 7 }, (_, i) => ({
+      id: `m${i + 1}`,
+      title: `Title ${i + 1}`,
+      rationale: "Rationale.",
+      sections_touched: [],
+      addressed_finding_ids: i === 0 ? ["rt1", "rt99"] : ["rt2"],
+      new_trade_off: "Trade.",
+    })),
+  };
+  const out = validateFixPlan(overflow, ["rt1", "rt2"], DEFAULT_FIX_PLAN_CONFIG);
+  assert.equal(out.error, null);
+  assert.equal(out.moves.length, 6);
+  assert.ok(out.warnings.includes("move_cap_hit"));
+  assert.ok(out.warnings.includes("ids_invented"));
+});
+
+test("resolveFixPlan returns skipped_kill_switch when env var set", () => {
+  const out = resolveFixPlan({
+    ctx: mkCtx(),
+    challenge: mkChallenge({ blocking_count: 1, findings: [mkFinding()] }),
+    artifact: "doc",
+    sourceSpec: "spec",
+    enableForCalibration: true,
+    cfg: { ...DEFAULT_FIX_PLAN_CONFIG, enabled: true },
+    env: { STARK_RED_TEAM_FIX_PLAN_KILL: "1" },
+  });
+  assert.equal(out.status, "skipped_kill_switch");
+  assert.equal(out.fixPlan, null);
+  assert.ok(out.runWarnings.includes("red_team.fix_plan.kill_switch_active"));
+});
+
+test("resolveFixPlan returns skipped_disabled when cfg.enabled=false and no calibration override", () => {
+  const out = resolveFixPlan({
+    ctx: mkCtx(),
+    challenge: mkChallenge({ blocking_count: 1, findings: [mkFinding()] }),
+    artifact: "doc",
+    sourceSpec: "spec",
+    cfg: DEFAULT_FIX_PLAN_CONFIG,
+    env: {},
+  });
+  assert.equal(out.status, "skipped_disabled");
+});
+
+test("resolveFixPlan returns skipped_clean when challenge has no blocking findings", () => {
+  const out = resolveFixPlan({
+    ctx: mkCtx(),
+    challenge: mkChallenge({ blocking_count: 0 }),
+    artifact: "doc",
+    sourceSpec: "spec",
+    cfg: { ...DEFAULT_FIX_PLAN_CONFIG, enabled: true },
+    env: {},
+  });
+  assert.equal(out.status, "skipped_clean");
+});
+
+test("resolveFixPlan returns skipped_human_review_only when only human-review findings", () => {
+  const hr = mkFinding({
+    counter_proposal: "REQUEST_HUMAN_REVIEW",
+    reason_for_uncertainty: "Not enough context",
+  });
+  const out = resolveFixPlan({
+    ctx: mkCtx(),
+    challenge: mkChallenge({
+      blocking_count: 0,
+      human_review_count: 1,
+      findings: [hr],
+    }),
+    artifact: "doc",
+    sourceSpec: "spec",
+    cfg: { ...DEFAULT_FIX_PLAN_CONFIG, enabled: true },
+    env: {},
+  });
+  assert.equal(out.status, "skipped_human_review_only");
+});
+
+test("resolveFixPlan returns skipped_budget_exhausted when challenge cost >= budget", () => {
+  const out = resolveFixPlan({
+    ctx: mkCtx(),
+    challenge: mkChallenge({
+      blocking_count: 1,
+      findings: [mkFinding()],
+      cost_usd: 2.5,
+    }),
+    artifact: "doc",
+    sourceSpec: "spec",
+    cfg: { ...DEFAULT_FIX_PLAN_CONFIG, enabled: true },
+    env: {},
+    perRunBudgetUsd: 2.0,
+  });
+  assert.equal(out.status, "skipped_budget_exhausted");
+});
+
+test("resolveFixPlan returns success with a valid mocked plan", () => {
+  const out = resolveFixPlan({
+    ctx: mkCtx(),
+    challenge: mkChallenge({
+      blocking_count: 2,
+      findings: [mkFinding({ id: "rt1" }), mkFinding({ id: "rt2" })],
+    }),
+    artifact: "design body",
+    sourceSpec: "spec body",
+    cfg: { ...DEFAULT_FIX_PLAN_CONFIG, enabled: true },
+    env: {},
+    codexFn: () => ({
+      raw_output: JSON.stringify(VALID_PLAN_JSON),
+      duration_s: 1.0,
+      input_tokens: 100,
+      output_tokens: 50,
+      error: null,
+    }),
+  });
+  assert.equal(out.status, "success");
+  assert.ok(out.fixPlan);
+  assert.equal(out.fixPlan!.moves.length, 2);
+  assert.equal(out.fixPlan!.error, null);
+});
+
+test("resolveFixPlan returns error when the codex call errors", () => {
+  const out = resolveFixPlan({
+    ctx: mkCtx(),
+    challenge: mkChallenge({
+      blocking_count: 1,
+      findings: [mkFinding({ id: "rt1" })],
+    }),
+    artifact: "design",
+    sourceSpec: "spec",
+    cfg: { ...DEFAULT_FIX_PLAN_CONFIG, enabled: true },
+    env: {},
+    codexFn: () => ({
+      raw_output: "",
+      duration_s: 0.5,
+      input_tokens: 0,
+      output_tokens: 0,
+      error: "codex exited 1",
+    }),
+  });
+  assert.equal(out.status, "error");
+  assert.ok(out.fixPlan);
+  assert.equal(out.fixPlan!.error, "codex exited 1");
+});
+
+test("renderFixPlanSection always emits the canonical anchor heading", () => {
+  for (const status of [
+    "skipped_disabled",
+    "skipped_kill_switch",
+    "skipped_clean",
+    "skipped_human_review_only",
+    "skipped_budget_exhausted",
+    "skipped_input_too_large",
+    "skipped_challenge_error",
+  ] as const) {
+    const md = renderFixPlanSection({ status, fixPlan: null });
+    assert.match(md, /^## Proposed Fix Plan\n/);
+    assert.match(md, new RegExp(`Status:\\*\\*\\s*skipped\\s*—\\s*${status}`));
+  }
+});
+
+test("renderFixPlanSection renders a full success block with moves", () => {
+  const cfg: FixPlanConfig = { ...DEFAULT_FIX_PLAN_CONFIG, enabled: true };
+  const validated = validateFixPlan(VALID_PLAN_JSON, ["rt1", "rt2"], cfg);
+  validated.model = "gpt-5.5-pro";
+  validated.reasoning_effort = "xhigh";
+  validated.cost_usd = 1.42;
+  validated.duration_s = 12.3;
+  validated.input_tokens = 1000;
+  validated.output_tokens = 200;
+  const md = renderFixPlanSection({ status: "success", fixPlan: validated });
+  assert.match(md, /^## Proposed Fix Plan\n/);
+  assert.match(md, /\*\*Status:\*\* success/);
+  assert.match(md, /\*\*Generated by:\*\* `gpt-5\.5-pro`/);
+  assert.match(md, /\*\*Coverage:\*\* 2 of 2 blocking findings addressed/);
+  assert.match(md, /### 1\. Stage migration behind a flag/);
+  assert.match(md, /### 2\. Add backfill verifier/);
+  assert.match(md, /### Unaddressed findings/);
+  assert.match(md, /### Orphan findings/);
+});
+
+test("renderFixPlanSection renders an error block carrying the upstream message", () => {
+  const md = renderFixPlanSection({
+    status: "error",
+    fixPlan: {
+      summary: "",
+      moves: [],
+      unaddressed_finding_ids: [],
+      orphan_finding_ids: [],
+      notes: "",
+      input_truncated: false,
+      input_omitted_finding_ids: [],
+      warnings: ["ids_invented"],
+      raw_output: "",
+      duration_s: 0,
+      cost_usd: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      model: "gpt-5.5-pro",
+      reasoning_effort: "xhigh",
+      error: "model returned 0 valid moves",
+    },
+  });
+  assert.match(md, /\*\*Status:\*\* error/);
+  assert.match(md, /\*\*Error:\*\* model returned 0 valid moves/);
+  assert.match(md, /\*\*Warnings:\*\* `ids_invented`/);
+});
+
+test("assembleFixPlanPrompt wraps every required input in a guarded envelope", () => {
+  const findings = [mkFinding({ id: "rt1" })];
+  const out = assembleFixPlanPrompt({
+    stage: "design",
+    artifact: "design body",
+    sourceSpec: "spec body",
+    findings,
+    synthesis: "synthesis text",
+    maxInputChars: 100_000,
+  });
+  // Each input gets exactly one open + one close delimiter.
+  for (const name of ["artifact", "source_spec", "findings_envelope", "synthesis"]) {
+    const open = new RegExp(`<<<RED_TEAM_INPUT name="${name}" hash="sha256:[0-9a-f]{64}">>>`);
+    const close = new RegExp(`<<<END_RED_TEAM_INPUT name="${name}">>>`);
+    assert.match(out.prompt, open);
+    assert.match(out.prompt, close);
+  }
+  assert.match(out.prompt, /Stage: design/);
+  assert.equal(out.omittedIds.length, 0);
+  assert.equal(out.fitsSafely, true);
+});
+
+test("dispatch() includes fix_plan_status=skipped_disabled by default in its receipt", () => {
+  const db = tmpDb();
+  const docPath = tmpDoc(
+    `---
+classification:
+  level: internal
+---
+# Fix-plan integration fixture
+Content for the dispatch-with-fix-plan smoke.
+`,
+  );
+  const ctx = buildRunContext({
+    stage: "design",
+    artifactPath: docPath,
+    sourceSpecPath: null,
+    dbPath: db,
+  });
+  const prompts = loadPersonaPrompts();
+  const result = dispatch({
+    ctx,
+    prompts,
+    personas: ["data", "security-trust"],
+    artifact: fs.readFileSync(docPath, "utf8"),
+    sourceSpec: fs.readFileSync(docPath, "utf8"),
+    model: "gpt-5.5-pro",
+    timeoutMs: 10_000,
+    dbPath: db,
+    noAudit: true,
+    codexFn: () => ({
+      raw_output: JSON.stringify([
+        {
+          persona: "data",
+          severity: "high",
+          concern: "Stub blocking finding",
+          consequence: "Tests assert wiring only",
+          counter_proposal: "Add a verifier",
+          trade_off: "One extra step",
+        },
+      ]),
+      duration_s: 0.01,
+      input_tokens: 1,
+      output_tokens: 1,
+      error: null,
+    }),
+  });
+  // Default config ships enabled=false → skipped_disabled even with blocking findings.
+  assert.equal(result.fix_plan_status, "skipped_disabled");
+  assert.equal(result.fix_plan, null);
+  assert.ok(result.sidecar_path);
+  const sidecar = fs.readFileSync(result.sidecar_path!, "utf8");
+  assert.match(sidecar, /## Proposed Fix Plan/);
+  assert.match(sidecar, /Status:\*\* skipped — skipped_disabled/);
 });

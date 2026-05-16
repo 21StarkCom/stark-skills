@@ -116,7 +116,58 @@ export interface DispatchResult {
   pr_comment_marker: string;
   error: string | null;
   findings: RedTeamFinding[];
+  fix_plan_status: FixPlanStatus;
+  fix_plan: RedTeamFixPlan | null;
 }
+
+export interface FixPlanMove {
+  id: string;
+  title: string;
+  rationale: string;
+  sections_touched: string[];
+  addressed_finding_ids: string[];
+  new_trade_off: string;
+}
+
+export interface RedTeamFixPlan {
+  summary: string;
+  moves: FixPlanMove[];
+  unaddressed_finding_ids: string[];
+  orphan_finding_ids: string[];
+  notes: string;
+  input_truncated: boolean;
+  input_omitted_finding_ids: string[];
+  warnings: string[];
+  raw_output: string;
+  duration_s: number;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  model: string;
+  reasoning_effort: string;
+  error: string | null;
+}
+
+export interface FixPlanConfig {
+  enabled: boolean;
+  model: string;
+  reasoning_effort: string;
+  timeout_s: number;
+  min_moves: number;
+  max_moves: number;
+  max_input_chars: number;
+}
+
+export type FixPlanStatus =
+  | "success"
+  | "error"
+  | "skipped_disabled"
+  | "skipped_kill_switch"
+  | "skipped_challenge_error"
+  | "skipped_human_review_only"
+  | "skipped_clean"
+  | "skipped_budget_exhausted"
+  | "skipped_input_too_large";
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -858,8 +909,12 @@ export function renderSidecarMarkdown(args: {
   ctx: RedTeamRunContext;
   result: RedTeamResult;
   model: string;
+  fixPlanStatus?: FixPlanStatus;
+  fixPlan?: RedTeamFixPlan | null;
 }): string {
   const { ctx, result, model } = args;
+  const fixPlanStatus: FixPlanStatus = args.fixPlanStatus ?? "skipped_disabled";
+  const fixPlan = args.fixPlan ?? null;
   const parts: string[] = [];
   const artifactBase = path.basename(ctx.artifact_path);
   parts.push(`# Red-team review — ${artifactBase}`);
@@ -886,6 +941,8 @@ export function renderSidecarMarkdown(args: {
     parts.push("## Findings");
     parts.push("");
     parts.push("_(no findings)_");
+    parts.push("");
+    parts.push(renderFixPlanSection({ status: fixPlanStatus, fixPlan }));
     return parts.join("\n");
   }
   parts.push("## Findings");
@@ -933,6 +990,8 @@ export function renderSidecarMarkdown(args: {
     // structured identity fields into the rendered sidecar.
     void escapeInline;
   }
+  parts.push("");
+  parts.push(renderFixPlanSection({ status: fixPlanStatus, fixPlan }));
   return parts.join("\n");
 }
 
@@ -944,6 +1003,8 @@ export function renderPrCommentBody(args: {
   ctx: RedTeamRunContext;
   result: RedTeamResult;
   model: string;
+  fixPlanStatus?: FixPlanStatus;
+  fixPlan?: RedTeamFixPlan | null;
 }): string {
   const marker = prCommentMarker(args.ctx);
   const sidecar = renderSidecarMarkdown(args);
@@ -979,6 +1040,20 @@ export interface DispatchArgs {
     output_tokens: number;
     error: string | null;
   };
+  /** Force-enable fix-plan even when `red_team.fix_plan.enabled` is false.
+   *  Used by calibration runs that need to exercise the path without
+   *  flipping the global config. Honored only when the kill switch is off
+   *  and no other gate refuses. */
+  enableFixPlanForCalibration?: boolean;
+  /** Optional per-run cost budget (USD). If provided, the fix-plan resolver
+   *  refuses on `challenge.cost_usd >= budget` and warns when the combined
+   *  cost crosses the budget. TS dispatch currently reports `cost_usd: 0`,
+   *  so leaving this undefined is the right default until cost tracking
+   *  lands. */
+  perRunBudgetUsd?: number;
+  /** Mock the fix-plan codex call separately from the challenge codex.
+   *  Falls back to `codexFn` when unset (tests typically share the mock). */
+  fixPlanCodexFn?: ResolveFixPlanArgs["codexFn"];
 }
 
 /**
@@ -1066,8 +1141,25 @@ export function dispatch(args: DispatchArgs): DispatchResult {
     };
   }
 
-  // Render sidecar.
-  const sidecarBody = renderSidecarMarkdown({ ctx, result, model });
+  // Resolve fix-plan (gated by config + kill switch; default skipped_disabled).
+  const fixPlanResolution = resolveFixPlan({
+    ctx,
+    challenge: result,
+    artifact,
+    sourceSpec,
+    enableForCalibration: args.enableFixPlanForCalibration,
+    perRunBudgetUsd: args.perRunBudgetUsd,
+    codexFn: args.fixPlanCodexFn ?? args.codexFn,
+  });
+
+  // Render sidecar (now including the fix-plan section).
+  const sidecarBody = renderSidecarMarkdown({
+    ctx,
+    result,
+    model,
+    fixPlanStatus: fixPlanResolution.status,
+    fixPlan: fixPlanResolution.fixPlan,
+  });
   const sidecarPath = args.noSidecar
     ? null
     : (() => {
@@ -1077,7 +1169,13 @@ export function dispatch(args: DispatchArgs): DispatchResult {
       })();
 
   // PR comment body (caller posts).
-  const prCommentBody = renderPrCommentBody({ ctx, result, model });
+  const prCommentBody = renderPrCommentBody({
+    ctx,
+    result,
+    model,
+    fixPlanStatus: fixPlanResolution.status,
+    fixPlan: fixPlanResolution.fixPlan,
+  });
 
   // Audit write.
   if (!args.noAudit) {
@@ -1105,6 +1203,8 @@ export function dispatch(args: DispatchArgs): DispatchResult {
     pr_comment_marker: prCommentMarker(ctx),
     error: result.error,
     findings: result.findings,
+    fix_plan_status: fixPlanResolution.status,
+    fix_plan: fixPlanResolution.fixPlan,
   };
 }
 
@@ -1324,6 +1424,8 @@ function makeBlocked(
     pr_comment_marker: prCommentMarker(ctx),
     error: `${reasonCode}: ${reason}`,
     findings: [],
+    fix_plan_status: "skipped_challenge_error",
+    fix_plan: null,
   };
 }
 
@@ -1347,6 +1449,8 @@ function errorResult(
     pr_comment_marker: prCommentMarker(ctx),
     error,
     findings: [],
+    fix_plan_status: "skipped_challenge_error",
+    fix_plan: null,
   };
 }
 
@@ -1419,4 +1523,678 @@ function detectRepoRoot(cwd: string): string | null {
   } catch {
     return null;
   }
+}
+
+// ── Fix-plan: types, config, kill switch ────────────────────────────────
+
+const FIX_PLAN_SECTION_LIMIT = 12 * 1024;
+const FIX_PLAN_CAP_MARKER = "...[CAP]";
+const FIX_PLAN_PROMPT_FILE = path.join(PROMPTS_DIR, "fix-plan.md");
+
+export const DEFAULT_FIX_PLAN_CONFIG: FixPlanConfig = {
+  enabled: false,
+  model: "gpt-5.5-pro",
+  reasoning_effort: "xhigh",
+  timeout_s: 1200,
+  min_moves: 2,
+  max_moves: 6,
+  max_input_chars: 200_000,
+};
+
+let _fixPlanCfgCache: FixPlanConfig | null = null;
+
+/** Read `red_team.fix_plan` from `global/config.json`, falling back to
+ *  DEFAULT_FIX_PLAN_CONFIG on any read/parse error or missing section.
+ *  Cached after first call. Use `_resetFixPlanConfigCache` in tests. */
+export function loadFixPlanConfig(): FixPlanConfig {
+  if (_fixPlanCfgCache) return _fixPlanCfgCache;
+  const cfgPath = path.join(REPO_ROOT, "global", "config.json");
+  try {
+    const raw = fs.readFileSync(cfgPath, "utf8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const rt = parsed?.["red_team"];
+    const fp = isObject(rt) ? (rt["fix_plan"] as unknown) : undefined;
+    if (isObject(fp)) {
+      _fixPlanCfgCache = { ...DEFAULT_FIX_PLAN_CONFIG, ...(fp as Partial<FixPlanConfig>) };
+      return _fixPlanCfgCache;
+    }
+  } catch {
+    /* fall through to defaults */
+  }
+  _fixPlanCfgCache = DEFAULT_FIX_PLAN_CONFIG;
+  return _fixPlanCfgCache;
+}
+
+export function _resetFixPlanConfigCache(): void {
+  _fixPlanCfgCache = null;
+}
+
+export function killSwitchActive(env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = (env.STARK_RED_TEAM_FIX_PLAN_KILL ?? "").toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
+// ── Fix-plan: envelope + prompt assembly ────────────────────────────────
+
+const SEVERITY_RANK_NUM: Record<Severity, number> = {
+  critical: 3,
+  high: 2,
+  medium: 1,
+  low: 0,
+};
+
+function isHumanReviewFinding(f: RedTeamFinding): boolean {
+  return f.counter_proposal === "REQUEST_HUMAN_REVIEW";
+}
+
+function findingToEnvelopeDict(f: RedTeamFinding): Record<string, unknown> {
+  return {
+    id: f.id,
+    persona: f.persona,
+    severity: f.severity,
+    concern: f.concern,
+    consequence: f.consequence,
+    counter_proposal: f.counter_proposal,
+    trade_off: f.trade_off,
+    reason_for_uncertainty: f.reason_for_uncertainty,
+  };
+}
+
+/** Pack findings into a JSON envelope ≤ maxChars. Returns the envelope,
+ *  any omitted IDs, and `fitsSafely=false` iff a blocking finding had to
+ *  be dropped (caller should refuse to dispatch). Sort order matches the
+ *  Python original: severity desc, human-review last within severity,
+ *  then id asc — so high-severity blocking findings always win when the
+ *  cap kicks in. */
+export function serializeFindingsEnvelope(
+  findings: readonly RedTeamFinding[],
+  maxChars: number,
+): { envelopeJson: string; omittedIds: string[]; fitsSafely: boolean } {
+  const sorted = [...findings].sort((a, b) => {
+    const rankDiff =
+      (SEVERITY_RANK_NUM[b.severity] ?? 0) - (SEVERITY_RANK_NUM[a.severity] ?? 0);
+    if (rankDiff !== 0) return rankDiff;
+    const hrA = isHumanReviewFinding(a) ? 1 : 0;
+    const hrB = isHumanReviewFinding(b) ? 1 : 0;
+    if (hrA !== hrB) return hrA - hrB;
+    return a.id.localeCompare(b.id);
+  });
+  const kept: Record<string, unknown>[] = [];
+  const omittedIds: string[] = [];
+  let omittedBlocking = false;
+  const dump = (
+    truncated: boolean,
+    ids: readonly string[],
+    rows: readonly Record<string, unknown>[],
+  ): string =>
+    JSON.stringify({
+      truncated,
+      omitted_finding_ids: ids,
+      findings: rows,
+    });
+  for (const f of sorted) {
+    const candidate = [...kept, findingToEnvelopeDict(f)];
+    const candidateJson = dump(omittedIds.length > 0, omittedIds, candidate);
+    if (candidateJson.length <= maxChars) {
+      kept.push(findingToEnvelopeDict(f));
+      continue;
+    }
+    omittedIds.push(f.id);
+    if (
+      !isHumanReviewFinding(f) &&
+      (SEVERITY_RANK_NUM[f.severity] ?? 0) >= SEVERITY_RANK_NUM.high
+    ) {
+      omittedBlocking = true;
+    }
+  }
+  return {
+    envelopeJson: dump(omittedIds.length > 0, omittedIds, kept),
+    omittedIds,
+    fitsSafely: !omittedBlocking,
+  };
+}
+
+function wrapFixPlanInput(name: string, text: string, maxChars: number): string {
+  // Mirror of `assemblePrompt`'s input-wrapping convention — same delimiter
+  // shape so the fix-plan model sees attacker-controllable input under the
+  // same guard the challenge model uses.
+  const escaped = text
+    .replace(/<<<RED_TEAM_INPUT/g, "&lt;&lt;&lt;RED_TEAM_INPUT")
+    .replace(/<<<END_RED_TEAM_INPUT/g, "&lt;&lt;&lt;END_RED_TEAM_INPUT");
+  const truncated =
+    escaped.length <= maxChars
+      ? escaped
+      : `${escaped.slice(0, maxChars)}\n[TRUNCATED to ${maxChars} chars]`;
+  const digest = createHash("sha256").update(truncated, "utf8").digest("hex");
+  return (
+    `<<<RED_TEAM_INPUT name="${name}" hash="sha256:${digest}">>>\n` +
+    `${truncated}\n` +
+    `<<<END_RED_TEAM_INPUT name="${name}">>>`
+  );
+}
+
+export function assembleFixPlanPrompt(args: {
+  stage: Stage;
+  artifact: string;
+  sourceSpec: string;
+  findings: readonly RedTeamFinding[];
+  synthesis: string;
+  maxInputChars: number;
+}): { prompt: string; envelopeJson: string; omittedIds: string[]; fitsSafely: boolean } {
+  const { envelopeJson, omittedIds, fitsSafely } = serializeFindingsEnvelope(
+    args.findings,
+    args.maxInputChars,
+  );
+  const promptHeader = fs.readFileSync(FIX_PLAN_PROMPT_FILE, "utf8");
+  const inputs = [
+    wrapFixPlanInput("artifact", args.artifact, args.maxInputChars),
+    wrapFixPlanInput("source_spec", args.sourceSpec, args.maxInputChars),
+    wrapFixPlanInput("findings_envelope", envelopeJson, args.maxInputChars),
+    wrapFixPlanInput("synthesis", args.synthesis, args.maxInputChars),
+  ];
+  const prompt = [promptHeader, `Stage: ${args.stage}`, ...inputs].join("\n\n");
+  return { prompt, envelopeJson, omittedIds, fitsSafely };
+}
+
+// ── Fix-plan: parse + validate ──────────────────────────────────────────
+
+export function parseFixPlanOutput(raw: string): Record<string, unknown> {
+  // Mirror of `parse_output`: best-effort JSON object extraction. Try the
+  // raw text first, then any ```json fenced block, then the first top-level
+  // {...} substring. Returns {} on total failure (caller maps to error).
+  const tryParse = (s: string): Record<string, unknown> | null => {
+    try {
+      const v: unknown = JSON.parse(s);
+      return isObject(v) ? (v as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
+  };
+  const trimmed = raw.trim();
+  if (!trimmed) return {};
+  const direct = tryParse(trimmed);
+  if (direct) return direct;
+  const fence = trimmed.match(/```(?:json)?\s*([\s\S]+?)```/);
+  if (fence?.[1]) {
+    const fenced = tryParse(fence[1].trim());
+    if (fenced) return fenced;
+  }
+  const brace = trimmed.match(/\{[\s\S]*\}/);
+  if (brace?.[0]) {
+    const balanced = tryParse(brace[0]);
+    if (balanced) return balanced;
+  }
+  return {};
+}
+
+function capText(value: string, limit: number, warnings: string[]): string {
+  if (value.length <= limit) return value;
+  if (!warnings.includes("field_capped")) warnings.push("field_capped");
+  return value.slice(0, Math.max(0, limit - FIX_PLAN_CAP_MARKER.length)) + FIX_PLAN_CAP_MARKER;
+}
+
+function uniqueMoveId(rawId: string, used: Set<string>, fallback: number): string {
+  let candidate = /^m\d+$/.test(rawId) ? rawId : `m${fallback}`;
+  if (candidate && !used.has(candidate)) {
+    used.add(candidate);
+    return candidate;
+  }
+  let idx = fallback;
+  while (true) {
+    candidate = `m${idx}`;
+    if (!used.has(candidate)) {
+      used.add(candidate);
+      return candidate;
+    }
+    idx += 1;
+  }
+}
+
+function emptyFixPlan(opts: {
+  error: string | null;
+  warnings?: string[];
+  rawOutput?: string;
+  durationS?: number;
+  costUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  model?: string;
+  reasoningEffort?: string;
+  inputTruncated?: boolean;
+  inputOmittedFindingIds?: string[];
+}): RedTeamFixPlan {
+  return {
+    summary: "",
+    moves: [],
+    unaddressed_finding_ids: [],
+    orphan_finding_ids: [],
+    notes: "",
+    input_truncated: opts.inputTruncated ?? false,
+    input_omitted_finding_ids: opts.inputOmittedFindingIds ?? [],
+    warnings: opts.warnings ?? [],
+    raw_output: opts.rawOutput ?? "",
+    duration_s: opts.durationS ?? 0,
+    cost_usd: opts.costUsd ?? 0,
+    input_tokens: opts.inputTokens ?? 0,
+    output_tokens: opts.outputTokens ?? 0,
+    model: opts.model ?? "",
+    reasoning_effort: opts.reasoningEffort ?? "",
+    error: opts.error,
+  };
+}
+
+export function validateFixPlan(
+  raw: Record<string, unknown>,
+  blockingFindingIds: readonly string[],
+  cfg: Pick<FixPlanConfig, "min_moves" | "max_moves">,
+): RedTeamFixPlan {
+  const warnings: string[] = [];
+  try {
+    const minMoves = cfg.min_moves;
+    const maxMoves = cfg.max_moves;
+    const blockingIds = Array.from(new Set(blockingFindingIds.map(String)));
+    const blockingSet = new Set(blockingIds);
+
+    const rawMoves = raw["moves"];
+    if (!Array.isArray(rawMoves)) {
+      return emptyFixPlan({ error: "fix-plan output missing required 'moves' list" });
+    }
+    const rawCount = rawMoves.length;
+    if (rawCount < minMoves || rawCount > maxMoves * 2) {
+      return emptyFixPlan({
+        error: `fix-plan returned ${rawCount} moves; expected ${minMoves}..${maxMoves}`,
+      });
+    }
+
+    const parsed: Array<[number, FixPlanMove]> = [];
+    const used = new Set<string>();
+    rawMoves.forEach((rm, i) => {
+      const idx = i + 1;
+      if (!isObject(rm)) return;
+      const required: ReadonlyArray<"id" | "title" | "rationale" | "new_trade_off"> = [
+        "id",
+        "title",
+        "rationale",
+        "new_trade_off",
+      ];
+      const values: Partial<Record<(typeof required)[number], string>> = {};
+      for (const key of required) {
+        const v = rm[key];
+        if (typeof v !== "string" || !v.trim()) return;
+        values[key] = v.trim();
+      }
+      const sectionsRaw = rm["sections_touched"];
+      const idsRaw = rm["addressed_finding_ids"];
+      if (!Array.isArray(sectionsRaw) || !Array.isArray(idsRaw)) return;
+
+      const sections: string[] = [];
+      for (const item of sectionsRaw.slice(0, 20)) {
+        if (typeof item === "string") sections.push(capText(item.trim(), 100, warnings));
+      }
+      if (sectionsRaw.length > 20 && !warnings.includes("field_capped")) {
+        warnings.push("field_capped");
+      }
+
+      const addressed: string[] = [];
+      let invented = false;
+      for (const item of idsRaw) {
+        if (typeof item !== "string") {
+          invented = true;
+          continue;
+        }
+        if (!blockingSet.has(item)) {
+          invented = true;
+          continue;
+        }
+        if (!addressed.includes(item)) addressed.push(item);
+      }
+      if (invented && !warnings.includes("ids_invented")) warnings.push("ids_invented");
+      if (addressed.length === 0 && sections.length === 0) return;
+
+      const moveId = uniqueMoveId(values.id!, used, idx);
+      parsed.push([
+        idx,
+        {
+          id: moveId,
+          title: capText(values.title!, 200, warnings),
+          rationale: capText(values.rationale!, 1000, warnings),
+          sections_touched: sections,
+          addressed_finding_ids: addressed,
+          new_trade_off: capText(values.new_trade_off!, 500, warnings),
+        },
+      ]);
+    });
+
+    if (parsed.length < minMoves) {
+      return emptyFixPlan({
+        error: `fix-plan returned ${parsed.length} valid moves after validation; expected at least ${minMoves}`,
+        warnings,
+      });
+    }
+
+    let kept = parsed;
+    if (parsed.length > maxMoves) {
+      kept = [...parsed]
+        .sort(
+          ([ai, a], [bi, b]) =>
+            b.addressed_finding_ids.length - a.addressed_finding_ids.length || ai - bi,
+        )
+        .slice(0, maxMoves)
+        .sort(([ai], [bi]) => ai - bi);
+      if (!warnings.includes("move_cap_hit")) warnings.push("move_cap_hit");
+    }
+
+    const moves = kept.map(([, m]) => m);
+    const addressedSet = new Set<string>();
+    for (const m of moves) for (const fid of m.addressed_finding_ids) addressedSet.add(fid);
+
+    const rawUnaddressed = raw["unaddressed_finding_ids"];
+    const modelUnaddressed: string[] = [];
+    if (Array.isArray(rawUnaddressed)) {
+      for (const item of rawUnaddressed) {
+        if (
+          typeof item === "string" &&
+          blockingSet.has(item) &&
+          !addressedSet.has(item) &&
+          !modelUnaddressed.includes(item)
+        ) {
+          modelUnaddressed.push(item);
+        }
+      }
+    }
+    const unaddressedSet = new Set(modelUnaddressed);
+    const orphan = blockingIds.filter(
+      (fid) => !addressedSet.has(fid) && !unaddressedSet.has(fid),
+    );
+
+    const summary = typeof raw["summary"] === "string" ? (raw["summary"] as string) : "";
+    const notes = typeof raw["notes"] === "string" ? (raw["notes"] as string) : "";
+
+    return {
+      summary: capText(summary, 1000, warnings),
+      moves,
+      unaddressed_finding_ids: modelUnaddressed,
+      orphan_finding_ids: orphan,
+      notes: capText(notes, 3000, warnings),
+      input_truncated: false,
+      input_omitted_finding_ids: [],
+      warnings,
+      raw_output: "",
+      duration_s: 0,
+      cost_usd: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      model: "",
+      reasoning_effort: "",
+      error: null,
+    };
+  } catch (err) {
+    return emptyFixPlan({
+      error: `fix-plan validation error: ${(err as Error).message}`,
+      warnings,
+    });
+  }
+}
+
+// ── Fix-plan: dispatch + resolve ────────────────────────────────────────
+
+/** Optional cost-budget hook. TS dispatch doesn't yet track challenge cost
+ *  (always reports 0), so the Python `skipped_budget_exhausted` /
+ *  `over_budget_after_fix` gates are no-ops in TS unless the caller wires
+ *  in a budget. Left as a parameter so callers that DO track cost (future
+ *  TS port of read-side calibration) can plug it in without changing the
+ *  resolver signature. */
+export interface ResolveFixPlanArgs {
+  ctx: RedTeamRunContext;
+  challenge: RedTeamResult;
+  artifact: string;
+  sourceSpec: string;
+  enableForCalibration?: boolean;
+  perRunBudgetUsd?: number;
+  cfg?: FixPlanConfig;
+  env?: NodeJS.ProcessEnv;
+  /** Mock for tests — same shape as dispatch()'s codexFn. */
+  codexFn?: (prompt: string, model: string) => {
+    raw_output: string;
+    duration_s: number;
+    input_tokens: number;
+    output_tokens: number;
+    error: string | null;
+  };
+}
+
+export function resolveFixPlan(args: ResolveFixPlanArgs): {
+  status: FixPlanStatus;
+  fixPlan: RedTeamFixPlan | null;
+  runWarnings: string[];
+} {
+  const runWarnings: string[] = [];
+  const env = args.env ?? process.env;
+  if (killSwitchActive(env)) {
+    runWarnings.push("red_team.fix_plan.kill_switch_active");
+    return { status: "skipped_kill_switch", fixPlan: null, runWarnings };
+  }
+  const cfg = args.cfg ?? loadFixPlanConfig();
+  if (!cfg.enabled && !args.enableForCalibration) {
+    return { status: "skipped_disabled", fixPlan: null, runWarnings };
+  }
+  if (args.challenge.error !== null) {
+    return { status: "skipped_challenge_error", fixPlan: null, runWarnings };
+  }
+  if (args.challenge.blocking_count === 0 && args.challenge.human_review_count > 0) {
+    return { status: "skipped_human_review_only", fixPlan: null, runWarnings };
+  }
+  if (args.challenge.blocking_count === 0) {
+    return { status: "skipped_clean", fixPlan: null, runWarnings };
+  }
+  if (
+    args.perRunBudgetUsd !== undefined &&
+    args.challenge.cost_usd >= args.perRunBudgetUsd
+  ) {
+    return { status: "skipped_budget_exhausted", fixPlan: null, runWarnings };
+  }
+
+  // Pre-flight the envelope so callers see the same skip behavior the
+  // dispatcher would have produced.
+  const filtered = args.challenge.findings.filter((f) => !isHumanReviewFinding(f));
+  const pre = serializeFindingsEnvelope(filtered, cfg.max_input_chars);
+  if (!pre.fitsSafely) {
+    return { status: "skipped_input_too_large", fixPlan: null, runWarnings };
+  }
+
+  const fixPlan = runRedTeamFixPlan({
+    ctx: args.ctx,
+    artifact: args.artifact,
+    sourceSpec: args.sourceSpec,
+    challengeFindings: args.challenge.findings,
+    synthesis: args.challenge.synthesis,
+    cfg,
+    codexFn: args.codexFn,
+  });
+  const status: FixPlanStatus = fixPlan.error === null ? "success" : "error";
+  if (
+    fixPlan.error === null &&
+    args.perRunBudgetUsd !== undefined &&
+    args.challenge.cost_usd + fixPlan.cost_usd > args.perRunBudgetUsd
+  ) {
+    runWarnings.push("over_budget_after_fix");
+    if (!fixPlan.warnings.includes("over_budget_after_fix")) {
+      fixPlan.warnings.push("over_budget_after_fix");
+    }
+  }
+  return { status, fixPlan, runWarnings };
+}
+
+export function runRedTeamFixPlan(args: {
+  ctx: RedTeamRunContext;
+  artifact: string;
+  sourceSpec: string;
+  challengeFindings: readonly RedTeamFinding[];
+  synthesis: string;
+  cfg: FixPlanConfig;
+  codexFn?: ResolveFixPlanArgs["codexFn"];
+}): RedTeamFixPlan {
+  const filtered = args.challengeFindings.filter((f) => !isHumanReviewFinding(f));
+  const { prompt, omittedIds, fitsSafely } = assembleFixPlanPrompt({
+    stage: args.ctx.stage,
+    artifact: args.artifact,
+    sourceSpec: args.sourceSpec,
+    findings: filtered,
+    synthesis: args.synthesis,
+    maxInputChars: args.cfg.max_input_chars,
+  });
+  const inputTruncated = omittedIds.length > 0;
+  if (!fitsSafely) {
+    return emptyFixPlan({
+      error: "findings JSON cannot be safely truncated",
+      model: args.cfg.model,
+      reasoningEffort: args.cfg.reasoning_effort,
+      inputTruncated,
+      inputOmittedFindingIds: omittedIds,
+    });
+  }
+  const sensitiveHits = preDispatchSensitiveGate(prompt);
+  if (sensitiveHits.length > 0) {
+    return emptyFixPlan({
+      error: `pre-dispatch gate refused: matched patterns ${sensitiveHits.join(", ")}`,
+      model: args.cfg.model,
+      reasoningEffort: args.cfg.reasoning_effort,
+      inputTruncated,
+      inputOmittedFindingIds: omittedIds,
+    });
+  }
+  const dispatched = args.codexFn
+    ? args.codexFn(prompt, args.cfg.model)
+    : dispatchCodex(prompt, args.cfg.model, args.cfg.timeout_s * 1000);
+  if (dispatched.error !== null) {
+    return emptyFixPlan({
+      error: dispatched.error,
+      rawOutput: dispatched.raw_output,
+      durationS: dispatched.duration_s,
+      inputTokens: dispatched.input_tokens,
+      outputTokens: dispatched.output_tokens,
+      model: args.cfg.model,
+      reasoningEffort: args.cfg.reasoning_effort,
+      inputTruncated,
+      inputOmittedFindingIds: omittedIds,
+    });
+  }
+  const rawDict = parseFixPlanOutput(dispatched.raw_output);
+  const blockingIds = filtered
+    .filter(
+      (f) =>
+        (SEVERITY_RANK_NUM[f.severity] ?? 0) >= SEVERITY_RANK_NUM.high,
+    )
+    .map((f) => f.id);
+  const validated = validateFixPlan(rawDict, blockingIds, args.cfg);
+  validated.raw_output = dispatched.raw_output;
+  validated.duration_s = dispatched.duration_s;
+  validated.cost_usd = 0;
+  validated.input_tokens = dispatched.input_tokens;
+  validated.output_tokens = dispatched.output_tokens;
+  validated.model = args.cfg.model;
+  validated.reasoning_effort = args.cfg.reasoning_effort;
+  validated.input_truncated = inputTruncated;
+  validated.input_omitted_finding_ids = omittedIds;
+  return validated;
+}
+
+// ── Fix-plan: markdown rendering ────────────────────────────────────────
+
+const RT_ID_RE = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
+
+function renderRtIds(ids: readonly string[]): string {
+  const valid = ids.filter((id) => RT_ID_RE.test(id));
+  return valid.length > 0 ? valid.map((id) => `\`${id}\``).join(", ") : "_None_";
+}
+
+function renderTextBlock(label: string, body: string): string[] {
+  return [`**${label}.** ${redact(escapeBlock(body))}`];
+}
+
+export function renderFixPlanSection(args: {
+  status: FixPlanStatus;
+  fixPlan: RedTeamFixPlan | null;
+}): string {
+  const { status, fixPlan } = args;
+  const lines: string[] = ["## Proposed Fix Plan", ""];
+  if (status === "success" && fixPlan !== null) {
+    const addressed = new Set<string>();
+    for (const m of fixPlan.moves) for (const fid of m.addressed_finding_ids) addressed.add(fid);
+    const addressedCount = addressed.size;
+    const unaddressedCount = fixPlan.unaddressed_finding_ids.length;
+    const orphanCount = fixPlan.orphan_finding_ids.length;
+    const blockingTotal = addressedCount + unaddressedCount + orphanCount;
+    lines.push("**Status:** success");
+    lines.push(
+      `**Generated by:** \`${fixPlan.model}\` at reasoning effort \`${fixPlan.reasoning_effort}\``,
+    );
+    lines.push(
+      `**Cost / duration:** $${fixPlan.cost_usd.toFixed(4)} / ${fixPlan.duration_s.toFixed(1)}s | **Tokens:** in=${fixPlan.input_tokens} out=${fixPlan.output_tokens}`,
+    );
+    const coverageExtras: string[] = [];
+    if (unaddressedCount) coverageExtras.push(`${unaddressedCount} deliberately deferred`);
+    if (orphanCount) coverageExtras.push(`${orphanCount} orphaned`);
+    const coverageSuffix = coverageExtras.length > 0 ? ` (${coverageExtras.join(", ")})` : "";
+    lines.push(
+      `**Coverage:** ${addressedCount} of ${blockingTotal} blocking findings addressed${coverageSuffix}`,
+    );
+    if (fixPlan.warnings.length > 0) {
+      lines.push("**Warnings:** " + fixPlan.warnings.map((w) => `\`${w}\``).join(", "));
+    }
+    if (fixPlan.input_truncated && fixPlan.input_omitted_finding_ids.length > 0) {
+      lines.push(
+        "**Input truncated — omitted finding IDs:** " +
+          renderRtIds(fixPlan.input_omitted_finding_ids),
+      );
+    }
+    lines.push("");
+    if (fixPlan.summary) {
+      lines.push(...renderTextBlock("Summary", fixPlan.summary));
+      lines.push("");
+    }
+    fixPlan.moves.forEach((move, i) => {
+      lines.push(`### ${i + 1}. ${redact(escapeBlock(move.title))}`);
+      lines.push("");
+      lines.push(`**Addresses:** ${renderRtIds(move.addressed_finding_ids)}`);
+      if (move.sections_touched.length > 0) {
+        lines.push(
+          "**Sections touched:** " + move.sections_touched.map((s) => `\`${s}\``).join(", "),
+        );
+      }
+      lines.push("");
+      lines.push(...renderTextBlock("Rationale", move.rationale));
+      lines.push("");
+      lines.push(...renderTextBlock("New trade-off", move.new_trade_off));
+      lines.push("");
+    });
+    lines.push("### Unaddressed findings");
+    lines.push(renderRtIds(fixPlan.unaddressed_finding_ids));
+    lines.push("");
+    lines.push("### Orphan findings");
+    lines.push(renderRtIds(fixPlan.orphan_finding_ids));
+    lines.push("");
+    if (fixPlan.notes) {
+      lines.push("### Notes");
+      lines.push("");
+      lines.push(redact(escapeBlock(fixPlan.notes)));
+      lines.push("");
+    }
+  } else if (status === "error") {
+    lines.push("**Status:** error");
+    if (fixPlan?.error) {
+      lines.push(`**Error:** ${redact(escapeBlock(fixPlan.error))}`);
+    }
+    if (fixPlan?.warnings.length) {
+      lines.push("**Warnings:** " + fixPlan.warnings.map((w) => `\`${w}\``).join(", "));
+    }
+  } else {
+    lines.push(`**Status:** skipped — ${status}`);
+  }
+  // Enforce a hard cap so the sidecar can't blow past PR-comment limits.
+  const rendered = lines.join("\n");
+  if (rendered.length > FIX_PLAN_SECTION_LIMIT) {
+    return rendered.slice(0, FIX_PLAN_SECTION_LIMIT) + "\n\n_[fix-plan section truncated]_";
+  }
+  return rendered;
 }
