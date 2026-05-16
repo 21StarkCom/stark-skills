@@ -5,8 +5,8 @@ description: >-
 argument-hint: '<plan-or-prompt> [--plan-slug SLUG] [--test-command CMD] [--lead claude|codex|gemini] [--wing claude|codex|gemini] [--max-rounds N] [--timeout N] [--dry-run]'
 disable-model-invocation: true
 model: opus
-revision: 7c91ffda1c063674729d3d8dddcf530bb937db53
-revision_date: 2026-05-14T07:49:39Z
+revision: b49134760c14d1de35bf7e3e325459aa0b018141
+revision_date: 2026-05-16T04:33:53Z
 ---
 
 ## Preflight
@@ -43,7 +43,7 @@ re-implement that logic here.
 - `--test-command CMD` — test command to run after each lead pass (e.g., `npm test`, `pytest`)
 - `--lead AGENT` — lead implementer agent ID (default: `claude`). One of `claude`, `codex`, `gemini`.
 - `--wing AGENT` — wing reviewer agent ID (default: `codex`). Must differ from `--lead`.
-- `--max-rounds N` — maximum **fix** rounds after the initial implement (default: `2`). The wing reviews up to `N+1` times.
+- `--max-rounds N` — maximum **fix** rounds after the initial implement (default: `4`). The wing reviews up to `N+1` times.
 - `--timeout N` — per-lead-invocation timeout in seconds (default: 900)
 - `--wing-timeout N` — per-wing-invocation timeout in seconds (default: 600)
 - `--dry-run` — show what would happen without executing

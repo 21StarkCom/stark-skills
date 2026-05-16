@@ -55,7 +55,7 @@ from dispatcher_base import is_agent_enabled, resolve_model as _resolve_model
 VALID_AGENTS = {"claude", "codex", "gemini"}
 DEFAULT_LEAD = "claude"
 DEFAULT_WING = "codex"
-DEFAULT_MAX_ROUNDS = 2
+DEFAULT_MAX_ROUNDS = 4
 WING_TIMEOUT_DEFAULT = 600
 
 # Trailing JSON block parser: capture the last fenced ```json block, or the
