@@ -503,7 +503,16 @@ export function fmtDuration(ms: number): string {
   return `${m}m ${rs}s`;
 }
 
-interface SpawnResult { stdout: string; stderr: string; status: number }
+interface SpawnResult {
+  stdout: string;
+  stderr: string;
+  status: number;
+  /** Signal that killed the child, if any. `status` is -1 in that case;
+   * callers should consult `signal` before formatting "exit N" messages,
+   * since signal-killed processes have no real exit code. Optional so
+   * tests can construct SpawnResult literals without spelling it out. */
+  signal?: NodeJS.Signals | null;
+}
 
 async function spawnCollect(
   cmd: string,
@@ -521,16 +530,32 @@ async function spawnCollect(
     child.stdout.on("data", (b) => out.push(b as Buffer));
     child.stderr.on("data", (b) => err.push(b as Buffer));
     child.on("error", reject);
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       resolve({
         stdout: Buffer.concat(out).toString("utf8"),
         stderr: Buffer.concat(err).toString("utf8"),
         status: code ?? -1,
+        signal: signal ?? null,
       });
     });
     if (opts.input !== undefined) child.stdin.end(opts.input);
     else child.stdin.end();
   });
+}
+
+/** Format a one-line failure description for a non-zero/signalled child.
+ * Signal-killed processes report no real exit code (status=-1) and often
+ * leave only framing chatter on stderr — falling back to stdout and the
+ * captured byte counts keeps the message diagnostically useful instead of
+ * surfacing things like "agent exit -1: Reading prompt from stdin...". */
+function formatAgentExitError(sp: SpawnResult): string {
+  const stderrTail = sp.stderr.trim().slice(-400);
+  const stdoutTail = sp.stdout.trim().slice(-400);
+  const tail = stderrTail || stdoutTail || "<no output captured>";
+  if (sp.signal) {
+    return `agent killed by signal ${sp.signal} (stdout=${sp.stdout.length}B stderr=${sp.stderr.length}B): ${tail}`;
+  }
+  return `agent exit ${sp.status}: ${tail}`;
 }
 
 /**
@@ -755,14 +780,15 @@ export async function dispatchDomains(opts: DispatchOptions): Promise<DispatchRe
         const sp = await spawner(built.cmd, built.args, {
           input: built.stdin, env, cwd,
         });
-        if (sp.status !== 0) {
+        if (sp.status !== 0 || sp.signal) {
           results[idx] = {
             domain: a.domain, agent: a.agent, ok: false,
             findings: [], parseErrors: [],
-            error: `agent exit ${sp.status}: ${sp.stderr.slice(0, 400)}`,
+            error: formatAgentExitError(sp),
             durationMs: Date.now() - start,
           };
-          progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  exit=${sp.status}  ${fmtDuration(Date.now() - start)}`);
+          const tag = sp.signal ? `signal=${sp.signal}` : `exit=${sp.status}`;
+          progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  ${tag}  ${fmtDuration(Date.now() - start)}`);
           continue;
         }
         const parsed = port.parseOutput(sp.stdout);
