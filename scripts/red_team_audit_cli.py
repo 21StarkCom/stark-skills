@@ -82,7 +82,8 @@ ORPHAN_CREATE_TTL_S = 60.0
 """Orphan ``.creating-<uuid>`` siblings older than this are auto-cleaned."""
 
 STUB_EXIT_CODE = 64
-"""``not_implemented_in_phase_0`` exit code for the five Phase 1 stub commands."""
+"""Legacy: Phase 0 stub exit code. Phase 1 implements the bodies; retained for
+backwards compatibility with any caller that grepped the literal."""
 
 # ── Frozen DDL (post-marker) ─────────────────────────────────────────────
 
@@ -925,6 +926,361 @@ def _emit_stub_not_implemented(subcommand: str) -> int:
     return STUB_EXIT_CODE
 
 
+# ── Phase 1 bodies: record-run / record-findings / update-run-status /
+#    read-run / get-findings ─────────────────────────────────────────────
+#
+# These are thin shell-out wrappers over the existing ``red_team_audit``
+# functions so the TS Phase 1 lib has a stable cross-language seam. The
+# plan's content-aware ``run_key`` + full status-transition table + stage-
+# compare-replace findings idempotency are deferred to a future Phase 1c
+# bump; the Phase 1a contract is "what existing Python writes today, plus
+# a stable subprocess seam". Both halves of the migration depend on this
+# being the only audit-write surface.
+
+# Allowed transitions for the lightweight final_status column. The plan's
+# fuller transition table (blocked_* / failed_* / lineage rules) lands
+# with the schema bump in a follow-up; for now we cover the four states
+# the current Python writes — clean, halted, halted_human_review, error —
+# plus the in-progress ↔ terminal edges the TS dispatcher needs.
+_VALID_RUN_STATUSES = frozenset({
+    "in-progress",
+    "clean",
+    "halted",
+    "halted_human_review",
+    "error",
+})
+
+_TERMINAL_STATUSES = frozenset({"clean", "halted", "halted_human_review", "error"})
+
+
+def _ensure_db_ready(db_path: Path, expected_version: int) -> None:
+    """Plan-mandated preflight: resolve → ensure-schema → assert-schema-version.
+
+    Every Phase 1 body calls this before any read/write so a fresh install
+    bootstraps cleanly and a writer never blindly mutates a drifted DB.
+    """
+    ensure_schema(db_path, expected_version)
+    assert_schema_version(db_path, expected_version)
+
+
+def _read_stdin_json() -> Any:
+    raw = sys.stdin.read()
+    if not raw.strip():
+        return None
+    return json.loads(raw)
+
+
+def _row_to_dict(cursor: sqlite3.Cursor, row: tuple) -> dict[str, Any]:
+    if cursor.description is None:
+        return {}
+    return {col[0]: row[i] for i, col in enumerate(cursor.description)}
+
+
+def _cmd_record_run(args: argparse.Namespace) -> int:
+    """Insert one red_team_runs row. Input via stdin JSON."""
+    try:
+        payload = _read_stdin_json()
+    except json.JSONDecodeError as exc:
+        _emit({"error": "bad_input_json", "detail": str(exc)})
+        return EXIT_BAD_INPUT
+    if not isinstance(payload, dict):
+        _emit({"error": "missing_payload", "detail": "expected a JSON object on stdin"})
+        return EXIT_BAD_INPUT
+
+    run_data = payload.get("run") if "run" in payload else payload
+    if not isinstance(run_data, dict):
+        _emit({"error": "bad_payload", "detail": "expected 'run' object or top-level run fields"})
+        return EXIT_BAD_INPUT
+
+    required = (
+        "run_id", "stage", "rounds_used", "final_status",
+        "total_findings", "critical_count", "high_count", "medium_count",
+        "human_review_count", "duration_s", "cost_usd", "model", "caller",
+    )
+    missing = [k for k in required if k not in run_data]
+    if missing:
+        _emit({"error": "missing_required_fields", "missing": missing})
+        return EXIT_BAD_INPUT
+
+    resolved = resolve_db(args.db)
+    try:
+        _ensure_db_ready(resolved.db_path, SCHEMA_VERSION)
+    except (SchemaDriftError, SchemaVersionMismatch) as exc:
+        _emit(_schema_error_envelope(exc, resolved.db_path))
+        return _schema_error_exit_code(exc)
+
+    import red_team_audit
+
+    try:
+        # Idempotent insert: if a row with the same run_id already exists,
+        # return it instead of inserting a duplicate. record_red_team_run
+        # itself does an unconditional INSERT, so we check first.
+        existing = _select_run_by_run_id(resolved.db_path, run_data["run_id"])
+        if existing is not None:
+            _emit({
+                "ok": True,
+                "status": "existing",
+                "run_id": run_data["run_id"],
+                "run": existing,
+            })
+            return 0
+        red_team_audit.record_red_team_run(run_data, db_path=resolved.db_path)
+    except Exception as exc:  # noqa: BLE001
+        _emit({"error": "record_failed", "detail": str(exc)})
+        return 1
+
+    inserted = _select_run_by_run_id(resolved.db_path, run_data["run_id"])
+    _emit({
+        "ok": True,
+        "status": "created",
+        "run_id": run_data["run_id"],
+        "run": inserted,
+    })
+    return 0
+
+
+def _cmd_record_findings(args: argparse.Namespace) -> int:
+    """Bulk-insert finding rows. Input via stdin JSON {run_id, findings: [...]}."""
+    try:
+        payload = _read_stdin_json()
+    except json.JSONDecodeError as exc:
+        _emit({"error": "bad_input_json", "detail": str(exc)})
+        return EXIT_BAD_INPUT
+    if not isinstance(payload, dict):
+        _emit({"error": "missing_payload", "detail": "expected a JSON object on stdin"})
+        return EXIT_BAD_INPUT
+
+    findings = payload.get("findings", [])
+    if not isinstance(findings, list):
+        _emit({"error": "bad_findings", "detail": "expected 'findings' to be a JSON array"})
+        return EXIT_BAD_INPUT
+
+    resolved = resolve_db(args.db)
+    try:
+        _ensure_db_ready(resolved.db_path, SCHEMA_VERSION)
+    except (SchemaDriftError, SchemaVersionMismatch) as exc:
+        _emit(_schema_error_envelope(exc, resolved.db_path))
+        return _schema_error_exit_code(exc)
+
+    if not findings:
+        _emit({"ok": True, "status": "no_change", "count": 0})
+        return 0
+
+    import red_team_audit
+    try:
+        red_team_audit.record_findings(findings, db_path=resolved.db_path)
+    except Exception as exc:  # noqa: BLE001
+        _emit({"error": "record_findings_failed", "detail": str(exc)})
+        return 1
+    _emit({"ok": True, "status": "inserted", "count": len(findings)})
+    return 0
+
+
+def _cmd_update_run_status(args: argparse.Namespace) -> int:
+    """Update final_status for an existing run row. Input via stdin or flags."""
+    payload: dict[str, Any] = {}
+    if not args.run_id or not args.to:
+        try:
+            stdin_payload = _read_stdin_json()
+        except json.JSONDecodeError as exc:
+            _emit({"error": "bad_input_json", "detail": str(exc)})
+            return EXIT_BAD_INPUT
+        if isinstance(stdin_payload, dict):
+            payload = stdin_payload
+    run_id = args.run_id or payload.get("run_id")
+    to_status = args.to or payload.get("to")
+    from_status = args.from_status or payload.get("from")
+
+    if not run_id:
+        _emit({"error": "missing_run_id", "detail": "pass --run-id or include run_id in JSON"})
+        return EXIT_BAD_INPUT
+    if not to_status:
+        _emit({"error": "missing_to", "detail": "pass --to or include to in JSON"})
+        return EXIT_BAD_INPUT
+    if to_status not in _VALID_RUN_STATUSES:
+        _emit({"error": "invalid_status", "detail": f"unknown status: {to_status!r}",
+               "valid_statuses": sorted(_VALID_RUN_STATUSES)})
+        return EXIT_BAD_INPUT
+
+    resolved = resolve_db(args.db)
+    try:
+        _ensure_db_ready(resolved.db_path, SCHEMA_VERSION)
+    except (SchemaDriftError, SchemaVersionMismatch) as exc:
+        _emit(_schema_error_envelope(exc, resolved.db_path))
+        return _schema_error_exit_code(exc)
+
+    existing = _select_run_by_run_id(resolved.db_path, run_id)
+    if existing is None:
+        _emit({"error": "run_not_found", "run_id": run_id})
+        return EXIT_NOT_FOUND
+    current = existing.get("final_status")
+
+    if current == to_status:
+        _emit({
+            "ok": True,
+            "status": "no_op_already_at_target",
+            "run_id": run_id,
+            "current": current,
+        })
+        return 0
+
+    # Terminal → non-terminal forbidden; the dispatcher's recovery path
+    # creates a new run row when an operator wants to retry after a
+    # terminal outcome.
+    if current in _TERMINAL_STATUSES and to_status not in _TERMINAL_STATUSES:
+        _emit({
+            "error": "forbidden_transition",
+            "run_id": run_id,
+            "from": current,
+            "to": to_status,
+            "detail": "terminal → non-terminal transitions are not allowed",
+        })
+        return EXIT_BAD_INPUT
+
+    if from_status and current != from_status:
+        _emit({
+            "error": "from_mismatch",
+            "run_id": run_id,
+            "expected_from": from_status,
+            "actual_from": current,
+        })
+        return EXIT_BAD_INPUT
+
+    conn = audit_base.connect(resolved.db_path)
+    try:
+        conn.execute(
+            "UPDATE red_team_runs SET final_status = ? WHERE run_id = ?",
+            (to_status, run_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    refreshed = _select_run_by_run_id(resolved.db_path, run_id)
+    _emit({
+        "ok": True,
+        "status": "transitioned",
+        "run_id": run_id,
+        "from": current,
+        "to": to_status,
+        "current": (refreshed or {}).get("final_status"),
+    })
+    return 0
+
+
+def _cmd_read_run(args: argparse.Namespace) -> int:
+    """Read one red_team_runs row by run_id."""
+    payload: dict[str, Any] = {}
+    if not args.run_id:
+        try:
+            stdin_payload = _read_stdin_json()
+        except json.JSONDecodeError as exc:
+            _emit({"error": "bad_input_json", "detail": str(exc)})
+            return EXIT_BAD_INPUT
+        if isinstance(stdin_payload, dict):
+            payload = stdin_payload
+    run_id = args.run_id or payload.get("run_id")
+    if not run_id:
+        _emit({"error": "missing_run_id", "detail": "pass --run-id or include run_id in JSON"})
+        return EXIT_BAD_INPUT
+
+    resolved = resolve_db(args.db)
+    try:
+        _ensure_db_ready(resolved.db_path, SCHEMA_VERSION)
+    except (SchemaDriftError, SchemaVersionMismatch) as exc:
+        _emit(_schema_error_envelope(exc, resolved.db_path))
+        return _schema_error_exit_code(exc)
+
+    row = _select_run_by_run_id(resolved.db_path, run_id)
+    if row is None:
+        _emit({"ok": True, "found": False, "run": None, "run_id": run_id})
+        return 0
+    _emit({"ok": True, "found": True, "run": row, "run_id": run_id})
+    return 0
+
+
+def _cmd_get_findings(args: argparse.Namespace) -> int:
+    """Read all finding rows for a run_id."""
+    payload: dict[str, Any] = {}
+    if not args.run_id:
+        try:
+            stdin_payload = _read_stdin_json()
+        except json.JSONDecodeError as exc:
+            _emit({"error": "bad_input_json", "detail": str(exc)})
+            return EXIT_BAD_INPUT
+        if isinstance(stdin_payload, dict):
+            payload = stdin_payload
+    run_id = args.run_id or payload.get("run_id")
+    if not run_id:
+        _emit({"error": "missing_run_id", "detail": "pass --run-id or include run_id in JSON"})
+        return EXIT_BAD_INPUT
+
+    resolved = resolve_db(args.db)
+    try:
+        _ensure_db_ready(resolved.db_path, SCHEMA_VERSION)
+    except (SchemaDriftError, SchemaVersionMismatch) as exc:
+        _emit(_schema_error_envelope(exc, resolved.db_path))
+        return _schema_error_exit_code(exc)
+
+    findings = _select_findings_by_run_id(resolved.db_path, run_id)
+    _emit({"ok": True, "run_id": run_id, "findings": findings, "count": len(findings)})
+    return 0
+
+
+# ── Body helpers ────────────────────────────────────────────────────────
+
+EXIT_BAD_INPUT = 2
+EXIT_NOT_FOUND = 3
+
+
+def _schema_error_envelope(
+    exc: SchemaDriftError | SchemaVersionMismatch, db_path: Path
+) -> dict[str, Any]:
+    if isinstance(exc, SchemaVersionMismatch):
+        return {
+            "error": "schema_version_mismatch",
+            "db_path": str(db_path),
+            "expected": exc.expected,
+            "actual": exc.actual,
+        }
+    return {"error": exc.code, "db_path": str(db_path), "detail": exc.detail}
+
+
+def _schema_error_exit_code(exc: SchemaDriftError | SchemaVersionMismatch) -> int:
+    if isinstance(exc, SchemaVersionMismatch):
+        return 2
+    return 3
+
+
+def _select_run_by_run_id(db_path: Path, run_id: str) -> dict[str, Any] | None:
+    conn = audit_base.connect(db_path)
+    try:
+        cur = conn.execute(
+            "SELECT * FROM red_team_runs WHERE run_id = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (run_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return _row_to_dict(cur, row)
+    finally:
+        conn.close()
+
+
+def _select_findings_by_run_id(db_path: Path, run_id: str) -> list[dict[str, Any]]:
+    conn = audit_base.connect(db_path)
+    try:
+        cur = conn.execute(
+            "SELECT * FROM red_team_findings WHERE run_id = ? "
+            "ORDER BY round_num, id",
+            (run_id,),
+        )
+        rows = cur.fetchall()
+        return [_row_to_dict(cur, r) for r in rows]
+    finally:
+        conn.close()
+
+
 # ── argparse wiring ──────────────────────────────────────────────────────
 
 
@@ -965,18 +1321,23 @@ def _build_parser() -> argparse.ArgumentParser:
     pc.add_argument("--json", action="store_true",
                     help="Accepted for symmetry; output is always JSON.")
 
-    # Stubbed Phase-1 subcommands. Each carries ``--replay-transcript PATH``
-    # so the Phase 0 CLI contract snapshot includes the flag — the Phase 2
-    # ``--help`` parity gate then passes without conflict when Phase 1 lands
-    # the bodies.
+    # Phase 1 bodies. The Phase-0 stub schemas described content-aware
+    # ``--run-key`` semantics; the Phase 1a wrappers below ship the
+    # lighter ``--run-id`` flow that mirrors what the current Python
+    # writers do today. ``--replay-transcript`` is declared on every
+    # subcommand so the Phase 2 ``--help`` parity gate still passes.
     for name in STUB_SUBCOMMANDS:
         sp = sub.add_parser(
             name,
-            help=f"{STUB_SUBCOMMANDS[name]['description']} (Phase 0 stub)",
+            help=STUB_SUBCOMMANDS[name]["description"],
         )
         sp.add_argument("--db", default=None)
-        sp.add_argument("--run-key", default=None)
-        sp.add_argument("--json", action="store_true")
+        sp.add_argument("--run-key", default=None,
+                        help="Reserved for Phase 1c content-aware identity. Currently unused.")
+        sp.add_argument("--run-id", default=None,
+                        help="Run id (UUID-shaped string) the writer uses today.")
+        sp.add_argument("--json", action="store_true",
+                        help="Accepted for symmetry; output is always JSON.")
         sp.add_argument(
             "--replay-transcript",
             metavar="PATH",
@@ -988,6 +1349,12 @@ def _build_parser() -> argparse.ArgumentParser:
                 "Phase 0 so the Phase 2 --help parity gate passes."
             ),
         )
+        if name == "update-run-status":
+            sp.add_argument("--to", default=None, choices=sorted(_VALID_RUN_STATUSES),
+                            help="Target status. One of: " + ", ".join(sorted(_VALID_RUN_STATUSES)))
+            sp.add_argument("--from", default=None, dest="from_status",
+                            choices=sorted(_VALID_RUN_STATUSES),
+                            help="Expected current status (optional guard).")
     return p
 
 
@@ -1095,11 +1462,14 @@ def main(argv: list[str] | None = None) -> int:
         "assert-schema-version": _cmd_assert_schema_version,
         "migrate": _cmd_migrate,
         "preflight-credentials": _cmd_preflight_credentials,
+        "record-run": _cmd_record_run,
+        "record-findings": _cmd_record_findings,
+        "update-run-status": _cmd_update_run_status,
+        "read-run": _cmd_read_run,
+        "get-findings": _cmd_get_findings,
     }.get(args.subcommand)
     if handler is not None:
         return handler(args)
-    if args.subcommand in STUB_SUBCOMMANDS:
-        return _emit_stub_not_implemented(args.subcommand)
     # Unreachable: argparse refuses unknown subcommands first.
     _emit({"error": "unknown_subcommand", "subcommand": args.subcommand})
     return 64

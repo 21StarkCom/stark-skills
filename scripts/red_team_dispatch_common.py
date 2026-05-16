@@ -121,6 +121,92 @@ def sidecar_path_for(path: Path) -> Path:
     return path.with_suffix(path.suffix + ".red-team.md")
 
 
+def _build_result_from_transcript(
+    path: Path,
+    *,
+    stage: str,
+) -> tuple[rt.RedTeamResult, list]:
+    """Construct a RedTeamResult + empty round-history from a recorded transcript.
+
+    Transcript schema (committed under ``tools/fixtures/replays/``):
+
+        {
+          "schema_version": 1,
+          "stage": "design" | "plan",
+          "model": "gpt-5.5-pro",
+          "synthesis": "...",
+          "findings": [{persona, severity, concern, ...}, ...],
+          "duration_s": 0.0,
+          "cost_usd": 0.0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "raw_output": "..."
+        }
+
+    The Phase 1a contract is deliberately minimal: rounds + verification +
+    fix-loop transcripts land with Phase 1c. The recorded findings flow
+    through the existing aggregation / sidecar / audit-write path
+    unchanged, so this seam is sufficient to drive Phase 2's byte-level
+    parity gate between the Python dispatcher and the TS port.
+    """
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("stage") and data["stage"] != stage:
+        raise ValueError(
+            f"transcript stage mismatch (transcript={data['stage']!r}, run stage={stage!r})"
+        )
+
+    raw_findings = data.get("findings", [])
+    if not isinstance(raw_findings, list):
+        raise ValueError("transcript 'findings' must be an array")
+
+    findings: list[rt.RedTeamFinding] = []
+    for f in raw_findings:
+        # Tolerate missing optional fields; required fields raise KeyError
+        # which propagates to the dispatcher's error envelope.
+        findings.append(
+            rt.RedTeamFinding(
+                id=f.get("id") or f.get("finding_id") or f"replay-{len(findings) + 1}",
+                persona=f["persona"],
+                severity=f["severity"],
+                concern=f["concern"],
+                consequence=f.get("consequence", ""),
+                counter_proposal=f.get("counter_proposal", ""),
+                trade_off=f.get("trade_off"),
+                reason_for_uncertainty=f.get("reason_for_uncertainty"),
+                risk_key=f.get("risk_key"),
+                affected_component=f.get("affected_component"),
+                failure_mode=f.get("failure_mode"),
+                concern_hash=f.get("concern_hash", ""),
+            )
+        )
+
+    blocking_count = sum(
+        1 for f in findings if f.severity in {"critical", "high"}
+        and f.counter_proposal != "REQUEST_HUMAN_REVIEW"
+    )
+    human_review_count = sum(
+        1 for f in findings if f.counter_proposal == "REQUEST_HUMAN_REVIEW"
+    )
+
+    result = rt.RedTeamResult(
+        stage=stage,
+        round_num=int(data.get("round_num", 1)),
+        synthesis=data.get("synthesis", ""),
+        findings=findings,
+        blocking_count=blocking_count,
+        human_review_count=human_review_count,
+        raw_output=data.get("raw_output", ""),
+        duration_s=float(data.get("duration_s", 0.0)),
+        cost_usd=float(data.get("cost_usd", 0.0)),
+        error=data.get("error"),
+        input_tokens=int(data.get("input_tokens", 0)),
+        output_tokens=int(data.get("output_tokens", 0)),
+    )
+    # Empty round-history is acceptable for Phase 1a replays — the FU-rt4
+    # transition log just becomes empty.
+    return result, []
+
+
 def build_dispatch_env() -> dict[str, str]:
     try:
         from runtime_env import build_agent_env
@@ -1285,6 +1371,7 @@ def execute_dispatch(
     audit: bool,
     cwd: str | None,
     enable_fix_plan_for_calibration: bool,
+    replay_transcript: Path | None = None,
 ) -> dict[str, Any]:
     if not artifact_path.exists():
         return {"status": "error", "error": f"{stage} file not found: {artifact_path}"}
@@ -1301,33 +1388,65 @@ def execute_dispatch(
         model_rates=model_rates,
         cwd=cwd,
     )
-    if getattr(rt.run_red_team, "__module__", "stark_red_team") == "stark_red_team":
+
+    # ── --replay-transcript: deterministic seam. Bypass the live model call,
+    # construct the RedTeamResult + history from the recorded transcript,
+    # and feed it through the rest of the dispatch path (sidecar + audit +
+    # PR posting). Documented in docs/specs/red-team-cli-contract-2026-05-16.md.
+    result: rt.RedTeamResult
+    history: list
+    telemetry: rt.CallTelemetrySink | None = None
+    if replay_transcript is not None:
+        if not replay_transcript.exists():
+            return {
+                "status": "error",
+                "error": f"replay transcript not found: {replay_transcript}",
+                "run_id": ctx.run_id,
+                "model": model,
+            }
         try:
-            assert_openai_key_available_for_responses(ctx, model)
-        except RuntimeError as exc:
-            return {"status": "error", "error": str(exc), "run_id": ctx.run_id, "model": model}
-
-    artifact = read_text(artifact_path)
-    if source_spec_path is not None:
-        source_spec = read_text(source_spec_path)
+            result, history = _build_result_from_transcript(
+                replay_transcript, stage=stage
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "status": "error",
+                "error": f"replay transcript parse failed: {exc}",
+                "run_id": ctx.run_id,
+                "model": model,
+            }
+        print(
+            f"red_team: --replay-transcript active (path={replay_transcript}); "
+            "live model dispatch bypassed",
+            file=sys.stderr,
+        )
+        artifact = read_text(artifact_path)
+        source_spec = read_text(source_spec_path) if source_spec_path is not None else artifact
     else:
-        source_spec = artifact
+        if getattr(rt.run_red_team, "__module__", "stark_red_team") == "stark_red_team":
+            try:
+                assert_openai_key_available_for_responses(ctx, model)
+            except RuntimeError as exc:
+                return {"status": "error", "error": str(exc), "run_id": ctx.run_id, "model": model}
 
-    if enable_fix_plan_for_calibration:
-        print("red_team.fix_plan.calibration_override", file=sys.stderr)
+        artifact = read_text(artifact_path)
+        source_spec = read_text(source_spec_path) if source_spec_path is not None else artifact
 
-    telemetry = _InsightsTelemetrySink(ctx) if audit else None
-    result, history = _run_iterative(
-        ctx=ctx,
-        stage=stage,
-        artifact=artifact,
-        source_spec=source_spec,
-        cfg=cfg,
-        model=model,
-        model_rates=model_rates,
-        cwd=cwd,
-        telemetry=telemetry,
-    )
+        if enable_fix_plan_for_calibration:
+            print("red_team.fix_plan.calibration_override", file=sys.stderr)
+
+        telemetry = _InsightsTelemetrySink(ctx) if audit else None  # type: ignore[assignment]
+        result, history = _run_iterative(
+            ctx=ctx,
+            stage=stage,
+            artifact=artifact,
+            source_spec=source_spec,
+            cfg=cfg,
+            model=model,
+            model_rates=model_rates,
+            cwd=cwd,
+            telemetry=telemetry,
+        )
     # FU-rt4 transition log — passed to ``emit_run`` below so the durable
     # ``red_team_run`` event carries every round outcome and the labelled
     # exit edge. PR-#430 round-3 review fix #13: previously this was

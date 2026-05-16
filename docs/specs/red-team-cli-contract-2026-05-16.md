@@ -6,7 +6,7 @@
 
 This document captures the **frozen surface** of the canonical Python audit CLI (`scripts/red_team_audit_cli.py`) plus the existing dispatcher entry points (`red_team_design_dispatch.py`, `red_team_plan_dispatch.py`) as of 2026-05-16. The Phase 2 `--help` parity gate compares the TS port byte-for-byte against this snapshot.
 
-`--replay-transcript PATH` is **declared on every Phase-0 stubbed subcommand** so the Phase 1 implementation in both Python and TS can land without conflicting with the Phase 2 parity gate.
+`--replay-transcript PATH` is **wired through the dispatcher CLIs (Phase 1a)** and **declared on every audit-CLI subcommand** so the Phase 1 TS lib can use the deterministic seam and the Phase 2 `--help` parity gate passes without conflict.
 
 ---
 
@@ -35,10 +35,10 @@ usage: red_team_audit_cli [-h]
 | `migrate --stamp-current` | shipping | Stamp every known DB. Rerun-safe. |
 | `preflight-credentials` | shipping | stark-* GitHub App keychain + minting smoke. |
 | `record-run` | **stub** | Phase 1 deliverable. Parser + schema + exit envelope only. |
-| `record-findings` | **stub** | Phase 1 deliverable. Parser + schema + exit envelope only. |
-| `update-run-status` | **stub** | Phase 1 deliverable. Parser + schema + exit envelope only. |
-| `read-run` | **stub** | Phase 1 deliverable. Parser + schema + exit envelope only. |
-| `get-findings` | **stub** | Phase 1 deliverable. Parser + schema + exit envelope only. |
+| `record-findings` | shipping (Phase 1a) | Bulk-insert finding rows. |
+| `update-run-status` | shipping (Phase 1a) | Update `final_status` with allowed-transition + `--from` guard. |
+| `read-run` | shipping (Phase 1a) | Read one run row by `--run-id`. |
+| `get-findings` | shipping (Phase 1a) | Read all findings for `--run-id`. |
 
 ### 2.2 `resolve-db`
 
@@ -230,45 +230,74 @@ Cites the existing `stark-gh` flow (`scripts/github_app.py`) — does **not** re
 | 0 | All three apps have a valid keychain entry and minted a token. |
 | 4 | One or more apps failed the keychain or mint check. |
 
-### 2.7 Phase-1 stubs — `record-run` / `record-findings` / `update-run-status` / `read-run` / `get-findings`
+### 2.7 Phase-1a bodies — `record-run` / `record-findings` / `update-run-status` / `read-run` / `get-findings`
 
-All five share the same flag surface so the Phase 2 `--help` parity gate covers them uniformly:
+All five share the same base flag surface so the Phase 2 `--help` parity gate covers them uniformly:
 
 ```
-usage: red_team_audit_cli <subcommand> [-h] [--db DB] [--run-key RUN_KEY]
+usage: red_team_audit_cli <subcommand> [-h] [--db DB] [--run-key RUN_KEY] [--run-id RUN_ID]
                                        [--json] [--replay-transcript PATH]
+                                       # update-run-status adds: --to STATUS [--from STATUS]
 ```
 
-| Flag | Phase 0 behavior | Phase 1 semantics |
+| Flag | Semantics |
+|---|---|
+| `--db` | Override the resolved DB path. |
+| `--run-key` | Reserved for the future Phase 1c content-aware identity. Currently parsed, unused. |
+| `--run-id` | UUID-shaped run id used by the current Python writers. Body subcommands take this. |
+| `--json` | Accepted for symmetry; output is always JSON. |
+| `--replay-transcript PATH` | Phase 1 deterministic seam — bypass live Codex/Responses-API dispatch and feed the recorded transcript through the parsing/aggregation/audit-write path. Declared on every subcommand so the Phase 2 `--help` parity gate passes. The flag is wired in the **dispatcher** CLIs (`red_team_design_dispatch.py`, `red_team_plan_dispatch.py`); the audit CLI subcommands accept the flag for parity but have no model-dispatch step to bypass. |
+| `--to STATUS` | (`update-run-status` only) Target status. Valid: `in-progress`, `clean`, `halted`, `halted_human_review`, `error`. |
+| `--from STATUS` | (`update-run-status` only) Optional guard: refuse transition if current ≠ `--from`. |
+
+Every body runs the **plan-mandated preflight** before any read/write: canonical resolver → `ensure-schema --expected-version 1` → `assert-schema-version --expected-version 1`. A fresh install bootstraps cleanly via the first call.
+
+#### Allowed status transitions (Phase 1a)
+
+| From | To | Result |
 |---|---|---|
-| `--db` | parsed, unused | Override the resolved DB path. |
-| `--run-key` | parsed, unused | Content-aware run identity (the Phase 1 spec defines its inputs). |
-| `--json` | parsed, unused (output is always JSON) | Accepted for symmetry. |
-| `--replay-transcript PATH` | **declared, unused in Phase 0** | Phase 1 deterministic replay seam — bypass live model dispatch and feed the recorded transcript through the parsing / aggregation / audit-write path. **Declared in Phase 0 so the Phase 2 --help parity gate passes without conflict.** |
+| `in-progress` | any valid status | `transitioned` |
+| `clean` / `halted` / `halted_human_review` / `error` | same | `no_op_already_at_target` |
+| `clean` / `halted` / `halted_human_review` / `error` | `in-progress` | `forbidden_transition` (exit 2) |
+| any valid status | another valid status | `transitioned` (subject to `--from` guard) |
 
-#### Stdout envelope (Phase 0)
+The plan's fuller transition table (`blocked_*` / `failed_*` lineage rules) lands with a follow-up Phase 1c schema bump.
 
-Every stub emits a structured "not implemented" envelope that includes the eventual stdin / stdout JSON schemas so callers can pre-write client code:
+#### Stdout envelopes (success)
 
 ```json
-{
-  "error": "not_implemented_in_phase_0",
-  "subcommand": "record-run",
-  "phase": 0,
-  "next_phase": 1,
-  "description": "...",
-  "stdin_schema": { ... },
-  "stdout_schema": { ... }
-}
+record-run         → {"ok": true, "status": "created"|"existing", "run_id": "...", "run": {...}}
+record-findings    → {"ok": true, "status": "inserted"|"no_change", "count": N}
+update-run-status  → {"ok": true, "status": "transitioned"|"no_op_already_at_target", "run_id": "...",
+                       "from": "...", "to": "...", "current": "..."}
+read-run           → {"ok": true, "found": true|false, "run_id": "...", "run": {...} | null}
+get-findings       → {"ok": true, "run_id": "...", "findings": [...], "count": N}
 ```
 
-#### Exit codes (Phase 0)
+#### Stdout envelopes (failure)
+
+```json
+{"error": "bad_input_json", "detail": "..."}
+{"error": "missing_payload", ...}
+{"error": "missing_required_fields", "missing": ["stage", ...]}
+{"error": "missing_run_id", ...}
+{"error": "missing_to", ...}
+{"error": "invalid_status", "valid_statuses": [...]}
+{"error": "forbidden_transition", "from": "...", "to": "...", "detail": "..."}
+{"error": "from_mismatch", "expected_from": "...", "actual_from": "..."}
+{"error": "run_not_found", "run_id": "..."}
+{"error": "record_failed", "detail": "..."}
+{"error": "schema_version_mismatch", ...}
+```
+
+#### Exit-code matrix
 
 | Code | Meaning |
 |---|---|
-| 64 | `not_implemented_in_phase_0` (every stub returns this). |
-
-Phase 1 fills in the bodies; exit codes will then follow each subcommand's own table per the migration plan's recovery order.
+| 0 | Success. |
+| 1 | Internal failure (`record_failed`, etc.). |
+| 2 | Bad input / forbidden transition / `from` mismatch / `update-run-status` invalid target. |
+| 3 | `run_not_found` (`update-run-status` / future `read-run` strict modes) or DB-missing-after-preflight. |
 
 ---
 
@@ -285,11 +314,38 @@ usage: red_team_design_dispatch [-h] --design DESIGN [--source-spec SOURCE_SPEC]
                                 [--enable-fix-plan-for-calibration]
                                 [--accept-red-team-human-review STABLE_KEY]
                                 [--no-confirm]
+                                [--replay-transcript PATH]
 ```
 
 Stdout JSON receipt (when `--json`) keys: `status`, `model`, `run_id`, `sidecar_path` (optional), `error` (optional), `total_findings`, `blocking_count`, `human_review_count`, `cost_usd`, `duration_s`, `synthesis` (optional), `fix_plan_status`.
 
 Exit codes: `0` success or `halted` (with a JSON receipt); `2` on `status="error"`.
+
+#### `--replay-transcript PATH` (Phase 1a)
+
+Bypasses live Codex / Responses-API dispatch and feeds the recorded transcript through the parsing → aggregation → sidecar → audit-write path. Documented as a deterministic seam used by tests; the Phase 2 TS port uses this to drive byte-level parity against the Python dispatcher.
+
+Transcript schema (committed under `tools/fixtures/replays/`):
+
+```json
+{
+  "schema_version": 1,
+  "stage": "design" | "plan",
+  "model": "gpt-5.5-pro",
+  "round_num": 1,
+  "synthesis": "...",
+  "raw_output": "...",
+  "findings": [
+    {"id": "rt1", "persona": "data", "severity": "high",
+     "concern": "...", "consequence": "...", "counter_proposal": "...",
+     "trade_off": "...", "concern_hash": "..."}
+  ],
+  "duration_s": 0.0, "cost_usd": 0.0,
+  "input_tokens": 0, "output_tokens": 0
+}
+```
+
+Stage mismatch (transcript `stage` ≠ run `stage`) and unparseable `findings` arrays raise structured errors. The flag is **also accepted by every audit-CLI subcommand** for `--help` parity even though those subcommands don't have a model-dispatch step to bypass — the flag is a no-op there. See `scripts/test_red_team_replay_transcript.py` for the live end-to-end test.
 
 ### 3.2 `red_team_plan_dispatch.py`
 
