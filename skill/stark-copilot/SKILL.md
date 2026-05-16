@@ -5,8 +5,8 @@ description: >-
 argument-hint: '<plan-or-prompt> [--plan-slug SLUG] [--test-command CMD] [--lead claude|codex|gemini] [--wing claude|codex|gemini] [--max-rounds N] [--timeout N] [--dry-run]'
 disable-model-invocation: true
 model: opus
-revision: fd96568fab6c354b525a56d463fd9499c3d04f38
-revision_date: 2026-05-16T04:34:14Z
+revision: 48ebf8a1831a23f5dd9ad7ff292cc2a403b27bb0
+revision_date: 2026-05-16T04:46:41Z
 ---
 
 ## Preflight
@@ -32,7 +32,7 @@ which has every enabled agent compete in a tournament per step, copilot uses two
 Each step runs a review→fix loop until the wing approves or `--max-rounds` fix rounds are exhausted.
 This is the cheaper, lower-variance sibling of autopilot — paired engineering instead of competition.
 
-This skill is thin: it orchestrates `copilot_dispatch.py`, which owns the worktree,
+This skill is thin: it orchestrates `tools/copilot_dispatch.ts`, which owns the worktree,
 the lead/wing dispatch, the review→fix loop, and the JSON verdict parsing. Do not
 re-implement that logic here.
 
@@ -59,6 +59,7 @@ If no input provided, ask: "What should I build?"
 
 ```bash
 SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
+TOOLS="${STARK_REVIEW_TOOLS:-$HOME/.claude/code-review/tools}"
 PYTHON="$SCRIPTS/.venv/bin/python3"
 [ -x "$PYTHON" ] || PYTHON=python3
 REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -169,7 +170,7 @@ Write three files for the dispatcher (replace `$$` with the orchestration PID or
 ### 2b. Dispatch the copilot loop
 
 ```bash
-$PYTHON $SCRIPTS/copilot_dispatch.py \
+node --experimental-strip-types "$TOOLS/copilot_dispatch.ts" \
   --repo-root $REPO_ROOT \
   --step-id "$step_id" \
   --implement-prompt-file /tmp/stark-copilot-$$/step-$step_id-implement.md \
@@ -248,7 +249,7 @@ gates. For procedures, see [autopilot's references/verification-gates.md](../sta
 
 Run the gates against the lead's worktree (use `worktree_path` from §2c). If a gate fails:
 
-- If the run still has fix budget remaining (i.e., the dispatcher exited with `final_verdict == "approved"` before round `max_rounds + 1`, **and** you choose to invest one more round), append the gate failure to the wing's findings format and re-invoke `copilot_dispatch.py` with `--max-rounds 1` and the wing's prior findings included in the implement prompt's "REVISION" framing. This burns one additional dispatcher invocation; surface that explicitly.
+- If the run still has fix budget remaining (i.e., the dispatcher exited with `final_verdict == "approved"` before round `max_rounds + 1`, **and** you choose to invest one more round), append the gate failure to the wing's findings format and re-invoke `copilot_dispatch.ts` with `--max-rounds 1` and the wing's prior findings included in the implement prompt's "REVISION" framing. This burns one additional dispatcher invocation; surface that explicitly.
 - Otherwise, stop the run with the gate failure surfaced. Do not silently fall back. The user must address the gate finding manually or rerun with a higher `--max-rounds`.
 
 ### 2f. Apply approved diff
@@ -277,7 +278,7 @@ Close issues with commit reference and update project board. For commands, see [
 ### 2h. Clean up worktree
 
 ```bash
-$PYTHON $SCRIPTS/copilot_dispatch.py \
+node --experimental-strip-types "$TOOLS/copilot_dispatch.ts" \
   --repo-root $REPO_ROOT \
   --step-id "$step_id" \
   --lead "$LEAD" \

@@ -69,6 +69,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `tools/review_setup_worktree.ts`, `review_cleanup_worktree.ts` — stark-review worktree provisioning
 - `tools/housekeeping_infra.ts` — stark-housekeeping Phase 5 (sessions, locks, log rotation, archival)
 - `tools/design_review_summary.ts` — stark-review-design Phase 4 markdown renderer
+- `tools/copilot_dispatch.ts` — stark-copilot lead/wing dispatcher (replaces former `scripts/copilot_dispatch.py`)
 
 ### Config & prompts
 - `global/config.json` — default config schema (models, runtime, triage, cost, etc.)
