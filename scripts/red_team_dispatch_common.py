@@ -241,7 +241,8 @@ def _record_run(ctx: rt.RedTeamRunContext, result: rt.RedTeamResult, model: str)
     import red_team_audit
 
     critical, high, medium = _severity_counts(result)
-    red_team_audit.init_red_team_tables()
+    db_path = red_team_audit.resolve_db_path()
+    red_team_audit.init_red_team_tables(db_path)
     red_team_audit.record_red_team_run(
         {
             "run_id": ctx.run_id,
@@ -265,7 +266,8 @@ def _record_run(ctx: rt.RedTeamRunContext, result: rt.RedTeamResult, model: str)
             # the forward-emitted red_team_run event uses, so backfill
             # (--scope=forward) reconstructs byte-identical timestamps.
             "created_at": ctx.started_at_iso,
-        }
+        },
+        db_path=db_path,
     )
 
 
@@ -273,6 +275,7 @@ def _record_and_emit_findings(ctx: rt.RedTeamRunContext, result: rt.RedTeamResul
     import red_team_audit
     import red_team_insights
 
+    db_path = red_team_audit.resolve_db_path()
     for finding in result.findings:
         stable_key = rt.compute_stable_key(
             run_id=ctx.run_id,
@@ -299,6 +302,7 @@ def _record_and_emit_findings(ctx: rt.RedTeamRunContext, result: rt.RedTeamResul
             risk_key=finding.risk_key,
             affected_component=finding.affected_component,
             failure_mode=finding.failure_mode,
+            db_path=db_path,
         )
         red_team_insights.emit_finding(ctx, finding=finding, round_num=result.round_num)
 
@@ -1421,6 +1425,7 @@ def execute_dispatch(
                 fix_plan_json=_fix_plan_json(fix_plan),
                 fix_plan_cost_usd=fix_plan.cost_usd if fix_plan is not None else None,
                 fix_plan_status=fix_plan_status,
+                db_path=red_team_audit.resolve_db_path(),
             )
             if fix_plan_status == "success" and fix_plan is not None and fix_plan_md is not None:
                 red_team_insights.emit_fix_plan(

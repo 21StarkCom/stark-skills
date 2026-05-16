@@ -54,7 +54,8 @@ def _audit_run(
     except Exception:
         return
     try:
-        red_team_audit.init_red_team_tables()
+        db_path = red_team_audit.resolve_db_path()
+        red_team_audit.init_red_team_tables(db_path)
         red_team_audit.record_red_team_run({
             "run_id": run_id,
             "stage": "design",
@@ -69,7 +70,7 @@ def _audit_run(
             "cost_usd": result.cost_usd,
             "model": model,
             "caller": "manual",
-        })
+        }, db_path=db_path)
         if result.findings:
             red_team_audit.record_findings([
                 {
@@ -86,7 +87,7 @@ def _audit_run(
                     "reason_for_uncertainty": f.reason_for_uncertainty,
                 }
                 for f in result.findings
-            ])
+            ], db_path=db_path)
     except Exception:
         # Audit must never break the dispatcher.
         pass
@@ -196,6 +197,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+    # Phase 0 wiring: non-blocking credential smoke. Failures log to stderr
+    # so the operator sees a missing Keychain entry before the run halts on
+    # a token-mint error later. Phase 1 promotes this to a hard gate.
+    try:
+        from red_team_audit_cli import preflight_credentials_smoke
+        preflight_credentials_smoke()
+    except Exception:
+        pass
     design_path = Path(args.design).resolve()
     source_spec_path = Path(args.source_spec).resolve() if args.source_spec else None
 

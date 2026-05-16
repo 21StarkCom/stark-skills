@@ -54,9 +54,12 @@ def accept_one(
     accepted_by: str | None,
     confirm: bool,
     out=sys.stdout,
+    db_path: str | None = None,
 ) -> int:
     """Accept one stable key. Returns exit code (0 success, non-zero failure)."""
-    meta = red_team_human_review.lookup_finding_metadata(stable_key)
+    from red_team_audit import resolve_db_path
+    resolved_db = resolve_db_path(db_path)
+    meta = red_team_human_review.lookup_finding_metadata(stable_key, db_path=resolved_db)
     if meta is None:
         print(
             f"red_team_accept: no finding with stable_key={stable_key!r}",
@@ -105,6 +108,7 @@ def accept_one(
             repo=meta.get("repo"),
             accepted_by=accepted_by,
             note=note,
+            db_path=resolved_db,
         )
     except ValueError as exc:
         # ``compute_accept_key`` refuses unresolved / "unknown" repos so an
@@ -144,6 +148,14 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip the interactive confirmation prompt (for scripted use).",
     )
+    p.add_argument(
+        "--db",
+        default=None,
+        help=(
+            "Audit DB path override. Defaults to the canonical resolver "
+            "(scripts/red_team_audit_cli.py resolve-db)."
+        ),
+    )
     return p
 
 
@@ -156,6 +168,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             note=args.note,
             accepted_by=args.accepted_by,
             confirm=not args.no_confirm,
+            db_path=args.db,
         )
         if result != 0:
             rc = result

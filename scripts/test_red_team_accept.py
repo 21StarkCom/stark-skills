@@ -41,7 +41,7 @@ def test_accept_one_refuses_non_tty_without_no_confirm(monkeypatch, capsys):
     distinct exit code (2) and instructs the caller to opt in explicitly.
     """
     monkeypatch.setattr(
-        "red_team_human_review.lookup_finding_metadata", lambda key: _meta()
+        "red_team_human_review.lookup_finding_metadata", lambda key, **kw: _meta()
     )
     accept_calls: list[tuple] = []
     monkeypatch.setattr(
@@ -68,7 +68,7 @@ def test_accept_one_refuses_non_tty_without_no_confirm(monkeypatch, capsys):
 def test_accept_one_no_confirm_skips_prompt_even_without_tty(monkeypatch):
     """``confirm=False`` is the explicit non-interactive opt-in."""
     monkeypatch.setattr(
-        "red_team_human_review.lookup_finding_metadata", lambda key: _meta()
+        "red_team_human_review.lookup_finding_metadata", lambda key, **kw: _meta()
     )
     accept_calls: list[dict] = []
 
@@ -95,7 +95,7 @@ def test_accept_one_surfaces_unresolved_repo_value_error(monkeypatch, capsys):
     """compute_accept_key raises for unresolved repos; the CLI reports it."""
     monkeypatch.setattr(
         "red_team_human_review.lookup_finding_metadata",
-        lambda key: _meta(repo="unknown"),
+        lambda key, **kw: _meta(repo="unknown"),
     )
 
     def raising_accept(*args, **kwargs):

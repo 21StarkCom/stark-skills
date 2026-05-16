@@ -72,12 +72,24 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--repo", default=None, help="Filter to one repo (nameWithOwner).")
     p.add_argument("--stage", default=None, choices=("design", "plan"), help="Filter by stage.")
     p.add_argument("--json", action="store_true", help="Emit JSON instead of human text.")
+    p.add_argument(
+        "--db",
+        default=None,
+        help=(
+            "Audit DB path override. Defaults to the canonical resolver "
+            "(scripts/red_team_audit_cli.py resolve-db)."
+        ),
+    )
     return p
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
-    halts = red_team_human_review.list_pending_halts(repo=args.repo, stage=args.stage)
+    from red_team_audit import resolve_db_path
+    db_path = resolve_db_path(args.db)
+    halts = red_team_human_review.list_pending_halts(
+        repo=args.repo, stage=args.stage, db_path=db_path,
+    )
     if args.json:
         _format_json(halts)
     else:
