@@ -5,8 +5,8 @@ description: >-
 argument-hint: '<plan-or-prompt> [--plan-slug SLUG] [--test-command CMD] [--lead claude|codex|gemini] [--wing claude|codex|gemini] [--max-rounds N] [--timeout N] [--dry-run]'
 disable-model-invocation: true
 model: opus
-revision: b49134760c14d1de35bf7e3e325459aa0b018141
-revision_date: 2026-05-16T04:33:53Z
+revision: fd96568fab6c354b525a56d463fd9499c3d04f38
+revision_date: 2026-05-16T04:34:14Z
 ---
 
 ## Preflight
@@ -125,7 +125,7 @@ Mode:         issue-driven (plan:widget-system, 12 tasks across 4 phases)
 Steps:        4
 Lead:         claude   (implementer)
 Wing:         codex    (reviewer)
-Max rounds:   2 fix rounds (up to 3 reviews per step)
+Max rounds:   4 fix rounds (up to 5 reviews per step)
 Test command: pytest
 Timeout:      900s lead / 600s wing
 
