@@ -7,6 +7,31 @@ import { resolveDraftConfig } from "./lib/config.ts";
 import { callCodex } from "./lib/codex.ts";
 import { mktempInRuntime } from "./lib/runtime.ts";
 
+// Conventional-commit types accepted by the repo's PR-title linter
+// (.github/workflows/pr-title.yml -> amannn/action-semantic-pull-request).
+// Keep this list in sync with the workflow's `types:` block.
+export const CONVENTIONAL_COMMIT_TYPES = [
+  "feat",
+  "fix",
+  "chore",
+  "docs",
+  "refactor",
+  "test",
+  "build",
+  "ci",
+  "perf",
+  "revert",
+  "release",
+  "deploy",
+] as const;
+
+// Matches `type: subject`, `type(scope): subject`, or `type!: subject`
+// (breaking-change marker). Scope, when present, must be non-empty and
+// contain no closing paren.
+export const CONVENTIONAL_COMMIT_TITLE_RE = new RegExp(
+  `^(?:${CONVENTIONAL_COMMIT_TYPES.join("|")})(?:\\([^)\\s][^)]*\\))?!?: \\S.*$`,
+);
+
 export function buildPrompt(plan: Plan): string {
   const stage2 = plan.stage2;
   const u = plan.untrustedInputs;
@@ -45,8 +70,18 @@ untrusted:
 
 RULES:
 1. needTitle: single-line, <= 200 chars, no markdown headers, no newlines.
+   MUST start with a Conventional Commits type prefix from this exact list:
+   ${CONVENTIONAL_COMMIT_TYPES.join(", ")}. Format: "type: subject" or
+   "type(scope): subject" (optional scope, optional "!" for breaking).
+   Pick the type that best matches the dominant change: feat for new
+   user-facing capability, fix for a bug fix, refactor for code shape
+   without behavior change, docs/test/ci/build/chore as appropriate.
+   Examples: "feat(observability): add request_id propagation",
+   "fix(slack): handle 429 retry-after honoring jitter",
+   "chore(deps): bump golang.org/x/net to 0.27.0".
 2. needBody: <= 32 KB; fill prTemplate if present, else use "## Summary", "## Why", "## Test plan".
-3. needCommitMessage: subject <= 72 chars plus optional body <= 1 KB.
+3. needCommitMessage: subject <= 72 chars plus optional body <= 1 KB. Subject
+   MUST also start with the same Conventional Commits type prefix.
 4. Output JSON only - one fenced json block.
 
 OUTPUT FORMAT:
@@ -89,6 +124,13 @@ export function validateOutput(
     if (/(closes|refs)\s+#\d+/i.test(title) || /#\d+/.test(title)) {
       return { ok: false, reason: "title references issue numbers", warnings };
     }
+    if (!CONVENTIONAL_COMMIT_TITLE_RE.test(title)) {
+      return {
+        ok: false,
+        reason: `title missing Conventional Commits type prefix (one of: ${CONVENTIONAL_COMMIT_TYPES.join(", ")}). Required format: "type: subject" or "type(scope): subject"`,
+        warnings,
+      };
+    }
   }
 
   let body = need.needBody ? o.body : null;
@@ -106,8 +148,16 @@ export function validateOutput(
   if (need.needCommitMessage) {
     if (typeof commit_message !== "string") return { ok: false, reason: "commit_message missing", warnings };
     const lines = commit_message.split("\n");
-    if (lines[0]!.length > 72) return { ok: false, reason: "commit subject > 72 chars", warnings };
+    const subject = lines[0]!;
+    if (subject.length > 72) return { ok: false, reason: "commit subject > 72 chars", warnings };
     if (Buffer.byteLength(commit_message, "utf8") > 1100) return { ok: false, reason: "commit > 1.1 KB", warnings };
+    if (!CONVENTIONAL_COMMIT_TITLE_RE.test(subject)) {
+      return {
+        ok: false,
+        reason: `commit subject missing Conventional Commits type prefix (one of: ${CONVENTIONAL_COMMIT_TYPES.join(", ")})`,
+        warnings,
+      };
+    }
   }
 
   return { ok: true, warnings, title, body, commit_message };

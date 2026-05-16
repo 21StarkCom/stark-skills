@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildPrompt, validateOutput, parseFencedJson } from "../gh_pr_open_draft.ts";
+import {
+  buildPrompt,
+  validateOutput,
+  parseFencedJson,
+  CONVENTIONAL_COMMIT_TITLE_RE,
+  CONVENTIONAL_COMMIT_TYPES,
+} from "../gh_pr_open_draft.ts";
 
 test("buildPrompt substitutes plan fields without leaking trusted/untrusted", () => {
   const plan: any = {
@@ -33,7 +39,7 @@ test("parseFencedJson extracts the first json block", () => {
 
 test("validateOutput rejects oversized title", () => {
   const r = validateOutput(
-    { title: "a".repeat(201), body: null, commit_message: null },
+    { title: "feat: " + "a".repeat(201), body: null, commit_message: null },
     { needTitle: true, needBody: false, needCommitMessage: false },
   );
   assert.equal(r.ok, false);
@@ -47,4 +53,81 @@ test("validateOutput strips Closes/Refs from body but warns", () => {
   assert.equal(r.ok, true);
   assert.equal(r.body!.includes("Closes"), false);
   assert.match(r.warnings.join(","), /closes/i);
+});
+
+test("validateOutput accepts well-formed Conventional Commits titles", () => {
+  const cases = [
+    "feat: add request_id propagation",
+    "fix(slack): handle 429 retry-after",
+    "chore(deps): bump golang.org/x/net",
+    "refactor(executor)!: require non-nil ActionStore",
+    "docs: clarify CLAUDE.md log fields contract",
+    "ci: pin pr-title action to a tag",
+  ];
+  for (const title of cases) {
+    const r = validateOutput(
+      { title, body: null, commit_message: null },
+      { needTitle: true, needBody: false, needCommitMessage: false },
+    );
+    assert.equal(r.ok, true, `expected ok for "${title}", reason=${r.reason}`);
+  }
+});
+
+test("validateOutput rejects title missing Conventional Commits type prefix", () => {
+  const cases = [
+    "Add request_id propagation",                           // no prefix
+    "feature: add propagation",                             // wrong type
+    "feat add propagation",                                 // no colon-space
+    "feat:add propagation",                                 // no space after colon
+    "feat(): empty scope",                                  // empty scope
+    "feat(scope) : add",                                    // space before colon
+    "FEAT: uppercase type",                                 // case-sensitive
+  ];
+  for (const title of cases) {
+    const r = validateOutput(
+      { title, body: null, commit_message: null },
+      { needTitle: true, needBody: false, needCommitMessage: false },
+    );
+    assert.equal(r.ok, false, `expected reject for "${title}"`);
+    assert.match(r.reason || "", /Conventional Commits/);
+  }
+});
+
+test("validateOutput enforces same prefix on commit_message subject", () => {
+  const bad = validateOutput(
+    { title: null, body: null, commit_message: "add request_id propagation" },
+    { needTitle: false, needBody: false, needCommitMessage: true },
+  );
+  assert.equal(bad.ok, false);
+  assert.match(bad.reason || "", /Conventional Commits/);
+
+  const good = validateOutput(
+    { title: null, body: null, commit_message: "feat(obs): add request_id propagation\n\nbody" },
+    { needTitle: false, needBody: false, needCommitMessage: true },
+  );
+  assert.equal(good.ok, true, `expected ok, reason=${good.reason}`);
+});
+
+test("CONVENTIONAL_COMMIT_TITLE_RE covers each declared type", () => {
+  for (const t of CONVENTIONAL_COMMIT_TYPES) {
+    assert.match(`${t}: subject`, CONVENTIONAL_COMMIT_TITLE_RE);
+  }
+});
+
+test("buildPrompt names the Conventional Commits prefix rule", () => {
+  const plan: any = {
+    branch: "feat/1",
+    baseBranch: "main",
+    candidateIssues: { preflight: [] },
+    userArgs: { title: null, commitMessage: null },
+    stage2: { needTitle: true, needBody: false, needCommitMessage: false },
+    untrustedInputs: {
+      combinedStat: "", committedDiff: "", stagedDiff: "",
+      unstagedDiff: null, untrackedFiles: null, prTemplate: null,
+      commitMessages: "", userBody: null,
+    },
+  };
+  const p = buildPrompt(plan);
+  assert.match(p, /Conventional Commits type prefix/);
+  assert.match(p, /feat, fix, chore/);
 });
