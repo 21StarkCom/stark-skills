@@ -3,6 +3,7 @@
   "quick_domains": [],
   "default_agent": "codex",
   "test_command": null,
+  "allow_no_test_command": true,
   "untrusted_fix_loop": false,
   "history_retention_days": 90,
   "domain_agents": {

@@ -66,6 +66,12 @@ export interface ResolvedConfig {
   fix_threshold: Severity;
   runtime: RuntimeConfig;
   test_command: string | null;
+  /** When true, the fix loop is allowed to run even with no test_command — the
+   * test step is skipped and commits are pushed unconditionally. Off by default
+   * (undefined treated as false) so the safety net stays on; opt in per
+   * repo/org/global when you want autofixes to ship without a verification
+   * gate. */
+  allow_no_test_command?: boolean;
   untrusted_fix_loop: boolean;
   history_retention_days: number;
   lock_ttl_minutes: number;
@@ -551,6 +557,9 @@ export interface FixLoopGateInput {
   cliAllowUntrustedFixLoop: boolean;
   configUntrustedFixLoop: boolean;
   noFixLoop: boolean;
+  /** When true, missing/empty testCommand does not deny the loop — the caller
+   * is expected to skip the test step and push commits without verification. */
+  allowNoTestCommand?: boolean;
 }
 
 export interface FixLoopGateResult {
@@ -566,23 +575,26 @@ export interface FixLoopGateResult {
  * Pure decision function: should we enter the fix loop for this PR?
  *
  * Rule precedence (first match wins):
- *  a) noFixLoop=true                           → soft skip (no_fix_loop)
- *  b) testCommand is null/empty                → soft skip (no_test_command)
- *  c) same-repo PR                             → allow
- *  d) fork PR + maintainer_can_modify          → allow
- *  e) fork PR, no MCM, no CLI opt-in           → soft skip (fork_no_mcm)
- *  f) fork PR, CLI opt-in but config disabled  → terminal auth_denied
- *  g) fork PR, both opt-ins                    → allow
+ *  a) noFixLoop=true                                   → soft skip (no_fix_loop)
+ *  b) testCommand empty AND allowNoTestCommand=false   → soft skip (no_test_command)
+ *  b') testCommand empty AND allowNoTestCommand=true   → allow (no_test_command_skipped) — caller MUST skip the test step
+ *  c) same-repo PR                                     → allow
+ *  d) fork PR + maintainer_can_modify                  → allow
+ *  e) fork PR, no MCM, no CLI opt-in                   → soft skip (fork_no_mcm)
+ *  f) fork PR, CLI opt-in but config disabled          → terminal auth_denied
+ *  g) fork PR, both opt-ins                            → allow
  *
  * test_command MUST be sourced from trusted config — never from CLAUDE.md or
- * package.json or any PR-controlled file.
+ * package.json or any PR-controlled file. allowNoTestCommand is also trusted
+ * config; setting it true ships unverified autofixes by design.
  */
 export function evaluateFixLoopGate(input: FixLoopGateInput): FixLoopGateResult {
   if (input.noFixLoop) {
     return { allow: false, terminal: false, reason: "no_fix_loop" };
   }
   const tc = input.testCommand;
-  if (tc === null || tc === undefined || tc === "" || (typeof tc === "string" && tc.trim() === "")) {
+  const tcEmpty = tc === null || tc === undefined || tc === "" || (typeof tc === "string" && tc.trim() === "");
+  if (tcEmpty && !input.allowNoTestCommand) {
     return { allow: false, terminal: false, reason: "no_test_command" };
   }
   if (!input.prHeadIsFork) {
