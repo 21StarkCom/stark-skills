@@ -127,6 +127,7 @@ def run_dispatch(
     audit: bool,
     cwd: str | None,
     enable_fix_plan_for_calibration: bool = False,
+    replay_transcript: Path | None = None,
 ) -> dict[str, Any]:
     """Run the red-team and return a dict shaped for the skill."""
     return execute_dispatch(
@@ -138,6 +139,7 @@ def run_dispatch(
         audit=audit,
         cwd=cwd,
         enable_fix_plan_for_calibration=enable_fix_plan_for_calibration,
+        replay_transcript=replay_transcript,
     )
 
 
@@ -193,6 +195,17 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip the interactive accept confirmation (for scripted use).",
     )
+    p.add_argument(
+        "--replay-transcript",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Phase 1 deterministic seam — bypass the live Codex / Responses "
+            "API call and feed the recorded transcript through the parsing "
+            "/ aggregation / audit-write / sidecar path. Documented in "
+            "docs/specs/red-team-cli-contract-2026-05-16.md."
+        ),
+    )
     return p
 
 
@@ -232,6 +245,7 @@ def main(argv: list[str] | None = None) -> int:
         audit=not args.no_audit,
         cwd=None,
         enable_fix_plan_for_calibration=args.enable_fix_plan_for_calibration,
+        replay_transcript=Path(args.replay_transcript).resolve() if args.replay_transcript else None,
     )
 
     if args.json:
