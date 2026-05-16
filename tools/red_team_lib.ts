@@ -201,6 +201,7 @@ export const REPO_ROOT = (() => {
 
 export const PROMPTS_DIR = path.join(REPO_ROOT, "global", "prompts", "red-team");
 export const AUDIT_CLI = path.join(REPO_ROOT, "scripts", "red_team_audit_cli.py");
+export const EMIT_QUEUE_CLI = path.join(REPO_ROOT, "scripts", "red_team_emit_queue_cli.py");
 
 // ── Prompt resolution ────────────────────────────────────────────────────
 
@@ -1186,6 +1187,30 @@ export function dispatch(args: DispatchArgs): DispatchResult {
         `red_team_lib: audit persist failed (non-fatal): ${(err as Error).message}`,
       );
     }
+  }
+
+  // Insights events (best-effort; --no-audit also suppresses these so a
+  // single flag controls all metric/audit side effects).
+  if (!args.noAudit) {
+    emitRun({
+      ctx,
+      result,
+      model,
+      fixPlanStatus: fixPlanResolution.status,
+      runWarnings: fixPlanResolution.runWarnings,
+    });
+    for (const f of result.findings) {
+      emitFinding({ ctx, finding: f, roundNum: result.round_num });
+    }
+    emitFixPlan({
+      ctx,
+      fixPlan: fixPlanResolution.fixPlan,
+      fixPlanStatus: fixPlanResolution.status,
+      fixPlanMd: renderFixPlanSection({
+        status: fixPlanResolution.status,
+        fixPlan: fixPlanResolution.fixPlan,
+      }),
+    });
   }
 
   return {
@@ -2207,4 +2232,267 @@ export function renderFixPlanSection(args: {
     return rendered.slice(0, FIX_PLAN_SECTION_LIMIT) + "\n\n_[fix-plan section truncated]_";
   }
   return rendered;
+}
+
+// ── Insights events: builders, enqueue, emitters ────────────────────────
+//
+// Mirrors `scripts/red_team_insights.py::emit_run|emit_finding|emit_fix_plan`.
+// The TS dispatcher derives the inner payload, then shells out to
+// `scripts/red_team_emit_queue_cli.py enqueue --type T --dedupe-key K` with
+// the payload on stdin. The CLI's `make_event` wraps it in the canonical
+// envelope (event_id / timestamp / cli / source / schema_version / session_id)
+// — so the timestamp on insights events is the enqueue time, not the
+// run-start time. That's a minor divergence from the Python `_envelope`
+// shape and is acceptable for "we observed this at X" event semantics.
+//
+// All three emitters are fail-open: any enqueue error logs to stderr and
+// returns without throwing. Insights are best-effort and never block a run.
+
+export interface InsightsEnqueueResult {
+  ok: boolean;
+  event_id?: string;
+  dedupe_key?: string;
+  duplicate?: boolean;
+  error?: string;
+}
+
+type DedupeKind = "run" | "finding" | "fix_plan";
+
+export function makeDedupeKey(
+  kind: DedupeKind,
+  args: { stage: Stage; runId: string; roundNum?: number; findingId?: string },
+): string {
+  if (kind === "finding") {
+    if (args.roundNum === undefined || !args.findingId) {
+      throw new Error("finding dedupe key requires roundNum and findingId");
+    }
+    return `red-team:finding:${args.stage}:${args.runId}:${args.roundNum}:${args.findingId}`;
+  }
+  if ((kind === "run" || kind === "fix_plan") && (args.roundNum !== undefined || args.findingId)) {
+    throw new Error(`${kind} dedupe key does not accept roundNum or findingId`);
+  }
+  return `red-team:${kind}:${args.stage}:${args.runId}`;
+}
+
+export function enqueueInsightsEvent(
+  eventType: "red_team_run" | "red_team_finding" | "red_team_fix_plan",
+  payload: Record<string, unknown>,
+  dedupeKey: string,
+): InsightsEnqueueResult {
+  const args = ["--type", eventType, "--dedupe-key", dedupeKey, "--payload-json", "-"];
+  const proc = spawnSync("python3", [EMIT_QUEUE_CLI, "enqueue", ...args], {
+    input: JSON.stringify(payload),
+    encoding: "utf8",
+    env: process.env as Record<string, string>,
+  });
+  if (proc.status !== 0) {
+    return {
+      ok: false,
+      error: `emit-queue exit=${proc.status ?? -1}: ${(proc.stderr ?? "").trim() || (proc.stdout ?? "").trim()}`,
+    };
+  }
+  try {
+    const out = JSON.parse(proc.stdout ?? "{}") as InsightsEnqueueResult;
+    return out;
+  } catch (err) {
+    return { ok: false, error: `unparseable emit-queue stdout: ${(err as Error).message}` };
+  }
+}
+
+// ── Payload builders (mirror Python `build_*_envelope` payload shape) ───
+
+function worstSeverity(result: RedTeamResult): Severity | null {
+  if (result.error) return null;
+  const severities = result.findings
+    .map((f) => f.severity)
+    .filter((s): s is Severity => SEVERITY_RANK_NUM[s] !== undefined);
+  if (severities.length === 0) return null;
+  return severities.reduce((acc, s) =>
+    SEVERITY_RANK_NUM[s] > SEVERITY_RANK_NUM[acc] ? s : acc,
+  );
+}
+
+/** Match the audit row writer's `caller` field (see `auditPersistRun` /
+ *  `makeBlocked`). Mismatched callers across the two sinks would surface
+ *  as the same run reporting two identities, which breaks downstream joins.
+ *  Blocked / errored runs early-return before insights fire, so the
+ *  reason-suffixed variant from `makeBlocked` never reaches here. */
+const INSIGHTS_CALLER = "stark-red-team-ts";
+
+export function buildRunPayload(args: {
+  ctx: RedTeamRunContext;
+  result: RedTeamResult;
+  model: string;
+  fixPlanStatus: FixPlanStatus | null;
+  runWarnings: string[];
+  caller?: string;
+}): Record<string, unknown> {
+  const { ctx, result, model, fixPlanStatus, runWarnings } = args;
+  const repoLabel = ctx.repo ?? "unknown";
+  return {
+    run_id: ctx.run_id,
+    stage: ctx.stage,
+    model,
+    caller: args.caller ?? INSIGHTS_CALLER,
+    final_status: deriveStatus(result),
+    worst_severity: worstSeverity(result),
+    passed: deriveStatus(result) === "clean",
+    rounds_used: result.round_num,
+    total_findings: result.findings.length,
+    blocking_count: result.blocking_count,
+    human_review_count: result.human_review_count,
+    critical_count: result.findings.filter((f) => f.severity === "critical").length,
+    high_count: result.findings.filter((f) => f.severity === "high").length,
+    medium_count: result.findings.filter((f) => f.severity === "medium").length,
+    duration_s: result.duration_s,
+    cost_usd: result.cost_usd,
+    repo: repoLabel,
+    artifact_relative_path: ctx.artifact_relative_path,
+    pr_number: ctx.pr_number,
+    fix_plan_status: fixPlanStatus,
+    warnings: [...runWarnings],
+    round_outcomes: [],
+    terminal_transition: null,
+  };
+}
+
+export function buildFindingPayload(args: {
+  ctx: RedTeamRunContext;
+  finding: RedTeamFinding;
+  roundNum: number;
+}): Record<string, unknown> {
+  const { ctx, finding, roundNum } = args;
+  const repoLabel = ctx.repo ?? "unknown";
+  const stableKey = `${ctx.run_id}:${ctx.stage}:${roundNum}:${finding.persona}:${finding.id}:${finding.concern_hash}`;
+  // Apply redact() so insights events can't carry sensitive content even if
+  // a finding's free-text fields slipped past upstream gates. TS dispatch
+  // has no retention-policy mode yet (Python's `red_team_audit_text.policy_from_config`);
+  // when that lands, swap redact() for the policy-aware version.
+  return {
+    run_id: ctx.run_id,
+    stage: ctx.stage,
+    round_num: roundNum,
+    finding_id: finding.id,
+    persona: finding.persona,
+    severity: finding.severity,
+    stable_key: stableKey,
+    concern_hash: finding.concern_hash,
+    risk_key: finding.risk_key,
+    affected_component: finding.affected_component,
+    failure_mode: finding.failure_mode,
+    retention_mode: "full",
+    concern: redact(finding.concern),
+    consequence: redact(finding.consequence),
+    counter_proposal: redact(finding.counter_proposal),
+    trade_off: finding.trade_off === null ? null : redact(finding.trade_off),
+    reason_for_uncertainty:
+      finding.reason_for_uncertainty === null ? null : redact(finding.reason_for_uncertainty),
+    concern_excerpt_hash: null,
+    consequence_excerpt_hash: null,
+    counter_proposal_excerpt_hash: null,
+    trade_off_excerpt_hash: null,
+    reason_for_uncertainty_excerpt_hash: null,
+    is_human_review: isHumanReviewFinding(finding),
+    repo: repoLabel,
+    pr_number: ctx.pr_number,
+  };
+}
+
+export function buildFixPlanPayload(args: {
+  ctx: RedTeamRunContext;
+  fixPlan: RedTeamFixPlan;
+  fixPlanMd: string;
+}): Record<string, unknown> {
+  const { ctx, fixPlan, fixPlanMd } = args;
+  const repoLabel = ctx.repo ?? "unknown";
+  const addressed = new Set<string>();
+  for (const m of fixPlan.moves) for (const fid of m.addressed_finding_ids) addressed.add(fid);
+  return {
+    run_id: ctx.run_id,
+    stage: ctx.stage,
+    model: fixPlan.model,
+    reasoning_effort: fixPlan.reasoning_effort,
+    summary: fixPlan.summary,
+    notes: fixPlan.notes,
+    moves: fixPlan.moves.map((m) => ({ ...m })),
+    move_count: fixPlan.moves.length,
+    addressed_finding_ids: [...addressed],
+    unaddressed_finding_ids: [...fixPlan.unaddressed_finding_ids],
+    orphan_finding_ids: [...fixPlan.orphan_finding_ids],
+    input_truncated: fixPlan.input_truncated,
+    input_omitted_finding_ids: [...fixPlan.input_omitted_finding_ids],
+    warnings: [...fixPlan.warnings],
+    cost_usd: fixPlan.cost_usd,
+    duration_s: fixPlan.duration_s,
+    input_tokens: fixPlan.input_tokens,
+    output_tokens: fixPlan.output_tokens,
+    fix_plan_md: fixPlanMd,
+    repo: repoLabel,
+    pr_number: ctx.pr_number,
+  };
+}
+
+// ── Emitters (fail-open wrappers used by dispatch()) ────────────────────
+
+export function emitRun(args: {
+  ctx: RedTeamRunContext;
+  result: RedTeamResult;
+  model: string;
+  fixPlanStatus: FixPlanStatus | null;
+  runWarnings: string[];
+}): InsightsEnqueueResult {
+  const payload = buildRunPayload(args);
+  const dedupeKey = makeDedupeKey("run", { stage: args.ctx.stage, runId: args.ctx.run_id });
+  const out = enqueueInsightsEvent("red_team_run", payload, dedupeKey);
+  if (!out.ok) {
+    console.error(`red_team_lib: emit red_team_run failed (non-fatal): ${out.error ?? "unknown"}`);
+  }
+  return out;
+}
+
+export function emitFinding(args: {
+  ctx: RedTeamRunContext;
+  finding: RedTeamFinding;
+  roundNum: number;
+}): InsightsEnqueueResult {
+  const payload = buildFindingPayload(args);
+  const dedupeKey = makeDedupeKey("finding", {
+    stage: args.ctx.stage,
+    runId: args.ctx.run_id,
+    roundNum: args.roundNum,
+    findingId: args.finding.id,
+  });
+  const out = enqueueInsightsEvent("red_team_finding", payload, dedupeKey);
+  if (!out.ok) {
+    console.error(
+      `red_team_lib: emit red_team_finding ${args.finding.id} failed (non-fatal): ${out.error ?? "unknown"}`,
+    );
+  }
+  return out;
+}
+
+/** Emit a `red_team_fix_plan` event for a *successful* fix-plan run only.
+ *  No-ops (returns `{ok:true, duplicate:false}` synthetic) when status is
+ *  not `success` or the plan carries an error, matching Python's
+ *  `emit_fix_plan` early-return contract. */
+export function emitFixPlan(args: {
+  ctx: RedTeamRunContext;
+  fixPlan: RedTeamFixPlan | null;
+  fixPlanStatus: FixPlanStatus;
+  fixPlanMd: string;
+}): InsightsEnqueueResult {
+  if (args.fixPlanStatus !== "success" || !args.fixPlan || args.fixPlan.error !== null) {
+    return { ok: true, duplicate: false };
+  }
+  const payload = buildFixPlanPayload({
+    ctx: args.ctx,
+    fixPlan: args.fixPlan,
+    fixPlanMd: args.fixPlanMd,
+  });
+  const dedupeKey = makeDedupeKey("fix_plan", { stage: args.ctx.stage, runId: args.ctx.run_id });
+  const out = enqueueInsightsEvent("red_team_fix_plan", payload, dedupeKey);
+  if (!out.ok) {
+    console.error(`red_team_lib: emit red_team_fix_plan failed (non-fatal): ${out.error ?? "unknown"}`);
+  }
+  return out;
 }
