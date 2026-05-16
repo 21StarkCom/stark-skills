@@ -732,110 +732,154 @@ export interface DispatchOptions {
 }
 
 export async function dispatchDomains(opts: DispatchOptions): Promise<DispatchResult[]> {
-  const cap = Math.max(1, opts.config.runtime?.max_concurrent_agents ?? 3);
+  const globalCap = Math.max(1, opts.config.runtime?.max_concurrent_agents ?? 3);
+  const perAgentCapMap = (opts.config.runtime?.max_concurrent_per_agent ?? {}) as Partial<Record<AgentName, number>>;
+  const perAgentCap = (a: AgentName): number => {
+    const v = perAgentCapMap[a];
+    // Absent / non-number → no cap. Explicit 0 (or negative) means "block":
+    // the scheduler's deadlock-drain branch then fails the assignment with
+    // dispatch_blocked rather than spinning forever.
+    if (typeof v !== "number") return Number.POSITIVE_INFINITY;
+    return Math.max(0, v);
+  };
   const allowlist = opts.config.runtime?.subagent_env_allowlist ?? [];
   const tempPrefix = opts.config.runtime?.temp_dir_prefix ?? "stark-env";
   const spawner = opts.spawnFn ?? spawnCollect;
 
-  const queue = [...opts.assignments];
-  const results: DispatchResult[] = new Array(queue.length);
-  let nextIdx = 0;
+  const assignments = opts.assignments;
+  const results: DispatchResult[] = new Array(assignments.length);
+  const total = assignments.length;
+  const pending = new Set<number>();
+  for (let i = 0; i < total; i++) pending.add(i);
+  const inflight = new Map<number, Promise<void>>();
+  const perAgentInFlight = new Map<AgentName, number>();
 
-  const total = queue.length;
-  async function worker(): Promise<void> {
-    while (true) {
-      const idx = nextIdx++;
-      if (idx >= queue.length) return;
-      const a = queue[idx];
-      const start = Date.now();
-      progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  starting…`);
-      const port = opts.ports.get(a.agent);
-      if (!port) {
-        results[idx] = {
-          domain: a.domain, agent: a.agent, ok: false,
-          findings: [], parseErrors: [],
-          error: `agent_not_supported: ${a.agent}`,
-          durationMs: Date.now() - start,
-        };
-        progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  agent_not_supported  ${fmtDuration(Date.now() - start)}`);
-        continue;
+  async function runOne(idx: number): Promise<void> {
+    const a = assignments[idx];
+    const start = Date.now();
+    progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  starting…`);
+    const port = opts.ports.get(a.agent);
+    if (!port) {
+      results[idx] = {
+        domain: a.domain, agent: a.agent, ok: false,
+        findings: [], parseErrors: [],
+        error: `agent_not_supported: ${a.agent}`,
+        durationMs: Date.now() - start,
+      };
+      progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  agent_not_supported  ${fmtDuration(Date.now() - start)}`);
+      return;
+    }
+    let tempDir: string | null = null;
+    try {
+      // Create the cwd FIRST so per-agent setup (e.g. Gemini's
+      // GEMINI_CLI_HOME / projects.json) can register it before spawn.
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `${tempPrefix}-`));
+      const built = port.buildCommand(a.prompt, a.model, {
+        cwd: tempDir,
+        trustedGeneratedCwd: true,
+      });
+      const env = pickAllowlistedEnv(process.env, allowlist);
+      for (const [k, v] of Object.entries(built.env)) {
+        if (!FORBIDDEN_ENV_KEYS.includes(k as (typeof FORBIDDEN_ENV_KEYS)[number])) {
+          env[k] = v;
+        }
       }
-      let tempDir: string | null = null;
-      try {
-        // Create the cwd FIRST so per-agent setup (e.g. Gemini's
-        // GEMINI_CLI_HOME / projects.json) can register it before spawn.
-        tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `${tempPrefix}-`));
-        const built = port.buildCommand(a.prompt, a.model, {
-          cwd: tempDir,
-          trustedGeneratedCwd: true,
-        });
-        const env = pickAllowlistedEnv(process.env, allowlist);
-        for (const [k, v] of Object.entries(built.env)) {
-          if (!FORBIDDEN_ENV_KEYS.includes(k as (typeof FORBIDDEN_ENV_KEYS)[number])) {
-            env[k] = v;
-          }
-        }
-        env.TMPDIR = tempDir;
-        const cwd = built.cwd ?? tempDir;
-        const sp = await spawner(built.cmd, built.args, {
-          input: built.stdin, env, cwd,
-        });
-        if (sp.status !== 0 || sp.signal) {
-          results[idx] = {
-            domain: a.domain, agent: a.agent, ok: false,
-            findings: [], parseErrors: [],
-            error: formatAgentExitError(sp),
-            durationMs: Date.now() - start,
-          };
-          const tag = sp.signal ? `signal=${sp.signal}` : `exit=${sp.status}`;
-          progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  ${tag}  ${fmtDuration(Date.now() - start)}`);
-          continue;
-        }
-        const parsed = port.parseOutput(sp.stdout);
-        // Tier 1 detection: stdout that yields no findings, no parse errors,
-        // and no explicit no-findings sentinel is not a clean review. This
-        // includes empty stdout: the prompt contract requires either findings
-        // or the sentinel, so silence must not become a silent "0 findings".
-        if (
-          parsed.findings.length === 0 &&
-          parsed.parseErrors.length === 0 &&
-          !parsed.noFindingsAck
-        ) {
-          results[idx] = {
-            domain: a.domain, agent: a.agent, ok: false,
-            findings: [], parseErrors: [],
-            error: `no parseable findings and no no_findings sentinel (${sp.stdout.length} stdout bytes)`,
-            durationMs: Date.now() - start,
-          };
-          progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  no-sentinel  ${fmtDuration(Date.now() - start)}`);
-          continue;
-        }
-        results[idx] = {
-          domain: a.domain, agent: a.agent, ok: true,
-          findings: parsed.findings.map((f) => ({ ...f, domain: a.domain, agent: a.agent })),
-          parseErrors: parsed.parseErrors,
-          durationMs: Date.now() - start,
-        };
-        progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  ok    ${parsed.findings.length} findings  ${fmtDuration(Date.now() - start)}`);
-      } catch (err) {
-        const message = safeStringify(err);
-        progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  ${message.slice(0, 80)}  ${fmtDuration(Date.now() - start)}`);
+      env.TMPDIR = tempDir;
+      const cwd = built.cwd ?? tempDir;
+      const sp = await spawner(built.cmd, built.args, {
+        input: built.stdin, env, cwd,
+      });
+      if (sp.status !== 0 || sp.signal) {
         results[idx] = {
           domain: a.domain, agent: a.agent, ok: false,
           findings: [], parseErrors: [],
-          error: message,
+          error: formatAgentExitError(sp),
           durationMs: Date.now() - start,
         };
-      } finally {
-        if (tempDir) {
-          try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* */ }
-        }
+        const tag = sp.signal ? `signal=${sp.signal}` : `exit=${sp.status}`;
+        progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  ${tag}  ${fmtDuration(Date.now() - start)}`);
+        return;
+      }
+      const parsed = port.parseOutput(sp.stdout);
+      // Tier 1 detection: stdout that yields no findings, no parse errors,
+      // and no explicit no-findings sentinel is not a clean review. This
+      // includes empty stdout: the prompt contract requires either findings
+      // or the sentinel, so silence must not become a silent "0 findings".
+      if (
+        parsed.findings.length === 0 &&
+        parsed.parseErrors.length === 0 &&
+        !parsed.noFindingsAck
+      ) {
+        results[idx] = {
+          domain: a.domain, agent: a.agent, ok: false,
+          findings: [], parseErrors: [],
+          error: `no parseable findings and no no_findings sentinel (${sp.stdout.length} stdout bytes)`,
+          durationMs: Date.now() - start,
+        };
+        progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  no-sentinel  ${fmtDuration(Date.now() - start)}`);
+        return;
+      }
+      results[idx] = {
+        domain: a.domain, agent: a.agent, ok: true,
+        findings: parsed.findings.map((f) => ({ ...f, domain: a.domain, agent: a.agent })),
+        parseErrors: parsed.parseErrors,
+        durationMs: Date.now() - start,
+      };
+      progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  ok    ${parsed.findings.length} findings  ${fmtDuration(Date.now() - start)}`);
+    } catch (err) {
+      const message = safeStringify(err);
+      progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  ${message.slice(0, 80)}  ${fmtDuration(Date.now() - start)}`);
+      results[idx] = {
+        domain: a.domain, agent: a.agent, ok: false,
+        findings: [], parseErrors: [],
+        error: message,
+        durationMs: Date.now() - start,
+      };
+    } finally {
+      if (tempDir) {
+        try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* */ }
       }
     }
   }
 
-  const workers = Array.from({ length: Math.min(cap, queue.length) }, () => worker());
-  await Promise.all(workers);
+  // Scheduler honors BOTH the global cap and any per-agent cap. On each tick
+  // it walks pending in submission order and starts every assignment whose
+  // agent has a free slot. Skipping a per-agent-blocked assignment to start a
+  // later one is intentional — it keeps an unrelated agent's quota usable
+  // when one agent is already at its cap, without changing where the result
+  // lands in the output array (results[] is keyed by original index).
+  while (pending.size > 0 || inflight.size > 0) {
+    for (const idx of [...pending]) {
+      if (inflight.size >= globalCap) break;
+      const agent = assignments[idx].agent;
+      if ((perAgentInFlight.get(agent) ?? 0) >= perAgentCap(agent)) continue;
+      pending.delete(idx);
+      perAgentInFlight.set(agent, (perAgentInFlight.get(agent) ?? 0) + 1);
+      const p = runOne(idx).finally(() => {
+        perAgentInFlight.set(agent, Math.max(0, (perAgentInFlight.get(agent) ?? 1) - 1));
+        inflight.delete(idx);
+      });
+      inflight.set(idx, p);
+    }
+    if (inflight.size === 0) {
+      // Pending work but no slot for any of it — only reachable when every
+      // remaining assignment's per-agent cap is 0 or negative. Drain the
+      // remainder as dispatch_blocked so callers see a clear error instead
+      // of the scheduler spinning forever.
+      for (const idx of pending) {
+        const a = assignments[idx];
+        results[idx] = {
+          domain: a.domain, agent: a.agent, ok: false,
+          findings: [], parseErrors: [],
+          error: `dispatch_blocked: per-agent concurrency cap for '${a.agent}' is non-positive`,
+          durationMs: 0,
+        };
+      }
+      pending.clear();
+      break;
+    }
+    await Promise.race(inflight.values());
+  }
   return results;
 }
 
