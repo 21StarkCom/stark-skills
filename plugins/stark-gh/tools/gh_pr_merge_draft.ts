@@ -87,9 +87,20 @@ OUTPUT FORMAT — one fenced json block, exactly the three keys (no others):
 }
 
 export function parseFencedJson(text: string): unknown {
-  const m = text.match(/```json\s*([\s\S]*?)```/);
-  if (!m) throw new Error("no fenced json block in model output");
-  return JSON.parse(m[1]!);
+  const open = text.match(/```json\s*\n?/);
+  if (!open) throw new Error("no fenced json block in model output");
+  const tail = text.slice(open.index! + open[0].length);
+  const closings = [...tail.matchAll(/```/g)].map((m) => m.index!);
+  if (closings.length === 0) throw new Error("no closing fence after ```json");
+  // Walk from the outermost closing fence inward so a nested ``` inside the
+  // JSON string body (e.g. PR body containing ```text blocks) does not
+  // truncate the parse.
+  let lastErr: unknown;
+  for (let i = closings.length - 1; i >= 0; i--) {
+    const candidate = tail.slice(0, closings[i]).trim();
+    try { return JSON.parse(candidate); } catch (err) { lastErr = err; }
+  }
+  throw new Error(`no valid JSON inside \`\`\`json fence: ${(lastErr as Error)?.message ?? "unknown"}`);
 }
 
 export interface DraftCtx {

@@ -37,6 +37,22 @@ test("parseFencedJson extracts the first json block", () => {
   assert.deepEqual(parseFencedJson(out), { title: "x" });
 });
 
+test("parseFencedJson handles nested ``` fences inside JSON string values", () => {
+  // Regression: codex emits a body field containing ```text fenced blocks.
+  // The old non-greedy regex stopped at the first inner ``` and broke parse.
+  const out = [
+    "```json",
+    "{",
+    '  "title": "docs: x",',
+    '  "body": "## Summary\\n\\n```text\\nfoo\\n```\\ndone"',
+    "}",
+    "```",
+  ].join("\n");
+  const parsed = parseFencedJson(out) as { title: string; body: string };
+  assert.equal(parsed.title, "docs: x");
+  assert.match(parsed.body, /```text\nfoo\n```/);
+});
+
 test("validateOutput rejects oversized title", () => {
   const r = validateOutput(
     { title: "feat: " + "a".repeat(201), body: null, commit_message: null },
