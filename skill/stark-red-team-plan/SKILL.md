@@ -8,8 +8,8 @@ description: >-
 argument-hint: "<plan-path> [--source-spec <path>] [--model <id>] [--dry-run] [--no-pr-comment]"
 disable-model-invocation: true
 model: opus
-revision: ea7268a18edb159e040db78148f2ab9cb324d76a
-revision_date: 2026-05-03T06:43:43Z
+revision: 0026c1167b6544f8034e4a1785408477b42150dc
+revision_date: 2026-05-16T13:48:50Z
 ---
 
 # stark-red-team-plan
@@ -106,12 +106,20 @@ clear error — surface it as the failure mode.
 ### 2.1 Run the dispatcher
 
 ```bash
+# Phase 2/3 of the red-team TS migration (2026-05-16) replaces the Python
+# dispatcher with `tools/red_team_plan.ts`. The Python file stays in tree
+# but is deprecated and no longer wired here.
 flags=()
 [ -n "$source_spec" ] && flags+=(--source-spec "$source_spec")
 [ -n "$model_override" ] && flags+=(--model "$model_override")
 [ -n "$dry_run" ] && flags+=(--no-sidecar --no-audit)
+[ -n "$classification_override" ] && flags+=(--classification-override "$classification_override")
+[ -n "$replay_transcript" ] && flags+=(--replay-transcript "$replay_transcript")
 
-output=$("$PYTHON" "$SCRIPTS/red_team_plan_dispatch.py" \
+TOOLS="${STARK_RED_TEAM_TOOLS:-$HOME/.claude/code-review/tools}"
+[ -d "$TOOLS" ] || TOOLS="$(dirname "$SCRIPTS")/tools"
+
+output=$(node --experimental-strip-types "$TOOLS/red_team_plan.ts" \
     --plan "$plan_path" \
     "${flags[@]}" \
     --json)

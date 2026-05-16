@@ -62,6 +62,11 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `scripts/red_team_emit_queue_cli.py` — canonical wrapper over `scripts/emit_queue.py` for the red-team subsystem. Subcommands: `enqueue --type T [--dedupe-key K]` (idempotent on `dedupe_key`), `peek [--source pending|dead-letter] [--limit N]`, `mark-done --event-id ID|--dedupe-key K` (idempotent), `dead-letter --event-id ID|--dedupe-key K [--reason R]` (idempotent). JSON in / JSON out, one envelope per call.
 - `scripts/red_team_design_dispatch.py` + `scripts/red_team_plan_dispatch.py` now expose `--replay-transcript PATH`. Schema in `tools/fixtures/replays/sample-design-replay.json`. The flag bypasses live Codex/Responses-API dispatch and feeds the recorded transcript through the parsing → aggregation → sidecar → audit-write path — the deterministic seam the Phase 2 TS port will use for byte-level parity testing.
 
+### Red-team TS dispatchers (Phases 1b → 3 of the TS migration)
+- `tools/red_team_lib.ts` — red-team dispatcher core. Persona/prompt resolution from `global/prompts/red-team/`, codex dispatch with sandbox (env scrubbing + isolated HOME), per-finding validation, sidecar markdown rendering, audit shell-out via `scripts/red_team_audit_cli.py`, pre-dispatch sensitive-data gate, redaction sanitizer (mirrors `emit_queue` + `red_team_audit_text` patterns), data-classification gate (YAML-frontmatter driven; see `docs/specs/red-team-classification-contract-2026-05-16.md`), `--replay-transcript` support.
+- `tools/red_team_design.ts` — `/stark-red-team-design` TS dispatcher (Phase 2). Thin wrapper over `red_team_lib.ts`. Skill now invokes this instead of `scripts/red_team_design_dispatch.py` (which stays in-tree, deprecated, for tests + the byte-parity gate).
+- `tools/red_team_plan.ts` — `/stark-red-team-plan` TS dispatcher (Phase 3). Same shape as design with `--plan` instead of `--design`.
+
 ### Other
 - `scripts/stark_persona.py` — session persona engine (weighted selection, combos, catchphrases)
 - `scripts/generate_skill_docs.py` — multi-LLM documentation generator with viz competition

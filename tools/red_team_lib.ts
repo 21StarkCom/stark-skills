@@ -1,0 +1,1422 @@
+/**
+ * Red-team dispatcher core (Phase 1b of the TS migration).
+ *
+ * Mirror of `scripts/red_team_dispatch_common.py` + `scripts/stark_red_team.py`
+ * (the user-facing subset). Shared by `tools/red_team_design.ts` and
+ * `tools/red_team_plan.ts`. No I/O at the top level; functions that touch
+ * disk or spawn subprocesses take explicit roots so they're unit-testable.
+ *
+ * What this lib owns:
+ *   - persona / prompt resolution from `global/prompts/red-team/`
+ *   - per-persona Codex dispatch (or a recorded transcript replay)
+ *   - finding validation + aggregation
+ *   - sidecar markdown rendering
+ *   - audit shell-out via `scripts/red_team_audit_cli.py`
+ *   - pre-dispatch sensitive-data gate + post-write redaction
+ *   - data-classification gate (frontmatter-driven)
+ *
+ * What this lib explicitly does NOT own (yet — those land with later phases):
+ *   - the fix-loop / multi-round refinement (the Python stays authoritative
+ *     until Phase 1c). The TS lib runs **one** round with all personas;
+ *     stability testing + verification rounds are a follow-up.
+ *   - the fix-plan generator (only the read-side of an existing plan).
+ *   - PR posting (rendered body is returned; the caller posts).
+ */
+
+import { execFileSync, spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
+
+// ── Types ────────────────────────────────────────────────────────────────
+
+export type Severity = "critical" | "high" | "medium" | "low";
+
+export type PersonaSlug =
+  | "security-trust"
+  | "reliability-distsys"
+  | "data"
+  | "product-dx"
+  | "cost-ops";
+
+export type Stage = "design" | "plan";
+
+export interface RedTeamFinding {
+  id: string;
+  persona: PersonaSlug;
+  severity: Severity;
+  concern: string;
+  consequence: string;
+  /** Concrete alternative, or the literal `REQUEST_HUMAN_REVIEW`. */
+  counter_proposal: string;
+  /** Required for Shape-A findings. */
+  trade_off: string | null;
+  /** Required for Shape-B (REQUEST_HUMAN_REVIEW) findings. */
+  reason_for_uncertainty: string | null;
+  /** FU-rt5 structured identity columns. */
+  risk_key: string | null;
+  affected_component: string | null;
+  failure_mode: string | null;
+  /** Stable hash over the canonical identity inputs. */
+  concern_hash: string;
+}
+
+export interface RedTeamResult {
+  stage: Stage;
+  round_num: number;
+  synthesis: string;
+  findings: RedTeamFinding[];
+  blocking_count: number;
+  human_review_count: number;
+  raw_output: string;
+  duration_s: number;
+  cost_usd: number;
+  error: string | null;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+export interface RedTeamRunContext {
+  run_id: string;
+  stage: Stage;
+  artifact_path: string;
+  source_spec_path: string | null;
+  /** Repo nameWithOwner if detectable. */
+  repo: string | null;
+  /** Relative-to-repo-root path of the artifact. */
+  artifact_relative_path: string | null;
+  /** PR number if detectable (e.g. from a CI env var). */
+  pr_number: number | null;
+  /** Resolved at run-start; passed to the audit CLI on every shell-out. */
+  db_path: string;
+  /** ISO timestamp at run-start. */
+  started_at: string;
+}
+
+export interface PersonaPrompts {
+  preamble: string;
+  stageTemplate: string;
+  personas: Map<PersonaSlug, string>;
+}
+
+export interface DispatchResult {
+  status: "clean" | "halted" | "halted_human_review" | "error";
+  run_id: string;
+  model: string;
+  total_findings: number;
+  blocking_count: number;
+  human_review_count: number;
+  cost_usd: number;
+  duration_s: number;
+  synthesis: string;
+  sidecar_path: string | null;
+  pr_comment_body: string | null;
+  pr_comment_marker: string;
+  error: string | null;
+  findings: RedTeamFinding[];
+}
+
+// ── Constants ────────────────────────────────────────────────────────────
+
+export const VALID_PERSONAS: readonly PersonaSlug[] = [
+  "security-trust",
+  "reliability-distsys",
+  "data",
+  "product-dx",
+  "cost-ops",
+] as const;
+
+export const VALID_SEVERITIES: ReadonlySet<Severity> = new Set([
+  "critical",
+  "high",
+  "medium",
+  "low",
+]);
+
+export const BLOCKING_SEVERITIES: ReadonlySet<Severity> = new Set([
+  "critical",
+  "high",
+]);
+
+export const REPO_ROOT = (() => {
+  // The lib lives at <repo>/tools/red_team_lib.ts. Walk up two levels for
+  // the repo root so dispatchers can resolve sibling paths (scripts/,
+  // global/) without being passed an explicit root.
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  return path.resolve(here, "..");
+})();
+
+export const PROMPTS_DIR = path.join(REPO_ROOT, "global", "prompts", "red-team");
+export const AUDIT_CLI = path.join(REPO_ROOT, "scripts", "red_team_audit_cli.py");
+
+// ── Prompt resolution ────────────────────────────────────────────────────
+
+/** Load all persona-related prompts from disk. Throws on missing files. */
+export function loadPersonaPrompts(
+  promptsDir: string = PROMPTS_DIR,
+  stage: Stage = "design",
+): PersonaPrompts {
+  const preamblePath = path.join(promptsDir, "preamble.md");
+  const stagePath = path.join(promptsDir, `${stage}.md`);
+  const preamble = fs.readFileSync(preamblePath, "utf8");
+  const stageTemplate = fs.readFileSync(stagePath, "utf8");
+  const personas = new Map<PersonaSlug, string>();
+  for (const slug of VALID_PERSONAS) {
+    const p = path.join(promptsDir, "personas", `${slug}.md`);
+    personas.set(slug, fs.readFileSync(p, "utf8"));
+  }
+  return { preamble, stageTemplate, personas };
+}
+
+/**
+ * Assemble the full prompt sent to Codex.
+ *
+ * Wraps the artifact / source-spec inside guarded `<<<RED_TEAM_INPUT>>>`
+ * envelopes that mirror the Python `assemble_prompt` injection-guard
+ * pattern — a prompt-injection in the doc that tries to escape the
+ * envelope hits a hash-validated boundary instead of the model's
+ * instructions.
+ */
+export function assemblePrompt(args: {
+  prompts: PersonaPrompts;
+  personas: PersonaSlug[];
+  artifact: string;
+  sourceSpec: string;
+  artifactName?: string;
+}): string {
+  const { prompts, personas, artifact, sourceSpec } = args;
+  const parts: string[] = [];
+  parts.push(prompts.preamble);
+  parts.push("");
+  parts.push("## Personas");
+  for (const slug of personas) {
+    const body = prompts.personas.get(slug);
+    if (body) {
+      parts.push(`### ${slug}`);
+      parts.push(body);
+    }
+  }
+  parts.push("");
+  parts.push(prompts.stageTemplate);
+  parts.push("");
+  parts.push(`<<<RED_TEAM_INPUT name="artifact">>>`);
+  parts.push(artifact);
+  parts.push(`<<<RED_TEAM_INPUT_END name="artifact">>>`);
+  parts.push("");
+  parts.push(`<<<RED_TEAM_INPUT name="source_spec">>>`);
+  parts.push(sourceSpec);
+  parts.push(`<<<RED_TEAM_INPUT_END name="source_spec">>>`);
+  parts.push("");
+  return parts.join("\n");
+}
+
+// ── Redaction sanitizer ─────────────────────────────────────────────────
+//
+// Mirrors the regex set in `scripts/emit_queue.py::_REDACT_PATTERNS` plus
+// `scripts/red_team_audit_text.py::_REDACTION_RULES`. Run before every
+// output sink (sidecar, stdout, PR comment, audit shell-out body) as a
+// defense-in-depth backstop after the pre-dispatch gate.
+
+const REDACTION_RULES: ReadonlyArray<[RegExp, string]> = [
+  // Token-shaped secrets (must come before generic base64).
+  [/sk-[A-Za-z0-9_-]{10,}/g, "sk-[REDACTED]"],
+  [/ghp_[A-Za-z0-9]{10,}/g, "ghp_[REDACTED]"],
+  [/ghs_[A-Za-z0-9]{10,}/g, "ghs_[REDACTED]"],
+  // PII patterns (mirror red_team_audit_text).
+  [/\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/g, "[EMAIL-REDACTED]"],
+  [/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, "[IP-REDACTED]"],
+  [/\b\d{3}-\d{2}-\d{4}\b/g, "[SSN-REDACTED]"],
+  [/\b\d{4}[ \-]?\d{4}[ \-]?\d{4}[ \-]?\d{4}\b/g, "[CC-REDACTED]"],
+  [/\b(?:\(?\d{3}\)?[ \-.]?)\d{3}[ \-.]?\d{4}\b/g, "[PHONE-REDACTED]"],
+  // Catch-all for long base64-shaped secrets. Must run last because it
+  // matches a lot.
+  [/[A-Za-z0-9+/]{41,}={0,2}/g, "[BASE64-REDACTED]"],
+];
+
+/** Run the regex set over `text`. Returns the sanitized string. */
+export function redact(text: string): string {
+  let out = text;
+  for (const [pattern, replacement] of REDACTION_RULES) {
+    out = out.replace(pattern, replacement);
+  }
+  return out;
+}
+
+/**
+ * Pre-dispatch sensitive-data gate. Scan the assembled provider request
+ * (prompt + artifact + source-spec) for token / key / PII patterns AND
+ * prompt-injection directives that try to exfiltrate adjacent files.
+ *
+ * Returns a non-empty array of matched pattern names when the gate should
+ * refuse, or an empty array when clean. The caller writes an audit row
+ * with `final_status: "halted"` + reason and exits non-zero.
+ */
+export function preDispatchSensitiveGate(payload: string): string[] {
+  const hits: string[] = [];
+  // Secret-shaped tokens.
+  if (/sk-[A-Za-z0-9_-]{10,}/.test(payload)) hits.push("openai_token");
+  if (/ghp_[A-Za-z0-9]{10,}/.test(payload)) hits.push("github_pat");
+  if (/ghs_[A-Za-z0-9]{10,}/.test(payload)) hits.push("github_install_token");
+  // GCP service-account key material.
+  if (/"private_key"\s*:\s*"-----BEGIN PRIVATE KEY-----/.test(payload)) {
+    hits.push("gcp_service_account_key");
+  }
+  // AWS access keys.
+  if (/AKIA[0-9A-Z]{16}/.test(payload)) hits.push("aws_access_key_id");
+  // JWT (three base64-url segments).
+  if (/\beyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\b/.test(payload)) {
+    hits.push("jwt");
+  }
+  // Prompt-injection patterns aimed at exfiltrating adjacent files.
+  const injectionPatterns: ReadonlyArray<[RegExp, string]> = [
+    [/cat\s+(?:\.\.\/)?\.env\b/i, "injection_cat_env"],
+    [/cat\s+~?\/?\.ssh\//i, "injection_read_ssh"],
+    [/please.+(?:read|cat|include).+\.env/i, "injection_please_env"],
+    [/ignore\s+(?:all\s+)?previous\s+instructions/i, "injection_ignore_prior"],
+  ];
+  for (const [pattern, name] of injectionPatterns) {
+    if (pattern.test(payload)) hits.push(name);
+  }
+  return hits;
+}
+
+// ── Sandbox ──────────────────────────────────────────────────────────────
+//
+// Mirror of `scripts/red_team_sandbox.py::scrub_env` — strip every host env
+// var that isn't on the explicit allowlist before handing the subprocess
+// off to codex. HOME is intentionally absent; isolateHome() supplies a
+// synthetic directory with a symlink to ~/.codex only.
+
+const SANDBOX_ENV_ALLOWLIST = [
+  "PATH",
+  "USER",
+  "SHELL",
+  "LANG",
+  "LC_ALL",
+  "TMPDIR",
+] as const;
+
+export function scrubEnv(source: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of SANDBOX_ENV_ALLOWLIST) {
+    const v = source[key];
+    if (typeof v === "string") out[key] = v;
+  }
+  return out;
+}
+
+export interface SandboxHome {
+  /** The synthetic HOME path. */
+  home: string;
+  /** Cleanup function — call in a finally block. */
+  cleanup: () => void;
+}
+
+/**
+ * Create a temp HOME with just `.codex` symlinked from the operator's
+ * real HOME. Returns the path and a cleanup closure. Mirrors the Python
+ * `synthetic_home()` context manager.
+ */
+export function isolateHome(realHome: string = process.env.HOME ?? ""): SandboxHome {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "red-team-home-"));
+  const realCodex = path.join(realHome, ".codex");
+  if (fs.existsSync(realCodex)) {
+    try {
+      fs.symlinkSync(realCodex, path.join(tmp, ".codex"));
+    } catch {
+      // Fallback: copy if symlinks aren't allowed (e.g. some CI workspaces).
+      fs.cpSync(realCodex, path.join(tmp, ".codex"), { recursive: true });
+    }
+  }
+  return {
+    home: tmp,
+    cleanup: () => {
+      try {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      } catch {
+        // best-effort
+      }
+    },
+  };
+}
+
+// ── Classification gate ─────────────────────────────────────────────────
+//
+// Reads a YAML-frontmatter `classification:` block (level / dpa_required /
+// retention_days / provider_allowlist / notes). When absent, falls back to
+// the legacy default documented in
+// docs/specs/red-team-classification-contract-2026-05-16.md.
+
+export type ClassLevel = "public" | "internal" | "confidential" | "restricted";
+
+export interface DocClassification {
+  level: ClassLevel;
+  dpa_required: boolean;
+  retention_days: number;
+  provider_allowlist: string[];
+  notes: string;
+  source: "frontmatter" | "legacy_default";
+}
+
+const LEGACY_DEFAULT_CLASSIFICATION: DocClassification = {
+  level: "internal",
+  dpa_required: false,
+  retention_days: 30,
+  provider_allowlist: ["openai-gpt-5.5", "anthropic-claude-opus-4-7"],
+  notes: "legacy default — operator did not annotate classification:",
+  source: "legacy_default",
+};
+
+/**
+ * Extract the classification block from YAML-style frontmatter. Tolerates
+ * absence, malformed YAML, or partially-specified blocks (missing fields
+ * fall back to the legacy default).
+ *
+ * No YAML library dependency — we parse the minimal subset the contract
+ * declares: `key: value` lines and `- item` lists inside a top-level
+ * `classification:` key. Anything more complex is reported via the
+ * returned `source` field so operators can audit.
+ */
+export function extractClassification(docText: string): DocClassification {
+  const fm = matchFrontmatter(docText);
+  if (!fm) return LEGACY_DEFAULT_CLASSIFICATION;
+  const block = extractKeyBlock(fm, "classification");
+  if (block === null) return LEGACY_DEFAULT_CLASSIFICATION;
+  const partial = parseClassificationBlock(block);
+  return {
+    level: partial.level ?? LEGACY_DEFAULT_CLASSIFICATION.level,
+    dpa_required: partial.dpa_required ?? LEGACY_DEFAULT_CLASSIFICATION.dpa_required,
+    retention_days:
+      partial.retention_days ?? LEGACY_DEFAULT_CLASSIFICATION.retention_days,
+    provider_allowlist:
+      partial.provider_allowlist ?? LEGACY_DEFAULT_CLASSIFICATION.provider_allowlist,
+    notes: partial.notes ?? "",
+    source: "frontmatter",
+  };
+}
+
+function matchFrontmatter(text: string): string | null {
+  if (!text.startsWith("---\n") && !text.startsWith("---\r\n")) return null;
+  const end = text.indexOf("\n---", 4);
+  if (end < 0) return null;
+  return text.slice(4, end);
+}
+
+function extractKeyBlock(yamlSubset: string, key: string): string | null {
+  const lines = yamlSubset.split(/\r?\n/);
+  let inBlock = false;
+  const collected: string[] = [];
+  for (const line of lines) {
+    if (!inBlock) {
+      if (line.match(new RegExp(`^${key}\\s*:\\s*$`))) {
+        inBlock = true;
+      }
+      continue;
+    }
+    if (line.match(/^\S/) && !line.startsWith(" ") && !line.startsWith("\t")) {
+      break; // dedent — end of block
+    }
+    collected.push(line);
+  }
+  return inBlock ? collected.join("\n") : null;
+}
+
+function parseClassificationBlock(block: string): Partial<DocClassification> {
+  const out: Partial<DocClassification> = {};
+  const lines = block.split(/\r?\n/);
+  let listKey: string | null = null;
+  let listAcc: string[] = [];
+  const flushList = () => {
+    if (listKey === "provider_allowlist") out.provider_allowlist = [...listAcc];
+    listKey = null;
+    listAcc = [];
+  };
+  for (const raw of lines) {
+    const line = raw.replace(/\s+$/, "");
+    if (!line.trim()) continue;
+    const listMatch = line.match(/^\s+-\s+(.*)$/);
+    if (listMatch && listKey) {
+      listAcc.push(listMatch[1]!.trim().replace(/^["']|["']$/g, ""));
+      continue;
+    }
+    if (listKey) flushList();
+    const kv = line.match(/^\s*(\w+)\s*:\s*(.*)$/);
+    if (!kv) continue;
+    const [, key, rawValue] = kv as unknown as [string, string, string];
+    const value = rawValue.trim();
+    if (value === "") {
+      // Maybe a list-typed key follows.
+      listKey = key;
+      continue;
+    }
+    if (key === "level") {
+      const lvl = value.replace(/^["']|["']$/g, "");
+      if (lvl === "public" || lvl === "internal" || lvl === "confidential" || lvl === "restricted") {
+        out.level = lvl;
+      }
+    } else if (key === "dpa_required") {
+      out.dpa_required = value === "true" || value === "True" || value === "yes";
+    } else if (key === "retention_days") {
+      const n = Number.parseInt(value, 10);
+      if (Number.isFinite(n) && n >= 0) out.retention_days = n;
+    } else if (key === "notes") {
+      out.notes = value.replace(/^["']|["']$/g, "");
+    }
+  }
+  flushList();
+  return out;
+}
+
+export interface ClassificationGateResult {
+  allowed: boolean;
+  classification: DocClassification;
+  reason_code: string | null;
+  reason: string | null;
+}
+
+/**
+ * Refuse when:
+ *   - level=restricted and no operator override is supplied.
+ *   - dpa_required=true and the provider isn't on the DPA-on-file list.
+ *   - provider isn't in the document's provider_allowlist.
+ */
+export function classificationGate(args: {
+  docText: string;
+  provider: string;
+  /** Operator-supplied `--classification-override` (lowercase level string). */
+  override: ClassLevel | null;
+  /** Providers with a DPA on file (operator configures). Empty disables the check. */
+  dpaOnFile?: ReadonlySet<string>;
+}): ClassificationGateResult {
+  const classification = extractClassification(args.docText);
+  const dpaOnFile = args.dpaOnFile ?? new Set<string>();
+
+  if (classification.level === "restricted" && args.override === null) {
+    return {
+      allowed: false,
+      classification,
+      reason_code: "classification_restricted_requires_override",
+      reason:
+        "level=restricted; pass --classification-override to acknowledge and proceed",
+    };
+  }
+  if (classification.dpa_required && !dpaOnFile.has(args.provider)) {
+    return {
+      allowed: false,
+      classification,
+      reason_code: "classification_dpa_missing",
+      reason: `provider ${args.provider!} has no DPA on file (dpa_required=true)`,
+    };
+  }
+  if (
+    classification.provider_allowlist.length > 0 &&
+    !classification.provider_allowlist.includes(args.provider)
+  ) {
+    return {
+      allowed: false,
+      classification,
+      reason_code: "classification_provider_not_allowed",
+      reason: `provider ${args.provider} is not in the document's provider_allowlist`,
+    };
+  }
+  return { allowed: true, classification, reason_code: null, reason: null };
+}
+
+// ── Finding validation ──────────────────────────────────────────────────
+
+/** Stable concern hash — used for stable_key + cross-run identity. */
+export function computeConcernHash(args: {
+  persona: PersonaSlug;
+  riskKey: string | null;
+  affectedComponent: string | null;
+  failureMode: string | null;
+  concern: string;
+}): string {
+  const { persona, riskKey, affectedComponent, failureMode, concern } = args;
+  // Structured identity wins when all three are present (FU-rt5 contract);
+  // otherwise we hash the normalized concern (FU-rt7 fallback).
+  if (riskKey && affectedComponent && failureMode) {
+    return sha256(`${persona}:${riskKey}:${affectedComponent}:${failureMode}`);
+  }
+  return sha256(`${persona}:${normalizeConcern(concern)}`);
+}
+
+function normalizeConcern(concern: string): string {
+  return concern.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function sha256(s: string): string {
+  return createHash("sha256").update(s).digest("hex");
+}
+
+/**
+ * Validate + coerce raw model output (a JSON array of finding objects)
+ * into typed `RedTeamFinding[]`. Skips invalid entries silently (the
+ * dispatcher's `error` field surfaces the parse rate); a fully empty
+ * result is reported as "no findings" rather than an error so a
+ * genuinely-clean review reads as `clean`.
+ */
+export function validateFindings(rawJson: string): {
+  findings: RedTeamFinding[];
+  invalid_count: number;
+  parse_error: string | null;
+} {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawJson);
+  } catch (err) {
+    return { findings: [], invalid_count: 0, parse_error: (err as Error).message };
+  }
+  if (!Array.isArray(parsed)) {
+    return { findings: [], invalid_count: 0, parse_error: "expected JSON array" };
+  }
+  const out: RedTeamFinding[] = [];
+  let invalid = 0;
+  for (const [i, item] of parsed.entries()) {
+    if (!isObject(item)) {
+      invalid++;
+      continue;
+    }
+    const persona = item.persona;
+    const severity = item.severity;
+    const concern = item.concern;
+    const consequence = item.consequence;
+    const counter = item.counter_proposal;
+    if (
+      typeof persona !== "string" ||
+      !VALID_PERSONAS.includes(persona as PersonaSlug) ||
+      typeof severity !== "string" ||
+      !VALID_SEVERITIES.has(severity as Severity) ||
+      typeof concern !== "string" ||
+      typeof consequence !== "string" ||
+      typeof counter !== "string"
+    ) {
+      invalid++;
+      continue;
+    }
+    // Shape A vs Shape B contract. The Python validator tolerates
+    // trade_off=null on Shape A (the preamble strongly recommends it but
+    // doesn't reject) and tolerates reason_for_uncertainty=null on Shape
+    // B for the same reason — keep TS parity so the recorded transcripts
+    // built by either side round-trip cleanly.
+    const tradeOff = typeof item.trade_off === "string" ? item.trade_off : null;
+    const reason =
+      typeof item.reason_for_uncertainty === "string"
+        ? item.reason_for_uncertainty
+        : null;
+    const riskKey = typeof item.risk_key === "string" ? item.risk_key : null;
+    const affectedComponent =
+      typeof item.affected_component === "string" ? item.affected_component : null;
+    const failureMode =
+      typeof item.failure_mode === "string" ? item.failure_mode : null;
+    out.push({
+      id:
+        typeof item.id === "string" && item.id
+          ? item.id
+          : `rt${out.length + 1}`,
+      persona: persona as PersonaSlug,
+      severity: severity as Severity,
+      concern,
+      consequence,
+      counter_proposal: counter,
+      trade_off: tradeOff,
+      reason_for_uncertainty: reason,
+      risk_key: riskKey,
+      affected_component: affectedComponent,
+      failure_mode: failureMode,
+      concern_hash:
+        typeof item.concern_hash === "string" && item.concern_hash
+          ? item.concern_hash
+          : computeConcernHash({
+              persona: persona as PersonaSlug,
+              riskKey,
+              affectedComponent,
+              failureMode,
+              concern,
+            }),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    void i;
+  }
+  return { findings: out, invalid_count: invalid, parse_error: null };
+}
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+export function countBlocking(findings: readonly RedTeamFinding[]): number {
+  return findings.filter(
+    (f) =>
+      BLOCKING_SEVERITIES.has(f.severity) &&
+      f.counter_proposal !== "REQUEST_HUMAN_REVIEW",
+  ).length;
+}
+
+export function countHumanReview(findings: readonly RedTeamFinding[]): number {
+  return findings.filter((f) => f.counter_proposal === "REQUEST_HUMAN_REVIEW").length;
+}
+
+/** Map a RedTeamResult to the canonical status enum. */
+export function deriveStatus(result: RedTeamResult): DispatchResult["status"] {
+  if (result.error) return "error";
+  if (result.human_review_count > 0) return "halted_human_review";
+  if (result.blocking_count > 0) return "halted";
+  return "clean";
+}
+
+// ── Replay transcript ───────────────────────────────────────────────────
+
+export interface RecordedTranscript {
+  schema_version: number;
+  stage: Stage;
+  model: string;
+  round_num?: number;
+  synthesis?: string;
+  raw_output?: string;
+  findings: unknown[];
+  duration_s?: number;
+  cost_usd?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  error?: string | null;
+}
+
+export function buildResultFromTranscript(
+  transcriptPath: string,
+  stage: Stage,
+): RedTeamResult {
+  const data = JSON.parse(fs.readFileSync(transcriptPath, "utf8")) as RecordedTranscript;
+  if (data.stage && data.stage !== stage) {
+    throw new Error(
+      `transcript stage mismatch (transcript=${data.stage!}, run stage=${stage})`,
+    );
+  }
+  const validated = validateFindings(JSON.stringify(data.findings ?? []));
+  if (validated.parse_error) {
+    throw new Error(`transcript findings parse error: ${validated.parse_error}`);
+  }
+  const findings = validated.findings;
+  return {
+    stage,
+    round_num: data.round_num ?? 1,
+    synthesis: data.synthesis ?? "",
+    findings,
+    blocking_count: countBlocking(findings),
+    human_review_count: countHumanReview(findings),
+    raw_output: data.raw_output ?? "",
+    duration_s: data.duration_s ?? 0,
+    cost_usd: data.cost_usd ?? 0,
+    error: data.error ?? null,
+    input_tokens: data.input_tokens ?? 0,
+    output_tokens: data.output_tokens ?? 0,
+  };
+}
+
+// ── Audit shell-out ─────────────────────────────────────────────────────
+
+export interface AuditEnvelope {
+  ok?: boolean;
+  status?: string;
+  error?: string;
+  detail?: unknown;
+  run_id?: string;
+  count?: number;
+  findings?: unknown[];
+  run?: Record<string, unknown> | null;
+  [k: string]: unknown;
+}
+
+function runAuditCli(
+  args: string[],
+  stdin?: string,
+  env?: Record<string, string>,
+): { code: number; stdout: string; stderr: string } {
+  // The audit CLI is our own first-party code — pass the parent env
+  // through so operator overrides like STARK_RED_TEAM_DB take effect.
+  // scrubEnv() is only for the codex subprocess (untrusted model surface).
+  const effectiveEnv = env ?? (process.env as Record<string, string>);
+  const proc = spawnSync("python3", [AUDIT_CLI, ...args], {
+    input: stdin,
+    encoding: "utf8",
+    env: effectiveEnv,
+  });
+  return {
+    code: proc.status ?? 1,
+    stdout: proc.stdout ?? "",
+    stderr: proc.stderr ?? "",
+  };
+}
+
+/** Resolve the canonical DB path via the CLI (cross-language seam). */
+export function resolveDbPath(): { db_path: string; source: string } {
+  const proc = runAuditCli(["resolve-db"]);
+  if (proc.code !== 0) {
+    throw new Error(`resolve-db failed (exit=${proc.code}): ${proc.stderr}`);
+  }
+  const envelope = JSON.parse(proc.stdout) as {
+    db_path: string;
+    source: string;
+  };
+  return envelope;
+}
+
+export interface RecordRunInput {
+  run_id: string;
+  stage: Stage;
+  rounds_used: number;
+  final_status: string;
+  total_findings: number;
+  critical_count: number;
+  high_count: number;
+  medium_count: number;
+  human_review_count: number;
+  duration_s: number;
+  cost_usd: number;
+  model: string;
+  caller: string;
+  repo?: string | null;
+  artifact_relative_path?: string | null;
+  pr_number?: number | null;
+}
+
+export function recordRun(input: RecordRunInput, dbPath: string): AuditEnvelope {
+  const proc = runAuditCli(["record-run", "--db", dbPath], JSON.stringify(input));
+  return parseAuditEnvelope(proc);
+}
+
+export function recordFindings(
+  runId: string,
+  findings: Array<Record<string, unknown>>,
+  dbPath: string,
+): AuditEnvelope {
+  const payload = { findings };
+  const proc = runAuditCli(
+    ["record-findings", "--db", dbPath, "--run-id", runId],
+    JSON.stringify(payload),
+  );
+  return parseAuditEnvelope(proc);
+}
+
+export function updateRunStatus(
+  runId: string,
+  to: string,
+  dbPath: string,
+  from?: string,
+): AuditEnvelope {
+  const args = ["update-run-status", "--db", dbPath, "--run-id", runId, "--to", to];
+  if (from) args.push("--from", from);
+  const proc = runAuditCli(args);
+  return parseAuditEnvelope(proc);
+}
+
+function parseAuditEnvelope(proc: {
+  code: number;
+  stdout: string;
+  stderr: string;
+}): AuditEnvelope {
+  try {
+    return JSON.parse(proc.stdout) as AuditEnvelope;
+  } catch {
+    return {
+      ok: false,
+      error: "audit_cli_unparseable_output",
+      detail: { code: proc.code, stdout: proc.stdout, stderr: proc.stderr },
+    };
+  }
+}
+
+// ── Sidecar rendering ───────────────────────────────────────────────────
+
+export function sidecarPathFor(artifactPath: string): string {
+  if (artifactPath.endsWith(".md")) {
+    return artifactPath.slice(0, -3) + ".red-team.md";
+  }
+  return artifactPath + ".red-team.md";
+}
+
+const SEVERITY_BADGE: Record<Severity, string> = {
+  critical: "🟣",
+  high: "🔴",
+  medium: "🟡",
+  low: "⚪",
+};
+
+function escapeInline(text: string): string {
+  return text.replace(/[\\`*_{}\[\]()#+!]/g, (m) => `\\${m}`);
+}
+
+function escapeBlock(text: string): string {
+  // For body text: only escape backticks (so ```{shell}`` snippets don't
+  // break the surrounding fence) — preserve line breaks + ordinary markdown.
+  return text.replace(/```/g, "``\\`");
+}
+
+export function renderSidecarMarkdown(args: {
+  ctx: RedTeamRunContext;
+  result: RedTeamResult;
+  model: string;
+}): string {
+  const { ctx, result, model } = args;
+  const parts: string[] = [];
+  const artifactBase = path.basename(ctx.artifact_path);
+  parts.push(`# Red-team review — ${artifactBase}`);
+  parts.push("");
+  parts.push(`- **Date:** ${ctx.started_at}`);
+  parts.push(`- **Run ID:** \`${ctx.run_id}\``);
+  parts.push(`- **Model:** \`${model}\``);
+  parts.push(`- **Stage:** ${ctx.stage}`);
+  parts.push(`- **Status:** **${deriveStatus(result)}**`);
+  parts.push(
+    `- **Findings:** ${result.findings.length} total — ${result.blocking_count} blocking (≥ high), ${result.human_review_count} human-review`,
+  );
+  parts.push(
+    `- **Cost:** $${result.cost_usd.toFixed(4)} | **Duration:** ${result.duration_s.toFixed(1)}s`,
+  );
+  parts.push("");
+  if (result.synthesis) {
+    parts.push("## Synthesis");
+    parts.push("");
+    parts.push(redact(escapeBlock(result.synthesis)));
+    parts.push("");
+  }
+  if (result.findings.length === 0) {
+    parts.push("## Findings");
+    parts.push("");
+    parts.push("_(no findings)_");
+    return parts.join("\n");
+  }
+  parts.push("## Findings");
+  parts.push("");
+  // Sort: blocking first, then by severity rank, then by persona.
+  const sorted = [...result.findings].sort((a, b) => {
+    const severityRank: Record<Severity, number> = {
+      critical: 0,
+      high: 1,
+      medium: 2,
+      low: 3,
+    };
+    return (
+      severityRank[a.severity] - severityRank[b.severity] ||
+      a.persona.localeCompare(b.persona)
+    );
+  });
+  for (const f of sorted) {
+    parts.push(
+      `### ${SEVERITY_BADGE[f.severity]} \`${f.id}\` — ${f.persona} (${f.severity})`,
+    );
+    parts.push("");
+    parts.push(`**Concern.** ${redact(escapeBlock(f.concern))}`);
+    parts.push("");
+    parts.push(`**Consequence.** ${redact(escapeBlock(f.consequence))}`);
+    parts.push("");
+    if (f.counter_proposal === "REQUEST_HUMAN_REVIEW") {
+      parts.push("**Counter-proposal.** `REQUEST_HUMAN_REVIEW`");
+      parts.push("");
+      if (f.reason_for_uncertainty) {
+        parts.push(
+          `**Reason for uncertainty.** ${redact(escapeBlock(f.reason_for_uncertainty))}`,
+        );
+        parts.push("");
+      }
+    } else {
+      parts.push(`**Counter-proposal.** ${redact(escapeBlock(f.counter_proposal))}`);
+      parts.push("");
+      if (f.trade_off) {
+        parts.push(`**Trade-off.** ${redact(escapeBlock(f.trade_off))}`);
+        parts.push("");
+      }
+    }
+    // Suppress the unused-variable lint for callers that don't yet pull
+    // structured identity fields into the rendered sidecar.
+    void escapeInline;
+  }
+  return parts.join("\n");
+}
+
+export function prCommentMarker(ctx: RedTeamRunContext): string {
+  return `<!-- stark-red-team: stage=${ctx.stage} artifact=${ctx.artifact_relative_path ?? ctx.artifact_path} -->`;
+}
+
+export function renderPrCommentBody(args: {
+  ctx: RedTeamRunContext;
+  result: RedTeamResult;
+  model: string;
+}): string {
+  const marker = prCommentMarker(args.ctx);
+  const sidecar = renderSidecarMarkdown(args);
+  return `${marker}\n${sidecar}\n`;
+}
+
+// ── Dispatch orchestration ──────────────────────────────────────────────
+
+export interface DispatchArgs {
+  ctx: RedTeamRunContext;
+  prompts: PersonaPrompts;
+  personas: PersonaSlug[];
+  artifact: string;
+  sourceSpec: string;
+  model: string;
+  /** Per-run timeout for the codex subprocess. */
+  timeoutMs: number;
+  /** Optional recorded transcript path — bypass live codex. */
+  replayTranscript?: string;
+  /** Optional override for classification gate. */
+  classificationOverride?: ClassLevel | null;
+  /** Audit DB. Caller resolves up-front so all writes share one path. */
+  dbPath: string;
+  /** Skip the audit shell-out (used by --no-audit and tests). */
+  noAudit?: boolean;
+  /** Skip writing the sidecar to disk. */
+  noSidecar?: boolean;
+  /** Mock the codex spawn (used by tests). */
+  codexFn?: (prompt: string, model: string) => {
+    raw_output: string;
+    duration_s: number;
+    input_tokens: number;
+    output_tokens: number;
+    error: string | null;
+  };
+}
+
+/**
+ * The single user-facing entry point. Phase 2 (`tools/red_team_design.ts`)
+ * and Phase 3 (`tools/red_team_plan.ts`) are thin wrappers that build the
+ * context + persona list and call this. Returns a `DispatchResult` shaped
+ * for the existing skill JSON receipt.
+ */
+export function dispatch(args: DispatchArgs): DispatchResult {
+  const { ctx, prompts, personas, artifact, sourceSpec, model } = args;
+
+  // Build the assembled provider request first so the pre-dispatch gate
+  // sees the exact bytes the model would receive.
+  const prompt = assemblePrompt({ prompts, personas, artifact, sourceSpec });
+
+  // Pre-dispatch sensitive-data gate.
+  const sensitiveHits = preDispatchSensitiveGate(prompt);
+  if (sensitiveHits.length > 0) {
+    return makeBlocked(
+      ctx, model,
+      "blocked_sensitive_input",
+      `pre-dispatch gate refused: matched patterns ${sensitiveHits.join(", ")}`,
+      args.dbPath, !!args.noAudit,
+    );
+  }
+
+  // Classification gate.
+  const gate = classificationGate({
+    docText: artifact,
+    provider: provider_for_model(model),
+    override: args.classificationOverride ?? null,
+  });
+  if (!gate.allowed) {
+    return makeBlocked(
+      ctx, model,
+      gate.reason_code ?? "blocked_classification",
+      gate.reason ?? "classification gate refused",
+      args.dbPath, !!args.noAudit,
+    );
+  }
+
+  // Replay or live dispatch.
+  let result: RedTeamResult;
+  if (args.replayTranscript) {
+    try {
+      result = buildResultFromTranscript(args.replayTranscript, ctx.stage);
+    } catch (err) {
+      return errorResult(ctx, model, `replay transcript: ${(err as Error).message}`);
+    }
+  } else if (args.codexFn) {
+    const dispatched = args.codexFn(prompt, model);
+    const validated = validateFindings(dispatched.raw_output);
+    result = {
+      stage: ctx.stage,
+      round_num: 1,
+      synthesis: "",
+      findings: validated.findings,
+      blocking_count: countBlocking(validated.findings),
+      human_review_count: countHumanReview(validated.findings),
+      raw_output: dispatched.raw_output,
+      duration_s: dispatched.duration_s,
+      cost_usd: 0,
+      error:
+        validated.parse_error ?? dispatched.error ?? null,
+      input_tokens: dispatched.input_tokens,
+      output_tokens: dispatched.output_tokens,
+    };
+  } else {
+    // Real codex dispatch.
+    const dispatched = dispatchCodex(prompt, model, args.timeoutMs);
+    const validated = validateFindings(dispatched.raw_output);
+    result = {
+      stage: ctx.stage,
+      round_num: 1,
+      synthesis: "",
+      findings: validated.findings,
+      blocking_count: countBlocking(validated.findings),
+      human_review_count: countHumanReview(validated.findings),
+      raw_output: dispatched.raw_output,
+      duration_s: dispatched.duration_s,
+      cost_usd: 0,
+      error: validated.parse_error ?? dispatched.error ?? null,
+      input_tokens: dispatched.input_tokens,
+      output_tokens: dispatched.output_tokens,
+    };
+  }
+
+  // Render sidecar.
+  const sidecarBody = renderSidecarMarkdown({ ctx, result, model });
+  const sidecarPath = args.noSidecar
+    ? null
+    : (() => {
+        const p = sidecarPathFor(ctx.artifact_path);
+        fs.writeFileSync(p, sidecarBody, "utf8");
+        return p;
+      })();
+
+  // PR comment body (caller posts).
+  const prCommentBody = renderPrCommentBody({ ctx, result, model });
+
+  // Audit write.
+  if (!args.noAudit) {
+    try {
+      auditPersistRun(ctx, result, model, args.dbPath);
+    } catch (err) {
+      console.error(
+        `red_team_lib: audit persist failed (non-fatal): ${(err as Error).message}`,
+      );
+    }
+  }
+
+  return {
+    status: deriveStatus(result),
+    run_id: ctx.run_id,
+    model,
+    total_findings: result.findings.length,
+    blocking_count: result.blocking_count,
+    human_review_count: result.human_review_count,
+    cost_usd: result.cost_usd,
+    duration_s: result.duration_s,
+    synthesis: result.synthesis,
+    sidecar_path: sidecarPath,
+    pr_comment_body: prCommentBody,
+    pr_comment_marker: prCommentMarker(ctx),
+    error: result.error,
+    findings: result.findings,
+  };
+}
+
+function provider_for_model(model: string): string {
+  // Crude shape — Phase 2+ refines this as more providers come online.
+  if (model.startsWith("gpt") || model.startsWith("o")) return "openai-gpt-5.5";
+  if (model.startsWith("claude")) return "anthropic-claude-opus-4-7";
+  return model;
+}
+
+function dispatchCodex(
+  prompt: string,
+  model: string,
+  timeoutMs: number,
+): {
+  raw_output: string;
+  duration_s: number;
+  input_tokens: number;
+  output_tokens: number;
+  error: string | null;
+} {
+  const sandbox = isolateHome();
+  const env = scrubEnv();
+  env.HOME = sandbox.home;
+  const start = Date.now();
+  try {
+    const args = [
+      "exec",
+      "--json",
+      "--skip-git-repo-check",
+      "-c",
+      'model_reasoning_effort="high"',
+      "-m",
+      model,
+    ];
+    const proc = spawnSync("codex", args, {
+      input: prompt,
+      encoding: "utf8",
+      env,
+      timeout: timeoutMs,
+    });
+    const elapsed = (Date.now() - start) / 1000;
+    if (proc.error) {
+      return {
+        raw_output: "",
+        duration_s: elapsed,
+        input_tokens: 0,
+        output_tokens: 0,
+        error: `codex spawn failed: ${proc.error.message}`,
+      };
+    }
+    if (proc.status !== 0) {
+      return {
+        raw_output: proc.stdout ?? "",
+        duration_s: elapsed,
+        input_tokens: 0,
+        output_tokens: 0,
+        error: `codex exited ${proc.status}: ${proc.stderr ?? ""}`.trim(),
+      };
+    }
+    const parsed = parseCodexJsonl(proc.stdout ?? "");
+    return {
+      raw_output: parsed.text,
+      duration_s: elapsed,
+      input_tokens: parsed.inputTokens,
+      output_tokens: parsed.outputTokens,
+      error: null,
+    };
+  } finally {
+    sandbox.cleanup();
+  }
+}
+
+/** Parse Codex `--json` JSONL output: collect assistant text + token counts. */
+export function parseCodexJsonl(stdout: string): {
+  text: string;
+  inputTokens: number;
+  outputTokens: number;
+} {
+  const parts: string[] = [];
+  let inputTokens = 0;
+  let outputTokens = 0;
+  for (const rawLine of stdout.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    let ev: unknown;
+    try {
+      ev = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!isObject(ev)) continue;
+    const usage = isObject(ev.usage) ? ev.usage : null;
+    if (usage) {
+      inputTokens += Number(usage.input_tokens ?? 0);
+      outputTokens += Number(usage.output_tokens ?? 0);
+    }
+    if (ev.type !== "item.completed") continue;
+    const item = ev.item;
+    if (!isObject(item)) continue;
+    const itype = item.type;
+    if (itype === "agent_message" && typeof item.text === "string") {
+      parts.push(item.text);
+    } else if (itype === "message" && Array.isArray(item.content)) {
+      for (const c of item.content) {
+        if (isObject(c) && c.type === "output_text" && typeof c.text === "string") {
+          parts.push(c.text);
+        }
+      }
+    }
+  }
+  return { text: parts.join("\n"), inputTokens, outputTokens };
+}
+
+function auditPersistRun(
+  ctx: RedTeamRunContext,
+  result: RedTeamResult,
+  model: string,
+  dbPath: string,
+): void {
+  const status = deriveStatus(result);
+  recordRun(
+    {
+      run_id: ctx.run_id,
+      stage: ctx.stage,
+      rounds_used: result.round_num,
+      final_status: status === "halted_human_review" ? "halted_human_review" : status,
+      total_findings: result.findings.length,
+      critical_count: result.findings.filter((f) => f.severity === "critical").length,
+      high_count: result.findings.filter((f) => f.severity === "high").length,
+      medium_count: result.findings.filter((f) => f.severity === "medium").length,
+      human_review_count: result.human_review_count,
+      duration_s: result.duration_s,
+      cost_usd: result.cost_usd,
+      model,
+      caller: "stark-red-team-ts",
+      repo: ctx.repo,
+      artifact_relative_path: ctx.artifact_relative_path,
+      pr_number: ctx.pr_number,
+    },
+    dbPath,
+  );
+  if (result.findings.length > 0) {
+    recordFindings(
+      ctx.run_id,
+      result.findings.map((f) => ({
+        run_id: ctx.run_id,
+        stage: ctx.stage,
+        round_num: result.round_num,
+        finding_id: f.id,
+        persona: f.persona,
+        severity: f.severity,
+        concern: redact(f.concern),
+        consequence: redact(f.consequence),
+        counter_proposal: redact(f.counter_proposal),
+        trade_off: f.trade_off === null ? null : redact(f.trade_off),
+        reason_for_uncertainty:
+          f.reason_for_uncertainty === null ? null : redact(f.reason_for_uncertainty),
+        stable_key: `${ctx.run_id}:${ctx.stage}:${result.round_num}:${f.persona}:${f.id}:${f.concern_hash}`,
+        concern_hash: f.concern_hash,
+        risk_key: f.risk_key,
+        affected_component: f.affected_component,
+        failure_mode: f.failure_mode,
+      })),
+      dbPath,
+    );
+  }
+}
+
+function makeBlocked(
+  ctx: RedTeamRunContext,
+  model: string,
+  reasonCode: string,
+  reason: string,
+  dbPath: string,
+  noAudit: boolean,
+): DispatchResult {
+  if (!noAudit) {
+    try {
+      recordRun(
+        {
+          run_id: ctx.run_id,
+          stage: ctx.stage,
+          rounds_used: 0,
+          final_status: "halted",
+          total_findings: 0,
+          critical_count: 0,
+          high_count: 0,
+          medium_count: 0,
+          human_review_count: 0,
+          duration_s: 0,
+          cost_usd: 0,
+          model,
+          caller: `stark-red-team-ts:${reasonCode}`,
+          repo: ctx.repo,
+          artifact_relative_path: ctx.artifact_relative_path,
+          pr_number: ctx.pr_number,
+        },
+        dbPath,
+      );
+    } catch {
+      // best-effort
+    }
+  }
+  return {
+    status: "halted",
+    run_id: ctx.run_id,
+    model,
+    total_findings: 0,
+    blocking_count: 0,
+    human_review_count: 0,
+    cost_usd: 0,
+    duration_s: 0,
+    synthesis: "",
+    sidecar_path: null,
+    pr_comment_body: null,
+    pr_comment_marker: prCommentMarker(ctx),
+    error: `${reasonCode}: ${reason}`,
+    findings: [],
+  };
+}
+
+function errorResult(
+  ctx: RedTeamRunContext,
+  model: string,
+  error: string,
+): DispatchResult {
+  return {
+    status: "error",
+    run_id: ctx.run_id,
+    model,
+    total_findings: 0,
+    blocking_count: 0,
+    human_review_count: 0,
+    cost_usd: 0,
+    duration_s: 0,
+    synthesis: "",
+    sidecar_path: null,
+    pr_comment_body: null,
+    pr_comment_marker: prCommentMarker(ctx),
+    error,
+    findings: [],
+  };
+}
+
+// ── Context construction ────────────────────────────────────────────────
+
+export function buildRunContext(args: {
+  stage: Stage;
+  artifactPath: string;
+  sourceSpecPath: string | null;
+  cwd?: string;
+  dbPath: string;
+}): RedTeamRunContext {
+  const repo = detectRepo(args.cwd ?? process.cwd());
+  const repoRoot = detectRepoRoot(args.cwd ?? process.cwd());
+  const rel = repoRoot ? path.relative(repoRoot, args.artifactPath) : null;
+  const prNumber = (() => {
+    const v = process.env.GITHUB_PR_NUMBER ?? process.env.PR_NUMBER;
+    if (!v) return null;
+    const n = Number.parseInt(v, 10);
+    return Number.isFinite(n) ? n : null;
+  })();
+  return {
+    run_id: `manual-${shortId()}`,
+    stage: args.stage,
+    artifact_path: args.artifactPath,
+    source_spec_path: args.sourceSpecPath,
+    repo,
+    artifact_relative_path: rel,
+    pr_number: prNumber,
+    db_path: args.dbPath,
+    started_at: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
+  };
+}
+
+function shortId(): string {
+  return createHash("sha1")
+    .update(`${Date.now()}-${Math.random()}`)
+    .digest("hex")
+    .slice(0, 12);
+}
+
+function detectRepo(cwd: string): string | null {
+  try {
+    const url = execFileSync("git", ["remote", "get-url", "origin"], {
+      cwd,
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 3000,
+    })
+      .toString()
+      .trim();
+    const sshMatch = url.match(/git@github\.com:(.+?)(?:\.git)?$/);
+    if (sshMatch) return sshMatch[1] ?? null;
+    const httpsMatch = url.match(/https:\/\/github\.com\/(.+?)(?:\.git)?$/);
+    if (httpsMatch) return httpsMatch[1] ?? null;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function detectRepoRoot(cwd: string): string | null {
+  try {
+    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd,
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 3000,
+    })
+      .toString()
+      .trim();
+  } catch {
+    return null;
+  }
+}

@@ -1,5 +1,12 @@
 """CLI dispatcher for /stark-red-team-design — adversarial design-doc challenge.
 
+.. deprecated:: 2026-05-16 (Phase 2 of the red-team TS migration)
+    Replaced as the skill's entry point by ``tools/red_team_design.ts``.
+    This file stays in tree as a Python-callable surface for tests + the
+    ``--replay-transcript`` byte-parity gate, and is no longer wired into
+    ``skill/stark-red-team-design/SKILL.md``. Schedule for removal in
+    Phase 4 (see ``docs/superpowers/plans/2026-05-16-red-team-ts-migration.md``).
+
 Thin wrapper over `stark_red_team.run_red_team(stage="design", ...)` for
 ad-hoc invocation against a design markdown file. Mirrors the call shape used
 by `forge_orchestrator.run_red_team_design_stage` but bypasses the

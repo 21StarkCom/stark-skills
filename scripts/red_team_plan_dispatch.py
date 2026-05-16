@@ -1,5 +1,12 @@
 """CLI dispatcher for /stark-red-team-plan — adversarial plan-doc challenge.
 
+.. deprecated:: 2026-05-16 (Phase 3 of the red-team TS migration)
+    Replaced as the skill's entry point by ``tools/red_team_plan.ts``.
+    This file stays in tree as a Python-callable surface for tests + the
+    ``--replay-transcript`` byte-parity gate, and is no longer wired into
+    ``skill/stark-red-team-plan/SKILL.md``. Schedule for removal in
+    Phase 4 (see ``docs/superpowers/plans/2026-05-16-red-team-ts-migration.md``).
+
 Thin wrapper over `stark_red_team.run_red_team(stage="plan", ...)` for ad-hoc
 invocation against an execution-plan markdown file. Mirrors the call shape
 used by `forge_orchestrator.run_red_team_plan_stage` but bypasses the
