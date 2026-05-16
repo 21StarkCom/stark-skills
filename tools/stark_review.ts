@@ -2597,6 +2597,7 @@ export async function main(
         cliAllowUntrustedFixLoop: cli.allowUntrustedFixLoop,
         configUntrustedFixLoop: !!config.untrusted_fix_loop,
         noFixLoop: cli.noFixLoop,
+        allowNoTestCommand: !!config.allow_no_test_command,
       });
       if (!gate.allow) {
         appendAudit({ action: "deny", round: pass.round, reason: gate.reason }, { home, repo, pr });
@@ -2677,19 +2678,28 @@ export async function main(
         break;
       }
 
-      // Trusted test
-      const testRes = await runTrustedTest({
-        worktree: cli.worktree,
-        testCommand: config.test_command as string,
-        config,
-        ...(spawnD ? { spawnFn: spawnD } : {}),
-      });
-      if (!testRes.ok) {
-        appendAudit({ action: "test_fail", round: pass.round, reason: `exit ${testRes.exitCode}` }, { home, repo, pr });
-        terminalCode = { code: "test_failure", message: `tests failed (exit ${testRes.exitCode})` };
-        break;
+      // Trusted test — skip when no test_command is configured AND the gate
+      // explicitly allowed the loop via allow_no_test_command. The gate is the
+      // sole authority on whether that opt-in is set; if we reach here with an
+      // empty command, the operator has accepted unverified autofixes.
+      const tcRaw = config.test_command ?? null;
+      const tcEmpty = tcRaw === null || (typeof tcRaw === "string" && tcRaw.trim() === "");
+      if (tcEmpty) {
+        appendAudit({ action: "test_skipped", round: pass.round, reason: "no_test_command_allowed" }, { home, repo, pr });
+      } else {
+        const testRes = await runTrustedTest({
+          worktree: cli.worktree,
+          testCommand: tcRaw as string,
+          config,
+          ...(spawnD ? { spawnFn: spawnD } : {}),
+        });
+        if (!testRes.ok) {
+          appendAudit({ action: "test_fail", round: pass.round, reason: `exit ${testRes.exitCode}` }, { home, repo, pr });
+          terminalCode = { code: "test_failure", message: `tests failed (exit ${testRes.exitCode})` };
+          break;
+        }
+        appendAudit({ action: "test_pass", round: pass.round }, { home, repo, pr });
       }
-      appendAudit({ action: "test_pass", round: pass.round }, { home, repo, pr });
 
       // Commit
       const commitMsg = `fix: address review findings (round ${pass.round})`;

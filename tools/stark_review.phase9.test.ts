@@ -75,6 +75,38 @@ test("evaluateFixLoopGate: (b) no test_command → soft skip", () => {
   }
 });
 
+test("evaluateFixLoopGate: (b') empty test_command + allowNoTestCommand → allow", () => {
+  for (const tc of [null, undefined, "", "   "]) {
+    const r = evaluateFixLoopGate({
+      testCommand: tc as any, prHeadIsFork: false, maintainerCanModify: false,
+      cliAllowUntrustedFixLoop: false, configUntrustedFixLoop: false, noFixLoop: false,
+      allowNoTestCommand: true,
+    });
+    assert.equal(r.allow, true, `tc=${JSON.stringify(tc)} should allow`);
+    assert.equal(r.terminal, false);
+  }
+});
+
+test("evaluateFixLoopGate: (b') empty test_command + allowNoTestCommand on fork w/ MCM → allow", () => {
+  const r = evaluateFixLoopGate({
+    testCommand: null, prHeadIsFork: true, maintainerCanModify: true,
+    cliAllowUntrustedFixLoop: false, configUntrustedFixLoop: false, noFixLoop: false,
+    allowNoTestCommand: true,
+  });
+  assert.equal(r.allow, true);
+  assert.equal(r.reason, "fork_with_mcm");
+});
+
+test("evaluateFixLoopGate: noFixLoop wins even when allowNoTestCommand is true", () => {
+  const r = evaluateFixLoopGate({
+    testCommand: null, prHeadIsFork: false, maintainerCanModify: false,
+    cliAllowUntrustedFixLoop: false, configUntrustedFixLoop: false, noFixLoop: true,
+    allowNoTestCommand: true,
+  });
+  assert.equal(r.allow, false);
+  assert.equal(r.reason, "no_fix_loop");
+});
+
 test("evaluateFixLoopGate: (c) same-repo PR → allow", () => {
   const r = evaluateFixLoopGate({
     testCommand: "make test", prHeadIsFork: false, maintainerCanModify: false,
