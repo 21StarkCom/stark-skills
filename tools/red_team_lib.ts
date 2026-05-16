@@ -1633,10 +1633,10 @@ export function serializeFindingsEnvelope(
       findings: rows,
     });
   for (const f of sorted) {
-    const candidate = [...kept, findingToEnvelopeDict(f)];
-    const candidateJson = dump(omittedIds.length > 0, omittedIds, candidate);
+    const row = findingToEnvelopeDict(f);
+    const candidateJson = dump(omittedIds.length > 0, omittedIds, [...kept, row]);
     if (candidateJson.length <= maxChars) {
-      kept.push(findingToEnvelopeDict(f));
+      kept.push(row);
       continue;
     }
     omittedIds.push(f.id);
@@ -1699,9 +1699,11 @@ export function assembleFixPlanPrompt(args: {
 // ── Fix-plan: parse + validate ──────────────────────────────────────────
 
 export function parseFixPlanOutput(raw: string): Record<string, unknown> {
-  // Mirror of `parse_output`: best-effort JSON object extraction. Try the
-  // raw text first, then any ```json fenced block, then the first top-level
-  // {...} substring. Returns {} on total failure (caller maps to error).
+  // Mirror of Python `parse_output`: best-effort JSON-object extraction.
+  // Try the raw text, then every ``` fenced block in order (matches the
+  // Python loop — important for model output that emits a non-JSON code
+  // sample before the actual JSON), then the first-`{`..last-`}` slice.
+  // Returns {} on total failure (caller maps to error).
   const tryParse = (s: string): Record<string, unknown> | null => {
     try {
       const v: unknown = JSON.parse(s);
@@ -1714,15 +1716,17 @@ export function parseFixPlanOutput(raw: string): Record<string, unknown> {
   if (!trimmed) return {};
   const direct = tryParse(trimmed);
   if (direct) return direct;
-  const fence = trimmed.match(/```(?:json)?\s*([\s\S]+?)```/);
-  if (fence?.[1]) {
-    const fenced = tryParse(fence[1].trim());
+  for (const m of trimmed.matchAll(/```(?:json)?\s*([\s\S]+?)```/g)) {
+    const body = (m[1] ?? "").trim();
+    if (!body.startsWith("{")) continue;
+    const fenced = tryParse(body);
     if (fenced) return fenced;
   }
-  const brace = trimmed.match(/\{[\s\S]*\}/);
-  if (brace?.[0]) {
-    const balanced = tryParse(brace[0]);
-    if (balanced) return balanced;
+  const startIdx = trimmed.indexOf("{");
+  const endIdx = trimmed.lastIndexOf("}");
+  if (startIdx >= 0 && startIdx < endIdx) {
+    const sliced = tryParse(trimmed.slice(startIdx, endIdx + 1));
+    if (sliced) return sliced;
   }
   return {};
 }
@@ -2188,6 +2192,12 @@ export function renderFixPlanSection(args: {
     if (fixPlan?.warnings.length) {
       lines.push("**Warnings:** " + fixPlan.warnings.map((w) => `\`${w}\``).join(", "));
     }
+  } else if (status === "success") {
+    // Defensive: resolveFixPlan only emits success with a non-null fixPlan,
+    // but a future caller could violate that contract. Surface honestly
+    // rather than silently mis-render as "skipped — success".
+    lines.push("**Status:** error");
+    lines.push("**Error:** fix-plan status was `success` but the plan body is missing");
   } else {
     lines.push(`**Status:** skipped — ${status}`);
   }

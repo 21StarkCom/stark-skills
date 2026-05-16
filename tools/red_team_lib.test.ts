@@ -794,6 +794,25 @@ test("parseFixPlanOutput extracts JSON from raw / fenced / brace-bracketed forms
   assert.deepEqual(parseFixPlanOutput(""), {});
 });
 
+test("parseFixPlanOutput skips non-JSON fenced blocks and lands on the JSON one", () => {
+  // Models sometimes emit a non-JSON code sample before the real payload
+  // (e.g. an example bash snippet, or a textual schema illustration).
+  // The first fence isn't JSON; the second one is — Python iterates all
+  // fenced blocks, so TS must too.
+  const raw = [
+    "Here's an outline:",
+    "```text",
+    "Step 1 — stage",
+    "Step 2 — verify",
+    "```",
+    "And the plan as JSON:",
+    "```json",
+    '{"summary":"x","moves":[]}',
+    "```",
+  ].join("\n");
+  assert.deepEqual(parseFixPlanOutput(raw), { summary: "x", moves: [] });
+});
+
 const VALID_PLAN_JSON = {
   summary: "Address schema risks with a phased rollout.",
   moves: [
