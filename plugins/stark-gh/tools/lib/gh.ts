@@ -268,3 +268,31 @@ export function originMatches(plan: { owner: string; name: string; host?: string
   if (plan.host && host !== plan.host) return false;
   return true;
 }
+
+// =============================================================================
+// Generic passthrough helpers for callers that need ad-hoc gh calls without
+// a dedicated wrapper. Used by /stark-gh:cleanup.
+// =============================================================================
+
+export function ghRaw(args: string[], opts: { exec?: ExecFn; input?: string } = {}): string {
+  return gh(args, opts);
+}
+
+export interface GhResult {
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+}
+
+export function tryGh(args: string[], opts: { exec?: ExecFn; input?: string } = {}): GhResult {
+  try {
+    return { ok: true, stdout: gh(args, opts), stderr: "" };
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException & { stderr?: Buffer; stdout?: Buffer };
+    return {
+      ok: false,
+      stdout: err.stdout?.toString("utf8") ?? "",
+      stderr: err.stderr?.toString("utf8") ?? err.message,
+    };
+  }
+}
