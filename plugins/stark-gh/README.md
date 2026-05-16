@@ -4,6 +4,7 @@ Claude Code plugin housing GitHub workflow slash commands.
 
 - v1: `/stark-gh:pr-open`
 - v1: `/stark-gh:pr-merge`
+- v1: `/stark-gh:cleanup`
 
 Design specs:
 - `docs/superpowers/specs/2026-04-28-stark-gh-pr-open-design.md`
@@ -32,11 +33,8 @@ repo or a sandbox repo, not main.**
    ```
    Expect `status: merged`, a `mergeSha`, and a `runbook` block with operator
    recovery hints.
-6. Cleanup (once /stark-gh:cleanup ships): `/stark-gh:cleanup --pr <N>`. For now:
-   ```bash
-   gh api -X DELETE repos/<owner>/<repo>/git/refs/heads/<headRef>
-   git checkout main && git branch -D smoke/pr-merge-<timestamp>
-   ```
+6. Cleanup: `/stark-gh:cleanup --pr <N>` — deletes head branch (local + remote),
+   removes any worktree on it, clears the watcher state dir.
 
 ## /stark-gh:pr-merge — post-merge recovery
 
@@ -59,8 +57,32 @@ In a throwaway feature branch in this repo:
 3. In Claude Code: `/stark-gh:pr-open --no-watch`
 4. Expect: a single commit with Codex-drafted message; branch pushed; PR created;
    PR URL printed.
-5. Clean up: `gh pr close <N>`, `git push origin :smoke/1-test-stark-gh`,
-   `git checkout main`, `git branch -D smoke/1-test-stark-gh`.
+5. Clean up: `gh pr close <N>`, then `/stark-gh:cleanup --pr <N>` to delete
+   the head branch (local + remote) and clear leftovers.
+
+## /stark-gh:cleanup — what it does
+
+Single TypeScript stage (`tools/gh_cleanup.ts`). Full-sweep mode:
+
+- `git fetch --all --prune --prune-tags`
+- Writes linear-tree git config (`pull.rebase=true`, `rebase.autoStash=true`,
+  `branch.autoSetupRebase=always`, `rerere.enabled=true`, `fetch.prune=true`,
+  `fetch.pruneTags=true`) — opt out with `--no-config`.
+- Rebases the current feature branch onto its upstream (or fast-forwards default).
+- Deletes local branches whose PR merged, whose upstream is gone, or whose tip
+  is reachable from `origin/<default>`. Unmerged branches are skipped unless
+  `--force` is set.
+- Deletes the matching remote branches via `gh api -X DELETE`.
+- Removes worktrees pinned to deleted branches; prunes broken entries.
+- Removes `~/.claude/code-review/stark-gh/watchers/<host>/<owner>/<repo>/pr-N/`
+  dirs for PRs GitHub reports as MERGED/CLOSED.
+
+Single-PR mode (`--pr N`) — narrows everything above to one PR's head ref +
+watcher state. Refuses if the PR is still open, on the default branch, or
+cross-repo.
+
+`--dry-run` prints the plan and exits without mutating anything. Working tree
+must be clean (exit 12 otherwise). Run from any branch in the repo.
 
 If anything goes wrong, every TypeScript tool prints stable exit codes and stderr.
 See the design specs for the exit-code tables.
