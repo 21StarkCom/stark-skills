@@ -293,6 +293,56 @@ test("dispatchDomains: empty stdout WITHOUT sentinel is a dispatch failure", asy
   assert.match(results[0].error ?? "", /no_findings sentinel/);
 });
 
+test("dispatchDomains: signal-killed child reports signal, not fake exit -1", async () => {
+  // Regression: codex CLI processes terminated by an external signal used to
+  // surface as `agent exit -1: <stderr banner>`, because spawnCollect flattened
+  // a null exit code into -1 and the dispatcher's error template only spoke
+  // "exit". The honest failure must name the signal and degrade gracefully
+  // when stderr is just framing chatter.
+  const config = bareConfig();
+  const port: AgentPort = {
+    buildCommand: (prompt: string) => ({ cmd: "/bin/echo", args: [], stdin: prompt, env: {} }),
+    parseOutput: () => ({ findings: [], parseErrors: [] }),
+  };
+  const ports = new Map([["codex" as const, port]]);
+  const fakeSpawn = async () => ({
+    stdout: "",
+    stderr: "Reading prompt from stdin...\n",
+    status: -1,
+    signal: "SIGTERM" as const,
+  });
+  const results = await dispatchDomains({
+    assignments: [{ domain: "behavior", agent: "codex", prompt: "p" }],
+    ports, config,
+    spawnFn: fakeSpawn as unknown as typeof fakeSpawn,
+  });
+  assert.equal(results.length, 1);
+  assert.equal(results[0].ok, false);
+  assert.match(results[0].error ?? "", /signal SIGTERM/);
+  assert.match(results[0].error ?? "", /Reading prompt from stdin/);
+  assert.doesNotMatch(results[0].error ?? "", /agent exit -1/);
+});
+
+test("dispatchDomains: signal kill with empty output reports <no output captured>", async () => {
+  const config = bareConfig();
+  const port: AgentPort = {
+    buildCommand: (prompt: string) => ({ cmd: "/bin/echo", args: [], stdin: prompt, env: {} }),
+    parseOutput: () => ({ findings: [], parseErrors: [] }),
+  };
+  const ports = new Map([["codex" as const, port]]);
+  const fakeSpawn = async () => ({
+    stdout: "", stderr: "", status: -1, signal: "SIGKILL" as const,
+  });
+  const results = await dispatchDomains({
+    assignments: [{ domain: "behavior", agent: "codex", prompt: "p" }],
+    ports, config,
+    spawnFn: fakeSpawn as unknown as typeof fakeSpawn,
+  });
+  assert.equal(results[0].ok, false);
+  assert.match(results[0].error ?? "", /signal SIGKILL/);
+  assert.match(results[0].error ?? "", /<no output captured>/);
+});
+
 test("dispatchDomains: failure of one domain does not abort siblings", async () => {
   const config = bareConfig();
   const fakePort: AgentPort = {
