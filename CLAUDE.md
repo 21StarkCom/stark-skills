@@ -57,6 +57,9 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `scripts/session_tui.py` — session start/end renderer
 - `scripts/session_tui_cli.py` — session TUI CLI entry point
 
+### Red-team audit CLI (Phase 0 of the TS migration)
+- `scripts/red_team_audit_cli.py` — canonical cross-language seam for the red-team audit SQLite. Subcommands: `resolve-db` (single source of truth for the DB path: `--db` > `STARK_RED_TEAM_DB` env > `red_team.audit.db_path` config > default `~/.claude/code-review/history/forged-review/forged_review_metrics.db`), `ensure-schema` (atomic temp-then-rename create / empty-DB recovery / pre-marker bootstrap / verify+refresh, all under a singleton `schema_meta` marker + `PRAGMA user_version`), `assert-schema-version` (writer gate), `migrate --stamp-current`, `preflight-credentials` (stark-claude/codex/gemini Keychain + installation-token mint smoke), and stubbed Phase 1 subcommands `record-run` / `record-findings` / `update-run-status` / `read-run` / `get-findings` (parser + JSON schema + `not_implemented_in_phase_0` exit envelope, all carrying `--replay-transcript PATH` so the Phase 2 `--help` parity gate passes). Stdout discipline: exactly one JSON envelope per call; logs go to stderr. See `docs/specs/red-team-audit-schema-2026-05-16.md` and `docs/specs/red-team-cli-contract-2026-05-16.md`. Frozen schema version: 1.
+
 ### Other
 - `scripts/stark_persona.py` — session persona engine (weighted selection, combos, catchphrases)
 - `scripts/plan_to_tasks_validate.py` — plan decomposition validation (3 LLM passes)

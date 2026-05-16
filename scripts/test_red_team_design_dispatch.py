@@ -559,11 +559,15 @@ def test_run_dispatch_audit_before_emit_order_and_final_status_invariant(
 
     class Audit:
         @staticmethod
-        def init_red_team_tables():
+        def resolve_db_path(cli_db=None):
+            return "/tmp/test-stub.db"
+
+        @staticmethod
+        def init_red_team_tables(db_path=None):
             calls.append("init")
 
         @staticmethod
-        def record_red_team_run(data):
+        def record_red_team_run(data, db_path=None):
             calls.append(f"run:{data['fix_plan_status']}:{data['final_status']}")
 
         @staticmethod

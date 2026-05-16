@@ -57,7 +57,8 @@ def _audit_run(
     except Exception:
         return
     try:
-        red_team_audit.init_red_team_tables()
+        db_path = red_team_audit.resolve_db_path()
+        red_team_audit.init_red_team_tables(db_path)
         red_team_audit.record_red_team_run({
             "run_id": run_id,
             "stage": _STAGE,
@@ -72,7 +73,7 @@ def _audit_run(
             "cost_usd": result.cost_usd,
             "model": model,
             "caller": "manual",
-        })
+        }, db_path=db_path)
         if result.findings:
             red_team_audit.record_findings([
                 {
@@ -89,7 +90,7 @@ def _audit_run(
                     "reason_for_uncertainty": f.reason_for_uncertainty,
                 }
                 for f in result.findings
-            ])
+            ], db_path=db_path)
     except Exception:
         pass
 
@@ -197,6 +198,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+    try:
+        from red_team_audit_cli import preflight_credentials_smoke
+        preflight_credentials_smoke()
+    except Exception:
+        pass
     plan_path = Path(args.plan).resolve()
     source_spec_path = Path(args.source_spec).resolve() if args.source_spec else None
 
