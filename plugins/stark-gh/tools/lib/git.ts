@@ -205,3 +205,26 @@ export function hashUntrackedFile(absPath: string): string {
     return crypto.createHash("sha256").update("").digest("hex");
   }
 }
+
+// Non-throwing variant for callers (like cleanup) that probe for success and
+// want to surface stderr rather than bubble exceptions. Always returns a
+// structured result; stdout/stderr captured as utf-8 strings.
+export interface GitResult {
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+}
+
+export function tryGit(args: string[], opts: { exec?: ExecFn; input?: string } = {}): GitResult {
+  try {
+    const out = git(args, opts);
+    return { ok: true, stdout: out, stderr: "" };
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException & { stderr?: Buffer; stdout?: Buffer };
+    return {
+      ok: false,
+      stdout: err.stdout?.toString("utf8") ?? "",
+      stderr: err.stderr?.toString("utf8") ?? err.message,
+    };
+  }
+}
