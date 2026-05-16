@@ -29,6 +29,16 @@ export interface RuntimeConfig {
   lock_ttl_minutes: number;
   subagent_env_allowlist: string[];
   max_concurrent_agents: number;
+  /** Optional per-agent concurrency caps, applied IN ADDITION to
+   * `max_concurrent_agents`. Absent / non-number means "no per-agent cap"
+   * (the global cap is the only limit). Explicit 0 or negative means "block"
+   * — the dispatcher fails affected assignments with `dispatch_blocked`
+   * instead of spinning. Set this for agents whose backend imposes
+   * account-level concurrent-stream throttling — e.g. codex on a ChatGPT-tier
+   * account, where 3 concurrent xhigh-reasoning streams against the same
+   * account get killed mid-stream. Defaulting codex to 1 here makes
+   * multi-domain reviews serialize codex while leaving claude/gemini parallel. */
+  max_concurrent_per_agent?: Partial<Record<AgentName, number>>;
   temp_dir_prefix: string;
   large_pr_file_threshold: number;
   large_pr_line_threshold: number;

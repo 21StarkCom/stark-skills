@@ -293,6 +293,92 @@ test("dispatchDomains: empty stdout WITHOUT sentinel is a dispatch failure", asy
   assert.match(results[0].error ?? "", /no_findings sentinel/);
 });
 
+test("dispatchDomains: per-agent cap serializes one agent while another runs in parallel", async () => {
+  // codex has a per-agent cap of 1 (account-level streaming throttle on
+  // ChatGPT-tier accounts kills concurrent xhigh-reasoning streams), but
+  // claude is unconstrained. With a global cap large enough for everyone,
+  // codex must serialize one-at-a-time while claude runs in parallel.
+  const config = bareConfig({
+    runtime: {
+      ...bareConfig().runtime,
+      max_concurrent_agents: 8,
+      max_concurrent_per_agent: { codex: 1 },
+    },
+  });
+  const peakByAgent = new Map<string, number>();
+  const inflightByAgent = new Map<string, number>();
+  const fakePort: AgentPort = {
+    buildCommand: (prompt: string) => ({ cmd: "/bin/echo", args: [], stdin: prompt, env: {} }),
+    parseOutput: () => ({ findings: [], parseErrors: [], noFindingsAck: true }),
+  };
+  const ports = new Map([
+    ["codex" as const, fakePort],
+    ["claude" as const, fakePort],
+  ]);
+  const fakeSpawn = async (
+    _cmd: string,
+    _args: string[],
+    o: { input?: string; env?: NodeJS.ProcessEnv; cwd?: string } = {},
+  ) => {
+    // Tag the spawn with the agent from the prompt so we can count by agent.
+    const agent = (o.input ?? "").startsWith("codex:") ? "codex" : "claude";
+    inflightByAgent.set(agent, (inflightByAgent.get(agent) ?? 0) + 1);
+    peakByAgent.set(agent, Math.max(peakByAgent.get(agent) ?? 0, inflightByAgent.get(agent)!));
+    await new Promise((r) => setTimeout(r, 25));
+    inflightByAgent.set(agent, (inflightByAgent.get(agent) ?? 1) - 1);
+    return { stdout: '{"no_findings":true,"domain":"d","agent":"codex"}\n', stderr: "", status: 0 };
+  };
+  const assignments = [
+    { domain: "c1", agent: "codex" as const, prompt: "codex:1" },
+    { domain: "c2", agent: "codex" as const, prompt: "codex:2" },
+    { domain: "c3", agent: "codex" as const, prompt: "codex:3" },
+    { domain: "k1", agent: "claude" as const, prompt: "claude:1" },
+    { domain: "k2", agent: "claude" as const, prompt: "claude:2" },
+    { domain: "k3", agent: "claude" as const, prompt: "claude:3" },
+  ];
+  const results = await dispatchDomains({
+    assignments, ports, config,
+    spawnFn: fakeSpawn as unknown as typeof fakeSpawn,
+  });
+  assert.equal(results.length, 6);
+  assert.equal(results.every((r) => r.ok), true, `expected all ok, got ${results.map((r) => r.error).filter(Boolean).join(" | ")}`);
+  assert.equal(peakByAgent.get("codex"), 1, `codex peak should be 1 (per-agent cap), got ${peakByAgent.get("codex")}`);
+  assert.ok((peakByAgent.get("claude") ?? 0) >= 2, `claude should run >=2 in parallel under global cap=8, got peak=${peakByAgent.get("claude")}`);
+});
+
+test("dispatchDomains: per-agent cap of 0 fails affected assignments with dispatch_blocked", async () => {
+  const config = bareConfig({
+    runtime: {
+      ...bareConfig().runtime,
+      max_concurrent_agents: 4,
+      max_concurrent_per_agent: { codex: 0 },
+    },
+  });
+  const fakePort: AgentPort = {
+    buildCommand: (prompt: string) => ({ cmd: "/bin/echo", args: [], stdin: prompt, env: {} }),
+    parseOutput: () => ({ findings: [], parseErrors: [], noFindingsAck: true }),
+  };
+  const ports = new Map([
+    ["codex" as const, fakePort],
+    ["claude" as const, fakePort],
+  ]);
+  const fakeSpawn = async () => ({
+    stdout: '{"no_findings":true,"domain":"d","agent":"claude"}\n', stderr: "", status: 0,
+  });
+  const results = await dispatchDomains({
+    assignments: [
+      { domain: "a", agent: "codex" as const, prompt: "p" },
+      { domain: "b", agent: "claude" as const, prompt: "p" },
+    ],
+    ports, config,
+    spawnFn: fakeSpawn as unknown as typeof fakeSpawn,
+  });
+  // codex assignment must surface dispatch_blocked; claude must still run.
+  assert.equal(results[0].ok, false);
+  assert.match(results[0].error ?? "", /dispatch_blocked.*codex/);
+  assert.equal(results[1].ok, true, `claude result should succeed; error=${results[1].error}`);
+});
+
 test("dispatchDomains: signal-killed child reports signal, not fake exit -1", async () => {
   // Regression: codex CLI processes terminated by an external signal used to
   // surface as `agent exit -1: <stderr banner>`, because spawnCollect flattened

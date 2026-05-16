@@ -48,6 +48,9 @@
       "ANTHROPIC_AGENTS"
     ],
     "max_concurrent_agents": 3,
+    "max_concurrent_per_agent": {
+      "codex": 1
+    },
     "temp_dir_prefix": "stark-env",
     "large_pr_file_threshold": 40,
     "large_pr_line_threshold": 3000,
