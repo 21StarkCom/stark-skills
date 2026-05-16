@@ -234,23 +234,278 @@ def test_migrate_stamp_current_idempotent_under_rerun(tmp_path):
         conn.close()
 
 
-# ── Stubs ───────────────────────────────────────────────────────────────
+# ── Phase 1a bodies: record-run / record-findings / update-run-status /
+#    read-run / get-findings ─────────────────────────────────────────────
 
 
-@pytest.mark.parametrize(
-    "sub",
-    ["record-run", "record-findings", "update-run-status", "read-run", "get-findings"],
-)
-def test_stubs_emit_not_implemented_envelope_with_phase0_exit_code(tmp_path, sub):
-    proc = _cli(sub)
-    assert proc.returncode == cli.STUB_EXIT_CODE
-    payload = json.loads(proc.stdout)
-    assert payload["error"] == "not_implemented_in_phase_0"
-    assert payload["subcommand"] == sub
-    assert payload["phase"] == 0
-    assert payload["next_phase"] == 1
-    assert "stdin_schema" in payload
-    assert "stdout_schema" in payload
+def _minimal_run_payload(run_id: str = "test-run-1") -> dict:
+    return {
+        "run_id": run_id,
+        "stage": "design",
+        "rounds_used": 1,
+        "final_status": "in-progress",
+        "total_findings": 0,
+        "critical_count": 0,
+        "high_count": 0,
+        "medium_count": 0,
+        "human_review_count": 0,
+        "duration_s": 1.0,
+        "cost_usd": 0.05,
+        "model": "gpt-5.5-pro",
+        "caller": "test",
+    }
+
+
+def test_record_run_creates_row_and_returns_envelope(tmp_path):
+    db = tmp_path / "rec.db"
+    payload = _minimal_run_payload()
+    proc = subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+         "record-run", "--db", str(db)],
+        input=json.dumps(payload),
+        capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    envelope = json.loads(proc.stdout)
+    assert envelope["ok"] is True
+    assert envelope["status"] == "created"
+    assert envelope["run_id"] == "test-run-1"
+    assert envelope["run"]["final_status"] == "in-progress"
+
+
+def test_record_run_idempotent_returns_existing_status(tmp_path):
+    db = tmp_path / "rec.db"
+    payload = _minimal_run_payload("dup-run")
+    for _ in range(2):
+        proc = subprocess.run(
+            [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+             "record-run", "--db", str(db)],
+            input=json.dumps(payload),
+            capture_output=True, text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+    envelope = json.loads(proc.stdout)
+    assert envelope["status"] == "existing"
+    # Exactly one DB row.
+    conn = sqlite3.connect(str(db))
+    try:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM red_team_runs WHERE run_id = ?", ("dup-run",)
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert count == 1
+
+
+def test_record_run_missing_required_field_returns_bad_input(tmp_path):
+    db = tmp_path / "rec.db"
+    payload = {"run_id": "rx"}  # missing everything else
+    proc = subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+         "record-run", "--db", str(db)],
+        input=json.dumps(payload),
+        capture_output=True, text=True,
+    )
+    assert proc.returncode == cli.EXIT_BAD_INPUT
+    envelope = json.loads(proc.stdout)
+    assert envelope["error"] == "missing_required_fields"
+    assert "stage" in envelope["missing"]
+
+
+def test_update_run_status_allowed_transition(tmp_path):
+    db = tmp_path / "rec.db"
+    payload = _minimal_run_payload("upd-run")
+    subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+         "record-run", "--db", str(db)],
+        input=json.dumps(payload), capture_output=True, text=True, check=True,
+    )
+    proc = subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+         "update-run-status", "--db", str(db), "--run-id", "upd-run", "--to", "clean"],
+        capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    envelope = json.loads(proc.stdout)
+    assert envelope["status"] == "transitioned"
+    assert envelope["from"] == "in-progress"
+    assert envelope["to"] == "clean"
+    assert envelope["current"] == "clean"
+
+
+def test_update_run_status_forbids_terminal_to_in_progress(tmp_path):
+    db = tmp_path / "rec.db"
+    payload = _minimal_run_payload("forbid-run")
+    subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+         "record-run", "--db", str(db)],
+        input=json.dumps(payload), capture_output=True, text=True, check=True,
+    )
+    # Move to terminal first.
+    subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+         "update-run-status", "--db", str(db), "--run-id", "forbid-run", "--to", "clean"],
+        capture_output=True, text=True, check=True,
+    )
+    # Now try to roll back to in-progress.
+    proc = subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+         "update-run-status", "--db", str(db), "--run-id", "forbid-run", "--to", "in-progress"],
+        capture_output=True, text=True,
+    )
+    assert proc.returncode == cli.EXIT_BAD_INPUT
+    envelope = json.loads(proc.stdout)
+    assert envelope["error"] == "forbidden_transition"
+
+
+def test_update_run_status_no_op_when_already_at_target(tmp_path):
+    db = tmp_path / "rec.db"
+    payload = _minimal_run_payload("noop-run")
+    payload["final_status"] = "clean"
+    subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+         "record-run", "--db", str(db)],
+        input=json.dumps(payload), capture_output=True, text=True, check=True,
+    )
+    proc = subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+         "update-run-status", "--db", str(db), "--run-id", "noop-run", "--to", "clean"],
+        capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout)["status"] == "no_op_already_at_target"
+
+
+def test_update_run_status_from_guard_mismatch(tmp_path):
+    db = tmp_path / "rec.db"
+    payload = _minimal_run_payload("guard-run")
+    subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+         "record-run", "--db", str(db)],
+        input=json.dumps(payload), capture_output=True, text=True, check=True,
+    )
+    # Guard says current must be 'clean'; actual is 'in-progress'.
+    proc = subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+         "update-run-status", "--db", str(db), "--run-id", "guard-run",
+         "--from", "clean", "--to", "halted"],
+        capture_output=True, text=True,
+    )
+    assert proc.returncode == cli.EXIT_BAD_INPUT
+    envelope = json.loads(proc.stdout)
+    assert envelope["error"] == "from_mismatch"
+
+
+def test_update_run_status_not_found(tmp_path):
+    db = tmp_path / "rec.db"
+    proc = subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+         "update-run-status", "--db", str(db), "--run-id", "ghost", "--to", "clean"],
+        capture_output=True, text=True,
+    )
+    assert proc.returncode == cli.EXIT_NOT_FOUND
+    assert json.loads(proc.stdout)["error"] == "run_not_found"
+
+
+def test_record_findings_round_trips_via_get_findings(tmp_path):
+    db = tmp_path / "rec.db"
+    subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+         "record-run", "--db", str(db)],
+        input=json.dumps(_minimal_run_payload("rt-r1")),
+        capture_output=True, text=True, check=True,
+    )
+    findings_payload = {
+        "findings": [
+            {
+                "run_id": "rt-r1",
+                "stage": "design",
+                "round_num": 1,
+                "finding_id": "rt-f1",
+                "persona": "data",
+                "severity": "high",
+                "concern": "x",
+                "consequence": "y",
+                "counter_proposal": "z",
+                "trade_off": None,
+                "reason_for_uncertainty": None,
+            }
+        ]
+    }
+    proc = subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+         "record-findings", "--db", str(db)],
+        input=json.dumps(findings_payload), capture_output=True, text=True,
+    )
+    assert proc.returncode == 0
+    assert json.loads(proc.stdout)["count"] == 1
+
+    gp = subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+         "get-findings", "--db", str(db), "--run-id", "rt-r1"],
+        capture_output=True, text=True,
+    )
+    assert gp.returncode == 0, gp.stderr
+    envelope = json.loads(gp.stdout)
+    assert envelope["count"] == 1
+    assert envelope["findings"][0]["finding_id"] == "rt-f1"
+
+
+def test_record_findings_no_change_on_empty_array(tmp_path):
+    db = tmp_path / "rec.db"
+    subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+         "record-run", "--db", str(db)],
+        input=json.dumps(_minimal_run_payload("rt-empty")),
+        capture_output=True, text=True, check=True,
+    )
+    proc = subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+         "record-findings", "--db", str(db)],
+        input=json.dumps({"findings": []}),
+        capture_output=True, text=True,
+    )
+    assert proc.returncode == 0
+    envelope = json.loads(proc.stdout)
+    assert envelope["status"] == "no_change"
+    assert envelope["count"] == 0
+
+
+def test_read_run_found_and_not_found(tmp_path):
+    db = tmp_path / "rec.db"
+    subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+         "record-run", "--db", str(db)],
+        input=json.dumps(_minimal_run_payload("rr-1")),
+        capture_output=True, text=True, check=True,
+    )
+    found = subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+         "read-run", "--db", str(db), "--run-id", "rr-1"],
+        capture_output=True, text=True, check=True,
+    )
+    assert json.loads(found.stdout)["found"] is True
+    missing = subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+         "read-run", "--db", str(db), "--run-id", "no-such"],
+        capture_output=True, text=True, check=True,
+    )
+    assert json.loads(missing.stdout)["found"] is False
+
+
+def test_phase1_bodies_run_ensure_schema_preflight_against_fresh_db(tmp_path):
+    """Calling any Phase 1 body against a non-existent DB must succeed
+    because the preflight bootstraps the schema atomically."""
+    db = tmp_path / "fresh-from-body.db"
+    assert not db.exists()
+    proc = subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "red_team_audit_cli.py"),
+         "read-run", "--db", str(db), "--run-id", "anything"],
+        capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert db.exists()
+    assert json.loads(proc.stdout)["found"] is False
 
 
 @pytest.mark.parametrize(

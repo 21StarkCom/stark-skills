@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "stage": "design",
+  "model": "gpt-5.5-pro",
+  "round_num": 1,
+  "synthesis": "Replay transcript covering 2 personas with a low/medium finding pair. Used by Phase 1 tests + the Phase 2 byte-parity gate.",
+  "raw_output": "[{\"persona\":\"data\",\"severity\":\"medium\",\"concern\":\"schema_meta singleton CHECK rule not stress-tested\",\"consequence\":\"silent corruption on multi-writer races\",\"counter_proposal\":\"add a fixture that races two ensure-schema calls\",\"trade_off\":\"slightly slower test suite\"}]",
+  "findings": [
+    {
+      "id": "rt1",
+      "persona": "data",
+      "severity": "medium",
+      "concern": "schema_meta singleton CHECK rule not stress-tested",
+      "consequence": "silent corruption on multi-writer races",
+      "counter_proposal": "add a fixture that races two ensure-schema calls",
+      "trade_off": "slightly slower test suite",
+      "concern_hash": "replay-sample-rt1"
+    },
+    {
+      "id": "rt2",
+      "persona": "reliability-distsys",
+      "severity": "high",
+      "concern": "Replay transcript bypasses sandbox so prompt-injection regressions are invisible",
+      "consequence": "Phase 2 byte-parity gate would pass against a sandbox-bypass regression",
+      "counter_proposal": "Add a unit test that asserts sandbox env-allowlist + FS-allowlist apply on the replay path too",
+      "trade_off": null,
+      "concern_hash": "replay-sample-rt2"
+    }
+  ],
+  "duration_s": 0.0,
+  "cost_usd": 0.0,
+  "input_tokens": 0,
+  "output_tokens": 0
+}
