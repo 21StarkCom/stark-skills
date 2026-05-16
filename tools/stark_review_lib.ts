@@ -786,6 +786,57 @@ export function resolvePromptSources(opts: {
 }
 
 /**
+ * Fallback used when no `classifier.md` is found in repo override or global
+ * prompts. Keeps the loop functional but lacks bucket definitions, so the
+ * model will skew toward `fix`. Surface this via the returned `source` so
+ * the caller can log a warning.
+ */
+export const FALLBACK_CLASSIFIER_PROMPT =
+  "Classify each finding as fix|false_positive|noise|ignored.";
+
+export interface ClassifierPromptResult {
+  prompt: string;
+  source: "repo" | "global" | "fallback";
+}
+
+/**
+ * Resolve the classifier prompt for a single agent.
+ *
+ * Lookup order (first match wins):
+ *  1. Repo override via `git show <baseRef>:.code-review/prompts/<agent>/classifier.md`
+ *  2. Global on disk: `<promptRoot>/<agent>/classifier.md`
+ *  3. Hardcoded `FALLBACK_CLASSIFIER_PROMPT` (signaled via `source: "fallback"`).
+ *
+ * The repo override path is read via `git show` against the trusted base ref —
+ * never from the worktree filesystem — so a PR cannot inject its own classifier
+ * prompt by adding a file under `.code-review/prompts/`.
+ */
+export function resolveClassifierPrompt(opts: {
+  agent: AgentName;
+  promptRoot: string;
+  baseRef: string;
+  repoRoot: string;
+}): ClassifierPromptResult {
+  const { agent, promptRoot, baseRef, repoRoot } = opts;
+
+  const repoPath = `.code-review/prompts/${agent}/classifier.md`;
+  const repoRaw = gitCapture(repoRoot, ["show", `${baseRef}:${repoPath}`]);
+  if (repoRaw !== null && repoRaw.trim().length > 0) {
+    return { prompt: repoRaw.trimEnd(), source: "repo" };
+  }
+
+  const globalPath = path.join(promptRoot, agent, "classifier.md");
+  if (fs.existsSync(globalPath)) {
+    const body = fs.readFileSync(globalPath, "utf8");
+    if (body.trim().length > 0) {
+      return { prompt: body.trimEnd(), source: "global" };
+    }
+  }
+
+  return { prompt: FALLBACK_CLASSIFIER_PROMPT, source: "fallback" };
+}
+
+/**
  * Pure prompt assembler. Assembles agent.md + domain prompt + FINDING_SCHEMA_PROMPT
  * + PR title/body/diff into the final reviewer prompt. No I/O.
  */

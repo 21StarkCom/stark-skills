@@ -6,11 +6,13 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
+  FALLBACK_CLASSIFIER_PROMPT,
   FINDING_SCHEMA_PROMPT,
   findingId,
   loadTrustedConfig,
   renderReviewPrompt,
   resolveBaseRef,
+  resolveClassifierPrompt,
   resolvePromptRoot,
   resolveAgentsForDomains,
   resolvePromptSources,
@@ -616,4 +618,111 @@ test("resolvePromptSources: throws when domain missing in all layers", () => {
       }),
     /no-such-domain/,
   );
+});
+
+// ─── resolveClassifierPrompt ────────────────────────────────────────────────
+
+test("resolveClassifierPrompt: repo override beats global", () => {
+  const home = makeTmpDir("stark-cls-home-");
+  const repo = makeTmpDir("stark-cls-repo-");
+  gitInit(repo);
+  const repoPromptDir = path.join(repo, ".code-review", "prompts", "claude");
+  fs.mkdirSync(repoPromptDir, { recursive: true });
+  fs.writeFileSync(path.join(repoPromptDir, "classifier.md"), "REPO_CLASSIFIER");
+  gitCommitAll(repo, "init");
+
+  const globalRoot = path.join(home, ".claude", "code-review", "prompts");
+  fs.mkdirSync(path.join(globalRoot, "claude"), { recursive: true });
+  fs.writeFileSync(path.join(globalRoot, "claude", "classifier.md"), "GLOBAL_CLASSIFIER");
+
+  const got = resolveClassifierPrompt({
+    agent: "claude",
+    promptRoot: globalRoot,
+    baseRef: "HEAD",
+    repoRoot: repo,
+  });
+  assert.equal(got.source, "repo");
+  assert.equal(got.prompt, "REPO_CLASSIFIER");
+});
+
+test("resolveClassifierPrompt: global wins when no repo override", () => {
+  const home = makeTmpDir("stark-cls-home-");
+  const repo = makeTmpDir("stark-cls-repo-");
+  gitInit(repo);
+  fs.writeFileSync(path.join(repo, "x"), "x");
+  gitCommitAll(repo, "init");
+
+  const globalRoot = path.join(home, ".claude", "code-review", "prompts");
+  fs.mkdirSync(path.join(globalRoot, "codex"), { recursive: true });
+  fs.writeFileSync(path.join(globalRoot, "codex", "classifier.md"), "GLOBAL_CODEX_CLASSIFIER\nnoise + false_positive");
+
+  const got = resolveClassifierPrompt({
+    agent: "codex",
+    promptRoot: globalRoot,
+    baseRef: "HEAD",
+    repoRoot: repo,
+  });
+  assert.equal(got.source, "global");
+  assert.ok(got.prompt.includes("GLOBAL_CODEX_CLASSIFIER"));
+  assert.ok(got.prompt.includes("noise"));
+});
+
+test("resolveClassifierPrompt: falls back when no classifier.md anywhere", () => {
+  const home = makeTmpDir("stark-cls-home-");
+  const repo = makeTmpDir("stark-cls-repo-");
+  gitInit(repo);
+  fs.writeFileSync(path.join(repo, "x"), "x");
+  gitCommitAll(repo, "init");
+
+  const globalRoot = path.join(home, ".claude", "code-review", "prompts");
+  fs.mkdirSync(path.join(globalRoot, "gemini"), { recursive: true });
+
+  const got = resolveClassifierPrompt({
+    agent: "gemini",
+    promptRoot: globalRoot,
+    baseRef: "HEAD",
+    repoRoot: repo,
+  });
+  assert.equal(got.source, "fallback");
+  assert.equal(got.prompt, FALLBACK_CLASSIFIER_PROMPT);
+});
+
+test("resolveClassifierPrompt: empty file falls back to global, then default", () => {
+  const home = makeTmpDir("stark-cls-home-");
+  const repo = makeTmpDir("stark-cls-repo-");
+  gitInit(repo);
+  const repoPromptDir = path.join(repo, ".code-review", "prompts", "claude");
+  fs.mkdirSync(repoPromptDir, { recursive: true });
+  fs.writeFileSync(path.join(repoPromptDir, "classifier.md"), "   \n\t\n");
+  gitCommitAll(repo, "init");
+
+  const globalRoot = path.join(home, ".claude", "code-review", "prompts");
+  fs.mkdirSync(path.join(globalRoot, "claude"), { recursive: true });
+  fs.writeFileSync(path.join(globalRoot, "claude", "classifier.md"), "GLOBAL_FALLBACK");
+
+  const got = resolveClassifierPrompt({
+    agent: "claude",
+    promptRoot: globalRoot,
+    baseRef: "HEAD",
+    repoRoot: repo,
+  });
+  assert.equal(got.source, "global");
+  assert.equal(got.prompt, "GLOBAL_FALLBACK");
+});
+
+test("resolveClassifierPrompt: installed prompts define noise + false_positive buckets (regression guard)", () => {
+  // This is a structural assertion that the bundled prompts retain the bucket
+  // definitions that distinguish noise/false_positive from fix. The original
+  // classifier bug was that the dispatcher hardcoded a one-line prompt with no
+  // bucket definitions, so the model defaulted everything to `fix`. If anyone
+  // strips these definitions from classifier.md the same regression returns.
+  const repoRoot = path.resolve(import.meta.dirname, "..");
+  for (const agent of ["claude", "codex", "gemini"] as const) {
+    const p = path.join(repoRoot, "global", "prompts", agent, "classifier.md");
+    if (!fs.existsSync(p)) continue;
+    const body = fs.readFileSync(p, "utf8").toLowerCase();
+    assert.ok(body.includes("noise"), `${agent}/classifier.md must define 'noise' bucket`);
+    assert.ok(body.includes("false_positive"), `${agent}/classifier.md must define 'false_positive' bucket`);
+    assert.ok(body.includes("fix"), `${agent}/classifier.md must define 'fix' bucket`);
+  }
 });

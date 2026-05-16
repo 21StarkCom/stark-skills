@@ -15,6 +15,7 @@ import {
   resolveBaseRef,
   resolvePromptRoot,
   resolvePromptSources,
+  resolveClassifierPrompt,
   selectDomains,
   resolveAgentsForDomains,
   compareSeverityDesc,
@@ -848,7 +849,11 @@ export interface ClassifyOpts {
 }
 
 export interface ClassifyEvent {
-  type: "path_rejected" | "classifier_failed" | "classifier_aborted";
+  type:
+    | "path_rejected"
+    | "classifier_failed"
+    | "classifier_aborted"
+    | "classifier_prompt_fallback";
   finding_id: string;
   reason: string;
 }
@@ -2410,6 +2415,7 @@ export {
   resolveAgentsForDomains,
   renderReviewPrompt,
   resolvePromptSources,
+  resolveClassifierPrompt,
   validateStagePaths,
   PathRejectedError,
 };
@@ -2931,12 +2937,28 @@ async function runReviewPass(ctx: PassCtx, deps: PassDeps): Promise<PassResult> 
       ports.set(classifierAgent, await loadAgentPort(classifierAgent));
     } catch { /* */ }
   }
+  const classifierPromptResolved = resolveClassifierPrompt({
+    agent: classifierAgent,
+    promptRoot,
+    baseRef: cli.base,
+    repoRoot: cli.worktree,
+  });
+  if (classifierPromptResolved.source === "fallback") {
+    progress(
+      `classifier prompt fallback: ${classifierAgent}/classifier.md not found in repo override or global; using one-line default — noise/false_positive classification will skew toward fix`,
+    );
+    classifierEvents.push({
+      type: "classifier_prompt_fallback",
+      finding_id: "",
+      reason: `no classifier.md for agent=${classifierAgent}`,
+    });
+  }
   progress(`classifying ${allFindings.length} finding(s)…`);
   const cls = await runClassifier(allFindings, {
     worktree: cli.worktree,
     classifierAgent,
     ports,
-    classifierPrompt: "Classify each finding as fix|false_positive|noise|ignored.",
+    classifierPrompt: classifierPromptResolved.prompt,
     config,
     ...(deps.spawnFn ? { spawnFn: deps.spawnFn } : {}),
   });
