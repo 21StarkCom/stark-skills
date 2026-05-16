@@ -365,3 +365,73 @@ sys.stdout.write(_sanitize_fix_plan_json(sys.stdin.read()) or "")
   assert.equal(tsOut, pyOut);
   assert.ok(!String(tsOut).includes("raw_output"), "raw_output must be stripped");
 });
+
+test("recordFindings is atomic — mid-batch failure leaves zero rows", () => {
+  // Self-review fix: without BEGIN/COMMIT each statement auto-commits,
+  // so a mid-batch failure would leak partial rows. Python uses deferred
+  // commit (one conn.commit() after the loop), so a NOT NULL violation
+  // on row N rolls back rows 1..N-1. TS must match.
+  const dbPath = tmpDb("atomic");
+  initRedTeamTables(dbPath);
+  const good: FindingRow = {
+    run_id: "atomic-run",
+    stage: "design",
+    round_num: 1,
+    finding_id: "rt1",
+    persona: "data",
+    severity: "high",
+    concern: "first finding",
+    consequence: "first consequence",
+    counter_proposal: "fix it",
+    trade_off: null,
+    reason_for_uncertainty: null,
+  };
+  // Force a NOT NULL violation on the second row by sending null where
+  // schema demands NOT NULL (persona is NOT NULL in the DDL).
+  const bad = { ...good, finding_id: "rt2", persona: null as unknown as string };
+  assert.throws(
+    () =>
+      recordFindings(
+        [good, bad],
+        dbPath,
+        policyFromConfig({ retain_full_text: true }),
+      ),
+    /NOT NULL/i,
+  );
+  const after = new DatabaseSync(dbPath);
+  try {
+    const count = (after.prepare("SELECT count(*) AS c FROM red_team_findings").get() as {
+      c: number;
+    }).c;
+    assert.equal(count, 0, "atomicity: zero rows must persist after rolled-back batch");
+  } finally {
+    after.close();
+  }
+});
+
+test("recordPersonaStats is atomic — mid-batch failure leaves zero rows", () => {
+  const dbPath = tmpDb("atomic-personas");
+  initRedTeamTables(dbPath);
+  const good: PersonaStatRow = {
+    run_id: "atomic-run",
+    stage: "design",
+    round_num: 1,
+    persona: "data",
+    findings_raised: 1,
+    findings_at_critical: 0,
+    findings_at_high: 1,
+    findings_at_medium: 0,
+    human_review_requests: 0,
+  };
+  const bad = { ...good, persona: null as unknown as string };
+  assert.throws(() => recordPersonaStats([good, bad], dbPath), /NOT NULL/i);
+  const after = new DatabaseSync(dbPath);
+  try {
+    const count = (after.prepare("SELECT count(*) AS c FROM red_team_persona_stats").get() as {
+      c: number;
+    }).c;
+    assert.equal(count, 0);
+  } finally {
+    after.close();
+  }
+});

@@ -69,11 +69,16 @@ export function policyFromConfig(
   const cfg = cfgAudit ?? {};
   const retainRaw = cfg["retain_full_text"];
   const excerptRaw = cfg["excerpt_max_chars"];
+  // Match Python `int(cfg_audit.get("excerpt_max_chars", DEFAULT))` —
+  // any finite numeric value flows through (including negatives, which
+  // `excerpt()` collapses to ""). Non-numeric / NaN / Infinity / missing
+  // fall back to the documented default. Clamping was a parity drift
+  // caught in #551 self-review.
   return {
     retainFullText: retainRaw === true,
     excerptMaxChars:
-      typeof excerptRaw === "number" && Number.isFinite(excerptRaw) && excerptRaw >= 0
-        ? Math.floor(excerptRaw)
+      typeof excerptRaw === "number" && Number.isFinite(excerptRaw)
+        ? Math.trunc(excerptRaw)
         : DEFAULT_EXCERPT_MAX_CHARS,
   };
 }

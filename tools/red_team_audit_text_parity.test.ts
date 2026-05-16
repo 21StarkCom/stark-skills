@@ -117,3 +117,26 @@ test("policyFromConfig honors retain_full_text + excerpt_max_chars overrides", (
   assert.equal(policy.retainFullText, true);
   assert.equal(policy.excerptMaxChars, 80);
 });
+
+test("policyFromConfig passes negative excerpt_max_chars through (matches Python)", () => {
+  // Python `int(cfg.get("excerpt_max_chars", DEFAULT))` accepts any int,
+  // including negatives. `_excerpt` then returns "" for max_chars <= 0.
+  // My initial impl clamped negatives back to the 240 default — caught
+  // by self-review, fixed here.
+  const policy = policyFromConfig({ excerpt_max_chars: -10 });
+  assert.equal(policy.excerptMaxChars, -10);
+  const out = applyToField("non-empty content", policy);
+  // Excerpt mode + max_chars <= 0 → stored is "" (not null, since text was non-empty).
+  assert.equal(out.stored, "");
+  // Hash is still computed against the original — pairing still works.
+  assert.equal(typeof out.hash, "string");
+  // And it matches Python byte-for-byte.
+  const pyOut = pythonApplyToField("non-empty content", policy);
+  assert.deepEqual(out, pyOut);
+});
+
+test("policyFromConfig truncates floats (matches Python int())", () => {
+  // Python int(3.7) = 3; int(-3.7) = -3. JS Math.trunc matches.
+  assert.equal(policyFromConfig({ excerpt_max_chars: 3.7 }).excerptMaxChars, 3);
+  assert.equal(policyFromConfig({ excerpt_max_chars: -3.7 }).excerptMaxChars, -3);
+});

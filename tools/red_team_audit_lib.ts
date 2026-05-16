@@ -412,7 +412,10 @@ export function recordFinding(
   }
 }
 
-/** Insert many findings in one connection. Same retention policy per row. */
+/** Insert many findings in one connection, atomically. Same retention
+ *  policy per row. Wrapped in BEGIN/COMMIT/ROLLBACK so a mid-batch
+ *  failure leaves zero rows persisted — matches Python's deferred-commit
+ *  semantics (`conn.execute()` * N, then a single `conn.commit()`). */
 export function recordFindings(
   findings: readonly FindingRow[],
   dbPath: string,
@@ -421,8 +424,19 @@ export function recordFindings(
   const db = connect(dbPath);
   try {
     const stmt = db.prepare(FINDING_INSERT_SQL);
-    for (const f of findings) {
-      stmt.run(...(buildFindingInsertArgs(f, policy) as never[]));
+    db.exec("BEGIN");
+    try {
+      for (const f of findings) {
+        stmt.run(...(buildFindingInsertArgs(f, policy) as never[]));
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* ignore secondary failure */
+      }
+      throw err;
     }
   } finally {
     db.close();
@@ -442,18 +456,29 @@ export function recordPersonaStats(
   const db = connect(dbPath);
   try {
     const stmt = db.prepare(PERSONA_INSERT_SQL);
-    for (const s of stats) {
-      stmt.run(
-        s.run_id,
-        s.stage,
-        s.round_num,
-        s.persona,
-        s.findings_raised,
-        s.findings_at_critical,
-        s.findings_at_high,
-        s.findings_at_medium,
-        s.human_review_requests,
-      );
+    db.exec("BEGIN");
+    try {
+      for (const s of stats) {
+        stmt.run(
+          s.run_id,
+          s.stage,
+          s.round_num,
+          s.persona,
+          s.findings_raised,
+          s.findings_at_critical,
+          s.findings_at_high,
+          s.findings_at_medium,
+          s.human_review_requests,
+        );
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* ignore secondary failure */
+      }
+      throw err;
     }
   } finally {
     db.close();
@@ -505,19 +530,30 @@ export function pruneRedTeamMetrics(
   const cutoff = `-${retentionDays} days`;
   const db = connect(dbPath);
   try {
-    const r1 = db
-      .prepare(
-        "DELETE FROM red_team_runs WHERE created_at < " +
-          "strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)",
-      )
-      .run(cutoff);
-    const r2 = db
-      .prepare(
-        "DELETE FROM red_team_findings WHERE created_at < " +
-          "strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)",
-      )
-      .run(cutoff);
-    return Number(r1.changes) + Number(r2.changes);
+    db.exec("BEGIN");
+    try {
+      const r1 = db
+        .prepare(
+          "DELETE FROM red_team_runs WHERE created_at < " +
+            "strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)",
+        )
+        .run(cutoff);
+      const r2 = db
+        .prepare(
+          "DELETE FROM red_team_findings WHERE created_at < " +
+            "strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)",
+        )
+        .run(cutoff);
+      db.exec("COMMIT");
+      return Number(r1.changes) + Number(r2.changes);
+    } catch (err) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* ignore secondary failure */
+      }
+      throw err;
+    }
   } finally {
     db.close();
   }
