@@ -6,8 +6,8 @@ argument-hint: "<path-to-spec> [--dry-run] [--cleanup <slug>] [--agents codex,ge
 disable-model-invocation: true
 context: fork
 model: opus
-revision: e504ba02a12b6dd779ebd026fa4c07df76697ff2
-revision_date: 2026-05-15T18:20:11Z
+revision: ab6a41c8d94c419a963eaac3902148f6961b723f
+revision_date: 2026-05-17T10:33:06Z
 ---
 
 # stark-plan-to-tasks
@@ -283,7 +283,7 @@ Clean up temp files (decomposition JSON, validation envelope, preview files).
 
 ## Observability
 
-Standard observability: create task per step with `activeForm` spinner text, timestamped log lines, 5-minute checkpoints for large plans. Emit completion event via `emit_queue.py`.
+Standard observability: create task per step with `activeForm` spinner text, timestamped log lines, 5-minute checkpoints for large plans. Emit completion event via `$SCRIPTS/stark-emit`.
 
 ## What This Skill Does NOT Do
 

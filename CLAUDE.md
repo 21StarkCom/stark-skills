@@ -48,7 +48,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `scripts/runtime_env.py` — isolated subprocess env builder (allowlist, token injection, temp dirs)
 - `scripts/github_app.py` — multi-app GitHub auth (stark-claude, stark-codex, stark-gemini)
 - `scripts/github_projects.py` — GitHub Projects V2 GraphQL utility (13 public functions)
-- `scripts/emit_queue.py` — SQLite-backed durable event queue with dead-letter
+- `tools/emit_queue_lib.ts` + `tools/emit_queue_cli.ts` — SQLite-backed durable event queue (producer side). Python consumers reach it via `scripts/_emit.py`, a thin subprocess wrapper. The drain side lives in stark-insights.
 - `scripts/session_state.py` — persistent session state management
 
 ### TUI & session
@@ -75,7 +75,7 @@ The red-team subsystem is **pure TypeScript** under `tools/`. All Python red-tea
 - `tools/red_team_accept.ts` — Interactive CLI: looks up a stable key, shows the matched concern, optionally prompts (skippable via `--no-confirm`), writes an `INSERT OR IGNORE` accept row. PR-#430 round-3 fix #22 non-TTY refusal preserved.
 - `tools/red_team_backfill_lib.ts` + `tools/red_team_backfill.ts` — Pulls historical `red_team_runs` + `red_team_findings` rows out of the audit DB, builds matching insights envelopes, enqueues directly. `--scope all|legacy|forward`, `--limit`, `--dry-run`, `--manifest`.
 - `tools/red_team_db_resolver.ts` — Canonical audit DB resolver. Precedence: `--db` > `STARK_RED_TEAM_DB` env > `red_team.audit.db_path` config > default `~/.claude/code-review/history/forged-review/forged_review_metrics.db`. Returns the canonicalized path (collapses symlinks like `/tmp → /private/tmp` on macOS to match Python's `Path.resolve()`).
-- `tools/emit_queue_lib.ts` — TS-native subset of `scripts/emit_queue.py` (just `makeEvent` + `enqueue` + schema init). Writes to the same `~/.stark-insights/queue.db` SQLite as the Python implementation, so a Python drain still processes events enqueued by TS and vice versa. `STARK_QUEUE_DIR` env honored.
+- `tools/emit_queue_lib.ts` + `tools/emit_queue_cli.ts` — canonical TS producer for the durable insights queue. Surface: `makeEvent`, `enqueue` (with ADR-0014 source-specific dedupe formulas), `validate`, `pendingCount`, `deadLetterCount`, `health`, `recordContextPct`, `initSchema`. CLI subcommands: `--health`, `--init-schema`, `record-context-pct`, `pending-count`, `dead-letter-count`, `enqueue --type T --payload JSON [...]`. Writes to `~/.stark-insights/queue.db` (`STARK_QUEUE_DIR` env honored). Python consumers reach the queue through `scripts/_emit.py`, a thin subprocess shim around the `enqueue` subcommand. The drain side lives in stark-insights.
 - `tools/skill_lib.ts` — shared skill discovery + reference parsing
 - `tools/skill_audit.ts`, `skill_validate.ts`, `skill_optimize.ts`, `skill_autopilot.ts` — meta-tooling
 - `tools/skill_diet.ts` — duplication linter for shared boilerplate (preflight, dispatch-failure, GH App auth)

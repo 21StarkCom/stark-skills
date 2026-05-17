@@ -1,20 +1,25 @@
 /**
- * TS-native emit-queue (subset).
+ * Canonical producer-side emit-queue implementation.
  *
- * Port of the red-team-relevant `scripts/emit_queue.py` surface
- * (`make_event` + `enqueue` + schema init) so the TS dispatcher and the
- * TS backfill CLI can write to the same `~/.stark-insights/queue.db`
- * SQLite without shelling out to Python.
+ * Surface: `makeEvent`, `enqueue`, `validate`, `pendingCount`,
+ * `deadLetterCount`, `health`, `recordContextPct`, `initSchema`.
+ * Writes events into `~/.stark-insights/queue.db` (overridable via
+ * `STARK_QUEUE_DIR`). The drain side (HTTP delivery, buffer.db, dim
+ * resolution, dead-letter retries) is owned by stark-insights —
+ * `stark_insights/queue_drain.py` reads from `pending` here on a
+ * scheduler tick.
  *
- * Only the **enqueue + make_event** subset is ported. The HTTP drain,
- * dead-letter retry, and other op-side functions stay in Python (they
- * run from CLI jobs that are not red-team-specific). Both implementations
- * write to the same DB shape, so a Python drain still processes events
- * enqueued by TS and vice versa.
+ * Consumers:
+ *   - TS callers import directly (`red_team_lib.ts`, `red_team_backfill.ts`).
+ *   - Shell callers go through `emit_queue_cli.ts` (`--health`,
+ *     `--init-schema`, `record-context-pct`, `enqueue`, …).
+ *   - Python callers reach the queue via `scripts/_emit.py`, which forks
+ *     `emit_queue_cli.ts enqueue` so we don't carry a second producer
+ *     implementation in Python.
  *
- * The schema is created idempotently on first write. Subsequent
- * inserts hit a cached "this DB has been initialized" record so we
- * don't re-run DDL on every event.
+ * Schema is created idempotently on first write. Subsequent inserts hit
+ * a per-path "this DB has been initialized" inode cache so we don't
+ * re-run DDL on every event.
  */
 
 import { DatabaseSync } from "node:sqlite";
@@ -23,11 +28,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// Full event-type allowlist — kept in lockstep with
-// `scripts/emit_queue.py::_VALID_TYPES`. When the TS lib was a red-team-only
-// subset, this set was just six entries; expanded to match Python because
-// Phase 2 of the emit-queue → TS migration starts routing other producers
-// through this lib (statusline, /stark-session, install.sh).
+// Full event-type allowlist. Until the emit-queue → TS migration this set
+// was scoped to the six red-team-only entries; widened to cover every
+// producer (statusline, /stark-session, install.sh, the Python consumers
+// routed through `_emit.py`).
 const VALID_TYPES: ReadonlySet<string> = new Set([
   "skill_invocation", "review_finding", "review_quality",
   "agent_dispatch", "prompt", "correction", "memory_write",
@@ -50,18 +54,20 @@ const VALID_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 const VALID_CLIS: ReadonlySet<string> = new Set(["claude", "codex", "gemini"]);
-// Matches `scripts/emit_queue.py::_VALID_SOURCES`. Replaces the prior
-// red-team-only subset (skill/hook/subagent) — `subagent` is dropped on
-// purpose (no caller left), `scraper` + `backfill` added for parity with
-// the Python set.
+// Source allowlist. `skill` covers manual stark-emit + SKILL.md telemetry;
+// `hook` covers PreToolUse/PostToolUse/Stop hook scripts; `scraper` covers
+// jobs that walk file offsets (CI signal logs, transcript scrapers);
+// `backfill` covers historical replay (red_team_backfill, future migrations).
 const VALID_SOURCES: ReadonlySet<string> = new Set(["skill", "hook", "scraper", "backfill"]);
 
 const REQUIRED_FIELDS: readonly string[] = [
   "type", "timestamp", "cli", "source", "schema_version", "payload",
 ];
 
-// Mirror of emit_queue.py::_REDACT_PATTERNS — applied to the serialized
-// event JSON before storage. Keep in lockstep with the Python regex set.
+// Patterns that look like API keys or tokens. Applied to the serialized
+// event JSON before persistence. `tools/red_team_audit_text_lib.ts` keeps
+// the same set (plus PII rules) under REDACTION_RULES — the parity test
+// catches divergence.
 const REDACT_PATTERNS: ReadonlyArray<[RegExp, string]> = [
   [/sk-[A-Za-z0-9_-]{10,}/g, "sk-[REDACTED]"],
   [/ghp_[A-Za-z0-9]{10,}/g, "ghp_[REDACTED]"],
@@ -222,7 +228,6 @@ function defaultDedupeKey(args: {
   //
   // Falls back to `{event_type}:{session_id}:{ts}` when the payload is
   // missing the source-specific fields — better a generic key than no key.
-  // Kept in lockstep with `scripts/emit_queue.py::_default_dedupe_key`.
   const ts = Math.floor(Date.now() / 1000);
   const generic = `${args.eventType}:${args.sessionId}:${ts}`;
 
@@ -373,16 +378,11 @@ export function ctxHistoryPath(env: NodeJS.ProcessEnv = process.env): string {
 /**
  * Record a context-window % reading and return a trend indicator.
  *
- * Mirrors `scripts/emit_queue.py::record_context_pct`:
  *   - Persists `<unix-ts>\t<pct>` tab-rows into ~/.stark-insights/ctx-history
  *   - Keeps the last 10 entries (older rows trimmed)
  *   - Compares the latest reading to the OLDEST kept entry (== ~last 10 ticks)
  *   - Returns "▲" when delta >= 5 percentage points, "▸" when delta >= 1, else ""
  *   - Atomic via tmp + rename so a concurrent statusline tick can't see a half-write
- *
- * Schema MUST stay in lockstep with Python: same file path, same row format,
- * same trend thresholds. The Python and TS implementations may both write
- * during the Phase 3 migration window.
  */
 export function recordContextPct(
   pct: number,

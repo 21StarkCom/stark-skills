@@ -114,9 +114,9 @@ provision_infrastructure() {
     info "Created local directories"
 
     # Delegate queue.db schema creation to the TS emit-queue CLI — the lib
-    # owns the canonical schema (mirrored from scripts/emit_queue.py), so
-    # installing via its own initializer keeps install.sh from drifting.
-    # buffer.db is owned by stark-insights (its own installer creates it).
+    # (tools/emit_queue_lib.ts) owns the canonical schema, so installing
+    # via its own initializer keeps install.sh from drifting. buffer.db
+    # is owned by stark-insights (its own installer creates it).
     node --experimental-strip-types --no-warnings \
         "$REPO_DIR/tools/emit_queue_cli.ts" --init-schema
 

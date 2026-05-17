@@ -5,8 +5,8 @@ description: >-
 argument-hint: "<path> [--agents claude,codex,gemini] [--timeout N] [--dry-run] [--force]"
 disable-model-invocation: true
 model: opus
-revision: 7c91ffda1c063674729d3d8dddcf530bb937db53
-revision_date: 2026-05-14T07:49:39Z
+revision: ab6a41c8d94c419a963eaac3902148f6961b723f
+revision_date: 2026-05-17T10:33:06Z
 ---
 
 ## Preflight
@@ -238,7 +238,7 @@ rm -rf /tmp/stark-d2p-$$
 
 ## Observability
 
-Standard observability: create task per phase, emit timestamped progress logs (`[HH:MM:SS] Phase N: ...`), record metrics block (plans generated N/3, reviews N/6, winner agent + score, runner-up, synthesis merges, output path, per-phase durations), emit completion event via `emit_queue.py`.
+Standard observability: create task per phase, emit timestamped progress logs (`[HH:MM:SS] Phase N: ...`), record metrics block (plans generated N/3, reviews N/6, winner agent + score, runner-up, synthesis merges, output path, per-phase durations), emit completion event via `$SCRIPTS/stark-emit`.
 
 Improvement flags: plan generation > 5 min → flag slow agent; cross-review parse failure → flag parse issue; score gap < 0.5 → "close race"; any dimension < 5 in winning plan → "weak spots in {dimension}"; agent generation failure → "only N/3 plans".
 

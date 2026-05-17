@@ -5,8 +5,8 @@ description: >-
 argument-hint: "[--dry-run] [--repo ORG/REPO] [--aggressive]"
 disable-model-invocation: true
 model: claude-sonnet-4-6
-revision: 7c91ffda1c063674729d3d8dddcf530bb937db53
-revision_date: 2026-05-14T07:49:39Z
+revision: ab6a41c8d94c419a963eaac3902148f6961b723f
+revision_date: 2026-05-17T10:33:06Z
 ---
 
 # stark-housekeeping
@@ -198,7 +198,7 @@ verification failure the originals are left in place and `errors` notes it.
 
 ## Observability
 
-Standard observability: create task, emit timestamped progress logs, record metrics block (issues closed by category, branches deleted, worktrees cleaned, per-phase timing), emit completion event via `emit_queue.py`:
+Standard observability: create task, emit timestamped progress logs, record metrics block (issues closed by category, branches deleted, worktrees cleaned, per-phase timing), emit completion event via `$SCRIPTS/stark-emit`:
 
 ```bash
 $SCRIPTS/stark-emit skill_invocation \
