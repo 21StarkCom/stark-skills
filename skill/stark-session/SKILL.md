@@ -5,8 +5,8 @@ description: >-
 argument-hint: "[start|end]"
 disable-model-invocation: true
 model: opus
-revision: 052ea19e44da89f888d628798524d9ce02663a6c
-revision_date: 2026-05-17T10:21:10Z
+revision: ab6a41c8d94c419a963eaac3902148f6961b723f
+revision_date: 2026-05-17T10:33:06Z
 ---
 
 ## Preflight
@@ -220,8 +220,10 @@ If branch has upstream or on main ahead of origin: `git push`. On failure: repor
 
 ### Phase 5.5 — Sync Telemetry
 
+stark-insights' scheduler drains `~/.stark-insights/queue.db` on its own
+cadence. The session-end hook only needs to nudge the buffer sync:
+
 ```bash
-$PYTHON -c "import sys; sys.path.insert(0, '$SCRIPTS'); from emit_queue import drain_to_buffer; print(drain_to_buffer(batch_size=500))"
 SYNC_SCRIPT=~/Code/Playground/stark-insights/scripts/sync_buffer.py
 if [ -f "$SYNC_SCRIPT" ]; then ~/Code/Playground/stark-insights/.venv/bin/python3 "$SYNC_SCRIPT" 2>/dev/null; fi
 ```

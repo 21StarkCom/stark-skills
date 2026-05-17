@@ -1,24 +1,22 @@
 #!/usr/bin/env node
 /**
- * emit-queue CLI — TS replacement for `python3 scripts/emit_queue.py --health`
- * and the per-tick `record_context_pct` import that statusline-command.sh runs.
+ * emit-queue CLI. Wire surface for shell + Python consumers (statusline,
+ * install.sh schema bootstrap, `/stark-session` health block, `scripts/_emit.py`).
  *
  * Subcommands:
  *   --health                         Print queue health stats as JSON, exit 0.
- *                                    Shape matches the Python `_health()` so
- *                                    /stark-session can swap consumers freely.
  *   --init-schema                    Open the queue DB to force schema
- *                                    creation. Used by install.sh in place of
- *                                    the prior `import emit_queue` heredoc.
+ *                                    creation. Used by install.sh.
  *   record-context-pct <pct>         Record a context-window % reading and
  *                                    print the trend indicator (▲ / ▸ / "")
  *                                    on a single line (no trailing newline).
  *   pending-count                    Print queue pending row count, one int.
  *   dead-letter-count                Print dead_letter row count, one int.
+ *   enqueue                          See USAGE below. Used by scripts/_emit.py
+ *                                    + stark-emit + stark-insights hooks.
  *
- * Both Python (`scripts/emit_queue.py`) and TS implementations write to the
- * same `~/.stark-insights/queue.db` SQLite, so a Python drain still picks up
- * rows enqueued by TS callers and vice versa.
+ * Writes to `~/.stark-insights/queue.db`; stark-insights' scheduler reads
+ * from `pending` on its own cadence.
  */
 
 import {
