@@ -8,8 +8,8 @@ description: >-
 argument-hint: "<plan-path> [--source-spec <path>] [--model <id>] [--dry-run] [--no-pr-comment]"
 disable-model-invocation: true
 model: opus
-revision: ea469ff2911993abd010f53e1a09085e5f015d0a
-revision_date: 2026-05-16T16:52:06Z
+revision: d999a7e78187c70724cc35edb0b72188f2e68909
+revision_date: 2026-05-17T04:49:07Z
 ---
 
 # stark-red-team-plan
@@ -252,8 +252,8 @@ If posting fails, warn and continue.
 ### 4.2.1 Accepting human-review halts
 
 If the run exits `halted_human_review`, the operator can acknowledge a
-specific concern with `red_team_accept.py STABLE_KEY` (shown in the
-sidecar, the PR comment, and the `red_team_status.py` display). Accepted
+specific concern with `node --experimental-strip-types tools/red_team_accept.ts STABLE_KEY` (shown in the
+sidecar, the PR comment, and the `tools/red_team_status.ts` display). Accepted
 keys persist in the audit DB so subsequent runs no longer halt on the
 same concern.
 

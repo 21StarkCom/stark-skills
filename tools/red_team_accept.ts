@@ -12,9 +12,10 @@
  */
 
 import readline from "node:readline";
-import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { resolveDb } from "./red_team_db_resolver.ts";
 
 import {
   acceptFinding,
@@ -24,7 +25,6 @@ import {
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "..");
-const AUDIT_CLI = path.join(REPO_ROOT, "scripts", "red_team_audit_cli.py");
 
 interface CliArgs {
   stableKeys: string[];
@@ -93,21 +93,6 @@ Options:
   );
 }
 
-function resolveDbPath(cliDb: string | null): string {
-  const args = ["resolve-db"];
-  if (cliDb !== null) args.push("--db", cliDb);
-  const proc = spawnSync("python3", [AUDIT_CLI, ...args], {
-    encoding: "utf8",
-    env: process.env as Record<string, string>,
-  });
-  if (proc.status !== 0) {
-    throw new Error(
-      `resolve-db failed (exit=${proc.status}): ${proc.stderr.trim() || proc.stdout.trim()}`,
-    );
-  }
-  const env = JSON.parse(proc.stdout) as { db_path: string };
-  return env.db_path;
-}
 
 function formatFinding(meta: FindingMetadata): string {
   const lines = [
@@ -215,7 +200,7 @@ export async function main(argv: string[]): Promise<number> {
     process.stderr.write("red_team_accept: at least one STABLE_KEY required\n");
     return 2;
   }
-  const dbPath = resolveDbPath(args.db);
+  const dbPath = resolveDb(args.db).db_path;
   let rc = 0;
   for (const key of args.stableKeys) {
     const result = await acceptOne({
