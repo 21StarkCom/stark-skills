@@ -6,8 +6,8 @@ description: >-
 argument-hint: "[PR_NUMBER] [--agent claude|codex|gemini] [--quick] [--domains a,b,c] [--dry-run] [--repo ORG/REPO]"
 disable-model-invocation: false
 model: opus[1m]
-revision: 10cf64168d96fde54c2af16f434e31a4d296f97b
-revision_date: 2026-05-13T07:18:37Z
+revision: ab6a41c8d94c419a963eaac3902148f6961b723f
+revision_date: 2026-05-17T10:33:06Z
 ---
 
 Single-agent PR review path. Keep this skill thin: do preflight, capture the
@@ -348,7 +348,7 @@ state — surface the path and let the user inspect.
 
 Standard observability applies: timestamped progress logs, metrics block
 (PR number, agents used, domains succeeded/failed, findings by severity,
-duration), and completion event via `emit_queue.py`.
+duration), and completion event via `$SCRIPTS/stark-emit`.
 
 See [../../standards/observability.md](../../standards/observability.md).
 

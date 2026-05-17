@@ -286,7 +286,7 @@ export function assemblePrompt(args: {
 
 // ── Redaction sanitizer ─────────────────────────────────────────────────
 //
-// Mirrors the regex set in `scripts/emit_queue.py::_REDACT_PATTERNS` plus
+// Mirrors the regex set in `tools/emit_queue_lib.ts::REDACT_PATTERNS` plus
 // `scripts/red_team_audit_text.py::_REDACTION_RULES`. Run before every
 // output sink (sidecar, stdout, PR comment, audit shell-out body) as a
 // defense-in-depth backstop after the pre-dispatch gate.

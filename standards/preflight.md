@@ -29,7 +29,7 @@ Parse the JSON `overall` field:
 When the skill runs from automation (CCR triggers, scheduled jobs, CI), a
 `blocked` result MUST also:
 
-1. Emit a `preflight_check` event with `status=blocked` via `emit_queue.py`.
+1. Emit a `preflight_check` event with `status=blocked` via `scripts/_emit.py::emit_event` (or `$SCRIPTS/stark-emit preflight_check status=blocked …` from shell).
 2. Append an entry to `~/.claude/code-review/alerts.jsonl`.
 3. Exit non-zero so the trigger is marked failed.
 
