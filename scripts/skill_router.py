@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 import config_loader
-import emit_queue
+from _emit import emit_event
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -144,7 +144,7 @@ def compute_suggestions(context: str) -> dict:
 def _emit_suggestion_event(context: str, suggestions_count: int, suppressed_count: int) -> None:
     """Emit a skill_suggestion event. Silently ignore emission errors."""
     try:
-        event = emit_queue.make_event(
+        emit_event(
             "skill_suggestion",
             {
                 "context": context,
@@ -152,7 +152,6 @@ def _emit_suggestion_event(context: str, suggestions_count: int, suppressed_coun
                 "suppressed_count": suppressed_count,
             },
         )
-        emit_queue.enqueue(event)
     except Exception:
         pass
 

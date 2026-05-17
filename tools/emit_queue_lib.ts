@@ -18,7 +18,7 @@
  */
 
 import { DatabaseSync } from "node:sqlite";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -212,12 +212,45 @@ function defaultDedupeKey(args: {
   sessionId: string;
   payload: Record<string, unknown>;
 }): string {
-  // Mirrors Python `_default_dedupe_key`: SHA-1 of source+cli+session+type+payload.
-  // Red-team callers always pass an explicit dedupe_key (run/finding/fix_plan
-  // keys), so this path is rare for the red-team subsystem; included for
-  // parity with Python event creation in case a caller skips it.
-  const canonical = `${args.source}|${args.cli}|${args.sessionId}|${args.eventType}|${JSON.stringify(args.payload)}`;
-  return `auto-${createHash("sha1").update(canonical, "utf8").digest("hex").slice(0, 16)}`;
+  // ADR-0014 pins source-specific formulas so the backend can dedupe replays
+  // at the event-semantic level instead of collapsing unrelated events that
+  // happened to share event_type + session_id + wall-clock:
+  //
+  //   - Skill:   `{skill}:{session_id}:{start_timestamp}`
+  //   - Hook:    `{cli}:{session_id}:{sequence_number}`
+  //   - Scraper: `{cli}:{file_path}:{byte_offset}`
+  //
+  // Falls back to `{event_type}:{session_id}:{ts}` when the payload is
+  // missing the source-specific fields — better a generic key than no key.
+  // Kept in lockstep with `scripts/emit_queue.py::_default_dedupe_key`.
+  const ts = Math.floor(Date.now() / 1000);
+  const generic = `${args.eventType}:${args.sessionId}:${ts}`;
+
+  if (args.source === "skill") {
+    const skill = args.payload["skill"];
+    // Python uses `payload.get("start_timestamp") or ts` — falsy-coalesce.
+    // Match it: 0, "" and null all fall back to `ts`, otherwise the
+    // coexistence window would drift between the two implementations.
+    const rawStartTs = args.payload["start_timestamp"];
+    const startTs = (rawStartTs === undefined || rawStartTs === null || rawStartTs === 0 || rawStartTs === "")
+      ? ts
+      : rawStartTs;
+    if (typeof skill === "string" && skill) {
+      return `${skill}:${args.sessionId}:${startTs}`;
+    }
+  } else if (args.source === "hook") {
+    const seq = args.payload["sequence_number"];
+    if (seq !== undefined && seq !== null) {
+      return `${args.cli}:${args.sessionId}:${seq}`;
+    }
+  } else if (args.source === "scraper") {
+    const filePath = args.payload["file_path"];
+    const byteOffset = args.payload["byte_offset"];
+    if (filePath !== undefined && filePath !== null && byteOffset !== undefined && byteOffset !== null) {
+      return `${args.cli}:${filePath}:${byteOffset}`;
+    }
+  }
+  return generic;
 }
 
 export function validate(event: Record<string, unknown>): string[] {
