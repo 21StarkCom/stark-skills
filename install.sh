@@ -113,11 +113,10 @@ provision_infrastructure() {
 
     info "Created local directories"
 
-    # Delegate queue.db and buffer.db schema creation to emit_queue.py — the
-    # runtime owns the canonical v2 schemas, so installing via its own
-    # initializers keeps install.sh from drifting (the prior inline schemas
-    # lagged behind and caused freshly-installed buffers to be quarantined
-    # on first write).
+    # Delegate queue.db schema creation to emit_queue.py — the runtime owns
+    # the canonical schema, so installing via its own initializer keeps
+    # install.sh from drifting. buffer.db is owned by stark-insights (its
+    # own installer creates it).
     REPO_DIR="$REPO_DIR" python3 - <<'PY'
 import os
 import sys
@@ -126,16 +125,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(os.environ["REPO_DIR"]) / "scripts"))
 import emit_queue  # noqa: E402
 
-for opener in (emit_queue._get_db, emit_queue._get_buffer_db):
-    connection = opener()
-    connection.close()
+connection = emit_queue._get_db()
+connection.close()
 
-for db_path in (emit_queue.QUEUE_DB, emit_queue.BUFFER_PATH):
-    if db_path.exists():
-        os.chmod(db_path, 0o600)
+if emit_queue.QUEUE_DB.exists():
+    os.chmod(emit_queue.QUEUE_DB, 0o600)
 PY
 
-    info "Provisioned SQLite databases"
+    info "Provisioned queue.db"
 }
 
 link_dir() {

@@ -22,7 +22,7 @@ import sys
 # Add scripts/ to path for emit_queue import
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
 
-from emit_queue import drain, enqueue, make_event
+from emit_queue import enqueue, make_event
 
 
 def _coerce(v: str) -> bool | int | float | str:
@@ -68,12 +68,8 @@ def main() -> None:
         enqueue(event)
     except ValueError:
         pass  # validation error — skip silently for backward compat
-
-    # Best-effort drain: flush whatever is pending
-    try:
-        drain()
-    except Exception:
-        pass  # drain failures are fine — events are safe in SQLite
+    # No drain here: stark-insights' scheduler owns the drain side; events
+    # are durable in queue.db until it picks them up.
 
 
 if __name__ == "__main__":
