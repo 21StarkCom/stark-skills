@@ -152,15 +152,68 @@ test("makeEvent honors explicit dedupe key over the auto formula", () => {
   assert.equal(event.dedupe_key, "custom-key");
 });
 
-test("makeEvent auto dedupe uses a SHA1-hash fallback", () => {
-  // The TS lib's auto-formula isn't the ADR-0014 source-specific one —
-  // it always hashes. Lock the prefix shape so changes here are deliberate.
+// ADR-0014 source-specific dedupe formulas. The TS auto-formula MUST match
+// Python's `_default_dedupe_key` exactly because Python consumers (preflight,
+// validation_gate, skill_router, …) compute their dedupe keys via the same
+// path during the migration window — divergence would re-deliver events.
+
+test("dedupe skill: payload {skill, start_timestamp} → `{skill}:{sid}:{start_ts}`", () => {
   const event = makeEvent({
     eventType: "skill_invocation",
-    payload: { skill: "x" },
-    sessionId: "sess-1",
+    payload: { skill: "stark-team-review", start_timestamp: 1700000000 },
+    sessionId: "sess-123",
+    source: "skill",
   });
-  assert.match(event.dedupe_key, /^auto-[0-9a-f]{16}$/);
+  assert.equal(event.dedupe_key, "stark-team-review:sess-123:1700000000");
+});
+
+test("dedupe hook: payload {sequence_number} → `{cli}:{sid}:{seq}`", () => {
+  const event = makeEvent({
+    eventType: "tool_usage",
+    payload: { sequence_number: 42 },
+    sessionId: "sess-1",
+    source: "hook",
+    cli: "codex",
+  });
+  assert.equal(event.dedupe_key, "codex:sess-1:42");
+});
+
+test("dedupe scraper: payload {file_path, byte_offset} → `{cli}:{file_path}:{byte_offset}`", () => {
+  const event = makeEvent({
+    eventType: "ci_signal",
+    payload: { file_path: "/var/log/ci.log", byte_offset: 12345 },
+    sessionId: "sess-x",
+    source: "scraper",
+    cli: "gemini",
+  });
+  assert.equal(event.dedupe_key, "gemini:/var/log/ci.log:12345");
+});
+
+test("dedupe generic fallback: skill payload without `skill` → `{type}:{sid}:{ts}`", () => {
+  const event = makeEvent({
+    eventType: "skill_invocation",
+    payload: {},
+    sessionId: "s",
+    source: "skill",
+  });
+  assert.match(event.dedupe_key, /^skill_invocation:s:\d+$/);
+});
+
+test("dedupe skill: falsy start_timestamp (0/'') falls back to now (Python parity)", () => {
+  // Python uses `or ts` — `0` and `''` coalesce to current ts. The TS
+  // ?? operator preserves them, which would drift dedupe keys between
+  // the two implementations during the coexistence window. Regression
+  // guard for that divergence.
+  for (const falsy of [0, ""]) {
+    const event = makeEvent({
+      eventType: "skill_invocation",
+      payload: { skill: "stark-team-review", start_timestamp: falsy },
+      sessionId: "sess-z",
+      source: "skill",
+    });
+    assert.match(event.dedupe_key, /^stark-team-review:sess-z:\d+$/,
+      `falsy start_timestamp=${JSON.stringify(falsy)} should fall back to ts`);
+  }
 });
 
 // ---------------------------------------------------------------------------

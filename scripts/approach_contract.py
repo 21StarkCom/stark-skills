@@ -14,7 +14,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-import emit_queue
+sys.path.insert(0, str(Path(__file__).parent))
+from _emit import emit_event
 
 LOG_PATH = Path.home() / ".claude" / "code-review" / "approach-contracts.jsonl"
 
@@ -199,7 +200,7 @@ def _log_contract(contract: ContractResult) -> None:
 
 def _emit_event(contract: ContractResult) -> None:
     try:
-        event = emit_queue.make_event(
+        emit_event(
             "approach_contract",
             {
                 "plan_file": contract.plan_file,
@@ -211,7 +212,6 @@ def _emit_event(contract: ContractResult) -> None:
                 "confirmed": contract.confirmed,
             },
         )
-        emit_queue.enqueue(event)
     except Exception as exc:
         print(f"approach_contract: warning: failed to emit event: {exc}", file=sys.stderr)
 

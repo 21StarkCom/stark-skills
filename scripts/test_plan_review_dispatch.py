@@ -556,7 +556,7 @@ class TestParallelDispatch:
             agent="claude", domain="completeness", raw_output="[]",
             model="claude-opus-4-7", findings=[finding], duration_s=1.5,
         )
-        with patch("emit_queue.enqueue") as mock_enqueue:
+        with patch("_emit.emit_event") as mock_emit:
             dispatch_plan_review(
                 plan_content="Test plan", round_num=1,
                 agents=["claude"],
@@ -565,36 +565,33 @@ class TestParallelDispatch:
                 file_path="docs/specs/foo.md",
                 repo="acme/spec-repo",
             )
-        # One agent_dispatch + one review_finding
-        types = [c.args[0]["type"] for c in mock_enqueue.call_args_list]
+        # emit_event(event_type, payload, *, project=..., dedupe_key=...)
+        types = [c.args[0] for c in mock_emit.call_args_list]
         assert "agent_dispatch" in types
         assert "review_finding" in types
-        # Per-finding event carries the doc context attributed to the real repo
-        finding_event = next(
-            c.args[0] for c in mock_enqueue.call_args_list
-            if c.args[0]["type"] == "review_finding"
-        )
-        assert finding_event["payload"]["pr_number"] is None
-        assert finding_event["payload"]["review_type"] == "design"
-        assert finding_event["payload"]["file"] == "docs/specs/foo.md"
+        finding_call = next(c for c in mock_emit.call_args_list if c.args[0] == "review_finding")
+        finding_payload = finding_call.args[1]
+        finding_kwargs = finding_call.kwargs
+        assert finding_payload["pr_number"] is None
+        assert finding_payload["review_type"] == "design"
+        assert finding_payload["file"] == "docs/specs/foo.md"
         # repo is the actual repo identifier — must NOT be the review_type
         # (catches the prior bug where "design"/"plan" leaked into payload.repo
         # and corrupted repo-scoped analytics).
-        assert finding_event["payload"]["repo"] == "acme/spec-repo"
-        assert finding_event["project"] == "acme/spec-repo"
-        assert finding_event["payload"]["title"] == "Missing rate limit"
+        assert finding_payload["repo"] == "acme/spec-repo"
+        assert finding_kwargs["project"] == "acme/spec-repo"
+        assert finding_payload["title"] == "Missing rate limit"
         # Dedupe key is repo-scoped so the same relative doc path in another
         # repo can't collide and silently drop events.
-        assert "acme/spec-repo" in finding_event["dedupe_key"]
+        assert "acme/spec-repo" in finding_kwargs["dedupe_key"]
         # agent_dispatch carries model + review_type and is repo-attributed.
-        ad = next(
-            c.args[0] for c in mock_enqueue.call_args_list
-            if c.args[0]["type"] == "agent_dispatch"
-        )
-        assert ad["payload"]["model"] == "claude-opus-4-7"
-        assert ad["payload"]["review_type"] == "design"
-        assert ad["payload"]["file"] == "docs/specs/foo.md"
-        assert ad["project"] == "acme/spec-repo"
+        ad_call = next(c for c in mock_emit.call_args_list if c.args[0] == "agent_dispatch")
+        ad_payload = ad_call.args[1]
+        ad_kwargs = ad_call.kwargs
+        assert ad_payload["model"] == "claude-opus-4-7"
+        assert ad_payload["review_type"] == "design"
+        assert ad_payload["file"] == "docs/specs/foo.md"
+        assert ad_kwargs["project"] == "acme/spec-repo"
 
     @patch("plan_review_dispatch._run_plan_subagent")
     def test_no_insights_emission_when_review_type_omitted(self, mock_sub, tmp_path):
@@ -611,14 +608,14 @@ class TestParallelDispatch:
             agent="claude", domain="completeness", raw_output="[]",
             model="claude-opus-4-7",
         )
-        with patch("emit_queue.enqueue") as mock_enqueue:
+        with patch("_emit.emit_event") as mock_emit:
             dispatch_plan_review(
                 plan_content="Test plan", round_num=1,
                 agents=["claude"],
                 global_prompts_dir=str(tmp_path / "prompts"),
                 # review_type/file_path omitted
             )
-        assert mock_enqueue.call_count == 0
+        assert mock_emit.call_count == 0
 
     @patch("plan_review_dispatch._run_plan_subagent")
     def test_dispatch_emits_top_level_models_map(self, mock_sub, tmp_path):

@@ -10,12 +10,13 @@ from typing import Any
 
 CONFIG_PATH = Path.home() / ".claude" / "code-review" / "config.json"
 
-try:  # emit_queue is best-effort — config loading must not fail if it's
-    # unavailable (e.g. partial install, missing optional dep). Tests
-    # monkeypatch _EMIT_QUEUE to capture events.
-    import emit_queue as _EMIT_QUEUE  # type: ignore[assignment]
+try:  # _emit is best-effort — config loading must not fail if it's
+    # unavailable (e.g. partial install). Tests monkeypatch
+    # `_emit.emit_event` (still routed via this attribute name for back-compat)
+    # to capture telemetry calls.
+    from _emit import emit_event as _EMIT_EVENT  # type: ignore[assignment]
 except ImportError:  # pragma: no cover
-    _EMIT_QUEUE = None  # type: ignore[assignment]
+    _EMIT_EVENT = None  # type: ignore[assignment]
 
 DEFAULT_MODELS = {
     "claude": {"enabled": True, "model_id": "claude-opus-4-7"},
@@ -450,10 +451,10 @@ def _drop_locked_overrides(
 def _emit_override_rejected(
     section_name: str, field: str, source: str | None, *, path: str | None = None,
 ) -> None:
-    if _EMIT_QUEUE is None:
+    if _EMIT_EVENT is None:
         return
     try:
-        event = _EMIT_QUEUE.make_event(
+        _EMIT_EVENT(
             "red_team_override_rejected",
             {
                 "section": section_name,
@@ -462,7 +463,6 @@ def _emit_override_rejected(
                 "source": source or "",
             },
         )
-        _EMIT_QUEUE.enqueue(event)
     except Exception as exc:  # noqa: BLE001 — emitting must never break load
         _warn(f"failed to enqueue override_rejected event: {exc}")
 

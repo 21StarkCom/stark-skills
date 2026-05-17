@@ -23,8 +23,10 @@
 
 import {
   deadLetterCount,
+  enqueue,
   health,
   initSchema,
+  makeEvent,
   pendingCount,
   recordContextPct,
 } from "./emit_queue_lib.ts";
@@ -37,7 +39,80 @@ emit-queue CLI
   emit_queue_cli.ts record-context-pct <pct>
   emit_queue_cli.ts pending-count
   emit_queue_cli.ts dead-letter-count
+  emit_queue_cli.ts enqueue --type T --payload JSON \\
+                         [--cli C] [--source S] [--session-id ID] \\
+                         [--project P] [--user-id U] [--dedupe-key K]
 `;
+
+function parseFlags(argv: string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (let i = 0; i < argv.length; i += 1) {
+    const tok = argv[i];
+    if (!tok.startsWith("--")) {
+      throw new Error(`unexpected positional argument: ${tok}`);
+    }
+    const key = tok.slice(2);
+    const next = argv[i + 1];
+    if (next === undefined || next.startsWith("--")) {
+      throw new Error(`flag --${key} requires a value`);
+    }
+    out.set(key, next);
+    i += 1;
+  }
+  return out;
+}
+
+function requireFlag(flags: Map<string, string>, key: string): string {
+  const v = flags.get(key);
+  if (v === undefined) throw new Error(`missing required flag: --${key}`);
+  return v;
+}
+
+function runEnqueue(argv: string[]): number {
+  let flags: Map<string, string>;
+  try {
+    flags = parseFlags(argv);
+  } catch (err) {
+    process.stderr.write(`enqueue: ${(err as Error).message}\n`);
+    return 2;
+  }
+
+  let eventType: string;
+  let payloadRaw: string;
+  try {
+    eventType = requireFlag(flags, "type");
+    payloadRaw = requireFlag(flags, "payload");
+  } catch (err) {
+    process.stderr.write(`enqueue: ${(err as Error).message}\n`);
+    return 2;
+  }
+
+  let payload: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(payloadRaw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      throw new Error("must be a JSON object");
+    }
+    payload = parsed as Record<string, unknown>;
+  } catch (err) {
+    process.stderr.write(`enqueue: --payload ${(err as Error).message}\n`);
+    return 2;
+  }
+
+  const event = makeEvent({
+    eventType,
+    payload,
+    cli: flags.get("cli"),
+    source: flags.get("source"),
+    sessionId: flags.get("session-id"),
+    project: flags.get("project"),
+    userId: flags.get("user-id"),
+    dedupeKey: flags.get("dedupe-key"),
+  });
+  const result = enqueue(event);
+  process.stdout.write(JSON.stringify(result) + "\n");
+  return result.ok ? 0 : 1;
+}
 
 export function main(argv: string[]): number {
   if (argv.length === 0 || argv[0] === "-h" || argv[0] === "--help") {
@@ -80,6 +155,10 @@ export function main(argv: string[]): number {
   if (cmd === "dead-letter-count") {
     process.stdout.write(String(deadLetterCount()) + "\n");
     return 0;
+  }
+
+  if (cmd === "enqueue") {
+    return runEnqueue(argv.slice(1));
   }
 
   process.stderr.write(`unknown command: ${cmd}\n${USAGE}`);
