@@ -59,11 +59,14 @@ def _log(entry: dict) -> None:
 
 
 def _emit_event(payload: dict) -> None:
+    # Telemetry must never break the host. _emit.emit_event swallows its own
+    # subprocess errors, but the lazy import is unprotected — guard the
+    # whole call so an import-time failure (missing _emit.py on sys.path,
+    # SyntaxError from a future edit, partial install) cannot propagate.
     try:
-        import emit_queue
-        event = emit_queue.make_event("heal_attempt", payload)
-        emit_queue.enqueue(event)
-    except Exception:
+        from _emit import emit_event
+        emit_event("heal_attempt", payload)
+    except Exception:  # noqa: BLE001 — telemetry MUST NOT break callers
         pass
 
 

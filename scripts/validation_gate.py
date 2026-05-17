@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 import config_loader
-import emit_queue
+from _emit import emit_event
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -171,8 +171,7 @@ def _emit(repo: str, checks: list[dict], overall: str) -> None:
             "check_count": len(checks),
             "passed_count": passed_count,
         }
-        event = emit_queue.make_event("validation_result", payload)
-        emit_queue.enqueue(event)
+        emit_event("validation_result", payload)
     except Exception:
         pass
 

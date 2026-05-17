@@ -1,76 +1,71 @@
-#!/usr/bin/env python3
-"""Emit skill completion events to stark-insights via durable local queue.
+#!/usr/bin/env bash
+# Emit skill completion events to stark-insights via durable local queue.
+#
+# Usage: stark-emit <event_type> [key=value ...]
+#
+# Designed for skill SKILL.md instructions — Claude runs this at the end
+# of a skill invocation to log structured outcomes.
+#
+# Thin shell wrapper that builds the payload JSON and shells into the TS
+# CLI (tools/emit_queue_cli.ts). The TS lib persists the event into
+# ~/.stark-insights/queue.db; stark-insights' scheduler drains it.
+#
+# Differences from hook-emit.py:
+#   - Sets source=skill for proper dedupe key computation
+#   - Reads CLAUDE_SESSION_ID + CLAUDE_PROJECT for session/project linkage
+#   - Coerces true/false → bool, numeric strings → int/float in payload
+set -euo pipefail
 
-Usage: stark-emit <event_type> [key=value ...]
+if [ $# -lt 1 ]; then
+    exit 0
+fi
 
-Designed for skill SKILL.md instructions — Claude runs this at the end
-of a skill invocation to log structured outcomes.
+EVENT_TYPE="$1"
+shift
 
-Events are written to a local SQLite queue (~/.stark-insights/queue.db)
-and drained to the API opportunistically. Events survive container
-restarts and network interruptions.
+# Locate the TS CLI: prefer the installed symlink, fall back to repo-local
+CLI=""
+if [ -f "$HOME/.claude/code-review/tools/emit_queue_cli.ts" ]; then
+    CLI="$HOME/.claude/code-review/tools/emit_queue_cli.ts"
+else
+    here="$(cd "$(dirname "$0")" && pwd)"
+    if [ -f "$here/tools/emit_queue_cli.ts" ]; then
+        CLI="$here/tools/emit_queue_cli.ts"
+    fi
+fi
+[ -n "$CLI" ] || exit 0  # no CLI reachable — silently drop, matching prior shim
 
-Differences from hook-emit.py:
-  - Sets source=skill for proper dedupe key computation
-  - Reads CLAUDE_SESSION_ID for session linkage
-  - Coerces CLI values: true/false→bool, numeric strings→int/float
-"""
+# Build the payload JSON from key=value args, coercing true/false/int/float.
+PAYLOAD=$(python3 - "$@" <<'PYEOF'
+import json, sys
 
-import os
-import sys
-
-# Add scripts/ to path for emit_queue import
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
-
-from emit_queue import enqueue, make_event
-
-
-def _coerce(v: str) -> bool | int | float | str:
-    if v.lower() == "true":
-        return True
-    if v.lower() == "false":
-        return False
-    try:
-        return int(v)
-    except ValueError:
-        pass
-    try:
-        return float(v)
-    except ValueError:
-        pass
+def coerce(v):
+    if v.lower() == "true": return True
+    if v.lower() == "false": return False
+    try: return int(v)
+    except ValueError: pass
+    try: return float(v)
+    except ValueError: pass
     return v
 
+out = {}
+for arg in sys.argv[1:]:
+    if "=" in arg:
+        k, v = arg.split("=", 1)
+        out[k] = coerce(v)
+print(json.dumps(out))
+PYEOF
+)
 
-def main() -> None:
-    if len(sys.argv) < 2:
-        return
+ARGS=(node --experimental-strip-types --no-warnings "$CLI" enqueue
+      --type "$EVENT_TYPE" --payload "$PAYLOAD" --source skill --cli claude)
 
-    event_type = sys.argv[1]
-    payload: dict[str, bool | int | float | str] = {}
-    for arg in sys.argv[2:]:
-        if "=" in arg:
-            k, v = arg.split("=", 1)
-            payload[k] = _coerce(v)
+if [ -n "${CLAUDE_SESSION_ID:-}" ]; then
+    ARGS+=(--session-id "$CLAUDE_SESSION_ID")
+fi
+if [ -n "${CLAUDE_PROJECT:-}" ]; then
+    ARGS+=(--project "$CLAUDE_PROJECT")
+fi
 
-    session_id = os.environ.get("CLAUDE_SESSION_ID")
-    project = os.environ.get("CLAUDE_PROJECT", "")
-
-    event = make_event(
-        event_type,
-        payload,
-        cli="claude",
-        source="skill",
-        session_id=session_id,
-        project=project or None,
-    )
-
-    try:
-        enqueue(event)
-    except ValueError:
-        pass  # validation error — skip silently for backward compat
-    # No drain here: stark-insights' scheduler owns the drain side; events
-    # are durable in queue.db until it picks them up.
-
-
-if __name__ == "__main__":
-    main()
+# Best-effort: telemetry failures must never break the caller.
+"${ARGS[@]}" >/dev/null 2>&1 || true

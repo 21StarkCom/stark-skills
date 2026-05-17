@@ -31,7 +31,7 @@ from config_loader import (
     get_red_team_config,
     get_model_rates,
 )
-import emit_queue
+from _emit import emit_event
 import github_app
 import lock_helpers
 
@@ -573,7 +573,7 @@ def _log_result(result: PreFlightResult) -> None:
 def _emit_event(result: PreFlightResult) -> None:
     """Emit a preflight_check event to the durable queue."""
     try:
-        event = emit_queue.make_event(
+        emit_event(
             "preflight_check",
             {
                 "workflow": result.workflow,
@@ -582,7 +582,6 @@ def _emit_event(result: PreFlightResult) -> None:
                 "checks": result.checks,
             },
         )
-        emit_queue.enqueue(event)
     except Exception as exc:
         print(f"preflight: warning: failed to emit event: {exc}", file=sys.stderr)
 

@@ -475,32 +475,17 @@ def _emit_plan_dispatch_events(
     """
     try:
         try:
-            from emit_queue import enqueue
+            from _emit import emit_event
         except ImportError:
             return
 
-        import datetime as _dt
-        now_iso = _dt.datetime.now(_dt.timezone.utc).isoformat()
         repo_label = repo or "unknown"
         safe_file = _safe_repo_relative(file_path, repo_dir)
-
-        def _envelope(event_type: str, payload: dict, dedupe_key: str) -> dict:
-            return {
-                "type": event_type,
-                "timestamp": now_iso,
-                "cli": "claude",
-                "source": "skill",
-                "schema_version": 1,
-                "project": repo_label,
-                "dedupe_key": dedupe_key,
-                "payload": payload,
-            }
-
         file_key = f"{repo_label}:{review_type}:{safe_file}:round-{round_num}"
         finding_idx = 0
         for r in results:
             try:
-                enqueue(_envelope("agent_dispatch", {
+                emit_event("agent_dispatch", {
                     "agent": r.agent,
                     "model": r.model,
                     "domain": r.domain,
@@ -512,12 +497,13 @@ def _emit_plan_dispatch_events(
                     "finding_count": len(r.findings),
                     "review_type": review_type,
                     "file": safe_file,
-                }, f"doc-review:{file_key}:agent:{r.agent}:{r.domain}"))
+                }, project=repo_label,
+                dedupe_key=f"doc-review:{file_key}:agent:{r.agent}:{r.domain}")
             except Exception as exc:  # pragma: no cover
                 print(f"  [!] Failed to emit agent_dispatch: {exc}", file=sys.stderr)
             for f in r.findings:
                 try:
-                    enqueue(_envelope("review_finding", {
+                    emit_event("review_finding", {
                         "pr_number": None,
                         "repo": repo_label,
                         "round": round_num,
@@ -528,14 +514,13 @@ def _emit_plan_dispatch_events(
                         "description": f.description,
                         "review_type": review_type,
                         "file": safe_file,
-                    }, f"doc-review:{file_key}:finding:{finding_idx}"))
+                    }, project=repo_label,
+                    dedupe_key=f"doc-review:{file_key}:finding:{finding_idx}")
                 except Exception as exc:  # pragma: no cover
                     print(f"  [!] Failed to emit review_finding: {exc}", file=sys.stderr)
                 finding_idx += 1
     except Exception as exc:  # pragma: no cover
-        # Never let telemetry crash a completed review. Catches anything
-        # the inner per-event handlers missed (datetime / import-time
-        # failures other than ImportError, etc.).
+        # Never let telemetry crash a completed review.
         print(f"  [!] Telemetry emission failed: {exc}", file=sys.stderr)
 
 
