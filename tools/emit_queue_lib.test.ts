@@ -61,9 +61,22 @@ test("validate rejects unknown cli", () => {
 });
 
 test("validate rejects unknown source", () => {
-  // The TS lib has a narrower VALID_SOURCES (skill/hook/subagent) than Python
-  // (which also accepts scraper/backfill). Use a definitely-bogus name.
+  // VALID_SOURCES is {skill, hook, scraper, backfill} — matches the Python
+  // _VALID_SOURCES exactly. Use a definitely-bogus name.
   const errs = validate(baseEvent({ source: "magic" }));
+  assert.ok(errs.some((e) => e.includes("invalid source")));
+});
+
+test("validate accepts every source in the parity set", () => {
+  for (const source of ["skill", "hook", "scraper", "backfill"]) {
+    assert.deepEqual(validate(baseEvent({ source })), [], source);
+  }
+});
+
+test("validate rejects the removed 'subagent' source", () => {
+  // Locks in the intentional removal from the prior {skill, hook, subagent}
+  // set. If you're re-adding 'subagent', delete this test deliberately.
+  const errs = validate(baseEvent({ source: "subagent" }));
   assert.ok(errs.some((e) => e.includes("invalid source")));
 });
 
@@ -86,6 +99,25 @@ test("validate accepts v2 + red-team event types", () => {
     "red_team_fix_plan",
     "red_team_call_start",
     "red_team_call_end",
+  ]) {
+    assert.deepEqual(validate(baseEvent({ type })), [], type);
+  }
+});
+
+test("validate accepts the v2 + tool + ci + back-compat type set", () => {
+  // Broader sweep — every additional type widened in this PR (beyond the
+  // red-team batch above). If a future change drops one, this test fails
+  // loudly instead of being silently masked by the negative coverage.
+  for (const type of [
+    "skill_invocation", "review_finding", "review_quality",
+    "agent_dispatch", "prompt", "correction",
+    "memory_write", "code_change", "bug_fix",
+    "pr_event", "tool_usage", "ci_signal",
+    "tournament_result", "preflight_check", "approach_contract",
+    "validation_result", "heal_attempt",
+    "context_compaction", "learning_captured", "skill_recommendation",
+    "learning_capture", "skill_suggestion",
+    "red_team_override_rejected",
   ]) {
     assert.deepEqual(validate(baseEvent({ type })), [], type);
   }
@@ -264,6 +296,24 @@ test("recordContextPct writes via tmp+rename (no .tmp left behind)", () => {
   recordContextPct(42, env);
   const tmp = ctxHistoryPath(env) + ".tmp";
   assert.equal(fs.existsSync(tmp), false);
+});
+
+test("recordContextPct trend compares against the oldest kept entry", () => {
+  // The semantic invariant is `kept[0]` (oldest in the rolling window),
+  // not the previous reading. A slow-rise series (each step <1pp vs
+  // previous, but cumulatively > 5pp vs oldest) must trigger ▲ — that's
+  // what catches a regression that compares-to-previous instead of
+  // compares-to-oldest.
+  const env = freshEnv();
+  for (const v of [50, 50.5, 51, 51.5, 52, 52.5, 53, 53.5, 54, 54.5]) {
+    recordContextPct(v, env);
+  }
+  // window now contains [50..54.5]. Next write of 56 is +1.5pp vs the
+  // previous (54.5) — would NOT trigger ▲ under compare-to-previous —
+  // but +6pp vs the oldest (50) which MUST trigger ▲ under the
+  // documented compare-to-oldest semantics.
+  const trend = recordContextPct(56, env);
+  assert.equal(trend, "▲");
 });
 
 // ---------------------------------------------------------------------------

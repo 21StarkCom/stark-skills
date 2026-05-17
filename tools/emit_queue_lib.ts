@@ -50,8 +50,10 @@ const VALID_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 const VALID_CLIS: ReadonlySet<string> = new Set(["claude", "codex", "gemini"]);
-// Matches `scripts/emit_queue.py::_VALID_SOURCES`. Widened from the prior
-// red-team-only subset (skill/hook/subagent) — see note on VALID_TYPES.
+// Matches `scripts/emit_queue.py::_VALID_SOURCES`. Replaces the prior
+// red-team-only subset (skill/hook/subagent) — `subagent` is dropped on
+// purpose (no caller left), `scraper` + `backfill` added for parity with
+// the Python set.
 const VALID_SOURCES: ReadonlySet<string> = new Set(["skill", "hook", "scraper", "backfill"]);
 
 const REQUIRED_FIELDS: readonly string[] = [
