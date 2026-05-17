@@ -7,14 +7,15 @@
 // SQLite DB), and the live `dispatch()` flow with a mocked codex.
 
 import { strict as assert } from "node:assert";
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
+import { initRedTeamTables } from "./red_team_audit_lib.ts";
+
 import {
-  AUDIT_CLI,
   DEFAULT_FIX_PLAN_CONFIG,
   PROMPTS_DIR,
   REPO_ROOT,
@@ -50,7 +51,6 @@ import {
   scrubEnv,
   serializeFindingsEnvelope,
   sidecarPathFor,
-  updateRunStatus,
   validateFindings,
   validateFixPlan,
 } from "./red_team_lib.ts";
@@ -87,8 +87,8 @@ function tmpDoc(content: string): string {
 
 // ── Constants + repo-relative anchors ─────────────────────────────────
 
-test("REPO_ROOT resolves to a directory containing scripts/red_team_audit_cli.py", () => {
-  assert.equal(fs.existsSync(AUDIT_CLI), true, `expected ${AUDIT_CLI} to exist`);
+test("REPO_ROOT resolves to a directory containing global/prompts/red-team/", () => {
+  // The audit CLI shell-out is gone after Phase 5b — TS-native everything.
   assert.equal(fs.existsSync(path.join(REPO_ROOT, "global", "prompts", "red-team")), true);
   assert.equal(PROMPTS_DIR, path.join(REPO_ROOT, "global", "prompts", "red-team"));
 });
@@ -498,22 +498,24 @@ test("parseCodexJsonl extracts agent_message text + token usage", () => {
 
 // ── Audit shell-out (live SQLite) ────────────────────────────────────
 
-test("resolveDbPath emits a canonical envelope from the real CLI", () => {
+test("resolveDbPath emits a canonical envelope (TS-native after Phase 5b)", () => {
   const out = resolveDbPath();
   assert.equal(typeof out.db_path, "string");
   assert.ok(out.db_path.length > 0);
   assert.ok(["default", "env", "config", "cli"].includes(out.source));
 });
 
-test("recordRun + updateRunStatus round-trip via the live CLI", () => {
+test("recordRun persists a row via the TS-native audit lib", () => {
   const db = tmpDb();
   const runId = `lib-test-${Math.random().toString(36).slice(2, 8)}`;
+  // initRedTeamTables must run before recordRun (the lib doesn't auto-init).
+  initRedTeamTables(db);
   const created = recordRun(
     {
       run_id: runId,
       stage: "design",
       rounds_used: 1,
-      final_status: "in-progress",
+      final_status: "halted",
       total_findings: 0,
       critical_count: 0,
       high_count: 0,
@@ -526,11 +528,9 @@ test("recordRun + updateRunStatus round-trip via the live CLI", () => {
     },
     db,
   );
+  assert.equal(created.ok, true);
   assert.equal(created.status, "created");
-
-  const transitioned = updateRunStatus(runId, "clean", db);
-  assert.equal(transitioned.status, "transitioned");
-  assert.equal(transitioned.to, "clean");
+  assert.equal(created.run_id, runId);
 });
 
 // ── End-to-end dispatch (mocked codex) ───────────────────────────────
@@ -1346,26 +1346,23 @@ classification:
       error: null,
     }),
   });
-  // Peek at the queue via the same CLI the dispatcher uses, so we exercise
-  // the real cross-language seam rather than poking SQLite directly.
-  const peek = spawnSync(
-    "python3",
-    [
-      path.join(REPO_ROOT, "scripts", "red_team_emit_queue_cli.py"),
-      "peek",
-      "--source",
-      "pending",
-      "--limit",
-      "200",
-    ],
-    { encoding: "utf8", env: process.env as Record<string, string> },
-  );
-  assert.equal(peek.status, 0, `peek stderr: ${peek.stderr}`);
-  const parsed = JSON.parse(peek.stdout) as {
-    rows: Array<{ event: { type: string; payload: Record<string, unknown> } }>;
-  };
-  const eventsForThisRun = parsed.rows
-    .map((r) => r.event)
+  // After Phase 5b the emit-queue CLI is gone; read the queue DB
+  // directly. STARK_QUEUE_DIR was set at module load so we hit a tmp DB.
+  const queueDbPath = path.join(process.env.STARK_QUEUE_DIR!, "queue.db");
+  const qdb = new DatabaseSync(queueDbPath);
+  let rawRows: Array<{ event_json: string }>;
+  try {
+    rawRows = qdb.prepare("SELECT event_json FROM pending").all() as Array<{
+      event_json: string;
+    }>;
+  } finally {
+    qdb.close();
+  }
+  const eventsForThisRun = rawRows
+    .map((r) => JSON.parse(r.event_json) as {
+      type: string;
+      payload: Record<string, unknown>;
+    })
     .filter((e) => (e.payload as { run_id?: string }).run_id === ctx.run_id);
   const typesSeen = new Set(eventsForThisRun.map((e) => e.type));
   // red_team_run + red_team_finding are mandatory; red_team_fix_plan does

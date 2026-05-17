@@ -10,16 +10,16 @@
  *     [--dry-run] [--manifest PATH]
  */
 
-import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { resolveDb } from "./red_team_db_resolver.ts";
 
 import { initRedTeamTables } from "./red_team_audit_lib.ts";
 import { runBackfill, type BackfillScope } from "./red_team_backfill_lib.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "..");
-const AUDIT_CLI = path.join(REPO_ROOT, "scripts", "red_team_audit_cli.py");
 
 interface CliArgs {
   scope: BackfillScope;
@@ -103,21 +103,6 @@ Options:
   );
 }
 
-function resolveDbPath(cliDb: string | null): string {
-  const args = ["resolve-db"];
-  if (cliDb !== null) args.push("--db", cliDb);
-  const proc = spawnSync("python3", [AUDIT_CLI, ...args], {
-    encoding: "utf8",
-    env: process.env as Record<string, string>,
-  });
-  if (proc.status !== 0) {
-    throw new Error(
-      `resolve-db failed (exit=${proc.status}): ${proc.stderr.trim() || proc.stdout.trim()}`,
-    );
-  }
-  const env = JSON.parse(proc.stdout) as { db_path: string };
-  return env.db_path;
-}
 
 export function main(argv: string[]): number {
   let args: CliArgs;
@@ -131,7 +116,7 @@ export function main(argv: string[]): number {
     printHelp();
     return 0;
   }
-  const dbPath = resolveDbPath(args.db);
+  const dbPath = resolveDb(args.db).db_path;
   process.stderr.write(
     `red-team backfill: scope=${args.scope} db=${dbPath} dry_run=${args.dryRun} ` +
       `limit=${args.limit === null ? "none" : args.limit}\n`,

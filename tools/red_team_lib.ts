@@ -33,12 +33,20 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
-import { loadAuditPolicy } from "./red_team_audit_lib.ts";
+import {
+  loadAuditPolicy,
+  recordRedTeamRun,
+  recordFindings as auditRecordFindings,
+  type FindingRow,
+  type RedTeamRunRow,
+} from "./red_team_audit_lib.ts";
 import {
   applyToField,
   policyMode,
   type AuditRetentionPolicy,
 } from "./red_team_audit_text_lib.ts";
+import { resolveDb } from "./red_team_db_resolver.ts";
+import { enqueue as queueEnqueue, makeEvent } from "./emit_queue_lib.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -210,8 +218,10 @@ export const REPO_ROOT = (() => {
 })();
 
 export const PROMPTS_DIR = path.join(REPO_ROOT, "global", "prompts", "red-team");
-export const AUDIT_CLI = path.join(REPO_ROOT, "scripts", "red_team_audit_cli.py");
-export const EMIT_QUEUE_CLI = path.join(REPO_ROOT, "scripts", "red_team_emit_queue_cli.py");
+// Phase 5b: the Python audit CLI + emit-queue CLI are gone. All audit
+// writes go through `tools/red_team_audit_lib.ts` directly, all insights
+// events go through `tools/emit_queue_lib.ts` directly. The constants
+// below used to point at the deleted scripts and are kept removed.
 
 // ── Prompt resolution ────────────────────────────────────────────────────
 
@@ -791,38 +801,12 @@ export interface AuditEnvelope {
   [k: string]: unknown;
 }
 
-function runAuditCli(
-  args: string[],
-  stdin?: string,
-  env?: Record<string, string>,
-): { code: number; stdout: string; stderr: string } {
-  // The audit CLI is our own first-party code — pass the parent env
-  // through so operator overrides like STARK_RED_TEAM_DB take effect.
-  // scrubEnv() is only for the codex subprocess (untrusted model surface).
-  const effectiveEnv = env ?? (process.env as Record<string, string>);
-  const proc = spawnSync("python3", [AUDIT_CLI, ...args], {
-    input: stdin,
-    encoding: "utf8",
-    env: effectiveEnv,
-  });
-  return {
-    code: proc.status ?? 1,
-    stdout: proc.stdout ?? "",
-    stderr: proc.stderr ?? "",
-  };
-}
-
-/** Resolve the canonical DB path via the CLI (cross-language seam). */
-export function resolveDbPath(): { db_path: string; source: string } {
-  const proc = runAuditCli(["resolve-db"]);
-  if (proc.code !== 0) {
-    throw new Error(`resolve-db failed (exit=${proc.code}): ${proc.stderr}`);
-  }
-  const envelope = JSON.parse(proc.stdout) as {
-    db_path: string;
-    source: string;
-  };
-  return envelope;
+/** Resolve the canonical DB path. TS-native after Phase 5b — no more
+ *  shell-out to the Python audit CLI. Resolution precedence matches the
+ *  former CLI: `--db` > `STARK_RED_TEAM_DB` env > `red_team.audit.db_path`
+ *  config > default. */
+export function resolveDbPath(cliDb?: string | null): { db_path: string; source: string } {
+  return resolveDb(cliDb ?? null);
 }
 
 export interface RecordRunInput {
@@ -844,49 +828,57 @@ export interface RecordRunInput {
   pr_number?: number | null;
 }
 
+/** Persist one red-team run row. TS-native after Phase 5b — calls
+ *  `red_team_audit_lib.ts::recordRedTeamRun` directly. Returns an
+ *  `AuditEnvelope` for back-compat with the old CLI shell-out shape. */
 export function recordRun(input: RecordRunInput, dbPath: string): AuditEnvelope {
-  const proc = runAuditCli(["record-run", "--db", dbPath], JSON.stringify(input));
-  return parseAuditEnvelope(proc);
+  try {
+    const row: RedTeamRunRow = {
+      ...input,
+      repo: input.repo ?? null,
+      artifact_relative_path: input.artifact_relative_path ?? null,
+      pr_number: input.pr_number ?? null,
+    };
+    recordRedTeamRun(row, dbPath);
+    return { ok: true, run_id: input.run_id, status: "created" };
+  } catch (err) {
+    return { ok: false, error: "record_run_failed", detail: (err as Error).message };
+  }
 }
 
+/** Persist N finding rows. TS-native after Phase 5b. Applies the
+ *  operator's retention policy (resolved from config) so concern /
+ *  consequence / counter_proposal / trade_off / reason_for_uncertainty
+ *  get redacted + excerpted per the FU-rt6 contract. */
 export function recordFindings(
   runId: string,
   findings: Array<Record<string, unknown>>,
   dbPath: string,
 ): AuditEnvelope {
-  const payload = { findings };
-  const proc = runAuditCli(
-    ["record-findings", "--db", dbPath, "--run-id", runId],
-    JSON.stringify(payload),
-  );
-  return parseAuditEnvelope(proc);
-}
-
-export function updateRunStatus(
-  runId: string,
-  to: string,
-  dbPath: string,
-  from?: string,
-): AuditEnvelope {
-  const args = ["update-run-status", "--db", dbPath, "--run-id", runId, "--to", to];
-  if (from) args.push("--from", from);
-  const proc = runAuditCli(args);
-  return parseAuditEnvelope(proc);
-}
-
-function parseAuditEnvelope(proc: {
-  code: number;
-  stdout: string;
-  stderr: string;
-}): AuditEnvelope {
   try {
-    return JSON.parse(proc.stdout) as AuditEnvelope;
-  } catch {
-    return {
-      ok: false,
-      error: "audit_cli_unparseable_output",
-      detail: { code: proc.code, stdout: proc.stdout, stderr: proc.stderr },
-    };
+    const rows = findings.map((f) => ({
+      run_id: (f.run_id as string) ?? runId,
+      stage: f.stage as string,
+      round_num: f.round_num as number,
+      finding_id: f.finding_id as string,
+      persona: f.persona as string,
+      severity: f.severity as string,
+      concern: f.concern as string,
+      consequence: f.consequence as string,
+      counter_proposal: f.counter_proposal as string,
+      trade_off: (f.trade_off as string | null) ?? null,
+      reason_for_uncertainty: (f.reason_for_uncertainty as string | null) ?? null,
+      stable_key: (f.stable_key as string | null) ?? null,
+      concern_hash: (f.concern_hash as string | null) ?? null,
+      risk_key: (f.risk_key as string | null) ?? null,
+      affected_component: (f.affected_component as string | null) ?? null,
+      failure_mode: (f.failure_mode as string | null) ?? null,
+    })) satisfies FindingRow[];
+    const policy = loadAuditPolicy(REPO_ROOT);
+    auditRecordFindings(rows, dbPath, policy);
+    return { ok: true, run_id: runId, count: rows.length, status: "recorded" };
+  } catch (err) {
+    return { ok: false, error: "record_findings_failed", detail: (err as Error).message };
   }
 }
 
@@ -2289,24 +2281,11 @@ export function enqueueInsightsEvent(
   payload: Record<string, unknown>,
   dedupeKey: string,
 ): InsightsEnqueueResult {
-  const args = ["--type", eventType, "--dedupe-key", dedupeKey, "--payload-json", "-"];
-  const proc = spawnSync("python3", [EMIT_QUEUE_CLI, "enqueue", ...args], {
-    input: JSON.stringify(payload),
-    encoding: "utf8",
-    env: process.env as Record<string, string>,
-  });
-  if (proc.status !== 0) {
-    return {
-      ok: false,
-      error: `emit-queue exit=${proc.status ?? -1}: ${(proc.stderr ?? "").trim() || (proc.stdout ?? "").trim()}`,
-    };
-  }
-  try {
-    const out = JSON.parse(proc.stdout ?? "{}") as InsightsEnqueueResult;
-    return out;
-  } catch (err) {
-    return { ok: false, error: `unparseable emit-queue stdout: ${(err as Error).message}` };
-  }
+  // Phase 5b: TS-native. Build the canonical envelope + INSERT OR IGNORE
+  // directly into the queue DB via `node:sqlite`. No more shell-out to
+  // `scripts/red_team_emit_queue_cli.py` (deleted in Phase 5b).
+  const event = makeEvent({ eventType, payload, dedupeKey });
+  return queueEnqueue(event);
 }
 
 // ── Payload builders (mirror Python `build_*_envelope` payload shape) ───
