@@ -14,9 +14,10 @@
  * Acceptance happens via `tools/red_team_accept.ts`.
  */
 
-import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { resolveDb } from "./red_team_db_resolver.ts";
 
 import {
   type PendingHalt,
@@ -25,7 +26,6 @@ import {
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "..");
-const AUDIT_CLI = path.join(REPO_ROOT, "scripts", "red_team_audit_cli.py");
 
 interface CliArgs {
   repo: string | null;
@@ -98,24 +98,6 @@ Options:
   );
 }
 
-/** Resolve the audit DB via the canonical CLI (cross-language seam). */
-function resolveDbPath(cliDb: string | null): string {
-  const args = ["resolve-db"];
-  if (cliDb !== null) {
-    args.push("--db", cliDb);
-  }
-  const proc = spawnSync("python3", [AUDIT_CLI, ...args], {
-    encoding: "utf8",
-    env: process.env as Record<string, string>,
-  });
-  if (proc.status !== 0) {
-    throw new Error(
-      `resolve-db failed (exit=${proc.status}): ${proc.stderr.trim() || proc.stdout.trim()}`,
-    );
-  }
-  const env = JSON.parse(proc.stdout) as { db_path: string };
-  return env.db_path;
-}
 
 function formatHuman(halts: readonly PendingHalt[]): string {
   if (halts.length === 0) {
@@ -177,7 +159,7 @@ export function main(argv: string[]): number {
     printHelp();
     return 0;
   }
-  const dbPath = resolveDbPath(args.db);
+  const dbPath = resolveDb(args.db).db_path;
   const halts = listPendingHalts({
     repo: args.repo,
     stage: args.stage,
