@@ -6,8 +6,8 @@ argument-hint: "<plan-slug-or-path> [--dry-run] [--skip-deploy] [--skip-release]
 disable-model-invocation: true
 context: fork
 model: opus
-revision: 7c91ffda1c063674729d3d8dddcf530bb937db53
-revision_date: 2026-05-14T07:49:39Z
+revision: ab6a41c8d94c419a963eaac3902148f6961b723f
+revision_date: 2026-05-17T10:33:06Z
 ---
 
 ## Preflight
@@ -360,7 +360,7 @@ Log recommendations to observability file. Suggest `/stark-review-improvement` i
 
 ## Observability
 
-Standard observability: create task, emit timestamped progress logs, record metrics block (phase, repo, task counts, duration, findings per task, agent scores, ci_bypassed, improvement flags), emit completion event via `emit_queue.py`. See [references/observability.md](references/observability.md) for the full protocol.
+Standard observability: create task, emit timestamped progress logs, record metrics block (phase, repo, task counts, duration, findings per task, agent scores, ci_bypassed, improvement flags), emit completion event via `$SCRIPTS/stark-emit`. See [references/observability.md](references/observability.md) for the full protocol.
 
 ---
 

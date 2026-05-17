@@ -48,7 +48,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `scripts/runtime_env.py` — isolated subprocess env builder (allowlist, token injection, temp dirs)
 - `scripts/github_app.py` — multi-app GitHub auth (stark-Codex, stark-codex, stark-gemini)
 - `scripts/github_projects.py` — GitHub Projects V2 GraphQL utility (13 public functions)
-- `scripts/emit_queue.py` — SQLite-backed durable event queue with dead-letter
+- `tools/emit_queue_lib.ts` + `tools/emit_queue_cli.ts` — SQLite-backed durable event queue (producer side). Python consumers reach it via `scripts/_emit.py`, a thin subprocess wrapper. The drain side lives in stark-insights.
 - `scripts/session_state.py` — persistent session state management
 
 ### TUI & session
@@ -69,7 +69,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `tools/red_team_status.ts` / `tools/red_team_accept.ts` — operator CLIs for listing / accepting human-review halts.
 - `tools/red_team_backfill_lib.ts` + `tools/red_team_backfill.ts` — historical-row backfill into the insights queue.
 - `tools/red_team_db_resolver.ts` — Canonical audit DB resolver (`--db` > env > config > default), matches Python `Path.resolve()` symlink semantics on macOS.
-- `tools/emit_queue_lib.ts` — TS-native subset of `scripts/emit_queue.py` (`makeEvent` + `enqueue` + schema init). Same `~/.stark-insights/queue.db` as the Python implementation.
+- `tools/emit_queue_lib.ts` — canonical TS implementation of the producer queue (`makeEvent` + `enqueue` + `validate` + `health` + `pendingCount` + `deadLetterCount` + `recordContextPct` + `initSchema`). Writes to `~/.stark-insights/queue.db`. Python consumers reach it through `tools/emit_queue_cli.ts` via `scripts/_emit.py`.
 
 ### Other
 - `scripts/stark_persona.py` — session persona engine (weighted selection, combos, catchphrases)
