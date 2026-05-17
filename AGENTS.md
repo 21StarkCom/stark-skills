@@ -58,7 +58,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `scripts/session_tui_cli.py` — session TUI CLI entry point
 
 ### Red-team audit + emit-queue CLIs (Python shell-out seam; Phase 1a of the TS migration)
-- `scripts/openai_responses.py` — Responses-API model allowlist + key resolver used by `preflight.py::check_red_team_transport_auth`. All other Python red-team modules + CLIs were deleted in Phase 5b of the 2026-05-16 migration — the entire red-team subsystem is now pure TypeScript under `tools/`.
+- The red-team subsystem is **pure TypeScript** under `tools/`. All Python red-team modules + CLIs were deleted by end of the 2026-05-16 migration. The Responses-API model allowlist + key resolver previously in `scripts/openai_responses.py` are now inlined into `preflight.py::check_red_team_transport_auth` (its only consumer).
 
 ### Red-team TS dispatchers
 - `tools/red_team_lib.ts` — red-team dispatcher core. Persona/prompt resolution, codex dispatch with sandbox, per-finding validation, sidecar markdown rendering, pre-dispatch sensitive-data gate, redaction sanitizer, data-classification gate, `--replay-transcript` support. Fix-plan generation (`resolveFixPlan` + `runRedTeamFixPlan` + `renderFixPlanSection`), insights emission (`emitRun` / `emitFinding` / `emitFixPlan`). All Python shell-outs removed in Phase 5b — audit writes go through `tools/red_team_audit_lib.ts`, insights events through `tools/emit_queue_lib.ts`, DB resolution through `tools/red_team_db_resolver.ts`.
