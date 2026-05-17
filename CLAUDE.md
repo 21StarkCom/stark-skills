@@ -57,8 +57,8 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `scripts/session_tui.py` — session start/end renderer
 - `scripts/session_tui_cli.py` — session TUI CLI entry point
 
-### Red-team Python helpers (Phase 5b leftovers)
-- `scripts/openai_responses.py` — Responses-API model allowlist + key resolver used by `preflight.py::check_red_team_transport_auth`. All other Python red-team modules + CLIs (`red_team_audit_cli.py`, `red_team_emit_queue_cli.py`, `red_team_audit.py`, `red_team_audit_text.py`, `red_team_backfill.py`, `red_team_human_review.py`, `red_team_insights.py`, `red_team_status.py`, `red_team_accept.py`, `red_team_types.py`) were deleted in Phase 5b of the 2026-05-16 migration — the entire red-team subsystem is now pure TypeScript under `tools/`.
+### Red-team subsystem
+The red-team subsystem is **pure TypeScript** under `tools/`. All Python red-team modules + CLIs were deleted by end of the 2026-05-16 migration. The Responses-API model allowlist + key resolver previously in `scripts/openai_responses.py` are now inlined into `preflight.py::check_red_team_transport_auth` (its only consumer).
 
 ### Other
 - `scripts/stark_persona.py` — session persona engine (weighted selection, combos, catchphrases)

@@ -399,19 +399,54 @@ def check_red_team_model_rates() -> tuple[str, str]:
     return "pass", f"rates found for {model}"
 
 
+_RESPONSES_API_MODELS: frozenset[str] = frozenset({
+    "o3",
+    "o3-mini",
+    "gpt-5.5-pro",
+    "gpt-5.4-pro",
+})
+"""Models that route through the OpenAI Responses API (HTTP) instead of
+the codex CLI. Inlined from the former `scripts/openai_responses.py` so
+the red-team Python subsystem is fully retired — preflight is the only
+remaining consumer."""
+
+
+def _resolve_openai_api_key(env: dict[str, str] | os._Environ[str]) -> str | None:
+    """Resolve an OpenAI API key from `OPENAI_API_KEY` or `OPENAI_API_KEY_FILE`
+    + `OPENAI_API_KEY_LABEL`. Inlined from `scripts/openai_responses.py`."""
+    direct = env.get("OPENAI_API_KEY")
+    if direct:
+        return direct
+    file_path = env.get("OPENAI_API_KEY_FILE")
+    label = env.get("OPENAI_API_KEY_LABEL")
+    if not file_path or not label:
+        return None
+    from pathlib import Path
+    try:
+        text = Path(file_path).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        if key.strip() == label:
+            return value.strip()
+    return None
+
+
 def check_red_team_transport_auth() -> tuple[str, str]:
     """Verify the locked default model's transport has the auth it needs.
 
-    Models in `RESPONSES_API_MODELS` route through the OpenAI Responses API,
-    which requires `OPENAI_API_KEY` (or `OPENAI_API_KEY_FILE` +
+    Models in `_RESPONSES_API_MODELS` route through the OpenAI Responses
+    API, which requires `OPENAI_API_KEY` (or `OPENAI_API_KEY_FILE` +
     `OPENAI_API_KEY_LABEL`) — *not* the codex-CLI keychain. Without this
     check, an install with valid Codex auth and no OpenAI key passes
     preflight and then halts at the design gate with `no OpenAI API key
     available` — surfacing as an unactionable runtime failure long after
     setup. (Round-3 finding 11.)
     """
-    from openai_responses import RESPONSES_API_MODELS, resolve_openai_api_key
-
     try:
         cfg = get_red_team_config()
     except Exception as exc:
@@ -421,10 +456,10 @@ def check_red_team_transport_auth() -> tuple[str, str]:
         return "skip", "red_team disabled in config"
 
     model = cfg.get("model")
-    if model not in RESPONSES_API_MODELS:
+    if model not in _RESPONSES_API_MODELS:
         return "skip", f"model {model!r} routes through codex CLI, not Responses API"
 
-    if resolve_openai_api_key(os.environ) is None:
+    if _resolve_openai_api_key(os.environ) is None:
         return "fail", (
             f"red_team.model '{model}' routes through the Responses API but "
             "no OpenAI API key is available. Set OPENAI_API_KEY, or "
