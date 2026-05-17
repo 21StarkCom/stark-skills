@@ -35,6 +35,10 @@ SEGMENTS = [
     ("git_branch",    "Git Branch",      1, "Current branch name",            "\u2618\ufe0f main"),
     ("git_dirty",     "Dirty State",     1, "Changed/untracked counts + diff", "\U0001f4c4 3 +12 -4"),
     ("model",         "Model",           1, "Claude model display name",      "Opus 1M"),
+    ("effort",        "Reasoning Effort",1, "Lo / Me / Hi / Xh / Mx \u2014 affects output volume + cost", "Hi"),
+    ("thinking",      "Extended Thinking",1,"\U0001f4ad when extended thinking is on (~2-4x output cost)",  "\U0001f4ad"),
+    ("agent",         "Active Agent",    1, "Subagent name (--agent or settings)",                   "\U0001f916 reviewer"),
+    ("out_style",     "Output Style",    1, "Non-default output style (Explanatory / Learning / custom)", "\U0001f3a8 Explanatory"),
     ("inflight",      "Inflight Count",  1, "In-flight tool calls",           "\u26a1\ufe0f 2"),
     ("longest_tool",  "Longest Tool",    1, "Longest running tool + time",    "\u23f3 Read 3m"),
     ("last_tool",     "Last Tool",       1, "Most recent tool + elapsed",     "\u23f1\ufe0f Grep 200ms"),
@@ -42,15 +46,16 @@ SEGMENTS = [
     ("q_dead",        "Dead Letters",    1, "Dead letter queue count",        "\U0001f41e 3"),
     ("session_name",  "Session Name",    1, "Named session identifier",       "refactor-auth"),
     ("vim_mode",      "Vim Mode",        1, "Vim N/I mode indicator",         "N"),
-    ("session_start", "Session Start",   1, "Start time HH:MM",              "\U0001f182 14:30"),
     ("api_ratio",     "API Ratio",       1, "API vs wall time %",            "\u2699\ufe0f 72%"),
-    ("end_time",      "End Time",        1, "Last tool completion time",      "\U0001f174 15:42"),
-    ("ctx_usage",     "Context Usage",   2, "Context window % + trend",       "\U0001f3ac 45%"),
+    ("ctx_usage",     "Context Usage",   2, "Context window % used",          "\U0001f9e0 45%"),
+    ("tokens",        "Token Flow (per turn)", 2, "Last API call: fresh \u2192 cache-read (hit%) \u2192 output", "\u2b06 5.3k \u2192 \U0001f4d6 178k 97% \u2192 \u2b07 850"),
+    ("cost",          "Session Cost",    2, "Real cost (cost.total_cost_usd) + per-hour burn rate", "\U0001f4b0 $1.234 \u00b7 $4.94/h"),
+    ("cost_rate",     "Burn Rate",       2, "Append per-hour rate to cost segment (sub-toggle)",   "$4.94/h"),
     ("session_dur",   "Session Duration",2, "Total elapsed session time",     "\U0001faab 12m"),
-    ("five_hour_rl",  "5h Rate Limit",   2, "5-hour rate limit % + reset",   "\U0001f6dd 32% \u23f3 3h12m"),
+    ("five_hour_rl",  "5h Rate Limit",   2, "5-hour rate limit % + reset",    "\U0001f6dd 32% \u23f3 3h12m"),
     ("weekly_rl",     "Weekly Limit",    2, "7-day rate limit % + reset",     "\U0001f4c5 18% \U0001f570\ufe0f 4d2h"),
-    ("tokens",        "Tokens",          2, "Input/output token counts",      "\u2b06 12.4K \u2b07 3.2K"),
-    ("cost",          "Session Cost",    2, "Estimated session cost",         "\U0001f4b0 $1.234"),
+    ("tier_warn",     "1M-tier Warning", 2, "Flag when exceeds_200k_tokens (Opus 2x pricing)", "\u26a0\ufe0f 1M-tier"),
+    ("tokens_total",  "Tokens (cumulative)", 2, "Session-wide totals (off by default; re-counts cached input each turn)", "\u03a3\u2b06 5.8M \u03a3\u2b07 12k"),
     ("code_churn",    "Code Churn",      2, "Lines added/removed",            "\u270f\ufe0f +42 -17"),
 ]
 
@@ -63,10 +68,30 @@ def load_config() -> dict[str, bool]:
     states = {s[0]: True for s in SEGMENTS}
     if SEGMENTS_JSON.exists():
         try:
-            states.update(json.loads(SEGMENTS_JSON.read_text()))
+            on_disk = json.loads(SEGMENTS_JSON.read_text())
+            states.update(_migrate_config(on_disk))
         except (json.JSONDecodeError, OSError):
             pass
     return states
+
+
+def _migrate_config(on_disk: dict[str, bool]) -> dict[str, bool]:
+    """Migrate renamed segment keys so existing user configs keep their intent.
+
+    `tokens` used to mean "cumulative session totals" — that role is now
+    `tokens_total`, and the `tokens` key has been repurposed to mean
+    "per-turn token flow". A user who previously set `tokens: false` to
+    suppress the noisy cumulative counter would otherwise silently lose
+    the per-turn flow segment instead.
+
+    Strategy: if a stale `tokens` value is present, carry it over to
+    `tokens_total` (only when `tokens_total` is not already set), then
+    drop the `tokens` key so it cannot mask the new per-turn meaning.
+    """
+    if "tokens" in on_disk:
+        prior = on_disk.pop("tokens")
+        on_disk.setdefault("tokens_total", prior)
+    return on_disk
 
 
 def save_config(states: dict[str, bool]) -> None:
