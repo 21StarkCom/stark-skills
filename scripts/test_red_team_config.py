@@ -3,9 +3,40 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 import config_loader
+
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_EMIT_QUEUE_CLI = _REPO_ROOT / "tools" / "emit_queue_cli.ts"
+
+
+def _assert_event_validates(event_type: str, payload: dict, tmp_dir: Path) -> None:
+    """Round-trip a captured event through the TS lib's enqueue (which calls
+    validate internally) against an isolated STARK_QUEUE_DIR. A non-zero
+    exit means the event_type or payload shape was rejected — the same
+    regression the deleted real-validator check used to catch.
+    """
+    env = {**os.environ, "STARK_QUEUE_DIR": str(tmp_dir)}
+    result = subprocess.run(
+        [
+            "node", "--experimental-strip-types", "--no-warnings",
+            str(_EMIT_QUEUE_CLI), "enqueue",
+            "--type", event_type,
+            "--payload", json.dumps(payload, default=str),
+        ],
+        env=env,
+        capture_output=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, (
+        f"TS enqueue rejected event_type={event_type!r}: "
+        f"stderr={result.stderr.decode('utf-8', 'replace')[:400]}"
+    )
 
 
 def test_get_red_team_config_returns_defaults(tmp_path):
@@ -337,6 +368,15 @@ def test_locked_override_emits_audit_event(tmp_path, capsys, monkeypatch):
 
     types = [e["type"] for e in captured]
     assert "red_team_override_rejected" in types
+    # Round-trip every captured event through the TS lib so a regression
+    # that renames `red_team_override_rejected` (or any other captured
+    # type) into something validate() rejects fails the test loudly —
+    # this is the same invariant the previous real-validator check
+    # protected before the cutover to the TS lib.
+    validate_dir = tmp_path / "validate_queue"
+    validate_dir.mkdir()
+    for e in captured:
+        _assert_event_validates(e["type"], e["payload"], validate_dir)
     rejected_fields = {
         e["payload"]["field"]
         for e in captured

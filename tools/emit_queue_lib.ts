@@ -228,7 +228,13 @@ function defaultDedupeKey(args: {
 
   if (args.source === "skill") {
     const skill = args.payload["skill"];
-    const startTs = args.payload["start_timestamp"] ?? ts;
+    // Python uses `payload.get("start_timestamp") or ts` — falsy-coalesce.
+    // Match it: 0, "" and null all fall back to `ts`, otherwise the
+    // coexistence window would drift between the two implementations.
+    const rawStartTs = args.payload["start_timestamp"];
+    const startTs = (rawStartTs === undefined || rawStartTs === null || rawStartTs === 0 || rawStartTs === "")
+      ? ts
+      : rawStartTs;
     if (typeof skill === "string" && skill) {
       return `${skill}:${args.sessionId}:${startTs}`;
     }

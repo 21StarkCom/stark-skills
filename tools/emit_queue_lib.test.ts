@@ -199,6 +199,23 @@ test("dedupe generic fallback: skill payload without `skill` → `{type}:{sid}:{
   assert.match(event.dedupe_key, /^skill_invocation:s:\d+$/);
 });
 
+test("dedupe skill: falsy start_timestamp (0/'') falls back to now (Python parity)", () => {
+  // Python uses `or ts` — `0` and `''` coalesce to current ts. The TS
+  // ?? operator preserves them, which would drift dedupe keys between
+  // the two implementations during the coexistence window. Regression
+  // guard for that divergence.
+  for (const falsy of [0, ""]) {
+    const event = makeEvent({
+      eventType: "skill_invocation",
+      payload: { skill: "stark-team-review", start_timestamp: falsy },
+      sessionId: "sess-z",
+      source: "skill",
+    });
+    assert.match(event.dedupe_key, /^stark-team-review:sess-z:\d+$/,
+      `falsy start_timestamp=${JSON.stringify(falsy)} should fall back to ts`);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // enqueue + queue introspection
 // ---------------------------------------------------------------------------
