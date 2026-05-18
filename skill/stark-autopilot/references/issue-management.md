@@ -13,7 +13,7 @@ done
 
 If `.github/project-config.json` exists, also update the project board:
 1. `export GH_TOKEN=$(node --experimental-strip-types "$TOOLS/github_app.ts" --app stark-claude token)`
-2. Find project item: `github_projects.find_item_for_issue(...)`
+2. Find project item: `node --experimental-strip-types "$TOOLS/github_projects.ts" find-item --org "$ORG" --repo "$REPO" --issue "$ISSUE_NUM" --project "$PROJECT_ID"`
 3. Update Status field to "Agent Working"
 4. `unset GH_TOKEN`
 

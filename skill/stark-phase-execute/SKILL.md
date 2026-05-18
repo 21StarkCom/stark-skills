@@ -6,8 +6,8 @@ argument-hint: "<plan-slug-or-path> [--dry-run] [--skip-deploy] [--skip-release]
 disable-model-invocation: true
 context: fork
 model: opus
-revision: 7d4eb375d131624ff59927945d448856858d621c
-revision_date: 2026-05-18T16:33:25Z
+revision: 63e888043556dafb1b0c7e9743f127ae4a257c6f
+revision_date: 2026-05-18T18:34:12Z
 ---
 
 ## Preflight
@@ -90,7 +90,7 @@ If any check fails → stop and report.
 
 ### 0.2 Fetch plan tasks
 
-**Project-based (preferred):** If `.github/project-config.json` exists, use bot token and `github_projects.get_items(config['project_id'], Status='Ready for Agent')`. Filter by AI Suitability: Autonomous or Assisted only. Unset GH_TOKEN after.
+**Project-based (preferred):** If `.github/project-config.json` exists, use bot token and `node --experimental-strip-types "$TOOLS/github_projects.ts" get-items --project "$PROJECT_ID" --filter "Status=Ready for Agent"`. Filter by AI Suitability via an additional `--filter "AI Suitability=Autonomous"` or post-process the JSON output with `jq` for the Autonomous/Assisted union. Unset GH_TOKEN after.
 
 **Label-based (fallback):**
 ```bash
@@ -161,7 +161,7 @@ git checkout main && git pull --rebase origin main
 git checkout -b phase/{SLUG}/issue-{NUMBER}-{slugified-title}
 ```
 
-If project config is loaded: use bot token, validate spec completeness via `github_projects.check_spec_completeness()`. If gate fails, log and skip to next task. Claim the task with `transition_status(... 'Agent Working')` and `set_field(... 'Agent', 'Claude')`. Unset GH_TOKEN.
+If project config is loaded: use bot token, validate spec completeness via `node --experimental-strip-types "$TOOLS/github_projects.ts" check-spec-completeness --fields "$ITEM_FIELDS_JSON"`. If gate fails, log and skip to next task. Claim the task by transitioning Status: `node --experimental-strip-types "$TOOLS/github_projects.ts" transition-status --project "$PROJECT_ID" --item "$ITEM_ID" --status "Agent Working"`, then `set-field --project "$PROJECT_ID" --item "$ITEM_ID" --name "Agent" --value "Claude"`. Unset GH_TOKEN.
 
 Log: `[HH:MM:SS]   ▸ Task #{NUMBER}: {title}`
 

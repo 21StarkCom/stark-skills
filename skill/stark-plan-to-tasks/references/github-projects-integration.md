@@ -6,6 +6,12 @@ After all issues are created (all 4 creation passes complete), optionally add th
 
 At the start of this step, check for `.github/project-config.json` in the target repo root. If the file does not exist, skip this entire step — project integration is opt-in.
 
+```bash
+CONFIG_JSON=$(node --experimental-strip-types "$TOOLS/github_projects.ts" load-config --repo-root "$REPO_ROOT")
+[ "$CONFIG_JSON" = "null" ] && exit 0
+PROJECT_ID=$(printf '%s' "$CONFIG_JSON" | jq -r '.project_id')
+```
+
 ## Auth
 
 Switch back to bot token. Project field mutations require the GitHub App token:
@@ -20,15 +26,17 @@ For each created issue (from the run manifest), perform these steps. If any Grap
 
 1. **Get issue node ID:**
    ```bash
-   $PYTHON -c "import sys; sys.path.insert(0, '$SCRIPTS'); import github_projects, github_app; github_app.select_app('stark-claude'); print(github_projects.get_issue_node_id('$ORG', '$REPO', $ISSUE_NUM))"
+   ISSUE_NODE_ID=$(node --experimental-strip-types "$TOOLS/github_projects.ts" \
+       get-issue-node-id --org "$ORG" --repo "$REPO" --issue "$ISSUE_NUM" | jq -r '.node_id')
    ```
 
-2. **Add to project:**
+2. **Add to project (returns the item ID — capture for step 3):**
    ```bash
-   $PYTHON -c "import sys; sys.path.insert(0, '$SCRIPTS'); import github_projects, github_app; github_app.select_app('stark-claude'); github_projects.add_issue_to_project('$ITEM_NODE_ID')"
+   ITEM_ID=$(node --experimental-strip-types "$TOOLS/github_projects.ts" \
+       add-issue --project "$PROJECT_ID" --issue "$ISSUE_NODE_ID" | jq -r '.item_id')
    ```
 
-3. **Set project fields** via `github_projects.set_fields()`:
+3. **Set project fields** via the `set-fields` subcommand (single GraphQL mutation per field, 100ms throttle between mutations):
 
    | Field | Value | Source |
    |-------|-------|--------|
@@ -43,22 +51,27 @@ For each created issue (from the run manifest), perform these steps. If any Grap
    | Priority | Derived from risk | `High` risk → `High` priority, `Medium` risk → `Medium`, `Low` risk → `Low` |
 
    ```bash
-   $PYTHON -c "
-   import sys; sys.path.insert(0, '$SCRIPTS')
-   import github_projects, github_app
-   github_app.select_app('stark-claude')
-   github_projects.set_fields('$ITEM_ID', {
-       'Status': '$STATUS',
-       'Phase': '$PHASE_NAME',
-       'Story Points': $SP,
-       'Risk': '$RISK',
-       'AI Suitability': '$AI_SUITABILITY',
-       'Documentation State': 'Not Started',
-       'Spec Approval': 'Not Required',
-       'Release Approval': 'Not Required',
-       'Priority': '$PRIORITY'
-   })
-   "
+   FIELDS_JSON=$(jq -nc \
+     --arg status "$STATUS" \
+     --arg phase "$PHASE_NAME" \
+     --argjson sp "$SP" \
+     --arg risk "$RISK" \
+     --arg ai "$AI_SUITABILITY" \
+     --arg priority "$PRIORITY" \
+     '{
+        Status: $status,
+        Phase: $phase,
+        "Story Points": $sp,
+        Risk: $risk,
+        "AI Suitability": $ai,
+        "Documentation State": "Not Started",
+        "Spec Approval": "Not Required",
+        "Release Approval": "Not Required",
+        Priority: $priority
+      }')
+
+   node --experimental-strip-types "$TOOLS/github_projects.ts" \
+       set-fields --project "$PROJECT_ID" --item "$ITEM_ID" --fields "$FIELDS_JSON"
    ```
 
 ## Error handling
