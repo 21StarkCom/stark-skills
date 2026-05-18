@@ -22,25 +22,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/aryeh/Code/Playground/stark-insights/hooks/hook-emit.py tool_usage"
-          }
-        ]
-      },
-      {
-        "matcher": "Skill",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/aryeh/Code/Playground/stark-insights/hooks/skill-setup.py"
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/aryeh/Code/Playground/stark-insights/hooks/gh-token-guard.py"
+            "command": "/Users/aryeh/.stark-insights/bin/stark hook tool_usage"
           }
         ]
       }
@@ -51,7 +33,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/aryeh/Code/Playground/stark-insights/hooks/hook-emit.py tool_usage status=complete"
+            "command": "/Users/aryeh/.stark-insights/bin/stark hook tool_usage status=complete"
           }
         ]
       }
@@ -62,16 +44,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/aryeh/Code/Playground/stark-insights/hooks/skill-telemetry-stop.py"
-          }
-        ]
-      },
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/aryeh/Code/Playground/stark-insights/hooks/hook-emit.py session_end"
+            "command": "/Users/aryeh/.stark-insights/bin/stark hook session_end"
           }
         ]
       },
@@ -99,7 +72,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/aryeh/Code/Playground/stark-insights/hooks/hook-emit.py session_start"
+            "command": "/Users/aryeh/.stark-insights/bin/stark hook session_start"
           }
         ]
       }
@@ -110,7 +83,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/aryeh/Code/Playground/stark-insights/hooks/hook-emit.py prompt"
+            "command": "/Users/aryeh/.stark-insights/bin/stark hook prompt"
           }
         ]
       }
@@ -121,7 +94,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/aryeh/Code/Playground/stark-insights/hooks/hook-emit.py notification"
+            "command": "/Users/aryeh/.stark-insights/bin/stark hook notification"
           }
         ]
       }
@@ -132,7 +105,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/aryeh/Code/Playground/stark-insights/hooks/hook-emit.py subagent_stop"
+            "command": "/Users/aryeh/.stark-insights/bin/stark hook subagent_stop"
           }
         ]
       }
@@ -143,7 +116,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/aryeh/Code/Playground/stark-insights/hooks/hook-emit.py compaction"
+            "command": "/Users/aryeh/.stark-insights/bin/stark hook compaction"
           }
         ]
       }
