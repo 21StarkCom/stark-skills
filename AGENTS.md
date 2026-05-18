@@ -70,6 +70,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `tools/red_team_db_resolver.ts` — Canonical audit DB resolver (`--db` > env > config > default), matches Python `Path.resolve()` symlink semantics on macOS.
 - `tools/emit_queue_lib.ts` — canonical TS implementation of the producer queue (`makeEvent` + `enqueue` + `validate` + `health` + `pendingCount` + `deadLetterCount` + `recordContextPct` + `initSchema`). Writes to `~/.stark-insights/queue.db`. Python consumers reach it through `tools/emit_queue_cli.ts` via `scripts/_emit.py`.
 - `tools/stark_persona_lib.ts` + `tools/stark_persona.ts` — pure-TypeScript `/stark-persona` (replaces the deleted `scripts/stark_persona.py`). Library: roster grammar, active.json, weight math, fuzzy match, SQLite schema, selection / combo / rating / survey / add. CLI: 11 subcommands (`select` / `deactivate` / `rate` / `survey` / `survey-answer` / `add` / `stats` / `history` / `print-roster` / `print-weights` / `session-end`). Insights events emit straight to `~/.stark-insights/queue.db` via `tools/emit_queue_lib.ts` as `persona_event`.
+- `tools/optimize_skill_description.ts` — skill-description optimizer (replaces the deleted `scripts/optimize_skill_description.py`). Reads SKILL.md frontmatter, scores via the skill-creator plugin's Python `run_eval.py`, asks `claude -p` for a better description based on the failing eval queries. CLI flags and JSON report shape match the Python.
 
 ### Other
 - `scripts/generate_skill_docs.py` — multi-LLM documentation generator with viz competition

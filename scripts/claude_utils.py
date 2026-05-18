@@ -55,7 +55,7 @@ def make_clean_env() -> dict[str, str]:
     subprocess sees only the allowlisted vars (no leaked host secrets) and
     ANTHROPIC_API_KEY sourced from ANTHROPIC_AGENTS. The "local" operation
     is in ``_USER_AUTH_OPS`` so no GitHub App token is fetched — used by
-    callers that don't touch GitHub (forge_fix_loop, optimize_skill_description).
+    callers that don't touch GitHub (e.g. forge_fix_loop).
 
     The hand-rolled fallback below preserves behavior when ``runtime_env``
     is unavailable (older installs that haven't been fully updated).
