@@ -5,8 +5,8 @@ description: >-
 argument-hint: "[start|end]"
 disable-model-invocation: true
 model: opus
-revision: ac3988f146e9e7cc65b915ad2d5e7095843d3880
-revision_date: 2026-05-18T08:38:56Z
+revision: 9e11a7d7b3c0253a7672a016f12b805b1908bacd
+revision_date: 2026-05-18T08:51:51Z
 ---
 
 ## Preflight
@@ -103,13 +103,9 @@ STATE_JSON=$($SESSION_CLI start \
 ### Phase 3 — Persist start HEAD
 
 ```bash
-python3 -c "
-import sys; sys.path.insert(0, '$SCRIPTS')
-from session_state import SessionState
-ss = SessionState.get_current()
-ss.start_head = '$START_HEAD'
-ss.save()
-" 2>/dev/null || true
+node --experimental-strip-types --no-warnings \
+  "$HOME/.claude/code-review/tools/session_state.ts" set \
+  --field start_head --value "$START_HEAD" 2>/dev/null || true
 ```
 
 ### Phase 4 — Render briefing
@@ -186,7 +182,8 @@ git commit -m "docs: session update — <summary>"
 
 ```bash
 python3 "$SCRIPTS/context_compactor.py" --json 2>/dev/null || true
-python3 "$SCRIPTS/session_state.py" --json 2>/dev/null || true
+node --experimental-strip-types --no-warnings \
+  "$HOME/.claude/code-review/tools/session_state.ts" --json 2>/dev/null || true
 ```
 
 Both are best-effort. Note the checkpoint path in the summary.
@@ -255,13 +252,9 @@ Render the end summary:
 6. **Persist session name**:
 
 ```bash
-python3 -c "
-import sys; sys.path.insert(0, '$SCRIPTS')
-from session_state import SessionState
-ss = SessionState.get_current()
-ss.name = '$SESSION_NAME'
-ss.save()
-" 2>/dev/null || true
+node --experimental-strip-types --no-warnings \
+  "$HOME/.claude/code-review/tools/session_state.ts" set \
+  --field name --value "$SESSION_NAME" 2>/dev/null || true
 ```
 
 ---

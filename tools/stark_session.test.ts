@@ -87,7 +87,7 @@ test("main: exits 1 on unknown subcommand", async () => {
 test("main start: returns parsed JSON envelope with errors slot present", async () => {
   // All collectors stub to no-op; we just check the envelope keys.
   const deps = makeStubDeps([
-    { cmd: ["python3", "/scripts/session_state.py", "--json"], stdout: JSON.stringify({
+    { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/session_state.ts", "--json"], stdout: JSON.stringify({
       session_id: "S", started_at: "", branch: "", repo: "",
       tasks_completed: [], last_checkpoint: null, name: null, start_head: null,
     }) },
@@ -120,7 +120,7 @@ test("main start: returns parsed JSON envelope with errors slot present", async 
 
 test("main end: returns parsed JSON envelope with diff + branch + session", async () => {
   const deps = makeStubDeps([
-    { cmd: ["python3", "/scripts/session_state.py", "--json"], stdout: JSON.stringify({
+    { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/session_state.ts", "--json"], stdout: JSON.stringify({
       session_id: "S", started_at: "T", branch: "main", repo: "x/y",
       tasks_completed: [], last_checkpoint: null, name: null, start_head: "persisted",
     }) },
