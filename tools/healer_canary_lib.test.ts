@@ -809,8 +809,8 @@ test("cmdExplain: returns full chronological log entries for the pattern + curre
   assert.equal(result.entries.length, 2);
   assert.equal(result.entries[0].timestamp, "2026-05-17T08:00:00Z");
   assert.equal(result.entries[1].timestamp, "2026-05-17T09:00:00Z");
-  assert.equal(result.circuit.ever_tripped, true);
-  assert.equal(typeof result.stats.success_rate, "number");
+  assert.equal(result.circuit?.ever_tripped, true);
+  assert.equal(typeof result.stats?.success_rate, "number");
 });
 
 test("cmdExplain: found=false when pattern id isn't in healer_patterns.json", () => {
