@@ -77,6 +77,7 @@ The red-team subsystem is **pure TypeScript** under `tools/`. All Python red-tea
 - `tools/skill_lib.ts` — shared skill discovery + reference parsing
 - `tools/skill_audit.ts`, `skill_validate.ts`, `skill_optimize.ts`, `skill_autopilot.ts` — meta-tooling
 - `tools/skill_diet.ts` — duplication linter for shared boilerplate (preflight, dispatch-failure, GH App auth)
+- `tools/skill_smoke_test.test.ts` — runs on every `npm test`. Walks every `skill/stark-*/SKILL.md`, asserts frontmatter parses + `name:` matches dir name + every in-repo `tools/*.ts` and `scripts/*.py` reference resolves + every distinct TS CLI mentioned by any skill exits cleanly on `--help`. Cross-repo references (e.g. `~/Code/Playground/stark-insights/...`) are filtered by an explicit `CROSS_REPO_PREFIXES` allowlist; add to that list if a skill ever points at another sibling repo.
 - `tools/release_changelog.ts`, `release_version_bump.ts` — stark-release Steps 3 + 5
 - `tools/review_setup_worktree.ts`, `review_cleanup_worktree.ts` — stark-review worktree provisioning
 - `tools/housekeeping_infra.ts` — stark-housekeeping Phase 5 (sessions, locks, log rotation, archival)
