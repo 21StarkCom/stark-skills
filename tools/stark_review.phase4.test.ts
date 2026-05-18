@@ -29,6 +29,11 @@ import {
   postReview,
   pruneHistory,
   runFixer,
+  assessFixerDestructiveness,
+  FIXER_DELETE_LINES_HARD_CAP,
+  FIXER_DELETE_DOMINANT_MIN,
+  FIXER_DELETE_DOMINANT_RATIO,
+  type FixerDiffStats,
   renderHumanSummary,
   runClassifier,
   validatePathContainment,
@@ -1066,4 +1071,119 @@ test("findExistingMarker: matches review whose body starts with marker", async (
     ghJsonFn: ghMock as Parameters<typeof findExistingMarker>[0]["ghJsonFn"],
   });
   assert.equal(found, true);
+});
+
+// ─── Phase 9.5: assessFixerDestructiveness ──────────────────────────────────
+
+function stat(over: Partial<FixerDiffStats> & { path: string }): FixerDiffStats {
+  return {
+    added: 0,
+    removed: 0,
+    deletedEntirely: false,
+    isNew: false,
+    binary: false,
+    ...over,
+  };
+}
+
+test("assessFixerDestructiveness: small targeted edit is allowed", () => {
+  const v = assessFixerDestructiveness(
+    [stat({ path: "src/x.ts", added: 4, removed: 2 })],
+    "added context.WithTimeout around CreateIssueComment",
+  );
+  assert.deepEqual(v, []);
+});
+
+test("assessFixerDestructiveness: brand-new files are exempt from delete checks", () => {
+  const v = assessFixerDestructiveness(
+    [stat({ path: "src/new.ts", added: 800, removed: 0, isNew: true })],
+    "added new helper",
+  );
+  assert.deepEqual(v, []);
+});
+
+test("assessFixerDestructiveness: binary files are skipped", () => {
+  const v = assessFixerDestructiveness(
+    [stat({ path: "x.bin", added: -1, removed: -1, binary: true })],
+    "regenerated binary",
+  );
+  assert.deepEqual(v, []);
+});
+
+test("assessFixerDestructiveness: hard cap trips when summary doesn't acknowledge", () => {
+  const v = assessFixerDestructiveness(
+    [stat({ path: "testdata/upstream.json", added: 0, removed: FIXER_DELETE_LINES_HARD_CAP })],
+    "addressed PR feedback",
+  );
+  assert.equal(v.length, 1);
+  assert.equal(v[0]!.path, "testdata/upstream.json");
+  assert.match(v[0]!.reason, /lines deleted.*cap/);
+});
+
+test("assessFixerDestructiveness: hard cap is bypassed when summary mentions deletion intent", () => {
+  const v = assessFixerDestructiveness(
+    [stat({ path: "src/legacy.ts", added: 0, removed: 600 })],
+    "deleted the legacy adapter per finding F-3",
+  );
+  assert.deepEqual(v, []);
+});
+
+test("assessFixerDestructiveness: deletion-dominant change trips at threshold", () => {
+  // Just above the min, ratio > 3
+  const v = assessFixerDestructiveness(
+    [stat({ path: "src/x.ts", added: 10, removed: FIXER_DELETE_DOMINANT_MIN + 1 })],
+    "tightened logic",
+  );
+  assert.equal(v.length, 1);
+  assert.match(v[0]!.reason, /deletion-dominant/);
+});
+
+test("assessFixerDestructiveness: deletion-dominant ratio just under threshold passes", () => {
+  // ratio exactly = FIXER_DELETE_DOMINANT_RATIO → does NOT trip (strict >)
+  const v = assessFixerDestructiveness(
+    [stat({ path: "src/x.ts", added: 100, removed: FIXER_DELETE_DOMINANT_RATIO * 100 })],
+    "refactor",
+  );
+  assert.deepEqual(v, []);
+});
+
+test("assessFixerDestructiveness: small deletion-dominant change under MIN passes", () => {
+  // removed=50 with added=0 — ratio is infinite but removed is below the
+  // dominant min, so we don't trip. Use the hard-cap rule for truly large
+  // deletions; the dominant-ratio rule is for medium deletions that look
+  // wrong because nothing went in alongside.
+  const v = assessFixerDestructiveness(
+    [stat({ path: "src/x.ts", added: 0, removed: FIXER_DELETE_DOMINANT_MIN - 1 })],
+    "removed dead branch",
+  );
+  assert.deepEqual(v, []);
+});
+
+test("assessFixerDestructiveness: file deletion without summary justification trips", () => {
+  const v = assessFixerDestructiveness(
+    [stat({ path: "internal/legacy/client.go", deletedEntirely: true })],
+    "addressed finding",
+  );
+  assert.equal(v.length, 1);
+  assert.match(v[0]!.reason, /deleted without summary justification/);
+});
+
+test("assessFixerDestructiveness: file deletion is allowed when summary names the path", () => {
+  const v = assessFixerDestructiveness(
+    [stat({ path: "internal/legacy/client.go", deletedEntirely: true })],
+    "deleted internal/legacy/client.go which had no remaining callers after F-4",
+  );
+  assert.deepEqual(v, []);
+});
+
+test("assessFixerDestructiveness: reproduces the round-1 golden-fixture regression", () => {
+  // This is the actual failure mode we're hardening against — the PR-#701
+  // round-1 fix loop deleted ~1602 lines from a single 1700-line golden
+  // fixture while only adding a few stub entries.
+  const v = assessFixerDestructiveness(
+    [stat({ path: "internal/jobs/testdata/repos_sync_golden/org_repos.upstream.json", added: 18, removed: 1602 })],
+    "addressed reviewer's concern that real upstream data was committed",
+  );
+  assert.equal(v.length, 1, "the destructive gutting of a golden fixture must trip");
+  assert.match(v[0]!.reason, /lines deleted.*cap/);
 });
