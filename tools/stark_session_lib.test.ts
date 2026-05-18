@@ -34,6 +34,7 @@ type StubRun = {
   code?: number;
   timeoutMs?: number;
   delayMs?: number;
+  timedOut?: boolean;
 };
 
 function makeDeps(opts: {
@@ -43,18 +44,18 @@ function makeDeps(opts: {
   toolsDir?: string;
   home?: string;
   now?: () => Date;
+  envLog?: Array<{ cmd: string[]; env: NodeJS.ProcessEnv | undefined }>;
 } = {}): Deps {
   const runs = [...(opts.runs ?? [])];
   const files = opts.files ?? {};
+  const envLog = opts.envLog;
   return {
     home: opts.home ?? "/home/u",
     scriptsDir: opts.scriptsDir ?? "/scripts",
     toolsDir: opts.toolsDir ?? "/tools",
     now: opts.now ?? (() => new Date("2026-05-18T12:00:00Z")),
-    async run(cmd, _opts) {
-      // Match: take the first stub whose cmd is a prefix-equal of the
-      // requested cmd (i.e. tests can register a stub keyed on
-      // [cmd0, cmd1] and any longer real call still matches).
+    async run(cmd, runOpts) {
+      if (envLog) envLog.push({ cmd: [...cmd], env: runOpts?.env });
       const idx = runs.findIndex(
         (s) =>
           s.cmd.length <= cmd.length &&
@@ -64,11 +65,12 @@ function makeDeps(opts: {
         return { stdout: "", stderr: `no stub for ${cmd.join(" ")}`, code: 127 };
       }
       const s = runs.splice(idx, 1)[0];
+      if (s.delayMs) await new Promise((r) => setTimeout(r, s.delayMs));
       return {
         stdout: s.stdout ?? "",
         stderr: s.stderr ?? "",
         code: s.code ?? 0,
-        timedOut: false,
+        timedOut: s.timedOut ?? false,
       };
     },
     async readFile(p) {
@@ -79,6 +81,192 @@ function makeDeps(opts: {
     },
   };
 }
+
+// ── Fixes from PR #560 review ────────────────────────────────────────
+
+test("collectStart: honors opts.session_id, start_head, started_at in session block", async () => {
+  const envLog: Array<{ cmd: string[]; env: NodeJS.ProcessEnv | undefined }> = [];
+  const deps = makeDeps({
+    envLog,
+    runs: [
+      {
+        cmd: ["python3", "/scripts/session_state.py", "--json"],
+        stdout: JSON.stringify({
+          session_id: "from-state", started_at: "from-state",
+          branch: "feat/x", repo: "x/y",
+          tasks_completed: [], last_checkpoint: null, name: null,
+          start_head: "from-state-sha",
+        }),
+      },
+      { cmd: ["git", "branch", "--show-current"], stdout: "feat/x\n" },
+      { cmd: ["git", "rev-list", "--left-right", "--count", "@{u}...HEAD"], stdout: "0\t0\n" },
+      { cmd: ["git", "status", "--short"], stdout: "" },
+      { cmd: ["git", "stash", "list"], stdout: "" },
+      { cmd: ["git", "log", "--oneline", "--format=%h|%s|%ar", "-5"], stdout: "" },
+      { cmd: ["gh", "pr", "list", "--author", "@me", "--state", "open"], stdout: "[]" },
+      { cmd: ["gh", "pr", "view", "--json", "number,title,state,reviewDecision,statusCheckRollup"], code: 1 },
+      // alerts, queue, canary, suggestions, persona, available, board — all OK
+      { cmd: ["python3", "/scripts/alert_delivery.py", "--check", "--json"], stdout: JSON.stringify({ unacknowledged: [] }) },
+      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/emit_queue_cli.ts", "--health"], stdout: JSON.stringify({ pending_count: 0, dead_letter_count: 0, max_created_at: null }) },
+      { cmd: ["python3", "/scripts/healer_canary.py", "--status", "--json"], stdout: JSON.stringify({ patterns: [] }) },
+      { cmd: ["python3", "/scripts/skill_router.py", "--context", "session", "--json"], stdout: JSON.stringify({ suggestions: [] }) },
+      { cmd: ["python3", "/scripts/stark_persona.py", "select", "--auto"], stdout: JSON.stringify({ name: "Tony" }) },
+      { cmd: ["python3", "/scripts/github_projects.py", "list-items"], stdout: "[]" },
+      { cmd: ["sh", "-c"], stdout: "" },
+    ],
+  });
+  const result = await collectStart(deps, {
+    session_id: "from-cli",
+    start_head: "from-cli-sha",
+    started_at: "from-cli-time",
+  });
+  assert.equal(result.session?.session_id, "from-cli");
+  assert.equal(result.session?.start_head, "from-cli-sha");
+  assert.equal(result.session?.started_at, "from-cli-time");
+  // session_state subprocess should have received CLAUDE_SESSION_ID = "from-cli"
+  const sessionStateCall = envLog.find((e) => e.cmd[1]?.endsWith("session_state.py"));
+  assert.equal(sessionStateCall?.env?.CLAUDE_SESSION_ID, "from-cli");
+});
+
+test("collectStart: enforces total wall-clock deadline, slow collectors get null + timeout error", async () => {
+  // One subprocess sleeps past the deadline; the call should still
+  // return within the budget and that slot should be null with an
+  // errors[] entry.
+  const deps = makeDeps({
+    runs: [
+      {
+        cmd: ["python3", "/scripts/session_state.py", "--json"],
+        delayMs: 500,
+        stdout: JSON.stringify({ session_id: "S", started_at: "", branch: "", repo: "",
+          tasks_completed: [], last_checkpoint: null, name: null, start_head: null }),
+      },
+      { cmd: ["git", "branch", "--show-current"], stdout: "feat/x\n" },
+      { cmd: ["git", "rev-list", "--left-right", "--count", "@{u}...HEAD"], stdout: "0\t0\n" },
+      { cmd: ["git", "status", "--short"], stdout: "" },
+      { cmd: ["git", "stash", "list"], stdout: "" },
+      { cmd: ["git", "log", "--oneline", "--format=%h|%s|%ar", "-5"], stdout: "" },
+      { cmd: ["gh", "pr", "list", "--author", "@me", "--state", "open"], stdout: "[]" },
+      { cmd: ["gh", "pr", "view", "--json", "number,title,state,reviewDecision,statusCheckRollup"], code: 1 },
+      { cmd: ["python3", "/scripts/alert_delivery.py", "--check", "--json"], stdout: JSON.stringify({ unacknowledged: [] }) },
+      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/emit_queue_cli.ts", "--health"], stdout: JSON.stringify({ pending_count: 0, dead_letter_count: 0, max_created_at: null }) },
+      { cmd: ["python3", "/scripts/healer_canary.py", "--status", "--json"], stdout: JSON.stringify({ patterns: [] }) },
+      { cmd: ["python3", "/scripts/skill_router.py", "--context", "session", "--json"], stdout: JSON.stringify({ suggestions: [] }) },
+      { cmd: ["python3", "/scripts/stark_persona.py", "select", "--auto"], stdout: "{}" },
+      { cmd: ["python3", "/scripts/github_projects.py", "list-items"], stdout: "[]" },
+      { cmd: ["sh", "-c"], stdout: "" },
+    ],
+  });
+  const t0 = Date.now();
+  const result = await collectStart(deps, {
+    session_id: "S", start_head: null, started_at: "",
+    walltimeMs: 50, // 50ms deadline; the session_state call sleeps 500ms
+  } as any);
+  const elapsed = Date.now() - t0;
+  assert.ok(elapsed < 400, `expected fast exit, got ${elapsed}ms`);
+  // The session_state slot should be null because it didn't return in time.
+  assert.equal(result.session, null);
+  assert.ok(result.errors.some((e) => e.source === "wall_clock_deadline"));
+});
+
+test("collectEnd: falls back to session_state.start_head when opts.start_head is null", async () => {
+  const deps = makeDeps({
+    runs: [
+      {
+        cmd: ["python3", "/scripts/session_state.py", "--json"],
+        stdout: JSON.stringify({
+          session_id: "S", started_at: "", branch: "main", repo: "x/y",
+          tasks_completed: [], last_checkpoint: null, name: null,
+          start_head: "persisted-sha",
+        }),
+      },
+      // collectDiffSummary should be invoked with persisted-sha, NOT fall to merge-base
+      { cmd: ["git", "diff", "--numstat", "persisted-sha", "HEAD"], stdout: "5\t2\ta.ts\n" },
+      { cmd: ["git", "diff", "--name-status", "persisted-sha", "HEAD"], stdout: "M\ta.ts\n" },
+      { cmd: ["git", "rev-parse", "--abbrev-ref", "@{u}"], stdout: "origin/main\n" },
+      { cmd: ["git", "rev-list", "--left-right", "--count", "@{u}...HEAD"], stdout: "0\t0\n" },
+      { cmd: ["gh", "pr", "view", "--json", "number"], code: 1 },
+    ],
+  });
+  const result = await collectEnd(deps, {
+    session_id: "S", start_head: null, started_at: "", name: null,
+  });
+  assert.equal(result.diff?.added, 5);
+  assert.equal(result.diff?.approximate, false);
+  assert.equal(result.session.start_head, "persisted-sha");
+});
+
+test("collectHealthChecks: falls back to git toplevel when CWD has no config", async () => {
+  const deps = makeDeps({
+    files: {
+      "/repo-root/.code-review/config.json": JSON.stringify({
+        session: { health_checks: [{ name: "from-root", command: "echo ok" }] },
+      }),
+    },
+    runs: [
+      { cmd: ["git", "rev-parse", "--show-toplevel"], stdout: "/repo-root\n" },
+      { cmd: ["sh", "-c", "echo ok"], stdout: "ok", code: 0 },
+    ],
+  });
+  const result = await collectHealthChecks(deps, []);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].name, "from-root");
+});
+
+test("collectBoard: --status flag includes Needs Clarification so needs_attention can fill", async () => {
+  const envLog: Array<{ cmd: string[]; env: any }> = [];
+  const deps = makeDeps({
+    envLog,
+    runs: [
+      {
+        cmd: ["python3", "/scripts/github_projects.py", "list-items"],
+        stdout: JSON.stringify([{ title: "t1", number: "1", status: "Needs Clarification" }]),
+      },
+    ],
+  });
+  const result = await collectBoard(deps, []);
+  // Statuses requested must include the clarification bucket
+  const call = envLog.find((e) => e.cmd[1]?.endsWith("github_projects.py"));
+  const statusFlagIdx = (call?.cmd ?? []).indexOf("--status");
+  const statusArg = statusFlagIdx >= 0 ? call?.cmd[statusFlagIdx + 1] : "";
+  assert.match(statusArg ?? "", /Needs Clarification/i);
+  assert.equal(result?.needs_attention.length, 1);
+});
+
+test("pushSubprocessError: redacts GitHub tokens / Bearer headers from stderr", async () => {
+  const deps = makeDeps({
+    runs: [
+      {
+        cmd: ["python3", "/scripts/session_state.py", "--json"],
+        code: 1,
+        stderr: "fatal: authentication failed: token ghp_abcdefghijklmnopqrstuvwxyz0123456789 Bearer secret-token-here",
+      },
+    ],
+  });
+  const errors: ErrSlot[] = [];
+  await collectSessionState(deps, errors);
+  assert.equal(errors.length, 1);
+  const msg = errors[0].message;
+  assert.ok(!/ghp_abcdefghijklmnopqrstuvwxyz0123456789/.test(msg), `expected ghp token redacted: ${msg}`);
+  assert.ok(!/secret-token-here/i.test(msg), `expected bearer redacted: ${msg}`);
+  assert.match(msg, /REDACTED/);
+});
+
+test("collector: marks slot null + records timeout when result.timedOut", async () => {
+  const deps = makeDeps({
+    runs: [
+      {
+        cmd: ["python3", "/scripts/alert_delivery.py", "--check", "--json"],
+        code: 124, timedOut: true, stderr: "",
+      },
+    ],
+  });
+  const errors: ErrSlot[] = [];
+  const result = await collectAlerts(deps, errors);
+  assert.equal(result, null);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].source, "alerts");
+  assert.match(errors[0].message, /timeout/i);
+});
 
 // ── collectHealerCategories ──────────────────────────────────────────
 
@@ -264,8 +452,7 @@ test("collectBoard: returns null when board script fails", async () => {
   const deps = makeDeps({
     runs: [
       {
-        cmd: ["python3", "/scripts/github_projects.py", "list-items",
-              "--status", "In Progress,Blocked", "--json"],
+        cmd: ["python3", "/scripts/github_projects.py", "list-items"],
         code: 1,
       },
     ],
@@ -282,8 +469,7 @@ test("collectBoard: bucket items into in_flight / blocked / needs_attention", as
   const deps = makeDeps({
     runs: [
       {
-        cmd: ["python3", "/scripts/github_projects.py", "list-items",
-              "--status", "In Progress,Blocked", "--json"],
+        cmd: ["python3", "/scripts/github_projects.py", "list-items"],
         stdout: JSON.stringify(items),
       },
     ],
@@ -563,7 +749,7 @@ test("collectStart: assembles every slot with overrides honored", async () => {
       { cmd: ["gh", "pr", "view", "--json", "number,title,state,reviewDecision,statusCheckRollup"], code: 1 },
       // board
       {
-        cmd: ["python3", "/scripts/github_projects.py", "list-items", "--status", "In Progress,Blocked", "--json"],
+        cmd: ["python3", "/scripts/github_projects.py", "list-items"],
         stdout: "[]",
       },
       // alerts

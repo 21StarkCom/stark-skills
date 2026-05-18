@@ -5,8 +5,8 @@ description: >-
 argument-hint: "[start|end]"
 disable-model-invocation: true
 model: opus
-revision: e51715b488e08f6af58c960f93cbad7799ad1815
-revision_date: 2026-05-18T05:01:57Z
+revision: 68038b13d3616e872dcf5487c250ae0494dc9db8
+revision_date: 2026-05-18T05:30:25Z
 ---
 
 ## Preflight
@@ -55,6 +55,7 @@ Path: `.code-review/config.json` (hierarchical: global → org → repo). Readin
 ### Phase 0 — Record start HEAD
 
 ```bash
+SESSION_ID="${CLAUDE_SESSION_ID:-$(python3 "$SCRIPTS/session_id.py")}"
 START_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
 STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 ```
@@ -71,6 +72,7 @@ Read and internalize — do NOT display:
 
 ```bash
 STATE_JSON=$($SESSION_CLI start \
+  --session-id "$SESSION_ID" \
   --start-head "$START_HEAD" \
   --started-at "$STARTED_AT" 2>/dev/null || echo '{}')
 ```

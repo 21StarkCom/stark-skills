@@ -24,7 +24,12 @@
 
 import { pathToFileURL } from "node:url";
 
-import { collectEnd, collectStart, realDeps } from "./stark_session_lib.ts";
+import {
+  collectEnd,
+  collectStart,
+  realDeps,
+  type Deps,
+} from "./stark_session_lib.ts";
 
 const USAGE = `\
 stark-session CLI
@@ -52,10 +57,9 @@ function parseFlags(argv: string[]): Map<string, string> {
   return out;
 }
 
-async function runStart(rest: string[]): Promise<number> {
+export async function runStart(rest: string[], deps?: Deps): Promise<number> {
   const flags = parseFlags(rest);
-  const deps = realDeps();
-  const result = await collectStart(deps, {
+  const result = await collectStart(deps ?? realDeps(), {
     session_id: flags.get("session-id") ?? "",
     start_head: flags.get("start-head") ?? null,
     started_at: flags.get("started-at") ?? "",
@@ -64,10 +68,9 @@ async function runStart(rest: string[]): Promise<number> {
   return 0;
 }
 
-async function runEnd(rest: string[]): Promise<number> {
+export async function runEnd(rest: string[], deps?: Deps): Promise<number> {
   const flags = parseFlags(rest);
-  const deps = realDeps();
-  const result = await collectEnd(deps, {
+  const result = await collectEnd(deps ?? realDeps(), {
     session_id: flags.get("session-id") ?? "",
     start_head: flags.get("start-head") ?? null,
     started_at: flags.get("started-at") ?? "",
@@ -77,15 +80,15 @@ async function runEnd(rest: string[]): Promise<number> {
   return 0;
 }
 
-export async function main(argv: string[]): Promise<number> {
+export async function main(argv: string[], deps?: Deps): Promise<number> {
   const [sub, ...rest] = argv;
   if (!sub || sub === "--help" || sub === "-h") {
     process.stdout.write(USAGE);
     return sub ? 0 : 1;
   }
   try {
-    if (sub === "start") return await runStart(rest);
-    if (sub === "end") return await runEnd(rest);
+    if (sub === "start") return await runStart(rest, deps);
+    if (sub === "end") return await runEnd(rest, deps);
     process.stderr.write(`unknown subcommand: ${sub}\n${USAGE}`);
     return 1;
   } catch (e) {

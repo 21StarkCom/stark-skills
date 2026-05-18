@@ -53,6 +53,26 @@ function healerLogPath(home: string): string {
 
 const SUBPROCESS_TIMEOUT_MS = 15_000;
 const SKILL_SUGGESTIONS_CAP = 2;
+const START_WALLTIME_MS_DEFAULT = 45_000;
+
+// Token/secret patterns. Kept loosely in sync with `emit_queue_lib.ts`'s
+// REDACT_PATTERNS — anything we hand to errors[] (or any stderr we surface
+// to the SKILL for rendering) must not leak credentials.
+const REDACT_PATTERNS: ReadonlyArray<[RegExp, string]> = [
+  [/ghp_[A-Za-z0-9_]{10,}/g, "ghp_[REDACTED]"],
+  [/ghs_[A-Za-z0-9_]{10,}/g, "ghs_[REDACTED]"],
+  [/github_pat_[A-Za-z0-9_]{10,}/g, "github_pat_[REDACTED]"],
+  [/sk-[A-Za-z0-9_-]{10,}/g, "sk-[REDACTED]"],
+  [/\bBearer\s+\S+/gi, "Bearer [REDACTED]"],
+  [/\btoken\s+\S+/gi, "token [REDACTED]"],
+  [/Authorization:\s*\S+/gi, "Authorization: [REDACTED]"],
+];
+
+function redact(text: string): string {
+  let out = text;
+  for (const [pat, repl] of REDACT_PATTERNS) out = out.replace(pat, repl);
+  return out;
+}
 
 // ── Real Deps factory ────────────────────────────────────────────────
 
@@ -133,7 +153,7 @@ function pushSubprocessError(
 ): void {
   const detail = result.timedOut
     ? "timeout"
-    : `exit ${result.code}${result.stderr ? ": " + result.stderr.trim().slice(0, 200) : ""}`;
+    : `exit ${result.code}${result.stderr ? ": " + redact(result.stderr.trim()).slice(0, 200) : ""}`;
   errors.push({ source, message: detail });
 }
 
@@ -142,7 +162,8 @@ function pushParseError(
   source: string,
   exc: unknown,
 ): void {
-  errors.push({ source, message: `parse: ${exc instanceof Error ? exc.message : String(exc)}` });
+  const raw = exc instanceof Error ? exc.message : String(exc);
+  errors.push({ source, message: `parse: ${redact(raw)}` });
 }
 
 // ── collectQueueHealth ───────────────────────────────────────────────
@@ -311,7 +332,7 @@ export async function collectBoard(
 ): Promise<BoardState | null> {
   const cmd = [
     "python3", `${deps.scriptsDir}/github_projects.py`, "list-items",
-    "--status", "In Progress,Blocked", "--json",
+    "--status", "In Progress,Blocked,Needs Clarification", "--json",
   ];
   const result = await deps.run(cmd, { timeoutMs: SUBPROCESS_TIMEOUT_MS });
   if (result.code !== 0) {
@@ -559,7 +580,16 @@ export async function collectHealthChecks(
   deps: Deps,
   errors: ErrSlot[],
 ): Promise<HealthCheck[]> {
-  const raw = await deps.readFile(".code-review/config.json");
+  let raw = await deps.readFile(".code-review/config.json");
+  if (raw === null) {
+    // Fallback: walk to repo root (mirrors the Python original).
+    const top = await deps.run(["git", "rev-parse", "--show-toplevel"], {
+      timeoutMs: SUBPROCESS_TIMEOUT_MS,
+    });
+    if (top.code === 0 && top.stdout.trim()) {
+      raw = await deps.readFile(`${top.stdout.trim()}/.code-review/config.json`);
+    }
+  }
   if (raw === null) return [];
   let cfg: any;
   try {
@@ -706,6 +736,8 @@ export type StartOpts = {
   session_id: string;
   start_head: string | null;
   started_at: string;
+  /** Total wall-clock budget for the whole start collection. Defaults to 45s. */
+  walltimeMs?: number;
 };
 
 export type StartState = {
@@ -744,53 +776,121 @@ export type EndState = {
   errors: ErrSlot[];
 };
 
-export async function collectStart(deps: Deps, _opts: StartOpts): Promise<StartState> {
+export async function collectStart(deps: Deps, opts: StartOpts): Promise<StartState> {
   const errors: ErrSlot[] = [];
-  const [
-    session, git, board, alerts, queue, canary, suggestions, persona, available, healerCats,
-  ] = await Promise.all([
-    collectSessionState(deps, errors),
-    collectGit(deps, errors),
-    collectBoard(deps, errors),
-    collectAlerts(deps, errors),
-    collectQueueHealth(deps, errors),
-    collectCanaryStatus(deps, errors),
-    collectSkillSuggestions(deps, errors),
-    collectPersona(deps, errors),
-    collectAvailableSkills(deps, errors),
-    collectHealerCategories(deps, errors),
-  ]);
-  // PRs depends on knowing the current branch; serialize after git is available.
-  const prs = git ? await collectPRs(deps, git.branch, errors) : null;
-  // Health checks run user-defined commands; do them last so a hung check
-  // can't block the cheaper collectors.
-  const health = await collectHealthChecks(deps, errors);
 
-  const healer = healerCats !== null || canary !== null
-    ? { categories: healerCats ?? [], canary }
+  // Propagate CLI session id to subprocess children so session_state.py and
+  // any other Python helper sees the same id the SKILL invoked us with.
+  const childDeps: Deps = opts.session_id
+    ? { ...deps, run: (cmd, runOpts) => deps.run(cmd, {
+        ...runOpts,
+        env: { ...(runOpts?.env ?? process.env), CLAUDE_SESSION_ID: opts.session_id },
+      }) }
+    : deps;
+
+  // Slot accumulator: each collector resolves its slot when done; collectors
+  // still in flight when the wall-clock deadline trips stay null.
+  const slots = {
+    session: null as SessionStateSlot | null,
+    git: null as GitState | null,
+    board: null as BoardState | null,
+    alerts: null as AlertsState | null,
+    queue: null as QueueState | null,
+    canary: null as CanaryStatus | null,
+    suggestions: [] as SkillSuggestion[],
+    persona: null as PersonaState | null,
+    available: [] as string[],
+    healerCats: null as HealerCategory[] | null,
+    prs: null as PRsState | null,
+    health: [] as HealthCheck[],
+  };
+
+  const tasks: Promise<unknown>[] = [
+    collectSessionState(childDeps, errors).then((v) => { slots.session = v; }),
+    collectGit(childDeps, errors).then(async (v) => {
+      slots.git = v;
+      // PRs depends on knowing the current branch.
+      if (v) slots.prs = await collectPRs(childDeps, v.branch, errors);
+    }),
+    collectBoard(childDeps, errors).then((v) => { slots.board = v; }),
+    collectAlerts(childDeps, errors).then((v) => { slots.alerts = v; }),
+    collectQueueHealth(childDeps, errors).then((v) => { slots.queue = v; }),
+    collectCanaryStatus(childDeps, errors).then((v) => { slots.canary = v; }),
+    collectSkillSuggestions(childDeps, errors).then((v) => { slots.suggestions = v; }),
+    collectPersona(childDeps, errors).then((v) => { slots.persona = v; }),
+    collectAvailableSkills(childDeps, errors).then((v) => { slots.available = v; }),
+    collectHealerCategories(childDeps, errors).then((v) => { slots.healerCats = v; }),
+    collectHealthChecks(childDeps, errors).then((v) => { slots.health = v; }),
+  ];
+
+  const walltime = opts.walltimeMs ?? START_WALLTIME_MS_DEFAULT;
+  let deadlineHit = false;
+  let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  const deadlinePromise = new Promise<void>((resolve) => {
+    deadlineTimer = setTimeout(() => { deadlineHit = true; resolve(); }, walltime);
+  });
+  try {
+    await Promise.race([
+      Promise.all(tasks).catch(() => {/* swallow — per-collector errors already pushed */}),
+      deadlinePromise,
+    ]);
+  } finally {
+    if (deadlineTimer) clearTimeout(deadlineTimer);
+  }
+  if (deadlineHit) {
+    errors.push({
+      source: "wall_clock_deadline",
+      message: `start collection exceeded ${walltime}ms budget; partial result returned`,
+    });
+  }
+
+  // Override session block with CLI-supplied values where present.
+  const session = slots.session
+    ? {
+        ...slots.session,
+        session_id: opts.session_id || slots.session.session_id,
+        start_head: opts.start_head ?? slots.session.start_head,
+        started_at: opts.started_at || slots.session.started_at,
+      }
+    : null;
+
+  const healer = slots.healerCats !== null || slots.canary !== null
+    ? { categories: slots.healerCats ?? [], canary: slots.canary }
     : null;
 
   return {
     session,
-    git,
-    prs,
-    board,
-    alerts,
-    health,
-    queue,
+    git: slots.git,
+    prs: slots.prs,
+    board: slots.board,
+    alerts: slots.alerts,
+    health: slots.health,
+    queue: slots.queue,
     healer,
-    skills: { available, suggestions },
-    persona,
+    skills: { available: slots.available, suggestions: slots.suggestions },
+    persona: slots.persona,
     errors,
   };
 }
 
 export async function collectEnd(deps: Deps, opts: EndOpts): Promise<EndState> {
   const errors: ErrSlot[] = [];
-  const [stateRow, diff, branch] = await Promise.all([
-    collectSessionState(deps, errors),
-    collectDiffSummary(deps, opts.start_head, errors),
-    collectBranchState(deps, errors),
+
+  const childDeps: Deps = opts.session_id
+    ? { ...deps, run: (cmd, runOpts) => deps.run(cmd, {
+        ...runOpts,
+        env: { ...(runOpts?.env ?? process.env), CLAUDE_SESSION_ID: opts.session_id },
+      }) }
+    : deps;
+
+  // session_state runs first; its persisted start_head feeds collectDiffSummary
+  // when the SKILL didn't capture one. branch state is independent and runs in
+  // parallel with diff to keep total wall-clock short.
+  const stateRow = await collectSessionState(childDeps, errors);
+  const startHead = opts.start_head ?? stateRow?.start_head ?? null;
+  const [diff, branch] = await Promise.all([
+    collectDiffSummary(childDeps, startHead, errors),
+    collectBranchState(childDeps, errors),
   ]);
   return {
     session: {
@@ -799,7 +899,7 @@ export async function collectEnd(deps: Deps, opts: EndOpts): Promise<EndState> {
       repo: stateRow?.repo ?? "",
       started_at: opts.started_at || stateRow?.started_at || "",
       name: opts.name ?? stateRow?.name ?? null,
-      start_head: opts.start_head ?? stateRow?.start_head ?? null,
+      start_head: startHead,
       ended_at: deps.now().toISOString(),
     },
     diff,
