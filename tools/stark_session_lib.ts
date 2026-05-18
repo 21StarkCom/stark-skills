@@ -254,11 +254,9 @@ export async function collectAlerts(
   deps: Deps,
   errors: ErrSlot[],
 ): Promise<AlertsState | null> {
-  // alert_delivery went TS-canonical in the 2026-05-18 cutover. The
-  // Python `scripts/alert_delivery.py` stays alive for the in-process
-  // emitter call from self_healer, but the JSON probe here talks to
-  // the TS CLI sibling under `tools/`. Both sides target the same
-  // on-disk marker dir so the data they see is the same.
+  // alert_delivery is pure TS as of the 2026-05-18 cutover (Python
+  // gone with the self_healer slice — that was the last in-process
+  // consumer). Talks to the CLI sibling under `tools/`.
   const toolsDir = `${deps.scriptsDir.replace(/\/scripts$/, "")}/tools`;
   const cmd = [
     "node",

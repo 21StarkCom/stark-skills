@@ -405,11 +405,14 @@ def _run_validation_chain(worktree_path: str, step_id: str) -> bool:
         )
         return False
 
-    # Attempt to heal
+    # Attempt to heal. self_healer went pure-TS in the 2026-05-18
+    # cutover; the Python is gone. Tools live one dir up from scripts/.
     heal_mode = get_self_heal_config().get("mode", "suggest")
+    tools_dir = scripts_dir.parent / "tools"
     try:
         subprocess.run(
-            [sys.executable, str(scripts_dir / "self_healer.py"),
+            ["node", "--experimental-strip-types", "--no-warnings",
+             str(tools_dir / "self_healer.ts"),
              "--pattern-id", pattern_id,
              "--stderr-file", stderr_path,
              "--mode", heal_mode,

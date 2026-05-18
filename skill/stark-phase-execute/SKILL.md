@@ -6,8 +6,8 @@ argument-hint: "<plan-slug-or-path> [--dry-run] [--skip-deploy] [--skip-release]
 disable-model-invocation: true
 context: fork
 model: opus
-revision: d613144dcc517657c006eaeaa89d6b613f910471
-revision_date: 2026-05-18T09:34:51Z
+revision: 85c2a5f6bd3b50c77abfd49f38e09e42214eccde
+revision_date: 2026-05-18T10:47:47Z
 ---
 
 ## Preflight
@@ -198,7 +198,7 @@ python3 $SCRIPTS/validation_gate.py --json --repo-root $(pwd)
 
 - `overall=pass` → continue to 1.3.
 - `overall=fail` → classify: `python3 $SCRIPTS/failure_classifier.py --stderr-file $STDERR_PATH --json`
-  - If `pattern_id` non-null: attempt heal (max 2 attempts): `python3 $SCRIPTS/self_healer.py --pattern-id $PATTERN_ID --stderr-file $STDERR_PATH --mode auto --json`. Re-run validation after each attempt.
+  - If `pattern_id` non-null: attempt heal (max 2 attempts): `node --experimental-strip-types --no-warnings $HOME/.claude/code-review/tools/self_healer.ts --pattern-id $PATTERN_ID --stderr-file $STDERR_PATH --mode auto --json`. Re-run validation after each attempt.
   - After 2 failed heal attempts: escalate, set task status `blocked`, stop the phase.
   - If `pattern_id` null (UNCLASSIFIED): log and continue — agent code issue, not environment.
 

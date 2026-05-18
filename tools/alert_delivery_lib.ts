@@ -1,14 +1,14 @@
 /**
- * Alert delivery — TypeScript port of `scripts/alert_delivery.py`.
+ * Alert delivery — TypeScript implementation (replaces the deleted
+ * `scripts/alert_delivery.py`).
  *
- * On-disk contract is the cross-language interop seam:
+ * On-disk contract:
  *   - alerts log:  `<base>/alerts.jsonl` (one JSON object per line)
  *   - marker file: `<base>/alert-{unix-ts}[-{counter}].marker`
- * `<base>` defaults to `~/.claude/code-review/`. Both the Python module
- * and this TS port write to the same paths; an alert emitted by either
- * side is visible to both. `scripts/alert_delivery.py` stays in place
- * because `self_healer.py` and `healer_canary.py` import it directly;
- * they migrate in their own slices.
+ * `<base>` defaults to `~/.claude/code-review/`. Cross-language
+ * interop was the seam while the Python and TS implementations lived
+ * side by side; with the Python gone (self_healer cutover, 2026-05-18)
+ * the on-disk format is now owned purely by this module.
  */
 
 import fs from "node:fs";
