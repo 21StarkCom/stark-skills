@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=579 runId=10021f64-b216-4d1d-84f1-b5f4e7eab425 -->
+- Ignore Claude-managed worktree checkouts under `.claude/worktrees/`.
 <!-- stark-gh:pr-merge pr=577 runId=19828674-92cb-4b32-9f24-4ce6093e548e -->
 - Added Go `stark hook` wiring for Claude Code hooks and removed stale deleted Python hook blocks.
 - **stark-session TS data collector** — `tools/stark_session_lib.ts` + `tools/stark_session.ts` collect git/gh/board/alerts/health/queue/healer/persona/skills state into a single JSON payload that `/stark-session` renders directly via Claude. Replaces the deleted Python TUI subsystem.
