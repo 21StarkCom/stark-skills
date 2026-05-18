@@ -102,7 +102,7 @@ test("main start: returns parsed JSON envelope with errors slot present", async 
     { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/emit_queue_cli.ts"], stdout: JSON.stringify({ pending_count: 0, dead_letter_count: 0, max_created_at: null }) },
     { cmd: ["python3", "/scripts/healer_canary.py"], stdout: JSON.stringify({ patterns: [] }) },
     { cmd: ["python3", "/scripts/skill_router.py"], stdout: JSON.stringify({ suggestions: [] }) },
-    { cmd: ["python3", "/scripts/stark_persona.py"], stdout: "{}" },
+    { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/stark_persona.ts"], stdout: "{}" },
     { cmd: ["python3", "/scripts/github_projects.py"], stdout: "[]" },
     { cmd: ["sh", "-c"], stdout: "" },
   ]);
