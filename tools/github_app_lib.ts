@@ -31,13 +31,27 @@ export interface AppConfig {
   keychainService: string;
 }
 
-export const APPS: Record<string, AppConfig> = {
-  "stark-claude": {
-    appId: "3066738",
-    installationId: "115648521",
-    installations: { GetEvinced: "115648521" },
-    keychainService: "STARK_CLAUDE_PRIVATE_KEY",
-  },
+const STARK_CLAUDE: AppConfig = {
+  appId: "3066738",
+  installationId: "115648521",
+  installations: { GetEvinced: "115648521" },
+  keychainService: "STARK_CLAUDE_PRIVATE_KEY",
+};
+
+// Declaring AppRegistry explicitly (instead of inferring via `satisfies`)
+// preserves both the literal union for `AppName` AND the widened
+// `installations: Record<string, string>` shape for each entry's value —
+// callers can pass arbitrary owner strings into `cfg.installations[owner]`
+// without per-entry widening assertions.
+interface AppRegistry {
+  "stark-claude": AppConfig;
+  "stark-codex": AppConfig;
+  "stark-gemini": AppConfig;
+  default: AppConfig;
+}
+
+export const APPS: AppRegistry = {
+  "stark-claude": STARK_CLAUDE,
   "stark-codex": {
     appId: "3066834",
     installationId: "115648800",
@@ -50,10 +64,15 @@ export const APPS: Record<string, AppConfig> = {
     installations: { GetEvinced: "115648971" },
     keychainService: "STARK_GEMINI_PRIVATE_KEY",
   },
+  // `default` is a legacy alias for stark-claude; both point at the same
+  // config object so a runtime patch on one shows up on the other.
+  default: STARK_CLAUDE,
 };
-APPS["default"] = APPS["stark-claude"]!;
 
-export const DEFAULT_APP = "stark-codex";
+export type AppName = keyof AppRegistry;
+export const APP_NAMES: readonly AppName[] = Object.keys(APPS) as AppName[];
+
+export const DEFAULT_APP: AppName = "stark-codex";
 export const API = "https://api.github.com";
 
 export class KeychainError extends Error {
@@ -63,18 +82,22 @@ export class KeychainError extends Error {
   }
 }
 
-export function resolveAppName(app?: string): string {
+export function isAppName(value: string): value is AppName {
+  return value in APPS;
+}
+
+export function resolveAppName(app?: string): AppName {
   const name = app ?? DEFAULT_APP;
-  if (!(name in APPS)) {
+  if (!isAppName(name)) {
     throw new Error(
-      `Unknown app '${name}'. Available: ${Object.keys(APPS).join(", ")}`,
+      `Unknown app '${name}'. Available: ${APP_NAMES.join(", ")}`,
     );
   }
   return name;
 }
 
-function appConfig(app?: string): AppConfig {
-  return APPS[resolveAppName(app)]!;
+function appConfig(app?: AppName): AppConfig {
+  return APPS[resolveAppName(app)];
 }
 
 // ---------------------------------------------------------------------------
@@ -101,7 +124,11 @@ export function detectRepo(): string {
 // Cache (shared on-disk format with the Python implementation).
 // ---------------------------------------------------------------------------
 
-const CACHE_DIR = path.join(os.homedir(), ".cache", "github-app-tokens");
+// Resolved lazily so tests can override `HOME` after import. The cost
+// (one os.homedir() call per cache op) is negligible.
+function cacheDir(): string {
+  return path.join(os.homedir(), ".cache", "github-app-tokens");
+}
 
 function atomicWriteJson(file: string, data: unknown): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -122,10 +149,10 @@ function atomicWriteJson(file: string, data: unknown): void {
   }
 }
 
-function tokenCacheFile(app: string, installationId?: string): string {
+function tokenCacheFile(app: AppName, installationId?: string): string {
   return installationId
-    ? path.join(CACHE_DIR, `${app}-${installationId}.json`)
-    : path.join(CACHE_DIR, `${app}.json`);
+    ? path.join(cacheDir(), `${app}-${installationId}.json`)
+    : path.join(cacheDir(), `${app}.json`);
 }
 
 interface CachedToken {
@@ -134,7 +161,7 @@ interface CachedToken {
 }
 
 export function readCachedToken(
-  app: string,
+  app: AppName,
   installationId?: string,
 ): string | null {
   const file = tokenCacheFile(app, installationId);
@@ -152,7 +179,7 @@ export function readCachedToken(
 export function writeCachedToken(
   token: string,
   expiresAt: number,
-  app: string,
+  app: AppName,
   installationId?: string,
 ): void {
   atomicWriteJson(tokenCacheFile(app, installationId), {
@@ -161,8 +188,8 @@ export function writeCachedToken(
   });
 }
 
-function installCacheFile(app: string): string {
-  return path.join(CACHE_DIR, `installations-${app}.json`);
+function installCacheFile(app: AppName): string {
+  return path.join(cacheDir(), `installations-${app}.json`);
 }
 
 interface InstallCache {
@@ -170,7 +197,7 @@ interface InstallCache {
   entries: Record<string, string>;
 }
 
-export function readInstallCache(app: string): Record<string, string> {
+export function readInstallCache(app: AppName): Record<string, string> {
   const file = installCacheFile(app);
   if (!fs.existsSync(file)) return {};
   try {
@@ -183,7 +210,7 @@ export function readInstallCache(app: string): Record<string, string> {
 }
 
 export function writeInstallCache(
-  app: string,
+  app: AppName,
   entries: Record<string, string>,
 ): void {
   atomicWriteJson(installCacheFile(app), {
@@ -196,7 +223,7 @@ export function writeInstallCache(
 // Private-key resolution.
 // ---------------------------------------------------------------------------
 
-export function getPrivateKeyFromKeychain(app?: string): string {
+export function getPrivateKeyFromKeychain(app?: AppName): string {
   const cfg = appConfig(app);
   let r;
   try {
@@ -367,7 +394,7 @@ export async function mintInstallationToken(
 
 export async function getInstallationId(
   owner: string,
-  app?: string,
+  app?: AppName,
 ): Promise<string> {
   const appName = resolveAppName(app);
   const cfg = APPS[appName]!;
@@ -430,7 +457,7 @@ export async function getInstallationId(
 // ---------------------------------------------------------------------------
 
 export interface GetTokenOpts {
-  app?: string;
+  app?: AppName;
   owner?: string;
 }
 
@@ -438,15 +465,14 @@ export async function getToken(opts: GetTokenOpts = {}): Promise<string> {
   const appName = resolveAppName(opts.app);
   const cfg = APPS[appName]!;
 
+  // Fail closed when a specific owner was requested but cannot be resolved.
+  // Silently falling back to the default installation would mint credentials
+  // scoped to the wrong org — the caller asked for owner X, returning a token
+  // for org Y is a security smell. The Python helper warn-fell-back here; this
+  // is a deliberate divergence flagged by stark-review on PR #578.
   let installId = cfg.installationId;
   if (opts.owner) {
-    try {
-      installId = await getInstallationId(opts.owner, appName);
-    } catch (err) {
-      process.stderr.write(
-        `github_app: could not resolve installation for owner '${opts.owner}' (${(err as Error).message}). Falling back to default installation.\n`,
-      );
-    }
+    installId = await getInstallationId(opts.owner, appName);
   }
 
   // 1. Cache
@@ -500,14 +526,33 @@ export async function getToken(opts: GetTokenOpts = {}): Promise<string> {
 // REST helpers.
 // ---------------------------------------------------------------------------
 
+/**
+ * Auto-derive the repo owner from a `/repos/{owner}/{name}/...` path.
+ *
+ * Returns `undefined` for routes that aren't repo-scoped (`/user`, `/app`,
+ * `/orgs/...`, etc.) — those paths don't need per-installation routing
+ * because they hit either the user/app-global context or a different
+ * resource hierarchy. Callers can still pass `owner` explicitly to override.
+ */
+function ownerFromPath(pathStr: string): string | undefined {
+  const m = /^\/repos\/([^/]+)\/[^/]+/.exec(pathStr);
+  return m?.[1];
+}
+
 async function apiCall(
   method: string,
   pathStr: string,
   body?: unknown,
   params?: Record<string, string | number>,
-  app?: string,
+  app?: AppName,
+  owner?: string,
 ): Promise<unknown> {
-  const bearer = await getToken({ app });
+  // Per-owner installation routing: prefer the caller's explicit `owner`,
+  // otherwise derive from a `/repos/{owner}/...` path. `getToken` itself
+  // falls back to the default installation only when no owner was provided
+  // — explicit-but-unresolvable owners fail closed (see getToken).
+  const effectiveOwner = owner ?? ownerFromPath(pathStr);
+  const bearer = await getToken({ app, owner: effectiveOwner });
   const resp = await ghRequest({
     method,
     path: pathStr,
@@ -525,37 +570,46 @@ async function apiCall(
 export async function apiGet(
   pathStr: string,
   params?: Record<string, string | number>,
-  app?: string,
+  app?: AppName,
+  owner?: string,
 ): Promise<unknown> {
-  return apiCall("GET", pathStr, undefined, params, app);
+  return apiCall("GET", pathStr, undefined, params, app, owner);
 }
 
 export async function apiPost(
   pathStr: string,
   body?: unknown,
-  app?: string,
+  app?: AppName,
+  owner?: string,
 ): Promise<unknown> {
-  return apiCall("POST", pathStr, body, undefined, app);
+  return apiCall("POST", pathStr, body, undefined, app, owner);
 }
 
 export async function apiPut(
   pathStr: string,
   body?: unknown,
-  app?: string,
+  app?: AppName,
+  owner?: string,
 ): Promise<unknown> {
-  return apiCall("PUT", pathStr, body, undefined, app);
+  return apiCall("PUT", pathStr, body, undefined, app, owner);
 }
 
 export async function apiPatch(
   pathStr: string,
   body?: unknown,
-  app?: string,
+  app?: AppName,
+  owner?: string,
 ): Promise<unknown> {
-  return apiCall("PATCH", pathStr, body, undefined, app);
+  return apiCall("PATCH", pathStr, body, undefined, app, owner);
 }
 
-export async function apiDelete(pathStr: string, app?: string): Promise<number> {
-  const bearer = await getToken({ app });
+export async function apiDelete(
+  pathStr: string,
+  app?: AppName,
+  owner?: string,
+): Promise<number> {
+  const effectiveOwner = owner ?? ownerFromPath(pathStr);
+  const bearer = await getToken({ app, owner: effectiveOwner });
   const resp = await ghRequest({ method: "DELETE", path: pathStr, bearer });
   if (resp.status >= 400) {
     const text = await resp.text();
@@ -571,7 +625,7 @@ export async function apiDelete(pathStr: string, app?: string): Promise<number> 
 export interface GraphQLOpts {
   variables?: Record<string, unknown>;
   retry?: boolean;
-  app?: string;
+  app?: AppName;
 }
 
 export async function graphql(
@@ -620,14 +674,14 @@ export async function graphql(
 // High-level operations (parity with the Python module's surface).
 // ---------------------------------------------------------------------------
 
-export async function repoInfo(repo: string, app?: string): Promise<unknown> {
+export async function repoInfo(repo: string, app?: AppName): Promise<unknown> {
   return apiGet(`/repos/${repo}`, undefined, app);
 }
 
 export async function prList(
   repo: string,
   state: string = "open",
-  app?: string,
+  app?: AppName,
 ): Promise<unknown> {
   return apiGet(`/repos/${repo}/pulls`, { state, per_page: 30 }, app);
 }
@@ -635,7 +689,7 @@ export async function prList(
 export async function prView(
   repo: string,
   number: number,
-  app?: string,
+  app?: AppName,
 ): Promise<unknown> {
   return apiGet(`/repos/${repo}/pulls/${number}`, undefined, app);
 }
@@ -646,7 +700,7 @@ export interface PrCreateOpts {
   body?: string;
   base?: string;
   draft?: boolean;
-  app?: string;
+  app?: AppName;
 }
 
 export async function prCreate(repo: string, opts: PrCreateOpts): Promise<unknown> {
@@ -670,7 +724,7 @@ export async function prReview(
   number: number,
   event: PrReviewEvent,
   body: string = "",
-  app?: string,
+  app?: AppName,
 ): Promise<unknown> {
   return apiPost(
     `/repos/${repo}/pulls/${number}/reviews`,
@@ -686,7 +740,7 @@ export async function prMerge(
   number: number,
   method: PrMergeMethod = "squash",
   commitTitle: string = "",
-  app?: string,
+  app?: AppName,
 ): Promise<unknown> {
   const payload: Record<string, unknown> = { merge_method: method };
   if (commitTitle) payload["commit_title"] = commitTitle;
@@ -697,7 +751,7 @@ export async function prComment(
   repo: string,
   number: number,
   body: string,
-  app?: string,
+  app?: AppName,
 ): Promise<unknown> {
   return apiPost(
     `/repos/${repo}/issues/${number}/comments`,
@@ -709,7 +763,7 @@ export async function prComment(
 export async function issueList(
   repo: string,
   state: string = "open",
-  app?: string,
+  app?: AppName,
 ): Promise<unknown[]> {
   const items = (await apiGet(
     `/repos/${repo}/issues`,
@@ -724,7 +778,7 @@ export interface IssueCreateOpts {
   body?: string;
   labels?: string[];
   issueType?: string;
-  app?: string;
+  app?: AppName;
 }
 
 export async function issueCreate(

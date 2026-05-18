@@ -20,9 +20,11 @@ import fs from "node:fs";
 
 import {
   APPS,
+  APP_NAMES,
   DEFAULT_APP,
   detectRepo,
   getToken,
+  isAppName,
   issueCreate,
   issueList,
   prComment,
@@ -32,6 +34,7 @@ import {
   prReview,
   prView,
   repoInfo,
+  type AppName,
   type PrMergeMethod,
   type PrReviewEvent,
 } from "./github_app_lib.ts";
@@ -56,8 +59,8 @@ Options:
   -h, --help             Show this help
 `;
 
-interface Parsed {
-  app: string;
+export interface Parsed {
+  app: AppName;
   repo: string | null;
   flags: Map<string, true>;
   options: Map<string, string>;
@@ -84,7 +87,25 @@ const KNOWN_FLAGS = new Set([
   "rebase",
 ]);
 
-function parseArgs(argv: string[]): Parsed {
+/** `pr review` flag → GitHub review event. Defaults to `COMMENT`. */
+export function reviewEventFromFlags(
+  flags: Map<string, true>,
+): PrReviewEvent {
+  if (flags.has("approve")) return "APPROVE";
+  if (flags.has("request-changes")) return "REQUEST_CHANGES";
+  return "COMMENT";
+}
+
+/** `pr merge` flag → API merge method. Defaults to `squash`. */
+export function mergeMethodFromFlags(
+  flags: Map<string, true>,
+): PrMergeMethod {
+  if (flags.has("rebase")) return "rebase";
+  if (flags.has("merge")) return "merge";
+  return "squash";
+}
+
+export function parseArgs(argv: string[]): Parsed {
   const out: Parsed = {
     app: DEFAULT_APP,
     repo: null,
@@ -123,8 +144,14 @@ function parseArgs(argv: string[]): Parsed {
         if (value === undefined) {
           throw new Error(`Missing value for --${name}`);
         }
-        if (name === "app") out.app = value;
-        else if (name === "repo") out.repo = value;
+        if (name === "app") {
+          if (!isAppName(value)) {
+            throw new Error(
+              `Unknown app '${value}'. Available: ${APP_NAMES.join(", ")}`,
+            );
+          }
+          out.app = value;
+        } else if (name === "repo") out.repo = value;
         else out.options.set(name, value);
         i += 2;
         continue;
@@ -133,11 +160,6 @@ function parseArgs(argv: string[]): Parsed {
     }
     out.positional.push(a);
     i++;
-  }
-  if (!(out.app in APPS)) {
-    throw new Error(
-      `Unknown app '${out.app}'. Available: ${Object.keys(APPS).join(", ")}`,
-    );
   }
   return out;
 }
@@ -225,11 +247,7 @@ async function runPr(parsed: Parsed): Promise<void> {
   if (action === "review") {
     const number = Number(rest[0]);
     if (!Number.isFinite(number)) throw new Error("pr review: missing NUMBER");
-    const event: PrReviewEvent = parsed.flags.has("approve")
-      ? "APPROVE"
-      : parsed.flags.has("request-changes")
-        ? "REQUEST_CHANGES"
-        : "COMMENT";
+    const event = reviewEventFromFlags(parsed.flags);
     const body = parsed.options.get("body") ?? "";
     await prReview(repo, number, event, body, parsed.app);
     process.stdout.write(`Review submitted: ${event}\n`);
@@ -238,11 +256,7 @@ async function runPr(parsed: Parsed): Promise<void> {
   if (action === "merge") {
     const number = Number(rest[0]);
     if (!Number.isFinite(number)) throw new Error("pr merge: missing NUMBER");
-    const method: PrMergeMethod = parsed.flags.has("rebase")
-      ? "rebase"
-      : parsed.flags.has("merge")
-        ? "merge"
-        : "squash";
+    const method = mergeMethodFromFlags(parsed.flags);
     await prMerge(
       repo,
       number,
