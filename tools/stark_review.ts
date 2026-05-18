@@ -2261,6 +2261,161 @@ export async function runFixer(opts: RunFixerOpts): Promise<RunFixerResult> {
 
 // ─── Phase 9: explicit-path staging (Task 9-3) ──────────────────────────────
 
+// ─── Phase 9.5: fixer destructiveness guard ─────────────────────────────────
+//
+// Defense-in-depth against the fixer "deleting test fixtures to silence a
+// finding" failure mode. The primary defense is the prompt
+// (global/prompts/codex/fixer.md's minimal-edit discipline section); this is
+// the structural backstop that runs even when the agent ignores the prompt.
+
+export class FixerDestructiveError extends Error {
+  code = "fixer_destructive" as const;
+  violations: FixerDestructivenessViolation[];
+  constructor(violations: FixerDestructivenessViolation[]) {
+    super(
+      `fixer produced destructive changes (${violations.length} file(s)): ` +
+        violations.map((v) => `${v.path} (${v.reason})`).join("; "),
+    );
+    this.violations = violations;
+  }
+}
+
+/** Per-file destructiveness verdict for one modified path. */
+export interface FixerDiffStats {
+  path: string;
+  /** Lines added in the working-tree diff vs HEAD. -1 for binary. */
+  added: number;
+  /** Lines removed in the working-tree diff vs HEAD. -1 for binary. */
+  removed: number;
+  /** True if the path existed at HEAD but no longer exists in the worktree. */
+  deletedEntirely: boolean;
+  /** True if the path did not exist at HEAD (brand-new file). */
+  isNew: boolean;
+  /** True if `git diff --numstat` reported the file as binary. */
+  binary: boolean;
+}
+
+export interface FixerDestructivenessViolation {
+  path: string;
+  reason: string;
+}
+
+/** Thresholds — picked conservatively so the common-case fixer edit passes,
+ * and only the "delete everything" anti-pattern trips. */
+export const FIXER_DELETE_LINES_HARD_CAP = 500;
+export const FIXER_DELETE_DOMINANT_MIN = 100;
+export const FIXER_DELETE_DOMINANT_RATIO = 3; // removed > ratio * added
+
+/** Pure function: given the per-file diff stats and the fixer's summary text,
+ * decide if the change is destructive enough to block. Returns the violations
+ * (empty when the change is acceptable). */
+export function assessFixerDestructiveness(
+  stats: FixerDiffStats[],
+  summary: string,
+): FixerDestructivenessViolation[] {
+  const violations: FixerDestructivenessViolation[] = [];
+  const summaryLower = summary.toLowerCase();
+  for (const s of stats) {
+    if (s.binary) continue; // binary diffs have no line counts to reason about
+    if (s.isNew) continue; // brand-new files cannot delete anything
+    if (s.deletedEntirely) {
+      // File removal is only acceptable if the summary explicitly names the
+      // path. Cheap substring check — the fixer summary is single-paragraph,
+      // adversarial-content here is the fixer's own output.
+      if (!summary.includes(s.path)) {
+        violations.push({ path: s.path, reason: "file deleted without summary justification" });
+      }
+      continue;
+    }
+    if (s.removed >= FIXER_DELETE_LINES_HARD_CAP) {
+      // Hard cap, regardless of additions. 500+ removed lines is "rewrite a
+      // small library," not "address a finding."
+      if (!summaryLower.includes("delet") && !summaryLower.includes("remov")) {
+        violations.push({
+          path: s.path,
+          reason: `${s.removed} lines deleted (cap ${FIXER_DELETE_LINES_HARD_CAP}); summary does not acknowledge`,
+        });
+      }
+      continue;
+    }
+    if (
+      s.removed >= FIXER_DELETE_DOMINANT_MIN &&
+      s.removed > FIXER_DELETE_DOMINANT_RATIO * s.added
+    ) {
+      violations.push({
+        path: s.path,
+        reason: `deletion-dominant: -${s.removed} / +${s.added} (ratio > ${FIXER_DELETE_DOMINANT_RATIO}, min ${FIXER_DELETE_DOMINANT_MIN})`,
+      });
+    }
+  }
+  return violations;
+}
+
+export interface CheckFixerDestructivenessOpts {
+  worktree: string;
+  paths: string[];
+  summary: string;
+  spawnFn?: typeof spawnCollect;
+}
+
+/** Gather working-tree diff stats for the fixer's modified files and apply
+ * assessFixerDestructiveness. Throws FixerDestructiveError on violation. */
+export async function checkFixerDestructiveness(opts: CheckFixerDestructivenessOpts): Promise<void> {
+  if (opts.paths.length === 0) return;
+  const spawn = opts.spawnFn ?? spawnCollect;
+  // git diff --numstat HEAD -- <paths> covers staged+unstaged plus new files.
+  // Output format per line: "<added>\t<removed>\t<path>" or "-\t-\t<path>" for binary.
+  const numstat = await spawn("git", ["-C", opts.worktree, "diff", "--numstat", "HEAD", "--", ...opts.paths], {
+    env: process.env,
+  });
+  if (numstat.status !== 0) {
+    // Don't block on a git failure — surface to caller via a thrown Error
+    // with a distinct (non-FixerDestructiveError) shape so the dispatcher's
+    // audit log records it as a generic skip rather than a destruction abort.
+    throw new Error(`fixer destructiveness check: git diff --numstat exit ${numstat.status}: ${numstat.stderr.slice(0, 200)}`);
+  }
+  // Pre-existence check via ls-tree (file path WAS in HEAD?).
+  const lsTree = await spawn("git", ["-C", opts.worktree, "ls-tree", "-r", "--name-only", "HEAD", "--", ...opts.paths], {
+    env: process.env,
+  });
+  const existedAtHead = new Set<string>();
+  if (lsTree.status === 0) {
+    for (const line of lsTree.stdout.split("\n")) {
+      const t = line.trim();
+      if (t) existedAtHead.add(t);
+    }
+  }
+  const stats: FixerDiffStats[] = [];
+  const sawInDiff = new Set<string>();
+  for (const line of numstat.stdout.split("\n")) {
+    if (!line.trim()) continue;
+    const [a, r, ...rest] = line.split("\t");
+    const p = rest.join("\t");
+    if (!p) continue;
+    sawInDiff.add(p);
+    const binary = a === "-" && r === "-";
+    const added = binary ? -1 : Number.parseInt(a ?? "0", 10) || 0;
+    const removed = binary ? -1 : Number.parseInt(r ?? "0", 10) || 0;
+    const isNew = !existedAtHead.has(p);
+    // git diff lists pure deletions with --numstat too — to know if the file
+    // is "deleted entirely" we check that it existed at HEAD AND no longer
+    // exists in the worktree.
+    const deletedEntirely = existedAtHead.has(p) && !fs.existsSync(path.join(opts.worktree, p));
+    stats.push({ path: p, added, removed, deletedEntirely, isNew, binary });
+  }
+  // Also capture paths the fixer listed that produced no diff (no-op edit or
+  // pure deletion that ls-tree captured but numstat skipped) — for the
+  // deletion case, synthesize a stat row so the deletedEntirely branch fires.
+  for (const p of opts.paths) {
+    if (sawInDiff.has(p)) continue;
+    if (existedAtHead.has(p) && !fs.existsSync(path.join(opts.worktree, p))) {
+      stats.push({ path: p, added: 0, removed: 0, deletedEntirely: true, isNew: false, binary: false });
+    }
+  }
+  const violations = assessFixerDestructiveness(stats, opts.summary);
+  if (violations.length > 0) throw new FixerDestructiveError(violations);
+}
+
 export interface StageFilesOpts {
   worktree: string;
   paths: string[];
@@ -2728,6 +2883,33 @@ export async function main(
       }
       if (fixerOutput.modified_files.length === 0) {
         appendAudit({ action: "skip", round: pass.round, reason: "fixer_no_changes" }, { home, repo, pr });
+        break;
+      }
+
+      // Destructiveness guard (Phase 9.5). Backstops the fixer prompt's
+      // minimal-edit discipline by inspecting the working-tree diff before
+      // staging. Trips on file deletions without summary justification,
+      // single-file deletions ≥ 500 lines without acknowledgement, or
+      // deletion-dominant changes (≥100 lines, removed > 3 × added).
+      try {
+        await checkFixerDestructiveness({
+          worktree: cli.worktree,
+          paths: fixerOutput.modified_files,
+          summary: fixerOutput.summary,
+          ...(spawnD ? { spawnFn: spawnD } : {}),
+        });
+      } catch (err) {
+        if (err instanceof FixerDestructiveError) {
+          const reason = `fixer_destructive: ${err.violations.map((v) => `${v.path} (${v.reason})`).join("; ")}`;
+          appendAudit({ action: "deny", round: pass.round, reason }, { home, repo, pr });
+          terminalCode = { code: "fixer_destructive", message: err.message };
+          break;
+        }
+        // Non-violation error (e.g. git command failure) — treat as a soft
+        // skip so the loop bails without claiming the change was destructive.
+        const reason = `fixer_destructiveness_check_error: ${(err as Error).message}`;
+        appendAudit({ action: "skip", round: pass.round, reason }, { home, repo, pr });
+        terminalCode = { code: "fixer_destructiveness_check_error", message: (err as Error).message };
         break;
       }
 
