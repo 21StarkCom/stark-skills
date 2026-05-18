@@ -8,8 +8,8 @@ description: >-
 argument-hint: "<design-path> [--source-spec <path>] [--model <id>] [--dry-run] [--no-pr-comment]"
 disable-model-invocation: true
 model: opus
-revision: 7d4eb375d131624ff59927945d448856858d621c
-revision_date: 2026-05-18T16:33:25Z
+revision: 63a8c794adafa2df8a713b4dcf9743a09e3c7cfc
+revision_date: 2026-05-18T19:17:41Z
 ---
 
 # stark-red-team-design
@@ -35,7 +35,7 @@ TOOLS="${STARK_RED_TEAM_TOOLS:-$HOME/.claude/code-review/tools}"
 [ -d "$TOOLS" ] || TOOLS="$(dirname "$SCRIPTS")/tools"
 PYTHON="$SCRIPTS/.venv/bin/python3"
 [ -x "$PYTHON" ] || PYTHON=python3
-"$PYTHON" "$SCRIPTS/preflight.py" --workflow stark-red-team-design --json
+node --experimental-strip-types "$TOOLS/preflight.ts" --workflow stark-red-team-design --json
 ```
 
 - `overall == "blocked"` → print failing checks, stop. In automation contexts,

@@ -1,0 +1,463 @@
+/**
+ * Minimal config reader — the subset of `scripts/config_loader.py` that
+ * `tools/preflight_lib.ts` needs. The Python `config_loader.py` stays in
+ * place for the other ~10 Python importers (orchestrators that haven't
+ * been ported yet); both sides read the same on-disk JSON, so they stay
+ * consistent.
+ *
+ * Scope (NOT a 1:1 port — only what preflight uses):
+ *
+ *   - `loadGlobalConfig()` — read `~/.claude/code-review/config.json`
+ *   - `DEFAULT_MODELS` / `DEFAULT_RED_TEAM` / `DEFAULT_MODEL_RATES` —
+ *     the schema-defaults the section accessors merge on top of
+ *   - `getModelsConfig()`, `getRedTeamConfig()`, `getModelRates()` —
+ *     deep-merge default + global. `getRedTeamConfig` also walks
+ *     repo/org `.code-review/config.json` overrides with locked-fields
+ *     enforcement + unknown-keys pruning, matching the Python's
+ *     two-layer defense (spec rt1 + rt2).
+ *   - `isAgentEnabled(agent)` — convenience over `getModelsConfig`
+ *   - `discoverConfig({cwd})` — minimal hierarchical merge that just
+ *     returns the top-of-chain `agents` field (the only field
+ *     preflight's `check_model_resolution` reads via this path)
+ *
+ * No `@lru_cache` equivalent — the file IO is negligible and lazy
+ * caching makes test isolation harder. If preflight ever becomes a hot
+ * path we can add memoization at the call site.
+ */
+
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { enqueue, makeEvent } from "./emit_queue_lib.ts";
+
+// ---------------------------------------------------------------------------
+// Paths
+// ---------------------------------------------------------------------------
+
+/** Resolved lazily so tests can override `HOME`. */
+function globalConfigPath(): string {
+  return path.join(os.homedir(), ".claude", "code-review", "config.json");
+}
+
+// ---------------------------------------------------------------------------
+// Default sections (mirror `scripts/config_loader.py:DEFAULT_*`)
+// ---------------------------------------------------------------------------
+
+export interface ModelEntry {
+  enabled?: boolean;
+  model_id?: string;
+  [key: string]: unknown;
+}
+
+export const DEFAULT_MODELS: Record<string, ModelEntry> = {
+  claude: { enabled: true, model_id: "claude-opus-4-7" },
+  codex: { enabled: true, model_id: "gpt-5.5" },
+  gemini: { enabled: true, model_id: "gemini-3.1-pro-preview" },
+};
+
+export interface RedTeamConfig {
+  enabled?: boolean;
+  agent?: string;
+  model?: string;
+  max_rounds?: number;
+  halt_on_unresolved?: boolean;
+  stages?: Record<string, { enabled?: boolean }>;
+  personas?: string[];
+  min_severity_to_block?: string;
+  timeout_s?: number;
+  per_run_budget_usd?: number;
+  stability_overlap_jaccard_min?: number;
+  max_input_chars?: number;
+  allow_human_review_halt?: boolean;
+  fix_plan?: {
+    enabled?: boolean;
+    model?: string;
+    reasoning_effort?: string;
+    timeout_s?: number;
+    min_moves?: number;
+    max_moves?: number;
+    max_input_chars?: number;
+  };
+  audit?: {
+    retain_full_text?: boolean;
+    excerpt_max_chars?: number;
+  };
+  [key: string]: unknown;
+}
+
+export const DEFAULT_RED_TEAM: RedTeamConfig = {
+  enabled: true,
+  agent: "codex",
+  model: "gpt-5.5-pro",
+  max_rounds: 2,
+  halt_on_unresolved: true,
+  stages: {
+    design: { enabled: true },
+    plan: { enabled: false },
+  },
+  personas: [
+    "security-trust",
+    "reliability-distsys",
+    "data",
+    "product-dx",
+    "cost-ops",
+  ],
+  min_severity_to_block: "high",
+  timeout_s: 900,
+  per_run_budget_usd: 30.0,
+  stability_overlap_jaccard_min: 0.4,
+  max_input_chars: 200_000,
+  allow_human_review_halt: true,
+  fix_plan: {
+    enabled: false,
+    model: "gpt-5.5-pro",
+    reasoning_effort: "xhigh",
+    timeout_s: 1200,
+    min_moves: 2,
+    max_moves: 6,
+    max_input_chars: 200_000,
+  },
+  audit: {
+    retain_full_text: false,
+    excerpt_max_chars: 240,
+  },
+};
+
+export interface ModelRate {
+  input_per_1m_usd: number;
+  output_per_1m_usd: number;
+}
+
+export const DEFAULT_MODEL_RATES: Record<string, ModelRate> = {
+  o3: { input_per_1m_usd: 15.0, output_per_1m_usd: 60.0 },
+  "claude-opus-4-7": { input_per_1m_usd: 15.0, output_per_1m_usd: 75.0 },
+  "gpt-5.4": { input_per_1m_usd: 5.0, output_per_1m_usd: 15.0 },
+  "gpt-5.5": { input_per_1m_usd: 5.0, output_per_1m_usd: 15.0 },
+  "gpt-5.4-pro": { input_per_1m_usd: 20.0, output_per_1m_usd: 80.0 },
+  "gpt-5.5-pro": { input_per_1m_usd: 25.0, output_per_1m_usd: 100.0 },
+  _fallback: { input_per_1m_usd: 100.0, output_per_1m_usd: 300.0 },
+};
+
+// ---------------------------------------------------------------------------
+// Locked-field paths (red_team) — repo/org overrides on these paths are
+// rejected at config load, matching `scripts/config_loader.py` rt1 + rt2.
+// ---------------------------------------------------------------------------
+
+/** Dotted paths that may NOT be overridden below the global config level. */
+const RED_TEAM_LOCKED_FIELDS: ReadonlySet<string> = new Set([
+  "personas",
+  "model",
+  "enabled",
+  "agent",
+  "min_severity_to_block",
+  "halt_on_unresolved",
+  "allow_human_review_halt",
+  "stages",
+  "fix_plan.enabled",
+  "fix_plan.model",
+  "fix_plan.reasoning_effort",
+  "fix_plan.min_moves",
+  "fix_plan.max_moves",
+  "audit.retain_full_text",
+  "audit.excerpt_max_chars",
+]);
+
+/**
+ * Locked PARENT paths derived from `RED_TEAM_LOCKED_FIELDS` — used to
+ * reject non-dict overrides at a parent path that would replace the whole
+ * locked subtree (e.g. `fix_plan: "off"` would defeat the per-leaf locks).
+ */
+const RED_TEAM_LOCKED_PARENTS: ReadonlySet<string> = (() => {
+  const parents = new Set<string>();
+  for (const dotted of RED_TEAM_LOCKED_FIELDS) {
+    const parts = dotted.split(".");
+    for (let i = 1; i < parts.length; i++) {
+      parents.add(parts.slice(0, i).join("."));
+    }
+  }
+  return parents;
+})();
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function warn(message: string): void {
+  process.stderr.write(`config: ${message}\n`);
+}
+
+function loadJsonFile(file: string): Record<string, unknown> {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      warn(`failed to read ${file}: ${(err as Error).message}`);
+    }
+    return {};
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    warn(`failed to parse ${file}: ${(err as Error).message}`);
+    return {};
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    warn(`expected top-level object in ${file}`);
+    return {};
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function deepMerge<T extends Record<string, unknown>>(
+  base: T,
+  override: unknown,
+): T {
+  const out: Record<string, unknown> = structuredClone(base);
+  if (override === null || override === undefined) return out as T;
+  if (typeof override !== "object" || Array.isArray(override)) {
+    warn(
+      `expected dict override, got ${Array.isArray(override) ? "array" : typeof override} — using defaults`,
+    );
+    return out as T;
+  }
+  for (const [k, v] of Object.entries(override as Record<string, unknown>)) {
+    const baseVal = out[k];
+    if (
+      baseVal !== null &&
+      typeof baseVal === "object" &&
+      !Array.isArray(baseVal) &&
+      v !== null &&
+      typeof v === "object" &&
+      !Array.isArray(v)
+    ) {
+      out[k] = deepMerge(
+        baseVal as Record<string, unknown>,
+        v as Record<string, unknown>,
+      );
+    } else {
+      out[k] = structuredClone(v);
+    }
+  }
+  return out as T;
+}
+
+// ---------------------------------------------------------------------------
+// Global config load
+// ---------------------------------------------------------------------------
+
+export function loadGlobalConfig(): Record<string, unknown> {
+  return loadJsonFile(globalConfigPath());
+}
+
+// ---------------------------------------------------------------------------
+// Section accessors
+// ---------------------------------------------------------------------------
+
+export function getModelsConfig(): Record<string, ModelEntry> {
+  return deepMerge(DEFAULT_MODELS, loadGlobalConfig()["models"]);
+}
+
+export function getModelRates(): Record<string, ModelRate> {
+  return deepMerge(DEFAULT_MODEL_RATES, loadGlobalConfig()["model_rates"]);
+}
+
+export function isAgentEnabled(agent: string): boolean {
+  const m = getModelsConfig()[agent];
+  if (!m || typeof m !== "object") return false;
+  return Boolean(m.enabled);
+}
+
+// ---------------------------------------------------------------------------
+// red_team — locked-fields + unknown-keys pruning
+// ---------------------------------------------------------------------------
+
+interface DropResult {
+  cleaned: Record<string, unknown>;
+  rejected: string[];
+}
+
+/** Strip locked dotted paths from a repo/org override. */
+function dropLockedOverrides(
+  override: Record<string, unknown>,
+  basePath: string = "",
+): DropResult {
+  const cleaned: Record<string, unknown> = {};
+  const rejected: string[] = [];
+  for (const [k, v] of Object.entries(override)) {
+    const dotted = basePath ? `${basePath}.${k}` : k;
+    if (RED_TEAM_LOCKED_FIELDS.has(dotted)) {
+      rejected.push(dotted);
+      continue;
+    }
+    if (
+      RED_TEAM_LOCKED_PARENTS.has(dotted) &&
+      (v === null || typeof v !== "object" || Array.isArray(v))
+    ) {
+      // A non-dict override at a locked parent would replace the entire
+      // locked subtree wholesale, bypassing per-leaf locks. Reject.
+      rejected.push(dotted);
+      continue;
+    }
+    if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+      const sub = dropLockedOverrides(v as Record<string, unknown>, dotted);
+      cleaned[k] = sub.cleaned;
+      rejected.push(...sub.rejected);
+    } else {
+      cleaned[k] = v;
+    }
+  }
+  return { cleaned, rejected };
+}
+
+function emitOverrideRejected(field: string, source: string): void {
+  try {
+    // `source: "skill"` — config loading happens inside skill execution.
+    // The queue's VALID_SOURCES allowlist rejects bespoke sources.
+    const res = enqueue(
+      makeEvent({
+        eventType: "red_team_override_rejected",
+        source: "skill",
+        payload: {
+          section: "red_team",
+          field: field.split(".").pop() ?? field,
+          path: field,
+          source,
+        },
+      }),
+    );
+    if (!res.ok) {
+      warn(`failed to enqueue override_rejected event: ${res.error}`);
+    }
+  } catch (err) {
+    warn(`failed to enqueue override_rejected event: ${(err as Error).message}`);
+  }
+}
+
+function pruneUnknownKeys(
+  override: Record<string, unknown>,
+  known: ReadonlySet<string>,
+  source: string,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(override)) {
+    if (!known.has(k)) {
+      warn(
+        `red_team.${k} is not a known config key and will be ignored in ${source} — drop it from your config or add it to the schema`,
+      );
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+function findRedTeamOverrideChain(cwd: string = process.cwd()): string[] {
+  const chain: string[] = [];
+  const home = fs.realpathSync(os.homedir());
+  let current: string;
+  try {
+    current = fs.realpathSync(cwd);
+  } catch {
+    return [];
+  }
+  while (current !== home && current !== path.dirname(current)) {
+    const cfg = path.join(current, ".code-review", "config.json");
+    if (fs.existsSync(cfg)) chain.push(cfg);
+    current = path.dirname(current);
+  }
+  return chain.reverse();
+}
+
+const RED_TEAM_KNOWN_KEYS: ReadonlySet<string> = new Set(
+  Object.keys(DEFAULT_RED_TEAM),
+);
+
+export function getRedTeamConfig(): RedTeamConfig {
+  const global = loadGlobalConfig();
+  let merged = deepMerge(DEFAULT_RED_TEAM, global["red_team"]);
+
+  for (const cfgPath of findRedTeamOverrideChain()) {
+    const layer = loadJsonFile(cfgPath);
+    const rawOverride = layer["red_team"];
+    if (rawOverride === undefined) continue;
+    if (
+      rawOverride === null ||
+      typeof rawOverride !== "object" ||
+      Array.isArray(rawOverride)
+    ) {
+      warn(
+        `expected object at red_team in ${cfgPath}, got ${Array.isArray(rawOverride) ? "array" : typeof rawOverride} — ignoring layer`,
+      );
+      continue;
+    }
+    const { cleaned, rejected } = dropLockedOverrides(
+      rawOverride as Record<string, unknown>,
+    );
+    for (const p of rejected) {
+      warn(
+        `red_team.${p} is locked to global config and cannot be overridden in ${cfgPath}`,
+      );
+      emitOverrideRejected(p, cfgPath);
+    }
+    const pruned = pruneUnknownKeys(cleaned, RED_TEAM_KNOWN_KEYS, cfgPath);
+    merged = deepMerge(merged, pruned);
+  }
+
+  return merged;
+}
+
+// ---------------------------------------------------------------------------
+// discoverConfig — hierarchical merge across global + org + repo. Preflight
+// only reads `cfg.agents`; we keep the surface minimal and let other ports
+// extend if they need more fields.
+// ---------------------------------------------------------------------------
+
+export interface DiscoverConfigOpts {
+  cwd?: string;
+  globalDir?: string;
+}
+
+interface DiscoveredConfig {
+  agents?: string[];
+  [key: string]: unknown;
+}
+
+function findConfigChain(cwd: string, globalDir: string): string[] {
+  const chain: string[] = [];
+  const home = fs.realpathSync(os.homedir());
+  let current: string;
+  try {
+    current = fs.realpathSync(cwd);
+  } catch {
+    current = cwd;
+  }
+  while (current !== home && current !== path.dirname(current)) {
+    const cfg = path.join(current, ".code-review", "config.json");
+    if (fs.existsSync(cfg)) chain.push(cfg);
+    current = path.dirname(current);
+  }
+  const globalCfg = path.join(globalDir, "config.json");
+  if (fs.existsSync(globalCfg)) chain.push(globalCfg);
+  return chain;
+}
+
+export function discoverConfig(opts: DiscoverConfigOpts = {}): DiscoveredConfig {
+  const cwd = opts.cwd ?? process.cwd();
+  const globalDir =
+    opts.globalDir ?? path.join(os.homedir(), ".claude", "code-review");
+  const chain = findConfigChain(cwd, globalDir);
+  // Walk from least-specific (global) to most-specific (repo) so the
+  // top-of-chain layer wins. Only `agents` (REPLACE field) is consumed
+  // by preflight today; preserve the Python's last-write-wins semantics.
+  const merged: DiscoveredConfig = {};
+  for (const cfgPath of chain.slice().reverse()) {
+    const layer = loadJsonFile(cfgPath);
+    for (const [k, v] of Object.entries(layer)) {
+      merged[k] = v;
+    }
+  }
+  return merged;
+}

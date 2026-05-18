@@ -5,15 +5,15 @@ description: >-
 argument-hint: '<plan-or-prompt> [--plan-slug SLUG] [--test-command CMD] [--lead claude|codex|gemini] [--wing claude|codex|gemini] [--max-rounds N] [--timeout N] [--dry-run]'
 disable-model-invocation: true
 model: opus
-revision: 27e35f5d4b6b1e245c6bdd1adf11d8f1ff0233e6
-revision_date: 2026-05-18T09:14:41Z
+revision: 63a8c794adafa2df8a713b4dcf9743a09e3c7cfc
+revision_date: 2026-05-18T19:17:41Z
 ---
 
 ## Preflight
 
 Run environment validation before proceeding:
 ```bash
-python3 ~/.claude/code-review/scripts/preflight.py --workflow stark-copilot --json
+node --experimental-strip-types ~/.claude/code-review/tools/preflight.ts --workflow stark-copilot --json
 ```
 Parse the JSON result:
 - If `overall` is "blocked": print the failing checks and stop. Do not proceed.
