@@ -108,7 +108,7 @@ test("collectStart: honors opts.session_id, start_head, started_at in session bl
       // alerts, queue, canary, suggestions, persona, available, board — all OK
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"], stdout: JSON.stringify({ unacknowledged: [] }) },
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/emit_queue_cli.ts", "--health"], stdout: JSON.stringify({ pending_count: 0, dead_letter_count: 0, max_created_at: null }) },
-      { cmd: ["python3", "/scripts/healer_canary.py", "--status", "--json"], stdout: JSON.stringify({ patterns: [] }) },
+      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/healer_canary.ts", "--status", "--json"], stdout: JSON.stringify({ patterns: [] }) },
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/skill_router.ts", "--context", "session", "--json"], stdout: JSON.stringify({ suggestions: [] }) },
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/stark_persona.ts", "select", "--auto"], stdout: JSON.stringify({ name: "Tony" }) },
       { cmd: ["python3", "/scripts/github_projects.py", "list-items"], stdout: "[]" },
@@ -151,7 +151,7 @@ test("collectStart: enforces total wall-clock deadline, slow collectors get null
       { cmd: ["gh", "pr", "view", "--json", "number,title,state,reviewDecision,statusCheckRollup"], code: 1 },
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"], stdout: JSON.stringify({ unacknowledged: [] }) },
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/emit_queue_cli.ts", "--health"], stdout: JSON.stringify({ pending_count: 0, dead_letter_count: 0, max_created_at: null }) },
-      { cmd: ["python3", "/scripts/healer_canary.py", "--status", "--json"], stdout: JSON.stringify({ patterns: [] }) },
+      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/healer_canary.ts", "--status", "--json"], stdout: JSON.stringify({ patterns: [] }) },
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/skill_router.ts", "--context", "session", "--json"], stdout: JSON.stringify({ suggestions: [] }) },
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/stark_persona.ts", "select", "--auto"], stdout: "{}" },
       { cmd: ["python3", "/scripts/github_projects.py", "list-items"], stdout: "[]" },
@@ -327,7 +327,7 @@ test("collectQueueHealth: parses pending + dead-letter + max_created_at", async 
 test("collectCanaryStatus: returns null when canary script not found", async () => {
   const deps = makeDeps({
     runs: [
-      { cmd: ["python3", "/scripts/healer_canary.py", "--status", "--json"], code: 2, stderr: "no" },
+      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/healer_canary.ts", "--status", "--json"], code: 2, stderr: "no" },
     ],
   });
   const errors: ErrSlot[] = [];
@@ -345,7 +345,7 @@ test("collectCanaryStatus: extracts circuits_open + near_promotion", async () =>
   const deps = makeDeps({
     runs: [
       {
-        cmd: ["python3", "/scripts/healer_canary.py", "--status", "--json"],
+        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/healer_canary.ts", "--status", "--json"],
         stdout: JSON.stringify(payload),
       },
     ],
@@ -766,7 +766,7 @@ test("collectStart: assembles every slot with overrides honored", async () => {
       },
       // canary
       {
-        cmd: ["python3", "/scripts/healer_canary.py", "--status", "--json"],
+        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/healer_canary.ts", "--status", "--json"],
         stdout: JSON.stringify({ patterns: [] }),
       },
       // skills suggestions

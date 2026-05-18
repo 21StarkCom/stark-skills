@@ -211,7 +211,16 @@ export async function collectCanaryStatus(
   deps: Deps,
   errors: ErrSlot[],
 ): Promise<CanaryStatus | null> {
-  const cmd = ["python3", `${deps.scriptsDir}/healer_canary.py`, "--status", "--json"];
+  // healer_canary went pure-TS in the 2026-05-18 cutover (Python deleted).
+  const toolsDir = `${deps.scriptsDir.replace(/\/scripts$/, "")}/tools`;
+  const cmd = [
+    "node",
+    "--experimental-strip-types",
+    "--no-warnings",
+    `${toolsDir}/healer_canary.ts`,
+    "--status",
+    "--json",
+  ];
   const result = await deps.run(cmd, { timeoutMs: SUBPROCESS_TIMEOUT_MS });
   if (result.code !== 0) {
     pushSubprocessError(errors, "canary", result);
@@ -247,9 +256,9 @@ export async function collectAlerts(
 ): Promise<AlertsState | null> {
   // alert_delivery went TS-canonical in the 2026-05-18 cutover. The
   // Python `scripts/alert_delivery.py` stays alive for the in-process
-  // emitter calls from self_healer / healer_canary, but the JSON probe
-  // here talks to the TS CLI sibling under `tools/`. Both sides target
-  // the same on-disk marker dir so the data they see is the same.
+  // emitter call from self_healer, but the JSON probe here talks to
+  // the TS CLI sibling under `tools/`. Both sides target the same
+  // on-disk marker dir so the data they see is the same.
   const toolsDir = `${deps.scriptsDir.replace(/\/scripts$/, "")}/tools`;
   const cmd = [
     "node",

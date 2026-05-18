@@ -57,6 +57,11 @@ const VALID_TYPES: ReadonlySet<string> = new Set([
   // subtype lives inside payload (consumer's PAYLOAD_SCHEMAS["persona_event"]
   // requires it there); the Python producer used the same name.
   "persona_event",
+  // healer_canary lifecycle: pattern promotions/demotions/circuit recoveries.
+  // Distinct from `heal_attempt` (per-attempt outcomes from self_healer) —
+  // this is the "canary control plane" signal, used by ops to spot pattern
+  // mode flips and manual circuit recoveries without grep-ing healer.jsonl.
+  "healer_canary",
 ]);
 
 const VALID_CLIS: ReadonlySet<string> = new Set(["claude", "codex", "gemini"]);
