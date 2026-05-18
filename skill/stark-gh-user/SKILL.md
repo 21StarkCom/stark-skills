@@ -5,8 +5,8 @@ description: >-
   invocations to dodge per-user GraphQL/REST rate limits. Tokens live in macOS
   Keychain (service `stark-gh-token`).
 argument-hint: "[show|primary|secondary|swap|limits] [--kind fine|classic|auto]"
-revision: 7d4eb375d131624ff59927945d448856858d621c
-revision_date: 2026-05-18T16:33:25Z
+revision: 63e888043556dafb1b0c7e9743f127ae4a257c6f
+revision_date: 2026-05-18T18:34:12Z
 ---
 
 # stark-gh-user
@@ -100,7 +100,7 @@ If a keychain entry is missing, render `MISSING` in place of the numbers and con
 
 ## Notes
 
-- `gh` honors `GH_TOKEN` over the keychain auth, so once the user `eval`s the export block, every subsequent `gh` call in that shell — including ones spawned by `multi_review.py`, `triage_orchestrator.py`, `github_projects.py`, and the TS tools in `tools/` — uses the chosen identity automatically. No call-site edits.
+- `gh` honors `GH_TOKEN` over the keychain auth, so once the user `eval`s the export block, every subsequent `gh` call in that shell — including ones spawned by `multi_review.py`, `triage_orchestrator.py`, and the TS tools in `tools/` (including `github_projects.ts`) — uses the chosen identity automatically. No call-site edits.
 - `runtime_env.py` overrides `GH_TOKEN` for review subprocesses with the matching App installation token, so review-posting still goes through the correct bot.
 - To revert to the OS keychain auth: `unset GH_TOKEN GITHUB_TOKEN STARK_GH_USER`.
 
