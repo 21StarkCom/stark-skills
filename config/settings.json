@@ -22,7 +22,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/aryeh/.stark-insights/bin/stark hook tool_usage"
+            "command": "/Users/aryeh/.stark-insights/bin/stark hook tool_usage tool=$TOOL_NAME"
           }
         ]
       }
@@ -33,7 +33,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/aryeh/.stark-insights/bin/stark hook tool_usage status=complete"
+            "command": "/Users/aryeh/.stark-insights/bin/stark hook tool_usage tool=$TOOL_NAME status=complete"
           }
         ]
       }
