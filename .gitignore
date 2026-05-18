@@ -7,6 +7,7 @@ __pycache__/
 .DS_Store
 skill/*-workspace/
 .worktrees/
+.claude/worktrees/
 .superpowers/
 .analysis-parsed/
 .analysis-raw-data/
