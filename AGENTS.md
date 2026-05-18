@@ -49,12 +49,12 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `scripts/github_app.py` — multi-app GitHub auth (stark-Codex, stark-codex, stark-gemini)
 - `scripts/github_projects.py` — GitHub Projects V2 GraphQL utility (13 public functions)
 - `tools/emit_queue_lib.ts` + `tools/emit_queue_cli.ts` — SQLite-backed durable event queue (producer side). Python consumers reach it via `scripts/_emit.py`, a thin subprocess wrapper. The drain side lives in stark-insights.
-- `scripts/session_state.py` — persistent session state management
+- `scripts/session_state.py` — persistent session state management. **Mid-migration to TS** (`tools/session_state_lib.ts` + `tools/session_state.ts`). Python remains only because `context_compactor.py` imports `SessionState`; both go in that port.
 
 ### TUI & session
 - `scripts/tui_core.py` — shared TUI rendering primitives (box, table, progress) — sole remaining consumer is `triage_tui.py`
 - `scripts/triage_tui.py` — triage decision TUI renderer
-- `tools/stark_session_lib.ts` + `tools/stark_session.ts` — `/stark-session` data collector. Subcommands `start` and `end` return structured JSON; Claude renders the briefing/summary directly. Shells out to existing Python helpers (`session_state.py`, `alert_delivery.py`, `healer_canary.py`, `stark_persona.py`, `skill_router.py`, `github_projects.py`). Replaces the deleted `session_tui*.py` ANSI/box-drawing renderer.
+- `tools/stark_session_lib.ts` + `tools/stark_session.ts` — `/stark-session` data collector. Subcommands `start` and `end` return structured JSON; Claude renders the briefing/summary directly. Session-state and persona collectors now talk to pure-TS siblings; remaining Python shell-outs (`alert_delivery.py`, `healer_canary.py`, `skill_router.py`, `github_projects.py`) are scheduled for their own follow-up slices. Replaces the deleted `session_tui*.py` ANSI/box-drawing renderer.
 
 ### Red-team audit + emit-queue CLIs (Python shell-out seam; Phase 1a of the TS migration)
 - The red-team subsystem is **pure TypeScript** under `tools/`. All Python red-team modules + CLIs were deleted by end of the 2026-05-16 migration. The Responses-API model allowlist + key resolver previously in `scripts/openai_responses.py` are now inlined into `preflight.py::check_red_team_transport_auth` (its only consumer).
@@ -70,7 +70,8 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `tools/red_team_db_resolver.ts` — Canonical audit DB resolver (`--db` > env > config > default), matches Python `Path.resolve()` symlink semantics on macOS.
 - `tools/emit_queue_lib.ts` — canonical TS implementation of the producer queue (`makeEvent` + `enqueue` + `validate` + `health` + `pendingCount` + `deadLetterCount` + `recordContextPct` + `initSchema`). Writes to `~/.stark-insights/queue.db`. Python consumers reach it through `tools/emit_queue_cli.ts` via `scripts/_emit.py`.
 - `tools/stark_persona_lib.ts` + `tools/stark_persona.ts` — pure-TypeScript `/stark-persona` (replaces the deleted `scripts/stark_persona.py`). Library: roster grammar, active.json, weight math, fuzzy match, SQLite schema, selection / combo / rating / survey / add. CLI: 11 subcommands (`select` / `deactivate` / `rate` / `survey` / `survey-answer` / `add` / `stats` / `history` / `print-roster` / `print-weights` / `session-end`). Insights events emit straight to `~/.stark-insights/queue.db` via `tools/emit_queue_lib.ts` as `persona_event`.
-- `tools/session_id_lib.ts` + `tools/session_id.ts` — TS port of `scripts/session_id.py` (kept alongside the Python until `session_state.py` ports too). Shared resolver: CLAUDE_SESSION_ID > newest-mtime marker in `~/.claude/projects/` > uuid4. `tools/emit_queue_lib.ts` now imports it, so every TS producer sees the same session ID the Python session-state machine does.
+- `tools/session_id_lib.ts` + `tools/session_id.ts` — TS port of `scripts/session_id.py`. Shared resolver: CLAUDE_SESSION_ID > newest-mtime marker in `~/.claude/projects/` > uuid4. Consumed by `tools/emit_queue_lib.ts` and `tools/session_state_lib.ts`.
+- `tools/session_state_lib.ts` + `tools/session_state.ts` — TS port of `scripts/session_state.py`. Same on-disk JSON shape and path sanitization. CLI: `[--session-id ID] [--json]` (Python parity) + new `set --field <name|start_head|last_checkpoint> --value VAL` for SKILL.md Phase 3 / Phase 6.
 - `tools/optimize_skill_description.ts` — skill-description optimizer (replaces the deleted `scripts/optimize_skill_description.py`). Reads SKILL.md frontmatter, scores via the skill-creator plugin's Python `run_eval.py`, asks `claude -p` for a better description based on the failing eval queries. CLI flags and JSON report shape match the Python.
 
 ### Other
