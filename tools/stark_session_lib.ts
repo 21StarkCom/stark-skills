@@ -288,7 +288,18 @@ export async function collectSkillSuggestions(
   deps: Deps,
   errors: ErrSlot[],
 ): Promise<SkillSuggestion[]> {
-  const cmd = ["python3", `${deps.scriptsDir}/skill_router.py`, "--context", "session", "--json"];
+  // skill_router went pure-TS in the 2026-05-18 cutover (the Python
+  // was deleted with that slice — no other callers).
+  const toolsDir = `${deps.scriptsDir.replace(/\/scripts$/, "")}/tools`;
+  const cmd = [
+    "node",
+    "--experimental-strip-types",
+    "--no-warnings",
+    `${toolsDir}/skill_router.ts`,
+    "--context",
+    "session",
+    "--json",
+  ];
   const result = await deps.run(cmd, { timeoutMs: SUBPROCESS_TIMEOUT_MS });
   if (result.code !== 0) {
     pushSubprocessError(errors, "skills", result);
