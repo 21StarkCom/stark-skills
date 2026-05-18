@@ -6,8 +6,8 @@ argument-hint: "<plan-slug-or-path> [--dry-run] [--skip-deploy] [--skip-release]
 disable-model-invocation: true
 context: fork
 model: opus
-revision: ab6a41c8d94c419a963eaac3902148f6961b723f
-revision_date: 2026-05-17T10:33:06Z
+revision: 27e35f5d4b6b1e245c6bdd1adf11d8f1ff0233e6
+revision_date: 2026-05-18T09:14:41Z
 ---
 
 ## Preflight
@@ -278,8 +278,8 @@ Print: `[HH:MM:SS]   ✓ Task #{NUMBER} merged (PR #{PR_NUM}, {rounds} rounds, {
 
 After each merge, record completed task and check for checkpoint interval:
 ```bash
-python3 ~/.claude/code-review/scripts/session_state.py --json 2>/dev/null || true
-python3 ~/.claude/code-review/scripts/context_compactor.py --json 2>/dev/null || true
+node --experimental-strip-types --no-warnings ~/.claude/code-review/tools/session_state.ts --json 2>/dev/null || true
+node --experimental-strip-types --no-warnings ~/.claude/code-review/tools/context_compactor.ts --json 2>/dev/null || true
 ```
 Both are best-effort — wrap in `|| true`. Never block task execution.
 

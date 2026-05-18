@@ -5,8 +5,8 @@ description: >-
 argument-hint: '<plan-or-prompt> [--plan-slug SLUG] [--test-command CMD] [--lead claude|codex|gemini] [--wing claude|codex|gemini] [--max-rounds N] [--timeout N] [--dry-run]'
 disable-model-invocation: true
 model: opus
-revision: 48ebf8a1831a23f5dd9ad7ff292cc2a403b27bb0
-revision_date: 2026-05-16T04:46:41Z
+revision: 27e35f5d4b6b1e245c6bdd1adf11d8f1ff0233e6
+revision_date: 2026-05-18T09:14:41Z
 ---
 
 ## Preflight
@@ -293,11 +293,11 @@ Print step summary (lead, wing, rounds count, final verdict, files changed, test
 
 After each step completes:
 ```bash
-python3 ~/.claude/code-review/scripts/session_state.py --json 2>/dev/null || true
+node --experimental-strip-types --no-warnings ~/.claude/code-review/tools/session_state.ts --json 2>/dev/null || true
 ```
 Call `add_task("{step_id}")` programmatically. Generate a checkpoint every `context_compaction.checkpoint_interval_minutes` minutes (default 15):
 ```bash
-python3 ~/.claude/code-review/scripts/context_compactor.py --json 2>/dev/null || true
+node --experimental-strip-types --no-warnings ~/.claude/code-review/tools/context_compactor.ts --json 2>/dev/null || true
 ```
 
 ## Phase 2.5: End-of-Run Verification (MANDATORY)

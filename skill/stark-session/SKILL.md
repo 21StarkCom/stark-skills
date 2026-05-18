@@ -5,8 +5,8 @@ description: >-
 argument-hint: "[start|end]"
 disable-model-invocation: true
 model: opus
-revision: 9e11a7d7b3c0253a7672a016f12b805b1908bacd
-revision_date: 2026-05-18T08:51:51Z
+revision: 27e35f5d4b6b1e245c6bdd1adf11d8f1ff0233e6
+revision_date: 2026-05-18T09:14:41Z
 ---
 
 ## Preflight
@@ -181,7 +181,8 @@ git commit -m "docs: session update — <summary>"
 ### Phase 3b — Session checkpoint
 
 ```bash
-python3 "$SCRIPTS/context_compactor.py" --json 2>/dev/null || true
+node --experimental-strip-types --no-warnings \
+  "$HOME/.claude/code-review/tools/context_compactor.ts" --json 2>/dev/null || true
 node --experimental-strip-types --no-warnings \
   "$HOME/.claude/code-review/tools/session_state.ts" --json 2>/dev/null || true
 ```

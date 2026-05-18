@@ -5,8 +5,8 @@ description: >-
 argument-hint: '<plan-or-prompt> [--plan-slug SLUG] [--test-command CMD] [--agents claude,codex,gemini] [--timeout N] [--dry-run]'
 disable-model-invocation: true
 model: opus
-revision: 7c91ffda1c063674729d3d8dddcf530bb937db53
-revision_date: 2026-05-14T07:49:39Z
+revision: 27e35f5d4b6b1e245c6bdd1adf11d8f1ff0233e6
+revision_date: 2026-05-18T09:14:41Z
 ---
 
 ## Preflight
@@ -262,13 +262,13 @@ Print step summary, then move to next step. The next step's agents will work fro
 
 After each step completes:
 ```bash
-python3 ~/.claude/code-review/scripts/session_state.py --json 2>/dev/null || true
+node --experimental-strip-types --no-warnings ~/.claude/code-review/tools/session_state.ts --json 2>/dev/null || true
 ```
 Call `add_task("{step_id}")` programmatically, or note the step completion in context. The session state tracks which autopilot steps have completed so a crashed session can identify what was already done.
 
 Every `context_compaction.checkpoint_interval_minutes` minutes (from config, default 15), generate a checkpoint:
 ```bash
-python3 ~/.claude/code-review/scripts/context_compactor.py --json 2>/dev/null || true
+node --experimental-strip-types --no-warnings ~/.claude/code-review/tools/context_compactor.ts --json 2>/dev/null || true
 ```
 Track the last checkpoint time and skip if not enough time has elapsed.
 
