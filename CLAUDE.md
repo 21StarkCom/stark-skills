@@ -52,10 +52,9 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `scripts/session_state.py` — persistent session state management
 
 ### TUI & session
-- `scripts/tui_core.py` — shared TUI rendering primitives (box, table, progress)
+- `scripts/tui_core.py` — shared TUI rendering primitives (box, table, progress) — sole remaining consumer is `triage_tui.py`
 - `scripts/triage_tui.py` — triage decision TUI renderer
-- `scripts/session_tui.py` — session start/end renderer
-- `scripts/session_tui_cli.py` — session TUI CLI entry point
+- The session-start/end TUI is gone. `/stark-session` now collects state via `tools/stark_session.ts` and Claude renders the briefing/summary itself — see "TS tools" below.
 
 ### Red-team subsystem
 The red-team subsystem is **pure TypeScript** under `tools/`. All Python red-team modules + CLIs were deleted by end of the 2026-05-16 migration. The Responses-API model allowlist + key resolver previously in `scripts/openai_responses.py` are now inlined into `preflight.py::check_red_team_transport_auth` (its only consumer).
@@ -75,6 +74,7 @@ The red-team subsystem is **pure TypeScript** under `tools/`. All Python red-tea
 - `tools/red_team_accept.ts` — Interactive CLI: looks up a stable key, shows the matched concern, optionally prompts (skippable via `--no-confirm`), writes an `INSERT OR IGNORE` accept row. PR-#430 round-3 fix #22 non-TTY refusal preserved.
 - `tools/red_team_backfill_lib.ts` + `tools/red_team_backfill.ts` — Pulls historical `red_team_runs` + `red_team_findings` rows out of the audit DB, builds matching insights envelopes, enqueues directly. `--scope all|legacy|forward`, `--limit`, `--dry-run`, `--manifest`.
 - `tools/red_team_db_resolver.ts` — Canonical audit DB resolver. Precedence: `--db` > `STARK_RED_TEAM_DB` env > `red_team.audit.db_path` config > default `~/.claude/code-review/history/forged-review/forged_review_metrics.db`. Returns the canonicalized path (collapses symlinks like `/tmp → /private/tmp` on macOS to match Python's `Path.resolve()`).
+- `tools/stark_session_lib.ts` + `tools/stark_session.ts` — `/stark-session` data collector. Pure-function collectors (git, gh, board, alerts, health, queue, healer, persona, skills, session_state) with injected `run`/`readFile` deps for testability; CLI subcommands `start` and `end` print structured JSON for Claude to render. Each collector returns its slot or `null` on failure and pushes `{source, message}` to a shared `errors[]` accumulator. Shells out to the existing Python helpers (`session_state.py`, `alert_delivery.py`, `healer_canary.py`, `stark_persona.py`, `skill_router.py`, `github_projects.py`) — those are scheduled for their own follow-up slices. Replaces the deleted `scripts/session_tui*.py` ANSI/box-drawing renderer.
 - `tools/emit_queue_lib.ts` + `tools/emit_queue_cli.ts` — canonical TS producer for the durable insights queue. Surface: `makeEvent`, `enqueue` (with ADR-0014 source-specific dedupe formulas), `validate`, `pendingCount`, `deadLetterCount`, `health`, `recordContextPct`, `initSchema`. CLI subcommands: `--health`, `--init-schema`, `record-context-pct`, `pending-count`, `dead-letter-count`, `enqueue --type T --payload JSON [...]`. Writes to `~/.stark-insights/queue.db` (`STARK_QUEUE_DIR` env honored). Python consumers reach the queue through `scripts/_emit.py`, a thin subprocess shim around the `enqueue` subcommand. The drain side lives in stark-insights.
 - `tools/skill_lib.ts` — shared skill discovery + reference parsing
 - `tools/skill_audit.ts`, `skill_validate.ts`, `skill_optimize.ts`, `skill_autopilot.ts` — meta-tooling

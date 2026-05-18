@@ -52,10 +52,9 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `scripts/session_state.py` — persistent session state management
 
 ### TUI & session
-- `scripts/tui_core.py` — shared TUI rendering primitives (box, table, progress)
+- `scripts/tui_core.py` — shared TUI rendering primitives (box, table, progress) — sole remaining consumer is `triage_tui.py`
 - `scripts/triage_tui.py` — triage decision TUI renderer
-- `scripts/session_tui.py` — session start/end renderer
-- `scripts/session_tui_cli.py` — session TUI CLI entry point
+- `tools/stark_session_lib.ts` + `tools/stark_session.ts` — `/stark-session` data collector. Subcommands `start` and `end` return structured JSON; Claude renders the briefing/summary directly. Shells out to existing Python helpers (`session_state.py`, `alert_delivery.py`, `healer_canary.py`, `stark_persona.py`, `skill_router.py`, `github_projects.py`). Replaces the deleted `session_tui*.py` ANSI/box-drawing renderer.
 
 ### Red-team audit + emit-queue CLIs (Python shell-out seam; Phase 1a of the TS migration)
 - The red-team subsystem is **pure TypeScript** under `tools/`. All Python red-team modules + CLIs were deleted by end of the 2026-05-16 migration. The Responses-API model allowlist + key resolver previously in `scripts/openai_responses.py` are now inlined into `preflight.py::check_red_team_transport_auth` (its only consumer).

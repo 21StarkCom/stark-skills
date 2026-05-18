@@ -5,8 +5,8 @@ description: >-
 argument-hint: "[start|end]"
 disable-model-invocation: true
 model: opus
-revision: ab6a41c8d94c419a963eaac3902148f6961b723f
-revision_date: 2026-05-17T10:33:06Z
+revision: 68038b13d3616e872dcf5487c250ae0494dc9db8
+revision_date: 2026-05-18T05:30:25Z
 ---
 
 ## Preflight
@@ -17,12 +17,12 @@ Run [standard preflight](../../standards/preflight.md) with `--workflow stark-se
 
 Session lifecycle management: **start** (context load + briefing) and **end** (test + merge + commit + push).
 
+A single TS CLI gathers every fact you need into one JSON blob; you render the briefing/summary directly. No ANSI, no box-drawing, no fallback path — when a collector fails, its slot is `null` and the failure is logged into `errors[]`.
+
 ## Arguments
 
 - `/stark-session` or `/stark-session start` — starts a session (default)
 - `/stark-session end` — ends a session
-- `--plain` — plain text (no ANSI, no emoji, no box-drawing)
-- `--no-color` — disable ANSI color only
 
 **Raw input:** `$ARGUMENTS`
 
@@ -30,229 +30,247 @@ Session lifecycle management: **start** (context load + briefing) and **end** (t
 
 ```bash
 SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
-PYTHON="$SCRIPTS/.venv/bin/python3"
-[ -x "$PYTHON" ] || PYTHON=python3
+TOOLS="${STARK_REVIEW_TOOLS:-$HOME/.claude/code-review/tools}"
+SESSION_CLI="node --experimental-strip-types --no-warnings $TOOLS/stark_session.ts"
 ```
 
 ## Config
 
-Path: `.code-review/config.json` (hierarchical: global → org → repo). Read each level with `test -f <path> && cat <path> || true`. Merge the `session` block; `session.test_command` falls back to top-level `test_command`.
+Path: `.code-review/config.json` (hierarchical: global → org → repo). Reading is handled inside the TS CLI; you only need to know the keys that affect **end-mode dialogue**:
 
 | Key | Default | Notes |
 |-----|---------|-------|
-| `health_checks` | `[]` | Commands to run on start |
 | `build_command` | `null` | Build command for end |
 | `test_command` | `null` | Falls back to top-level |
 | `doc_paths` | `["docs/", "CLAUDE.md"]` | Paths to stage on end |
 | `devlog_path` | `null` | Devlog directory |
 | `pr_merge_strategy` | `"squash"` | squash/merge/rebase |
 
+`session.health_checks` is consumed by the TS CLI directly — you don't run these yourself.
+
 ---
 
 ## Start Mode
 
-### Phase 0b — Session State
+### Phase 0 — Record start HEAD
 
 ```bash
-python3 ~/.claude/code-review/scripts/session_state.py --json 2>/dev/null || true
-```
-Display session ID, branch, started_at. Show resume info if `tasks_completed` is non-empty or `last_checkpoint` is set. Skip silently if command fails.
-
-### Phase 0c — Record start HEAD
-
-```bash
+SESSION_ID="${CLAUDE_SESSION_ID:-$(python3 "$SCRIPTS/session_id.py")}"
 START_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
+STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 ```
-Persist `start_head` to session state for end-mode diff summaries.
 
 ### Phase 1 — Gather context (silent)
 
-Read and internalize — do NOT display any of this content:
+Read and internalize — do NOT display:
 - `CLAUDE.md` from current directory and each parent up to `~`
 - Memory files: `~/.claude/projects/*/memory/` matching current project path
-- Config hierarchy (see Config section)
 
-### Phase 2 — Git state
+(Config + project board context are handled by the CLI in Phase 2.)
 
-```bash
-git fetch --prune
-git branch --show-current
-git status --short  # NEVER use -uall
-git log --oneline -5
-git stash list
-# If on feature branch: git log main..$BRANCH --oneline
-```
-
-Fetch open PRs (both non-fatal `|| true`):
-```bash
-gh pr list --author @me --state open --json number,title,headRefName,reviewDecision,url 2>/dev/null || true
-gh pr view --json number,title,state,reviewDecision,statusCheckRollup 2>/dev/null || true
-```
-
-### Project Board Context
-
-If `.github/project-config.json` exists: use bot token, query `in_flight` (Status=Agent Working, Agent=Claude), `needs_attention` (Status=Needs Clarification), and `blocked` items. Display in briefing. Unset GH_TOKEN after.
-
-### Phase 2b — Unacknowledged Alerts
+### Phase 2 — Collect session state
 
 ```bash
-python3 ~/.claude/code-review/scripts/alert_delivery.py --check --json 2>/dev/null || true
-```
-If `unacknowledged` is non-empty, display prominently **before** the briefing. Non-fatal — continue even if alerts exist.
-
-### Phase 3 — Health checks
-
-Run each `session.health_checks` command. Report pass/fail — non-fatal.
-
-**Built-in: telemetry queue health:**
-```bash
-node --experimental-strip-types --no-warnings \
-    ~/.claude/code-review/tools/emit_queue_cli.ts --health 2>/dev/null || true
-```
-Display `pending_count` and `max_created_at`. Also check for dead-lettered events:
-```bash
-p=$(node --experimental-strip-types --no-warnings \
-    ~/.claude/code-review/tools/emit_queue_cli.ts pending-count 2>/dev/null || echo 0)
-d=$(node --experimental-strip-types --no-warnings \
-    ~/.claude/code-review/tools/emit_queue_cli.ts dead-letter-count 2>/dev/null || echo 0)
-if [ "$d" -gt 0 ]; then echo "WARN: $d dead-lettered events, $p pending"
-elif [ "$p" -gt 10 ]; then echo "WARN: $p events pending drain"
-else echo "OK: queue healthy ($p pending, $d dead)"; fi
+STATE_JSON=$($SESSION_CLI start \
+  --session-id "$SESSION_ID" \
+  --start-head "$START_HEAD" \
+  --started-at "$STARTED_AT" 2>/dev/null || echo '{}')
 ```
 
-If `~/.claude/code-review/healer.jsonl` exists, show top-5 failure categories:
+`STATE_JSON` is the structured briefing. Schema:
+
+```json
+{
+  "session": { "session_id", "started_at", "branch", "repo",
+               "tasks_completed", "last_checkpoint", "name", "start_head" } | null,
+  "git": { "branch", "ahead", "behind", "uncommitted", "stashes",
+           "recent_commits": [{ "sha", "message", "age" }] } | null,
+  "prs": { "mine": [{ "number", "title", "head", "review_decision", "url" }],
+           "current_branch": { "number", "title", "state", "review_decision",
+                               "checks": { "pass", "fail", "pending" } } | null } | null,
+  "board": { "in_flight", "blocked", "needs_attention" } | null,
+  "alerts": { "unacknowledged": [{ "level", "message", "context" }] } | null,
+  "health": [{ "name", "passed", "detail", "duration" }],
+  "queue": { "pending", "dead_letter", "max_created_at" } | null,
+  "healer": { "categories": [{ "name", "count" }],
+              "canary": { "circuits_open", "near_promotion" } } | null,
+  "skills": { "available": [...], "suggestions": [{ "name", "reason" }] },
+  "persona": { "name", "source", "catchphrase", ... } | null,
+  "errors": [{ "source", "message" }]
+}
+```
+
+### Phase 3 — Persist start HEAD
+
 ```bash
 python3 -c "
-import json, collections, pathlib
-log = pathlib.Path.home() / '.claude/code-review/healer.jsonl'
-if not log.exists(): exit(0)
-cats = collections.Counter()
-for l in log.read_text().splitlines():
-    if not l: continue
-    try: cats[json.loads(l).get('category', 'unknown')] += 1
-    except (json.JSONDecodeError, TypeError): pass
-if cats:
-    print('Failure categories:')
-    for cat, n in cats.most_common(5): print(f'  {cat}: {n}')
+import sys; sys.path.insert(0, '$SCRIPTS')
+from session_state import SessionState
+ss = SessionState.get_current()
+ss.start_head = '$START_HEAD'
+ss.save()
 " 2>/dev/null || true
 ```
 
-**Built-in: healer canary status:**
-```bash
-python3 ~/.claude/code-review/scripts/healer_canary.py --status --json 2>/dev/null || true
-```
-Display circuits open (`circuit == "open"`) and patterns near promotion (`mode == "suggest"`, `successful_suggests >= 3`). Skip silently if fails.
+### Phase 4 — Render briefing
 
-### Phase 4 — Available skills
+Render `STATE_JSON` as a concise briefing for the user. Layout guidance:
 
-`ls ~/.claude/skills/*/SKILL.md .claude/skills/*/SKILL.md 2>/dev/null || true`. Extract skill names from paths.
+1. **Header line:** `Session {session.session_id[:8]} · {session.branch} · {session.repo}`
+2. **Persona line** (if `persona`): `Persona: {name} ({source}) — "{catchphrase}"`
+3. **Alerts** (if `alerts.unacknowledged` non-empty): surface FIRST and prominently — each as `[{level}] {message}` with context underneath.
+4. **Git**: branch, ahead/behind, uncommitted count, stashes, last 5 commits.
+5. **PRs**: open PRs (`mine`), then the current branch PR with check rollup if present.
+6. **Board**: `in_flight`, `needs_attention`, `blocked` (omit empty buckets).
+7. **Health**: render each result on one line — pass/fail/timeout, name, duration, short detail.
+8. **Queue**: `pending`/`dead_letter` — warn if `dead_letter > 0` or `pending > 10`.
+9. **Healer**: top categories from `healer.categories`; flag any `circuits_open` and `near_promotion`.
+10. **Skills**: skill `suggestions` (cap 2). Available skills list is for your awareness; don't dump it on the user.
+11. **Errors** (if non-empty): brief one-liner at the bottom — *"Couldn't read: X, Y"*.
 
-### Phase 4b — Persona Selection
+Omit entire sections that are `null` or empty. Prefer brief, scannable formatting over walls of text.
 
-If `/stark-persona` skill exists: `PERSONA_JSON=$(python3 scripts/stark_persona.py select --auto 2>/dev/null)`. If valid JSON, include in briefing: `Persona: {persona} ({source}) — "{catchphrase}"`. Skip silently if fails. 1-in-5 chance survey fires AFTER persona selection, displayed after the briefing.
+### Phase 5 — Task list
 
-### Phase 4c — Skill Suggestions
+Build a prioritized task list from the briefing data in this order, including only categories that have items:
 
-```bash
-python3 ~/.claude/code-review/scripts/skill_router.py --context session --json 2>/dev/null || true
-```
-Display at most 2 suggestions. Skip silently if fails.
+1. **Open PRs needing action** — review comments, failing checks, requested changes
+2. **Uncommitted changes** — dirty tree, staged files, stashes
+3. **Failing health checks**
+4. **Board items in flight** assigned to Claude
+5. **Alerts** still unacknowledged
 
-### Phase 5 — Structured Briefing
+Ask: **"Task list look right? Say 'go' to start from the top, or tell me what to focus on."**
 
-Build flags from `$ARGUMENTS` and `$STARK_PLAIN` env var. Build `PERSONA_ARG` and `NEXT_UP_ARG` from collected data. Invoke:
-
-```bash
-$PYTHON $SCRIPTS/session_tui_cli.py start \
-    --session-id "$SESSION_ID" --repo "$REPO" \
-    --start-head "$START_HEAD" --started-at "$STARTED_AT" \
-    $PLAIN_FLAG $NO_COLOR_FLAG $PERSONA_ARG $NEXT_UP_ARG
-```
-
-If CLI exits non-zero, fall back to plain-text briefing from collected phase data. The structured briefing shows: git state, PRs, health, alerts, board, next-up items.
-
-### Phase 6 — Session Task List
-
-Build prioritized task list from phases 1–5 in this order:
-1. Open PRs needing action (review comments, failing checks, requested changes)
-2. Uncommitted changes (dirty tree, staged files, stashes)
-3. Failing health checks
-4. Project board items assigned to Claude (Status=Agent Working)
-5. Stale branches (no commits in 7 days)
-
-Only include categories that actually exist. Ask: **"Task list look right? Say 'go' to start from the top, or tell me what to focus on."** On "go", work sequentially without prompting between tasks — only pause for genuine decisions (merge conflict, ambiguous review, failing test). If empty: "Everything looks clean. What are we working on?"
+On "go", work sequentially without prompting between tasks — only pause for genuine decisions (merge conflict, ambiguous review, failing test). If everything is empty: "Everything looks clean. What are we working on?"
 
 ---
 
 ## End Mode
 
-### Phase 0b — Persona Cleanup
+### Phase 0 — Persona cleanup
 
-If `~/.stark-persona/active.json` exists: `python3 scripts/stark_persona.py session-end 2>/dev/null`. Display fun-fact callout (20% chance) AFTER session summary.
+```bash
+if [ -f "$HOME/.stark-persona/active.json" ]; then
+  python3 "$SCRIPTS/stark_persona.py" session-end 2>/dev/null || true
+fi
+```
+Display the 20% fun-fact callout AFTER the summary (if any).
 
-### Phase 1 — Run tests
+### Phase 1 — Tests
 
-Get test_command from `session.test_command` or top-level `test_command`. Run test_command and `session.build_command` if set. On failure: warn and ask "Proceed anyway?"
+Read `test_command` and `build_command` from `.code-review/config.json` (`session.*` first, then top-level). Run them.
+
+On failure: warn and ask **"Proceed anyway?"**
 
 ### Phase 2 — Merge open PRs
 
-`gh auth status` — skip with warning if fails. `gh pr list --head $(git branch --show-current) --json number,title,state`. For each open PR: offer to merge via `gh pr merge <number> --<pr_merge_strategy>`. On failure: report and ask "Skip this PR?" Uses user's PAT via `gh` CLI — NOT GitHub App bots.
+```bash
+gh auth status   # skip with warning if fails
+gh pr list --head "$(git branch --show-current)" --json number,title,state
+```
+
+For each open PR: offer to merge via `gh pr merge <number> --<pr_merge_strategy>`. On failure: report and ask "Skip this PR?". Uses your PAT — not GitHub App bots.
 
 ### Phase 3 — Commit docs
 
-Stage paths from `session.doc_paths`. If `session.devlog_path` configured: prompt for one-line summary, create entry at `<devlog_path>/YYYY-MM-DD.md`, stage the file. Always ask for summary for commit message. Check `git diff --cached --stat` — skip commit if empty. Commit: `git commit -m "docs: session update — <summary>"`
+Stage paths from `session.doc_paths`. If `session.devlog_path` is set, prompt for a one-line summary, create `<devlog_path>/YYYY-MM-DD.md`, stage it. Always ask for a summary for the commit message.
 
-### Phase 3b — Session Checkpoint
+Skip the commit if `git diff --cached --stat` is empty. Otherwise:
 
 ```bash
-python3 ~/.claude/code-review/scripts/context_compactor.py --json 2>/dev/null || true
-python3 ~/.claude/code-review/scripts/session_state.py --json 2>/dev/null || true
+git commit -m "docs: session update — <summary>"
 ```
-Both are best-effort (`|| true`). Note checkpoint path in summary.
 
-### Phase 4 — Project Field Updates
+### Phase 3b — Session checkpoint
 
-If `.github/project-config.json` exists: extract issue numbers from git log commits in this session. If `docs/` files were modified in commits referencing an issue, update Documentation State to 'Drafted' (only if currently 'Not Started'). Do NOT override 'Reviewed' or 'Complete'. Log warnings — never block session end.
+```bash
+python3 "$SCRIPTS/context_compactor.py" --json 2>/dev/null || true
+python3 "$SCRIPTS/session_state.py" --json 2>/dev/null || true
+```
+
+Both are best-effort. Note the checkpoint path in the summary.
+
+### Phase 4 — Project field updates
+
+If `.github/project-config.json` exists: pull issue numbers from this session's commits. For commits referencing an issue that also modified `docs/`, set Documentation State to `Drafted` (only if currently `Not Started`). Do not override `Reviewed` or `Complete`. Log warnings — never block session end.
 
 ### Phase 5 — Push
 
-If branch has upstream or on main ahead of origin: `git push`. On failure: report and ask how to proceed. If no upstream and not on main: ask "Push to origin?"
+If the branch has an upstream, or you're on `main` ahead of `origin`: `git push`. On failure: report and ask how to proceed. If no upstream and not on `main`: ask **"Push to origin?"**
 
-### Phase 5.5 — Sync Telemetry
-
-stark-insights' scheduler drains `~/.stark-insights/queue.db` on its own
-cadence. The session-end hook only needs to nudge the buffer sync:
+### Phase 5.5 — Sync telemetry
 
 ```bash
 SYNC_SCRIPT=~/Code/Playground/stark-insights/scripts/sync_buffer.py
-if [ -f "$SYNC_SCRIPT" ]; then ~/Code/Playground/stark-insights/.venv/bin/python3 "$SYNC_SCRIPT" 2>/dev/null; fi
+if [ -f "$SYNC_SCRIPT" ]; then
+  ~/Code/Playground/stark-insights/.venv/bin/python3 "$SYNC_SCRIPT" 2>/dev/null
+fi
 ```
-If sync fails, note "Telemetry: buffered locally".
+If sync fails, note "Telemetry: buffered locally" in the summary.
 
-### Phase 5.6 — Derive Session Name
+### Phase 5.6 — Derive session name
 
-In priority order: PRs merged in session → issues closed in session → branch name → most common commit prefix → `session-$SESSION_ID`. Slugify (lowercase, hyphens, max 50 chars).
+In priority order, derive a slug (lowercase, hyphens, max 50 chars) from:
 
-### Phase 6 — Structured Summary
+1. PRs merged in this session
+2. Issues closed in this session
+3. Branch name
+4. Most common commit prefix
+5. `session-$SESSION_ID`
 
-Build receipt JSON from phases 1–5.5 results (Tests, Build, Push, PRs, Issues, Docs, Telemetry — each with `name`, `passed`, `detail`, `duration`). Invoke:
+You compute this — no CLI call needed; you have all the inputs from accumulated phase results.
+
+### Phase 6 — Collect end state + render summary
 
 ```bash
-$PYTHON $SCRIPTS/session_tui_cli.py end \
-    --session-id "$SESSION_ID" --repo "$REPO" --name "$SESSION_NAME" \
-    --start-head "$START_HEAD" --started-at "$STARTED_AT" \
-    --receipt "$RECEIPT_JSON" $PLAIN_FLAG $NO_COLOR_FLAG $PERSONA_ARG
+END_JSON=$($SESSION_CLI end \
+  --session-id "$SESSION_ID" \
+  --start-head "$START_HEAD" \
+  --started-at "$STARTED_AT" \
+  --name "$SESSION_NAME" 2>/dev/null || echo '{}')
 ```
 
-After rendering: persist session name via `session_state.name = session_name; session_state.save()`. Fall back to plain-text summary if CLI exits non-zero.
+Schema:
+
+```json
+{
+  "session": { "session_id", "branch", "repo", "started_at",
+               "name", "start_head", "ended_at" },
+  "diff": { "added", "removed", "file_count",
+            "key_files": [{ "path", "added", "removed", "status" }],
+            "approximate" } | null,
+  "branch": { "ahead", "behind", "upstream", "has_pr" },
+  "errors": [{ "source", "message" }]
+}
+```
+
+Render the end summary:
+
+1. **Header**: `Session {name} · {duration} · {branch}`
+2. **Receipt** (from your in-memory accumulator through phases 1–5.5): Tests, Build, PRs merged, Docs committed, Push, Telemetry — each as pass/fail with a detail and duration.
+3. **Diff**: `{added}+ / {removed}- across {file_count} files` + the key files list. Warn if `diff.approximate` is true (start HEAD wasn't recorded).
+4. **Branch**: ahead/behind vs upstream, PR link if `has_pr`.
+5. **Errors** (if non-empty): brief one-liner.
+6. **Persist session name**:
+
+```bash
+python3 -c "
+import sys; sys.path.insert(0, '$SCRIPTS')
+from session_state import SessionState
+ss = SessionState.get_current()
+ss.name = '$SESSION_NAME'
+ss.save()
+" 2>/dev/null || true
+```
 
 ---
 
 ## Observability
 
 Standard observability: create task, emit timestamped logs, record metrics block. Skill-specific metrics:
-- **Start:** context load time, git state time, per-health-check duration, total briefing time
-- **End:** test duration, build duration, PRs merged, docs committed, project fields updated, push result
+- **Start:** subprocess collector durations from `STATE_JSON.errors` + your own wall-clock measurement of the CLI call.
+- **End:** test duration, build duration, PRs merged, docs committed, project fields updated, push result.
 
 Emit completion event:
 - **Start:** `$SCRIPTS/stark-emit skill_invocation skill=stark-session args=start duration_s=... branch=... health_passed=... health_total=...`
@@ -264,15 +282,14 @@ See [../../standards/observability.md](../../standards/observability.md).
 
 | Failure | Recovery |
 |---------|----------|
-| No CLAUDE.md | Note in briefing — suggest creating one |
-| No memory files | "No previous session context" — not an error |
-| `gh` auth fails | Skip PR sections — show git state only |
-| Not a git repo | Skip git and PR sections |
-| Health check fails | Report with stderr, continue |
+| `STATE_JSON` empty / `{}` | CLI crashed — read stderr, fall back to plain `git status` + `gh pr list` |
+| Specific slot is `null` | Note in `errors[]`; omit that section from briefing |
+| `gh` auth fails | `prs` slot null, skip PR sections |
+| Not a git repo | `git` and `prs` slots null |
 | Test/build fails | Warn, ask whether to proceed |
-| PR merge fails | Report error, offer to skip |
-| Push fails | Report error, ask how to proceed |
-| Project config missing | Skip project board/field sections silently |
-| Config missing | Use hardcoded defaults |
+| PR merge fails | Report, offer to skip |
+| Push fails | Report, ask how to proceed |
+| Project config missing | `board` slot null silently |
+| Config missing | Health checks empty, defaults applied for end-mode keys |
 
-> **Warning:** Every command in a parallel batch must exit 0 — one non-zero exit cancels the entire batch. Use `|| true` on any command that might fail (ls with globs, cat on optional files, health checks). Phases 3, 4, and 4b are commonly parallelized — every command there must be failure-safe.
+> **Warning:** Every command in a parallel batch must exit 0 — one non-zero exit cancels the entire batch. Use `|| true` on the few shell commands that remain in the SKILL itself. The TS CLI is failure-safe by construction; no `|| true` needed when calling it.
