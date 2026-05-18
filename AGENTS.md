@@ -70,9 +70,10 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `tools/red_team_backfill_lib.ts` + `tools/red_team_backfill.ts` — historical-row backfill into the insights queue.
 - `tools/red_team_db_resolver.ts` — Canonical audit DB resolver (`--db` > env > config > default), matches Python `Path.resolve()` symlink semantics on macOS.
 - `tools/emit_queue_lib.ts` — canonical TS implementation of the producer queue (`makeEvent` + `enqueue` + `validate` + `health` + `pendingCount` + `deadLetterCount` + `recordContextPct` + `initSchema`). Writes to `~/.stark-insights/queue.db`. Python consumers reach it through `tools/emit_queue_cli.ts` via `scripts/_emit.py`.
+- `tools/stark_persona_lib.ts` — Slice 1 of the `/stark-persona` Python→TS port: read-only surface (`PersonaRecord`, `parseRoster`, `loadRoster`, `loadActive`/`writeActive`/`deleteActive`, `computeWeight`, `getDateMatches`, `fuzzyMatchPersona`). Faithful port from `scripts/stark_persona.py`; write paths + CLI follow in Slice 2.
 
 ### Other
-- `scripts/stark_persona.py` — session persona engine (weighted selection, combos, catchphrases)
+- `scripts/stark_persona.py` — session persona engine (weighted selection, combos, catchphrases). **Mid-migration to TS** — read-only surface now in `tools/stark_persona_lib.ts`; remains authoritative until the CLI cutover lands in Slice 3.
 - `scripts/generate_skill_docs.py` — multi-LLM documentation generator with viz competition
 - `scripts/flow_extractor.py` — workflow extraction from SKILL.md files
 - `scripts/flow_layout.py` — dagre layout runner for flow diagrams
