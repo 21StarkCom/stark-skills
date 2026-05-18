@@ -2,7 +2,7 @@
 """Shared TUI rendering primitives for stark-skills.
 
 Provides color/plain-mode detection, ANSI helpers, text sanitization,
-and reusable formatting functions used by triage_tui and session_tui.
+and reusable formatting functions used by triage_tui.
 """
 from __future__ import annotations
 
