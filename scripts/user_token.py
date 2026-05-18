@@ -68,6 +68,12 @@ def get_user_token(user: UserId = "primary", kind: TokenKind = "auto") -> str:
         if not classic:
             raise KeyError(f"keychain: {KEYCHAIN_SERVICE}/{user}-classic not found")
         return classic
+    # auto mode: secondary prefers classic because GetEvinced's fine-grained
+    # PAT permission picker has no "Checks" entry (verified 2026-05-18 — no
+    # items match "checks" even for org owners), so secondary-fine can't reach
+    # the /check-runs API that `gh pr checks` needs. Primary is unaffected.
+    if user == "secondary" and classic:
+        return classic
     if fine:
         return fine
     if classic:
