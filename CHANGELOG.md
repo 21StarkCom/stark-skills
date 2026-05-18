@@ -11,12 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **stark-session TS data collector** — `tools/stark_session_lib.ts` + `tools/stark_session.ts` collect git/gh/board/alerts/health/queue/healer/persona/skills state into a single JSON payload that `/stark-session` renders directly via Claude. Replaces the deleted Python TUI subsystem.
 
 ### Changed
+- **`optimize_skill_description`** ported from Python to TypeScript. `scripts/optimize_skill_description.py` (323 lines) + `scripts/test_optimize_skill_description.py` (86 lines) deleted; replaced by `tools/optimize_skill_description.ts` + 14 TS tests covering frontmatter parsing, improve-prompt assembly (with 200-char truncation parity), and the `ANTHROPIC_AGENTS → ANTHROPIC_API_KEY` env allowlist. CLI surface preserved (same flags, same JSON report shape). Scoring still shells out to the skill-creator plugin's Python `run_eval.py` — that lives outside this repo.
 - **stark-persona** ported from Python to TypeScript. `scripts/stark_persona.py` (1504 lines) + `scripts/test_stark_persona.py` (1191 lines) deleted; replaced by `tools/stark_persona_lib.ts` + `tools/stark_persona.ts` + 44 TS tests (25 lib + 19 CLI smoke). SKILL.md (and `/stark-session` start/end hooks + `tools/stark_session_lib.ts` collector) cut over to `node --experimental-strip-types tools/stark_persona.ts`. JSON shape of `select --auto` preserved (still parsed by `/stark-session`). Insights events now write directly to `~/.stark-insights/queue.db` via `tools/emit_queue_lib.ts` under the new `persona_event` allowlist entry (no HTTP, no token file, no `_emit.py` shim). Persona DB at `~/.stark-persona/persona.db` and `active.json` schema unchanged — pre-existing rows are reused as-is.
 
 ### Removed
 - **Session TUI subsystem** — `scripts/session_tui.py`, `scripts/session_tui_cli.py`, `scripts/test_session_tui.py`. The structured briefing/end-summary are now produced by Claude from the JSON returned by `tools/stark_session.ts`. `--plain` / `--no-color` CLI flags are gone with the renderer.
 - **stark-graph** code, tests, workflows, docs, and config keys (`graph_enriched_domains`, `graph_gate_mode`, `graph_max_parse_workers`, `graph_coverage_threshold`).
 - `scripts/stark_persona.py` and `scripts/test_stark_persona.py` — replaced by `tools/stark_persona{,.test,_lib,_lib.test,_writes.test}.ts`.
+- `scripts/optimize_skill_description.py` and `scripts/test_optimize_skill_description.py` — replaced by `tools/optimize_skill_description{,.test}.ts`.
 
 ## [v0.6.2] - 2026-04-24
 

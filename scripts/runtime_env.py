@@ -26,8 +26,8 @@ import github_app
 _GH_TOKEN_OPS: frozenset[str] = frozenset({"review"})
 
 # Operations using the user's native gh auth — no bot token injected.
-# "local" covers Claude callers that never touch GitHub (forge_fix_loop,
-# optimize_skill_description) and just need a sanitized subprocess env.
+# "local" covers Claude callers that never touch GitHub (e.g. forge_fix_loop)
+# and just need a sanitized subprocess env.
 _USER_AUTH_OPS: frozenset[str] = frozenset({"pr_create", "issue_ops", "local"})
 
 # Host env var holding the Anthropic API key. Read at dispatch time and
