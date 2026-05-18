@@ -5,8 +5,8 @@ description: >-
   /stark-persona.
 disable-model-invocation: true
 model: opus
-revision: 6b87ca62ee8dd55dc36bf48842dc93d2db763258
-revision_date: 2026-04-02T14:29:50+03:00
+revision: fefc4b333b06e7ec73b8bd0e396449f25f4dd359
+revision_date: 2026-05-18T07:25:44Z
 ---
 
 # stark-persona
@@ -33,10 +33,10 @@ Session persona system — assigns a character voice to Claude for the session.
 
 ## Execution
 
-Delegate all stateful operations to the Python helper:
+Delegate all stateful operations to the TypeScript CLI:
 
 ```bash
-python3 ~/.claude/code-review/scripts/stark_persona.py <subcommand> [args]
+node --experimental-strip-types ~/.claude/code-review/tools/stark_persona.ts <subcommand> [args]
 ```
 
 Parse the ARGUMENTS and map to the appropriate subcommand:
@@ -75,4 +75,4 @@ When `/stark-persona --off` is invoked or the session ends, emit this reset inst
 
 "The persona has been deactivated. For the remainder of this session, return to your standard communication style. No character voice, no catchphrases, no persona-specific vocabulary. Back to normal."
 
-This is emitted by `cmd_deactivate()` and `cmd_session_end()` in stark_persona.py.
+This is emitted by `cmdDeactivate` and `cmdSessionEnd` in `tools/stark_persona.ts`.

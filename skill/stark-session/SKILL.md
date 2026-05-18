@@ -152,7 +152,7 @@ On "go", work sequentially without prompting between tasks — only pause for ge
 
 ```bash
 if [ -f "$HOME/.stark-persona/active.json" ]; then
-  python3 "$SCRIPTS/stark_persona.py" session-end 2>/dev/null || true
+  node --experimental-strip-types "$HOME/.claude/code-review/tools/stark_persona.ts" session-end 2>/dev/null || true
 fi
 ```
 Display the 20% fun-fact callout AFTER the summary (if any).

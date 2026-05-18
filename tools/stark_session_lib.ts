@@ -302,7 +302,19 @@ export async function collectPersona(
   deps: Deps,
   errors: ErrSlot[],
 ): Promise<PersonaState | null> {
-  const cmd = ["python3", `${deps.scriptsDir}/stark_persona.py`, "select", "--auto"];
+  // Persona went pure-TS in the 2026-05-18 cutover. `deps.scriptsDir` still
+  // points at `~/.claude/code-review/scripts/`; the TS sibling tools live one
+  // directory up under `tools/`, so derive the path rather than carrying a
+  // second config knob.
+  const toolsDir = `${deps.scriptsDir.replace(/\/scripts$/, "")}/tools`;
+  const cmd = [
+    "node",
+    "--experimental-strip-types",
+    "--no-warnings",
+    `${toolsDir}/stark_persona.ts`,
+    "select",
+    "--auto",
+  ];
   const result = await deps.run(cmd, { timeoutMs: SUBPROCESS_TIMEOUT_MS });
   if (result.code !== 0) {
     pushSubprocessError(errors, "persona", result);
