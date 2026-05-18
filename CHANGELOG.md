@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **stark-session TS data collector** — `tools/stark_session_lib.ts` + `tools/stark_session.ts` collect git/gh/board/alerts/health/queue/healer/persona/skills state into a single JSON payload that `/stark-session` renders directly via Claude. Replaces the deleted Python TUI subsystem.
+
 ### Removed
+- **Session TUI subsystem** — `scripts/session_tui.py`, `scripts/session_tui_cli.py`, `scripts/test_session_tui.py`. The structured briefing/end-summary are now produced by Claude from the JSON returned by `tools/stark_session.ts`. `--plain` / `--no-color` CLI flags are gone with the renderer.
 - **stark-graph** code, tests, workflows, docs, and config keys (`graph_enriched_domains`, `graph_gate_mode`, `graph_max_parse_workers`, `graph_coverage_threshold`).
 
 ## [v0.6.2] - 2026-04-24
