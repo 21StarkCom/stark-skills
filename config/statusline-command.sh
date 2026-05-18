@@ -182,11 +182,24 @@ if [ -f "$f" ]; then
   done
 fi
 
-# Single sqlite3 fork instead of two — both counts in one query.
+# v2: the meaningful "events waiting for BigQuery" signal is buffer.db's
+# rowid vs bqsync's last persisted HWM, not queue.db.pending. The legacy
+# queue.db is now drained every 60s into buffer.db (see stark-insights
+# `drain-queue` subcommand), so its `pending` only flashes above 0 if the
+# drainer stalls. Show buffer lag as the primary "🪲 N" segment; surface
+# queue stall as its own segment when it climbs past zero.
 q_pending=0 q_dead=0
-f="$HOME/.stark-insights/queue.db"
-if [ -f "$f" ]; then
-  IFS='|' read -r q_pending q_dead < <(sqlite3 "$f" \
+buf_lag=0
+buf="$HOME/.stark-insights/buffer.db"
+state="$HOME/.stark-insights/buffer-bqsync-state.json"
+if [ -f "$buf" ] && [ -f "$state" ]; then
+  hwm=$(sqlite3 "$buf" \
+    "SELECT (SELECT MAX(rowid) FROM events) - json_extract(readfile('$state'), '\$.last_rowid')" 2>/dev/null)
+  buf_lag=${hwm:-0}
+fi
+qf="$HOME/.stark-insights/queue.db"
+if [ -f "$qf" ]; then
+  IFS='|' read -r q_pending q_dead < <(sqlite3 "$qf" \
     "SELECT (SELECT COUNT(*) FROM pending), (SELECT COUNT(*) FROM dead_letter)" 2>/dev/null)
   q_pending=${q_pending:-0} q_dead=${q_dead:-0}
 fi
@@ -236,7 +249,13 @@ _on out_style && [ -n "$out_style" ] && [ "$out_style" != "default" ] && \
 _on inflight && [ "$inflight" -gt 0 ] 2>/dev/null && seg "${SKY}\u26a1\ufe0f ${inflight}${R}"
 _on longest_tool && [ "$longest_s" -gt 60 ] 2>/dev/null && seg "$(tcolor "$longest_s" 180 60)\u23f3 ${longest_tool} $(( longest_s / 60 ))m${R}"
 _on last_tool && [ -n "$last_tool" ] && seg "${TEAL}\u23f1\ufe0f ${last_tool}${R}"
-_on q_pending && [ "$q_pending" -gt 5 ] 2>/dev/null && seg "${MAR}\U0001fab2 ${q_pending}${R}"
+# Buffer lag = events captured but not yet drained into BigQuery (bqsync
+# fires every 15 min, so this naturally cycles 0 → ~hundreds → 0). Worth
+# surfacing only when it persists above a threshold suggesting bqsync
+# stalled — 500 corresponds to ~5 min of normal traffic during high-flow
+# Claude Code sessions.
+_on buf_lag && [ "$buf_lag" -gt 500 ] 2>/dev/null && seg "${MAR}\U0001fab2 ${buf_lag}${R}"
+_on q_pending && [ "$q_pending" -gt 5 ] 2>/dev/null && seg "${MAR}\U0001f9ca ${q_pending}${R}"
 _on q_dead && [ "$q_dead" -gt 0 ] 2>/dev/null && seg "${RED}\U0001f41e ${q_dead}${R}"
 _on session_name && [ -n "$session_name" ] && seg "${DIM}${session_name}${R}"
 _on vim_mode && [ -n "$vim_mode" ] && { [ "$vim_mode" = "NORMAL" ] && seg "${YEL}N${R}" || seg "${DIM}I${R}"; }
