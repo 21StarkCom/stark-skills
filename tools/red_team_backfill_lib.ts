@@ -107,7 +107,7 @@ function loadRows(dbPath: string, scope: BackfillScope, limit: number | null): L
           "fix_plan_json, fix_plan_cost_usd " +
           `FROM red_team_runs ${where} ORDER BY created_at, id${limitSql}`,
       )
-      .all(...(params as never[])) as RunRow[];
+      .all(...(params as never[])) as unknown as RunRow[];
     const out: LoadedRow[] = [];
     for (const r of runRows) {
       const findings = db
@@ -117,7 +117,7 @@ function loadRows(dbPath: string, scope: BackfillScope, limit: number | null): L
             "FROM red_team_findings WHERE run_id = ? AND stage = ? " +
             "ORDER BY round_num, id",
         )
-        .all(r.run_id, r.stage) as FindingRow[];
+        .all(r.run_id, r.stage) as unknown as FindingRow[];
       out.push({ ...r, findings });
     }
     return out;
