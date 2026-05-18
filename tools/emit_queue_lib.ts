@@ -51,6 +51,10 @@ const VALID_TYPES: ReadonlySet<string> = new Set([
   "red_team_run", "red_team_finding", "red_team_fix_plan",
   // FU-rt11 — Per-call telemetry.
   "red_team_call_start", "red_team_call_end",
+  // /stark-persona — session selection / rating / deactivation / survey.
+  // subtype lives inside payload (consumer's PAYLOAD_SCHEMAS["persona_event"]
+  // requires it there); the Python producer used the same name.
+  "persona_event",
 ]);
 
 const VALID_CLIS: ReadonlySet<string> = new Set(["claude", "codex", "gemini"]);

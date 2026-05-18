@@ -61,7 +61,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 The red-team subsystem is **pure TypeScript** under `tools/`. All Python red-team modules + CLIs were deleted by end of the 2026-05-16 migration. The Responses-API model allowlist + key resolver previously in `scripts/openai_responses.py` are now inlined into `preflight.py::check_red_team_transport_auth` (its only consumer).
 
 ### Other
-- `scripts/stark_persona.py` — session persona engine (weighted selection, combos, catchphrases). **Mid-migration to TS** — read-only surface (`PersonaRecord`, `parseRoster`, `loadRoster`, `loadActive`/`writeActive`/`deleteActive`, `computeWeight`, `getDateMatches`, `fuzzyMatchPersona`) now lives in `tools/stark_persona_lib.ts`; write paths + CLI follow in Slice 2.
+- `scripts/stark_persona.py` — session persona engine (weighted selection, combos, catchphrases). **Mid-migration to TS** — full read + write surface ported to `tools/stark_persona_lib.ts` + `tools/stark_persona.ts`; Python remains authoritative until SKILL.md cutover lands in Slice 3.
 - `scripts/plan_to_tasks_validate.py` — plan decomposition validation (3 LLM passes)
 
 ### TS tools (`tools/`)
@@ -85,7 +85,7 @@ The red-team subsystem is **pure TypeScript** under `tools/`. All Python red-tea
 - `tools/design_review_summary.ts` — legacy stark-review-design Phase 4 markdown renderer (kept for the Python `plan_review_dispatch.py` consumers)
 - `tools/copilot_dispatch.ts` — stark-copilot lead/wing dispatcher (replaces former `scripts/copilot_dispatch.py`)
 - `tools/stark_review_doc.ts` + `stark_review_doc_lib.ts` — lead/wing doc-review dispatcher used by `/stark-review-design` and `/stark-review-plan`. Codex (xhigh) reviews per-domain in parallel; Claude (opus-4-7) wing emits JSON patches that the host applies with unique-match validation. Replaces the Python `plan_review_dispatch.py` for these two skills (the Python remains for `triage_orchestrator.py` and `plan_to_tasks_validate.py`).
-- `tools/stark_persona_lib.ts` — Slice 1 of the persona Python→TS port: read-only surface (`PersonaRecord`, `parseRoster`, `loadRoster`, `loadActive`/`writeActive`/`deleteActive`, `computeWeight`, `getDateMatches`, `fuzzyMatchPersona`). Faithful port of `scripts/stark_persona.py` — same roster grammar, same active.json shape, same weight math, ported difflib SequenceMatcher for fuzzy match. Write path + CLI land in Slice 2.
+- `tools/stark_persona_lib.ts` + `tools/stark_persona.ts` — TS port of `scripts/stark_persona.py` for `/stark-persona`. Library covers the full surface (PersonaRecord + roster parse, active.json read/write/delete, `computeWeight`, `getDateMatches`, `fuzzyMatchPersona`, `initDb` + schema, `syncWeights`, `selectSinglePersona`, `selectCombo`, `recordRating` with combo dilution, `recordSurveyAnswer`, `addPersona` with sanitization, `makeRandom` Mulberry32, `SURVEY_POOL`). Insights events go straight to `~/.stark-insights/queue.db` via `tools/emit_queue_lib.ts` (no `_emit.py` shim) under the `persona_event` type. CLI ships 11 subcommands: `select` / `deactivate` / `rate` / `survey` / `survey-answer` / `add` / `stats` / `history` / `print-roster` / `print-weights` / `session-end`. SKILL.md cutover + Python deletion land in Slice 3.
 
 ### Config & prompts
 - `global/config.json` — default config schema (models, runtime, triage, cost, etc.)
