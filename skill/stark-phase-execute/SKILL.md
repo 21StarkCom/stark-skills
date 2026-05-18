@@ -6,8 +6,8 @@ argument-hint: "<plan-slug-or-path> [--dry-run] [--skip-deploy] [--skip-release]
 disable-model-invocation: true
 context: fork
 model: opus
-revision: 27e35f5d4b6b1e245c6bdd1adf11d8f1ff0233e6
-revision_date: 2026-05-18T09:14:41Z
+revision: d613144dcc517657c006eaeaa89d6b613f910471
+revision_date: 2026-05-18T09:34:51Z
 ---
 
 ## Preflight
@@ -327,7 +327,7 @@ Present a comprehensive summary after everything completes. See [references/dash
 
 After all tasks complete, suggest follow-up skills:
 ```bash
-python3 ~/.claude/code-review/scripts/skill_router.py --context implementation --json 2>/dev/null || true
+node --experimental-strip-types --no-warnings ~/.claude/code-review/tools/skill_router.ts --context implementation --json 2>/dev/null || true
 ```
 Display at most 2 suggestions. Skip silently if command fails.
 

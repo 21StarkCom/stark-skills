@@ -109,7 +109,7 @@ test("collectStart: honors opts.session_id, start_head, started_at in session bl
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"], stdout: JSON.stringify({ unacknowledged: [] }) },
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/emit_queue_cli.ts", "--health"], stdout: JSON.stringify({ pending_count: 0, dead_letter_count: 0, max_created_at: null }) },
       { cmd: ["python3", "/scripts/healer_canary.py", "--status", "--json"], stdout: JSON.stringify({ patterns: [] }) },
-      { cmd: ["python3", "/scripts/skill_router.py", "--context", "session", "--json"], stdout: JSON.stringify({ suggestions: [] }) },
+      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/skill_router.ts", "--context", "session", "--json"], stdout: JSON.stringify({ suggestions: [] }) },
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/stark_persona.ts", "select", "--auto"], stdout: JSON.stringify({ name: "Tony" }) },
       { cmd: ["python3", "/scripts/github_projects.py", "list-items"], stdout: "[]" },
       { cmd: ["sh", "-c"], stdout: "" },
@@ -152,7 +152,7 @@ test("collectStart: enforces total wall-clock deadline, slow collectors get null
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"], stdout: JSON.stringify({ unacknowledged: [] }) },
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/emit_queue_cli.ts", "--health"], stdout: JSON.stringify({ pending_count: 0, dead_letter_count: 0, max_created_at: null }) },
       { cmd: ["python3", "/scripts/healer_canary.py", "--status", "--json"], stdout: JSON.stringify({ patterns: [] }) },
-      { cmd: ["python3", "/scripts/skill_router.py", "--context", "session", "--json"], stdout: JSON.stringify({ suggestions: [] }) },
+      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/skill_router.ts", "--context", "session", "--json"], stdout: JSON.stringify({ suggestions: [] }) },
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/stark_persona.ts", "select", "--auto"], stdout: "{}" },
       { cmd: ["python3", "/scripts/github_projects.py", "list-items"], stdout: "[]" },
       { cmd: ["sh", "-c"], stdout: "" },
@@ -397,7 +397,7 @@ test("collectAlerts: returns unacknowledged list with normalized fields", async 
 test("collectSkillSuggestions: returns [] when script fails", async () => {
   const deps = makeDeps({
     runs: [
-      { cmd: ["python3", "/scripts/skill_router.py", "--context", "session", "--json"], code: 1 },
+      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/skill_router.ts", "--context", "session", "--json"], code: 1 },
     ],
   });
   assert.deepEqual(await collectSkillSuggestions(deps, []), []);
@@ -407,7 +407,7 @@ test("collectSkillSuggestions: capped at 2 entries", async () => {
   const deps = makeDeps({
     runs: [
       {
-        cmd: ["python3", "/scripts/skill_router.py", "--context", "session", "--json"],
+        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/skill_router.ts", "--context", "session", "--json"],
         stdout: JSON.stringify({
           suggestions: [
             { name: "a", reason: "r1" },
@@ -771,7 +771,7 @@ test("collectStart: assembles every slot with overrides honored", async () => {
       },
       // skills suggestions
       {
-        cmd: ["python3", "/scripts/skill_router.py", "--context", "session", "--json"],
+        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/skill_router.ts", "--context", "session", "--json"],
         stdout: JSON.stringify({ suggestions: [] }),
       },
       // persona
