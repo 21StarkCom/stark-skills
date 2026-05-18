@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=580 runId=ccea06f7-93af-4864-887a-c3a0bb7391dd -->
+- Added canonical hook tool arguments in settings to match installer output.
 <!-- stark-gh:pr-merge pr=579 runId=10021f64-b216-4d1d-84f1-b5f4e7eab425 -->
 - Ignore Claude-managed worktree checkouts under `.claude/worktrees/`.
 <!-- stark-gh:pr-merge pr=577 runId=19828674-92cb-4b32-9f24-4ce6093e548e -->
