@@ -106,7 +106,7 @@ test("collectStart: honors opts.session_id, start_head, started_at in session bl
       { cmd: ["gh", "pr", "list", "--author", "@me", "--state", "open"], stdout: "[]" },
       { cmd: ["gh", "pr", "view", "--json", "number,title,state,reviewDecision,statusCheckRollup"], code: 1 },
       // alerts, queue, canary, suggestions, persona, available, board — all OK
-      { cmd: ["python3", "/scripts/alert_delivery.py", "--check", "--json"], stdout: JSON.stringify({ unacknowledged: [] }) },
+      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"], stdout: JSON.stringify({ unacknowledged: [] }) },
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/emit_queue_cli.ts", "--health"], stdout: JSON.stringify({ pending_count: 0, dead_letter_count: 0, max_created_at: null }) },
       { cmd: ["python3", "/scripts/healer_canary.py", "--status", "--json"], stdout: JSON.stringify({ patterns: [] }) },
       { cmd: ["python3", "/scripts/skill_router.py", "--context", "session", "--json"], stdout: JSON.stringify({ suggestions: [] }) },
@@ -149,7 +149,7 @@ test("collectStart: enforces total wall-clock deadline, slow collectors get null
       { cmd: ["git", "log", "--oneline", "--format=%h|%s|%ar", "-5"], stdout: "" },
       { cmd: ["gh", "pr", "list", "--author", "@me", "--state", "open"], stdout: "[]" },
       { cmd: ["gh", "pr", "view", "--json", "number,title,state,reviewDecision,statusCheckRollup"], code: 1 },
-      { cmd: ["python3", "/scripts/alert_delivery.py", "--check", "--json"], stdout: JSON.stringify({ unacknowledged: [] }) },
+      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"], stdout: JSON.stringify({ unacknowledged: [] }) },
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/emit_queue_cli.ts", "--health"], stdout: JSON.stringify({ pending_count: 0, dead_letter_count: 0, max_created_at: null }) },
       { cmd: ["python3", "/scripts/healer_canary.py", "--status", "--json"], stdout: JSON.stringify({ patterns: [] }) },
       { cmd: ["python3", "/scripts/skill_router.py", "--context", "session", "--json"], stdout: JSON.stringify({ suggestions: [] }) },
@@ -257,7 +257,7 @@ test("collector: marks slot null + records timeout when result.timedOut", async 
   const deps = makeDeps({
     runs: [
       {
-        cmd: ["python3", "/scripts/alert_delivery.py", "--check", "--json"],
+        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"],
         code: 124, timedOut: true, stderr: "",
       },
     ],
@@ -363,7 +363,7 @@ test("collectCanaryStatus: extracts circuits_open + near_promotion", async () =>
 test("collectAlerts: returns null when alert_delivery script fails", async () => {
   const deps = makeDeps({
     runs: [
-      { cmd: ["python3", "/scripts/alert_delivery.py", "--check", "--json"], code: 1 },
+      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"], code: 1 },
     ],
   });
   assert.equal(await collectAlerts(deps, []), null);
@@ -373,7 +373,7 @@ test("collectAlerts: returns unacknowledged list with normalized fields", async 
   const deps = makeDeps({
     runs: [
       {
-        cmd: ["python3", "/scripts/alert_delivery.py", "--check", "--json"],
+        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"],
         stdout: JSON.stringify({
           unacknowledged: [
             { level: "warning", message: "stale branch", context: "topic-a" },
@@ -756,7 +756,7 @@ test("collectStart: assembles every slot with overrides honored", async () => {
       },
       // alerts
       {
-        cmd: ["python3", "/scripts/alert_delivery.py", "--check", "--json"],
+        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"],
         stdout: JSON.stringify({ unacknowledged: [] }),
       },
       // queue health

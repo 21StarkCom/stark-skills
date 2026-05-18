@@ -98,7 +98,7 @@ test("main start: returns parsed JSON envelope with errors slot present", async 
     { cmd: ["git", "log", "--oneline", "--format=%h|%s|%ar", "-5"], stdout: "" },
     { cmd: ["gh", "pr", "list", "--author", "@me"], stdout: "[]" },
     { cmd: ["gh", "pr", "view"], code: 1 },
-    { cmd: ["python3", "/scripts/alert_delivery.py"], stdout: JSON.stringify({ unacknowledged: [] }) },
+    { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/alert_delivery.ts"], stdout: JSON.stringify({ unacknowledged: [] }) },
     { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/emit_queue_cli.ts"], stdout: JSON.stringify({ pending_count: 0, dead_letter_count: 0, max_created_at: null }) },
     { cmd: ["python3", "/scripts/healer_canary.py"], stdout: JSON.stringify({ patterns: [] }) },
     { cmd: ["python3", "/scripts/skill_router.py"], stdout: JSON.stringify({ suggestions: [] }) },

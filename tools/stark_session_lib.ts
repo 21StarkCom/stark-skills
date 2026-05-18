@@ -245,7 +245,20 @@ export async function collectAlerts(
   deps: Deps,
   errors: ErrSlot[],
 ): Promise<AlertsState | null> {
-  const cmd = ["python3", `${deps.scriptsDir}/alert_delivery.py`, "--check", "--json"];
+  // alert_delivery went TS-canonical in the 2026-05-18 cutover. The
+  // Python `scripts/alert_delivery.py` stays alive for the in-process
+  // emitter calls from self_healer / healer_canary, but the JSON probe
+  // here talks to the TS CLI sibling under `tools/`. Both sides target
+  // the same on-disk marker dir so the data they see is the same.
+  const toolsDir = `${deps.scriptsDir.replace(/\/scripts$/, "")}/tools`;
+  const cmd = [
+    "node",
+    "--experimental-strip-types",
+    "--no-warnings",
+    `${toolsDir}/alert_delivery.ts`,
+    "--check",
+    "--json",
+  ];
   const result = await deps.run(cmd, { timeoutMs: SUBPROCESS_TIMEOUT_MS });
   if (result.code !== 0) {
     pushSubprocessError(errors, "alerts", result);
