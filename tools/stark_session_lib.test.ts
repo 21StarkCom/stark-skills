@@ -90,7 +90,7 @@ test("collectStart: honors opts.session_id, start_head, started_at in session bl
     envLog,
     runs: [
       {
-        cmd: ["python3", "/scripts/session_state.py", "--json"],
+        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/session_state.ts", "--json"],
         stdout: JSON.stringify({
           session_id: "from-state", started_at: "from-state",
           branch: "feat/x", repo: "x/y",
@@ -124,7 +124,9 @@ test("collectStart: honors opts.session_id, start_head, started_at in session bl
   assert.equal(result.session?.start_head, "from-cli-sha");
   assert.equal(result.session?.started_at, "from-cli-time");
   // session_state subprocess should have received CLAUDE_SESSION_ID = "from-cli"
-  const sessionStateCall = envLog.find((e) => e.cmd[1]?.endsWith("session_state.py"));
+  const sessionStateCall = envLog.find((e) =>
+    e.cmd.some((c) => typeof c === "string" && c.endsWith("session_state.ts")),
+  );
   assert.equal(sessionStateCall?.env?.CLAUDE_SESSION_ID, "from-cli");
 });
 
@@ -135,7 +137,7 @@ test("collectStart: enforces total wall-clock deadline, slow collectors get null
   const deps = makeDeps({
     runs: [
       {
-        cmd: ["python3", "/scripts/session_state.py", "--json"],
+        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/session_state.ts", "--json"],
         delayMs: 500,
         stdout: JSON.stringify({ session_id: "S", started_at: "", branch: "", repo: "",
           tasks_completed: [], last_checkpoint: null, name: null, start_head: null }),
@@ -172,7 +174,7 @@ test("collectEnd: falls back to session_state.start_head when opts.start_head is
   const deps = makeDeps({
     runs: [
       {
-        cmd: ["python3", "/scripts/session_state.py", "--json"],
+        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/session_state.ts", "--json"],
         stdout: JSON.stringify({
           session_id: "S", started_at: "", branch: "main", repo: "x/y",
           tasks_completed: [], last_checkpoint: null, name: null,
@@ -236,7 +238,7 @@ test("pushSubprocessError: redacts GitHub tokens / Bearer headers from stderr", 
   const deps = makeDeps({
     runs: [
       {
-        cmd: ["python3", "/scripts/session_state.py", "--json"],
+        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/session_state.ts", "--json"],
         code: 1,
         stderr: "fatal: authentication failed: token ghp_abcdefghijklmnopqrstuvwxyz0123456789 Bearer secret-token-here",
       },
@@ -487,7 +489,7 @@ test("collectBoard: bucket items into in_flight / blocked / needs_attention", as
 test("collectSessionState: returns null when script fails", async () => {
   const deps = makeDeps({
     runs: [
-      { cmd: ["python3", "/scripts/session_state.py", "--json"], code: 1 },
+      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/session_state.ts", "--json"], code: 1 },
     ],
   });
   assert.equal(await collectSessionState(deps, []), null);
@@ -506,7 +508,7 @@ test("collectSessionState: returns parsed state payload", async () => {
   };
   const deps = makeDeps({
     runs: [
-      { cmd: ["python3", "/scripts/session_state.py", "--json"], stdout: JSON.stringify(state) },
+      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/session_state.ts", "--json"], stdout: JSON.stringify(state) },
     ],
   });
   const result = await collectSessionState(deps, []);
@@ -732,7 +734,7 @@ test("collectStart: assembles every slot with overrides honored", async () => {
     runs: [
       // session_state
       {
-        cmd: ["python3", "/scripts/session_state.py", "--json"],
+        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/session_state.ts", "--json"],
         stdout: JSON.stringify({
           session_id: "S1", started_at: "T0", branch: "feat/x", repo: "x/y",
           tasks_completed: [], last_checkpoint: null, name: null, start_head: null,
@@ -802,7 +804,7 @@ test("collectEnd: assembles session + diff + branch state", async () => {
   const deps = makeDeps({
     runs: [
       {
-        cmd: ["python3", "/scripts/session_state.py", "--json"],
+        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/session_state.ts", "--json"],
         stdout: JSON.stringify({
           session_id: "S1", started_at: "T0", branch: "feat/x", repo: "x/y",
           tasks_completed: [], last_checkpoint: null, name: null, start_head: "deadbeef",

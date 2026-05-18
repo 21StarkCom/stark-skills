@@ -388,7 +388,18 @@ export async function collectSessionState(
   deps: Deps,
   errors: ErrSlot[],
 ): Promise<SessionStateSlot | null> {
-  const cmd = ["python3", `${deps.scriptsDir}/session_state.py`, "--json"];
+  // Session state went pure-TS in the 2026-05-18 cutover. The Python
+  // `scripts/session_state.py` is still in place for `context_compactor.py`,
+  // but the collector talks to the TS CLI sibling under `tools/`. Same
+  // JSON shape as before so the parse path below is unchanged.
+  const toolsDir = `${deps.scriptsDir.replace(/\/scripts$/, "")}/tools`;
+  const cmd = [
+    "node",
+    "--experimental-strip-types",
+    "--no-warnings",
+    `${toolsDir}/session_state.ts`,
+    "--json",
+  ];
   const result = await deps.run(cmd, { timeoutMs: SUBPROCESS_TIMEOUT_MS });
   if (result.code !== 0) {
     pushSubprocessError(errors, "session_state", result);
