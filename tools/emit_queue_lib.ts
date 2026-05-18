@@ -28,6 +28,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { resolveSessionId as resolveSessionIdLib } from "./session_id_lib.ts";
+
 // Full event-type allowlist. Until the emit-queue → TS migration this set
 // was scoped to the six red-team-only entries; widened to cover every
 // producer (statusline, /stark-session, install.sh, the Python consumers
@@ -93,12 +95,11 @@ export function queueDbPath(env: NodeJS.ProcessEnv = process.env): string {
   return path.join(queueDir(env), "queue.db");
 }
 
+// Delegated to the shared `session_id_lib` resolver — keeps the
+// projects-dir scan + env precedence in one place so every producer
+// reports the same session.
 function resolveSessionId(env: NodeJS.ProcessEnv = process.env): string {
-  const explicit = (env.CLAUDE_SESSION_ID ?? "").trim();
-  if (explicit) return explicit;
-  // Skip the projects-dir resolution path (Python's _resolve_from_projects_dir).
-  // uuid4 fallback matches Python's final branch.
-  return randomUUID();
+  return resolveSessionIdLib({ env });
 }
 
 const SCHEMA_SQL = `\
