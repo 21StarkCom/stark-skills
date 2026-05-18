@@ -5,15 +5,15 @@ description: >-
 argument-hint: "<path> [--agents claude,codex,gemini] [--timeout N] [--dry-run] [--force]"
 disable-model-invocation: true
 model: opus
-revision: 7d4eb375d131624ff59927945d448856858d621c
-revision_date: 2026-05-18T16:33:25Z
+revision: 63a8c794adafa2df8a713b4dcf9743a09e3c7cfc
+revision_date: 2026-05-18T19:17:41Z
 ---
 
 ## Preflight
 
 Run environment validation before proceeding:
 ```bash
-python3 ~/.claude/code-review/scripts/preflight.py --workflow stark-design-to-plan --json
+node --experimental-strip-types ~/.claude/code-review/tools/preflight.ts --workflow stark-design-to-plan --json
 ```
 Parse the JSON result:
 - If `overall` is "blocked": print the failing checks and stop. Do not proceed.

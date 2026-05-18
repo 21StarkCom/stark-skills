@@ -6,10 +6,8 @@ Skills point at this doc instead of inlining the pattern.
 ## Invocation
 
 ```bash
-SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
-PYTHON="$SCRIPTS/.venv/bin/python3"
-[ -x "$PYTHON" ] || PYTHON=python3
-"$PYTHON" "$SCRIPTS/preflight.py" --workflow <skill-slug> --json
+TOOLS="${STARK_REVIEW_TOOLS:-$HOME/.claude/code-review/tools}"
+node --experimental-strip-types "$TOOLS/preflight.ts" --workflow <skill-slug> --json
 ```
 
 The skill provides its own `<skill-slug>` (e.g. `stark-review`, `stark-review-plan`).
@@ -37,5 +35,9 @@ Interactive skill invocations skip steps 1–3 and just print + stop.
 
 ## Constants
 
-`SCRIPTS` and `PYTHON` set above are reused throughout the skill body — define
-them once in this preflight block and rely on them later.
+`TOOLS` set above is reused throughout the skill body for other TS dispatchers
+(`stark_review.ts`, `github_app.ts`, etc.) — define it once in this preflight
+block and rely on it later. Skills that still call into Python orchestrators
+also need `SCRIPTS=${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}` and a
+`PYTHON="$SCRIPTS/.venv/bin/python3"` fallback alongside; preflight itself
+no longer requires the Python interpreter.

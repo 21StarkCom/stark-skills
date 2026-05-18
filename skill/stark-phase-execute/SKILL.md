@@ -6,15 +6,15 @@ argument-hint: "<plan-slug-or-path> [--dry-run] [--skip-deploy] [--skip-release]
 disable-model-invocation: true
 context: fork
 model: opus
-revision: 63e888043556dafb1b0c7e9743f127ae4a257c6f
-revision_date: 2026-05-18T18:34:12Z
+revision: 63a8c794adafa2df8a713b4dcf9743a09e3c7cfc
+revision_date: 2026-05-18T19:17:41Z
 ---
 
 ## Preflight
 
 Run environment validation before proceeding:
 ```bash
-python3 ~/.claude/code-review/scripts/preflight.py --workflow stark-phase-execute --json
+node --experimental-strip-types ~/.claude/code-review/tools/preflight.ts --workflow stark-phase-execute --json
 ```
 Parse the JSON result:
 - If `overall` is "blocked": print the failing checks and stop. Do not proceed.
