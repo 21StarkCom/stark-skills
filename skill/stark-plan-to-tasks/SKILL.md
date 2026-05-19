@@ -96,17 +96,60 @@ Derive `PLAN_SLUG` from filename: strip `.md`, strip trailing `-design`/`-spec`/
 
 **You are both orchestrator and evaluating agent.** Evaluate the plan against the robustness checklist — whether it has enough detail for self-contained task decomposition (not whether the architecture is correct).
 
+### 2.1 Scope check (run first, before checklist)
+
+Is the plan really one cohesive piece of work, or does it bundle multiple independent subsystems that each produce working software on their own? Signals it should be split:
+
+- Two or more clearly orthogonal surfaces (e.g., "new ingestion pipeline AND new dashboard AND new auth flow")
+- Total scope obviously exceeds 6–8 phases × 8–10 tasks before you start
+- Disjoint dependency islands (sections that share no acceptance criteria with each other)
+
+If split is warranted, stop here and tell the user: "This plan looks like N separate plans. Recommend splitting into: A / B / C — each producing standalone deliverables. Re-run me on each." Do not proceed to decomposition.
+
+### 2.2 Robustness checklist
+
 **Checklist:** Completeness, File paths (concrete files referenced), Decisions made (no unresolved forks), Dependencies explicit, Boundaries clear, Acceptance criteria exist, Edge cases/error handling addressed, Security/performance constraints stated.
 
-- Present gaps as a structured report. Do NOT auto-fix the plan.
+### 2.3 No-Placeholders canon (auto-reject)
+
+Any of these in the plan is a Pass 1 failure — flag them as gaps regardless of the rest of the checklist:
+
+| Anti-pattern | Why it fails |
+|---|---|
+| `TBD`, `TODO`, `[fill in]`, "implement later" | Decision deferred — decomposition can't be self-contained |
+| "Add appropriate error handling" / "handle edge cases" / "add validation" | No spec for what's appropriate — implementer guesses |
+| "Similar to X above" / "Same pattern as Task N" | Implementer may read out of order; repeat the substance |
+| "Write tests for the above" (without naming what to test) | Test scope is the spec; missing scope = missing tests |
+| "We'll figure out X during implementation" | That's where decomposition belongs, not after |
+| Method/type names referenced but never defined | Forces guesswork at issue-creation time |
+
+- Present gaps (checklist + canon violations) as a structured report. Do NOT auto-fix the plan.
 - Suggest trivial clarifications inline; user approves all changes.
 - Re-read from disk after edits. Max 3 validation cycles. If gaps remain after 3 rounds → stop.
-- Only proceed to Pass 2 when checklist passes with no open gaps.
+- Only proceed to Pass 2 when checklist passes with no open gaps and no canon violations.
 - **Do NOT challenge architectural decisions, add scope, or infer implementation details.**
 
 ---
 
 ## Phase 3: Decomposition (Pass 2)
+
+### 3.1 File map (lock decomposition boundaries first)
+
+Before identifying phases, enumerate **every file** the plan will create or modify, across all the work. For each: one-line responsibility ("owns X", "extends Y"). The point is to surface boundary collisions and over-broad files *before* fragmenting them across tasks — once tasks exist, you can't easily see overlap.
+
+Output as a single table:
+
+| Path | Status | Responsibility |
+|---|---|---|
+| `src/foo/bar.ts` | create | Owns parsing of … |
+| `src/foo/baz.ts` | modify | Add `parseX` to existing export surface |
+
+Guardrails:
+- A single file appearing across > 3 tasks is a smell — split the file or split the work.
+- Two tasks both creating the same file → merge them or split the file into two.
+- Use these boundaries to decide phase splits.
+
+### 3.2 Phase + task generation
 
 **Identify phases first** (all at once): `phase_id` (slug), `name`, `description` (one line), `depends_on`. Then generate tasks one phase at a time.
 
@@ -169,6 +212,26 @@ Validate: all required fields, unique `phase_id` and `task_id`, no circular depe
 
 ---
 
+## Phase 3.5: Self-Review (cheap pre-Pass-3 filter)
+
+Before paying for an external validation agent, **you** review your own decomposition against three deterministic checks. Catches the easy issues for free. This is not a substitute for Pass 3 — it just lets Pass 3 focus on what only an outside eye can spot.
+
+### 3.5.1 Spec coverage
+
+Walk every section/requirement of the post-Pass-1 plan. For each, point to at least one `task_id` that implements it. List unmapped requirements explicitly. If any → add tasks (or fold into existing) before Pass 3.
+
+### 3.5.2 Placeholder scan
+
+Re-run the Phase 2 No-Placeholders canon against the **breakdown JSON** (titles, `what`, `why`, `how`, `acceptance_criteria`, `review_hints`). The canon applies just as hard to the decomposition as to the plan. Any hit → fix in-place before Pass 3.
+
+### 3.5.3 Type/name consistency
+
+Scan the breakdown for cross-task references: types, function names, file paths, environment variables, API endpoints, label names. A function called `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a real bug — implementers will build the wrong thing. Build a quick symbol → first-defining-task index; any mismatch → reconcile in-place.
+
+If any of the three checks finds issues, fix them in the breakdown JSON and re-validate the JSON schema. **Do not** loop on self-review — one pass only. Then proceed to Phase 4.
+
+---
+
 ## Phase 4: Validation (Pass 3 — separate agent)
 
 Verify plan file SHA-256 still matches `plan_hash`. If changed → re-run Phase 3.
@@ -183,7 +246,9 @@ $PYTHON $SCRIPTS/plan_to_tasks_validate.py "$PLAN_FILE" "$BREAKDOWN_FILE" --time
 
 This script handles envelope construction, agent dispatch (uses `--agents` when supplied, otherwise falls back to configured `validation_agents`), output normalization, and structured JSON output. Expect output: `{"schema_version": 1, "approved": true|false, "issues": [...]}`. If malformed, retry once with stronger prompt. If still malformed → treat as validation failure.
 
-**Validation checks:** Coverage (all requirements have tasks), self-containment (each issue stands alone), dependency correctness (no circular deps, no orphan knowledge), overlap, sizing, review sufficiency, metric sanity.
+**Validation checks:** Coverage (all requirements have tasks), self-containment (each issue stands alone), dependency correctness (no circular deps, no orphan knowledge), overlap, sizing, review sufficiency, metric sanity, **cross-task name/type consistency** (a method/type/path/env-var named differently across tasks is a bug — implementers will build the wrong thing).
+
+**Calibration:** Only flag issues that would cause real problems during implementation — an implementer building the wrong thing, getting stuck, or shipping a bug. Minor wording, stylistic preferences, and "nice to have" suggestions are not issues. Approve unless there are serious gaps: missing requirements, contradictory steps, placeholder content, vague tasks, or cross-task name/type mismatches.
 
 **Multiple agents:** If codex and gemini disagree, take the union of findings.
 
@@ -259,7 +324,25 @@ If commit fails: warn, leave changes unstaged.
 
 ## Phase 7: Summary
 
-Print: phases/issues/story points created, risk/confidence/AI suitability distributions, links to phase tracking issues, ready-to-use `/stark-copilot --plan-slug` command.
+Print: phases/issues/story points created, risk/confidence/AI suitability distributions, links to phase tracking issues.
+
+### Execution handoff
+
+End the summary with an explicit two-option framing. Do not just dump the `/stark-copilot` command — make the user's next move a choice:
+
+```
+Phase tracking issues created. Two execution paths:
+
+  1. Autonomous (recommended) — lead/wing implementation:
+     /stark-copilot --plan-slug {PLAN_SLUG}
+
+  2. Manual — work issues yourself, in any order respecting dependencies:
+     gh issue list --label "plan:{PLAN_SLUG}" --repo {ORG_REPO}
+
+Which approach?
+```
+
+Don't loop on the answer — present, then exit. The user picks up from here.
 
 Append to `~/.claude/code-review/logs/stark-plan-to-tasks.jsonl`:
 ```json
