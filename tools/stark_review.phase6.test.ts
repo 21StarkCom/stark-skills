@@ -165,8 +165,8 @@ test("lock ordering through main(): acquire before GET, release after POST", asy
   // it falls open to "fix" without aborting.
   let spawnInvocations = 0;
   const spawnMock = async (cmd: string) => {
-    // tokenForAgent calls python3 scripts/github_app.py — return a dummy token.
-    if (cmd === "python3") {
+    // tokenForAgent shells out to `node ... tools/github_app.ts` — return a dummy token.
+    if (cmd === "node") {
       return { stdout: "ghs_test_token_phase6\n", stderr: "", status: 0 };
     }
     spawnInvocations += 1;

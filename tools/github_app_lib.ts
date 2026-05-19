@@ -1,5 +1,6 @@
 /**
- * GitHub App authentication — TypeScript port of `scripts/github_app.py`.
+ * GitHub App authentication — sole implementation (the parallel Python
+ * module `scripts/github_app.py` was deleted on 2026-05-19).
  *
  * Mints installation access tokens from the GitHub App private key stored
  * in macOS Keychain (with STARK_* env-var fallback for CI and final
@@ -7,10 +8,9 @@
  * and provides thin REST + GraphQL helpers for the operations the SKILLs
  * use (`token`, `pr review`, `pr comment`, plus the standard CRUD set).
  *
- * The Python module remains the source-of-truth for Python orchestrators
- * (runtime_env.py, multi_review.py, plan_to_tasks_validate.py). The on-disk token +
- * installation caches and the keychain entries are shared cross-language
- * by design — both implementations read and write the same JSON files.
+ * The on-disk JSON cache shape and keychain entries are unchanged from
+ * what the Python module wrote, so any tokens minted before the deletion
+ * remain valid.
  */
 
 import crypto from "node:crypto";
@@ -20,7 +20,7 @@ import path from "node:path";
 import childProcess from "node:child_process";
 
 // ---------------------------------------------------------------------------
-// App registry — kept in sync with `scripts/github_app.py:APPS`.
+// App registry.
 // ---------------------------------------------------------------------------
 
 export interface AppConfig {

@@ -10,7 +10,7 @@
  *   5. Loop until approved, blocked, max-rounds exhausted, or empty-diff revision detected
  *
  * Drop-in replacement for the Python copilot_dispatch.py. Same CLI surface,
- * same JSON output shape. Shells out to scripts/github_app.py only when a
+ * same JSON output shape. Shells out to `tools/github_app.ts` only when a
  * GitHub App token is actually required (wing review with operation="review").
  */
 import { spawn } from "node:child_process";
@@ -71,19 +71,6 @@ function resolveSelfDir(): string {
 }
 
 const SELF_DIR = resolveSelfDir();
-const PY_SCRIPTS_CANDIDATES = [
-  path.resolve(SELF_DIR, "..", "scripts"),
-  path.join(HOME, ".claude", "code-review", "scripts"),
-];
-
-function findPyScript(name: string): string {
-  for (const dir of PY_SCRIPTS_CANDIDATES) {
-    const p = path.join(dir, name);
-    if (existsSync(p)) return p;
-  }
-  return path.join(PY_SCRIPTS_CANDIDATES[0]!, name);
-}
-
 // Config (minimal port of config_loader.py) -------------------------------
 
 interface AgentModelConfig {
@@ -455,12 +442,14 @@ export async function buildAgentEnv(
 }
 
 async function fetchGitHubAppToken(appName: string): Promise<string | null> {
-  const py = findPyScript("github_app.py");
-  if (!existsSync(py)) return null;
-  const res = await run("python3", [py, "--app", appName, "token"], {
-    timeoutSec: 30,
-    env: process.env,
-  });
+  // Sibling TS CLI: tools/github_app.ts (resolved relative to this script).
+  const ts = path.join(SELF_DIR, "github_app.ts");
+  if (!existsSync(ts)) return null;
+  const res = await run(
+    "node",
+    ["--experimental-strip-types", ts, "--app", appName, "token"],
+    { timeoutSec: 30, env: process.env },
+  );
   if (res.code !== 0) {
     process.stderr.write(
       `copilot_dispatch: github_app token fetch failed (exit ${res.code}): ` +

@@ -244,10 +244,9 @@ interface ExecutionOutcome {
 }
 
 /**
- * Execute a pattern's action. `github_app.py` is still Python (its own
- * follow-up port); the `refresh_token` action shells out to it. All
- * other actions are stubs that print "not yet implemented" and return
- * success=true — same behavior as the Python.
+ * Execute a pattern's action. The `refresh_token` action shells out to the
+ * TS GitHub-App CLI to mint a fresh installation token. All other actions
+ * are stubs that print "not yet implemented" and return success=true.
  */
 function executeAction(
   pattern: HealerPattern,
@@ -256,9 +255,11 @@ function executeAction(
 ): ExecutionOutcome {
   let success = true;
   if (pattern.action === "refresh_token") {
+    // scriptsDir is `<base>/scripts`; the TS CLI sits at `<base>/tools/`.
+    const toolsDir = path.join(path.dirname(scriptsDir), "tools");
     const result = spawnSync(
-      "python3",
-      [path.join(scriptsDir, "github_app.py"), "token"],
+      "node",
+      ["--experimental-strip-types", path.join(toolsDir, "github_app.ts"), "token"],
       { encoding: "utf8", timeout: 30_000 },
     );
     success = result.status === 0;
@@ -327,7 +328,8 @@ export interface RunHealOpts {
   logPath?: string;
   /** Override for the alert_delivery base dir. */
   alertsBaseDir?: string;
-  /** Override for the scripts dir (where `github_app.py` lives). Defaults to `~/.claude/code-review/scripts`. */
+  /** Override for the scripts dir. Defaults to `~/.claude/code-review/scripts`; the
+   * sibling `tools/` directory hosts the GitHub-App TS CLI used by `refresh_token`. */
   scriptsDir?: string;
   env?: NodeJS.ProcessEnv;
   now?: Date;

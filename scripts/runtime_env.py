@@ -11,12 +11,38 @@ from __future__ import annotations
 import atexit
 import os
 import shutil
+import subprocess
 import sys
 import uuid
 from pathlib import Path
 
 from config_loader import get_runtime_config, load_config
-import github_app
+
+# TS CLI for GitHub App auth (replaces former in-process `import github_app`).
+# Path is resolved relative to the repo root (one level up from scripts/).
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_GITHUB_APP_TS = str(_REPO_ROOT / "tools" / "github_app.ts")
+
+
+def _get_token_via_ts(app_name: str) -> str:
+    """Mint / fetch a GitHub App installation token via the TS CLI.
+
+    Shells out to `node --experimental-strip-types tools/github_app.ts
+    --app NAME token`. The TS CLI shares the on-disk token cache with any
+    prior Python invocations so this is cheap on the cache-hit path.
+    """
+    result = subprocess.run(
+        ["node", "--experimental-strip-types", _GITHUB_APP_TS, "--app", app_name, "token"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"github_app.ts token failed for app={app_name!r}: "
+            f"{result.stderr.strip() or 'unknown error'}"
+        )
+    return result.stdout.strip()
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -151,7 +177,7 @@ def build_agent_env(agent: str, operation: str) -> dict[str, str]:
     # GH_TOKEN: inject bot token only for review operations.
     if operation in _GH_TOKEN_OPS:
         app_name = github_apps.get(agent, f"stark-{agent}")
-        env["GH_TOKEN"] = github_app.get_token(app=app_name)
+        env["GH_TOKEN"] = _get_token_via_ts(app_name)
     elif operation not in _USER_AUTH_OPS:
         print(
             f"runtime_env: warning: unknown operation {operation!r} for agent {agent!r};"

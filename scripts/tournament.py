@@ -227,7 +227,6 @@ if not AGENTS:
     AGENTS = dict(_ALL_AGENTS)
 
 PYTHON = sys.executable
-GITHUB_APP = str(SCRIPTS_DIR / "github_app.py")
 CODEX_REASONING_CONFIG = CODEX_REASONING_EFFORT_HIGH
 
 
