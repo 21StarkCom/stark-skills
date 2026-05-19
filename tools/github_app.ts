@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * github_app CLI — TypeScript port of `scripts/github_app.py`'s argparse
- * surface. Subcommands match the Python 1:1 so SKILL.md bash snippets that
- * pipe / capture output continue to work:
+ * github_app CLI — sole implementation (the parallel Python CLI
+ * `scripts/github_app.py` was deleted on 2026-05-19). Surface preserved
+ * so SKILL.md bash snippets that pipe / capture output keep working:
  *
  *   github_app.ts [--app APP] [--repo OWNER/NAME] token
  *   github_app.ts [--app APP] [--repo OWNER/NAME] repo

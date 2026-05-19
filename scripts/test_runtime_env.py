@@ -84,7 +84,7 @@ def _patch_config():
 
 def test_review_operation_includes_gh_token():
     """build_agent_env('claude', 'review') must include GH_TOKEN."""
-    with patch("runtime_env.github_app.get_token", return_value=FAKE_TOKEN):
+    with patch("runtime_env._get_token_via_ts", return_value=FAKE_TOKEN):
         env = runtime_env.build_agent_env("claude", "review")
     assert env.get("GH_TOKEN") == FAKE_TOKEN
 
@@ -99,15 +99,15 @@ def test_review_operation_includes_gh_token():
 )
 def test_review_operation_uses_agent_specific_app(agent: str, expected_app: str):
     """Review envs must request the matching GitHub App token for each agent."""
-    with patch("runtime_env.github_app.get_token", return_value=FAKE_TOKEN) as mock_tok:
+    with patch("runtime_env._get_token_via_ts", return_value=FAKE_TOKEN) as mock_tok:
         env = runtime_env.build_agent_env(agent, "review")
     assert env.get("GH_TOKEN") == FAKE_TOKEN
-    mock_tok.assert_called_once_with(app=expected_app)
+    mock_tok.assert_called_once_with(expected_app)
 
 
 def test_pr_create_operation_excludes_gh_token():
     """build_agent_env('claude', 'pr_create') must NOT include GH_TOKEN."""
-    with patch("runtime_env.github_app.get_token", return_value=FAKE_TOKEN) as mock_tok:
+    with patch("runtime_env._get_token_via_ts", return_value=FAKE_TOKEN) as mock_tok:
         env = runtime_env.build_agent_env("claude", "pr_create")
     assert "GH_TOKEN" not in env
     mock_tok.assert_not_called()
@@ -115,7 +115,7 @@ def test_pr_create_operation_excludes_gh_token():
 
 def test_issue_ops_operation_excludes_gh_token():
     """build_agent_env('claude', 'issue_ops') must NOT include GH_TOKEN."""
-    with patch("runtime_env.github_app.get_token", return_value=FAKE_TOKEN) as mock_tok:
+    with patch("runtime_env._get_token_via_ts", return_value=FAKE_TOKEN) as mock_tok:
         env = runtime_env.build_agent_env("claude", "issue_ops")
     assert "GH_TOKEN" not in env
     mock_tok.assert_not_called()
@@ -123,7 +123,7 @@ def test_issue_ops_operation_excludes_gh_token():
 
 def test_claude_gets_api_key_from_anthropic_agents():
     """For claude ops, ANTHROPIC_API_KEY must be injected from ANTHROPIC_AGENTS."""
-    with patch("runtime_env.github_app.get_token", return_value=FAKE_TOKEN):
+    with patch("runtime_env._get_token_via_ts", return_value=FAKE_TOKEN):
         for op in ("review", "pr_create", "issue_ops", "unknown_op"):
             env = runtime_env.build_agent_env("claude", op)
             assert env.get("ANTHROPIC_API_KEY") == FAKE_AGENT_KEY, (
@@ -136,7 +136,7 @@ def test_claude_gets_api_key_from_anthropic_agents():
 @pytest.mark.parametrize("agent", ["codex", "gemini"])
 def test_non_claude_agents_never_see_anthropic_keys(agent: str):
     """Codex and gemini subprocesses must never see ANTHROPIC_API_KEY or ANTHROPIC_AGENTS."""
-    with patch("runtime_env.github_app.get_token", return_value=FAKE_TOKEN):
+    with patch("runtime_env._get_token_via_ts", return_value=FAKE_TOKEN):
         for op in ("review", "pr_create", "issue_ops"):
             env = runtime_env.build_agent_env(agent, op)
             assert "ANTHROPIC_API_KEY" not in env, (
@@ -149,7 +149,7 @@ def test_non_claude_agents_never_see_anthropic_keys(agent: str):
 
 def test_only_allowlisted_vars_passed_through():
     """Only allowlisted + injected vars should appear in the returned env."""
-    with patch("runtime_env.github_app.get_token", return_value=FAKE_TOKEN):
+    with patch("runtime_env._get_token_via_ts", return_value=FAKE_TOKEN):
         env = runtime_env.build_agent_env("claude", "review")
     # Non-allowlisted vars must not be present
     assert "SECRET_TOKEN" not in env
@@ -165,7 +165,7 @@ def test_only_allowlisted_vars_passed_through():
 
 def test_unknown_operation_defaults_to_no_gh_token(capsys):
     """Unknown operations must default to no GH_TOKEN and emit a warning."""
-    with patch("runtime_env.github_app.get_token", return_value=FAKE_TOKEN) as mock_tok:
+    with patch("runtime_env._get_token_via_ts", return_value=FAKE_TOKEN) as mock_tok:
         env = runtime_env.build_agent_env("claude", "unknown_op")
     assert "GH_TOKEN" not in env
     mock_tok.assert_not_called()

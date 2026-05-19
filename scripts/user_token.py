@@ -25,7 +25,7 @@ Usage:
     eval "$(python scripts/user_token.py --swap)"
 
 This intentionally only addresses *user-identity* gh calls. Bot calls keep using
-GitHub App installation tokens minted by `github_app.py`.
+GitHub App installation tokens minted by `tools/github_app.ts`.
 """
 
 from __future__ import annotations
