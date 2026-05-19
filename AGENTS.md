@@ -32,7 +32,6 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `scripts/dispatcher_base.py` — shared base: config discovery, model resolution, domain/prompt resolution
 - `scripts/multi_review.py` — PR review orchestrator (ThreadPoolExecutor, parallel sub-agents)
 - `scripts/plan_review_dispatch.py` — plan/design review dispatch (N agents × M domains)
-- `scripts/design_to_plan_dispatch.py` — generic generate-and-cross-review dispatch for enabled agents
 - `scripts/tournament.py` — reusable multi-LLM competition engine (semantic, visual, test evaluation)
 - `scripts/domain_triage.py` — context-aware domain dispatch engine
 - `scripts/triage_orchestrator.py` — triage orchestration with shadow validation support
@@ -48,6 +47,10 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `scripts/github_app.py` — multi-app GitHub auth (stark-Codex, stark-codex, stark-gemini)
 - `scripts/github_projects.py` — GitHub Projects V2 GraphQL utility (13 public functions)
 - `tools/emit_queue_lib.ts` + `tools/emit_queue_cli.ts` — SQLite-backed durable event queue (producer side). Python consumers reach it via `scripts/_emit.py`, a thin subprocess wrapper. The drain side lives in stark-insights.
+
+### Dispatch tools (TS)
+- `tools/copilot_dispatch.ts` — `/stark-copilot` lead/wing implementation dispatcher (replaces former `scripts/copilot_dispatch.py`). Owns the worktree + diff + review→fix loop + JSON verdict parsing. Also the canonical home for shared agent-dispatch primitives now imported by `plan_dispatch.ts`: `run`, `buildAgentEnv`, `setupGeminiHome`, `makeGeminiEnv`, `tryGeminiApiKeyFallback`, `releaseAgentTempDir`, plus the verdict parsers.
+- `tools/plan_dispatch.ts` — `/stark-design-to-plan` lead/wing plan-generation dispatcher (replaces the deleted `scripts/design_to_plan_dispatch.py`, which used a 3-agent tournament + cross-review). Round 1: lead reads design + `generate.md`, emits markdown plan draft. Wing reviews via `review.md`, returns `{verdict, blocking_findings[], non_blocking_suggestions[], summary}` JSON. On `revise`, lead receives prior draft + findings + `revise.md`, emits a new draft. Loops until `approve` / `block` / `--max-rounds` / empty-draft / unchanged-from-prior. No worktree (plans are text). Same final-verdict union + JSON output shape as copilot. Defaults: lead=`claude`, wing=`codex`, max-rounds=4, lead-timeout=900s, wing-timeout=600s.
 
 ### TUI & session
 - `scripts/tui_core.py` — shared TUI rendering primitives (box, table, progress) — sole remaining consumer is `triage_tui.py`
@@ -110,7 +113,7 @@ All skills live in `skill/stark-*/SKILL.md`; `install.sh` symlinks them for Clau
 ### Pipeline (end-to-end, in order)
 
 - `/stark-review-design <path>` — multi-agent design/spec review (N agents × 12 domains, default N=2)
-- `/stark-design-to-plan <path>` — generate implementation plan from design doc (enabled agents generate, then cross-review before synthesis)
+- `/stark-design-to-plan <path>` — generate implementation plan from design doc via paired lead/wing loop (default lead `claude`, wing `codex`); lead drafts, wing reviews and emits JSON verdict, fix-loop until approved. Cheaper and lower-variance than the prior 3-agent tournament.
 - `/stark-review-plan <path>` — multi-agent execution plan review (N agents × 10 adversarial domains, default N=2)
 - `/stark-plan-to-tasks <path> [--dry-run] [--cleanup <slug>]` — decompose plan into phased GitHub issues (3 LLM passes)
 - `/stark-phase-execute <plan-slug> [--dry-run]` — autonomous phase execution: implement all tasks, PR, review, merge, release, dashboard

@@ -1,12 +1,12 @@
 ---
 name: stark-design-to-plan
 description: >-
-  Convert design docs into phased implementation plans via the enabled agents + cross-review. Use for plan from design/spec.
-argument-hint: "<path> [--agents claude,codex,gemini] [--timeout N] [--dry-run] [--force]"
+  Convert design docs into phased implementation plans via paired lead/wing agents. Lead drafts, wing reviews, fix-loop until approved. Use for plan from design/spec.
+argument-hint: "<path> [--lead claude|codex|gemini] [--wing claude|codex|gemini] [--max-rounds N] [--timeout N] [--wing-timeout N] [--dry-run] [--force]"
 disable-model-invocation: true
 model: opus
-revision: 63a8c794adafa2df8a713b4dcf9743a09e3c7cfc
-revision_date: 2026-05-18T19:17:41Z
+revision: 6943b7a3856c1caabf33b8449f6ed1604d203423
+revision_date: 2026-05-19T05:45:53Z
 ---
 
 ## Preflight
@@ -17,25 +17,37 @@ node --experimental-strip-types ~/.claude/code-review/tools/preflight.ts --workf
 ```
 Parse the JSON result:
 - If `overall` is "blocked": print the failing checks and stop. Do not proceed.
-- If `overall` is "degraded": print a warning with the failing checks, then continue with available agents.
+- If `overall` is "degraded": print a warning with the failing checks, then continue if both the configured lead and wing agents are available.
 - If `overall` is "ready": continue silently.
 - In non-interactive automation contexts, a blocked preflight must emit a `preflight_check` event with `status=blocked`, append an entry to `~/.claude/code-review/alerts.jsonl`, and exit non-zero so the trigger is marked failed.
 
 # stark-design-to-plan
 
-Generate a phased implementation plan from a design document. The enabled agents each independently
-produce a plan, then each plan is cross-reviewed by the other enabled agents.
-The highest-scoring plan becomes the base, synthesized with the best elements from the others.
+Generate a phased implementation plan from a design document via a paired **lead/wing** subagent loop:
 
-Fills the pipeline gap: `/stark-review-design` → **`/stark-design-to-plan`** → `/stark-review-plan`
+- **Lead** (default `claude`) — drafts the plan from the design doc
+- **Wing** (default `codex`) — reviews the draft, returns approve / revise / block JSON verdict
+- **Fix loop** — on `revise`, lead receives the wing's blocking findings + prior draft and emits a revised plan; wing re-reviews. Loops until `approve`, `block`, or `--max-rounds` exhaustion.
+
+This is the cheaper, lower-variance sibling of the prior 3-agent tournament. Paired writing instead of competition.
+
+This skill is thin: it orchestrates `tools/plan_dispatch.ts`, which owns the dispatch, the review→fix loop, and the JSON verdict parsing. Do not re-implement that logic here.
+
+Fills the pipeline gap: `/stark-review-design` → **`/stark-design-to-plan`** → `/stark-review-plan` → `/stark-plan-to-tasks`.
 
 ## Arguments
 
 - `<path>` — path to design/spec markdown file (required)
-- `--agents LIST` — comma-separated agent IDs (default: claude,codex,gemini)
-- `--timeout N` — per-agent timeout in seconds (default: 600)
-- `--dry-run` — generate plans and reviews but don't write output files
+- `--lead AGENT` — lead implementer agent ID (default: `claude`). One of `claude`, `codex`, `gemini`.
+- `--wing AGENT` — wing reviewer agent ID (default: `codex`). Must differ from `--lead`.
+- `--max-rounds N` — maximum **fix** rounds after the initial draft (default: `4`). The wing reviews up to `N+1` times.
+- `--timeout N` — per-lead-invocation timeout in seconds (default: 900)
+- `--wing-timeout N` — per-wing-invocation timeout in seconds (default: 600)
+- `--dry-run` — generate plan but don't write output files or post to PR
 - `--force` — proceed even if design file has uncommitted changes
+
+If `--lead` and `--wing` resolve to the same agent, error and stop:
+> Error: --lead and --wing must be different agents.
 
 **Raw input:** `$ARGUMENTS`
 
@@ -44,8 +56,7 @@ Fills the pipeline gap: `/stark-review-design` → **`/stark-design-to-plan`** �
 ```bash
 SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
 TOOLS="${STARK_REVIEW_TOOLS:-$HOME/.claude/code-review/tools}"
-PYTHON="$SCRIPTS/.venv/bin/python3"
-[ -x "$PYTHON" ] || PYTHON=python3
+PROMPTS="${STARK_REVIEW_PROMPTS:-$HOME/.claude/code-review/prompts}"
 ```
 
 ## Phase 1: Setup
@@ -63,7 +74,6 @@ PYTHON="$SCRIPTS/.venv/bin/python3"
   git diff --name-only -- "$path"
   ```
   If dirty AND `--force` not passed, warn and abort.
-- Read file content. Store as `design_content`.
 
 ### 1.2 Detect PR context
 
@@ -71,7 +81,7 @@ PYTHON="$SCRIPTS/.venv/bin/python3"
 pr_number=$(gh pr view --json number --jq .number 2>/dev/null)
 ```
 
-Store for Phase 5 if present.
+Store for Phase 4 if present.
 
 ### 1.3 Authenticate (only if PR detected)
 
@@ -82,177 +92,152 @@ export GH_TOKEN=$(node --experimental-strip-types "$TOOLS/github_app.ts" --app s
 Auth failure → warn, continue without PR posting.
 
 ### 1.4 Approach Contract
-Before dispatching agents, confirm the approach:
+
+Before dispatching the lead/wing loop, confirm the approach:
 ```bash
-python3 ~/.claude/code-review/scripts/approach_contract.py --plan-file <path> --force-confirm
+python3 "$SCRIPTS/approach_contract.py" --plan-file <path> --force-confirm
 ```
 
-## Phase 2: Generate Plans
+## Phase 2: Lead/Wing Loop
 
-Dispatch the enabled agents in parallel. Each produces an implementation plan:
+Dispatch the paired lead/wing loop. The dispatcher runs the lead in round 1, then up to `max_rounds` review→fix iterations: wing reviews → if `revise`, lead re-runs with the wing's blocking findings → wing reviews the new draft. It exits on the first `approve`, on `block`, on `--max-rounds` exhaustion, on an empty-draft revision, on an unchanged-from-prior revision, or on any unrecoverable agent error.
 
 ```bash
-$PYTHON $SCRIPTS/design_to_plan_dispatch.py \
-  --mode generate \
+node --experimental-strip-types "$TOOLS/plan_dispatch.ts" \
   --design-file "$path" \
-  --timeout $timeout
+  --generate-prompt-file "$PROMPTS/design-to-plan/$lead/generate.md" \
+  --review-prompt-file "$PROMPTS/design-to-plan/$wing/review.md" \
+  --revise-prompt-file "$PROMPTS/design-to-plan/$lead/revise.md" \
+  --lead "$lead" \
+  --wing "$wing" \
+  --max-rounds "$max_rounds" \
+  --timeout "$timeout" \
+  --wing-timeout "$wing_timeout"
 ```
 
-Capture JSON output. Extract `results[].plan_content` for each agent.
+The exit code is `0` only when `final_verdict == "approved"`.
 
-**Minimum viable:** At least 2 enabled agents must succeed. If only 1 succeeds, warn and use that single plan (skip cross-review). If 0 succeed, abort with dispatch failure diagnostics.
+The dispatcher prints a JSON object on stdout:
 
-Write each plan to a temp file for Phase 3 input:
-```bash
-mkdir -p /tmp/stark-d2p-$$
-# Write plans as {agent}.md
+```json
+{
+  "lead": "claude",
+  "wing": "codex",
+  "final_verdict": "approved | blocked | aborted | max_rounds_unresolved | unresolved",
+  "error": null,
+  "duration_s": 123.4,
+  "rounds": [
+    {
+      "round": 1,
+      "draft_length": 6234,
+      "verdict": "revise",
+      "blocking_findings": ["..."],
+      "non_blocking_suggestions": ["..."],
+      "summary": "...",
+      "parse_retry_used": false,
+      "duration_s": 60.1,
+      "error": null
+    }
+  ],
+  "final_plan": "# ...full markdown plan..."
+}
 ```
 
-Also write plans as a JSON file for the cross-review dispatch:
-```bash
-# /tmp/stark-d2p-$$/plans.json = {"claude": "...", "codex": "...", "gemini": "..."}
-```
+Read the final plan from `final_plan`. Per-round metadata (verdict, findings, parse retries) lives in `rounds[]` for the audit trail (Phase 4).
 
-## Phase 3: Cross-Review Plans
+### Handle terminal verdicts
 
-Each plan gets reviewed by the other enabled agents (full 3-agent mode produces 6 reviews):
+| `final_verdict` | Action |
+|---|---|
+| `approved` | Continue to Phase 3 (output + persist). |
+| `blocked` | Stop. Print the wing's `summary` and `blocking_findings` from the last round. Do not write output files. |
+| `aborted` | Lead's round-1 generate failed (timeout, empty draft, or CLI error). Stop, surface the round-1 `error`. |
+| `max_rounds_unresolved` | Wing did not approve within `--max-rounds` fix rounds. Stop, print all rounds' findings. |
+| `unresolved` | Loop terminated for another reason (wing parse retry exhausted, empty-draft revision, mid-loop lead failure). Stop, surface the `error` field and the latest findings. |
 
-```bash
-$PYTHON $SCRIPTS/design_to_plan_dispatch.py \
-  --mode cross-review \
-  --design-file "$path" \
-  --plans-json /tmp/stark-d2p-$$/plans.json \
-  --timeout $timeout
-```
+In every non-`approved` case, do **not** write the plan file or post to the PR. Surface what's needed to address the failure manually, then exit.
 
-Capture JSON output. Parse:
-- `results[]` — individual review scores, strengths, weaknesses
-- `plan_averages` — average score per plan author
-- `winner` — agent whose plan scored highest
+## Phase 3: Output & Persist
 
-Display the scorecard:
+### 3a. Terminal summary
 
-```
-Cross-Review Scorecard
-──────────────────────
-              Complete  Feasible  Phasing  Risk  Testable  Avg
-  claude        8.5       9.0      8.0     7.5    8.0     8.2 ★
-  codex         7.5       8.5      7.0     8.0    7.5     7.7
-  gemini        8.0       7.0      8.5     7.0    8.0     7.7
-
-Winner: claude (8.2/10)
-```
-
-Each score in the table is the average of the 2 cross-reviews for that plan.
-
-If the top 2 plans are within 0.5 points, declare a tie and note it:
-```
-Winner: tie (claude 8.2, gemini 7.9) — synthesizing both equally
-```
-
-## Phase 4: Synthesize
-
-This phase runs in the Claude Code orchestrator (not dispatched to a sub-agent).
-
-Read:
-1. The winning plan (or both plans in a tie)
-2. All 6 cross-reviews (scores, strengths, weaknesses)
-3. The original design document
-
-Synthesis rules:
-1. **Winner as base:** Start with the winning plan's structure and content
-2. **Merge superior elements:** For each section where a non-winning plan scored higher on a specific dimension (based on cross-review feedback), incorporate that plan's approach for that section
-3. **Address weaknesses:** For each weakness flagged by cross-reviewers, fix it in the synthesis
-4. **Discard confirmed problems:** If both reviewers of a plan flagged the same weakness, do not carry that element into the synthesis
-5. **Preserve specificity:** Keep concrete file paths, function names, commands. Don't generalize what the plans made specific
-
-Output: a single markdown implementation plan document.
-
-### Synthesis Quality Check
-
-After generating the synthesis, verify:
-- Every section of the design document has corresponding plan tasks
-- No phase depends on a later phase
-- Verification criteria exist for every phase
-- Rollback procedure exists for every phase
-- No orphaned tasks (tasks that no phase contains)
-
-If issues found, fix them inline.
-
-## Phase 5: Output & Persist
-
-### 5a. Terminal
-
-Print the synthesis summary:
+Print:
 ```
 Design-to-Plan Complete
 ───────────────────────
-Design:    {path}
-Plans:     3 generated (claude, codex, gemini)
-Reviews:   6 cross-reviews
-Winner:    {agent} ({score}/10)
-Output:    {output_path}
+Design:        {path}
+Lead:          {lead}
+Wing:          {wing}
+Rounds:        {N} ({verdict-of-each})
+Final verdict: approved
+Output:        {output_path}
 ```
 
-### 5b. Write plan file (skip in --dry-run)
+### 3b. Write plan file (skip in --dry-run)
 
-Write the synthesized plan alongside the design file:
+Write the approved plan alongside the design file:
 - If design is `docs/specs/2026-03-27-auth-design.md`
 - Plan goes to `docs/specs/2026-03-27-auth-plan.md`
 
 Naming: replace `-design.md` with `-plan.md`. If the design filename doesn't end with `-design.md`, append `.plan.md`.
 
-### 5c. Write review summary (skip in --dry-run)
+### 3c. Write review summary (skip in --dry-run)
 
-Write cross-review details to `{design-name}.d2p-review.md` alongside the design file.
+Write per-round details to `{design-name}.d2p-review.md` alongside the design file.
 
 Contents:
-- Scorecard table (from Phase 3)
-- Per-plan strengths/weaknesses (from cross-reviews)
-- Synthesis decisions (which elements came from which plan)
+- Per-round verdict, blocking findings, non-blocking suggestions, summary
+- Total duration, round count, lead/wing identities
 
-### 5d. Post to PR (if PR detected and not --dry-run)
+### 3d. Post to PR (if PR detected and not --dry-run)
 
-Post the scorecard and synthesis summary under stark-claude:
+Post the summary under the lead's GitHub App identity:
+
+| Lead | App identity |
+|---|---|
+| `claude` | stark-claude |
+| `codex` | stark-codex |
+| `gemini` | stark-gemini |
 
 ```bash
-node --experimental-strip-types "$TOOLS/github_app.ts" --app stark-claude pr review $pr_number --comment --body "$summary"
+node --experimental-strip-types "$TOOLS/github_app.ts" --app $lead_app pr review $pr_number --comment --body "$summary"
 ```
 
-### 5e. Save history
+## Phase 4: Persist history
 
 ```bash
 mkdir -p ~/.claude/code-review/history/design-to-plan/{design-filename}
 ```
 
 Write:
-- `generate.json` — raw plan outputs from all 3 agents
-- `cross-review.json` — all 6 review outputs with scores
-- `synthesis.md` — final synthesized plan
+- `dispatch.json` — full JSON from the dispatcher (lead, wing, final_verdict, rounds[], final_plan)
+- `plan.md` — final plan content (same as the file written in 3b)
 - `summary.md` — human-readable summary
-
-### 5f. Cleanup
-
-```bash
-rm -rf /tmp/stark-d2p-$$
-```
+- `rounds.jsonl` — one JSONL entry per round (round, verdict, blocking_findings, summary, parse_retry_used)
 
 ## Observability
 
-Standard observability: create task per phase, emit timestamped progress logs (`[HH:MM:SS] Phase N: ...`), record metrics block (plans generated N/3, reviews N/6, winner agent + score, runner-up, synthesis merges, output path, per-phase durations), emit completion event via `$SCRIPTS/stark-emit`.
+Standard observability: create task per phase, emit timestamped progress logs (`[HH:MM:SS] Phase N: ...`), record metrics block (lead, wing, rounds count, final verdict, total duration, lead duration, wing duration, parse retries), emit completion event via `$SCRIPTS/stark-emit`.
 
-Improvement flags: plan generation > 5 min → flag slow agent; cross-review parse failure → flag parse issue; score gap < 0.5 → "close race"; any dimension < 5 in winning plan → "weak spots in {dimension}"; agent generation failure → "only N/3 plans".
+Improvement flags: total run > 10 min → flag slow loop; any parse retry → flag verdict format drift; `max_rounds_unresolved` → flag wing too strict OR lead too weak (operator decides); `lead_fix_round_no_change` → flag lead stuck on a finding; `lead_round1_empty_draft` → flag generate-prompt issue.
 
 ## Failure Modes
 
-| Failure | Recovery |
-|---------|----------|
-| No path provided | "Usage: /stark-design-to-plan <path>" |
-| File not found | Search docs/ for candidates |
-| Uncommitted changes | "Commit or stash first, or use --force" |
-| 0/3 plans generated | Abort with dispatch diagnostics |
-| 1/3 plans generated | Use single plan, skip cross-review, warn |
-| 2/3 plans generated | Cross-review with available plans (4 reviews instead of 6) |
-| Cross-review parse failure | Use raw output, score manually in synthesis |
-| All cross-reviews fail | Use plan line counts and structure as quality heuristic |
-| Script not found | "Run install.sh to set up stark-skills" |
+Most failure modes are owned by the dispatcher (listed for orchestrator awareness):
+
+| Scenario | Dispatcher behavior | Orchestrator action |
+|---|---|---|
+| No path provided | (Pre-dispatch) | "Usage: /stark-design-to-plan <path>" |
+| File not found | (Pre-dispatch) | Search docs/ for candidates |
+| Uncommitted changes | (Pre-dispatch) | "Commit or stash first, or use --force" |
+| `--lead` == `--wing` | `error=lead_eq_wing` returned immediately | Refuse before dispatch in §1; never reach dispatcher |
+| Lead times out / errors on round 1 | `final_verdict=aborted`, `error` set | Stop the run; surface error |
+| Lead emits empty draft on round 1 | `final_verdict=aborted`, `error=lead_round1_empty_draft` | Stop; investigate generate prompt |
+| Wing times out reviewing | Dispatcher retries once; if still fails, treats as `unresolved` with `error=wing_error:timeout` | Stop; surface error |
+| Wing returns malformed JSON verdict | Dispatcher retries once with explicit "JSON only" suffix; if still malformed, treats as `revise` and continues the fix loop | Trust the dispatcher; review `parse_retry_used` in audit log |
+| Wing returns `block` verdict | `final_verdict=blocked`, `error=wing_blocked` | Stop the run; print wing's `summary` and `blocking_findings` |
+| Lead's revision produces empty draft | `final_verdict=unresolved`, `error=lead_fix_round_empty_draft` | Stop; surface findings — lead is stuck |
+| Lead's revision is identical to prior round | `final_verdict=unresolved`, `error=lead_fix_round_no_change` | Stop; surface findings — lead made no progress |
+| Lead errors mid-loop | `final_verdict=unresolved`, `error=lead_fix_round_failed:*` | Stop; surface error |
+| `--max-rounds` exhausted without approval | `final_verdict=max_rounds_unresolved`, all rounds in `rounds[]` | Stop; print every round's blocking_findings; operator decides whether to retry with more rounds or fix the design |
+| Tool not found (claude/codex/gemini CLI missing) | `agent_unavailable` | Run installer or check PATH |

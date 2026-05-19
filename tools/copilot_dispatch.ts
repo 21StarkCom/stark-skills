@@ -266,7 +266,7 @@ interface RunOptions {
 
 const DEFAULT_OUTPUT_CAP = 32 * 1024 * 1024; // 32 MiB
 
-async function run(
+export async function run(
   cmd: string,
   args: string[],
   opts: RunOptions,
@@ -378,7 +378,7 @@ const BLOCKED_ENV_KEYS = new Set(["ANTHROPIC_API_KEY", "ANTHROPIC_AGENTS"]);
 const ANTHROPIC_PREFIX = "ANTHROPIC_";
 const ALLOWED_ANTHROPIC_KEYS = new Set(["ANTHROPIC_CODE_CLI"]);
 
-type Operation = "implementation" | "review" | "local";
+export type Operation = "implementation" | "review" | "local";
 
 // Tracks subprocess scratch dirs that survived past their subprocess (e.g.
 // caller forgot to clean them). A single process.exit handler sweeps them
@@ -405,7 +405,7 @@ function makeAgentTempDir(): string {
   return tmp;
 }
 
-function releaseAgentTempDir(tmp: string): void {
+export function releaseAgentTempDir(tmp: string): void {
   _liveTempDirs.delete(tmp);
   try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
 }
@@ -416,7 +416,7 @@ interface AgentEnv {
   tempDir: string;
 }
 
-async function buildAgentEnv(
+export async function buildAgentEnv(
   agent: AgentName,
   operation: Operation,
 ): Promise<AgentEnv> {
@@ -491,7 +491,7 @@ const GEMINI_AUTH_ERROR_PATTERNS = [
   "Could not automatically determine credentials",
 ] as const;
 
-function setupGeminiHome(
+export function setupGeminiHome(
   prefix: string,
   projectDir: string,
   projectLabel: string,
@@ -528,7 +528,7 @@ function setupGeminiHome(
   return home;
 }
 
-function makeGeminiEnv(
+export function makeGeminiEnv(
   geminiHome: string,
   opts: { trustWorkspace?: boolean } = {},
 ): NodeJS.ProcessEnv {
@@ -583,7 +583,7 @@ function logApiKeyFallback(task: string, reason: string): void {
   } catch { /* best-effort */ }
 }
 
-async function tryGeminiApiKeyFallback(
+export async function tryGeminiApiKeyFallback(
   env: NodeJS.ProcessEnv,
   contextLabel: string,
   stderrSnippet: string,
