@@ -40,6 +40,7 @@ import {
   loadPersonaPrompts,
   makeDedupeKey,
   parseCodexJsonl,
+  parseCommitteeOutput,
   parseFixPlanOutput,
   preDispatchSensitiveGate,
   recordRun,
@@ -799,6 +800,38 @@ test("serializeFindingsEnvelope returns fitsSafely=false when a blocking finding
   const out = serializeFindingsEnvelope(findings, 1000);
   assert.equal(out.fitsSafely, false);
   assert.ok(out.omittedIds.length > 0);
+});
+
+test("parseCommitteeOutput unwraps the documented {synthesis, findings} shape", () => {
+  // Schema-correct: top-level object with synthesis + findings array.
+  const wrapped = JSON.stringify({
+    synthesis: "Tension between security and DX.",
+    findings: [{ id: "rt1", persona: "security-trust" }],
+  });
+  const fromObject = parseCommitteeOutput(wrapped);
+  assert.equal(fromObject.synthesis, "Tension between security and DX.");
+  assert.deepEqual(JSON.parse(fromObject.findings_json), [
+    { id: "rt1", persona: "security-trust" },
+  ]);
+
+  // Inside a ```json fence (common with `gpt-5.5` over codex exec).
+  const fenced = "Here is the JSON:\n```json\n" + wrapped + "\n```\n";
+  const fromFence = parseCommitteeOutput(fenced);
+  assert.equal(fromFence.synthesis, "Tension between security and DX.");
+  assert.deepEqual(JSON.parse(fromFence.findings_json), [
+    { id: "rt1", persona: "security-trust" },
+  ]);
+
+  // Legacy bare array — synthesis empty, findings round-trip.
+  const bare = parseCommitteeOutput('[{"id":"rt1"}]');
+  assert.equal(bare.synthesis, "");
+  assert.deepEqual(JSON.parse(bare.findings_json), [{ id: "rt1" }]);
+
+  // Empty / unparseable — return raw so validateFindings surfaces the error.
+  assert.equal(parseCommitteeOutput("").findings_json, "");
+  const garbage = parseCommitteeOutput("totally not json");
+  assert.equal(garbage.synthesis, "");
+  assert.equal(garbage.findings_json, "totally not json");
 });
 
 test("parseFixPlanOutput extracts JSON from raw / fenced / brace-bracketed forms", () => {

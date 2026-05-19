@@ -47,6 +47,7 @@ import {
 } from "./red_team_audit_text_lib.ts";
 import { resolveDb } from "./red_team_db_resolver.ts";
 import { enqueue as queueEnqueue, makeEvent } from "./emit_queue_lib.ts";
+import { resolveOpenaiApiKey } from "./preflight_lib.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -387,19 +388,31 @@ export interface SandboxHome {
 }
 
 /**
- * Create a temp HOME with just `.codex` symlinked from the operator's
- * real HOME. Returns the path and a cleanup closure. Mirrors the Python
- * `synthetic_home()` context manager.
+ * Create a temp HOME containing a fresh `.codex/` directory whose entries
+ * are symlinked back to the operator's real `~/.codex/` — with one
+ * exception: `auth.json` is excluded so the caller can drop in an
+ * apikey-mode credential without clobbering the user's real (often
+ * ChatGPT-account) login. dispatchCodex synthesizes that auth.json when
+ * an OPENAI_API_KEY is resolvable; otherwise codex falls back to whatever
+ * auth state the real home offers (e.g. ChatGPT oauth tokens). Returns
+ * the synthetic HOME path and a cleanup closure.
  */
 export function isolateHome(realHome: string = process.env.HOME ?? ""): SandboxHome {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "red-team-home-"));
   const realCodex = path.join(realHome, ".codex");
+  const sandCodex = path.join(tmp, ".codex");
   if (fs.existsSync(realCodex)) {
-    try {
-      fs.symlinkSync(realCodex, path.join(tmp, ".codex"));
-    } catch {
-      // Fallback: copy if symlinks aren't allowed (e.g. some CI workspaces).
-      fs.cpSync(realCodex, path.join(tmp, ".codex"), { recursive: true });
+    fs.mkdirSync(sandCodex, { recursive: true });
+    for (const name of fs.readdirSync(realCodex)) {
+      if (name === "auth.json") continue; // dispatchCodex owns this entry
+      const src = path.join(realCodex, name);
+      const dst = path.join(sandCodex, name);
+      try {
+        fs.symlinkSync(src, dst);
+      } catch {
+        // Fallback: copy if symlinks aren't allowed (e.g. some CI workspaces).
+        fs.cpSync(src, dst, { recursive: true });
+      }
     }
   }
   return {
@@ -1108,11 +1121,12 @@ export function dispatch(args: DispatchArgs): DispatchResult {
     }
   } else if (args.codexFn) {
     const dispatched = args.codexFn(prompt, model);
-    const validated = validateFindings(dispatched.raw_output);
+    const parsed = parseCommitteeOutput(dispatched.raw_output);
+    const validated = validateFindings(parsed.findings_json);
     result = {
       stage: ctx.stage,
       round_num: 1,
-      synthesis: "",
+      synthesis: parsed.synthesis,
       findings: validated.findings,
       blocking_count: countBlocking(validated.findings),
       human_review_count: countHumanReview(validated.findings),
@@ -1127,11 +1141,12 @@ export function dispatch(args: DispatchArgs): DispatchResult {
   } else {
     // Real codex dispatch.
     const dispatched = dispatchCodex(prompt, model, args.timeoutMs);
-    const validated = validateFindings(dispatched.raw_output);
+    const parsed = parseCommitteeOutput(dispatched.raw_output);
+    const validated = validateFindings(parsed.findings_json);
     result = {
       stage: ctx.stage,
       round_num: 1,
-      synthesis: "",
+      synthesis: parsed.synthesis,
       findings: validated.findings,
       blocking_count: countBlocking(validated.findings),
       human_review_count: countHumanReview(validated.findings),
@@ -1256,6 +1271,32 @@ function dispatchCodex(
   const sandbox = isolateHome();
   const env = scrubEnv();
   env.HOME = sandbox.home;
+  // Resolve OPENAI_API_KEY (direct, or OPENAI_API_KEY_FILE +
+  // OPENAI_API_KEY_LABEL). When present, write an apikey-mode auth.json
+  // into the synthetic ~/.codex so codex talks to the Responses API —
+  // gpt-5.5-pro, o3, etc., aren't available on the ChatGPT-account oauth
+  // that a bare ~/.codex install carries. isolateHome already excluded
+  // auth.json so this never clobbers the operator's real login. The env
+  // allowlist still strips OPENAI_API_KEY at scrub time; this one
+  // synthesized file is the only host-derived credential that crosses
+  // the sandbox boundary.
+  const apiKey = resolveOpenaiApiKey(process.env);
+  if (apiKey) {
+    const sandCodex = path.join(sandbox.home, ".codex");
+    fs.mkdirSync(sandCodex, { recursive: true });
+    const authPath = path.join(sandCodex, "auth.json");
+    fs.writeFileSync(
+      authPath,
+      JSON.stringify({
+        auth_mode: "apikey",
+        OPENAI_API_KEY: apiKey,
+        tokens: null,
+        last_refresh: null,
+      }),
+      { mode: 0o600 },
+    );
+    env.OPENAI_API_KEY = apiKey;
+  }
   const start = Date.now();
   try {
     const args = [
@@ -1721,6 +1762,52 @@ export function assembleFixPlanPrompt(args: {
   ];
   const prompt = [promptHeader, `Stage: ${args.stage}`, ...inputs].join("\n\n");
   return { prompt, envelopeJson, omittedIds, fitsSafely };
+}
+
+/**
+ * Parse the committee's raw output into `{synthesis, findings_json}`.
+ * The preamble instructs the model to return `{"synthesis": "...",
+ * "findings": [...]}` — possibly wrapped in a ```json fence. Falls back
+ * to a bare-array shape so older transcripts still work. Returns
+ * `findings_json` as the JSON-stringified array so callers can hand it
+ * straight to `validateFindings`.
+ */
+export function parseCommitteeOutput(raw: string): {
+  synthesis: string;
+  findings_json: string;
+} {
+  const tryParse = (s: string): unknown => {
+    try { return JSON.parse(s); } catch { return undefined; }
+  };
+  const trimmed = (raw ?? "").trim();
+  const candidates: string[] = [];
+  if (trimmed) candidates.push(trimmed);
+  for (const m of trimmed.matchAll(/```(?:json)?\s*([\s\S]+?)```/g)) {
+    const body = (m[1] ?? "").trim();
+    if (body) candidates.push(body);
+  }
+  const startIdx = trimmed.indexOf("{");
+  const endIdx = trimmed.lastIndexOf("}");
+  if (startIdx >= 0 && startIdx < endIdx) {
+    candidates.push(trimmed.slice(startIdx, endIdx + 1));
+  }
+  const arrStart = trimmed.indexOf("[");
+  const arrEnd = trimmed.lastIndexOf("]");
+  if (arrStart >= 0 && arrStart < arrEnd) {
+    candidates.push(trimmed.slice(arrStart, arrEnd + 1));
+  }
+  for (const s of candidates) {
+    const v = tryParse(s);
+    if (Array.isArray(v)) {
+      return { synthesis: "", findings_json: JSON.stringify(v) };
+    }
+    if (isObject(v) && Array.isArray((v as Record<string, unknown>).findings)) {
+      const obj = v as Record<string, unknown>;
+      const synth = typeof obj.synthesis === "string" ? obj.synthesis : "";
+      return { synthesis: synth, findings_json: JSON.stringify(obj.findings) };
+    }
+  }
+  return { synthesis: "", findings_json: raw ?? "" };
 }
 
 // ── Fix-plan: parse + validate ──────────────────────────────────────────

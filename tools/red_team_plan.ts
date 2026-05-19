@@ -14,6 +14,7 @@ import {
   type ClassLevel,
   dispatch,
   loadPersonaPrompts,
+  PROMPTS_DIR,
   resolveDbPath,
   type PersonaSlug,
   VALID_PERSONAS,
@@ -169,7 +170,7 @@ async function main(argv: string[]): Promise<number> {
     dbPath: resolved.db_path,
   });
 
-  const prompts = loadPersonaPrompts("", "plan");
+  const prompts = loadPersonaPrompts(PROMPTS_DIR, "plan");
   const result = dispatch({
     ctx,
     prompts,
