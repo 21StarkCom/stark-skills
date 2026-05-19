@@ -11,7 +11,7 @@ Provides:
 - resolve_prompt(agent, filename, prompts_dir, repo_dir, repo_subdir) — agent → domains/ fallback
 
 These are the patterns shared across:
-  multi_review.py, plan_review_dispatch.py, design_to_plan_dispatch.py, autopilot_dispatch.py
+  multi_review.py, plan_review_dispatch.py, design_to_plan_dispatch.py
 """
 
 from __future__ import annotations

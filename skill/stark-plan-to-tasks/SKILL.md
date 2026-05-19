@@ -259,7 +259,7 @@ If commit fails: warn, leave changes unstaged.
 
 ## Phase 7: Summary
 
-Print: phases/issues/story points created, risk/confidence/AI suitability distributions, links to phase tracking issues, ready-to-use autopilot command.
+Print: phases/issues/story points created, risk/confidence/AI suitability distributions, links to phase tracking issues, ready-to-use `/stark-copilot --plan-slug` command.
 
 Append to `~/.claude/code-review/logs/stark-plan-to-tasks.jsonl`:
 ```json
@@ -291,7 +291,7 @@ Standard observability: create task per step with `activeForm` spinner text, tim
 - Challenge architectural decisions
 - Add scope beyond the plan
 - Assign issues to people or agents
-- Kick off implementation (prints `/stark-autopilot` command instead)
+- Kick off implementation (prints `/stark-copilot` command instead)
 - Create GitHub Projects or milestones
 - Supplement weak plans with external research
 

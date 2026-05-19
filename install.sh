@@ -95,7 +95,6 @@ provision_infrastructure() {
 
     mkdir -p \
         "$HOME/.stark-insights" \
-        "$CODE_REVIEW_DIR/history/autopilot" \
         "$CODE_REVIEW_DIR/history/design-reviews" \
         "$CODE_REVIEW_DIR/history/forge" \
         "$CODE_REVIEW_DIR/sessions" \

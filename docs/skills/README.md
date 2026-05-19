@@ -20,7 +20,7 @@ Designs are produced by `superpowers:brainstorm` (outside this repo). From there
 
 **Step 4 — `/stark-plan-to-tasks`** decomposes the reviewed plan into phased GitHub issues with story points, risk labels, and confidence scores. Three LLM passes ensure consistency.
 
-**Step 5 — `/stark-phase-execute`** picks up those issues and autonomously implements them — for each issue: implement, create PR, run multi-agent review, fix findings, merge. Zero user intervention. For maximum quality, `/stark-autopilot` is the alternative execution mode: all 3 agents compete on every implementation step in parallel git worktrees, with a tournament to pick the winner at each step.
+**Step 5 — `/stark-phase-execute`** picks up those issues and autonomously implements them — for each issue: implement, create PR, run multi-agent review, fix findings, merge. Zero user intervention. `/stark-copilot` is the alternative execution mode: a paired lead/wing build loop where the lead implements in a worktree and the wing reviews the diff until it approves.
 
 **Step 6 — `/stark-review`** is the PR code review that runs during execution (or standalone). One agent across triage-selected domains, posted to GitHub under the agent's bot identity.
 
