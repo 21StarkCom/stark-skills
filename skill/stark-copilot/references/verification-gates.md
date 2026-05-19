@@ -1,8 +1,8 @@
 # Verification Gates
 
-## Step Verification (2d): Verify winner before applying
+## Step Verification (§2e): Verify the approved diff before applying
 
-Before applying, the winner's code must pass these gates in the winner's worktree. A failure here disqualifies the winner — fall back to the next-highest scorer.
+Before applying, the lead's approved diff must pass these gates in the lead's worktree. A failure here means either burning one more dispatcher round with the gate failure as a finding, or stopping the run.
 
 ### Gate 1: Import check
 
@@ -10,11 +10,11 @@ Install deps and import all new/modified Python modules:
 
 ```bash
 # Create or reuse a verification venv
-[ -d /tmp/autopilot-verify ] || python3 -m venv /tmp/autopilot-verify
-/tmp/autopilot-verify/bin/pip install -q -r requirements.txt 2>/dev/null
+[ -d /tmp/stark-copilot-verify ] || python3 -m venv /tmp/stark-copilot-verify
+/tmp/stark-copilot-verify/bin/pip install -q -r requirements.txt 2>/dev/null
 
 # Import every Python module in the package
-/tmp/autopilot-verify/bin/python3 -c "
+/tmp/stark-copilot-verify/bin/python3 -c "
 import importlib, pathlib, sys
 sys.path.insert(0, '.')
 failures = []
@@ -29,14 +29,14 @@ sys.exit(len(failures))
 "
 ```
 
-If any module fails to import, disqualify this winner. The most common cause is cross-module interface mismatches (calling constructors with wrong args, importing names that don't exist).
+If any module fails to import, either burn one more dispatcher round with the failure as a wing finding, or stop the run. The most common cause is cross-module interface mismatches (calling constructors with wrong args, importing names that don't exist).
 
 ### Gate 2: SDK API verification (when step adds external SDK calls)
 
 If the step introduces calls to external SDKs (database clients, cloud APIs, LLM SDKs), verify the methods exist:
 
 ```bash
-/tmp/autopilot-verify/bin/python3 -c "
+/tmp/stark-copilot-verify/bin/python3 -c "
 import inspect
 from <sdk_module> import <Class>
 # Verify method signatures match what our code calls
@@ -57,7 +57,7 @@ Every 5 steps (or when completing a phase), trace the call chain between modules
 2. For each return value consumed by another module, verify the type matches
 3. For each config/secret name used in code, verify it matches what infrastructure (Terraform, env vars) defines
 
-This is the #1 source of bugs in multi-step autopilot runs — each agent writes code assuming interfaces it hasn't verified.
+This is the #1 source of bugs in multi-step autonomous runs — the lead writes code assuming interfaces it hasn't verified, and the wing reviews the diff in isolation without exercising imports.
 
 ## End-of-Run Verification (Phase 2.5)
 
@@ -66,8 +66,8 @@ After ALL steps complete but BEFORE the summary, run a comprehensive verificatio
 ### Full import chain test
 
 ```bash
-/tmp/autopilot-verify/bin/pip install -q -r requirements.txt
-/tmp/autopilot-verify/bin/python3 -c "
+/tmp/stark-copilot-verify/bin/pip install -q -r requirements.txt
+/tmp/stark-copilot-verify/bin/python3 -c "
 import importlib, pathlib, sys
 sys.path.insert(0, '.')
 ok = fail = 0
@@ -113,4 +113,4 @@ for method in ['get', 'set', 'update', 'commit', '_rollback']:
     assert hasattr(AsyncTransaction, method), f"AsyncTransaction.{method} does not exist"
 ```
 
-**This phase exists because:** In an 8-round review of a 22-step autopilot run, 43 bugs were found — the majority were cross-module interface mismatches and wrong SDK API assumptions that would have been caught by importing the modules and verifying method signatures. The cost of this verification is ~60 seconds. The cost of not doing it is hours of review rounds.
+**This phase exists because:** In an 8-round review of a 22-step autonomous build, 43 bugs were found — the majority were cross-module interface mismatches and wrong SDK API assumptions that would have been caught by importing the modules and verifying method signatures. The cost of this verification is ~60 seconds. The cost of not doing it is hours of review rounds.

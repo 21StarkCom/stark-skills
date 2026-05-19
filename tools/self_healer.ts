@@ -8,9 +8,7 @@
  *                  [--mode suggest|auto] [--json]
  *
  * Consumed by:
- *   - `scripts/autopilot_dispatch.py` (Python orchestrator → subprocess
- *     hop to this CLI; cmd shape updated in the same slice).
- *   - `skill/stark-phase-execute/SKILL.md` (cut over alongside).
+ *   - `skill/stark-phase-execute/SKILL.md` (subprocess hop to this CLI).
  *
  * Reads `circuit_breaker_threshold` and `auto_patterns` from
  * `config.self_heal.*` in `~/.claude/code-review/config.json` (inline

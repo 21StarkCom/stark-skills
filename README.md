@@ -57,7 +57,7 @@ Turn ideas into tracked, phased GitHub issues, then execute them autonomously.
 | [`/stark-design-to-plan`](docs/skills/stark-design-to-plan/usage.md) | Generate implementation plan from design doc | Starting a new feature. Enabled agents generate plans from a brainstormed design, then cross-review one another before synthesis. |
 | [`/stark-plan-to-tasks`](docs/skills/stark-plan-to-tasks/usage.md) | Decompose a spec into phased GitHub issues | After a spec/plan is reviewed and approved. 3 LLM passes: quality gate → decomposition → validation. |
 | [`/stark-phase-execute`](docs/skills/stark-phase-execute/usage.md) | Autonomously implement all tasks in a phase | When you have GitHub issues ready. Branches, implements, PRs, reviews, merges — zero intervention. |
-| [`/stark-autopilot`](docs/skills/stark-autopilot/usage.md) | Autonomous implementation with tournament | When you want all enabled agents to compete per step in worktrees. Best implementation wins at each step. |
+| [`/stark-copilot`](skill/stark-copilot/SKILL.md) | Autonomous implementation with paired lead/wing agents | When you want a paired lead/wing build loop — lead implements, wing reviews diff, fix-loop until approved. |
 
 **Best practice:** The full pipeline is: `/stark-design` → `/stark-review-design` → `/stark-design-to-plan` → `/stark-review-plan` → `/stark-plan-to-tasks` → `/stark-phase-execute`. Each step feeds the next. Don't skip the review steps — unreviewed plans produce ambiguous issues that block autonomous execution.
 
@@ -156,7 +156,6 @@ stark-skills/
 ├── scripts/                      ← → ~/.claude/code-review/scripts/
 │   ├── multi_review.py           ← review orchestrator (ThreadPoolExecutor, 3×9)
 │   ├── tournament.py             ← multi-LLM competition engine
-│   ├── autopilot_dispatch.py     ← tournament-based autonomous implementation
 │   ├── flow_extractor.py         ← workflow extraction from SKILL.md
 │   ├── generate_skill_docs.py    ← documentation generator (3-LLM competition)
 │   └── github_app.py             ← multi-app GitHub auth

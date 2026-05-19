@@ -23,14 +23,12 @@ Parse the JSON result:
 
 # stark-copilot
 
-Autonomous implementation with a paired **lead/wing** subagent loop. Unlike `/stark-autopilot`,
-which has every enabled agent compete in a tournament per step, copilot uses two roles:
+Autonomous implementation with a paired **lead/wing** subagent loop:
 
 - **Lead** (default `claude`) — implements the step in a git worktree
 - **Wing** (default `codex`) — reviews the lead's diff and either approves or returns blocking findings
 
 Each step runs a review→fix loop until the wing approves or `--max-rounds` fix rounds are exhausted.
-This is the cheaper, lower-variance sibling of autopilot — paired engineering instead of competition.
 
 This skill is thin: it orchestrates `tools/copilot_dispatch.ts`, which owns the worktree,
 the lead/wing dispatch, the review→fix loop, and the JSON verdict parsing. Do not
@@ -104,18 +102,45 @@ When a plan file path is available, retain it as `plan_path` for the approach co
 
 ### 1.2 Extract steps
 
-Same as `/stark-autopilot` §1.2 (issue-driven, plan-file, and inline modes). Each step contains:
-- `step_id` — phase slug
+**Issue-driven mode:**
+
+Group fetched issues into phases and tasks:
+
+1. **Identify phase tracking issues** — issues whose title starts with "Phase" and whose body contains a task checklist (`- [ ] #NNN`)
+2. **Identify task issues** — all other issues with the `plan:{PLAN_SLUG}` label
+3. **Group tasks under phases** by matching the phase reference in each task's Dependencies section or by the task checklist in the phase issue
+4. **Order phases** by their dependency links (phase `depends_on` from the issue body)
+5. **Filter by ai_suitability** (from the issue body metadata):
+   - `autonomous` and `assisted` tasks → include in steps
+   - `human-led` tasks → skip with warning:
+     > Skipping human-led task #{number}: {title} — requires manual implementation
+6. **Skip already-closed tasks** — if `state` is `CLOSED`, skip:
+   > Skipping #{number}: {title} — already closed
+
+If ALL tasks in a phase are closed or human-led, skip the entire phase:
+> Skipping phase {step_id}: all tasks are closed or human-led.
+
+**Plan-file mode / Inline mode:**
+
+Parse the plan into an ordered list of steps.
+
+Regardless of mode, each step contains:
+- `step_id` — phase slug (e.g., `phase-1-data-model`)
 - `title` — phase name
 - `task` — the raw step task description (issue body sections concatenated, or the parsed plan section, or the inline prompt). Saved to `step-$step_id-task.md` for the dispatcher.
 - `prompt` — the lead's full implement prompt (composed from the agent-specific `implement.md` template + previous-step context + `task`). Saved to `step-$step_id-implement.md`.
 - `issue_numbers` — issue numbers covered by the step
 
-Skip closed and human-led tasks with the same warnings as autopilot.
-
 ### 1.3 Detect test command
 
-Same as `/stark-autopilot` §1.3.
+If `--test-command` provided, use it. Otherwise, auto-detect:
+```bash
+[ -f "package.json" ] && grep -q '"test"' package.json && echo "npm test"
+[ -f "pyproject.toml" ] && echo "pytest"
+[ -f "Makefile" ] && grep -q '^test:' Makefile && echo "make test"
+```
+
+If no test command found, warn: "No test command detected. Wing review will rely on semantic evaluation only."
 
 ### 1.4 Show battle plan
 
@@ -157,7 +182,7 @@ For each step (sequentially — each builds on the previous step's merged result
 
 ### 2a0. Transition issues to In Progress
 
-Update issue status and project board. For commands, see [autopilot's references/issue-management.md](../stark-autopilot/references/issue-management.md).
+Update issue status and project board. For commands, see [references/issue-management.md](references/issue-management.md).
 
 ### 2a. Stage prompt files
 
@@ -200,7 +225,7 @@ The dispatcher prints a JSON object with this shape:
   "step_id": "...",
   "lead": "claude",
   "wing": "codex",
-  "worktree_path": "/.../.worktrees/autopilot-claude-...",
+  "worktree_path": "/.../.worktrees/copilot-claude-...",
   "final_verdict": "approved | blocked | aborted | max_rounds_unresolved | unresolved",
   "error": null,
   "duration_s": 123.4,
@@ -245,7 +270,7 @@ needed to address the failure manually, then exit.
 ### 2e. Verify approved diff (MANDATORY — do not skip)
 
 Before applying, the approved diff must pass the import, SDK API, and cross-module
-gates. For procedures, see [autopilot's references/verification-gates.md](../stark-autopilot/references/verification-gates.md).
+gates. For procedures, see [references/verification-gates.md](references/verification-gates.md).
 
 Run the gates against the lead's worktree (use `worktree_path` from §2c). If a gate fails:
 
@@ -273,7 +298,7 @@ git commit -m "feat: [step title] (copilot: $LEAD impl, $WING review, $rounds_co
 
 ### 2g1. Transition issues to Done
 
-Close issues with commit reference and update project board. For commands, see [autopilot's references/issue-management.md](../stark-autopilot/references/issue-management.md).
+Close issues with commit reference and update project board. For commands, see [references/issue-management.md](references/issue-management.md).
 
 ### 2h. Clean up worktree
 
@@ -302,7 +327,7 @@ node --experimental-strip-types --no-warnings ~/.claude/code-review/tools/contex
 
 ## Phase 2.5: End-of-Run Verification (MANDATORY)
 
-After ALL steps complete, run the full import chain test, smoke test, and SDK API spot-check. For procedures, see [autopilot's references/verification-gates.md](../stark-autopilot/references/verification-gates.md).
+After ALL steps complete, run the full import chain test, smoke test, and SDK API spot-check. For procedures, see [references/verification-gates.md](references/verification-gates.md).
 
 If ANY check fails, fix before proceeding to Phase 3.
 
@@ -336,15 +361,15 @@ If the working tree is on a branch with an open PR (detect via `gh pr view --jso
 | `codex` | stark-codex |
 | `gemini` | stark-gemini |
 
-Use the same `gh api` posting flow autopilot uses. For the snippet, see [autopilot's references/issue-management.md](../stark-autopilot/references/issue-management.md).
+For the `gh api` posting snippet, see [references/issue-management.md](references/issue-management.md).
 
 ## Observability
 
-Reuse autopilot's task templates, log line formats, and metrics block format with role substitution (lead/wing instead of competing agents). See [autopilot's references/observability.md](../stark-autopilot/references/observability.md).
+For task templates, log line formats, and the metrics block format (substitute lead/wing for the role names), see [references/observability.md](references/observability.md).
 
 ## Failure Modes
 
-Most autopilot failure modes apply here too — see [autopilot's references/failure-modes.md](../stark-autopilot/references/failure-modes.md). Copilot-specific additions (the dispatcher already handles most of these — listed for orchestrator awareness):
+For the baseline failure modes (worktree, dispatch, agent CLI), see [references/failure-modes.md](references/failure-modes.md). Copilot-specific additions (the dispatcher already handles most of these — listed for orchestrator awareness):
 
 | Scenario | Dispatcher behavior | Orchestrator action |
 |---|---|---|

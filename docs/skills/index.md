@@ -11,7 +11,7 @@
 | `/stark-red-team-plan` | Adversarial 5-persona challenge of an execution plan | [source](../../skill/stark-red-team-plan/SKILL.md) |
 | `/stark-plan-to-tasks` | Decompose plan into phased GitHub issues with story points | [usage](stark-plan-to-tasks/usage.md) · [internals](stark-plan-to-tasks/internals.md) |
 | `/stark-phase-execute` | Autonomous phase execution — implement, PR, review, merge | [usage](stark-phase-execute/usage.md) · [internals](stark-phase-execute/internals.md) |
-| `/stark-autopilot` | Tournament implementation — agents compete per step in worktrees | [usage](stark-autopilot/usage.md) · [internals](stark-autopilot/internals.md) |
+| `/stark-copilot` | Paired lead/wing autonomous implementation — lead implements, wing reviews, fix-loop | [source](../../skill/stark-copilot/SKILL.md) |
 
 ## Workflow & Ops
 

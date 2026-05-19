@@ -33,7 +33,6 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `scripts/multi_review.py` — PR review orchestrator (ThreadPoolExecutor, parallel sub-agents)
 - `scripts/plan_review_dispatch.py` — plan/design review dispatch (N agents × M domains)
 - `scripts/design_to_plan_dispatch.py` — generic generate-and-cross-review dispatch for enabled agents
-- `scripts/autopilot_dispatch.py` — tournament-based autonomous implementation (agents compete in worktrees)
 - `scripts/tournament.py` — reusable multi-LLM competition engine (semantic, visual, test evaluation)
 - `scripts/domain_triage.py` — context-aware domain dispatch engine
 - `scripts/triage_orchestrator.py` — triage orchestration with shadow validation support
@@ -71,11 +70,11 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `tools/stark_persona_lib.ts` + `tools/stark_persona.ts` — pure-TypeScript `/stark-persona` (replaces the deleted `scripts/stark_persona.py`). Library: roster grammar, active.json, weight math, fuzzy match, SQLite schema, selection / combo / rating / survey / add. CLI: 11 subcommands (`select` / `deactivate` / `rate` / `survey` / `survey-answer` / `add` / `stats` / `history` / `print-roster` / `print-weights` / `session-end`). Insights events emit straight to `~/.stark-insights/queue.db` via `tools/emit_queue_lib.ts` as `persona_event`.
 - `tools/session_id_lib.ts` + `tools/session_id.ts` — pure-TS session ID resolver (replaces the deleted `scripts/session_id.py`). Three-tier: CLAUDE_SESSION_ID > newest-mtime marker in `~/.claude/projects/` > uuid4. Consumed by `tools/emit_queue_lib.ts`, `tools/session_state_lib.ts`, and `tools/context_compactor_lib.ts`.
 - `tools/session_state_lib.ts` + `tools/session_state.ts` — pure-TS session state machine (replaces the deleted `scripts/session_state.py`). Same on-disk JSON shape, same path sanitization. CLI: `[--session-id ID] [--json]` (Python parity) + `set --field <name|start_head|last_checkpoint> --value VAL` for the SKILL.md mutators.
-- `tools/self_healer_lib.ts` + `tools/self_healer.ts` — pattern-based auto-fixer (replaces the deleted `scripts/self_healer.py`). Same gate ladder as the Python (guard → max_per_session → auto-mode allowlist → circuit breaker → suggest/auto branch). Atomic writes. Direct emit through `emit_queue_lib` + `alert_delivery_lib`. Consumed by `scripts/autopilot_dispatch.py` (still Python) + `skill/stark-phase-execute/SKILL.md`.
+- `tools/self_healer_lib.ts` + `tools/self_healer.ts` — pattern-based auto-fixer (replaces the deleted `scripts/self_healer.py`). Same gate ladder as the Python (guard → max_per_session → auto-mode allowlist → circuit breaker → suggest/auto branch). Atomic writes. Direct emit through `emit_queue_lib` + `alert_delivery_lib`. Consumed by `skill/stark-phase-execute/SKILL.md`.
 - `tools/healer_canary_lib.ts` + `tools/healer_canary.ts` — canary rollout for self_healer patterns (replaces the deleted `scripts/healer_canary.py`). CLI: `--status` (Python parity) + new `--check` (oncall paging, exits 2 on tripped auto-pattern), `--close-circuit PATTERN_ID` (manual recovery), `--explain PATTERN_ID` (audit trail). Atomic config writes. Configurable promotion gate. Emits `healer_canary` insights events on lifecycle transitions.
 - `tools/skill_router_lib.ts` + `tools/skill_router.ts` — pure-TS contextual skill suggestions (replaces the deleted `scripts/skill_router.py`). `context → mapped skills → minus suppressed → minus recently-used → ranked → capped`. Emits `skill_suggestion` events directly through `emit_queue_lib`. Consumed by `/stark-session` + `stark-phase-execute`.
 - `tools/alert_delivery_lib.ts` + `tools/alert_delivery.ts` — pure-TS alert emit + check (replaces the deleted `scripts/alert_delivery.py`). On-disk contract unchanged: alerts.jsonl + alert-{ts}.marker files in `~/.claude/code-review/`, same-second collision counter. Consumed in-process by `tools/self_healer_lib.ts`; CLI consumed by the `/stark-session` collector.
-- `tools/context_compactor_lib.ts` + `tools/context_compactor.ts` — pure-TS session-checkpoint generator (replaces the deleted `scripts/context_compactor.py`). Writes `checkpoint-{ts}.md` under `sessions/{sid}/`, updates `session_state.last_checkpoint`, honors size cap. Loads `context_compaction` config inline (no `config_loader.py` dep). CLI: `[--session-id ID] [--json]`. Consumed by `/stark-session` Phase 3b + stark-autopilot / stark-copilot / stark-phase-execute end hooks.
+- `tools/context_compactor_lib.ts` + `tools/context_compactor.ts` — pure-TS session-checkpoint generator (replaces the deleted `scripts/context_compactor.py`). Writes `checkpoint-{ts}.md` under `sessions/{sid}/`, updates `session_state.last_checkpoint`, honors size cap. Loads `context_compaction` config inline (no `config_loader.py` dep). CLI: `[--session-id ID] [--json]`. Consumed by `/stark-session` Phase 3b + stark-copilot / stark-phase-execute end hooks.
 - `tools/optimize_skill_description.ts` — skill-description optimizer (replaces the deleted `scripts/optimize_skill_description.py`). Reads SKILL.md frontmatter, scores via the skill-creator plugin's Python `run_eval.py`, asks `claude -p` for a better description based on the failing eval queries. CLI flags and JSON report shape match the Python.
 
 ### Other
@@ -92,7 +91,6 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `global/prompts/{Codex,codex,gemini}/` — per-agent × per-domain PR review prompts (9 domains each)
 - `global/prompts/{design-review,plan-review}/` — per-agent + shared `domains/` doc review prompts
 - `global/prompts/{design-to-plan,prompt-to-design}/` — per-agent generate + cross-review prompts
-- `global/prompts/autopilot/` — per-agent autopilot implementation prompts
 - `global/prompts/triage/` — domain triage prompts and manifest
 - `standards/templates/` — PR template, ADR template, MkDocs scaffold, staleness config
 - `standards/index.md` — "Start Here" pitch page for adopting the doc system
@@ -116,7 +114,7 @@ All skills live in `skill/stark-*/SKILL.md`; `install.sh` symlinks them for Clau
 - `/stark-review-plan <path>` — multi-agent execution plan review (N agents × 10 adversarial domains, default N=2)
 - `/stark-plan-to-tasks <path> [--dry-run] [--cleanup <slug>]` — decompose plan into phased GitHub issues (3 LLM passes)
 - `/stark-phase-execute <plan-slug> [--dry-run]` — autonomous phase execution: implement all tasks, PR, review, merge, release, dashboard
-- `/stark-autopilot <plan-or-prompt> [--plan-slug SLUG]` — autonomous implementation with tournament at every step (all enabled agents compete in worktrees); issue-driven mode when plan has been decomposed via `/stark-plan-to-tasks`
+- `/stark-copilot <plan-or-prompt> [--lead AGENT] [--wing AGENT] [--plan-slug SLUG]` — autonomous implementation with paired lead/wing subagents; issue-driven mode when plan has been decomposed via `/stark-plan-to-tasks`
 - `/stark-review [PR_NUMBER]` — single-agent PR code review (1 LLM × triage-selected domains, fast/cheap)
 - `/stark-review-improvement [--prompts-dir DIR]` — improve prompts based on review assessment (PR or design/plan review)
 - `/stark-review-design-improvement` — improve design review prompts (wraps /stark-review-improvement with --prompts-dir design-review)

@@ -7,7 +7,7 @@ For each issue number in the step's `issue_numbers`, add a comment and update st
 ```bash
 unset GH_TOKEN  # Use user's PAT for issue operations
 for issue in ${step.issue_numbers}; do
-  gh issue comment $issue --repo $REPO --body "Implementation started — autopilot step \`$step_id\` dispatching 3 agents."
+  gh issue comment $issue --repo $REPO --body "Implementation started — copilot step \`$step_id\` ($LEAD lead, $WING wing)."
 done
 ```
 
@@ -28,7 +28,7 @@ unset GH_TOKEN  # Use user's PAT
 COMMIT_SHA=$(git rev-parse --short HEAD)
 for issue in ${step.issue_numbers}; do
   gh issue close $issue --repo $REPO \
-    --comment "Implemented in commit $COMMIT_SHA (autopilot step \`$step_id\`, $winner won $score)."
+    --comment "Implemented in commit $COMMIT_SHA (copilot step \`$step_id\`, $LEAD lead → $WING wing approved in $rounds_count round(s))."
 done
 ```
 
@@ -42,22 +42,24 @@ Failure is non-fatal — log and continue. Issues can be closed manually if the 
 ## Summary Template
 
 ```
-stark-autopilot — Complete
-──────────────────────────
+stark-copilot — Complete
+────────────────────────
 Steps:    5/5 completed
 Duration: 45m 12s
+Lead:     claude (implementer)
+Wing:     codex  (reviewer)
 
 Step Results:
-  1. [title] — claude won (92/100)
-  2. [title] — codex won (88/100)
-  3. [title] — claude won (95/100)
-  4. [title] — gemini won (91/100)
-  5. [title] — claude won (89/100)
+  1. [title] — approved in 2 rounds
+  2. [title] — approved in 1 round
+  3. [title] — approved in 3 rounds
+  4. [title] — approved in 1 round
+  5. [title] — approved in 2 rounds
 
-Agent Stats:
-  claude:  3 wins, avg 92.0/100
-  codex:   1 win,  avg 85.3/100
-  gemini:  1 win,  avg 82.7/100
+Aggregate:
+  Avg rounds/step: 1.8
+  Total rounds:    9
+  Wing parse retries: 0
 
 Files changed: 23 (+1,450 / -200)
 Commits: 5

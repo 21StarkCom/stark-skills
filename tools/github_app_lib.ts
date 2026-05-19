@@ -8,8 +8,7 @@
  * use (`token`, `pr review`, `pr comment`, plus the standard CRUD set).
  *
  * The Python module remains the source-of-truth for Python orchestrators
- * (preflight.py, runtime_env.py, github_projects.py, multi_review.py,
- * autopilot_dispatch.py, plan_to_tasks_validate.py). The on-disk token +
+ * (runtime_env.py, multi_review.py, plan_to_tasks_validate.py). The on-disk token +
  * installation caches and the keychain entries are shared cross-language
  * by design — both implementations read and write the same JSON files.
  */
