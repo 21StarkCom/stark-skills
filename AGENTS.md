@@ -44,7 +44,6 @@ This is a **personal playground**, not production. No customers depend on it; th
 ### Infrastructure
 - `scripts/config_loader.py` — central config with lru_cache, typed section accessors, deep merge
 - `scripts/runtime_env.py` — isolated subprocess env builder (allowlist, token injection, temp dirs)
-- `scripts/github_app.py` — multi-app GitHub auth (stark-Codex, stark-codex, stark-gemini)
 - `scripts/github_projects.py` — GitHub Projects V2 GraphQL utility (13 public functions)
 - `tools/emit_queue_lib.ts` + `tools/emit_queue_cli.ts` — SQLite-backed durable event queue (producer side). Python consumers reach it via `scripts/_emit.py`, a thin subprocess wrapper. The drain side lives in stark-insights.
 

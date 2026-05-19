@@ -418,9 +418,9 @@ export function _resetTokenCacheForTests(): void {
 
 export interface TokenForAgentOpts {
   repo?: string;
-  scriptsDir?: string;
+  toolsDir?: string;
   spawnFn?: typeof spawnCollect;
-  pythonBin?: string;
+  nodeBin?: string;
 }
 
 export async function tokenForAgent(
@@ -429,15 +429,18 @@ export async function tokenForAgent(
 ): Promise<string> {
   const cached = tokenCache.get(agent);
   if (cached) return cached;
-  const scripts = opts.scriptsDir ?? path.join(os.homedir(), ".claude", "code-review", "scripts");
-  const py = opts.pythonBin ?? "python3";
+  // Default to the installed TS CLI at ~/.claude/code-review/tools/github_app.ts.
+  // Override via `toolsDir` for tests / out-of-tree invocations.
+  const tools = opts.toolsDir ?? path.join(os.homedir(), ".claude", "code-review", "tools");
+  const node = opts.nodeBin ?? "node";
   const args = [
-    path.join(scripts, "github_app.py"),
+    "--experimental-strip-types",
+    path.join(tools, "github_app.ts"),
     "--app", `stark-${agent}`,
   ];
   if (opts.repo) args.push("--repo", opts.repo);
   args.push("token");
-  const sp = await (opts.spawnFn ?? spawnCollect)(py, args, { env: process.env });
+  const sp = await (opts.spawnFn ?? spawnCollect)(node, args, { env: process.env });
   if (sp.status !== 0) {
     throw new Error(
       `tokenForAgent(${agent}) failed (exit ${sp.status}): ${sp.stderr.slice(0, 400)}`,

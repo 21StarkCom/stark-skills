@@ -68,7 +68,7 @@ from dispatcher_base import (
 # ── Config ──────────────────────────────────────────────────────────────
 
 SCRIPTS_DIR = Path(__file__).parent
-GITHUB_APP = str(SCRIPTS_DIR / "github_app.py")
+GITHUB_APP_TS = str(SCRIPTS_DIR.parent / "tools" / "github_app.ts")
 GLOBAL_PROMPTS_DIR = Path.home() / ".claude" / "code-review" / "prompts"
 
 
@@ -546,7 +546,7 @@ def detect_base_branch(cwd: str | None = None) -> str:
 
 
 def get_open_prs(repo: str) -> list[dict]:
-    """Get open PRs for a repo using github_app.py."""
+    """Get open PRs for a repo using tools/github_app.ts."""
     token = _get_gh_token("stark-claude")
     env = {**os.environ, "GH_TOKEN": token}
     result = subprocess.run(
@@ -579,10 +579,10 @@ def get_open_prs(repo: str) -> list[dict]:
 
 def _get_gh_token(app: str) -> str:
     result = subprocess.run(
-        [PYTHON, GITHUB_APP, "--app", app, "token"],
+        ["node", "--experimental-strip-types", GITHUB_APP_TS, "--app", app, "token"],
         capture_output=True,
         text=True,
-        timeout=15,
+        timeout=30,
     )
     if result.returncode != 0:
         raise RuntimeError(f"Failed to get token for {app}: {result.stderr}")

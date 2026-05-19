@@ -157,8 +157,7 @@ stark-skills/
 │   ├── multi_review.py           ← review orchestrator (ThreadPoolExecutor, 3×9)
 │   ├── tournament.py             ← multi-LLM competition engine
 │   ├── flow_extractor.py         ← workflow extraction from SKILL.md
-│   ├── generate_skill_docs.py    ← documentation generator (3-LLM competition)
-│   └── github_app.py             ← multi-app GitHub auth
+│   └── generate_skill_docs.py    ← documentation generator (3-LLM competition)
 ├── global/                       ← → ~/.claude/code-review/
 │   ├── config.json               ← global defaults
 │   └── prompts/{claude,codex,gemini}/  ← per-agent × per-domain review prompts (9 domains)

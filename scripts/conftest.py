@@ -33,11 +33,11 @@ def _ensure_anthropic_agents(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _stub_github_app_token(request, monkeypatch):
-    """Stub github_app.get_token so dispatcher tests don't need keychain access.
+    """Stub runtime_env._get_token_via_ts so dispatcher tests don't shell out
+    to `node tools/github_app.ts` (and thus don't need keychain access).
 
-    Tests that specifically exercise github_app (test_github_app*.py) opt out
-    by setting the pytest marker `no_github_app_stub` or by re-patching inside
-    the test.
+    Tests that specifically exercise the GitHub-auth plumbing opt out via the
+    pytest marker `no_github_app_stub` or by re-patching inside the test.
     """
     if request.node.get_closest_marker("no_github_app_stub"):
         return
@@ -45,11 +45,13 @@ def _stub_github_app_token(request, monkeypatch):
     nodeid = request.node.nodeid
     if any(
         name in nodeid
-        for name in ("test_github_app", "test_github_projects", "test_pr_commenter")
+        for name in ("test_github_projects", "test_pr_commenter")
     ):
         return
     try:
-        import github_app
+        import runtime_env
     except ImportError:
         return
-    monkeypatch.setattr(github_app, "get_token", lambda app=None: "ghs_test_fixture_token")
+    monkeypatch.setattr(
+        runtime_env, "_get_token_via_ts", lambda _app: "ghs_test_fixture_token"
+    )

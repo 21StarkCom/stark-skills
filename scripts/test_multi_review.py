@@ -47,15 +47,17 @@ class TestGithubAppPython:
             assert multi_review._resolve_python() == sys.executable
 
     @patch("multi_review.subprocess.run")
-    def test_get_gh_token_uses_resolved_python(self, mock_run, monkeypatch):
-        monkeypatch.setenv("STARK_REVIEW_PYTHON", "/opt/review-python")
-        monkeypatch.setattr(multi_review, "PYTHON", multi_review._resolve_python())
+    def test_get_gh_token_invokes_ts_cli(self, mock_run):
+        """_get_gh_token must shell out to `node tools/github_app.ts`."""
         mock_run.return_value = MagicMock(returncode=0, stdout="token\n", stderr="")
 
         assert multi_review._get_gh_token("stark-codex") == "token"
 
         cmd = mock_run.call_args.args[0]
-        assert cmd[:2] == ["/opt/review-python", multi_review.GITHUB_APP]
+        assert cmd[0] == "node"
+        assert cmd[1] == "--experimental-strip-types"
+        assert cmd[2] == multi_review.GITHUB_APP_TS
+        assert cmd[2].endswith("tools/github_app.ts")
         assert cmd[-3:] == ["--app", "stark-codex", "token"]
 
 
