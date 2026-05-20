@@ -15,15 +15,15 @@ This is a **personal playground**, not production. No customers depend on it; th
 
 ## Repo Layout
 
-- `global/` — global config + prompts, installed to `~/.Codex/code-review/`
-- `scripts/` — Python orchestrator + GitHub App auth, installed to `~/.Codex/code-review/scripts/`
-- `skill/` — all skills (`skill/stark-*/SKILL.md`, 30 skills), symlinked to Claude and copied to `~/.codex/skills/`
+- `global/` — global config + prompts, installed to `~/.claude/code-review/`
+- `scripts/` — Python orchestrators, installed to `~/.claude/code-review/scripts/`
+- `skill/` — all skills (`skill/stark-*/SKILL.md`, 17 skills), symlinked to Claude and copied to `~/.codex/skills/`
 - `org/evinced/` — Evinced org config, installed to `~/Code/.code-review/`
 - `data/` — persona roster, review coverage HTML, generated showcase pages
 - `automation/` — CCR automation fleet: 12 triggers, prompts, logs, cost tracking, reports
 - `.github/workflows/` — GitHub Actions: project sync, gate checks, stale detection, heartbeat
 - `docs/` — specs, plans, ADRs, retrospectives, generated skill docs
-- `standards/` — org-wide doc templates and workflows, installed to `~/.Codex/code-review/standards/`
+- `standards/` — org-wide doc templates and workflows, installed to `~/.claude/code-review/standards/`
 - `install.sh` — symlinks repo contents to Claude/config locations and copies Codex skills
 
 ## Key Files
@@ -36,14 +36,14 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `scripts/triage_orchestrator.py` — triage orchestration with shadow validation support
 
 ### Agent utilities
-- `scripts/claude_utils.py` — Codex CLI dispatch helpers (Vertex AI env, model pinning)
+- `scripts/claude_utils.py` — Claude CLI dispatch helpers (Vertex AI env, model pinning)
 - `scripts/codex_utils.py` — Codex CLI dispatch helpers (JSONL parsing, reasoning config)
 - `scripts/gemini_utils.py` — Gemini CLI dispatch helpers (session isolation, API key fallback)
 
 ### Infrastructure
 - `scripts/config_loader.py` — central config with lru_cache, typed section accessors, deep merge
 - `scripts/runtime_env.py` — isolated subprocess env builder (allowlist, token injection, temp dirs)
-- `scripts/github_projects.py` — GitHub Projects V2 GraphQL utility (13 public functions)
+- `tools/github_projects_lib.ts` + `tools/github_projects.ts` — GitHub Projects V2 GraphQL operations (TS; replaces the deleted `scripts/github_projects.py`)
 - `tools/emit_queue_lib.ts` + `tools/emit_queue_cli.ts` — SQLite-backed durable event queue (producer side). Python consumers reach it via `scripts/_emit.py`, a thin subprocess wrapper. The drain side lives in stark-insights.
 
 ### Dispatch tools (TS)
@@ -79,16 +79,11 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `tools/optimize_skill_description.ts` — skill-description optimizer (replaces the deleted `scripts/optimize_skill_description.py`). Reads SKILL.md frontmatter, scores via the skill-creator plugin's Python `run_eval.py`, asks `claude -p` for a better description based on the failing eval queries. CLI flags and JSON report shape match the Python.
 
 ### Other
-- `scripts/flow_extractor.py` — workflow extraction from SKILL.md files
-- `scripts/flow_layout.py` — dagre layout runner for flow diagrams
-- `scripts/flow_schema.py` — FlowDiagram Pydantic model
-- `scripts/metrics.py` — review performance metrics collection
-- `scripts/pr_status.py` — PR analytics dashboard data
 - `scripts/plan_to_tasks_validate.py` — plan decomposition validation (3 LLM passes)
 
 ### Config & prompts
 - `global/config.json` — default config schema (models, runtime, triage, cost, etc.)
-- `global/prompts/{Codex,codex,gemini}/` — per-agent × per-domain PR review prompts (9 domains each)
+- `global/prompts/{claude,codex,gemini}/` — per-agent × per-domain PR review prompts (9 domains each)
 - `global/prompts/{design-review,plan-review}/` — per-agent + shared `domains/` doc review prompts
 - `global/prompts/{design-to-plan,prompt-to-design}/` — per-agent generate + cross-review prompts
 - `global/prompts/triage/` — domain triage prompts and manifest
@@ -141,6 +136,6 @@ All skills live in `skill/stark-*/SKILL.md`; `install.sh` symlinks them for Clau
 
 | App | App ID | Installation ID | Keychain |
 |-----|--------|----------------|----------|
-| stark-Codex | 3066738 | 115648521 | STARK_CLAUDE_PRIVATE_KEY |
+| stark-claude | 3066738 | 115648521 | STARK_CLAUDE_PRIVATE_KEY |
 | stark-codex | 3066834 | 115648800 | STARK_CODEX_PRIVATE_KEY |
 | stark-gemini | 3066689 | 115648971 | STARK_GEMINI_PRIVATE_KEY |

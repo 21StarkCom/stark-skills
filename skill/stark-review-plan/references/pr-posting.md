@@ -14,11 +14,6 @@ node --experimental-strip-types "$TOOLS/github_app.ts" --app stark-gemini pr rev
 
 Each agent's comment should list its raw findings in a table. If an agent returned 0 findings or failed, still post a short status comment under its identity.
 
-In tournament mode, also post the tournament scorecard under stark-claude:
-```bash
-node --experimental-strip-types "$TOOLS/github_app.ts" --app stark-claude pr review $pr_number --comment --body "$tournament_scorecard"
-```
-
 Then post the orchestrator's classified summary as `stark-claude[bot]`:
 
 ```bash
