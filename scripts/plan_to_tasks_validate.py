@@ -126,6 +126,10 @@ Your job is adversarial — try to break the decomposition. Check:
 5. Sizing — tasks within guardrails (≤5 AC, ≤4 files, ≤500 words in how)
 6. Review sufficiency — review hints specific, not generic
 7. Metric sanity — story points consistent, risk ratings aligned
+8. Cross-task name/type consistency — a method/type/file-path/env-var/label referenced across multiple tasks must use the same name. A function called `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug.
+
+CALIBRATION — read this before flagging anything:
+Only flag issues that would cause real problems during implementation — an implementer building the wrong thing, getting stuck, or shipping a bug. Minor wording, stylistic preferences, "could be clearer", and "nice to have" suggestions are NOT issues. Approve unless there are serious gaps: missing requirements, contradictory steps, placeholder content (TBD, "handle edge cases", "similar to above"), vague-to-the-point-of-unactionable tasks, or cross-task name/type mismatches.
 
 Output ONLY a JSON object:
 {"schema_version": 1, "approved": true/false, "issues": [{"phase_id": "...", "task_id": "...", "field": "...", "problem": "...", "suggestion": "..."}]}
