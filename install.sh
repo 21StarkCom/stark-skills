@@ -816,7 +816,7 @@ status() {
 
     # Verify key scripts are accessible
     for script in multi_review.ts github_app.ts github_projects.ts; do
-        if [ -f "$CODE_REVIEW_DIR/scripts/$script" ]; then
+        if [ -f "$CODE_REVIEW_DIR/tools/$script" ]; then
             info "  Script: $script"
         else
             error "  Script: $script not found"
