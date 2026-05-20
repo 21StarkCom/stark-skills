@@ -501,7 +501,7 @@ function findRedTeamOverrideChain(cwd: string = process.cwd()): string[] {
   try {
     current = fs.realpathSync(cwd);
   } catch {
-    return [];
+    current = cwd;
   }
   while (current !== home && current !== path.dirname(current)) {
     const cfg = path.join(current, ".code-review", "config.json");

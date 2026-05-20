@@ -24,9 +24,9 @@ Do NOT modify any other files.
 Read the pinned model constants from the cloned repo (these are local files):
 
 ```bash
-grep -E '^CLAUDE_MODEL\s*=' scripts/claude_utils.py
-grep -E '^CODEX_MODEL\s*=' scripts/codex_utils.py
-grep -E '^GEMINI_MODEL\s*=' scripts/gemini_utils.py
+grep -E 'CLAUDE_MODEL =' tools/claude_utils_lib.ts
+grep -E 'CODEX_MODEL =' tools/codex_utils_lib.ts
+grep -E 'GEMINI_MODEL =' tools/gemini_utils_lib.ts
 ```
 
 Record each current pin: model name + version string.

@@ -556,9 +556,11 @@ export async function dispatchPlanReview(
   domains = { ...domains };
   for (const dd of disabledDomains) delete domains[dd];
 
-  const domainKeys = Object.keys(domains).sort((a, b) =>
-    (domains[a].order ?? "99").localeCompare(domains[b].order ?? "99"),
-  );
+  const domainKeys = Object.keys(domains).sort((a, b) => {
+    const oa = domains[a].order ?? "99";
+    const ob = domains[b].order ?? "99";
+    return oa < ob ? -1 : oa > ob ? 1 : 0;
+  });
 
   const totalSubagents = agents.length * domainKeys.length;
   log(

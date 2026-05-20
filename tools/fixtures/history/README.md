@@ -24,11 +24,11 @@ schema. Drift on either side silently breaks consumers.
 
 ## How this fixture was generated
 
-The fixture began life as a real round file from a `multi_review.py` run on
+The fixture began life as a real round file from a `multi_review.ts` run on
 an internal PR. The capture and sanitize procedure:
 
-1. Run `python scripts/multi_review.py --pr <N> --repo <ORG/REPO>` against a
-   small PR (one or two findings is plenty).
+1. Run `node --experimental-strip-types tools/multi_review.ts --pr <N> --repo <ORG/REPO>`
+   against a small PR (one or two findings is plenty).
 2. Locate the resulting file at
    `~/.claude/code-review/history/<ORG>/<REPO>/<N>/round-1.json`.
 3. Copy it into this directory.

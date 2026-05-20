@@ -271,50 +271,23 @@ async function runValidationAgent(
   const start = performance.now();
   const stdinPayload = `${VALIDATION_PROMPT}\n\n${envelopeJson}`;
 
-  let raw: string;
-  if (agent === "codex") {
-    const proc = await runProcess(
-      "codex",
-      [
-        "exec",
-        "-m",
-        CODEX_MODEL,
-        "-c",
-        CODEX_REASONING_CONFIG,
-        "--ephemeral",
-        "--json",
-        "--full-auto",
-        "-",
-      ],
-      { input: stdinPayload, timeoutMs: timeout * 2 * 1000 },
-    );
-    if (proc.spawnError) {
-      return makeResult({
-        agent,
-        error: `agent_unavailable: ${agent} not found in PATH`,
-        duration_s: (performance.now() - start) / 1000,
-      });
-    }
-    if (proc.timedOut) {
-      return makeResult({
-        agent,
-        error: `Timeout after ${timeout}s`,
-        duration_s: (performance.now() - start) / 1000,
-      });
-    }
-    raw = proc.stdout || proc.stderr;
-  } else if (agent === "gemini") {
-    const geminiHome = setupGeminiHome(
-      "stark-gemini-validate-",
-      process.cwd(),
-      "validate",
-      "plan",
-    );
-    try {
+  try {
+    let raw: string;
+    if (agent === "codex") {
       const proc = await runProcess(
-        "gemini",
-        ["-m", GEMINI_MODEL, "-p", VALIDATION_PROMPT, "-o", "json"],
-        { input: envelopeJson, timeoutMs: timeout * 1000, env: makeGeminiEnv(geminiHome) },
+        "codex",
+        [
+          "exec",
+          "-m",
+          CODEX_MODEL,
+          "-c",
+          CODEX_REASONING_CONFIG,
+          "--ephemeral",
+          "--json",
+          "--full-auto",
+          "-",
+        ],
+        { input: stdinPayload, timeoutMs: timeout * 2 * 1000 },
       );
       if (proc.spawnError) {
         return makeResult({
@@ -331,24 +304,59 @@ async function runValidationAgent(
         });
       }
       raw = proc.stdout || proc.stderr;
-    } finally {
+    } else if (agent === "gemini") {
+      const geminiHome = setupGeminiHome(
+        "stark-gemini-validate-",
+        process.cwd(),
+        "validate",
+        "plan",
+      );
       try {
-        fs.rmSync(geminiHome, { recursive: true, force: true });
-      } catch {
-        // ignore
+        const proc = await runProcess(
+          "gemini",
+          ["-m", GEMINI_MODEL, "-p", VALIDATION_PROMPT, "-o", "json"],
+          { input: envelopeJson, timeoutMs: timeout * 1000, env: makeGeminiEnv(geminiHome) },
+        );
+        if (proc.spawnError) {
+          return makeResult({
+            agent,
+            error: `agent_unavailable: ${agent} not found in PATH`,
+            duration_s: (performance.now() - start) / 1000,
+          });
+        }
+        if (proc.timedOut) {
+          return makeResult({
+            agent,
+            error: `Timeout after ${timeout}s`,
+            duration_s: (performance.now() - start) / 1000,
+          });
+        }
+        raw = proc.stdout || proc.stderr;
+      } finally {
+        try {
+          fs.rmSync(geminiHome, { recursive: true, force: true });
+        } catch {
+          // ignore
+        }
       }
+    } else {
+      return makeResult({
+        agent,
+        error: `Unknown agent: ${agent}`,
+        duration_s: (performance.now() - start) / 1000,
+      });
     }
-  } else {
+
+    const result = parseValidationOutput(raw, agent);
+    result.duration_s = (performance.now() - start) / 1000;
+    return result;
+  } catch (exc) {
     return makeResult({
       agent,
-      error: `Unknown agent: ${agent}`,
+      error: `Unexpected error: ${exc instanceof Error ? exc.message : String(exc)}`,
       duration_s: (performance.now() - start) / 1000,
     });
   }
-
-  const result = parseValidationOutput(raw, agent);
-  result.duration_s = (performance.now() - start) / 1000;
-  return result;
 }
 
 /** Dispatch validation agents in parallel. Returns one result per agent. */

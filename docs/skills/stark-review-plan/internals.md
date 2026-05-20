@@ -124,7 +124,7 @@ Disable a domain per-repo: Add domain slug to disabled_domains array in {repo}/.
 
 Change fix threshold: Set plan_review.fix_threshold in config. 'high' = fewer auto-fixes (conservative), 'low' = more auto-fixes (aggressive).
 
-Modify agent CLI flags: Edit scripts/plan_review_dispatch.py — each agent has separate invocation code. Run test_plan_review_dispatch.py::TestCLIFlagsSmoke after changes.
+Modify agent CLI flags: Edit tools/plan_review_dispatch_lib.ts — each agent has separate invocation code. Run the plan_review_dispatch_lib.test.ts suite after changes.
 
 Override prompts per-repo: Place prompt files in {repo}/.code-review/plan-prompts/{agent}/{domain}.md. These override global prompts for that repo.
 

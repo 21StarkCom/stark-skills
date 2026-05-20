@@ -15,9 +15,9 @@ graph TD
     F --> G["Present numbered list\nto user for approval"]
     G --> H{"User selects\nitems to apply"}
     H --> I["Apply prompt edits\nglobal/prompts/{agent}/*.md"]
-    H --> J["Apply orchestrator edits\nscripts/multi_review.py"]
+    H --> J["Apply orchestrator edits\ntools/multi_review.ts"]
     H --> K["Apply config edits\nconfig.json"]
-    I --> L["Validate: markdown syntax,\nPython compile, JSON check"]
+    I --> L["Validate: markdown syntax,\nTS typecheck, JSON check"]
     J --> L
     K --> L
     L --> M{"All checks pass?"}

@@ -40,8 +40,7 @@ Each domain prompt is in `~/.claude/code-review/prompts/{agent}/`. Every agent g
 ## Tools
 
 ```bash
-PYTHON=~/Code/scripts/.venv/bin/python3
-REVIEW="$PYTHON ~/Code/scripts/multi_review.py"
+REVIEW="node --experimental-strip-types ~/.claude/code-review/tools/multi_review.ts"
 
 # Single PR in current repo
 $REVIEW --pr <N> --json
@@ -55,13 +54,13 @@ $REVIEW --pr <N> --dry-run --json
 
 ## Workflow
 
-1. Run `multi_review.py --pr <N> --json` to dispatch all 27 sub-agents in parallel
+1. Run `multi_review.ts --pr <N> --json` to dispatch all 27 sub-agents in parallel
 2. Parse the JSON output — each result has `agent`, `domain`, `findings`
 3. Cross-reference findings: if 2+ agents flag the same issue, it's higher confidence
 4. Fix every critical, high, and medium issue yourself (edit the code directly)
 5. Run the repo's test suite (`pnpm test`, `npm test`, etc.) and fix any failures
 6. Commit fixes: `git add <files> && git commit -m "fix: address review findings (round N)"`
-7. Run `multi_review.py` again to re-review your fixes
+7. Run `multi_review.ts` again to re-review your fixes
 8. Repeat steps 2-7 until a round returns zero critical/high/medium findings and tests pass
 9. Report the summary table and stop
 
