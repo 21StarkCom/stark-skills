@@ -3,14 +3,16 @@ set -euo pipefail
 
 # Resolve script path: worktree-relative or global fallback
 SCRIPT=""
-if [[ -f "scripts/user_token.py" ]]; then
-  SCRIPT="scripts/user_token.py"
-elif [[ -f "$HOME/.claude/code-review/scripts/user_token.py" ]]; then
-  SCRIPT="$HOME/.claude/code-review/scripts/user_token.py"
+if [[ -f "tools/user_token.ts" ]]; then
+  SCRIPT="tools/user_token.ts"
+elif [[ -f "$HOME/.claude/code-review/tools/user_token.ts" ]]; then
+  SCRIPT="$HOME/.claude/code-review/tools/user_token.ts"
 else
-  echo "Error: user_token.py not found" >&2
+  echo "Error: user_token.ts not found" >&2
   exit 1
 fi
+
+run_token() { node --experimental-strip-types --no-warnings "$SCRIPT" "$@"; }
 
 # Parse arguments: extract subcommand and --kind flag
 SUBCOMMAND="show"
@@ -28,14 +30,14 @@ done
 # Execute subcommand
 case "$SUBCOMMAND" in
   primary|secondary)
-    python3 "$SCRIPT" --user "$SUBCOMMAND" $KIND
+    run_token --user "$SUBCOMMAND" $KIND
     ;;
   swap)
-    python3 "$SCRIPT" --swap $KIND
+    run_token --swap $KIND
     ;;
   show)
     ACTIVE_USER="${STARK_GH_USER:-primary}"
-    TOKEN=$(python3 "$SCRIPT" --user "$ACTIVE_USER" 2>/dev/null) || {
+    TOKEN=$(run_token --user "$ACTIVE_USER" 2>/dev/null) || {
       echo "Error: No token for '$ACTIVE_USER'. Add it to keychain: security add-generic-password -U -s stark-gh-token -a $ACTIVE_USER-fine -w '<token>'" >&2
       exit 1
     }
@@ -46,7 +48,7 @@ case "$SUBCOMMAND" in
   limits)
     echo "identity   core         graphql      login"
     for user in primary secondary; do
-      TOKEN=$(python3 "$SCRIPT" --user "$user" 2>/dev/null) || {
+      TOKEN=$(run_token --user "$user" 2>/dev/null) || {
         echo "$user      MISSING      MISSING      MISSING"
         continue
       }

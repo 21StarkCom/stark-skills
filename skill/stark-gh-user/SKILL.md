@@ -33,7 +33,7 @@ The token-printing modes do not mutate the user's shell. They emit `export …` 
 
 ## Resolver
 
-The single source of truth is `scripts/user_token.py` (installed at `~/.claude/code-review/scripts/user_token.py`). It reads from macOS Keychain entries:
+The single source of truth is `tools/user_token.ts` (installed at `~/.claude/code-review/tools/user_token.ts`). It reads from macOS Keychain entries:
 
 - `stark-gh-token / primary-fine`
 - `stark-gh-token / primary-classic`
@@ -44,20 +44,20 @@ The single source of truth is `scripts/user_token.py` (installed at `~/.claude/c
 
 ## Behavior
 
-Resolve the script path (worktree-relative `scripts/user_token.py`, falling back to `~/.claude/code-review/scripts/user_token.py`).
+Resolve the script path (worktree-relative `tools/user_token.ts`, falling back to `~/.claude/code-review/tools/user_token.ts`).
 
 Parse `$ARGUMENTS` into a subcommand and optional `--kind` flag. Default subcommand: `show`.
 
 ### `show`
 
 1. Read `$STARK_GH_USER` (default `primary`).
-2. Run `python3 <script> --user <active>` to confirm a token is reachable. If it raises, surface the keychain account name that's missing.
+2. Run `node --experimental-strip-types --no-warnings <script> --user <active>` to confirm a token is reachable. If it raises, surface the keychain account name that's missing.
 3. Spawn `gh api rate_limit --jq '.resources | {core, graphql}'` with `GH_TOKEN` set to that token.
 4. Print: active user, login (`gh api user --jq .login`), core remaining/limit, graphql remaining/limit.
 
 ### `primary` / `secondary`
 
-1. Resolve token via `python3 <script> --user <name> --kind <kind>`.
+1. Resolve token via `node --experimental-strip-types --no-warnings <script> --user <name> --kind <kind>`.
 2. Print three lines exactly (no markdown, no commentary), so the user can `eval` them:
    ```
    export STARK_GH_USER=<name>
@@ -68,7 +68,7 @@ Parse `$ARGUMENTS` into a subcommand and optional `--kind` flag. Default subcomm
 
 ### `swap`
 
-Run `python3 <script> --swap` (forwarding `--kind` if provided). Pass through stdout verbatim. The script already emits the three export lines plus a `#` comment indicating the direction of the swap.
+Run `node --experimental-strip-types --no-warnings <script> --swap` (forwarding `--kind` if provided). Pass through stdout verbatim. The script already emits the three export lines plus a `#` comment indicating the direction of the swap.
 
 ### `limits`
 
@@ -106,7 +106,7 @@ If a keychain entry is missing, render `MISSING` in place of the numbers and con
 
 ## How It Works
 
-Run `~/.claude/skills/stark-gh-user/handler.sh` with the subcommand as an argument. The handler resolves the script path, parses arguments, and delegates to `user_token.py` or runs `gh api` calls.
+Run `~/.claude/skills/stark-gh-user/handler.sh` with the subcommand as an argument. The handler resolves the script path, parses arguments, and delegates to `user_token.ts` or runs `gh api` calls.
 
 ```bash
 #!/bin/bash
@@ -114,14 +114,16 @@ set -euo pipefail
 
 # Resolve script path: worktree-relative or global fallback
 SCRIPT=""
-if [[ -f "scripts/user_token.py" ]]; then
-  SCRIPT="scripts/user_token.py"
-elif [[ -f "$HOME/.claude/code-review/scripts/user_token.py" ]]; then
-  SCRIPT="$HOME/.claude/code-review/scripts/user_token.py"
+if [[ -f "tools/user_token.ts" ]]; then
+  SCRIPT="tools/user_token.ts"
+elif [[ -f "$HOME/.claude/code-review/tools/user_token.ts" ]]; then
+  SCRIPT="$HOME/.claude/code-review/tools/user_token.ts"
 else
-  echo "Error: user_token.py not found" >&2
+  echo "Error: user_token.ts not found" >&2
   exit 1
 fi
+
+run_token() { node --experimental-strip-types --no-warnings "$SCRIPT" "$@"; }
 
 # Parse arguments: extract subcommand and --kind flag
 SUBCOMMAND="show"
@@ -142,16 +144,16 @@ done
 case "$SUBCOMMAND" in
   primary|secondary)
     # Print export lines for eval
-    python3 "$SCRIPT" --user "$SUBCOMMAND" $KIND
+    run_token --user "$SUBCOMMAND" $KIND
     ;;
   swap)
     # Print export + direction comment
-    python3 "$SCRIPT" --swap $KIND
+    run_token --swap $KIND
     ;;
   show)
     # Show active user + rate limits
     ACTIVE_USER="${STARK_GH_USER:-primary}"
-    TOKEN=$(python3 "$SCRIPT" --user "$ACTIVE_USER" 2>/dev/null) || {
+    TOKEN=$(run_token --user "$ACTIVE_USER" 2>/dev/null) || {
       echo "Error: No token for '$ACTIVE_USER'. Add it to keychain: security add-generic-password -U -s stark-gh-token -a $ACTIVE_USER-fine -w '<token>'" >&2
       exit 1
     }
@@ -163,7 +165,7 @@ case "$SUBCOMMAND" in
     # Show both identities side-by-side
     echo "identity   core         graphql      login"
     for user in primary secondary; do
-      TOKEN=$(python3 "$SCRIPT" --user "$user" 2>/dev/null) || {
+      TOKEN=$(run_token --user "$user" 2>/dev/null) || {
         echo "$user      MISSING      MISSING      MISSING"
         continue
       }
