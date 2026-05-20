@@ -17,7 +17,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { enqueue, makeEvent } from "./emit_queue_lib.ts";
-import { loadGlobalConfig } from "./stark_config_lib.ts";
+import { getValidationGateConfig } from "./stark_config_lib.ts";
 
 const ALLOWED_DISCOVERY_COMMANDS: ReadonlySet<string> = new Set([
   "npm test",
@@ -225,21 +225,12 @@ function emitResult(repo: string, checks: CheckResult[], overall: string): void 
 }
 
 // ---------------------------------------------------------------------------
-// Config access
+// Config access — via the shared stark_config_lib section accessor.
 // ---------------------------------------------------------------------------
-
-function validationGateSection(): Record<string, unknown> {
-  const vg = loadGlobalConfig()["validation_gate"];
-  if (vg && typeof vg === "object" && !Array.isArray(vg)) {
-    return vg as Record<string, unknown>;
-  }
-  return {};
-}
 
 /** Resolve the per-check timeout: config `timeout_seconds`, else 60. */
 export function getConfiguredTimeout(): number {
-  const raw = validationGateSection()["timeout_seconds"];
-  const n = Number(raw);
+  const n = Number(getValidationGateConfig().timeout_seconds);
   return Number.isFinite(n) && n > 0 ? Math.trunc(n) : DEFAULT_TIMEOUT_SECONDS;
 }
 
@@ -253,7 +244,9 @@ export function runValidationGate(
 ): ValidationResult {
   const repo = getRepoName(repoRoot);
 
-  const perRepoRaw = validationGateSection()["per_repo_commands"];
+  const perRepoRaw = (getValidationGateConfig() as Record<string, unknown>)[
+    "per_repo_commands"
+  ];
   const perRepo: Record<string, unknown> =
     perRepoRaw && typeof perRepoRaw === "object" && !Array.isArray(perRepoRaw)
       ? (perRepoRaw as Record<string, unknown>)

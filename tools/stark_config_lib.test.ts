@@ -9,13 +9,24 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  DEFAULT_FORGE,
   DEFAULT_MODELS,
   DEFAULT_MODEL_RATES,
   DEFAULT_RED_TEAM,
+  DEFAULT_RUNTIME,
   discoverConfig,
+  getContextCompactionConfig,
+  getCostConfig,
+  getForgeConfig,
+  getForgedReviewConfig,
+  getModelId,
   getModelRates,
   getModelsConfig,
   getRedTeamConfig,
+  getRuntimeConfig,
+  getSelfHealConfig,
+  getSkillActivationConfig,
+  getValidationGateConfig,
   isAgentEnabled,
   loadGlobalConfig,
 } from "./stark_config_lib.ts";
@@ -325,5 +336,72 @@ test("discoverConfig: keys not present at the more-specific layer fall through t
     } finally {
       process.chdir(prevCwd);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3a — section accessors + getModelId (full config_loader.py port)
+// ---------------------------------------------------------------------------
+
+test("getModelId: returns the configured model id, null for unknown agent", async () => {
+  await withScratchHome(() => {
+    assert.equal(getModelId("claude"), "claude-opus-4-7");
+    assert.equal(getModelId("nonexistent"), null);
+  });
+});
+
+test("getModelId: reflects a global override", async () => {
+  await withScratchHome((home) => {
+    writeGlobalConfig(home, { models: { codex: { model_id: "gpt-9" } } });
+    assert.equal(getModelId("codex"), "gpt-9");
+  });
+});
+
+test("section accessors: return their DEFAULT_* when no override", async () => {
+  await withScratchHome(() => {
+    assert.deepEqual(getRuntimeConfig(), DEFAULT_RUNTIME);
+    assert.deepEqual(getForgeConfig(), DEFAULT_FORGE);
+    assert.equal(getSelfHealConfig().mode, "suggest");
+    assert.equal(getValidationGateConfig().timeout_seconds, 60);
+    assert.equal(getSkillActivationConfig().max_suggestions, 2);
+    assert.equal(getContextCompactionConfig().checkpoint_interval_minutes, 15);
+    assert.equal(getCostConfig().hard_stop_usd, 100);
+    assert.equal(getForgedReviewConfig().forge_threshold, 4);
+  });
+});
+
+test("getRuntimeConfig: partial override merges, sibling defaults survive", async () => {
+  await withScratchHome((home) => {
+    writeGlobalConfig(home, { runtime: { max_concurrent_agents: 8 } });
+    const cfg = getRuntimeConfig();
+    assert.equal(cfg.max_concurrent_agents, 8);
+    // Untouched defaults survive the partial override.
+    assert.equal(cfg.lock_ttl_minutes, 30);
+    assert.equal(cfg.temp_dir_prefix, "stark-env");
+  });
+});
+
+test("getForgeConfig: nested override merges without clobbering siblings", async () => {
+  await withScratchHome((home) => {
+    writeGlobalConfig(home, { forge: { domain_routing: { security: "claude" } } });
+    const cfg = getForgeConfig();
+    assert.equal(cfg.domain_routing.security, "claude");
+    // Sibling routing entries from the default survive.
+    assert.equal(cfg.domain_routing.completeness, "claude");
+    assert.equal(cfg.max_rounds, 3);
+  });
+});
+
+test("getValidationGateConfig: surfaces extra keys like per_repo_commands", async () => {
+  await withScratchHome((home) => {
+    writeGlobalConfig(home, {
+      validation_gate: { per_repo_commands: { _default: { test_cmd: "npm test" } } },
+    });
+    const cfg = getValidationGateConfig() as Record<string, unknown>;
+    assert.deepEqual(cfg["per_repo_commands"], {
+      _default: { test_cmd: "npm test" },
+    });
+    // Default fields still present.
+    assert.equal((cfg as { timeout_seconds: number }).timeout_seconds, 60);
   });
 });

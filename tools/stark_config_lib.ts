@@ -1,28 +1,29 @@
 /**
- * Minimal config reader — the subset of `scripts/config_loader.py` that
- * `tools/preflight_lib.ts` needs. The Python `config_loader.py` stays in
- * place for the other ~10 Python importers (orchestrators that haven't
- * been ported yet); both sides read the same on-disk JSON, so they stay
- * consistent.
+ * Config reader — TypeScript port of `scripts/config_loader.py`.
  *
- * Scope (NOT a 1:1 port — only what preflight uses):
+ * Started as a preflight-only subset; Phase 3a of the Python→TS migration
+ * extended it to the full section surface so the dispatch infra can drop
+ * the Python `config_loader.py`. During the Phase 3+4 transition the
+ * Python module still exists for the not-yet-ported orchestrators; both
+ * sides read the same on-disk JSON, so they stay consistent.
  *
+ * Surface:
  *   - `loadGlobalConfig()` — read `~/.claude/code-review/config.json`
- *   - `DEFAULT_MODELS` / `DEFAULT_RED_TEAM` / `DEFAULT_MODEL_RATES` —
- *     the schema-defaults the section accessors merge on top of
- *   - `getModelsConfig()`, `getRedTeamConfig()`, `getModelRates()` —
- *     deep-merge default + global. `getRedTeamConfig` also walks
- *     repo/org `.code-review/config.json` overrides with locked-fields
- *     enforcement + unknown-keys pruning, matching the Python's
- *     two-layer defense (spec rt1 + rt2).
- *   - `isAgentEnabled(agent)` — convenience over `getModelsConfig`
- *   - `discoverConfig({cwd})` — minimal hierarchical merge that just
- *     returns the top-of-chain `agents` field (the only field
- *     preflight's `check_model_resolution` reads via this path)
+ *   - `DEFAULT_*` — schema-defaults the section accessors merge on top of
+ *   - Section accessors (`getModelsConfig`, `getRuntimeConfig`,
+ *     `getSelfHealConfig`, `getValidationGateConfig`,
+ *     `getSkillActivationConfig`, `getContextCompactionConfig`,
+ *     `getCostConfig`, `getForgeConfig`, `getForgedReviewConfig`,
+ *     `getModelRates`) — deep-merge default + global.
+ *   - `getRedTeamConfig()` — additionally walks repo/org
+ *     `.code-review/config.json` overrides with locked-fields enforcement
+ *     + unknown-keys pruning (spec rt1 + rt2).
+ *   - `isAgentEnabled(agent)` / `getModelId(agent)` — model convenience
+ *   - `discoverConfig({cwd})` — minimal hierarchical merge (preflight)
  *
- * No `@lru_cache` equivalent — the file IO is negligible and lazy
- * caching makes test isolation harder. If preflight ever becomes a hot
- * path we can add memoization at the call site.
+ * No `@lru_cache` equivalent — the file IO is negligible and lazy caching
+ * makes test isolation harder. Add memoization at the call site if a hot
+ * path ever needs it.
  */
 
 import fs from "node:fs";
@@ -137,6 +138,104 @@ export const DEFAULT_MODEL_RATES: Record<string, ModelRate> = {
   "gpt-5.4-pro": { input_per_1m_usd: 20.0, output_per_1m_usd: 80.0 },
   "gpt-5.5-pro": { input_per_1m_usd: 25.0, output_per_1m_usd: 100.0 },
   _fallback: { input_per_1m_usd: 100.0, output_per_1m_usd: 300.0 },
+};
+
+// ---------------------------------------------------------------------------
+// Remaining config sections (mirror `scripts/config_loader.py:DEFAULT_*`).
+// These complete the port beyond preflight's original needs — the Phase 3
+// dispatch infra (runtime_env, dispatcher_base) consumes `runtime`.
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_RUNTIME = {
+  lock_ttl_minutes: 30,
+  subagent_env_allowlist: ["PATH", "HOME", "USER", "SHELL", "LANG", "TERM", "ANTHROPIC_AGENTS"],
+  max_concurrent_agents: 3,
+  temp_dir_prefix: "stark-env",
+};
+
+export const DEFAULT_SELF_HEAL = {
+  enabled: true,
+  mode: "suggest",
+  max_auto_retries: 0,
+  patterns_file: "healer_patterns.json",
+  circuit_breaker_threshold: 3,
+  auto_patterns: [] as string[],
+};
+
+export const DEFAULT_VALIDATION_GATE = {
+  enabled: true,
+  run_on: ["implementation", "autopilot"],
+  skip_domains: [] as string[],
+  timeout_seconds: 60,
+};
+
+export const DEFAULT_SKILL_ACTIVATION = {
+  enabled: true,
+  suggest_after_review_rounds: 3,
+  max_suggestions: 2,
+  cooldown_hours: 24,
+  suppressed_skills: [] as string[],
+  activation_signals: ["review_finding", "correction", "skill_invocation"],
+};
+
+export const DEFAULT_CONTEXT_COMPACTION = {
+  enabled: true,
+  checkpoint_interval_minutes: 15,
+  max_checkpoint_size_kb: 50,
+  include_file_summaries: true,
+};
+
+export const DEFAULT_COST = {
+  weekly_budget_usd: 50.0,
+  daily_alert_usd: 15.0,
+  hard_stop_usd: 100.0,
+  track_rolling_7d: true,
+};
+
+export const DEFAULT_FORGE = {
+  domain_routing: {
+    completeness: "claude",
+    security: "codex",
+    scope: "claude",
+    "api-design": "codex",
+    "data-modeling": "codex",
+    consistency: "claude",
+    accessibility: "claude",
+    "test-plan": "codex",
+  },
+  plan_review_routing: {
+    completeness: "claude",
+    security: "codex",
+    sequencing: "claude",
+    viability: "codex",
+  },
+  agent_fallback_order: ["claude", "codex", "gemini"],
+  consensus_domains: ["security"],
+  consensus_threshold: 2,
+  max_rounds: 3,
+  workers: 3,
+  fix_threshold: "medium",
+  noise_improvement_threshold: 0.33,
+  heuristic_consolidation_threshold: 50,
+  review_timeout: 300,
+  fix_timeout: 900,
+};
+
+export const DEFAULT_FORGED_REVIEW = {
+  forge_threshold: 4,
+  max_rounds: 3,
+  domain_pairs: {
+    architecture: { leader: "claude", second: "codex" },
+    behavior: { leader: "codex", second: "claude" },
+    "type-safety": { leader: "codex", second: "gemini" },
+    security: { leader: "gemini", second: "codex" },
+    "test-coverage": { leader: "codex", second: "gemini" },
+    "spec-conformance": { leader: "claude", second: "codex" },
+  },
+  always_on_domains: ["behavior"],
+  triage_agent: "claude",
+  delta_rereview: true,
+  auto_merge_when_clean: true,
 };
 
 // ---------------------------------------------------------------------------
@@ -268,6 +367,47 @@ export function isAgentEnabled(agent: string): boolean {
   const m = getModelsConfig()[agent];
   if (!m || typeof m !== "object") return false;
   return Boolean(m.enabled);
+}
+
+/** Resolve an agent's configured model id, or null when unset/non-string. */
+export function getModelId(agent: string): string | null {
+  const m = getModelsConfig()[agent];
+  if (!m || typeof m !== "object") return null;
+  const id = (m as ModelEntry).model_id;
+  return typeof id === "string" ? id : null;
+}
+
+/** Deep-merge a default section with its global-config override. */
+function getSection<T extends Record<string, unknown>>(
+  defaults: T,
+  key: string,
+): T {
+  return deepMerge(defaults, loadGlobalConfig()[key]);
+}
+
+export function getRuntimeConfig(): typeof DEFAULT_RUNTIME {
+  return getSection(DEFAULT_RUNTIME, "runtime");
+}
+export function getSelfHealConfig(): typeof DEFAULT_SELF_HEAL {
+  return getSection(DEFAULT_SELF_HEAL, "self_heal");
+}
+export function getValidationGateConfig(): typeof DEFAULT_VALIDATION_GATE {
+  return getSection(DEFAULT_VALIDATION_GATE, "validation_gate");
+}
+export function getSkillActivationConfig(): typeof DEFAULT_SKILL_ACTIVATION {
+  return getSection(DEFAULT_SKILL_ACTIVATION, "skill_activation");
+}
+export function getContextCompactionConfig(): typeof DEFAULT_CONTEXT_COMPACTION {
+  return getSection(DEFAULT_CONTEXT_COMPACTION, "context_compaction");
+}
+export function getCostConfig(): typeof DEFAULT_COST {
+  return getSection(DEFAULT_COST, "cost");
+}
+export function getForgeConfig(): typeof DEFAULT_FORGE {
+  return getSection(DEFAULT_FORGE, "forge");
+}
+export function getForgedReviewConfig(): typeof DEFAULT_FORGED_REVIEW {
+  return getSection(DEFAULT_FORGED_REVIEW, "forged_review");
 }
 
 // ---------------------------------------------------------------------------
