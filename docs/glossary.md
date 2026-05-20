@@ -19,7 +19,7 @@
 
 **Approach contract** — Pre-execution confirmation step (`scripts/approach_contract.py`) that displays the derived goal, approach, and constraints from a plan before long-running skills begin execution. Requires Y/n/edit in interactive mode.
 
-**Validation gate** — Post-code-generation quality check (`scripts/validation_gate.py`) that runs lint, typecheck, and test commands. Returns structured results consumed by the failure classifier. Introduced in Workflow Improvement P1.
+**Validation gate** — Post-code-generation quality check (`tools/validation_gate.ts`) that runs lint, typecheck, and test commands. Returns structured results consumed by the failure classifier. Introduced in Workflow Improvement P1.
 
 **Failure classifier** — Error categorization module (`tools/failure_classifier.ts`) that maps stderr output to one of 8 canonical error codes and pattern IDs used by the self-healer.
 

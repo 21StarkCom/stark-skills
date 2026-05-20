@@ -194,7 +194,7 @@ If subagent reports ambiguity and project config is loaded: use bot token, trans
 ### 1.2b Validation chain
 
 ```bash
-python3 $SCRIPTS/validation_gate.py --json --repo-root $(pwd)
+node --experimental-strip-types --no-warnings "$TOOLS/validation_gate.ts" --json --repo-root $(pwd)
 ```
 
 - `overall=pass` → continue to 1.3.
