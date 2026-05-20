@@ -198,7 +198,7 @@ python3 $SCRIPTS/validation_gate.py --json --repo-root $(pwd)
 ```
 
 - `overall=pass` → continue to 1.3.
-- `overall=fail` → classify: `python3 $SCRIPTS/failure_classifier.py --stderr-file $STDERR_PATH --json`
+- `overall=fail` → classify: `node --experimental-strip-types --no-warnings "$TOOLS/failure_classifier.ts" --stderr-file $STDERR_PATH --json`
   - If `pattern_id` non-null: attempt heal (max 2 attempts): `node --experimental-strip-types --no-warnings $HOME/.claude/code-review/tools/self_healer.ts --pattern-id $PATTERN_ID --stderr-file $STDERR_PATH --mode auto --json`. Re-run validation after each attempt.
   - After 2 failed heal attempts: escalate, set task status `blocked`, stop the phase.
   - If `pattern_id` null (UNCLASSIFIED): log and continue — agent code issue, not environment.
