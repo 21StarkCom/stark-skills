@@ -32,8 +32,6 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `scripts/dispatcher_base.py` — shared base: config discovery, model resolution, domain/prompt resolution
 - `scripts/multi_review.py` — PR review orchestrator (ThreadPoolExecutor, parallel sub-agents)
 - `scripts/plan_review_dispatch.py` — plan/design review dispatch (N agents × M domains)
-- `scripts/domain_triage.py` — context-aware domain dispatch engine
-- `scripts/triage_orchestrator.py` — triage orchestration with shadow validation support
 
 ### Agent utilities
 - `scripts/claude_utils.py` — Claude CLI dispatch helpers (Vertex AI env, model pinning)
@@ -51,8 +49,6 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `tools/plan_dispatch.ts` — `/stark-design-to-plan` lead/wing plan-generation dispatcher (replaces the deleted `scripts/design_to_plan_dispatch.py`, which used a 3-agent tournament + cross-review). Round 1: lead reads design + `generate.md`, emits markdown plan draft. Wing reviews via `review.md`, returns `{verdict, blocking_findings[], non_blocking_suggestions[], summary}` JSON. On `revise`, lead receives prior draft + findings + `revise.md`, emits a new draft. Loops until `approve` / `block` / `--max-rounds` / empty-draft / unchanged-from-prior. No worktree (plans are text). Same final-verdict union + JSON output shape as copilot. Defaults: lead=`claude`, wing=`codex`, max-rounds=4, lead-timeout=900s, wing-timeout=600s.
 
 ### TUI & session
-- `scripts/tui_core.py` — shared TUI rendering primitives (box, table, progress) — sole remaining consumer is `triage_tui.py`
-- `scripts/triage_tui.py` — triage decision TUI renderer
 - `tools/stark_session_lib.ts` + `tools/stark_session.ts` — `/stark-session` data collector. Subcommands `start` and `end` return structured JSON; Claude renders the briefing/summary directly. Session-state, persona, alerts, skill-suggestions, healer-canary collectors hit pure-TS siblings; only `github_projects.py` remains. Replaces the deleted `session_tui*.py` ANSI/box-drawing renderer.
 
 ### Red-team audit + emit-queue CLIs (Python shell-out seam; Phase 1a of the TS migration)
