@@ -32,7 +32,6 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `scripts/dispatcher_base.py` — shared base: config discovery, model resolution, domain/prompt resolution
 - `scripts/multi_review.py` — PR review orchestrator (ThreadPoolExecutor, parallel sub-agents)
 - `scripts/plan_review_dispatch.py` — plan/design review dispatch (N agents × M domains)
-- `scripts/tournament.py` — reusable multi-LLM competition engine (semantic, visual, test evaluation)
 - `scripts/domain_triage.py` — context-aware domain dispatch engine
 - `scripts/triage_orchestrator.py` — triage orchestration with shadow validation support
 
@@ -80,7 +79,6 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `tools/optimize_skill_description.ts` — skill-description optimizer (replaces the deleted `scripts/optimize_skill_description.py`). Reads SKILL.md frontmatter, scores via the skill-creator plugin's Python `run_eval.py`, asks `claude -p` for a better description based on the failing eval queries. CLI flags and JSON report shape match the Python.
 
 ### Other
-- `scripts/generate_skill_docs.py` — multi-LLM documentation generator with viz competition
 - `scripts/flow_extractor.py` — workflow extraction from SKILL.md files
 - `scripts/flow_layout.py` — dagre layout runner for flow diagrams
 - `scripts/flow_schema.py` — FlowDiagram Pydantic model
