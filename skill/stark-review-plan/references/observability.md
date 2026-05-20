@@ -9,9 +9,9 @@ At skill start, create tasks for the progress spinner:
 ```
 TaskCreate: "Phase 1: Setup -- validate plan, check history"
             activeForm: "Setting up plan review"
-TaskCreate: "Phase 2: Review-Fix Loop (up to N rounds)"   [or "Phase 2T: Tournament" if --tournament]
+TaskCreate: "Phase 2: Review-Fix Loop (up to N rounds)"
             activeForm: "Running review-fix loop"
-TaskCreate: "Phase 3: Final Review"                        [skip if --tournament]
+TaskCreate: "Phase 3: Final Review"
             activeForm: "Running final review round"
 TaskCreate: "Phase 4: Summary"
             activeForm: "Generating summary"
@@ -28,17 +28,6 @@ TaskCreate: "Round 1: dispatch NxM sub-agents"
             activeForm: "Dispatching NxM sub-agents (round 1)"
 TaskCreate: "Round 1: classify + fix"
             activeForm: "Classifying and fixing findings"
-```
-
-For Phase 2T (tournament):
-
-```
-TaskCreate: "Tournament: dispatch 3 full-document reviews"
-            activeForm: "Dispatching tournament competitors"
-TaskCreate: "Tournament: judge evaluation"
-            activeForm: "Judge evaluating reviews (2 passes)"
-TaskCreate: "Tournament: synthesize winner"
-            activeForm: "Synthesizing best-of-all findings"
 ```
 
 ## Timestamped log lines (required)
@@ -62,19 +51,6 @@ Record `T0` at skill start. Print for every phase transition and key event:
 [HH:MM:SS] === stark-review-plan completed ===
 ```
 
-In tournament mode:
-
-```
-[HH:MM:SS] Phase 2T: Tournament -- started
-[HH:MM:SS]   > Dispatching 3 full-document reviews
-[HH:MM:SS]   > Reviews complete -- claude: 180s, codex: 210s, gemini: 195s
-[HH:MM:SS]   > Judge evaluation pass 1 -- done (45s)
-[HH:MM:SS]   > Judge evaluation pass 2 (swapped order) -- done (42s)
-[HH:MM:SS]   > Winner: {agent} (score: {score}/100)
-[HH:MM:SS]   > Synthesis: {N} findings merged from non-winner reviews
-[HH:MM:SS] Phase 2T: done (7m 12s)
-```
-
 ## 5-minute checkpoints (required for runs > 5 min)
 
 ```
@@ -87,7 +63,6 @@ In tournament mode:
 Metrics
 -------
 Total duration:     Xm Ys
-Mode:               normal | tournament
 Phases:
   Phase 1 (Setup):        3s
   Phase 2 (Review-Fix):   9m 12s
@@ -106,14 +81,6 @@ Rounds:              2 fix + 1 final
 Domains:             10
 ```
 
-In tournament mode, replace Agents/Rounds rows with:
-
-```
-Tournament winner:   {agent} ({score}/100)
-Runner-up:           {agent} ({score}/100)
-Merged findings:     {N} from non-winner reviews
-```
-
 ## Improvement flags (required)
 
 Check and print:
@@ -121,6 +88,5 @@ Check and print:
 - Agent failure rate > 20% -> flag by agent
 - A round produced 0 new findings -> suggest reducing rounds
 - Dispatch health < 50% -> warn about low coverage
-- Tournament: score gap < 5 points -> "results too close to call -- review manually"
 
 If none: `No improvement opportunities detected.`

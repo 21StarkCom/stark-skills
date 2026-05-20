@@ -39,15 +39,3 @@ Maps deployment-plan failure vectors to the 4 adversarial domains. Populated fro
 | H) API Prerequisites | completeness, sequencing | {found/clean/not-applicable} | {section or finding ref} |
 | I) Identity Lifecycle | security | {found/clean/not-applicable} | {section or finding ref} |
 | J) Evidence Strictness | completeness | {found/clean/not-applicable} | {section or finding ref} |
-
-## Tournament Evaluation Criteria
-
-The judge runs twice with swapped order (position bias control). Numeric scores are averaged across both passes.
-
-- **Coverage** — what fraction of real issues did the agent find?
-- **Severity accuracy** — were critical issues called critical, not just "medium"?
-- **False positive rate** — how many findings were noise or not real?
-- **Actionability** — can an engineer act on each finding without guessing?
-- **Specificity** — does each finding cite exact sections, commands, or line numbers?
-
-If the judge detects position bias (winner changes when review order is swapped), the result is a tie. In tie mode, no winner is declared — only the synthesized findings are used. The summary reports "Tournament result: tie (position bias detected)" and lists the synthesized findings.

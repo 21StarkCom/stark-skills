@@ -30,15 +30,6 @@ TaskCreate: "Round 1: classify + fix"
             activeForm: "Classifying and fixing findings"
 ```
 
-For tournament mode, replace Phase 2 / Phase 3 tasks with:
-
-```
-TaskCreate: "Tournament: dispatch 3 comprehensive reviews"
-            activeForm: "Running 3-agent tournament"
-TaskCreate: "Tournament: judge evaluation"
-            activeForm: "Evaluating competing reviews"
-```
-
 ## Timestamped log lines (required)
 
 Record `T0` at skill start. Print for every phase transition and key event:
@@ -58,18 +49,6 @@ Record `T0` at skill start. Print for every phase transition and key event:
 [HH:MM:SS] Phase 4: Summary — done (5s)
 [HH:MM:SS] Phase 5: Output — done (3s)
 [HH:MM:SS] === stark-review-design completed ===
-```
-
-For tournament mode:
-
-```
-[HH:MM:SS] === stark-review-design (tournament) started ===
-[HH:MM:SS]   ▸ Dispatching 3 comprehensive reviews (all 8 domains)
-[HH:MM:SS]   ▸ All 3 agents returned — 240s
-[HH:MM:SS]   ▸ Judge evaluation pass 1
-[HH:MM:SS]   ▸ Judge evaluation pass 2 (order swapped)
-[HH:MM:SS]   ▸ Winner: {agent} (score: X.XX)
-[HH:MM:SS] === stark-review-design (tournament) completed ===
 ```
 
 ## 5-minute checkpoints (required for runs > 5 min)
@@ -99,22 +78,6 @@ Issues found:        10 (7 fixed, 3 unresolved)
 Noise:               11 (7 false positive, 4 noise)
 Agents:              30 dispatched, 28 succeeded, 2 failed
 Rounds:              2 fix + 1 final
-```
-
-For tournament mode:
-
-```
-Metrics
-───────
-Mode:               tournament
-Total duration:     Xm Ys
-  Agent reviews:    4m 05s
-  Judge (pass 1):   45s
-  Judge (pass 2):   42s
-
-Winner:             {agent}
-Scores:             claude={X.XX}, codex={X.XX}, gemini={X.XX}
-Findings (winner):  N total, M high/critical
 ```
 
 ## Improvement flags (required)

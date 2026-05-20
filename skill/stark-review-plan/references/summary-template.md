@@ -40,13 +40,6 @@ Generate a consolidated markdown summary with these sections.
 - **Noise** = `false_positive` or `noise` (not real problems -- do not count as issues)
 - **Ignored** = below fix_threshold
 
-In tournament mode, also include:
-```markdown
-**Tournament winner:** {agent} (score: {score}/100)
-**Runner-up:** {agent} (score: {score}/100)
-**Merged findings:** {count from non-winner reviews added to synthesis}
-```
-
 ### 4b. All Findings Table
 
 | # | Round | Agent(s) | Domain | Severity | Section | Title | Outcome |
