@@ -32,7 +32,6 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `scripts/dispatcher_base.py` — shared base: config discovery, model resolution, domain/prompt resolution
 - `scripts/multi_review.py` — PR review orchestrator (ThreadPoolExecutor, parallel sub-agents)
 - `scripts/plan_review_dispatch.py` — plan/design review dispatch (N agents × M domains)
-- `scripts/tournament.py` — reusable multi-LLM competition engine (semantic, visual, test evaluation)
 - `scripts/domain_triage.py` — context-aware domain dispatch engine
 - `scripts/triage_orchestrator.py` — triage orchestration with shadow validation support
 
