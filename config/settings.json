@@ -170,7 +170,7 @@
     }
   },
   "outputStyle": "Concrete",
-  "effortLevel": "high",
+  "effortLevel": "medium",
   "skipDangerousModePermissionPrompt": true,
   "remoteControlAtStartup": false,
   "agentPushNotifEnabled": true,
