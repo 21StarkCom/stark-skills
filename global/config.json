@@ -179,7 +179,7 @@
     "max_input_chars": 200000,
     "allow_human_review_halt": true,
     "fix_plan": {
-      "enabled": false,
+      "enabled": true,
       "model": "gpt-5.5-pro",
       "reasoning_effort": "xhigh",
       "timeout_s": 1200,
