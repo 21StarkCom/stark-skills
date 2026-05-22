@@ -31,6 +31,8 @@ export interface CleanupArgs {
   noRebase: boolean;
   noWatcherCleanup: boolean;
   noConfig: boolean;
+  noGc: boolean;
+  dropStaleStashes: boolean;
   force: boolean;
   json: boolean;
 }
@@ -44,6 +46,8 @@ export function parseRawArgs(raw: string): CleanupArgs {
     noRebase: false,
     noWatcherCleanup: false,
     noConfig: false,
+    noGc: false,
+    dropStaleStashes: false,
     force: false,
     json: false,
   };
@@ -68,6 +72,10 @@ export function parseRawArgs(raw: string): CleanupArgs {
       a.noWatcherCleanup = true;
     } else if (t === "--no-config") {
       a.noConfig = true;
+    } else if (t === "--no-gc") {
+      a.noGc = true;
+    } else if (t === "--drop-stale-stashes") {
+      a.dropStaleStashes = true;
     } else if (t === "--force") {
       a.force = true;
     } else if (t === "--json") {
@@ -131,13 +139,26 @@ export interface RemoteBranchPlan {
 export interface WorktreePlan {
   path: string;
   branch: string | null;
-  reason: "broken" | "branch-deleted";
+  // "review-merged" — a detached-HEAD review worktree (review-*-prN-*) whose
+  // PR is MERGED/CLOSED and whose tree is clean. The skill's branch-pinned
+  // sweep never catches these because they have no branch ref.
+  reason: "broken" | "branch-deleted" | "review-merged";
+  prNumber?: number;
 }
 
 export interface WatcherDirPlan {
   path: string;
   prNumber: number;
   state: "MERGED" | "CLOSED";
+}
+
+// A stash whose base branch no longer exists locally. Surfaced in the plan but
+// NEVER dropped unless --drop-stale-stashes is passed — a stale stash can be
+// the only copy of unrecovered work.
+export interface StashPlan {
+  ref: string;          // stash@{N}
+  baseBranch: string;   // branch the stash was taken on
+  message: string;      // full `git stash list` subject
 }
 
 export interface CleanupPlan {
@@ -150,6 +171,8 @@ export interface CleanupPlan {
   remoteBranches: RemoteBranchPlan[];
   worktrees: WorktreePlan[];
   watcherDirs: WatcherDirPlan[];
+  staleStashes: StashPlan[];
+  gc: { willRun: boolean; looseObjects: number };
   notes: string[];
 }
 
@@ -251,6 +274,77 @@ function discoverWatcherDirs(repo: RepoCtx): WatcherDirPlan[] {
   }
   return found;
 }
+
+// A review worktree path looks like `review-<repo-slug>-pr<N>-<mode>`. The
+// `/stark-review` skill provisions these detached (no branch ref), so the
+// branch-pinned sweep misses them once their PR merges.
+function reviewWorktreePrNumber(wtPath: string): number | null {
+  const base = path.basename(wtPath);
+  const m = /^review-.*-pr(\d+)-/.exec(base);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+function worktreeIsClean(wtPath: string): boolean {
+  const r = tryGit(["-C", wtPath, "status", "--porcelain"]);
+  return r.ok && r.stdout.trim() === "";
+}
+
+// Detached-HEAD review worktrees whose PR is done. Dirty ones are reported as a
+// note and skipped (never force-removed without --force).
+function discoverReviewWorktrees(repo: RepoCtx, args: CleanupArgs, notes: string[]): WorktreePlan[] {
+  const found: WorktreePlan[] = [];
+  for (const w of listWorktrees()) {
+    if (w.broken || w.branch !== null) continue; // branch-pinned ones handled elsewhere
+    const prNumber = reviewWorktreePrNumber(w.path);
+    if (prNumber === null) continue;
+    if (args.pr !== null && prNumber !== args.pr) continue;
+    const r = tryGh(["pr", "view", String(prNumber), "--repo", repo.nameWithOwner, "--json", "state"]);
+    if (!r.ok) continue;
+    let state: string;
+    try {
+      state = JSON.parse(r.stdout).state;
+    } catch {
+      continue;
+    }
+    if (state !== "MERGED" && state !== "CLOSED") continue;
+    if (!worktreeIsClean(w.path) && !args.force) {
+      notes.push(`review worktree ${w.path} (PR #${prNumber} ${state}) has uncommitted changes; skipped. Pass --force to remove.`);
+      continue;
+    }
+    found.push({ path: w.path, branch: null, reason: "review-merged", prNumber });
+  }
+  return found;
+}
+
+// Stashes whose base branch no longer exists locally. The base branch is parsed
+// from the `git stash list` subject ("WIP on <branch>:" / "On <branch>:").
+function discoverStaleStashes(): StashPlan[] {
+  const out = git(["stash", "list", "--format=%gd%x09%gs"]);
+  const stale: StashPlan[] = [];
+  for (const line of out.split("\n").filter(Boolean)) {
+    const [ref, subject] = line.split("\t");
+    if (!ref || !subject) continue;
+    const m = /^(?:WIP on|On) ([^:]+):/.exec(subject);
+    if (!m) continue;
+    const baseBranch = m[1]!;
+    const exists = tryGit(["show-ref", "--verify", "--quiet", `refs/heads/${baseBranch}`]).ok;
+    if (!exists) stale.push({ ref, baseBranch, message: subject });
+  }
+  return stale;
+}
+
+// Loose-object count from `git count-objects -v`. A non-trivial count means a
+// `git gc` would tighten the object store.
+function looseObjectCount(): number {
+  const r = tryGit(["count-objects", "-v"]);
+  if (!r.ok) return 0;
+  const m = /^count:\s*(\d+)/m.exec(r.stdout);
+  return m ? Number(m[1]) : 0;
+}
+
+const GC_LOOSE_OBJECT_THRESHOLD = 50;
 
 // =============================================================================
 // Plan builder — full sweep
@@ -361,9 +455,19 @@ export function buildPlanFullSweep(args: CleanupArgs): CleanupPlan {
       worktrees.push({ path: w.path, branch: w.branch, reason: "branch-deleted" });
     }
   }
+  // Detached-HEAD review worktrees for done PRs — the branch-pinned scan above
+  // can't see them.
+  worktrees.push(...discoverReviewWorktrees(repo, args, notes));
 
   // Watcher state
   const watcherDirs = args.noWatcherCleanup ? [] : discoverWatcherDirs(repo);
+
+  // Stale stashes (surfaced; only dropped with --drop-stale-stashes).
+  const staleStashes = discoverStaleStashes();
+
+  // git gc decision.
+  const looseObjects = looseObjectCount();
+  const gc = { willRun: !args.noGc && looseObjects >= GC_LOOSE_OBJECT_THRESHOLD, looseObjects };
 
   const unsafe = localBranches.filter(
     b => !b.safeDelete && b.reason !== "merged-pr" && !args.force,
@@ -384,6 +488,8 @@ export function buildPlanFullSweep(args: CleanupArgs): CleanupPlan {
     remoteBranches,
     worktrees,
     watcherDirs,
+    staleStashes,
+    gc,
     notes,
   };
 }
@@ -438,12 +544,15 @@ export function buildPlanSinglePr(prNumber: number, args: CleanupArgs): CleanupP
   }
 
   const willDelete = new Set(localBranches.map(b => b.name));
+  const notes: string[] = [];
   const worktrees: WorktreePlan[] = [];
   for (const w of listWorktrees()) {
     if (w.branch && willDelete.has(w.branch)) {
       worktrees.push({ path: w.path, branch: w.branch, reason: "branch-deleted" });
     }
   }
+  // Detached-HEAD review worktree for this PR, if one is left over.
+  worktrees.push(...discoverReviewWorktrees(repo, args, notes));
 
   const watcherDirs: WatcherDirPlan[] = [];
   if (!args.noWatcherCleanup) {
@@ -463,7 +572,9 @@ export function buildPlanSinglePr(prNumber: number, args: CleanupArgs): CleanupP
     remoteBranches,
     worktrees,
     watcherDirs,
-    notes: [],
+    staleStashes: [],
+    gc: { willRun: false, looseObjects: 0 },
+    notes,
   };
 }
 
@@ -481,6 +592,8 @@ export interface ExecuteReceipt {
   worktreesRemoved: string[];
   worktreesFailed: { path: string; reason: string }[];
   watcherDirsRemoved: string[];
+  stashesDropped: string[];
+  gcRan: boolean;
   errors: string[];
 }
 
@@ -495,6 +608,8 @@ export function executePlan(plan: CleanupPlan, args: CleanupArgs): ExecuteReceip
     worktreesRemoved: [],
     worktreesFailed: [],
     watcherDirsRemoved: [],
+    stashesDropped: [],
+    gcRan: false,
     errors: [],
   };
 
@@ -566,6 +681,28 @@ export function executePlan(plan: CleanupPlan, args: CleanupArgs): ExecuteReceip
     }
   }
 
+  // Stale stashes — opt-in only. Drop highest index first so lower stash@{N}
+  // refs stay valid as the list shrinks.
+  if (args.dropStaleStashes && plan.staleStashes.length > 0) {
+    const byIndexDesc = [...plan.staleStashes].sort((a, b) => {
+      const ia = Number(/\{(\d+)\}/.exec(a.ref)?.[1] ?? -1);
+      const ib = Number(/\{(\d+)\}/.exec(b.ref)?.[1] ?? -1);
+      return ib - ia;
+    });
+    for (const s of byIndexDesc) {
+      const del = tryGit(["stash", "drop", s.ref]);
+      if (del.ok) r.stashesDropped.push(s.ref);
+      else r.errors.push(`stash drop ${s.ref}: ${del.stderr.split("\n")[0]}`);
+    }
+  }
+
+  // git gc — repack when the loose-object count crossed the threshold.
+  if (plan.gc.willRun) {
+    const gc = tryGit(["gc", "--quiet"]);
+    if (gc.ok) r.gcRan = true;
+    else r.errors.push(`git gc: ${gc.stderr.split("\n")[0]}`);
+  }
+
   return r;
 }
 
@@ -603,9 +740,26 @@ export function renderPlan(plan: CleanupPlan, args: CleanupArgs): string {
   lines.push(`Remote branches to delete (${plan.remoteBranches.length}):`);
   for (const b of plan.remoteBranches) lines.push(`  origin/${b.name}  — ${b.reason} (PR #${b.prNumber})`);
   lines.push(`Worktrees to remove (${plan.worktrees.length}):`);
-  for (const w of plan.worktrees) lines.push(`  ${w.path}  — ${w.reason}${w.branch ? ` [${w.branch}]` : ""}`);
+  for (const w of plan.worktrees) {
+    const tag = w.branch ? ` [${w.branch}]` : w.prNumber ? ` (PR #${w.prNumber})` : "";
+    lines.push(`  ${w.path}  — ${w.reason}${tag}`);
+  }
   lines.push(`Watcher state dirs to remove (${plan.watcherDirs.length}):`);
   for (const w of plan.watcherDirs) lines.push(`  ${w.path}  — PR #${w.prNumber} ${w.state}`);
+  if (plan.staleStashes.length > 0) {
+    const verb = args.dropStaleStashes ? "to drop" : "(stale — pass --drop-stale-stashes to drop)";
+    lines.push(`Stale stashes ${verb} (${plan.staleStashes.length}):`);
+    for (const s of plan.staleStashes) {
+      lines.push(`  ${s.ref}  — base branch '${s.baseBranch}' is gone — ${s.message}`);
+    }
+  }
+  if (plan.gc.looseObjects > 0) {
+    lines.push(
+      plan.gc.willRun
+        ? `git gc: will run (${plan.gc.looseObjects} loose objects)`
+        : `git gc: skipped (${plan.gc.looseObjects} loose objects, below threshold or --no-gc)`,
+    );
+  }
   if (plan.notes.length > 0) {
     lines.push("");
     lines.push("Notes:");
@@ -635,6 +789,8 @@ export function renderReceipt(r: ExecuteReceipt): string {
     for (const f of r.worktreesFailed) lines.push(`    ${f.path}: ${f.reason}`);
   }
   lines.push(`  watcher state dirs removed: ${r.watcherDirsRemoved.length}`);
+  if (r.stashesDropped.length > 0) lines.push(`  stale stashes dropped: ${r.stashesDropped.length}`);
+  if (r.gcRan) lines.push(`  git gc: done`);
   if (r.errors.length > 0) {
     lines.push(`  errors: ${r.errors.length}`);
     for (const e of r.errors) lines.push(`    ${e}`);

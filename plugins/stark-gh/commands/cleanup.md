@@ -2,9 +2,10 @@
 name: cleanup
 description: >-
   Sweep the local + remote repo for merged-PR branches, stale tracking refs,
-  worktree leftovers, and merged-PR watcher state. Rebases the current branch
+  worktree leftovers (including detached-HEAD review worktrees), merged-PR
+  watcher state, stale stashes, and loose objects. Rebases the current branch
   onto upstream and applies linear-tree git config so the history stays sharp.
-argument-hint: "[--pr N] [--dry-run] [--keep-branch NAME ...] [--no-rebase] [--no-watcher-cleanup] [--no-config] [--force] [--json]"
+argument-hint: "[--pr N] [--dry-run] [--keep-branch NAME ...] [--no-rebase] [--no-watcher-cleanup] [--no-config] [--no-gc] [--drop-stale-stashes] [--force] [--json]"
 allowed-tools: Bash
 model: sonnet
 ---
@@ -56,12 +57,28 @@ applies linear-tree git config (`pull.rebase=true`, `rebase.autoStash=true`,
 `fetch.pruneTags=true`), rebases current feature branch onto its upstream
 (or fast-forwards default), deletes local branches whose PR merged or whose
 upstream is gone, deletes the corresponding remote branches, removes worktrees
-pinned to deleted branches, removes watcher state dirs for PRs that GitHub
-reports as MERGED/CLOSED.
+pinned to deleted branches **plus detached-HEAD review worktrees**
+(`review-*-prN-*`) whose PR is MERGED/CLOSED, removes watcher state dirs for
+PRs that GitHub reports as MERGED/CLOSED, surfaces stale stashes (base branch
+gone), and runs `git gc` when loose objects pile up.
 
 **Single PR (`--pr N`)** — narrow cleanup for one PR. Deletes its head branch
 local + remote (if the PR is MERGED/CLOSED, not on the default branch, and not
-cross-repo), removes any worktree on that branch, removes its watcher state.
+cross-repo), removes any worktree on that branch (including a detached review
+worktree for that PR), removes its watcher state.
+
+## Worktrees, stashes, objects
+
+- **Detached-HEAD review worktrees** — `/stark-review` provisions
+  `review-*-prN-single` worktrees with no branch ref, so the branch-pinned
+  sweep can't see them. The full sweep matches them by path, confirms the PR
+  is MERGED/CLOSED, and removes them only when the tree is clean (a dirty one
+  is reported and skipped unless `--force`).
+- **Stale stashes** — a stash whose base branch no longer exists is *surfaced*
+  in the plan but never dropped silently. Pass `--drop-stale-stashes` to drop
+  them (highest index first).
+- **Loose objects** — when `git count-objects` reports ≥ 50 loose objects, the
+  sweep runs `git gc --quiet`. Skip with `--no-gc`.
 
 ## Safety
 
@@ -71,6 +88,7 @@ cross-repo), removes any worktree on that branch, removes its watcher state.
   (then `git branch -D` is used).
 - Worktrees with uncommitted changes will refuse to remove unless `--force` is
   passed (which forwards `--force` to `git worktree remove`).
+- Stale stashes are surfaced but never dropped without `--drop-stale-stashes`.
 - Rebase failures auto-abort; the user lands back where they started.
 - Dirty working tree blocks the whole run (exit 12) — commit/stash first.
 
@@ -84,5 +102,7 @@ cross-repo), removes any worktree on that branch, removes its watcher state.
 | `--no-rebase` | Skip the rebase / fast-forward phase |
 | `--no-watcher-cleanup` | Skip the `~/.claude/code-review/stark-gh/watchers/...` sweep |
 | `--no-config` | Skip the linear-tree `git config` writes |
-| `--force` | Use `git branch -D` and `git worktree remove --force` for unsafe targets |
+| `--no-gc` | Skip the `git gc` repack step |
+| `--drop-stale-stashes` | Drop stashes whose base branch no longer exists (default: surface only) |
+| `--force` | Use `git branch -D`, `git worktree remove --force`, and force-remove dirty review worktrees |
 | `--json` | Emit plan + receipt as JSON (suitable for piping) |
