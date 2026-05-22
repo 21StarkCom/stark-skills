@@ -409,7 +409,9 @@ function buildGhEnv(envOverride?: Record<string, string>): NodeJS.ProcessEnv {
 /** Resolve the GitHub App installation token for a specific agent identity
  * (stark-claude / stark-codex / stark-gemini). Cached per process for the
  * agent's ~1h token lifetime. Tokens are NEVER injected into the agent CLI
- * environment — only into the gh transport that POSTs the review. */
+ * environment — only into the gh transport that POSTs the review and the git
+ * transport that pushes fix commits. Callers that may run long after a token
+ * was first minted (the POST and push steps) pass forceRefresh to re-mint. */
 const tokenCache: Map<AgentName, string> = new Map();
 
 export function _resetTokenCacheForTests(): void {
@@ -421,13 +423,17 @@ export interface TokenForAgentOpts {
   toolsDir?: string;
   spawnFn?: typeof spawnCollect;
   nodeBin?: string;
+  /** Bypass and overwrite the per-process cache. GH App installation tokens
+   * live ~1h, but a single review round can run longer; the POST and push
+   * steps force a fresh mint so they never present an expired credential. */
+  forceRefresh?: boolean;
 }
 
 export async function tokenForAgent(
   agent: AgentName,
   opts: TokenForAgentOpts = {},
 ): Promise<string> {
-  const cached = tokenCache.get(agent);
+  const cached = opts.forceRefresh ? undefined : tokenCache.get(agent);
   if (cached) return cached;
   // Default to the installed TS CLI at ~/.claude/code-review/tools/github_app.ts.
   // Override via `toolsDir` for tests / out-of-tree invocations.
@@ -2556,8 +2562,9 @@ export async function cleanupStaleForkRemote(
 export interface PushOpts {
   worktree: string;
   target: PushTarget;
-  /** GH App installation token. Used for fork pushes via GIT_ASKPASS; NEVER
-   * embedded in a URL or argv. */
+  /** GH App installation token. Authenticates both origin and fork pushes via
+   * GIT_ASKPASS; NEVER embedded in a URL or argv. When omitted, the origin
+   * push falls back to ambient git credentials (test / non-token callers). */
   token?: string;
   spawnFn?: typeof spawnCollect;
 }
@@ -2568,18 +2575,60 @@ export interface PushResult {
   stderr: string;
 }
 
-/** Execute the push. Same-repo: `git push origin HEAD:<ref>`. Fork-with-MCM:
- * add a temporary `stark-fork-push` remote, push via GIT_ASKPASS reading
- * STARK_PUSH_TOKEN from env, then remove the remote. Never `--force`. */
+/** Write a one-shot GIT_ASKPASS helper that echoes $STARK_PUSH_TOKEN, so the
+ * token reaches git via env + a 0700 temp file — never argv or a remote URL.
+ * Returns the script path and a cleanup fn. */
+function makeAskpass(): { askpath: string; cleanup: () => void } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "stark-askpass-"));
+  const askpath = path.join(dir, "askpass.sh");
+  fs.writeFileSync(askpath, '#!/bin/sh\nprintf "%s" "$STARK_PUSH_TOKEN"\n', { mode: 0o700 });
+  fs.chmodSync(askpath, 0o700);
+  return {
+    askpath,
+    cleanup: () => {
+      try { fs.unlinkSync(askpath); } catch { /* */ }
+      try { fs.rmdirSync(dir); } catch { /* */ }
+    },
+  };
+}
+
+/** Execute the push. Never `--force`.
+ *  - origin (same-repo) with a token: push over `origin` with the token fed
+ *    via GIT_ASKPASS and ambient credential helpers disabled (`-c
+ *    credential.helper=`), so neither a stale keychain entry nor an expired
+ *    `gh`/`GH_TOKEN` credential can shadow the freshly minted token.
+ *  - origin without a token: bare `git push origin` on ambient credentials.
+ *  - fork-with-MCM: add a temporary `stark-fork-push` remote, push via the
+ *    same GIT_ASKPASS path, then remove the remote. */
 export async function pushBranch(opts: PushOpts): Promise<PushResult> {
   const spawn = opts.spawnFn ?? spawnCollect;
   if (opts.target.kind === "origin") {
-    const sp = await spawn(
-      "git",
-      ["-C", opts.worktree, "push", "origin", `HEAD:${opts.target.ref}`],
-      { env: process.env },
-    );
-    return analyzePushResult(sp);
+    // No token: legacy / test path — rely on ambient git credentials.
+    if (!opts.token) {
+      const sp = await spawn(
+        "git",
+        ["-C", opts.worktree, "push", "origin", `HEAD:${opts.target.ref}`],
+        { env: process.env },
+      );
+      return analyzePushResult(sp);
+    }
+    const { askpath, cleanup } = makeAskpass();
+    try {
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        GIT_ASKPASS: askpath,
+        GIT_TERMINAL_PROMPT: "0",
+        STARK_PUSH_TOKEN: opts.token,
+      };
+      const sp = await spawn(
+        "git",
+        ["-C", opts.worktree, "-c", "credential.helper=", "push", "origin", `HEAD:${opts.target.ref}`],
+        { env },
+      );
+      return analyzePushResult(sp);
+    } finally {
+      cleanup();
+    }
   }
   // Fork push via askpass.
   if (!opts.token) {
@@ -2588,10 +2637,7 @@ export async function pushBranch(opts: PushOpts): Promise<PushResult> {
   if (!opts.target.cloneUrl) {
     return { ok: false, conflict: false, stderr: "fork push requires cloneUrl" };
   }
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "stark-askpass-"));
-  const askpath = path.join(dir, "askpass.sh");
-  fs.writeFileSync(askpath, '#!/bin/sh\nprintf "%s" "$STARK_PUSH_TOKEN"\n', { mode: 0o700 });
-  fs.chmodSync(askpath, 0o700);
+  const { askpath, cleanup } = makeAskpass();
   try {
     // Add the fork remote (no embedded credentials in URL).
     const addSp = await spawn(
@@ -2611,7 +2657,7 @@ export async function pushBranch(opts: PushOpts): Promise<PushResult> {
       };
       const sp = await spawn(
         "git",
-        ["-C", opts.worktree, "push", FORK_PUSH_REMOTE, `HEAD:${opts.target.ref}`],
+        ["-C", opts.worktree, "-c", "credential.helper=", "push", FORK_PUSH_REMOTE, `HEAD:${opts.target.ref}`],
         { env },
       );
       return analyzePushResult(sp);
@@ -2621,8 +2667,7 @@ export async function pushBranch(opts: PushOpts): Promise<PushResult> {
       } catch { /* */ }
     }
   } finally {
-    try { fs.unlinkSync(askpath); } catch { /* */ }
-    try { fs.rmdirSync(dir); } catch { /* */ }
+    cleanup();
   }
 }
 
@@ -2972,30 +3017,31 @@ export async function main(
       const newSha = shaSp.status === 0 ? shaSp.stdout.trim() : "";
       appendAudit({ action: "commit", round: pass.round, sha: newSha, files: stagedPaths }, { home, repo, pr });
 
-      // Push (gh app token for fork-with-MCM; redact in audit). pushTarget was
-      // resolved up-front (before the fixer ran) so we know a push path exists.
-      let pushToken: string | undefined;
-      if (pushTarget.kind === "fork") {
-        try {
-          pushToken = await tokenForAgent(pass.postingAgent, {
-            repo,
-            ...(spawnD ? { spawnFn: spawnD } : {}),
-          });
-        } catch (err) {
-          const reason = (err as Error).message;
-          appendAudit({ action: "skip", round: pass.round, reason: `push_token_failed: ${reason}` }, { home, repo, pr });
-          terminalCode = { code: "push_token_failed", message: reason };
-          break;
-        }
+      // Push. Mint a FRESH GH App token immediately before pushing — a single
+      // review round can outlast the ~1h installation-token lifetime, so a
+      // round-start token may already be expired. forceRefresh re-mints, and
+      // pushBranch authenticates origin and fork pushes alike via GIT_ASKPASS.
+      // pushTarget was resolved up-front (before the fixer ran).
+      let pushToken: string;
+      try {
+        pushToken = await tokenForAgent(pass.postingAgent, {
+          repo,
+          forceRefresh: true,
+          ...(spawnD ? { spawnFn: spawnD } : {}),
+        });
+      } catch (err) {
+        const reason = (err as Error).message;
+        appendAudit({ action: "skip", round: pass.round, reason: `push_token_failed: ${reason}` }, { home, repo, pr });
+        terminalCode = { code: "push_token_failed", message: reason };
+        break;
       }
       const pushRes = await pushBranch({
         worktree: cli.worktree,
         target: pushTarget,
-        ...(pushToken ? { token: pushToken } : {}),
+        token: pushToken,
         ...(spawnD ? { spawnFn: spawnD } : {}),
       });
-      const auditOpts: AppendAuditOpts = { home, repo, pr };
-      if (pushToken) auditOpts.redactInLogs = [pushToken];
+      const auditOpts: AppendAuditOpts = { home, repo, pr, redactInLogs: [pushToken] };
       if (!pushRes.ok) {
         appendAudit({
           action: "skip", round: pass.round,
@@ -3278,8 +3324,11 @@ async function runReviewPass(ctx: PassCtx, deps: PassDeps): Promise<PassResult> 
     let posterToken: string | undefined;
     if (!cli.dryRun) {
       try {
+        // Force a fresh mint: a long review round can outlast the token's
+        // ~1h lifetime, so a round-start token may be expired by POST time.
         posterToken = await tokenForAgent(postingAgent, {
           repo,
+          forceRefresh: true,
           ...(deps.spawnFn ? { spawnFn: deps.spawnFn } : {}),
         });
       } catch (err) {

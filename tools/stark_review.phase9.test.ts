@@ -360,7 +360,7 @@ test("parseCli: --max-rounds rejects values above the ceiling", () => {
   assert.equal(r.config, undefined);
 });
 
-test("pushBranch: same-repo uses origin, no token in env, no extraheader", async () => {
+test("pushBranch: origin without a token uses a bare push (legacy/test path)", async () => {
   const wt = tmpDir("wt");
   const calls: { cmd: string; args: string[]; env?: any }[] = [];
   const fakeSpawn = async (cmd: string, args: string[], opts: any) => {
@@ -379,6 +379,46 @@ test("pushBranch: same-repo uses origin, no token in env, no extraheader", async
   for (const a of calls[0].args) {
     assert.ok(!/extraheader/i.test(a));
     assert.ok(!a.includes("ghp_"));
+  }
+  assert.ok(!calls[0].env?.GIT_ASKPASS, "bare push must not set GIT_ASKPASS");
+});
+
+test("pushBranch: origin with a token uses GIT_ASKPASS + disables credential helper", async () => {
+  const wt = tmpDir("wt");
+  const calls: { cmd: string; args: string[]; env?: any }[] = [];
+  let askpassPath: string | undefined;
+  const fakeSpawn = async (cmd: string, args: string[], opts: any) => {
+    calls.push({ cmd, args, env: opts?.env });
+    if (opts?.env?.GIT_ASKPASS) askpassPath = opts.env.GIT_ASKPASS;
+    return { stdout: "", stderr: "", status: 0 };
+  };
+  const TOKEN = "ghs_origin_push_token";
+  const r = await pushBranch({
+    worktree: wt,
+    target: { kind: "origin", ref: "main", fullName: "o/r" },
+    token: TOKEN,
+    spawnFn: fakeSpawn as any,
+  });
+  assert.equal(r.ok, true);
+  const pushCall = calls.find((c) => c.args.includes("push") && c.args.includes("origin"));
+  assert.ok(pushCall, "push call should target origin");
+  // Ambient credential helpers (osxkeychain / gh) disabled so neither a stale
+  // keychain entry nor an expired GH_TOKEN can shadow the freshly minted token.
+  const ci = pushCall!.args.indexOf("-c");
+  assert.ok(
+    ci >= 0 && pushCall!.args[ci + 1] === "credential.helper=",
+    "origin token push must pass -c credential.helper=",
+  );
+  // Token reaches git via GIT_ASKPASS env only — never argv or a URL.
+  assert.equal(pushCall!.env.GIT_TERMINAL_PROMPT, "0");
+  assert.equal(pushCall!.env.STARK_PUSH_TOKEN, TOKEN);
+  assert.ok(pushCall!.env.GIT_ASKPASS && pushCall!.env.GIT_ASKPASS.endsWith("askpass.sh"));
+  for (const a of pushCall!.args) {
+    assert.ok(!a.includes(TOKEN), "token must not appear in argv");
+    assert.ok(!/extraheader/i.test(a));
+  }
+  if (askpassPath) {
+    assert.ok(!fs.existsSync(askpassPath), "askpass.sh should be deleted after push");
   }
 });
 
@@ -408,6 +448,12 @@ test("pushBranch: fork uses GIT_ASKPASS, never URL-embedded token", async () => 
   assert.equal(pushCall!.env.GIT_TERMINAL_PROMPT, "0");
   assert.equal(pushCall!.env.STARK_PUSH_TOKEN, TOKEN);
   assert.ok(pushCall!.env.GIT_ASKPASS && pushCall!.env.GIT_ASKPASS.endsWith("askpass.sh"));
+  // Ambient credential helpers disabled so a host-matching helper cannot shadow the token.
+  const fci = pushCall!.args.indexOf("-c");
+  assert.ok(
+    fci >= 0 && pushCall!.args[fci + 1] === "credential.helper=",
+    "fork token push must pass -c credential.helper=",
+  );
   // Argv must NOT include the token or extraheader.
   for (const a of pushCall!.args) {
     assert.ok(!a.includes(TOKEN));

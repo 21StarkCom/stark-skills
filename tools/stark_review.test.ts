@@ -213,6 +213,22 @@ test("tokenForAgent: caches per process and surfaces failures", async () => {
   assert.equal(calls, 1, "token must be cached after first resolution");
 });
 
+test("tokenForAgent: forceRefresh bypasses the cache", async () => {
+  _resetTokenCacheForTests();
+  let calls = 0;
+  const fakeSpawn = async () => {
+    calls++;
+    return { stdout: `ghs_fake_token_${calls}\n`, stderr: "", status: 0 };
+  };
+  const t1 = await tokenForAgent("codex", { repo: "o/r", spawnFn: fakeSpawn });
+  const t2 = await tokenForAgent("codex", { repo: "o/r", spawnFn: fakeSpawn, forceRefresh: true });
+  assert.equal(calls, 2, "forceRefresh must re-mint even when a token is cached");
+  assert.notEqual(t1, t2, "forceRefresh returns the freshly minted token");
+  const t3 = await tokenForAgent("codex", { repo: "o/r", spawnFn: fakeSpawn });
+  assert.equal(calls, 2, "a non-refresh call after a refresh stays cached");
+  assert.equal(t3, t2, "the cache now holds the refreshed token");
+});
+
 test("tokenForAgent: throws on subprocess failure", async () => {
   _resetTokenCacheForTests();
   const fakeSpawn = async () => ({ stdout: "", stderr: "boom", status: 1 });
