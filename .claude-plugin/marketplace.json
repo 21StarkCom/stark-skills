@@ -1,6 +1,6 @@
 {
   "name": "stark-skills",
-  "description": "Local stark-skills marketplace — multi-agent code review and GitHub workflow plugins",
+  "description": "Local stark-skills marketplace — multi-agent code review, GitHub workflow, and token-efficiency plugins",
   "owner": {
     "name": "Evinced",
     "email": "engineering@evinced.com"
@@ -13,6 +13,14 @@
       "version": "0.1.0",
       "category": "productivity",
       "tags": ["github", "pr", "workflow"]
+    },
+    {
+      "name": "caveman",
+      "description": "Ultra-compressed communication mode — cuts ~75% of output tokens, keeps full technical accuracy",
+      "source": "./plugins/caveman",
+      "version": "0.1.0",
+      "category": "productivity",
+      "tags": ["tokens", "brevity", "communication", "cost"]
     }
   ]
 }
