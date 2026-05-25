@@ -8,7 +8,7 @@ Key architectural decisions:
 
 - **JSONL append-only spool is the contract.** Emit (host) and server (container) are decoupled by the filesystem — phases can be built and tested independently.
 - **Read-only spool mount + host-side prune.** Container can never tamper with evidence; retention split is enforced from day one, not bolted on later.
-- **Per-install token + bootstrap-code → session cookie.** Auth is wired in Phase 4 (server) before any UI exists; UI in Phase 5 only consumes it. **The bootstrap helper (`tools/observability_open.ts`) never echoes the raw token to stdout in any code path** (no `--print-token` flag exists). It writes the session cookie to a 0600 file for scripted use and stores the long-lived token in the macOS Keychain (service `stark-observability-token`). Scripts that need Bearer auth read the token directly from the Keychain via the OS `security` CLI — distinct from any helper stdout.
+- **Per-install token + bootstrap-code → session cookie.** Auth is wired in Phase 4 (server) before any UI exists; UI in Phase 5 only consumes it. **The bootstrap helper (`tools/observability_open.ts`) never echoes the raw token to stdout in any code path** (no `--print-token` flag exists). It writes the session cookie to a 0600 file for scripted use and stores BOTH long-lived tokens in the macOS Keychain — the bootstrap/UI Bearer token under service `stark-observability-bootstrap-token`, the prune-only token under service `stark-observability-prune-token`. There is no legacy `stark-observability-token` service: every helper, script, SKILL.md snippet, and CLI uses one of the two scoped service names. Scripts that need Bearer auth read the appropriate token directly from the Keychain via the OS `security` CLI — distinct from any helper stdout.
 - **Liveness via run-heartbeat + `parent_pid` + `host_boot_id` + hostinfo `live_pids[]`.** Container performs NO `/proc` introspection. macOS Docker Desktop cannot mount host `/proc`, so liveness consumes a host-maintained sidecar (`hostinfo/host.json`) exclusively.
 - **Single ownership rule for emit lifecycle:** the **dispatcher entry point** owns `startRun` / `endRun` / `startRunHeartbeat` AND `startSubAgent` / `endSubAgent` / `startHeartbeat`. `runProcess` does ONE observability thing only — `attachChild` to tap stdout/stderr. This eliminates double-end / missing-summary risk and is enforced as a code rule in Phase 6.
 - **Heartbeat-stop is strictly a timer cancel; lifecycle calls own termination.** `startRunHeartbeat(ctx)` and `startHeartbeat(ctx, sa)` return `{stop}` objects whose `stop()` ONLY cancels the timer and releases the local interval handle. It does NOT call `endRun` / `endSubAgent` / `run_end` / `subagent_end`. The dispatcher always calls `endRun` (or `endSubAgent`) **first**, then `runHb.stop()` (or `saHb.stop()`) **second**. This rule applies to in-process callers (the dispatcher's own timer handle) and to the daemon-internal run-heartbeat timer (which is cancelled inside `endRun` before the daemon flushes and exits).
@@ -99,7 +99,7 @@ Can be done in parallel with Phase 1:
    - Acceptance: start ticker; `cat ~/.claude/code-review/observability/hostinfo/host.json | jq '.uptime_seconds > 0'` returns `true`; `boot_time_seconds` matches the `sysctl` parse; `live_pids[]` includes the ticker's own PID and the current shell's PID; field updates within 5 s; the rename is atomic verified by a torn-write stress test (1000 rapid reads while the ticker writes 1000 times → zero parse errors).
 
 3. **Docker compose + Dockerfile skeleton with explicit container name + executable LAN bootstrap sequence**
-   - What: Multi-stage `node:22-alpine` image, deps `better-sqlite3`, `chokidar`, `ws`, `fastify`, `cookie`, `@fastify/static`, `@fastify/rate-limit`. **Alpine `better-sqlite3` build requirements:** stage `builder` (FROM `node:22-alpine`) installs `python3 make g++ gcc libc-dev` via `apk add --no-cache --virtual .build-deps`, copies `package.json` + `package-lock.json`, runs `npm ci --build-from-source` to compile native modules, then drops the build deps. The runtime stage starts from a fresh `node:22-alpine` and `COPY --from=builder /app/node_modules /app/node_modules`, leaving the toolchain out of the final image. This is the only known-reproducible install path for `better-sqlite3` on `node:22-alpine` as of 2026-05-25. The image installs **no `sqlite3` CLI** — all index mutations go through Node's `better-sqlite3` in the server process; the prune CLI uses the server's internal HTTP endpoint, not direct DB access (see Phase 7 Task 3). The container generates THREE scoped secrets on first run if missing (replaces the prior single-token design — one long-lived secret reused as bootstrap + general Bearer + retention credential is a single point of compromise with no revocation surface):
+   - What: Multi-stage `node:22-alpine` image, deps `better-sqlite3`, `chokidar`, `ws`, `fastify`, `cookie`, `@fastify/static`, `@fastify/rate-limit`, `zod` (needed by the Phase 3 retention-notify request schemas and the Phase 4 HTTP API request schemas — must ship in the initial Phase 1 `package.json` + `package-lock.json` so the first Phase 3 import does not break the container at startup with a `MODULE_NOT_FOUND` error). **Alpine `better-sqlite3` build requirements:** stage `builder` (FROM `node:22-alpine`) installs `python3 make g++ gcc libc-dev` via `apk add --no-cache --virtual .build-deps`, copies `package.json` + `package-lock.json`, runs `npm ci --build-from-source` to compile native modules, then drops the build deps. The runtime stage starts from a fresh `node:22-alpine` and `COPY --from=builder /app/node_modules /app/node_modules`, leaving the toolchain out of the final image. This is the only known-reproducible install path for `better-sqlite3` on `node:22-alpine` as of 2026-05-25. The image installs **no `sqlite3` CLI** — all index mutations go through Node's `better-sqlite3` in the server process; the prune CLI uses the server's internal HTTP endpoint, not direct DB access (see Phase 7 Task 3). The container generates THREE scoped secrets on first run if missing (replaces the prior single-token design — one long-lived secret reused as bootstrap + general Bearer + retention credential is a single point of compromise with no revocation surface):
      - `/data/bootstrap_token` (256-bit, mode 0600) — accepted ONLY by `POST /api/auth/bootstrap`; the operator-visible secret the helper exchanges for a session.
      - `/data/prune_token` (256-bit, mode 0600) — accepted ONLY by `POST /api/internal/retention/notify` on the separate loopback retention listener (Phase 4 Task 1); never accepted as session/UI Bearer.
      - `/data/token` retained as a backward-compat symlink → `/data/bootstrap_token` for one release, removed in Phase 8 docs cut.
@@ -112,7 +112,14 @@ Can be done in parallel with Phase 1:
        environment:
          OBSERVABILITY_PUBLISHED_HOST: "127.0.0.1:7700"
          OBSERVABILITY_BIND: "0.0.0.0"
-         OBSERVABILITY_BIND_RETENTION: "127.0.0.1"
+         OBSERVABILITY_BIND_RETENTION: "0.0.0.0"
+         OBSERVABILITY_RETENTION_PUBLISHED_HOST: "127.0.0.1:7701"
+         # OBSERVABILITY_BIND_RETENTION MUST remain 0.0.0.0 — see Phase 4 Task 1
+         # Docker userland-proxy gotcha. The host-publish-loopback property is
+         # enforced by OBSERVABILITY_RETENTION_PUBLISHED_HOST + the
+         # ports: ["127.0.0.1:7701:7701"] mapping, NOT by the in-container bind.
+         # The LAN override file MUST NOT republish 7701 and MUST NOT change
+         # OBSERVABILITY_RETENTION_PUBLISHED_HOST.
          # OBSERVABILITY_ALLOW_LAN, OBSERVABILITY_TLS_TERMINATED intentionally
          # unset in the default file — the LAN override file sets both.
        ```
@@ -145,10 +152,11 @@ Can be done in parallel with Phase 1:
    - **Server boot binding rules (the container CANNOT introspect Compose `ports:` mappings from inside, so an explicit env-var contract is the only reliable signal of what host-side address is published):**
      - **Default bind inside the container:** `0.0.0.0` (per design §"Network binding"). Host exposure is constrained by `docker-compose.yml`'s default `ports: ["127.0.0.1:7700:7700"]` — only host loopback is published. The container-internal `0.0.0.0` is required so Docker's port forwarder can reliably reach the server through the published port (binding to `127.0.0.1` inside a container is not reliably reachable through Docker port publishing depending on userland-proxy configuration).
      - **Required env contract:** every Compose file MUST set `OBSERVABILITY_PUBLISHED_HOST` to the exact host-side `<address>:<port>` it publishes to (`127.0.0.1:7700` in the default file; `<lan-ip>:7700` in the LAN override). The container reads this env at boot and uses its value — never `req.socket.remoteAddress`, which Docker's userland proxy replaces with a gateway address such as `192.168.65.1`/`172.x` — as the authoritative answer to "what host-side address am I exposed on". The server refuses to boot (non-zero exit + recovery instructions) if `OBSERVABILITY_PUBLISHED_HOST` is unset.
-     - **Non-loopback publish refused unless authorized:** if `OBSERVABILITY_PUBLISHED_HOST` is not in `{127.0.0.1:7700, ::1:7700, localhost:7700}`, the server refuses to boot unless ALL THREE conditions hold simultaneously:
+     - **Non-loopback publish refused unless authorized:** if `OBSERVABILITY_PUBLISHED_HOST` is not in `{127.0.0.1:7700, ::1:7700, localhost:7700}`, the server refuses to boot unless ALL FOUR conditions hold simultaneously:
        1. `OBSERVABILITY_ALLOW_LAN=1` is set in the container env, AND
        2. `/data/last_bootstrap_at` exists on the SQLite-index volume (written by `POST /api/auth/exchange` in Phase 4 Task 1 the first time a bootstrap code is redeemed), AND
-       3. `OBSERVABILITY_TLS_TERMINATED=1` is set (signals that an HTTPS reverse proxy fronts the listener; see the Phase 4 Task 1 cookie-`Secure`/WSS contract). The server's own listener never speaks HTTPS; operator-facing docs (Phase 8) point at `mkcert`-issued certs on a local reverse proxy as the recommended setup.
+       3. `OBSERVABILITY_TLS_TERMINATED=1` is set (signals that an HTTPS reverse proxy fronts the listener; see the Phase 4 Task 1 cookie-`Secure`/WSS contract). The server's own listener never speaks HTTPS; operator-facing docs (Phase 8) point at `mkcert`-issued certs on a local reverse proxy as the recommended setup, AND
+       4. The Node server's host-side `ports:` publish is REMOVED from the LAN override file (the published LAN address belongs exclusively to the Caddy sidecar; the Node listener is reachable only over the internal Compose `proxy` network at `observability:<OBSERVABILITY_PORT>`). At runtime the server middleware honors `X-Forwarded-Proto: https` ONLY when the connecting peer's IP resolves to the internal `proxy` network (verified via the bridge-interface peer address, NOT `req.socket.remoteAddress` which Docker's userland proxy makes unreliable); any request whose peer is NOT on the proxy network is rejected with 400 BEFORE the cookie/Bearer auth middleware runs. An operator who removes the Caddy sidecar and republishes the Node listener directly will see every protected route fail this trusted-proxy check, surfacing the misconfiguration as a hard refusal instead of a silent downgrade to plain HTTP carrying a forged `X-Forwarded-Proto: https`.
      - `OBSERVABILITY_BIND` overrides the container-internal bind only; it never substitutes for the three rules above.
      - On refusal the server prints an exact recovery instruction to `docker logs` and exits non-zero:
        ```
@@ -168,7 +176,7 @@ Can be done in parallel with Phase 1:
         node --experimental-strip-types tools/observability_open.ts --no-browser
         ```
         The helper has **two modes that consume the bootstrap code differently** so the same one-time code is never claimed twice — once was the original design's UX bug, where the helper exchanged the code itself and then asked the browser to also call `/api/auth/exchange`, but the code was already consumed.
-        - **Default (browser) mode** — invoked as `tools/observability_open.ts` with no flag. Reads `/data/bootstrap_token` via `docker exec stark-observability cat /data/bootstrap_token`, stores it in the macOS Keychain under service `stark-observability-bootstrap-token`, calls `POST /api/auth/bootstrap` to obtain a one-time code, opens `http://127.0.0.1:7700/?b=<code>` in the OS default browser, then EXITS. The browser-side mount script (Phase 5 Task 2) is what calls `POST /api/auth/exchange` with the code and receives the HttpOnly session cookie. The helper does NOT call exchange in this mode.
+        - **Default (browser) mode** — invoked as `tools/observability_open.ts` with no flag. Reads `/data/bootstrap_token` via `docker exec stark-observability cat /data/bootstrap_token`, stores it in the macOS Keychain under service `stark-observability-bootstrap-token`, also reads `/data/prune_token` via `docker exec` and stores it under service `stark-observability-prune-token`, calls `POST /api/auth/bootstrap` to obtain a one-time code, opens `http://127.0.0.1:7700/#b=<code>` in the OS default browser. The code lives in the URL FRAGMENT, not the query string — fragments are not transmitted in the HTTP request target so the still-valid 60-second code never appears in Node access logs, Caddy access logs, browser address-bar history before `history.replaceState`, or any in-flight diagnostic proxy capture. Then EXITS. The browser-side mount script (Phase 5 Task 2) parses `location.hash`, strips it via `history.replaceState(null, "", location.pathname)`, and calls `POST /api/auth/exchange` with the code to receive the HttpOnly session cookie. The helper does NOT call exchange in this mode.
         - **Headless mode** — invoked as `tools/observability_open.ts --no-browser` (used by the Phase 1 LAN bootstrap step 2 and by any scripted setup). Same Keychain population, same `POST /api/auth/bootstrap` call to obtain a code, and THEN the helper itself calls `POST /api/auth/exchange` on loopback, receives the session cookie, and writes it to `~/.claude/code-review/observability/session.cookie` (mode 0600, Netscape format for curl) for use by scripted clients (`curl -b $COOKIE_FILE`). The code is single-use; the helper consumes it; no browser is involved.
 
         In BOTH modes the server's `exchange` handler writes the marker file `/data/last_bootstrap_at` containing `new Date().toISOString()` (Phase 4 Task 1 spells out that write — it is the ONLY writer of the marker that authorizes future LAN binds). Neither mode echoes any token value to stdout.
@@ -177,10 +185,19 @@ Can be done in parallel with Phase 1:
         ```bash
         brew install mkcert nss 2>/dev/null || true
         mkcert -install
-        mkdir -p tools/observability_server/proxy/certs
-        mkcert -cert-file tools/observability_server/proxy/certs/lan.crt \
-               -key-file  tools/observability_server/proxy/certs/lan.key \
+        # Cert + key live OUTSIDE the repo tree so a stray `git add .` cannot
+        # accidentally commit the LAN TLS private key. The Caddy sidecar mounts
+        # this host path read-only in the LAN override file.
+        CERT_DIR="$HOME/.claude/code-review/observability/proxy/certs"
+        mkdir -p "$CERT_DIR"
+        chmod 0700 "$CERT_DIR"
+        mkcert -cert-file "$CERT_DIR/lan.crt" \
+               -key-file  "$CERT_DIR/lan.key" \
                192.168.1.42 stark-observability.local localhost 127.0.0.1
+        chmod 0600 "$CERT_DIR/lan.crt" "$CERT_DIR/lan.key"
+        # Belt-and-suspenders: the repo .gitignore covers tools/observability_server/proxy/
+        # so an old draft cert path cannot be committed either; a CI grep test fails
+        # the build if any `*.key` file appears under tracked paths.
         ```
      5. **Enable LAN with the mkcert-fronted reverse proxy.** Copy the example override into place and edit the bind address:
         ```bash
@@ -188,12 +205,17 @@ Can be done in parallel with Phase 1:
            tools/observability_server/docker-compose.override.yml
         # Edit the override to set the LAN bind, e.g. "192.168.1.42:7700:7700",
         # and confirm OBSERVABILITY_ALLOW_LAN=1 AND OBSERVABILITY_TLS_TERMINATED=1
+        # AND OBSERVABILITY_PORT=7799 (read by the Node server's bind code to
+        # override the default 7700 when the Caddy sidecar fronts the listener)
         # are set in the env block. The override declares a sidecar `proxy` service
-        # (Caddy) that mounts proxy/certs/, terminates TLS on the LAN address,
-        # and proxies to the Node server on an internal-only container network at
-        # http://observability:7799 (the Node server's actual bind in LAN mode
-        # moves to 0.0.0.0:7799 inside the container; the published LAN port
-        # 7700 belongs to the Caddy sidecar). The example override is checked in
+        # (Caddy) that mounts the host-private cert dir, terminates TLS on the LAN
+        # address, and proxies to the Node server on an internal-only container
+        # network at http://observability:7799 — matching OBSERVABILITY_PORT. In
+        # LAN mode the Node server binds 0.0.0.0:7799 inside the container; the
+        # published LAN port 7700 belongs exclusively to the Caddy sidecar; the
+        # override REMOVES the Node service's host-side `ports:` publish entirely
+        # so the Node listener is reachable only via the internal Compose network
+        # (no direct host path bypasses Caddy). The example override is checked in
         # with the Caddyfile already wired.
         ```
      6. **Restart with both overlays:**
@@ -235,7 +257,8 @@ Can be done in parallel with Phase 1:
      );
      CREATE INDEX IF NOT EXISTS idx_chunk_trunc_subagent ON chunk_truncations(subagent_id, seq);
      ```
-   - The `runs` table from §6 of the design gets one additional column added in this same migration: `writer_daemon_pid INTEGER` (nullable). Diagnostics-only; the liveness sweeper does NOT read it. Populated from `run_heartbeat.writer_daemon_pid` (see Phase 2 Task 8 / Phase 3 Task 2).
+   - The `runs` table from §6 of the design gets one additional column added in this same migration: `writer_daemon_pid INTEGER` (nullable). Populated from `run_heartbeat.writer_daemon_pid` (see Phase 2 Task 8 / Phase 3 Task 2). Read by the Phase 4 Task 4 sweeper step 6 (daemon-loss detection) — and only there.
+   - The `spool_files` table from §6 of the design gets three additional columns added in this same migration to support the Phase 3 Task 4 `pre-rename` / `update-mtime` two-step gate: `rewrite_pending INTEGER NOT NULL DEFAULT 0`, `rewrite_pending_size_bytes INTEGER` (nullable), `rewrite_pending_truncated_json TEXT` (nullable). The Phase 3 retention-notify endpoint reads and writes all three; the tailer reads `rewrite_pending` as its skip-while-rewrite-in-flight gate; the canonical `update-mtime` handler clears all three back to default values.
    - `chunk_offsets` is RETAINED (it carries `stream` + `encoding`, which the chunk SSE endpoint still needs for surviving chunks). `event_offsets` is the superset used for WS backfill of every event type.
    - Files: `tools/observability_server/migrations/001_init.sql`, `tools/observability_server/server/db.ts`.
    - Acceptance: starting the container with an empty `/data` produces `index.db` with `runs` (incl. `writer_daemon_pid` column), `subagents`, `progress_events`, `spool_files`, `tail_offsets`, `chunk_offsets`, `event_offsets`, `chunk_truncations` tables plus all indexes; restart is a no-op.
@@ -302,7 +325,7 @@ jq '.uptime_seconds > 0 and (.live_pids | length) > 0' \
 1. **Core in-process surface**
    - What: Implement the full surface from the design: `startRun`, `endRun`, `startSubAgent`, `endSubAgent`, `emitProgress`, `attachChild`, `startHeartbeat`, `startRunHeartbeat`.
    - Files: `tools/observability_emit_lib.ts` (new).
-   - Run-id: `crypto.randomUUID()`. Subagent id: `${runId}:${seq}` where `seq = ctx._nextSubagentSeq++`.
+   - Run-id: `crypto.randomUUID()`. Subagent id allocation is daemon-owned: the `start_subagent` UDS op (Task 3) is the only code path that mints an id; the daemon increments an internal `_nextSubagentSeq` counter inside its own process under the same writer-queue serialization that orders every other write, then returns `${runId}:${seq}` in the response. No client process maintains a subagent-seq counter; the client-side `RunCtx` carries no `_nextSubagentSeq` field. Two clients connected to the same run via `connectRun` therefore cannot accidentally mint the same `<runId>:1` — the only allocator is the single daemon process and its single writer queue.
    - `startRun(opts)`: reads `OBSERVABILITY_PER_RUN_MAX_MB` (default 2048) → `ctx.byteBudgetBytes`; reads `OBSERVABILITY_DISABLED=1` env → returns a stub disabled `RunCtx`; runs `fs.statfs(spoolDir)` low-disk preflight (< 1 GiB free → disable with `emit_status: "disabled", emit_disabled_reason: "low_disk"`); calls `paths_lib.ensureRoot()`; spawns the writer daemon with `--tracked-parent-pid <pid>` (default = `process.pid`; phase-execute passes the SKILL.md shell pid); writes initial `meta.json` atomically (`.tmp` + rename); captures `parent_pid = trackedParentPid` and `host_boot_id` (read once from `~/.claude/code-review/observability/hostinfo/host.json` if present, else from `sysctl -n kern.boottime`).
    - **`endRun(ctx, status)` semantics:** stops the daemon-internal run-heartbeat timer (the daemon ignores further heartbeat ticks once `end_run` is received); drains the writer queue; writes a final `run_end` JSONL record with the given status and TS-computed `ts = new Date().toISOString()`; fsyncs the current rotation file; rewrites `meta.json` with `ended_at = new Date().toISOString()` + `status`; closes the UDS server; deletes `writer.sock` + `writer.pid`; exits the daemon process with code 0. The dispatcher's local `RunCtx` handle becomes a stub after this call returns; subsequent `emitProgress` / `endSubAgent` calls on it are no-ops with a single stderr warning.
 
@@ -354,7 +377,9 @@ jq '.uptime_seconds > 0 and (.live_pids | length) > 0' \
      4. Deletes `.sock` and `.pid`, exits 0.
      The Phase 4 liveness sweeper sees the `runs.status = 'crashed'` row (written by the index writer from the daemon's `run_end`), matches its terminal-status filter, and does NOT re-touch it. There is no double-crashed-write race.
    - **Daemon lifecycle on SIGTERM/SIGHUP:** same as `end_run` but with `status: "error"`. (Different from parent-loss: SIGTERM is an explicit cooperative shutdown signal sent by an operator or by a wrapper script — distinct intent from "parent died mysteriously".)
-   - **Daemon lifecycle on SIGKILL (daemon itself killed):** stale socket remains on disk. The next `connectRun(runId)` from any caller detects no listener (ECONNREFUSED on connect) and treats the run as crashed-by-daemon-loss: emits a single stderr warning, returns a stub disabled client. The Phase 4 liveness sweeper covers the row: with the daemon dead, `run_heartbeat` writes stop, `runs.last_heartbeat_at` ages past 60 s, the daemon's pid is gone from `live_pids[]`, and the sweeper marks `status: 'crashed', crashed_reason: 'parent_exit'` (since the tracked parent — whatever it was — is also dead per the live_pids[] check). Idempotency: once written, the terminal-status filter prevents further updates.
+   - **Daemon lifecycle on SIGKILL (daemon itself killed) — two sub-cases distinguished by whether the tracked parent (dispatcher) is still alive:**
+     - **Sub-case A: daemon AND tracked parent both dead.** Stale socket remains on disk. The next `connectRun(runId)` from any caller detects no listener (ECONNREFUSED on connect) and treats the run as crashed-by-daemon-loss: emits a single stderr warning, returns a stub disabled client. The Phase 4 sweeper step 4 covers the row: `runs.last_heartbeat_at` ages past 60 s, the tracked-parent pid is gone from `live_pids[]`, and the sweeper writes `status: 'crashed', crashed_reason: 'parent_exit'`. Idempotency: the terminal-status filter prevents further updates.
+     - **Sub-case B: daemon dead but tracked parent (dispatcher) still alive.** The owning dispatcher's next lifecycle call (`startSubAgent` / `endSubAgent` / `emitProgress` / `endRun`) hits `ECONNREFUSED` against the now-stale `writer.sock`. The emit lib treats this as a fail-fast condition: it (1) logs one stderr line (`[observability] writer daemon for <runId> is gone — emit fails closed; dispatcher exiting non-zero`), (2) sets the process-local `__obs_disabled = { reason: "daemon_lost" }` flag (every subsequent emit call becomes a silent stub no-op), and (3) re-raises the original UDS error so the dispatcher's surrounding try/catch sees a real failure and exits non-zero through its normal error path — the dispatcher's `await endRun(ctx, 'error')` in the catch is itself stubbed out due to `__obs_disabled` and is harmless. The Phase 4 sweeper step 6 (added in this round of fixes) is the only sweeper rule that consults `runs.writer_daemon_pid` and only in conjunction with stale `last_heartbeat_at`: on hit it writes `status: 'crashed', crashed_reason: 'daemon_lost'` with a TS-bound `ended_at`. Phase 8 Task 2 has a dedicated failure-path test for this exact scenario (`kill -9 $(cat writer.pid)` while the dispatcher continues attempting to emit) asserting (a) the dispatcher exits non-zero within one lifecycle call, (b) the sweeper writes `crashed_reason: 'daemon_lost'` within 90 s, and (c) the row is idempotent on subsequent sweeper ticks.
    - **In-process and cross-process clients use the same API.** The emit lib exposes:
      ```ts
      export async function startRun(opts): Promise<RunCtx>           // spawns the daemon, awaits the readiness handshake, returns a RunCtx wired to it
@@ -373,14 +398,14 @@ jq '.uptime_seconds > 0 and (.live_pids | length) > 0' \
      - Killing the daemon (`kill -9 $(cat writer.pid)`) without `endRun` leaves a stale socket; a fresh `connectRun(runId)` detects it within 1 s and logs a single stderr line.
 
 4. **Chunk encoding + 64 KB split + non-consuming tap**
-   - What: `attachChild` adds non-consuming `'data'` listeners on `child.stdout` and `child.stderr`. Each Buffer is tested for valid UTF-8 (`Buffer.isUtf8(buf)`); on `false`, emit as `encoding: "base64"`. Chunks are split based on **serialized request size**, NOT raw Buffer length. Before sending each `emit_chunk` op the emit lib computes `Buffer.byteLength(JSON.stringify(request))` and re-slices the underlying data if that would exceed 56 KiB (leaves headroom under the daemon's 64 KiB request cap from Task 3 for JSON envelope overhead and any future field additions). Practical raw-slice ceilings: ~40 KiB for non-UTF-8 buffers (base64 expands 4/3 → ~54 KiB encoded plus envelope) and ~48 KiB for UTF-8 (JSON `\u00xx` escape worst case ~2x plus envelope). Every produced chunk shares the same `subagent_id` and `ts`; the writer queue assigns `seq` monotonically (daemon-assigned). The unit test in Task 4 explicitly plants a 64 KiB binary buffer and asserts every `emit_chunk` request fits under the cap before send.
+   - What: `attachChild` adds non-consuming `'data'` listeners on `child.stdout` and `child.stderr`. Each Buffer is tested for valid UTF-8 via `import { isUtf8 } from 'node:buffer'; isUtf8(buf)` — the function lives on the `node:buffer` module, NOT as a `Buffer` static method. `Buffer.isUtf8` is undefined in current Node 22 and would throw `TypeError` on the very first chunk, breaking the dispatcher's stream handling. On `false`, emit as `encoding: "base64"`. Chunks are split based on **serialized request size**, NOT raw Buffer length. Before sending each `emit_chunk` op the emit lib computes `Buffer.byteLength(JSON.stringify(request))` and re-slices the underlying data if that would exceed 56 KiB (leaves headroom under the daemon's 64 KiB request cap from Task 3 for JSON envelope overhead and any future field additions). Practical raw-slice ceilings: ~40 KiB for non-UTF-8 buffers (base64 expands 4/3 → ~54 KiB encoded plus envelope) and ~48 KiB for UTF-8 (JSON `\u00xx` escape worst case ~2x plus envelope). Every produced chunk shares the same `subagent_id` and `ts`; the writer queue assigns `seq` monotonically (daemon-assigned). The unit test in Task 4 explicitly plants a 64 KiB binary buffer and asserts every `emit_chunk` request fits under the cap before send.
    - **Non-consuming property guarded by unit test:** the test spawns a child, calls `attachChild` AFTER the dispatcher already attached its own `.on('data', ...)` consumer, and asserts the dispatcher's consumer still receives identical bytes byte-for-byte. If the test fails, the implementation falls back to `pipe()`-through-`PassThrough` and observes the PassThrough.
 
 5. **Redaction**
-   - What: `tools/observability_redact_lib.ts` (new) exports `redact(text: string): { text: string; redacted: boolean }`. Applies regex list from design §Security plus extras from `~/.claude/code-review/observability/redactors.json` (optional) and `OBSERVABILITY_REDACT_EXTRA_ENV` (CSV env-var names → their literal values become redaction targets). Replacement preserves character count: `<REDACTED:jwt>` padded with `*` to the matched length so log offsets stay stable.
-   - Applied **inside the daemon** before any write: every chunk, every `subagent_progress.payload` (deep-walked via `JSON.stringify` round-trip with string-leaf replacement), every `summary`, every `error` string.
+   - What: `tools/observability_redact_lib.ts` (new) exports two surfaces. **`redact(text: string): { text: string; redacted: boolean }`** for one-shot strings (subagent_progress.payload, summary, error) — applies the regex list from design §Security plus extras from `~/.claude/code-review/observability/redactors.json` (optional) and `OBSERVABILITY_REDACT_EXTRA_ENV` (CSV env-var names → their literal values become redaction targets). Replacement preserves character count: `<REDACTED:jwt>` padded with `*` to the matched length so log offsets stay stable. **`createStreamRedactor(): { feed(chunk: string): string; flush(): string }`** for chunked stdout/stderr — maintains a per-(run, subagent, stream) overlap buffer so a secret split across two `attachChild` Buffer arrivals, across the Phase 2 Task 4 56 KiB serialized-request-size split, or across base64-encoding boundaries is still matched. The redactor holds a tail of size `MAX_PATTERN_LEN - 1` where `MAX_PATTERN_LEN` is the longest configured pattern's worst-case match length, computed at boot from the active regex set, default 4096 bytes (covers JWTs, `sk-ant-...` keys, AKIA tokens, bearer headers, and any custom pattern from `redactors.json` up to that length; longer custom patterns are rejected at config load with a warning). `feed(chunk)` returns the safe-to-emit prefix (everything up to `len(buffered) - MAX_PATTERN_LEN + 1`) and retains the trailing tail; `flush()` is called on `end_subagent` and on `chunk-budget-exceeded` to emit the residual tail with one final regex pass.
+   - Applied **inside the daemon** before any write. For one-shot strings, `redact(...)` runs as before. For chunked output, the daemon owns one `createStreamRedactor()` instance per `(subagent_id, stream)`, feeds each incoming `emit_chunk.chunk` through `.feed()` to produce the value actually written to JSONL, and calls `.flush()` on `end_subagent`. The flushed remainder, if non-empty, is written as a final `subagent_stdout`/`subagent_stderr` event with the same `subagent_id`/`stream` and a daemon-assigned `seq` ordered before `subagent_end`.
    - Each event carrying any redaction sets a top-level `redacted: true` field.
-   - Acceptance: positive + negative cases for every built-in pattern (jwt, ghp_, ghs_, gho_, sk-, sk-ant-, AKIA, bearer-in-header).
+   - Acceptance: positive + negative cases for every built-in pattern (jwt, ghp_, ghs_, gho_, sk-, sk-ant-, AKIA, bearer-in-header), PLUS a boundary-split sweep that for each pattern (a) plants a literal secret of the longest example length, (b) writes it across the stream split at every byte offset from 1 to `MAX_PATTERN_LEN`, (c) writes it across an attachChild Buffer boundary at every byte offset, (d) writes it across the Phase 2 Task 4 56 KiB serialized-request-size split, and asserts the emitted JSONL contains zero unredacted occurrences of the raw secret in any case.
 
 6. **Byte budgets + chunk-budget-exceeded path**
    - What: Each chunk write inside the daemon increments `ctx.bytesWritten`. If the write would exceed `ctx.byteBudgetBytes`, the writer emits a single `subagent_progress { kind: "chunk-budget-exceeded" }` (only once per run), sets `ctx.byteBudgetExceeded = true`, rewrites `meta.json.byte_budget_exceeded = true` atomically, and silently drops further chunks. Lifecycle, progress (other kinds), heartbeat, and end events keep flowing.
@@ -503,13 +528,16 @@ jq '.uptime_seconds > 0 and (.live_pids | length) > 0' \
      3. Inside one `BEGIN/COMMIT`: `UPDATE spool_files SET rewrite_pending = 0, rewrite_pending_size_bytes = NULL, rewrite_pending_truncated_json = NULL WHERE run_id = ? AND rotation_index = ?`.
      4. Returns `{ "ok": true, "action": "abort-rewrite" }`. No destructive state was set by Call A, so there is nothing else to undo.
 
-   - **Server behavior on `action: "update-mtime"`:**
-     1. Validate Bearer token + loopback as above.
+   - **Server behavior on `action: "update-mtime"` (DESTRUCTIVE — this is the canonical post-rename transaction; the Phase 7 Call B description below MUST match this exactly; pre-rename only sets the gate, update-mtime does all destructive index work):**
+     1. Validate Bearer token (prune token, service `stark-observability-prune-token`) + retention listener as above.
      2. Validate body matches update-mtime schema.
      3. Inside a single `BEGIN/COMMIT`:
-        - `UPDATE spool_files SET mtime_ns = new_mtime_ns WHERE run_id = ? AND rotation_index = ?`
-        - `UPDATE tail_offsets SET mtime_ns = new_mtime_ns WHERE file_path = ?`
-     4. Returns `{ "ok": true, "action": "update-mtime" }`.
+        - Read back the truncated set from `spool_files.rewrite_pending_truncated_json` (NOT the request body, which carries no truncated array — the column-stored set is the idempotent source of truth in case Call B is retried after a transient failure).
+        - For each `{seq, subagent_id, stream, bytes_dropped}` in the stored set: `DELETE FROM chunk_offsets WHERE run_id = ? AND seq = ?`.
+        - `DELETE FROM event_offsets WHERE run_id = ? AND seq IN (<the truncated seqs>)` (the tailer will re-insert these rows with new byte ranges when it replays the rewritten file from offset 0).
+        - `UPDATE tail_offsets SET offset = 0, mtime_ns = ? WHERE file_path = ?` (the offset reset is what causes the next chokidar `change` event to drive a re-read from byte 0).
+        - `UPDATE spool_files SET size_bytes = rewrite_pending_size_bytes, mtime_ns = ?, rewrite_pending = 0, rewrite_pending_size_bytes = NULL, rewrite_pending_truncated_json = NULL, deleted_at = NULL WHERE run_id = ? AND rotation_index = ?`. Clearing `rewrite_pending = 0` is what opens the tailer gate; if this step is missed the tailer skips the file forever and `chunk_truncated` rows never land. Byte-counter decrements on `subagents.{stdout_bytes|stderr_bytes}` remain owned exclusively by the Phase 3 Task 2 `chunk_truncated` event handler when the tailer replays the rewritten file — never by this endpoint.
+     4. Returns `{ "ok": true, "cleared": <count of truncated rows from the stored set>, "action": "update-mtime" }`.
 
    - The chokidar `change` event fired by the prune's `rename(2)` triggers the tailer to re-read the rewritten file from offset 0 and re-insert `chunk_truncated` rows + their `event_offsets` rows. The `update-mtime` call patches up `spool_files.mtime_ns` and `tail_offsets.mtime_ns` after the fact so the tailer's "in-place rewrite" detection (mtime regression or size shrink) doesn't spuriously fire on the next legitimate append (there will never be one for a terminal run, but defensive).
    - Files: `server/http_api.ts` (route stub in this phase with a "trusted-loopback-only" check; full auth middleware applied in Phase 4). Zod schemas for both bodies live in `server/retention_notify_schemas.ts`.
@@ -553,7 +581,7 @@ jq '.uptime_seconds > 0 and (.live_pids | length) > 0' \
 1. **Auth subsystem + separate loopback-only retention listener (closes the `loopback-only` promise the original Phase 3 Task 4 endpoint could not actually keep when the main listener was bound to LAN in LAN mode — Host/Origin checks are CSRF defenses, not network-boundary substitutes for source-IP enforcement that Docker's userland proxy makes unreliable)**
    - **Listener split:** the server boots TWO Fastify instances inside the container.
      - **Main listener** — handles every browser/CLI-facing route (`/api/runs`, `/api/auth/*`, `/api/health*`, `/ws`, `/`). Bind per the Phase 1 Task 3 contract: `0.0.0.0:7700` inside the container, published per `OBSERVABILITY_PUBLISHED_HOST`.
-     - **Retention listener** — handles ONLY `POST /api/internal/retention/notify`. Binds `127.0.0.1:7701` inside the container and is published via the default compose file as `127.0.0.1:7701:7701`. **Never published on a LAN address under any combination of envs** — the listener-bind logic refuses to start if it sees `OBSERVABILITY_BIND_RETENTION` set to anything non-loopback. The LAN override file MUST NOT republish 7701. This is the actual network boundary that makes the endpoint loopback-only; Host/Origin checks become a defense-in-depth layer, not the primary guard.
+     - **Retention listener** — handles ONLY `POST /api/internal/retention/notify`. Binds `0.0.0.0:7701` inside the container (binding to `127.0.0.1` inside a container is not reliably reachable through Docker's userland-proxy port publishing — the same gotcha as the main listener in Phase 1 Task 3, where a 127.0.0.1 bind inside the container silently rejects every host-to-container forwarded packet) and is published via the default compose file as `127.0.0.1:7701:7701` so only the host loopback can reach it. **Never published on a LAN address under any combination of envs** — the listener-bind logic asserts at boot that the host-side published address resolves to a loopback host (read from `OBSERVABILITY_RETENTION_PUBLISHED_HOST`, default `127.0.0.1:7701`) and refuses to start otherwise. The LAN override file MUST NOT republish 7701 and MUST NOT change `OBSERVABILITY_RETENTION_PUBLISHED_HOST`. The actual network boundary that makes the endpoint host-loopback-only is the Compose `ports: ["127.0.0.1:7701:7701"]` mapping plus the `OBSERVABILITY_RETENTION_PUBLISHED_HOST` boot check; Host/Origin checks become a defense-in-depth layer, not the primary guard.
      - The host-side prune CLI (Phase 7) connects to `http://127.0.0.1:7701/api/internal/retention/notify` exclusively. Authenticated with `/data/prune_token` (Phase 1 Task 3 token split).
    - What: `server/auth.ts`. Surfaces:
      - `POST /api/auth/bootstrap` — body `{ token }`. Validates against `/data/token` (constant-time compare via `crypto.timingSafeEqual`). On success, generates a 60-second one-time bootstrap code (32 random bytes, base64url) stored in in-memory `Map<code, expires_at>`, returns `{ code }`. **Does NOT write `/data/last_bootstrap_at`** — only a successful `exchange` call below writes that marker, so a bootstrap attempt that never completes the cookie-exchange flow cannot retroactively authorize a LAN bind.
@@ -586,11 +614,14 @@ jq '.uptime_seconds > 0 and (.live_pids | length) > 0' \
      # Cookie-based auth — preferred for any browser-shaped client (curl with -b is fine):
      curl -sS -b "$COOKIE_FILE" http://127.0.0.1:7700/api/runs?limit=10
 
-     # Bearer auth for clients that cannot use cookies (e.g., the Phase 7 prune CLI).
+     # Bearer auth for general API/UI clients that cannot use cookies.
      # The token is read DIRECTLY from the macOS Keychain via the OS `security` CLI.
      # This is an operator-owned OS surface for revealing a secret; it is distinct
      # from the helper's stdout, which never carries the token in any flag or path.
-     TOKEN=$(security find-generic-password -s stark-observability-token -w)
+     # Note: the Phase 7 prune CLI uses a SEPARATE scoped service
+     # `stark-observability-prune-token` — that token is accepted ONLY by the
+     # retention listener on port 7701, never by the main listener on 7700.
+     TOKEN=$(security find-generic-password -s stark-observability-bootstrap-token -w)
      curl -sS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7700/api/runs?limit=10
      unset TOKEN
      ```
@@ -636,7 +667,8 @@ jq '.uptime_seconds > 0 and (.live_pids | length) > 0' \
         - **`runs.parent_pid` here is the tracked-parent pid written by the daemon into every `run_heartbeat`** (= the dispatcher Node process pid for normal dispatchers; the SKILL.md shell pid for phase-execute). This is the same pid `live_pids[]` would contain if the tracked parent were still alive.
         - **Single-writer property:** the daemon's own parent-loss path (Phase 2 Task 3) also writes `status: "crashed", crashed_reason: "parent_exit"` with its own TS-bound `ended_at`. When that happens first (daemon still alive, only the tracked parent died), the row already matches the terminal-status filter when the sweeper runs; the sweeper's `WHERE status NOT IN (...)` clause is what guarantees no double-write. There is exactly one writer per failure mode: the daemon when it lives long enough to see ESRCH, the sweeper when it doesn't.
      5. Orphan sweep (separate 5-minute tick): `SELECT run_id FROM runs WHERE status NOT IN ('crashed','ok','error','timeout') AND (last_heartbeat_at IS NULL OR last_heartbeat_at < ?)` where the cutoff is bound from TS via `new Date(Date.now() - 1_800_000).toISOString()` for the same ISO-8601 vs `datetime('now',...)` format-mismatch reason as step 4 → same TS-bound transaction with `crashed_reason: 'orphan_timeout'`.
-   - All three crashed paths (daemon-written `parent_exit`, sweeper-written `parent_exit`, sweeper-written `host_boot_changed`, sweeper-written `orphan_timeout`) write to SQLite only; the spool is read-only for the container.
+     6. Daemon-loss sweep (runs on the same 30 s tick as steps 1–4): `SELECT run_id FROM runs WHERE status NOT IN ('crashed','ok','error','timeout') AND writer_daemon_pid IS NOT NULL AND writer_daemon_pid NOT IN (host.live_pids[]) AND (last_heartbeat_at IS NULL OR last_heartbeat_at < ?)` where the cutoff is bound from TS via `new Date(Date.now() - 60_000).toISOString()`. This is the only sweeper rule that consults `writer_daemon_pid` — and only in conjunction with stale `last_heartbeat_at`, so a daemon that briefly skipped a heartbeat tick but is still alive in `live_pids[]` is not falsely marked crashed. Hits run the same TS-bound transaction pattern with `crashed_reason: 'daemon_lost'`. Covers Phase 2 Task 3 Sub-case B (daemon SIGKILLed but tracked parent still alive in `live_pids[]`), which the step-4 `parent_pid NOT IN live_pids` predicate does not catch.
+   - All five crashed paths (daemon-written `parent_exit`, sweeper-written `parent_exit`, sweeper-written `host_boot_changed`, sweeper-written `orphan_timeout`, sweeper-written `daemon_lost`) write to SQLite only; the spool is read-only for the container.
    - **Idempotency assertion in tests:** after any crashed transition, running the sweeper 10 more times in a row must produce zero additional UPDATE statements (verified by counting `runs.changes()` between ticks).
    - **Timestamp-shape assertion in tests:** after a sweeper-written crashed transition, `SELECT ended_at FROM runs WHERE run_id = ?` must match `/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/`. The fail case the wing flagged (`...:12.12.345Z` from `strftime`) is impossible because no UPDATE in this file uses `strftime` for an `ended_at` SET — all are TS-bound parameters.
 
@@ -647,11 +679,11 @@ jq '.uptime_seconds > 0 and (.live_pids | length) > 0' \
    - What: Middleware adds CSP from §9 to UI responses; HSTS omitted (loopback) except in LAN mode where Caddy emits HSTS instead; no `Access-Control-Allow-Origin`; `X-Content-Type-Options: nosniff`; `X-Frame-Options: DENY`.
 
 7. **Append-only security audit log**
-   - What: `server/audit.ts` exposes `recordAudit(action, result, fields)` and writes one JSONL line per call to `/data/audit.jsonl` (mode 0600, fsync per write). Shape: `{ts, action, result, run_id?, credential_kind, host_meta, reason_code, generation?}` — never raw tokens, never bootstrap codes, never session cookies, never payload bodies, never `Authorization` header values. Actions covered: `auth.bootstrap.attempt` / `.success` / `.failure`, `auth.exchange.success` / `.failure` / `.code_expired` / `.code_replayed`, `auth.session.invalidated`, `boot.lan.accepted` / `.refused`, `retention.notify.pre_rename` / `.update_mtime` / `.abort_rewrite` (each with `run_id` + truncated row count, never the rows themselves), `retention.notify.unauthorized`, `token.rotate.bootstrap` / `.prune`, `prune.cli.success` / `.failure`. The log is host-side via the spool mount (`~/.claude/code-review/observability/audit.jsonl`), so it survives container delete-recreate. Retention: trimmed by the prune CLI alongside `prune.log` (entries older than 365 days dropped). The hourly retention sweep checks `audit.jsonl` size and triggers an alert if exceeded `OBSERVABILITY_AUDIT_MAX_MB` (default 100).
+   - What: `server/audit.ts` exposes `recordAudit(action, result, fields)` and writes one JSONL line per call to `/audit/audit.jsonl` inside the container (mode 0600, fsync per write), backed by a NEW host mount `~/.claude/code-review/observability/audit:/audit` (added to the Phase 1 Task 3 compose `volumes:` block as a sibling of `/spool/runs` and `/hostinfo`; read/write so the server can append and the host-side prune CLI can trim it in place). The audit log MUST NOT live on `/data` (the named Docker volume `observability_index`) because that path is destroyed by `docker volume rm` during container delete-recreate, and the security audit trail must survive that operation. Shape: `{ts, action, result, run_id?, credential_kind, host_meta, reason_code, generation?}` — never raw tokens, never bootstrap codes, never session cookies, never payload bodies, never `Authorization` header values. Actions covered: `auth.bootstrap.attempt` / `.success` / `.failure`, `auth.exchange.success` / `.failure` / `.code_expired` / `.code_replayed`, `auth.session.invalidated`, `boot.lan.accepted` / `.refused`, `retention.notify.pre_rename` / `.update_mtime` / `.abort_rewrite` (each with `run_id` + truncated row count, never the rows themselves), `retention.notify.unauthorized`, `token.rotate.bootstrap` / `.prune`, `prune.cli.success` / `.failure`. Retention: trimmed in place on the host by the prune CLI alongside `prune.log` (entries older than 365 days dropped); a Phase 8 test deletes `observability_index` and asserts `audit.jsonl` is still present on the host afterward. The hourly retention sweep checks `audit.jsonl` size and triggers an alert if exceeded `OBSERVABILITY_AUDIT_MAX_MB` (default 100).
 
 ### Risks
 
-- **Bootstrap-code phishing** via `?b=...` in an iframe → CSP `frame-ancestors 'none'` + UI checks `window.top === window` and refuses to call `/api/auth/exchange` otherwise.
+- **Bootstrap-code phishing** via `#b=...` in an iframe → CSP `frame-ancestors 'none'` + UI checks `window.top === window` and refuses to call `/api/auth/exchange` otherwise. The fragment-based URL (Phase 1 Task 3 + Phase 5 Task 2) additionally prevents the code from appearing in any HTTP request target, so Node/Caddy access logs and in-flight proxy captures never see a valid code.
 - **`event_offsets` storage cost** — ~648 MB at design load. Acceptable on a Mac SSD; verified in Phase 8.
 - **Sweeper depends on heartbeat-populated `runs.parent_pid` + `last_heartbeat_at` that may not exist yet** — eliminated by the Phase 2 Task 3 startup readiness handshake, which fsyncs an initial `run_heartbeat` before `startRun` returns. The Phase 4 sweeper's step-4 SELECT now also covers `last_heartbeat_at IS NULL` for runs with a non-null tracked parent (defense-in-depth for the rare race where the daemon was SIGKILLed before the readiness heartbeat reached the index).
 - **Daemon-vs-sweeper race for the same crashed transition** — eliminated by the terminal-status filter: whichever writer gets there first wins; the other is a no-op.
@@ -680,7 +712,7 @@ jq '.uptime_seconds > 0 and (.live_pids | length) > 0' \
    - Files: `tools/observability_server/ui/package.json`, `vite.config.ts`, `src/main.tsx`, `src/App.tsx`.
 
 2. **Bootstrap-code exchange on load**
-   - What: `index.html` includes a tiny bundled module that reads `?b=<code>` from `location`, calls `history.replaceState(null, "", location.pathname)` to strip, POSTs to `/api/auth/exchange`. On 204 → mount the app. On failure → render "run `node --experimental-strip-types tools/observability_open.ts`" instructional page. Refuses to exchange if `window.top !== window`.
+   - What: `index.html` includes a tiny bundled module that reads `#b=<code>` from `location.hash` (URL FRAGMENT — never query string; fragments are not transmitted in the HTTP request target so the still-valid code does not appear in Node/Caddy access logs or in-flight diagnostic proxy captures), calls `history.replaceState(null, "", location.pathname)` to strip the fragment from the address bar before any other code runs, POSTs to `/api/auth/exchange`. On 204 → mount the app. On failure → render "run `node --experimental-strip-types tools/observability_open.ts`" instructional page. Refuses to exchange if `window.top !== window`.
 
 3. **Tree (left rail)**
    - What: Native `<ul role="tree">` with `<li role="treeitem">`. Keyboard model per §9. Data: TanStack Query against `GET /api/runs?status=running` (refetch 5 s) plus `GET /api/runs?limit=50` for history. Aggregated client-side into repo → branch → PR → run → sub-agent.
@@ -791,7 +823,7 @@ jq '.uptime_seconds > 0 and (.live_pids | length) > 0' \
    - **New file:** `tools/phase_execute_observability.ts`. Subcommands (all idempotent on per-session state file):
 
      - **`start --plan-slug <slug> --session-id <id> [--repo <ORG/REPO>] [--branch <name>]`** — there is intentionally NO `--skill-pid` flag; the SKILL.md shell's `$$` is unreliable across bash command blocks (see the session-sentinel rationale above).
-       - Spawns the long-lived session sentinel (`/bin/sh -c 'while sleep 86400; do :; done'`, detached + `unref`-ed) and captures its `{sentinel_pid, sentinel_pgid}`.
+       - Spawns the lease-checking session sentinel via `child_process.spawn('/bin/sh', [sentinelScript, leasePath, ttlS], { detached: true, stdio: 'ignore' })` where `sentinelScript` is the checked-in `tools/phase_execute_observability_sentinel.sh` from the rationale block above (loops every 15 s, `stat`s the lease, exits 0 the moment the lease is missing OR its mtime is older than `STARK_PHASE_LEASE_TTL_S` (default 180 s)). `unref()`s the child. Captures the spawned `{sentinel_pid, sentinel_pgid}`. The sentinel is intentionally NOT immortal — it exits whenever the SKILL aborts without refreshing the lease, which is what drives the daemon's `kill(sentinel_pid, 0)` ESRCH path to the canonical crashed `run_end`. There is no `while sleep 86400` loop and no other long-sleep process anywhere in this design.
        - Calls `startRun({dispatcher:"stark-phase-execute", trackedParentPid: <sentinel_pid>, ...})`. This spawns the writer daemon (Phase 2 Task 3) with `--tracked-parent-pid <sentinel_pid>` and returns a `RunCtx` wired to it.
        - Writes the resulting `{runId, writerSocketPath, writerPid, sessionId, sentinel_pid, sentinel_pgid}` to `~/.claude/code-review/sessions/<session_id>/phase_run.json`.
        - Writes `~/.claude/code-review/sessions/<session_id>/phase_run.env` containing exactly:
@@ -813,9 +845,11 @@ jq '.uptime_seconds > 0 and (.live_pids | length) > 0' \
 
         An integration test starts a long-running child via `exec-child` (a fake dispatcher that sleeps 30 s), calls `end --status ok` immediately, and asserts the `end` CLI does NOT call `endRun` until the child exits — observable as `runs.ended_at IS NULL` for at least 29 s after `end` was invoked.
 
-   - **Child-dispatcher linking (mandatory `exec-child` wrapper — sourcing `phase_run.env` once in a setup block is unsafe because Claude Code may exec each SKILL.md bash block in a fresh `/bin/bash -c '…'` whose environment is empty; a later block running in a fresh shell would invoke a child dispatcher without `STARK_OBS_PARENT_RUN_ID`, and the child would call `startRun` instead of `connectRun`, splitting its events into a separate sibling run dir):** the `phase_run.env` file sets `STARK_OBS_PARENT_RUN_ID` and `STARK_OBS_SESSION_ID`. **Every child-dispatcher invocation in the SKILL.md goes through `phase_execute_observability.ts exec-child -- <child-command-and-args>` (a new subcommand defined alongside `start`/`progress`/`subagent-start`/`subagent-end`/`end` above).** `exec-child` resolves `SESSION_ID` via `tools/session_id.ts`, reads `~/.claude/code-review/sessions/<session_id>/phase_run.env`, merges its contents into the current environment, then `execve`s the child command with the merged environment. There is exactly one source of `STARK_OBS_PARENT_RUN_ID` propagation across SKILL blocks: this wrapper — no block ever `source`s the env file by hand. Each child dispatcher's main checks `process.env.STARK_OBS_PARENT_RUN_ID` and, if set, calls `connectRun` instead of `startRun`. The child's events flow into the parent run via the same daemon. Note that `runs.parent_pid` continues to reflect the **session sentinel pid** (the daemon's `tracked-parent-pid`), not any child dispatcher pid — child Node processes come and go; the sentinel + lease is what defines whether the run is alive.
+   - **Child-dispatcher linking (mandatory `exec-child` wrapper — sourcing `phase_run.env` once in a setup block is unsafe because Claude Code may exec each SKILL.md bash block in a fresh `/bin/bash -c '…'` whose environment is empty; a later block running in a fresh shell would invoke a child dispatcher without `STARK_OBS_PARENT_RUN_ID`, and the child would call `startRun` instead of `connectRun`, splitting its events into a separate sibling run dir):** the `phase_run.env` file sets `STARK_OBS_PARENT_RUN_ID` and `STARK_OBS_SESSION_ID`. **Every child-dispatcher invocation in the SKILL.md goes through `phase_execute_observability.ts exec-child -- <child-command-and-args>` (a new subcommand defined alongside `start`/`progress`/`subagent-start`/`subagent-end`/`end` above).** `exec-child` resolves `SESSION_ID` via `tools/session_id.ts`, **`utimensSync`-touches `~/.claude/code-review/sessions/<session_id>/lease.tick` (refreshing the session sentinel's lease so the lease-checking sentinel does not exit mid-child)**, reads `~/.claude/code-review/sessions/<session_id>/phase_run.env`, merges its contents into the current environment, then `execve`s the child command with the merged environment. There is exactly one source of `STARK_OBS_PARENT_RUN_ID` propagation across SKILL blocks: this wrapper — no block ever `source`s the env file by hand. Each child dispatcher's main checks `process.env.STARK_OBS_PARENT_RUN_ID` and, if set, calls `connectRun` instead of `startRun`. The child's events flow into the parent run via the same daemon. Note that `runs.parent_pid` continues to reflect the **session sentinel pid** (the daemon's `tracked-parent-pid`), not any child dispatcher pid — child Node processes come and go; the sentinel + lease is what defines whether the run is alive.
 
    - **SKILL.md edits (binding, in this same task):** `skill/stark-phase-execute/SKILL.md` gets four explicit invocation blocks.
+
+     **Mandatory lease-refresh contract (load-bearing for the lease-checking sentinel — every SKILL.md bash command block MUST touch `lease.tick` as its very first action, unconditionally, before any other command, including in error-handling paths; missing this refresh in any block causes the sentinel to exit and the daemon to write `crashed_reason: "parent_exit"` while the SKILL is still legitimately executing later blocks):**
 
      1. **Preflight + start (very first block in the SKILL):**
         ```bash
@@ -824,28 +858,39 @@ jq '.uptime_seconds > 0 and (.live_pids | length) > 0' \
         node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts start \
           --plan-slug "$PLAN_SLUG" \
           --session-id "$SESSION_ID"
-        # No --skill-pid: `start` spawns its own session sentinel process and
-        # uses that sentinel's pid as --tracked-parent-pid for the writer
-        # daemon. $$ varies across SKILL.md bash command blocks and would race
-        # the daemon's ESRCH poll into a false-positive crashed transition.
+        # No --skill-pid: `start` spawns its own lease-checking session sentinel
+        # process (NOT an immortal sleep loop) and uses that sentinel's pid as
+        # --tracked-parent-pid for the writer daemon. $$ varies across SKILL.md
+        # bash command blocks and would race the daemon's ESRCH poll into a
+        # false-positive crashed transition.
+
+        # Refresh the lease as the first post-start action. The sentinel checks
+        # this file every 15 s and exits when it goes stale (> STARK_PHASE_LEASE_TTL_S,
+        # default 180 s old). Every subsequent SKILL bash block (2/3/4 below) also
+        # touches it as its first action.
+        touch "$HOME/.claude/code-review/sessions/$SESSION_ID/lease.tick"
 
         source "$HOME/.claude/code-review/sessions/$SESSION_ID/phase_run.env"
         ```
      2. **Around each major lifecycle event:**
         ```bash
+        touch "$HOME/.claude/code-review/sessions/$SESSION_ID/lease.tick"
         node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts progress \
           --kind "$KIND" --payload "$PAYLOAD_JSON"
         ```
      3. **Around each in-Claude sub-skill:**
         ```bash
+        touch "$HOME/.claude/code-review/sessions/$SESSION_ID/lease.tick"
         SAID="$(node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts subagent-start \
           --agent claude --model opus-4-7 --task memory-update)"
         # ... do the sub-skill work ...
+        touch "$HOME/.claude/code-review/sessions/$SESSION_ID/lease.tick"
         node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts subagent-end \
           --subagent-id "$SAID" --status ok
         ```
      4. **At the very end (and on every error path):**
         ```bash
+        touch "$HOME/.claude/code-review/sessions/$SESSION_ID/lease.tick"
         node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts end \
           --status "$STATUS"
         ```
@@ -883,7 +928,7 @@ jq '.uptime_seconds > 0 and (.live_pids | length) > 0' \
 
 1. **Host-side prune CLI**
    - What: `tools/observability_prune.ts`. Flags: `--retention-days` (default 30, also `OBSERVABILITY_RETENTION_DAYS`), `--total-cap-gb` (default 50, also `OBSERVABILITY_TOTAL_CAP_GB`), `--dry-run`, `--json`.
-   - **Token acquisition:** at the top of `main()` the CLI calls `getObservabilityToken()` which shells out to `security find-generic-password -s stark-observability-token -w` (the `-w` flag emits the password to stdout of THAT command). The CLI stores the result in a local variable, uses it only as the `Authorization: Bearer` header on the two notify requests, and zeroizes the variable at the end of each file's pair of requests. No CLI flag, no env-var path, no helper invocation participates in token transport. If `security` exits non-zero (no Keychain entry), the CLI prints a one-line recovery instruction (`"run: node --experimental-strip-types tools/observability_open.ts --no-browser to populate the Keychain"`) and exits non-zero.
+   - **Token acquisition:** at the top of `main()` the CLI calls `getPruneToken()` which shells out to `security find-generic-password -s stark-observability-prune-token -w` (the `-w` flag emits the password to stdout of THAT command). This is the scoped prune-only credential from Phase 1 Task 3's token split; it is accepted ONLY by the retention listener on port 7701 and ONLY for `POST /api/internal/retention/notify`. The general `stark-observability-bootstrap-token` is never read by this CLI and would be rejected by the retention listener even if accidentally substituted (different `/data` file). The CLI stores the result in a local variable, uses it only as the `Authorization: Bearer` header on the two notify requests, and zeroizes the variable at the end of each file's pair of requests. No CLI flag, no env-var path, no helper invocation participates in token transport. If `security` exits non-zero (no Keychain entry), the CLI prints a one-line recovery instruction (`"run: node --experimental-strip-types tools/observability_open.ts --no-browser to populate the Keychain"`) and exits non-zero.
    - Walks `runs/`, reads each `meta.json`, partitions into age-prunable + survivors.
    - **Reconciliation pass for sweeper-only crashes (runs before the skip filter):** the prune CLI calls `GET /api/runs?status=crashed` (Phase 4 endpoint, authenticated with the Keychain Bearer per Task 1) and for each returned run reads its on-disk `meta.json`. If `meta.json.ended_at` is `null` but the API row has a non-null `ended_at` (i.e. the container's liveness sweeper marked the run crashed via SQLite-only because the spool mount is read-only and the writer daemon had been SIGKILLed before it could rewrite `meta.json` — the Phase 8 dispatcher+daemon double-kill scenario), the CLI atomically rewrites `meta.json` (`.tmp` + `rename(2)`) with `ended_at` = the API value, `status: "crashed"`, `crashed_reason` = the API value. This host-side reconciliation step is what makes sweeper-only crashes prune-eligible. Skip protection (after reconciliation): any run whose `meta.json.ended_at` is `null` is excluded from BOTH age pruning AND pressure pruning.
    - Age pruning: move dir to `.trash/{run_id}/` (atomic `rename(2)`); write `.trash/{run_id}/.moved_at` containing `new Date().toISOString()`; schedule `rm -rf` on the next prune invocation (≥ 60 s later).
@@ -906,8 +951,8 @@ jq '.uptime_seconds > 0 and (.live_pids | length) > 0' \
      4. **Call A — `action: "pre-rename"` (BEFORE rename). The body carries `new_size_bytes` and the full `truncated[]` array; it NEVER carries `new_mtime_ns`** because the mtime is intrinsically unknowable until the rename has happened and the file has been re-stat'd. Exact request:
         ```http
         POST /api/internal/retention/notify HTTP/1.1
-        Host: 127.0.0.1:7700
-        Authorization: Bearer <token-from-Keychain>
+        Host: 127.0.0.1:7701
+        Authorization: Bearer <token-from-Keychain (service stark-observability-prune-token)>
         Content-Type: application/json
         ```
         ```json
@@ -928,8 +973,8 @@ jq '.uptime_seconds > 0 and (.live_pids | length) > 0' \
      6. `fstat` the post-rename file to read its actual `new_mtime_ns`. **Call B — `action: "update-mtime"` (AFTER rename). The body carries ONLY `new_mtime_ns` plus identifying keys; it NEVER carries `truncated[]` or `new_size_bytes`** (which the server already recorded in Call A):
         ```http
         POST /api/internal/retention/notify HTTP/1.1
-        Host: 127.0.0.1:7700
-        Authorization: Bearer <token-from-Keychain>
+        Host: 127.0.0.1:7701
+        Authorization: Bearer <token-from-Keychain (service stark-observability-prune-token)>
         Content-Type: application/json
         ```
         ```json
@@ -963,13 +1008,13 @@ jq '.uptime_seconds > 0 and (.live_pids | length) > 0' \
 - **Prune races with an active dispatcher** → `ended_at IS NULL` filter excludes active runs. (Sweeper-only crashed runs are NOT affected by this exclusion because the reconciliation pass in Task 1 mutates `meta.json.ended_at` to the SQLite value before the skip filter runs.)
 - **Server unreachable during prune** → CLI errors out for that file with a logged entry in `errors[]`; original file untouched; retry next hour.
 - **Server restart between Call A and Call B** → the tailer's next read (offset = 0, persisted by Call A) re-inserts everything correctly from the rewritten file (if rename succeeded) or from the original (if not). Call B is retried on the next prune cycle; until then, only `spool_files.mtime_ns` is potentially stale, which is harmless for terminal runs.
-- **Keychain entry missing on a fresh install** → CLI exits with the printed recovery instruction; the operator runs `tools/observability_open.ts --no-browser` once and retries. No fallback path that involves shipping the token through helper stdout.
+- **Prune-token Keychain entry missing on a fresh install** → CLI exits with the printed recovery instruction; the operator runs `tools/observability_open.ts --no-browser` once (which populates BOTH `stark-observability-bootstrap-token` and `stark-observability-prune-token` from the corresponding container-side files via `docker exec`) and retries. No fallback path that involves shipping the token through helper stdout. No fallback path that accepts the bootstrap-token credential at the retention listener — the listener validates exclusively against `/data/prune_token`.
 
 ### Verification
 
 - Synthetic: emit 100 fake runs spanning 60 days, populate spool to 60 GB total. Run `node --experimental-strip-types tools/observability_prune.ts --retention-days 30 --total-cap-gb 50 --json | jq`. Assert all runs > 30 days gone; total < 50 GB; `chunk_truncated` records present in the oldest 25 % of survivors with seq values matching the original chunks; lifecycle/progress/heartbeat events preserved verbatim.
 - **Schema-correctness test:** force a pressure-truncate. Capture both HTTP requests via `mitmproxy` started with `--set strip_authorization_header=true` and a script `tools/observability_server/test/mitmproxy_redact_auth.py` that overrides the `request` hook to set `flow.request.headers["Authorization"] = "<REDACTED>"` before the flow is persisted, and that refuses to write any flow whose redaction did not apply (defense against the hook misfiring). Assert Call A's JSON body validates against the `pre-rename` zod schema, contains `new_size_bytes`, contains a non-empty `truncated[]` with `{seq, subagent_id, stream, bytes_dropped}` per element, and does NOT contain `new_mtime_ns`. Assert Call B's body validates against the `update-mtime` schema, contains `new_mtime_ns`, and does NOT contain `truncated` or `new_size_bytes`. Assert Call A is sent strictly before the `rename(2)` syscall (verified via `dtruss` ordering) and Call B is sent strictly after. **Verify that an `Authorization` header was present on both flows by checking `flow.request.headers.get("Authorization") == "<REDACTED>"` AFTER the hook ran** — never compare against the actual token value. No raw `Authorization` value is ever written to the mitmproxy dump, the test report, or the `.observability-runs/` artifact. The Phase 8 Task 7 live test uses the same redacting mitmproxy config.
-- **No-print-token assertion (prune surface):** `grep -RIn "print-token\|observability_open.ts.*--print" tools/observability_prune.ts` returns zero matches; `grep -RIn "security find-generic-password -s stark-observability-token -w" tools/observability_prune.ts` returns exactly one match (the canonical token acquisition site).
+- **No-print-token assertion (prune surface):** `grep -RIn "print-token\|observability_open.ts.*--print" tools/observability_prune.ts` returns zero matches; `grep -RIn "security find-generic-password -s stark-observability-prune-token -w" tools/observability_prune.ts` returns exactly one match (the canonical prune-token acquisition site); `grep -RIn "stark-observability-token\b\|stark-observability-bootstrap-token" tools/observability_prune.ts` returns zero matches (neither the legacy service name nor the bootstrap-token service is referenced by the prune CLI).
 - Open the UI and select a truncated sub-agent; assert inline gap markers render at the truncated chunk seqs.
 - Verify via authenticated curl that `chunk_truncations` rows are present and `chunk_offsets` rows for the truncated seqs are gone:
   ```bash
@@ -1065,8 +1110,16 @@ jq '.uptime_seconds > 0 and (.live_pids | length) > 0' \
      docker compose \
        -f tools/observability_server/docker-compose.yml \
        -f tools/observability_server/docker-compose.override.yml up -d
-     # Server boots, accepts the LAN bind, /api/health/probe responds from the LAN IP.
-     curl -sS http://192.168.X.Y:7700/api/health/probe   # expect {"ok":true}
+     # Server boots: Caddy accepts the LAN bind with the mkcert cert; the Node
+     # listener is reachable only via the internal proxy network (no host-side
+     # publish in LAN mode per Phase 1 Task 3 condition 4); /api/health/probe
+     # responds via TLS terminated at Caddy.
+     # Use `--cacert "$(mkcert -CAROOT)/rootCA.pem"` so curl trusts the local mkcert
+     # root; the operator's browser already trusts it from `mkcert -install`.
+     curl -sS --cacert "$(mkcert -CAROOT)/rootCA.pem" https://192.168.X.Y:7700/api/health/probe   # expect {"ok":true}
+     # Negative test: plain HTTP off-loopback must fail (Caddy speaks only TLS on
+     # 7700 in LAN mode; the Node listener has no host-side publish to fall back to).
+     curl -sS --max-time 5 http://192.168.X.Y:7700/api/health/probe && exit 1 || echo "plain-HTTP LAN refused as expected"
      ```
      Then revert: bring stack down, delete the override, restart loopback-only.
 
