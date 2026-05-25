@@ -1,0 +1,73 @@
+# LAN override example. Copy to `docker-compose.override.yml` ONLY after
+# you've run `tools/observability_open.ts --no-browser` against the
+# loopback first boot — that helper writes `/data/last_bootstrap_at`
+# inside the named SQLite-index volume, which authorizes the non-loopback
+# bind below. See plan §"Executable LAN bootstrap sequence".
+#
+# Before applying:
+#   1. Edit the `<LAN-IP>` placeholder below to your host's LAN address.
+#   2. Issue a mkcert cert to ~/.claude/code-review/observability/proxy/certs/.
+#      (See plan step 4.)
+#   3. Confirm the env block has OBSERVABILITY_ALLOW_LAN=1,
+#      OBSERVABILITY_TLS_TERMINATED=1, and OBSERVABILITY_PORT=7799.
+#
+# CRITICAL CONSTRAINTS:
+#   - The retention listener stays loopback-only. We KEEP the
+#     `127.0.0.1:7701:7701` publish below (via `ports: !override`) so
+#     the host-side prune CLI can still reach it; we DO NOT publish
+#     7701 on the LAN address.
+#   - DO NOT change OBSERVABILITY_RETENTION_PUBLISHED_HOST.
+#   - The Node service has NO `7700` publish here. The Caddy sidecar is
+#     the only LAN-published service. The Node listener is reachable
+#     only via the internal `proxy` Compose network on port 7799.
+#
+services:
+  observability:
+    environment:
+      OBSERVABILITY_PUBLISHED_HOST: "<LAN-IP>:7700"
+      OBSERVABILITY_ALLOW_LAN: "1"
+      OBSERVABILITY_TLS_TERMINATED: "1"
+      OBSERVABILITY_PORT: "7799"
+      OBSERVABILITY_BIND: "0.0.0.0"
+    # !override REPLACES the inherited base ports list. We drop the
+    # 127.0.0.1:7700:7700 publish because the Caddy sidecar fronts 7700
+    # on the LAN address and the Node listener moves to internal
+    # port 7799 (reachable only via the `proxy` network). We KEEP
+    # 127.0.0.1:7701:7701 so the loopback-only retention listener
+    # (Phase 4 Task 1) stays reachable from the host for the prune CLI.
+    # !reset [] would have nuked 7701 too — wing-review fix.
+    ports: !override
+      - "127.0.0.1:7701:7701"
+    networks:
+      - proxy
+
+  proxy:
+    image: caddy:2.8-alpine
+    container_name: stark-observability-proxy
+    restart: unless-stopped
+    depends_on:
+      - observability
+    ports:
+      - "<LAN-IP>:7700:7700"
+    volumes:
+      # Cert + key live OUTSIDE the repo tree so a stray `git add .`
+      # cannot accidentally commit the LAN TLS private key.
+      - ~/.claude/code-review/observability/proxy/certs:/certs:ro
+      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - "no-new-privileges:true"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+      - /data:size=16m
+      - /config:size=16m
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    driver: bridge

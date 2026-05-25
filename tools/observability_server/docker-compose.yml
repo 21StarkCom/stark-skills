@@ -1,0 +1,135 @@
+services:
+  # One-shot init sidecar: runs as root, chowns the named SQLite-index
+  # volume (and the /audit host-bind) to whatever UID/GID the main
+  # `observability` service will run as, then exits. Required because:
+  #
+  #   1. The named volume `observability_index` is seeded from the
+  #      image-side `/data` dir (root-owned at build time). Without this
+  #      chown, an `observability` container running as a non-root UID
+  #      cannot write `/data/index.db`, `/data/bootstrap_token`, etc.
+  #   2. /audit is a host-bind to a 0700 dir owned by the host operator
+  #      (created by `ensureRoot()` in tools/observability_paths_lib.ts).
+  #      On Linux + macOS Docker Desktop alike, that dir is only
+  #      readable/writable by the same UID it was created under. On
+  #      Linux this matters every time; on macOS Docker Desktop it
+  #      matters when the operator UID differs from the container UID
+  #      (i.e. always, unless someone manually pinned them to match).
+  #
+  # The runtime UID/GID comes from the `.env` file in this directory,
+  # which the operator generates once via:
+  #   printf 'OBSERVABILITY_UID=%s\nOBSERVABILITY_GID=%s\n' \
+  #     "$(id -u)" "$(id -g)" > .env
+  # (See `.env.example` for full guidance + the UID 10001 acceptance
+  # path used by Phase 2's launchd writer.)
+  init:
+    image: alpine:3.20
+    container_name: stark-observability-init
+    user: "0:0"
+    volumes:
+      - observability_index:/data
+      - ~/.claude/code-review/observability/audit:/audit
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        chown "${OBSERVABILITY_UID}:${OBSERVABILITY_GID}" /data /audit
+        chmod 0700 /data /audit
+    restart: "no"
+
+  observability:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stark-observability
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    # Loopback-only publish. The LAN override file
+    # (docker-compose.lan.yml.example) replaces the 7700 entry with
+    # `!override` and keeps 7701 loopback-only.
+    ports:
+      - "127.0.0.1:7700:7700"
+      - "127.0.0.1:7701:7701"
+    environment:
+      OBSERVABILITY_PUBLISHED_HOST: "127.0.0.1:7700"
+      OBSERVABILITY_BIND: "0.0.0.0"
+      OBSERVABILITY_BIND_RETENTION: "0.0.0.0"
+      OBSERVABILITY_RETENTION_PUBLISHED_HOST: "127.0.0.1:7701"
+      # OBSERVABILITY_BIND_RETENTION MUST remain 0.0.0.0 — see Phase 4 Task 1
+      # Docker userland-proxy gotcha. The host-publish-loopback property is
+      # enforced by OBSERVABILITY_RETENTION_PUBLISHED_HOST + the
+      # ports: ["127.0.0.1:7701:7701"] mapping, NOT by the in-container bind.
+      # The LAN override file MUST NOT change OBSERVABILITY_RETENTION_PUBLISHED_HOST
+      # and MUST preserve the 7701 loopback publish (it does, via !override).
+      # OBSERVABILITY_ALLOW_LAN, OBSERVABILITY_TLS_TERMINATED intentionally
+      # unset in the default file — the LAN override file sets both.
+    volumes:
+      # Spool tree + hostinfo are host bind mounts in read-only mode so
+      # the container observes what the host writer daemon + launchd
+      # ticker produce. The container cannot mutate them.
+      #
+      # /audit is also a HOST BIND mount per plan §1.5.1 E9 (Phase 1
+      # Task 1 creates this path at 0700 via ensureRoot()). The audit
+      # log is operator-visible without `docker volume inspect`
+      # gymnastics. The init sidecar chowns it to the runtime UID/GID
+      # so the server can write it.
+      #
+      # UID handling (wing-review fix): the container `user:` resolves
+      # from `.env` to the host operator's UID/GID by default. That
+      # means the operator-owned 0700 host bind mounts (`/spool/runs`,
+      # `/hostinfo`, `/audit`) are reachable from the container without
+      # widening modes or relying on Docker Desktop UID translation
+      # (which VirtioFS does NOT perform). The starkobs UID 10001
+      # acceptance story is preserved as the Phase 2 deployment path:
+      # once the launchd writer plist creates a real `starkobs:10001`
+      # host user and chowns the bind dirs to it, the operator sets
+      # OBSERVABILITY_UID=10001 + OBSERVABILITY_GID=10001 in `.env`.
+      - ~/.claude/code-review/observability/runs:/spool/runs:ro
+      - ~/.claude/code-review/observability/hostinfo:/hostinfo:ro
+      - ~/.claude/code-review/observability/audit:/audit
+      # /data stays a Docker named volume because the SQLite index +
+      # bootstrap markers + scoped tokens are server-owned state, not
+      # operator-edited files. The init sidecar above chowns it to the
+      # runtime UID/GID on every `up`. `name: observability_index`
+      # (below) pins the volume name so the Phase 8 marker-wipe commands
+      # target this exact volume.
+      - observability_index:/data
+    # Plan §1.5.2 RT1 + §1.5.1 E8: dedicated non-root UID/GID, no caps,
+    # no privilege escalation. UID/GID is required (no silent fallback);
+    # the operator generates `.env` once via the one-liner in
+    # `.env.example`. The `:?` syntax fails compose-up loudly with the
+    # error string if either var is unset — that is preferable to a
+    # silent default that produces unreadable bind mounts.
+    user: "${OBSERVABILITY_UID:?set OBSERVABILITY_UID in tools/observability_server/.env}:${OBSERVABILITY_GID:?set OBSERVABILITY_GID in tools/observability_server/.env}"
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    read_only: true
+    tmpfs:
+      # tmpfs uid/gid match the runtime `user:` so /tmp is writable by
+      # the same process. Variable substitution + explicit `:?` so an
+      # unset var fails loudly (matching `user:` above).
+      - /tmp:size=64m,mode=0700,uid=${OBSERVABILITY_UID:?set OBSERVABILITY_UID in .env},gid=${OBSERVABILITY_GID:?set OBSERVABILITY_GID in .env}
+    init: false
+    healthcheck:
+      # Probe whichever port the container is actually listening on. The
+      # LAN override file sets OBSERVABILITY_PORT=7799 (Caddy fronts 7700
+      # on the LAN address; the Node listener binds 7799 internally), so
+      # an inherited 7700 probe would mark the service unhealthy in LAN
+      # mode. Falling back to 7700 preserves the default-file behavior.
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:'+(process.env.OBSERVABILITY_PORT||7700)+'/api/health/probe').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  observability_index:
+    name: observability_index

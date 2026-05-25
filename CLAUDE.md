@@ -45,6 +45,12 @@ This is a **personal playground**, not production. No customers depend on it; th
 - GitHub App auth lives entirely in `tools/github_app{,_lib}.ts` (TS) — mints installation tokens, imported directly by `runtime_env_lib.ts`.
 - `tools/emit_queue_lib.ts` + `tools/emit_queue_cli.ts` — SQLite-backed durable event queue (producer side). The drain side lives in stark-insights.
 
+### Observability stack
+- `tools/observability_paths_lib.ts` — canonical path helpers + `ensureRoot()` / `ensurePrivateDir()` / `openPrivate()`. Every writer in the observability stack goes through this module so files land at 0600 and dirs at 0700 regardless of the caller's umask.
+- `tools/observability_hostinfo.ts` — host-side ticker (launchd-managed) that writes `~/.claude/code-review/observability/hostinfo/host.json` every 5 s. **Sole** host-introspection surface — macOS Docker Desktop does not expose `/proc` to containers.
+- `tools/observability_install_launchd.ts` — generator for the hostinfo + prune launchd plists. Sets `PATH` portably so `/usr/bin/env node` resolves on both `/opt/homebrew/bin` (Apple Silicon Homebrew) and `/usr/local/bin` (Intel Homebrew / manual installs).
+- `tools/observability_server/` — Dockerized server (multi-stage `node:22-alpine`, `better-sqlite3` + `fastify`). `server/bind.ts` enforces the loopback-vs-LAN bind gates; `server/db.ts` + `migrations/001_init.sql` define the SQLite index. Liveness reads only `/hostinfo/host.json` — see `tools/observability_server/CLAUDE.md`.
+
 ### TUI & session
 - The session-start/end TUI is gone. `/stark-session` now collects state via `tools/stark_session.ts` and Claude renders the briefing/summary itself — see "TS tools" below.
 
