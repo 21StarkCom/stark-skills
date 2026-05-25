@@ -69,8 +69,54 @@ export function currentSpoolFile(runId: string, rotationIndex: number): string {
   return path.join(runDir(runId), `events-${idx}.jsonl`);
 }
 
+/**
+ * Path to the writer daemon's UDS for a run.
+ *
+ * macOS caps `sun_path` at 104 bytes. The natural per-run-dir path
+ * (`~/.claude/code-review/observability/runs/<uuid>/writer.sock`) is right
+ * at the edge for a normal `$HOME` and well over the limit under `/var/
+ * folders/.../T/...` paths used by tmpdir-rebased tests. We store the
+ * socket under a short shared prefix (`/tmp/stark-obs/`) keyed by a short
+ * hash of the runId, and keep `writer.pid` + `writer.cap` co-located in
+ * the per-run dir for diagnostics.
+ */
 export function writerSocketPath(runId: string): string {
-  return path.join(runDir(runId), "writer.sock");
+  const hash = quickHash(sanitizeId(runId));
+  return path.join(os.tmpdir(), "stark-obs", `${hash}.sock`);
+}
+
+/** Short, stable hash of a run id for socket-path keying. Not security
+ * critical — the cap file is the auth surface. */
+function quickHash(input: string): string {
+  let h = 0x811c9dc5; // FNV-1a 32-bit
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = (h * 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+/** mkdir for the short-prefix socket dir under tmpdir. Mode 0700; only
+ * the owning user can open the sockets inside. */
+export function ensureSocketDir(): string {
+  const d = path.join(os.tmpdir(), "stark-obs");
+  ensurePrivateDir(d);
+  return d;
+}
+
+export function writerPidPath(runId: string): string {
+  return path.join(runDir(runId), "writer.pid");
+}
+
+/**
+ * Path to the writer daemon's capability secret (RT1). 32-byte random
+ * b64url token written 0600 in the per-run dir at daemon-boot time;
+ * dispatchers read this file and present its contents on the first UDS
+ * `hello` frame. The 0600 mode is the same-UID gate — a same-UID process
+ * that has not opened this file cannot synthesize a valid cap.
+ */
+export function writerCapPath(runId: string): string {
+  return path.join(runDir(runId), "writer.cap");
 }
 
 export function sessionCookiePath(): string {
@@ -132,6 +178,7 @@ export function ensureRoot(): void {
   ensurePrivateDir(trashDir());
   ensurePrivateDir(auditDir());
   ensurePrivateDir(SESSIONS_ROOT);
+  ensureSocketDir();
 }
 
 /**
