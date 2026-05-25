@@ -37,7 +37,7 @@ jobs:
 
       - name: Checkout
         if: steps.token.outputs.skip != 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           sparse-checkout: .github/project-config.json
           sparse-checkout-cone-mode: false
