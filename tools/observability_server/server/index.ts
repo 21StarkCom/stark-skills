@@ -1,64 +1,105 @@
 /**
- * stark-observability server — Phase 1 skeleton.
+ * stark-observability server bootstrap.
  *
- * What's here:
- *   - Start-up binding-rules enforcement (OBSERVABILITY_PUBLISHED_HOST,
- *     OBSERVABILITY_ALLOW_LAN, OBSERVABILITY_TLS_TERMINATED, marker file
- *     present, NO Node host-publish in LAN mode).
+ * What's wired now (Phase 1 + Phase 3):
+ *
+ *   - Start-up binding-rules enforcement (main listener).
  *   - SQLite migrations runner against /data/index.db.
  *   - GET /api/health/probe → {"ok": true}.
+ *   - JSONL spool tailer + event-bus + SQLite index writer
+ *     (Phase 3 Tasks 1, 2, 3, 6, 7).
+ *   - Loopback-only retention listener on a SECOND Fastify instance,
+ *     hosting POST /api/internal/retention/notify (Phase 3 Task 4).
  *
- * Everything else (auth, WS, retention listener, prune endpoints, tailer,
- * findings synthesis, etc.) is added by later phases — see the plan.
+ * What is intentionally NOT here yet:
  *
- * Bind decision tree:
- *   1. Read OBSERVABILITY_BIND (default 0.0.0.0) + OBSERVABILITY_PORT
- *      (default 7700).
- *   2. Require OBSERVABILITY_PUBLISHED_HOST. Refuse to boot if missing.
- *   3. If PUBLISHED_HOST is NOT in the loopback allowlist, require ALL
- *      of: OBSERVABILITY_ALLOW_LAN=1, OBSERVABILITY_TLS_TERMINATED=1,
- *      /data/last_bootstrap_at present. Print the recovery instructions
- *      and exit non-zero otherwise.
- *
- * The container does NOT introspect Compose `ports:` mappings. The
- * required env contract is the only reliable signal.
+ *   - Auth middleware (Phase 4 Task 1) — the retention route accepts
+ *     loopback connections without a Bearer in this phase; Phase 4
+ *     wires `/data/prune_token` validation through the `requireBearer`
+ *     dep.
+ *   - The rest of the HTTP API + WebSocket + UI + liveness sweeper.
  */
 
 import fs from "node:fs";
 import path from "node:path";
+import Database from "better-sqlite3";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import { runMigrations } from "./db.ts";
 import { BindRefused, resolveBindDecision } from "./bind.ts";
 import { seedTokens } from "./tokens.ts";
+import { EventBus } from "./event_bus.ts";
+import { IndexWriter } from "./index_writer.ts";
+import { Tailer } from "./tailer.ts";
+import { registerRetentionRoutes } from "./http_api.ts";
+import { recoverPendingRewrites } from "./rewrite_recovery.ts";
 
 const DATA_DIR = process.env.OBSERVABILITY_DATA_DIR ?? "/data";
 const DB_PATH = path.join(DATA_DIR, "index.db");
 const BOOTSTRAP_MARKER = path.join(DATA_DIR, "last_bootstrap_at");
+const SPOOL_DIR = process.env.OBSERVABILITY_SPOOL_DIR ?? "/spool/runs";
+const RETENTION_PORT = Number(
+  process.env.OBSERVABILITY_RETENTION_PORT ?? "7701",
+);
+const RETENTION_BIND = process.env.OBSERVABILITY_BIND_RETENTION ?? "0.0.0.0";
 
-export async function buildServer(): Promise<FastifyInstance> {
+export interface BuiltServer {
+  app: FastifyInstance;
+  retentionApp: FastifyInstance;
+  tailer: Tailer;
+  indexWriter: IndexWriter;
+  bus: EventBus;
+  db: Database.Database;
+}
+
+export async function buildServer(opts?: {
+  dbPath?: string;
+  spoolRoot?: string;
+}): Promise<BuiltServer> {
+  const dbPath = opts?.dbPath ?? DB_PATH;
+  const spoolRoot = opts?.spoolRoot ?? SPOOL_DIR;
+  const db = new Database(dbPath);
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
+  db.pragma("synchronous = NORMAL");
+
+  // RT2: SQLite is the sole rewrite transaction log. On boot, finish
+  // any rewrite that was interrupted between pre-rename and update-mtime
+  // BEFORE the tailer (which would otherwise honor the rewrite_pending
+  // gate forever) and the retention listener come up.
+  try {
+    recoverPendingRewrites(db);
+  } catch (err) {
+    process.stderr.write(
+      `[server] rewrite recovery failed: ${(err as Error).message}\n`,
+    );
+  }
+
+  const bus = new EventBus();
+  const indexWriter = new IndexWriter({ db, bus });
+  const tailer = new Tailer({ spoolRoot, bus, db });
+
   const app = Fastify({
-    // Phase 4+ will swap this for a redactor that hashes/strips secrets.
     logger: { level: process.env.OBSERVABILITY_LOG_LEVEL ?? "info" },
     disableRequestLogging: false,
   });
-
   app.get("/api/health/probe", async () => ({ ok: true }));
 
-  return app;
+  const retentionApp = Fastify({
+    logger: { level: process.env.OBSERVABILITY_LOG_LEVEL ?? "info" },
+    disableRequestLogging: false,
+  });
+  registerRetentionRoutes(retentionApp, {
+    db,
+    triggerScan: (target) => tailer.scanNow(target),
+  });
+
+  return { app, retentionApp, tailer, indexWriter, bus, db };
 }
 
 async function main(): Promise<void> {
-  // 1. ensure data dir + open DB + run migrations BEFORE we bind a port,
-  //    so a schema failure surfaces in `docker logs` instead of as a
-  //    crashed liveness probe.
   fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
   await runMigrations(DB_PATH, path.join(import.meta.dirname, "..", "migrations"));
-
-  // 1b. seed scoped secrets on first boot (bootstrap_token, prune_token,
-  //     and the /data/token backward-compat symlink). Idempotent — a
-  //     re-boot with the named volume preserved is a no-op. The hint we
-  //     log is presence-only; values are NEVER written to stdout/stderr.
   const seeded = seedTokens(DATA_DIR);
   if (seeded.generated.length > 0) {
     process.stdout.write(
@@ -66,7 +107,6 @@ async function main(): Promise<void> {
     );
   }
 
-  // 2. validate the binding contract.
   let decision;
   try {
     decision = resolveBindDecision({
@@ -82,21 +122,60 @@ async function main(): Promise<void> {
     throw err;
   }
 
-  // 3. build the app and listen.
-  const app = await buildServer();
-  await app.listen({ host: decision.bindHost, port: decision.bindPort });
-  app.log.info(
+  const built = await buildServer();
+  built.indexWriter.start();
+  built.tailer.start();
+
+  await built.app.listen({ host: decision.bindHost, port: decision.bindPort });
+  built.app.log.info(
     {
       bind: `${decision.bindHost}:${decision.bindPort}`,
       published: decision.publishedHost,
       lan: decision.isLan,
     },
-    "stark-observability server listening",
+    "stark-observability main listener up",
+  );
+
+  await built.retentionApp.listen({
+    host: RETENTION_BIND,
+    port: RETENTION_PORT,
+  });
+  built.retentionApp.log.info(
+    {
+      bind: `${RETENTION_BIND}:${RETENTION_PORT}`,
+      published:
+        process.env.OBSERVABILITY_RETENTION_PUBLISHED_HOST ?? "<unset>",
+    },
+    "stark-observability retention listener up",
   );
 
   const shutdown = async (sig: string) => {
-    app.log.info({ sig }, "shutting down");
-    await app.close();
+    built.app.log.info({ sig }, "shutting down");
+    try {
+      built.indexWriter.flush();
+    } catch {
+      // best-effort
+    }
+    try {
+      await built.tailer.stop();
+    } catch {
+      // best-effort
+    }
+    try {
+      await built.app.close();
+    } catch {
+      // best-effort
+    }
+    try {
+      await built.retentionApp.close();
+    } catch {
+      // best-effort
+    }
+    try {
+      built.db.close();
+    } catch {
+      // best-effort
+    }
     process.exit(0);
   };
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
