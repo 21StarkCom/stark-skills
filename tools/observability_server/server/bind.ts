@@ -83,6 +83,34 @@ export function resolveBindDecision(inputs: BindInputs): BindDecision {
   return { bindHost, bindPort, publishedHost, isLan };
 }
 
+/**
+ * Port-agnostic loopback check for the retention listener boot guard
+ * (Phase 4 Task 1). Accepts host:port where host is 127.0.0.1, ::1
+ * (bracketed `[::1]:N` or bare `::1:N`), or localhost. Anything else
+ * is rejected so the prune-token-authenticated endpoint cannot be
+ * republished outside the host.
+ */
+export function isLoopbackPublishedHost(value: string): boolean {
+  if (typeof value !== "string" || value.length === 0) return false;
+  const trimmed = value.trim();
+  let host: string;
+  let portStr: string;
+  if (trimmed.startsWith("[")) {
+    const m = /^\[([^\]]+)\]:(\d+)$/.exec(trimmed);
+    if (m === null) return false;
+    host = (m[1] ?? "").toLowerCase();
+    portStr = m[2] ?? "";
+  } else {
+    const idx = trimmed.lastIndexOf(":");
+    if (idx <= 0 || idx === trimmed.length - 1) return false;
+    host = trimmed.slice(0, idx).toLowerCase();
+    portStr = trimmed.slice(idx + 1);
+  }
+  const port = Number(portStr);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) return false;
+  return host === "127.0.0.1" || host === "::1" || host === "localhost";
+}
+
 function buildLanRefusalMessage(state: {
   allow: boolean;
   tls: boolean;
