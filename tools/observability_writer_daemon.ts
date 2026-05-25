@@ -32,6 +32,7 @@
  *     {"op":"end_subagent","subagent_id":"<id>","status":"ok",...}
  *     {"op":"emit_progress","subagent_id":"<id>|null","kind":"finding","payload":{...}}
  *     {"op":"emit_chunk","subagent_id":"<id>","stream":"stdout","encoding":"utf8","chunk":"..."}
+ *     {"op":"emit_chunk_truncated","subagent_id":"<id>","stream":"stdout","bytes_dropped":N,"reason":"..."}
  *     {"op":"emit_subagent_heartbeat","subagent_id":"<id>"}
  *     {"op":"end_run","status":"ok"|"error"|"timeout"}
  *     {"op":"ping"}
@@ -1138,6 +1139,43 @@ async function dispatchOp(
           }
           return;
         }
+        try {
+          socket.write(JSON.stringify({ ok: true, seq }) + "\n");
+        } catch {
+          // ignore
+        }
+      });
+      return;
+    }
+    case "emit_chunk_truncated": {
+      // Direct chunk_truncated emission. Used by the E2E fixture (Phase 5
+      // Playwright spec) to seed a deterministic retention gap without
+      // routing 1 MiB+ of base64 through the regular emit_chunk path
+      // (which the WriterClient would reject because the JSON frame
+      // exceeds MAX_FRAME_BYTES). The payload stays well under the frame
+      // cap; the daemon writes the same shape the undecodable-budget
+      // path inside `emit_chunk` produces.
+      await rt.queue.push(async () => {
+        const subId = String(req.subagent_id ?? "");
+        const stream = String(req.stream ?? "stdout");
+        const bytesDroppedRaw =
+          typeof req.bytes_dropped === "number"
+            ? req.bytes_dropped
+            : Number.parseInt(String(req.bytes_dropped ?? ""), 10);
+        const bytesDropped =
+          Number.isFinite(bytesDroppedRaw) && bytesDroppedRaw >= 0
+            ? Math.floor(bytesDroppedRaw)
+            : 0;
+        const reason =
+          typeof req.reason === "string" && req.reason.length > 0
+            ? req.reason
+            : "synthetic_test_seed";
+        const seq = writeEvent(rt, "chunk_truncated", {
+          subagent_id: subId,
+          stream,
+          bytes_dropped: bytesDropped,
+          reason,
+        });
         try {
           socket.write(JSON.stringify({ ok: true, seq }) + "\n");
         } catch {

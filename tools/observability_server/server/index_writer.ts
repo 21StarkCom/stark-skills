@@ -338,6 +338,20 @@ export class IndexWriter extends EventEmitter {
     if (isNoOpReplay) {
       this.stats.events_skipped_replay_total += 1;
     } else if (subId !== null) {
+      // First-apply-without-prior-chunk = synthetic gap (writer daemon's
+      // `emit_chunk_truncated` test-seed op, or any future "standalone
+      // gap" producer). The chunk_offsets row never existed at this seq,
+      // so the byte-counter decrement that the replace-chunk path runs
+      // would push subagents.{stdout|stderr}_bytes below the true
+      // emitted total. Detect that case by checking chunk_offsets BEFORE
+      // the delete (the delete is then idempotent — no rows match), and
+      // skip the decrement when no row existed.
+      const hadExistingChunk =
+        isReplaceChunk ||
+        (isFirstApply &&
+          (this.stmts.selectChunkOffsetExists.get(runId, seq) as
+            | { one: number }
+            | undefined) !== undefined);
       this.stmts.upsertChunkTruncation.run(
         runId,
         subId,
@@ -347,8 +361,10 @@ export class IndexWriter extends EventEmitter {
         stream,
       );
       this.stmts.deleteChunkOffset.run(runId, seq);
-      const byteCol = stream === "stderr" ? "stderr_bytes" : "stdout_bytes";
-      this.stmts.decSubagentBytes[byteCol].run(bytesDropped, subId);
+      if (hadExistingChunk) {
+        const byteCol = stream === "stderr" ? "stderr_bytes" : "stdout_bytes";
+        this.stmts.decSubagentBytes[byteCol].run(bytesDropped, subId);
+      }
       this.stats.chunk_truncated_transitions_total += 1;
       if (isFirstApply) this.stats.events_indexed_total += 1;
       // Live-stream notify — Phase 4 WS subscribers get the gap in
@@ -554,6 +570,7 @@ interface IndexStatements {
   upsertChunkOffset: DbStatement;
   upsertChunkTruncation: DbStatement;
   deleteChunkOffset: DbStatement;
+  selectChunkOffsetExists: DbStatement;
   insertRun: DbStatement;
   updateRunHeartbeat: DbStatement;
   updateRunEnd: DbStatement;
@@ -607,6 +624,9 @@ function prepareStatements(db: DbHandle): IndexStatements {
     ),
     deleteChunkOffset: db.prepare(
       `DELETE FROM chunk_offsets WHERE run_id = ? AND seq = ?`,
+    ),
+    selectChunkOffsetExists: db.prepare(
+      `SELECT 1 AS one FROM chunk_offsets WHERE run_id = ? AND seq = ? LIMIT 1`,
     ),
     insertRun: db.prepare(
       `INSERT OR IGNORE INTO runs

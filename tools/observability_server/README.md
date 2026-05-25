@@ -143,6 +143,52 @@ the plan §"Executable LAN bootstrap sequence" and the
 - File modes: every file the server creates lands at `0600`; every
   directory at `0700`. Enforced by `tools/observability_paths_lib.ts`.
 
+## UI
+
+The `ui/` directory is a self-contained Vite + React + TypeScript app.
+Production build (`npm run build` inside `ui/`) emits `ui/dist/` which
+the Dockerfile's `ui-builder` stage bakes into the runtime image at
+`/app/ui/dist`. `@fastify/static` serves it at `/`; the auth
+middleware exempts `/`, `/index.html`, and `/assets/*` so a cold
+browser load with no cookie still gets the bootstrap shell + asset
+bundle (plan §1.5.1 E1).
+
+Local UI development against a running container:
+
+```bash
+cd tools/observability_server/ui
+npm install
+npm run dev    # serves at http://127.0.0.1:5173 and proxies /api + /ws
+```
+
+The dev server hits the container's main listener at
+`http://127.0.0.1:7700`; export `OBSERVABILITY_E2E_BASE_URL` if your
+publish address differs.
+
+### Bootstrap flow
+
+The browser bootstrap is a two-step exchange (plan Phase 5 Task 2):
+
+1. The host helper opens
+   `http://127.0.0.1:7700/#b=<one-time-code>`. The `b=` value lives in
+   the URL fragment so it is never transmitted to the server in the
+   HTTP request target and is never persisted in proxy access logs.
+2. The page's first JS module (`src/bootstrap.ts`) reads the
+   fragment, stashes the code, and calls
+   `history.replaceState(null, "", location.pathname)` to strip it
+   from the address bar. It refuses to read the fragment if
+   `window.top !== window` (frame-busting / clickjacking guard). React
+   then POSTs the code to `/api/auth/exchange`; on 204 the cookie is
+   set and the app mounts.
+
+A11y (plan §9): native `<ul role="tree">` left rail, sortable
+`<table aria-sort>` detail view, focusable inline gap markers for
+`chunk_truncated`, polite ARIA live region with 2 s batching and a
+"Quiet" toggle, focus rings ≥ 3:1, 44×44 touch targets,
+`prefers-reduced-motion` honored. The Playwright + axe suite
+(`ui/test/e2e/`) enforces zero violations and the < 2 s sub-agent
+select → first-byte target.
+
 ## SQLite schema
 
 `migrations/001_init.sql` creates the full schema, including the post-

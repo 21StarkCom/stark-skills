@@ -516,6 +516,35 @@ test("emit_chunk request never exceeds 64 KiB serialized size (NUL-byte stress)"
   }
 });
 
+test("--truncate-after-s emits a chunk_truncated event via emit_chunk_truncated op (Phase 5 fixture seam)", async () => {
+  if (process.platform !== "darwin" && process.platform !== "linux") return;
+  const home = tmpHome();
+  try {
+    const { runId } = await runHarnessOwned(home, [
+      "--duration-s",
+      "2",
+      "--emit-rate-bps",
+      "1000",
+      "--subagents",
+      "1",
+      "--truncate-after-s",
+      "0.2",
+    ]);
+    const events = readSpool(home, runId);
+    const truncated = events.filter((e) => e.type === "chunk_truncated");
+    assert.ok(
+      truncated.length >= 1,
+      `expected ≥1 chunk_truncated record, got ${truncated.length}`,
+    );
+    const first = truncated[0]!;
+    assert.equal(first.stream, "stdout");
+    assert.equal(first.bytes_dropped, 1_310_720);
+    assert.equal(first.reason, "synthetic_harness_seed");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("initial run_heartbeat carries bytes_written: 0 (Phase 2 Task 3)", async () => {
   if (process.platform !== "darwin" && process.platform !== "linux") return;
   const home = tmpHome();
