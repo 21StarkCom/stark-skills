@@ -258,14 +258,30 @@ git push origin v${NEXT_VERSION}
 
 ## Step 9: GitHub Release
 
-Always create a GitHub Release — no confirmation needed:
+If the repo has a release-publishing workflow that triggers on `v*.*.*`
+tag push (`.github/workflows/release.yml` with `on: push: tags: - "v*.*.*"`),
+**skip this step** — the workflow creates the Release from the CHANGELOG
+itself. Manually creating the release in parallel produces a `view → create`
+race that fails the workflow run with HTTP 422 `already_exists` (see
+stark-night-watch run 26380137617).
 
 ```bash
-gh release create v${NEXT_VERSION} \
-  --repo $REPO \
-  --title "v${NEXT_VERSION}" \
-  --notes "[CHANGELOG content for this version, formatted as markdown]"
+# Detect: does a tag-triggered release workflow exist?
+if grep -lE '^\s*-\s*"v\*\.\*\.\*"' .github/workflows/*.y*ml 2>/dev/null | \
+   xargs grep -l 'release create' 2>/dev/null | head -1; then
+  echo "Tag-triggered release workflow detected — workflow will create the GH Release."
+  RELEASE_URL="https://github.com/${REPO}/releases/tag/v${NEXT_VERSION}"
+else
+  gh release create v${NEXT_VERSION} \
+    --repo $REPO \
+    --title "v${NEXT_VERSION}" \
+    --notes "[CHANGELOG content for this version, formatted as markdown]"
+  RELEASE_URL="(from gh release create output)"
+fi
 ```
+
+Repos with a release workflow today: `stark-night-watch`.
+Repos without one (skill still creates the release): everything else.
 
 ---
 
@@ -296,6 +312,7 @@ Commit:     [hash]
 | Tag already exists | Error — that version is taken, suggest next |
 | Push fails | `git pull --rebase origin main`, retry |
 | `gh` auth fails | Verify `gh auth status` — user's PAT must be active |
+| Release workflow + skill both try to create the GH Release | Skill must skip Step 9 when `.github/workflows/*.yml` has a `v*.*.*` tag trigger that runs `gh release create`. See Step 9. |
 | TF drift detected (Step 1.5) | `cd infra/terraform && terraform apply`, then re-run `/stark-release`. Do NOT skip — CD will fail the drift gate *after* migrating, leaving the env half-deployed. |
 
 ## Observability
