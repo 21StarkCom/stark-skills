@@ -388,6 +388,123 @@ test("chunk_truncated transitions a stdout row in-place (byte counters decrement
   });
 });
 
+test("chunk_truncated at a fresh seq (synthetic gap) does NOT decrement byte counters", () => {
+  // Regression: the writer daemon's `emit_chunk_truncated` test-seed op
+  // writes a chunk_truncated at a brand-new seq. Without the
+  // hadExistingChunk guard, the byte-counter decrement would push
+  // subagents.stdout_bytes below the true emitted total.
+  withDb((db) => {
+    const bus = new EventBus();
+    const writer = new IndexWriter({ db, bus });
+    writer.start();
+
+    pushEvent(
+      bus,
+      "run-synth",
+      {
+        seq: 1,
+        ts: "t",
+        type: "run_start",
+        meta: { dispatcher: "x" },
+        tracked_parent_pid: 1,
+      },
+      0,
+      50,
+    );
+    pushEvent(
+      bus,
+      "run-synth",
+      {
+        seq: 2,
+        ts: "t",
+        type: "subagent_start",
+        subagent_id: "run-synth:1",
+        agent: "a",
+        task: "t",
+      },
+      50,
+      100,
+    );
+    pushEvent(
+      bus,
+      "run-synth",
+      {
+        seq: 3,
+        ts: "t",
+        type: "subagent_stdout",
+        subagent_id: "run-synth:1",
+        stream: "stdout",
+        encoding: "utf8",
+        chunk: "bbbbbbbbbb",
+      },
+      100,
+      200,
+    );
+    writer.flush();
+    assert.equal(
+      (
+        db
+          .prepare("SELECT stdout_bytes FROM subagents WHERE subagent_id = ?")
+          .get("run-synth:1") as { stdout_bytes: number }
+      ).stdout_bytes,
+      10,
+    );
+
+    // Synthetic gap at a NEW seq (4) — no prior chunk_offsets row.
+    pushEvent(
+      bus,
+      "run-synth",
+      {
+        seq: 4,
+        ts: "t",
+        type: "chunk_truncated",
+        subagent_id: "run-synth:1",
+        stream: "stdout",
+        bytes_dropped: 999_999,
+      },
+      200,
+      260,
+    );
+    writer.flush();
+
+    // Byte counter unchanged — the gap was synthetic.
+    assert.equal(
+      (
+        db
+          .prepare("SELECT stdout_bytes FROM subagents WHERE subagent_id = ?")
+          .get("run-synth:1") as { stdout_bytes: number }
+      ).stdout_bytes,
+      10,
+    );
+    // chunk_truncations row + event_offsets row still landed.
+    assert.equal(
+      (
+        db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM chunk_truncations WHERE run_id = ? AND seq = 4",
+          )
+          .get("run-synth") as { n: number }
+      ).n,
+      1,
+    );
+    const offset = db
+      .prepare("SELECT type FROM event_offsets WHERE run_id = ? AND seq = 4")
+      .get("run-synth") as { type: string };
+    assert.equal(offset.type, "chunk_truncated");
+    // Pre-existing chunk_offsets row at seq 3 untouched.
+    assert.equal(
+      (
+        db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM chunk_offsets WHERE run_id = ? AND seq = 3",
+          )
+          .get("run-synth") as { n: number }
+      ).n,
+      1,
+    );
+  });
+});
+
 test("subagent_progress finding increments both subagent + run counters; non-finding kinds don't", () => {
   withDb((db) => {
     const bus = new EventBus();

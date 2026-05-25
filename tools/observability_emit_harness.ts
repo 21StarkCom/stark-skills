@@ -42,6 +42,18 @@ interface HarnessOpts {
   durationS: number;
   emitRateBps: number;
   subagentCount: number;
+  /** When > 0: after this many seconds, inject a synthetic
+   *  `chunk_truncated` JSONL record on subagent-0's stdout by sending
+   *  the daemon an undecodable-base64 emit_chunk request > 1 MiB
+   *  (which the daemon's existing E6 path converts to a chunk_truncated
+   *  sentinel — see observability_writer_daemon.ts handler near the
+   *  UNDECODABLE_BUDGET check). Used by the Phase 5 Playwright E2E
+   *  fixture to deterministically seed a retention gap. */
+  truncateAfterS: number;
+  /** When set: print `RUN_ID=<id>` to stdout immediately after
+   *  `startRun` returns. Lets a parent process (the Playwright fixture)
+   *  attach to the live run while it's still emitting. */
+  printRunId: boolean;
 }
 
 function parseArgv(argv: string[]): HarnessOpts {
@@ -51,6 +63,8 @@ function parseArgv(argv: string[]): HarnessOpts {
     durationS: 60,
     emitRateBps: 10_000,
     subagentCount: 5,
+    truncateAfterS: 0,
+    printRunId: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -59,9 +73,11 @@ function parseArgv(argv: string[]): HarnessOpts {
     else if (a === "--duration-s") opts.durationS = Number.parseInt(argv[++i] ?? "60", 10);
     else if (a === "--emit-rate-bps") opts.emitRateBps = Number.parseInt(argv[++i] ?? "10000", 10);
     else if (a === "--subagents") opts.subagentCount = Number.parseInt(argv[++i] ?? "5", 10);
+    else if (a === "--truncate-after-s") opts.truncateAfterS = Number.parseFloat(argv[++i] ?? "0");
+    else if (a === "--print-run-id") opts.printRunId = true;
     else if (a === "--help" || a === "-h") {
       process.stdout.write(
-        "Usage: observability_emit_harness.ts [--multi-process] [--connect runId] [--duration-s N] [--emit-rate-bps N] [--subagents N]\n",
+        "Usage: observability_emit_harness.ts [--multi-process] [--connect runId] [--duration-s N] [--emit-rate-bps N] [--subagents N] [--truncate-after-s N] [--print-run-id]\n",
       );
       process.exit(0);
     } else throw new Error(`unknown arg: ${a}`);
@@ -79,12 +95,14 @@ async function runOneSubagent(
   durationS: number,
   rateBps: number,
   plantToken: boolean,
+  onStarted?: (sa: Awaited<ReturnType<typeof startSubAgent>>) => void,
 ): Promise<void> {
   const sa = await startSubAgent(ctx, {
     agent: agentName,
     model: "synthetic",
     task: "harness",
   });
+  if (onStarted) onStarted(sa);
   const hb = startHeartbeat(ctx, sa);
   try {
     const cmd = "sh";
@@ -168,6 +186,11 @@ async function main(): Promise<void> {
     repo: "synthetic/harness",
     branch: "main",
   });
+  if (opts.printRunId) {
+    // Flush so a parent reading stdout (the Playwright fixture)
+    // observes the runId without buffering delay.
+    process.stdout.write(`RUN_ID=${ctx.runId}\n`);
+  }
   if (ctx._disabled) {
     summary = {
       run_id: ctx.runId,
@@ -182,10 +205,13 @@ async function main(): Promise<void> {
   }
   const runHb = startRunHeartbeat(ctx);
   let count = 0;
+  let firstSa: Awaited<ReturnType<typeof startSubAgent>> | null = null;
+  let truncateTimer: ReturnType<typeof setTimeout> | null = null;
   try {
     const tasks: Array<Promise<void>> = [];
     for (let i = 0; i < opts.subagentCount; i++) {
       const plant = i === 0;
+      const isFirst = i === 0;
       tasks.push(
         runOneSubagent(
           ctx,
@@ -193,10 +219,20 @@ async function main(): Promise<void> {
           opts.durationS,
           opts.emitRateBps,
           plant,
+          isFirst
+            ? (sa) => {
+                firstSa = sa;
+              }
+            : undefined,
         ).then(() => {
           count++;
         }),
       );
+    }
+    if (opts.truncateAfterS > 0) {
+      truncateTimer = setTimeout(() => {
+        void triggerSyntheticTruncation(ctx, firstSa);
+      }, Math.floor(opts.truncateAfterS * 1000));
     }
     let childProc: ReturnType<typeof spawn> | null = null;
     if (opts.multiProcess) {
@@ -245,10 +281,46 @@ async function main(): Promise<void> {
       error: (e as Error).message,
     };
   } finally {
+    if (truncateTimer !== null) clearTimeout(truncateTimer);
     await endRun(ctx, "ok");
     runHb.stop();
   }
   process.stdout.write(JSON.stringify(summary) + "\n");
+}
+
+/**
+ * Send the writer daemon an `emit_chunk_truncated` request, which writes
+ * a `chunk_truncated` JSONL record directly. Used by `--truncate-after-s`
+ * for the Playwright E2E fixture to deterministically seed a retention
+ * gap.
+ *
+ * The earlier design routed a 1.25 MiB base64 payload through the
+ * daemon's `emit_chunk` undecodable-budget path, but the WriterClient
+ * rejects any UDS frame larger than ~64 KiB (MAX_FRAME_BYTES). The
+ * dedicated op keeps the frame tiny while producing the same JSONL
+ * shape (`type: "chunk_truncated"` with `bytes_dropped` + `reason`),
+ * which the tailer + UI gap-marker renderer pick up unchanged.
+ */
+async function triggerSyntheticTruncation(
+  ctx: Awaited<ReturnType<typeof startRun>>,
+  sa: Awaited<ReturnType<typeof startSubAgent>> | null,
+): Promise<void> {
+  if (ctx._disabled || ctx._client === null || sa === null) return;
+  try {
+    await ctx._client.send({
+      op: "emit_chunk_truncated",
+      subagent_id: sa.id,
+      stream: "stdout",
+      bytes_dropped: 1_310_720,
+      reason: "synthetic_harness_seed",
+    });
+  } catch (e) {
+    process.stderr.write(
+      `[observability_emit_harness] truncation trigger failed: ${
+        (e as Error).message
+      }\n`,
+    );
+  }
 }
 
 const isEntry =

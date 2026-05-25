@@ -42,6 +42,30 @@ set. Non-loopback values require all of:
 
 See `server/bind.ts` for the full decision tree.
 
+## UI (Phase 5)
+
+`ui/` is a Vite + React + TypeScript SPA. Production bundle goes to
+`ui/dist`; the Dockerfile's `ui-builder` stage copies it into the
+runtime image at `/app/ui/dist`. `OBSERVABILITY_UI_DIR` overrides the
+path (defaults to `/app/ui/dist`).
+
+Rules for new UI code:
+
+- All log chunk + finding text renders through React text nodes — no
+  unsafe HTML-string props anywhere under `ui/src/`. The ANSI sanitizer
+  in `ui/src/ansi.ts` emits a typed token stream; tokens map to
+  `<span className=...>`.
+- The static auth-exempt list (`server/middleware.ts`) covers `/`,
+  `/index.html`, `/favicon.ico`, and the `/assets/` prefix. Anything
+  Vite emits outside `assets/` MUST be added to that list.
+- The bootstrap fragment is captured by `ui/src/bootstrap.ts` BEFORE
+  any other module's top-level code (it's the first import of
+  `main.tsx`). Do not move the import; do not introduce side effects
+  earlier.
+- `chunk_truncated` MUST render as a focusable `<div role="separator">`
+  with the bytes-dropped count in `aria-label`. The component lives at
+  `ui/src/components/GapMarker.tsx`.
+
 ## Migrations
 
 `migrations/NNN_*.sql` run on every boot, idempotent via `PRAGMA
