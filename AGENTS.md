@@ -74,6 +74,12 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `tools/context_compactor_lib.ts` + `tools/context_compactor.ts` — pure-TS session-checkpoint generator (replaces the deleted `scripts/context_compactor.py`). Writes `checkpoint-{ts}.md` under `sessions/{sid}/`, updates `session_state.last_checkpoint`, honors size cap. Loads `context_compaction` config inline (no `config_loader.py` dep). CLI: `[--session-id ID] [--json]`. Consumed by `/stark-session` Phase 3b + stark-copilot / stark-phase-execute end hooks.
 - `tools/optimize_skill_description.ts` — skill-description optimizer (replaces the deleted `scripts/optimize_skill_description.py`). Reads SKILL.md frontmatter, scores via the skill-creator plugin's Python `run_eval.py`, asks `claude -p` for a better description based on the failing eval queries. CLI flags and JSON report shape match the Python.
 
+### Observability stack
+- `tools/observability_paths_lib.ts` — canonical path helpers + 0700/0600 mode enforcement; every observability writer goes through this.
+- `tools/observability_hostinfo.ts` — host-side ticker (launchd-managed) for `host.json`. Sole host-introspection surface — macOS Docker Desktop does not expose `/proc` to containers.
+- `tools/observability_install_launchd.ts` — generates the hostinfo + prune launchd plists with a portable `PATH` (Apple Silicon + Intel Homebrew).
+- `tools/observability_server/` — Dockerized server (`server/bind.ts` for bind gates; `server/db.ts` + `migrations/001_init.sql` for the SQLite index). See `tools/observability_server/CLAUDE.md`.
+
 ### Other
 - `tools/plan_to_tasks_validate.ts` + `plan_to_tasks_validate_lib.ts` — plan decomposition validation (parallel codex/gemini validators)
 
