@@ -342,16 +342,17 @@ tick. For each `run` with `last_heartbeat_at > 60 s ago` AND
 `run_end IS NULL`, it:
 
 1. Reads the run's recorded `parent_pid` and `host_boot_id` from the
-   index (the host bind-mounts `/proc` read-only at `/host_proc` so the
-   container can stat process info).
-2. If the current host_boot_id (read from a host-info sidecar volume
-   refreshed by a small `tools/observability_hostinfo.ts` ticker every
-   60 s) does NOT match the recorded `host_boot_id`, treat the run as
+   index. There is no `/proc` mount inside the container; the host
+   `tools/observability_hostinfo.ts` ticker exposes the necessary host
+   facts via `/hostinfo/host.json` (`host_boot_id`, `uptime_seconds`,
+   `live_pids[]`).
+2. If the current host_boot_id (read from `host.json`, refreshed every
+   5 s) does NOT match the recorded `host_boot_id`, treat the run as
    **crashed by host event** (reboot/sleep) and mark non-terminal
    sub-agents as `crashed` with reason `host_boot_changed`.
 3. Otherwise, if the recorded `parent_pid` is missing from
-   `/host_proc`, treat the run as **crashed by dispatcher exit** and
-   mark non-terminal sub-agents as `crashed` with reason
+   `host.json#live_pids[]`, treat the run as **crashed by dispatcher
+   exit** and mark non-terminal sub-agents as `crashed` with reason
    `parent_exit`.
 4. Otherwise, treat the run as **stale, parent still alive** — no
    state change yet; flag in `/api/health` and reconsider next tick.
@@ -364,9 +365,9 @@ explicitly accepts up to 90 s practical bound.
 **Laptop sleep / resume.** macOS pauses the dispatcher and the container
 together during sleep. On resume, `host_boot_id` is unchanged (sleep is
 not reboot) but the recorded run-heartbeat may be very stale. To avoid
-false crashed-state on resume, the docker server also reads
-`/host_proc/uptime` on every tick and skips state transitions for one
-full tick (30 s) whenever the host uptime delta is smaller than the
+false crashed-state on resume, the docker server reads
+`host.json#uptime_seconds` on every tick and skips state transitions for
+one full tick (30 s) whenever the host uptime delta is smaller than the
 wall-clock delta by more than 60 s (i.e., the host slept). On reboot
 (`host_boot_id` change), inflight runs are explicitly marked crashed
 because the dispatcher is gone.
@@ -385,10 +386,10 @@ process introspection have failed.
 
 Single container, image based on `node:22-alpine`. Mounts:
 
-- `~/.claude/code-review/observability/runs:/spool:ro` (read-only — see Architecture)
-- `/proc:/host_proc:ro` (host-process introspection for liveness / parent-pid checks)
-- `~/.claude/code-review/observability/hostinfo:/hostinfo:ro` (small ticker file maintained by the host-side `tools/observability_hostinfo.ts`; carries `host_boot_id`, uptime, free disk)
-- named volume `observability_index:/data` (SQLite database — the only writable path inside the container)
+- `~/.claude/code-review/observability/runs:/spool/runs:ro` (read-only — see Architecture)
+- `~/.claude/code-review/observability/hostinfo:/hostinfo:ro` (ticker file maintained by the host-side `tools/observability_hostinfo.ts`; carries `host_boot_id`, uptime, free disk, **and `live_pids[]`** — the only host-process introspection surface; macOS Docker Desktop does not expose `/proc` to containers, so there is **no** `/proc:/host_proc:ro` mount)
+- `~/.claude/code-review/observability/audit:/audit` (audit log, writable)
+- named volume `observability_index:/data` (SQLite database — the only other writable path inside the container)
 
 One Node process, four subcomponents:
 
@@ -1185,12 +1186,12 @@ Plus three new top-level tools (not in the docker image):
 
 `docker-compose.yml` mounts:
 
-- `~/.claude/code-review/observability/runs:/spool:ro`
-- `/proc:/host_proc:ro`
-- `~/.claude/code-review/observability/hostinfo:/hostinfo:ro`
+- `~/.claude/code-review/observability/runs:/spool/runs:ro`
+- `~/.claude/code-review/observability/hostinfo:/hostinfo:ro` (sole host-introspection surface — see "Liveness contract" above)
+- `~/.claude/code-review/observability/audit:/audit`
 - named volume `observability_index:/data`
 
-Ports: `127.0.0.1:7700:7700`.
+Ports: `127.0.0.1:7700:7700` (UI/API) + `127.0.0.1:7701:7701` (loopback-only retention listener).
 
 Start: `docker compose -f tools/observability_server/docker-compose.yml up -d`.
 
