@@ -8,6 +8,18 @@ export interface Run {
   repo: string | null;
   branch: string | null;
   pr_number: number | null;
+  /** Absolute filesystem path of the checkout the run came from. Same
+   *  repo+branch coming out of a `.worktrees/<name>` checkout has a
+   *  distinct `worktree_path` so the tree separates them under a
+   *  dedicated worktree node. Null on legacy rows. */
+  worktree_path: string | null;
+  /** Human-readable label derived from `worktree_path`:
+   *   - "<name>" when the path ends in `.worktrees/<name>`
+   *   - "primary" otherwise
+   *   - null when `worktree_path` is null
+   *  Server-computed (see runs_api.ts::worktreeLabel) so the UI doesn't
+   *  duplicate the path-parsing rule. */
+  worktree_label: string | null;
   started_at: string;
   ended_at: string | null;
   status: string | null;

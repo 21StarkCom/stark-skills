@@ -15,6 +15,8 @@ function run(over: Partial<Run>): Run {
     repo: "evinced/stark-skills",
     branch: "main",
     pr_number: 42,
+    worktree_path: null,
+    worktree_label: null,
     started_at: "2026-05-25T10:00:00.000Z",
     ended_at: null,
     status: "running",

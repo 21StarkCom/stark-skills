@@ -433,6 +433,7 @@ export class IndexWriter extends EventEmitter {
     const repo = strField(meta, "repo") ?? null;
     const branch = strField(meta, "branch") ?? null;
     const prNumber = numField(meta, "pr_number") ?? null;
+    const worktreePath = strField(meta, "worktree_path") ?? null;
     const trackedParentPid = numField(rec, "tracked_parent_pid") ?? null;
     const writerDaemonPid = numField(rec, "writer_daemon_pid") ?? null;
     const hostBootId = strField(rec, "host_boot_id") ?? null;
@@ -442,6 +443,7 @@ export class IndexWriter extends EventEmitter {
       repo,
       branch,
       prNumber,
+      worktreePath,
       ts,
       trackedParentPid,
       writerDaemonPid,
@@ -656,9 +658,10 @@ function prepareStatements(db: DbHandle): IndexStatements {
     ),
     insertRun: db.prepare(
       `INSERT OR IGNORE INTO runs
-         (run_id, dispatcher, repo, branch, pr_number, started_at, status,
-          parent_pid, writer_daemon_pid, host_boot_id, last_heartbeat_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, NULL)`,
+         (run_id, dispatcher, repo, branch, pr_number, worktree_path,
+          started_at, status, parent_pid, writer_daemon_pid, host_boot_id,
+          last_heartbeat_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, NULL)`,
     ),
     updateRunHeartbeat: db.prepare(
       `UPDATE runs

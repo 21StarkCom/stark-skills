@@ -27,8 +27,8 @@
  *   Netscape format for curl). Used by Phase 1 step 2 of the LAN bootstrap
  *   sequence and by any scripted setup.
  *
- * The helper NEVER echoes a raw token to stdout in any code path.
- * `--print-token` does not exist.
+ * The helper NEVER echoes a raw token to stdout in any code path, and
+ * no print-token flag is implemented.
  */
 
 import { spawnSync } from "node:child_process";

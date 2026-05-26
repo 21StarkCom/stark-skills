@@ -160,10 +160,10 @@ function handleRunsList(
 
   const rows = deps.db
     .prepare(
-      `SELECT run_id, dispatcher, repo, branch, pr_number, started_at,
-              ended_at, status, last_heartbeat_at, total_subagents,
-              total_findings, crashed_reason, parent_pid, writer_daemon_pid,
-              host_boot_id, last_seq, bytes_written
+      `SELECT run_id, dispatcher, repo, branch, pr_number, worktree_path,
+              started_at, ended_at, status, last_heartbeat_at,
+              total_subagents, total_findings, crashed_reason, parent_pid,
+              writer_daemon_pid, host_boot_id, last_seq, bytes_written
          FROM runs
          ${whereSql}
         ORDER BY started_at DESC, run_id DESC
@@ -197,10 +197,10 @@ function handleRunGet(
   }
   const row = deps.db
     .prepare(
-      `SELECT run_id, dispatcher, repo, branch, pr_number, started_at,
-              ended_at, status, last_heartbeat_at, total_subagents,
-              total_findings, crashed_reason, parent_pid, writer_daemon_pid,
-              host_boot_id, last_seq, bytes_written
+      `SELECT run_id, dispatcher, repo, branch, pr_number, worktree_path,
+              started_at, ended_at, status, last_heartbeat_at,
+              total_subagents, total_findings, crashed_reason, parent_pid,
+              writer_daemon_pid, host_boot_id, last_seq, bytes_written
          FROM runs
         WHERE run_id = ?`,
     )
@@ -660,6 +660,7 @@ interface RunRow {
   repo: string | null;
   branch: string | null;
   pr_number: number | null;
+  worktree_path: string | null;
   started_at: string;
   ended_at: string | null;
   status: string | null;
@@ -729,6 +730,21 @@ function mergeBySeq(chunks: ChunkRow[], truncs: TruncRow[]): OrderedItem[] {
   return out;
 }
 
+/** Human-readable label for a worktree path. Returns:
+ *   - "<name>" when the path ends in `.../worktrees/<name>` — covers both
+ *     stark-skills' canonical `.claude/worktrees/<name>` layout AND
+ *     plain `.worktrees/<name>` (the suffix the underlying directory
+ *     name uses).
+ *   - "primary" for anything else (or null when path is null/empty)
+ * The full path is also surfaced as `worktree_path` for tooltips. */
+function worktreeLabel(p: string | null): string | null {
+  if (!p) return null;
+  const m = p.match(/[\\/]worktrees[\\/]([^\\/]+)\/?$/);
+  if (m) return m[1] ?? null;
+  const base = p.split(/[\\/]/).filter(Boolean).pop() ?? null;
+  return base ? "primary" : null;
+}
+
 function renderRun(row: RunRow): Record<string, unknown> {
   return {
     run_id: row.run_id,
@@ -736,6 +752,8 @@ function renderRun(row: RunRow): Record<string, unknown> {
     repo: row.repo,
     branch: row.branch,
     pr_number: row.pr_number,
+    worktree_path: row.worktree_path,
+    worktree_label: worktreeLabel(row.worktree_path),
     started_at: row.started_at,
     ended_at: row.ended_at,
     status: row.status,
