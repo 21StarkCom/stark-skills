@@ -260,7 +260,20 @@ function SubagentDetail(props: SubagentDetailProps): JSX.Element {
         </dl>
       ) : null}
 
-      <LogViewer events={events} liveStatus={status} />
+      <LogViewer
+        events={events}
+        liveStatus={
+          // Surface "ended" once the sub-agent has a terminal ended_at,
+          // regardless of WebSocket state: the backfill from
+          // event_offsets has replayed every chunk this sub-agent ever
+          // emitted, so the user IS looking at the final output even
+          // though no more events will arrive. Without this override
+          // the badge would say "Live" forever for finished sub-agents.
+          sa && sa.ended_at !== null && status !== "disconnected"
+            ? "ended"
+            : status
+        }
+      />
 
       <details className="findings-list" open={findings.length > 0}>
         <summary>Findings ({findings.length})</summary>
