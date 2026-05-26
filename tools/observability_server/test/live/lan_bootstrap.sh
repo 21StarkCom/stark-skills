@@ -54,7 +54,11 @@ echo "marker present"
 step 3 "stop loopback stack + install LAN override"
 docker compose -f "$COMPOSE_FILE" down
 cp "$OVERRIDE_EXAMPLE" "$OVERRIDE_FILE"
-sed -i.bak "s/LAN_IP_PLACEHOLDER/$LAN_IP/" "$OVERRIDE_FILE"
+# The example file uses literal `<LAN-IP>` as the sigil. Replace ALL
+# occurrences so both the OBSERVABILITY_PUBLISHED_HOST env value and
+# the Caddy sidecar's `ports:` publish line pick up the operator's
+# address.
+sed -i.bak "s/<LAN-IP>/$LAN_IP/g" "$OVERRIDE_FILE"
 rm "$OVERRIDE_FILE.bak"
 
 step 4 "boot LAN stack via TLS"
@@ -71,7 +75,11 @@ fi
 echo "TLS probe ok"
 
 # Negative: plain HTTP off-loopback must refuse.
-if curl -sS --max-time 5 "http://$LAN_IP:7700/api/health/probe" >/dev/null; then
+# `--fail` makes curl exit non-zero on any 4xx/5xx. Caddy answers
+# `400 Client sent an HTTP request to an HTTPS server.` on plain HTTP
+# against the TLS port, which IS the refusal — without `--fail` curl
+# would still exit 0 and the test would mis-interpret as success.
+if curl -sS --fail --max-time 5 "http://$LAN_IP:7700/api/health/probe" >/dev/null 2>&1; then
   echo "FAIL — plain HTTP LAN probe should have been refused" >&2
   exit 1
 fi

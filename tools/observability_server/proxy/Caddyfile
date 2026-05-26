@@ -17,6 +17,11 @@
     reverse_proxy observability:7799 {
         header_up X-Forwarded-Proto https
         header_up X-Forwarded-For   {client_ip}
-        header_up Host              {host}
+        # Caddy 2 preserves the client's Host header by default in
+        # reverse_proxy. We deliberately do NOT add `header_up Host …`:
+        # `{host}` strips the port (which would mismatch the server's
+        # `<lan>:<port>` allowlist) and the upstream-destination form
+        # would replace it with `observability:7799` (which the server
+        # also rejects).
     }
 }
