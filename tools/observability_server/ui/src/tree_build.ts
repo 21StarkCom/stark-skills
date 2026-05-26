@@ -84,11 +84,19 @@ export function buildTree(opts: BuildTreeOpts): TreeNode[] {
               isLive: live,
             };
           });
+          // Worktree suffix: hide for "primary" (avoid noise on the
+          // common case), show "[<name>]" for git worktrees, and skip
+          // entirely on legacy null rows. The full path stays on
+          // `run.worktree_path` for the detail pane tooltip.
+          const wt = run.worktree_label;
+          const wtSuffix =
+            wt && wt !== "primary" ? ` [${wt}]` : "";
+          const wtAria = wt && wt !== "primary" ? ` (worktree: ${wt})` : "";
           return {
             id: `run:${run.run_id}`,
             kind: "run",
-            label: `${run.dispatcher} · ${shortRunId(run.run_id)}`,
-            ariaLabel: `${run.dispatcher} ${shortRunId(run.run_id)} ${run.status ?? "pending"}`,
+            label: `${run.dispatcher} · ${shortRunId(run.run_id)}${wtSuffix}`,
+            ariaLabel: `${run.dispatcher} ${shortRunId(run.run_id)} ${run.status ?? "pending"}${wtAria}`,
             status: run.status,
             children: saChildren,
             run,

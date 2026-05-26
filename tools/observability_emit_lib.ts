@@ -63,6 +63,12 @@ export interface RunOptions {
   repo?: string;
   branch?: string;
   prNumber?: number;
+  /** Absolute path to the working checkout this run came from. Lets
+   *  the UI tree separate runs out of a git worktree
+   *  (`.worktrees/<name>`) from the primary checkout under the same
+   *  repo+branch. dispatcher_helpers.initRunCtx() defaults this to
+   *  `git rev-parse --show-toplevel` when unset. */
+  worktreePath?: string;
   trackedParentPid?: number;
   byteBudgetBytes?: number;
   /** Test seam: override the writer daemon script path. */
@@ -451,6 +457,7 @@ export async function startRun(opts: RunOptions): Promise<RunCtx> {
     repo: opts.repo ?? null,
     branch: opts.branch ?? null,
     pr_number: opts.prNumber ?? null,
+    worktree_path: opts.worktreePath ?? null,
     ...(opts.meta ?? {}),
   };
   const daemonScript =

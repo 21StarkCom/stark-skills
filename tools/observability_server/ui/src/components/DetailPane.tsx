@@ -118,6 +118,19 @@ function RunDetail(props: RunDetailProps): JSX.Element {
           <dd>{run.status ?? "—"}</dd>
         </div>
         <div>
+          <dt>Branch</dt>
+          <dd>{run.branch ?? "—"}</dd>
+        </div>
+        <div>
+          <dt>Worktree</dt>
+          <dd title={run.worktree_path ?? undefined}>
+            {run.worktree_label ?? "—"}
+            {run.worktree_label && run.worktree_label !== "primary" && run.worktree_path
+              ? ` · ${run.worktree_path}`
+              : ""}
+          </dd>
+        </div>
+        <div>
           <dt>Started</dt>
           <dd>{run.started_at}</dd>
         </div>

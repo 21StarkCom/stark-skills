@@ -77,6 +77,21 @@ function envOrGitBranch(envBranch?: string): string | undefined {
   return gitCurrentBranch() ?? undefined;
 }
 
+function gitToplevel(): string | null {
+  const r = cp.spawnSync("git", ["rev-parse", "--show-toplevel"], {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (r.status !== 0) return null;
+  const p = (r.stdout ?? "").trim();
+  return p.length > 0 ? p : null;
+}
+
+function envOrGitWorktreePath(envPath?: string): string | undefined {
+  if (envPath && envPath.length > 0) return envPath;
+  return gitToplevel() ?? undefined;
+}
+
 export interface DispatcherLifecycle {
   ctx: RunCtx;
   /** Whether this process owns (spawned) the writer daemon for `ctx`. */
@@ -121,6 +136,7 @@ export async function initRunCtx(opts: InitRunCtxOptions): Promise<DispatcherLif
         repo: envOrGitRepo(opts.repo),
         branch: envOrGitBranch(opts.branch),
         prNumber: opts.prNumber,
+        worktreePath: envOrGitWorktreePath(opts.worktreePath),
         trackedParentPid: process.pid,
         byteBudgetBytes: opts.byteBudgetBytes,
         meta: opts.meta,
