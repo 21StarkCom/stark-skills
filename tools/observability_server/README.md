@@ -229,3 +229,177 @@ curl -sS http://127.0.0.1:7700/api/health/probe
 For everything else see the plan
 (`docs/specs/2026-05-25-stark-review-observability-plan.md`) and design
 (`docs/specs/2026-05-25-stark-review-observability-design.md`).
+
+## JSONL event schema (Phase 8 reference)
+
+Every JSONL spool record carries `seq` (monotonic per run), `ts`
+(ISO-8601 ms), and `type`. The current set:
+
+| `type` | Required fields | Notes |
+| --- | --- | --- |
+| `run_start` | `version`, `dispatcher`, `tracked_parent_pid`, `writer_daemon_pid` | First record. `version` = 1. |
+| `run_heartbeat` | – | 10 s interval; daemon-owned timer. |
+| `run_end` | `status`, `ended_at`, `crashed_reason?` | `status ∈ ok/error/timeout/crashed`. |
+| `subagent_start` | `subagent_id`, `agent`, `model`, `task` | – |
+| `subagent_heartbeat` | `subagent_id` | 30 s interval; tier-batched. |
+| `subagent_end` | `subagent_id`, `status`, `duration_ms` | – |
+| `subagent_stdout` / `subagent_stderr` | `subagent_id`, `stream`, `encoding`, `chunk` | `encoding ∈ utf8/base64`; tier-batched. |
+| `subagent_progress` | `subagent_id`, `kind`, `payload` | `kind == "finding"` is tier-immediate. |
+| `chunk_truncated` | `subagent_id`, `stream`, `bytes_dropped`, `reason` | Phase 7 + E6 sentinel. `seq` is preserved across the in-place rewrite. |
+
+### `chunk_truncated` semantics
+
+A `subagent_stdout` / `subagent_stderr` record at `(run_id, seq)` may be
+rewritten in-place by the prune CLI into a `chunk_truncated` record at
+the same `seq`. The tailer detects the in-place rewrite via mtime
+change + `spool_files.rewrite_state` transitions; the index writer's
+state machine (`subagent_*` → `chunk_truncated`) deletes the
+`chunk_offsets` row for that seq and inserts a `chunk_truncations` row.
+WS subscribers see the gap live via `event: gap`; backfill via
+`code: retention_gap`. The UI renders inline gap markers
+(`ui/src/components/GapMarker.tsx`).
+
+### Liveness — hostinfo only
+
+`host.json` is the ONLY host-introspection surface. Liveness sweep
+joins `runs.parent_pid` against `host.live_pids[]`. There is no
+`/proc` mount; macOS Docker Desktop does not expose host `/proc`.
+
+### Writer daemon UDS protocol (per-run)
+
+Each dispatcher run spawns a per-run daemon. Dispatchers connect to
+`tmpdir/stark-obs/<hash>.sock` (mode 0600). First frame:
+
+```json
+{"op": "hello", "cap": "<ephemeral-cap>"}
+```
+
+The cap is minted by `op: "caps_issue"` against the per-run
+`writer.cap` issuer secret (0600, in the per-run dir). Subsequent ops:
+`start_subagent`, `end_subagent`, `emit_progress`, `emit_chunk`,
+`emit_chunk_truncated`, `emit_subagent_heartbeat`, `end_run`, `ping`.
+
+### Retention-notify two-call protocol
+
+`POST /api/internal/retention/notify` (Bearer-token, loopback-only)
+accepts a strictly-ordered pair per rewritten spool file:
+
+```json
+// Call A — sent BEFORE rename(2). Never carries new_mtime_ns.
+{"action": "pre-rename", "run_id": "...", "rotation_index": 0,
+ "file_path": "...", "new_size_bytes": 500,
+ "truncated": [{"seq": 5, "subagent_id": "...", "stream": "stdout", "bytes_dropped": 1234}]}
+
+// Call B — sent AFTER rename(2). Never carries truncated[] or new_size_bytes.
+{"action": "update-mtime", "run_id": "...", "rotation_index": 0,
+ "file_path": "...", "new_mtime_ns": 1779692401000000000}
+
+// On rename(2) failure — must complete before retrying.
+{"action": "abort-rewrite", "run_id": "...", "rotation_index": 0,
+ "file_path": "..."}
+```
+
+The Bearer-token check resolves the `stark-observability-prune-token`
+Keychain entry (NEVER `stark-observability-token`); the prune CLI
+writes the header to a 0600 temp file and passes it via `curl -K
+<file>` so the token never lands in `argv`.
+
+### Crashed-state semantics
+
+Two redundant writers, single-writer-per-failure-mode guaranteed by
+the sweeper's `status NOT IN (terminal)` filter:
+
+- **Daemon-written** (≤ 60 s): per-run writer daemon polls
+  `kill(tracked_parent_pid, 0)` every 30 s; on ESRCH writes a final
+  `run_heartbeat`, then `run_end {status: "crashed", crashed_reason:
+  "parent_exit"}` with `ended_at = new Date().toISOString()`, rewrites
+  `meta.json` with the same TS, removes `writer.sock` + `writer.pid`,
+  exits 0.
+- **Sweeper-written** (≤ 90 s, fallback): the container's liveness
+  sweep runs every 30 s, marks rows whose `parent_pid` ∉
+  `host.live_pids[]` as crashed via a `status NOT IN (terminal)`
+  UPDATE with `ended_at` bound server-side. The synthetic close event
+  is recorded in `synthetic_events` so WS backfill replays it.
+
+`runs.parent_pid` is always the **tracked-parent pid** — the
+dispatcher Node pid for normal dispatchers, or the SKILL.md shell
+pid for `/stark-phase-execute`. The daemon's own pid lives in
+`runs.writer_daemon_pid` and is diagnostic only.
+
+All `ended_at` + `last_heartbeat_at` values are server-bound ISO-8601
+millisecond strings. SQLite `strftime` / `datetime('now', ...)` are
+forbidden; `tools/observability_server/server/grep_assertions.test.ts`
+enforces this in CI.
+
+## Deployment runbook — LAN bootstrap
+
+```bash
+# 1. Loopback boot + first-bootstrap dance.
+docker compose -f tools/observability_server/docker-compose.yml up -d
+node --experimental-strip-types tools/observability_open.ts --no-browser
+# → writes /data/last_bootstrap_at, /data/bootstrap_token,
+#   /data/prune_token, populates Keychain (stark-observability-bootstrap-token
+#   + stark-observability-prune-token), drops session.cookie at
+#   ~/.claude/code-review/observability/session.cookie.
+
+# 2. Stop loopback stack.
+docker compose -f tools/observability_server/docker-compose.yml down
+
+# 3. Install LAN override.
+cp tools/observability_server/docker-compose.lan.yml.example \
+   tools/observability_server/docker-compose.override.yml
+# Replace LAN_IP_PLACEHOLDER with your host's actual LAN IP.
+
+# 4. Boot LAN stack via TLS.
+docker compose \
+  -f tools/observability_server/docker-compose.yml \
+  -f tools/observability_server/docker-compose.override.yml up -d
+
+# 5. TLS probe via mkcert root.
+curl -sS --cacert "$(mkcert -CAROOT)/rootCA.pem" \
+     https://<LAN_IP>:7700/api/health/probe   # → {"ok":true}
+# Plain HTTP off-loopback must refuse.
+```
+
+There is no escape hatch around `/data/last_bootstrap_at` — first
+boot must always be loopback. `bash tools/observability_server/test/live/lan_bootstrap.sh`
+automates the full sequence + the negative HTTP-LAN refusal test.
+
+## Scripted auth contract
+
+Scripts and operators NEVER use `curl -H "Authorization: Bearer $TOKEN"`
+or any helper-stdout-piped Bearer flow. The two authoritative forms:
+
+```bash
+# Cookie file — populated by tools/observability_open.ts:
+COOKIE_FILE=~/.claude/code-review/observability/session.cookie
+curl -sS -b "$COOKIE_FILE" http://127.0.0.1:7700/api/runs
+
+# Bearer-needing scripts (prune CLI) — write the header to a 0600 file:
+HDR=$(mktemp -t obs-curl-XXXXXX)
+trap 'rm -f "$HDR"' EXIT
+chmod 0600 "$HDR"
+TOKEN=$(security find-generic-password -s stark-observability-prune-token -w)
+printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" >"$HDR"
+curl -sS -K "$HDR" http://127.0.0.1:7701/api/internal/retention/...
+```
+
+The presence of `--print-token` in any source file is a build break —
+`server/grep_assertions.test.ts` enforces it.
+
+## Phase 8 load harness + live tests
+
+- `tools/observability_server/test/load.ts --spec` — plan-profile load
+  test (N=27 sub-agents × 10 KB/s × 600 s + 2 WS subscribers + 5 s
+  history loop). Asserts WS p95 < 2 s, SSFB p95 < 2 s, UDS RTT p95 <
+  5 ms, commit p95 < 50 ms, memory growth < 50 MB/h. Writes
+  `test/load-report.json`; render with `load_report.ts`.
+- `tools/observability_server/test/failure_paths.test.ts` — failure
+  matrix from §Testing: malformed JSONL, deleted spool, parse storm,
+  SQLite commit failure, dispatcher SIGKILL, server crash between
+  retention-notify Call A and Call B, base64 chunk truncation.
+- `tools/observability_server/test/live/` — operator-driven scripts
+  (dispatcher SIGKILL, dispatcher+daemon SIGKILL with sweeper
+  idempotency, host_boot_id change, pressure retention notify, LAN
+  bootstrap). Each prints `PASS`/`FAIL` so they can be wired into CI.
+

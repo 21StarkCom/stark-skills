@@ -244,6 +244,48 @@ test("stale hostinfo (older than 60 s) skips the tick", () => {
   }
 });
 
+test("loadHostInfo accepts canonical wall_clock field (matches real ticker)", () => {
+  // Real ticker (`tools/observability_hostinfo.ts`) emits `wall_clock`
+  // only — no `ts` / `ts_ms`. Regression guard for the Phase 8 wing
+  // finding: prior sweeper rejected every snapshot the live ticker
+  // produced, leaving liveness inert on real installs.
+  const nowMs = 1_700_000_000_000;
+  const h = setup({
+    host_boot_id: "bootA",
+    boot_time_seconds: Math.floor(nowMs / 1000) - 3600,
+    uptime_seconds: 3600,
+    live_pids: [],
+    free_disk_bytes: 1_000_000_000,
+    wall_clock: new Date(nowMs).toISOString(),
+  });
+  if (!h) return;
+  try {
+    h.db.prepare(
+      `INSERT INTO runs (run_id, dispatcher, started_at, status, parent_pid,
+                         host_boot_id, last_heartbeat_at)
+       VALUES (?, 'x', ?, 'running', 9999, 'bootA', ?)`,
+    ).run(
+      "run-wallclock",
+      new Date(h.now() - 5 * 60_000).toISOString(),
+      new Date(h.now() - 2 * 60_000).toISOString(),
+    );
+    const sw = new LivenessSweeper({
+      db: h.db,
+      hostInfoPath: h.hostInfoPath,
+      now: h.now,
+    });
+    sw.runMainTick();
+    const row = h.db
+      .prepare(`SELECT status, crashed_reason FROM runs WHERE run_id = ?`)
+      .get("run-wallclock") as { status: string; crashed_reason: string };
+    assert.equal(row.status, "crashed");
+    assert.equal(row.crashed_reason, "parent_exit");
+    assert.equal(sw.getStats().hostinfo_stale_ticks, 0);
+  } finally {
+    h.cleanup();
+  }
+});
+
 test("orphan sweeper crashes a run with NULL last_heartbeat_at older than 30 min", () => {
   const h = setup(
     freshHostInfo({ bootId: "bootA", livePids: [9999], nowMs: 1_700_000_000_000 }),

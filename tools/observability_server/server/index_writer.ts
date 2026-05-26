@@ -63,7 +63,15 @@ export interface IndexWriterStats {
   events_skipped_replay_total: number;
   chunk_truncated_transitions_total: number;
   batches_flushed_total: number;
+  /** Most recent batch commit latency in milliseconds. Null until the
+   * first batch flushes. Surface for the Phase 8 load harness. */
+  last_commit_ms: number | null;
 }
+
+/** Bounded ring buffer of recent batch commit latencies (ms). Phase 8
+ * load assertions read this to compute p50/p95 without exposing raw
+ * timing data on the public HTTP surface. */
+const COMMIT_LATENCY_SAMPLE_CAP = 1024;
 
 export class IndexWriter extends EventEmitter {
   private readonly db: DbHandle;
@@ -77,7 +85,9 @@ export class IndexWriter extends EventEmitter {
     events_skipped_replay_total: 0,
     chunk_truncated_transitions_total: 0,
     batches_flushed_total: 0,
+    last_commit_ms: null,
   };
+  private commitLatencies: number[] = [];
   private subscribed = false;
 
   constructor(opts: IndexWriterOptions) {
@@ -110,6 +120,12 @@ export class IndexWriter extends EventEmitter {
 
   getStats(): Readonly<IndexWriterStats> {
     return { ...this.stats };
+  }
+
+  /** Snapshot of recent batch-commit latencies (newest last, in ms).
+   * Phase 8 load harness reads this directly to compute percentiles. */
+  getCommitLatencies(): number[] {
+    return this.commitLatencies.slice();
   }
 
   private enqueue(item: BatchedItem): void {
@@ -148,9 +164,19 @@ export class IndexWriter extends EventEmitter {
         }
       }
     });
+    const startedAtMs = performance.now();
     try {
       txn(items);
+      const elapsedMs = performance.now() - startedAtMs;
       this.stats.batches_flushed_total += 1;
+      this.stats.last_commit_ms = elapsedMs;
+      this.commitLatencies.push(elapsedMs);
+      if (this.commitLatencies.length > COMMIT_LATENCY_SAMPLE_CAP) {
+        this.commitLatencies.splice(
+          0,
+          this.commitLatencies.length - COMMIT_LATENCY_SAMPLE_CAP,
+        );
+      }
       for (const t of truncationsToEmit) {
         this.bus.emit("truncation", t);
       }

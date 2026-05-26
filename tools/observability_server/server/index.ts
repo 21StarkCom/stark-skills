@@ -166,6 +166,7 @@ export async function buildServer(
     indexWriterStats: () => indexWriter.getStats(),
     getTailerParseErrors: () => tailer.getParseErrorsTotal(),
     getDurabilityStats: () => readDurabilityStats(DATA_DIR),
+    getCommitLatencies: () => indexWriter.getCommitLatencies(),
   });
 
   // Static UI shell (Phase 5 builds the React app; Phase 4 just wires
@@ -208,6 +209,7 @@ export async function buildServer(
     requireBearer: pruneTokenChecker,
     triggerScan: (target) => tailer.scanNow(target),
     recoverPending: () => recoverPendingRewrites(db),
+    triggerLivenessSweep: () => liveness.runMainTick(),
   });
 
   return {

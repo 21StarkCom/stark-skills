@@ -70,6 +70,13 @@ export interface RetentionRouteDeps {
    * and never re-issues pre-rename).
    */
   recoverPending?: () => RecoveryStats;
+  /**
+   * Backend for `POST /internal/retention/sweep-now`. Wired by
+   * `index.ts` to `LivenessSweeper.runMainTick()`. Live tests use this
+   * to verify the 30 s sweeper's idempotency without waiting 30 × N s
+   * between observations (Phase 8 Task 4 — wing-finding fix).
+   */
+  triggerLivenessSweep?: () => void;
 }
 
 interface PreRenameSql {
@@ -239,6 +246,36 @@ export function registerRetentionRoutes(
         return reply.code(500).send({
           ok: false,
           code: "recovery_failed",
+          error: (err as Error).message,
+        });
+      }
+    });
+  }
+
+  // Wing-finding fix (Phase 8 Task 4): explicit liveness-sweep trigger.
+  // The 30 s tick is fine in production, but the dispatcher+daemon
+  // SIGKILL live test needs to observe ≥ 20 ticks without sleeping
+  // 30 × 20 = 10 minutes between observations. The retention listener
+  // is loopback-only + prune-token-authed, so exposing the sweep here
+  // doesn't widen the attack surface.
+  for (const sweepPath of [
+    "/api/internal/retention/sweep-now",
+    "/internal/retention/sweep-now",
+  ]) {
+    app.post(sweepPath, async (req, reply) => {
+      if (deps.requireBearer && !deps.requireBearer(req)) {
+        return reply.code(401).send({ ok: false, code: "unauthorized" });
+      }
+      if (!deps.triggerLivenessSweep) {
+        return reply.code(503).send({ ok: false, code: "sweep_unavailable" });
+      }
+      try {
+        deps.triggerLivenessSweep();
+        return reply.code(200).send({ ok: true, action: "sweep-now" });
+      } catch (err) {
+        return reply.code(500).send({
+          ok: false,
+          code: "sweep_failed",
           error: (err as Error).message,
         });
       }

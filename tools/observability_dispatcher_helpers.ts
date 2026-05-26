@@ -20,6 +20,10 @@
  * observability off.
  */
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import {
   connectRun,
   emitProgress,
@@ -33,6 +37,7 @@ import {
   type RunOptions as EmitRunOptions,
   type SubAgent,
 } from "./observability_emit_lib.ts";
+import { writerPidPath } from "./observability_paths_lib.ts";
 
 export interface DispatcherLifecycle {
   ctx: RunCtx;
@@ -91,8 +96,74 @@ export async function initRunCtx(opts: InitRunCtxOptions): Promise<DispatcherLif
     }
   }
 
+  // Phase 8 Task 4 — when the operator opts in via
+  // STARK_OBS_WRITE_LIVE_RUN_METADATA=1, record the run's identifying
+  // pids to ~/.claude/code-review/observability/test/live-run.json so the
+  // destructive live-test scripts (dispatcher_*sigkill.sh,
+  // pressure_retention.sh, host_boot_id_change.ts) can resolve
+  // dispatcher_pid / writer_pid / run_id from harness bookkeeping rather
+  // than from `pgrep`/`tail`. Owned ctxs only — connectRun children share
+  // their parent's daemon and would overwrite the parent's metadata.
+  if (
+    ownsRun &&
+    !ctx._disabled &&
+    process.env.STARK_OBS_WRITE_LIVE_RUN_METADATA === "1"
+  ) {
+    try {
+      maybeWriteLiveRunMetadata(ctx.runId);
+    } catch (err) {
+      process.stderr.write(
+        `[obs] live-run.json write failed: ${(err as Error).message}\n`,
+      );
+    }
+  }
+
   const runHb = startRunHeartbeat(ctx);
   return { ctx, ownsRun, runHb };
+}
+
+/**
+ * Atomically write the live-run metadata. Used only when the operator
+ * explicitly enables the live-test harness via the
+ * `STARK_OBS_WRITE_LIVE_RUN_METADATA` env var on a real
+ * `/stark-review` / `/stark-copilot` / etc. invocation. Schema matches
+ * `tools/observability_server/test/live/live_run_metadata.ts` verbatim
+ * so the destructive shell scripts can `jq -r` the same keys regardless
+ * of which writer produced the file.
+ *
+ * The writer-daemon pid is read out of the per-run `writer.pid` file
+ * that `startRun()` fsynced before returning. If the file can't be read
+ * yet (rare race), `writer_pid` is recorded as `null` and the harness
+ * scripts fall back to their own resolution.
+ */
+function maybeWriteLiveRunMetadata(runId: string): void {
+  const outDir = path.join(
+    os.homedir(),
+    ".claude",
+    "code-review",
+    "observability",
+    "test",
+  );
+  fs.mkdirSync(outDir, { recursive: true, mode: 0o700 });
+  let writerPid: number | null = null;
+  try {
+    const raw = fs.readFileSync(writerPidPath(runId), "utf8").trim();
+    const n = Number.parseInt(raw, 10);
+    if (Number.isFinite(n) && n > 0) writerPid = n;
+  } catch {
+    // writer.pid not yet readable — record null
+  }
+  const outPath = path.join(outDir, "live-run.json");
+  const tmp = outPath + ".tmp";
+  const payload = {
+    harness_started_at: new Date().toISOString(),
+    run_id: runId,
+    dispatcher_pid: process.pid,
+    writer_pid: writerPid,
+    sentinel_pid: null,
+  };
+  fs.writeFileSync(tmp, JSON.stringify(payload, null, 2) + "\n", { mode: 0o600 });
+  fs.renameSync(tmp, outPath);
 }
 
 /**

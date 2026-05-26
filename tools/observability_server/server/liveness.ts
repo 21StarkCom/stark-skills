@@ -71,9 +71,15 @@ export interface HostInfo {
   /** Set of live PIDs at last ticker write. */
   live_pids: number[];
   free_disk_bytes: number;
-  /** ms-precision ISO string from the host ticker. */
-  ts: string;
-  /** Optional Unix-epoch milliseconds. */
+  /**
+   * Canonical ms-precision ISO string from `tools/observability_hostinfo.ts`.
+   * Production ticker emits this field. Older test fixtures may emit `ts`
+   * or `ts_ms` instead; `loadHostInfo()` accepts any of the three.
+   */
+  wall_clock?: string;
+  /** Legacy ms-precision ISO string (test-only). */
+  ts?: string;
+  /** Optional Unix-epoch milliseconds (test-only). */
   ts_ms?: number;
 }
 
@@ -425,11 +431,15 @@ export class LivenessSweeper {
     }
     // Reject stale snapshots: the ticker promises 5 s freshness, and
     // the sweeper requires < 60 s old per plan §Phase 4 Task 4.
+    // Accept the canonical `wall_clock` field emitted by
+    // `tools/observability_hostinfo.ts`, plus the older `ts`/`ts_ms`
+    // shapes still used by some unit-test fixtures.
     if (parsed.ts_ms !== undefined) {
       if (this.now() - parsed.ts_ms > HOSTINFO_STALE_MS) return null;
     } else {
-      // No ms timestamp — best-effort from `Date.parse(ts)`.
-      const t = Date.parse(parsed.ts);
+      const isoStr = parsed.wall_clock ?? parsed.ts;
+      if (typeof isoStr !== "string" || isoStr.length === 0) return null;
+      const t = Date.parse(isoStr);
       if (!Number.isFinite(t) || this.now() - t > HOSTINFO_STALE_MS) {
         return null;
       }

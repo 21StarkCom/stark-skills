@@ -57,6 +57,7 @@ async function withApp(
         events_skipped_replay_total: 0,
         chunk_truncated_transitions_total: 0,
         batches_flushed_total: 1,
+        last_commit_ms: null,
       }),
       getTailerParseErrors: () => 0,
     });
@@ -205,6 +206,7 @@ test("GET /api/health durability block reflects injected provider", async () => 
         events_skipped_replay_total: 0,
         chunk_truncated_transitions_total: 0,
         batches_flushed_total: 0,
+        last_commit_ms: null,
       }),
       getTailerParseErrors: () => 0,
       getDurabilityStats: () => ({
@@ -262,6 +264,7 @@ test("chunks SSE with to_seq omitted switches to live tail and ends on subagent_
         events_skipped_replay_total: 0,
         chunk_truncated_transitions_total: 0,
         batches_flushed_total: 0,
+        last_commit_ms: null,
       }),
       getTailerParseErrors: () => 0,
     });
@@ -349,6 +352,7 @@ test("chunks SSE on already-terminal subagent emits end immediately", async () =
         events_skipped_replay_total: 0,
         chunk_truncated_transitions_total: 0,
         batches_flushed_total: 0,
+        last_commit_ms: null,
       }),
       getTailerParseErrors: () => 0,
     });

@@ -66,6 +66,13 @@ export interface RunsApiDeps {
   indexWriterStats: () => IndexWriterStats;
   getTailerParseErrors: () => number;
   /**
+   * Optional accessor for the recent batch-commit latency samples
+   * tracked by the index writer. When present, `/api/health.index_writer`
+   * surfaces p50/p95 so the Phase 8 load harness can run against a
+   * remote server without poking internals.
+   */
+  getCommitLatencies?: () => number[];
+  /**
    * Optional live-event source. When provided, chunk SSE handlers
    * with `to_seq` omitted switch to live tail; otherwise they
    * deliver the current bounded range and emit `event: end`.
@@ -622,16 +629,29 @@ function buildHealthBody(
         fsync_p99_ms: null,
         last_fsync_at: null,
       };
+  const commitLatencies = deps.getCommitLatencies?.() ?? [];
   return {
     ok: true,
     ts: new Date(now()).toISOString(),
     runs: counts,
-    index_writer: iw,
+    index_writer: {
+      ...iw,
+      commit_ms_p50: percentile(commitLatencies, 50),
+      commit_ms_p95: percentile(commitLatencies, 95),
+      commit_samples: commitLatencies.length,
+    },
     tailer: {
       parse_errors_total: deps.getTailerParseErrors(),
     },
     durability,
   };
+}
+
+function percentile(values: number[], p: number): number | null {
+  if (values.length === 0) return null;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const idx = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
+  return sorted[idx]!;
 }
 
 interface RunRow {
