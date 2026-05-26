@@ -65,11 +65,19 @@ function readJson<T>(p: string): T {
 
 function readCookies(cookieFile: string): string {
   const raw = fs.readFileSync(cookieFile, "utf8");
-  // Netscape cookie jar format → header line. Lines starting with "#"
-  // are comments. Tab-separated fields; the value is column 7.
+  // Netscape cookie jar format → header line. Tab-separated fields;
+  // value is column 7. curl marks HttpOnly cookies with a literal
+  // `#HttpOnly_` prefix — that prefix is NOT a comment marker, the
+  // line still carries the cookie. Strip the prefix and parse normally.
+  // True comments (`# ...`) and blank lines are skipped.
   const parts: string[] = [];
-  for (const line of raw.split("\n")) {
-    if (!line || line.startsWith("#")) continue;
+  for (let line of raw.split("\n")) {
+    if (!line) continue;
+    if (line.startsWith("#HttpOnly_")) {
+      line = line.slice("#HttpOnly_".length);
+    } else if (line.startsWith("#")) {
+      continue;
+    }
     const cols = line.split("\t");
     if (cols.length < 7) continue;
     const name = cols[5];
