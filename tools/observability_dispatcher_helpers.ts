@@ -20,6 +20,7 @@
  * observability off.
  */
 
+import * as cp from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -38,6 +39,43 @@ import {
   type SubAgent,
 } from "./observability_emit_lib.ts";
 import { writerPidPath } from "./observability_paths_lib.ts";
+
+/** Best-effort git fallbacks for repo / branch when the SKILL.md wrapper
+ *  didn't export STARK_REPO_SLUG / STARK_BRANCH. Returns null on any
+ *  failure (not a git repo, git not on PATH, detached HEAD, etc.). All
+ *  calls use spawnSync with argv (never shell) — git args are static
+ *  literals, no user input flows in. */
+function gitOriginSlug(): string | null {
+  const r = cp.spawnSync("git", ["remote", "get-url", "origin"], {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (r.status !== 0) return null;
+  const url = (r.stdout ?? "").trim();
+  if (!url) return null;
+  const m = /[:/]([^/:]+)\/([^/]+?)(?:\.git)?$/.exec(url);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+
+function gitCurrentBranch(): string | null {
+  const r = cp.spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (r.status !== 0) return null;
+  const b = (r.stdout ?? "").trim();
+  return b && b !== "HEAD" ? b : null;
+}
+
+function envOrGitRepo(envRepo?: string): string | undefined {
+  if (envRepo && envRepo.length > 0) return envRepo;
+  return gitOriginSlug() ?? undefined;
+}
+
+function envOrGitBranch(envBranch?: string): string | undefined {
+  if (envBranch && envBranch.length > 0) return envBranch;
+  return gitCurrentBranch() ?? undefined;
+}
 
 export interface DispatcherLifecycle {
   ctx: RunCtx;
@@ -73,8 +111,15 @@ export async function initRunCtx(opts: InitRunCtxOptions): Promise<DispatcherLif
   const ctx = ownsRun
     ? await startRun({
         dispatcher: opts.dispatcher,
-        repo: opts.repo,
-        branch: opts.branch,
+        // Auto-derive repo + branch from `git rev-parse` when the
+        // STARK_REPO_SLUG / STARK_BRANCH env vars are unset (direct CLI
+        // invocations from inside a worktree). The git-derived values
+        // populate the API's repo/branch columns so the UI tree groups
+        // runs under their actual repo + branch instead of `<no repo>` /
+        // `<no branch>`. The PR number stays env-only (`STARK_PR_NUMBER`)
+        // because there's no reliable git-side equivalent.
+        repo: envOrGitRepo(opts.repo),
+        branch: envOrGitBranch(opts.branch),
         prNumber: opts.prNumber,
         trackedParentPid: process.pid,
         byteBudgetBytes: opts.byteBudgetBytes,
