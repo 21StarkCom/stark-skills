@@ -16,6 +16,7 @@ import {
   loadConfig,
   SUPPORTED_VALIDATION_AGENTS,
 } from "./plan_to_tasks_validate_lib.ts";
+import { finishRun, initRunCtx } from "./observability_dispatcher_helpers.ts";
 
 const HELP = `Validate a plan-to-tasks breakdown against the original plan.
 
@@ -102,7 +103,33 @@ async function main(argv: string[]): Promise<number> {
     breakdown = {};
   }
 
-  const results = await dispatchValidators(planContent, breakdown, planHash, agents, timeout);
+  // Phase 6 Task 2: observability lifecycle.
+  const lifecycle = await initRunCtx({
+    dispatcher: "stark-plan-to-tasks-validate",
+    repo: process.env.STARK_REPO_SLUG,
+    branch: process.env.STARK_BRANCH,
+    meta: { plan_hash: planHash, agents },
+  });
+
+  let results;
+  let status: "ok" | "error" | "timeout" = "ok";
+  try {
+    results = await dispatchValidators(
+      planContent,
+      breakdown,
+      planHash,
+      agents,
+      timeout,
+      lifecycle.ctx,
+    );
+    if (results.some((r) => r.error !== null)) status = "error";
+  } catch (err) {
+    await finishRun(lifecycle, "error");
+    lifecycle.runHb.stop();
+    throw err;
+  }
+  await finishRun(lifecycle, status);
+  lifecycle.runHb.stop();
 
   const output = {
     plan_hash: planHash,

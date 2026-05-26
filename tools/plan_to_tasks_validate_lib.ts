@@ -15,6 +15,8 @@ import path from "node:path";
 
 import { CODEX_MODEL, CODEX_REASONING_EFFORT_HIGH, parseJsonlOutput } from "./codex_utils_lib.ts";
 import { GEMINI_MODEL, makeGeminiEnv, setupGeminiHome } from "./gemini_utils_lib.ts";
+import { attachChild, type RunCtx, type SubAgent } from "./observability_emit_lib.ts";
+import { withSubAgent } from "./observability_dispatcher_helpers.ts";
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -221,44 +223,76 @@ interface ProcResult {
   spawnError: boolean;
 }
 
-function runProcess(
+async function runProcess(
   cmd: string,
   args: string[],
-  opts: { input?: string; timeoutMs: number; env?: Record<string, string> },
+  opts: {
+    input?: string;
+    timeoutMs: number;
+    env?: Record<string, string>;
+    /** Phase 6: optional observability tap. */
+    observability?: { ctx: RunCtx; sa: SubAgent };
+  },
 ): Promise<ProcResult> {
-  return new Promise((resolve) => {
-    const child = spawn(cmd, args, { env: opts.env });
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    let spawnError = false;
-    let settled = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
-    }, opts.timeoutMs);
-    const done = (r: ProcResult) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(r);
-    };
-    child.stdout?.on("data", (d) => {
-      stdout += d.toString();
-    });
-    child.stderr?.on("data", (d) => {
-      stderr += d.toString();
-    });
-    child.on("error", (err) => {
-      spawnError = true;
-      done({ status: null, stdout, stderr: stderr || String(err), timedOut, spawnError });
-    });
-    child.on("close", (code) => {
-      done({ status: code, stdout, stderr, timedOut, spawnError });
-    });
-    if (opts.input !== undefined) child.stdin?.write(opts.input);
-    child.stdin?.end();
-  });
+  const inner = await new Promise<{ result: ProcResult; drain: (() => Promise<void>) | null }>(
+    (resolve) => {
+      const child = spawn(cmd, args, { env: opts.env });
+      const obsHandle = opts.observability
+        ? attachChild(opts.observability.ctx, opts.observability.sa, child)
+        : null;
+      let stdout = "";
+      let stderr = "";
+      let timedOut = false;
+      let spawnError = false;
+      let settled = false;
+      let stdoutEnded = false;
+      let stderrEnded = false;
+      let closed: ProcResult | null = null;
+      const tryFinish = () => {
+        if (settled) return;
+        if (closed === null) return;
+        if (!stdoutEnded || !stderrEnded) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ result: closed, drain: obsHandle?.drain ?? null });
+      };
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGKILL");
+      }, opts.timeoutMs);
+      child.stdout?.on("data", (d) => {
+        stdout += d.toString();
+      });
+      child.stderr?.on("data", (d) => {
+        stderr += d.toString();
+      });
+      if (child.stdout) child.stdout.once("end", () => { stdoutEnded = true; tryFinish(); });
+      else stdoutEnded = true;
+      if (child.stderr) child.stderr.once("end", () => { stderrEnded = true; tryFinish(); });
+      else stderrEnded = true;
+      child.on("error", (err) => {
+        spawnError = true;
+        stdoutEnded = true;
+        stderrEnded = true;
+        closed = { status: null, stdout, stderr: stderr || String(err), timedOut, spawnError };
+        tryFinish();
+      });
+      child.on("close", (code) => {
+        closed = { status: code, stdout, stderr, timedOut, spawnError };
+        tryFinish();
+      });
+      if (opts.input !== undefined) child.stdin?.write(opts.input);
+      child.stdin?.end();
+    },
+  );
+  if (inner.drain) {
+    try {
+      await inner.drain();
+    } catch (err) {
+      inner.result.stderr += `\n[observability drain failed] ${(err as Error).message}\n`;
+    }
+  }
+  return inner.result;
 }
 
 // ── Agent dispatch ───────────────────────────────────────────────────────
@@ -267,27 +301,50 @@ async function runValidationAgent(
   agent: string,
   envelopeJson: string,
   timeout: number,
+  obsCtx: RunCtx | null = null,
 ): Promise<ValidationResult> {
   const start = performance.now();
   const stdinPayload = `${VALIDATION_PROMPT}\n\n${envelopeJson}`;
+  const wrapRun = async (
+    runFn: (taps: { observability?: { ctx: RunCtx; sa: SubAgent } }) => Promise<ProcResult>,
+  ): Promise<ProcResult> => {
+    if (obsCtx && !obsCtx._disabled) {
+      return await withSubAgent(
+        obsCtx,
+        { agent, model: agent === "codex" ? CODEX_MODEL : GEMINI_MODEL, task: "validate" },
+        async ({ sa }) => {
+          const r = await runFn({ observability: { ctx: obsCtx, sa } });
+          const st: "ok" | "error" | "timeout" = r.timedOut
+            ? "timeout"
+            : r.status === 0
+              ? "ok"
+              : "error";
+          return { value: r, status: st, summary: { exit_code: r.status, timed_out: r.timedOut } };
+        },
+      );
+    }
+    return await runFn({});
+  };
 
   try {
     let raw: string;
     if (agent === "codex") {
-      const proc = await runProcess(
-        "codex",
-        [
-          "exec",
-          "-m",
-          CODEX_MODEL,
-          "-c",
-          CODEX_REASONING_CONFIG,
-          "--ephemeral",
-          "--json",
-          "--full-auto",
-          "-",
-        ],
-        { input: stdinPayload, timeoutMs: timeout * 2 * 1000 },
+      const proc = await wrapRun((taps) =>
+        runProcess(
+          "codex",
+          [
+            "exec",
+            "-m",
+            CODEX_MODEL,
+            "-c",
+            CODEX_REASONING_CONFIG,
+            "--ephemeral",
+            "--json",
+            "--full-auto",
+            "-",
+          ],
+          { input: stdinPayload, timeoutMs: timeout * 2 * 1000, ...taps },
+        ),
       );
       if (proc.spawnError) {
         return makeResult({
@@ -312,10 +369,17 @@ async function runValidationAgent(
         "plan",
       );
       try {
-        const proc = await runProcess(
-          "gemini",
-          ["-m", GEMINI_MODEL, "-p", VALIDATION_PROMPT, "-o", "json"],
-          { input: envelopeJson, timeoutMs: timeout * 1000, env: makeGeminiEnv(geminiHome) },
+        const proc = await wrapRun((taps) =>
+          runProcess(
+            "gemini",
+            ["-m", GEMINI_MODEL, "-p", VALIDATION_PROMPT, "-o", "json"],
+            {
+              input: envelopeJson,
+              timeoutMs: timeout * 1000,
+              env: makeGeminiEnv(geminiHome),
+              ...taps,
+            },
+          ),
         );
         if (proc.spawnError) {
           return makeResult({
@@ -366,6 +430,7 @@ export async function dispatchValidators(
   planHash: string | null,
   agents: string[] | null,
   timeout: number = DEFAULT_TIMEOUT,
+  obsCtx: RunCtx | null = null,
 ): Promise<ValidationResult[]> {
   const hash = planHash ?? computePlanHash(planContent);
 
@@ -395,6 +460,6 @@ export async function dispatchValidators(
   const envelopeJson = JSON.stringify(envelope);
 
   return Promise.all(
-    resolvedAgents.map((agent) => runValidationAgent(agent, envelopeJson, timeout)),
+    resolvedAgents.map((agent) => runValidationAgent(agent, envelopeJson, timeout, obsCtx)),
   );
 }

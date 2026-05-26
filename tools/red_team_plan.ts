@@ -12,7 +12,7 @@ import path from "node:path";
 import {
   buildRunContext,
   type ClassLevel,
-  dispatch,
+  dispatchWithObservability,
   loadPersonaPrompts,
   PROMPTS_DIR,
   resolveDbPath,
@@ -171,20 +171,80 @@ async function main(argv: string[]): Promise<number> {
   });
 
   const prompts = loadPersonaPrompts(PROMPTS_DIR, "plan");
-  const result = dispatch({
-    ctx,
-    prompts,
-    personas: args.personas,
-    artifact,
-    sourceSpec,
-    model: args.model,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-    dbPath: resolved.db_path,
-    noAudit: args.noAudit,
-    noSidecar: args.noSidecar,
-    replayTranscript: args.replayTranscript ?? undefined,
-    classificationOverride: args.classificationOverride,
+
+  // Phase 6 Task 2 + wing-round-3 fix #22: observability lifecycle wraps the
+  // real codex subprocess via `dispatchWithObservability` (spawn+attachChild+
+  // drain). Sub-agent heartbeat lives in the dispatcher and `.stop()`s after
+  // `endSubAgent` (Phase 2 Task 8 contract).
+  const { initRunCtx, finishRun } = await import("./observability_dispatcher_helpers.ts");
+  const { startSubAgent, endSubAgent, emitProgress, startHeartbeat } =
+    await import("./observability_emit_lib.ts");
+  const lifecycle = await initRunCtx({
+    dispatcher: "stark-red-team-plan",
+    repo: process.env.STARK_REPO_SLUG,
+    branch: process.env.STARK_BRANCH,
+    meta: { artifact: planPath, personas: args.personas ?? null, model: args.model ?? null },
   });
+
+  let result: Awaited<ReturnType<typeof dispatchWithObservability>>;
+  try {
+    const sa = await startSubAgent(lifecycle.ctx, {
+      agent: "codex",
+      model: args.model ?? "gpt-5.5-pro",
+      task: "red-team-committee-plan",
+    });
+    const saHb = startHeartbeat(lifecycle.ctx, sa);
+    try {
+      result = await dispatchWithObservability(
+        {
+          ctx,
+          prompts,
+          personas: args.personas,
+          artifact,
+          sourceSpec,
+          model: args.model,
+          timeoutMs: DEFAULT_TIMEOUT_MS,
+          dbPath: resolved.db_path,
+          noAudit: args.noAudit,
+          noSidecar: args.noSidecar,
+          replayTranscript: args.replayTranscript ?? undefined,
+          classificationOverride: args.classificationOverride,
+        },
+        { ctx: lifecycle.ctx, sa },
+      );
+      for (const f of result.findings) {
+        await emitProgress(lifecycle.ctx, sa, "finding", {
+          severity: f.severity,
+          persona: (f as { persona?: string }).persona ?? null,
+          concern: (f as { concern?: string }).concern ?? null,
+        });
+      }
+      await endSubAgent(
+        lifecycle.ctx,
+        sa,
+        result.status === "error" ? "error" : "ok",
+        Math.max(0, Math.round(result.duration_s * 1000)),
+        {
+          findings: result.total_findings,
+          blocking: result.blocking_count,
+          human_review: result.human_review_count,
+        },
+      );
+    } catch (e) {
+      await endSubAgent(lifecycle.ctx, sa, "error", Date.now() - sa.startedAtMs, {
+        error: (e as Error).message,
+      });
+      throw e;
+    } finally {
+      saHb.stop();
+    }
+  } catch (err) {
+    await finishRun(lifecycle, "error");
+    lifecycle.runHb.stop();
+    throw err;
+  }
+  await finishRun(lifecycle, result.status === "error" ? "error" : "ok");
+  lifecycle.runHb.stop();
 
   if (args.json) {
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
