@@ -10,17 +10,21 @@ test("empty args → defaults", () => {
     noRebase: false,
     noWatcherCleanup: false,
     noConfig: false,
+    noGc: false,
+    dropStaleStashes: false,
     force: false,
     json: false,
   });
 });
 
 test("all simple flags", () => {
-  const a = parseRawArgs("--dry-run --no-rebase --no-watcher-cleanup --no-config --force --json");
+  const a = parseRawArgs("--dry-run --no-rebase --no-watcher-cleanup --no-config --no-gc --drop-stale-stashes --force --json");
   assert.equal(a.dryRun, true);
   assert.equal(a.noRebase, true);
   assert.equal(a.noWatcherCleanup, true);
   assert.equal(a.noConfig, true);
+  assert.equal(a.noGc, true);
+  assert.equal(a.dropStaleStashes, true);
   assert.equal(a.force, true);
   assert.equal(a.json, true);
 });
