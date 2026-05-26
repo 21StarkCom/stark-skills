@@ -503,6 +503,33 @@ a.skip-link:focus {
   height: 22px;
 }
 
+/* ---------- Active-only toggle (left rail filter) ---------- */
+.app__rail-filter {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.active-only-toggle {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 600;
+}
+.active-only-toggle input {
+  min-height: 0;
+  width: 18px;
+  height: 18px;
+}
+.active-only-help {
+  margin: 0;
+  font-size: 0.85em;
+  color: var(--text-muted, #666);
+}
+
 /* ---------- Instructions page ---------- */
 .instructions {
   max-width: 60ch;

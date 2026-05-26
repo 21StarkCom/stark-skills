@@ -31,10 +31,32 @@ export function App(): JSX.Element {
   );
 }
 
+const ACTIVE_ONLY_LS_KEY = "stark-obs:tree-active-only";
+
+function readActiveOnlyPref(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    const v = window.localStorage.getItem(ACTIVE_ONLY_LS_KEY);
+    if (v === null) return true; // default ON
+    return v === "1";
+  } catch {
+    return true;
+  }
+}
+
 function AppShell(): JSX.Element {
   const [tab, setTab] = useState<Tab>("live");
   const [selection, setSelection] = useState<Selection>(null);
+  const [activeOnly, setActiveOnly] = useState<boolean>(() => readActiveOnlyPref());
   const live = useLiveRegion();
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(ACTIVE_ONLY_LS_KEY, activeOnly ? "1" : "0");
+    } catch {
+      // localStorage disabled — fall through, in-memory state still works
+    }
+  }, [activeOnly]);
 
   // Active runs refetch on a 5 s cadence; history (limit=50) refetches
   // on a 30 s cadence so a finished run shows up in the rail.
@@ -89,10 +111,26 @@ function AppShell(): JSX.Element {
   );
   const livePulse = useLivePulse(runningRunIds);
 
+  // Active-only filter: keep a run when its own status is "running" OR
+  // any of its known sub-agents is "running". Sub-agents are pulled
+  // from the per-run detail load (subagentsByRun); a run whose detail
+  // hasn't landed yet falls back to its top-level status (so brand-new
+  // runs aren't hidden during the detail fetch).
+  const visibleRuns = useMemo(() => {
+    if (!activeOnly) return runs;
+    return runs.filter((r) => {
+      if (r.status === "running") return true;
+      const sas = subagentsByRun[r.run_id];
+      if (sas && sas.some((sa) => sa.status === "running")) return true;
+      return false;
+    });
+  }, [runs, subagentsByRun, activeOnly]);
+
   const tree = useMemo<TreeNode[]>(
-    () => buildTree({ runs, subagentsByRun, livePulse }),
-    [runs, subagentsByRun, livePulse],
+    () => buildTree({ runs: visibleRuns, subagentsByRun, livePulse }),
+    [visibleRuns, subagentsByRun, livePulse],
   );
+  const hiddenCount = runs.length - visibleRuns.length;
 
   // Announce when a new run starts.
   const knownIds = useRef<Set<string>>(new Set());
@@ -218,6 +256,24 @@ function AppShell(): JSX.Element {
           className="app__panel"
         >
           <aside className="app__rail" aria-label="Run tree">
+            <div className="app__rail-filter">
+              <label className="active-only-toggle">
+                <input
+                  type="checkbox"
+                  checked={activeOnly}
+                  onChange={(e) => setActiveOnly(e.target.checked)}
+                  aria-describedby="active-only-help"
+                />
+                <span>Show only active runs</span>
+              </label>
+              <p id="active-only-help" className="active-only-help">
+                {activeOnly
+                  ? hiddenCount > 0
+                    ? `${hiddenCount} finished run${hiddenCount === 1 ? "" : "s"} hidden`
+                    : "All runs match — nothing hidden"
+                  : "Showing every run; toggle on to hide finished runs"}
+              </p>
+            </div>
             <Tree
               roots={tree}
               selectedId={treeSelectedId}
