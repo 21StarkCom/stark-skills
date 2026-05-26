@@ -23,6 +23,8 @@ function plan(overrides: Partial<CleanupPlan> = {}): CleanupPlan {
     remoteBranches: [],
     worktrees: [],
     watcherDirs: [],
+    staleStashes: [],
+    gc: { willRun: false, looseObjects: 0 },
     notes: [],
     ...overrides,
   };
@@ -95,6 +97,8 @@ test("renderReceipt: summarises counts and surfaces errors", () => {
     worktreesRemoved: ["/tmp/wt1"],
     worktreesFailed: [],
     watcherDirsRemoved: ["/x/pr-7"],
+    stashesDropped: ["stash@{0}"],
+    gcRan: true,
     errors: ["fs error"],
   };
   const out = renderReceipt(r);
@@ -104,6 +108,29 @@ test("renderReceipt: summarises counts and surfaces errors", () => {
   assert.match(out, /remote branches deleted: 1/);
   assert.match(out, /worktrees removed: 1/);
   assert.match(out, /watcher state dirs removed: 1/);
+  assert.match(out, /stale stashes dropped: 1/);
+  assert.match(out, /git gc: done/);
   assert.match(out, /errors: 1/);
   assert.match(out, /fs error/);
+});
+
+test("renderPlan: stale stashes surface with drop hint", () => {
+  const p = plan({
+    staleStashes: [
+      { ref: "stash@{0}", baseBranch: "feat/dead", message: "On feat/dead: WIP" },
+    ],
+  });
+  const out = renderPlan(p, parseRawArgs(""));
+  assert.match(out, /Stale stashes.*--drop-stale-stashes/);
+  assert.match(out, /stash@\{0\}.*feat\/dead.*is gone/);
+});
+
+test("renderPlan: review-merged worktree shows PR number", () => {
+  const p = plan({
+    worktrees: [{ path: "/tmp/review-x-pr9-single", branch: null, reason: "review-merged", prNumber: 9 }],
+    gc: { willRun: true, looseObjects: 120 },
+  });
+  const out = renderPlan(p, parseRawArgs(""));
+  assert.match(out, /review-merged.*PR #9/);
+  assert.match(out, /git gc: will run \(120 loose objects\)/);
 });
