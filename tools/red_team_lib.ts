@@ -26,7 +26,7 @@
  *     defense-in-depth backstop).
  */
 
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -1353,6 +1353,272 @@ function dispatchCodex(
   } finally {
     sandbox.cleanup();
   }
+}
+
+/**
+ * Observability handle for tapping the codex subprocess. Defined as a
+ * structural type so callers don't have to import RunCtx/SubAgent into
+ * test files that exercise dispatch synchronously.
+ */
+export interface RedTeamObservabilityHandle {
+  ctx: unknown; // RunCtx — opaque to keep red_team_lib import-free of emit lib types
+  sa: unknown;  // SubAgent
+}
+
+/**
+ * Async sibling of `dispatchCodex` that uses `spawn` (not spawnSync) and
+ * routes stdout/stderr through `attachChild` so the real subprocess lifecycle
+ * is captured in the observability spool BEFORE `endSubAgent` runs.
+ *
+ * Wing-round-3 fix #22 — the previous synthetic-sub-agent wrapper in
+ * `red_team_design.ts`/`red_team_plan.ts` bracketed a spawnSync call, so
+ * stdout/stderr never reached the daemon. Callers that want chunks in the
+ * spool pass an `observability` handle here; the prebuilt result is then
+ * threaded through sync `dispatch()` via `codexFn` so all downstream paths
+ * (parse, validate, sidecar, audit) stay untouched.
+ */
+export async function dispatchCodexAsync(
+  prompt: string,
+  model: string,
+  timeoutMs: number,
+  observability?: RedTeamObservabilityHandle,
+): Promise<{
+  raw_output: string;
+  duration_s: number;
+  input_tokens: number;
+  output_tokens: number;
+  error: string | null;
+}> {
+  const sandbox = isolateHome();
+  const env = scrubEnv();
+  env.HOME = sandbox.home;
+  const apiKey = resolveOpenaiApiKey(process.env);
+  if (apiKey) {
+    const sandCodex = path.join(sandbox.home, ".codex");
+    fs.mkdirSync(sandCodex, { recursive: true });
+    const authPath = path.join(sandCodex, "auth.json");
+    fs.writeFileSync(
+      authPath,
+      JSON.stringify({
+        auth_mode: "apikey",
+        OPENAI_API_KEY: apiKey,
+        tokens: null,
+        last_refresh: null,
+      }),
+      { mode: 0o600 },
+    );
+    env.OPENAI_API_KEY = apiKey;
+  }
+  const start = Date.now();
+  try {
+    const args = [
+      "exec",
+      "--json",
+      "--skip-git-repo-check",
+      "-c",
+      'model_reasoning_effort="high"',
+      "-m",
+      model,
+    ];
+    const child = spawn("codex", args, { env, stdio: ["pipe", "pipe", "pipe"] });
+
+    // Attach the observability tap BEFORE any data event fires, so the
+    // captured byte stream is byte-for-byte identical to what the local
+    // parser sees below (the tap is non-consuming — see attachChild).
+    let drain: (() => Promise<void>) | null = null;
+    if (observability) {
+      try {
+        const emitLib = await import("./observability_emit_lib.ts");
+        const handle = emitLib.attachChild(
+          observability.ctx as Parameters<typeof emitLib.attachChild>[0],
+          observability.sa as Parameters<typeof emitLib.attachChild>[1],
+          child,
+        );
+        drain = handle.drain;
+      } catch {
+        // Observability disabled or unreachable — fall through without tap.
+        drain = null;
+      }
+    }
+
+    // Buffer stdout/stderr in parallel with the tap.
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    child.stdout!.on("data", (b: Buffer) => stdoutChunks.push(b));
+    child.stderr!.on("data", (b: Buffer) => stderrChunks.push(b));
+
+    // Stream the prompt over stdin, then close to signal EOF.
+    child.stdin!.end(prompt);
+
+    // Wait for the subprocess to exit; enforce timeoutMs. E2: on timeout we
+    // mark `timedOut: true` and SIGKILL the child, but DO NOT resolve until
+    // `close` plus stdout/stderr "end" have all fired — so attachChild's tap
+    // sees every final byte before the caller awaits drain(). Matches the
+    // runProcess pattern in copilot_dispatch.ts.
+    const exitInfo = await new Promise<{
+      status: number | null;
+      signal: NodeJS.Signals | null;
+      timedOut: boolean;
+      error: Error | null;
+    }>((resolve) => {
+      let settled = false;
+      let closed = false;
+      let stdoutEnded = false;
+      let stderrEnded = false;
+      let result: {
+        status: number | null;
+        signal: NodeJS.Signals | null;
+        timedOut: boolean;
+        error: Error | null;
+      } | null = null;
+      const tryFinish = () => {
+        if (settled) return;
+        if (result === null) return;
+        if (!closed) return;
+        if (!stdoutEnded || !stderrEnded) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(result);
+      };
+      const timer = setTimeout(() => {
+        if (result === null) {
+          result = { status: null, signal: null, timedOut: true, error: null };
+        }
+        try { child.kill("SIGKILL"); } catch { /* */ }
+        tryFinish();
+      }, timeoutMs);
+      if (child.stdout) child.stdout.once("end", () => { stdoutEnded = true; tryFinish(); });
+      else stdoutEnded = true;
+      if (child.stderr) child.stderr.once("end", () => { stderrEnded = true; tryFinish(); });
+      else stderrEnded = true;
+      child.on("error", (err) => {
+        // streams may not emit "end" on spawn error — force the gate.
+        stdoutEnded = true;
+        stderrEnded = true;
+        closed = true;
+        if (result === null) {
+          result = { status: null, signal: null, timedOut: false, error: err as Error };
+        } else {
+          result.error = err as Error;
+        }
+        tryFinish();
+      });
+      child.on("close", (status, signal) => {
+        closed = true;
+        if (result === null) {
+          result = { status, signal, timedOut: false, error: null };
+        } else {
+          // Timer already populated result with timedOut: true — keep flag,
+          // but record the real exit signal for diagnostics.
+          result.signal = signal;
+        }
+        tryFinish();
+      });
+    });
+
+    // E2: drain the observability tap AFTER the child has exited so every
+    // emitted chunk's UDS write is acked before endSubAgent fires.
+    if (drain) {
+      try { await drain(); } catch { /* */ }
+    }
+
+    const elapsed = (Date.now() - start) / 1000;
+    const stdoutStr = Buffer.concat(stdoutChunks).toString("utf8");
+    const stderrStr = Buffer.concat(stderrChunks).toString("utf8");
+
+    if (exitInfo.error) {
+      return {
+        raw_output: "",
+        duration_s: elapsed,
+        input_tokens: 0,
+        output_tokens: 0,
+        error: `codex spawn failed: ${exitInfo.error.message}`,
+      };
+    }
+    if (exitInfo.timedOut) {
+      return {
+        raw_output: stdoutStr,
+        duration_s: elapsed,
+        input_tokens: 0,
+        output_tokens: 0,
+        error: `codex timed out after ${timeoutMs}ms`,
+      };
+    }
+    if (exitInfo.status !== 0) {
+      return {
+        raw_output: stdoutStr,
+        duration_s: elapsed,
+        input_tokens: 0,
+        output_tokens: 0,
+        error: `codex exited ${exitInfo.status}: ${stderrStr}`.trim(),
+      };
+    }
+    const parsed = parseCodexJsonl(stdoutStr);
+    return {
+      raw_output: parsed.text,
+      duration_s: elapsed,
+      input_tokens: parsed.inputTokens,
+      output_tokens: parsed.outputTokens,
+      error: null,
+    };
+  } finally {
+    sandbox.cleanup();
+  }
+}
+
+/**
+ * Async wrapper around sync `dispatch` that runs the codex subprocess via
+ * `dispatchCodexAsync` (taps stdout/stderr through `attachChild`) and then
+ * threads the prebuilt result back through `dispatch` via `codexFn`. The
+ * fix-plan codex call stays on the sync path (unobserved) to avoid changing
+ * `resolveFixPlan`'s shape; callers wanting fix-plan observability should
+ * pass `fixPlanCodexFn` explicitly.
+ *
+ * Wing-round-3 fix #22: every red-team dispatcher entry uses this wrapper
+ * when an observability handle is available, so the real codex subprocess
+ * stdout/stderr lands in the spool before `endSubAgent`.
+ */
+export async function dispatchWithObservability(
+  args: DispatchArgs,
+  observability?: RedTeamObservabilityHandle,
+): Promise<DispatchResult> {
+  // No real subprocess to tap — fall through to sync dispatch.
+  if (args.replayTranscript || args.codexFn) {
+    return dispatch(args);
+  }
+  const prompt = assemblePrompt({
+    prompts: args.prompts,
+    personas: args.personas,
+    artifact: args.artifact,
+    sourceSpec: args.sourceSpec,
+  });
+  // Skip the codex spawn if the pre-dispatch sensitive gate will refuse
+  // anyway — sync dispatch re-runs the gate and returns the blocked
+  // envelope without ever calling our codexFn.
+  if (preDispatchSensitiveGate(prompt).length > 0) {
+    return dispatch(args);
+  }
+  const dispatched = await dispatchCodexAsync(
+    prompt,
+    args.model,
+    args.timeoutMs,
+    observability,
+  );
+  // The fix-plan path runs its own codex spawn; default it to the real
+  // sync dispatcher so we don't accidentally feed it the challenge's
+  // prebuilt output (resolveFixPlan falls back to `args.codexFn` when
+  // `fixPlanCodexFn` is undefined — see runRedTeamFixPlan).
+  const fixPlanCodexFn =
+    args.fixPlanCodexFn ??
+    ((p: string, m: string) => {
+      const cfg = loadFixPlanConfig();
+      return dispatchCodex(p, m, cfg.timeout_s * 1000);
+    });
+  return dispatch({
+    ...args,
+    codexFn: () => dispatched,
+    fixPlanCodexFn,
+  });
 }
 
 /** Parse Codex `--json` JSONL output: collect assistant text + token counts. */

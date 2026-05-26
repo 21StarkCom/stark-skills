@@ -32,6 +32,17 @@ import { realpathSync } from "node:fs";
 
 import type { AgentName } from "./stark_review_lib.ts";
 import {
+  attachChild,
+  emitProgress,
+  type RunCtx,
+  type SubAgent,
+} from "./observability_emit_lib.ts";
+import {
+  finishRun,
+  initRunCtx,
+  withSubAgent,
+} from "./observability_dispatcher_helpers.ts";
+import {
   applyPatches,
   buildFixerPrompt,
   buildReviewerPrompt,
@@ -93,6 +104,8 @@ interface RunOptions {
   env?: NodeJS.ProcessEnv;
   stdin?: string;
   timeoutSec: number;
+  /** Phase 6: optional observability tap. */
+  observability?: { ctx: RunCtx; sa: SubAgent };
 }
 
 async function run(cmd: string, args: string[], opts: RunOptions): Promise<RunResult> {
@@ -101,90 +114,122 @@ async function run(cmd: string, args: string[], opts: RunOptions): Promise<RunRe
   let stdoutLen = 0;
   let stderrLen = 0;
 
-  return new Promise((resolve) => {
-    let child: ReturnType<typeof spawn>;
+  const inner = await new Promise<{ result: RunResult; drain: (() => Promise<void>) | null }>(
+    (resolve) => {
+      let child: ReturnType<typeof spawn>;
+      try {
+        child = spawn(cmd, args, {
+          cwd: opts.cwd,
+          env: opts.env,
+          stdio: [opts.stdin !== undefined ? "pipe" : "ignore", "pipe", "pipe"],
+        });
+      } catch (err) {
+        const e = err as NodeJS.ErrnoException;
+        resolve({
+          result: {
+            code: null,
+            signal: null,
+            stdout: "",
+            stderr: e.message ?? "",
+            timedOut: false,
+            notFound: e.code === "ENOENT",
+          },
+          drain: null,
+        });
+        return;
+      }
+
+      const obsHandle = opts.observability
+        ? attachChild(opts.observability.ctx, opts.observability.sa, child)
+        : null;
+
+      let settled = false;
+      let stdoutEnded = false;
+      let stderrEnded = false;
+      let processClosed = false;
+      let timedOutFlag = false;
+      let closed: RunResult | null = null;
+      const tryFinish = () => {
+        if (settled) return;
+        if (closed === null) return;
+        if (!stdoutEnded || !stderrEnded || !processClosed) return;
+        settled = true;
+        resolve({ result: closed, drain: obsHandle?.drain ?? null });
+      };
+
+      const timer = setTimeout(() => {
+        // E2 sequencing: don't synthesize the result + resolve on the
+        // timer. Kill the child and wait for child.on("close") to
+        // populate `closed` — resolving on stdio-end alone would let
+        // endSubAgent fire before the process actually exits.
+        timedOutFlag = true;
+        try { child.kill("SIGTERM"); } catch { /* ignore */ }
+        setTimeout(() => {
+          try { child.kill("SIGKILL"); } catch { /* ignore */ }
+        }, 5_000);
+      }, opts.timeoutSec * 1000);
+
+      child.stdout?.on("data", (chunk: Buffer) => {
+        if (stdoutLen >= DEFAULT_OUTPUT_CAP) return;
+        stdoutChunks.push(chunk);
+        stdoutLen += chunk.length;
+      });
+      child.stderr?.on("data", (chunk: Buffer) => {
+        if (stderrLen >= DEFAULT_OUTPUT_CAP) return;
+        stderrChunks.push(chunk);
+        stderrLen += chunk.length;
+      });
+      if (child.stdout) child.stdout.once("end", () => { stdoutEnded = true; tryFinish(); });
+      else stdoutEnded = true;
+      if (child.stderr) child.stderr.once("end", () => { stderrEnded = true; tryFinish(); });
+      else stderrEnded = true;
+
+      child.on("error", (err) => {
+        clearTimeout(timer);
+        const e = err as NodeJS.ErrnoException;
+        stdoutEnded = true;
+        stderrEnded = true;
+        processClosed = true;
+        closed = {
+          code: null,
+          signal: null,
+          stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
+          stderr: Buffer.concat(stderrChunks).toString("utf-8"),
+          timedOut: false,
+          notFound: e.code === "ENOENT",
+        };
+        tryFinish();
+      });
+
+      child.on("close", (code, signal) => {
+        clearTimeout(timer);
+        processClosed = true;
+        closed = {
+          code,
+          signal,
+          stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
+          stderr: Buffer.concat(stderrChunks).toString("utf-8"),
+          timedOut: timedOutFlag,
+          notFound: false,
+        };
+        tryFinish();
+      });
+
+      if (opts.stdin !== undefined && child.stdin) {
+        child.stdin.on("error", () => { /* broken pipe -- swallow */ });
+        child.stdin.end(opts.stdin);
+      }
+    },
+  );
+
+  if (inner.drain) {
     try {
-      child = spawn(cmd, args, {
-        cwd: opts.cwd,
-        env: opts.env,
-        stdio: [opts.stdin !== undefined ? "pipe" : "ignore", "pipe", "pipe"],
-      });
+      await inner.drain();
     } catch (err) {
-      const e = err as NodeJS.ErrnoException;
-      resolve({
-        code: null,
-        signal: null,
-        stdout: "",
-        stderr: e.message ?? "",
-        timedOut: false,
-        notFound: e.code === "ENOENT",
-      });
-      return;
+      inner.result.stderr += `\n[observability drain failed] ${(err as Error).message}\n`;
     }
-
-    let settled = false;
-    const finish = (r: RunResult): void => {
-      if (settled) return;
-      settled = true;
-      resolve(r);
-    };
-
-    const timer = setTimeout(() => {
-      try { child.kill("SIGTERM"); } catch { /* ignore */ }
-      setTimeout(() => {
-        try { child.kill("SIGKILL"); } catch { /* ignore */ }
-      }, 5_000);
-      finish({
-        code: null,
-        signal: "SIGTERM",
-        stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
-        stderr: Buffer.concat(stderrChunks).toString("utf-8"),
-        timedOut: true,
-        notFound: false,
-      });
-    }, opts.timeoutSec * 1000);
-
-    child.stdout?.on("data", (chunk: Buffer) => {
-      if (stdoutLen >= DEFAULT_OUTPUT_CAP) return;
-      stdoutChunks.push(chunk);
-      stdoutLen += chunk.length;
-    });
-    child.stderr?.on("data", (chunk: Buffer) => {
-      if (stderrLen >= DEFAULT_OUTPUT_CAP) return;
-      stderrChunks.push(chunk);
-      stderrLen += chunk.length;
-    });
-
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      const e = err as NodeJS.ErrnoException;
-      finish({
-        code: null,
-        signal: null,
-        stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
-        stderr: Buffer.concat(stderrChunks).toString("utf-8"),
-        timedOut: false,
-        notFound: e.code === "ENOENT",
-      });
-    });
-
-    child.on("close", (code, signal) => {
-      clearTimeout(timer);
-      finish({
-        code,
-        signal,
-        stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
-        stderr: Buffer.concat(stderrChunks).toString("utf-8"),
-        timedOut: false,
-        notFound: false,
-      });
-    });
-
-    if (opts.stdin !== undefined && child.stdin) {
-      child.stdin.on("error", () => { /* broken pipe -- swallow */ });
-      child.stdin.end(opts.stdin);
-    }
-  });
+  }
+  return inner.result;
 }
 
 async function runGit(args: string[], cwd: string, timeoutSec = 60): Promise<RunResult> {
@@ -293,6 +338,8 @@ async function runCodexReviewer(opts: {
   /** Spawn cwd. Codex needs a real directory; we use os.tmpdir() so it
    * doesn't refuse to start, and pair that with --skip-git-repo-check. */
   cwd: string;
+  obsCtx?: RunCtx | null;
+  roundNum?: number;
 }): Promise<LeadDispatchResult> {
   const t0 = process.hrtime.bigint();
   const args = [
@@ -305,12 +352,36 @@ async function runCodexReviewer(opts: {
     opts.model,
     "-",
   ];
-  const res = await run("codex", args, {
-    cwd: opts.cwd,
-    env: baseSubprocessEnv(),
-    stdin: opts.prompt,
-    timeoutSec: opts.timeoutSec,
-  });
+  const callOnce = async (): Promise<RunResult> => {
+    if (opts.obsCtx && !opts.obsCtx._disabled) {
+      return await withSubAgent(
+        opts.obsCtx,
+        { agent: "codex", model: opts.model, task: `doc-review-${opts.domain}-round-${opts.roundNum ?? 1}` },
+        async ({ sa }) => {
+          const r = await run("codex", args, {
+            cwd: opts.cwd,
+            env: baseSubprocessEnv(),
+            stdin: opts.prompt,
+            timeoutSec: opts.timeoutSec,
+            observability: { ctx: opts.obsCtx!, sa },
+          });
+          const st: "ok" | "error" | "timeout" = r.timedOut
+            ? "timeout"
+            : r.code === 0
+              ? "ok"
+              : "error";
+          return { value: r, status: st, summary: { exit_code: r.code, domain: opts.domain } };
+        },
+      );
+    }
+    return await run("codex", args, {
+      cwd: opts.cwd,
+      env: baseSubprocessEnv(),
+      stdin: opts.prompt,
+      timeoutSec: opts.timeoutSec,
+    });
+  };
+  const res = await callOnce();
   const duration = elapsedSec(t0);
 
   const base: Omit<LeadDispatchResult, "raw_output" | "findings" | "empty_ack" | "error" | "parse_error"> = {
@@ -394,6 +465,9 @@ async function runClaudeWing(opts: {
   prompt: string;
   timeoutSec: number;
   model: string;
+  obsCtx?: RunCtx | null;
+  roundNum?: number;
+  attempt?: number;
 }): Promise<WingDispatchResult> {
   const t0 = process.hrtime.bigint();
   const args = [
@@ -411,11 +485,38 @@ async function runClaudeWing(opts: {
     "--allowedTools",
     "Read,Glob,Grep",
   ];
-  const res = await run("claude", args, {
-    env: claudeSubprocessEnv(),
-    stdin: opts.prompt,
-    timeoutSec: opts.timeoutSec,
-  });
+  const callOnce = async (): Promise<RunResult> => {
+    if (opts.obsCtx && !opts.obsCtx._disabled) {
+      return await withSubAgent(
+        opts.obsCtx,
+        {
+          agent: "claude",
+          model: opts.model,
+          task: `doc-wing-fix-round-${opts.roundNum ?? 1}-attempt-${opts.attempt ?? 1}`,
+        },
+        async ({ sa }) => {
+          const r = await run("claude", args, {
+            env: claudeSubprocessEnv(),
+            stdin: opts.prompt,
+            timeoutSec: opts.timeoutSec,
+            observability: { ctx: opts.obsCtx!, sa },
+          });
+          const st: "ok" | "error" | "timeout" = r.timedOut
+            ? "timeout"
+            : r.code === 0
+              ? "ok"
+              : "error";
+          return { value: r, status: st, summary: { exit_code: r.code } };
+        },
+      );
+    }
+    return await run("claude", args, {
+      env: claudeSubprocessEnv(),
+      stdin: opts.prompt,
+      timeoutSec: opts.timeoutSec,
+    });
+  };
+  const res = await callOnce();
   const duration = elapsedSec(t0);
 
   if (res.notFound) {
@@ -527,6 +628,8 @@ async function runLeadReview(opts: {
   timeoutSec: number;
   model: string;
   reasoningEffort: string;
+  obsCtx?: RunCtx | null;
+  roundNum?: number;
 }): Promise<LeadDispatchResult[]> {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "stark-doc-review-"));
   try {
@@ -551,7 +654,20 @@ async function runLeadReview(opts: {
         model: opts.model,
         reasoningEffort: opts.reasoningEffort,
         cwd,
+        obsCtx: opts.obsCtx,
+        roundNum: opts.roundNum,
       });
+      if (opts.obsCtx && !opts.obsCtx._disabled) {
+        for (const f of r.findings) {
+          await emitProgress(opts.obsCtx, null, "finding", {
+            agent: "codex",
+            domain: r.domain,
+            severity: f.severity,
+            section: f.section,
+            title: f.title,
+          });
+        }
+      }
       log(
         `${ts()} ← codex:${domain} ${r.error ? "error=" + r.error : "ok"} findings=${r.findings.length} ${r.duration_s.toFixed(1)}s`,
       );
@@ -569,6 +685,7 @@ async function runWingFixRound(opts: {
   wingTimeoutSec: number;
   wingModel: string;
   maxWingAttempts: number;
+  obsCtx?: RunCtx | null;
 }): Promise<{
   finalDoc: string;
   attempted: FixerPatch[];
@@ -598,6 +715,9 @@ async function runWingFixRound(opts: {
       prompt,
       timeoutSec: opts.wingTimeoutSec,
       model: opts.wingModel,
+      obsCtx: opts.obsCtx,
+      roundNum: opts.roundNum,
+      attempt,
     });
     if (wing.error) {
       log(`${ts()} ← claude wing error=${wing.error}`);
@@ -673,6 +793,8 @@ export interface DispatchOptions {
   wingTimeoutSec: number;
   maxWingAttempts: number;
   commitFixes: boolean;
+  /** Phase 6: optional observability ctx (caller-owned). */
+  obsCtx?: RunCtx | null;
 }
 
 interface Receipt {
@@ -831,6 +953,9 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
     const roundT0 = process.hrtime.bigint();
     log(`── Round ${roundNum} (review-fix) ──`);
 
+    if (opts.obsCtx) {
+      await emitProgress(opts.obsCtx, null, "round", { round_num: roundNum, phase: "lead-review" });
+    }
     const leadResults = await runLeadReview({
       doc: currentDoc,
       domains: domainKeys,
@@ -841,6 +966,8 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       timeoutSec: opts.leadTimeoutSec,
       model: opts.leadModel,
       reasoningEffort: CODEX_REASONING_EFFORT_XHIGH,
+      obsCtx: opts.obsCtx,
+      roundNum,
     });
     const succeeded = leadResults.filter((r) => r.error === null).length;
     if (succeeded === 0) {
@@ -906,6 +1033,9 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
     }
 
     // Wing fix pass
+    if (opts.obsCtx) {
+      await emitProgress(opts.obsCtx, null, "round", { round_num: roundNum, phase: "wing-fix" });
+    }
     const wingOutcome = await runWingFixRound({
       doc: currentDoc,
       findings: toFix,
@@ -913,6 +1043,7 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       wingTimeoutSec: opts.wingTimeoutSec,
       wingModel: opts.wingModel,
       maxWingAttempts: opts.maxWingAttempts,
+      obsCtx: opts.obsCtx,
     });
 
     let commitSha: string | null = null;
@@ -975,6 +1106,12 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
   if (!dispatchFailureEarlyExit && !opts.dryRun) {
     log("── Final review (review-only) ──");
     const finalT0 = process.hrtime.bigint();
+    if (opts.obsCtx) {
+      await emitProgress(opts.obsCtx, null, "round", {
+        round_num: persistedRounds.length + 1,
+        phase: "final-review",
+      });
+    }
     const finalLead = await runLeadReview({
       doc: currentDoc,
       domains: domainKeys,
@@ -985,6 +1122,8 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       timeoutSec: opts.leadTimeoutSec,
       model: opts.leadModel,
       reasoningEffort: CODEX_REASONING_EFFORT_XHIGH,
+      obsCtx: opts.obsCtx,
+      roundNum: persistedRounds.length + 1,
     });
     const allRaw: DocFinding[] = finalLead.flatMap((r) => r.findings);
     const classified = classifyFindings(allRaw, {
@@ -1298,6 +1437,14 @@ async function main(): Promise<number> {
 
   const config = loadDocReviewConfig(args.promptsDir);
 
+  // Phase 6 Task 2: observability lifecycle.
+  const lifecycle = await initRunCtx({
+    dispatcher: args.promptsDir === "design-review" ? "stark-review-design" : "stark-review-plan",
+    repo: process.env.STARK_REPO_SLUG,
+    branch: process.env.STARK_BRANCH,
+    meta: { doc: args.doc, prompts_dir: args.promptsDir },
+  });
+
   const dispatchOpts: DispatchOptions = {
     docPath: args.doc,
     promptsDir: args.promptsDir,
@@ -1314,9 +1461,22 @@ async function main(): Promise<number> {
     wingTimeoutSec: args.wingTimeoutSec,
     maxWingAttempts: args.maxWingAttempts,
     commitFixes: args.commitFixes,
+    obsCtx: lifecycle.ctx,
   };
 
-  const { receipt, exitCode } = await dispatchDocReview(dispatchOpts);
+  let receipt;
+  let exitCode: number;
+  try {
+    const out = await dispatchDocReview(dispatchOpts);
+    receipt = out.receipt;
+    exitCode = out.exitCode;
+  } catch (err) {
+    await finishRun(lifecycle, "error");
+    lifecycle.runHb.stop();
+    throw err;
+  }
+  await finishRun(lifecycle, exitCode === 0 ? "ok" : "error");
+  lifecycle.runHb.stop();
   process.stdout.write(JSON.stringify(receipt, null, 2) + "\n");
   // Stderr summary (one-liner; the receipt is the authoritative payload)
   const totalFindings = receipt.rounds.reduce(

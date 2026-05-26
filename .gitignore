@@ -20,3 +20,6 @@ tools/observability_server/docker-compose.override.yml
 .remember/
 *-playground.html
 artifacts/
+
+**/.vite/
+.vite/
