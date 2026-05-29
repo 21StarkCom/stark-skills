@@ -41,7 +41,7 @@ For each CLAUDE.md, check:
 
 Cross-check that any tool version references are consistent across repos:
 - CLI tool versions mentioned should not contradict each other
-- Model names (e.g., `claude-opus-4-6`) should be consistent
+- Model names (e.g., `claude-opus-4-8`) should be consistent
 
 ### 4. Validate Path References
 
