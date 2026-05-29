@@ -15,38 +15,7 @@
     ]
   },
   "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/aryeh/.stark-insights/bin/stark hook tool_usage tool=$TOOL_NAME"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/aryeh/.stark-insights/bin/stark hook tool_usage tool=$TOOL_NAME status=complete"
-          }
-        ]
-      }
-    ],
     "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/aryeh/.stark-insights/bin/stark hook session_end"
-          }
-        ]
-      },
       {
         "matcher": "",
         "hooks": [
@@ -63,59 +32,6 @@
           {
             "type": "command",
             "command": "mkdir -p \"${CLAUDE_PROJECT_DIR:-.}/.remember/logs\""
-          }
-        ]
-      },
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/aryeh/.stark-insights/bin/stark hook session_start"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/aryeh/.stark-insights/bin/stark hook prompt"
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/aryeh/.stark-insights/bin/stark hook notification"
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/aryeh/.stark-insights/bin/stark hook subagent_stop"
-          }
-        ]
-      }
-    ],
-    "PreCompact": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/aryeh/.stark-insights/bin/stark hook compaction"
           }
         ]
       }
