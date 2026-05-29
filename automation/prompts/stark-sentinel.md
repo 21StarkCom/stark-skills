@@ -25,7 +25,7 @@ For each CLI tool, verify critical flags are still accepted:
 
 **Claude:**
 ```bash
-claude --model claude-opus-4-6 --help >/dev/null 2>&1 && echo "claude: PASS" || echo "claude: FAIL"
+claude --model claude-opus-4-8 --help >/dev/null 2>&1 && echo "claude: PASS" || echo "claude: FAIL"
 ```
 
 **Codex:**
