@@ -345,7 +345,7 @@ test("discoverConfig: keys not present at the more-specific layer fall through t
 
 test("getModelId: returns the configured model id, null for unknown agent", async () => {
   await withScratchHome(() => {
-    assert.equal(getModelId("claude"), "claude-opus-4-7");
+    assert.equal(getModelId("claude"), "claude-opus-4-8");
     assert.equal(getModelId("nonexistent"), null);
   });
 });

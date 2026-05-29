@@ -7,7 +7,7 @@
  *
  *   Lead:  codex (gpt-5.5) at xhigh reasoning, dispatched per-domain in
  *          parallel (capped via --max-codex-concurrent).
- *   Wing:  claude (opus-4-7) — receives findings + current doc, emits a
+ *   Wing:  claude (opus-4-8) — receives findings + current doc, emits a
  *          JSON {patches: [...]} block. Host applies patches sequentially
  *          with unique-match validation. On partial patch failure, retries
  *          the wing once with failures attached, then gives up the round.
@@ -71,7 +71,7 @@ const DEFAULT_PROMPTS_BASE = path.join(HOME, ".claude", "code-review", "prompts"
 const DEFAULT_TIMEOUT_SEC = 600;
 const WING_TIMEOUT_SEC = 900;
 const CODEX_DEFAULT_MODEL = "gpt-5.5";
-const CLAUDE_DEFAULT_MODEL = "claude-opus-4-7";
+const CLAUDE_DEFAULT_MODEL = "claude-opus-4-8";
 const CODEX_REASONING_EFFORT_XHIGH = 'model_reasoning_effort="xhigh"';
 const DEFAULT_OUTPUT_CAP = 32 * 1024 * 1024;
 

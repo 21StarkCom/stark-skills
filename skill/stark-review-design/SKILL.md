@@ -2,7 +2,7 @@
 name: stark-review-design
 description: >-
   Multi-domain design/spec review with lead/wing fix loop. Codex (gpt-5.5, xhigh
-  reasoning) reviews 8 domains in parallel; Claude (opus-4-7) wing fixes findings.
+  reasoning) reviews 8 domains in parallel; Claude (opus-4-8) wing fixes findings.
   Use for review design, review spec, review architecture.
 argument-hint: "<path> [--rounds N] [--dry-run] [--force] [--codex-concurrent N]"
 disable-model-invocation: true
@@ -29,7 +29,7 @@ Lead/wing multi-round design review:
   `consistency`, `accessibility`, `test-plan`). Concurrency is capped via
   `--codex-concurrent N` (default 3, raises the safe per-agent ceiling for
   this skill above the global stark-review cap of 1).
-- **Wing (claude, opus-4-7)** receives the document + classified `fix` findings
+- **Wing (claude, opus-4-8)** receives the document + classified `fix` findings
   and emits a JSON `{patches: [{old, new}], skipped: [...]}` block. The
   dispatcher validates each patch (`old` must occur exactly once) and applies
   it surgically; on partial failure it retries the wing once with the failures

@@ -52,7 +52,7 @@ export interface ModelEntry {
 }
 
 export const DEFAULT_MODELS: Record<string, ModelEntry> = {
-  claude: { enabled: true, model_id: "claude-opus-4-7" },
+  claude: { enabled: true, model_id: "claude-opus-4-8" },
   codex: { enabled: true, model_id: "gpt-5.5" },
   gemini: { enabled: true, model_id: "gemini-3.1-pro-preview" },
 };
@@ -132,7 +132,7 @@ export interface ModelRate {
 
 export const DEFAULT_MODEL_RATES: Record<string, ModelRate> = {
   o3: { input_per_1m_usd: 15.0, output_per_1m_usd: 60.0 },
-  "claude-opus-4-7": { input_per_1m_usd: 15.0, output_per_1m_usd: 75.0 },
+  "claude-opus-4-8": { input_per_1m_usd: 15.0, output_per_1m_usd: 75.0 },
   "gpt-5.4": { input_per_1m_usd: 5.0, output_per_1m_usd: 15.0 },
   "gpt-5.5": { input_per_1m_usd: 5.0, output_per_1m_usd: 15.0 },
   "gpt-5.4-pro": { input_per_1m_usd: 20.0, output_per_1m_usd: 80.0 },
