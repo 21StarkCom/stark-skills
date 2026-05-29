@@ -62,14 +62,18 @@ SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
 ## Phase 1: Parse arguments + validate
 
 Parse `$ARGUMENTS` for `<path>` (first non-flag positional) and flags
-`--rounds N`, `--dry-run`, `--force`, `--codex-concurrent N`.
+`--rounds N`, `--dry-run`, `--force`, `--codex-concurrent N`. Bind the path to
+`DOC` — **never `path`**: under zsh the lowercase `path` parameter is tied to
+`$PATH`, so `path=…` silently clobbers the command search path and every
+dispatched `codex`/`node`/`gh` call dies with `agent_unavailable`.
 
-- If no path: error "Usage: /stark-review-plan <path>" and abort.
-- If the path looks like a partial name (no `/`), `find docs/ -name "*${path}*"
-  -o -name "*${path}*.md" 2>/dev/null | head -5` to suggest matches.
+- If no `DOC`: error "Usage: /stark-review-plan <path>" and abort.
+- If `DOC` looks like a partial name (no `/`), `find docs/ -name "*${DOC}*"
+  -o -name "*${DOC}*.md" 2>/dev/null | head -5` to suggest matches.
 - Capture the repo root BEFORE delegating:
 
 ```bash
+DOC="<first non-flag positional from $ARGUMENTS>"
 REPO_DIR="$(pwd)"
 ```
 
@@ -92,7 +96,7 @@ Token failure is non-fatal: the dispatcher runs without GitHub posting.
 ```bash
 set +e
 RECEIPT_JSON=$(node --experimental-strip-types "$TOOLS/stark_review_doc.ts" \
-    --doc "$path" --prompts-dir plan-review \
+    --doc "$DOC" --prompts-dir plan-review \
     --repo-dir "$REPO_DIR" --prompts-base "$PROMPTS_BASE" \
     ${ROUNDS:+--rounds "$ROUNDS"} \
     ${CODEX_CONCURRENT:+--codex-concurrent "$CODEX_CONCURRENT"} \

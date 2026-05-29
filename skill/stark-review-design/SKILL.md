@@ -63,7 +63,7 @@ To call the dispatcher:
 
 ```bash
 node --experimental-strip-types "$TOOLS/stark_review_doc.ts" \
-    --doc "$path" --prompts-dir design-review \
+    --doc "$DOC" --prompts-dir design-review \
     --repo-dir "$REPO_DIR" --prompts-base "$PROMPTS_BASE" \
     ${ROUNDS:+--rounds "$ROUNDS"} \
     ${CODEX_CONCURRENT:+--codex-concurrent "$CODEX_CONCURRENT"} \
@@ -74,15 +74,19 @@ node --experimental-strip-types "$TOOLS/stark_review_doc.ts" \
 ## Phase 1: Parse arguments + validate
 
 Parse `$ARGUMENTS` for the leading `<path>` (first non-flag positional) and
-flags `--rounds N`, `--dry-run`, `--force`, `--codex-concurrent N`.
+flags `--rounds N`, `--dry-run`, `--force`, `--codex-concurrent N`. Bind the
+path to `DOC` — **never `path`**: under zsh the lowercase `path` parameter is
+tied to `$PATH`, so `path=…` silently clobbers the command search path and
+every dispatched `codex`/`node`/`gh` call dies with `agent_unavailable`.
 
-- If no path: error "Usage: /stark-review-design <path>" and abort.
-- If the path looks like a partial name (no `/`), `find docs/ -name "*${path}*"
-  -o -name "*${path}*.md" 2>/dev/null | head -5` to suggest matches.
+- If no `DOC`: error "Usage: /stark-review-design <path>" and abort.
+- If `DOC` looks like a partial name (no `/`), `find docs/ -name "*${DOC}*"
+  -o -name "*${DOC}*.md" 2>/dev/null | head -5` to suggest matches.
 - Repo dir defaults to the current working directory. Capture it BEFORE
   delegating — keeps prompt resolution anchored to the operator's checkout.
 
 ```bash
+DOC="<first non-flag positional from $ARGUMENTS>"
 REPO_DIR="$(pwd)"
 ```
 
@@ -113,7 +117,7 @@ already streams human progress to the terminal.
 ```bash
 set +e
 RECEIPT_JSON=$(node --experimental-strip-types "$TOOLS/stark_review_doc.ts" \
-    --doc "$path" --prompts-dir design-review \
+    --doc "$DOC" --prompts-dir design-review \
     --repo-dir "$REPO_DIR" --prompts-base "$PROMPTS_BASE" \
     ${ROUNDS:+--rounds "$ROUNDS"} \
     ${CODEX_CONCURRENT:+--codex-concurrent "$CODEX_CONCURRENT"} \
