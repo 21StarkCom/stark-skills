@@ -53,7 +53,7 @@ export const DEFAULT_TIMEOUT_SEC = 900;
 export const WING_TIMEOUT_DEFAULT_SEC = 600;
 export const TEST_TIMEOUT_SEC = 120;
 
-const CLAUDE_DEFAULT_MODEL = "claude-opus-4-7";
+const CLAUDE_DEFAULT_MODEL = "claude-opus-4-8";
 const CODEX_DEFAULT_MODEL = "gpt-5.5";
 const GEMINI_DEFAULT_MODEL = "gemini-3.1-pro-preview";
 const CODEX_REASONING_EFFORT_MEDIUM = 'model_reasoning_effort="medium"';

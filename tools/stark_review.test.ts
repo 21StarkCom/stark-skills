@@ -57,12 +57,12 @@ test("resolveAgentPorts: succeeds for mixed-agent run with real ports", async ()
 // ─── Task 8-1: agent_claude.ts port ─────────────────────────────────────────
 
 test("agent_claude: buildCommand emits claude CLI argv with model pinning", () => {
-  const built = agentClaude.buildCommand("hello", "claude-opus-4-7");
+  const built = agentClaude.buildCommand("hello", "claude-opus-4-8");
   assert.equal(built.cmd, "claude");
   assert.deepEqual(built.args, [
     "-p", "-",
     "--output-format", "json",
-    "--model", "claude-opus-4-7",
+    "--model", "claude-opus-4-8",
     "--no-session-persistence",
   ]);
   assert.equal(built.stdin, "hello");

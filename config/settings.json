@@ -14,7 +14,6 @@
       "/Users/aryeh/Code/Evinced"
     ]
   },
-  "model": "claude-opus-4-7",
   "hooks": {
     "PreToolUse": [
       {
@@ -147,7 +146,8 @@
     "commit-commands@claude-plugins-official": true,
     "playground@claude-plugins-official": true,
     "gopls-lsp@claude-plugins-official": true,
-    "stark-gh@stark-skills": true
+    "stark-gh@stark-skills": true,
+    "caveman@stark-skills": true
   },
   "extraKnownMarketplaces": {
     "claude-code-lsps": {
@@ -170,7 +170,7 @@
     }
   },
   "outputStyle": "Concrete",
-  "effortLevel": "medium",
+  "effortLevel": "low",
   "skipDangerousModePermissionPrompt": true,
   "remoteControlAtStartup": false,
   "agentPushNotifEnabled": true,

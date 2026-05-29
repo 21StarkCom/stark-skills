@@ -16,7 +16,7 @@
  *   node --experimental-strip-types tools/optimize_skill_description.ts \
  *     --skill-path skill/stark-forged-review \
  *     --eval-set path/to/trigger_eval.json \
- *     --model claude-opus-4-7 \
+ *     --model claude-opus-4-8 \
  *     --max-iterations 3 \
  *     --out-json /tmp/optimize-results.json
  *
@@ -286,7 +286,7 @@ function parseCliArgs(argv: string[]): CliArgs {
   const args: CliArgs = {
     skillPath: "",
     evalSet: "",
-    model: "claude-opus-4-7",
+    model: "claude-opus-4-8",
     maxIterations: 3,
     runsPerQuery: 3,
     timeout: 180,
