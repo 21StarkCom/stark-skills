@@ -412,7 +412,7 @@ Wrap this sub-skill in observability so the parent run shows it as a sub-agent:
 ```bash
 node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts touch-lease
 SAID="$(node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts subagent-start \
-  --agent claude --model opus-4-7 --task memory-update)"
+  --agent claude --model opus-4-8 --task memory-update)"
 # ... perform memory update ...
 node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts touch-lease
 node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts subagent-end \

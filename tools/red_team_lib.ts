@@ -450,7 +450,7 @@ const LEGACY_DEFAULT_CLASSIFICATION: DocClassification = {
   level: "internal",
   dpa_required: false,
   retention_days: 30,
-  provider_allowlist: ["openai-gpt-5.5", "anthropic-claude-opus-4-7"],
+  provider_allowlist: ["openai-gpt-5.5", "anthropic-claude-opus-4-8"],
   notes: "legacy default — operator did not annotate classification:",
   source: "legacy_default",
 };
@@ -1262,7 +1262,7 @@ export function dispatch(args: DispatchArgs): DispatchResult {
 function provider_for_model(model: string): string {
   // Crude shape — Phase 2+ refines this as more providers come online.
   if (model.startsWith("gpt") || model.startsWith("o")) return "openai-gpt-5.5";
-  if (model.startsWith("claude")) return "anthropic-claude-opus-4-7";
+  if (model.startsWith("claude")) return "anthropic-claude-opus-4-8";
   return model;
 }
 

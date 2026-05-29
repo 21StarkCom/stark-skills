@@ -2,7 +2,7 @@ import type { AgentName, Finding, Severity } from "./stark_review_lib.ts";
 import { findingId } from "./stark_review_lib.ts";
 import type { BuildContext, BuiltCommand, ParseError, ParseResult } from "./agent_codex.ts";
 
-export const CLAUDE_DEFAULT_MODEL = "claude-opus-4-7";
+export const CLAUDE_DEFAULT_MODEL = "claude-opus-4-8";
 
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set<Severity>([
   "critical", "high", "medium", "low",

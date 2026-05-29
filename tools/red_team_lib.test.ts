@@ -224,7 +224,7 @@ classification:
   retention_days: 90
   provider_allowlist:
     - openai-gpt-5.5
-    - anthropic-claude-opus-4-7
+    - anthropic-claude-opus-4-8
   notes: tagged by ops
 ---
 # Body
@@ -236,7 +236,7 @@ classification:
   assert.equal(cl.retention_days, 90);
   assert.deepEqual(cl.provider_allowlist, [
     "openai-gpt-5.5",
-    "anthropic-claude-opus-4-7",
+    "anthropic-claude-opus-4-8",
   ]);
   assert.equal(cl.notes, "tagged by ops");
 });
@@ -255,7 +255,7 @@ test("classificationGate refuses when provider isn't in the allowlist", () => {
 classification:
   level: internal
   provider_allowlist:
-    - anthropic-claude-opus-4-7
+    - anthropic-claude-opus-4-8
 ---
 body
 `;
@@ -315,7 +315,7 @@ body
     docText,
     provider: "openai-gpt-5.5",
     override: null,
-    dpaOnFile: new Set(["anthropic-claude-opus-4-7"]),
+    dpaOnFile: new Set(["anthropic-claude-opus-4-8"]),
   });
   assert.equal(out.allowed, false);
   assert.equal(out.reason_code, "classification_dpa_missing");

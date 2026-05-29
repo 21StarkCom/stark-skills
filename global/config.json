@@ -37,7 +37,7 @@
     "max_validation_iterations": 2
   },
   "models": {
-    "claude": { "enabled": true, "model_id": "claude-opus-4-7" },
+    "claude": { "enabled": true, "model_id": "claude-opus-4-8" },
     "codex": { "enabled": true, "model_id": "gpt-5.5" },
     "gemini": { "enabled": false, "model_id": "gemini-3.1-pro-preview" }
   },
@@ -197,7 +197,7 @@
       "input_per_1m_usd": 15.00,
       "output_per_1m_usd": 60.00
     },
-    "claude-opus-4-7": {
+    "claude-opus-4-8": {
       "input_per_1m_usd": 15.00,
       "output_per_1m_usd": 75.00
     },
@@ -223,7 +223,7 @@
     }
   },
   "automation": {
-    "model": "claude-opus-4-7",
+    "model": "claude-opus-4-8",
     "repos": [
       "GetEvinced/stark-skills",
       "GetEvinced/infra-pulse",
