@@ -42,7 +42,7 @@ Review artifacts before they ship. Each review skill dispatches the enabled LLM 
 |-------|----------------|-------------|
 | `/stark-review` | PR code changes | Triage-selected domains, 1 LLM × N domains — fast, cheap, default agent configurable per domain. |
 | [`/stark-review-design`](skill/stark-review-design/SKILL.md) | Architecture and design docs | Before committing to a design. Reviews across 8 domains (completeness, security, scope, etc.). |
-| [`/stark-review-plan`](docs/skills/stark-review-plan/usage.md) | Execution plans and deployment plans | Before executing. Adversarial SRE review across 10 failure vectors — assumes the plan will break. |
+| [`/stark-review-plan`](docs/skills/stark-review-plan/usage.md) | Execution plans and deployment plans | Before executing. Adversarial SRE review across 4 failure vectors (completeness, security, sequencing, viability) — assumes the plan will break. |
 | [`/stark-review-improvement`](docs/skills/stark-review-improvement/usage.md) | Review prompt effectiveness | After reviews produce too many false positives. Tunes agent prompts based on assessment data. |
 | [`/stark-review-design-improvement`](skill/stark-review-design-improvement/SKILL.md) | Design review prompt effectiveness | After design reviews produce too many false positives. Wraps `/stark-review-improvement` with design-review prompts. |
 
@@ -131,8 +131,7 @@ The core engine dispatches the enabled AI agents across the configured review do
 
 ```
 Default install:
-├── claude × {architecture, accessibility, correctness, type-safety, security, test-coverage,
-│              spec-conformance, ui-design-conformance, regression-prevention}
+├── claude × {architecture, behavior, type-safety, security, test-coverage, spec-conformance}
 └── codex  × {same 6 domains}
 
 Optional:
@@ -163,7 +162,7 @@ stark-skills/
 │   ├── config.json               ← global defaults
 │   └── prompts/{claude,codex,gemini}/  ← per-agent × per-domain review prompts (6 domains)
 ├── data/                         ← persona roster, review coverage, showcase pages
-├── automation/                   ← CCR automation fleet (12 triggers, logs, costs)
+├── automation/                   ← CCR automation fleet (11 triggers, logs, costs)
 ├── .github/workflows/            ← GitHub Actions (project sync, gate checks, heartbeat)
 ├── org/evinced/                  ← → ~/Code/.code-review/
 ├── docs/
@@ -182,7 +181,7 @@ The installer creates symlinks — files stay in this repo. `git pull` updates e
 | `global/config.json` | `~/.claude/code-review/config.json` | Global defaults |
 | `global/orchestrator.md` | `~/.claude/code-review/orchestrator.md` | Fix-review loop |
 | `global/prompts/` | `~/.claude/code-review/prompts/` | Agent × domain prompts |
-| `scripts/` | `~/.claude/code-review/scripts/` | Python scripts |
+| `scripts/` | `~/.claude/code-review/scripts/` | Shell helpers + JSON schemas |
 | `org/evinced/` | `~/Code/.code-review/` | Org config |
 
 ```bash
@@ -227,7 +226,7 @@ Domains are auto-discovered at startup.
 
 - macOS (keychain-based auth)
 - `claude`, `codex`, `gemini` CLI tools in PATH
-- Python 3.10+ with `PyJWT` and `requests`
+- Node.js (TS tooling runs via `node --experimental-strip-types`)
 - GitHub App private keys in macOS Keychain
 
 Run `./install.sh` to check all dependencies.
