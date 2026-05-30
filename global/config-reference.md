@@ -13,7 +13,7 @@ Triggers are grouped into four tiers by urgency and cost. When multiple triggers
 | 1 | Strategic / high-value evolution work | $5–$10/run | `stark-evolution`, `stark-self-review` |
 | 2 | Active monitoring, dependency & drift detection | $1–$3/run | `stark-sentinel`, `stark-dependency-audit`, `stark-infra-drift`, `stark-api-compat` |
 | 3 | Periodic intelligence gathering and sync | $2–$3/run | `stark-intelligence`, `stark-claude-md-sync` |
-| 4 | Observability, reporting, housekeeping | $1–$2/run | `stark-digest`, `stark-observability-check`, `stark-automation-monitor`, `stark-hooks-auditor` |
+| 4 | Reporting, housekeeping | $1–$2/run | `stark-digest`, `stark-automation-monitor`, `stark-hooks-auditor` |
 
 Per-trigger `budget_usd` is a soft cap: the trigger posts a Slack alert to `#stark-automation` if it exceeds the allocation, but does not hard-stop mid-run.
 
