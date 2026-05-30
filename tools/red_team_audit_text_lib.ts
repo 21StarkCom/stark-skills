@@ -1,41 +1,12 @@
 /**
- * Audit-text retention policy for red-team findings (FU-rt6).
+ * FU-rt6 retention policy for red-team audit text fields.
  *
- * TS port of `scripts/red_team_audit_text.py`. Pure functions — no I/O,
- * no SQLite, no subprocess. Used by:
- *   - `tools/red_team_lib.ts::buildFindingPayload` so insights events
- *     honor `red_team.audit.retain_full_text` instead of hard-coding
- *     `retention_mode: "full"`.
- *   - `tools/red_team_audit_lib.ts::recordFindings` so audit rows match.
- *
- * Excerpt mode (the default) stores a short redacted excerpt plus a
- * SHA-256 of the original text. The hash is the link between a redacted
- * row and a finding the operator may also see in a sidecar / PR comment.
+ * `applyToField` decides, per field, whether to store the full model text or
+ * a redacted excerpt. Used by:
+ *   - `tools/red_team_lib.ts::buildFindingPayload` so audit-finding rows
+ *     carry only the policy-permitted text.
+ *   - `tools/red_team_audit_lib.ts` audit-row inserts.
  */
-
-import { createHash } from "node:crypto";
-
-const DEFAULT_EXCERPT_MAX_CHARS = 240;
-const TRUNCATION_MARKER = "…";
-
-// Secret + PII redaction patterns. Keep in lockstep with
-// `tools/red_team_lib.ts::REDACTION_RULES`
-// — divergence is what the parity test catches.
-const REDACTION_RULES: ReadonlyArray<[RegExp, string]> = [
-  [/sk-[A-Za-z0-9_-]{10,}/g, "sk-[REDACTED]"],
-  [/ghp_[A-Za-z0-9]{10,}/g, "ghp_[REDACTED]"],
-  [/ghs_[A-Za-z0-9]{10,}/g, "ghs_[REDACTED]"],
-  [/\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/g, "[EMAIL-REDACTED]"],
-  [/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, "[IP-REDACTED]"],
-  [/\b\d{3}-\d{2}-\d{4}\b/g, "[SSN-REDACTED]"],
-  [/\b\d{4}[ \-]?\d{4}[ \-]?\d{4}[ \-]?\d{4}\b/g, "[CC-REDACTED]"],
-  [/\b(?:\(?\d{3}\)?[ \-.]?)\d{3}[ \-.]?\d{4}\b/g, "[PHONE-REDACTED]"],
-  [/[A-Za-z0-9+/]{41,}={0,2}/g, "[BASE64-REDACTED]"],
-];
-
-/** Run the secret + PII regex set over `text`. Idempotent. */
-export function redactAuditText(text: string): string {
-  let out = text;
   for (const [pattern, replacement] of REDACTION_RULES) {
     out = out.replace(pattern, replacement);
   }
