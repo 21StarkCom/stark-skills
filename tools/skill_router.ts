@@ -9,14 +9,10 @@
  * JSON output keeps the same shape (`suggestions`, `context`,
  * `timestamp`, `config`) — the `_suppressed_count` key from the
  * internal result is stripped before printing, like the Python.
- *
- * Emits a `skill_suggestion` event into `~/.stark-insights/queue.db`
- * directly via `tools/emit_queue_lib.ts` (no `scripts/_emit.py` shim).
  */
 
 import fs from "node:fs";
 
-import { enqueue, makeEvent } from "./emit_queue_lib.ts";
 import {
   computeSuggestions,
   humanReadable,
@@ -65,32 +61,6 @@ function flagBool(args: ParsedArgs, name: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Event emission (fail-open, matches Python `_emit_suggestion_event`)
-// ---------------------------------------------------------------------------
-
-function emitSuggestionEvent(
-  context: string,
-  suggestionsCount: number,
-  suppressedCount: number,
-): void {
-  try {
-    const event = makeEvent({
-      eventType: "skill_suggestion",
-      payload: {
-        context,
-        suggestions_count: suggestionsCount,
-        suppressed_count: suppressedCount,
-      },
-      cli: "claude",
-      source: "skill",
-    });
-    enqueue(event);
-  } catch {
-    // fail-open — emission must never break the CLI
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -122,13 +92,10 @@ function main(argv: string[]): number {
     usage,
     now: new Date(),
   });
-  const suppressedCount = result._suppressed_count;
   // Strip the internal field before printing — matches Python's
   // `result.pop("_suppressed_count", 0)` right before output.
   const out: Record<string, unknown> = { ...result };
   delete (out as Record<string, unknown>)._suppressed_count;
-
-  emitSuggestionEvent(context, result.suggestions.length, suppressedCount);
 
   if (flagBool(args, "json")) {
     process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);

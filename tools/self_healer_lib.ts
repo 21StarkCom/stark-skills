@@ -9,8 +9,6 @@
  * Improvements over the Python (matches the healer_canary precedent):
  *   - Atomic writes for `healer-session.json` and `healer-circuits.json`
  *     (tmp + rename). Python was naive `write_text(...)`.
- *   - Insights events go directly through `emit_queue_lib` —
- *     `scripts/_emit.py` shim no longer needed for this consumer.
  *   - Critical/warning alerts go directly through `alert_delivery_lib` —
  *     `scripts/alert_delivery.py` import is gone. Self_healer was its
  *     last consumer, so the Python comes out in the same slice.
@@ -34,7 +32,6 @@ import os from "node:os";
 import path from "node:path";
 
 import { emitAlert } from "./alert_delivery_lib.ts";
-import { enqueue, makeEvent } from "./emit_queue_lib.ts";
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -275,28 +272,6 @@ function executeAction(
 }
 
 // ---------------------------------------------------------------------------
-// Insights event emission
-// ---------------------------------------------------------------------------
-
-function emitHealEvent(
-  payload: Record<string, unknown>,
-  env?: NodeJS.ProcessEnv,
-): void {
-  try {
-    const event = makeEvent({
-      eventType: "heal_attempt",
-      payload,
-      cli: "claude",
-      source: "skill",
-      env,
-    });
-    enqueue(event, env);
-  } catch {
-    // fail-open — telemetry MUST NOT break the heal flow
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Log helper (append-only, matches Python `_log`)
 // ---------------------------------------------------------------------------
 
@@ -344,7 +319,6 @@ export interface RunHealResult {
 
 export function runHeal(opts: RunHealOpts): RunHealResult {
   const now = opts.now ?? new Date();
-  const env = opts.env;
   const threshold = opts.threshold ?? 3;
   const autoPatterns = new Set(opts.autoPatterns ?? []);
   const patternsPath = opts.patternsPath ?? defaultPatternsPath();
@@ -443,16 +417,6 @@ export function runHeal(opts: RunHealOpts): RunHealResult {
       pattern_id: pattern.id,
       action: pattern.action,
     };
-    emitHealEvent(
-      {
-        pattern_id: pattern.id,
-        action: pattern.action,
-        mode: "auto",
-        status: "skipped",
-        reason: "circuit_open",
-      },
-      env,
-    );
     appendLog(
       {
         timestamp: ts,
@@ -485,15 +449,6 @@ export function runHeal(opts: RunHealOpts): RunHealResult {
       action: pattern.action,
       requires_confirmation: pattern.requires_confirmation ?? false,
     };
-    emitHealEvent(
-      {
-        pattern_id: pattern.id,
-        action: pattern.action,
-        mode: effectiveMode,
-        status: "suggested",
-      },
-      env,
-    );
     appendLog(
       {
         timestamp: ts,
@@ -515,15 +470,6 @@ export function runHeal(opts: RunHealOpts): RunHealResult {
       pattern_id: pattern.id,
       action: pattern.action,
     };
-    emitHealEvent(
-      {
-        pattern_id: pattern.id,
-        action: pattern.action,
-        mode: "auto",
-        status: "skipped",
-      },
-      env,
-    );
     appendLog(
       {
         timestamp: ts,
@@ -549,15 +495,6 @@ export function runHeal(opts: RunHealOpts): RunHealResult {
     action: pattern.action,
     verify_passed: execution.verify_passed,
   };
-  emitHealEvent(
-    {
-      pattern_id: pattern.id,
-      action: pattern.action,
-      mode: "auto",
-      status: "applied",
-    },
-    env,
-  );
   appendLog(
     {
       timestamp: ts,

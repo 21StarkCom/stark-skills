@@ -1,7 +1,9 @@
 # ADR-0014: Durable Telemetry With Local Queue
 
+> **Superseded / Reverted (2026-05-30):** stark-insights collection decommissioned; the local emit queue producers and `~/.stark-insights/queue.db` were removed. This ADR is retained as history.
+
 **Date:** 2026-04-01
-**Status:** Accepted
+**Status:** Superseded / Reverted (2026-05-30)
 **Context:** Codex architectural review of stark-skills observability, stark-insights design spec
 
 ## Decision

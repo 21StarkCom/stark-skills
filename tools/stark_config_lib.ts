@@ -30,7 +30,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { enqueue, makeEvent } from "./emit_queue_lib.ts";
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -452,30 +451,6 @@ function dropLockedOverrides(
   return { cleaned, rejected };
 }
 
-function emitOverrideRejected(field: string, source: string): void {
-  try {
-    // `source: "skill"` — config loading happens inside skill execution.
-    // The queue's VALID_SOURCES allowlist rejects bespoke sources.
-    const res = enqueue(
-      makeEvent({
-        eventType: "red_team_override_rejected",
-        source: "skill",
-        payload: {
-          section: "red_team",
-          field: field.split(".").pop() ?? field,
-          path: field,
-          source,
-        },
-      }),
-    );
-    if (!res.ok) {
-      warn(`failed to enqueue override_rejected event: ${res.error}`);
-    }
-  } catch (err) {
-    warn(`failed to enqueue override_rejected event: ${(err as Error).message}`);
-  }
-}
-
 function pruneUnknownKeys(
   override: Record<string, unknown>,
   known: ReadonlySet<string>,
@@ -540,7 +515,6 @@ export function getRedTeamConfig(): RedTeamConfig {
       warn(
         `red_team.${p} is locked to global config and cannot be overridden in ${cfgPath}`,
       );
-      emitOverrideRejected(p, cfgPath);
     }
     const pruned = pruneUnknownKeys(cleaned, RED_TEAM_KNOWN_KEYS, cfgPath);
     merged = deepMerge(merged, pruned);

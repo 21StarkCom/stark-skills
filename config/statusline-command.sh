@@ -50,7 +50,7 @@ _cfg="$HOME/.claude/statusline-segments.json"
 _on() { [[ "$_skip" != *" $1 "* ]]; }
 
 # Cache wall-clock once; bash printf-builtin avoids a `date +%s` fork on
-# each call site (rate segs, last-tool freshness, session-start).
+# each call site (rate segs, session-start).
 printf -v NOW '%(%s)T' -1
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -157,53 +157,6 @@ if [ -n "$cost_usd" ]; then
   }')
 fi
 
-# ── File-based state ─────────────────────────────────────────────────────
-last_tool="" lt_ts="" inflight=0 longest_tool="" longest_s=0
-
-f="$HOME/.stark-insights/last-tool"
-if [ -f "$f" ]; then
-  IFS=$'\t' read -r lt_name lt_ms lt_ts < "$f" 2>/dev/null
-  if [ -n "$lt_name" ] && [ -n "$lt_ms" ] && [ -n "$lt_ts" ] && [ $(( NOW - lt_ts )) -lt 30 ]; then
-    [ "$lt_ms" -lt 1000 ] 2>/dev/null && last_tool="${lt_name} ${lt_ms}ms" || last_tool="${lt_name} $(( lt_ms / 1000 ))s"
-  fi
-fi
-
-# Status file is single-line tab-separated key=value pairs. Read once, no
-# nested while/for needed (the previous form ran an outer loop one time).
-f="$HOME/.stark-insights/status"
-if [ -f "$f" ]; then
-  IFS=$'\t' read -ra flds < "$f" 2>/dev/null
-  for x in "${flds[@]}"; do
-    case "$x" in
-      inflight=*)     inflight=${x#*=};;
-      longest_tool=*) longest_tool=${x#*=};;
-      longest_s=*)    longest_s=${x#*=};;
-    esac
-  done
-fi
-
-# v2: the meaningful "events waiting for BigQuery" signal is buffer.db's
-# rowid vs bqsync's last persisted HWM, not queue.db.pending. The legacy
-# queue.db is now drained every 60s into buffer.db (see stark-insights
-# `drain-queue` subcommand), so its `pending` only flashes above 0 if the
-# drainer stalls. Show buffer lag as the primary "🪲 N" segment; surface
-# queue stall as its own segment when it climbs past zero.
-q_pending=0 q_dead=0
-buf_lag=0
-buf="$HOME/.stark-insights/buffer.db"
-state="$HOME/.stark-insights/buffer-bqsync-state.json"
-if [ -f "$buf" ] && [ -f "$state" ]; then
-  hwm=$(sqlite3 "$buf" \
-    "SELECT (SELECT MAX(rowid) FROM events) - json_extract(readfile('$state'), '\$.last_rowid')" 2>/dev/null)
-  buf_lag=${hwm:-0}
-fi
-qf="$HOME/.stark-insights/queue.db"
-if [ -f "$qf" ]; then
-  IFS='|' read -r q_pending q_dead < <(sqlite3 "$qf" \
-    "SELECT (SELECT COUNT(*) FROM pending), (SELECT COUNT(*) FROM dead_letter)" 2>/dev/null)
-  q_pending=${q_pending:-0} q_dead=${q_dead:-0}
-fi
-
 # ═════════════════════════════════════════════════════════════════════════
 # Line 1: repo · branch · model · operational
 # ═════════════════════════════════════════════════════════════════════════
@@ -246,17 +199,6 @@ _on agent && [ -n "$agent_name" ] && seg "${TEAL}\U0001f916 ${agent_name}${R}"
 _on out_style && [ -n "$out_style" ] && [ "$out_style" != "default" ] && \
   [ "$out_style" != "Default" ] && seg "${DIM}\U0001f3a8 ${out_style}${R}"
 
-_on inflight && [ "$inflight" -gt 0 ] 2>/dev/null && seg "${SKY}\u26a1\ufe0f ${inflight}${R}"
-_on longest_tool && [ "$longest_s" -gt 60 ] 2>/dev/null && seg "$(tcolor "$longest_s" 180 60)\u23f3 ${longest_tool} $(( longest_s / 60 ))m${R}"
-_on last_tool && [ -n "$last_tool" ] && seg "${TEAL}\u23f1\ufe0f ${last_tool}${R}"
-# Buffer lag = events captured but not yet drained into BigQuery (bqsync
-# fires every 15 min, so this naturally cycles 0 → ~hundreds → 0). Worth
-# surfacing only when it persists above a threshold suggesting bqsync
-# stalled — 500 corresponds to ~5 min of normal traffic during high-flow
-# Claude Code sessions.
-_on buf_lag && [ "$buf_lag" -gt 500 ] 2>/dev/null && seg "${MAR}\U0001fab2 ${buf_lag}${R}"
-_on q_pending && [ "$q_pending" -gt 5 ] 2>/dev/null && seg "${MAR}\U0001f9ca ${q_pending}${R}"
-_on q_dead && [ "$q_dead" -gt 0 ] 2>/dev/null && seg "${RED}\U0001f41e ${q_dead}${R}"
 _on session_name && [ -n "$session_name" ] && seg "${DIM}${session_name}${R}"
 _on vim_mode && [ -n "$vim_mode" ] && { [ "$vim_mode" = "NORMAL" ] && seg "${YEL}N${R}" || seg "${DIM}I${R}"; }
 

@@ -5,16 +5,11 @@
  * derived goal ("what"), execution steps ("how"), CLAUDE.md constraints,
  * and any detected constraint violations. Used as a confirmation gate
  * before long-running skills begin.
- *
- * The Python imported `_emit`; this port emits telemetry directly via
- * `emit_queue_lib.ts`.
  */
 
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
-import { enqueue, makeEvent } from "./emit_queue_lib.ts";
 
 function logPath(): string {
   return path.join(
@@ -281,29 +276,6 @@ export function logContract(contract: ContractResult): void {
   } catch (err) {
     process.stderr.write(
       `approach_contract: warning: failed to write log: ${(err as Error).message}\n`,
-    );
-  }
-}
-
-export function emitContractEvent(contract: ContractResult): void {
-  try {
-    enqueue(
-      makeEvent({
-        eventType: "approach_contract",
-        payload: {
-          plan_file: contract.plan_file,
-          what: contract.what,
-          how: contract.how,
-          constraints: contract.constraints,
-          valid: contract.valid,
-          violations: contract.violations,
-          confirmed: contract.confirmed,
-        },
-      }),
-    );
-  } catch (err) {
-    process.stderr.write(
-      `approach_contract: warning: failed to emit event: ${(err as Error).message}\n`,
     );
   }
 }

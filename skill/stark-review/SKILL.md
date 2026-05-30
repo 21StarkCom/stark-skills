@@ -346,7 +346,7 @@ state — surface the path and let the user inspect.
 
 Standard observability applies: timestamped progress logs, metrics block
 (PR number, agents used, domains succeeded/failed, findings by severity,
-duration), and completion event via `$SCRIPTS/stark-emit`.
+duration).
 
 See [../../standards/observability.md](../../standards/observability.md).
 

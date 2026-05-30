@@ -46,7 +46,6 @@ import {
   type AuditRetentionPolicy,
 } from "./red_team_audit_text_lib.ts";
 import { resolveDb } from "./red_team_db_resolver.ts";
-import { enqueue as queueEnqueue, makeEvent } from "./emit_queue_lib.ts";
 import { resolveOpenaiApiKey } from "./preflight_lib.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -220,10 +219,7 @@ export const REPO_ROOT = (() => {
 })();
 
 export const PROMPTS_DIR = path.join(REPO_ROOT, "global", "prompts", "red-team");
-// Phase 5b: the Python audit CLI + emit-queue CLI are gone. All audit
-// writes go through `tools/red_team_audit_lib.ts` directly, all insights
-// events go through `tools/emit_queue_lib.ts` directly. The constants
-// below used to point at the deleted scripts and are kept removed.
+// All audit writes go through `tools/red_team_audit_lib.ts` directly.
 
 // ── Prompt resolution ────────────────────────────────────────────────────
 
@@ -288,8 +284,7 @@ export function assemblePrompt(args: {
 
 // ── Redaction sanitizer ─────────────────────────────────────────────────
 //
-// Mirrors the regex set in `tools/emit_queue_lib.ts::REDACT_PATTERNS` plus
-// `scripts/red_team_audit_text.py::_REDACTION_RULES`. Run before every
+// Run before every
 // output sink (sidecar, stdout, PR comment, audit shell-out body) as a
 // defense-in-depth backstop after the pre-dispatch gate.
 
@@ -1213,30 +1208,6 @@ export function dispatch(args: DispatchArgs): DispatchResult {
         `red_team_lib: audit persist failed (non-fatal): ${(err as Error).message}`,
       );
     }
-  }
-
-  // Insights events (best-effort; --no-audit also suppresses these so a
-  // single flag controls all metric/audit side effects).
-  if (!args.noAudit) {
-    emitRun({
-      ctx,
-      result,
-      model,
-      fixPlanStatus: fixPlanResolution.status,
-      runWarnings: fixPlanResolution.runWarnings,
-    });
-    for (const f of result.findings) {
-      emitFinding({ ctx, finding: f, roundNum: result.round_num });
-    }
-    emitFixPlan({
-      ctx,
-      fixPlan: fixPlanResolution.fixPlan,
-      fixPlanStatus: fixPlanResolution.status,
-      fixPlanMd: renderFixPlanSection({
-        status: fixPlanResolution.status,
-        fixPlan: fixPlanResolution.fixPlan,
-      }),
-    });
   }
 
   return {
@@ -2598,58 +2569,6 @@ export function renderFixPlanSection(args: {
   return rendered;
 }
 
-// ── Insights events: builders, enqueue, emitters ────────────────────────
-//
-// Mirrors `scripts/red_team_insights.py::emit_run|emit_finding|emit_fix_plan`.
-// The TS dispatcher derives the inner payload, then shells out to
-// `scripts/red_team_emit_queue_cli.py enqueue --type T --dedupe-key K` with
-// the payload on stdin. The CLI's `make_event` wraps it in the canonical
-// envelope (event_id / timestamp / cli / source / schema_version / session_id)
-// — so the timestamp on insights events is the enqueue time, not the
-// run-start time. That's a minor divergence from the Python `_envelope`
-// shape and is acceptable for "we observed this at X" event semantics.
-//
-// All three emitters are fail-open: any enqueue error logs to stderr and
-// returns without throwing. Insights are best-effort and never block a run.
-
-export interface InsightsEnqueueResult {
-  ok: boolean;
-  event_id?: string;
-  dedupe_key?: string;
-  duplicate?: boolean;
-  error?: string;
-}
-
-type DedupeKind = "run" | "finding" | "fix_plan";
-
-export function makeDedupeKey(
-  kind: DedupeKind,
-  args: { stage: Stage; runId: string; roundNum?: number; findingId?: string },
-): string {
-  if (kind === "finding") {
-    if (args.roundNum === undefined || !args.findingId) {
-      throw new Error("finding dedupe key requires roundNum and findingId");
-    }
-    return `red-team:finding:${args.stage}:${args.runId}:${args.roundNum}:${args.findingId}`;
-  }
-  if ((kind === "run" || kind === "fix_plan") && (args.roundNum !== undefined || args.findingId)) {
-    throw new Error(`${kind} dedupe key does not accept roundNum or findingId`);
-  }
-  return `red-team:${kind}:${args.stage}:${args.runId}`;
-}
-
-export function enqueueInsightsEvent(
-  eventType: "red_team_run" | "red_team_finding" | "red_team_fix_plan",
-  payload: Record<string, unknown>,
-  dedupeKey: string,
-): InsightsEnqueueResult {
-  // Phase 5b: TS-native. Build the canonical envelope + INSERT OR IGNORE
-  // directly into the queue DB via `node:sqlite`. No more shell-out to
-  // `scripts/red_team_emit_queue_cli.py` (deleted in Phase 5b).
-  const event = makeEvent({ eventType, payload, dedupeKey });
-  return queueEnqueue(event);
-}
-
 // ── Payload builders (mirror Python `build_*_envelope` payload shape) ───
 
 function worstSeverity(result: RedTeamResult): Severity | null {
@@ -2790,67 +2709,3 @@ export function buildFixPlanPayload(args: {
   };
 }
 
-// ── Emitters (fail-open wrappers used by dispatch()) ────────────────────
-
-export function emitRun(args: {
-  ctx: RedTeamRunContext;
-  result: RedTeamResult;
-  model: string;
-  fixPlanStatus: FixPlanStatus | null;
-  runWarnings: string[];
-}): InsightsEnqueueResult {
-  const payload = buildRunPayload(args);
-  const dedupeKey = makeDedupeKey("run", { stage: args.ctx.stage, runId: args.ctx.run_id });
-  const out = enqueueInsightsEvent("red_team_run", payload, dedupeKey);
-  if (!out.ok) {
-    console.error(`red_team_lib: emit red_team_run failed (non-fatal): ${out.error ?? "unknown"}`);
-  }
-  return out;
-}
-
-export function emitFinding(args: {
-  ctx: RedTeamRunContext;
-  finding: RedTeamFinding;
-  roundNum: number;
-}): InsightsEnqueueResult {
-  const payload = buildFindingPayload(args);
-  const dedupeKey = makeDedupeKey("finding", {
-    stage: args.ctx.stage,
-    runId: args.ctx.run_id,
-    roundNum: args.roundNum,
-    findingId: args.finding.id,
-  });
-  const out = enqueueInsightsEvent("red_team_finding", payload, dedupeKey);
-  if (!out.ok) {
-    console.error(
-      `red_team_lib: emit red_team_finding ${args.finding.id} failed (non-fatal): ${out.error ?? "unknown"}`,
-    );
-  }
-  return out;
-}
-
-/** Emit a `red_team_fix_plan` event for a *successful* fix-plan run only.
- *  No-ops (returns `{ok:true, duplicate:false}` synthetic) when status is
- *  not `success` or the plan carries an error, matching Python's
- *  `emit_fix_plan` early-return contract. */
-export function emitFixPlan(args: {
-  ctx: RedTeamRunContext;
-  fixPlan: RedTeamFixPlan | null;
-  fixPlanStatus: FixPlanStatus;
-  fixPlanMd: string;
-}): InsightsEnqueueResult {
-  if (args.fixPlanStatus !== "success" || !args.fixPlan || args.fixPlan.error !== null) {
-    return { ok: true, duplicate: false };
-  }
-  const payload = buildFixPlanPayload({
-    ctx: args.ctx,
-    fixPlan: args.fixPlan,
-    fixPlanMd: args.fixPlanMd,
-  });
-  const dedupeKey = makeDedupeKey("fix_plan", { stage: args.ctx.stage, runId: args.ctx.run_id });
-  const out = enqueueInsightsEvent("red_team_fix_plan", payload, dedupeKey);
-  if (!out.ok) {
-    console.error(`red_team_lib: emit red_team_fix_plan failed (non-fatal): ${out.error ?? "unknown"}`);
-  }
-  return out;
-}

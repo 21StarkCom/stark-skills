@@ -10,7 +10,6 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
 import { initRedTeamTables } from "./red_team_audit_lib.ts";
@@ -33,12 +32,9 @@ import {
   countHumanReview,
   deriveStatus,
   dispatch,
-  emitFixPlan,
-  enqueueInsightsEvent,
   extractClassification,
   killSwitchActive,
   loadPersonaPrompts,
-  makeDedupeKey,
   parseCodexJsonl,
   parseCommitteeOutput,
   parseFixPlanOutput,
@@ -1188,37 +1184,7 @@ Content for the dispatch-with-fix-plan smoke.
   assert.match(sidecar, /Status:\*\* skipped — skipped_disabled/);
 });
 
-// ── Insights events coverage ──────────────────────────────────────────
-
-test("makeDedupeKey produces the canonical shape per kind", () => {
-  assert.equal(
-    makeDedupeKey("run", { stage: "design", runId: "r1" }),
-    "red-team:run:design:r1",
-  );
-  assert.equal(
-    makeDedupeKey("fix_plan", { stage: "plan", runId: "r2" }),
-    "red-team:fix_plan:plan:r2",
-  );
-  assert.equal(
-    makeDedupeKey("finding", { stage: "design", runId: "r3", roundNum: 1, findingId: "rt1" }),
-    "red-team:finding:design:r3:1:rt1",
-  );
-});
-
-test("makeDedupeKey rejects invalid argument combinations", () => {
-  assert.throws(
-    () => makeDedupeKey("finding", { stage: "design", runId: "r1" }),
-    /finding dedupe key requires roundNum and findingId/,
-  );
-  assert.throws(
-    () => makeDedupeKey("run", { stage: "design", runId: "r1", roundNum: 1 }),
-    /run dedupe key does not accept roundNum or findingId/,
-  );
-  assert.throws(
-    () => makeDedupeKey("fix_plan", { stage: "design", runId: "r1", findingId: "x" }),
-    /fix_plan dedupe key does not accept roundNum or findingId/,
-  );
-});
+// ── Insights payload coverage ─────────────────────────────────────────
 
 test("buildRunPayload counts severities and threads fix_plan_status", () => {
   const findings: RedTeamFinding[] = [
@@ -1324,118 +1290,3 @@ test("buildFixPlanPayload collects addressed IDs across moves", () => {
   assert.match(payload.fix_plan_md as string, /## Proposed Fix Plan/);
 });
 
-test("enqueueInsightsEvent writes to the queue and is idempotent on dedupe_key", () => {
-  // STARK_QUEUE_DIR is already isolated at module load (see top of file).
-  const payload = {
-    run_id: "test-run-enqueue",
-    stage: "design",
-    final_status: "clean",
-  };
-  const dedupeKey = "red-team:run:design:test-run-enqueue";
-  const first = enqueueInsightsEvent("red_team_run", payload, dedupeKey);
-  assert.equal(first.ok, true);
-  assert.equal(first.duplicate, false);
-  const second = enqueueInsightsEvent("red_team_run", payload, dedupeKey);
-  assert.equal(second.ok, true);
-  assert.equal(second.duplicate, true);
-});
-
-test("dispatch() actually emits insights events to the queue end-to-end", () => {
-  // STARK_QUEUE_DIR is isolated at module load. Run a real dispatch
-  // (mocked codex, real audit + emit-queue CLI), then peek at the queue
-  // and confirm the three documented event types landed.
-  const db = tmpDb();
-  const docPath = tmpDoc(
-    `---
-classification:
-  level: internal
----
-# Insights wiring fixture
-`,
-  );
-  const ctx = buildRunContext({
-    stage: "design",
-    artifactPath: docPath,
-    sourceSpecPath: null,
-    dbPath: db,
-  });
-  const prompts = loadPersonaPrompts();
-  dispatch({
-    ctx,
-    prompts,
-    personas: ["data", "security-trust"],
-    artifact: fs.readFileSync(docPath, "utf8"),
-    sourceSpec: fs.readFileSync(docPath, "utf8"),
-    model: "gpt-5.5-pro",
-    timeoutMs: 10_000,
-    dbPath: db,
-    noSidecar: true, // exercise insights even when the sidecar write is off
-    codexFn: () => ({
-      raw_output: JSON.stringify([
-        {
-          persona: "data",
-          severity: "high",
-          concern: "Insights wiring smoke — single blocking finding",
-          consequence: "Tests assert insights wiring only",
-          counter_proposal: "Wire emitRun + emitFinding through the queue",
-          trade_off: "One extra shell-out per finding",
-        },
-      ]),
-      duration_s: 0.01,
-      input_tokens: 1,
-      output_tokens: 1,
-      error: null,
-    }),
-  });
-  // After Phase 5b the emit-queue CLI is gone; read the queue DB
-  // directly. STARK_QUEUE_DIR was set at module load so we hit a tmp DB.
-  const queueDbPath = path.join(process.env.STARK_QUEUE_DIR!, "queue.db");
-  const qdb = new DatabaseSync(queueDbPath);
-  let rawRows: Array<{ event_json: string }>;
-  try {
-    rawRows = qdb.prepare("SELECT event_json FROM pending").all() as Array<{
-      event_json: string;
-    }>;
-  } finally {
-    qdb.close();
-  }
-  const eventsForThisRun = rawRows
-    .map((r) => JSON.parse(r.event_json) as {
-      type: string;
-      payload: Record<string, unknown>;
-    })
-    .filter((e) => (e.payload as { run_id?: string }).run_id === ctx.run_id);
-  const typesSeen = new Set(eventsForThisRun.map((e) => e.type));
-  // red_team_run + red_team_finding are mandatory; red_team_fix_plan does
-  // not land because fix_plan defaults to disabled in config.
-  assert.ok(typesSeen.has("red_team_run"), `expected red_team_run; saw ${[...typesSeen].join(",")}`);
-  assert.ok(typesSeen.has("red_team_finding"), `expected red_team_finding; saw ${[...typesSeen].join(",")}`);
-  assert.ok(!typesSeen.has("red_team_fix_plan"), "fix-plan should not emit when disabled");
-  // Caller must match the audit row, not be left as "manual" or empty.
-  const runEvent = eventsForThisRun.find((e) => e.type === "red_team_run")!;
-  assert.equal((runEvent.payload as { caller: string }).caller, "stark-red-team-ts");
-});
-
-test("emitFixPlan no-ops on non-success status or when fix-plan carries an error", () => {
-  const plan = validateFixPlan(VALID_PLAN_JSON, ["rt1", "rt2"], DEFAULT_FIX_PLAN_CONFIG);
-  // Non-success status — no enqueue regardless of plan body.
-  const skipped = emitFixPlan({
-    ctx: mkCtx(),
-    fixPlan: plan,
-    fixPlanStatus: "skipped_disabled",
-    fixPlanMd: "## Proposed Fix Plan\n…",
-  });
-  assert.equal(skipped.ok, true);
-  assert.equal(skipped.duplicate, false);
-  assert.equal(skipped.event_id, undefined);
-  // Status=success but plan has an error — also a no-op.
-  plan.error = "fake validation error";
-  const errored = emitFixPlan({
-    ctx: mkCtx(),
-    fixPlan: plan,
-    fixPlanStatus: "success",
-    fixPlanMd: "## Proposed Fix Plan\n…",
-  });
-  assert.equal(errored.ok, true);
-  assert.equal(errored.event_id, undefined);
-});

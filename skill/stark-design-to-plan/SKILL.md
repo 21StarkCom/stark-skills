@@ -217,7 +217,7 @@ Write:
 
 ## Observability
 
-Standard observability: create task per phase, emit timestamped progress logs (`[HH:MM:SS] Phase N: ...`), record metrics block (lead, wing, rounds count, final verdict, total duration, lead duration, wing duration, parse retries), emit completion event via `$SCRIPTS/stark-emit`.
+Standard observability: create task per phase, emit timestamped progress logs (`[HH:MM:SS] Phase N: ...`), record metrics block (lead, wing, rounds count, final verdict, total duration, lead duration, wing duration, parse retries).
 
 Improvement flags: total run > 10 min → flag slow loop; any parse retry → flag verdict format drift; `max_rounds_unresolved` → flag wing too strict OR lead too weak (operator decides); `lead_fix_round_no_change` → flag lead stuck on a finding; `lead_round1_empty_draft` → flag generate-prompt issue.
 

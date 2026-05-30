@@ -10,11 +10,10 @@
  * aggregate to `blocked`; non-critical failures or warns escalate to
  * `degraded`; all-pass stays `ready`.
  *
- * Output channels mirror the Python 1:1: a JSONL append to
- * `~/.claude/code-review/preflight.jsonl` and a `preflight_check`
- * event to the durable insights queue (via `tools/emit_queue_lib.ts`).
- * Both are best-effort — a failure to write the log or enqueue the
- * event surfaces as a stderr warning and never fails the run.
+ * Results are appended as one JSON line to
+ * `~/.claude/code-review/preflight.jsonl`. The append is best-effort —
+ * a failure to write the log surfaces as a stderr warning and never
+ * fails the run.
  */
 
 import fs from "node:fs";
@@ -22,7 +21,6 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { enqueue, makeEvent } from "./emit_queue_lib.ts";
 import { getToken } from "./github_app_lib.ts";
 import { isLockStale } from "./lock_helpers_lib.ts";
 import {
@@ -541,7 +539,7 @@ export async function runPreflight(
 }
 
 // ---------------------------------------------------------------------------
-// Logging + event emission (best-effort)
+// Logging (best-effort)
 // ---------------------------------------------------------------------------
 
 export function logResult(result: PreFlightResult): void {
@@ -552,36 +550,6 @@ export function logResult(result: PreFlightResult): void {
   } catch (err) {
     process.stderr.write(
       `preflight: warning: failed to write log: ${(err as Error).message}\n`,
-    );
-  }
-}
-
-export function emitResultEvent(result: PreFlightResult): void {
-  try {
-    // `source: "skill"` matches the Python `_emit.emit_event()` default —
-    // preflight is invoked from SKILL.md preambles, so it fits the skill
-    // event lineage. The queue's `VALID_SOURCES` allowlist rejects
-    // anything else (see `tools/emit_queue_lib.ts::VALID_SOURCES`).
-    const res = enqueue(
-      makeEvent({
-        eventType: "preflight_check",
-        source: "skill",
-        payload: {
-          workflow: result.workflow,
-          overall: result.overall,
-          recommended_mode: result.recommended_mode,
-          checks: result.checks,
-        },
-      }),
-    );
-    if (!res.ok) {
-      process.stderr.write(
-        `preflight: warning: failed to emit event: ${res.error}\n`,
-      );
-    }
-  } catch (err) {
-    process.stderr.write(
-      `preflight: warning: failed to emit event: ${(err as Error).message}\n`,
     );
   }
 }

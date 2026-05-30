@@ -11,7 +11,6 @@
  *     every SKILL reads via `jq`).
  * Side effects (best-effort, errors logged to stderr):
  *   - Appends one JSON line to `~/.claude/code-review/preflight.jsonl`.
- *   - Enqueues a `preflight_check` event to the durable insights queue.
  *
  * Exit code: 1 when `overall == "blocked"`, otherwise 0.
  */
@@ -19,7 +18,6 @@
 import fs from "node:fs";
 
 import {
-  emitResultEvent,
   logResult,
   renderTable,
   runPreflight,
@@ -98,9 +96,8 @@ async function main(argv: string[]): Promise<number> {
     skip: parsed.skip,
   });
 
-  // Side effects: log + emit. Both swallow errors internally.
+  // Side effect: log. Swallows errors internally.
   logResult(result);
-  emitResultEvent(result);
 
   if (parsed.json) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

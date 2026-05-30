@@ -55,8 +55,7 @@ const SUBPROCESS_TIMEOUT_MS = 15_000;
 const SKILL_SUGGESTIONS_CAP = 2;
 const START_WALLTIME_MS_DEFAULT = 45_000;
 
-// Token/secret patterns. Kept loosely in sync with `emit_queue_lib.ts`'s
-// REDACT_PATTERNS — anything we hand to errors[] (or any stderr we surface
+// Token/secret patterns — anything we hand to errors[] (or any stderr we surface
 // to the SKILL for rendering) must not leak credentials.
 const REDACT_PATTERNS: ReadonlyArray<[RegExp, string]> = [
   [/ghp_[A-Za-z0-9_]{10,}/g, "ghp_[REDACTED]"],
@@ -164,40 +163,6 @@ function pushParseError(
 ): void {
   const raw = exc instanceof Error ? exc.message : String(exc);
   errors.push({ source, message: `parse: ${redact(raw)}` });
-}
-
-// ── collectQueueHealth ───────────────────────────────────────────────
-
-export type QueueState = {
-  pending: number;
-  dead_letter: number;
-  max_created_at: string | null;
-};
-
-export async function collectQueueHealth(
-  deps: Deps,
-  errors: ErrSlot[],
-): Promise<QueueState | null> {
-  const cmd = [
-    "node", "--experimental-strip-types", "--no-warnings",
-    `${deps.toolsDir}/emit_queue_cli.ts`, "--health",
-  ];
-  const result = await deps.run(cmd, { timeoutMs: SUBPROCESS_TIMEOUT_MS });
-  if (result.code !== 0) {
-    pushSubprocessError(errors, "queue", result);
-    return null;
-  }
-  try {
-    const obj = JSON.parse(result.stdout);
-    return {
-      pending: Number(obj.pending_count ?? 0),
-      dead_letter: Number(obj.dead_letter_count ?? 0),
-      max_created_at: obj.max_created_at ?? null,
-    };
-  } catch (e) {
-    pushParseError(errors, "queue", e);
-    return null;
-  }
 }
 
 // ── collectCanaryStatus ──────────────────────────────────────────────
@@ -801,7 +766,6 @@ export type StartState = {
   board: BoardState | null;
   alerts: AlertsState | null;
   health: HealthCheck[];
-  queue: QueueState | null;
   healer: { categories: HealerCategory[]; canary: CanaryStatus | null } | null;
   skills: { available: string[]; suggestions: SkillSuggestion[] };
   persona: PersonaState | null;
@@ -849,7 +813,6 @@ export async function collectStart(deps: Deps, opts: StartOpts): Promise<StartSt
     git: null as GitState | null,
     board: null as BoardState | null,
     alerts: null as AlertsState | null,
-    queue: null as QueueState | null,
     canary: null as CanaryStatus | null,
     suggestions: [] as SkillSuggestion[],
     persona: null as PersonaState | null,
@@ -868,7 +831,6 @@ export async function collectStart(deps: Deps, opts: StartOpts): Promise<StartSt
     }),
     collectBoard(childDeps, errors).then((v) => { slots.board = v; }),
     collectAlerts(childDeps, errors).then((v) => { slots.alerts = v; }),
-    collectQueueHealth(childDeps, errors).then((v) => { slots.queue = v; }),
     collectCanaryStatus(childDeps, errors).then((v) => { slots.canary = v; }),
     collectSkillSuggestions(childDeps, errors).then((v) => { slots.suggestions = v; }),
     collectPersona(childDeps, errors).then((v) => { slots.persona = v; }),
@@ -919,7 +881,6 @@ export async function collectStart(deps: Deps, opts: StartOpts): Promise<StartSt
     board: slots.board,
     alerts: slots.alerts,
     health: slots.health,
-    queue: slots.queue,
     healer,
     skills: { available: slots.available, suggestions: slots.suggestions },
     persona: slots.persona,

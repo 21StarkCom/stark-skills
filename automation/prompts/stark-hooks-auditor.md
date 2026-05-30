@@ -24,7 +24,7 @@ Do NOT modify any other files.
 
 Read hook settings from all 6 repos:
 ```bash
-for repo in stark-skills stark-team stark-insights infra-sentinel stark-autopilot stark-docs; do
+for repo in stark-skills stark-team infra-sentinel stark-autopilot stark-docs; do
   echo "=== $repo ==="
   echo "--- .claude/settings.json ---"
   gh api repos/GetEvinced/$repo/contents/.claude/settings.json --jq '.content' | base64 -d 2>/dev/null || echo "MISSING"
@@ -58,9 +58,9 @@ Parse all hook configurations and build `automation/hooks/registry.md`:
 - {repo}: {command}
 
 ## Cross-Repo Coverage
-| Hook Type | stark-skills | stark-team | stark-insights | infra-sentinel | stark-autopilot | stark-docs |
-|-----------|-------------|------------|----------------|----------------|-----------------|------------|
-| {type}    | {yes/no}    | {yes/no}   | ...            | ...            | ...             | ...        |
+| Hook Type | stark-skills | stark-team | infra-sentinel | stark-autopilot | stark-docs |
+|-----------|-------------|------------|----------------|-----------------|------------|
+| {type}    | {yes/no}    | {yes/no}   | ...            | ...             | ...        |
 ```
 
 ### 3. Analyze Patterns

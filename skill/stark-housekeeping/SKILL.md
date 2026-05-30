@@ -198,18 +198,7 @@ verification failure the originals are left in place and `errors` notes it.
 
 ## Observability
 
-Standard observability: create task, emit timestamped progress logs, record metrics block (issues closed by category, branches deleted, worktrees cleaned, per-phase timing), emit completion event via `$SCRIPTS/stark-emit`:
-
-```bash
-$SCRIPTS/stark-emit skill_invocation \
-  skill=stark-housekeeping duration_s=$TOTAL_SECONDS success=true \
-  issues_closed=$CLOSED branches_deleted=$BRANCHES worktrees_cleaned=$WORKTREES \
-  session_files_removed=$SESSION_FILES checkpoint_files_removed=$CHECKPOINT_FILES \
-  stale_locks_removed=$STALE_LOCKS logs_rotated=$LOGS_ROTATED \
-  validation_logs_removed=$VALIDATION_LOGS \
-  artifacts_archived_files=$ARCHIVED_FILES artifacts_archived_count=$ARCHIVED_COUNT \
-  dry_run=$DRY_RUN aggressive=$AGGRESSIVE
-```
+Standard observability: create task, emit timestamped progress logs, record metrics block (issues closed by category, branches deleted, worktrees cleaned, per-phase timing).
 
 See [../../standards/observability.md](../../standards/observability.md) for the full protocol.
 

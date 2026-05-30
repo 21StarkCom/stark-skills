@@ -5,7 +5,6 @@
 // recorded → circuit updated → alerts emitted on critical transitions.
 
 import { strict as assert } from "node:assert";
-import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -43,7 +42,6 @@ interface TestCtx {
 
 function ctx(): TestCtx {
   const dir = tmp();
-  const queueDir = path.join(dir, "stark-insights");
   const alertsBaseDir = path.join(dir, "alerts");
   return {
     dir,
@@ -54,7 +52,6 @@ function ctx(): TestCtx {
     alertsBaseDir,
     env: {
       ...process.env,
-      STARK_QUEUE_DIR: queueDir,
       CLAUDE_SESSION_ID: "self-healer-test",
     },
   };
@@ -80,19 +77,6 @@ function logLines(c: TestCtx): Array<Record<string, unknown>> {
     .split("\n")
     .filter((l) => l.length > 0)
     .map((l) => JSON.parse(l));
-}
-
-function queueEvents(env: NodeJS.ProcessEnv): Array<Record<string, unknown>> {
-  const file = path.join(env.STARK_QUEUE_DIR ?? "", "queue.db");
-  if (!fs.existsSync(file)) return [];
-  const db = new DatabaseSync(file);
-  try {
-    return (db
-      .prepare("SELECT event_json FROM pending ORDER BY id")
-      .all() as Array<{ event_json: string }>).map((r) => JSON.parse(r.event_json));
-  } finally {
-    db.close();
-  }
 }
 
 function alertMarkers(c: TestCtx): string[] {
@@ -394,7 +378,7 @@ test("runHeal: --mode auto + tripped circuit → skipped with reason=circuit_ope
   assert.equal(alertMarkers(c).length, 0);
 });
 
-test("runHeal: --mode suggest → emits a 'suggested' result + log + heal_attempt event", () => {
+test("runHeal: --mode suggest → emits a 'suggested' result + log", () => {
   const c = ctx();
   writePatterns(c, [pattern()]);
   fs.writeFileSync(path.join(c.dir, "stderr.log"), "err");
@@ -406,10 +390,6 @@ test("runHeal: --mode suggest → emits a 'suggested' result + log + heal_attemp
   });
   assert.equal(r.exit, 0);
   assert.equal(r.result.status, "suggested");
-  // heal_attempt event in queue.
-  const events = queueEvents(c.env);
-  assert.ok(events.some((e) => e.type === "heal_attempt" &&
-    (e.payload as Record<string, unknown>).status === "suggested"));
 });
 
 test("runHeal: --mode auto + requires_confirmation → skipped (won't auto-apply)", () => {
@@ -520,24 +500,4 @@ test("runHeal: max_per_session counter only increments on successful executions"
   //  release_stale_lock action returns success=true regardless, so the
   //  counter DOES bump. Match Python exactly.)
   assert.equal(sessionCount("test-pattern", c.sessionPath), 1);
-});
-
-test("runHeal: emits heal_attempt insights event for every code path that reaches execution", () => {
-  const c = ctx();
-  writePatterns(c, [pattern({ action: "release_stale_lock", verify_command: "true" })]);
-  fs.writeFileSync(path.join(c.dir, "stderr.log"), "err");
-  runHeal({
-    ...baseOpts(c),
-    patternId: "test-pattern",
-    stderrFile: path.join(c.dir, "stderr.log"),
-    mode: "auto",
-    autoPatterns: ["test-pattern"],
-  });
-  const events = queueEvents(c.env);
-  const heal = events.filter((e) => e.type === "heal_attempt");
-  assert.ok(heal.length >= 1);
-  const applied = heal.find((e) =>
-    (e.payload as Record<string, unknown>).status === "applied",
-  );
-  assert.ok(applied, "expected a status=applied heal_attempt event");
 });

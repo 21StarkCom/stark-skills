@@ -197,17 +197,7 @@ If `.github/project-config.json` exists: pull issue numbers from this session's 
 
 If the branch has an upstream, or you're on `main` ahead of `origin`: `git push`. On failure: report and ask how to proceed. If no upstream and not on `main`: ask **"Push to origin?"**
 
-### Phase 5.5 — Sync telemetry
-
-```bash
-SYNC_SCRIPT=~/Code/Playground/stark-insights/scripts/sync_buffer.py
-if [ -f "$SYNC_SCRIPT" ]; then
-  ~/Code/Playground/stark-insights/.venv/bin/python3 "$SYNC_SCRIPT" 2>/dev/null
-fi
-```
-If sync fails, note "Telemetry: buffered locally" in the summary.
-
-### Phase 5.6 — Derive session name
+### Phase 5.5 — Derive session name
 
 In priority order, derive a slug (lowercase, hyphens, max 50 chars) from:
 
@@ -246,7 +236,7 @@ Schema:
 Render the end summary:
 
 1. **Header**: `Session {name} · {duration} · {branch}`
-2. **Receipt** (from your in-memory accumulator through phases 1–5.5): Tests, Build, PRs merged, Docs committed, Push, Telemetry — each as pass/fail with a detail and duration.
+2. **Receipt** (from your in-memory accumulator through phases 1–5.5): Tests, Build, PRs merged, Docs committed, Push — each as pass/fail with a detail and duration.
 3. **Diff**: `{added}+ / {removed}- across {file_count} files` + the key files list. Warn if `diff.approximate` is true (start HEAD wasn't recorded).
 4. **Branch**: ahead/behind vs upstream, PR link if `has_pr`.
 5. **Errors** (if non-empty): brief one-liner.
@@ -265,10 +255,6 @@ node --experimental-strip-types --no-warnings \
 Standard observability: create task, emit timestamped logs, record metrics block. Skill-specific metrics:
 - **Start:** subprocess collector durations from `STATE_JSON.errors` + your own wall-clock measurement of the CLI call.
 - **End:** test duration, build duration, PRs merged, docs committed, project fields updated, push result.
-
-Emit completion event:
-- **Start:** `$SCRIPTS/stark-emit skill_invocation skill=stark-session args=start duration_s=... branch=... health_passed=... health_total=...`
-- **End:** `$SCRIPTS/stark-emit skill_invocation skill=stark-session args=end duration_s=... prs_merged=... docs_committed=... pushed=...`
 
 See [../../standards/observability.md](../../standards/observability.md).
 

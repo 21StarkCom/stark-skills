@@ -61,7 +61,6 @@ provision_infrastructure() {
     echo "Provisioning local infrastructure..."
 
     mkdir -p \
-        "$HOME/.stark-insights" \
         "$CODE_REVIEW_DIR/history/design-reviews" \
         "$CODE_REVIEW_DIR/history/forge" \
         "$CODE_REVIEW_DIR/sessions" \
@@ -78,20 +77,6 @@ provision_infrastructure() {
     fi
 
     info "Created local directories"
-
-    # Delegate queue.db schema creation to the TS emit-queue CLI — the lib
-    # (tools/emit_queue_lib.ts) owns the canonical schema, so installing
-    # via its own initializer keeps install.sh from drifting. buffer.db
-    # is owned by stark-insights (its own installer creates it).
-    node --experimental-strip-types --no-warnings \
-        "$REPO_DIR/tools/emit_queue_cli.ts" --init-schema
-
-    queue_db="${STARK_QUEUE_DIR:-$HOME/.stark-insights}/queue.db"
-    if [ -f "$queue_db" ]; then
-        chmod 600 "$queue_db"
-    fi
-
-    info "Provisioned queue.db"
 }
 
 link_dir() {

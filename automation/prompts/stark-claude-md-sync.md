@@ -22,7 +22,7 @@ Do NOT modify any other files. Fixes to CLAUDE.md files are submitted as PRs to 
 
 Read CLAUDE.md from all 6 repos:
 ```bash
-for repo in stark-skills stark-team stark-insights infra-sentinel stark-autopilot stark-docs; do
+for repo in stark-skills stark-team infra-sentinel stark-autopilot stark-docs; do
   echo "=== $repo ==="
   gh api repos/GetEvinced/$repo/contents/CLAUDE.md --jq '.content' | base64 -d 2>/dev/null || echo "MISSING"
 done

@@ -12,9 +12,7 @@
  * specific file rather than the scan).
  *
  * Designed to be the single source of truth for session ID resolution
- * across the TS tools — `tools/emit_queue_lib.ts:resolveSessionId()`
- * used to inline a partial version with a `// Skip the projects-dir
- * resolution path` TODO; that inline copy now imports from here.
+ * across the TS tools.
  */
 
 import { randomUUID } from "node:crypto";

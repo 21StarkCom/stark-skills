@@ -17,7 +17,6 @@ import {
   collectHealthChecks,
   collectPersona,
   collectPRs,
-  collectQueueHealth,
   collectSessionState,
   collectSkillSuggestions,
   collectStart,
@@ -105,9 +104,8 @@ test("collectStart: honors opts.session_id, start_head, started_at in session bl
       { cmd: ["git", "log", "--oneline", "--format=%h|%s|%ar", "-5"], stdout: "" },
       { cmd: ["gh", "pr", "list", "--author", "@me", "--state", "open"], stdout: "[]" },
       { cmd: ["gh", "pr", "view", "--json", "number,title,state,reviewDecision,statusCheckRollup"], code: 1 },
-      // alerts, queue, canary, suggestions, persona, available, board — all OK
+      // alerts, canary, suggestions, persona, available, board — all OK
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"], stdout: JSON.stringify({ unacknowledged: [] }) },
-      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/emit_queue_cli.ts", "--health"], stdout: JSON.stringify({ pending_count: 0, dead_letter_count: 0, max_created_at: null }) },
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/healer_canary.ts", "--status", "--json"], stdout: JSON.stringify({ patterns: [] }) },
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/skill_router.ts", "--context", "session", "--json"], stdout: JSON.stringify({ suggestions: [] }) },
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/stark_persona.ts", "select", "--auto"], stdout: JSON.stringify({ name: "Tony" }) },
@@ -150,7 +148,6 @@ test("collectStart: enforces total wall-clock deadline, slow collectors get null
       { cmd: ["gh", "pr", "list", "--author", "@me", "--state", "open"], stdout: "[]" },
       { cmd: ["gh", "pr", "view", "--json", "number,title,state,reviewDecision,statusCheckRollup"], code: 1 },
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"], stdout: JSON.stringify({ unacknowledged: [] }) },
-      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/emit_queue_cli.ts", "--health"], stdout: JSON.stringify({ pending_count: 0, dead_letter_count: 0, max_created_at: null }) },
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/healer_canary.ts", "--status", "--json"], stdout: JSON.stringify({ patterns: [] }) },
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/skill_router.ts", "--context", "session", "--json"], stdout: JSON.stringify({ suggestions: [] }) },
       { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/stark_persona.ts", "select", "--auto"], stdout: "{}" },
@@ -277,48 +274,6 @@ test("collectHealerCategories: returns null when healer.jsonl is missing", async
   const errors: ErrSlot[] = [];
   const result = await collectHealerCategories(deps, errors);
   assert.equal(result, null);
-  assert.equal(errors.length, 0);
-});
-
-// ── collectQueueHealth ───────────────────────────────────────────────
-
-test("collectQueueHealth: returns null when emit_queue_cli --health fails", async () => {
-  const deps = makeDeps({
-    runs: [
-      {
-        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/emit_queue_cli.ts", "--health"],
-        code: 1,
-        stderr: "boom",
-      },
-    ],
-  });
-  const errors: ErrSlot[] = [];
-  const result = await collectQueueHealth(deps, errors);
-  assert.equal(result, null);
-  assert.equal(errors.length, 1);
-  assert.equal(errors[0].source, "queue");
-});
-
-test("collectQueueHealth: parses pending + dead-letter + max_created_at", async () => {
-  const deps = makeDeps({
-    runs: [
-      {
-        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/emit_queue_cli.ts", "--health"],
-        stdout: JSON.stringify({
-          pending_count: 3,
-          dead_letter_count: 1,
-          max_created_at: "2026-05-18T10:00:00Z",
-        }),
-      },
-    ],
-  });
-  const errors: ErrSlot[] = [];
-  const result = await collectQueueHealth(deps, errors);
-  assert.deepEqual(result, {
-    pending: 3,
-    dead_letter: 1,
-    max_created_at: "2026-05-18T10:00:00Z",
-  });
   assert.equal(errors.length, 0);
 });
 
@@ -759,11 +714,6 @@ test("collectStart: assembles every slot with overrides honored", async () => {
         cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"],
         stdout: JSON.stringify({ unacknowledged: [] }),
       },
-      // queue health
-      {
-        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/emit_queue_cli.ts", "--health"],
-        stdout: JSON.stringify({ pending_count: 0, dead_letter_count: 0, max_created_at: null }),
-      },
       // canary
       {
         cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/healer_canary.ts", "--status", "--json"],
@@ -792,7 +742,6 @@ test("collectStart: assembles every slot with overrides honored", async () => {
   assert.equal(result.session?.session_id, "S1");
   assert.equal(result.git?.branch, "feat/x");
   assert.equal(result.prs?.mine.length, 0);
-  assert.equal(result.queue?.pending, 0);
   assert.equal(result.skills.available.length, 1);
   assert.equal(result.persona?.name, "Tony");
   assert.equal(result.errors.length, 0);

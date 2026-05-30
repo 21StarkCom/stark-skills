@@ -31,7 +31,6 @@ import {
   resolveModel,
   resolvePrompt as baseResolvePrompt,
 } from "./dispatcher_base_lib.ts";
-import { enqueue, makeEvent } from "./emit_queue_lib.ts";
 import {
   makeGeminiEnv,
   parseJsonOutput as parseGeminiOutput,
@@ -1058,26 +1057,6 @@ function historyRoot(): string {
   return path.join(os.homedir(), ".claude", "code-review", "history");
 }
 
-function emitEvent(
-  eventType: string,
-  payload: Record<string, unknown>,
-  opts: { project?: string; dedupeKey: string },
-  log: Logger,
-): void {
-  try {
-    enqueue(
-      makeEvent({
-        eventType,
-        payload,
-        project: opts.project,
-        dedupeKey: opts.dedupeKey,
-      }),
-    );
-  } catch (exc) {
-    log(`  [!] Failed to emit event: ${(exc as Error).message}`);
-  }
-}
-
 function historyDir(repo: string, prNumber: number): string {
   const parts = repo.split("/");
   const d =
@@ -1177,55 +1156,6 @@ export function saveRoundHistory(
   };
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 
-  const fileKey = `${repo}/${prNumber}/round-${rnd.round_num}`;
-  let findingIdx = 0;
-  for (const res of rnd.results) {
-    emitEvent(
-      "agent_dispatch",
-      {
-        agent: res.agent,
-        model: res.model,
-        domain: res.domain,
-        task: `${res.domain} review`,
-        round: rnd.round_num,
-        duration_s: res.duration_s,
-        success: res.error === null,
-        timeout: (res.error ?? "").includes("Timed out"),
-        finding_count: res.findings.length,
-        mode,
-        review_type: "pr",
-      },
-      { project: repo, dedupeKey: `review:${fileKey}:agent:${res.agent}:${res.domain}` },
-      log,
-    );
-    for (const f of res.findings) {
-      emitEvent(
-        "review_finding",
-        {
-          pr_number: prNumber,
-          repo,
-          round: rnd.round_num,
-          agent: f.agent,
-          domain: f.domain,
-          severity: f.severity,
-          title: f.title,
-          description: f.description,
-          classification: f.classification,
-          classification_reason: f.classification_reason,
-          cross_validated_by: f.cross_validated_by,
-          fixed_in_round: f.fixed_in_round,
-          fix_verified: f.fix_verified,
-          mode,
-          domain_agent: (domainAgents ?? {})[f.domain],
-          review_type: "pr",
-          file: f.file || null,
-        },
-        { project: repo, dedupeKey: `review:${fileKey}:finding:${findingIdx}` },
-        log,
-      );
-      findingIdx += 1;
-    }
-  }
   return filePath;
 }
 
@@ -1347,24 +1277,6 @@ export function saveReviewSummary(
   };
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 
-  emitEvent(
-    "review_quality",
-    {
-      pr_number: prNumber,
-      repo,
-      mode,
-      domain_agents: domainAgents,
-      total_rounds: rounds.length,
-      signal_to_noise_pct: signalPct,
-      per_agent: perAgent,
-      per_agent_domain: agentDomainQuality,
-      per_domain: perDomain,
-      avg_duration_s: avgDuration,
-      error_counts: errorCounts,
-    },
-    { project: repo, dedupeKey: `review:${repo}/${prNumber}:quality` },
-    log,
-  );
   return filePath;
 }
 

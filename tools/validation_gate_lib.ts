@@ -6,9 +6,8 @@
  * global config, or are auto-discovered from repo marker files when no
  * config entry exists.
  *
- * The Python imported `config_loader` + `_emit`; this port reads config
- * via `stark_config_lib.ts:loadGlobalConfig()` (same on-disk file) and
- * emits telemetry directly through `emit_queue_lib.ts`.
+ * The Python imported `config_loader`; this port reads config via
+ * `stark_config_lib.ts:loadGlobalConfig()` (same on-disk file).
  */
 
 import { spawnSync } from "node:child_process";
@@ -16,7 +15,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { enqueue, makeEvent } from "./emit_queue_lib.ts";
 import { getValidationGateConfig } from "./stark_config_lib.ts";
 
 const ALLOWED_DISCOVERY_COMMANDS: ReadonlySet<string> = new Set([
@@ -204,26 +202,6 @@ function writeStderrLog(checks: CheckResult[]): string {
   return logPath;
 }
 
-/** Emit a validation_result event. Swallows all errors. */
-function emitResult(repo: string, checks: CheckResult[], overall: string): void {
-  try {
-    const passedCount = checks.filter((c) => c.passed).length;
-    enqueue(
-      makeEvent({
-        eventType: "validation_result",
-        payload: {
-          repo,
-          overall,
-          check_count: checks.length,
-          passed_count: passedCount,
-        },
-      }),
-    );
-  } catch {
-    // best-effort
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Config access — via the shared stark_config_lib section accessor.
 // ---------------------------------------------------------------------------
@@ -301,8 +279,6 @@ export function runValidationGate(
         ? "pass"
         : "fail"
       : "pass";
-
-  emitResult(repo, checks, overall);
 
   return {
     repo,

@@ -15,7 +15,6 @@ import * as readline from "node:readline/promises";
 import {
   buildContract,
   type ContractResult,
-  emitContractEvent,
   formatContract,
   logContract,
 } from "./approach_contract_lib.ts";
@@ -39,7 +38,6 @@ function expanduser(p: string): string {
 
 function finish(contract: ContractResult, asJson: boolean): void {
   logContract(contract);
-  emitContractEvent(contract);
   if (asJson) {
     process.stdout.write(`${JSON.stringify(contract, null, 2)}\n`);
   }

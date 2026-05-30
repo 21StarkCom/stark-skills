@@ -13,7 +13,7 @@
  *     getDateMatches, fuzzyMatchPersona.
  *   - Write (Slice 2): initDb, syncWeights, selectSinglePersona,
  *     selectCombo, recordRating, recordSurveyAnswer, recomputeWeight,
- *     sanitizeInput, detectType, addPersona, emitPersonaEvent,
+ *     sanitizeInput, detectType, addPersona,
  *     makeRandom, SURVEY_POOL.
  */
 
@@ -22,8 +22,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-
-import { enqueue, makeEvent } from "./emit_queue_lib.ts";
 
 // ---------------------------------------------------------------------------
 // Data model
@@ -705,43 +703,6 @@ export function syncWeights(roster: PersonaRecord[], db: DatabaseSync): void {
 }
 
 // ---------------------------------------------------------------------------
-// Insights emission (#162) — direct write to ~/.stark-insights/queue.db via
-// tools/emit_queue_lib.ts. No HTTP, no token file, no _emit.py shim.
-// ---------------------------------------------------------------------------
-
-export function makeDedupeKey(
-  subtype: string,
-  sessionId: number | string | null,
-): string {
-  const ts = Math.floor(Date.now() / 1000);
-  return `persona:${subtype}:${sessionId}:${ts}`;
-}
-
-export function emitPersonaEvent(
-  subtype: string,
-  payload: Record<string, unknown>,
-  dedupeKey: string,
-  env?: NodeJS.ProcessEnv,
-): void {
-  // subtype belongs INSIDE payload — stark-insights' PAYLOAD_SCHEMAS
-  // ["persona_event"] treats subtype as a required payload key and the
-  // envelope strips unknown top-level fields.
-  try {
-    const event = makeEvent({
-      eventType: "persona_event",
-      payload: { ...payload, subtype },
-      cli: "claude",
-      source: "skill",
-      dedupeKey,
-      env,
-    });
-    enqueue(event, env);
-  } catch {
-    // Fail-open: a busted insights queue must never break a persona pick.
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Stats helpers
 // ---------------------------------------------------------------------------
 
@@ -859,19 +820,6 @@ function persistSelection(opts: PersistOpts): Record<string, unknown> {
   }
 
   writeActive(result, activeFile);
-
-  emitPersonaEvent(
-    "selection",
-    {
-      persona: persona.slug,
-      is_combo: isCombo,
-      weight_at_selection: newWeight,
-      date_signal_matched: dateSignalMatched,
-      persona_session_id: sessionId,
-    },
-    makeDedupeKey("selection", sessionId),
-    env,
-  );
 
   return result;
 }
@@ -1022,19 +970,6 @@ export function selectCombo(opts: SelectComboOpts): Record<string, unknown> {
 
   writeActive(result, activeFile);
 
-  emitPersonaEvent(
-    "selection",
-    {
-      persona: primary.slug,
-      is_combo: true,
-      weight_at_selection: computeWeight(getPersonaStats(db, primary.slug)),
-      date_signal_matched: false,
-      persona_session_id: sessionId,
-    },
-    makeDedupeKey("selection", sessionId),
-    env,
-  );
-
   return result;
 }
 
@@ -1131,17 +1066,6 @@ export function recordRating(opts: RecordRatingOpts): string {
     }
   }
 
-  emitPersonaEvent(
-    "rating",
-    {
-      persona: slug,
-      rating,
-      persona_session_id: sessionId,
-    },
-    makeDedupeKey("rating", sessionId),
-    env,
-  );
-
   const emoji = rating === "like" ? "\u{1F44D}" : "\u{1F44E}";
   const name =
     (active.name as string | undefined) ??
@@ -1169,16 +1093,6 @@ export function recordSurveyAnswer(opts: RecordSurveyOpts): void {
     active && typeof active.session_id === "number"
       ? (active.session_id as number)
       : null;
-  emitPersonaEvent(
-    "survey_response",
-    {
-      question,
-      answer,
-      persona_session_id: sessionId,
-    },
-    makeDedupeKey("survey_response", sessionId),
-    env,
-  );
 }
 
 // ---------------------------------------------------------------------------

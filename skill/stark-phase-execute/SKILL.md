@@ -440,7 +440,7 @@ Log recommendations to observability file. Suggest `/stark-review-improvement` i
 
 ## Observability
 
-Standard observability: create task, emit timestamped progress logs, record metrics block (phase, repo, task counts, duration, findings per task, agent scores, ci_bypassed, improvement flags), emit completion event via `$SCRIPTS/stark-emit`. See [references/observability.md](references/observability.md) for the full protocol.
+Standard observability: create task, emit timestamped progress logs, record metrics block (phase, repo, task counts, duration, findings per task, agent scores, ci_bypassed, improvement flags). See [references/observability.md](references/observability.md) for the full protocol.
 
 **Phase 6 observability run termination — required final block:**
 

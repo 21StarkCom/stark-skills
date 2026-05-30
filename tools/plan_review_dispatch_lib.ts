@@ -17,7 +17,6 @@ import path from "node:path";
 import { buildClaudeCmd } from "./claude_utils_lib.ts";
 import { CODEX_REASONING_EFFORT_XHIGH, parseJsonlOutput } from "./codex_utils_lib.ts";
 import { discoverDomains, resolvePrompt as baseResolvePrompt, resolveModel } from "./dispatcher_base_lib.ts";
-import { enqueue, makeEvent } from "./emit_queue_lib.ts";
 import {
   makeGeminiEnv,
   parseJsonOutput as parseGeminiOutput,
@@ -437,78 +436,6 @@ async function runPlanSubagent(
   return result;
 }
 
-// ── Telemetry ────────────────────────────────────────────────────────────
-
-function emitPlanDispatchEvents(
-  results: PlanSubAgentResult[],
-  reviewType: string,
-  filePath: string,
-  roundNum: number,
-  repo: string | null,
-  repoDir: string | null,
-  log: Logger,
-): void {
-  try {
-    const repoLabel = repo || "unknown";
-    const safeFile = safeRepoRelative(filePath, repoDir);
-    const fileKey = `${repoLabel}:${reviewType}:${safeFile}:round-${roundNum}`;
-    let findingIdx = 0;
-    for (const r of results) {
-      try {
-        enqueue(
-          makeEvent({
-            eventType: "agent_dispatch",
-            project: repoLabel,
-            dedupeKey: `doc-review:${fileKey}:agent:${r.agent}:${r.domain}`,
-            payload: {
-              agent: r.agent,
-              model: r.model,
-              domain: r.domain,
-              task: `${r.domain} review`,
-              round: roundNum,
-              duration_s: r.duration_s,
-              success: r.error === null,
-              timeout: (r.error ?? "").includes("timeout"),
-              finding_count: r.findings.length,
-              review_type: reviewType,
-              file: safeFile,
-            },
-          }),
-        );
-      } catch (exc) {
-        log(`  [!] Failed to emit agent_dispatch: ${(exc as Error).message}`);
-      }
-      for (const f of r.findings) {
-        try {
-          enqueue(
-            makeEvent({
-              eventType: "review_finding",
-              project: repoLabel,
-              dedupeKey: `doc-review:${fileKey}:finding:${findingIdx}`,
-              payload: {
-                pr_number: null,
-                repo: repoLabel,
-                round: roundNum,
-                agent: f.agent,
-                domain: f.domain,
-                severity: f.severity,
-                title: f.title,
-                description: f.description,
-                review_type: reviewType,
-                file: safeFile,
-              },
-            }),
-          );
-        } catch (exc) {
-          log(`  [!] Failed to emit review_finding: ${(exc as Error).message}`);
-        }
-        findingIdx += 1;
-      }
-    }
-  } catch (exc) {
-    log(`  [!] Telemetry emission failed: ${(exc as Error).message}`);
-  }
-}
 
 // ── Bounded parallel pool ────────────────────────────────────────────────
 
@@ -668,17 +595,6 @@ export async function dispatchPlanReview(
     if (model) modelsInUse[agent] = model;
   }
 
-  if (options.reviewType && options.filePath) {
-    emitPlanDispatchEvents(
-      results,
-      options.reviewType,
-      options.filePath,
-      roundNum,
-      options.repo ?? null,
-      options.repoDir ?? null,
-      log,
-    );
-  }
 
   return {
     round: roundNum,

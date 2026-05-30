@@ -317,4 +317,4 @@ Commit:     [hash]
 
 ## Observability
 
-Standard observability: create task, emit timestamped logs, record metrics block (version prev→new, bump type, CHANGELOG entries by category, tag/release created, push duration), emit: `$SCRIPTS/stark-emit skill_invocation skill=stark-release duration_s=... success=... version=... bump_type=...`. See [../../standards/observability.md](../../standards/observability.md).
+Standard observability: create task, emit timestamped logs, record metrics block (version prev→new, bump type, CHANGELOG entries by category, tag/release created, push duration). See [../../standards/observability.md](../../standards/observability.md).

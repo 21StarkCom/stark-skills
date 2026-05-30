@@ -5,11 +5,9 @@
 // Tests cover: data loaders (patterns, circuits, config, log entries),
 // stats math, promotion-criteria gating (configurable), all four
 // commands (status, promote, demote, AND the two new commands —
-// check + closeCircuit), explain output, atomic config writes, and
-// the `healer_canary` insights event payload shape.
+// check + closeCircuit), explain output, and atomic config writes.
 
 import { strict as assert } from "node:assert";
-import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -52,7 +50,6 @@ interface TestCtx {
 
 function ctx(): TestCtx {
   const dir = tmp();
-  const queueDir = path.join(dir, "stark-insights");
   return {
     dir,
     patternsPath: path.join(dir, "healer_patterns.json"),
@@ -61,7 +58,6 @@ function ctx(): TestCtx {
     logPath: path.join(dir, "healer.jsonl"),
     env: {
       ...process.env,
-      STARK_QUEUE_DIR: queueDir,
       CLAUDE_SESSION_ID: "healer-canary-test",
     },
   };
@@ -82,20 +78,6 @@ function entry(overrides: Partial<HealerLogEntry> = {}): HealerLogEntry {
     status: "suggested",
     ...overrides,
   };
-}
-
-function queueEvents(env: NodeJS.ProcessEnv): Array<Record<string, unknown>> {
-  const file = path.join(env.STARK_QUEUE_DIR ?? "", "queue.db");
-  if (!fs.existsSync(file)) return [];
-  const db = new DatabaseSync(file);
-  try {
-    const rows = db
-      .prepare("SELECT event_json FROM pending ORDER BY id")
-      .all() as Array<{ event_json: string }>;
-    return rows.map((r) => JSON.parse(r.event_json));
-  } finally {
-    db.close();
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -566,39 +548,11 @@ test("cmdPromote: rejects unknown pattern id", () => {
   assert.ok(result.reasons && result.reasons.some((r) => r.includes("not found")));
 });
 
-test("cmdPromote: emits a healer_canary insights event with action=promoted", () => {
-  const c = ctx();
-  fs.writeFileSync(c.patternsPath, JSON.stringify([pattern({ id: "p1" })]));
-  fs.writeFileSync(c.configPath, JSON.stringify({}));
-  fs.writeFileSync(
-    c.logPath,
-    Array.from({ length: 5 }, () =>
-      JSON.stringify(entry({ pattern_id: "p1" })),
-    ).join("\n") + "\n",
-  );
-  cmdPromote("p1", {
-    patternsPath: c.patternsPath,
-    configPath: c.configPath,
-    circuitsPath: c.circuitsPath,
-    logPath: c.logPath,
-    now: new Date("2026-05-18T12:00:00Z"),
-    env: c.env,
-  });
-  const events = queueEvents(c.env);
-  const match = events.find(
-    (e) => e.type === "healer_canary"
-      && (e.payload as Record<string, unknown>).action === "promoted",
-  );
-  assert.ok(match, `expected promoted event in ${JSON.stringify(events)}`);
-  const payload = match!.payload as Record<string, unknown>;
-  assert.equal(payload.pattern_id, "p1");
-});
-
 // ---------------------------------------------------------------------------
 // cmdDemote
 // ---------------------------------------------------------------------------
 
-test("cmdDemote: removes the id from auto_patterns and emits a demoted event", () => {
+test("cmdDemote: removes the id from auto_patterns", () => {
   const c = ctx();
   fs.writeFileSync(
     c.configPath,
@@ -616,8 +570,6 @@ test("cmdDemote: removes the id from auto_patterns and emits a demoted event", (
   assert.deepEqual(result.auto_patterns, ["p2"]);
   const cfg = JSON.parse(fs.readFileSync(c.configPath, "utf8"));
   assert.deepEqual(cfg.self_heal.auto_patterns, ["p2"]);
-  const events = queueEvents(c.env);
-  assert.ok(events.some((e) => (e.payload as Record<string, unknown>).action === "demoted"));
 });
 
 test("cmdDemote: idempotent — second demote returns not_present note", () => {
@@ -753,24 +705,6 @@ test("cmdCloseCircuit: no-op when circuit wasn't tripped (idempotent)", () => {
   });
   assert.equal(result.ok, true);
   assert.equal(result.no_op, true);
-});
-
-test("cmdCloseCircuit: emits a healer_canary event with action=circuit_closed", () => {
-  const c = ctx();
-  fs.writeFileSync(
-    c.circuitsPath,
-    JSON.stringify({ p1: { tripped_at: "2026-05-18T11:00:00Z" } }),
-  );
-  cmdCloseCircuit("p1", {
-    patternsPath: c.patternsPath,
-    configPath: c.configPath,
-    circuitsPath: c.circuitsPath,
-    logPath: c.logPath,
-    now: new Date("2026-05-18T12:00:00Z"),
-    env: c.env,
-  });
-  const events = queueEvents(c.env);
-  assert.ok(events.some((e) => (e.payload as Record<string, unknown>).action === "circuit_closed"));
 });
 
 // ---------------------------------------------------------------------------

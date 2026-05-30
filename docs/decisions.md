@@ -38,8 +38,10 @@
 
 ## 2026-03-28 — stark-insights: AI CLI Observability System
 
+> **Reverted (2026-05-30):** stark-insights collection decommissioned; the local emit queue producers and `~/.stark-insights/queue.db` were removed (see ADR-0014). Entry retained as history.
+
 - **Date:** 2026-03-28
-- **Status:** Decomposed → issues created
+- **Status:** Reverted (2026-05-30) — was: Decomposed → issues created
 - **Tracking:** GetEvinced/stark-insights#2, #3, #4, #5, #6, #7, #8, #9
 - **Story Points:** 137 total (40 tasks across 8 phases)
 - **Summary:** Local-first, cloud-synced observability for AI CLI interactions. Docker container with FastAPI + MCP server, SQLite write-ahead buffer syncing to Cloud SQL Postgres. Key decisions: write-ahead buffer for all events (not just offline), ADC auth (no SA key files), source-stable dedupe keys, HTTP/SSE MCP transport, monthly partitioned events table, priority-based buffer eviction.

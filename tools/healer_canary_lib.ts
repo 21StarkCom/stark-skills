@@ -18,10 +18,6 @@
  *     hand-editing `healer-circuits.json`.
  *   - `cmdExplain` (NEW) — audit trail for a single pattern: every log
  *     entry, current circuit state, computed stats, eligibility.
- *   - `healer_canary` insights events on every lifecycle transition
- *     (promote / demote / circuit_closed). Matches the pattern set by
- *     skill_router and persona — canary ops should show up in the
- *     queue alongside the rest of the system's lifecycle signals.
  *   - Test coverage from 0 → 34 cases.
  *
  * Preserved (don't break consumers):
@@ -36,8 +32,6 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
-import { enqueue, makeEvent } from "./emit_queue_lib.ts";
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -367,36 +361,6 @@ export function checkPromotionCriteria(
 }
 
 // ---------------------------------------------------------------------------
-// Insights event emission (new — matches skill_router / persona pattern)
-// ---------------------------------------------------------------------------
-
-export type CanaryAction = "promoted" | "demoted" | "circuit_closed";
-
-function emitCanaryEvent(
-  action: CanaryAction,
-  patternId: string,
-  extra: Record<string, unknown>,
-  env?: NodeJS.ProcessEnv,
-): void {
-  try {
-    const event = makeEvent({
-      eventType: "healer_canary",
-      payload: {
-        action,
-        pattern_id: patternId,
-        ...extra,
-      },
-      cli: "claude",
-      source: "skill",
-      env,
-    });
-    enqueue(event, env);
-  } catch {
-    // fail-open — emission must never break the canary CLI
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Shared CLI options
 // ---------------------------------------------------------------------------
 
@@ -532,17 +496,6 @@ export function cmdPromote(
     },
     resolved.logPath,
   );
-  emitCanaryEvent(
-    "promoted",
-    patternId,
-    {
-      mode: "auto",
-      successful_suggests: stats.successful_suggests,
-      total_attempts: stats.total_attempts,
-    },
-    resolved.env,
-  );
-
   return { ok: true, pattern_id: patternId, auto_patterns: autoPatterns };
 }
 
@@ -590,7 +543,6 @@ export function cmdDemote(
     },
     resolved.logPath,
   );
-  emitCanaryEvent("demoted", patternId, { mode: "suggest" }, resolved.env);
 
   return { ok: true, pattern_id: patternId, auto_patterns: next };
 }
@@ -677,7 +629,6 @@ export function cmdCloseCircuit(
     },
     resolved.logPath,
   );
-  emitCanaryEvent("circuit_closed", patternId, {}, resolved.env);
 
   return { ok: true, pattern_id: patternId, circuit: nextState };
 }

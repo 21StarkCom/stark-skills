@@ -21,12 +21,10 @@
 import {
   addPersona,
   deleteActive,
-  emitPersonaEvent,
   ensureDirs,
   initDb,
   loadActive,
   loadRoster,
-  makeDedupeKey,
   makeRandom,
   recordRating,
   recordSurveyAnswer,
@@ -145,7 +143,6 @@ function cmdSelect(args: ParsedArgs): number {
 
 function cmdDeactivate(_args: ParsedArgs): number {
   ensureDirs();
-  const active = loadActive();
   const db = initDb();
   try {
     db.prepare(
@@ -154,19 +151,6 @@ function cmdDeactivate(_args: ParsedArgs): number {
   } finally {
     db.close();
   }
-  const sessionId =
-    active && typeof active.session_id === "number"
-      ? (active.session_id as number)
-      : null;
-  const persona =
-    (active && (active.persona as string | undefined)) ??
-    (active && (active.combo_name as string | undefined)) ??
-    "unknown";
-  emitPersonaEvent(
-    "deactivation",
-    { persona, persona_session_id: sessionId },
-    makeDedupeKey("deactivation", sessionId),
-  );
   deleteActive();
   console.log("Persona deactivated. Back to standard.");
   return 0;

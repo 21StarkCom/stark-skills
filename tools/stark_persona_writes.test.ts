@@ -1,8 +1,7 @@
 // Slice 2 tests for `tools/stark_persona_lib.ts` — write surface:
 // SQLite schema (#151), syncWeights, selectSinglePersona (#154),
 // selectCombo (#156), recordRating + favorite-combo dilution (#158),
-// add-persona sanitization (#160), session-end / deactivate, and
-// insights emission via `tools/emit_queue_lib.ts` (#162 port).
+// add-persona sanitization (#160), and session-end / deactivate.
 
 import { strict as assert } from "node:assert";
 import { DatabaseSync } from "node:sqlite";
@@ -71,20 +70,6 @@ function tableNames(db: DatabaseSync): Set<string> {
     )
     .all() as Array<{ name: string }>;
   return new Set(rows.map((r) => r.name));
-}
-
-function queueEvents(queueDir: string): Array<Record<string, unknown>> {
-  const dbFile = path.join(queueDir, "queue.db");
-  if (!fs.existsSync(dbFile)) return [];
-  const db = new DatabaseSync(dbFile);
-  try {
-    const rows = db
-      .prepare("SELECT event_json FROM pending ORDER BY id")
-      .all() as Array<{ event_json: string }>;
-    return rows.map((r) => JSON.parse(r.event_json) as Record<string, unknown>);
-  } finally {
-    db.close();
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -578,69 +563,6 @@ test("addPersona rejects bad trait count", () => {
       }),
     /3-5 traits/,
   );
-});
-
-// ---------------------------------------------------------------------------
-// Insights emission via emit_queue_lib.ts (#162 port)
-// ---------------------------------------------------------------------------
-
-test("selectSinglePersona emits a persona_event selection into the insights queue", () => {
-  const c = ctx();
-  const db = initDb(c.dbFile);
-  const roster = loadRoster(SEED_ROSTER);
-  try {
-    syncWeights(roster, db);
-    const result = selectSinglePersona({
-      roster,
-      db,
-      activeFile: c.activeFile,
-      rng: makeRandom(42),
-      env: c.env,
-    });
-    const events = queueEvents(c.queueDir);
-    const matching = events.filter(
-      (e) => e.type === "persona_event" &&
-        (e.payload as Record<string, unknown>).subtype === "selection",
-    );
-    assert.equal(matching.length, 1);
-    const payload = matching[0].payload as Record<string, unknown>;
-    assert.equal(payload.persona, result.persona);
-    assert.equal(payload.is_combo, false);
-    assert.equal(payload.persona_session_id, result.session_id);
-    // Producer must never use the envelope's `session_id` key inside the payload.
-    assert.ok(!("session_id" in payload));
-  } finally {
-    db.close();
-  }
-});
-
-test("recordRating emits a persona_event rating into the insights queue", () => {
-  const c = ctx();
-  const db = initDb(c.dbFile);
-  const roster = loadRoster(SEED_ROSTER);
-  try {
-    syncWeights(roster, db);
-    const result = selectSinglePersona({
-      roster,
-      db,
-      activeFile: c.activeFile,
-      rng: makeRandom(42),
-      env: c.env,
-    });
-    recordRating({ db, rating: "like", activeFile: c.activeFile, env: c.env });
-    const events = queueEvents(c.queueDir);
-    const matching = events.filter(
-      (e) => e.type === "persona_event" &&
-        (e.payload as Record<string, unknown>).subtype === "rating",
-    );
-    assert.equal(matching.length, 1);
-    const payload = matching[0].payload as Record<string, unknown>;
-    assert.equal(payload.rating, "like");
-    assert.equal(payload.persona, result.persona);
-    assert.equal(payload.persona_session_id, result.session_id);
-  } finally {
-    db.close();
-  }
 });
 
 test("makeRandom is deterministic given the same seed", () => {

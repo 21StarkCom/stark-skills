@@ -29,7 +29,7 @@ Do NOT modify any other files.
 Build a service list from all repos:
 
 ```bash
-for repo in stark-skills stark-team stark-insights infra-sentinel stark-autopilot stark-docs; do
+for repo in stark-skills stark-team infra-sentinel stark-autopilot stark-docs; do
   echo "=== $repo ==="
   # Check for docker-compose services
   gh api repos/GetEvinced/$repo/contents/docker-compose.yml --jq '.content' | base64 -d 2>/dev/null | grep -E '^\s+\w+:$' || echo "no docker-compose"

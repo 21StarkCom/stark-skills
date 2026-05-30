@@ -18,9 +18,8 @@ import { createHash } from "node:crypto";
 const DEFAULT_EXCERPT_MAX_CHARS = 240;
 const TRUNCATION_MARKER = "…";
 
-// Mirrors `tools/emit_queue_lib.ts::REDACT_PATTERNS` plus the PII
-// patterns the deleted `scripts/red_team_audit_text.py::_PII_PATTERNS`
-// used to add. Keep in lockstep with `tools/red_team_lib.ts::REDACTION_RULES`
+// Secret + PII redaction patterns. Keep in lockstep with
+// `tools/red_team_lib.ts::REDACTION_RULES`
 // — divergence is what the parity test catches.
 const REDACTION_RULES: ReadonlyArray<[RegExp, string]> = [
   [/sk-[A-Za-z0-9_-]{10,}/g, "sk-[REDACTED]"],

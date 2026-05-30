@@ -29,11 +29,6 @@
  *   healer_canary.ts --explain PATTERN_ID [--json]             (NEW)
  *     Audit trail for a single pattern: every log entry, current
  *     circuit state, computed stats, mode, eligibility.
- *
- * Insights events: every promote / demote / close-circuit emits a
- * `healer_canary` event (action + pattern_id + extra context) directly
- * via `tools/emit_queue_lib.ts` — distinct from `heal_attempt` (the
- * per-attempt signal self_healer emits).
  */
 
 import fs from "node:fs";
