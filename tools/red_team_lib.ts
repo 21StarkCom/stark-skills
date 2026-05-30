@@ -12,7 +12,7 @@
  *   - per-persona Codex dispatch (or a recorded transcript replay)
  *   - finding validation + aggregation
  *   - sidecar markdown rendering
- *   - audit shell-out via `scripts/red_team_audit_cli.py`
+ *   - local SQLite audit writes via `tools/red_team_audit_lib.ts`
  *   - pre-dispatch sensitive-data gate + post-write redaction
  *   - data-classification gate (frontmatter-driven)
  *
@@ -22,7 +22,7 @@
  *     ported (the Python equivalent was deleted in Phase 4).
  *   - PR posting (rendered body is returned; the caller posts).
  *   - excerpt-mode retention on free-text fields (`retention_mode: "full"`
- *     is hard-coded for both audit + insights writes; `redact()` is the
+ *     is hard-coded for audit writes; `redact()` is the
  *     defense-in-depth backstop).
  */
 
@@ -2532,12 +2532,10 @@ function worstSeverity(result: RedTeamResult): Severity | null {
   );
 }
 
-/** Match the audit row writer's `caller` field (see `auditPersistRun` /
- *  `makeBlocked`). Mismatched callers across the two sinks would surface
- *  as the same run reporting two identities, which breaks downstream joins.
- *  Blocked / errored runs early-return before insights fire, so the
+/** Default `caller` identity stamped onto the audit run row. Blocked /
+ *  errored runs early-return before the audit write fires, so the
  *  reason-suffixed variant from `makeBlocked` never reaches here. */
-const INSIGHTS_CALLER = "stark-red-team-ts";
+const AUDIT_CALLER = "stark-red-team-ts";
 
 export function buildRunPayload(args: {
   ctx: RedTeamRunContext;
@@ -2553,7 +2551,7 @@ export function buildRunPayload(args: {
     run_id: ctx.run_id,
     stage: ctx.stage,
     model,
-    caller: args.caller ?? INSIGHTS_CALLER,
+    caller: args.caller ?? AUDIT_CALLER,
     final_status: deriveStatus(result),
     worst_severity: worstSeverity(result),
     passed: deriveStatus(result) === "clean",
