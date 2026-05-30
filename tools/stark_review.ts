@@ -27,11 +27,6 @@ import {
   type Severity,
 } from "./stark_review_lib.ts";
 import type { BuildContext, BuiltCommand, ParseError, ParseResult } from "./agent_codex.ts";
-import {
-  attachChild,
-  type RunCtx,
-  type SubAgent,
-} from "./observability_emit_lib.ts";
 
 // ─── Agent port loader (Phase 3, preserved) ─────────────────────────────────
 
@@ -528,22 +523,6 @@ interface SpawnResult {
   signal?: NodeJS.Signals | null;
 }
 
-/**
- * Phase 6 Task 1: optional non-consuming observability tap. When `observability`
- * is set, `attachChild` registers ITS OWN listeners on stdout/stderr; the
- * collector listeners below still capture every byte. spawnCollect performs
- * NO lifecycle ops (single-ownership rule) — the dispatcher (here:
- * dispatchDomains and runClassifier) owns startSubAgent/endSubAgent.
- *
- * E2: the resolve gates on stdout/stderr "end" so the final bytes reach the
- * tap, then awaits drain() so every UDS-write ack lands before the
- * dispatcher's endSubAgent runs.
- */
-export interface SpawnObservability {
-  ctx: RunCtx;
-  sa: SubAgent;
-}
-
 async function spawnCollect(
   cmd: string,
   args: string[],
@@ -551,21 +530,14 @@ async function spawnCollect(
     input?: string;
     env?: NodeJS.ProcessEnv;
     cwd?: string;
-    observability?: SpawnObservability;
   } = {},
 ): Promise<SpawnResult> {
-  const inner = await new Promise<{
-    result: SpawnResult;
-    drain: (() => Promise<void>) | null;
-  }>((resolve, reject) => {
+  return await new Promise<SpawnResult>((resolve, reject) => {
     const sopts: SpawnOptionsWithoutStdio = {
       env: opts.env ?? process.env,
       cwd: opts.cwd,
     };
     const child = spawn(cmd, args, sopts);
-    const obsHandle = opts.observability
-      ? attachChild(opts.observability.ctx, opts.observability.sa, child)
-      : null;
     const out: Buffer[] = [];
     const err: Buffer[] = [];
     let stdoutEnded = false;
@@ -577,7 +549,7 @@ async function spawnCollect(
       if (closed === null) return;
       if (!stdoutEnded || !stderrEnded) return;
       settled = true;
-      resolve({ result: closed, drain: obsHandle?.drain ?? null });
+      resolve(closed);
     };
     child.stdout.on("data", (b) => out.push(b as Buffer));
     child.stderr.on("data", (b) => err.push(b as Buffer));
@@ -596,20 +568,6 @@ async function spawnCollect(
     if (opts.input !== undefined) child.stdin.end(opts.input);
     else child.stdin.end();
   });
-
-  if (inner.drain) {
-    try {
-      await inner.drain();
-    } catch (drainErr) {
-      // drain failure means the writer daemon went away; the emit lib has
-      // already flipped ctx._disabled. Surface as stderr so the caller's
-      // existing non-zero handling kicks in but do NOT throw.
-      inner.result.stderr =
-        inner.result.stderr +
-        `\n[observability drain failed] ${(drainErr as Error).message}\n`;
-    }
-  }
-  return inner.result;
 }
 
 /** Format a one-line failure description for a non-zero/signalled child.
@@ -798,14 +756,6 @@ export interface DispatchOptions {
   ports: Map<AgentName, AgentPort>;
   config: ResolvedConfig;
   spawnFn?: typeof spawnCollect;
-  /**
-   * Phase 6 Task 2: per-(agent,domain) observability lifecycle. When set,
-   * `dispatchDomains` brackets each spawn with `startSubAgent`/`endSubAgent`
-   * against `ctx`, AND passes `observability: {ctx, sa}` into the spawn so
-   * `attachChild` taps stdout/stderr. Single-ownership: spawnCollect performs
-   * NO lifecycle ops — only the chunk-tap.
-   */
-  observability?: { ctx: RunCtx };
 }
 
 export async function dispatchDomains(opts: DispatchOptions): Promise<DispatchResult[]> {
@@ -846,31 +796,6 @@ export async function dispatchDomains(opts: DispatchOptions): Promise<DispatchRe
       progress(`[${idx + 1}/${total}] ${a.agent} × ${a.domain}  fail  agent_not_supported  ${fmtDuration(Date.now() - start)}`);
       return;
     }
-    // Phase 6 Task 2: per-(agent,domain) sub-agent lifecycle. Wraps the
-    // spawn site itself so each codex/claude/gemini reviewer process is its
-    // own sub-agent in the parent run's JSONL — replacing the prior single
-    // outer wrapper sub-agent recorded at main() level. The dispatcher owns
-    // startSubAgent/endSubAgent (single-ownership); spawnCollect only taps.
-    let sa: SubAgent | null = null;
-    let saHb: { stop: () => void } | null = null;
-    if (opts.observability) {
-      try {
-        const emitLib = await import("./observability_emit_lib.ts");
-        sa = await emitLib.startSubAgent(opts.observability.ctx, {
-          agent: a.agent,
-          model: a.model ?? "<port-default>",
-          task: a.domain,
-        });
-        // Phase 6 Task 2 wing-round-3 fix #22: sub-agent heartbeat MUST run
-        // for the duration of the sub-agent. `.stop()` is a timer-cancel only
-        // (Phase 2 Task 8) and runs strictly AFTER endSubAgent.
-        saHb = emitLib.startHeartbeat(opts.observability.ctx, sa);
-      } catch {
-        // Observability disabled or daemon unreachable — proceed without tap.
-        sa = null;
-        saHb = null;
-      }
-    }
     let tempDir: string | null = null;
     try {
       // Create the cwd FIRST so per-agent setup (e.g. Gemini's
@@ -890,9 +815,6 @@ export async function dispatchDomains(opts: DispatchOptions): Promise<DispatchRe
       const cwd = built.cwd ?? tempDir;
       const sp = await spawner(built.cmd, built.args, {
         input: built.stdin, env, cwd,
-        ...(opts.observability && sa
-          ? { observability: { ctx: opts.observability.ctx, sa } }
-          : {}),
       });
       if (sp.status !== 0 || sp.signal) {
         results[idx] = {
@@ -943,36 +865,6 @@ export async function dispatchDomains(opts: DispatchOptions): Promise<DispatchRe
     } finally {
       if (tempDir) {
         try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* */ }
-      }
-      // Phase 6 Task 2: close out the sub-agent regardless of which return
-      // path runOne took. The result row has been filled in by now; we read
-      // ok/error from results[idx] for the status field.
-      if (sa && opts.observability) {
-        const r = results[idx];
-        try {
-          const emitLib = await import("./observability_emit_lib.ts");
-          await emitLib.endSubAgent(
-            opts.observability.ctx,
-            sa,
-            r?.ok ? "ok" : "error",
-            Date.now() - start,
-            r
-              ? {
-                  ok: r.ok,
-                  findings_count: r.findings.length,
-                  parse_errors: r.parseErrors.length,
-                  error: r.error ?? null,
-                }
-              : { ok: false, error: "result row missing" },
-          );
-        } catch {
-          // ignore — observability disabled or daemon gone
-        }
-      }
-      // Stop the per-sub-agent heartbeat AFTER endSubAgent so the lifecycle
-      // event is committed before the timer is cancelled.
-      if (saHb) {
-        try { saHb.stop(); } catch { /* */ }
       }
     }
   }
@@ -2849,13 +2741,6 @@ export interface MainDeps {
   ghTextFn?: typeof ghText;
   ghJsonOnceFn?: typeof ghJsonOnce;
   spawnFn?: typeof spawnCollect;
-  /**
-   * Phase 6 Task 2: optional run-level ctx threaded all the way into
-   * dispatchDomains so each per-(agent,domain) reviewer spawn gets its own
-   * sub-agent. The top-level invocation builds this from initRunCtx and
-   * passes it in.
-   */
-  observability?: { ctx: RunCtx };
 }
 
 export async function main(
@@ -2961,7 +2846,6 @@ export async function main(
   // Round-invariant inputs for runReviewPass.
   const passDeps: PassDeps = { ghJsonFn: ghJsonD, ghTextFn: ghTextD, ghJsonOnceFn: ghJsonOnceD };
   if (spawnD) passDeps.spawnFn = spawnD;
-  if (deps.observability) passDeps.observability = deps.observability;
   const passCtx: PassCtx = {
     cli, config, repo, pr, domains, agentsResolved, promptRoot, home,
   };
@@ -3253,13 +3137,6 @@ interface PassDeps {
   ghTextFn: typeof ghText;
   ghJsonOnceFn: typeof ghJsonOnce;
   spawnFn?: typeof spawnCollect;
-  /**
-   * Phase 6 Task 2: the run-level ctx threaded down from main() so
-   * dispatchDomains can bracket each per-(agent,domain) spawn with its own
-   * sub-agent lifecycle. Optional — when absent, dispatchDomains runs in its
-   * pre-observability shape.
-   */
-  observability?: { ctx: RunCtx };
 }
 
 type PassResult =
@@ -3368,7 +3245,6 @@ async function runReviewPass(ctx: PassCtx, deps: PassDeps): Promise<PassResult> 
   const results = await dispatchDomains({
     assignments, ports, config,
     ...(deps.spawnFn ? { spawnFn: deps.spawnFn } : {}),
-    ...(deps.observability ? { observability: deps.observability } : {}),
   });
   let allFindings: Finding[] = [];
   for (const r of results) {
@@ -3609,34 +3485,14 @@ const isDirectRun = (() => {
 
 if (isDirectRun) {
   (async () => {
-    // Phase 6 Task 2: run-level observability lifecycle. The dispatcher owns
-    // run lifecycle (startRun via initRunCtx → endRun via finishRun). The
-    // per-(agent,domain) reviewer sub-agents are started inside dispatchDomains'
-    // runOne — NOT wrapped here. The `observability` ctx is threaded through
-    // main → PassDeps → dispatchDomains so every spawned reviewer process is
-    // recorded as its own sub-agent with attachChild taps on stdout/stderr.
-    const { initRunCtx, finishRun } = await import("./observability_dispatcher_helpers.ts");
-    const lifecycle = await initRunCtx({
-      dispatcher: "stark-review",
-      repo: process.env.STARK_REPO_SLUG,
-      branch: process.env.STARK_BRANCH,
-      meta: { argv: process.argv.slice(2) },
-    });
-
     let exit = 0;
     try {
-      const { exitCode } = await main(process.argv.slice(2), {
-        observability: { ctx: lifecycle.ctx },
-      });
+      const { exitCode } = await main(process.argv.slice(2));
       exit = exitCode;
     } catch (err) {
-      await finishRun(lifecycle, "error");
-      lifecycle.runHb.stop();
       process.stderr.write(`stark-review: fatal: ${(err as Error).stack ?? err}\n`);
       process.exit(2);
     }
-    await finishRun(lifecycle, exit === 0 ? "ok" : "error");
-    lifecycle.runHb.stop();
     process.exit(exit);
   })();
 }

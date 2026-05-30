@@ -206,11 +206,6 @@ node --experimental-strip-types "$TOOLS/github_app.ts" --app stark-claude pr rev
 
 If posting fails for either identity, warn and continue.
 
-## Observability
-
-For task templates, log line formats, checkpoint timing, and metrics block
-format, see [references/observability.md](references/observability.md).
-
 ## Debugging Dispatch Failures
 
 For dispatch troubleshooting (CLI flags per agent, error detection, smoke

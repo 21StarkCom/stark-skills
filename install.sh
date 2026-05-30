@@ -863,12 +863,12 @@ status() {
             error "Registry: automation/registry.json not found"
         fi
 
-        # Trigger log files (expect 12)
+        # Trigger log files (expect 11)
         local expected_triggers=(
             stark-evolution stark-self-review stark-sentinel
             stark-dependency-audit stark-infra-drift stark-api-compat
             stark-intelligence stark-claude-md-sync stark-digest
-            stark-observability-check stark-automation-monitor stark-hooks-auditor
+            stark-automation-monitor stark-hooks-auditor
         )
         local found=0
         local missing=0
@@ -880,9 +880,9 @@ status() {
             fi
         done
         if [ "$missing" -eq 0 ]; then
-            info "Trigger logs: $found/12 present"
+            info "Trigger logs: $found/11 present"
         else
-            warn "Trigger logs: $found/12 present ($missing missing)"
+            warn "Trigger logs: $found/11 present ($missing missing)"
         fi
 
         # CLI snapshots

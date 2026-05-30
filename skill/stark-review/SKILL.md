@@ -342,14 +342,6 @@ The tool always exits 0; a `removed: false` receipt is a deliberate safety
 decision, not a tool failure. Skip cleanup on dispatch failure or unpushed
 state — surface the path and let the user inspect.
 
-## Observability
-
-Standard observability applies: timestamped progress logs, metrics block
-(PR number, agents used, domains succeeded/failed, findings by severity,
-duration).
-
-See [../../standards/observability.md](../../standards/observability.md).
-
 ## Failure Modes
 
 | Failure                                          | Recovery |

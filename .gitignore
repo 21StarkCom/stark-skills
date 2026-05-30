@@ -13,10 +13,6 @@ skill/*-workspace/
 .analysis-raw-data/
 scripts/node_modules/
 tools/node_modules/
-tools/observability_server/node_modules/
-tools/observability_server/.env
-tools/observability_server/docker-compose.override.yml
-.observability-runs/
 .remember/
 *-playground.html
 artifacts/

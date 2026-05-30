@@ -22,7 +22,6 @@ import {
   reviewPr,
   reviewPrSingle,
 } from "./multi_review_lib.ts";
-import { finishRun, initRunCtx } from "./observability_dispatcher_helpers.ts";
 
 const HELP = `Multi-agent PR review orchestrator.
 
@@ -161,15 +160,6 @@ async function main(argv: string[]): Promise<number> {
     const jsonOutput = args.jsonOutput || args.jsonOnly;
     const log = args.jsonOnly ? stderrLog : stdoutLog;
 
-    // Phase 6 Task 2: observability lifecycle.
-    const lifecycle = await initRunCtx({
-      dispatcher: args.single ? "stark-review" : "stark-multi-review",
-      repo,
-      branch: base,
-      prNumber: args.pr,
-      meta: { mode: args.single ? "single" : "team" },
-    });
-
     const reviewOptions = {
       base,
       dryRun: args.dryRun,
@@ -180,22 +170,11 @@ async function main(argv: string[]): Promise<number> {
       cwd: root,
       roundNum: args.roundNum,
       persistHistory: args.persistHistory,
-      obsCtx: lifecycle.ctx,
     };
 
-    let result: Record<string, unknown>;
-    let status: "ok" | "error" | "timeout" = "ok";
-    try {
-      result = args.single
-        ? await reviewPrSingle(repo, args.pr, { ...reviewOptions, overrideAgent: args.agent }, log)
-        : await reviewPr(repo, args.pr, reviewOptions, log);
-    } catch (err) {
-      await finishRun(lifecycle, "error");
-      lifecycle.runHb.stop();
-      throw err;
-    }
-    await finishRun(lifecycle, status);
-    lifecycle.runHb.stop();
+    const result: Record<string, unknown> = args.single
+      ? await reviewPrSingle(repo, args.pr, { ...reviewOptions, overrideAgent: args.agent }, log)
+      : await reviewPr(repo, args.pr, reviewOptions, log);
 
     if (jsonOutput) {
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

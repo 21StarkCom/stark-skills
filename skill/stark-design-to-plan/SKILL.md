@@ -215,12 +215,6 @@ Write:
 - `summary.md` — human-readable summary
 - `rounds.jsonl` — one JSONL entry per round (round, verdict, blocking_findings, summary, parse_retry_used)
 
-## Observability
-
-Standard observability: create task per phase, emit timestamped progress logs (`[HH:MM:SS] Phase N: ...`), record metrics block (lead, wing, rounds count, final verdict, total duration, lead duration, wing duration, parse retries).
-
-Improvement flags: total run > 10 min → flag slow loop; any parse retry → flag verdict format drift; `max_rounds_unresolved` → flag wing too strict OR lead too weak (operator decides); `lead_fix_round_no_change` → flag lead stuck on a finding; `lead_round1_empty_draft` → flag generate-prompt issue.
-
 ## Failure Modes
 
 Most failure modes are owned by the dispatcher (listed for orchestrator awareness):

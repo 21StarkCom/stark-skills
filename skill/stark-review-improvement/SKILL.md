@@ -232,10 +232,6 @@ Changes: {count} prompt edits, {count} orchestrator edits, {count} config edits"
 
 Do NOT push unless the user explicitly asks.
 
-## Observability
-
-Standard observability: record metrics block (action items parsed/approved/applied by category, validation syntax checks, files modified by type). See [../../standards/observability.md](../../standards/observability.md).
-
 ## Important Constraints
 
 - **Never rewrite an entire prompt file.** Targeted edits only.

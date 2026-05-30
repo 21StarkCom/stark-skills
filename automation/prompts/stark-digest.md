@@ -26,7 +26,7 @@ Read the latest run entries from each trigger log:
 ```bash
 for trigger in stark-sentinel stark-api-compat stark-dependency-audit stark-self-review \
                stark-evolution stark-infra-drift stark-automation-monitor stark-intelligence \
-               stark-claude-md-sync stark-observability-check stark-hooks-auditor; do
+               stark-claude-md-sync stark-hooks-auditor; do
   echo "=== $trigger ==="
   head -50 automation/triggers/$trigger.md 2>/dev/null || echo "NO LOG"
 done

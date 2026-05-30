@@ -253,7 +253,6 @@
       "stark-intelligence":        { "cron": "0 6 * * 3",  "tier": 3, "budget_usd": 3.0 },
       "stark-claude-md-sync":      { "cron": "0 4 * * 4",  "tier": 3, "budget_usd": 2.0 },
       "stark-digest":              { "cron": "0 14 * * 5", "tier": 4, "budget_usd": 2.0 },
-      "stark-observability-check": { "cron": "0 8 * * *",  "tier": 4, "budget_usd": 1.0 },
       "stark-automation-monitor":  { "cron": "0 9 * * *",  "tier": 4, "budget_usd": 2.0 },
       "stark-hooks-auditor":       { "cron": "0 5 * * 4",  "tier": 4, "budget_usd": 2.0 }
     }

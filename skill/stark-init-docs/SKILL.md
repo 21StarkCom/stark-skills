@@ -309,10 +309,6 @@ git commit -m "docs: remove doc scaffold"
 
 If nothing was removed, skip the commit.
 
-## Observability
-
-Standard observability: record metrics block (mode executed, files created/skipped/moved/deleted, ADRs/specs/guides generated, internal links updated). See [../../standards/observability.md](../../standards/observability.md).
-
 ## Error Handling
 
 - If `$TEMPLATES` directory doesn't exist: error "Templates not found at ~/.claude/code-review/standards/templates/. Run install.sh first."

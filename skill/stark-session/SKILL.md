@@ -250,14 +250,6 @@ node --experimental-strip-types --no-warnings \
 
 ---
 
-## Observability
-
-Standard observability: create task, emit timestamped logs, record metrics block. Skill-specific metrics:
-- **Start:** subprocess collector durations from `STATE_JSON.errors` + your own wall-clock measurement of the CLI call.
-- **End:** test duration, build duration, PRs merged, docs committed, project fields updated, push result.
-
-See [../../standards/observability.md](../../standards/observability.md).
-
 ## Failure Modes
 
 | Failure | Recovery |

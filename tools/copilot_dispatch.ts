@@ -29,18 +29,6 @@ import { readFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import {
-  attachChild,
-  emitProgress,
-  type RunCtx,
-  type SubAgent,
-} from "./observability_emit_lib.ts";
-import {
-  finishRun,
-  initRunCtx,
-  withSubAgent,
-} from "./observability_dispatcher_helpers.ts";
-
 // Constants ---------------------------------------------------------------
 
 export const VALID_AGENTS = ["claude", "codex", "gemini"] as const;
@@ -255,25 +243,12 @@ interface RunResult {
   notFound: boolean;
 }
 
-export interface RunObservability {
-  ctx: RunCtx;
-  sa: SubAgent;
-}
-
 interface RunOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   stdin?: string;
   timeoutSec: number;
   outputCapBytes?: number;
-  /**
-   * Phase 6: optional observability tap. When set, `run` calls
-   * `attachChild(ctx, sa, child)` after `spawn()` and awaits the returned
-   * `drain()` (plus stdout/stderr "end") before resolving. `run` does NOT
-   * call any lifecycle ops — `startSubAgent`/`endSubAgent`/`startRun`/`endRun`
-   * are the dispatcher's responsibility. Single-ownership rule.
-   */
-  observability?: RunObservability;
 }
 
 const DEFAULT_OUTPUT_CAP = 32 * 1024 * 1024; // 32 MiB
@@ -289,10 +264,7 @@ export async function run(
   let stdoutLen = 0;
   let stderrLen = 0;
 
-  const inner = await new Promise<{
-    result: RunResult;
-    drain: (() => Promise<void>) | null;
-  }>((resolve) => {
+  const inner = await new Promise<RunResult>((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
       child = spawn(cmd, args, {
@@ -303,26 +275,15 @@ export async function run(
     } catch (err) {
       const e = err as NodeJS.ErrnoException;
       resolve({
-        result: {
-          code: null,
-          signal: null,
-          stdout: "",
-          stderr: e.message ?? "",
-          timedOut: false,
-          notFound: e.code === "ENOENT",
-        },
-        drain: null,
+        code: null,
+        signal: null,
+        stdout: "",
+        stderr: e.message ?? "",
+        timedOut: false,
+        notFound: e.code === "ENOENT",
       });
       return;
     }
-
-    // Phase 6 Task 1: optional non-consuming observability tap. attachChild
-    // registers ITS OWN listeners on stdout/stderr; the cap-tracking listeners
-    // below run alongside. `run` performs NO lifecycle ops — the dispatcher
-    // owns startSubAgent/endSubAgent (single-ownership rule).
-    const obsHandle = opts.observability
-      ? attachChild(opts.observability.ctx, opts.observability.sa, child)
-      : null;
 
     let settled = false;
     let stdoutEnded = false;
@@ -335,7 +296,7 @@ export async function run(
       if (closedResult === null) return;
       if (!stdoutEnded || !stderrEnded || !processClosed) return;
       settled = true;
-      resolve({ result: closedResult, drain: obsHandle?.drain ?? null });
+      resolve(closedResult);
     };
 
     const timer = setTimeout(() => {
@@ -343,8 +304,7 @@ export async function run(
       // staged result waits for child.on("close") (and stdout/stderr
       // "end") via tryFinish()'s processClosed gate. Resolving on
       // stdio-end alone is unsafe — a child can close its FDs while
-      // the process keeps running, which would let endSubAgent fire
-      // before the child actually exits.
+      // the process keeps running.
       timedOutFlag = true;
       try { child.kill("SIGTERM"); } catch { /* ignore */ }
       setTimeout(() => {
@@ -363,7 +323,7 @@ export async function run(
       stderrLen += chunk.length;
     });
     // E2: await stdout/stderr "end" before resolving so the final bytes
-    // reach attachChild's tap before drain() is awaited.
+    // are captured before the result resolves.
     if (child.stdout) child.stdout.once("end", () => { stdoutEnded = true; tryFinish(); });
     else stdoutEnded = true;
     if (child.stderr) child.stderr.once("end", () => { stderrEnded = true; tryFinish(); });
@@ -408,22 +368,7 @@ export async function run(
     }
   });
 
-  // E2: await the observability drain BEFORE returning so every UDS-write
-  // ack lands before the dispatcher's endSubAgent runs.
-  if (inner.drain) {
-    try {
-      await inner.drain();
-    } catch (err) {
-      // drain failure means the writer daemon went away; the emit lib has
-      // already flipped ctx._disabled. Surface as stderr in the result so
-      // the caller's existing non-zero handling kicks in but do NOT throw —
-      // dispatchers may still want the partial output. Best-effort: append
-      // a one-line marker so the issue is visible in logs.
-      const msg = `\n[observability drain failed] ${(err as Error).message}\n`;
-      inner.result.stderr = inner.result.stderr + msg;
-    }
-  }
-  return inner.result;
+  return inner;
 }
 
 async function runGit(
@@ -944,8 +889,6 @@ async function runImplementationAgent(
   prompt: string,
   worktreePath: string,
   timeoutSec: number,
-  obsCtx: RunCtx | null,
-  roundNum: number,
 ): Promise<ImplementOutcome> {
   const t0 = process.hrtime.bigint();
   const out: ImplementOutcome = {
@@ -999,39 +942,7 @@ async function runImplementationAgent(
   try {
     const maxAttempts = 2;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const callOnce = async () => {
-        if (obsCtx && !obsCtx._disabled) {
-          return await withSubAgent(
-            obsCtx,
-            {
-              agent,
-              model: resolveModel(agent),
-              task: `lead-implement-round-${roundNum}-attempt-${attempt}`,
-            },
-            async ({ sa }) => {
-              const r = await run(cmd, args, {
-                cwd: worktreePath,
-                env,
-                stdin,
-                timeoutSec,
-                observability: { ctx: obsCtx, sa },
-              });
-              const status: "ok" | "error" | "timeout" = r.timedOut
-                ? "timeout"
-                : r.code === 0
-                  ? "ok"
-                  : "error";
-              return {
-                value: r,
-                status,
-                summary: { exit_code: r.code, timed_out: r.timedOut, not_found: r.notFound },
-              };
-            },
-          );
-        }
-        return await run(cmd, args, { cwd: worktreePath, env, stdin, timeoutSec });
-      };
-      const res = await callOnce();
+      const res = await run(cmd, args, { cwd: worktreePath, env, stdin, timeoutSec });
       if (res.notFound) {
         out.error = "agent_unavailable";
         out.duration_s = elapsedSec(t0);
@@ -1100,8 +1011,6 @@ async function runWingReview(
   reviewPayload: string,
   cwd: string,
   timeoutSec: number,
-  obsCtx: RunCtx | null,
-  roundNum: number,
 ): Promise<{ raw: string; error: string | null }> {
   if (!isAgentEnabled(wing)) return { raw: "", error: "agent_disabled" };
 
@@ -1133,49 +1042,12 @@ async function runWingReview(
     return { raw: "", error: `env_setup_failed:${(err as Error).message}` };
   }
 
-  // Phase 6 Task 2: bracket wing dispatch with a sub-agent lifecycle when
-  // observability is wired. Each retry (e.g. gemini api-key fallback) lives
-  // under the same sub-agent so summary counts stay 1:1 with logical wing
-  // attempts. Emit `wing-attempt` progress markers (Phase 6 Task 4).
-  const callRun = async (attemptLabel: string): Promise<Awaited<ReturnType<typeof run>>> => {
-    if (obsCtx && !obsCtx._disabled) {
-      return await withSubAgent(
-        obsCtx,
-        {
-          agent: wing,
-          model: resolveModel(wing),
-          task: `wing-review-round-${roundNum}-${attemptLabel}`,
-        },
-        async ({ sa }) => {
-          await emitProgress(obsCtx, sa, "wing-attempt", {
-            round_num: roundNum,
-            label: attemptLabel,
-          });
-          const r = await run(cmd, args, {
-            cwd,
-            env,
-            stdin,
-            timeoutSec,
-            observability: { ctx: obsCtx, sa },
-          });
-          const status: "ok" | "error" | "timeout" = r.timedOut
-            ? "timeout"
-            : r.code === 0
-              ? "ok"
-              : "error";
-          return {
-            value: r,
-            status,
-            summary: { exit_code: r.code, timed_out: r.timedOut, not_found: r.notFound },
-          };
-        },
-      );
-    }
+  const callRun = async (): Promise<Awaited<ReturnType<typeof run>>> => {
     return await run(cmd, args, { cwd, env, stdin, timeoutSec });
   };
 
   try {
-    let res = await callRun("primary");
+    let res = await callRun();
     if (res.notFound) return { raw: "", error: "agent_unavailable" };
     if (res.timedOut) return { raw: "", error: "timeout" };
 
@@ -1186,7 +1058,7 @@ async function runWingReview(
         shouldFallbackToApiKey(stderrSnippet) &&
         (await tryGeminiApiKeyFallback(env, "wing-review", stderrSnippet))
       ) {
-        res = await callRun("api-key-fallback");
+        res = await callRun();
         if (res.notFound) return { raw: "", error: "agent_unavailable" };
         if (res.timedOut) return { raw: "", error: "timeout" };
         if (res.code !== 0) return { raw: res.stderr.slice(0, 500), error: "cli_error" };
@@ -1365,8 +1237,6 @@ export interface RunCopilotOpts {
   timeoutSec: number;
   wingTimeoutSec: number;
   testCommand: string | null;
-  /** Phase 6: optional observability context. Owned + ended by the caller. */
-  obsCtx?: RunCtx | null;
 }
 
 interface PreflightFailure {
@@ -1382,7 +1252,6 @@ export async function runCopilotStep(
 ): Promise<CopilotResult | PreflightFailure> {
   const { repoRoot, stepId, implementPrompt, reviewPrompt, stepTask, lead, wing,
     maxRounds, timeoutSec, wingTimeoutSec, testCommand } = opts;
-  const obsCtx: RunCtx | null = opts.obsCtx ?? null;
 
   if (lead === wing) return { step_id: stepId, error: "lead_eq_wing", rounds: [] };
   if (!VALID_AGENTS.includes(lead) || !VALID_AGENTS.includes(wing)) {
@@ -1412,8 +1281,7 @@ export async function runCopilotStep(
   }
 
   // Round 1: lead implements --------------------------------------------
-  if (obsCtx) await emitProgress(obsCtx, null, "round", { round_num: 1, phase: "lead-implement" });
-  const sr = await runImplementationAgent(lead, implementPrompt, worktreePath, timeoutSec, obsCtx, 1);
+  const sr = await runImplementationAgent(lead, implementPrompt, worktreePath, timeoutSec);
   const r1 = newRound(1);
   r1.diff = sr.diff;
   r1.files_changed = sr.files_changed;
@@ -1448,11 +1316,10 @@ export async function runCopilotStep(
       reviewPrompt, stepTask, currentRound.diff, currentRound.test_passed, prior,
     );
 
-    if (obsCtx) await emitProgress(obsCtx, null, "round", { round_num: roundNum, phase: "wing-review" });
     const preSnapshot = await snapshotWorktree(worktreePath);
-    let wingResult = await runWingReview(wing, payload, worktreePath, wingTimeoutSec, obsCtx, roundNum);
+    let wingResult = await runWingReview(wing, payload, worktreePath, wingTimeoutSec);
     if (wingResult.error === "timeout") {
-      wingResult = await runWingReview(wing, payload, worktreePath, wingTimeoutSec, obsCtx, roundNum);
+      wingResult = await runWingReview(wing, payload, worktreePath, wingTimeoutSec);
     }
     const postSnapshot = await snapshotWorktree(worktreePath);
 
@@ -1490,7 +1357,7 @@ export async function runCopilotStep(
         "verdict block. Respond again ending with EXACTLY one ```json fenced block " +
         "containing keys verdict, blocking_findings, non_blocking_suggestions, summary.";
       const retryPre = await snapshotWorktree(worktreePath);
-      const retry = await runWingReview(wing, retryPayload, worktreePath, wingTimeoutSec, obsCtx, roundNum);
+      const retry = await runWingReview(wing, retryPayload, worktreePath, wingTimeoutSec);
       const retryPost = await snapshotWorktree(worktreePath);
       if (retryPre[0] !== retryPost[0] || retryPre[1] !== retryPost[1]) {
         await restoreWorktree(worktreePath, retryPre);
@@ -1549,8 +1416,7 @@ export async function runCopilotStep(
     const fixPrompt = buildFixPrompt(
       implementPrompt, stepTask, currentRound.blocking_findings, nextRoundNum,
     );
-    if (obsCtx) await emitProgress(obsCtx, null, "round", { round_num: nextRoundNum, phase: "lead-implement-fix" });
-    const srFix = await runImplementationAgent(lead, fixPrompt, worktreePath, timeoutSec, obsCtx, nextRoundNum);
+    const srFix = await runImplementationAgent(lead, fixPrompt, worktreePath, timeoutSec);
     const nextRound = newRound(nextRoundNum);
     nextRound.diff = srFix.diff;
     nextRound.files_changed = srFix.files_changed;
@@ -1770,41 +1636,19 @@ async function main(): Promise<number> {
     readFile(args.stepTaskFile, "utf-8"),
   ]);
 
-  // Phase 6 Task 2: observability lifecycle. startRun (or connectRun) BEFORE
-  // dispatch; endRun AFTER. Disabled-state ctxs are silent no-ops.
-  const lifecycle = await initRunCtx({
-    dispatcher: "stark-copilot",
-    repo: process.env.STARK_REPO_SLUG,
-    branch: process.env.STARK_BRANCH,
-    meta: { step_id: args.stepId, lead: args.lead, wing: args.wing },
+  const result: CopilotResult | PreflightFailure = await runCopilotStep({
+    repoRoot: args.repoRoot,
+    stepId: args.stepId,
+    implementPrompt,
+    reviewPrompt,
+    stepTask,
+    lead: args.lead,
+    wing: args.wing,
+    maxRounds: args.maxRounds,
+    timeoutSec: args.timeoutSec,
+    wingTimeoutSec: args.wingTimeoutSec,
+    testCommand: args.testCommand,
   });
-
-  let result: CopilotResult | PreflightFailure;
-  let status: "ok" | "error" | "timeout" = "ok";
-  try {
-    result = await runCopilotStep({
-      repoRoot: args.repoRoot,
-      stepId: args.stepId,
-      implementPrompt,
-      reviewPrompt,
-      stepTask,
-      lead: args.lead,
-      wing: args.wing,
-      maxRounds: args.maxRounds,
-      timeoutSec: args.timeoutSec,
-      wingTimeoutSec: args.wingTimeoutSec,
-      testCommand: args.testCommand,
-      obsCtx: lifecycle.ctx,
-    });
-    if ((result as CopilotResult).final_verdict !== "approved") status = "error";
-  } catch (err) {
-    status = "error";
-    await finishRun(lifecycle, status);
-    lifecycle.runHb.stop();
-    throw err;
-  }
-  await finishRun(lifecycle, status);
-  lifecycle.runHb.stop();
 
   process.stdout.write(JSON.stringify(result, null, 2) + "\n");
   return (result as CopilotResult).final_verdict === "approved" ? 0 : 1;

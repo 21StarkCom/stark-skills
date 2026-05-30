@@ -314,7 +314,3 @@ Commit:     [hash]
 | `gh` auth fails | Verify `gh auth status` — user's PAT must be active |
 | Release workflow + skill both try to create the GH Release | Skill must skip Step 9 when `.github/workflows/*.yml` has a `v*.*.*` tag trigger that runs `gh release create`. See Step 9. |
 | TF drift detected (Step 1.5) | `cd infra/terraform && terraform apply`, then re-run `/stark-release`. Do NOT skip — CD will fail the drift gate *after* migrating, leaving the env half-deployed. |
-
-## Observability
-
-Standard observability: create task, emit timestamped logs, record metrics block (version prev→new, bump type, CHANGELOG entries by category, tag/release created, push duration). See [../../standards/observability.md](../../standards/observability.md).

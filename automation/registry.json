@@ -48,12 +48,6 @@
       "last_registered": "2026-03-28T09:24:13.265340+00:00",
       "enabled": true
     },
-    "stark-observability-check": {
-      "trigger_id": "trig_012SBD7LuU3H5NUmDZsrxMRB",
-      "last_registered": "2026-03-28T09:24:13.265340+00:00",
-      "enabled": true,
-      "telemetry_v2": true
-    },
     "stark-automation-monitor": {
       "trigger_id": "trig_01PcJEPLiw667i7Q14vbA2xU",
       "last_registered": "2026-03-28T09:24:13.265340+00:00",

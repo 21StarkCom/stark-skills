@@ -71,7 +71,7 @@ Resolve plan slug from argument:
 
 ## Phase 0: Initialize
 
-Capture T0. Create the observability log.
+Capture T0. Create the phase run log.
 
 ### 0.1 Validate environment
 
@@ -142,57 +142,9 @@ Dry run:     {yes/no}
 
 Create a parent task for the phase with child tasks for each issue.
 
-### 0.5 Initialize observability log
+### 0.5 Initialize phase run log
 
 Write to `{HISTORY}/{ORG}/{REPO}/phase-{SLUG}-{YYYYMMDD-HHMMSS}.json` with phase, repo, started_at, dry_run, max_rounds, tasks (empty), summary (null). Updated incrementally as tasks complete.
-
-### 0.6 Initialize observability run (Phase 6 — session sentinel + writer daemon)
-
-Start the phase-wide observability run BEFORE any child dispatcher fires. This:
-
-1. Spawns a long-lived **session sentinel** process (a checked-in shell script — NOT an immortal sleep loop; it polls a lease file every 15 s and exits when the lease goes stale).
-2. Starts the per-run writer daemon with the sentinel pid as `--tracked-parent-pid` (so the daemon's `kill(pid, 0)` liveness poll observes ESRCH iff the SKILL aborts mid-execution).
-3. Writes `~/.claude/code-review/sessions/$SESSION_ID/{phase_run.json,phase_run.env,lease.tick}`.
-
-```bash
-export SESSION_ID="$(node --experimental-strip-types ~/.claude/code-review/tools/session_id.ts)"
-
-node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts start \
-  --plan-slug "$SLUG" \
-  --session-id "$SESSION_ID" \
-  --repo "$ORG_REPO"
-# `start` does NOT take --skill-pid: it spawns its own session sentinel and
-# uses THAT pid as the writer daemon's tracked-parent-pid. $$ varies across
-# SKILL.md bash command blocks and would race the daemon into a spurious
-# `crashed_reason: "parent_exit"` transition mid-run.
-
-# Refresh the lease as the first post-start action. The sentinel polls every
-# 15 s and exits when the lease is > $STARK_PHASE_LEASE_TTL_S (default 180 s)
-# old. Every subsequent SKILL bash block MUST run touch-lease as its first
-# action — see lease-refresh contract below. `touch-lease` resolves SESSION_ID
-# itself (E3): bare `touch "$HOME/.../$SESSION_ID/lease.tick"` would write to
-# the wrong path when $SESSION_ID is empty in a fresh shell.
-node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts touch-lease
-
-# Source the env so subsequent commands in THIS block get
-# STARK_OBS_PARENT_RUN_ID + STARK_OBS_SESSION_ID set. Later blocks must use
-# the `exec-child` wrapper (see below) to propagate the env to child
-# dispatchers — sourcing the file directly is unsafe across fresh shells.
-source "$HOME/.claude/code-review/sessions/$SESSION_ID/phase_run.env"
-
-# Best-effort EXIT trap: fires `end --status error` ONLY when this block
-# exits non-zero. Claude Code may run each SKILL bash block in a fresh
-# `/bin/bash -c '…'`, so an unconditional EXIT trap would end the run the
-# moment THIS block completes successfully — before any later block can
-# emit into the parent run. The `$?` guard preserves the belt-and-suspenders
-# intent for abnormal exits while letting the lease+sentinel (the
-# load-bearing detector) handle cross-block abort detection.
-trap 'rc=$?; if [ "$rc" -ne 0 ]; then node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts end --status error 2>/dev/null || true; fi' EXIT
-```
-
-**Mandatory lease-refresh contract (load-bearing):** every subsequent SKILL.md bash command block MUST run `phase_execute_observability.ts touch-lease` as its very first action, unconditionally, before any other command. The `touch-lease` subcommand resolves the session id itself (via `session_id.ts` — env > marker-scan > uuid4), so it works in fresh shells where `$SESSION_ID` is empty (E3). A bare `touch "$HOME/.../$SESSION_ID/lease.tick"` would write to the wrong path in a fresh shell and let the sentinel expire while the SKILL is still legitimately executing later blocks.
-
-**Mandatory child wrapper:** every child dispatcher invocation in this SKILL — `multi_review.ts`, `copilot_dispatch.ts`, `plan_dispatch.ts`, `plan_to_tasks_validate.ts`, `red_team_design.ts`, `red_team_plan.ts`, `stark_review_doc.ts`, `stark_review.ts` — MUST be invoked through `phase_execute_observability.ts exec-child -- <cmd>` so the writer daemon's `STARK_OBS_PARENT_RUN_ID` env-var is propagated and the child registers in `children/` for the end-time barrier. Direct invocation creates a separate sibling run dir.
 
 ---
 
@@ -205,13 +157,8 @@ Execute each task sequentially. Each merges to main before the next begins.
 Pull latest main and create feature branch:
 
 ```bash
-node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts touch-lease
 git checkout main && git pull --rebase origin main
 git checkout -b phase/{SLUG}/issue-{NUMBER}-{slugified-title}
-
-# Emit a per-task lifecycle progress marker into the parent run.
-node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts progress \
-  --kind task-start --payload "$(jq -nc --arg n "$NUMBER" --arg t "$TITLE" '{issue_number: ($n|tonumber), title: $t}')"
 ```
 
 If project config is loaded: use bot token, validate spec completeness via `node --experimental-strip-types "$TOOLS/github_projects.ts" check-spec-completeness --fields "$ITEM_FIELDS_JSON"`. If gate fails, log and skip to next task. Claim the task by transitioning Status: `node --experimental-strip-types "$TOOLS/github_projects.ts" transition-status --project "$PROJECT_ID" --item "$ITEM_ID" --status "Agent Working"`, then `set-field --project "$PROJECT_ID" --item "$ITEM_ID" --name "Agent" --value "Claude"`. Unset GH_TOKEN.
@@ -247,7 +194,6 @@ If subagent reports ambiguity and project config is loaded: use bot token, trans
 ### 1.2b Validation chain
 
 ```bash
-node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts touch-lease
 node --experimental-strip-types --no-warnings "$TOOLS/validation_gate.ts" --json --repo-root $(pwd)
 ```
 
@@ -257,12 +203,11 @@ node --experimental-strip-types --no-warnings "$TOOLS/validation_gate.ts" --json
   - After 2 failed heal attempts: escalate, set task status `blocked`, stop the phase.
   - If `pattern_id` null (UNCLASSIFIED): log and continue — agent code issue, not environment.
 
-Log validation result in task observability: `{"validation": {"passed": true, "heal_attempts": 0, "pattern_id": null}}`
+Log validation result in the task run log: `{"validation": {"passed": true, "heal_attempts": 0, "pattern_id": null}}`
 
 ### 1.3 Push & create PR
 
 ```bash
-node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts touch-lease
 unset GH_TOKEN
 git push -u origin $(git branch --show-current)
 ```
@@ -273,19 +218,16 @@ Write PR body to a temp file (`mktemp`, `chmod 600`) — never interpolate LLM o
 
 Create a review worktree:
 ```bash
-node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts touch-lease
 git fetch origin refs/pull/${PR_NUM}/head
 git worktree add /tmp/review-${REPO}-pr${PR_NUM} -b review/pr-${PR_NUM} FETCH_HEAD
 ```
 
 **The round loop is managed by this skill, not by multi_review.ts.** For round = 1 to MAX_ROUNDS:
 
-1. Refresh lease + dispatch review via `exec-child` so the multi-agent review's events flow into THIS parent run:
+1. Dispatch review:
    ```bash
-   node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts touch-lease
-   node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts exec-child \
-     -- node --experimental-strip-types --no-warnings "$TOOLS/multi_review.ts" \
-       --pr $PR_NUM --base $merge_base --json-only --dry-run
+   node --experimental-strip-types --no-warnings "$TOOLS/multi_review.ts" \
+     --pr $PR_NUM --base $merge_base --json-only --dry-run
    ```
 2. Classify each finding: `fix` (severity >= medium, issue exists), `false_positive`, `noise` (single-agent, style), `ignored` (low severity)
 3. **Stop check:** zero `fix` findings or all FP/noise/ignored → stop (clean). Otherwise fix and continue.
@@ -303,20 +245,18 @@ After loop, post review summary via stark-claude[bot]: `export GH_TOKEN=$(node -
 > **Warning:** Do not update project Status here — the project-pr-sync GitHub Action handles transitions automatically.
 
 ```bash
-node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts touch-lease
 unset GH_TOKEN
 gh pr checks $PR_NUM --watch --fail-level all 2>/dev/null || true
 gh pr merge $PR_NUM --squash --admin --delete-branch
 git checkout main && git pull --rebase origin main && git fetch --prune
 ```
 
-If CI fails: merge anyway with `--admin`, flag `ci_bypassed: true` in observability log.
+If CI fails: merge anyway with `--admin`, flag `ci_bypassed: true` in the phase run log.
 
 ### 1.6 Close issue
 
 PR body contains `Closes #{NUMBER}` for auto-close. Verify closure:
 ```bash
-node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts touch-lease
 unset GH_TOKEN
 gh api "/repos/${ORG_REPO}/issues/${NUMBER}" --jq .state
 ```
@@ -324,7 +264,7 @@ If still open: `gh issue close $NUMBER --comment "Implemented and merged via PR 
 
 ### 1.7 Log task result
 
-Append to observability JSON:
+Append to the phase run log JSON:
 ```json
 {
   "issue_number": 42, "title": "...", "branch": "...", "pr_number": 57,
@@ -343,7 +283,6 @@ Print: `[HH:MM:SS]   ✓ Task #{NUMBER} merged (PR #{PR_NUM}, {rounds} rounds, {
 
 After each merge, record completed task and check for checkpoint interval:
 ```bash
-node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts touch-lease
 node --experimental-strip-types --no-warnings ~/.claude/code-review/tools/session_state.ts --json 2>/dev/null || true
 node --experimental-strip-types --no-warnings ~/.claude/code-review/tools/context_compactor.ts --json 2>/dev/null || true
 ```
@@ -358,7 +297,6 @@ If any step fails for a task: log error, set task `failed`, switch back to main,
 ## Phase 2: Regression Testing
 
 ```bash
-node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts touch-lease
 git checkout main && git pull --rebase origin main && git fetch --prune
 ```
 
@@ -394,7 +332,6 @@ Present a comprehensive summary after everything completes. See [references/dash
 
 After all tasks complete, suggest follow-up skills:
 ```bash
-node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts touch-lease
 node --experimental-strip-types --no-warnings ~/.claude/code-review/tools/skill_router.ts --context implementation --json 2>/dev/null || true
 ```
 Display at most 2 suggestions. Skip silently if command fails.
@@ -406,18 +343,6 @@ Display at most 2 suggestions. Skip silently if command fails.
 ### 5.1 Update memory
 
 Save a project memory summarizing the phase execution: what was accomplished, surprises, decisions made. Only non-obvious information useful in future conversations.
-
-Wrap this sub-skill in observability so the parent run shows it as a sub-agent:
-
-```bash
-node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts touch-lease
-SAID="$(node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts subagent-start \
-  --agent claude --model opus-4-8 --task memory-update)"
-# ... perform memory update ...
-node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts touch-lease
-node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts subagent-end \
-  --subagent-id "$SAID" --status ok
-```
 
 ### 5.2 Update docs
 
@@ -434,25 +359,7 @@ Read review history from this phase's PRs. Check for patterns:
 | Agent consistently missing issues others find | 2+ misses | Flag: prompt weak in that domain |
 | Unparseable output from an agent | any | Flag: fix `global/prompts/{agent}/agent.md` |
 
-Log recommendations to observability file. Suggest `/stark-review-improvement` if any threshold exceeded.
-
----
-
-## Observability
-
-Standard observability: create task, emit timestamped progress logs, record metrics block (phase, repo, task counts, duration, findings per task, agent scores, ci_bypassed, improvement flags). See [references/observability.md](references/observability.md) for the full protocol.
-
-**Phase 6 observability run termination — required final block:**
-
-```bash
-node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts touch-lease
-# Tear down the parent observability run. `end` waits up to
-# STARK_PHASE_CHILD_WAIT_MAX_S (default 600 s) for any still-running child
-# dispatcher to exit before calling endRun — preserving lifecycle records.
-# Then it SIGTERMs the session sentinel, removes phase_run.json / phase_run.env /
-# lease.tick, and cleans up the children/ directory.
-node --experimental-strip-types ~/.claude/code-review/tools/phase_execute_observability.ts end --status "${PHASE_STATUS:-ok}"
-```
+Log recommendations to the phase run log file. Suggest `/stark-review-improvement` if any threshold exceeded.
 
 ---
 

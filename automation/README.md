@@ -19,7 +19,6 @@ All state is persisted as git-committed files in this `automation/` directory. C
 | `stark-intelligence` | `0 6 * * 3` (Wed 06:00) | 3 — Intelligence | Cross-repo pattern analysis, extract reusable insights |
 | `stark-claude-md-sync` | `0 4 * * 4` (Thu 04:00) | 3 — Intelligence | Audit CLAUDE.md files across repos for accuracy and completeness |
 | `stark-digest` | `0 14 * * 5` (Fri 14:00) | 4 — Reporting | Weekly Slack digest summarizing all fleet activity |
-| `stark-observability-check` | `0 8 * * *` (daily 08:00) | 4 — Reporting | Verify monitoring stack health (Prometheus, Grafana, alerts) |
 | `stark-automation-monitor` | `0 9 * * *` (daily 09:00) | 4 — Meta | Aggregate all trigger logs, generate reports and cost ledger |
 | `stark-hooks-auditor` | `0 5 * * 4` (Thu 05:00) | 4 — Meta | Audit Claude Code hooks across all repos, recommend additions |
 

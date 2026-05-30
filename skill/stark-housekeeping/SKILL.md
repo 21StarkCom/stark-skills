@@ -196,12 +196,6 @@ verification failure the originals are left in place and `errors` notes it.
 
 ---
 
-## Observability
-
-Standard observability: create task, emit timestamped progress logs, record metrics block (issues closed by category, branches deleted, worktrees cleaned, per-phase timing).
-
-See [../../standards/observability.md](../../standards/observability.md) for the full protocol.
-
 ## Failure Modes
 
 See [references/failure-modes.md](references/failure-modes.md) for the full recovery table.

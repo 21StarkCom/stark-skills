@@ -363,10 +363,6 @@ If the working tree is on a branch with an open PR (detect via `gh pr view --jso
 
 For the `gh api` posting snippet, see [references/issue-management.md](references/issue-management.md).
 
-## Observability
-
-For task templates, log line formats, and the metrics block format (substitute lead/wing for the role names), see [references/observability.md](references/observability.md).
-
 ## Failure Modes
 
 For the baseline failure modes (worktree, dispatch, agent CLI), see [references/failure-modes.md](references/failure-modes.md). Copilot-specific additions (the dispatcher already handles most of these — listed for orchestrator awareness):

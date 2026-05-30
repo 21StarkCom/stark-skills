@@ -18,13 +18,6 @@ import path from "node:path";
 import { buildClaudeCmd } from "./claude_utils_lib.ts";
 import { CODEX_REASONING_EFFORT_XHIGH, parseJsonlOutput } from "./codex_utils_lib.ts";
 import {
-  attachChild,
-  emitProgress,
-  type RunCtx,
-  type SubAgent,
-} from "./observability_emit_lib.ts";
-import { withSubAgent } from "./observability_dispatcher_helpers.ts";
-import {
   AGENTS,
   discoverConfig,
   discoverDomains,
@@ -596,11 +589,6 @@ interface ProcResult {
   timedOut: boolean;
 }
 
-export interface RunObservability {
-  ctx: RunCtx;
-  sa: SubAgent;
-}
-
 export async function runProcess(
   cmd: string,
   args: string[],
@@ -609,78 +597,54 @@ export async function runProcess(
     timeoutMs: number;
     env?: Record<string, string>;
     cwd?: string;
-    /**
-     * Phase 6: optional observability tap. Attaches `attachChild` after spawn,
-     * awaits drain + stream end before resolving. No lifecycle ops.
-     */
-    observability?: RunObservability;
   },
 ): Promise<ProcResult> {
-  const inner = await new Promise<{ result: ProcResult; drain: (() => Promise<void>) | null }>(
-    (resolve) => {
-      const child = spawn(cmd, args, { env: opts.env, cwd: opts.cwd });
-      // Phase 6 Task 1: optional non-consuming observability tap.
-      const obsHandle = opts.observability
-        ? attachChild(opts.observability.ctx, opts.observability.sa, child)
-        : null;
-      let stdout = "";
-      let stderr = "";
-      let timedOut = false;
-      let settled = false;
-      let stdoutEnded = false;
-      let stderrEnded = false;
-      let closed: ProcResult | null = null;
-      const tryFinish = () => {
-        if (settled) return;
-        if (closed === null) return;
-        if (!stdoutEnded || !stderrEnded) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve({ result: closed, drain: obsHandle?.drain ?? null });
-      };
-      const timer = setTimeout(() => {
-        timedOut = true;
-        child.kill("SIGKILL");
-      }, opts.timeoutMs);
-      child.stdout?.on("data", (d) => {
-        stdout += d.toString();
-      });
-      child.stderr?.on("data", (d) => {
-        stderr += d.toString();
-      });
-      // E2: gate the resolve on stream "end" so attachChild's pumps see every
-      // chunk before drain() awaits the inflight acks.
-      if (child.stdout) child.stdout.once("end", () => { stdoutEnded = true; tryFinish(); });
-      else stdoutEnded = true;
-      if (child.stderr) child.stderr.once("end", () => { stderrEnded = true; tryFinish(); });
-      else stderrEnded = true;
-      child.on("error", (err) => {
-        stdoutEnded = true;
-        stderrEnded = true;
-        closed = { status: null, stdout, stderr: stderr || String(err), timedOut };
-        tryFinish();
-      });
-      child.on("close", (code) => {
-        closed = { status: code, stdout, stderr, timedOut };
-        tryFinish();
-      });
-      if (opts.input !== undefined) {
-        child.stdin?.write(opts.input);
-      }
-      child.stdin?.end();
-    },
-  );
-
-  if (inner.drain) {
-    try {
-      await inner.drain();
-    } catch (err) {
-      inner.result.stderr =
-        inner.result.stderr +
-        `\n[observability drain failed] ${(err as Error).message}\n`;
+  return await new Promise<ProcResult>((resolve) => {
+    const child = spawn(cmd, args, { env: opts.env, cwd: opts.cwd });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    let settled = false;
+    let stdoutEnded = false;
+    let stderrEnded = false;
+    let closed: ProcResult | null = null;
+    const tryFinish = () => {
+      if (settled) return;
+      if (closed === null) return;
+      if (!stdoutEnded || !stderrEnded) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(closed);
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, opts.timeoutMs);
+    child.stdout?.on("data", (d) => {
+      stdout += d.toString();
+    });
+    child.stderr?.on("data", (d) => {
+      stderr += d.toString();
+    });
+    if (child.stdout) child.stdout.once("end", () => { stdoutEnded = true; tryFinish(); });
+    else stdoutEnded = true;
+    if (child.stderr) child.stderr.once("end", () => { stderrEnded = true; tryFinish(); });
+    else stderrEnded = true;
+    child.on("error", (err) => {
+      stdoutEnded = true;
+      stderrEnded = true;
+      closed = { status: null, stdout, stderr: stderr || String(err), timedOut };
+      tryFinish();
+    });
+    child.on("close", (code) => {
+      closed = { status: code, stdout, stderr, timedOut };
+      tryFinish();
+    });
+    if (opts.input !== undefined) {
+      child.stdin?.write(opts.input);
     }
-  }
-  return inner.result;
+    child.stdin?.end();
+  });
 }
 
 // ── Findings parser ──────────────────────────────────────────────────────
@@ -1287,8 +1251,6 @@ interface RunSubagentOpts {
   specContext?: string | null;
   overrideTimeoutS?: number | null;
   promptCache?: Map<string, string> | null;
-  /** Phase 6: observability ctx (caller-owned). */
-  obsCtx?: RunCtx | null;
   /** Round number (for sub-agent task labeling). */
   roundNum?: number;
 }
@@ -1405,44 +1367,12 @@ async function runSubagentInner(
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     let result: ProcResult;
     try {
-      const callOnce = async (): Promise<ProcResult> => {
-        if (opts.obsCtx && !opts.obsCtx._disabled) {
-          return await withSubAgent(
-            opts.obsCtx,
-            {
-              agent,
-              model: resolveModel(agent),
-              task: `review-${domainKey}-round-${opts.roundNum ?? 0}-attempt-${attempt}`,
-            },
-            async ({ sa }) => {
-              const r = await runProcess(cmd[0], cmd.slice(1), {
-                input: stdinInput,
-                timeoutMs: timeoutS * 1000,
-                env,
-                cwd: opts.cwd,
-                observability: { ctx: opts.obsCtx!, sa },
-              });
-              const st: "ok" | "error" | "timeout" = r.timedOut
-                ? "timeout"
-                : r.status === 0
-                  ? "ok"
-                  : "error";
-              return {
-                value: r,
-                status: st,
-                summary: { exit_code: r.status, timed_out: r.timedOut, domain: domainKey },
-              };
-            },
-          );
-        }
-        return await runProcess(cmd[0], cmd.slice(1), {
-          input: stdinInput,
-          timeoutMs: timeoutS * 1000,
-          env,
-          cwd: opts.cwd,
-        });
-      };
-      result = await callOnce();
+      result = await runProcess(cmd[0], cmd.slice(1), {
+        input: stdinInput,
+        timeoutMs: timeoutS * 1000,
+        env,
+        cwd: opts.cwd,
+      });
     } catch (e) {
       cleanupTemp();
       return makeSubAgentResult({
@@ -1583,8 +1513,6 @@ export async function runReviewRound(
     domains?: string[] | null;
     cwd?: string;
     specContext?: string | null;
-    /** Phase 6: optional observability ctx (caller-owned). */
-    obsCtx?: RunCtx | null;
   },
   log: Logger,
 ): Promise<ReviewRound> {
@@ -1654,17 +1582,12 @@ export async function runReviewRound(
             specContext: opts.specContext,
             overrideTimeoutS: agentTimeout,
             promptCache,
-            obsCtx: opts.obsCtx,
             roundNum,
           },
           log,
         ).then((result) => ({ agent, domain: domainKey, result })),
       );
     }
-  }
-
-  if (opts.obsCtx) {
-    await emitProgress(opts.obsCtx, null, "round", { round_num: roundNum, phase: "review-dispatch" });
   }
 
   for (const settled of await Promise.all(tasks)) {
@@ -1680,21 +1603,6 @@ export async function runReviewRound(
       );
     }
     rnd.results.push(result);
-    // Phase 6 Task 4: emit per-finding progress so the UI can show findings
-    // landing live. The `sa` link is null because the per-sub-agent record is
-    // already closed via withSubAgent; this is a parent-level summary event.
-    if (opts.obsCtx && !opts.obsCtx._disabled) {
-      for (const f of result.findings) {
-        await emitProgress(opts.obsCtx, null, "finding", {
-          agent,
-          domain: domainKey,
-          severity: f.severity,
-          file: (f as { file?: string }).file ?? null,
-          line: (f as { line?: number }).line ?? null,
-          title: (f as { title?: string }).title ?? null,
-        });
-      }
-    }
     const n = result.findings.length;
     const crits = result.findings.filter((f) => f.severity === "critical").length;
     const highs = result.findings.filter((f) => f.severity === "high").length;
@@ -1752,7 +1660,7 @@ export async function runSingleAgentRound(
   base: string,
   roundNum: number,
   domainAgentMap: Record<string, string>,
-  opts: { cwd?: string; specContext?: string | null; obsCtx?: RunCtx | null },
+  opts: { cwd?: string; specContext?: string | null },
   log: Logger,
 ): Promise<ReviewRound> {
   const config = discoverConfig(opts.cwd);
@@ -1809,7 +1717,6 @@ export async function runSingleAgentRound(
           cwd: opts.cwd,
           specContext: opts.specContext,
           overrideTimeoutS: agentTimeout,
-          obsCtx: opts.obsCtx,
           roundNum,
         },
         log,
@@ -1830,18 +1737,6 @@ export async function runSingleAgentRound(
       );
     }
     rnd.results.push(result);
-    if (opts.obsCtx && !opts.obsCtx._disabled) {
-      for (const f of result.findings) {
-        await emitProgress(opts.obsCtx, null, "finding", {
-          agent,
-          domain: domainKey,
-          severity: f.severity,
-          file: (f as { file?: string }).file ?? null,
-          line: (f as { line?: number }).line ?? null,
-          title: (f as { title?: string }).title ?? null,
-        });
-      }
-    }
     const n = result.findings.length;
     const crits = result.findings.filter((f) => f.severity === "critical").length;
     const highs = result.findings.filter((f) => f.severity === "high").length;
@@ -1904,8 +1799,6 @@ export interface ReviewOptions {
   cwd?: string;
   roundNum?: number | null;
   persistHistory?: boolean;
-  /** Phase 6: optional observability ctx (caller-owned). */
-  obsCtx?: RunCtx | null;
 }
 
 /** Run single-agent review: 1 agent per domain (from domain_agents config). */
@@ -1965,7 +1858,7 @@ export async function reviewPrSingle(
     base,
     effectiveRound,
     daMap,
-    { cwd: options.cwd, specContext, obsCtx: options.obsCtx ?? null },
+    { cwd: options.cwd, specContext },
     log,
   );
 
@@ -2122,7 +2015,6 @@ export async function reviewPr(
       domains: activeDomains,
       cwd: options.cwd,
       specContext,
-      obsCtx: options.obsCtx ?? null,
     },
     log,
   );

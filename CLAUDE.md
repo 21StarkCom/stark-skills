@@ -44,19 +44,6 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `tools/runtime_env_lib.ts` — isolated subprocess env builder (allowlist, GitHub App token injection, process-scoped temp dirs)
 - GitHub App auth lives entirely in `tools/github_app{,_lib}.ts` (TS) — mints installation tokens, imported directly by `runtime_env_lib.ts`.
 
-### Observability stack
-- `tools/observability_paths_lib.ts` — canonical path helpers + `ensureRoot()` / `ensurePrivateDir()` / `openPrivate()`. Every writer in the observability stack goes through this module so files land at 0600 and dirs at 0700 regardless of the caller's umask. `writerSocketPath(runId)` returns a path under `os.tmpdir()/stark-obs/` (FNV-1a hash of run id) to dodge macOS's 104-byte `sun_path` cap; `writer.pid` and `writer.cap` stay in the per-run dir.
-- `tools/observability_hostinfo.ts` — host-side ticker (launchd-managed) that writes `~/.claude/code-review/observability/hostinfo/host.json` every 5 s. **Sole** host-introspection surface — macOS Docker Desktop does not expose `/proc` to containers.
-- `tools/observability_install_launchd.ts` — generator for the hostinfo + prune launchd plists. Sets `PATH` portably so `/usr/bin/env node` resolves on both `/opt/homebrew/bin` (Apple Silicon Homebrew) and `/usr/local/bin` (Intel Homebrew / manual installs).
-- `tools/observability_redact_lib.ts` — secret redaction. `redact(text)` for one-shot strings, `createStreamRedactor()` for chunked stdout/stderr with overlap buffer (length = longest pattern's `maxLen`), `redactJson(value)` recursive (depth cap 32, per-string cap 1 MiB). Length-preserving (`<REDACTED:NAME>` padded with `*`). Built-in patterns: JWT, ghp_/ghs_/gho_/ghu_/ghr_, sk-ant-, sk-, AKIA, Authorization: Bearer. Operator overrides via `OBSERVABILITY_REDACT_EXTRA_ENV` (literal env-var values) + `~/.claude/code-review/observability/redactors.json` (additional regexes). Disable per-pattern via `OBSERVABILITY_REDACT_DISABLE_PATTERNS` (CSV).
-- `tools/observability_writer_daemon.ts` — per-run writer daemon (one process per active run). Owns the writer queue (Promise-chain FIFO, monotonic seq), rotation (`OBSERVABILITY_MAX_FILE_BYTES`, default 100 MB), byte budget (`OBSERVABILITY_PER_RUN_MAX_MB`, default 2 GiB, emits single `chunk-budget-exceeded` marker), run-heartbeat timer (10 s, internal), tracked-parent-pid poll (30 s — on ESRCH writes `run_end {status:"crashed", crashed_reason:"parent_exit"}` + meta.json rewrite + sock/pid cleanup), per-`(subagent_id, stream)` `StreamRedactor` flush-on-end, durability tiers per RT5 (lifecycle + findings + redacted=true → fsync each write; chunks + non-finding progress + heartbeats → group-commit every 50 events or 100 ms). UDS at `tmpdir/stark-obs/<hash>.sock` (mode 0600); first frame is `{op:"hello", cap}` against `writer.cap` (random 32-byte b64url) — same-UID without cap is rejected.
-- `tools/observability_emit_lib.ts` — thin emit-lib client. `startRun()` spawns the daemon (`spawn(..., { detached: true, stdio: 'ignore' })` + `child.unref()`), awaits the readiness handshake (socket bound → cap fsynced → initial `run_start` + `run_heartbeat` committed → `ping` replies with all three `*_committed: true`), returns a `RunCtx`. `connectRun(runId)` for child dispatchers when `STARK_OBS_PARENT_RUN_ID` is set. Public surface: `startSubAgent`, `endSubAgent`, `emitProgress`, `attachChild` (returns `{drain}` — drain awaits every UDS-write ack so `endSubAgent` doesn't race the last hundreds of ms of output, E2), `startHeartbeat`, `startRunHeartbeat` (no-op on non-owned ctxs; daemon owns the actual timer), `endRun` (awaits daemon flush + fsync + meta rewrite + sock cleanup before returning). Disabled state: `OBSERVABILITY_DISABLED=1` env + low-disk + mkdir/spawn/handshake failures all yield a stub `RunCtx` whose methods are silent no-ops so dispatcher call sites run unchanged.
-- `tools/observability_emit_harness.ts` — synthetic dispatcher harness used by Phase 2 verification + integration tests. `--multi-process` mode starts a run, then spawns a second node process that `connectRun`s into the same daemon — confirms strictly monotonic seq across two writers sharing the daemon.
-- `tools/observability_server/` — Dockerized server (multi-stage `node:22-alpine`, `better-sqlite3` + `fastify`). `server/bind.ts` enforces the loopback-vs-LAN bind gates; `server/db.ts` + `migrations/001_init.sql` define the SQLite index. Liveness reads only `/hostinfo/host.json` — see `tools/observability_server/CLAUDE.md`.
-- `tools/observability_server/test/load.ts` + `load_report.ts` — Phase 8 load harness. Spawns the in-process server pointed at a tmpdir spool, runs N synthetic sub-agents through the emit harness, attaches M WS subscribers + a 5 s history-query loop, and asserts WS p95 < 2 s, SSFB p95 < 2 s, UDS RTT p95 < 5 ms, commit p95 < 50 ms, memory growth < 50 MB/h. `--spec` switches to the plan-spec profile (N=27, 600 s, 10 KB/s, 2 ws). Reads `/api/health.index_writer.commit_ms_p50/p95` (added on this branch) for the SQLite commit assertion.
-- `tools/observability_server/test/failure_paths.test.ts` — Phase 8 failure-path suite. Forces malformed JSONL, deleted spool file mid-tail, parse storm (≥10k bad lines), SQLite commit failure (`error` event), dispatcher SIGKILL, server crash between retention-notify Call A and Call B (`recoverPendingRewrites` finishes forward), and base64 chunk truncation. `node:test` runner (not Vitest — TS-test convention).
-- `tools/observability_server/test/live/` — operator-driven Phase 8 live tests (Tasks 3–8): `dispatcher_sigkill.sh` (daemon-written crashed path ≤ 60 s), `dispatcher_and_daemon_sigkill.sh` (sweeper-written ≤ 90 s + 20-tick idempotency), `host_boot_id_change.ts`, `pressure_retention.sh` (mitmproxy notify-schema capture + Keychain Bearer match), `lan_bootstrap.sh` (five-step loopback→LAN dance), `live_run_metadata.ts` (standalone fallback writer for `~/.claude/code-review/observability/test/live-run.json` — primary path is launching the dispatcher under test with `STARK_OBS_WRITE_LIVE_RUN_METADATA=1`, which makes every TS dispatcher built on `observability_dispatcher_helpers.ts::initRunCtx` write the same file natively with the real dispatcher pid, writer pid, and run id, so destructive scripts never need `pgrep`/`tail`).
-
 ### TUI & session
 - The session-start/end TUI is gone. `/stark-session` now collects state via `tools/stark_session.ts` and Claude renders the briefing/summary itself — see "TS tools" below.
 
@@ -151,64 +138,6 @@ All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.claude/skil
 ### Project Setup & Docs
 
 - `/stark-init-docs [--template|--backfill|--upgrade|--clean]` — scaffold dev docs
-
-## Stark Review Observability
-
-### Start
-
-```bash
-docker compose -f tools/observability_server/docker-compose.yml up -d
-node --experimental-strip-types tools/observability_open.ts
-```
-
-`observability_open.ts` runs the bootstrap exchange against the running container, populates `~/.claude/code-review/observability/session.cookie` (0600), mirrors the bootstrap + prune tokens into the macOS Keychain as **two scoped services** (`stark-observability-bootstrap-token` for the UI/main-API Bearer; `stark-observability-prune-token` for the retention listener only), atomically writes `/data/last_bootstrap_at` so subsequent LAN binds are authorized, and opens the UI in the browser unless `--no-browser` is passed. The helper **never prints the raw token** — scripts read from the cookie file or via `security find-generic-password -s <scoped-service> -w`.
-
-### Spool + prune
-
-- Spool root: `~/.claude/code-review/observability/runs/<run_id>/events-NNNN.jsonl`.
-- Audit log mount: `~/.claude/code-review/observability/audit/audit.jsonl` (separate volume from `observability_index`, survives DB reset).
-- Prune CLI: `node --experimental-strip-types tools/observability_prune.ts`. Reads ONLY the `stark-observability-prune-token` Keychain entry; talks to the retention listener on port 7701, never the main API.
-
-### Liveness contract
-
-The container reads only `/hostinfo/host.json` — there is no `/proc` mount on macOS Docker Desktop. The launchd-managed host ticker (`tools/observability_hostinfo.ts`) refreshes the file every 5 s. The container's liveness sweeper joins on `host.live_pids[]` to decide whether a `running` row is actually alive.
-
-### Crashed-state contract
-
-`runs.parent_pid` is always the **tracked-parent pid** (= dispatcher Node pid for normal dispatchers, = SKILL.md shell pid for `/stark-phase-execute`) — never the writer daemon pid. The daemon pid is `runs.writer_daemon_pid`, diagnostic only. Crash detection runs in two redundant writers, exactly one wins per row:
-
-- **Daemon-written** path (≤ 60 s): the per-run writer daemon polls `kill(parent_pid, 0)` every 30 s; on ESRCH it writes `run_end {status: "crashed", crashed_reason: "parent_exit", ended_at: <ISO ms>}`, rewrites `meta.json`, cleans up its socket + pid, exits 0.
-- **Sweeper-written** path (≤ 90 s, fallback for when the daemon is also dead): the container's liveness sweep marks rows whose `parent_pid` is missing from `host.live_pids[]` as crashed via a `status NOT IN (terminal)` UPDATE, with the same TS-bound `ended_at`.
-
-Every `ended_at` and `last_heartbeat_at` value is server-bound `new Date().toISOString()`. SQLite-native clock functions (`strftime`, `datetime('now',...)`) are forbidden — `tools/observability_server/server/grep_assertions.test.ts` enforces this in CI.
-
-### Retention notify protocol
-
-The prune CLI emits **two strictly-ordered calls** per rewritten file to `POST /api/internal/retention/notify` on the retention listener:
-
-1. `action: "pre-rename"` — carries `new_size_bytes` + `truncated[]`; sent BEFORE `rename(2)`; never carries `new_mtime_ns`.
-2. `action: "update-mtime"` — carries `new_mtime_ns` (plus identifying keys); sent AFTER the rename + `fstat`; never carries `truncated[]` or `new_size_bytes`.
-
-A failed rename triggers `action: "abort-rewrite"`. SQLite is the sole rewrite transaction log — on server restart, `recoverPendingRewrites` walks `spool_files WHERE rewrite_state IN ('pending','renamed')` and finishes whichever transition the on-disk file matches.
-
-### Writer daemon: one-per-run
-
-Each dispatcher run gets its own writer daemon process. Dispatchers connect via the per-run UDS `tmpdir/stark-obs/<hash>.sock` (mode 0600, short-prefix to dodge macOS's 104-byte `sun_path` cap), present a single-use ephemeral capability minted from `writer.cap` (same-UID + filesystem access = proof of authority), and emit ops over the framed JSONL protocol. Child dispatchers (`STARK_OBS_PARENT_RUN_ID` set) reuse the parent's daemon via `connectRun` rather than spawning their own.
-
-### LAN bootstrap
-
-LAN exposure requires all three of:
-
-1. `OBSERVABILITY_PUBLISHED_HOST=<lan-ip>:7700`
-2. `OBSERVABILITY_ALLOW_LAN=1` and `OBSERVABILITY_TLS_TERMINATED=1`
-3. `/data/last_bootstrap_at` already present (written on a successful loopback `POST /api/auth/exchange`)
-
-The LAN container bind is via the override file `tools/observability_server/docker-compose.lan.yml.example`; Caddy fronts Node with mkcert TLS on the LAN address; plain HTTP off-loopback is refused. There is no escape hatch around the bootstrap marker — first boot must always be loopback.
-
-### Load test + live test
-
-- `tools/observability_server/test/load.ts --spec` runs the plan-profile load test (N=27 sub-agents × 10 KB/s × 600 s + 2 WS subscribers + 5 s history loop), asserts WS p95 < 2 s + UDS RTT p95 < 5 ms + commit p95 < 50 ms + memory growth < 50 MB/h + chunk-count parity, writes `tools/observability_server/test/load-report.json`. Render with `load_report.ts`.
-- `tools/observability_server/test/live/` contains the operator-driven scripts for the daemon-written / sweeper-written crashed paths, host_boot_id change, pressure-retention notify-schema capture, and the LAN bootstrap five-step sequence.
 
 ## Conventions
 

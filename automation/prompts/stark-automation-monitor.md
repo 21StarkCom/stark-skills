@@ -25,7 +25,7 @@ Do NOT modify any other files.
 
 ### 1. Parse Trigger Logs
 
-Read the top 20 lines of each of the 12 trigger log files in `automation/triggers/` (excluding `_index.md` and your own log):
+Read the top 20 lines of each of the 11 trigger log files in `automation/triggers/` (excluding `_index.md` and your own log):
 ```bash
 for f in automation/triggers/stark-*.md; do
   head -20 "$f"

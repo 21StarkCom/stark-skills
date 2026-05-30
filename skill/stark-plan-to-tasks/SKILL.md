@@ -365,10 +365,6 @@ Clean up temp files (decomposition JSON, validation envelope, preview files).
 
 ---
 
-## Observability
-
-Standard observability: create task per step with `activeForm` spinner text, timestamped log lines, 5-minute checkpoints for large plans.
-
 ## What This Skill Does NOT Do
 
 - Challenge architectural decisions

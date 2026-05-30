@@ -37,12 +37,6 @@ import {
   VALID_AGENTS,
   type AgentName,
 } from "./copilot_dispatch.ts";
-import { emitProgress, type RunCtx } from "./observability_emit_lib.ts";
-import {
-  finishRun,
-  initRunCtx,
-  withSubAgent,
-} from "./observability_dispatcher_helpers.ts";
 
 // Constants ---------------------------------------------------------------
 
@@ -145,7 +139,6 @@ async function callAgent(
   timeoutSec: number,
   geminiPrefix: string,
   contextLabel: string,
-  obsCtx: RunCtx | null = null,
 ): Promise<AgentCallOutcome> {
   const t0 = process.hrtime.bigint();
   const out: AgentCallOutcome = {
@@ -210,39 +203,7 @@ async function callAgent(
     const maxAttempts = 2;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const cwd = agent === "gemini" && geminiCwd ? geminiCwd : undefined;
-      const callOnce = async () => {
-        if (obsCtx && !obsCtx._disabled) {
-          return await withSubAgent(
-            obsCtx,
-            {
-              agent,
-              model: resolveModel(agent),
-              task: `${contextLabel}-attempt-${attempt}`,
-            },
-            async ({ sa }) => {
-              const r = await run(cmd, args, {
-                timeoutSec,
-                env,
-                stdin,
-                cwd,
-                observability: { ctx: obsCtx, sa },
-              });
-              const status: "ok" | "error" | "timeout" = r.timedOut
-                ? "timeout"
-                : r.code === 0
-                  ? "ok"
-                  : "error";
-              return {
-                value: r,
-                status,
-                summary: { exit_code: r.code, timed_out: r.timedOut, not_found: r.notFound },
-              };
-            },
-          );
-        }
-        return await run(cmd, args, { timeoutSec, env, stdin, cwd });
-      };
-      const res = await callOnce();
+      const res = await run(cmd, args, { timeoutSec, env, stdin, cwd });
       if (res.notFound) {
         out.error = "agent_unavailable";
         break;
@@ -375,8 +336,6 @@ export interface RunPlanOpts {
   maxRounds: number;
   timeoutSec: number;
   wingTimeoutSec: number;
-  /** Phase 6: optional observability context. */
-  obsCtx?: RunCtx | null;
 }
 
 function newRound(round_num: number): PlanRoundResult {
@@ -402,7 +361,6 @@ export async function runPlanDispatch(
     designContent, generatePrompt, reviewPrompt, revisePrompt,
     lead, wing, maxRounds, timeoutSec, wingTimeoutSec,
   } = opts;
-  const obsCtx: RunCtx | null = opts.obsCtx ?? null;
 
   if (lead === wing) return { error: "lead_eq_wing", rounds: [] };
   if (!VALID_AGENTS.includes(lead) || !VALID_AGENTS.includes(wing)) {
@@ -415,9 +373,8 @@ export async function runPlanDispatch(
   const rounds: PlanRoundResult[] = [];
 
   // Round 1: lead generates ------------------------------------------------
-  if (obsCtx) await emitProgress(obsCtx, null, "round", { round_num: 1, phase: "lead-generate" });
   const leadPrompt1 = buildLeadGeneratePrompt(generatePrompt, designContent);
-  const r1Result = await callAgent(lead, leadPrompt1, timeoutSec, "gemini-plan-lead-", "lead-generate", obsCtx);
+  const r1Result = await callAgent(lead, leadPrompt1, timeoutSec, "gemini-plan-lead-", "lead-generate");
   const r1 = newRound(1);
   r1.duration_s = r1Result.duration_s;
   r1.draft = r1Result.raw.trim();
@@ -444,10 +401,9 @@ export async function runPlanDispatch(
     const prior = rounds.slice();
     const payload = buildWingReviewPayload(reviewPrompt, designContent, currentRound.draft, prior);
 
-    if (obsCtx) await emitProgress(obsCtx, null, "round", { round_num: roundNum, phase: "wing-review" });
-    let wingResult = await callAgent(wing, payload, wingTimeoutSec, "gemini-plan-wing-", "wing-review", obsCtx);
+    let wingResult = await callAgent(wing, payload, wingTimeoutSec, "gemini-plan-wing-", "wing-review");
     if (wingResult.error === "timeout") {
-      wingResult = await callAgent(wing, payload, wingTimeoutSec, "gemini-plan-wing-retry-", "wing-review-retry", obsCtx);
+      wingResult = await callAgent(wing, payload, wingTimeoutSec, "gemini-plan-wing-retry-", "wing-review-retry");
     }
 
     if (wingResult.error) {
@@ -471,7 +427,7 @@ export async function runPlanDispatch(
         "containing keys verdict, blocking_findings, non_blocking_suggestions, summary.";
       const retry = await callAgent(
         wing, retryPayload, wingTimeoutSec,
-        "gemini-plan-wing-parse-retry-", "wing-parse-retry", obsCtx,
+        "gemini-plan-wing-parse-retry-", "wing-parse-retry",
       );
       parseRetry = true;
       wingResult = retry;
@@ -519,10 +475,9 @@ export async function runPlanDispatch(
       revisePrompt, designContent, currentRound.draft,
       currentRound.blocking_findings, nextRoundNum,
     );
-    if (obsCtx) await emitProgress(obsCtx, null, "round", { round_num: nextRoundNum, phase: "lead-revise" });
     const fixResult = await callAgent(
       lead, reviseText, timeoutSec,
-      "gemini-plan-lead-revise-", "lead-revise", obsCtx,
+      "gemini-plan-lead-revise-", "lead-revise",
     );
     const nextRound = newRound(nextRoundNum);
     nextRound.duration_s = fixResult.duration_s;
@@ -702,39 +657,17 @@ async function main(): Promise<number> {
     readFile(args.revisePromptFile, "utf-8"),
   ]);
 
-  // Phase 6 Task 2: observability lifecycle.
-  const lifecycle = await initRunCtx({
-    dispatcher: "stark-design-to-plan",
-    repo: process.env.STARK_REPO_SLUG,
-    branch: process.env.STARK_BRANCH,
-    meta: { design_file: args.designFile, lead: args.lead, wing: args.wing },
+  const result: PlanDispatchResult | PreflightFailure = await runPlanDispatch({
+    designContent,
+    generatePrompt,
+    reviewPrompt,
+    revisePrompt,
+    lead: args.lead,
+    wing: args.wing,
+    maxRounds: args.maxRounds,
+    timeoutSec: args.timeoutSec,
+    wingTimeoutSec: args.wingTimeoutSec,
   });
-
-  let result: PlanDispatchResult | PreflightFailure;
-  let status: "ok" | "error" | "timeout" = "ok";
-  try {
-    result = await runPlanDispatch({
-      designContent,
-      generatePrompt,
-      reviewPrompt,
-      revisePrompt,
-      lead: args.lead,
-      wing: args.wing,
-      maxRounds: args.maxRounds,
-      timeoutSec: args.timeoutSec,
-      wingTimeoutSec: args.wingTimeoutSec,
-      obsCtx: lifecycle.ctx,
-    });
-    if (!("final_verdict" in result) || result.final_verdict !== "approved") {
-      status = "error";
-    }
-  } catch (err) {
-    await finishRun(lifecycle, "error");
-    lifecycle.runHb.stop();
-    throw err;
-  }
-  await finishRun(lifecycle, status);
-  lifecycle.runHb.stop();
 
   process.stdout.write(JSON.stringify(result, null, 2) + "\n");
   return "final_verdict" in result && result.final_verdict === "approved" ? 0 : 1;
