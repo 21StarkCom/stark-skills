@@ -1,6 +1,6 @@
 # Orchestrator Prompt — Multi-Agent PR Review
 
-You are the orchestrator. You dispatch 27 parallel sub-agent reviews (3 agents × 9 domains) and you are the only one who fixes code.
+You are the orchestrator. You dispatch up to 18 parallel sub-agent reviews (3 agents × 6 domains) and you are the only one who fixes code.
 
 ## Architecture
 

@@ -76,9 +76,10 @@ This is a **personal playground**, not production. No customers depend on it; th
 
 ### Config & prompts
 - `global/config.json` — default config schema (models, runtime, triage, cost, etc.)
-- `global/prompts/{claude,codex,gemini}/` — per-agent × per-domain PR review prompts (9 domains each)
+- `global/prompts/{claude,codex,gemini}/` — per-agent × per-domain PR review prompts (6 domains: architecture, behavior, type-safety, security, test-coverage, spec-conformance) + `agent.md` preamble + `classifier.md`; codex also has `fixer.md`
 - `global/prompts/{design-review,plan-review}/` — per-agent + shared `domains/` doc review prompts
-- `global/prompts/{design-to-plan,prompt-to-design}/` — per-agent generate + cross-review prompts
+- `global/prompts/design-to-plan/` — per-agent `generate`/`review`/`revise` plan-generation prompts
+- `global/prompts/copilot/` — `/stark-copilot` lead/wing `implement`/`review` prompts
 - `global/prompts/triage/` — domain triage prompts and manifest
 - `standards/templates/` — PR template, ADR template, MkDocs scaffold, staleness config
 - `standards/index.md` — "Start Here" pitch page for adopting the doc system
@@ -97,9 +98,9 @@ All skills live in `skill/stark-*/SKILL.md`; `install.sh` symlinks them for Clau
 
 ### Pipeline (end-to-end, in order)
 
-- `/stark-review-design <path>` — multi-agent design/spec review (N agents × 12 domains, default N=2)
+- `/stark-review-design <path>` — multi-agent design/spec review (N agents × 8 domains, default N=2)
 - `/stark-design-to-plan <path>` — generate implementation plan from design doc via paired lead/wing loop (default lead `claude`, wing `codex`); lead drafts, wing reviews and emits JSON verdict, fix-loop until approved. Cheaper and lower-variance than the prior 3-agent tournament.
-- `/stark-review-plan <path>` — multi-agent execution plan review (N agents × 10 adversarial domains, default N=2)
+- `/stark-review-plan <path>` — multi-agent execution plan review (N agents × 4 adversarial domains, default N=2)
 - `/stark-plan-to-tasks <path> [--dry-run] [--cleanup <slug>]` — decompose plan into phased GitHub issues (3 LLM passes)
 - `/stark-phase-execute <plan-slug> [--dry-run]` — autonomous phase execution: implement all tasks, PR, review, merge, release, dashboard
 - `/stark-copilot <plan-or-prompt> [--lead AGENT] [--wing AGENT] [--plan-slug SLUG]` — autonomous implementation with paired lead/wing subagents; issue-driven mode when plan has been decomposed via `/stark-plan-to-tasks`

@@ -92,9 +92,10 @@ The red-team subsystem is **pure TypeScript** under `tools/`. All Python red-tea
 
 ### Config & prompts
 - `global/config.json` — default config schema (models, runtime, triage, cost, etc.)
-- `global/prompts/{claude,codex,gemini}/` — per-agent × per-domain PR review prompts (9 domains each)
+- `global/prompts/{claude,codex,gemini}/` — per-agent × per-domain PR review prompts (6 domains: architecture, behavior, type-safety, security, test-coverage, spec-conformance) + `agent.md` preamble + `classifier.md`; codex also has `fixer.md`
 - `global/prompts/{design-review,plan-review}/` — per-agent + shared `domains/` doc review prompts
-- `global/prompts/{design-to-plan,prompt-to-design}/` — per-agent generate + cross-review prompts
+- `global/prompts/design-to-plan/` — per-agent `generate`/`review`/`revise` plan-generation prompts
+- `global/prompts/copilot/` — `/stark-copilot` lead/wing `implement`/`review` prompts
 - `global/prompts/triage/` — domain triage prompts and manifest
 - `standards/templates/` — PR template, ADR template, MkDocs scaffold, staleness config
 - `standards/index.md` — "Start Here" pitch page for adopting the doc system
@@ -123,7 +124,7 @@ All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.claude/skil
 - `/stark-copilot <plan-or-prompt> [--lead AGENT] [--wing AGENT] [--plan-slug SLUG]` — autonomous implementation with paired lead/wing subagents (default lead `claude`, wing `codex`); lead implements in worktree, wing reviews diff, fix-loop until approved. Issue-driven mode when plan has been decomposed via `/stark-plan-to-tasks`.
 - `/stark-gh:pr-merge [--pr N] [...]` — rebase + draft squash prose & CHANGELOG entry via Codex + force-push + squash-merge once CI is green
 - `/stark-gh:cleanup [--pr N] [--dry-run] [--keep-branch NAME] [--no-rebase] [--no-watcher-cleanup] [--no-config] [--no-gc] [--drop-stale-stashes] [--force] [--json]` — sweep merged/stale branches (local + remote), prune tracking refs, remove worktree leftovers (including detached-HEAD `review-*-prN-*` worktrees for done PRs), clean merged-PR watcher state, surface stale stashes, `git gc` loose objects, and rebase current branch onto upstream so history stays linear. `--pr N` narrows to one PR's head ref + watcher state.
-- `/stark-review [PR_NUMBER]` — single-agent PR code review (1 LLM × 9 domains, fast/cheap)
+- `/stark-review [PR_NUMBER]` — single-agent PR code review (1 LLM × triage-selected domains from 6, fast/cheap)
 - `/stark-review-improvement [--prompts-dir DIR]` — improve prompts based on review assessment (PR or design/plan review)
 - `/stark-review-design-improvement` — improve design review prompts (wraps /stark-review-improvement with --prompts-dir design-review)
 
