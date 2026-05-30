@@ -34,7 +34,7 @@ After all tasks: regression tests, version bump, deploy, dashboard, memory updat
 
 - Claude Code running with `--dangerouslySkipPermissions` or equivalent tool allowlists
 - `gh auth status` shows an active user PAT
-- `claude`, `codex`, `gemini`, `gh` are all in PATH
+- `claude`, `codex`, `gh` are in PATH (`gemini` is optional — opt-in via `models.gemini.enabled`)
 - GitHub Apps (stark-claude, stark-codex, stark-gemini) installed on the target repo
 
 ## Arguments
@@ -54,10 +54,7 @@ After all tasks: regression tests, version bump, deploy, dashboard, memory updat
 ## Constants
 
 ```bash
-SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
 TOOLS="${STARK_REVIEW_TOOLS:-$HOME/.claude/code-review/tools}"
-PYTHON="$SCRIPTS/.venv/bin/python3"
-[ -x "$PYTHON" ] || PYTHON=python3
 HISTORY="$HOME/.claude/code-review/history"
 ```
 
@@ -81,7 +78,8 @@ Pull latest main, verify clean state, confirm toolchain:
 git checkout main && git pull --rebase origin main
 git status --porcelain          # must be empty
 git branch --show-current       # must be main
-which gh claude codex gemini    # all must exist
+which gh claude codex           # all must exist
+which gemini || echo "gemini not in PATH — optional, enable via models.gemini.enabled"
 gh auth status                  # must show active account
 node --experimental-strip-types "$TOOLS/github_app.ts" --app stark-claude token >/dev/null
 ```

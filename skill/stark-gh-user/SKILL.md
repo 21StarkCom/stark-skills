@@ -101,7 +101,7 @@ If a keychain entry is missing, render `MISSING` in place of the numbers and con
 ## Notes
 
 - `gh` honors `GH_TOKEN` over the keychain auth, so once the user `eval`s the export block, every subsequent `gh` call in that shell — including ones spawned by `multi_review.ts` and the TS tools in `tools/` (including `github_projects.ts`) — uses the chosen identity automatically. No call-site edits.
-- `runtime_env.py` overrides `GH_TOKEN` for review subprocesses with the matching App installation token, so review-posting still goes through the correct bot.
+- `tools/runtime_env_lib.ts` overrides `GH_TOKEN` for review subprocesses with the matching App installation token, so review-posting still goes through the correct bot.
 - To revert to the OS keychain auth: `unset GH_TOKEN GITHUB_TOKEN STARK_GH_USER`.
 
 ## How It Works

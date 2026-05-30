@@ -26,10 +26,7 @@ Decompose a spec/design document into phased GitHub issues. Three LLM passes: qu
 ## Constants
 
 ```bash
-SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
 TOOLS="${STARK_REVIEW_TOOLS:-$HOME/.claude/code-review/tools}"
-PYTHON="$SCRIPTS/.venv/bin/python3"
-[ -x "$PYTHON" ] || PYTHON=python3
 ```
 
 This skill uses only the `stark-claude` GitHub App.
@@ -196,7 +193,7 @@ Guardrails:
         "task_id": "task-1-1-user-entity",
         "title": "...", "type": "feature",
         "what": "...", "why": "...",
-        "where": ["src/models/user.py"],
+        "where": ["src/models/user.ts"],
         "how": "...",
         "acceptance_criteria": ["..."],
         "dependencies": [],

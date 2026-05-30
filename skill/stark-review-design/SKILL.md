@@ -56,7 +56,6 @@ Answers the question: **"Is this the right system?"**
 ```bash
 TOOLS="${STARK_REVIEW_TOOLS:-$HOME/.claude/code-review/tools}"
 PROMPTS_BASE="${STARK_REVIEW_PROMPTS_BASE:-$HOME/.claude/code-review/prompts}"
-SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
 ```
 
 To call the dispatcher:
@@ -138,33 +137,22 @@ Parse the receipt JSON. Every failure surface independently forces a non-zero
 exit so the user can act.
 
 ```bash
-parse() { printf '%s' "$RECEIPT_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); $1"; }
+parse() { printf '%s' "$RECEIPT_JSON" | jq -r "$1"; }
 
-OK=$(parse 'print(str(d.get("ok")).lower())')
-ERR_CODE=$(parse 'e=d.get("error") or {}; print(e.get("code","") or "")')
-ERR_MSG=$(parse 'e=d.get("error") or {}; print(e.get("message","") or "")')
+OK=$(parse '(.ok // false) | tostring')
+ERR_CODE=$(parse '.error.code // ""')
+ERR_MSG=$(parse '.error.message // ""')
 FAILED_LIST=$(parse '
-rounds = d.get("rounds") or []
-items = []
-for r in rounds:
-    rd = r.get("round")
-    for f in (r.get("failed_results") or []):
-        items.append("round {}: {}/{} — {}".format(rd, f.get("agent"), f.get("domain"), f.get("error")))
-print("\n".join(items))
+  (.rounds // [])[] as $r
+  | ($r.failed_results // [])[]
+  | "round \($r.round): \(.agent)/\(.domain) — \(.error)"
 ')
 WING_ERRORS=$(parse '
-rounds = d.get("rounds") or []
-items = []
-for r in rounds:
-    fix = r.get("fix") or {}
-    we = fix.get("wing_error")
-    if we:
-        items.append("round {}: wing_error={}".format(r.get("round"), we))
-    for pf in (fix.get("patch_failures") or []):
-        items.append("round {}: patch failure on finding {} — {}".format(
-            r.get("round"), pf.get("finding_id"), pf.get("reason"),
-        ))
-print("\n".join(items))
+  (.rounds // [])[] as $r
+  | ($r.fix // {}) as $fix
+  | ( if $fix.wing_error then "round \($r.round): wing_error=\($fix.wing_error)" else empty end ),
+    ( ($fix.patch_failures // [])[]
+      | "round \($r.round): patch failure on finding \(.finding_id) — \(.reason)" )
 ')
 
 failed=0

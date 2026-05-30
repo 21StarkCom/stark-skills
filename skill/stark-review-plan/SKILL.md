@@ -56,7 +56,6 @@ For domain definitions and finding-classification criteria, see
 ```bash
 TOOLS="${STARK_REVIEW_TOOLS:-$HOME/.claude/code-review/tools}"
 PROMPTS_BASE="${STARK_REVIEW_PROMPTS_BASE:-$HOME/.claude/code-review/prompts}"
-SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
 ```
 
 ## Phase 1: Parse arguments + validate
@@ -114,33 +113,28 @@ Exit codes:
 ## Phase 4: Surface failures
 
 ```bash
-parse() { printf '%s' "$RECEIPT_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); $1"; }
+parse() { printf '%s' "$RECEIPT_JSON" | node --experimental-strip-types -e "
+let raw=''; process.stdin.on('data',c=>raw+=c).on('end',()=>{
+  const d=JSON.parse(raw); const out=[];
+  $1
+  process.stdout.write(out.join('\n'));
+});"; }
 
-OK=$(parse 'print(str(d.get("ok")).lower())')
-ERR_CODE=$(parse 'e=d.get("error") or {}; print(e.get("code","") or "")')
-ERR_MSG=$(parse 'e=d.get("error") or {}; print(e.get("message","") or "")')
+OK=$(parse 'out.push(String(d.ok ?? null).toLowerCase());')
+ERR_CODE=$(parse 'out.push((d.error||{}).code||"");')
+ERR_MSG=$(parse 'out.push((d.error||{}).message||"");')
 FAILED_LIST=$(parse '
-rounds = d.get("rounds") or []
-items = []
-for r in rounds:
-    rd = r.get("round")
-    for f in (r.get("failed_results") or []):
-        items.append("round {}: {}/{} — {}".format(rd, f.get("agent"), f.get("domain"), f.get("error")))
-print("\n".join(items))
+for (const r of (d.rounds||[]))
+  for (const f of (r.failed_results||[]))
+    out.push(`round ${r.round}: ${f.agent}/${f.domain} — ${f.error}`);
 ')
 WING_ERRORS=$(parse '
-rounds = d.get("rounds") or []
-items = []
-for r in rounds:
-    fix = r.get("fix") or {}
-    we = fix.get("wing_error")
-    if we:
-        items.append("round {}: wing_error={}".format(r.get("round"), we))
-    for pf in (fix.get("patch_failures") or []):
-        items.append("round {}: patch failure on finding {} — {}".format(
-            r.get("round"), pf.get("finding_id"), pf.get("reason"),
-        ))
-print("\n".join(items))
+for (const r of (d.rounds||[])) {
+  const fix=r.fix||{};
+  if (fix.wing_error) out.push(`round ${r.round}: wing_error=${fix.wing_error}`);
+  for (const pf of (fix.patch_failures||[]))
+    out.push(`round ${r.round}: patch failure on finding ${pf.finding_id} — ${pf.reason}`);
+}
 ')
 
 failed=0

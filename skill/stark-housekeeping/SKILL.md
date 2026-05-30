@@ -25,13 +25,7 @@ Audits and cleans up project state: closes stale issues, deletes merged branches
 
 ## Constants
 
-```bash
-SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
-PYTHON="$SCRIPTS/.venv/bin/python3"
-[ -x "$PYTHON" ] || PYTHON=python3
-```
-
-Detect repo (or use `--repo` override): parse `org/repo` from `git remote get-url origin`.
+Detect repo (or use `--repo` override): parse `org/repo` from `git remote get-url origin`. The `TOOLS` path (`$HOME/.claude/code-review/tools`) is set locally in Phase 5 where it is used.
 
 ---
 
@@ -182,7 +176,7 @@ renders into the Phase 4 summary block:
 |-----------|--------|-----------|
 | 5.1 | `~/.claude/code-review/sessions/*.json` | 30 days |
 | 5.2 | `~/.claude/code-review/sessions/**/checkpoint-*.md` | 7 days |
-| 5.3 | Stale `.lock` files in `~/.claude/code-review/` and `/tmp/` | TS port of `lock_helpers.is_lock_stale` (TTL + PID alive + start_time match) |
+| 5.3 | Stale `.lock` files in `~/.claude/code-review/` and `/tmp/` | `tools/lock_helpers_lib.ts::isLockStale` (TTL + PID alive + start_time match) |
 | 5.4 | `healer.jsonl`, `preflight.jsonl`, `approach-contracts.jsonl` | keep last 1000 lines |
 | 5.5 | `~/.claude/code-review/logs/*.stderr` | 14 days |
 | 5.6 | `automation/logs/` and `~/.claude/code-review/history/autopilot/` | tar.gz files older than 30 days, grouped by YYYY-MM into `~/.claude/code-review/archives/` |

@@ -16,9 +16,9 @@ Closes the feedback loop on stark-skills: reads the prompt improvement assessmen
 ## Arguments
 
 - `--prompts-dir DIR` — which prompt set to target (default: agent root = `$PROMPTS/{agent}/`). When set, prompts resolve to `$PROMPTS/{DIR}/{agent}/`. Common values:
-  - *(omitted)* — PR code review prompts (`global/prompts/{claude,codex,gemini}/`)
-  - `design-review` — design/spec review prompts (`global/prompts/design-review/{claude,codex,gemini}/`)
-  - `plan-review` — plan review prompts (`global/prompts/plan-review/{claude,codex,gemini}/`)
+  - *(omitted)* — PR code review prompts (`global/prompts/{claude,codex,gemini}/`; gemini disabled by default)
+  - `design-review` — design/spec review prompts (`global/prompts/design-review/{claude,codex,gemini}/`; gemini disabled by default)
+  - `plan-review` — plan review prompts (`global/prompts/plan-review/{claude,codex,gemini}/`; gemini disabled by default)
 
 **Raw input:** `$ARGUMENTS`
 
@@ -27,7 +27,7 @@ Closes the feedback loop on stark-skills: reads the prompt improvement assessmen
 ```
 STARK_REPO  = ~/Code/Playground/stark-skills
 PROMPTS     = $STARK_REPO/global/prompts
-SCRIPTS     = $STARK_REPO/scripts
+TOOLS       = $STARK_REPO/tools
 CONFIG      = $STARK_REPO/global/config.json
 ORG_CONFIG  = $STARK_REPO/org/evinced/config.json
 HISTORY     = ~/.claude/code-review/history
@@ -38,7 +38,7 @@ When `--prompts-dir` is set:
 
 ```
 PROMPT_ROOT = $PROMPTS/{prompts-dir}/{agent}/   # e.g., $PROMPTS/design-review/claude/
-ORCHESTRATOR = $TOOLS/plan_review_dispatch.ts  # instead of multi_review.ts
+ORCHESTRATOR = $TOOLS/stark_review_doc.ts  # instead of multi_review.ts
 HISTORY_SUB  = design-reviews                    # history subdirectory
 ```
 
@@ -62,8 +62,8 @@ Look in the **current conversation context** for either:
 If neither exists, check the most recent history directory for the matching review type:
 
 ```bash
-# For PR code review (default):
-ls -td $HISTORY/*/*/* | head -1
+# For PR code review (default; recurses per-repo-slug subdirs):
+find $HISTORY -name "*.json" | sort | tail -1
 # For design-review:
 ls -td $HISTORY/design-reviews/*/ | head -1
 # For plan-review:
@@ -145,7 +145,7 @@ Read the relevant function. Apply targeted fix. The orchestrator depends on `--p
 | No file exclusion filtering      | `_run_subagent()` or new helper | Filter diff output before passing to agents  |
 | Missing post-processing (dedup)  | After `_parse_findings()`       | Add cross-agent dedup by file+line proximity |
 
-**For design/plan review (`plan_review_dispatch.ts`):**
+**For design/plan review (`stark_review_doc.ts`):**
 
 | Issue                                      | Where                                 | Fix                                                                                    |
 | ------------------------------------------ | ------------------------------------- | -------------------------------------------------------------------------------------- |
@@ -181,8 +181,8 @@ Add new fields with safe defaults:
 After all edits:
 
 1. **Syntax check prompts** — ensure no broken markdown, no missing sections
-2. **Python syntax** — if orchestrator was edited: `python3 -c "import py_compile; py_compile.compile('$ORCHESTRATOR')"`
-3. **JSON validity** — if config was edited: `python3 -c "import json; json.load(open('$CONFIG'))"`
+2. **TS type-check** — if orchestrator was edited: `node --experimental-strip-types --check "$ORCHESTRATOR"`
+3. **JSON validity** — if config was edited: `node -e "JSON.parse(require('fs').readFileSync('$CONFIG','utf8'))"`
 4. **Diff review** — show `git diff` in `$STARK_REPO` to the user for confirmation
 
 ## Phase 4: Log the Learning
@@ -207,7 +207,7 @@ Create or append to `$CHANGELOG`:
 
 ### Validation
 - [ ] Prompt syntax OK
-- [ ] Python compiles
+- [ ] Orchestrator type-checks
 - [ ] Config valid JSON
 ```
 

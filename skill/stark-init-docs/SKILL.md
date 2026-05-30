@@ -67,8 +67,8 @@ Copy from `$TEMPLATES` to the repo, substituting placeholders:
 | `adr-template.md` | `docs/adr/0000-template.md` | none |
 | `mkdocs.yml` | `mkdocs.yml` (repo root) | `__REPO_NAME__` → directory name of repo root |
 | `pull_request_template.md` | `.github/pull_request_template.md` | none |
-| `.doc-staleness.yml` | `.doc-staleness.yml` (repo root) | none |
-| `index.md` | `docs/index.md` | `__REPO_NAME__` → directory name of repo root |
+| `doc-staleness.yml` | `.doc-staleness.yml` (repo root) | none |
+| `docs-index.md` | `docs/index.md` | `__REPO_NAME__` → directory name of repo root |
 
 For each file: if the destination already exists, skip it and log "Skipping {path} (already exists)".
 

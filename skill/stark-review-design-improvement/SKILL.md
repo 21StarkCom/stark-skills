@@ -16,7 +16,7 @@ Improve design/spec review prompts based on assessment feedback from `/stark-rev
 This is a wrapper around `/stark-review-improvement` that:
 1. Sets `--prompts-dir design-review` (targets `global/prompts/design-review/{agent}/`)
 2. Looks for assessments in `~/.claude/code-review/history/design-reviews/` or in conversation context (the "Prompt Improvement Assessment" section from a `/stark-review-design` run)
-3. Uses `plan_review_dispatch.ts` as the orchestrator (not `multi_review.ts`)
+3. Uses `tools/stark_review_doc.ts` as the orchestrator (not `multi_review.ts`)
 
 ## Usage
 
@@ -50,15 +50,15 @@ If the assessment also appears in a `*.design-review.md` file alongside the desi
 
 ### Step 2: Delegate to /stark-review-improvement
 
-Invoke `/stark-review-improvement --prompts-dir design-review` with the extracted assessment. This resolves all prompt paths to `global/prompts/design-review/{agent}/` and uses `plan_review_dispatch.ts` as the orchestrator.
+Invoke `/stark-review-improvement --prompts-dir design-review` with the extracted assessment. This resolves all prompt paths to `global/prompts/design-review/{agent}/` and uses `tools/stark_review_doc.ts --prompts-dir design-review` as the orchestrator.
 
 ### Step 3: Design-review-specific context
 
 When the delegated skill presents action items for confirmation, add context about the design review pipeline:
 
-- **Domain prompts** are at `global/prompts/design-review/{claude,codex,gemini}/01-completeness.md` through `08-test-plan.md`
+- **Domain prompts**: shared domains `01-completeness.md` through `06-consistency.md` live at `global/prompts/design-review/domains/`; only `07-accessibility.md` and `08-test-plan.md` are per-agent at `global/prompts/design-review/{claude,codex,gemini}/`
 - **Agent preamble** is at `global/prompts/design-review/{agent}/agent.md`
-- **Dispatch script** is `tools/plan_review_dispatch.ts` (not `multi_review.ts`)
+- **Dispatch script** is `tools/stark_review_doc.ts` (invoked `--prompts-dir design-review`, not `multi_review.ts`)
 - **8 domains:** completeness, security, scope, api-design, data-modeling, consistency, accessibility, test-plan
 
 ### Common design review improvements

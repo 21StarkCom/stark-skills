@@ -56,10 +56,7 @@ If no input provided, ask: "What should I build?"
 ## Constants
 
 ```bash
-SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
 TOOLS="${STARK_REVIEW_TOOLS:-$HOME/.claude/code-review/tools}"
-PYTHON="$SCRIPTS/.venv/bin/python3"
-[ -x "$PYTHON" ] || PYTHON=python3
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 # LEAD  — resolved from --lead, default claude
 # WING  — resolved from --wing, default codex
@@ -320,7 +317,7 @@ After each step completes:
 ```bash
 node --experimental-strip-types --no-warnings ~/.claude/code-review/tools/session_state.ts --json 2>/dev/null || true
 ```
-Call `add_task("{step_id}")` programmatically. Generate a checkpoint every `context_compaction.checkpoint_interval_minutes` minutes (default 15):
+Generate a checkpoint every `context_compaction.checkpoint_interval_minutes` minutes (default 15):
 ```bash
 node --experimental-strip-types --no-warnings ~/.claude/code-review/tools/context_compactor.ts --json 2>/dev/null || true
 ```

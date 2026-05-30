@@ -231,7 +231,7 @@ Commit the changelog and any updated version files together:
 git add CHANGELOG.md ${VERSION_FILES}
 git commit -m "release: v${NEXT_VERSION}
 
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ```
 
 ---

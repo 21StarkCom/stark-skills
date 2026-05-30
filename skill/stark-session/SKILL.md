@@ -29,7 +29,6 @@ A single TS CLI gathers every fact you need into one JSON blob; you render the b
 ## Constants
 
 ```bash
-SCRIPTS="${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}"
 TOOLS="${STARK_REVIEW_TOOLS:-$HOME/.claude/code-review/tools}"
 SESSION_CLI="node --experimental-strip-types --no-warnings $TOOLS/stark_session.ts"
 ```
