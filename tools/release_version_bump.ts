@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
 // stark-release Step 5 — auto-detect every version file in the repo
-// (Python __init__.py / pyproject.toml, package.json, Cargo.toml) and
-// rewrite each one to a target semver. Replaces the bash detection table
-// in stark-release SKILL.md with a single deterministic call.
+// (Python __init__.py / pyproject.toml, package.json, Cargo.toml, plus a
+// plain top-level VERSION / VERSION.txt) and rewrite each one to a target
+// semver. Replaces the bash detection table in stark-release SKILL.md with
+// a single deterministic call.
 //
 // pyproject.toml is intentionally skipped when `[tool.setuptools-scm]`
 // is present — those projects derive their version from git tags and
@@ -18,7 +19,8 @@ export type Ecosystem =
   | "python-init"
   | "python-pyproject"
   | "node"
-  | "rust";
+  | "rust"
+  | "version-file";
 
 export type BumpedFile = {
   path: string; // relative to repo root
@@ -107,6 +109,22 @@ export function bumpCargoToml(content: string, newVersion: string): RewriteOutpu
   };
 }
 
+export function bumpVersionFile(content: string, newVersion: string): RewriteOutput {
+  // A plain VERSION file is, by convention, just the version string —
+  // optionally `v`-prefixed, usually with a trailing newline. Replace only
+  // the first semver token so the optional `v` prefix and the file's
+  // surrounding whitespace / trailing newline are preserved. If the file
+  // holds no semver (a VERSION file that means something else), previous is
+  // null and bumpAll skips it silently.
+  const re = /(v?)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)/;
+  const match = content.match(re);
+  if (!match) return { content, previous: null };
+  return {
+    content: content.replace(re, `$1${newVersion}`),
+    previous: match[2],
+  };
+}
+
 // ── File discovery ──────────────────────────────────────────────
 
 const SKIP_DIRS = new Set([
@@ -158,6 +176,14 @@ function hasVersionMarker(filePath: string): boolean {
   }
 }
 
+function isFileSafe(p: string): boolean {
+  try {
+    return fs.statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
 // ── Top-level orchestration ────────────────────────────────────
 
 type DetectedFile = {
@@ -182,6 +208,16 @@ export function detectVersionFiles(repoRoot: string): DetectedFile[] {
   if (fs.existsSync(cargo)) {
     detected.push({ absolutePath: cargo, ecosystem: "rust" });
   }
+  // Plain top-level VERSION file (e.g. Terraform / Go infra repos that keep
+  // the version in a bare file alongside the git tag). VERSION.txt is the
+  // common variant. A non-semver VERSION file is harmless — bumpVersionFile
+  // returns previous=null and bumpAll skips it.
+  for (const name of ["VERSION", "VERSION.txt"]) {
+    const vf = path.join(repoRoot, name);
+    if (isFileSafe(vf)) {
+      detected.push({ absolutePath: vf, ecosystem: "version-file" });
+    }
+  }
   return detected;
 }
 
@@ -195,6 +231,8 @@ function rewrite(content: string, ecosystem: Ecosystem, newVersion: string): Rew
       return bumpPackageJson(content, newVersion);
     case "rust":
       return bumpCargoToml(content, newVersion);
+    case "version-file":
+      return bumpVersionFile(content, newVersion);
   }
 }
 

@@ -190,7 +190,8 @@ The tool auto-detects every supported version file and rewrites each one:
 - `pyproject.toml` with `version = "X.Y.Z"` (skipped when `[tool.setuptools-scm]` is present)
 - `package.json` with `"version"` (Node — preserves indentation)
 - `Cargo.toml` `[package]` `version =` (Rust — does NOT touch dep versions)
-- Go projects have no version file; the git tag alone carries the version.
+- a plain top-level `VERSION` / `VERSION.txt` (Terraform / Go infra repos — rewrites the first semver token, preserving an optional `v` prefix and the trailing newline; a non-semver file is silently skipped)
+- Go projects without a `VERSION` file have none; the git tag alone carries the version.
 
 Receipt shape: `{ version, dryRun, filesUpdated[{path, ecosystem, previous}],
 filesSkipped[{path, reason}] }`. If `filesUpdated` is empty AND `filesSkipped`

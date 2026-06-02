@@ -13,6 +13,7 @@ import {
   bumpPackageJson,
   bumpPyproject,
   bumpPythonInit,
+  bumpVersionFile,
   isValidSemver,
 } from "./release_version_bump.ts";
 
@@ -96,6 +97,30 @@ test("bumpCargoToml rewrites the [package] version, not dependency versions", ()
   assert.match(result.content, /serde = \{ version = "1\.0\.0" \}/);
 });
 
+// ── plain VERSION file ──────────────────────────────────────────
+
+test("bumpVersionFile rewrites a bare version and preserves the trailing newline", () => {
+  const result = bumpVersionFile("0.13.6\n", "0.13.9");
+  assert.equal(result.previous, "0.13.6");
+  assert.equal(result.content, "0.13.9\n");
+});
+
+test("bumpVersionFile preserves a leading v prefix and a no-newline file", () => {
+  const pref = bumpVersionFile("v1.2.3\n", "1.2.4");
+  assert.equal(pref.previous, "1.2.3");
+  assert.equal(pref.content, "v1.2.4\n");
+
+  const noNewline = bumpVersionFile("0.1.0", "0.2.0");
+  assert.equal(noNewline.previous, "0.1.0");
+  assert.equal(noNewline.content, "0.2.0");
+});
+
+test("bumpVersionFile returns previous=null for a non-semver VERSION file", () => {
+  const result = bumpVersionFile("stable\n", "9.9.9");
+  assert.equal(result.previous, null);
+  assert.equal(result.content, "stable\n");
+});
+
 // ── bumpAll integration ─────────────────────────────────────────
 
 test("bumpAll updates every supported file in a synthetic repo", (t) => {
@@ -113,6 +138,7 @@ test("bumpAll updates every supported file in a synthetic repo", (t) => {
       path.join(repo, "src", "demo", "__init__.py"),
       '__version__ = "0.0.1"\n',
     );
+    fs.writeFileSync(path.join(repo, "VERSION"), "0.0.1\n");
 
     const result = bumpAll(repo, "1.0.0");
     assert.equal(result.version, "1.0.0");
@@ -120,6 +146,7 @@ test("bumpAll updates every supported file in a synthetic repo", (t) => {
     const updatedPaths = result.filesUpdated.map((f) => f.path).sort();
     assert.deepEqual(updatedPaths, [
       "Cargo.toml",
+      "VERSION",
       "package.json",
       "pyproject.toml",
       path.join("src", "demo", "__init__.py"),
@@ -131,6 +158,10 @@ test("bumpAll updates every supported file in a synthetic repo", (t) => {
     assert.match(
       fs.readFileSync(path.join(repo, "Cargo.toml"), "utf8"),
       /version = "1\.0\.0"/,
+    );
+    assert.equal(
+      fs.readFileSync(path.join(repo, "VERSION"), "utf8"),
+      "1.0.0\n",
     );
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
