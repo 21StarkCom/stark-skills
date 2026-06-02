@@ -202,6 +202,32 @@ For monorepos the tool updates ALL detected files for consistency.
 
 ---
 
+## Step 5.5: Regenerate visualizations (if present)
+
+Skip entirely if the repo has no `scripts/generate-viz.py`.
+
+Some repos (e.g. `infra-ai-platform`) render version-stamped HTML + markdown
+from their Terraform/config via `scripts/generate-viz.py` and gate every PR on
+a freshness check (`generate-viz.py --check`). The generated files embed the
+version string, so the Step 5 bump leaves them stale and the NEXT PR's viz
+check fails. Regenerate now — AFTER the version file is bumped (so the new
+version is stamped in) and BEFORE the release commit (Step 6 stages the
+result).
+
+```bash
+if [ -f scripts/generate-viz.py ]; then
+  echo "Regenerating version-stamped visualizations for v${NEXT_VERSION}…"
+  # --no-screenshots matches the gated check (`--check --no-screenshots`) and
+  # avoids a headless-browser dependency in the release environment; PNG
+  # screenshots are not part of the freshness gate.
+  python3 scripts/generate-viz.py --no-screenshots
+fi
+```
+
+The regenerated files are committed with the version bump in Step 6.
+
+---
+
 ## Step 6: Update CHANGELOG
 
 Move `[Unreleased]` content to a new versioned section. The `[Unreleased]` section
@@ -227,9 +253,16 @@ After:
 - Bug B (#43)
 ```
 
-Commit the changelog and any updated version files together:
+Commit the changelog, any updated version files, and any regenerated
+visualizations (Step 5.5) together:
 ```bash
 git add CHANGELOG.md ${VERSION_FILES}
+# Stage regenerated visualizations + their markdown injections (Step 5.5).
+# Safe to add broadly — Step 1 required a clean tree, so the only changes
+# under these paths are release artifacts.
+if [ -f scripts/generate-viz.py ]; then
+  git add docs/visualizations/ README.md docs/ 2>/dev/null || true
+fi
 git commit -m "release: v${NEXT_VERSION}
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
