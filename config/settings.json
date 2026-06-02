@@ -37,6 +37,7 @@
       }
     ]
   },
+  "enableWorkflows": true,
   "statusLine": {
     "type": "command",
     "command": "bash /Users/aryeh/.claude/statusline-command.sh"
@@ -62,8 +63,7 @@
     "commit-commands@claude-plugins-official": true,
     "playground@claude-plugins-official": true,
     "gopls-lsp@claude-plugins-official": true,
-    "stark-gh@stark-skills": true,
-    "caveman@stark-skills": true
+    "stark-gh@stark-skills": true
   },
   "extraKnownMarketplaces": {
     "claude-code-lsps": {
@@ -86,13 +86,13 @@
     }
   },
   "outputStyle": "Proactive",
-  "effortLevel": "xhigh",
-  "enableWorkflows": true,
+  "effortLevel": "medium",
   "autoUpdatesChannel": "latest",
   "skipDangerousModePermissionPrompt": true,
   "theme": "dark",
   "editorMode": "normal",
   "preferredNotifChannel": "auto",
+  "remoteControlAtStartup": true,
   "inputNeededNotifEnabled": true,
   "agentPushNotifEnabled": true,
   "skipAutoPermissionPrompt": true,
@@ -102,5 +102,5 @@
       "Pushing branches and opening/merging PRs in /Users/aryeh/Code/Playground/stark-data-core is permitted — it is a trusted sibling repo in Aryeh's workspace alongside stark-night-watch and is covered by the same review workflow."
     ]
   },
-  "remoteControlAtStartup": true
+  "model": "opus"
 }
