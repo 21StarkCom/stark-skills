@@ -2,7 +2,8 @@
   "env": {
     "CLAUDE_CODE_USE_VERTEX": "0",
     "ANTHROPIC_VERTEX_PROJECT_ID": "infra-ai-platform",
-    "CLOUD_ML_REGION": "global"
+    "CLOUD_ML_REGION": "global",
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "50"
   },
   "permissions": {
     "allow": [

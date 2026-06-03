@@ -39,6 +39,7 @@ export const DEFAULT_WING: AgentName = "codex";
 export const DEFAULT_MAX_ROUNDS = 4;
 export const DEFAULT_TIMEOUT_SEC = 900;
 export const WING_TIMEOUT_DEFAULT_SEC = 600;
+export const DEFAULT_GOAL_MAX_BUDGET_USD = 5;
 export const TEST_TIMEOUT_SEC = 120;
 
 const CLAUDE_DEFAULT_MODEL = "claude-opus-4-8";
@@ -857,16 +858,29 @@ export async function restoreWorktree(
 
 // Agent dispatch ----------------------------------------------------------
 
-function buildClaudeCmd(opts: {
+export function buildClaudeCmd(opts: {
   allowedTools?: string;
   outputFormat?: "text" | "json";
+  // When set, the prompt is passed as the `-p` ARGUMENT instead of stdin (`-p -`).
+  // Required for the `/goal` loop to fire: a leading `/goal` is only honored in the
+  // argument form — via stdin it is read as plain prompt text (verified 2026-06-03,
+  // Claude Code 2.1.161). Passing from a Node args array avoids any shell quoting.
+  // TRADEOFF: an argv-passed prompt is visible in `ps`/process listings. Goal prompts
+  // here carry only issue/plan/task text (never secrets — the skills never interpolate
+  // credentials into prompts), so on a single-user host this exposure is acceptable;
+  // the goal loop cannot be driven any other way. Do not put secrets in goal prompts.
+  promptArg?: string;
+  maxBudgetUsd?: number; // runaway guard for goal loops
 }): { cmd: string; args: string[] } {
   const args = [
-    "-p", "-",
+    "-p", opts.promptArg ?? "-",
     "--output-format", opts.outputFormat ?? "text",
     "--model", resolveModel("claude"),
     "--no-session-persistence",
   ];
+  if (opts.maxBudgetUsd && opts.maxBudgetUsd > 0) {
+    args.push("--max-budget-usd", String(opts.maxBudgetUsd));
+  }
   if (opts.allowedTools) args.push("--allowedTools", opts.allowedTools);
   return { cmd: "claude", args };
 }
@@ -889,6 +903,8 @@ async function runImplementationAgent(
   prompt: string,
   worktreePath: string,
   timeoutSec: number,
+  goalCondition: string | null = null,
+  goalMaxBudgetUsd: number | null = null,
 ): Promise<ImplementOutcome> {
   const t0 = process.hrtime.bigint();
   const out: ImplementOutcome = {
@@ -918,8 +934,21 @@ async function runImplementationAgent(
 
   try {
     if (agent === "claude") {
-      const c = buildClaudeCmd({ allowedTools: "Edit,Write,Read,Bash,Glob,Grep" });
-      cmd = c.cmd; args = c.args; stdin = prompt;
+      if (goalCondition) {
+        // Goal-driven lead: prefix the prompt with /goal and pass it as the -p
+        // argument so Claude Code loops until the condition holds. The lead never
+        // commits (the dispatcher owns git), so the condition omits "committed".
+        const goalPrompt = `/goal ${goalCondition}\n\n${prompt}`;
+        const c = buildClaudeCmd({
+          allowedTools: "Edit,Write,Read,Bash,Glob,Grep",
+          promptArg: goalPrompt,
+          maxBudgetUsd: goalMaxBudgetUsd ?? undefined,
+        });
+        cmd = c.cmd; args = c.args; stdin = undefined;
+      } else {
+        const c = buildClaudeCmd({ allowedTools: "Edit,Write,Read,Bash,Glob,Grep" });
+        cmd = c.cmd; args = c.args; stdin = prompt;
+      }
       const built = await buildAgentEnv("claude", "implementation");
       env = built.env; agentTempDir = built.tempDir;
     } else if (agent === "codex") {
@@ -1237,6 +1266,10 @@ export interface RunCopilotOpts {
   timeoutSec: number;
   wingTimeoutSec: number;
   testCommand: string | null;
+  // When set (and lead === "claude"), the lead runs as a Claude Code /goal loop
+  // that iterates until the condition holds. null/undefined → single-pass (legacy).
+  goalCondition?: string | null;
+  goalMaxBudgetUsd?: number | null;
 }
 
 interface PreflightFailure {
@@ -1252,6 +1285,16 @@ export async function runCopilotStep(
 ): Promise<CopilotResult | PreflightFailure> {
   const { repoRoot, stepId, implementPrompt, reviewPrompt, stepTask, lead, wing,
     maxRounds, timeoutSec, wingTimeoutSec, testCommand } = opts;
+  // Goal mode only applies to a claude lead (/goal is a Claude Code feature).
+  const goalCondition = lead === "claude" ? (opts.goalCondition ?? null) : null;
+  // When goal mode is active the budget is a mandatory runaway guard: a null,
+  // NaN, or non-positive value must NOT silently disable it — fall back to the
+  // documented default rather than running unbounded.
+  const goalMaxBudgetUsd = goalCondition
+    ? (Number.isFinite(opts.goalMaxBudgetUsd) && (opts.goalMaxBudgetUsd as number) > 0
+        ? (opts.goalMaxBudgetUsd as number)
+        : DEFAULT_GOAL_MAX_BUDGET_USD)
+    : null;
 
   if (lead === wing) return { step_id: stepId, error: "lead_eq_wing", rounds: [] };
   if (!VALID_AGENTS.includes(lead) || !VALID_AGENTS.includes(wing)) {
@@ -1281,7 +1324,7 @@ export async function runCopilotStep(
   }
 
   // Round 1: lead implements --------------------------------------------
-  const sr = await runImplementationAgent(lead, implementPrompt, worktreePath, timeoutSec);
+  const sr = await runImplementationAgent(lead, implementPrompt, worktreePath, timeoutSec, goalCondition, goalMaxBudgetUsd);
   const r1 = newRound(1);
   r1.diff = sr.diff;
   r1.files_changed = sr.files_changed;
@@ -1416,7 +1459,7 @@ export async function runCopilotStep(
     const fixPrompt = buildFixPrompt(
       implementPrompt, stepTask, currentRound.blocking_findings, nextRoundNum,
     );
-    const srFix = await runImplementationAgent(lead, fixPrompt, worktreePath, timeoutSec);
+    const srFix = await runImplementationAgent(lead, fixPrompt, worktreePath, timeoutSec, goalCondition, goalMaxBudgetUsd);
     const nextRound = newRound(nextRoundNum);
     nextRound.diff = srFix.diff;
     nextRound.files_changed = srFix.files_changed;
@@ -1525,6 +1568,8 @@ interface CliArgs {
   wingTimeoutSec: number;
   testCommand: string | null;
   cleanup: boolean;
+  goalCondition: string | null;
+  goalMaxBudgetUsd: number | null;
 }
 
 function usage(): string {
@@ -1547,6 +1592,9 @@ function usage(): string {
     `  --timeout N                     Per-lead-invocation timeout sec (default ${DEFAULT_TIMEOUT_SEC})`,
     `  --wing-timeout N                Per-wing-invocation timeout sec (default ${WING_TIMEOUT_DEFAULT_SEC})`,
     "  --test-command CMD              Optional test command to run after each round",
+    "  --goal-condition TEXT           Run the claude lead as a /goal loop until TEXT holds",
+    "                                  (ignored when lead is codex/gemini)",
+    `  --goal-max-budget-usd N         Runaway guard for the goal loop (default ${DEFAULT_GOAL_MAX_BUDGET_USD}; must be > 0)`,
     "  --cleanup                       Remove the lead's worktree for --step-id and exit",
   ].join("\n");
 }
@@ -1565,6 +1613,8 @@ function parseArgs(argv: ReadonlyArray<string>): CliArgs {
     wingTimeoutSec: WING_TIMEOUT_DEFAULT_SEC,
     testCommand: null,
     cleanup: false,
+    goalCondition: null,
+    goalMaxBudgetUsd: null,
   };
   const need = (i: number, flag: string): string => {
     const v = argv[i + 1];
@@ -1594,6 +1644,14 @@ function parseArgs(argv: ReadonlyArray<string>): CliArgs {
       case "--timeout":              args.timeoutSec = asInt(need(i, a), a); i++; break;
       case "--wing-timeout":         args.wingTimeoutSec = asInt(need(i, a), a); i++; break;
       case "--test-command":         args.testCommand = need(i, a); i++; break;
+      case "--goal-condition":       args.goalCondition = need(i, a); i++; break;
+      case "--goal-max-budget-usd": {
+        const v = Number.parseFloat(need(i, a));
+        if (!Number.isFinite(v) || v <= 0) {
+          throw new Error(`${a} must be a positive number (got ${argv[i + 1]})`);
+        }
+        args.goalMaxBudgetUsd = v; i++; break;
+      }
       case "--cleanup":              args.cleanup = true; break;
       case "-h": case "--help":      process.stdout.write(usage() + "\n"); process.exit(0);
       default: throw new Error(`unknown arg: ${a}`);
@@ -1648,6 +1706,8 @@ async function main(): Promise<number> {
     timeoutSec: args.timeoutSec,
     wingTimeoutSec: args.wingTimeoutSec,
     testCommand: args.testCommand,
+    goalCondition: args.goalCondition,
+    goalMaxBudgetUsd: args.goalMaxBudgetUsd,
   });
 
   process.stdout.write(JSON.stringify(result, null, 2) + "\n");

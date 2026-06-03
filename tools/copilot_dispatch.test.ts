@@ -15,12 +15,14 @@ import {
   parseCodexJsonl,
   parseGeminiJson,
   buildReviewPayload,
+  buildClaudeCmd,
   buildFixPrompt,
   restoreWorktree,
   sanitizeRef,
   shouldFallbackToApiKey,
   snapshotWorktree,
   tokenizeShell,
+  DEFAULT_GOAL_MAX_BUDGET_USD,
   VALID_AGENTS,
 } from "./copilot_dispatch.ts";
 
@@ -370,6 +372,43 @@ describe("createWorktree / cleanupWorktree", () => {
 
 // --- CLI smoke (--help, missing args) -------------------------------------
 
+describe("buildClaudeCmd (goal mode)", () => {
+  test("default (no promptArg) reads stdin via `-p -` and sets no budget", () => {
+    const { cmd, args } = buildClaudeCmd({ allowedTools: "Read" });
+    assert.equal(cmd, "claude");
+    const pIdx = args.indexOf("-p");
+    assert.equal(args[pIdx + 1], "-");
+    assert.equal(args.includes("--max-budget-usd"), false);
+  });
+
+  test("promptArg routes the prompt as the `-p` ARGUMENT (enables /goal loop)", () => {
+    const goalPrompt = "/goal tests pass\n\nimplement the thing";
+    const { args } = buildClaudeCmd({ promptArg: goalPrompt, maxBudgetUsd: 5 });
+    const pIdx = args.indexOf("-p");
+    assert.equal(args[pIdx + 1], goalPrompt);
+    assert.notEqual(args[pIdx + 1], "-");
+  });
+
+  test("maxBudgetUsd adds the runaway guard flag", () => {
+    const { args } = buildClaudeCmd({ promptArg: "/goal x", maxBudgetUsd: 7 });
+    const bIdx = args.indexOf("--max-budget-usd");
+    assert.notEqual(bIdx, -1);
+    assert.equal(args[bIdx + 1], "7");
+  });
+
+  test("non-positive / NaN budget never emits the flag", () => {
+    for (const bad of [0, -3, Number.NaN]) {
+      const { args } = buildClaudeCmd({ promptArg: "/goal x", maxBudgetUsd: bad });
+      assert.equal(args.includes("--max-budget-usd"), false, `budget=${bad}`);
+    }
+  });
+
+  test("DEFAULT_GOAL_MAX_BUDGET_USD is a positive number", () => {
+    assert.equal(typeof DEFAULT_GOAL_MAX_BUDGET_USD, "number");
+    assert.ok(DEFAULT_GOAL_MAX_BUDGET_USD > 0);
+  });
+});
+
 describe("CLI", () => {
   test("--help exits 0 and prints usage", () => {
     const file = path.resolve(import.meta.dirname ?? "", "copilot_dispatch.ts");
@@ -394,5 +433,34 @@ describe("CLI", () => {
       const e = err as { status?: number };
       assert.equal(e.status, 2);
     }
+  });
+
+  test("--goal-max-budget-usd rejects non-positive / non-numeric values (exit 2)", () => {
+    const file = path.resolve(import.meta.dirname ?? "", "copilot_dispatch.ts");
+    for (const bad of ["0", "-1", "abc"]) {
+      try {
+        execFileSync(
+          "node",
+          ["--experimental-strip-types", file,
+            "--repo-root", "/tmp", "--step-id", "x",
+            "--implement-prompt-file", "/tmp/i", "--review-prompt-file", "/tmp/r",
+            "--step-task-file", "/tmp/t", "--goal-max-budget-usd", bad],
+          { encoding: "utf-8", stdio: "pipe" },
+        );
+        assert.fail(`should have exited non-zero for budget=${bad}`);
+      } catch (err) {
+        const e = err as { status?: number };
+        assert.equal(e.status, 2, `budget=${bad}`);
+      }
+    }
+  });
+
+  test("--help documents the goal-mode flags", () => {
+    const file = path.resolve(import.meta.dirname ?? "", "copilot_dispatch.ts");
+    const out = execFileSync(
+      "node", ["--experimental-strip-types", file, "--help"], { encoding: "utf-8" },
+    );
+    assert.match(out, /--goal-condition/);
+    assert.match(out, /--goal-max-budget-usd/);
   });
 });
