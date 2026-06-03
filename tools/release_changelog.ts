@@ -15,7 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-export type CategoryName = "added" | "fixed" | "changed";
+export type CategoryName = "added" | "fixed" | "changed" | "removed";
 
 export type CommitRecord = { subject: string; body: string };
 
@@ -29,6 +29,7 @@ export type UnreleasedSection = {
   added: string[];
   fixed: string[];
   changed: string[];
+  removed: string[];
   raw: string;
   isEmpty: boolean;
 };
@@ -39,6 +40,7 @@ export type GatheredChanges = {
   added: string[];
   fixed: string[];
   changed: string[];
+  removed: string[];
   hasBreaking: boolean;
   totalEntries: number;
   recommendedBump: "patch" | "minor" | "major" | null;
@@ -94,7 +96,7 @@ export function parseChangelogUnreleased(changelogContent: string): UnreleasedSe
   // Find the `## [Unreleased]` heading; bail if absent.
   const headerIdx = changelogContent.search(/^##\s*\[Unreleased\]/m);
   if (headerIdx === -1) {
-    return { added: [], fixed: [], changed: [], raw: "", isEmpty: true };
+    return { added: [], fixed: [], changed: [], removed: [], raw: "", isEmpty: true };
   }
   // Strip the heading line itself, then truncate at the next versioned
   // section (`## [vX.Y.Z]`). JS regex has no `\Z` anchor, so we slice
@@ -110,12 +112,16 @@ function parseUnreleasedSections(raw: string): UnreleasedSection {
   const added: string[] = [];
   const fixed: string[] = [];
   const changed: string[] = [];
+  const removed: string[] = [];
   let current: CategoryName | null = null;
   for (const line of raw.split("\n")) {
     const sub = line.match(/^###\s+(\w+)/);
     if (sub) {
       const name = sub[1].toLowerCase();
-      current = name === "added" || name === "fixed" || name === "changed" ? name : null;
+      current =
+        name === "added" || name === "fixed" || name === "changed" || name === "removed"
+          ? name
+          : null;
       continue;
     }
     const bullet = line.match(/^\s*-\s+(.*)$/);
@@ -124,6 +130,7 @@ function parseUnreleasedSections(raw: string): UnreleasedSection {
       if (!text) continue;
       if (current === "added") added.push(text);
       else if (current === "fixed") fixed.push(text);
+      else if (current === "removed") removed.push(text);
       else changed.push(text);
     }
   }
@@ -131,8 +138,9 @@ function parseUnreleasedSections(raw: string): UnreleasedSection {
     added,
     fixed,
     changed,
+    removed,
     raw: raw.trim(),
-    isEmpty: added.length + fixed.length + changed.length === 0,
+    isEmpty: added.length + fixed.length + changed.length + removed.length === 0,
   };
 }
 
@@ -143,14 +151,16 @@ export function recommendBump(
   fixed: string[],
   changed: string[],
   hasBreaking: boolean,
+  // Trailing optional so existing 4-arg callers keep working. A bare ### Removed
+  // entry is NOT auto-major: many removals (docs, dead tooling, internal churn)
+  // are non-breaking. Authors mark genuinely breaking removals with a
+  // `**BREAKING:**` prefix, which routes through hasBreaking → major.
+  removed: string[] = [],
 ): "patch" | "minor" | "major" | null {
-  if (added.length + fixed.length + changed.length === 0) return null;
+  if (added.length + fixed.length + changed.length + removed.length === 0) return null;
   if (hasBreaking) return "major";
   if (added.length > 0) return "minor";
-  if (fixed.length > 0 && changed.length === 0) return "patch";
-  // Only ### Changed entries (refactor/chore/etc) → still a patch in the
-  // SKILL.md rules, since there's no new feature and no breaking change.
-  if (changed.length > 0 && added.length === 0 && fixed.length === 0) return "patch";
+  // Only Fixed / Changed / Removed entries → patch (no new feature, no breaking).
   return "patch";
 }
 
@@ -162,7 +172,7 @@ export function gatherChanges(opts: {
   const unreleased = parseChangelogUnreleased(opts.changelogContent);
 
   if (!unreleased.isEmpty) {
-    const hasBreaking = unreleased.changed.some((entry) =>
+    const hasBreaking = [...unreleased.changed, ...unreleased.removed].some((entry) =>
       /^\*\*BREAKING:\*\*/.test(entry),
     );
     return {
@@ -171,14 +181,19 @@ export function gatherChanges(opts: {
       added: unreleased.added,
       fixed: unreleased.fixed,
       changed: unreleased.changed,
+      removed: unreleased.removed,
       hasBreaking,
       totalEntries:
-        unreleased.added.length + unreleased.fixed.length + unreleased.changed.length,
+        unreleased.added.length +
+        unreleased.fixed.length +
+        unreleased.changed.length +
+        unreleased.removed.length,
       recommendedBump: recommendBump(
         unreleased.added,
         unreleased.fixed,
         unreleased.changed,
         hasBreaking,
+        unreleased.removed,
       ),
     };
   }
@@ -191,6 +206,7 @@ export function gatherChanges(opts: {
       added: [],
       fixed: [],
       changed: [],
+      removed: [],
       hasBreaking: false,
       totalEntries: 0,
       recommendedBump: null,
@@ -208,12 +224,16 @@ export function gatherChanges(opts: {
     else if (result.category === "fixed") fixed.push(result.entry);
     else changed.push(result.entry);
   }
+  // git-log categorization never yields "removed": Conventional Commits has no
+  // removal type, so removals surface as chore/refactor → changed. ### Removed
+  // is a CHANGELOG-authored category only.
   return {
     source: "git-log",
     lastTag: opts.lastTag,
     added,
     fixed,
     changed,
+    removed: [],
     hasBreaking,
     totalEntries: added.length + fixed.length + changed.length,
     recommendedBump: recommendBump(added, fixed, changed, hasBreaking),
@@ -289,6 +309,11 @@ function formatText(changes: GatheredChanges): string {
   if (changes.changed.length) {
     out.push("### Changed");
     for (const e of changes.changed) out.push(`- ${e}`);
+    out.push("");
+  }
+  if (changes.removed.length) {
+    out.push("### Removed");
+    for (const e of changes.removed) out.push(`- ${e}`);
     out.push("");
   }
   out.push(
