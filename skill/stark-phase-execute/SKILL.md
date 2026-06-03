@@ -197,16 +197,16 @@ claude -p "$(cat "$PROMPT_FILE")" \
   --output-format text \
   --permission-mode bypassPermissions \
   --no-session-persistence \
-  --max-budget-usd "${STARK_GOAL_MAX_BUDGET_USD:-5}" \
+  --max-budget-usd "${STARK_GOAL_MAX_BUDGET_USD:-10}" \
   --allowedTools "Edit,Write,Read,Bash,Glob,Grep"
 rm -f "$PROMPT_FILE"
 ```
 
-The `/goal` condition is re-evaluated each turn by the fast model; the loop ends when implementation + tests + commit are all satisfied, on `--max-budget-usd` exhaustion, or when interrupted. `--max-budget-usd` is a mandatory runaway guard (default $5/task via `STARK_GOAL_MAX_BUDGET_USD`). This replaces the hand-rolled retry cap with Claude Code's native goal mechanism.
+The `/goal` condition is re-evaluated each turn by the fast model; the loop ends when implementation + tests + commit are all satisfied, on `--max-budget-usd` exhaustion, or when interrupted. `--max-budget-usd` is a mandatory runaway guard (default $10/task via `STARK_GOAL_MAX_BUDGET_USD`). This replaces the hand-rolled retry cap with Claude Code's native goal mechanism.
 
 > **Verified:** the goal loop fires only via the `-p` **argument** form, not stdin (`-p -`). If a future Claude Code build changes this, fall back with `--no-goal`.
 >
-> **Security note:** because the prompt is passed as a `-p` argument it is visible in `ps`/process listings. The prompt carries only issue/task text — never interpolate secrets into it. `--max-budget-usd` is a mandatory runaway guard; the default ($5 via `STARK_GOAL_MAX_BUDGET_USD`) must stay positive.
+> **Security note:** because the prompt is passed as a `-p` argument it is visible in `ps`/process listings. The prompt carries only issue/task text — never interpolate secrets into it. `--max-budget-usd` is a mandatory runaway guard; the default ($10 via `STARK_GOAL_MAX_BUDGET_USD`) must stay positive.
 
 **Fallback (`--no-goal`).** Spawn a bounded subagent (Agent tool, foreground) with the same instruction body, ending with: "If tests fail, fix them. If you can't resolve after 2 attempts, commit what you have and note the failure."
 
