@@ -14,6 +14,7 @@ test("buildCodexArgv composes the production invocation", () => {
     "--json",
     "-s",
     "read-only",
+    "--skip-git-repo-check",
     "-",
   ]);
 });

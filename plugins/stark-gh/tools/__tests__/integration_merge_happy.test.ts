@@ -96,8 +96,8 @@ test("integration: commands/pr-merge.md is zero-LLM-logic body", () => {
   assert.doesNotMatch(codeBlocks, /\bcurl .*api\.anthropic/i, "code blocks must not call anthropic HTTP API");
   // Must reference --raw-args pattern.
   assert.match(content, /--raw-args "\$ARGUMENTS"/);
-  // Must invoke from install path.
-  assert.match(content, /\$HOME\/\.claude\/plugins\/stark-gh\/tools/);
+  // Must invoke from the plugin install path via CLAUDE_PLUGIN_ROOT.
+  assert.match(content, /\$\{CLAUDE_PLUGIN_ROOT\}\/tools/);
   // Kill-switch removed (operator opted in); must NOT contain the gate any more.
   assert.doesNotMatch(content, /STARK_GH_PR_MERGE_ENABLE/);
   // Must install cross-stage cleanup trap.
