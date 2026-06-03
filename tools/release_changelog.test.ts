@@ -117,6 +117,26 @@ test("parseChangelogUnreleased extracts entries by sub-section", () => {
   assert.deepEqual(section.changed, []);
 });
 
+test("parseChangelogUnreleased extracts ### Removed entries", () => {
+  const md = [
+    "# Changelog",
+    "",
+    "## [Unreleased]",
+    "",
+    "### Removed",
+    "- dead viz generator",
+    "- stale CI gate",
+    "",
+    "## [v1.0.0] - 2026-01-01",
+    "",
+  ].join("\n");
+  const section = parseChangelogUnreleased(md);
+  assert.equal(section.isEmpty, false);
+  assert.deepEqual(section.removed, ["dead viz generator", "stale CI gate"]);
+  assert.deepEqual(section.added, []);
+  assert.deepEqual(section.changed, []);
+});
+
 test("parseChangelogUnreleased flags an empty section", () => {
   const md = ["## [Unreleased]", "", "## [v0.1.0] - 2026-01-01", "### Added", "- x"].join(
     "\n",
@@ -164,6 +184,41 @@ test("gatherChanges falls back to git log when [Unreleased] is empty", () => {
   assert.deepEqual(result.changed, ["cleanup"]);
 });
 
+test("gatherChanges surfaces a ### Removed-only CHANGELOG as a patch", () => {
+  const md = [
+    "## [Unreleased]",
+    "### Removed",
+    "- viz generator and all generated artifacts",
+    "",
+  ].join("\n");
+  const result = gatherChanges({
+    changelogContent: md,
+    gitLogOutput: `chore: remove viz${RS}\n`,
+    lastTag: "v0.13.8",
+  });
+  assert.equal(result.source, "changelog");
+  assert.deepEqual(result.removed, ["viz generator and all generated artifacts"]);
+  assert.equal(result.totalEntries, 1);
+  assert.equal(result.hasBreaking, false);
+  assert.equal(result.recommendedBump, "patch");
+});
+
+test("gatherChanges treats a **BREAKING:** removal as major", () => {
+  const md = [
+    "## [Unreleased]",
+    "### Removed",
+    "- **BREAKING:** dropped the v1 output consumers depend on",
+    "",
+  ].join("\n");
+  const result = gatherChanges({
+    changelogContent: md,
+    gitLogOutput: "",
+    lastTag: "v1.2.3",
+  });
+  assert.equal(result.hasBreaking, true);
+  assert.equal(result.recommendedBump, "major");
+});
+
 test("gatherChanges returns source=empty when both inputs are empty", () => {
   const result = gatherChanges({
     changelogContent: "## [Unreleased]\n",
@@ -186,6 +241,18 @@ test("recommendBump: any added → minor", () => {
 
 test("recommendBump: breaking change → major", () => {
   assert.equal(recommendBump(["new feature"], [], ["**BREAKING:** drop X"], true), "major");
+});
+
+test("recommendBump: only removals → patch", () => {
+  assert.equal(recommendBump([], [], [], false, ["dropped dead code"]), "patch");
+});
+
+test("recommendBump: breaking removal → major", () => {
+  assert.equal(recommendBump([], [], [], true, ["**BREAKING:** drop output"]), "major");
+});
+
+test("recommendBump: added wins over removals → minor", () => {
+  assert.equal(recommendBump(["feature"], [], [], false, ["dropped thing"]), "minor");
 });
 
 test("recommendBump: empty → null", () => {

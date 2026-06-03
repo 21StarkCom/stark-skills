@@ -147,12 +147,14 @@ CHANGES_JSON=$(node --experimental-strip-types "$TOOLS/release_changelog.ts" --j
 The tool reads `CHANGELOG.md`, then falls back to `git log <last-tag>..HEAD`
 when `[Unreleased]` is empty, and categorizes commits by Conventional Commits
 prefix into Added / Fixed / Changed (with `**BREAKING:**` markers for breaking
-changes). It also returns a `recommendedBump` field that Step 4 can use
-directly.
+changes). The CHANGELOG parser also recognizes the Keep-a-Changelog `### Removed`
+category; the `git-log` fallback never emits `removed` (Conventional Commits has
+no removal type, so removals land under Changed). It also returns a
+`recommendedBump` field that Step 4 can use directly.
 
-JSON shape: `{ source, lastTag, added[], fixed[], changed[], hasBreaking,
-totalEntries, recommendedBump }`. Source values: `changelog` (used existing
-entries), `git-log` (auto-generated), `empty` (nothing to release).
+JSON shape: `{ source, lastTag, added[], fixed[], changed[], removed[],
+hasBreaking, totalEntries, recommendedBump }`. Source values: `changelog` (used
+existing entries), `git-log` (auto-generated), `empty` (nothing to release).
 
 - If CHANGELOG.md is missing → tool exits 2 with the missing-file message; abort.
 - If `source == "empty"` → abort with "No commits to release."
@@ -169,9 +171,13 @@ entries came from the CHANGELOG).
 If `$ARGUMENTS` contains `patch`, `minor`, or `major` → use that.
 
 Otherwise, analyze the unreleased changes and auto-select:
-- Only `### Fixed` entries → `patch`
+- Only `### Fixed`, `### Changed`, and/or `### Removed` entries → `patch`
 - Has `### Added` entries → `minor`
-- Has `### Changed` with breaking changes → `major`
+- Any `**BREAKING:**` entry (under Changed or Removed) → `major`
+
+`### Removed` is **not** auto-major: many removals (docs, dead tooling, internal
+churn) are non-breaking. Mark a genuinely breaking removal with a `**BREAKING:**`
+prefix so it bumps major.
 
 Calculate `$NEXT_VERSION` accordingly. Do NOT ask for confirmation — proceed automatically.
 
