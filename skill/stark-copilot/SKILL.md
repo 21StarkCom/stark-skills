@@ -205,12 +205,12 @@ node --experimental-strip-types "$TOOLS/copilot_dispatch.ts" \
   --max-rounds "$max_rounds" \
   --timeout "$timeout" \
   [--test-command "$test_command"] \
-  [--goal-condition "the step is fully implemented and the project's test suite passes" --goal-max-budget-usd "${STARK_GOAL_MAX_BUDGET_USD:-5}"]
+  [--goal-condition "the step is fully implemented and the project's test suite passes" --goal-max-budget-usd "${STARK_GOAL_MAX_BUDGET_USD:-10}"]
 ```
 
 Pass `--goal-condition` **by default when `LEAD` is `claude`** (omit it when `--no-goal` is set or the lead is `codex`/`gemini`). With it set, the dispatcher prefixes the lead's prompt with `/goal …` and runs it as a `-p`-argument goal loop that iterates until tests pass, bounded by `--goal-max-budget-usd` and `--timeout`. The condition omits "committed" on purpose — rule 6 of the implement prompt keeps the lead from committing; the dispatcher owns git and the wing reviews the worktree diff.
 
-> **Budget guard:** `--goal-max-budget-usd` is mandatory in goal mode. A missing, zero, or non-numeric value never disables the guard — the dispatcher falls back to its built-in default ($5) rather than running unbounded.
+> **Budget guard:** `--goal-max-budget-usd` is mandatory in goal mode. A missing, zero, or non-numeric value never disables the guard — the dispatcher falls back to its built-in default ($10) rather than running unbounded.
 >
 > **Security note:** the goal loop requires the prompt to be passed as a `-p` **argument** (stdin doesn't trigger `/goal`), so the prompt is visible in `ps`/process listings. The composed prompt carries only issue/plan/task text — **never put secrets in it** (the skills don't interpolate credentials into prompts).
 

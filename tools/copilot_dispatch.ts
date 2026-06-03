@@ -39,7 +39,7 @@ export const DEFAULT_WING: AgentName = "codex";
 export const DEFAULT_MAX_ROUNDS = 4;
 export const DEFAULT_TIMEOUT_SEC = 900;
 export const WING_TIMEOUT_DEFAULT_SEC = 600;
-export const DEFAULT_GOAL_MAX_BUDGET_USD = 5;
+export const DEFAULT_GOAL_MAX_BUDGET_USD = 10;
 export const TEST_TIMEOUT_SEC = 120;
 
 const CLAUDE_DEFAULT_MODEL = "claude-opus-4-8";
