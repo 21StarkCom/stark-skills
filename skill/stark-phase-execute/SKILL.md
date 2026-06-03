@@ -48,6 +48,8 @@ After all tasks: regression tests, version bump, deploy, dashboard, memory updat
 | `--start-from <N>` | 1st issue | Resume from a specific issue number |
 | `--rounds <N>` | 3 | Max review-fix rounds per PR |
 | `--repo ORG/REPO` | auto-detect | Override repo detection from git remote |
+| `--no-goal` | off (goal-driven is ON) | Disable the goal-driven implement loop; fall back to the bounded Agent-tool subagent (§1.2) |
+| `--parallel` | off | Run independent tasks (no cross-task `depends_on`) concurrently via a Workflow instead of strictly sequentially. Dependent tasks stay sequential. See [Phase 1P](#phase-1p-parallel-execution-opt-in). |
 
 **Raw input:** `$ARGUMENTS`
 
@@ -165,25 +167,46 @@ Log: `[HH:MM:SS]   ▸ Task #{NUMBER}: {title}`
 
 ### 1.2 Implement
 
-Spawn a subagent (Agent tool, foreground):
+**Default — goal-driven headless loop.** Drive the implementer as a Claude Code *goal loop* so it keeps iterating across turns until the issue is satisfied and tests pass, rather than the old fixed "2 attempts." Write the prompt to a temp file (`mktemp`, `chmod 600`) — never interpolate issue body into the shell — with a leading `/goal` directive as the **first line**, then pass the file **as the `-p` argument** via `"$(cat …)"`:
 
+```bash
+PROMPT_FILE=$(mktemp); chmod 600 "$PROMPT_FILE"
+cat > "$PROMPT_FILE" <<'EOF'
+/goal GitHub issue #{NUMBER} is fully implemented, the project's test suite passes, and all changes are committed to the current branch
+EOF
+# Append the task body (heredoc-safe; written by the orchestrator, not shell-interpolated):
+#   You are implementing GitHub issue #{NUMBER} for repo {ORG_REPO}.
+#   Issue title: {title}
+#   Issue body: {body}
+#   Branch: phase/{SLUG}/issue-{NUMBER}-{slugified-title}
+#   Working directory: {repo root}
+#
+#   1. Read the issue. Understand what needs to change.
+#   2. Explore the codebase for relevant code.
+#   3. Implement the changes.
+#   4. Run the project's test suite. If tests fail, fix the code and re-run.
+#   5. Stage and commit with: feat|fix|chore(scope): description (#{NUMBER})
+#   6. Do NOT push — the orchestrator handles that.
+
+# IMPORTANT: the /goal loop only fires when the prompt is the -p ARGUMENT.
+# Passing it via stdin (`-p -`) is read as plain text and does NOT loop
+# (verified 2026-06-03, Claude Code 2.1.161). `"$(cat …)"` passes the whole
+# multi-line file as a single argv entry — no shell re-interpretation of its body.
+claude -p "$(cat "$PROMPT_FILE")" \
+  --model "$(node --experimental-strip-types "$TOOLS/stark_config_lib.ts" --model claude 2>/dev/null || echo claude-opus-4-8)" \
+  --output-format text \
+  --permission-mode bypassPermissions \
+  --no-session-persistence \
+  --max-budget-usd "${STARK_GOAL_MAX_BUDGET_USD:-5}" \
+  --allowedTools "Edit,Write,Read,Bash,Glob,Grep"
+rm -f "$PROMPT_FILE"
 ```
-You are implementing GitHub issue #{NUMBER} for repo {ORG_REPO}.
-Issue title: {title}
-Issue body: {body}
-Branch: phase/{SLUG}/issue-{NUMBER}-{slugified-title}
-Working directory: {repo root}
 
-Instructions:
-1. Read the issue. Understand what needs to change.
-2. Explore the codebase for relevant code.
-3. Implement the changes.
-4. Run the project's test suite.
-5. Stage and commit with: feat|fix|chore(scope): description (#{NUMBER})
-6. Do NOT push — the orchestrator handles that.
+The `/goal` condition is re-evaluated each turn by the fast model; the loop ends when implementation + tests + commit are all satisfied, on `--max-budget-usd` exhaustion, or when interrupted. `--max-budget-usd` is a mandatory runaway guard (default $5/task via `STARK_GOAL_MAX_BUDGET_USD`). This replaces the hand-rolled retry cap with Claude Code's native goal mechanism.
 
-If tests fail, fix them. If you can't resolve after 2 attempts, commit what you have and note the failure.
-```
+> **Verified:** the goal loop fires only via the `-p` **argument** form, not stdin (`-p -`). If a future Claude Code build changes this, fall back with `--no-goal`.
+
+**Fallback (`--no-goal`).** Spawn a bounded subagent (Agent tool, foreground) with the same instruction body, ending with: "If tests fail, fix them. If you can't resolve after 2 attempts, commit what you have and note the failure."
 
 Verify after completion: files changed (`git diff --stat HEAD`), no uncommitted changes (`git status --porcelain`). If no changes at all → log failure, skip to next task.
 
@@ -289,6 +312,49 @@ Both are best-effort — wrap in `|| true`. Never block task execution.
 ### 1.8 Error handling
 
 If any step fails for a task: log error, set task `failed`, switch back to main, remove lingering worktree, delete remote branch (`git push origin --delete ... 2>/dev/null || true`). Print: `[HH:MM:SS]   ✗ Task #{NUMBER} failed: {error}`. **Continue to next task** — never block the phase.
+
+---
+
+## Phase 1P: Parallel execution (opt-in)
+
+Active only when `--parallel` is passed. Replaces the sequential Phase 1 loop for **independent** tasks; dependent tasks still run in order.
+
+### 1P.1 Build the dependency graph
+
+From each task issue's `## Dependencies` / `depends_on` metadata, partition the task list into:
+- **Independent set** — tasks with no unmet `depends_on` edge to another task in this phase.
+- **Dependent tail** — everything else, kept in topological order.
+
+If the independent set has ≤1 task, skip parallel mode and fall through to the normal sequential Phase 1.
+
+### 1P.2 Fan out independent tasks via a Workflow
+
+Call the **Workflow** tool. Each task runs the full lifecycle (branch → goal-driven implement → push → multi-agent review → fix → merge) in its **own git worktree** so parallel tasks don't collide on the working tree. Pipeline shape:
+
+```js
+export const meta = {
+  name: 'phase-execute-parallel',
+  description: 'Implement + review + merge independent phase tasks concurrently',
+  phases: [{ title: 'Implement' }, { title: 'Review' }, { title: 'Merge' }],
+}
+const tasks = args.tasks // [{number, title, body, branch}]
+const results = await pipeline(
+  tasks,
+  t => agent(`/goal issue #${t.number} implemented, tests pass, committed.\n\n${t.body}`,
+             { label: `impl:#${t.number}`, phase: 'Implement', isolation: 'worktree', schema: IMPL_SCHEMA }),
+  (impl, t) => agent(`Review the diff for issue #${t.number}. Return findings.`,
+             { label: `review:#${t.number}`, phase: 'Review', schema: REVIEW_SCHEMA }),
+  (review, t) => agent(`Merge PR for issue #${t.number} once CI is green.`,
+             { label: `merge:#${t.number}`, phase: 'Merge', schema: MERGE_SCHEMA }),
+)
+return results.filter(Boolean)
+```
+
+- `isolation: 'worktree'` is mandatory here — concurrent leads mutate files.
+- After the Workflow returns, merge the **dependent tail** sequentially via the normal Phase 1 loop, since each may depend on a now-merged independent task.
+- Log per-task results into the same phase run log (§1.7) shape.
+
+> **Constraint:** because merges land on `main` as each task finishes, only tasks with no inter-dependency are safe to parallelize. When in doubt, leave a task in the dependent tail. `--parallel` is a throughput optimization, not a correctness change.
 
 ---
 

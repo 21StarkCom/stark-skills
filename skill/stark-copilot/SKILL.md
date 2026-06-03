@@ -44,6 +44,8 @@ re-implement that logic here.
 - `--max-rounds N` — maximum **fix** rounds after the initial implement (default: `4`). The wing reviews up to `N+1` times.
 - `--timeout N` — per-lead-invocation timeout in seconds (default: 900)
 - `--wing-timeout N` — per-wing-invocation timeout in seconds (default: 600)
+- `--no-goal` — disable the goal-driven lead loop. When the lead is `claude` (the default), the lead's implement prompt is prefixed with a `/goal` directive (§2a) so it keeps iterating until tests pass; `--no-goal` reverts to a single bounded pass. Ignored when the lead is `codex`/`gemini` (`/goal` is a Claude Code feature).
+- `--parallel` — when the steps are mutually independent (no step builds on another's merged result), fan them out concurrently via a Workflow instead of the sequential Phase 2 loop. See [Parallel steps](#parallel-steps-opt-in).
 - `--dry-run` — show what would happen without executing
 
 If `--lead` and `--wing` resolve to the same agent, error and stop:
@@ -185,7 +187,7 @@ Update issue status and project board. For commands, see [references/issue-manag
 
 Write three files for the dispatcher (replace `$$` with the orchestration PID or any unique tag):
 
-- `/tmp/stark-copilot-$$/step-$step_id-implement.md` — the lead's full implement prompt (composed from `global/prompts/copilot/{LEAD}/implement.md` + previous-step context + step task)
+- `/tmp/stark-copilot-$$/step-$step_id-implement.md` — the lead's full implement prompt (composed from `global/prompts/copilot/{LEAD}/implement.md` + previous-step context + step task). Do **not** embed a `/goal` directive in this file — goal mode is enabled via the `--goal-condition` flag in §2b instead (a `/goal` line in a stdin-piped prompt is read as plain text and does **not** loop; verified 2026-06-03, Claude Code 2.1.161). The dispatcher prepends `/goal` and routes the prompt as a `-p` argument for you.
 - `/tmp/stark-copilot-$$/step-$step_id-review.md` — the wing's review prompt template (verbatim copy of `global/prompts/copilot/{WING}/review.md`)
 - `/tmp/stark-copilot-$$/step-$step_id-task.md` — the step's raw task description (used by the dispatcher to build the wing's review payload and the lead's fix prompts)
 
@@ -202,8 +204,11 @@ node --experimental-strip-types "$TOOLS/copilot_dispatch.ts" \
   --wing "$WING" \
   --max-rounds "$max_rounds" \
   --timeout "$timeout" \
-  [--test-command "$test_command"]
+  [--test-command "$test_command"] \
+  [--goal-condition "the step is fully implemented and the project's test suite passes" --goal-max-budget-usd "${STARK_GOAL_MAX_BUDGET_USD:-5}"]
 ```
+
+Pass `--goal-condition` **by default when `LEAD` is `claude`** (omit it when `--no-goal` is set or the lead is `codex`/`gemini`). With it set, the dispatcher prefixes the lead's prompt with `/goal …` and runs it as a `-p`-argument goal loop that iterates until tests pass, bounded by `--goal-max-budget-usd` and `--timeout`. The condition omits "committed" on purpose — rule 6 of the implement prompt keeps the lead from committing; the dispatcher owns git and the wing reviews the worktree diff.
 
 The dispatcher owns the loop. It runs the lead in a worktree (round 1), then up to
 `max_rounds` review→fix iterations: wing reviews → if `revise`, lead re-runs in the
@@ -359,6 +364,29 @@ If the working tree is on a branch with an open PR (detect via `gh pr view --jso
 | `gemini` | stark-gemini |
 
 For the `gh api` posting snippet, see [references/issue-management.md](references/issue-management.md).
+
+## Parallel steps (opt-in)
+
+Active only with `--parallel`, and only sound when the steps are **mutually independent** — no step's implement prompt references a prior step's merged result. The default copilot contract is sequential ("each builds on the previous step's merged result"), so most plans should NOT use this.
+
+When the steps are independent, call the **Workflow** tool and run one `copilot_dispatch.ts` lead/wing loop per step concurrently, each in its own worktree (the dispatcher already isolates per step, so no extra `isolation` flag is needed beyond distinct `--step-id`s):
+
+```js
+export const meta = {
+  name: 'copilot-parallel',
+  description: 'Run independent copilot lead/wing loops concurrently',
+  phases: [{ title: 'Build' }],
+}
+const steps = args.steps // [{step_id, title, ...}]
+const results = await parallel(steps.map(s => () =>
+  agent(`Dispatch copilot_dispatch.ts for step ${s.step_id} (lead/wing loop) and return its JSON verdict.`,
+        { label: `copilot:${s.step_id}`, phase: 'Build', schema: STEP_VERDICT_SCHEMA })))
+return results.filter(Boolean)
+```
+
+After the Workflow returns, apply each approved diff and commit in a deterministic order (§2e–§2g), then run end-of-run verification (Phase 2.5) once across the combined result. If any step came back non-`approved`, surface it and do not apply that step's diff.
+
+> **Constraint:** parallel mode trades the build-on-previous guarantee for throughput. If any step depends on another, leave `--parallel` off.
 
 ## Failure Modes
 
