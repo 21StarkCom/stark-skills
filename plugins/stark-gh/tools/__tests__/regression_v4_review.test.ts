@@ -56,6 +56,7 @@ test("decideStage3: existing PR + only metadata flags routes to edit (not push-o
     ]),
     "git diff --cached": "",
     "git diff": "",
+    "git diff --binary": "",
     "git fetch --no-tags --quiet origin +refs/heads/main:refs/remotes/origin/main": "",
     "git rev-parse origin/main": "base\n",
     "git diff origin/main...HEAD": "",

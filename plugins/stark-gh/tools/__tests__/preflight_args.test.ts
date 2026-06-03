@@ -14,7 +14,7 @@ test("parse empty raw-args", () => {
     reviewer: [],
     label: [],
     assignee: [],
-    commitAll: false,
+    commitAll: true,
     fullContext: false,
     noWatch: false,
     draft: false,
@@ -53,6 +53,13 @@ test("parse simple flags", () => {
   assert.deepEqual(a.reviewer, ["alice", "bob"]);
   assert.equal(a.commitAll, true);
   assert.equal(a.draft, true);
+});
+
+test("commitAll defaults to true; --staged-only opts out", () => {
+  assert.equal(parseRawArgs("").commitAll, true);
+  assert.equal(parseRawArgs("--staged-only").commitAll, false);
+  // explicit --commit-all still wins as true
+  assert.equal(parseRawArgs("--commit-all").commitAll, true);
 });
 
 test("parse secret override flags", () => {

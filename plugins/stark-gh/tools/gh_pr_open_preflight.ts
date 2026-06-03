@@ -56,7 +56,7 @@ export function parseRawArgs(raw: string): UserArgs {
     reviewer: [],
     label: [],
     assignee: [],
-    commitAll: false,
+    commitAll: true,
     fullContext: false,
     noWatch: false,
     draft: false,
@@ -120,6 +120,9 @@ export function parseRawArgs(raw: string): UserArgs {
         break;
       case "--commit-all":
         a.commitAll = true;
+        break;
+      case "--staged-only":
+        a.commitAll = false;
         break;
       case "--full-context":
         a.fullContext = true;
@@ -197,7 +200,7 @@ export function collectState(
   const hasStaged = dirtyFiles.staged.length > 0;
   const hasUnstagedOrUntracked = dirtyFiles.unstaged.length + dirtyFiles.untracked.length > 0;
   if (hasUnstagedOrUntracked && !hasStaged && !opts.commitAll) {
-    throw new Error("unstaged-only changes; either `git add` what you want, or pass `--commit-all`");
+    throw new Error("unstaged-only changes with --staged-only; `git add` what you want, or drop --staged-only to stage everything");
   }
 
   const headOid = gitLib.headOid(opts);
