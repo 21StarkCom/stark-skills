@@ -250,7 +250,7 @@ function main(): never {
     stageChanges(plan);
   } catch (e) {
     if (String((e as Error).message) === "nothing-staged") {
-      die(Exit.NOTHING_STAGED, "nothing staged; stage your changes or pass --commit-all");
+      die(Exit.NOTHING_STAGED, "nothing staged under --staged-only; `git add` what you want, or drop --staged-only to stage everything");
     }
     throw e;
   }
