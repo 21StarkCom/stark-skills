@@ -264,9 +264,12 @@ performed by the TS tool's classifier stage. The wrapper does not re-classify.
 
 ## Phase 4: Fix Loop
 
-The TS dispatcher runs the fix loop between review rounds when the
-authorization gate allows it (Phase 9 — see `tools/stark_review_lib.ts`
-`evaluateFixLoopGate`). The wrapper does not orchestrate the loop itself;
+The TS dispatcher runs the fix loop after each review round's POST lands —
+including the final round — when the authorization gate allows it (Phase 9 —
+see `tools/stark_review_lib.ts` `evaluateFixLoopGate`). `--max-rounds` bounds
+review+fix cycles, not reviews: every round that finds fixable findings attempts
+a fix, and the trusted `test_command` is the per-round verification gate rather
+than a subsequent review round. The wrapper does not orchestrate the loop itself;
 it surfaces what the TS tool reports in the receipt (`fixes_pushed`,
 audit-log entries under `~/.claude/code-review/history/<org>/<repo>/<pr>/`).
 
@@ -293,7 +296,7 @@ ladder (high → low): `critical` > `high` > `medium` > `low`. Setting
 excludes nits. The default in `global/config.json` is `"low"` — every
 classified `fix` finding from Critical down to nits enters the loop.
 
-### Step sequence (per round, after review POST lands)
+### Step sequence (every round, including the last, after review POST lands)
 
 1. Filter `pass.allFindings` to `classification === "fix"` AND severity ≥ `fix_threshold`.
 2. Resolve and validate the push target (`resolvePushTarget` — bails terminally if
@@ -305,7 +308,9 @@ classified `fix` finding from Critical down to nits enters the loop.
 5. Run the trusted `test_command` with a sandboxed env allowlist (`stark_review_lib.ts`
    `runTrustedTest`). Non-zero exit → terminal `test_failure`.
 6. Commit + push to the resolved push target. Commit SHA + audit entry land in
-   the receipt; the next round re-runs the review against the new HEAD.
+   the receipt. A non-final round's fix is re-reviewed by the next round against
+   the new HEAD; the final round's fix is verified by step 5's `test_command`
+   alone (no further review round runs).
 
 `--max-rounds` caps the loop. Resolution order: explicit `--max-rounds` →
 `config.max_rounds` (global/org/repo merge) → built-in default `3`. The hard
