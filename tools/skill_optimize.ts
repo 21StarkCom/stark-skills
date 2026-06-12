@@ -451,7 +451,7 @@ function parseArgs(argv: string[]): CliOptions {
     // Default to plan mode so a bare `skill_optimize` invocation never
     // uploads bundle contents off-box. API mode is explicit: `--mode api`.
     mode: "plan",
-    model: "gpt-5.4-pro",
+    model: "gpt-5.5-pro",
     outDir: "artifacts/skill-optimizer",
     pollIntervalMs: 5000,
     reasoningEffort: "medium",
@@ -589,10 +589,10 @@ function parseArgs(argv: string[]): CliOptions {
   }
   if (
     options.mode === "api" &&
-    options.model === "gpt-5.4-pro" &&
+    options.model.endsWith("-pro") &&
     options.reasoningEffort === "low"
   ) {
-    throw new Error("gpt-5.4-pro supports reasoning effort: medium, high, xhigh");
+    throw new Error(`${options.model} supports reasoning effort: medium, high, xhigh`);
   }
 
   return options;
