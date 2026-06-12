@@ -1,5 +1,8 @@
 {
-  "agents": ["claude", "codex"],
+  "agents": [
+    "claude",
+    "codex"
+  ],
   "quick_domains": [],
   "default_agent": "codex",
   "test_command": null,
@@ -28,24 +31,44 @@
   },
   "session": {
     "health_checks": [],
-    "doc_paths": ["docs/", "CLAUDE.md"],
+    "doc_paths": [
+      "docs/",
+      "CLAUDE.md"
+    ],
     "pr_merge_strategy": "squash"
   },
   "plan_to_tasks": {
-    "validation_agents": ["codex"],
+    "validation_agents": [
+      "codex"
+    ],
     "max_quality_gate_rounds": 3,
     "max_validation_iterations": 2
   },
   "models": {
-    "claude": { "enabled": true, "model_id": "claude-opus-4-8" },
-    "codex": { "enabled": true, "model_id": "gpt-5.5" },
-    "gemini": { "enabled": false, "model_id": "gemini-3.1-pro-preview" }
+    "claude": {
+      "enabled": true,
+      "model_id": "claude-opus-4-8"
+    },
+    "codex": {
+      "enabled": true,
+      "model_id": "gpt-5.5"
+    },
+    "gemini": {
+      "enabled": false,
+      "model_id": "gemini-3.1-pro-preview"
+    }
   },
   "runtime": {
     "lock_ttl_minutes": 30,
     "subagent_env_allowlist": [
-      "PATH", "HOME", "USER", "SHELL", "LANG", "TERM",
-      "ANTHROPIC_AGENTS"
+      "PATH",
+      "HOME",
+      "USER",
+      "SHELL",
+      "LANG",
+      "TERM",
+      "ANTHROPIC_AGENTS",
+      "VTT_TEST_PG_DSN"
     ],
     "max_concurrent_agents": 3,
     "max_concurrent_per_agent": {
@@ -66,7 +89,10 @@
   },
   "validation_gate": {
     "enabled": true,
-    "run_on": ["implementation", "autopilot"],
+    "run_on": [
+      "implementation",
+      "autopilot"
+    ],
     "skip_domains": [],
     "timeout_seconds": 60
   },
@@ -76,7 +102,11 @@
     "max_suggestions": 2,
     "cooldown_hours": 24,
     "suppressed_skills": [],
-    "activation_signals": ["review_finding", "correction", "skill_invocation"]
+    "activation_signals": [
+      "review_finding",
+      "correction",
+      "skill_invocation"
+    ]
   },
   "context_compaction": {
     "enabled": true,
@@ -85,9 +115,9 @@
     "include_file_summaries": true
   },
   "cost": {
-    "weekly_budget_usd": 50.0,
-    "daily_alert_usd": 15.0,
-    "hard_stop_usd": 100.0,
+    "weekly_budget_usd": 50,
+    "daily_alert_usd": 15,
+    "hard_stop_usd": 100,
     "track_rolling_7d": true
   },
   "triage": {
@@ -98,7 +128,10 @@
     "insights_url": "http://localhost:7420"
   },
   "design_review": {
-    "agents": ["claude", "codex"],
+    "agents": [
+      "claude",
+      "codex"
+    ],
     "fix_threshold": "medium",
     "disabled_domains": [],
     "max_rounds": 3,
@@ -128,8 +161,13 @@
       "sequencing": "claude",
       "viability": "codex"
     },
-    "agent_fallback_order": ["claude", "codex"],
-    "consensus_domains": ["security"],
+    "agent_fallback_order": [
+      "claude",
+      "codex"
+    ],
+    "consensus_domains": [
+      "security"
+    ],
     "consensus_threshold": 2,
     "max_rounds": 3,
     "workers": 3,
@@ -142,14 +180,34 @@
     "forge_threshold": 4,
     "max_rounds": 3,
     "domain_pairs": {
-      "architecture":          { "leader": "claude", "second": "codex" },
-      "behavior":              { "leader": "codex",  "second": "claude" },
-      "type-safety":           { "leader": "codex",  "second": "claude" },
-      "security":              { "leader": "codex",  "second": "claude" },
-      "test-coverage":         { "leader": "codex",  "second": "claude" },
-      "spec-conformance":      { "leader": "claude", "second": "codex" }
+      "architecture": {
+        "leader": "claude",
+        "second": "codex"
+      },
+      "behavior": {
+        "leader": "codex",
+        "second": "claude"
+      },
+      "type-safety": {
+        "leader": "codex",
+        "second": "claude"
+      },
+      "security": {
+        "leader": "codex",
+        "second": "claude"
+      },
+      "test-coverage": {
+        "leader": "codex",
+        "second": "claude"
+      },
+      "spec-conformance": {
+        "leader": "claude",
+        "second": "codex"
+      }
     },
-    "always_on_domains": ["behavior"],
+    "always_on_domains": [
+      "behavior"
+    ],
     "triage_agent": "claude",
     "delta_rereview": true,
     "auto_merge_when_clean": true,
@@ -162,8 +220,12 @@
     "max_rounds": 2,
     "halt_on_unresolved": true,
     "stages": {
-      "design": { "enabled": true },
-      "plan":   { "enabled": false }
+      "design": {
+        "enabled": true
+      },
+      "plan": {
+        "enabled": false
+      }
     },
     "personas": [
       "security-trust",
@@ -174,7 +236,7 @@
     ],
     "min_severity_to_block": "high",
     "timeout_s": 900,
-    "per_run_budget_usd": 30.00,
+    "per_run_budget_usd": 30,
     "stability_overlap_jaccard_min": 0.416,
     "max_input_chars": 200000,
     "allow_human_review_halt": true,
@@ -194,32 +256,32 @@
   },
   "model_rates": {
     "o3": {
-      "input_per_1m_usd": 15.00,
-      "output_per_1m_usd": 60.00
+      "input_per_1m_usd": 15,
+      "output_per_1m_usd": 60
     },
     "claude-opus-4-8": {
-      "input_per_1m_usd": 15.00,
-      "output_per_1m_usd": 75.00
+      "input_per_1m_usd": 15,
+      "output_per_1m_usd": 75
     },
     "gpt-5.4": {
-      "input_per_1m_usd": 5.00,
-      "output_per_1m_usd": 15.00
+      "input_per_1m_usd": 5,
+      "output_per_1m_usd": 15
     },
     "gpt-5.5": {
-      "input_per_1m_usd": 5.00,
-      "output_per_1m_usd": 15.00
+      "input_per_1m_usd": 5,
+      "output_per_1m_usd": 15
     },
     "gpt-5.4-pro": {
-      "input_per_1m_usd": 20.00,
-      "output_per_1m_usd": 80.00
+      "input_per_1m_usd": 20,
+      "output_per_1m_usd": 80
     },
     "gpt-5.5-pro": {
-      "input_per_1m_usd": 25.00,
-      "output_per_1m_usd": 100.00
+      "input_per_1m_usd": 25,
+      "output_per_1m_usd": 100
     },
     "_fallback": {
-      "input_per_1m_usd": 100.00,
-      "output_per_1m_usd": 300.00
+      "input_per_1m_usd": 100,
+      "output_per_1m_usd": 300
     }
   },
   "automation": {
@@ -237,24 +299,77 @@
       "context7": "088e0653-356a-4362-8b07-bd93b9acabbb"
     },
     "github_app_ids": {
-      "claude": { "app_id": 3066738, "installation_id": 115648521 },
-      "codex":  { "app_id": 3066834, "installation_id": 115648800 },
-      "gemini": { "app_id": 3066689, "installation_id": 115648971 }
+      "claude": {
+        "app_id": 3066738,
+        "installation_id": 115648521
+      },
+      "codex": {
+        "app_id": 3066834,
+        "installation_id": 115648800
+      },
+      "gemini": {
+        "app_id": 3066689,
+        "installation_id": 115648971
+      }
     },
-    "cost_alert_threshold_usd_per_week": 50.0,
+    "cost_alert_threshold_usd_per_week": 50,
     "slack_channel": "#stark-automation",
     "triggers": {
-      "stark-evolution":           { "cron": "0 3 * * 0",  "tier": 1, "budget_usd": 10.0 },
-      "stark-self-review":         { "cron": "0 6 * * 1",  "tier": 1, "budget_usd": 5.0 },
-      "stark-sentinel":            { "cron": "0 5 * * 0-3,5-6", "tier": 2, "budget_usd": 1.0 },
-      "stark-dependency-audit":    { "cron": "0 4 * * 2",  "tier": 2, "budget_usd": 3.0 },
-      "stark-infra-drift":         { "cron": "0 6 * * *",  "tier": 2, "budget_usd": 1.0 },
-      "stark-api-compat":          { "cron": "0 7 * * *",  "tier": 2, "budget_usd": 1.0 },
-      "stark-intelligence":        { "cron": "0 6 * * 3",  "tier": 3, "budget_usd": 3.0 },
-      "stark-claude-md-sync":      { "cron": "0 4 * * 4",  "tier": 3, "budget_usd": 2.0 },
-      "stark-digest":              { "cron": "0 14 * * 5", "tier": 4, "budget_usd": 2.0 },
-      "stark-automation-monitor":  { "cron": "0 9 * * *",  "tier": 4, "budget_usd": 2.0 },
-      "stark-hooks-auditor":       { "cron": "0 5 * * 4",  "tier": 4, "budget_usd": 2.0 }
+      "stark-evolution": {
+        "cron": "0 3 * * 0",
+        "tier": 1,
+        "budget_usd": 10
+      },
+      "stark-self-review": {
+        "cron": "0 6 * * 1",
+        "tier": 1,
+        "budget_usd": 5
+      },
+      "stark-sentinel": {
+        "cron": "0 5 * * 0-3,5-6",
+        "tier": 2,
+        "budget_usd": 1
+      },
+      "stark-dependency-audit": {
+        "cron": "0 4 * * 2",
+        "tier": 2,
+        "budget_usd": 3
+      },
+      "stark-infra-drift": {
+        "cron": "0 6 * * *",
+        "tier": 2,
+        "budget_usd": 1
+      },
+      "stark-api-compat": {
+        "cron": "0 7 * * *",
+        "tier": 2,
+        "budget_usd": 1
+      },
+      "stark-intelligence": {
+        "cron": "0 6 * * 3",
+        "tier": 3,
+        "budget_usd": 3
+      },
+      "stark-claude-md-sync": {
+        "cron": "0 4 * * 4",
+        "tier": 3,
+        "budget_usd": 2
+      },
+      "stark-digest": {
+        "cron": "0 14 * * 5",
+        "tier": 4,
+        "budget_usd": 2
+      },
+      "stark-automation-monitor": {
+        "cron": "0 9 * * *",
+        "tier": 4,
+        "budget_usd": 2
+      },
+      "stark-hooks-auditor": {
+        "cron": "0 5 * * 4",
+        "tier": 4,
+        "budget_usd": 2
+      }
     }
   }
 }
