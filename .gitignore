@@ -21,3 +21,6 @@ artifacts/
 .vite/
 
 node_modules/
+
+# session lock files
+.claude/scheduled_tasks.lock
