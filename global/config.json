@@ -67,7 +67,17 @@
       "SHELL",
       "LANG",
       "TERM",
-      "ANTHROPIC_AGENTS",
+      "ANTHROPIC_AGENTS"
+    ],
+    "test_env_allowlist": [
+      "PATH",
+      "HOME",
+      "LANG",
+      "LC_ALL",
+      "SHELL",
+      "TMPDIR",
+      "USER",
+      "LOGNAME",
       "VTT_TEST_PG_DSN"
     ],
     "max_concurrent_agents": 3,
