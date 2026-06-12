@@ -153,7 +153,8 @@ Options:
   --no-fix-loop             Skip the fix loop for this run (review still posts)
   --allow-untrusted-fix-loop  Opt in to fork-PR fix loop without maintainer_can_modify;
                               ALSO requires config.untrusted_fix_loop=true
-  --max-rounds <int>        Max rounds (default from config.max_rounds, else 3; ceiling 10)
+  --max-rounds <int>        Max review+fix rounds; every round (incl. the last) fixes
+                            (default from config.max_rounds, else 3; ceiling 10)
   --json                    Emit machine receipt to stdout
   --help                    Show this help
 `;
@@ -2897,7 +2898,10 @@ export async function main(
         }
         break;
       }
-      if (round === cli.maxRounds) break;
+      // The final round runs the fix step too — `maxRounds` bounds review+fix
+      // cycles, not reviews. Every round that finds fixable findings attempts a
+      // fix; the trusted test_command (below) is the per-round verification gate
+      // instead of relying on a subsequent review round to confirm the fix.
 
       const fixCandidates = pass.allFindings.filter(
         (f) => f.classification === "fix" && severityMeetsThreshold(f.severity, config.fix_threshold),
@@ -2928,7 +2932,7 @@ export async function main(
         break;
       }
 
-      // ── Phase 9 fix-loop step (between rounds) ──────────────────────────
+      // ── Phase 9 fix-loop step (after each round's review POST) ──────────
       const fixerPromptPath = path.join(promptRoot, "codex", "fixer.md");
       let fixerOutput: FixerOutput;
       try {
