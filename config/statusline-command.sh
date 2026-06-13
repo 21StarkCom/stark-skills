@@ -110,18 +110,26 @@ rate_seg() { # section_emoji pct reset_epoch [time_emoji]
   seg2 "${TC}${1} ${pct}%${FR}${R}"
 }
 
-gradient() { # text → sets GRAD: flowing Catppuccin aurora sweep (mauve→sky→teal→peach)
-  # Animation rides statusLine.refreshInterval (integer seconds, min 1 — a
-  # sub-second value is ignored and the timer never fires). Each re-exec
-  # reads a fresh EPOCHREALTIME and the wave advances a frame. Pure bash
-  # fixed-point math, no forks. GRAD holds interpreted ESC bytes (printf -v
-  # %b) — embed directly, don't re-%b it.
-  local text="$1" RST=$'\033[0m'
-  local -a PR=(203 137 148 250) PG=(166 220 226 179) PB=(247 235 213 135)
+gradient() { # text [palette] → sets GRAD: per-account color sweep
+  # Static spatial gradient across the label. The periodic statusLine refresh
+  # is intentionally disabled (no refreshInterval key), so there's no animation
+  # timer — each event-driven re-render reads a fresh EPOCHREALTIME and drifts
+  # the field a frame, but it no longer animates on a clock. Palette ($2)
+  # selects the account's color family: gold (Max/Com), violet (Max/Net), blue
+  # (Enterprise), pink (Team). Pure bash fixed-point math, no forks. GRAD holds
+  # interpreted ESC bytes (printf -v %b) — embed directly, don't re-%b it.
+  local text="$1" pal="${2:-gold}" RST=$'\033[0m'
+  local -a PR PG PB
+  case "$pal" in
+    violet) PR=(203 180 224 150) PG=(140 110 120 90 ) PB=(247 250 255 240) ;;  # purple→magenta — Max/Net
+    blue)   PR=(0   64  138 33 ) PG=(160 196 224 182) PB=(255 255 255 255) ;;  # strong light blue — Enterprise
+    pink)   PR=(255 255 255 250) PG=(77  120 160 100) PB=(148 180 205 170) ;;  # vivid pink — Team
+    *)      PR=(230 255 255 250) PG=(150 190 224 204) PB=(0   0   60  15 ) ;;  # amber→gold — Max/Com
+  esac
   local n=${#PR[@]} len=${#text}
 
   local et="${EPOCHREALTIME:-}"
-  if [[ -z $et ]]; then # bash <5 / unset → static mauve, reset-terminated
+  if [[ -z $et ]]; then # bash <5 / unset → static first stop, reset-terminated
     printf -v GRAD '%b' "\033[38;2;${PR[0]};${PG[0]};${PB[0]}m${text}${RST}"
     return
   fi
@@ -328,8 +336,17 @@ if _on account; then
       *) acct_label="$acct_dom" ;;
     esac
     if [ -n "$acct_label" ]; then
-      gradient "$acct_label"
-      # Emoji stays static (glyphs ignore fg color); the label flows.
+      # Color family per account: Max/Net → violet, Max/Com → gold,
+      # Enterprise → blue, Team → pink.
+      case "$acct_label" in
+        Max/Net)    _pal=violet ;;
+        Max/*)      _pal=gold ;;
+        Enterprise) _pal=blue ;;
+        Team)       _pal=pink ;;
+        *)          _pal=gold ;;
+      esac
+      gradient "$acct_label" "$_pal"
+      # Emoji stays static (glyphs ignore fg color); the label carries the gradient.
       seg2 "${MAUVE}\U0001f464${R} ${GRAD}"
     fi
   fi
