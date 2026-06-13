@@ -1,6 +1,7 @@
 import type { AgentName, Finding, Severity } from "./stark_review_lib.ts";
 import { findingId } from "./stark_review_lib.ts";
 import type { BuildContext, BuiltCommand, ParseError, ParseResult } from "./agent_codex.ts";
+import { resolvedPath } from "./agent_env_lib.ts";
 
 export const CLAUDE_DEFAULT_MODEL = "claude-opus-4-8";
 
@@ -26,6 +27,7 @@ function buildEnv(): Record<string, string> {
     const v = process.env[key];
     if (typeof v === "string") env[key] = v;
   }
+  env.PATH = resolvedPath(env.PATH);
   const apiKey = process.env.ANTHROPIC_AGENTS ?? process.env.ANTHROPIC_API_KEY;
   if (typeof apiKey === "string" && apiKey.length > 0) {
     env.ANTHROPIC_API_KEY = apiKey;
