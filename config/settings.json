@@ -42,8 +42,7 @@
   "enableWorkflows": true,
   "statusLine": {
     "type": "command",
-    "command": "bash /Users/aryeh/.claude/statusline-command.sh",
-    "refreshInterval": 1
+    "command": "bash /Users/aryeh/.claude/statusline-command.sh"
   },
   "enabledPlugins": {
     "superpowers@claude-plugins-official": true,
