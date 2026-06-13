@@ -16,6 +16,7 @@
       "/Users/aryeh/Code/Evinced"
     ]
   },
+  "model": "opus[1m]",
   "hooks": {
     "Stop": [
       {
@@ -88,7 +89,7 @@
     }
   },
   "outputStyle": "Proactive",
-  "effortLevel": "medium",
+  "effortLevel": "xhigh",
   "autoUpdatesChannel": "latest",
   "skipDangerousModePermissionPrompt": true,
   "theme": "dark",
