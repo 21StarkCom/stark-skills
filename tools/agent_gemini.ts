@@ -5,6 +5,7 @@ import os from "node:os";
 import type { AgentName, Finding, Severity } from "./stark_review_lib.ts";
 import { findingId } from "./stark_review_lib.ts";
 import type { BuildContext, BuiltCommand, ParseError, ParseResult } from "./agent_codex.ts";
+import { resolvedPath } from "./agent_env_lib.ts";
 
 export const GEMINI_DEFAULT_MODEL = "gemini-3.1-pro-preview";
 const VERTEX_PROJECT = "infra-ai-platform";
@@ -71,6 +72,7 @@ function buildEnv(geminiHome: string, apiKey: string | null, trustWorkspace: boo
     const v = process.env[key];
     if (typeof v === "string") env[key] = v;
   }
+  env.PATH = resolvedPath(env.PATH);
   env.GEMINI_CLI_HOME = geminiHome;
   if (trustWorkspace) env.GEMINI_CLI_TRUST_WORKSPACE = "true";
   if (apiKey) {

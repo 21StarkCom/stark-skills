@@ -1,5 +1,6 @@
 import type { AgentName, Finding, Severity } from "./stark_review_lib.ts";
 import { findingId } from "./stark_review_lib.ts";
+import { resolvedPath } from "./agent_env_lib.ts";
 
 export interface BuiltCommand {
   cmd: string;
@@ -64,6 +65,7 @@ function buildMinimalEnv(): Record<string, string> {
     const v = process.env[key];
     if (typeof v === "string") env[key] = v;
   }
+  env.PATH = resolvedPath(env.PATH);
   return env;
 }
 
