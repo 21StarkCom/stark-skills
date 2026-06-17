@@ -27,6 +27,7 @@ import {
   type Severity,
 } from "./stark_review_lib.ts";
 import type { BuildContext, BuiltCommand, ParseError, ParseResult } from "./agent_codex.ts";
+import { assetToolsDir } from "./asset_root_lib.ts";
 
 // ─── Agent port loader (Phase 3, preserved) ─────────────────────────────────
 
@@ -438,7 +439,7 @@ export async function tokenForAgent(
   if (cached) return cached;
   // Default to the installed TS CLI at ~/.claude/code-review/tools/github_app.ts.
   // Override via `toolsDir` for tests / out-of-tree invocations.
-  const tools = opts.toolsDir ?? path.join(os.homedir(), ".claude", "code-review", "tools");
+  const tools = opts.toolsDir ?? assetToolsDir();
   const node = opts.nodeBin ?? "node";
   const args = [
     "--experimental-strip-types",

@@ -15,6 +15,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { assetConfigPath } from "./asset_root_lib.ts";
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -68,7 +70,7 @@ export function defaultSkillUsagePath(): string {
 }
 
 export function defaultConfigPath(): string {
-  return path.join(os.homedir(), ".claude", "code-review", "config.json");
+  return assetConfigPath();
 }
 
 // ---------------------------------------------------------------------------

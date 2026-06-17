@@ -13,6 +13,15 @@ This is a **personal playground**, not production. No customers depend on it; th
 - **Test live.** Local-only verification is not enough. If a flow touches GCP, exercise the real GCP surface.
 - **Always update documentation.** Any change that affects behavior, structure, commands, env vars, or operations must update the relevant docs (this file and `AGENTS.md` included) in the same change.
 
+## Distribution
+
+This repo is the **source of truth** for the skills + tools. Two distribution channels:
+
+- **`install.sh` (local dev)** — symlinks `skill/`, `tools/`, `global/`, etc. into `~/.claude/`. Live: edit a file → instantly active. This is the author's daily loop; nothing here is retired.
+- **stark-marketplace (teammates)** — the `stark-marketplace` repo packages these skills as self-contained Claude Code plugins (`/plugin marketplace add GetEvinced/stark-marketplace`). Its `catalog/` is **generated from this repo** by `stark sync`, and its engine vendors `tools/`+`global/` into each plugin so installs need no `install.sh`. CI auto-publishes: `.github/workflows/marketplace-sync.yml` regenerates the marketplace and opens a PR on every push to `main` touching `skill/`, `tools/`, `global/`, or `plugins/stark-gh/`.
+
+**The seam that makes one source serve both:** `tools/asset_root_lib.ts` — `assetRoot()` resolves immutable assets (tools/prompts/config) from `${CLAUDE_PLUGIN_ROOT}` when installed as a plugin, else `~/.claude/code-review` (the install.sh symlink); `stateRoot()` always stays under `$HOME`. Skills mirror this with `${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}`. **Never hardcode `~/.claude/code-review/{tools,prompts,scripts,standards}` in a skill or tool** — route immutable-asset reads through `asset_root_lib`/the dual-fallback so plugin installs keep working.
+
 ## Repo Layout
 
 - `global/` — global config + prompts, installed to `~/.claude/code-review/`
@@ -21,7 +30,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `org/evinced/` — Evinced org config, installed to `~/Code/.code-review/`
 - `data/` — persona roster, review coverage HTML, generated showcase pages
 - `automation/` — CCR automation fleet: 12 triggers, prompts, logs, cost tracking, reports
-- `.github/workflows/` — GitHub Actions: project sync, gate checks, stale detection, heartbeat
+- `.github/workflows/` — GitHub Actions: project sync, gate checks, stale detection, heartbeat, `marketplace-sync` (auto-publish to stark-marketplace)
 - `docs/` — specs, plans, ADRs, retrospectives, generated skill docs
 - `standards/` — org-wide doc templates and workflows, installed to `~/.claude/code-review/standards/`
 - `install.sh` — symlinks repo contents to install locations
@@ -41,7 +50,8 @@ This is a **personal playground**, not production. No customers depend on it; th
 
 ### Infrastructure
 - `tools/stark_config_lib.ts` — full config reader (DEFAULT_* sections, per-section accessors, deep merge, red_team locked-field enforcement) — see TS tools section
-- `tools/runtime_env_lib.ts` — isolated subprocess env builder (allowlist, GitHub App token injection, process-scoped temp dirs)
+- `tools/asset_root_lib.ts` — the plugin/dev resolution seam. `assetRoot()`/`assetConfigPath()`/`assetPromptsDir()`/`assetToolsDir()` resolve immutable assets from `${CLAUDE_PLUGIN_ROOT}` (installed plugin) else `~/.claude/code-review` (install.sh symlink); `assetRootForHome(home)` is the test-injection variant; `stateRoot()` always returns the `$HOME` tree for mutable state. Imported by the config/prompt hub tools (`stark_config_lib`, `dispatcher_base_lib`, `stark_review*`, `copilot_dispatch`, `self_healer`, `skill_router`, `context_compactor`, `plan_to_tasks_validate`).
+- `tools/runtime_env_lib.ts` — isolated subprocess env builder (allowlist, GitHub App token injection, process-scoped temp dirs, `CLAUDE_PLUGIN_ROOT` propagation to sub-agents)
 - GitHub App auth lives entirely in `tools/github_app{,_lib}.ts` (TS) — mints installation tokens, imported directly by `runtime_env_lib.ts`.
 
 ### TUI & session

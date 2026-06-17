@@ -17,6 +17,7 @@ import path from "node:path";
 import { CLAUDE_MODEL } from "./claude_utils_lib.ts";
 import { CODEX_MODEL } from "./codex_utils_lib.ts";
 import { GEMINI_MODEL } from "./gemini_utils_lib.ts";
+import { assetRoot } from "./asset_root_lib.ts";
 import { getModelId, isAgentEnabled } from "./stark_config_lib.ts";
 
 // ---------------------------------------------------------------------------
@@ -144,8 +145,7 @@ export function discoverConfig(
   globalDir?: string,
 ): Record<string, unknown> {
   const resolvedCwd = cwd ?? process.cwd();
-  const resolvedGlobal =
-    globalDir ?? path.join(os.homedir(), ".claude", "code-review");
+  const resolvedGlobal = globalDir ?? assetRoot();
 
   const chain = findConfigChain(resolvedCwd, resolvedGlobal);
   const merged = structuredClone(DEFAULT_CONFIG);

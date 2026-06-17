@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+import { assetRootForHome } from "./asset_root_lib.ts";
+
 export type AgentName = "claude" | "codex" | "gemini";
 /** @deprecated alias for AgentName; kept for backwards compatibility */
 export type Agent = AgentName;
@@ -407,7 +409,7 @@ export function resolvePromptRoot(opts: { configRoot: string; home: string }): s
   const sourceLayout = path.join(opts.configRoot, "global", "prompts");
   if (fs.existsSync(sourceLayout)) return sourceLayout;
 
-  const installed = path.join(opts.home, ".claude", "code-review", "prompts");
+  const installed = path.join(assetRootForHome(opts.home), "prompts");
   if (fs.existsSync(installed)) return installed;
 
   return installed;
@@ -493,9 +495,9 @@ export function loadTrustedConfig(opts: {
     ? fs.realpathSync(repoRootRaw)
     : repoRootRaw;
 
-  // Global
+  // Global (bundle-relative when running as an installed plugin).
   const globalCfg = readJsonIfExists(
-    path.join(opts.home, ".claude", "code-review", "config.json"),
+    path.join(assetRootForHome(opts.home), "config.json"),
   );
 
   // Org walk: configRoot -> home (innermost wins among org overrides).

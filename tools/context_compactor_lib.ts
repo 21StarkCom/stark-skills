@@ -11,9 +11,9 @@
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
+import { assetConfigPath } from "./asset_root_lib.ts";
 import { resolveSessionId } from "./session_id_lib.ts";
 import {
   defaultSessionsDir,
@@ -42,7 +42,7 @@ export const DEFAULT_CONTEXT_COMPACTION: ContextCompactionConfig = {
 };
 
 export function defaultConfigPath(): string {
-  return path.join(os.homedir(), ".claude", "code-review", "config.json");
+  return assetConfigPath();
 }
 
 export function loadContextCompactionConfig(

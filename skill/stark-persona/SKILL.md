@@ -36,7 +36,7 @@ Session persona system — assigns a character voice to Claude for the session.
 Delegate all stateful operations to the TypeScript CLI:
 
 ```bash
-node --experimental-strip-types ~/.claude/code-review/tools/stark_persona.ts <subcommand> [args]
+node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/stark_persona.ts <subcommand> [args]
 ```
 
 Parse the ARGUMENTS and map to the appropriate subcommand:
