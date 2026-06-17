@@ -614,37 +614,47 @@ install() {
     fi
     info "All skills passed validation"
 
-    # 5. Skills: ~/.claude/skills/{name}/SKILL.md → repo/skill/{name}/SKILL.md
-    #    Auto-discover all stark-* skill dirs under skill/
-    for skill_dir in "$REPO_DIR"/skill/stark-*/; do
-        [ -d "$skill_dir" ] || continue
-        skill_dir="${skill_dir%/}"  # strip trailing slash
-        local skill_name
-        skill_name=$(basename "$skill_dir")
-        local skill_file="$skill_dir/SKILL.md"
+    # 5. Skills + local plugins → ~/.claude/.
+    #    SKIPPED when the stark-marketplace plugins are installed: skills/commands
+    #    are then managed by the marketplace (`/plugin install <bundle>@stark-marketplace`),
+    #    and re-symlinking here would DUPLICATE every skill + re-add the legacy
+    #    local stark-gh plugin. install.sh still manages tools/config/prompts/etc.
+    #    Override with STARK_FORCE_SKILL_SYMLINKS=1 to symlink anyway (pure dev mode).
+    if [ -d "$HOME/.claude/plugins/cache/stark-marketplace" ] && [ "${STARK_FORCE_SKILL_SYMLINKS:-0}" != "1" ]; then
+        info "stark-marketplace plugins detected — skills/commands are marketplace-managed; skipping skill + local-plugin symlinks (STARK_FORCE_SKILL_SYMLINKS=1 to override)"
+    else
+        # Skills: ~/.claude/skills/{name}/SKILL.md → repo/skill/{name}/SKILL.md
+        # Auto-discover all stark-* skill dirs under skill/
+        for skill_dir in "$REPO_DIR"/skill/stark-*/; do
+            [ -d "$skill_dir" ] || continue
+            skill_dir="${skill_dir%/}"  # strip trailing slash
+            local skill_name
+            skill_name=$(basename "$skill_dir")
+            local skill_file="$skill_dir/SKILL.md"
 
-        if [ -f "$skill_file" ]; then
-            mkdir -p "$HOME/.claude/skills/$skill_name"
-            link_dir "$skill_file" "$HOME/.claude/skills/$skill_name/SKILL.md" "Skill: $skill_name"
-        else
-            warn "Skill dir $skill_name has no SKILL.md"
-        fi
-    done
+            if [ -f "$skill_file" ]; then
+                mkdir -p "$HOME/.claude/skills/$skill_name"
+                link_dir "$skill_file" "$HOME/.claude/skills/$skill_name/SKILL.md" "Skill: $skill_name"
+            else
+                warn "Skill dir $skill_name has no SKILL.md"
+            fi
+        done
 
-    # Install plugins (Claude Code expects ~/.claude/plugins/<name>)
-    mkdir -p "$HOME/.claude/plugins"
-    for plugin_dir in "$REPO_DIR"/plugins/*/; do
-        [ -d "$plugin_dir" ] || continue
-        [ -f "$plugin_dir/.claude-plugin/plugin.json" ] || continue
-        plugin_dir="${plugin_dir%/}"
-        name=$(basename "$plugin_dir")
-        target="$HOME/.claude/plugins/$name"
-        if [ -L "$target" ] || [ -e "$target" ]; then
-            rm -f "$target"
-        fi
-        ln -sfn "$plugin_dir" "$target"
-        echo "[plugin] $name -> $target"
-    done
+        # Install local plugins (Claude Code expects ~/.claude/plugins/<name>)
+        mkdir -p "$HOME/.claude/plugins"
+        for plugin_dir in "$REPO_DIR"/plugins/*/; do
+            [ -d "$plugin_dir" ] || continue
+            [ -f "$plugin_dir/.claude-plugin/plugin.json" ] || continue
+            plugin_dir="${plugin_dir%/}"
+            name=$(basename "$plugin_dir")
+            target="$HOME/.claude/plugins/$name"
+            if [ -L "$target" ] || [ -e "$target" ]; then
+                rm -f "$target"
+            fi
+            ln -sfn "$plugin_dir" "$target"
+            echo "[plugin] $name -> $target"
+        done
+    fi
 
     # Post-install: body size warnings (non-blocking)
     local body_warnings=0
