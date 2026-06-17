@@ -30,7 +30,7 @@ regret in 6 months?"**
 ## Preflight
 
 ```bash
-TOOLS="${STARK_RED_TEAM_TOOLS:-$HOME/.claude/code-review/tools}"
+TOOLS="${STARK_RED_TEAM_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
 node --experimental-strip-types "$TOOLS/preflight.ts" --workflow stark-red-team-design --json
 ```
 
@@ -57,7 +57,7 @@ Raw input: `$ARGUMENTS`
 ## Constants
 
 ```
-TOOLS = ~/.claude/code-review/tools
+TOOLS = ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools
 ```
 
 ## Phase 1: Setup

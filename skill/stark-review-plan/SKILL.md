@@ -54,8 +54,8 @@ For domain definitions and finding-classification criteria, see
 ## Constants
 
 ```bash
-TOOLS="${STARK_REVIEW_TOOLS:-$HOME/.claude/code-review/tools}"
-PROMPTS_BASE="${STARK_REVIEW_PROMPTS_BASE:-$HOME/.claude/code-review/prompts}"
+TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
+PROMPTS_BASE="${STARK_REVIEW_PROMPTS_BASE:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/prompts}"
 ```
 
 ## Phase 1: Parse arguments + validate

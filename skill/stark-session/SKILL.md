@@ -29,7 +29,7 @@ A single TS CLI gathers every fact you need into one JSON blob; you render the b
 ## Constants
 
 ```bash
-TOOLS="${STARK_REVIEW_TOOLS:-$HOME/.claude/code-review/tools}"
+TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
 SESSION_CLI="node --experimental-strip-types --no-warnings $TOOLS/stark_session.ts"
 ```
 
@@ -54,7 +54,7 @@ Path: `.code-review/config.json` (hierarchical: global → org → repo). Readin
 ### Phase 0 — Record start HEAD
 
 ```bash
-SESSION_ID="${CLAUDE_SESSION_ID:-$(node --experimental-strip-types --no-warnings "$HOME/.claude/code-review/tools/session_id.ts")}"
+SESSION_ID="${CLAUDE_SESSION_ID:-$(node --experimental-strip-types --no-warnings "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/session_id.ts")}"
 START_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
 STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 ```
@@ -103,7 +103,7 @@ STATE_JSON=$($SESSION_CLI start \
 
 ```bash
 node --experimental-strip-types --no-warnings \
-  "$HOME/.claude/code-review/tools/session_state.ts" set \
+  "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/session_state.ts" set \
   --field start_head --value "$START_HEAD" 2>/dev/null || true
 ```
 
@@ -147,7 +147,7 @@ On "go", work sequentially without prompting between tasks — only pause for ge
 
 ```bash
 if [ -f "$HOME/.stark-persona/active.json" ]; then
-  node --experimental-strip-types "$HOME/.claude/code-review/tools/stark_persona.ts" session-end 2>/dev/null || true
+  node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/stark_persona.ts" session-end 2>/dev/null || true
 fi
 ```
 Display the 20% fun-fact callout AFTER the summary (if any).
@@ -181,9 +181,9 @@ git commit -m "docs: session update — <summary>"
 
 ```bash
 node --experimental-strip-types --no-warnings \
-  "$HOME/.claude/code-review/tools/context_compactor.ts" --json 2>/dev/null || true
+  "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/context_compactor.ts" --json 2>/dev/null || true
 node --experimental-strip-types --no-warnings \
-  "$HOME/.claude/code-review/tools/session_state.ts" --json 2>/dev/null || true
+  "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/session_state.ts" --json 2>/dev/null || true
 ```
 
 Both are best-effort. Note the checkpoint path in the summary.
@@ -243,7 +243,7 @@ Render the end summary:
 
 ```bash
 node --experimental-strip-types --no-warnings \
-  "$HOME/.claude/code-review/tools/session_state.ts" set \
+  "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/session_state.ts" set \
   --field name --value "$SESSION_NAME" 2>/dev/null || true
 ```
 

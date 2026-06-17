@@ -14,7 +14,7 @@ revision_date: 2026-05-18T19:17:41Z
 
 Run environment validation before proceeding:
 ```bash
-node --experimental-strip-types ~/.claude/code-review/tools/preflight.ts --workflow stark-phase-execute --json
+node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/preflight.ts --workflow stark-phase-execute --json
 ```
 Parse the JSON result:
 - If `overall` is "blocked": print the failing checks and stop. Do not proceed.
@@ -56,7 +56,7 @@ After all tasks: regression tests, version bump, deploy, dashboard, memory updat
 ## Constants
 
 ```bash
-TOOLS="${STARK_REVIEW_TOOLS:-$HOME/.claude/code-review/tools}"
+TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
 HISTORY="$HOME/.claude/code-review/history"
 ```
 
@@ -124,7 +124,7 @@ Invoke Skill: stark-plan-to-tasks ${PLAN_FILE}
 ### 0.3b Approach Contract
 
 ```bash
-node --experimental-strip-types --no-warnings ~/.claude/code-review/tools/approach_contract.ts --plan-file <plan_path> --force-confirm
+node --experimental-strip-types --no-warnings ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/approach_contract.ts --plan-file <plan_path> --force-confirm
 ```
 
 ### 0.4 Phase briefing
@@ -222,7 +222,7 @@ node --experimental-strip-types --no-warnings "$TOOLS/validation_gate.ts" --json
 
 - `overall=pass` → continue to 1.3.
 - `overall=fail` → classify: `node --experimental-strip-types --no-warnings "$TOOLS/failure_classifier.ts" --stderr-file $STDERR_PATH --json`
-  - If `pattern_id` non-null: attempt heal (max 2 attempts): `node --experimental-strip-types --no-warnings $HOME/.claude/code-review/tools/self_healer.ts --pattern-id $PATTERN_ID --stderr-file $STDERR_PATH --mode auto --json`. Re-run validation after each attempt.
+  - If `pattern_id` non-null: attempt heal (max 2 attempts): `node --experimental-strip-types --no-warnings ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/self_healer.ts --pattern-id $PATTERN_ID --stderr-file $STDERR_PATH --mode auto --json`. Re-run validation after each attempt.
   - After 2 failed heal attempts: escalate, set task status `blocked`, stop the phase.
   - If `pattern_id` null (UNCLASSIFIED): log and continue — agent code issue, not environment.
 
@@ -306,8 +306,8 @@ Print: `[HH:MM:SS]   ✓ Task #{NUMBER} merged (PR #{PR_NUM}, {rounds} rounds, {
 
 After each merge, record completed task and check for checkpoint interval:
 ```bash
-node --experimental-strip-types --no-warnings ~/.claude/code-review/tools/session_state.ts --json 2>/dev/null || true
-node --experimental-strip-types --no-warnings ~/.claude/code-review/tools/context_compactor.ts --json 2>/dev/null || true
+node --experimental-strip-types --no-warnings ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/session_state.ts --json 2>/dev/null || true
+node --experimental-strip-types --no-warnings ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/context_compactor.ts --json 2>/dev/null || true
 ```
 Both are best-effort — wrap in `|| true`. Never block task execution.
 
@@ -398,7 +398,7 @@ Present a comprehensive summary after everything completes. See [references/dash
 
 After all tasks complete, suggest follow-up skills:
 ```bash
-node --experimental-strip-types --no-warnings ~/.claude/code-review/tools/skill_router.ts --context implementation --json 2>/dev/null || true
+node --experimental-strip-types --no-warnings ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/skill_router.ts --context implementation --json 2>/dev/null || true
 ```
 Display at most 2 suggestions. Skip silently if command fails.
 

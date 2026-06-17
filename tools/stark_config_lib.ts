@@ -30,14 +30,19 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { assetConfigPath, assetRoot } from "./asset_root_lib.ts";
+
 
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
 
-/** Resolved lazily so tests can override `HOME`. */
+/**
+ * Global config path. Resolves bundle-relative when running as an installed
+ * plugin (`CLAUDE_PLUGIN_ROOT` set), else `~/.claude/code-review/config.json`.
+ */
 function globalConfigPath(): string {
-  return path.join(os.homedir(), ".claude", "code-review", "config.json");
+  return assetConfigPath();
 }
 
 // ---------------------------------------------------------------------------
@@ -560,8 +565,7 @@ function findConfigChain(cwd: string, globalDir: string): string[] {
 
 export function discoverConfig(opts: DiscoverConfigOpts = {}): DiscoveredConfig {
   const cwd = opts.cwd ?? process.cwd();
-  const globalDir =
-    opts.globalDir ?? path.join(os.homedir(), ".claude", "code-review");
+  const globalDir = opts.globalDir ?? assetRoot();
   const chain = findConfigChain(cwd, globalDir);
   // Walk from least-specific (global) to most-specific (repo) so the
   // top-of-chain layer wins. Only `agents` (REPLACE field) is consumed
