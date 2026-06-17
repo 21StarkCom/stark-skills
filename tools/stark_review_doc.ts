@@ -52,11 +52,12 @@ import {
   resolveDocPromptSources,
   selectFindingsToFix,
 } from "./stark_review_doc_lib.ts";
+import { assetConfigPath, assetPromptsDir } from "./asset_root_lib.ts";
 
 // ─── Constants ─────────────────────────────────────────────────────────
 
 const HOME = os.homedir();
-const DEFAULT_PROMPTS_BASE = path.join(HOME, ".claude", "code-review", "prompts");
+const DEFAULT_PROMPTS_BASE = assetPromptsDir();
 const DEFAULT_TIMEOUT_SEC = 600;
 const WING_TIMEOUT_SEC = 900;
 const CODEX_DEFAULT_MODEL = "gpt-5.5";
@@ -491,7 +492,7 @@ function ts(): string {
  */
 function loadDocReviewConfig(promptsDir: PromptsDir): DocReviewConfig {
   const cfg: DocReviewConfig = { ...DEFAULT_DOC_REVIEW_CONFIG };
-  const globalCfgPath = path.join(HOME, ".claude", "code-review", "config.json");
+  const globalCfgPath = assetConfigPath();
   if (!fs.existsSync(globalCfgPath)) return cfg;
   let parsed: unknown;
   try {

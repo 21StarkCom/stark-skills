@@ -5,8 +5,8 @@ set -euo pipefail
 SCRIPT=""
 if [[ -f "tools/user_token.ts" ]]; then
   SCRIPT="tools/user_token.ts"
-elif [[ -f "$HOME/.claude/code-review/tools/user_token.ts" ]]; then
-  SCRIPT="$HOME/.claude/code-review/tools/user_token.ts"
+elif [[ -f "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/user_token.ts" ]]; then
+  SCRIPT="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/user_token.ts"
 else
   echo "Error: user_token.ts not found" >&2
   exit 1

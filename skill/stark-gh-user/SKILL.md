@@ -33,7 +33,7 @@ The token-printing modes do not mutate the user's shell. They emit `export …` 
 
 ## Resolver
 
-The single source of truth is `tools/user_token.ts` (installed at `~/.claude/code-review/tools/user_token.ts`). It reads from macOS Keychain entries:
+The single source of truth is `tools/user_token.ts` (installed at `${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/user_token.ts`). It reads from macOS Keychain entries:
 
 - `stark-gh-token / primary-fine`
 - `stark-gh-token / primary-classic`
@@ -44,7 +44,7 @@ The single source of truth is `tools/user_token.ts` (installed at `~/.claude/cod
 
 ## Behavior
 
-Resolve the script path (worktree-relative `tools/user_token.ts`, falling back to `~/.claude/code-review/tools/user_token.ts`).
+Resolve the script path (worktree-relative `tools/user_token.ts`, falling back to `${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/user_token.ts`).
 
 Parse `$ARGUMENTS` into a subcommand and optional `--kind` flag. Default subcommand: `show`.
 
@@ -116,8 +116,8 @@ set -euo pipefail
 SCRIPT=""
 if [[ -f "tools/user_token.ts" ]]; then
   SCRIPT="tools/user_token.ts"
-elif [[ -f "$HOME/.claude/code-review/tools/user_token.ts" ]]; then
-  SCRIPT="$HOME/.claude/code-review/tools/user_token.ts"
+elif [[ -f "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/user_token.ts" ]]; then
+  SCRIPT="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/user_token.ts"
 else
   echo "Error: user_token.ts not found" >&2
   exit 1

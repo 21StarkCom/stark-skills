@@ -16,9 +16,8 @@
  */
 
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
+import { assetConfigPath } from "./asset_root_lib.ts";
 import { runHeal, type HealMode } from "./self_healer_lib.ts";
 
 // ---------------------------------------------------------------------------
@@ -69,7 +68,7 @@ interface SelfHealConfig {
 }
 
 function loadSelfHealConfig(): SelfHealConfig {
-  const file = path.join(os.homedir(), ".claude", "code-review", "config.json");
+  const file = assetConfigPath();
   let text: string;
   try {
     text = fs.readFileSync(file, "utf8");

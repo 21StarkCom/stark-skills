@@ -13,7 +13,7 @@ revision_date: 2026-05-18T19:17:41Z
 
 Run environment validation before proceeding:
 ```bash
-node --experimental-strip-types ~/.claude/code-review/tools/preflight.ts --workflow stark-copilot --json
+node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/preflight.ts --workflow stark-copilot --json
 ```
 Parse the JSON result:
 - If `overall` is "blocked": print the failing checks and stop. Do not proceed.
@@ -58,7 +58,7 @@ If no input provided, ask: "What should I build?"
 ## Constants
 
 ```bash
-TOOLS="${STARK_REVIEW_TOOLS:-$HOME/.claude/code-review/tools}"
+TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 # LEAD  — resolved from --lead, default claude
 # WING  — resolved from --wing, default codex
@@ -172,7 +172,7 @@ If `--dry-run`, stop here.
 Only when `plan_path` is set (plan-file or issue-driven mode that originated from a plan file). Inline mode skips this step.
 
 ```bash
-[ -n "$plan_path" ] && node --experimental-strip-types --no-warnings ~/.claude/code-review/tools/approach_contract.ts --plan-file "$plan_path" --force-confirm
+[ -n "$plan_path" ] && node --experimental-strip-types --no-warnings ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/approach_contract.ts --plan-file "$plan_path" --force-confirm
 ```
 
 ## Phase 2: Execute Steps
@@ -324,11 +324,11 @@ Print step summary (lead, wing, rounds count, final verdict, files changed, test
 
 After each step completes:
 ```bash
-node --experimental-strip-types --no-warnings ~/.claude/code-review/tools/session_state.ts --json 2>/dev/null || true
+node --experimental-strip-types --no-warnings ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/session_state.ts --json 2>/dev/null || true
 ```
 Generate a checkpoint every `context_compaction.checkpoint_interval_minutes` minutes (default 15):
 ```bash
-node --experimental-strip-types --no-warnings ~/.claude/code-review/tools/context_compactor.ts --json 2>/dev/null || true
+node --experimental-strip-types --no-warnings ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/context_compactor.ts --json 2>/dev/null || true
 ```
 
 ## Phase 2.5: End-of-Run Verification (MANDATORY)

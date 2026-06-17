@@ -10,9 +10,9 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
+import { assetConfigPath } from "./asset_root_lib.ts";
 import { CODEX_MODEL, CODEX_REASONING_EFFORT_HIGH, parseJsonlOutput } from "./codex_utils_lib.ts";
 import { GEMINI_MODEL, makeGeminiEnv, setupGeminiHome } from "./gemini_utils_lib.ts";
 
@@ -29,7 +29,7 @@ export const DEFAULT_PLAN_TO_TASKS_CONFIG: Record<string, unknown> = {
 export const SUPPORTED_VALIDATION_AGENTS: ReadonlySet<string> = new Set(["codex", "gemini"]);
 
 function globalConfigPath(): string {
-  return path.join(os.homedir(), ".claude", "code-review", "config.json");
+  return assetConfigPath();
 }
 
 // ── Data models ──────────────────────────────────────────────────────────

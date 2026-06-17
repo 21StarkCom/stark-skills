@@ -29,6 +29,8 @@ import { readFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import { assetConfigPath } from "./asset_root_lib.ts";
+
 // Constants ---------------------------------------------------------------
 
 export const VALID_AGENTS = ["claude", "codex", "gemini"] as const;
@@ -51,7 +53,7 @@ const VERTEX_PROJECT = "infra-ai-platform";
 const VERTEX_LOCATION = "global";
 
 const HOME = os.homedir();
-const CONFIG_PATH = path.join(HOME, ".claude", "code-review", "config.json");
+const CONFIG_PATH = assetConfigPath();
 const DEFAULT_ADC_PATH = path.join(
   HOME,
   ".config",

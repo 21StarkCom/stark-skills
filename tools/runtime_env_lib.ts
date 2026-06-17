@@ -158,6 +158,15 @@ export async function buildAgentEnv(
     }
   }
 
+  // Always propagate CLAUDE_PLUGIN_ROOT (when set) so any stark tool a
+  // sub-agent shells out to resolves its vendored assets (config/prompts/tools)
+  // from the same installed-plugin dir. Structural runtime path, not a
+  // user-tunable allowlist entry — injected unconditionally.
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  if (pluginRoot && pluginRoot.trim() !== "") {
+    env["CLAUDE_PLUGIN_ROOT"] = pluginRoot;
+  }
+
   // Inject ANTHROPIC_API_KEY for the claude agent, from ANTHROPIC_AGENTS.
   if (agent === "claude") {
     const sourceKey = process.env[API_KEY_SOURCE_VAR];

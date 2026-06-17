@@ -26,7 +26,7 @@ Decompose a spec/design document into phased GitHub issues. Three LLM passes: qu
 ## Constants
 
 ```bash
-TOOLS="${STARK_REVIEW_TOOLS:-$HOME/.claude/code-review/tools}"
+TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
 ```
 
 This skill uses only the `stark-claude` GitHub App.
