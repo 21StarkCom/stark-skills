@@ -1,0 +1,116 @@
+# Auto-publish: regenerate stark-marketplace from this repo (the source of truth)
+# and open a PR there. The marketplace's own CI (validate / build --check /
+# check-bumps / tests / gitleaks) gates the PR before merge.
+#
+# PREREQUISITES (one-time, set in this repo's settings):
+#   - Secret STARK_CLAUDE_APP_ID        = the stark-claude GitHub App ID (3066738)
+#   - Secret STARK_CLAUDE_PRIVATE_KEY   = the stark-claude App private key (PEM)
+#   - The stark-claude App must be INSTALLED on GetEvinced/stark-marketplace with
+#     `contents: write` + `pull_requests: write` (it mints a scoped token here).
+#
+# The engine is pure Go (no Node needed): `stark sync` copies the .ts tools
+# verbatim into the vendor snapshot; nothing executes them in CI.
+name: marketplace-sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "skill/**"
+      - "tools/**"
+      - "global/**"
+      - "plugins/stark-gh/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketplace-sync
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint stark-claude token (scoped to stark-marketplace)
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.STARK_CLAUDE_APP_ID }}
+          private-key: ${{ secrets.STARK_CLAUDE_PRIVATE_KEY }}
+          owner: GetEvinced
+          repositories: stark-marketplace
+
+      - name: Checkout stark-skills (source of truth)
+        uses: actions/checkout@v4
+        with:
+          path: stark-skills
+
+      - name: Checkout stark-marketplace
+        uses: actions/checkout@v4
+        with:
+          repository: GetEvinced/stark-marketplace
+          path: stark-marketplace
+          token: ${{ steps.app-token.outputs.token }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: stark-marketplace/engine/go.sum
+
+      - name: Regenerate, auto-bump changed bundles, rebuild, gate
+        working-directory: stark-marketplace
+        run: |
+          set -euo pipefail
+          SK="$GITHUB_WORKSPACE/stark-skills"
+
+          # 1. regenerate catalog skills/commands + vendor snapshot.
+          ( cd engine && go run ./cmd/stark sync --from "$SK" ../catalog )
+
+          # 2. bump the patch version of every bundle whose skills/commands changed,
+          #    so the per-artifact version-bump gate (check-bumps) is satisfied.
+          changed=$(git status --porcelain catalog \
+            | sed -nE 's#^.{2} catalog/([^/]+)/(skills|commands)/.*#\1#p' | sort -u)
+          for b in $changed; do
+            f="catalog/$b/bundle.yaml"
+            cur=$(sed -nE 's/^version: ([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' "$f")
+            IFS=. read -r MA MI PA <<< "$cur"
+            new="$MA.$MI.$((PA + 1))"
+            perl -i -pe "s/^version: \\Q$cur\\E\$/version: $new/" "$f"
+            echo "bumped $b: $cur -> $new"
+          done
+
+          # 3. re-sync (re-stamps artifacts with the new bundle versions) + rebuild.
+          ( cd engine
+            go run ./cmd/stark sync --from "$SK" ../catalog
+            go run ./cmd/stark build ../catalog
+            go run ./cmd/stark validate ../catalog
+            go run ./cmd/stark sync --from "$SK" --check ../catalog
+            go run ./cmd/stark build --check ../catalog
+            go run ./cmd/stark check-bumps ../catalog )
+
+      - name: Open or update the sync PR
+        working-directory: stark-marketplace
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SRC_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "marketplace already in sync — nothing to publish"
+            exit 0
+          fi
+          short="${SRC_SHA::7}"
+          branch="auto/marketplace-sync"
+          git config user.name "stark-claude[bot]"
+          git config user.email "stark-claude[bot]@users.noreply.github.com"
+          git switch -C "$branch"
+          git add -A
+          git commit -m "chore(sync): regenerate from stark-skills@${short}"
+          git push --force -u origin "$branch"
+          gh pr create --repo GetEvinced/stark-marketplace \
+            --head "$branch" --base main \
+            --title "chore(sync): regenerate from stark-skills@${short}" \
+            --body "Automated regeneration from stark-skills@${SRC_SHA} by the marketplace-sync workflow. Merges once this repo's CI is green." \
+            2>/dev/null || echo "PR already open for $branch — updated by force-push"
