@@ -66,9 +66,20 @@
     "commit-commands@claude-plugins-official": true,
     "playground@claude-plugins-official": true,
     "gopls-lsp@claude-plugins-official": true,
-    "stark-gh@stark-skills": true
+    "stark-analyze@stark-marketplace": true,
+    "stark-constitution@stark-marketplace": true,
+    "stark-gh@stark-marketplace": true,
+    "stark-implement@stark-marketplace": true,
+    "stark-ops@stark-marketplace": true,
+    "stark-plan@stark-marketplace": true
   },
   "extraKnownMarketplaces": {
+    "stark-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "GetEvinced/stark-marketplace"
+      }
+    },
     "claude-code-lsps": {
       "source": {
         "source": "github",
