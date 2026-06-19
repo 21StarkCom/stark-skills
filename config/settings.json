@@ -16,7 +16,6 @@
       "/Users/aryeh/Code/Evinced"
     ]
   },
-  "model": "opus[1m]",
   "hooks": {
     "Stop": [
       {
@@ -96,6 +95,12 @@
       "source": {
         "source": "git",
         "url": "https://github.com/obra/superpowers-marketplace.git"
+      }
+    },
+    "stark-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "GetEvinced/stark-marketplace"
       }
     }
   },
