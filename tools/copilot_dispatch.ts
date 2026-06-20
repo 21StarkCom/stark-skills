@@ -43,6 +43,13 @@ export const DEFAULT_TIMEOUT_SEC = 900;
 export const WING_TIMEOUT_DEFAULT_SEC = 600;
 export const DEFAULT_GOAL_MAX_BUDGET_USD = 10;
 export const TEST_TIMEOUT_SEC = 120;
+// Claude Code applies a low DEFAULT per-invocation turn cap in `-p` mode; a phase
+// (write sources + slow swift build + test + fix) blows past it and the CLI exits 1
+// with subtype `error_max_turns` (looks like a generic cli_error to the dispatcher).
+// Pass an explicit generous cap so the lead can finish a phase in one pass.
+export const LEAD_MAX_TURNS = 100;
+// Runaway $ guard for the no-goal lead (goal mode already caps via --goal-max-budget-usd).
+export const LEAD_MAX_BUDGET_USD = 12;
 
 const CLAUDE_DEFAULT_MODEL = "claude-opus-4-8";
 const CODEX_DEFAULT_MODEL = "gpt-5.5";
@@ -873,6 +880,7 @@ export function buildClaudeCmd(opts: {
   // the goal loop cannot be driven any other way. Do not put secrets in goal prompts.
   promptArg?: string;
   maxBudgetUsd?: number; // runaway guard for goal loops
+  maxTurns?: number; // explicit turn cap so a phase doesn't hit the CLI default and exit 1
 }): { cmd: string; args: string[] } {
   const args = [
     "-p", opts.promptArg ?? "-",
@@ -880,6 +888,9 @@ export function buildClaudeCmd(opts: {
     "--model", resolveModel("claude"),
     "--no-session-persistence",
   ];
+  if (opts.maxTurns && opts.maxTurns > 0) {
+    args.push("--max-turns", String(opts.maxTurns));
+  }
   if (opts.maxBudgetUsd && opts.maxBudgetUsd > 0) {
     args.push("--max-budget-usd", String(opts.maxBudgetUsd));
   }
@@ -945,10 +956,15 @@ async function runImplementationAgent(
           allowedTools: "Edit,Write,Read,Bash,Glob,Grep",
           promptArg: goalPrompt,
           maxBudgetUsd: goalMaxBudgetUsd ?? undefined,
+          maxTurns: LEAD_MAX_TURNS,
         });
         cmd = c.cmd; args = c.args; stdin = undefined;
       } else {
-        const c = buildClaudeCmd({ allowedTools: "Edit,Write,Read,Bash,Glob,Grep" });
+        const c = buildClaudeCmd({
+          allowedTools: "Edit,Write,Read,Bash,Glob,Grep",
+          maxTurns: LEAD_MAX_TURNS,
+          maxBudgetUsd: LEAD_MAX_BUDGET_USD,
+        });
         cmd = c.cmd; args = c.args; stdin = prompt;
       }
       const built = await buildAgentEnv("claude", "implementation");

@@ -21,7 +21,7 @@ failure that returns zero findings is a failure, not a pass.
 
 ```bash
 which claude codex gemini
-$PYTHON $SCRIPTS/plan_review_dispatch.py --prompts-dir <prompts-dir> \
+node --experimental-strip-types "$TOOLS/plan_review_dispatch.ts" --prompts-dir <prompts-dir> \
   --file "$path" --round $round --agents claude --timeout 60
 ```
 

@@ -161,8 +161,10 @@ All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.claude/skil
 
 ## GitHub Apps
 
-| App | App ID | Installation ID | Keychain |
-|-----|--------|----------------|----------|
-| stark-claude | 3066738 | 115648521 | STARK_CLAUDE_PRIVATE_KEY |
-| stark-codex | 3066834 | 115648800 | STARK_CODEX_PRIVATE_KEY |
-| stark-gemini | 3066689 | 115648971 | STARK_GEMINI_PRIVATE_KEY |
+Source of truth is the `APPS` map in `tools/github_app_lib.ts`. All three are the **21S** apps on org `21-Stark-AI` (acting as `aryeh-stark`); each is also installed on `GetEvinced` to cover repos still pending migration. The old `GetEvinced`-era apps (app IDs `30667xx`, pre-`_21S` keychain entries) are **retired**.
+
+| App (display name) | App ID | Install (21-Stark-AI) | Install (GetEvinced) | Keychain |
+|--------------------|--------|-----------------------|----------------------|----------|
+| stark-claude (Stark Claude 21S) | 4094779 | 141330560 | 141330785 | STARK_CLAUDE_PRIVATE_KEY_21S |
+| stark-codex (Stark Codex 21S) | 4094776 | 141330526 | 141330738 | STARK_CODEX_PRIVATE_KEY_21S |
+| stark-gemini (Stark Gemini 21S) | 4094781 | 141330618 | 141330831 | STARK_GEMINI_PRIVATE_KEY_21S |
