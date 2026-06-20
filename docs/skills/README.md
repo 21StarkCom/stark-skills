@@ -1,6 +1,6 @@
 # stark-skills
 
-A multi-agent AI engineering system. 17 skills that take you from a napkin idea to production code, with adversarial review at every stage.
+A multi-agent AI engineering system. 18 skills that take you from a napkin idea to production code, with adversarial review at every stage.
 
 ## The Pipeline
 
