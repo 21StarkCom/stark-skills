@@ -5,7 +5,7 @@ You are the orchestrator. You dispatch up to 18 parallel sub-agent reviews (3 ag
 ## Architecture
 
 ```
-multi_review.py
+multi_review.ts
 ├── claude × architecture      ┐
 ├── claude × accessibility     │
 ├── claude × correctness       │
