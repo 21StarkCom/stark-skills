@@ -17,6 +17,11 @@ tools/node_modules/
 *-playground.html
 artifacts/
 
+# refactor-planner: intermediates + generated artifacts (a target repo commits its own)
+.refactor-planner/
+/REFACTOR_PLAN.md
+/REFACTOR_BACKLOG.json
+
 **/.vite/
 .vite/
 

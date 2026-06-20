@@ -1,6 +1,6 @@
 # stark-skills
 
-AI-powered development workflow system for Claude Code. 17 skills covering the full development lifecycle — from planning through code review, shipping, and maintenance. Claude and Codex are enabled by default, with optional Gemini support available through config.
+AI-powered development workflow system for Claude Code. 18 skills covering the full development lifecycle — from planning through code review, shipping, and maintenance. Claude and Codex are enabled by default, with optional Gemini support available through config.
 
 ## Quick Start
 
@@ -60,6 +60,16 @@ Turn ideas into tracked, phased GitHub issues, then execute them autonomously.
 | [`/stark-copilot`](skill/stark-copilot/SKILL.md) | Autonomous implementation with paired lead/wing agents | When you want a paired lead/wing build loop — lead implements, wing reviews diff, fix-loop until approved. |
 
 **Best practice:** The full pipeline is: brainstorm a design (`superpowers:brainstorming`) → `/stark-review-design` → `/stark-design-to-plan` → `/stark-review-plan` → `/stark-plan-to-tasks` → `/stark-phase-execute`. Each step feeds the next. Don't skip the review steps — unreviewed plans produce ambiguous issues that block autonomous execution.
+
+### Refactoring
+
+Plan a restructure of an existing codebase before touching it.
+
+| Skill | What it does | When to use |
+|-------|-------------|-------------|
+| [`/stark-refactor-plan`](skill/stark-refactor-plan/SKILL.md) | Inspect any repo and emit `REFACTOR_PLAN.md` + `REFACTOR_BACKLOG.json` | Before a refactor. Planning-only — produces an evidence-based, phased, file-by-file plan another agent can execute. Never modifies source. |
+
+**Best practice:** Run `/stark-refactor-plan` first, review the plan and backlog, then hand the backlog to `/stark-copilot` or `/stark-plan-to-tasks` to execute one low-risk PR at a time. The plan changes nothing but the two artifacts, so it's always safe to run.
 
 ### PR and Shipping
 

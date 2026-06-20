@@ -17,7 +17,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 
 - `global/` — global config + prompts, installed to `~/.claude/code-review/`
 - `scripts/` — shell helpers + JSON (`register_triggers.sh`, `healer_patterns.json`); installed to `~/.claude/code-review/scripts/`. The orchestrators + dispatch infra were migrated to `tools/` (TypeScript).
-- `skill/` — all skills (`skill/stark-*/SKILL.md`, 17 skills), symlinked to Claude and copied to `~/.codex/skills/`
+- `skill/` — all skills (`skill/stark-*/SKILL.md`, 18 skills), symlinked to Claude and copied to `~/.codex/skills/`
 - `org/evinced/` — Evinced org config, installed to `~/Code/.code-review/`
 - `data/` — persona roster, review coverage HTML, generated showcase pages
 - `automation/` — CCR automation fleet: 12 triggers, prompts, logs, cost tracking, reports
@@ -32,6 +32,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `tools/dispatcher_base_lib.ts` — shared dispatch base: hierarchical review-config discovery, model resolution, agent registry, domain/prompt resolution
 - `tools/multi_review.ts` + `multi_review_lib.ts` — PR review orchestrator (parallel agent×domain sub-agent dispatch)
 - `tools/plan_review_dispatch.ts` + `plan_review_dispatch_lib.ts` — plan/spec document review dispatch (N agents × M domains)
+- `tools/refactor_planner.ts` + `refactor_planner_lib.ts` — multi-agent repository refactor-planning dispatcher (`/stark-refactor-plan`). Modes `dry-run` / `run` / `validate`; 10 focused subagents over size-capped context packs; deterministic host scan (`refactor_planner_discovery.ts`), context packs (`refactor_planner_context.ts`), provider abstraction with claude/codex/`noop` (`refactor_planner_provider.ts`), host-owned conflict resolution + DAG-valid backlog assembly (`refactor_planner_synth.ts`), 14-section plan + backlog rendering (`refactor_planner_artifacts.ts`), types/validators/gate (`refactor_planner_schemas.ts`). Prompts in `global/prompts/refactor-planner/`. Outputs `REFACTOR_PLAN.md` + `REFACTOR_BACKLOG.json`; planning-only. Doc: `skill/stark-refactor-plan/references/dispatcher.md`.
 
 ### Agent utilities
 - `tools/claude_utils_lib.ts` — Claude CLI dispatch helpers (clean env, headless command builder, model pinning)
@@ -114,6 +115,7 @@ All skills live in `skill/stark-*/SKILL.md`; `install.sh` symlinks them for Clau
 - `/stark-release [patch|minor|major]` — cut a release: changelog, tag, GitHub Release
 - `/stark-housekeeping [--dry-run] [--aggressive]` — audit and clean up stale issues, dead branches, worktree remnants
 - `/stark-persona` — session character voices with weighted selection, combos, catchphrases, and feedback
+- `/stark-refactor-plan [target-dir]` — planning-only refactor analysis of any repo; emits `REFACTOR_PLAN.md` + `REFACTOR_BACKLOG.json` (evidence-based, phased, file-by-file). Pure-guidance skill — no dispatcher, never modifies source. Output templates in `skill/stark-refactor-plan/references/`
 
 ### Project Setup & Docs
 
