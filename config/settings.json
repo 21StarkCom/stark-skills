@@ -75,7 +75,7 @@
     "stark-marketplace": {
       "source": {
         "source": "github",
-        "repo": "GetEvinced/stark-marketplace"
+        "repo": "21-Stark-AI/stark-marketplace"
       }
     },
     "claude-code-lsps": {

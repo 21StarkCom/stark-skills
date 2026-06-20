@@ -6,7 +6,7 @@ AI-powered development workflow system for Claude Code. 18 skills covering the f
 
 ```bash
 # Clone and install
-git clone git@github.com:GetEvinced/stark-skills.git ~/Code/Playground/stark-skills
+git clone git@github.com:21-Stark-AI/stark-skills.git ~/Code/Playground/stark-skills
 cd ~/Code/Playground/stark-skills
 ./install.sh
 

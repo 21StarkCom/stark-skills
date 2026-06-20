@@ -130,8 +130,13 @@ All skills live in `skill/stark-*/SKILL.md`; `install.sh` symlinks them for Clau
 
 ## GitHub Apps
 
-| App | App ID | Installation ID | Keychain |
-|-----|--------|----------------|----------|
-| stark-claude | 3066738 | 115648521 | STARK_CLAUDE_PRIVATE_KEY |
-| stark-codex | 3066834 | 115648800 | STARK_CODEX_PRIVATE_KEY |
-| stark-gemini | 3066689 | 115648971 | STARK_GEMINI_PRIVATE_KEY |
+The **21S** apps (act as `aryeh-stark`), installed on both orgs:
+
+| App | App ID | Installation ID (21-Stark-AI / GetEvinced) | Keychain |
+|-----|--------|--------------------------------------------|----------|
+| stark-claude (Stark Claude 21S) | 4094779 | 141330560 / 141330785 | STARK_CLAUDE_PRIVATE_KEY_21S |
+| stark-codex (Stark Codex 21S) | 4094776 | 141330526 / 141330738 | STARK_CODEX_PRIVATE_KEY_21S |
+| stark-gemini (Stark Gemini 21S) | 4094781 | 141330618 / 141330831 | STARK_GEMINI_PRIVATE_KEY_21S |
+
+> The Keychain stores **base64-of-PEM** (`github_app_lib` decodes it). For CI secrets / `actions/create-github-app-token`, set the **decoded** PEM:
+> `security find-generic-password -s STARK_CLAUDE_PRIVATE_KEY_21S -w | base64 -D | gh secret set STARK_CLAUDE_PRIVATE_KEY --repo 21-Stark-AI/stark-skills`

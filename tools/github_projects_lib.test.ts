@@ -195,7 +195,7 @@ function makeItem(overrides: Partial<ProjectItem> = {}): ProjectItem {
     item_id: "I_1",
     issue_number: 42,
     title: "Hello",
-    repo: "GetEvinced/stark-skills",
+    repo: "21-Stark-AI/stark-skills",
     state: "OPEN",
     fields: {
       Status: "Ready for Agent",

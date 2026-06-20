@@ -28,7 +28,7 @@ function makeState(overrides: Partial<SessionState> = {}): SessionState {
     session_id: "ckpt-session",
     started_at: "2026-04-01T10:00:00Z",
     branch: "main",
-    repo: "GetEvinced/stark-skills",
+    repo: "21-Stark-AI/stark-skills",
     tasks_completed: ["task-1", "task-2"],
     last_checkpoint: null,
     context: { env: "test" },
@@ -55,7 +55,7 @@ test("buildCheckpointContent: includes Generated timestamp and the session heade
   assert.ok(md.includes("**Generated:** 2026-05-18T08:00:00Z"));
   assert.ok(md.includes("- **Session ID:** ckpt-session"));
   assert.ok(md.includes("- **Branch:** main"));
-  assert.ok(md.includes("- **Repo:** GetEvinced/stark-skills"));
+  assert.ok(md.includes("- **Repo:** 21-Stark-AI/stark-skills"));
 });
 
 test("buildCheckpointContent: lists tasks_completed", () => {

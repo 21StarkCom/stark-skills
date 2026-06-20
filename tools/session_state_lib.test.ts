@@ -27,7 +27,7 @@ function makeState(overrides: Partial<SessionState> = {}): SessionState {
     session_id: "abc-123",
     started_at: "2026-05-18T00:00:00Z",
     branch: "main",
-    repo: "GetEvinced/stark-skills",
+    repo: "21-Stark-AI/stark-skills",
     tasks_completed: [],
     last_checkpoint: null,
     context: {},
@@ -62,15 +62,15 @@ test("sanitizeId: strips whitespace and special chars", () => {
 
 test("normalizeRepoUrl: https GitHub URL → owner/repo", () => {
   assert.equal(
-    normalizeRepoUrl("https://github.com/GetEvinced/stark-skills.git"),
-    "GetEvinced/stark-skills",
+    normalizeRepoUrl("https://github.com/21-Stark-AI/stark-skills.git"),
+    "21-Stark-AI/stark-skills",
   );
 });
 
 test("normalizeRepoUrl: ssh GitHub URL → owner/repo", () => {
   assert.equal(
-    normalizeRepoUrl("git@github.com:GetEvinced/stark-skills.git"),
-    "GetEvinced/stark-skills",
+    normalizeRepoUrl("git@github.com:21-Stark-AI/stark-skills.git"),
+    "21-Stark-AI/stark-skills",
   );
 });
 

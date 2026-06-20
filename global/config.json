@@ -297,12 +297,12 @@
   "automation": {
     "model": "claude-opus-4-8",
     "repos": [
-      "GetEvinced/stark-skills",
+      "21-Stark-AI/stark-skills",
       "GetEvinced/infra-pulse",
       "GetEvinced/infra-ai-platform",
       "GetEvinced/infra-sentinel",
       "GetEvinced/stark-team",
-      "GetEvinced/stark-data-core"
+      "21-Stark-AI/stark-data-core"
     ],
     "connectors": {
       "slack": "cf414024-1eec-4f23-8b5d-c6c0eb4b100e",
@@ -310,16 +310,16 @@
     },
     "github_app_ids": {
       "claude": {
-        "app_id": 3066738,
-        "installation_id": 115648521
+        "app_id": 4094779,
+        "installation_id": 141330560
       },
       "codex": {
-        "app_id": 3066834,
-        "installation_id": 115648800
+        "app_id": 4094776,
+        "installation_id": 141330526
       },
       "gemini": {
-        "app_id": 3066689,
-        "installation_id": 115648971
+        "app_id": 4094781,
+        "installation_id": 141330618
       }
     },
     "cost_alert_threshold_usd_per_week": 50,
