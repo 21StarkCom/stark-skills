@@ -3,9 +3,9 @@
 # check-bumps / tests / gitleaks) gates the PR before merge.
 #
 # PREREQUISITES (one-time, set in this repo's settings):
-#   - Secret STARK_CLAUDE_APP_ID        = the stark-claude GitHub App ID (3066738)
-#   - Secret STARK_CLAUDE_PRIVATE_KEY   = the stark-claude App private key (PEM)
-#   - The stark-claude App must be INSTALLED on GetEvinced/stark-marketplace with
+#   - Secret STARK_CLAUDE_APP_ID        = the Stark Claude 21S GitHub App ID (4094779)
+#   - Secret STARK_CLAUDE_PRIVATE_KEY   = the Stark Claude 21S App private key (PEM)
+#   - The Stark Claude 21S App must be INSTALLED on 21-Stark-AI/stark-marketplace with
 #     `contents: write` + `pull_requests: write` (it mints a scoped token here).
 #
 # The engine is pure Go (no Node needed): `stark sync` copies the .ts tools
@@ -39,7 +39,7 @@ jobs:
         with:
           app-id: ${{ secrets.STARK_CLAUDE_APP_ID }}
           private-key: ${{ secrets.STARK_CLAUDE_PRIVATE_KEY }}
-          owner: GetEvinced
+          owner: 21-Stark-AI
           repositories: stark-marketplace
 
       - name: Checkout stark-skills (source of truth)
@@ -50,7 +50,7 @@ jobs:
       - name: Checkout stark-marketplace
         uses: actions/checkout@v4
         with:
-          repository: GetEvinced/stark-marketplace
+          repository: 21-Stark-AI/stark-marketplace
           path: stark-marketplace
           token: ${{ steps.app-token.outputs.token }}
 
@@ -109,7 +109,7 @@ jobs:
           git add -A
           git commit -m "chore(sync): regenerate from stark-skills@${short}"
           git push --force -u origin "$branch"
-          gh pr create --repo GetEvinced/stark-marketplace \
+          gh pr create --repo 21-Stark-AI/stark-marketplace \
             --head "$branch" --base main \
             --title "chore(sync): regenerate from stark-skills@${short}" \
             --body "Automated regeneration from stark-skills@${SRC_SHA} by the marketplace-sync workflow. Merges once this repo's CI is green." \
