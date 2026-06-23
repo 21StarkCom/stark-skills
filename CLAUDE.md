@@ -8,7 +8,8 @@ Multi-agent PR code review system. Claude and Codex are enabled by default; Gemi
 
 This is a **personal playground**, not production. No customers depend on it; the only user is the author.
 
-- **No rollout ceremony.** Skip soaking, gating, smoking, canary, and gradual-rollout patterns. Ship straight to main.
+- **No rollout ceremony.** Skip soaking, gating, smoking, canary, and gradual-rollout patterns. Merge straight to main once the PR is green.
+- **Branch + PR for everything — nothing lost.** Every change lands on a branch and merges via PR; never commit or push to `main` directly. "Ship straight to main" means merge once green, not bypass the PR. This repo **is** the review system — so every review's findings get posted on the PR as comments (inline where anchored, summary otherwise; `multi_review.ts` already does the GitHub posting). Don't drop, downgrade, or summarize findings away, and don't merge with open findings unaddressed — fix them, or reply on the thread saying why not.
 - **Language preference:** Go for backend, TypeScript for scripts. **Avoid Python at all costs** — the repo's tooling is now TypeScript-only (`tools/`); the former Python orchestrators + dispatch infra under `scripts/` were migrated out. Do not introduce new Python.
 - **Test live.** Local-only verification is not enough. If a flow touches GCP, exercise the real GCP surface.
 - **Always update documentation.** Any change that affects behavior, structure, commands, env vars, or operations must update the relevant docs (this file and `AGENTS.md` included) in the same change.
