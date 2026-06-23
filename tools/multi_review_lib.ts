@@ -1337,7 +1337,11 @@ async function runSubagentInner(
       `Then review them according to these instructions:\n\n${fullPrompt}`;
     const effectiveCwd = opts.cwd ?? process.cwd();
     geminiHome = setupGeminiHome("gemini-review-", effectiveCwd, "review", "plan");
-    cmd = ["gemini", "-m", resolveModel("gemini"), "-p", prompt, "-o", "json"];
+    // gemini CLI 0.46+ gates headless runs behind a workspace-trust check;
+    // --skip-trust matches plan_dispatch.ts / copilot_dispatch.ts (the trust
+    // error is not in GEMINI_AUTH_ERROR_PATTERNS, so it never reaches the
+    // API-key fallback — without this, gemini reviews fail hard with exit 55).
+    cmd = ["gemini", "-m", resolveModel("gemini"), "--skip-trust", "-p", prompt, "-o", "json"];
     stdinInput = undefined;
   } else {
     return makeSubAgentResult({ agent, domain: domainKey, error: `Unknown agent: ${agent}` });

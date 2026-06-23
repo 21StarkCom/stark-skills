@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Multi-agent PR code review system. Claude and Codex are enabled by default; Gemini is disabled (opt-in via `models.gemini.enabled`). Hierarchical config (global → org → repo). Self-improving prompts via review history analysis.
+Multi-agent PR code review system. Claude, Codex, and Gemini are all enabled (Gemini → `gemini-3.1-pro-preview` on Vertex). The Vertex **project/location are resolved at runtime** by `tools/vertex_config_lib.ts` (env > config > `GOOGLE_CLOUD_PROJECT` > local `gcloud`) — **never hardcoded/committed in source**. Note: `-latest` aliases like `gemini-pro-latest` only resolve via the Generative-Language API-key fallback, **not** Vertex. Hierarchical config (global → org → repo). Self-improving prompts via review history analysis.
 
 ## Operating Principles
 

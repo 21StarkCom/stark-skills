@@ -30,6 +30,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { assetConfigPath } from "./asset_root_lib.ts";
+import { resolveVertexLocation, resolveVertexProject } from "./vertex_config_lib.ts";
 
 // Constants ---------------------------------------------------------------
 
@@ -56,8 +57,8 @@ const CODEX_DEFAULT_MODEL = "gpt-5.5";
 const GEMINI_DEFAULT_MODEL = "gemini-3.1-pro-preview";
 const CODEX_REASONING_EFFORT_MEDIUM = 'model_reasoning_effort="medium"';
 
-const VERTEX_PROJECT = "infra-ai-platform";
-const VERTEX_LOCATION = "global";
+// Vertex project/location resolved at dispatch time (env > config >
+// GOOGLE_CLOUD_PROJECT > gcloud-derived); no project id hardcoded here.
 
 const HOME = os.homedir();
 const CONFIG_PATH = assetConfigPath();
@@ -509,6 +510,8 @@ const GEMINI_AUTH_ERROR_PATTERNS = [
   "DefaultCredentialsError",
   "RefreshError",
   "Could not automatically determine credentials",
+  // No Vertex project resolved → CLI demands one; degrade to the API key.
+  "GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION",
 ] as const;
 
 export function setupGeminiHome(
@@ -530,11 +533,14 @@ export function setupGeminiHome(
     }
   }
 
+  const project = resolveVertexProject();
+  const vertexAi: Record<string, string> = { region: resolveVertexLocation() };
+  if (project) vertexAi.projectId = project;
   const settings: Record<string, unknown> = {
     security: {
       auth: {
         selectedType: "vertex-ai",
-        vertexAi: { projectId: VERTEX_PROJECT, region: VERTEX_LOCATION },
+        vertexAi,
       },
     },
     selectedAuthType: "vertex-ai",
@@ -562,8 +568,9 @@ export function makeGeminiEnv(
   env["GEMINI_CLI_HOME"] = geminiHome;
   if (opts.trustWorkspace) env["GEMINI_CLI_TRUST_WORKSPACE"] = "true";
   env["GOOGLE_GENAI_USE_VERTEXAI"] = "true";
-  env["GOOGLE_CLOUD_PROJECT"] = VERTEX_PROJECT;
-  env["GOOGLE_CLOUD_LOCATION"] = VERTEX_LOCATION;
+  const vertexProject = resolveVertexProject();
+  if (vertexProject) env["GOOGLE_CLOUD_PROJECT"] = vertexProject;
+  env["GOOGLE_CLOUD_LOCATION"] = resolveVertexLocation();
   if (!env["GOOGLE_APPLICATION_CREDENTIALS"] && existsSync(DEFAULT_ADC_PATH)) {
     env["GOOGLE_APPLICATION_CREDENTIALS"] = DEFAULT_ADC_PATH;
   }

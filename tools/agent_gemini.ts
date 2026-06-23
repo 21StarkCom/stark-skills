@@ -6,10 +6,11 @@ import type { AgentName, Finding, Severity } from "./stark_review_lib.ts";
 import { findingId } from "./stark_review_lib.ts";
 import type { BuildContext, BuiltCommand, ParseError, ParseResult } from "./agent_codex.ts";
 import { resolvedPath } from "./agent_env_lib.ts";
+import { resolveVertexLocation, resolveVertexProject } from "./vertex_config_lib.ts";
 
 export const GEMINI_DEFAULT_MODEL = "gemini-3.1-pro-preview";
-const VERTEX_PROJECT = "infra-ai-platform";
-const VERTEX_LOCATION = "global";
+// Vertex project/location resolved at command-build time (env > config >
+// GOOGLE_CLOUD_PROJECT > gcloud-derived); no project id hardcoded here.
 
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set<Severity>([
   "critical", "high", "medium", "low",
@@ -35,13 +36,16 @@ export function setupGeminiHome(projectDir: string, useApiKey: boolean): string 
   const home = path.join(projectDir, ".gemini-home");
   const dotGemini = path.join(home, ".gemini");
   fs.mkdirSync(dotGemini, { recursive: true });
+  const project = resolveVertexProject();
+  const vertexAi: Record<string, string> = { region: resolveVertexLocation() };
+  if (project) vertexAi.projectId = project;
   const settings = useApiKey
     ? { security: { auth: { selectedType: "gemini-api-key" } }, selectedAuthType: "gemini-api-key" }
     : {
         security: {
           auth: {
             selectedType: "vertex-ai",
-            vertexAi: { projectId: VERTEX_PROJECT, region: VERTEX_LOCATION },
+            vertexAi,
           },
         },
         selectedAuthType: "vertex-ai",
@@ -84,8 +88,9 @@ function buildEnv(geminiHome: string, apiKey: string | null, trustWorkspace: boo
     // values, because a host-set GOOGLE_CLOUD_LOCATION (e.g. us-east1) breaks
     // preview models that only exist on the global endpoint.
     env.GOOGLE_GENAI_USE_VERTEXAI = "true";
-    env.GOOGLE_CLOUD_PROJECT = VERTEX_PROJECT;
-    env.GOOGLE_CLOUD_LOCATION = VERTEX_LOCATION;
+    const project = resolveVertexProject();
+    if (project) env.GOOGLE_CLOUD_PROJECT = project;
+    env.GOOGLE_CLOUD_LOCATION = resolveVertexLocation();
     const adc = process.env.GOOGLE_APPLICATION_CREDENTIALS;
     if (typeof adc === "string" && adc.length > 0) {
       env.GOOGLE_APPLICATION_CREDENTIALS = adc;

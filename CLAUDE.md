@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Multi-agent PR code review system. Claude and Codex are enabled by default; Gemini is disabled (opt-in via `models.gemini.enabled`). Hierarchical config (global → org → repo). Self-improving prompts via review history analysis.
+Multi-agent PR code review system. Claude, Codex, and Gemini are all enabled (Gemini → `gemini-3.1-pro-preview` on Vertex). The Vertex **project/location are resolved at runtime** by `tools/vertex_config_lib.ts` (env > config > `GOOGLE_CLOUD_PROJECT` > local `gcloud`) — **never hardcoded/committed in source**. Note: `-latest` aliases like `gemini-pro-latest` only resolve via the Generative-Language API-key fallback, **not** Vertex. Hierarchical config (global → org → repo). Self-improving prompts via review history analysis.
 
 ## Operating Principles
 
@@ -54,6 +54,7 @@ This repo is the **source of truth** for the skills + tools. Two distribution ch
 - `tools/stark_config_lib.ts` — full config reader (DEFAULT_* sections, per-section accessors, deep merge, red_team locked-field enforcement) — see TS tools section
 - `tools/asset_root_lib.ts` — the plugin/dev resolution seam. `assetRoot()`/`assetConfigPath()`/`assetPromptsDir()`/`assetToolsDir()` resolve immutable assets from `${CLAUDE_PLUGIN_ROOT}` (installed plugin) else `~/.claude/code-review` (install.sh symlink); `assetRootForHome(home)` is the test-injection variant; `stateRoot()` always returns the `$HOME` tree for mutable state. Imported by the config/prompt hub tools (`stark_config_lib`, `dispatcher_base_lib`, `stark_review*`, `copilot_dispatch`, `self_healer`, `skill_router`, `context_compactor`, `plan_to_tasks_validate`).
 - `tools/runtime_env_lib.ts` — isolated subprocess env builder (allowlist, GitHub App token injection, process-scoped temp dirs, `CLAUDE_PLUGIN_ROOT` propagation to sub-agents)
+- `tools/vertex_config_lib.ts` — resolves the Vertex AI project/location for headless Gemini dispatch **without hardcoding a GCP project id in source**. `resolveVertexProject()` precedence: `STARK_GEMINI_VERTEX_PROJECT` env > `models.gemini.vertex_project` config (ships empty) > `GOOGLE_CLOUD_PROJECT` env > cached `gcloud config get-value project` > null (caller degrades to the `GEMINI_API_KEY` path; the "must specify `GOOGLE_CLOUD_PROJECT`" error is in the fallback patterns). `resolveVertexLocation()` = `STARK_GEMINI_VERTEX_LOCATION` env > config > `"global"` (preview models are global-only; ambient `GOOGLE_CLOUD_LOCATION` is deliberately ignored). Imported by `gemini_utils_lib.ts`, `copilot_dispatch.ts`, `agent_gemini.ts` — the three former hardcode sites.
 - GitHub App auth lives entirely in `tools/github_app{,_lib}.ts` (TS) — mints installation tokens, imported directly by `runtime_env_lib.ts`.
 
 ### TUI & session

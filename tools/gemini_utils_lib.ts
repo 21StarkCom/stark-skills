@@ -16,6 +16,7 @@ import path from "node:path";
 
 import { AgentDisabledError } from "./agent_disabled_error.ts";
 import { getModelId, isAgentEnabled } from "./stark_config_lib.ts";
+import { resolveVertexLocation, resolveVertexProject } from "./vertex_config_lib.ts";
 
 export { AgentDisabledError };
 
@@ -35,10 +36,9 @@ export function getGeminiModel(): string {
 // written into each isolated home (see setupGeminiHome).
 const AUTH_FILES = ["oauth_creds.json", "google_accounts.json", "installation_id"];
 
-// Vertex AI config for headless Gemini dispatch. Global region is
-// required for preview models (e.g. gemini-3.1-pro-preview).
-const VERTEX_PROJECT = "infra-ai-platform";
-const VERTEX_LOCATION = "global";
+// Vertex AI project/location are resolved at dispatch time via
+// vertex_config_lib (env > config > GOOGLE_CLOUD_PROJECT > gcloud-derived).
+// No project id is hardcoded here — see resolveVertexProject/Location.
 
 // ---------------------------------------------------------------------------
 // API key fallback
@@ -115,6 +115,8 @@ export const GEMINI_AUTH_ERROR_PATTERNS = [
   "DefaultCredentialsError",
   "RefreshError",
   "Could not automatically determine credentials",
+  // No Vertex project resolved → CLI demands one; degrade to the API key.
+  "GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION",
 ];
 
 /** True if a Gemini CLI error looks like a Vertex AI auth failure. */
@@ -202,11 +204,14 @@ export function setupGeminiHome(
     }
   }
 
+  const project = resolveVertexProject();
+  const vertexAi: Record<string, string> = { region: resolveVertexLocation() };
+  if (project) vertexAi.projectId = project;
   const settings: Record<string, unknown> = {
     security: {
       auth: {
         selectedType: "vertex-ai",
-        vertexAi: { projectId: VERTEX_PROJECT, region: VERTEX_LOCATION },
+        vertexAi,
       },
     },
     selectedAuthType: "vertex-ai",
@@ -278,8 +283,9 @@ export function makeGeminiEnv(
     env.GEMINI_CLI_TRUST_WORKSPACE = "true";
   }
   env.GOOGLE_GENAI_USE_VERTEXAI = "true";
-  env.GOOGLE_CLOUD_PROJECT = VERTEX_PROJECT;
-  env.GOOGLE_CLOUD_LOCATION = VERTEX_LOCATION;
+  const project = resolveVertexProject();
+  if (project) env.GOOGLE_CLOUD_PROJECT = project;
+  env.GOOGLE_CLOUD_LOCATION = resolveVertexLocation();
   const adc = defaultAdcPath();
   if (!("GOOGLE_APPLICATION_CREDENTIALS" in env) && fs.existsSync(adc)) {
     env.GOOGLE_APPLICATION_CREDENTIALS = adc;

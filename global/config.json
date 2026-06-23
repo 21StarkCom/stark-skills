@@ -54,8 +54,10 @@
       "model_id": "gpt-5.5"
     },
     "gemini": {
-      "enabled": false,
-      "model_id": "gemini-3.1-pro-preview"
+      "enabled": true,
+      "model_id": "gemini-3.1-pro-preview",
+      "vertex_project": "",
+      "vertex_location": "global"
     }
   },
   "runtime": {
