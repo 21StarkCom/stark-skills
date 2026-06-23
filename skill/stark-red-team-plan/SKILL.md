@@ -50,9 +50,11 @@ Raw input: `$ARGUMENTS`
 - `--model <id>` — optional. Override `red_team.model` (default
   `gpt-5.5-pro`). Routed via OpenAI Responses API for `{o3, o3-mini,
   gpt-5.5-pro, gpt-5.4-pro}`; other models go through `codex exec`.
-- `--dry-run` — render the sidecar to stdout only; do not write the file
-  and do not post to the PR.
-- `--no-pr-comment` — skip PR comment posting even if a PR is detected.
+- `--dry-run` — render the sidecar to stdout only; do not write the file,
+  do not open/comment on a PR, and do not commit or push.
+- `--no-pr-comment` — skip **all** PR side effects: do not auto-open a PR and
+  do not post the findings comment (even if a PR is already detected). The
+  sidecar is still written and committed locally.
 
 ## Constants
 
@@ -77,19 +79,31 @@ TOOLS = ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools
 ### 1.2 Detect PR context
 
 ```bash
+REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)
 pr_number=$(gh pr view --json number --jq .number 2>/dev/null)
 ```
 
-If on a feature branch with an open PR, store `pr_number` for Phase 4. Not
-having a PR is fine.
+Store both `REPO` and `pr_number` for Phase 4. If a PR already exists, the
+findings comment edits it in place. **If no PR exists, Phase 4 opens one and
+pushes the plan doc + sidecar** (unless `--dry-run` or `--no-pr-comment`), so
+the findings always land on a PR.
 
-### 1.3 Authenticate (only if PR detected)
+### 1.3 Posting identity (which GitHub App)
 
-```bash
-export GH_TOKEN=$(node --experimental-strip-types "$TOOLS/github_app.ts" --app stark-claude token)
-```
+The PR and every finding are opened/commented as **the GitHub App that matches
+the agent that ran the committee** — one identity per LLM:
 
-Auth failure → warn, skip PR posting, continue.
+| Run model (`result.model`) | GitHub App |
+|----------------------------|------------|
+| `claude*`                  | `stark-claude` |
+| `gpt*` / `o*` (OpenAI / codex) | `stark-codex` |
+| `gemini*`                  | `stark-gemini` |
+
+The red-team ships on `gpt-5.5-pro` (routed via codex), so the default app is
+`stark-codex`; a `--model claude-…` run posts as `stark-claude`, a `--model
+gemini-…` run as `stark-gemini`. The exact app (`RT_APP`) is resolved from the
+run's `model` in Phase 2.2 and the token is minted in Phase 4, so no auth
+happens here. Skip all PR interaction if `--dry-run` or `--no-pr-comment`.
 
 ### 1.4 Verify red-team API key
 
@@ -154,6 +168,22 @@ If `status == "error"`, halt and report the error verbatim. Do not retry
 within the skill — re-run after fixing the underlying issue (most common:
 missing `OPENAI_API_KEY`, codex CLI not installed, model name typo).
 
+### 2.3 Resolve the posting GitHub App
+
+Map the run's `model` to the matching GitHub App (see the Phase 1.3 table) so
+the PR and its findings comment are authored by the agent that ran the
+committee. Default to `stark-codex` (the red-team ships on `gpt-5.5-pro`):
+
+```bash
+rt_model=$(echo "$output" | jq -r '.model')
+case "$rt_model" in
+  claude*)       RT_APP=stark-claude ;;
+  gemini*)       RT_APP=stark-gemini ;;
+  gpt*|o[0-9]*)  RT_APP=stark-codex ;;
+  *)             RT_APP=stark-codex ;;   # default: OpenAI/codex transport
+esac
+```
+
 ## Phase 3: Render
 
 Print the consolidated summary to the terminal:
@@ -202,9 +232,110 @@ section. With the default `red_team.fix_plan.enabled: true`, that section is
 populated by a second `gpt-5.5-pro` call (unless the kill switch is set or there
 are no blocking findings).
 
-### 4.2 PR comment (skipped if `--dry-run`, `--no-pr-comment`, or no PR)
+### 4.2 Branch, commit, open-or-reuse the PR, and post findings
 
-Post the dispatcher-rendered `pr_comment_body` (FU-rt9). It is a single
+Every finding lands on a PR, commented by the GitHub App that ran the committee
+(`$RT_APP`, resolved in Phase 2.3 — `stark-codex` by default). If a PR already
+exists for the branch, the comment edits the existing red-team comment in place;
+if none exists, this skill **opens one** and pushes the plan doc + sidecar so
+the findings live with the doc.
+
+Skip **all** of 4.2 if `--dry-run` (nothing is persisted in a dry run).
+Otherwise the sidecar is always committed (4.2b); opening a PR (4.2a + 4.2c) and
+posting the findings comment (4.2d) are additionally skipped when
+`--no-pr-comment` is set. Resolve the gate once up front (`$no_pr_comment` is
+non-empty when `--no-pr-comment` was passed):
+
+```bash
+# Open a fresh PR this run? Only when none exists AND PR interaction is allowed.
+open_pr=0
+[ -z "$pr_number" ] && [ -z "$no_pr_comment" ] && open_pr=1
+```
+
+#### 4.2a Ensure a working branch (never commit to the default branch)
+
+Workspace rule: never commit or push to the default branch. If HEAD is on the
+default branch or detached, cut a feature branch before committing — whether or
+not we end up opening a PR:
+
+```bash
+default_branch=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')
+default_branch=${default_branch:-main}
+cur=$(git branch --show-current)
+if [ "$cur" = "$default_branch" ] || [ -z "$cur" ]; then
+  stem=$(basename -- "$plan_path" | sed -E 's/\.[^.]+$//')
+  branch="red-team/plan-${stem}-$(date +%Y%m%d-%H%M%S)"
+  git switch -c "$branch"
+else
+  branch="$cur"
+fi
+```
+
+Commits use the repo's own `user.name` / `user.email` (per workspace policy,
+`21-Stark-AI` repos commit as `Aryeh Stark <aryeh@21stark.com>`).
+
+#### 4.2b Commit the doc (only when opening a PR) + sidecar
+
+The sidecar is always committed so the findings are durable alongside the plan.
+When opening a PR the plan doc must also be on the branch ("push the spec/plan
+to the PR"), so commit it together with the sidecar; otherwise (a PR already
+exists, or `--no-pr-comment`) leave the doc untouched and commit only the
+sidecar — don't sweep in unrelated changes, don't rewrite the doc:
+
+```bash
+git add -- "$sidecar_path"
+if [ "$open_pr" = 1 ]; then
+  git add -- "$plan_path"            # opening a PR → land the doc on the branch
+  commit_paths=("$plan_path" "$sidecar_path")
+else
+  commit_paths=("$sidecar_path")
+fi
+git commit -m "docs(red-team): findings for $(basename -- "$plan_path")
+
+$total_findings findings ($blocking_count blocking, $human_review_count human-review)
+Model: $model · Run: $run_id" \
+  -- "${commit_paths[@]}"
+```
+
+- The leading `--` guards paths starting with `-`; the path-pathspec form
+  commits exactly those paths regardless of anything else staged. Never use
+  `git commit -a`.
+- **Doc-not-committed guard:** when we're *not* committing the doc (`open_pr` is
+  0) and the plan doc has uncommitted changes (`git diff --quiet -- "$plan_path"`
+  non-zero, or it shows in `git status --porcelain`), still commit the sidecar
+  but warn that the findings reference a working-tree version of the plan not
+  yet in history; the user can commit the plan and re-run. (When opening a PR we
+  intentionally commit those doc changes — that is the point.)
+- If the commit fails for any other reason (hook rejection, nothing new to
+  commit because the sidecar is unchanged), warn and continue — the sidecar is
+  already on disk.
+
+#### 4.2c Open the PR and push (only when none exists)
+
+```bash
+if [ "$open_pr" = 1 ]; then
+  git push -u origin HEAD
+  created=$(node --experimental-strip-types "$TOOLS/github_app.ts" --app "$RT_APP" \
+      --repo "$REPO" pr create \
+      --head "$branch" \
+      --base "$default_branch" \
+      --title "Red-team: $(basename -- "$plan_path")" \
+      --body "Adversarial red-team review of \`$plan_path\` ($rt_model). Findings posted as a PR comment by \`$RT_APP\`; full sidecar at \`$sidecar_path\`.")
+  pr_number=$(printf '%s\n' "$created" | grep -oE '#[0-9]+' | head -n1 | tr -d '#')
+fi
+```
+
+The PR is created by the run's GitHub App (`--app "$RT_APP"`) so the PR and its
+findings comment share one identity. If the push or create fails, warn and
+continue — the commit + sidecar are durable locally and the user can open the
+PR manually. For an **existing** PR, do **not** push — the user controls when
+the branch goes up; the comment below still posts to it via the API.
+
+#### 4.2d Post the findings comment (run's GitHub App)
+
+Skip if `--no-pr-comment`, or if there is still no `pr_number` (e.g. the PR
+open in 4.2c failed). Otherwise post the dispatcher-rendered `pr_comment_body`
+(FU-rt9). It is a single
 collapsible-per-persona summary with a critical/high "Highlights" section
 on top, deterministic anchors for every finding, and an HTML-comment
 marker (`<!-- stark-red-team: stage=plan artifact=... -->`) at the head
@@ -215,10 +346,12 @@ in its JSON output, so the lookup below copies the dispatcher's contract
 verbatim.
 
 The flow is **find-by-marker, edit-or-create** (FU-rt9 invariant — "one
-updatable comment per run"):
+updatable comment per run"). Mint `GH_TOKEN` from the same app (`$RT_APP`) so
+the raw `gh api` lookup/PATCH act as that identity too:
 
 ```bash
-body=$(echo "$output" | jq -r ".pr_comment_body")
+export GH_TOKEN=$(node --experimental-strip-types "$TOOLS/github_app.ts" --app "$RT_APP" token)
+body=$(echo "$output" | jq -rj ".pr_comment_body")
 marker=$(echo "$output" | jq -r ".pr_comment_marker")
 
 # Keyed on stage + artifact path (NOT run_id) so a fresh dispatcher run still
@@ -236,16 +369,17 @@ else
   # would never show up in the issues-comments API used for the lookup
   # above, so a `pr review --comment` create branch silently broke the
   # FU-rt9 "one updatable comment per run" invariant on every rerun.
-  node --experimental-strip-types "$TOOLS/github_app.ts" --app stark-claude pr comment "$pr_number" \
+  node --experimental-strip-types "$TOOLS/github_app.ts" --app "$RT_APP" pr comment "$pr_number" \
     --body "$body"
 fi
 ```
 
 The dispatcher already runs `truncate_pr_comment` on the body before
 returning it, so the GitHub 65 KB cap is honored without a second pass.
-If posting fails, warn and continue.
+If the find or patch fails, fall through to the create path; if create
+also fails, warn and continue.
 
-### 4.2.1 Accepting human-review halts
+### 4.3 Accepting human-review halts
 
 If the run exits `halted_human_review`, the operator can acknowledge a
 specific concern with `node --experimental-strip-types tools/red_team_accept.ts STABLE_KEY` (shown in the
@@ -253,49 +387,13 @@ sidecar, the PR comment, and the `tools/red_team_status.ts` display). Accepted
 keys persist in the audit DB so subsequent runs no longer halt on the
 same concern.
 
-### 4.3 SQLite audit
+### 4.4 SQLite audit
 
 Unless `--no-audit` is set, the dispatcher writes a single local audit row to
 the red-team SQLite via `tools/red_team_audit_lib.ts` (run metadata, findings,
 and fix-plan outcome). That row is the only audit surface — no insights events
 and no remote emit/queue (insights telemetry was decommissioned). The audit
 write does not control the skill's status.
-
-### 4.4 Commit sidecar
-
-Skip if `--dry-run` or no sidecar was written. Otherwise commit only the
-sidecar so the findings are durable alongside the plan — even if the user
-has unrelated changes staged or in the working tree:
-
-```bash
-git add -- "$sidecar_path"
-git commit -m "docs(red-team): findings for $(basename -- "$plan_path")
-
-$total_findings findings ($blocking_count blocking, $human_review_count human-review)
-Model: $model · Run: $run_id" \
-  -- "$sidecar_path"
-```
-
-The scoped `git add -- "$sidecar_path"` puts the sidecar (including
-first-run, never-tracked files) into the index without touching anything
-else, and the path-pathspec form on `git commit ... -- <path>` commits
-exactly that path regardless of what else is otherwise staged. The leading
-`--` on both commands ensures sidecar paths starting with `-` are not parsed
-as flags. Do **not** use an unscoped `git commit -a` or omit the `-- <path>`
-on commit — either would sweep in unrelated staged changes.
-
-If the plan file itself has uncommitted changes
-(`git diff --quiet -- "$plan_path"` is non-zero, or it appears in
-`git status --porcelain`), skip the commit and warn the user that the
-findings reference a working-tree version of the plan that is not in
-history; let them commit the plan first and re-run, or commit the
-sidecar manually.
-
-If the commit fails for any other reason (hook rejection, nothing to commit
-because the sidecar is unchanged, etc.), warn and continue — the sidecar
-file is already on disk.
-
-Do not push. The user controls when the branch goes up.
 
 ## Output Contract
 
