@@ -196,6 +196,19 @@ export const DEFAULT_COST = {
   track_rolling_7d: true,
 };
 
+/**
+ * iac_review — config for the multi-agent Terraform/Terragrunt reviewers.
+ * `agents` lists the LLMs that each run the review as their own subagent,
+ * e.g. ["gemini","codex"]. Overridable via the `iac_review` config section.
+ */
+export const DEFAULT_IAC_REVIEW = {
+  enabled: true,
+  agents: ["codex"] as string[],
+  timeout_sec: 600,
+  max_files: 80,
+  max_bytes_per_file: 100_000,
+};
+
 export const DEFAULT_FORGE = {
   domain_routing: {
     completeness: "claude",
@@ -412,6 +425,9 @@ export function getForgeConfig(): typeof DEFAULT_FORGE {
 }
 export function getForgedReviewConfig(): typeof DEFAULT_FORGED_REVIEW {
   return getSection(DEFAULT_FORGED_REVIEW, "forged_review");
+}
+export function getIacReviewConfig(): typeof DEFAULT_IAC_REVIEW {
+  return getSection(DEFAULT_IAC_REVIEW, "iac_review");
 }
 
 // ---------------------------------------------------------------------------

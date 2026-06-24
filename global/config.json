@@ -24,6 +24,13 @@
   "extra_domains": [],
   "context_files": [],
   "severity_overrides": {},
+  "iac_review": {
+    "enabled": true,
+    "agents": ["codex", "gemini"],
+    "timeout_sec": 600,
+    "max_files": 80,
+    "max_bytes_per_file": 100000
+  },
   "github_apps": {
     "claude": "stark-claude",
     "codex": "stark-codex",
