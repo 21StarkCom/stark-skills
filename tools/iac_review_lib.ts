@@ -609,7 +609,10 @@ export function dedupeFindings(findings: IacFinding[]): IacFinding[] {
       const sameFile = h.file === f.file;
       const nearLine = Math.abs(h.line - f.line) <= 3 || h.line === 0 || f.line === 0;
       const sameTitle = normTitle(h.title) === normTitle(f.title);
-      if (sameFile && (sameTitle || (nearLine && titlesOverlap(h.title, f.title)))) {
+      // Cross-agent findings on the exact same file+line are almost always the
+      // same issue phrased differently — collapse them (matches multi_review).
+      const sameLineCrossAgent = h.line > 0 && h.line === f.line && h.agent !== f.agent;
+      if (sameFile && (sameTitle || sameLineCrossAgent || (nearLine && titlesOverlap(h.title, f.title)))) {
         g.push(f);
         placed = true;
         break;

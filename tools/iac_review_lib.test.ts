@@ -83,3 +83,34 @@ test("dedupeFindings: merges same file+title across agents into cross-validated"
   // sorted: critical before low
   assert.equal(merged[0].severity, "critical");
 });
+
+test("dedupeFindings: collapses cross-agent findings on the exact same file+line despite different titles", () => {
+  const findings: IacFinding[] = [
+    {
+      agent: "gemini", severity: "critical", file: "root.hcl", line: 5,
+      title: "Shared state key across units", description: "", suggestion: "", cross_validated_by: [],
+    },
+    {
+      agent: "codex", severity: "critical", file: "root.hcl", line: 5,
+      title: "Isolate remote state keys per unit", description: "", suggestion: "", cross_validated_by: [],
+    },
+  ];
+  const merged = dedupeFindings(findings);
+  assert.equal(merged.length, 1);
+  assert.deepEqual(merged[0].cross_validated_by, ["codex"]);
+});
+
+test("dedupeFindings: keeps same-agent findings on the same line separate (two real issues)", () => {
+  const findings: IacFinding[] = [
+    {
+      agent: "codex", severity: "high", file: "main.tf", line: 5,
+      title: "Missing encryption", description: "", suggestion: "", cross_validated_by: [],
+    },
+    {
+      agent: "codex", severity: "high", file: "main.tf", line: 5,
+      title: "Public access not blocked", description: "", suggestion: "", cross_validated_by: [],
+    },
+  ];
+  const merged = dedupeFindings(findings);
+  assert.equal(merged.length, 2);
+});
