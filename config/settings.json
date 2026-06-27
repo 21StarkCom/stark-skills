@@ -98,7 +98,7 @@
     }
   },
   "outputStyle": "Proactive",
-  "effortLevel": "xhigh",
+  "effortLevel": "low",
   "autoUpdatesChannel": "latest",
   "skipDangerousModePermissionPrompt": true,
   "theme": "dark",
