@@ -307,9 +307,9 @@
     "model": "claude-opus-4-8",
     "repos": [
       "21-Stark-AI/stark-skills",
-      "GetEvinced/infra-pulse",
-      "GetEvinced/infra-ai-platform",
-      "GetEvinced/infra-sentinel",
+      "21-Stark-AI/infra-pulse",
+      "21-Stark-AI/infra-ai-platform",
+      "21-Stark-AI/infra-sentinel",
       "GetEvinced/stark-team",
       "21-Stark-AI/stark-data-core"
     ],
