@@ -23,6 +23,8 @@ import { DatabaseSync, type StatementSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
 
+import { assetConfigPath } from "./asset_root_lib.ts";
+
 import {
   applyToField,
   policyFromConfig,
@@ -559,12 +561,17 @@ export function pruneRedTeamMetrics(
   }
 }
 
-/** Resolve the audit retention policy from global/config.json.
+/** Resolve the audit retention policy from the shipped config.json.
+ *  Resolves through the asset-root seam (`assetConfigPath()`) by default so it
+ *  works in every distribution (source checkout, install.sh symlink tree,
+ *  vendored marketplace plugin); pass an explicit config-file path to override.
  *  Mirrors Python `_resolve_audit_policy`. Callers that want an explicit
  *  policy (tests, calibration) should bypass this and build one via
  *  `policyFromConfig` directly. */
-export function loadAuditPolicy(repoRoot: string): AuditRetentionPolicy {
-  const cfgPath = path.join(repoRoot, "global", "config.json");
+export function loadAuditPolicy(
+  configPath: string = assetConfigPath(),
+): AuditRetentionPolicy {
+  const cfgPath = configPath;
   try {
     const raw = fs.readFileSync(cfgPath, "utf8");
     const parsed = JSON.parse(raw) as Record<string, unknown>;

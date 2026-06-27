@@ -16,7 +16,7 @@ import { initRedTeamTables } from "./red_team_audit_lib.ts";
 
 import {
   DEFAULT_FIX_PLAN_CONFIG,
-  PROMPTS_DIR,
+  redTeamPromptsDir,
   REPO_ROOT,
   VALID_PERSONAS,
   assembleFixPlanPrompt,
@@ -84,10 +84,23 @@ function tmpDoc(content: string): string {
 
 // ── Constants + repo-relative anchors ─────────────────────────────────
 
-test("REPO_ROOT resolves to a directory containing global/prompts/red-team/", () => {
-  // The audit CLI shell-out is gone after Phase 5b — TS-native everything.
+test("redTeamPromptsDir resolves via the asset-root seam (STARK_ASSET_ROOT)", () => {
+  // In a source checkout the prompts live at global/prompts/red-team; the
+  // shipped/vendored layout uses <assetRoot>/prompts/red-team. The dispatcher
+  // must resolve through assetPromptsDir() so it works in every distribution.
+  const prev = process.env.STARK_ASSET_ROOT;
+  try {
+    process.env.STARK_ASSET_ROOT = "/tmp/fake-asset-root";
+    assert.equal(
+      redTeamPromptsDir(),
+      path.join("/tmp/fake-asset-root", "prompts", "red-team"),
+    );
+  } finally {
+    if (prev === undefined) delete process.env.STARK_ASSET_ROOT;
+    else process.env.STARK_ASSET_ROOT = prev;
+  }
+  // The canonical source checkout still carries the prompts under global/.
   assert.equal(fs.existsSync(path.join(REPO_ROOT, "global", "prompts", "red-team")), true);
-  assert.equal(PROMPTS_DIR, path.join(REPO_ROOT, "global", "prompts", "red-team"));
 });
 
 test("VALID_PERSONAS matches the Python persona registry", () => {

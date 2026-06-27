@@ -47,6 +47,7 @@ import {
 } from "./red_team_audit_text_lib.ts";
 import { resolveDb } from "./red_team_db_resolver.ts";
 import { resolveOpenaiApiKey } from "./preflight_lib.ts";
+import { assetPromptsDir, assetConfigPath } from "./asset_root_lib.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -213,19 +214,32 @@ export const BLOCKING_SEVERITIES: ReadonlySet<Severity> = new Set([
 export const REPO_ROOT = (() => {
   // The lib lives at <repo>/tools/red_team_lib.ts. Walk up two levels for
   // the repo root so dispatchers can resolve sibling paths (scripts/,
-  // global/) without being passed an explicit root.
+  // fixtures/) without being passed an explicit root. NOTE: do NOT use this
+  // to resolve shipped assets (prompts/config) — those move when the source
+  // is vendored into a marketplace plugin. Use the asset-root seam instead.
   const here = path.dirname(fileURLToPath(import.meta.url));
   return path.resolve(here, "..");
 })();
 
-export const PROMPTS_DIR = path.join(REPO_ROOT, "global", "prompts", "red-team");
+/**
+ * Red-team persona/stage prompts dir. Resolves through the canonical asset
+ * seam (`assetPromptsDir()`), so it honors `STARK_ASSET_ROOT` /
+ * `CLAUDE_PLUGIN_ROOT` and uses the `prompts/red-team` layout that holds in
+ * every distribution: the install.sh symlink tree (`global/prompts` →
+ * `~/.claude/code-review/prompts`) and the vendored marketplace plugin
+ * (`<plugin>/prompts/red-team`). A raw source checkout still works because
+ * `assetPromptsDir()` falls back to `~/.claude/code-review/prompts`.
+ */
+export function redTeamPromptsDir(): string {
+  return path.join(assetPromptsDir(), "red-team");
+}
 // All audit writes go through `tools/red_team_audit_lib.ts` directly.
 
 // ── Prompt resolution ────────────────────────────────────────────────────
 
 /** Load all persona-related prompts from disk. Throws on missing files. */
 export function loadPersonaPrompts(
-  promptsDir: string = PROMPTS_DIR,
+  promptsDir: string = redTeamPromptsDir(),
   stage: Stage = "design",
 ): PersonaPrompts {
   const preamblePath = path.join(promptsDir, "preamble.md");
@@ -883,7 +897,7 @@ export function recordFindings(
       affected_component: (f.affected_component as string | null) ?? null,
       failure_mode: (f.failure_mode as string | null) ?? null,
     })) satisfies FindingRow[];
-    const policy = loadAuditPolicy(REPO_ROOT);
+    const policy = loadAuditPolicy();
     auditRecordFindings(rows, dbPath, policy);
     return { ok: true, run_id: runId, count: rows.length, status: "recorded" };
   } catch (err) {
@@ -1793,7 +1807,10 @@ function detectRepoRoot(cwd: string): string | null {
 
 const FIX_PLAN_SECTION_LIMIT = 12 * 1024;
 const FIX_PLAN_CAP_MARKER = "...[CAP]";
-const FIX_PLAN_PROMPT_FILE = path.join(PROMPTS_DIR, "fix-plan.md");
+/** Re-resolved per call so it honors the asset-root seam (see redTeamPromptsDir). */
+function fixPlanPromptFile(): string {
+  return path.join(redTeamPromptsDir(), "fix-plan.md");
+}
 
 export const DEFAULT_FIX_PLAN_CONFIG: FixPlanConfig = {
   enabled: false,
@@ -1812,7 +1829,7 @@ let _fixPlanCfgCache: FixPlanConfig | null = null;
  *  Cached after first call. Use `_resetFixPlanConfigCache` in tests. */
 export function loadFixPlanConfig(): FixPlanConfig {
   if (_fixPlanCfgCache) return _fixPlanCfgCache;
-  const cfgPath = path.join(REPO_ROOT, "global", "config.json");
+  const cfgPath = assetConfigPath();
   try {
     const raw = fs.readFileSync(cfgPath, "utf8");
     const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -1949,7 +1966,7 @@ export function assembleFixPlanPrompt(args: {
     args.findings,
     args.maxInputChars,
   );
-  const promptHeader = fs.readFileSync(FIX_PLAN_PROMPT_FILE, "utf8");
+  const promptHeader = fs.readFileSync(fixPlanPromptFile(), "utf8");
   const inputs = [
     wrapFixPlanInput("artifact", args.artifact, args.maxInputChars),
     wrapFixPlanInput("source_spec", args.sourceSpec, args.maxInputChars),
@@ -2588,7 +2605,7 @@ export function buildFindingPayload(args: {
   // Resolve the FU-rt6 retention policy. Default ships as excerpt mode so
   // the metrics queue never carries verbatim model output unless an
   // operator explicitly flips `red_team.audit.retain_full_text` to true.
-  const policy = args.policy ?? loadAuditPolicy(REPO_ROOT);
+  const policy = args.policy ?? loadAuditPolicy();
   const concern = applyToField(finding.concern, policy);
   const consequence = applyToField(finding.consequence, policy);
   const counter = applyToField(finding.counter_proposal, policy);
