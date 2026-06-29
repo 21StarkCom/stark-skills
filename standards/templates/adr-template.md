@@ -1,16 +1,20 @@
-# NNNN: Title
+# NNNN. Title
 
-**Date:** YYYY-MM-DD
-**Status:** Proposed | Accepted | Superseded by [NNNN]
+- **Status:** Proposed | Accepted | Superseded by [NNNN](NNNN-slug.md)
+- **Date:** YYYY-MM-DD
 
 ## Context
-<!-- What's the situation that requires a decision? -->
+
+<!-- What situation forces a decision? -->
 
 ## Decision
+
 <!-- What did you decide? -->
 
 ## Alternatives Considered
-<!-- What else did you consider and why did you reject it? -->
+
+<!-- What else was weighed, and why rejected? -->
 
 ## Consequences
-<!-- What follows from this decision? Both positive and negative. -->
+
+<!-- What follows — both positive and negative? -->

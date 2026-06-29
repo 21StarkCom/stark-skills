@@ -55,7 +55,7 @@ Create the standard docs structure. All operations are idempotent — skip files
 ### Step 1: Create directories
 
 ```bash
-mkdir -p docs/{specs,plans,adr,guides,reference,architecture}
+mkdir -p docs/{adr,spec,plan,retro,guides,reference,architecture}
 ```
 
 ### Step 2: Copy templates
@@ -141,6 +141,8 @@ Be CONSERVATIVE. Only generate ADRs for major technology choices:
 
 Each ADR follows the template in `docs/adr/0000-template.md`. Number them starting from `0001`. Set status to "Accepted" and date to the earliest commit that introduced the technology (from git log).
 
+For ADRs going forward, prefer `brain adr new "<title>"` (the `/stark-adr` skill), which auto-numbers and renders this same template; this backfill step is only for bootstrapping historical decisions. The layout follows the doc convention `docs/{adr,spec,plan,retro}/` (folder per type; see `stark-2nd-brain-cli/docs/CONVENTIONS.md`).
+
 Do NOT generate ADRs for:
 - Dev dependencies (linters, formatters, test frameworks)
 - Transitive dependencies
@@ -151,7 +153,7 @@ Do NOT generate ADRs for:
 
 For merged PRs that represent significant features (not bug fixes, deps, or chores):
 
-- Create a stub spec in `docs/specs/` named `{mergedAt-date}-{slug}.md`
+- Create a stub spec in `docs/spec/` named `{mergedAt-date}-{slug}.md`
 - Include: title, date, PR link, summary from PR body
 - Mark as "Implemented" with a link to the PR
 
@@ -179,7 +181,7 @@ nav:
       - "ADR-0001: Language Choice": adr/0001-language-choice.md
       # ... all generated ADRs
   - Specs:
-    - "Feature Name": specs/2024-01-15-feature-name.md
+    - "Feature Name": spec/2024-01-15-feature-name.md
     # ... all generated specs
   - Guides:
     - Getting Started: guides/getting-started.md
