@@ -103,6 +103,103 @@ test("redTeamPromptsDir resolves via the asset-root seam (STARK_ASSET_ROOT)", ()
   assert.equal(fs.existsSync(path.join(REPO_ROOT, "global", "prompts", "red-team")), true);
 });
 
+// Seed a red-team prompt tree (preamble + stage + 5 personas) under
+// `<promptsRoot>/red-team` so loadPersonaPrompts can read it.
+function seedRedTeamPrompts(promptsRoot: string): void {
+  const rt = path.join(promptsRoot, "red-team");
+  fs.mkdirSync(path.join(rt, "personas"), { recursive: true });
+  fs.writeFileSync(path.join(rt, "preamble.md"), "Red Team Committee preamble\n");
+  fs.writeFileSync(path.join(rt, "design.md"), "design stage template\n");
+  fs.writeFileSync(path.join(rt, "plan.md"), "plan stage template\n");
+  for (const slug of VALID_PERSONAS) {
+    fs.writeFileSync(path.join(rt, "personas", `${slug}.md`), `persona ${slug}\n`);
+  }
+}
+
+test("redTeamPromptsDir resolves the FLAT layout (installed plugin / symlink tree)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "rt-flat-"));
+  seedRedTeamPrompts(path.join(root, "prompts")); // <root>/prompts/red-team
+  const prev = process.env.STARK_ASSET_ROOT;
+  try {
+    process.env.STARK_ASSET_ROOT = root;
+    assert.equal(redTeamPromptsDir(), path.join(root, "prompts", "red-team"));
+    const prompts = loadPersonaPrompts();
+    assert.match(prompts.preamble, /Red Team Committee/);
+    for (const slug of VALID_PERSONAS) {
+      assert.ok((prompts.personas.get(slug) ?? "").length > 0, `missing ${slug}`);
+    }
+  } finally {
+    if (prev === undefined) delete process.env.STARK_ASSET_ROOT;
+    else process.env.STARK_ASSET_ROOT = prev;
+  }
+});
+
+test("redTeamPromptsDir falls back to the global/ layout (raw source checkout)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "rt-global-"));
+  // Only the global/ layout exists — no flat <root>/prompts.
+  seedRedTeamPrompts(path.join(root, "global", "prompts"));
+  const prev = process.env.STARK_ASSET_ROOT;
+  try {
+    process.env.STARK_ASSET_ROOT = root;
+    assert.equal(redTeamPromptsDir(), path.join(root, "global", "prompts", "red-team"));
+    const prompts = loadPersonaPrompts();
+    assert.match(prompts.preamble, /Red Team Committee/);
+    for (const slug of VALID_PERSONAS) {
+      assert.ok((prompts.personas.get(slug) ?? "").length > 0, `missing ${slug}`);
+    }
+  } finally {
+    if (prev === undefined) delete process.env.STARK_ASSET_ROOT;
+    else process.env.STARK_ASSET_ROOT = prev;
+  }
+});
+
+test("STARK_RED_TEAM_PROMPTS_DIR overrides the asset seam", () => {
+  const override = fs.mkdtempSync(path.join(os.tmpdir(), "rt-override-"));
+  seedRedTeamPrompts(override); // <override>/red-team
+  const prevOverride = process.env.STARK_RED_TEAM_PROMPTS_DIR;
+  const prevAsset = process.env.STARK_ASSET_ROOT;
+  try {
+    // Asset root points somewhere with NO prompts — the override must win.
+    process.env.STARK_ASSET_ROOT = "/tmp/does-not-exist-asset-root";
+    process.env.STARK_RED_TEAM_PROMPTS_DIR = override;
+    assert.equal(redTeamPromptsDir(), path.join(override, "red-team"));
+    const prompts = loadPersonaPrompts();
+    assert.match(prompts.preamble, /Red Team Committee/);
+  } finally {
+    if (prevOverride === undefined) delete process.env.STARK_RED_TEAM_PROMPTS_DIR;
+    else process.env.STARK_RED_TEAM_PROMPTS_DIR = prevOverride;
+    if (prevAsset === undefined) delete process.env.STARK_ASSET_ROOT;
+    else process.env.STARK_ASSET_ROOT = prevAsset;
+  }
+});
+
+test("config db_path override resolves through both flat + global layouts", () => {
+  const cfg = { red_team: { audit: { db_path: "/tmp/from-config/audit.db" } } };
+  for (const layout of ["flat", "global"] as const) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), `rt-cfg-${layout}-`));
+    const cfgPath =
+      layout === "flat"
+        ? path.join(root, "config.json")
+        : path.join(root, "global", "config.json");
+    fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+    const prev = process.env.STARK_ASSET_ROOT;
+    const prevDb = process.env.STARK_RED_TEAM_DB;
+    try {
+      process.env.STARK_ASSET_ROOT = root;
+      delete process.env.STARK_RED_TEAM_DB; // ensure config wins over env
+      const out = resolveDbPath();
+      // canonicalize() resolves /tmp -> /private/tmp on macOS; compare the tail.
+      assert.match(out.db_path, /from-config[/\\]audit\.db$/, `layout=${layout}`);
+    } finally {
+      if (prev === undefined) delete process.env.STARK_ASSET_ROOT;
+      else process.env.STARK_ASSET_ROOT = prev;
+      if (prevDb === undefined) delete process.env.STARK_RED_TEAM_DB;
+      else process.env.STARK_RED_TEAM_DB = prevDb;
+    }
+  }
+});
+
 test("VALID_PERSONAS matches the Python persona registry", () => {
   assert.deepEqual([...VALID_PERSONAS].sort(), [
     "cost-ops",

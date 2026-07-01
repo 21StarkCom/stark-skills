@@ -26,11 +26,48 @@
  * the live symlink dev loop is unaffected.
  */
 
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 function nonEmpty(v: string | undefined): string | undefined {
   return v && v.trim() !== "" ? v : undefined;
+}
+
+function existsDir(p: string): boolean {
+  try {
+    return fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function existsFile(p: string): boolean {
+  try {
+    return fs.statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Pick the first candidate that exists (as a directory), else the last
+ * candidate as a back-compat fallback. The fallback preserves the historical
+ * behaviour for callers (and tests) that expect a concrete path even when no
+ * layout is present on disk yet.
+ */
+function firstExistingDir(candidates: readonly string[], fallback: string): string {
+  for (const c of candidates) {
+    if (existsDir(c)) return c;
+  }
+  return fallback;
+}
+
+function firstExistingFile(candidates: readonly string[], fallback: string): string {
+  for (const c of candidates) {
+    if (existsFile(c)) return c;
+  }
+  return fallback;
 }
 
 /** Canonical home tree: `~/.claude/code-review`. */
@@ -74,14 +111,31 @@ export function stateRoot(): string {
   return nonEmpty(process.env.STARK_STATE_ROOT) ?? homeCodeReview();
 }
 
-/** `assetRoot()/config.json` — the global config file. */
+/**
+ * The shipped global config file. Layout-robust: the install.sh symlink tree
+ * and the vendored marketplace plugin keep it FLAT at `<assetRoot>/config.json`
+ * (the marketplace engine drops the `global/` layer when bundling — see
+ * `stark-marketplace/engine/internal/importer/vendor.go`), but a raw source
+ * checkout keeps it under `<assetRoot>/global/config.json`. Try the flat layout
+ * first, then the source layout, then fall back to the flat path for
+ * back-compat when neither exists on disk yet.
+ */
 export function assetConfigPath(): string {
-  return path.join(assetRoot(), "config.json");
+  const root = assetRoot();
+  const flat = path.join(root, "config.json");
+  return firstExistingFile([flat, path.join(root, "global", "config.json")], flat);
 }
 
-/** `assetRoot()/prompts` — the per-agent prompt tree. */
+/**
+ * The per-agent prompt tree. Layout-robust for the same reason as
+ * `assetConfigPath()`: flat `<assetRoot>/prompts` in the symlink tree and the
+ * vendored plugin, `<assetRoot>/global/prompts` in a raw source checkout. Try
+ * flat first, then source, then fall back to flat.
+ */
 export function assetPromptsDir(): string {
-  return path.join(assetRoot(), "prompts");
+  const root = assetRoot();
+  const flat = path.join(root, "prompts");
+  return firstExistingDir([flat, path.join(root, "global", "prompts")], flat);
 }
 
 /** `assetRoot()/tools` — the bundled TypeScript tool scripts. */

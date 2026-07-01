@@ -11,17 +11,17 @@
  * Precedence (highest wins):
  *   1. `cliDb` argument (the `--db PATH` the caller passed).
  *   2. `STARK_RED_TEAM_DB` environment variable.
- *   3. `red_team.audit.db_path` in `global/config.json`.
+ *   3. `red_team.audit.db_path` in the shipped config (resolved through the
+ *      layout-robust asset seam — see `assetConfigPath()`).
  *   4. Hard-coded `DEFAULT_DB_PATH`.
  */
 
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(HERE, "..");
+import { assetConfigPath } from "./asset_root_lib.ts";
+
 const ENV_DB_OVERRIDE = "STARK_RED_TEAM_DB";
 const DEFAULT_DB_PATH = path.join(
   os.homedir(),
@@ -77,7 +77,7 @@ function canonicalize(p: string): string {
 }
 
 function loadConfigDbOverride(): string | null {
-  const cfgPath = path.join(REPO_ROOT, "global", "config.json");
+  const cfgPath = assetConfigPath();
   try {
     const raw = fs.readFileSync(cfgPath, "utf8");
     const parsed = JSON.parse(raw) as Record<string, unknown>;

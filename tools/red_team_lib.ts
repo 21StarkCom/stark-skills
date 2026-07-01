@@ -8,7 +8,10 @@
  * roots so they're unit-testable.
  *
  * What this lib owns:
- *   - persona / prompt resolution from `global/prompts/red-team/`
+ *   - persona / prompt resolution from the red-team prompts dir (resolved
+ *     layout-robustly through the asset seam — `prompts/red-team` in the
+ *     symlink tree + vendored plugin, `global/prompts/red-team` in a raw
+ *     source checkout; overridable via `STARK_RED_TEAM_PROMPTS_DIR`)
  *   - per-persona Codex dispatch (or a recorded transcript replay)
  *   - finding validation + aggregation
  *   - sidecar markdown rendering
@@ -221,16 +224,27 @@ export const REPO_ROOT = (() => {
   return path.resolve(here, "..");
 })();
 
+/** Operator override for the red-team prompts dir (points at the dir that
+ *  holds `preamble.md` / `<stage>.md` / `personas/`). Highest precedence. */
+const ENV_PROMPTS_DIR_OVERRIDE = "STARK_RED_TEAM_PROMPTS_DIR";
+
 /**
- * Red-team persona/stage prompts dir. Resolves through the canonical asset
- * seam (`assetPromptsDir()`), so it honors `STARK_ASSET_ROOT` /
- * `CLAUDE_PLUGIN_ROOT` and uses the `prompts/red-team` layout that holds in
- * every distribution: the install.sh symlink tree (`global/prompts` →
- * `~/.claude/code-review/prompts`) and the vendored marketplace plugin
- * (`<plugin>/prompts/red-team`). A raw source checkout still works because
- * `assetPromptsDir()` falls back to `~/.claude/code-review/prompts`.
+ * Red-team persona/stage prompts dir. Resolution precedence:
+ *   1. `STARK_RED_TEAM_PROMPTS_DIR` env override (operator / tests).
+ *   2. The canonical asset seam (`assetPromptsDir()`), which is itself
+ *      layout-robust: it picks the first of `<assetRoot>/prompts` (flat — the
+ *      install.sh symlink tree and the vendored marketplace plugin, where the
+ *      marketplace engine drops the `global/` layer when bundling) or
+ *      `<assetRoot>/global/prompts` (raw source checkout) that exists on disk.
+ *
+ * `assetPromptsDir()` honors `STARK_ASSET_ROOT` / `CLAUDE_PLUGIN_ROOT`, so the
+ * `red-team` subdir resolves correctly in every distribution.
  */
 export function redTeamPromptsDir(): string {
+  const override = process.env[ENV_PROMPTS_DIR_OVERRIDE];
+  if (override && override.trim() !== "") {
+    return path.join(override, "red-team");
+  }
   return path.join(assetPromptsDir(), "red-team");
 }
 // All audit writes go through `tools/red_team_audit_lib.ts` directly.
@@ -1824,7 +1838,8 @@ export const DEFAULT_FIX_PLAN_CONFIG: FixPlanConfig = {
 
 let _fixPlanCfgCache: FixPlanConfig | null = null;
 
-/** Read `red_team.fix_plan` from `global/config.json`, falling back to
+/** Read `red_team.fix_plan` from the shipped config (resolved through the
+ *  layout-robust asset seam — `assetConfigPath()`), falling back to
  *  DEFAULT_FIX_PLAN_CONFIG on any read/parse error or missing section.
  *  Cached after first call. Use `_resetFixPlanConfigCache` in tests. */
 export function loadFixPlanConfig(): FixPlanConfig {
