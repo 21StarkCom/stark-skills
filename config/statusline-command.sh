@@ -116,7 +116,7 @@ gradient() { # text [palette] → sets GRAD: per-account color sweep
   # timer — each event-driven re-render reads a fresh EPOCHREALTIME and drifts
   # the field a frame, but it no longer animates on a clock. Palette ($2)
   # selects the account's color family: gold (Max/Com), violet (Max/Net), blue
-  # (Enterprise), pink (Team). Pure bash fixed-point math, no forks. GRAD holds
+  # (Enterprise), pink (Team #1/#2). Pure bash fixed-point math, no forks. GRAD holds
   # interpreted ESC bytes (printf -v %b) — embed directly, don't re-%b it.
   local text="$1" pal="${2:-gold}" RST=$'\033[0m'
   local -a PR PG PB
@@ -331,18 +331,21 @@ if _on account; then
         if [ "$acct_otype" = "claude_max" ]; then acct_label="Max/Com"
         else acct_label="Enterprise"; fi ;;
       *.net)
+        # Two Team accounts share the .net domain — disambiguate by the email
+        # local part: aryeh.kiovetsky2 → Team#2, the original → Team#1.
         if [ "$acct_otype" = "claude_max" ]; then acct_label="Max/Net"
-        else acct_label="Team"; fi ;;
+        elif [ "${acct_email%%@*}" = "aryeh.kiovetsky2" ]; then acct_label="Team#2"
+        else acct_label="Team#1"; fi ;;
       *) acct_label="$acct_dom" ;;
     esac
     if [ -n "$acct_label" ]; then
       # Color family per account: Max/Net → violet, Max/Com → gold,
-      # Enterprise → blue, Team → pink.
+      # Enterprise → blue, Team (both #1/#2) → pink.
       case "$acct_label" in
         Max/Net)    _pal=violet ;;
         Max/*)      _pal=gold ;;
         Enterprise) _pal=blue ;;
-        Team)       _pal=pink ;;
+        Team*)      _pal=pink ;;
         *)          _pal=gold ;;
       esac
       gradient "$acct_label" "$_pal"
