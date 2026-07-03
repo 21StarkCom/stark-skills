@@ -59,6 +59,9 @@ R="\033[0m" DIM="\033[38;5;245m"
 PEACH="\033[38;5;216m" YEL="\033[38;5;229m" GRN="\033[38;5;150m"
 SAP="\033[38;5;117m"   RED="\033[38;5;211m" TEAL="\033[38;5;158m"
 MAR="\033[38;5;217m"   MAUVE="\033[38;5;141m" SKY="\033[38;5;117m"
+CTX_COL="\033[38;2;77;165;220m"    # #4da5dc — CTX label (context gauge)
+WND_COL="\033[38;2;120;55;85m"     # #783755 — WND label (5-hour window gauge)
+WEEK_COL="\033[38;2;177;219;217m"  # #b1dbd9 — WEEK label (5-hour reset countdown)
 SEP=" ${DIM}|${R} "
 
 # Gauge heat ramp — 10 truecolor stops used by mkbar to shade each filled dot
@@ -432,12 +435,11 @@ if _on session_dur && [ -n "$total_dur_ms" ] && [ "$total_dur_ms" -gt 0 ] 2>/dev
   seg2 "${DIM}${_batt} ${FD}${R}"
 fi
 
-# Context capacity gauge — how full is the window. 🧠 (brain) since the
-# context is what the model thinks with.
+# Context capacity gauge — how full is the window.
 if _on ctx_usage && [ -n "$used_pct" ]; then
   printf -v ctx '%.0f' "$used_pct"
   tcolor "$ctx" 80 50; mkbar "$ctx"
-  seg2 "${TC}\U0001f9e0${R} ${BAR} ${TC}${ctx}%${R}"
+  seg2 "${CTX_COL}CTX${R} ${BAR} ${TC}${ctx}%${R}"
 fi
 
 # Turn flow — what flowed in/out on the last API call, read as one
@@ -464,7 +466,13 @@ if _on cost && [ -n "$session_cost" ]; then
   seg2 "$c"
 fi
 
-_on five_hour_rl && rate_seg "\U0001f6dd" "$five_pct" "$five_reset" "\\u23f3"
+# 5-hour rate-limit window: fixed-color text labels (WND for the usage bar,
+# WEEK for the reset countdown) instead of rate_seg's dynamic-colored emoji.
+if _on five_hour_rl && [ -n "$five_pct" ]; then
+  printf -v _fpct '%.0f' "$five_pct"
+  tcolor "$_fpct" 80 50; mkbar "$_fpct"; fmt_remain "$five_reset" "${WEEK_COL}WEEK${R}"
+  seg2 "${WND_COL}WND${R} ${BAR} ${TC}${_fpct}%${FR}${R}"
+fi
 _on weekly_rl && rate_seg "\U0001f4c5" "$week_pct" "$week_reset" "\\U0001f570\\ufe0f"
 
 _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
