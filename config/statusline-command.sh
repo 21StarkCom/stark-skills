@@ -361,7 +361,7 @@ _on session_name && [ -n "$session_name" ] && seg "${DIM}${session_name}${R}"
 _on vim_mode && [ -n "$vim_mode" ] && { [ "$vim_mode" = "NORMAL" ] && seg "${YEL}N${R}" || seg "${DIM}I${R}"; }
 
 # ═════════════════════════════════════════════════════════════════════════
-# Line 2: account · gauges · tokens · cost
+# Line 2: account · duration · gauges · tokens · cost
 # ═════════════════════════════════════════════════════════════════════════
 l2=""
 
@@ -424,6 +424,14 @@ if _on account; then
   fi
 fi
 
+# Session duration — right after the account so the "how long have I been at
+# this" read comes first. Full battery 🔋 for the first 4h, low battery 🪫 after.
+if _on session_dur && [ -n "$total_dur_ms" ] && [ "$total_dur_ms" -gt 0 ] 2>/dev/null; then
+  fmt_dur $(( total_dur_ms / 1000 ))
+  if [ "$total_dur_ms" -lt 14400000 ]; then _batt="\U0001f50b"; else _batt="\U0001faab"; fi
+  seg2 "${DIM}${_batt} ${FD}${R}"
+fi
+
 # Context capacity gauge — how full is the window. 🧠 (brain) since the
 # context is what the model thinks with.
 if _on ctx_usage && [ -n "$used_pct" ]; then
@@ -455,9 +463,6 @@ if _on cost && [ -n "$session_cost" ]; then
   _on cost_rate && [ -n "$cost_rate" ] && c="${c} ${DIM}· ${cost_rate}${R}"
   seg2 "$c"
 fi
-
-_on session_dur && [ -n "$total_dur_ms" ] && [ "$total_dur_ms" -gt 0 ] 2>/dev/null && \
-  { fmt_dur $(( total_dur_ms / 1000 )); seg2 "${DIM}\U0001faab ${FD}${R}"; }
 
 _on five_hour_rl && rate_seg "\U0001f6dd" "$five_pct" "$five_reset" "\\u23f3"
 _on weekly_rl && rate_seg "\U0001f4c5" "$week_pct" "$week_reset" "\\U0001f570\\ufe0f"
