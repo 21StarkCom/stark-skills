@@ -25,7 +25,6 @@ eval "$(jq -r "${_segsrc[@]}" '{
   vim_mode:     (.vim.mode // ""),
   session_name: (.session_name // ""),
   effort:       (.effort.level // ""),
-  thinking:     (.thinking.enabled // false),
   agent_name:   (.agent.name // ""),
   out_style:    (.output_style.name // ""),
   week_pct:     (.rate_limits.seven_day.used_percentage // ""),
@@ -43,7 +42,6 @@ eval "$(jq -r "${_segsrc[@]}" '{
   s_added:      (.cost.total_lines_added // ""),
   s_removed:    (.cost.total_lines_removed // ""),
   total_dur_ms: (.cost.total_duration_ms // ""),
-  api_dur_ms:   (.cost.total_api_duration_ms // ""),
   skip:         ([($_seg[0] // {}) | objects | to_entries[] | select(.value == false) | .key] | join(" "))
 } | to_entries[] | "\(.key)=\(.value | tostring | @sh)"' 2>/dev/null)"
 
@@ -56,6 +54,16 @@ PEACH="\033[38;5;216m" YEL="\033[38;5;229m" GRN="\033[38;5;150m"
 SAP="\033[38;5;117m"   RED="\033[38;5;211m" TEAL="\033[38;5;158m"
 MAR="\033[38;5;217m"   MAUVE="\033[38;5;141m" SKY="\033[38;5;117m"
 SEP=" ${DIM}|${R} "
+
+# Gauge heat ramp — 10 truecolor stops used by mkbar to shade each filled dot
+# by the level it represents (dot near 0% = green, near 100% = red):
+# green ×2 → yellow ×2 → orange ×3 → red ×3.
+_SHADE=(
+  "\033[38;2;74;150;70m"   "\033[38;2;140;205;120m"                          # green (dark → light)
+  "\033[38;2;205;218;130m" "\033[38;2;249;226;175m"                          # yellow
+  "\033[38;2;250;191;140m" "\033[38;2;244;168;104m" "\033[38;2;238;146;78m"  # orange
+  "\033[38;2;236;122;118m" "\033[38;2;226;92;92m"  "\033[38;2;212;66;66m"    # red
+)
 
 # Cache wall-clock once; bash printf-builtin avoids a `date +%s` fork on
 # each call site (rate segs, session-start).
@@ -103,11 +111,25 @@ fmt_remain() { # reset_epoch [time_emoji] → sets FR: " ⏳ XdYh" or ""
   else FR=" ${e} ${m}m"; fi
 }
 
+mkbar() { # pct [width] → sets BAR: railed █ bar, each filled cell shaded by its level (green→red)
+  local pct=$1 w=${2:-10} i f='' e='' filled val idx
+  filled=$(( (pct * w + 50) / 100 ))
+  [ "$filled" -gt "$w" ] && filled=$w
+  [ "$filled" -lt 0 ] && filled=0
+  for (( i = 0; i < filled; i++ )); do
+    val=$(( (100 * i + 50) / w )); idx=$(( val / 10 )); (( idx > 9 )) && idx=9
+    f+="${_SHADE[idx]}█"
+  done
+  for (( i = filled; i < w; i++ )); do e+="░"; done
+  local BORD="\033[38;5;252m"   # bright neutral — contrasts both filled + empty cells
+  BAR="${BORD}▐${R}${f}${DIM}${e}${BORD}▌${R}"
+}
+
 rate_seg() { # section_emoji pct reset_epoch [time_emoji]
   [ -z "$2" ] && return
   local pct; printf -v pct '%.0f' "$2"
-  tcolor "$pct" 80 50; fmt_remain "$3" "$4"
-  seg2 "${TC}${1} ${pct}%${FR}${R}"
+  tcolor "$pct" 80 50; fmt_remain "$3" "$4"; mkbar "$pct"
+  seg2 "${TC}${1}${R} ${BAR} ${TC}${pct}%${FR}${R}"
 }
 
 gradient() { # text [palette] → sets GRAD: per-account color sweep
@@ -263,11 +285,10 @@ if _on git_branch && [ -n "$git_branch" ]; then
   _on git_dirty && [ -n "$git_dirty" ] && out="${out} ${MAR}${git_dirty}${R}"
 fi
 
-# Model: strip " 4.5"-style versions, shorten " (1M context)" → " 1M" —
+# Model: keep the version, shorten " (1M context)" → " 1M" —
 # pure-bash regex replaces a sed fork.
 if _on model && [ -n "$model" ]; then
   m="$model"
-  [[ $m =~ ^(.*)\ [0-9]+\.[0-9]+(.*)$ ]] && m="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
   [[ $m =~ ^(.*)\ \(([0-9]+[KMG])\ context\)(.*)$ ]] && m="${BASH_REMATCH[1]} ${BASH_REMATCH[2]}${BASH_REMATCH[3]}"
   seg "${SAP}${m}${R}"
 fi
@@ -286,9 +307,6 @@ if _on effort && [ -n "$effort" ]; then
   seg "${_ec}${_el}${R}"
 fi
 
-# Extended thinking — only show when enabled (off is the default state).
-_on thinking && [ "$thinking" = "true" ] && seg "${YEL}\U0001f4ad${R}"
-
 # Active subagent (--agent foo or via agent settings).
 _on agent && [ -n "$agent_name" ] && seg "${TEAL}\U0001f916 ${agent_name}${R}"
 
@@ -298,12 +316,6 @@ _on out_style && [ -n "$out_style" ] && [ "$out_style" != "default" ] && \
 
 _on session_name && [ -n "$session_name" ] && seg "${DIM}${session_name}${R}"
 _on vim_mode && [ -n "$vim_mode" ] && { [ "$vim_mode" = "NORMAL" ] && seg "${YEL}N${R}" || seg "${DIM}I${R}"; }
-
-if _on api_ratio && [ -n "$total_dur_ms" ] && [ -n "$api_dur_ms" ] && [ "$total_dur_ms" -gt 0 ] 2>/dev/null; then
-  ratio=$(( api_dur_ms * 100 / total_dur_ms ))
-  tcolor "$ratio" 80 50
-  seg "${TC}⚙️ ${ratio}%${R}"
-fi
 
 # ═════════════════════════════════════════════════════════════════════════
 # Line 2: account · gauges · tokens · cost
@@ -373,8 +385,8 @@ fi
 # context is what the model thinks with.
 if _on ctx_usage && [ -n "$used_pct" ]; then
   printf -v ctx '%.0f' "$used_pct"
-  tcolor "$ctx" 80 50
-  seg2 "${TC}\U0001f9e0 ${ctx}%${R}"
+  tcolor "$ctx" 80 50; mkbar "$ctx"
+  seg2 "${TC}\U0001f9e0${R} ${BAR} ${TC}${ctx}%${R}"
 fi
 
 # Turn flow — what flowed in/out on the last API call, read as one
