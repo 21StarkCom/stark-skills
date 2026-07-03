@@ -116,14 +116,17 @@ gradient() { # text [palette] → sets GRAD: per-account color sweep
   # timer — each event-driven re-render reads a fresh EPOCHREALTIME and drifts
   # the field a frame, but it no longer animates on a clock. Palette ($2)
   # selects the account's color family: gold (Max/Com), violet (Max/Net), blue
-  # (Enterprise), pink (Team). Pure bash fixed-point math, no forks. GRAD holds
+  # (Enterprise), pink→orange spectrum (Team#1 pink / #2 coral / #3 orange). Pure
+  # bash fixed-point math, no forks. GRAD holds
   # interpreted ESC bytes (printf -v %b) — embed directly, don't re-%b it.
   local text="$1" pal="${2:-gold}" RST=$'\033[0m'
   local -a PR PG PB
   case "$pal" in
     violet) PR=(203 180 224 150) PG=(140 110 120 90 ) PB=(247 250 255 240) ;;  # purple→magenta — Max/Net
     blue)   PR=(0   64  138 33 ) PG=(160 196 224 182) PB=(255 255 255 255) ;;  # strong light blue — Enterprise
-    pink)   PR=(255 255 255 250) PG=(77  120 160 100) PB=(148 180 205 170) ;;  # vivid pink — Team
+    team1)  PR=(255 255 255 245) PG=(77  128 105 90 ) PB=(148 180 160 140) ;;  # hot pink — Team#1
+    team2)  PR=(255 255 255 250) PG=(110 145 125 100) PB=(110 120 100 90 ) ;;  # coral/salmon — Team#2
+    team3)  PR=(255 255 255 250) PG=(150 178 138 160) PB=(40  75  30  55 ) ;;  # orange — Team#3
     *)      PR=(230 255 255 250) PG=(150 190 224 204) PB=(0   0   60  15 ) ;;  # amber→gold — Max/Com
   esac
   local n=${#PR[@]} len=${#text}
@@ -331,18 +334,29 @@ if _on account; then
         if [ "$acct_otype" = "claude_max" ]; then acct_label="Max/Com"
         else acct_label="Enterprise"; fi ;;
       *.net)
+        # Several Team accounts share the .net domain — disambiguate by the email
+        # local part: aryeh.kiovetsky2 → Team#2, aryeh.kiovetsky3 → Team#3,
+        # the original → Team#1.
         if [ "$acct_otype" = "claude_max" ]; then acct_label="Max/Net"
-        else acct_label="Team"; fi ;;
+        else case "${acct_email%%@*}" in
+          aryeh.kiovetsky2) acct_label="Team#2" ;;
+          aryeh.kiovetsky3) acct_label="Team#3" ;;
+          *)                acct_label="Team#1" ;;
+        esac; fi ;;
       *) acct_label="$acct_dom" ;;
     esac
     if [ -n "$acct_label" ]; then
-      # Color family per account: Max/Net → violet, Max/Com → gold,
-      # Enterprise → blue, Team → pink.
+      # Color family per account: Max/Net → violet, Max/Com → gold, Enterprise →
+      # blue. The Team accounts share a pink→orange spectrum, one shade each:
+      # Team#1 pink, Team#2 coral, Team#3 orange.
       case "$acct_label" in
         Max/Net)    _pal=violet ;;
         Max/*)      _pal=gold ;;
         Enterprise) _pal=blue ;;
-        Team)       _pal=pink ;;
+        Team#1)     _pal=team1 ;;
+        Team#2)     _pal=team2 ;;
+        Team#3)     _pal=team3 ;;
+        Team*)      _pal=team1 ;;
         *)          _pal=gold ;;
       esac
       gradient "$acct_label" "$_pal"
