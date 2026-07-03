@@ -12,7 +12,7 @@
 #     git_dirty segment is enabled, in ONE process substitution, and its
 #     result is TTL-cached (4s) keyed on repo root — bursty event-driven
 #     re-renders are fork-free
-#   • gauge bars index precomputed shaded prefixes — no per-cell loop
+#   • gauge bars substring a pre-built fill string — no per-cell loop
 #   • helpers return via printf -v globals (TC/FN/FD/FR/GRAD) — no $(...) subshells
 
 # ── Extract all fields + segment visibility (single jq call) ─────────────
@@ -64,15 +64,23 @@ FIVEHR_COL="\033[38;2;237;117;78m" # #ed754e — 5H label (5-hour window gauge)
 DAY_COL="\033[38;2;229;114;74m"    # #e5724a — 7D label (7-day window gauge)
 SEP=" ${DIM}|${R} "
 
-# Gauge heat ramp — 10 truecolor stops used by mkbar to shade each filled dot
-# by the level it represents (dot near 0% = green, near 100% = red):
-# green ×2 → yellow ×2 → orange ×3 → red ×3.
-_SHADE=(
-  "\033[38;2;74;150;70m"   "\033[38;2;140;205;120m"                          # green (dark → light)
-  "\033[38;2;205;218;130m" "\033[38;2;249;226;175m"                          # yellow
-  "\033[38;2;250;191;140m" "\033[38;2;244;168;104m" "\033[38;2;238;146;78m"  # orange
-  "\033[38;2;236;122;118m" "\033[38;2;226;92;92m"  "\033[38;2;212;66;66m"    # red
-)
+# Per-gauge bar fill — each gauge fades a light tint (cell 0) → its saturated
+# hue (cell 9) across the 10 cells, so the three bars read as distinct channels
+# and depth grows with fill. Prefixes are precomputed once (see build_grad).
+build_grad() { # arrname r0 g0 b0 r1 g1 b1 → global array of 11 filled-cell prefixes
+  local -n _a="$1"; local r0=$2 g0=$3 b0=$4 r1=$5 g1=$6 b1=$7 i r g b acc=""
+  _a=("")
+  for (( i = 0; i < 10; i++ )); do
+    r=$(( r0 + (r1 - r0) * i / 9 ))
+    g=$(( g0 + (g1 - g0) * i / 9 ))
+    b=$(( b0 + (b1 - b0) * i / 9 ))
+    acc+="\033[38;2;${r};${g};${b}m█"
+    _a+=("$acc")
+  done
+}
+build_grad _CTX_FB 223 177  96 160  53  47   # #dfb160 → #a0352f — CTX (gold→crimson)
+build_grad _5H_FB   80 155 197 196  60  60   # #509bc5 → #c43c3c — 5H (blue→red)
+build_grad _7D_FB  162 166 211  72  47 134   # #a2a6d3 → #482f86 — 7D (indigo)
 
 # Cache wall-clock once; bash printf-builtin avoids a `date +%s` fork on
 # each call site (rate segs, session-start).
@@ -121,19 +129,18 @@ fmt_remain() { # reset_epoch [time_emoji] → sets FR: " ⏳ XdYh" or " XdYh" (e
   else FR=" ${lead}${m}m"; fi
 }
 
-# All gauges render at width 10, and for w=10 cell i's heat level is exactly
-# _SHADE[i] ((100i+50)/10 = 10i+5 → idx i) — so the filled prefixes are built
-# once and mkbar becomes a pure array lookup + substring, no per-cell loop.
-_FB=("") _fb=""
-for (( _i = 0; _i < 10; _i++ )); do _fb+="${_SHADE[_i]}█"; _FB+=("$_fb"); done
+# All gauges render at width 10. Each gauge's filled prefixes are precomputed
+# by build_grad (light→dark), so mkbar is a pure array lookup + substring — no
+# per-cell loop.
 _E10="░░░░░░░░░░"
 _BORD="\033[38;5;252m"   # bright neutral rail — contrasts both filled + empty cells
 
-mkbar() { # pct → sets BAR: railed █ bar, each filled cell shaded by its level (green→red)
+mkbar() { # pct gradarray → sets BAR: railed █ bar, filled cells fading light→dark
+  local -n _fb="$2"
   local filled=$(( ($1 * 10 + 50) / 100 ))
   (( filled > 10 )) && filled=10
   (( filled < 0 )) && filled=0
-  BAR="${_BORD}▐${R}${_FB[filled]}${DIM}${_E10:0:10-filled}${_BORD}▌${R}"
+  BAR="${_BORD}▐${R}${_fb[filled]}${DIM}${_E10:0:10-filled}${_BORD}▌${R}"
 }
 
 gradient() { # text [palette] → sets GRAD: per-account color sweep
@@ -432,7 +439,7 @@ fi
 # Context capacity gauge — how full is the window.
 if _on ctx_usage && [ -n "$used_pct" ]; then
   printf -v ctx '%.0f' "$used_pct"
-  tcolor "$ctx" 80 50; mkbar "$ctx"
+  tcolor "$ctx" 80 50; mkbar "$ctx" _CTX_FB
   seg2 "${CTX_COL}CTX${R} ${BAR} ${TC}${ctx}%${R}"
 fi
 
@@ -464,14 +471,14 @@ fi
 # colored emoji; countdown is a bare duration, no emoji/label of its own.
 if _on five_hour_rl && [ -n "$five_pct" ]; then
   printf -v _fpct '%.0f' "$five_pct"
-  tcolor "$_fpct" 80 50; mkbar "$_fpct"; fmt_remain "$five_reset" ""
+  tcolor "$_fpct" 80 50; mkbar "$_fpct" _5H_FB; fmt_remain "$five_reset" ""
   seg2 "${FIVEHR_COL}5H${R} ${BAR} ${TC}${_fpct}%${FR}${R}"
 fi
 # 7-day rate-limit window: fixed-color "7D" label instead of the dynamic-
 # colored 📅 emoji; countdown is a bare duration, matching 5H.
 if _on weekly_rl && [ -n "$week_pct" ]; then
   printf -v _wpct '%.0f' "$week_pct"
-  tcolor "$_wpct" 80 50; mkbar "$_wpct"; fmt_remain "$week_reset" ""
+  tcolor "$_wpct" 80 50; mkbar "$_wpct" _7D_FB; fmt_remain "$week_reset" ""
   seg2 "${DAY_COL}7D${R} ${BAR} ${TC}${_wpct}%${FR}${R}"
 fi
 
