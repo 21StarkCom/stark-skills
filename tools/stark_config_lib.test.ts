@@ -257,6 +257,39 @@ test("getRedTeamConfig: unknown keys in repo override are pruned with a warning"
   });
 });
 
+test("getRedTeamConfig: fold defaults present", async () => {
+  await withScratchHome(() => {
+    const cfg = getRedTeamConfig();
+    assert.equal(cfg.fold.enabled, true);
+    assert.equal(cfg.fold.model, "claude-opus-4-8");
+    assert.equal(cfg.fold.max_cost_usd, 15);
+  });
+});
+
+test("getRedTeamConfig: fold.model is locked against repo override", async () => {
+  await withScratchHome(async (home) => {
+    writeGlobalConfig(home, { red_team: {} });
+    const repoDir = path.join(home, "fake-repo");
+    fs.mkdirSync(path.join(repoDir, ".code-review"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repoDir, ".code-review", "config.json"),
+      JSON.stringify({ red_team: { fold: { model: "gpt-3.5-turbo" } } }),
+    );
+    const prevCwd = process.cwd();
+    process.chdir(repoDir);
+    try {
+      const cfg = getRedTeamConfig();
+      assert.equal(
+        cfg.fold.model,
+        "claude-opus-4-8",
+        "fold.model is locked — repo cannot override",
+      );
+    } finally {
+      process.chdir(prevCwd);
+    }
+  });
+});
+
 test("getRedTeamConfig: non-dict override at a locked parent (e.g. fix_plan: 'off') is rejected wholesale", async () => {
   await withScratchHome(async (home) => {
     writeGlobalConfig(home, { red_team: {} });

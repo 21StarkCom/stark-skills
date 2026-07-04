@@ -12,7 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { initRedTeamTables } from "./red_team_audit_lib.ts";
+import { connect, initRedTeamTables } from "./red_team_audit_lib.ts";
 
 import {
   DEFAULT_FIX_PLAN_CONFIG,
@@ -21,6 +21,7 @@ import {
   VALID_PERSONAS,
   assembleFixPlanPrompt,
   assemblePrompt,
+  auditPersistRun,
   buildFindingPayload,
   buildFixPlanPayload,
   buildResultFromTranscript,
@@ -80,6 +81,21 @@ function tmpDoc(content: string): string {
   const p = path.join(dir, "doc.md");
   fs.writeFileSync(p, content, "utf8");
   return p;
+}
+
+// Read one red_team_runs row back for assertions on what actually landed in
+// SQLite (as opposed to the AuditEnvelope wrapper that recordRun returns).
+function readRunRow(dbPath: string, runId: string): Record<string, unknown> {
+  const db = connect(dbPath);
+  try {
+    const row = db
+      .prepare("SELECT * FROM red_team_runs WHERE run_id = ?")
+      .get(runId) as Record<string, unknown> | undefined;
+    assert.ok(row, `no red_team_runs row for run_id=${runId}`);
+    return row!;
+  } finally {
+    db.close();
+  }
 }
 
 // ── Constants + repo-relative anchors ─────────────────────────────────
@@ -640,6 +656,37 @@ test("recordRun persists a row via the TS-native audit lib", () => {
   assert.equal(created.run_id, runId);
 });
 
+test("auditPersistRun records real fix_plan_status/md/json/cost, not 'pending'", () => {
+  const dbPath = tmpDb();
+  initRedTeamTables(dbPath);
+  const ctx = mkCtx({ run_id: "t-fold-1", stage: "design" });
+  const result = mkChallenge({ findings: [], cost_usd: 3.5, round_num: 1 });
+  const fixPlan = {
+    summary: "x",
+    moves: [],
+    cost_usd: 1.25,
+    model: "gpt-5.5-pro",
+    unaddressed_finding_ids: [],
+    orphan_finding_ids: [],
+    notes: "",
+    input_truncated: false,
+    input_omitted_finding_ids: [],
+    warnings: [],
+    raw_output: "",
+    duration_s: 1,
+    input_tokens: 10,
+    output_tokens: 5,
+    reasoning_effort: "xhigh",
+    error: null,
+  };
+  auditPersistRun(ctx, result, "gpt-5.5-pro", dbPath, "success", fixPlan, "## Proposed Fix Plan\n…");
+  const row = readRunRow(dbPath, "t-fold-1");
+  assert.equal(row.fix_plan_status, "success");
+  assert.notEqual(row.fix_plan_md, null);
+  assert.notEqual(row.fix_plan_json, null);
+  assert.equal(row.fix_plan_cost_usd, 1.25);
+});
+
 // ── End-to-end dispatch (mocked codex) ───────────────────────────────
 
 test("dispatch() runs end-to-end with a mocked codex, writes sidecar, persists audit", () => {
@@ -854,7 +901,7 @@ function mkChallenge(over: Partial<RedTeamResult> = {}): RedTeamResult {
   };
 }
 
-function mkCtx(): RedTeamRunContext {
+function mkCtx(over: Partial<RedTeamRunContext> = {}): RedTeamRunContext {
   return {
     run_id: "test-run",
     stage: "design",
@@ -865,6 +912,7 @@ function mkCtx(): RedTeamRunContext {
     pr_number: null,
     db_path: "/tmp/nonexistent.db",
     started_at: "2026-05-16T00:00:00Z",
+    ...over,
   };
 }
 

@@ -61,6 +61,15 @@ export const DEFAULT_MODELS: Record<string, ModelEntry> = {
   gemini: { enabled: true, model_id: "gemini-3.1-pro-preview" },
 };
 
+export interface FoldConfig {
+  enabled: boolean;
+  model: string;
+  timeout_s: number;
+  max_input_chars: number;
+  max_cost_usd: number;
+  open_pr: boolean;
+}
+
 export interface RedTeamConfig {
   enabled?: boolean;
   agent?: string;
@@ -84,6 +93,7 @@ export interface RedTeamConfig {
     max_moves?: number;
     max_input_chars?: number;
   };
+  fold: FoldConfig;
   audit?: {
     retain_full_text?: boolean;
     excerpt_max_chars?: number;
@@ -122,6 +132,14 @@ export const DEFAULT_RED_TEAM: RedTeamConfig = {
     min_moves: 2,
     max_moves: 6,
     max_input_chars: 200_000,
+  },
+  fold: {
+    enabled: true,
+    model: "claude-opus-4-8",
+    timeout_s: 1200,
+    max_input_chars: 200_000,
+    max_cost_usd: 15,
+    open_pr: true,
   },
   audit: {
     retain_full_text: false,
@@ -275,6 +293,8 @@ const RED_TEAM_LOCKED_FIELDS: ReadonlySet<string> = new Set([
   "fix_plan.reasoning_effort",
   "fix_plan.min_moves",
   "fix_plan.max_moves",
+  "fold.enabled",
+  "fold.model",
   "audit.retain_full_text",
   "audit.excerpt_max_chars",
 ]);

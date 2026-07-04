@@ -5,9 +5,11 @@
  * Uses `node:sqlite` (built-in on Node 22+; we run Node 26). No npm dep.
  *
  * Tables:
- *   - red_team_runs           one row per full red-team cycle
- *   - red_team_persona_stats  per-persona per-round aggregate counts
- *   - red_team_findings       raw finding text under FU-rt6 retention
+ *   - red_team_runs                    one row per full red-team cycle
+ *   - red_team_persona_stats           per-persona per-round aggregate counts
+ *   - red_team_findings                raw finding text under FU-rt6 retention
+ *   - red_team_fold_runs               one row per fix-plan fold decision cycle
+ *   - red_team_fix_plan_dispositions   per-move accept/modify/reject outcome
  *
  * Schema constants here MUST stay byte-equivalent to the Python original
  * - the parity test (`red_team_audit_parity.test.ts`) feeds identical
@@ -104,6 +106,39 @@ CREATE INDEX IF NOT EXISTS idx_red_team_findings_run
     ON red_team_findings(run_id, round_num);
 CREATE INDEX IF NOT EXISTS idx_red_team_findings_persona
     ON red_team_findings(persona, severity);
+
+CREATE TABLE IF NOT EXISTS red_team_fold_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fold_run_id TEXT NOT NULL UNIQUE,
+    source_run_id TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    artifact_relative_path TEXT,
+    artifact_hash TEXT,
+    fix_plan_hash TEXT,
+    repo TEXT,
+    pr_number INTEGER,
+    decider_model TEXT NOT NULL,
+    accepted_count INTEGER NOT NULL,
+    modified_count INTEGER NOT NULL,
+    rejected_count INTEGER NOT NULL,
+    apply_failed_count INTEGER NOT NULL,
+    cost_usd REAL NOT NULL,
+    duration_s REAL NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+CREATE TABLE IF NOT EXISTS red_team_fix_plan_dispositions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fold_run_id TEXT NOT NULL,
+    source_run_id TEXT NOT NULL,
+    move_id TEXT NOT NULL,
+    addressed_finding_ids TEXT NOT NULL,
+    disposition TEXT NOT NULL,
+    rationale TEXT,
+    move_snapshot_json TEXT,
+    UNIQUE(fold_run_id, move_id)
+);
+CREATE INDEX IF NOT EXISTS idx_fix_plan_disp_source ON red_team_fix_plan_dispositions(source_run_id);
+CREATE INDEX IF NOT EXISTS idx_fix_plan_disp_move   ON red_team_fix_plan_dispositions(disposition);
 `;
 
 const RED_TEAM_RUNS_V12_COLUMNS: ReadonlyArray<[string, string]> = [
@@ -255,6 +290,34 @@ export interface PersonaStatRow {
   findings_at_high: number;
   findings_at_medium: number;
   human_review_requests: number;
+}
+
+export interface FoldRunRow {
+  fold_run_id: string;
+  source_run_id: string;
+  stage: string;
+  artifact_relative_path?: string | null;
+  artifact_hash?: string | null;
+  fix_plan_hash?: string | null;
+  repo?: string | null;
+  pr_number?: number | null;
+  decider_model: string;
+  accepted_count: number;
+  modified_count: number;
+  rejected_count: number;
+  apply_failed_count: number;
+  cost_usd: number;
+  duration_s: number;
+}
+
+export interface DispositionRow {
+  fold_run_id: string;
+  source_run_id: string;
+  move_id: string;
+  addressed_finding_ids: string;
+  disposition: string;
+  rationale?: string | null;
+  move_snapshot_json?: string | null;
 }
 
 /** Recursively walk a JSON-decoded value, returning a new value whose
@@ -487,36 +550,88 @@ export function recordPersonaStats(
   }
 }
 
-/** Update the persisted fix-plan state for an existing red-team run.
- *  Throws when no row exists for runId. */
-export function recordFixPlan(
-  runId: string,
-  opts: {
-    fixPlanMd: string | null;
-    fixPlanJson: string | null;
-    fixPlanCostUsd: number | null;
-    fixPlanStatus: string;
-  },
-  dbPath: string,
-): void {
-  const sanitizedJson = sanitizeFixPlanJson(opts.fixPlanJson);
+const FOLD_RUN_INSERT_SQL =
+  "INSERT OR REPLACE INTO red_team_fold_runs (fold_run_id, source_run_id, stage, " +
+  "artifact_relative_path, artifact_hash, fix_plan_hash, repo, pr_number, " +
+  "decider_model, accepted_count, modified_count, rejected_count, " +
+  "apply_failed_count, cost_usd, duration_s) " +
+  "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+/** Insert/upsert one red_team_fold_runs row - one row per fix-plan fold
+ *  decision cycle (accept/modify/reject/apply-failed tallies + cost/duration).
+ *  `INSERT OR REPLACE` on the `fold_run_id` UNIQUE constraint makes this
+ *  idempotent: `fold_run_id` is deterministic (`fold-<sourceRunId>-<hash8>`),
+ *  so a legitimate identical rerun (e.g. re-folding a byte-identical artifact)
+ *  replaces the prior row with the updated counts rather than throwing a
+ *  UNIQUE violation - mirroring how `recordDispositions` upserts (rt2 "next
+ *  run reconciles"). */
+export function recordFoldRun(row: FoldRunRow, dbPath: string): void {
   const db = connect(dbPath);
   try {
-    const stmt = db.prepare(
-      "UPDATE red_team_runs " +
-        "SET fix_plan_md = ?, fix_plan_json = ?, fix_plan_cost_usd = ?, " +
-        "fix_plan_status = ? " +
-        "WHERE run_id = ?",
+    db.prepare(FOLD_RUN_INSERT_SQL).run(
+      row.fold_run_id,
+      row.source_run_id,
+      row.stage,
+      row.artifact_relative_path ?? null,
+      row.artifact_hash ?? null,
+      row.fix_plan_hash ?? null,
+      row.repo ?? null,
+      row.pr_number ?? null,
+      row.decider_model,
+      row.accepted_count,
+      row.modified_count,
+      row.rejected_count,
+      row.apply_failed_count,
+      row.cost_usd,
+      row.duration_s,
     );
-    const info = stmt.run(
-      opts.fixPlanMd,
-      sanitizedJson,
-      opts.fixPlanCostUsd,
-      opts.fixPlanStatus,
-      runId,
-    );
-    if (info.changes !== 1) {
-      throw new Error(`red_team_runs row not found for run_id=${JSON.stringify(runId)}`);
+  } finally {
+    db.close();
+  }
+}
+
+const DISPOSITION_INSERT_SQL =
+  "INSERT OR REPLACE INTO red_team_fix_plan_dispositions " +
+  "(fold_run_id, source_run_id, move_id, addressed_finding_ids, " +
+  "disposition, rationale, move_snapshot_json) " +
+  "VALUES (?, ?, ?, ?, ?, ?, ?)";
+
+/** Insert/upsert many fix-plan-move disposition rows in one connection,
+ *  atomically. `INSERT OR REPLACE` on the `(fold_run_id, move_id)` unique
+ *  constraint makes re-recording a move idempotent - it replaces the prior
+ *  disposition rather than duplicating the row, which a fold-run retry
+ *  would otherwise do. Wrapped in BEGIN/COMMIT/ROLLBACK so a mid-batch
+ *  failure leaves the table unchanged, matching `recordFindings`'
+ *  semantics. */
+export function recordDispositions(
+  rows: readonly DispositionRow[],
+  dbPath: string,
+): void {
+  if (rows.length === 0) return;
+  const db = connect(dbPath);
+  try {
+    const stmt = db.prepare(DISPOSITION_INSERT_SQL);
+    db.exec("BEGIN");
+    try {
+      for (const r of rows) {
+        stmt.run(
+          r.fold_run_id,
+          r.source_run_id,
+          r.move_id,
+          r.addressed_finding_ids,
+          r.disposition,
+          r.rationale ?? null,
+          r.move_snapshot_json ?? null,
+        );
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* ignore secondary failure */
+      }
+      throw err;
     }
   } finally {
     db.close();

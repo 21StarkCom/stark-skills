@@ -16,6 +16,7 @@
  *     [--classification-override LEVEL]
  */
 
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -42,6 +43,7 @@ interface CliArgs {
   replayTranscript: string | null;
   classificationOverride: ClassLevel | null;
   personas: PersonaSlug[];
+  fold: boolean;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -55,6 +57,7 @@ function parseArgs(argv: string[]): CliArgs {
     replayTranscript: null,
     classificationOverride: null,
     personas: [...VALID_PERSONAS],
+    fold: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -98,6 +101,9 @@ function parseArgs(argv: string[]): CliArgs {
         args.classificationOverride = v;
         break;
       }
+      case "--fold":
+        args.fold = true;
+        break;
       case "-h":
       case "--help":
         printHelp();
@@ -120,6 +126,7 @@ function printHelp(): void {
                           [--no-sidecar] [--no-audit] [--json]
                           [--replay-transcript PATH]
                           [--classification-override LEVEL]
+                          [--fold]
 
 Adversarial red-team review of a design doc (TS port).
 
@@ -133,6 +140,7 @@ options:
   --json                           Emit a single JSON object on stdout.
   --replay-transcript PATH         Phase 1 deterministic seam — bypass live model.
   --classification-override LEVEL  Override the classification gate (public|internal|confidential|restricted).
+  --fold                           After a successful challenge, fold the fix plan into the artifact via red_team_fold.ts (non-fatal).
 `);
 }
 
@@ -219,6 +227,45 @@ async function main(argv: string[]): Promise<number> {
       }
     }
   }
+  // Non-fatal convenience post-step: after a successful challenge that wrote a
+  // sidecar, fold the fix plan into the artifact by shelling out to the
+  // standalone fold CLI (`red_team_fold.ts`, the reusable unit). This is sugar
+  // over that CLI — the challenge has already succeeded, written its sidecar,
+  // and audited; a fold failure is logged but never changes the challenge's
+  // exit code or its stdout/JSON contract. `result.sidecar_path` is null under
+  // `--no-sidecar`, so that case is subsumed by the truthiness guard. (These
+  // dispatchers have no `--dry-run`.)
+  if (args.fold && result.sidecar_path && result.status !== "error") {
+    const foldEntry = new URL("./red_team_fold.ts", import.meta.url).pathname;
+    const foldArgs = ["--experimental-strip-types", foldEntry, "--artifact", args.design];
+    if (args.sourceSpec) foldArgs.push("--source-spec", args.sourceSpec);
+    // We deliberately never pass `--json` to fold. Under the challenge's own
+    // `--json` we have already emitted the single JSON object that contract
+    // promises; a second JSON envelope on stdout would corrupt it. So under
+    // `--json` we route fold's stdout to *our* stderr (fd 2) — stdout stays
+    // exactly one JSON object — and log a one-line note to stderr. In human
+    // mode fold's summary flows to stdout after a separator.
+    if (args.json) {
+      process.stderr.write(
+        `red_team_design: --fold running fold step (output routed to stderr to preserve --json stdout)\n`,
+      );
+    } else {
+      process.stdout.write(`\n--- fold step ---\n`);
+    }
+    const r = spawnSync(process.execPath, foldArgs, {
+      stdio: ["inherit", args.json ? 2 : "inherit", "inherit"],
+    });
+    if (r.error) {
+      process.stderr.write(
+        `red_team_design: --fold step failed to spawn (non-fatal): ${r.error.message}\n`,
+      );
+    } else if (typeof r.status === "number" && r.status !== 0) {
+      process.stderr.write(
+        `red_team_design: --fold step exited ${r.status} (non-fatal; challenge already succeeded)\n`,
+      );
+    }
+  }
+
   if (result.status === "error") return 2;
   return 0;
 }

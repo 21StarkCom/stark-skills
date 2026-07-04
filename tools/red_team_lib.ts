@@ -51,6 +51,7 @@ import {
 import { resolveDb } from "./red_team_db_resolver.ts";
 import { resolveOpenaiApiKey } from "./preflight_lib.ts";
 import { assetPromptsDir, assetConfigPath } from "./asset_root_lib.ts";
+import { computeDispatchCost } from "./cost_lib.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -863,6 +864,10 @@ export interface RecordRunInput {
   repo?: string | null;
   artifact_relative_path?: string | null;
   pr_number?: number | null;
+  fix_plan_status?: FixPlanStatus | null;
+  fix_plan_md?: string | null;
+  fix_plan_json?: string | null;
+  fix_plan_cost_usd?: number | null;
 }
 
 /** Persist one red-team run row. TS-native after Phase 5b — calls
@@ -1087,9 +1092,10 @@ export interface DispatchArgs {
   enableFixPlanForCalibration?: boolean;
   /** Optional per-run cost budget (USD). If provided, the fix-plan resolver
    *  refuses on `challenge.cost_usd >= budget` and warns when the combined
-   *  cost crosses the budget. TS dispatch currently reports `cost_usd: 0`,
-   *  so leaving this undefined is the right default until cost tracking
-   *  lands. */
+   *  cost crosses the budget. `challenge.cost_usd` is computed via
+   *  `computeDispatchCost` for live codex dispatch; mocked `codexFn` runs
+   *  (e.g. tests) still report `cost_usd: 0` since no real tokens were
+   *  spent. */
   perRunBudgetUsd?: number;
   /** Mock the fix-plan codex call separately from the challenge codex.
    *  Falls back to `codexFn` when unset (tests typically share the mock). */
@@ -1179,7 +1185,7 @@ export function dispatch(args: DispatchArgs): DispatchResult {
       human_review_count: countHumanReview(validated.findings),
       raw_output: dispatched.raw_output,
       duration_s: dispatched.duration_s,
-      cost_usd: 0,
+      cost_usd: computeDispatchCost(model, dispatched.input_tokens, dispatched.output_tokens),
       error: validated.parse_error ?? dispatched.error ?? null,
       input_tokens: dispatched.input_tokens,
       output_tokens: dispatched.output_tokens,
@@ -1230,7 +1236,18 @@ export function dispatch(args: DispatchArgs): DispatchResult {
   // Audit write.
   if (!args.noAudit) {
     try {
-      auditPersistRun(ctx, result, model, args.dbPath);
+      auditPersistRun(
+        ctx,
+        result,
+        model,
+        args.dbPath,
+        fixPlanResolution.status,
+        fixPlanResolution.fixPlan,
+        renderFixPlanSection({
+          status: fixPlanResolution.status,
+          fixPlan: fixPlanResolution.fixPlan,
+        }),
+      );
     } catch (err) {
       console.error(
         `red_team_lib: audit persist failed (non-fatal): ${(err as Error).message}`,
@@ -1611,11 +1628,14 @@ export function parseCodexJsonl(stdout: string): {
   return { text: parts.join("\n"), inputTokens, outputTokens };
 }
 
-function auditPersistRun(
+export function auditPersistRun(
   ctx: RedTeamRunContext,
   result: RedTeamResult,
   model: string,
   dbPath: string,
+  fixPlanStatus: FixPlanStatus,
+  fixPlan: RedTeamFixPlan | null,
+  fixPlanMd: string | null,
 ): void {
   const status = deriveStatus(result);
   recordRun(
@@ -1636,6 +1656,10 @@ function auditPersistRun(
       repo: ctx.repo,
       artifact_relative_path: ctx.artifact_relative_path,
       pr_number: ctx.pr_number,
+      fix_plan_status: fixPlanStatus,
+      fix_plan_md: fixPlanMd,
+      fix_plan_json: fixPlan ? JSON.stringify(fixPlan) : null,
+      fix_plan_cost_usd: fixPlan ? fixPlan.cost_usd : null,
     },
     dbPath,
   );
@@ -2435,7 +2459,15 @@ export function runRedTeamFixPlan(args: {
   const validated = validateFixPlan(rawDict, blockingIds, args.cfg);
   validated.raw_output = dispatched.raw_output;
   validated.duration_s = dispatched.duration_s;
-  validated.cost_usd = 0;
+  // Note: computed from `dispatched.*`/`args.cfg.model` (not `validated.*`)
+  // because `validated.input_tokens`/`output_tokens`/`model` are only
+  // assigned below — reading them here would see validateFixPlan's
+  // pre-assignment defaults (0 / "").
+  validated.cost_usd = computeDispatchCost(
+    args.cfg.model,
+    dispatched.input_tokens,
+    dispatched.output_tokens,
+  );
   validated.input_tokens = dispatched.input_tokens;
   validated.output_tokens = dispatched.output_tokens;
   validated.model = args.cfg.model;
