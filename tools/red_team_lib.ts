@@ -382,9 +382,17 @@ export function redact(text: string): string {
 }
 
 /**
- * Pre-dispatch sensitive-data gate. Scan the assembled provider request
- * (prompt + artifact + source-spec) for token / key / PII patterns AND
+ * Pre-dispatch sensitive-data gate. Scan the **untrusted input** (artifact +
+ * source-spec + any threaded dispositions) for token / key / PII patterns AND
  * prompt-injection directives that try to exfiltrate adjacent files.
+ *
+ * IMPORTANT: pass only the untrusted document text, NOT the full assembled
+ * prompt. Our own authored preamble/persona instructions legitimately quote
+ * attacker phrases as *examples* (e.g. `"ignore previous instructions"` in the
+ * injection-defense section); scanning them self-trips the gate and blocks
+ * every run. Route the scan through `untrustedGatePayload()` so only the
+ * document under review is inspected. (See the `injection_ignore_prior`
+ * self-trip regression this guards against.)
  *
  * Returns a non-empty array of matched pattern names when the gate should
  * refuse, or an empty array when clean. The caller writes an audit row
@@ -417,6 +425,19 @@ export function preDispatchSensitiveGate(payload: string): string[] {
     if (pattern.test(payload)) hits.push(name);
   }
   return hits;
+}
+
+/**
+ * Build the payload the pre-dispatch gate should scan: only the untrusted
+ * document text (artifact + source-spec + any threaded dispositions), never
+ * our own authored preamble/persona prompts. Keeps the gate focused on the
+ * document under review and prevents the preamble's example attacker phrases
+ * from self-tripping it.
+ */
+export function untrustedGatePayload(
+  parts: ReadonlyArray<string | null | undefined>,
+): string {
+  return parts.filter((p): p is string => typeof p === "string" && p.length > 0).join("\n");
 }
 
 // ── Sandbox ──────────────────────────────────────────────────────────────
@@ -1157,12 +1178,15 @@ export interface DispatchArgs {
 export function dispatch(args: DispatchArgs): DispatchResult {
   const { ctx, prompts, personas, artifact, sourceSpec, model } = args;
 
-  // Build the assembled provider request first so the pre-dispatch gate
-  // sees the exact bytes the model would receive.
+  // Build the assembled provider request.
   const prompt = assemblePrompt({ prompts, personas, artifact, sourceSpec });
 
-  // Pre-dispatch sensitive-data gate.
-  const sensitiveHits = preDispatchSensitiveGate(prompt);
+  // Pre-dispatch sensitive-data gate — scan ONLY the untrusted document text
+  // (artifact + source-spec), never the assembled prompt: our own preamble
+  // quotes attacker phrases as examples and would self-trip the gate.
+  const sensitiveHits = preDispatchSensitiveGate(
+    untrustedGatePayload([artifact, sourceSpec]),
+  );
   if (sensitiveHits.length > 0) {
     return makeBlocked(
       ctx, model,
@@ -1604,8 +1628,13 @@ export async function dispatchAsync(
   });
   // Skip the codex spawn if the pre-dispatch sensitive gate will refuse
   // anyway — sync dispatch re-runs the gate and returns the blocked
-  // envelope without ever calling our codexFn.
-  if (preDispatchSensitiveGate(prompt).length > 0) {
+  // envelope without ever calling our codexFn. Scan only the untrusted
+  // inputs (matches sync dispatch), not the assembled prompt.
+  if (
+    preDispatchSensitiveGate(
+      untrustedGatePayload([args.artifact, args.sourceSpec]),
+    ).length > 0
+  ) {
     return dispatch(args);
   }
   const dispatched = await dispatchCodexAsync(
@@ -2466,7 +2495,16 @@ export function runRedTeamFixPlan(args: {
       inputOmittedFindingIds: omittedIds,
     });
   }
-  const sensitiveHits = preDispatchSensitiveGate(prompt);
+  // Gate the untrusted inputs (artifact + source-spec + committee findings
+  // text), never the assembled fix-plan prompt whose `fixer.md` template can
+  // legitimately quote attacker phrases as examples.
+  const sensitiveHits = preDispatchSensitiveGate(
+    untrustedGatePayload([
+      args.artifact,
+      args.sourceSpec,
+      filtered.map((f) => `${f.concern}\n${f.consequence}\n${f.counter_proposal}`).join("\n"),
+    ]),
+  );
   if (sensitiveHits.length > 0) {
     return emptyFixPlan({
       error: `pre-dispatch gate refused: matched patterns ${sensitiveHits.join(", ")}`,
