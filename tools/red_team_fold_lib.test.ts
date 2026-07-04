@@ -6,8 +6,10 @@ import {
   resolveFixPlanForFold,
   parseDispositions,
   applyFold,
+  assembleFoldPrompt,
   type MoveDisposition,
 } from "./red_team_fold_lib.ts";
+import { scrubEnv } from "./red_team_lib.ts";
 
 const PLAN = JSON.stringify({ summary: "s", moves: [], model: "gpt-5.5-pro",
   unaddressed_finding_ids: [], orphan_finding_ids: [], notes: "", input_truncated: false,
@@ -124,4 +126,51 @@ test("applyFold: duplicate move_id — only the failing patch flips, applied edi
   assert.equal(out.newDoc, "XXX\nBBB\n");                 // first edit landed
   assert.equal(out.dispositions[0].disposition, "accept");      // NOT mislabeled
   assert.equal(out.dispositions[1].disposition, "apply_failed"); // the real failure
+});
+
+// ── Task 7: token-less decider dispatch (rt1) + prompt assembly ──────────
+
+test("scrubEnv strips GitHub/model tokens (decider is token-less)", () => {
+  const scrubbed = scrubEnv({ GITHUB_TOKEN: "ghs_x", OPENAI_API_KEY: "sk-x", PATH: "/usr/bin" } as NodeJS.ProcessEnv);
+  assert.equal(scrubbed.GITHUB_TOKEN, undefined);
+  assert.equal(scrubbed.OPENAI_API_KEY, undefined);
+  assert.equal(scrubbed.GH_TOKEN, undefined);
+  // The allowlist still passes through what the decider subprocess needs to run at all.
+  assert.equal(scrubbed.PATH, "/usr/bin");
+});
+
+test("assembleFoldPrompt wraps untrusted blocks in RED_TEAM_INPUT delimiters, system prompt outside them", () => {
+  const p = assembleFoldPrompt({
+    foldMd: "SYSTEM",
+    artifact: "ART",
+    sourceSpec: "SPEC",
+    fixPlan: {
+      summary: "s", moves: [], model: "m", unaddressed_finding_ids: [], orphan_finding_ids: [],
+      notes: "", input_truncated: false, input_omitted_finding_ids: [], warnings: [], raw_output: "",
+      duration_s: 0, cost_usd: 0, input_tokens: 0, output_tokens: 0, reasoning_effort: "", error: null,
+    },
+    findings: [],
+  });
+  assert.equal(p.includes("<<<RED_TEAM_INPUT"), true);
+  assert.equal(p.includes("<<<END_RED_TEAM_INPUT"), true);
+  assert.equal(p.startsWith("SYSTEM"), true); // system prompt outside the delimiters
+  assert.equal(p.includes("ART"), true);
+  assert.equal(p.includes("SPEC"), true);
+  // Every RED_TEAM_INPUT open tag carries a hash attribute.
+  assert.match(p, /<<<RED_TEAM_INPUT name="artifact" hash="[0-9a-f]{64}">>>/);
+});
+
+test("assembleFoldPrompt omits the source_spec block when null", () => {
+  const p = assembleFoldPrompt({
+    foldMd: "SYSTEM",
+    artifact: "ART",
+    sourceSpec: null,
+    fixPlan: {
+      summary: "s", moves: [], model: "m", unaddressed_finding_ids: [], orphan_finding_ids: [],
+      notes: "", input_truncated: false, input_omitted_finding_ids: [], warnings: [], raw_output: "",
+      duration_s: 0, cost_usd: 0, input_tokens: 0, output_tokens: 0, reasoning_effort: "", error: null,
+    },
+    findings: [],
+  });
+  assert.equal(p.includes('name="source_spec"'), false);
 });

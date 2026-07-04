@@ -11,10 +11,14 @@
 // fallback). It never silently picks "whatever's latest" — that would risk
 // folding a stale or foreign plan into an artifact that has since moved on.
 import { createHash } from "node:crypto";
-import { extractVerdictJson, isPlainObject } from "./copilot_dispatch.ts";
-import { parseFixPlanOutput } from "./red_team_lib.ts";
-import type { FixPlanMove, RedTeamFixPlan } from "./red_team_lib.ts";
+import { extractVerdictJson, isPlainObject, run } from "./copilot_dispatch.ts";
+import { parseFixPlanOutput, scrubEnv } from "./red_team_lib.ts";
+import type { FixPlanMove, RedTeamFinding, RedTeamFixPlan } from "./red_team_lib.ts";
 import { applyPatches, type FixerPatch } from "./stark_review_doc_lib.ts";
+import {
+  buildCommand as buildClaudeCommand,
+  normalizeOutput as normalizeClaudeOutput,
+} from "./agent_claude.ts";
 
 /** Outcome the fold host applies to a single fix-plan move. */
 export type Disposition = "accept" | "modify" | "reject" | "apply_failed";
@@ -271,4 +275,142 @@ export function applyFold(
     failedDispositions.has(d) ? { ...d, disposition: "apply_failed" as Disposition } : d,
   );
   return { newDoc: res.newDoc, dispositions: out };
+}
+
+// ── Task 7: token-less decider dispatch (rt1) + prompt assembly ──────────
+//
+// The fold decider is Claude, acting AS the artifact's author, triaging a
+// fix plan whose text (and whatever the artifact/findings carry) is
+// untrusted — it may contain prompt injection aimed at the model. Two
+// independent defenses:
+//
+//   1. `assembleFoldPrompt` wraps every untrusted block in a hash-stamped
+//      `<<<RED_TEAM_INPUT>>>` envelope with the system prompt (`foldMd`)
+//      placed OUTSIDE the delimiters, so the model's actual instructions
+//      never share a "region" with attacker-controlled text.
+//   2. `dispatchDecider` runs the model subprocess with a token-less env
+//      (`scrubEnv()` — no GITHUB_TOKEN/GH_TOKEN/OPENAI_*) so a successful
+//      injection still has no credential to exfiltrate. This is the
+//      load-bearing invariant (rt1): even if defense 1 fails, defense 2
+//      holds.
+
+/** Wrap one untrusted block in a hash-stamped `<<<RED_TEAM_INPUT>>>` envelope. */
+function block(name: string, body: string): string {
+  return `<<<RED_TEAM_INPUT name="${name}" hash="${sha256Hex(body)}">>>\n${body}\n<<<END_RED_TEAM_INPUT name="${name}">>>`;
+}
+
+/**
+ * Assemble the full prompt sent to the fold decider.
+ *
+ * `foldMd` (the system/triage-contract prompt) is placed first, OUTSIDE any
+ * delimiter — it is the only text the decider treats as instructions. The
+ * artifact, source spec (when present), fix-plan moves, and findings are
+ * each wrapped via `block()` so a prompt injection embedded in any of them
+ * (e.g. text inside the artifact claiming to be a new system instruction)
+ * is legible to the model only as content under review, matching the
+ * injection-defense contract described in `fold.md` and, in spirit,
+ * `preamble.md`.
+ *
+ * Only `fixPlan.moves` is serialized (not the full `RedTeamFixPlan`
+ * envelope) — the decider triages moves, it has no use for the fix-plan's
+ * own dispatch metadata (cost, duration, raw_output, ...).
+ */
+export function assembleFoldPrompt(a: {
+  foldMd: string;
+  artifact: string;
+  sourceSpec: string | null;
+  fixPlan: RedTeamFixPlan;
+  findings: RedTeamFinding[];
+}): string {
+  const parts: string[] = [a.foldMd, "", block("artifact", a.artifact)];
+  if (a.sourceSpec) parts.push(block("source_spec", a.sourceSpec));
+  parts.push(block("fix_plan", JSON.stringify(a.fixPlan.moves, null, 2)));
+  parts.push(block("findings", JSON.stringify(a.findings, null, 2)));
+  return parts.join("\n");
+}
+
+/**
+ * Extract `usage.input_tokens` / `usage.output_tokens` from Claude's
+ * `--output-format json` envelope (`{"type":"result",...,"usage":{...}}`).
+ * Text unwrapping is `normalizeClaudeOutput` (agent_claude.ts) — no existing
+ * port needs token counts (the multi-review dispatcher discards them), so
+ * this is a small local addition rather than a shared export. Malformed or
+ * missing usage fields degrade to 0 rather than throwing — a parse miss
+ * here must never fail the whole dispatch.
+ */
+function parseClaudeUsage(stdout: string): { input_tokens: number; output_tokens: number } {
+  const trimmed = stdout.trim();
+  if (!trimmed) return { input_tokens: 0, output_tokens: 0 };
+  try {
+    const obj: unknown = JSON.parse(trimmed);
+    if (isPlainObject(obj)) {
+      const usage = obj["usage"];
+      if (isPlainObject(usage)) {
+        const inputTokens = typeof usage["input_tokens"] === "number" ? usage["input_tokens"] : 0;
+        const outputTokens = typeof usage["output_tokens"] === "number" ? usage["output_tokens"] : 0;
+        return { input_tokens: inputTokens, output_tokens: outputTokens };
+      }
+    }
+  } catch {
+    // Not JSON (or malformed) — no usage available; text is still returned
+    // by the caller via normalizeClaudeOutput's own passthrough fallback.
+  }
+  return { input_tokens: 0, output_tokens: 0 };
+}
+
+/**
+ * Dispatch the fold decider: a single headless Claude call over the
+ * assembled prompt.
+ *
+ * Command/argv construction is delegated to `agent_claude.ts::buildCommand`
+ * — the real, exported "headless Claude dispatch" builder shared with the
+ * multi-review orchestrator (`stark_review.ts`'s claude `AgentPort`); it
+ * already accepts an explicit `model` and emits the `-p - --output-format
+ * json --model <m> --no-session-persistence` argv shape. Its OWN `env` is
+ * deliberately NOT used here: `buildCommand` populates `ANTHROPIC_API_KEY`
+ * (fine for its normal callers, which need Claude to authenticate itself),
+ * but the fold decider must run with nothing beyond `scrubEnv()` — no
+ * GitHub token, no OpenAI key, full stop (rt1). A prompt-injected artifact
+ * that talks its way past the injection defense in `assembleFoldPrompt`
+ * still finds no credential to exfiltrate in this subprocess's env.
+ *
+ * `timeoutMs` is converted to `run()`'s `timeoutSec` (rounding up, floor 1s,
+ * so a sub-second budget never collapses to an immediate timeout).
+ */
+export async function dispatchDecider(a: {
+  prompt: string;
+  model: string;
+  timeoutMs: number;
+}): Promise<{ raw_output: string; input_tokens: number; output_tokens: number; error: string | null }> {
+  const built = buildClaudeCommand(a.prompt, a.model);
+  const timeoutSec = Math.max(1, Math.ceil(a.timeoutMs / 1000));
+
+  const res = await run(built.cmd, built.args, {
+    env: scrubEnv(), // rt1: token-less — NOT built.env (which carries ANTHROPIC_API_KEY)
+    stdin: built.stdin,
+    timeoutSec,
+  });
+
+  if (res.notFound) {
+    return { raw_output: "", input_tokens: 0, output_tokens: 0, error: "claude_unavailable" };
+  }
+  if (res.timedOut) {
+    return { raw_output: normalizeClaudeOutput(res.stdout), input_tokens: 0, output_tokens: 0, error: "timeout" };
+  }
+  if (res.code !== 0) {
+    return {
+      raw_output: normalizeClaudeOutput(res.stdout),
+      input_tokens: 0,
+      output_tokens: 0,
+      error: `claude exited ${res.code ?? "null"}: ${res.stderr.slice(0, 500)}`,
+    };
+  }
+
+  const usage = parseClaudeUsage(res.stdout);
+  return {
+    raw_output: normalizeClaudeOutput(res.stdout),
+    input_tokens: usage.input_tokens,
+    output_tokens: usage.output_tokens,
+    error: null,
+  };
 }
