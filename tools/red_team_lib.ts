@@ -1059,8 +1059,13 @@ export function renderRefutationSection(r: RefuteResult): string {
         t.action === "downgraded"
           ? `${t.original_severity} → ${t.final_severity}`
           : t.original_severity;
+      // Collapse newlines, then neutralize table-breaking pipes via the HTML
+      // entity (renders as `|` in GFM tables) instead of a backslash escape —
+      // an entity introduces no meta-char, so this is a complete, single-pass
+      // sanitization (avoids js/incomplete-sanitization). The span is already
+      // redacted + markdown-escaped by escapeInline above.
       const span = v?.cited_span
-        ? redact(escapeInline(v.cited_span)).replace(/\|/g, "\\|").replace(/\s*\n\s*/g, " ").slice(0, 120)
+        ? redact(escapeInline(v.cited_span)).replace(/\s*\n\s*/g, " ").replace(/\|/g, "&#124;").slice(0, 120)
         : "—";
       parts.push(
         `| \`${t.id}\` | ${t.action} | ${sev} | ${v?.lens ?? "—"} | ${span} |`,
