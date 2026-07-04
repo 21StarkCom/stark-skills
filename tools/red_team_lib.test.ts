@@ -1505,6 +1505,72 @@ Content for the dispatch-with-fix-plan smoke.
   assert.match(sidecar, /Status:\*\* skipped — skipped_disabled/);
 });
 
+test("dispatch() applies a refinement: drops a blocker, recomputes status, renders the section", () => {
+  const db = tmpDb();
+  const docPath = tmpDoc("# Refinement fixture\n\nContent.\n");
+  const ctx = buildRunContext({ stage: "design", artifactPath: docPath, sourceSpecPath: null, dbPath: db });
+  const prompts = loadPersonaPrompts();
+  // Committee emits one blocking finding; the refinement drops it → clean.
+  const kept: RedTeamFinding[] = [];
+  const refinement = {
+    findings: kept,
+    summary: { total: 1, upheld: 0, downgraded: 0, dropped: 1, skipped: 0, errors: 0 },
+    trail: [
+      {
+        id: "rt1",
+        action: "dropped" as const,
+        original_severity: "high" as const,
+        final_severity: null,
+        verdicts: [
+          {
+            disposition: "drop" as const,
+            new_severity: null,
+            cited_span: "the doc already handles it",
+            rationale: "addressed",
+            lens: "already-addressed" as const,
+          },
+        ],
+      },
+    ],
+  };
+  const result = dispatch({
+    ctx,
+    prompts,
+    personas: ["data"],
+    artifact: fs.readFileSync(docPath, "utf8"),
+    sourceSpec: fs.readFileSync(docPath, "utf8"),
+    model: "gpt-5.5-pro",
+    timeoutMs: 10_000,
+    dbPath: db,
+    noAudit: true,
+    refinement,
+    codexFn: () => ({
+      raw_output: JSON.stringify([
+        {
+          id: "rt1",
+          persona: "data",
+          severity: "high",
+          concern: "Blocking finding the refuter will drop",
+          consequence: "n/a",
+          counter_proposal: "Add X",
+          trade_off: "Y",
+        },
+      ]),
+      duration_s: 0.01,
+      input_tokens: 1,
+      output_tokens: 1,
+      error: null,
+    }),
+  });
+  assert.equal(result.total_findings, 0);
+  assert.equal(result.blocking_count, 0);
+  assert.equal(result.status, "clean");
+  const sidecar = fs.readFileSync(result.sidecar_path!, "utf8");
+  assert.match(sidecar, /## Refutation pass/);
+  assert.match(sidecar, /1 upheld|0 upheld/);
+  assert.match(sidecar, /dropped/);
+});
+
 // ── Insights payload coverage ─────────────────────────────────────────
 
 test("buildRunPayload counts severities and threads fix_plan_status", () => {

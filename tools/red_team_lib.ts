@@ -52,6 +52,14 @@ import { resolveDb } from "./red_team_db_resolver.ts";
 import { resolveOpenaiApiKey } from "./preflight_lib.ts";
 import { assetPromptsDir, assetConfigPath } from "./asset_root_lib.ts";
 import { computeDispatchCost } from "./cost_lib.ts";
+import {
+  DEFAULT_VERIFY_CONFIG,
+  refuteFindings,
+  verifyKillSwitchActive,
+  type RefuteFn,
+  type RefuteResult,
+  type VerifyConfig,
+} from "./red_team_verify_lib.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -1026,12 +1034,49 @@ function escapeBlock(text: string): string {
   return text.replace(/```/g, "``\\`");
 }
 
+/**
+ * Render the refutation-pass audit trail: the drop/downgrade summary plus a
+ * per-finding table of what the refuter did and the span it cited. This is the
+ * transparency record — every recalibration is auditable by a human.
+ */
+export function renderRefutationSection(r: RefuteResult): string {
+  const s = r.summary;
+  const parts: string[] = [];
+  parts.push("## Refutation pass");
+  parts.push("");
+  parts.push(
+    `- ${s.total} findings challenged → **${s.upheld} upheld, ${s.downgraded} downgraded, ${s.dropped} dropped**` +
+      `, ${s.skipped} skipped${s.errors ? ` (${s.errors} refuter errors — findings kept)` : ""}`,
+  );
+  const changed = r.trail.filter((t) => t.action === "dropped" || t.action === "downgraded");
+  if (changed.length > 0) {
+    parts.push("");
+    parts.push("| Finding | Action | Severity | Lens | Cited span |");
+    parts.push("| --- | --- | --- | --- | --- |");
+    for (const t of changed) {
+      const v = t.verdicts.find((x) => x.cited_span) ?? t.verdicts[0];
+      const sev =
+        t.action === "downgraded"
+          ? `${t.original_severity} → ${t.final_severity}`
+          : t.original_severity;
+      const span = v?.cited_span
+        ? redact(escapeInline(v.cited_span)).replace(/\|/g, "\\|").replace(/\s*\n\s*/g, " ").slice(0, 120)
+        : "—";
+      parts.push(
+        `| \`${t.id}\` | ${t.action} | ${sev} | ${v?.lens ?? "—"} | ${span} |`,
+      );
+    }
+  }
+  return parts.join("\n");
+}
+
 export function renderSidecarMarkdown(args: {
   ctx: RedTeamRunContext;
   result: RedTeamResult;
   model: string;
   fixPlanStatus?: FixPlanStatus;
   fixPlan?: RedTeamFixPlan | null;
+  refinement?: RefuteResult | null;
 }): string {
   const { ctx, result, model } = args;
   const fixPlanStatus: FixPlanStatus = args.fixPlanStatus ?? "skipped_disabled";
@@ -1052,6 +1097,10 @@ export function renderSidecarMarkdown(args: {
     `- **Cost:** $${result.cost_usd.toFixed(4)} | **Duration:** ${result.duration_s.toFixed(1)}s`,
   );
   parts.push("");
+  if (args.refinement) {
+    parts.push(renderRefutationSection(args.refinement));
+    parts.push("");
+  }
   if (result.synthesis) {
     parts.push("## Synthesis");
     parts.push("");
@@ -1107,9 +1156,6 @@ export function renderSidecarMarkdown(args: {
         parts.push("");
       }
     }
-    // Suppress the unused-variable lint for callers that don't yet pull
-    // structured identity fields into the rendered sidecar.
-    void escapeInline;
   }
   parts.push("");
   parts.push(renderFixPlanSection({ status: fixPlanStatus, fixPlan }));
@@ -1183,6 +1229,17 @@ export interface DispatchArgs {
   /** Optional fix-plan config override. Tests use this to pin behavior
    *  independent of the on-disk `red_team.fix_plan` defaults. */
   fixPlanCfg?: FixPlanConfig;
+  /** Refutation-pass (Task #2) override config. When unset, `dispatchAsync`
+   *  loads `red_team.verify`. */
+  verifyCfg?: VerifyConfig;
+  /** Test seam for the refutation pass — overrides the real Claude dispatch. */
+  refuteFn?: RefuteFn;
+  /** Pre-computed refutation result. `dispatchAsync` runs the async refuter
+   *  and threads the survivors here so sync `dispatch()` uses them for
+   *  countBlocking / status / sidecar / audit. Callers other than
+   *  `dispatchAsync` normally leave this unset (sync dispatch does not run the
+   *  async refuter). */
+  refinement?: RefuteResult | null;
 }
 
 /**
@@ -1281,6 +1338,20 @@ export function dispatch(args: DispatchArgs): DispatchResult {
     };
   }
 
+  // Refutation pass (Task #2): `dispatchAsync` runs the async Claude refuter
+  // and threads the surviving/recalibrated findings here. Apply them BEFORE
+  // countBlocking/deriveStatus/fix-plan/sidecar/audit so the gate + all
+  // downstream artifacts see the refuted set. No refinement (sync dispatch,
+  // replay, disabled, or kill-switch) → result is unchanged.
+  if (args.refinement) {
+    result = {
+      ...result,
+      findings: args.refinement.findings,
+      blocking_count: countBlocking(args.refinement.findings),
+      human_review_count: countHumanReview(args.refinement.findings),
+    };
+  }
+
   // Resolve fix-plan (gated by config + kill switch; default skipped_disabled).
   // Replay runs reproduce a captured transcript and must not call codex — skip
   // resolveFixPlan entirely so its codexFn never fires.
@@ -1297,13 +1368,14 @@ export function dispatch(args: DispatchArgs): DispatchResult {
         cfg: args.fixPlanCfg,
       });
 
-  // Render sidecar (now including the fix-plan section).
+  // Render sidecar (now including the refutation + fix-plan sections).
   const sidecarBody = renderSidecarMarkdown({
     ctx,
     result,
     model,
     fixPlanStatus: fixPlanResolution.status,
     fixPlan: fixPlanResolution.fixPlan,
+    refinement: args.refinement,
   });
   const sidecarPath = args.noSidecar
     ? null
@@ -1675,10 +1747,50 @@ export async function dispatchAsync(
       const cfg = loadFixPlanConfig();
       return dispatchCodex(p, m, cfg.timeout_s * 1000);
     });
+
+  // Refutation pass (Task #2): adversarially challenge each committee finding
+  // with a distinct agent (Claude), dropping/downgrading only what the artifact
+  // text refutes. Runs here (async) and threads the survivors into sync
+  // dispatch() via `refinement`. Skipped on committee error, kill switch, or
+  // when disabled — in which case the un-refuted findings flow through.
+  const verifyCfg = args.verifyCfg ?? loadVerifyConfig();
+  let refinement: RefuteResult | null = null;
+  if (
+    verifyCfg.enabled &&
+    !verifyKillSwitchActive() &&
+    !dispatched.error
+  ) {
+    const parsed = parseCommitteeOutput(dispatched.raw_output);
+    const validated = validateFindings(parsed.findings_json);
+    if (!validated.parse_error && validated.findings.length > 0) {
+      try {
+        refinement = await refuteFindings({
+          findings: validated.findings,
+          artifact: args.artifact,
+          sourceSpec: args.sourceSpec,
+          cfg: verifyCfg,
+          refuteFn: args.refuteFn,
+        });
+        const s = refinement.summary;
+        console.error(
+          `red_team_lib: refutation pass — ${s.total} findings → ` +
+            `${s.upheld} upheld, ${s.downgraded} downgraded, ${s.dropped} dropped, ` +
+            `${s.skipped} skipped${s.errors ? ` (${s.errors} refuter errors)` : ""}`,
+        );
+      } catch (err) {
+        console.error(
+          `red_team_lib: refutation pass failed (non-fatal, findings kept as-is): ${(err as Error).message}`,
+        );
+        refinement = null;
+      }
+    }
+  }
+
   return dispatch({
     ...args,
     codexFn: () => dispatched,
     fixPlanCodexFn,
+    refinement,
   });
 }
 
@@ -1982,6 +2094,32 @@ export function loadFixPlanConfig(): FixPlanConfig {
 
 export function _resetFixPlanConfigCache(): void {
   _fixPlanCfgCache = null;
+}
+
+let _verifyCfgCache: VerifyConfig | null = null;
+
+/** Load the `red_team.verify` config (refutation pass), merged over defaults. */
+export function loadVerifyConfig(): VerifyConfig {
+  if (_verifyCfgCache) return _verifyCfgCache;
+  const cfgPath = assetConfigPath();
+  try {
+    const raw = fs.readFileSync(cfgPath, "utf8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const rt = parsed?.["red_team"];
+    const v = isObject(rt) ? (rt["verify"] as unknown) : undefined;
+    if (isObject(v)) {
+      _verifyCfgCache = { ...DEFAULT_VERIFY_CONFIG, ...(v as Partial<VerifyConfig>) };
+      return _verifyCfgCache;
+    }
+  } catch {
+    /* fall through to defaults */
+  }
+  _verifyCfgCache = DEFAULT_VERIFY_CONFIG;
+  return _verifyCfgCache;
+}
+
+export function _resetVerifyConfigCache(): void {
+  _verifyCfgCache = null;
 }
 
 export function killSwitchActive(env: NodeJS.ProcessEnv = process.env): boolean {

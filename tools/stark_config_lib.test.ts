@@ -174,7 +174,8 @@ test("getRedTeamConfig: defaults merge underneath the global override", async ()
     const cfg = getRedTeamConfig();
     assert.equal(cfg.model, "gpt-5.5-pro");
     // Default fields survive.
-    assert.equal(cfg.max_rounds, DEFAULT_RED_TEAM.max_rounds);
+    assert.equal(cfg.timeout_s, DEFAULT_RED_TEAM.timeout_s);
+    assert.deepEqual(cfg.verify, DEFAULT_RED_TEAM.verify);
     assert.deepEqual(cfg.personas, DEFAULT_RED_TEAM.personas);
   });
 });
@@ -217,13 +218,13 @@ test("getRedTeamConfig: repo override on a non-locked field IS honored", async (
     fs.mkdirSync(path.join(repoDir, ".code-review"), { recursive: true });
     fs.writeFileSync(
       path.join(repoDir, ".code-review", "config.json"),
-      JSON.stringify({ red_team: { max_rounds: 5 } }),
+      JSON.stringify({ red_team: { timeout_s: 123 } }),
     );
     const prevCwd = process.cwd();
     process.chdir(repoDir);
     try {
       const cfg = getRedTeamConfig();
-      assert.equal(cfg.max_rounds, 5, "max_rounds is not locked — override OK");
+      assert.equal(cfg.timeout_s, 123, "timeout_s is not locked — override OK");
     } finally {
       process.chdir(prevCwd);
     }
@@ -238,14 +239,14 @@ test("getRedTeamConfig: unknown keys in repo override are pruned with a warning"
     fs.writeFileSync(
       path.join(repoDir, ".code-review", "config.json"),
       JSON.stringify({
-        red_team: { max_rounds: 4, bogus_smuggled_key: "value" },
+        red_team: { timeout_s: 456, bogus_smuggled_key: "value" },
       }),
     );
     const prevCwd = process.cwd();
     process.chdir(repoDir);
     try {
       const cfg = getRedTeamConfig();
-      assert.equal(cfg.max_rounds, 4);
+      assert.equal(cfg.timeout_s, 456);
       assert.equal(
         (cfg as Record<string, unknown>)["bogus_smuggled_key"],
         undefined,

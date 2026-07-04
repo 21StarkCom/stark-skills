@@ -236,7 +236,6 @@
     "enabled": true,
     "agent": "codex",
     "model": "gpt-5.5-pro",
-    "max_rounds": 2,
     "halt_on_unresolved": true,
     "stages": {
       "design": {
@@ -256,9 +255,15 @@
     "min_severity_to_block": "high",
     "timeout_s": 900,
     "per_run_budget_usd": 30,
-    "stability_overlap_jaccard_min": 0.416,
     "max_input_chars": 200000,
     "allow_human_review_halt": true,
+    "verify": {
+      "enabled": true,
+      "model": "claude-opus-4-8",
+      "timeout_s": 300,
+      "votes": 1,
+      "max_input_chars": 200000
+    },
     "fix_plan": {
       "enabled": true,
       "model": "gpt-5.5-pro",
