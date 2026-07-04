@@ -1,6 +1,9 @@
 // tools/red_team_fold_lib.test.ts
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   sha256Hex,
   resolveFixPlanForFold,
@@ -8,9 +11,18 @@ import {
   applyFold,
   assembleFoldPrompt,
   renderFoldLog,
+  runFold,
+  buildDeciderEnv,
+  buildDeciderCommand,
+  DECIDER_DISALLOWED_TOOLS,
+  foldSidecarPathFor,
+  resolveFoldFixPlanSource,
+  openOrEditFoldPr,
   type MoveDisposition,
+  type FoldResult,
 } from "./red_team_fold_lib.ts";
-import { scrubEnv } from "./red_team_lib.ts";
+import { scrubEnv, sidecarPathFor, type RedTeamFixPlan } from "./red_team_lib.ts";
+import { connect, initRedTeamTables } from "./red_team_audit_lib.ts";
 
 const PLAN = JSON.stringify({ summary: "s", moves: [], model: "gpt-5.5-pro",
   unaddressed_finding_ids: [], orphan_finding_ids: [], notes: "", input_truncated: false,
@@ -218,3 +230,293 @@ test("renderFoldLog: counts + per-move sections", () => {
   assert.equal(md.includes("REJECTED"), true);
   assert.equal(md.includes("0 accepted / 1 modified / 1 rejected"), true);
 });
+
+// ── Task 10: runFold orchestrator (audit-before-publish, budget, rt1) ─────
+
+function mkTempDb(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fold-db-"));
+  const db = path.join(dir, "metrics.db");
+  initRedTeamTables(db);
+  return db;
+}
+
+function writeTmp(content: string, name = "artifact.md"): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fold-art-"));
+  const p = path.join(dir, name);
+  fs.writeFileSync(p, content, "utf8");
+  return p;
+}
+
+function fpWithMoves(n: number): RedTeamFixPlan {
+  const moves = Array.from({ length: n }, (_, i) => ({
+    id: `m${i + 1}`,
+    title: `move ${i + 1}`,
+    rationale: "because",
+    sections_touched: [`§${i + 1}`],
+    addressed_finding_ids: [`rt${i + 1}`],
+    new_trade_off: "a trade-off",
+  }));
+  return {
+    summary: "s",
+    moves,
+    unaddressed_finding_ids: [],
+    orphan_finding_ids: [],
+    notes: "",
+    input_truncated: false,
+    input_omitted_finding_ids: [],
+    warnings: [],
+    raw_output: "",
+    duration_s: 0,
+    cost_usd: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    model: "gpt-5.5-pro",
+    reasoning_effort: "xhigh",
+    error: null,
+  };
+}
+
+function countRows(dbPath: string, table: string): number {
+  const db = connect(dbPath);
+  try {
+    const r = db.prepare(`SELECT count(*) AS c FROM ${table}`).get() as { c: number };
+    return Number(r.c);
+  } finally {
+    db.close();
+  }
+}
+
+test("runFold: writes audit BEFORE opening PR (onAudit precedes onPr, no live call)", async () => {
+  const dbPath = mkTempDb();
+  const art = "line one\nUNIQUE\nline three\n";
+  const p = writeTmp(art);
+  const events: string[] = [];
+  const r = await runFold({
+    artifactPath: p,
+    dbPath,
+    dryRun: false,
+    openPr: true,
+    foldMd: "SYSTEM",
+    repo: "o/r",
+    branch: "b",
+    fixPlanSource: { fixPlan: fpWithMoves(1), sourceRunId: "r1", artifactHash: sha256Hex(art) },
+    deciderFn: async () => ({
+      raw_output: JSON.stringify({ dispositions: [{ move_id: "m1", disposition: "reject", rationale: "false premise" }] }),
+      input_tokens: 100,
+      output_tokens: 100,
+      error: null,
+    }),
+    // Inject the PR side so no real GitHub call happens.
+    prFn: async () => ({ pr_url: "https://github.com/o/r/pull/1", pr_number: 1 }),
+    onAudit: () => events.push("audit"),
+    onPr: () => events.push("pr"),
+  });
+  assert.equal(r.status, "ok");
+  assert.deepEqual(events, ["audit", "pr"]); // audit strictly before publish
+  assert.equal(r.pr_url, "https://github.com/o/r/pull/1");
+  assert.equal(r.rejected_count, 1);
+  assert.equal(countRows(dbPath, "red_team_fold_runs"), 1);
+  assert.equal(countRows(dbPath, "red_team_fix_plan_dispositions"), 1);
+});
+
+test("runFold: over-budget dispatch skips PR and writes NOTHING", async () => {
+  const dbPath = mkTempDb();
+  const art = "A\n";
+  const p = writeTmp(art);
+  const events: string[] = [];
+  const r = await runFold({
+    artifactPath: p,
+    dbPath,
+    dryRun: false,
+    openPr: true,
+    foldMd: "SYSTEM",
+    fixPlanSource: { fixPlan: fpWithMoves(1), sourceRunId: "r1", artifactHash: sha256Hex(art) },
+    // 10M input tokens on claude-opus-4-8 = $150 > $15 fold cap.
+    deciderFn: async () => ({
+      raw_output: JSON.stringify({ dispositions: [{ move_id: "m1", disposition: "accept", rationale: "ok", patch: { old: "A", new: "B" } }] }),
+      input_tokens: 10_000_000,
+      output_tokens: 0,
+      error: null,
+    }),
+    prFn: async () => {
+      throw new Error("PR must not be opened when over budget");
+    },
+    onAudit: () => events.push("audit"),
+    onPr: () => events.push("pr"),
+  });
+  assert.equal(r.status, "skipped_budget_exhausted_fold");
+  assert.equal(r.cost_usd > 15, true);
+  assert.equal(events.length, 0); // no audit, no PR
+  assert.equal(countRows(dbPath, "red_team_fold_runs"), 0);
+  assert.equal(countRows(dbPath, "red_team_fix_plan_dispositions"), 0);
+  assert.equal(fs.readFileSync(p, "utf8"), art); // artifact untouched
+  assert.equal(fs.existsSync(foldSidecarPathFor(p)), false); // no .fold.md
+});
+
+test("runFold: no moves short-circuits before dispatch (no decider, no PR, no writes)", async () => {
+  const dbPath = mkTempDb();
+  const art = "A\n";
+  const p = writeTmp(art);
+  const r = await runFold({
+    artifactPath: p,
+    dbPath,
+    dryRun: false,
+    openPr: true,
+    foldMd: "SYSTEM",
+    fixPlanSource: { fixPlan: fpWithMoves(0), sourceRunId: "r1", artifactHash: sha256Hex(art) },
+    deciderFn: async () => {
+      throw new Error("decider must not run when there are no moves");
+    },
+    prFn: async () => {
+      throw new Error("PR must not run when there are no moves");
+    },
+  });
+  assert.equal(r.status, "no_moves");
+  assert.equal(countRows(dbPath, "red_team_fold_runs"), 0);
+  assert.equal(fs.readFileSync(p, "utf8"), art);
+});
+
+test("runFold: --dry-run triages into the return value but writes NOTHING", async () => {
+  const dbPath = mkTempDb();
+  const art = "ORIGINAL\n";
+  const p = writeTmp(art);
+  const r = await runFold({
+    artifactPath: p,
+    dbPath,
+    dryRun: true,
+    openPr: true,
+    foldMd: "SYSTEM",
+    fixPlanSource: { fixPlan: fpWithMoves(1), sourceRunId: "r1", artifactHash: sha256Hex(art) },
+    deciderFn: async () => ({
+      raw_output: JSON.stringify({ dispositions: [{ move_id: "m1", disposition: "accept", rationale: "ok", patch: { old: "ORIGINAL", new: "REVISED" } }] }),
+      input_tokens: 10,
+      output_tokens: 10,
+      error: null,
+    }),
+    onAudit: () => {
+      throw new Error("no audit in dry-run");
+    },
+    prFn: async () => {
+      throw new Error("no PR in dry-run");
+    },
+  });
+  assert.equal(r.status, "ok");
+  assert.equal(r.revised_doc.includes("REVISED"), true); // triaged in the return value
+  assert.equal(fs.readFileSync(p, "utf8"), art); // artifact NOT written
+  assert.equal(fs.existsSync(foldSidecarPathFor(p)), false); // no .fold.md
+  assert.equal(countRows(dbPath, "red_team_fold_runs"), 0); // no audit
+});
+
+test("rt1: buildDeciderEnv keeps model auth, drops repo/publishing creds", () => {
+  const env = buildDeciderEnv({
+    HOME: "/home/me",
+    ANTHROPIC_API_KEY: "sk-ant-x",
+    GITHUB_TOKEN: "ghs_secret",
+    GH_TOKEN: "gh_secret",
+    OPENAI_API_KEY: "sk-openai",
+    PATH: "/usr/bin",
+  } as unknown as NodeJS.ProcessEnv);
+  assert.equal(env.HOME, "/home/me"); // model needs HOME
+  assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-x"); // the one sanctioned egress
+  assert.equal(env.PATH, "/usr/bin"); // binary needs PATH
+  assert.equal(env.GITHUB_TOKEN, undefined); // no repo/publishing cred
+  assert.equal(env.GH_TOKEN, undefined);
+  assert.equal(env.OPENAI_API_KEY, undefined);
+});
+
+test("rt1: buildDeciderEnv surfaces ANTHROPIC_AGENTS as ANTHROPIC_API_KEY", () => {
+  const env = buildDeciderEnv({ HOME: "/h", ANTHROPIC_AGENTS: "sk-agents", PATH: "/usr/bin" } as unknown as NodeJS.ProcessEnv);
+  assert.equal(env.ANTHROPIC_API_KEY, "sk-agents");
+  assert.equal(env.GITHUB_TOKEN, undefined);
+});
+
+test("rt1: buildDeciderCommand disables mutating/exfil tools (decider only emits JSON)", () => {
+  const built = buildDeciderCommand("PROMPT", "claude-opus-4-8");
+  assert.equal(built.args.includes("--disallowedTools"), true);
+  for (const tool of DECIDER_DISALLOWED_TOOLS) {
+    assert.equal(built.args.includes(tool), true);
+  }
+  // The tool list is variadic-friendly (each name its own argv element).
+  const idx = built.args.indexOf("--disallowedTools");
+  assert.equal(built.args[idx + 1], "Bash");
+  // And the command's env carries no repo/publishing credential.
+  assert.equal(built.env.GITHUB_TOKEN, undefined);
+  assert.equal(built.env.GH_TOKEN, undefined);
+});
+
+test("resolveFoldFixPlanSource: malformed fix_plan_json in DB → no_fix_plan_found (no throw)", () => {
+  const dbPath = mkTempDb();
+  const db = connect(dbPath);
+  try {
+    db.prepare(
+      "INSERT INTO red_team_runs (run_id, stage, rounds_used, final_status, total_findings, " +
+        "critical_count, high_count, medium_count, human_review_count, duration_s, cost_usd, " +
+        "model, caller, fix_plan_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    ).run("run-x", "design", 1, "halted", 1, 0, 1, 0, 0, 1.0, 0.1, "gpt-5.5-pro", "test", "{not valid json");
+  } finally {
+    db.close();
+  }
+  const art = "ARTIFACT BODY";
+  const p = writeTmp(art);
+  fs.writeFileSync(sidecarPathFor(p), `# Red-team review\n\n- **Run ID:** \`run-x\`\n`, "utf8");
+  const r = resolveFoldFixPlanSource({
+    artifactPath: p,
+    artifactText: art,
+    dbPath,
+    explicitFixPlanJson: null,
+    sourceRunId: null,
+    forceStale: false,
+  });
+  assert.equal(r.status, "no_fix_plan_found");
+  assert.equal(r.source, null);
+});
+
+test("resolveFoldFixPlanSource: valid DB fix plan keyed by sidecar Run ID resolves ok", () => {
+  const dbPath = mkTempDb();
+  const plan = fpWithMoves(2);
+  const db = connect(dbPath);
+  try {
+    db.prepare(
+      "INSERT INTO red_team_runs (run_id, stage, rounds_used, final_status, total_findings, " +
+        "critical_count, high_count, medium_count, human_review_count, duration_s, cost_usd, " +
+        "model, caller, fix_plan_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    ).run("run-y", "design", 1, "halted", 2, 0, 2, 0, 0, 1.0, 0.1, "gpt-5.5-pro", "test", JSON.stringify(plan));
+  } finally {
+    db.close();
+  }
+  const art = "ARTIFACT BODY 2";
+  const p = writeTmp(art);
+  fs.writeFileSync(sidecarPathFor(p), `# Red-team review\n\n- **Run ID:** \`run-y\`\n`, "utf8");
+  const r = resolveFoldFixPlanSource({
+    artifactPath: p,
+    artifactText: art,
+    dbPath,
+    explicitFixPlanJson: null,
+    sourceRunId: null,
+    forceStale: false,
+  });
+  assert.equal(r.status, "ok");
+  assert.equal(r.source?.sourceRunId, "run-y");
+  assert.equal(r.source?.fixPlan.moves.length, 2);
+  // v1 limitation: current artifact hash is adopted as the source hash.
+  assert.equal(r.source?.artifactHash, sha256Hex(art));
+});
+
+test("openOrEditFoldPr: no repo → no-op (never opens a real PR)", async () => {
+  const res = await openOrEditFoldPr({
+    repo: null,
+    marker: "<!-- stark-red-team-fold -->",
+    body: "log",
+    branch: null,
+    base: null,
+    prNumber: null,
+    artifactRelPath: "d.md",
+    sourceRunId: "r1",
+    app: "stark-claude",
+  });
+  assert.deepEqual(res, { pr_url: null, pr_number: null });
+});
+
+// Keep the FoldResult type referenced so the import is exercised.
+const _foldResultShape: (r: FoldResult) => string = (r) => r.status;
+void _foldResultShape;
