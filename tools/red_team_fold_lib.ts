@@ -638,6 +638,11 @@ export interface RunFoldOpts {
   sourceRunId?: string | null;
   forceStale?: boolean;
 
+  /** Optional decider-model override (operator `--model`). The fold decider
+   *  runs on the Claude CLI (`buildDeciderCommand`), so this must be a Claude
+   *  model id; omitted → `red_team.fold.model` (claude-opus-4-8). */
+  model?: string;
+
   /** System/triage-contract prompt. When omitted, read from
    *  `<assetPromptsDir>/red-team/fold.md` (the production path). */
   foldMd?: string;
@@ -912,7 +917,7 @@ export async function runFold(opts: RunFoldOpts): Promise<FoldResult> {
   const readFileFn = opts.readFileFn ?? ((p: string) => fs.readFileSync(p, "utf8"));
   const writeFileFn = opts.writeFileFn ?? ((p: string, d: string) => fs.writeFileSync(p, d, "utf8"));
   const cfg = getRedTeamConfig().fold;
-  const deciderModel = cfg.model;
+  const deciderModel = opts.model ?? cfg.model;
 
   const artifactText = readFileFn(opts.artifactPath);
   const artifactHash = sha256Hex(artifactText);
