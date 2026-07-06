@@ -7,8 +7,8 @@
  * 2026-05-16 TS migration.
  *
  * Usage:
- *   node --experimental-strip-types tools/red_team_design.ts \
- *     --design path/to/design.md \
+ *   node --experimental-strip-types tools/red_team_spec.ts \
+ *     --spec path/to/spec.md \
  *     [--source-spec path/to/spec.md] \
  *     [--model gpt-5.5-pro] \
  *     [--no-sidecar] [--no-audit] [--json] \
@@ -34,7 +34,7 @@ const DEFAULT_MODEL = "gpt-5.5-pro";
 const DEFAULT_TIMEOUT_MS = 900_000;
 
 interface CliArgs {
-  design: string;
+  spec: string;
   sourceSpec: string | null;
   model: string;
   noSidecar: boolean;
@@ -48,7 +48,7 @@ interface CliArgs {
 
 function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = {
-    design: "",
+    spec: "",
     sourceSpec: null,
     model: DEFAULT_MODEL,
     noSidecar: false,
@@ -67,8 +67,8 @@ function parseArgs(argv: string[]): CliArgs {
       return v;
     };
     switch (arg) {
-      case "--design":
-        args.design = next();
+      case "--spec":
+        args.spec = next();
         break;
       case "--source-spec":
         args.sourceSpec = next();
@@ -113,14 +113,14 @@ function parseArgs(argv: string[]): CliArgs {
         throw new Error(`unknown argument: ${arg}`);
     }
   }
-  if (!args.design) {
-    throw new Error("--design is required");
+  if (!args.spec) {
+    throw new Error("--spec is required");
   }
   return args;
 }
 
 function printHelp(): void {
-  process.stdout.write(`usage: red_team_design.ts [-h] --design DESIGN
+  process.stdout.write(`usage: red_team_spec.ts [-h] --spec SPEC
                           [--source-spec SOURCE_SPEC]
                           [--model MODEL]
                           [--no-sidecar] [--no-audit] [--json]
@@ -128,14 +128,14 @@ function printHelp(): void {
                           [--classification-override LEVEL]
                           [--fold]
 
-Adversarial red-team review of a design doc (TS port).
+Adversarial red-team review of a spec doc (TS port).
 
 options:
   -h, --help                       show this help message and exit
-  --design DESIGN                  Path to the design markdown file.
+  --spec SPEC                  Path to the spec markdown file.
   --source-spec SOURCE_SPEC        Optional source-spec file.
   --model MODEL                    Override the configured red-team model.
-  --no-sidecar                     Skip writing the <design>.red-team.md sidecar.
+  --no-sidecar                     Skip writing the <spec>.red-team.md sidecar.
   --no-audit                       Skip the SQLite audit row.
   --json                           Emit a single JSON object on stdout.
   --replay-transcript PATH         Phase 1 deterministic seam — bypass live model.
@@ -149,15 +149,15 @@ async function main(argv: string[]): Promise<number> {
   try {
     args = parseArgs(argv);
   } catch (err) {
-    process.stderr.write(`red_team_design: ${(err as Error).message}\n`);
+    process.stderr.write(`red_team_spec: ${(err as Error).message}\n`);
     return 2;
   }
 
-  const designPath = path.resolve(args.design);
-  if (!fs.existsSync(designPath)) {
+  const specPath = path.resolve(args.spec);
+  if (!fs.existsSync(specPath)) {
     const envelope = {
       status: "error",
-      error: `design file not found: ${designPath}`,
+      error: `spec file not found: ${specPath}`,
     };
     process.stdout.write(JSON.stringify(envelope, null, 2) + "\n");
     return 2;
@@ -174,15 +174,15 @@ async function main(argv: string[]): Promise<number> {
     return 2;
   }
 
-  const artifact = fs.readFileSync(designPath, "utf8");
+  const artifact = fs.readFileSync(specPath, "utf8");
   const sourceSpec = sourceSpecPath
     ? fs.readFileSync(sourceSpecPath, "utf8")
     : artifact;
 
   const resolved = resolveDbPath();
   const ctx = buildRunContext({
-    stage: "design",
-    artifactPath: designPath,
+    stage: "spec",
+    artifactPath: specPath,
     sourceSpecPath,
     dbPath: resolved.db_path,
   });
@@ -237,7 +237,7 @@ async function main(argv: string[]): Promise<number> {
   // dispatchers have no `--dry-run`.)
   if (args.fold && result.sidecar_path && result.status !== "error") {
     const foldEntry = new URL("./red_team_fold.ts", import.meta.url).pathname;
-    const foldArgs = ["--experimental-strip-types", foldEntry, "--artifact", args.design];
+    const foldArgs = ["--experimental-strip-types", foldEntry, "--artifact", args.spec];
     if (args.sourceSpec) foldArgs.push("--source-spec", args.sourceSpec);
     // We deliberately never pass `--json` to fold. Under the challenge's own
     // `--json` we have already emitted the single JSON object that contract
@@ -247,7 +247,7 @@ async function main(argv: string[]): Promise<number> {
     // mode fold's summary flows to stdout after a separator.
     if (args.json) {
       process.stderr.write(
-        `red_team_design: --fold running fold step (output routed to stderr to preserve --json stdout)\n`,
+        `red_team_spec: --fold running fold step (output routed to stderr to preserve --json stdout)\n`,
       );
     } else {
       process.stdout.write(`\n--- fold step ---\n`);
@@ -257,11 +257,11 @@ async function main(argv: string[]): Promise<number> {
     });
     if (r.error) {
       process.stderr.write(
-        `red_team_design: --fold step failed to spawn (non-fatal): ${r.error.message}\n`,
+        `red_team_spec: --fold step failed to spawn (non-fatal): ${r.error.message}\n`,
       );
     } else if (typeof r.status === "number" && r.status !== 0) {
       process.stderr.write(
-        `red_team_design: --fold step exited ${r.status} (non-fatal; challenge already succeeded)\n`,
+        `red_team_spec: --fold step exited ${r.status} (non-fatal; challenge already succeeded)\n`,
       );
     }
   }
@@ -273,6 +273,6 @@ async function main(argv: string[]): Promise<number> {
 main(process.argv.slice(2))
   .then((code) => process.exit(code))
   .catch((err) => {
-    process.stderr.write(`red_team_design: unhandled: ${(err as Error).stack ?? err}\n`);
+    process.stderr.write(`red_team_spec: unhandled: ${(err as Error).stack ?? err}\n`);
     process.exit(1);
   });

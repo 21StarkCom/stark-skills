@@ -526,7 +526,7 @@ test("resolveFoldFixPlanSource: malformed fix_plan_json in DB → no_fix_plan_fo
       "INSERT INTO red_team_runs (run_id, stage, rounds_used, final_status, total_findings, " +
         "critical_count, high_count, medium_count, human_review_count, duration_s, cost_usd, " +
         "model, caller, fix_plan_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-    ).run("run-x", "design", 1, "halted", 1, 0, 1, 0, 0, 1.0, 0.1, "gpt-5.5-pro", "test", "{not valid json");
+    ).run("run-x", "spec", 1, "halted", 1, 0, 1, 0, 0, 1.0, 0.1, "gpt-5.5-pro", "test", "{not valid json");
   } finally {
     db.close();
   }
@@ -554,7 +554,7 @@ test("resolveFoldFixPlanSource: valid DB fix plan keyed by sidecar Run ID resolv
       "INSERT INTO red_team_runs (run_id, stage, rounds_used, final_status, total_findings, " +
         "critical_count, high_count, medium_count, human_review_count, duration_s, cost_usd, " +
         "model, caller, fix_plan_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-    ).run("run-y", "design", 1, "halted", 2, 0, 2, 0, 0, 1.0, 0.1, "gpt-5.5-pro", "test", JSON.stringify(plan));
+    ).run("run-y", "spec", 1, "halted", 2, 0, 2, 0, 0, 1.0, 0.1, "gpt-5.5-pro", "test", JSON.stringify(plan));
   } finally {
     db.close();
   }

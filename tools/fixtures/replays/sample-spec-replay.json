@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "stage": "design",
+  "stage": "spec",
   "model": "gpt-5.5-pro",
   "round_num": 1,
   "synthesis": "Replay transcript covering 2 personas with a low/medium finding pair. Used by Phase 1 tests + the Phase 2 byte-parity gate.",

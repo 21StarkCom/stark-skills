@@ -1,7 +1,7 @@
 /**
  * Red-team dispatcher core.
  *
- * Shared by `tools/red_team_design.ts` and `tools/red_team_plan.ts`. Owns
+ * Shared by `tools/red_team_spec.ts` and `tools/red_team_plan.ts`. Owns
  * the full red-team flow that previously lived in the Python dispatcher
  * (deleted in Phase 4 of the 2026-05-16 migration). No I/O at the top
  * level; functions that touch disk or spawn subprocesses take explicit
@@ -72,7 +72,7 @@ export type PersonaSlug =
   | "product-dx"
   | "cost-ops";
 
-export type Stage = "design" | "plan";
+export type Stage = "spec" | "plan";
 
 export interface RedTeamFinding {
   id: string;
@@ -302,7 +302,7 @@ export function redTeamPromptsDir(): string {
 /** Load all persona-related prompts from disk. Throws on missing files. */
 export function loadPersonaPrompts(
   promptsDir: string = redTeamPromptsDir(),
-  stage: Stage = "design",
+  stage: Stage = "spec",
 ): PersonaPrompts {
   const preamblePath = path.join(promptsDir, "preamble.md");
   const stagePath = path.join(promptsDir, `${stage}.md`);
@@ -336,9 +336,9 @@ export function assemblePrompt(args: {
    *  guarded input block so the plan committee can see which concerns were
    *  already raised and resolved at design time and stop re-litigating them
    *  (task #5 — plan-stage dedup). */
-  designDispositions?: string;
+  specDispositions?: string;
 }): string {
-  const { prompts, personas, artifact, sourceSpec, designDispositions } = args;
+  const { prompts, personas, artifact, sourceSpec, specDispositions } = args;
   const parts: string[] = [];
   parts.push(prompts.preamble);
   parts.push("");
@@ -361,10 +361,10 @@ export function assemblePrompt(args: {
   parts.push(sourceSpec);
   parts.push(`<<<RED_TEAM_INPUT_END name="source_spec">>>`);
   parts.push("");
-  if (designDispositions && designDispositions.trim()) {
-    parts.push(`<<<RED_TEAM_INPUT name="design_dispositions">>>`);
-    parts.push(designDispositions);
-    parts.push(`<<<RED_TEAM_INPUT_END name="design_dispositions">>>`);
+  if (specDispositions && specDispositions.trim()) {
+    parts.push(`<<<RED_TEAM_INPUT name="spec_dispositions">>>`);
+    parts.push(specDispositions);
+    parts.push(`<<<RED_TEAM_INPUT_END name="spec_dispositions">>>`);
     parts.push("");
   }
   return parts.join("\n");
@@ -1194,7 +1194,7 @@ export interface DispatchArgs {
   /** Plan-stage only: content of the design's resolved red-team sidecar
    *  (`<design>.red-team.md`), threaded to the plan committee so it stops
    *  re-deriving already-resolved design concerns (task #5). */
-  designDispositions?: string;
+  specDispositions?: string;
   model: string;
   /** Per-run timeout for the codex subprocess. */
   timeoutMs: number;
@@ -1248,7 +1248,7 @@ export interface DispatchArgs {
 }
 
 /**
- * The single user-facing entry point. Phase 2 (`tools/red_team_design.ts`)
+ * The single user-facing entry point. Phase 2 (`tools/red_team_spec.ts`)
  * and Phase 3 (`tools/red_team_plan.ts`) are thin wrappers that build the
  * context + persona list and call this. Returns a `DispatchResult` shaped
  * for the existing skill JSON receipt.
@@ -1262,7 +1262,7 @@ export function dispatch(args: DispatchArgs): DispatchResult {
     personas,
     artifact,
     sourceSpec,
-    designDispositions: args.designDispositions,
+    specDispositions: args.specDispositions,
   });
 
   // Pre-dispatch sensitive-data gate — scan ONLY the untrusted document text
@@ -1724,7 +1724,7 @@ export async function dispatchAsync(
     personas: args.personas,
     artifact: args.artifact,
     sourceSpec: args.sourceSpec,
-    designDispositions: args.designDispositions,
+    specDispositions: args.specDispositions,
   });
   // Skip the codex spawn if the pre-dispatch sensitive gate will refuse
   // anyway — sync dispatch re-runs the gate and returns the blocked

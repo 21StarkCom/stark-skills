@@ -922,7 +922,7 @@ export async function runFold(opts: RunFoldOpts): Promise<FoldResult> {
   const artifactText = readFileFn(opts.artifactPath);
   const artifactHash = sha256Hex(artifactText);
   const artifactRelPath = opts.artifactRelPath ?? path.basename(opts.artifactPath);
-  const stage = opts.stage ?? "design";
+  const stage = opts.stage ?? "spec";
 
   // 1) Resolve the fix-plan source (pre-resolved by caller, else DB-load site).
   let src: FixPlanSource;

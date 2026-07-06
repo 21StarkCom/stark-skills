@@ -8,7 +8,7 @@
  * Usage:
  *   node --experimental-strip-types tools/red_team_status.ts
  *   node --experimental-strip-types tools/red_team_status.ts --repo Evinced/foo
- *   node --experimental-strip-types tools/red_team_status.ts --stage design
+ *   node --experimental-strip-types tools/red_team_status.ts --stage spec
  *   node --experimental-strip-types tools/red_team_status.ts --json
  *
  * Acceptance happens via `tools/red_team_accept.ts`.
@@ -29,7 +29,7 @@ const REPO_ROOT = path.resolve(HERE, "..");
 
 interface CliArgs {
   repo: string | null;
-  stage: "design" | "plan" | null;
+  stage: "spec" | "plan" | null;
   json: boolean;
   db: string | null;
   help: boolean;
@@ -56,8 +56,8 @@ function parseArgs(argv: string[]): CliArgs {
         break;
       case "--stage": {
         const v = next();
-        if (v !== "design" && v !== "plan") {
-          throw new Error(`--stage must be design|plan, got ${JSON.stringify(v)}`);
+        if (v !== "spec" && v !== "plan") {
+          throw new Error(`--stage must be spec|plan, got ${JSON.stringify(v)}`);
         }
         args.stage = v;
         break;
@@ -89,7 +89,7 @@ acknowledge them by stable_key.
 
 Options:
   --repo NAME        Filter to one repo (nameWithOwner).
-  --stage STAGE      Filter by stage (design|plan).
+  --stage STAGE      Filter by stage (spec|plan).
   --json             Emit JSON instead of human text.
   --db PATH          Audit DB path override. Defaults to the canonical
                      resolver (scripts/red_team_audit_cli.py resolve-db).

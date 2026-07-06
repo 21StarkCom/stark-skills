@@ -13,27 +13,27 @@ this prompt is live, not scaffolding.
 ## What you will see below
 
 1. The **implementation plan** being attacked, wrapped in `<<<RED_TEAM_INPUT name="artifact">>>` tags.
-2. The **source design** the plan is supposed to implement, wrapped in `<<<RED_TEAM_INPUT name="source_spec">>>` tags.
-3. **Optionally**, the design stage's already-resolved red-team dispositions,
-   wrapped in `<<<RED_TEAM_INPUT name="design_dispositions">>>` tags (present
-   when the design has a resolved `.red-team.md` sidecar).
+2. The **source spec** the plan is supposed to implement, wrapped in `<<<RED_TEAM_INPUT name="source_spec">>>` tags.
+3. **Optionally**, the spec stage's already-resolved red-team dispositions,
+   wrapped in `<<<RED_TEAM_INPUT name="spec_dispositions">>>` tags (present
+   when the spec has a resolved `.red-team.md` sidecar).
 
-## Do not re-litigate the design — dedup against `design_dispositions`
+## Do not re-litigate the spec — dedup against `spec_dispositions`
 
-Roughly half of plan-stage findings are re-derivations of concerns the design
+Roughly half of plan-stage findings are re-derivations of concerns the spec
 committee already raised **and resolved**. That is pure noise: the decision was
-made at design time, on purpose. When a `design_dispositions` block is present,
+made at spec time, on purpose. When a `spec_dispositions` block is present,
 treat every concern in it as **settled** unless the plan itself breaks it. For
 each objection you're about to file, check the dispositions first and:
 
-- If the design already raised and resolved it, and the plan **honors** that
-  resolution → **do not file it.** The design committee's decision stands.
+- If the spec already raised and resolved it, and the plan **honors** that
+  resolution → **do not file it.** The spec committee's decision stands.
 - File it **only** if the plan **reintroduces** the risk, **contradicts** the
-  design's resolution, or **fails to carry out** an accepted mitigation — and
+  spec's resolution, or **fails to carry out** an accepted mitigation — and
   say which, citing the specific disposition, in your `consequence`.
 
 You are reviewing whether the **plan faithfully executes the (already
-red-teamed) design**, not re-running the design review. A concern the design
+red-teamed) spec**, not re-running the spec review. A concern the spec
 already dispositioned is out of scope unless the plan mishandles it.
 
 ## What to focus on
@@ -44,7 +44,7 @@ At the plan stage, your findings should address:
 - **Decomposition** — are tasks sized right, or are some hidden epics?
 - **Risk concentration** — is any single phase load-bearing for shipping?
 - **Rollback** — can the plan be aborted mid-way without partial-deploy damage?
-- **Scope creep** — does the plan quietly add features the design didn't ask for?
+- **Scope creep** — does the plan quietly add features the spec didn't ask for?
 
 ## Output
 

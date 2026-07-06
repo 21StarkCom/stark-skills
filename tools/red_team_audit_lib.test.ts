@@ -79,7 +79,7 @@ test("recordFoldRun + recordDispositions round-trip; disposition upserts", () =>
     {
       fold_run_id: "f1",
       source_run_id: "r1",
-      stage: "design",
+      stage: "spec",
       decider_model: "claude-opus-4-8",
       accepted_count: 1,
       modified_count: 1,
@@ -98,7 +98,7 @@ test("recordFoldRun + recordDispositions round-trip; disposition upserts", () =>
   // land as NULL rather than throwing or defaulting to something else.
   const foldRun = readFoldRun(dbPath, "f1");
   assert.equal(foldRun.source_run_id, "r1");
-  assert.equal(foldRun.stage, "design");
+  assert.equal(foldRun.stage, "spec");
   assert.equal(foldRun.decider_model, "claude-opus-4-8");
   assert.equal(foldRun.accepted_count, 1);
   assert.equal(foldRun.modified_count, 1);
@@ -214,7 +214,7 @@ test("recordFoldRun is idempotent — same fold_run_id upserts to the updated co
   const base = {
     fold_run_id: "f-dup",
     source_run_id: "r1",
-    stage: "design",
+    stage: "spec",
     decider_model: "claude-opus-4-8",
     accepted_count: 1,
     modified_count: 0,
@@ -251,7 +251,7 @@ test("initRedTeamTables is idempotent across the new fold-run tables", () => {
     {
       fold_run_id: "f3",
       source_run_id: "r3",
-      stage: "design",
+      stage: "spec",
       decider_model: "claude-opus-4-8",
       accepted_count: 0,
       modified_count: 0,

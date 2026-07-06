@@ -238,7 +238,7 @@
     "model": "gpt-5.5-pro",
     "halt_on_unresolved": true,
     "stages": {
-      "design": {
+      "spec": {
         "enabled": true
       },
       "plan": {

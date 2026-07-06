@@ -114,7 +114,7 @@ export const DEFAULT_RED_TEAM: RedTeamConfig = {
   model: "gpt-5.5-pro",
   halt_on_unresolved: true,
   stages: {
-    design: { enabled: true },
+    spec: { enabled: true },
     plan: { enabled: false },
   },
   personas: [

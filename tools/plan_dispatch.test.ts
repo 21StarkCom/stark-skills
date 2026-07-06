@@ -103,7 +103,7 @@ describe("buildRevisePrompt", () => {
 
 describe("runPlanDispatch preflight", () => {
   const baseOpts = {
-    designContent: "DESIGN",
+    specContent: "DESIGN",
     generatePrompt: "G",
     reviewPrompt: "R",
     revisePrompt: "V",
@@ -158,7 +158,7 @@ describe("CLI", () => {
     assert.match(out, /Usage: plan_dispatch/);
   });
 
-  test("missing --design-file exits 2", () => {
+  test("missing --spec-file exits 2", () => {
     const file = path.resolve(import.meta.dirname ?? "", "plan_dispatch.ts");
     try {
       execFileSync(

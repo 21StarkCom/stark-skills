@@ -2,7 +2,7 @@
 /**
  * `/stark-red-team-plan` TS dispatcher (Phase 3 of the migration plan).
  *
- * Sibling of `tools/red_team_design.ts`; only the stage + flag name
+ * Sibling of `tools/red_team_spec.ts`; only the stage + flag name
  * differ. Delegates everything to `tools/red_team_lib.ts`.
  */
 
@@ -28,8 +28,8 @@ const DEFAULT_TIMEOUT_MS = 900_000;
 interface CliArgs {
   plan: string;
   sourceSpec: string | null;
-  designDispositions: string | null;
-  noDesignDispositions: boolean;
+  specDispositions: string | null;
+  noSpecDispositions: boolean;
   model: string;
   noSidecar: boolean;
   noAudit: boolean;
@@ -44,8 +44,8 @@ function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = {
     plan: "",
     sourceSpec: null,
-    designDispositions: null,
-    noDesignDispositions: false,
+    specDispositions: null,
+    noSpecDispositions: false,
     model: DEFAULT_MODEL,
     noSidecar: false,
     noAudit: false,
@@ -69,11 +69,11 @@ function parseArgs(argv: string[]): CliArgs {
       case "--source-spec":
         args.sourceSpec = next();
         break;
-      case "--design-dispositions":
-        args.designDispositions = next();
+      case "--spec-dispositions":
+        args.specDispositions = next();
         break;
-      case "--no-design-dispositions":
-        args.noDesignDispositions = true;
+      case "--no-spec-dispositions":
+        args.noSpecDispositions = true;
         break;
       case "--model":
         args.model = next();
@@ -124,7 +124,7 @@ function parseArgs(argv: string[]): CliArgs {
 function printHelp(): void {
   process.stdout.write(`usage: red_team_plan.ts [-h] --plan PLAN
                         [--source-spec SOURCE_SPEC]
-                        [--design-dispositions PATH] [--no-design-dispositions]
+                        [--spec-dispositions PATH] [--no-spec-dispositions]
                         [--model MODEL]
                         [--no-sidecar] [--no-audit] [--json]
                         [--replay-transcript PATH]
@@ -137,10 +137,10 @@ options:
   -h, --help                       show this help message and exit
   --plan PLAN                      Path to the plan markdown file.
   --source-spec SOURCE_SPEC        Optional source-spec (design) file.
-  --design-dispositions PATH       Design-stage red-team sidecar to thread in for
+  --spec-dispositions PATH       Design-stage red-team sidecar to thread in for
                                    plan-stage dedup. Default: auto-discover the
                                    source-spec's <design>.red-team.md sidecar.
-  --no-design-dispositions         Disable design-dispositions threading.
+  --no-spec-dispositions         Disable design-dispositions threading.
   --model MODEL                    Override the configured red-team model.
   --no-sidecar                     Skip writing the <plan>.red-team.md sidecar.
   --no-audit                       Skip the SQLite audit row.
@@ -189,14 +189,14 @@ async function main(argv: string[]): Promise<number> {
   // Task #5 — plan-stage dedup. Thread the design's resolved red-team sidecar
   // (`<design>.red-team.md`) into the plan committee so it stops re-deriving
   // concerns already raised + resolved at the design stage. Resolution order:
-  //   explicit --design-dispositions PATH  >  auto: the source-spec's sidecar
-  // `--no-design-dispositions` opts out entirely. Missing/unreadable → silent
+  //   explicit --spec-dispositions PATH  >  auto: the source-spec's sidecar
+  // `--no-spec-dispositions` opts out entirely. Missing/unreadable → silent
   // skip (the plan committee just runs without the dedup context).
-  let designDispositions: string | null = null;
-  if (!args.noDesignDispositions) {
+  let specDispositions: string | null = null;
+  if (!args.noSpecDispositions) {
     let dispPath: string | null = null;
-    if (args.designDispositions) {
-      dispPath = path.resolve(args.designDispositions);
+    if (args.specDispositions) {
+      dispPath = path.resolve(args.specDispositions);
       if (!fs.existsSync(dispPath)) {
         const envelope = {
           status: "error",
@@ -211,7 +211,7 @@ async function main(argv: string[]): Promise<number> {
     }
     if (dispPath) {
       try {
-        designDispositions = fs.readFileSync(dispPath, "utf8");
+        specDispositions = fs.readFileSync(dispPath, "utf8");
         process.stderr.write(
           `red_team_plan: threading design dispositions from ${dispPath}\n`,
         );
@@ -239,7 +239,7 @@ async function main(argv: string[]): Promise<number> {
     personas: args.personas,
     artifact,
     sourceSpec,
-    designDispositions: designDispositions ?? undefined,
+    specDispositions: specDispositions ?? undefined,
     model: args.model,
     timeoutMs: DEFAULT_TIMEOUT_MS,
     dbPath: resolved.db_path,

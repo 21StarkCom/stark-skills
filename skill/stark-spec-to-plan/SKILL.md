@@ -107,7 +107,7 @@ Dispatch the paired lead/wing loop. The dispatcher runs the lead in round 1, the
 
 ```bash
 node --experimental-strip-types "$TOOLS/plan_dispatch.ts" \
-  --design-file "$path" \
+  --spec-file "$path" \
   --generate-prompt-file "$PROMPTS/spec-to-plan/$lead/generate.md" \
   --review-prompt-file "$PROMPTS/spec-to-plan/$wing/review.md" \
   --revise-prompt-file "$PROMPTS/spec-to-plan/$lead/revise.md" \

@@ -44,7 +44,7 @@ node --experimental-strip-types "$TOOLS/preflight.ts" --workflow stark-red-team-
 Raw input: `$ARGUMENTS`
 
 - `<plan-path>` — required. Path to the plan markdown file under attack.
-- `--source-spec <path>` — optional. The source design or requirements the
+- `--source-spec <path>` — optional. The source spec or requirements the
   plan is meant to execute. If omitted, the plan is used as its own spec
   (matches `forge_orchestrator` fallback behavior).
 - `--model <id>` — optional. Override `red_team.model` (default

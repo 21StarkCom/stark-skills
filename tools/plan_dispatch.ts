@@ -262,26 +262,26 @@ async function callAgent(
 
 export function buildLeadGeneratePrompt(
   generateTemplate: string,
-  designContent: string,
+  specContent: string,
 ): string {
   return (
     generateTemplate +
     "\n\n## Design document to plan from\n\n" +
-    designContent +
+    specContent +
     "\n"
   );
 }
 
 export function buildWingReviewPayload(
   reviewTemplate: string,
-  designContent: string,
+  specContent: string,
   draft: string,
   priorRounds: ReadonlyArray<Pick<PlanRoundResult, "round_num" | "verdict" | "blocking_findings" | "summary">>,
 ): string {
   const parts: string[] = [
     reviewTemplate,
     "\n\n## Design document the plan must implement\n\n",
-    designContent,
+    specContent,
     "\n\n## Plan draft under review\n\n",
     draft.trim() ? draft : "(empty draft)",
     "\n",
@@ -302,7 +302,7 @@ export function buildWingReviewPayload(
 
 export function buildRevisePrompt(
   reviseTemplate: string,
-  designContent: string,
+  specContent: string,
   priorDraft: string,
   findings: ReadonlyArray<string>,
   roundNum: number,
@@ -317,7 +317,7 @@ export function buildRevisePrompt(
     "\n\n## Wing's blocking findings (address every one)\n\n" +
     findingsBlock +
     "\n\n## Design document the plan must implement\n\n" +
-    designContent +
+    specContent +
     "\n\n## Your prior draft (revise this)\n\n" +
     priorDraft +
     "\n"
@@ -327,7 +327,7 @@ export function buildRevisePrompt(
 // Main loop ---------------------------------------------------------------
 
 export interface RunPlanOpts {
-  designContent: string;
+  specContent: string;
   generatePrompt: string;
   reviewPrompt: string;
   revisePrompt: string;
@@ -358,7 +358,7 @@ export async function runPlanDispatch(
   opts: RunPlanOpts,
 ): Promise<PlanDispatchResult | PreflightFailure> {
   const {
-    designContent, generatePrompt, reviewPrompt, revisePrompt,
+    specContent, generatePrompt, reviewPrompt, revisePrompt,
     lead, wing, maxRounds, timeoutSec, wingTimeoutSec,
   } = opts;
 
@@ -373,7 +373,7 @@ export async function runPlanDispatch(
   const rounds: PlanRoundResult[] = [];
 
   // Round 1: lead generates ------------------------------------------------
-  const leadPrompt1 = buildLeadGeneratePrompt(generatePrompt, designContent);
+  const leadPrompt1 = buildLeadGeneratePrompt(generatePrompt, specContent);
   const r1Result = await callAgent(lead, leadPrompt1, timeoutSec, "gemini-plan-lead-", "lead-generate");
   const r1 = newRound(1);
   r1.duration_s = r1Result.duration_s;
@@ -399,7 +399,7 @@ export async function runPlanDispatch(
 
   for (let roundNum = 1; roundNum <= maxRounds + 1; roundNum++) {
     const prior = rounds.slice();
-    const payload = buildWingReviewPayload(reviewPrompt, designContent, currentRound.draft, prior);
+    const payload = buildWingReviewPayload(reviewPrompt, specContent, currentRound.draft, prior);
 
     let wingResult = await callAgent(wing, payload, wingTimeoutSec, "gemini-plan-wing-", "wing-review");
     if (wingResult.error === "timeout") {
@@ -472,7 +472,7 @@ export async function runPlanDispatch(
     // Revise round -------------------------------------------------------
     const nextRoundNum = roundNum + 1;
     const reviseText = buildRevisePrompt(
-      revisePrompt, designContent, currentRound.draft,
+      revisePrompt, specContent, currentRound.draft,
       currentRound.blocking_findings, nextRoundNum,
     );
     const fixResult = await callAgent(
@@ -557,7 +557,7 @@ export { isPlainObject };
 // CLI ---------------------------------------------------------------------
 
 interface CliArgs {
-  designFile: string;
+  specFile: string;
   generatePromptFile: string;
   reviewPromptFile: string;
   revisePromptFile: string;
@@ -570,11 +570,11 @@ interface CliArgs {
 
 function usage(): string {
   return [
-    "Usage: plan_dispatch.ts --design-file PATH --generate-prompt-file PATH \\",
+    "Usage: plan_dispatch.ts --spec-file PATH --generate-prompt-file PATH \\",
     "                        --review-prompt-file PATH --revise-prompt-file PATH [options]",
     "",
     "Required:",
-    "  --design-file PATH              Design doc the lead reads",
+    "  --spec-file PATH              Design doc the lead reads",
     "  --generate-prompt-file PATH     Lead round-1 generate-prompt template",
     "  --review-prompt-file PATH       Wing review-prompt template",
     "  --revise-prompt-file PATH       Lead revise-prompt template (rounds 2..N+1)",
@@ -590,7 +590,7 @@ function usage(): string {
 
 function parseArgs(argv: ReadonlyArray<string>): CliArgs {
   const args: CliArgs = {
-    designFile: "",
+    specFile: "",
     generatePromptFile: "",
     reviewPromptFile: "",
     revisePromptFile: "",
@@ -617,7 +617,7 @@ function parseArgs(argv: ReadonlyArray<string>): CliArgs {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     switch (a) {
-      case "--design-file":          args.designFile = need(i, a); i++; break;
+      case "--spec-file":          args.specFile = need(i, a); i++; break;
       case "--generate-prompt-file": args.generatePromptFile = need(i, a); i++; break;
       case "--review-prompt-file":   args.reviewPromptFile = need(i, a); i++; break;
       case "--revise-prompt-file":   args.revisePromptFile = need(i, a); i++; break;
@@ -631,7 +631,7 @@ function parseArgs(argv: ReadonlyArray<string>): CliArgs {
       default: throw new Error(`unknown arg: ${a}`);
     }
   }
-  if (!args.designFile) throw new Error("--design-file is required");
+  if (!args.specFile) throw new Error("--spec-file is required");
   if (!args.generatePromptFile) throw new Error("--generate-prompt-file is required");
   if (!args.reviewPromptFile) throw new Error("--review-prompt-file is required");
   if (!args.revisePromptFile) throw new Error("--revise-prompt-file is required");
@@ -650,15 +650,15 @@ async function main(): Promise<number> {
     return 2;
   }
 
-  const [designContent, generatePrompt, reviewPrompt, revisePrompt] = await Promise.all([
-    readFile(args.designFile, "utf-8"),
+  const [specContent, generatePrompt, reviewPrompt, revisePrompt] = await Promise.all([
+    readFile(args.specFile, "utf-8"),
     readFile(args.generatePromptFile, "utf-8"),
     readFile(args.reviewPromptFile, "utf-8"),
     readFile(args.revisePromptFile, "utf-8"),
   ]);
 
   const result: PlanDispatchResult | PreflightFailure = await runPlanDispatch({
-    designContent,
+    specContent,
     generatePrompt,
     reviewPrompt,
     revisePrompt,
