@@ -881,10 +881,12 @@ export function buildClaudeCmd(opts: {
   // Required for the `/goal` loop to fire: a leading `/goal` is only honored in the
   // argument form — via stdin it is read as plain prompt text (verified 2026-06-03,
   // Claude Code 2.1.161). Passing from a Node args array avoids any shell quoting.
-  // TRADEOFF: an argv-passed prompt is visible in `ps`/process listings. Goal prompts
-  // here carry only issue/plan/task text (never secrets — the skills never interpolate
-  // credentials into prompts), so on a single-user host this exposure is acceptable;
-  // the goal loop cannot be driven any other way. Do not put secrets in goal prompts.
+  // The `/goal` argument is a SHORT completion condition that points at a staged
+  // prompt file (the full task must NOT be inlined — Claude Code caps the `/goal`
+  // argument at 4000 chars and silently no-ops a longer one; see the goal branch in
+  // runImplementationAgent). TRADEOFF: an argv-passed goal string is visible in
+  // `ps`/process listings, but it now carries only the short condition + a file path
+  // (never secrets), so on a single-user host this exposure is acceptable.
   promptArg?: string;
   maxBudgetUsd?: number; // runaway guard for goal loops
   maxTurns?: number; // explicit turn cap so a phase doesn't hit the CLI default and exit 1
@@ -954,11 +956,24 @@ async function runImplementationAgent(
 
   try {
     if (agent === "claude") {
+      // Build the env (and its temp dir) FIRST so goal mode can stage the prompt
+      // file inside it — outside the worktree, so it never pollutes collectDiff.
+      const built = await buildAgentEnv("claude", "implementation");
+      env = built.env; agentTempDir = built.tempDir;
       if (goalCondition) {
-        // Goal-driven lead: prefix the prompt with /goal and pass it as the -p
-        // argument so Claude Code loops until the condition holds. The lead never
-        // commits (the dispatcher owns git), so the condition omits "committed".
-        const goalPrompt = `/goal ${goalCondition}\n\n${prompt}`;
+        // Goal-driven lead: Claude Code caps the `/goal` ARGUMENT at 4000 chars,
+        // so an inlined multi-KB implement prompt silently no-ops the loop (it
+        // prints "Goal condition is limited to 4000 characters" and exits 0 with
+        // an empty diff). Instead, write the full prompt to a file and keep the
+        // `/goal` argument short, pointing the lead at that file — the lead reads
+        // it with its Read tool, then loops until the condition holds. The lead
+        // never commits (the dispatcher owns git), so the condition omits it.
+        const promptFile = path.join(agentTempDir, "implement-prompt.md");
+        writeFileSync(promptFile, prompt, "utf8");
+        const goalPrompt =
+          `/goal Read the full task specification in the file ${promptFile}, ` +
+          `then implement it completely in this repository. ` +
+          `Done when: ${goalCondition}.`;
         const c = buildClaudeCmd({
           allowedTools: "Edit,Write,Read,Bash,Glob,Grep",
           promptArg: goalPrompt,
@@ -974,8 +989,6 @@ async function runImplementationAgent(
         });
         cmd = c.cmd; args = c.args; stdin = prompt;
       }
-      const built = await buildAgentEnv("claude", "implementation");
-      env = built.env; agentTempDir = built.tempDir;
     } else if (agent === "codex") {
       const c = buildCodexCmd({ readOnly: false });
       cmd = c.cmd; args = c.args; stdin = prompt;
