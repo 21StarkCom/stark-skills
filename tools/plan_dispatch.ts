@@ -2,7 +2,7 @@
 /**
  * Plan dispatch — paired lead/wing plan generation with review-fix loop.
  *
- * Round 1: lead reads the design doc + generate prompt, emits a plan markdown
+ * Round 1: lead reads the spec doc + generate prompt, emits a plan markdown
  *          draft on stdout.
  * Wing reviews the draft text, returns an `approve | revise | block` JSON
  * verdict. If `revise` and fix budget remains, lead receives its prior draft
@@ -266,7 +266,7 @@ export function buildLeadGeneratePrompt(
 ): string {
   return (
     generateTemplate +
-    "\n\n## Design document to plan from\n\n" +
+    "\n\n## Spec document to plan from\n\n" +
     specContent +
     "\n"
   );
@@ -280,7 +280,7 @@ export function buildWingReviewPayload(
 ): string {
   const parts: string[] = [
     reviewTemplate,
-    "\n\n## Design document the plan must implement\n\n",
+    "\n\n## Spec document the plan must implement\n\n",
     specContent,
     "\n\n## Plan draft under review\n\n",
     draft.trim() ? draft : "(empty draft)",
@@ -316,7 +316,7 @@ export function buildRevisePrompt(
     reviseTemplate +
     "\n\n## Wing's blocking findings (address every one)\n\n" +
     findingsBlock +
-    "\n\n## Design document the plan must implement\n\n" +
+    "\n\n## Spec document the plan must implement\n\n" +
     specContent +
     "\n\n## Your prior draft (revise this)\n\n" +
     priorDraft +
@@ -574,7 +574,7 @@ function usage(): string {
     "                        --review-prompt-file PATH --revise-prompt-file PATH [options]",
     "",
     "Required:",
-    "  --spec-file PATH              Design doc the lead reads",
+    "  --spec-file PATH              Spec doc the lead reads",
     "  --generate-prompt-file PATH     Lead round-1 generate-prompt template",
     "  --review-prompt-file PATH       Wing review-prompt template",
     "  --revise-prompt-file PATH       Lead revise-prompt template (rounds 2..N+1)",

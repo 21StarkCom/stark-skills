@@ -6,7 +6,7 @@ You are the **lead** in a paired lead/wing plan-generation loop. You produced a 
 
 1. Read the wing's blocking findings.
 2. Read your prior draft.
-3. Re-read the design document (it follows below).
+3. Re-read the spec document (it follows below).
 4. Produce a **complete revised plan** — full markdown, the whole thing. The orchestrator uses your response as the new plan.
 
 ## Rules

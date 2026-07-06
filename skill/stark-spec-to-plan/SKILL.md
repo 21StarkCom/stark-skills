@@ -1,7 +1,7 @@
 ---
 name: stark-spec-to-plan
 description: >-
-  Convert design docs into phased implementation plans via paired lead/wing agents. Lead drafts, wing reviews, fix-loop until approved. Use for plan from design/spec.
+  Convert spec docs into phased implementation plans via paired lead/wing agents. Lead drafts, wing reviews, fix-loop until approved. Use for plan from spec.
 argument-hint: "<path> [--lead claude|codex|gemini] [--wing claude|codex|gemini] [--max-rounds N] [--timeout N] [--wing-timeout N] [--dry-run] [--force]"
 disable-model-invocation: true
 model: opus
@@ -23,9 +23,9 @@ Parse the JSON result:
 
 # stark-spec-to-plan
 
-Generate a phased implementation plan from a design document via a paired **lead/wing** subagent loop:
+Generate a phased implementation plan from a spec document via a paired **lead/wing** subagent loop:
 
-- **Lead** (default `claude`) — drafts the plan from the design doc
+- **Lead** (default `claude`) — drafts the plan from the spec doc
 - **Wing** (default `codex`) — reviews the draft, returns approve / revise / block JSON verdict
 - **Fix loop** — on `revise`, lead receives the wing's blocking findings + prior draft and emits a revised plan; wing re-reviews. Loops until `approve`, `block`, or `--max-rounds` exhaustion.
 
@@ -37,14 +37,14 @@ Fills the pipeline gap: `/stark-review-spec` → **`/stark-spec-to-plan`** → `
 
 ## Arguments
 
-- `<path>` — path to design/spec markdown file (required)
+- `<path>` — path to spec markdown file (required)
 - `--lead AGENT` — lead implementer agent ID (default: `claude`). One of `claude`, `codex`, `gemini`.
 - `--wing AGENT` — wing reviewer agent ID (default: `codex`). Must differ from `--lead`.
 - `--max-rounds N` — maximum **fix** rounds after the initial draft (default: `4`). The wing reviews up to `N+1` times.
 - `--timeout N` — per-lead-invocation timeout in seconds (default: 900)
 - `--wing-timeout N` — per-wing-invocation timeout in seconds (default: 600)
 - `--dry-run` — generate plan but don't write output files or post to PR
-- `--force` — proceed even if design file has uncommitted changes
+- `--force` — proceed even if spec file has uncommitted changes
 
 If `--lead` and `--wing` resolve to the same agent, error and stop:
 > Error: --lead and --wing must be different agents.
@@ -166,9 +166,9 @@ In every non-`approved` case, do **not** write the plan file or post to the PR. 
 
 Print:
 ```
-Design-to-Plan Complete
+Spec-to-Plan Complete
 ───────────────────────
-Design:        {path}
+Spec:          {path}
 Lead:          {lead}
 Wing:          {wing}
 Rounds:        {N} ({verdict-of-each})
@@ -178,15 +178,15 @@ Output:        {output_path}
 
 ### 3b. Write plan file (skip in --dry-run)
 
-Write the approved plan alongside the design file:
-- If design is `docs/specs/2026-03-27-auth-design.md`
+Write the approved plan alongside the spec file:
+- If the input spec is `docs/specs/2026-03-27-auth-design.md`
 - Plan goes to `docs/specs/2026-03-27-auth-plan.md`
 
-Naming: replace `-design.md` with `-plan.md`. If the design filename doesn't end with `-design.md`, append `.plan.md`. Store the result as `$plan_path` (referenced in 3d).
+Naming: replace `-design.md` with `-plan.md`. If the input filename doesn't end with `-design.md`, append `.plan.md`. Store the result as `$plan_path` (referenced in 3d).
 
 ### 3c. Write review summary (skip in --dry-run)
 
-Write per-round details to `{design-name}.s2p-review.md` alongside the design file. Store the result as `$review_summary_path` (referenced in 3d).
+Write per-round details to `{spec-name}.s2p-review.md` alongside the spec file. Store the result as `$review_summary_path` (referenced in 3d).
 
 Contents:
 - Per-round verdict, blocking findings, non-blocking suggestions, summary
@@ -212,7 +212,7 @@ open_pr=0
 [ -z "$pr_number" ] && open_pr=1
 ```
 
-**3d.i — Ensure a working branch (never commit to the default branch).** The design is already committed (Phase 1 aborts on a dirty design without `--force`); the plan + summary written in 3b/3c are new files to land on a branch:
+**3d.i — Ensure a working branch (never commit to the default branch).** The spec is already committed (Phase 1 aborts on a dirty spec without `--force`); the plan + summary written in 3b/3c are new files to land on a branch:
 
 ```bash
 default_branch=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')
@@ -269,7 +269,7 @@ export GH_TOKEN=$(node --experimental-strip-types "$TOOLS/github_app.ts" --app "
 ## Phase 4: Persist history
 
 ```bash
-mkdir -p ~/.claude/code-review/history/spec-to-plan/{design-filename}
+mkdir -p ~/.claude/code-review/history/spec-to-plan/{spec-filename}
 ```
 
 Write:
@@ -296,5 +296,5 @@ Most failure modes are owned by the dispatcher (listed for orchestrator awarenes
 | Lead's revision produces empty draft | `final_verdict=unresolved`, `error=lead_fix_round_empty_draft` | Stop; surface findings — lead is stuck |
 | Lead's revision is identical to prior round | `final_verdict=unresolved`, `error=lead_fix_round_no_change` | Stop; surface findings — lead made no progress |
 | Lead errors mid-loop | `final_verdict=unresolved`, `error=lead_fix_round_failed:*` | Stop; surface error |
-| `--max-rounds` exhausted without approval | `final_verdict=max_rounds_unresolved`, all rounds in `rounds[]` | Stop; print every round's blocking_findings; operator decides whether to retry with more rounds or fix the design |
+| `--max-rounds` exhausted without approval | `final_verdict=max_rounds_unresolved`, all rounds in `rounds[]` | Stop; print every round's blocking_findings; operator decides whether to retry with more rounds or fix the spec |
 | Tool not found (claude/codex/gemini CLI missing) | `agent_unavailable` | Run installer or check PATH |
