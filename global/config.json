@@ -76,7 +76,9 @@
       "SHELL",
       "LANG",
       "TERM",
-      "ANTHROPIC_AGENTS"
+      "ANTHROPIC_AGENTS",
+      "TEST_DATABASE_URL",
+      "DATABASE_URL"
     ],
     "test_env_allowlist": [
       "PATH",

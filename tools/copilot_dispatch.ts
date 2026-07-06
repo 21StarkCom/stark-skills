@@ -1016,10 +1016,14 @@ async function runImplementationAgent(
         return out;
       }
       if (res.timedOut) {
-        if (attempt < maxAttempts) {
-          process.stderr.write(`  [${agent}] lead timed out, retrying...\n`);
-          continue;
-        }
+        // A lead timeout is TERMINAL — do NOT retry. The lead was already granted the
+        // full `timeoutSec` budget; re-running it from scratch consumes a SECOND full
+        // window (worst case ~2×timeoutSec of wall-clock). In goal mode the /goal loop
+        // reliably spends the whole budget iterating on tests, so a timeout there is
+        // common, and the 2× blowup pushes the dispatch past the host's background-
+        // process reap limit — the run is killed with no verdict (empty result JSON).
+        // Fail fast instead so the orchestrator can re-dispatch with a larger --timeout
+        // (or without goal mode). Transient CLI errors below still get one bounded retry.
         out.error = "timeout";
         out.duration_s = elapsedSec(t0);
         return out;
