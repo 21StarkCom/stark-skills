@@ -186,7 +186,7 @@ stark-skills/
 This repo is the **source of truth** for the skills + tools; they ship as self-contained Claude Code plugins via the [stark-marketplace](https://github.com/21-Stark-AI/stark-marketplace).
 
 - The marketplace `catalog/` is **generated from this repo** by `stark sync`, and its engine vendors `tools/` + `global/` (config + prompts) into each plugin — so an install needs no symlinks and no local setup step.
-- CI auto-publishes: `.github/workflows/marketplace-sync.yml` regenerates the marketplace and opens a PR on every push to `main` touching `skill/`, `tools/`, `global/`, or `plugins/stark-gh/`.
+- CI auto-publishes: `.github/workflows/marketplace-sync.yml` regenerates the marketplace and opens a PR on every push to `main` touching a vendored asset root — `skill/`, `tools/`, `global/`, `scripts/`, `standards/`, or `plugins/stark-gh/`.
 
 ```
 /plugin marketplace add 21-Stark-AI/stark-marketplace
