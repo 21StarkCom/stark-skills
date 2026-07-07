@@ -260,7 +260,7 @@ test("getInstallationId: GetEvinced short-circuits to hardcoded ID", async () =>
   // Hardcoded entries take precedence over cache + API discovery, so this
   // doesn't touch the network even with no keychain entry available.
   const id = await getInstallationId("GetEvinced", "stark-claude");
-  assert.equal(id, "115648521");
+  assert.equal(id, "141330785");
 });
 
 test("getInstallationId: cache hit short-circuits to cached value", async () => {
