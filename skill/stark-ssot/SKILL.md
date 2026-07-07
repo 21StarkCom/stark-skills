@@ -62,7 +62,7 @@ value or a rule, spend two minutes learning where the target repo already keeps
 its single sources of truth, then route through those. Look for:
 
 - **Config / constants:** a config package or loader, a `constants`/`const`
-  block, `locals`/`variables` in Terraform, `.env` schema, a settings module.
+  block, `locals`/`variables` in Terraform, an env-var schema, a settings module.
 - **Registries / routing:** a provider map, a model/agent/tool registry, a
   handler or route table, a plugin/connector index.
 - **Domain / calculation modules:** the package that owns a business rule
