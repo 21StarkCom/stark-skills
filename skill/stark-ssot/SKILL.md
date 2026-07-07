@@ -17,6 +17,13 @@ model: opus[1m]
 
 # stark-ssot — one owner per responsibility
 
+> **Skill vs. review domain.** SSOT is *also* an automated detection lens: the
+> `ssot` domain fires on every `/stark-review` (code), `/stark-review-spec`, and
+> `/stark-review-plan` run and posts findings to the PR. That domain *detects*
+> duplicate sources of truth; **this skill is the consolidation workflow** — the
+> actual "give it one owner and route the copies through it" refactor. Use the
+> skill to fix what review (or you) found.
+
 ## Overview
 
 Duplication doesn't hurt the day you write it. It hurts the day one copy

@@ -2,7 +2,7 @@
 name: stark-review-plan
 description: >-
   Multi-domain execution plan review with lead/wing fix loop. Codex (gpt-5.5,
-  xhigh reasoning) reviews 4 adversarial domains in parallel; Claude (opus-4-8)
+  xhigh reasoning) reviews 5 adversarial domains in parallel; Claude (opus-4-8)
   wing fixes findings. Use for review plan, audit deployment plan.
 argument-hint: "<path> [--rounds N] [--dry-run] [--force] [--codex-concurrent N]"
 disable-model-invocation: true
@@ -24,8 +24,8 @@ Run [standard preflight](../../standards/preflight.md) with `--workflow stark-re
 Lead/wing multi-round execution plan review:
 
 - **Lead (codex, gpt-5.5, model_reasoning_effort=xhigh)** dispatches 1 review
-  per domain in parallel — 4 adversarial domains by default for plan review
-  (`completeness`, `security`, `sequencing`, `viability`). Concurrency capped
+  per domain in parallel — 5 adversarial domains by default for plan review
+  (`completeness`, `security`, `sequencing`, `viability`, `ssot`). Concurrency capped
   via `--codex-concurrent N` (default 3).
 - **Wing (claude, opus-4-8)** receives the plan + classified `fix` findings
   and emits a JSON patch block; the dispatcher validates each patch's `old`

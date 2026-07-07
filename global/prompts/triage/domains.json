@@ -5,7 +5,8 @@
     "type-safety": "Reviews whether the diff weakens TypeScript correctness or public API safety through invalid types, unsafe assertions, missing exports, or broken polymorphic typing.",
     "security": "Reviews whether the diff introduces security or error-handling issues at trust boundaries, in data handling, dependency choices, or failure paths.",
     "test-coverage": "Reviews whether the diff leaves specific bug-prone behaviors insufficiently tested or contains weak tests that would fail to catch concrete regressions.",
-    "spec-conformance": "Reviews whether the diff actually implements the referenced ticket, acceptance criteria, and stated PR goals without missing requirements or adding undocumented scope."
+    "spec-conformance": "Reviews whether the diff actually implements the referenced ticket, acceptance criteria, and stated PR goals without missing requirements or adding undocumented scope.",
+    "ssot": "Reviews whether the diff introduces or extends a second source of truth — a value, rule, calculation, parser, route, or policy hardcoded or re-implemented when the codebase already has an owner (config, registry, constant, shared module), so the copies will drift. Relevant when the diff adds hardcoded literals (model ids, project/env ids, URLs, timeouts, costs, thresholds, paths, credentials), duplicates a calculation across UI and server, copies a parser/helper, or wires a fallback default at a call site."
   },
   "spec-review": {
     "completeness": "Reviews whether the spec document is coherent as a whole, states the problem clearly, explains trade-offs, provides enough structure and success criteria, and covers all major components, interfaces, failure paths, and implementation-critical sections.",
@@ -15,12 +16,14 @@
     "data-modeling": "Reviews whether the spec document defines sound schemas, data flows, consistency guarantees, ownership boundaries, indexing, and lifecycle policies.",
     "consistency": "Reviews whether the spec document contradicts itself across sections, reuses terms inconsistently, or gives implementers conflicting constraints or responsibilities.",
     "accessibility": "Reviews whether the spec document treats accessibility as a first-class requirement across semantics, keyboard support, focus handling, screen readers, motion, and alternative representations.",
-    "test-plan": "Reviews whether the spec document includes an adequate test strategy covering major behaviors, failure paths, environments, non-functional needs, and observability validation."
+    "test-plan": "Reviews whether the spec document includes an adequate test strategy covering major behaviors, failure paths, environments, non-functional needs, and observability validation.",
+    "ssot": "Reviews whether the spec design endorses a second source of truth — the same value, rule, calculation, or piece of state produced or derived by more than one component instead of one authoritative owner plus consumers. Distinct from consistency (which finds internal contradictions): this finds duplicated ownership even when the document is internally consistent, e.g. server and UI both computing a rule, a new store duplicating data an existing system owns without a named sync authority, or a value re-derived where it could be consumed."
   },
   "plan-review": {
     "completeness": "Reviews whether the implementation plan is coherent overall, covers the full end-to-end execution path including prerequisites, verification steps, rollback paths, cleanup, data handling, and communications.",
     "security": "Reviews whether the implementation plan addresses identity lifecycle, least privilege, secrets management, trust boundaries, encryption, auditability, and pre-launch security validation.",
     "sequencing": "Reviews whether the implementation plan orders dependent steps correctly, accounts for implicit prerequisites and propagation delays, and handles dual-write or multi-system coordination safely.",
-    "viability": "Reviews whether the implementation plan is actually executable with valid commands, realistic timing, and idempotent steps, and whether it identifies realistic failure modes, quantifies blast radius, and defines mitigations."
+    "viability": "Reviews whether the implementation plan is actually executable with valid commands, realistic timing, and idempotent steps, and whether it identifies realistic failure modes, quantifies blast radius, and defines mitigations.",
+    "ssot": "Reviews whether a plan step creates a second source of truth — hardcoding a literal (id, endpoint, project, threshold, version, credential) an existing owner already holds, copying a value into a new location without a named sync authority, re-implementing a centralized calculation, or editing one copy of a truth without accounting for the others. Distinct from sequencing (order) and completeness (missing steps): this finds the same truth written into two places that will drift after execution."
   }
 }

@@ -15,7 +15,8 @@
     "type-safety": "codex",
     "security": "codex",
     "test-coverage": "codex",
-    "spec-conformance": "codex"
+    "spec-conformance": "codex",
+    "ssot": "codex"
   },
   "fix_threshold": "low",
   "max_rounds": 3,
@@ -174,13 +175,15 @@
       "data-modeling": "codex",
       "consistency": "claude",
       "accessibility": "claude",
-      "test-plan": "codex"
+      "test-plan": "codex",
+      "ssot": "codex"
     },
     "plan_review_routing": {
       "completeness": "claude",
       "security": "codex",
       "sequencing": "claude",
-      "viability": "codex"
+      "viability": "codex",
+      "ssot": "codex"
     },
     "agent_fallback_order": [
       "claude",
@@ -224,6 +227,10 @@
       "spec-conformance": {
         "leader": "claude",
         "second": "codex"
+      },
+      "ssot": {
+        "leader": "codex",
+        "second": "claude"
       }
     },
     "always_on_domains": [
