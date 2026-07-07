@@ -1,0 +1,202 @@
+---
+name: stark-ssot
+description: >-
+  Use when consolidating or reviewing a single source of truth — duplicated
+  logic, a constant/model-id/URL/timeout copied into a second place, a parser or
+  regex reimplemented, a local policy branch that belongs in a registry, a
+  fallback default wired at a call site, or a value re-derived in the UI. Also on
+  requests to centralize, deduplicate, unify, or "why is this implemented
+  manually / in two places". Symptoms in a diff: a hardcoded model id or GCP
+  project, `~/.claude/code-review/...` typed out, a hand-rolled token→USD cost, a
+  re-pasted dispatch/env helper, a duplicated `>=`/threshold check. Do NOT use
+  for code that only looks similar but answers a different question.
+argument-hint: "[file-or-area to consolidate or review]"
+disable-model-invocation: false
+model: opus[1m]
+---
+
+# stark-ssot — one owner per responsibility
+
+## Overview
+
+Duplication doesn't hurt the day you write it. It hurts the day one copy
+changes and the other doesn't. A model id hardcoded in a tool works until the
+config bumps the model and this one call still talks to the old one. A `>= 50`
+copied into the UI works until marketing moves it to 75 and the banner now
+promises free shipping checkout won't honor. Two sources of truth is not a
+style problem — it's a **latent production bug with a delay fuse**.
+
+**Core principle: one responsibility has exactly one owner.** If a value,
+decision, calculation, route, permission, timeout, cost, model choice, parser
+rule, or state transition already has an owner, **call the owner**. Don't copy
+the rule, don't re-derive it, don't wrap it in a local default.
+
+**Honoring the letter but not the spirit still fails:** importing the owner and
+then adding a "just this once" local branch that overrides it is the same drift,
+one indirection later.
+
+## The one test that catches most duplication
+
+Point at the value or decision and ask: **if this rule changed tomorrow, how
+many files would I have to edit — and would a reviewer catch it if I missed
+one?**
+
+- More than one file → you have parallel sources of truth. Give it an owner and
+  import it.
+- Exactly one, and it's a shared module → correct; leave it.
+- More than one **but the two answer different questions** (different contract,
+  data shape, lifecycle, or product context) → *not* duplication. Same shape ≠
+  same responsibility. Keep them separate and say why (below).
+
+## Where the owners already live in this repo
+
+This isn't abstract here — the fleet already centralizes the exact things people
+reflexively hardcode. Reach for the owner:
+
+| You're about to hardcode… | The owner to call instead |
+|---|---|
+| a **model id** (`claude-opus-4-8`, `gpt-5.5`…) | `stark_config_lib.getModelId()` / `isAgentEnabled()` — never a literal in a tool |
+| a **GCP project / Vertex location** | `vertex_config_lib.resolveVertexProject()` / `resolveVertexLocation()` — resolved at runtime, never committed in source |
+| `~/.claude/code-review/{tools,prompts,...}` | `asset_root_lib.assetRoot()/assetPromptsDir()/stateRoot()` — the plugin-resolution seam; a literal breaks installed-plugin runs |
+| a **GitHub App id / installation / keychain entry** | the `APPS` map in `github_app_lib.ts` — the single source; skills mint tokens through it |
+| a **token→USD cost** calc | `cost_lib.computeDispatchCost()` — one home so challenge/fix-plan/fold agree |
+| the **audit DB path** | `red_team_db_resolver` (its `--db > env > config > default` precedence) |
+| an agent **dispatch/env helper** (`run`, `buildAgentEnv`, gemini-home, Vertex env, output parsers) | import from `copilot_dispatch.ts` — `plan_dispatch`/`iac_review` already do; don't re-paste |
+| a **red-team locked field** (personas, model, `enabled`, `stages`, `fix_plan.*`…) | `stark_config_lib.getRedTeamConfig()` enforces them — a repo override that reaches in is rejected by design |
+
+If you find yourself typing one of the left-column values into a new file, stop:
+the drift the right column prevents is the whole point of this skill.
+
+## When NOT to unify
+
+Reaching for a shared owner where there isn't one shared responsibility is its
+own harm — it couples code that must be free to diverge, and the next
+requirement forces an ugly split. Do **not** unify:
+
+- Code that only *looks* similar but serves different contracts, data shapes,
+  lifecycle boundaries, or product contexts. `validateProductName` (catalog:
+  1–100 chars) and `validateChatMessage` (chat: 1–100 chars) share a *shape*,
+  not an owner — product names may grow to 200, chat may add emoji rules.
+  Merging them couples two unrelated rules.
+- Presentation-only copy, one-off test fixtures, generated snapshots, examples —
+  anywhere drift **cannot** reach production behavior. A fixture that duplicates
+  a literal for readability is fine.
+- Greenfield code before a repeated responsibility or a natural owner exists.
+  Don't pre-abstract a single use.
+
+If you decide *not* to unify, **say so and say how drift is prevented** — that
+sentence is the deliverable, not silence.
+
+## Relationship to debugging
+
+If you hit this duplication while chasing a concrete failure, prove the
+mechanism first with `superpowers:systematic-debugging` — don't consolidate on a
+hunch. Once the proven cause **is** scattered truth, use this skill to give it
+one owner, then go back and verify the fix against the original symptom. Keep
+that failing case as a regression test at the call site.
+
+## Workflow
+
+1. **Scan for duplicate responsibility before editing.** Grep for the same
+   constant, enum, route, model id, timeout, regex, calculation, parser, state
+   transition, or decision phrase. Read both the producer and the consumer path.
+   Classify the match: exact / semantic / only superficial.
+2. **Find the owner — existing before new.** Prefer a registry, config, shared
+   service, domain util, provider interface, or type that already exists (see
+   the table). Only if none fits, create the **smallest** owner at the natural
+   module boundary — not a new abstraction layer.
+3. **Decide whether to unify** using the one test above. Unify when both places
+   answer the same question or must change together. Otherwise record why the
+   duplication is intentional and drift-safe.
+4. **Move the behavior to the owner.** Export a named function, typed constant,
+   registry entry, or domain helper; replace the local copies with calls to it.
+   Keep adapters thin — translate inputs/outputs, make **no** policy decisions.
+5. **Protect the contract.** Add/extend a test at the owner level; add one
+   call-site regression test if the duplication had caused a bug. Prefer typed
+   unions / `const` objects over magic strings.
+6. **Check for drift after the patch.** Grep again for the old literal and the
+   duplicated logic; delete dead exports the consolidation orphaned; confirm the
+   behavior is now driven only from the owner.
+
+## Before → after (this repo)
+
+```ts
+// ❌ Two sources of truth: the model id and the GCP project are hardcoded here,
+//    so a config bump or a project change silently skips this call site.
+const MODEL = "claude-opus-4-8";
+const env = { GOOGLE_CLOUD_PROJECT: "infra-ai-platform", ...base };
+const res = await run(claudeCmd(MODEL), env);
+
+// ✅ Both routed through their owners — one place decides, every call follows.
+const model = getModelId("claude");                 // stark_config_lib owns it
+const project = resolveVertexProject();             // vertex_config_lib owns it (runtime-resolved)
+const env = buildAgentEnv({ project, ...base });    // copilot_dispatch owns the env shape
+const res = await run(claudeCmd(model), env);
+```
+
+```js
+// ❌ One policy, two owners. Move the threshold and the banner lies.
+if (cart.total >= 50) order.shipping = 0;            // checkout.js
+const remaining = 50 - cartTotal;                    // CartBanner.jsx
+
+// ✅ Policy has one owner; the UI adapts the value but does not re-decide it.
+export const FREE_SHIPPING_THRESHOLD = 75;                                   // pricing.js
+export const qualifiesForFreeShipping = (t) => t >= FREE_SHIPPING_THRESHOLD;
+if (qualifiesForFreeShipping(cart.total)) order.shipping = 0;                 // checkout.js
+const remaining = Math.max(0, FREE_SHIPPING_THRESHOLD - cartTotal);          // CartBanner.jsx
+```
+
+## Anti-pattern quick reference
+
+| Smell in the diff | Why it's bad | Fix |
+|---|---|---|
+| hardcoded model id / GCP project / API URL / timeout in a tool | drifts from config the day it changes | call `stark_config_lib` / `vertex_config_lib` |
+| `~/.claude/code-review/{tools,prompts}` typed out | breaks installed-plugin runs | route through `asset_root_lib` |
+| a GitHub App id / key literal | second source vs the `APPS` map | mint via `github_app_lib` |
+| a hand-rolled token→USD cost | challenge/fold/fix-plan disagree | `cost_lib.computeDispatchCost` |
+| re-pasted `run`/`buildAgentEnv`/gemini-home helper | copies drift silently | import from `copilot_dispatch` |
+| the same calculation in UI and server | one moves, the other lies | one owner; UI formats, doesn't re-derive |
+| "just this one" local branch for behavior owned elsewhere | how a registry rots | put the decision in the provider/router |
+| a parser/regex copied into a second component | two copies diverge silently | export one shared parser |
+| a fallback default wired at the call site | a second source of truth for that default | centralize the default in the owner |
+| a new helper duplicating an existing one under a different name | two owners for one job | reuse the existing helper |
+
+## Acceptable local logic
+
+Local code is allowed to: validate its own inputs before calling the owner;
+adapt transport/view shapes to domain shapes; do presentation-only formatting;
+and hold test fixtures that intentionally duplicate a value for readability
+**when drift cannot reach production**. None of these make a policy decision.
+
+## Reviewing someone else's diff
+
+Flag the change if **any** is true:
+
+- a value with an owner (model id, project, cost, route, threshold, App id) is
+  hardcoded instead of imported
+- the same calculation or policy appears in two files that must change together
+- a "just this one" local branch overrides a registry/provider decision
+- a parser/regex/helper is copied rather than shared
+- a fallback default sits at a call site instead of the owner
+- a UI re-derives a business rule instead of formatting the owner's value
+
+Post the finding on the PR (inline where anchored) — don't fold it into a vague
+recap. If a duplication is deliberate, the diff should already say why and how
+drift is prevented; if it doesn't, that's the finding.
+
+## Final answer shape
+
+When this skill shaped the work, close with:
+
+- **`SSOT:`** what became or stayed the single source of truth (name the owner).
+- **`Consolidated:`** which duplicate paths were removed or routed through it.
+- **`Verification:`** the grep/tests proving no obvious duplicate source remains.
+
+## Red flags — stop and fix
+
+- "I'll just hardcode the timeout / URL / model id here too" → it has an owner; import it.
+- "I'll copy this regex/parser into the new component" → export it from one place.
+- "These two blocks look the same, I'll merge them" → same *shape* isn't same *responsibility*; merge only if they must change together.
+- "I'll add one local branch just for this case" → that's how a registry rots; put it in the owner.
+- "Quicker to recompute it in the UI" → the UI may format the value, never re-derive the rule.
+- "I'll wrap the call site with a fallback default" → that's a second source of truth for the default; centralize it.
