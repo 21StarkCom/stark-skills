@@ -1,7 +1,7 @@
 /**
- * Asset- vs. state-root resolution — the seam that lets one source tree run
- * both as install.sh symlinks (local dev) and as a self-contained Claude Code
- * plugin (marketplace distribution).
+ * Asset- vs. state-root resolution — the seam that lets a skill/tool resolve
+ * its shipped assets whether it runs inside a self-contained Claude Code plugin
+ * (marketplace distribution) or via a direct, non-plugin invocation.
  *
  * Two distinct roots:
  *
@@ -9,9 +9,9 @@
  *     `standards/`, `config.json`, `forge_heuristics.json`, `orchestrator.md`.
  *     In an installed plugin Claude Code sets `CLAUDE_PLUGIN_ROOT` to the
  *     plugin's cache dir, which the stark-marketplace engine populates with
- *     these assets (vendored per bundle). In local dev `CLAUDE_PLUGIN_ROOT` is
- *     unset and we fall back to the canonical `~/.claude/code-review` tree that
- *     `install.sh` symlinks into place. `STARK_ASSET_ROOT` overrides both
+ *     these assets (vendored per bundle). For direct (non-plugin) invocations
+ *     `CLAUDE_PLUGIN_ROOT` is unset and we fall back to the canonical
+ *     `~/.claude/code-review` tree. `STARK_ASSET_ROOT` overrides both
  *     (tests / unusual layouts).
  *
  *   - `stateRoot()` — MUTABLE runtime state: `history/`, `sessions/`,

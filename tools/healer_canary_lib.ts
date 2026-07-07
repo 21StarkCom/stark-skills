@@ -42,8 +42,8 @@ export function defaultBaseDir(): string {
 }
 
 export function defaultPatternsPath(): string {
-  // Symlinked into ~/.claude/code-review/scripts/ by install.sh; for tests
-  // and dev runs, resolve relative to the installed scripts/ dir.
+  // Vendored into each marketplace plugin's scripts/ dir; resolve relative to
+  // the installed scripts/ dir (plugin root, or the ~/.claude/code-review fallback).
   return path.join(defaultBaseDir(), "scripts", "healer_patterns.json");
 }
 

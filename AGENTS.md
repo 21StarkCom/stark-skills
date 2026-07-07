@@ -17,14 +17,14 @@ This is a **personal playground**, not production. No customers depend on it; th
 
 - `global/` — global config + prompts, installed to `~/.claude/code-review/`
 - `scripts/` — shell helpers + JSON (`register_triggers.sh`, `healer_patterns.json`); installed to `~/.claude/code-review/scripts/`. The orchestrators + dispatch infra were migrated to `tools/` (TypeScript).
-- `skill/` — all skills (`skill/stark-*/SKILL.md`, 18 skills), symlinked to Claude and copied to `~/.codex/skills/`
-- `org/evinced/` — Evinced org config, installed to `~/Code/.code-review/`
+- `skill/` — all skills (`skill/stark-*/SKILL.md`, 18 skills), packaged as marketplace plugins
+- `org/evinced/` — Evinced org config overrides
 - `data/` — persona roster, review coverage HTML, generated showcase pages
 - `automation/` — CCR automation fleet: 12 triggers, prompts, logs, cost tracking, reports
-- `.github/workflows/` — GitHub Actions: project sync, gate checks, stale detection, heartbeat
+- `.github/workflows/` — GitHub Actions: project sync, gate checks, stale detection, heartbeat, `marketplace-sync`
 - `docs/` — specs, plans, ADRs, retrospectives, generated skill docs
-- `standards/` — org-wide doc templates and workflows, installed to `~/.claude/code-review/standards/`
-- `install.sh` — symlinks repo contents to Claude/config locations and copies Codex skills
+- `standards/` — org-wide doc templates and workflows
+- `plugins/stark-gh/` — local plugin source, packaged by the marketplace
 
 ## Key Files
 
@@ -88,17 +88,19 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `standards/templates/` — PR template, ADR template, MkDocs scaffold, staleness config
 - `standards/index.md` — "Start Here" pitch page for adopting the doc system
 
-## Commands
+## Distribution
 
-```bash
-./install.sh              # install symlinks/copies
-./install.sh --status     # check installation
-./install.sh --uninstall  # remove installed symlinks/copies
+Skills + tools ship as self-contained Claude Code plugins via the [stark-marketplace](https://github.com/21-Stark-AI/stark-marketplace) — its `catalog/` is generated from this repo by `stark sync`, and each plugin vendors the `tools/` + `global/` it needs (no symlinks, no local install step). `.github/workflows/marketplace-sync.yml` auto-publishes on every push to `main` touching `skill/`, `tools/`, `global/`, or `plugins/stark-gh/`.
+
+```
+/plugin marketplace add 21-Stark-AI/stark-marketplace
+/plugin install stark-analyze@stark-marketplace   # + stark-plan, stark-implement, stark-gh, stark-ops, ...
+/plugin update  stark-analyze@stark-marketplace   # pull the latest published version
 ```
 
 ## Skills
 
-All skills live in `skill/stark-*/SKILL.md`; `install.sh` symlinks them for Claude and copies full skill directories to `~/.codex/skills/` for Codex.
+All skills live in `skill/stark-*/SKILL.md` and are packaged into marketplace plugins.
 
 ### Pipeline (end-to-end, in order)
 

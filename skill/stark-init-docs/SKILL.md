@@ -313,7 +313,7 @@ If nothing was removed, skip the commit.
 
 ## Error Handling
 
-- If `$TEMPLATES` directory doesn't exist: error "Templates not found at ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/standards/templates/. Run install.sh first."
+- If `$TEMPLATES` directory doesn't exist: error "Templates not found at ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/standards/templates/. Reinstall the plugin: /plugin update <bundle>@stark-marketplace."
 - If not in a git repo: error "Not a git repository."
 - If `gh` CLI is unavailable during `--backfill`: warn and continue without PR data.
 - If `git mv` fails during `--upgrade` (file already exists at target): warn, skip that file, continue.

@@ -5,10 +5,9 @@ AI-powered development workflow system for Claude Code. 18 skills covering the f
 ## Quick Start
 
 ```bash
-# Clone and install
-git clone git@github.com:21-Stark-AI/stark-skills.git ~/Code/Playground/stark-skills
-cd ~/Code/Playground/stark-skills
-./install.sh
+# Install the plugins from the marketplace (in Claude Code)
+/plugin marketplace add 21-Stark-AI/stark-marketplace
+/plugin install stark-analyze@stark-marketplace   # + stark-plan, stark-implement, stark-gh, stark-ops, ...
 
 # Start a work session (context loading, health checks, briefing)
 /stark-session start
@@ -20,7 +19,7 @@ cd ~/Code/Playground/stark-skills
 /stark-session end
 ```
 
-All skills are available as `/slash-commands` in Claude Code after installing.
+All skills are available as `/slash-commands` in Claude Code after installing the plugins. Each plugin is self-contained — it vendors the `tools/` and `global/` (config + prompts) it needs, so there is nothing to symlink and no local install step.
 
 ---
 
@@ -157,48 +156,45 @@ Each agent posts a consolidated review via its own GitHub App bot:
 
 ```
 stark-skills/
-├── install.sh                    ← symlinks everything to install locations
-├── skill/                        ← → ~/.claude/skills/
-│   ├── stark-review/SKILL.md       ← one dir per skill
+├── skill/                        ← one dir per skill (stark-*/SKILL.md)
+│   ├── stark-review/SKILL.md
 │   ├── stark-persona/SKILL.md
 │   └── ...
-├── scripts/                      ← → ~/.claude/code-review/scripts/
-│   ├── register_triggers.sh      ← automation-fleet trigger registration
-│   └── *.{sh,json}               ← shell helpers + JSON schemas
-├── tools/                        ← → ~/.claude/code-review/tools/
-│   ├── multi_review.ts           ← PR review orchestrator (TypeScript)
-│   └── ...                       ← dispatch infra, agent CLIs, meta-tooling
-├── global/                       ← → ~/.claude/code-review/
+├── scripts/                      ← automation-fleet trigger registration + JSON schemas
+│   ├── register_triggers.sh
+│   └── *.{sh,json}
+├── tools/                        ← TypeScript dispatch infra, agent CLIs, meta-tooling
+│   ├── multi_review.ts           ← PR review orchestrator
+│   └── ...
+├── global/                       ← config + prompts vendored into each plugin
 │   ├── config.json               ← global defaults
 │   └── prompts/{claude,codex,gemini}/  ← per-agent × per-domain review prompts (6 domains)
+├── plugins/stark-gh/             ← local plugin source (packaged by the marketplace)
 ├── data/                         ← persona roster, review coverage, showcase pages
 ├── automation/                   ← CCR automation fleet (11 triggers, logs, costs)
-├── .github/workflows/            ← GitHub Actions (project sync, gate checks, heartbeat)
-├── org/evinced/                  ← → ~/Code/.code-review/
+├── .github/workflows/            ← GitHub Actions (project sync, gate checks, marketplace-sync)
+├── org/evinced/                  ← org config overrides
 ├── docs/
 │   ├── skills/                   ← generated skill docs (Markdown, Mermaid, JSON, and PNG artifacts)
 │   ├── adr/                      ← architectural decision records
 │   └── specs/                    ← design specs
-└── standards/                    ← → ~/.claude/code-review/standards/
+└── standards/                    ← org-wide doc templates and workflows
 ```
 
-## Install Locations
+## Distribution
 
-The installer creates symlinks — files stay in this repo. `git pull` updates everything.
+This repo is the **source of truth** for the skills + tools; they ship as self-contained Claude Code plugins via the [stark-marketplace](https://github.com/21-Stark-AI/stark-marketplace).
 
-| Repo path | Installed at | Purpose |
-|-----------|-------------|---------|
-| `global/config.json` | `~/.claude/code-review/config.json` | Global defaults |
-| `global/orchestrator.md` | `~/.claude/code-review/orchestrator.md` | Fix-review loop |
-| `global/prompts/` | `~/.claude/code-review/prompts/` | Agent × domain prompts |
-| `scripts/` | `~/.claude/code-review/scripts/` | Shell helpers + JSON schemas |
-| `org/evinced/` | `~/Code/.code-review/` | Org config |
+- The marketplace `catalog/` is **generated from this repo** by `stark sync`, and its engine vendors `tools/` + `global/` (config + prompts) into each plugin — so an install needs no symlinks and no local setup step.
+- CI auto-publishes: `.github/workflows/marketplace-sync.yml` regenerates the marketplace and opens a PR on every push to `main` touching `skill/`, `tools/`, `global/`, or `plugins/stark-gh/`.
 
-```bash
-./install.sh              # install (symlink)
-./install.sh --status     # check what's linked
-./install.sh --uninstall  # remove symlinks
 ```
+/plugin marketplace add 21-Stark-AI/stark-marketplace
+/plugin install stark-analyze@stark-marketplace   # then stark-plan, stark-implement, stark-gh, stark-ops, ...
+/plugin update  stark-analyze@stark-marketplace   # pull the latest published version
+```
+
+Immutable assets (tools/prompts/config) resolve from the installed plugin root (`${CLAUDE_PLUGIN_ROOT}`) via `tools/asset_root_lib.ts`; mutable state (`history/`, `sessions/`, `locks/`, …) lives under `~/.claude/code-review/` (`stateRoot()`).
 
 ## Config Hierarchy
 
@@ -238,8 +234,6 @@ Domains are auto-discovered at startup.
 - `claude`, `codex`, `gemini` CLI tools in PATH
 - Node.js (TS tooling runs via `node --experimental-strip-types`)
 - GitHub App private keys in macOS Keychain
-
-Run `./install.sh` to check all dependencies.
 
 ## Skill Documentation
 

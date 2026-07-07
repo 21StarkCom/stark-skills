@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **BREAKING: `install.sh` removed — distribution is now marketplace-only.** The symlink-based local installer (and its `--select` TUI, `--status`, `--uninstall`, git-hook/manifest/infra provisioning) is deleted; skills + tools ship exclusively as self-contained Claude Code plugins via stark-marketplace. Each plugin already vendors `tools/` + `global/`, so no symlinks are needed. Trade-off: editing a file in this repo is no longer instantly live — publish (merge → `marketplace-sync` PR → merge) and `/plugin update <bundle>@stark-marketplace` to pick it up. Assets plugins don't cover (`~/.claude/settings.json`, statusline, output-styles, `org/evinced` overrides, mutable-state dirs, git hooks) are now managed by hand. `asset_root_lib.ts` keeps the `~/.claude/code-review` fallback for direct non-plugin invocations (automation-fleet crons). Docs (README, AGENTS.md, CLAUDE.md) updated to the marketplace-only flow.
+
 ## [v0.7.0] - 2026-06-03
 
 ### Added

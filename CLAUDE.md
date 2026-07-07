@@ -16,25 +16,26 @@ This is a **personal playground**, not production. No customers depend on it; th
 
 ## Distribution
 
-This repo is the **source of truth** for the skills + tools. Two distribution channels:
+This repo is the **source of truth** for the skills + tools. Distribution is **marketplace-only** — the former `install.sh` symlink installer was removed (2026-07-07); there is no local symlink install step.
 
-- **`install.sh` (local dev)** — symlinks `skill/`, `tools/`, `global/`, etc. into `~/.claude/`. Live: edit a file → instantly active. **Marketplace-aware:** when the stark-marketplace plugins are installed (`~/.claude/plugins/cache/stark-marketplace/` exists), install.sh **skips** the skill + local-plugin symlinks (skills are then marketplace-managed; symlinking would duplicate them) — it still manages tools/config/prompts/settings/etc. Force the old symlink behavior with `STARK_FORCE_SKILL_SYMLINKS=1`.
-- **stark-marketplace (teammates)** — the `stark-marketplace` repo packages these skills as self-contained Claude Code plugins (`/plugin marketplace add GetEvinced/stark-marketplace`). Its `catalog/` is **generated from this repo** by `stark sync`, and its engine vendors `tools/`+`global/` into each plugin so installs need no `install.sh`. CI auto-publishes: `.github/workflows/marketplace-sync.yml` regenerates the marketplace and opens a PR on every push to `main` touching `skill/`, `tools/`, `global/`, or `plugins/stark-gh/`.
+- **stark-marketplace** — the `stark-marketplace` repo packages these skills as self-contained Claude Code plugins (`/plugin marketplace add 21-Stark-AI/stark-marketplace`, then `/plugin install <bundle>@stark-marketplace`). Its `catalog/` is **generated from this repo** by `stark sync`, and its engine vendors `tools/`+`global/` (config + prompts) into each plugin so an install needs no symlinks and no setup step. `/plugin update <bundle>@stark-marketplace` pulls the latest published version. CI auto-publishes: `.github/workflows/marketplace-sync.yml` regenerates the marketplace and opens a PR on every push to `main` touching `skill/`, `tools/`, `global/`, or `plugins/stark-gh/`.
+- **Local dev is no longer live.** Editing a file in this repo does not take effect until the change is published (merge to `main` → `marketplace-sync` PR → merge) and the plugin is reinstalled/updated (`/plugin update …`). To test an in-progress edit against a real install, run `stark sync` in the marketplace repo and `/plugin update` locally.
+- **Assets plugins don't cover** (user `~/.claude/settings.json`, statusline, output-styles, `org/evinced` overrides, mutable-state dirs, git hooks) are now managed by hand — the installer no longer provisions them.
 
-**The seam that makes one source serve both:** `tools/asset_root_lib.ts` — `assetRoot()` resolves immutable assets (tools/prompts/config) from `${CLAUDE_PLUGIN_ROOT}` when installed as a plugin, else `~/.claude/code-review` (the install.sh symlink); `stateRoot()` always stays under `$HOME`. Skills mirror this with `${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}`. **Never hardcode `~/.claude/code-review/{tools,prompts,scripts,standards}` in a skill or tool** — route immutable-asset reads through `asset_root_lib`/the dual-fallback so plugin installs keep working.
+**The plugin-resolution seam:** `tools/asset_root_lib.ts` — `assetRoot()` resolves immutable assets (tools/prompts/config) from `${CLAUDE_PLUGIN_ROOT}` when running inside an installed plugin, falling back to `~/.claude/code-review` for direct (non-plugin) invocations such as automation-fleet crons; `stateRoot()` always stays under `$HOME`. Skills mirror this with `${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}`. **Never hardcode `~/.claude/code-review/{tools,prompts,scripts,standards}` in a skill or tool** — route immutable-asset reads through `asset_root_lib`/the dual-fallback so plugin installs keep working.
 
 ## Repo Layout
 
-- `global/` — global config + prompts, installed to `~/.claude/code-review/`
-- `scripts/` — shell helpers + JSON (`register_triggers.sh`, `healer_patterns.json`); installed to `~/.claude/code-review/scripts/`. The orchestrator + dispatch infra were migrated to `tools/` (TypeScript) — see the Python→TS migration spec.
-- `skill/` — all skills (`skill/stark-*/SKILL.md`, 18 skills), installed as symlinks to `~/.claude/skills/`
-- `org/evinced/` — Evinced org config, installed to `~/Code/.code-review/`
+- `global/` — global config + prompts, vendored into each marketplace plugin
+- `scripts/` — shell helpers + JSON (`register_triggers.sh`, `healer_patterns.json`), vendored into plugins. The orchestrator + dispatch infra were migrated to `tools/` (TypeScript) — see the Python→TS migration spec.
+- `skill/` — all skills (`skill/stark-*/SKILL.md`, 18 skills), packaged as marketplace plugins
+- `org/evinced/` — Evinced org config overrides
 - `data/` — persona roster, review coverage HTML, generated showcase pages
 - `automation/` — CCR automation fleet: 12 triggers, prompts, logs, cost tracking, reports
 - `.github/workflows/` — GitHub Actions: project sync, gate checks, stale detection, heartbeat, `marketplace-sync` (auto-publish to stark-marketplace)
 - `docs/` — specs, plans, ADRs, retrospectives, generated skill docs
-- `standards/` — org-wide doc templates and workflows, installed to `~/.claude/code-review/standards/`
-- `install.sh` — symlinks repo contents to install locations
+- `standards/` — org-wide doc templates and workflows
+- `plugins/stark-gh/` — local plugin source, packaged by the marketplace
 
 ## Key Files
 
@@ -53,7 +54,7 @@ This repo is the **source of truth** for the skills + tools. Two distribution ch
 
 ### Infrastructure
 - `tools/stark_config_lib.ts` — full config reader (DEFAULT_* sections, per-section accessors, deep merge, red_team locked-field enforcement) — see TS tools section
-- `tools/asset_root_lib.ts` — the plugin/dev resolution seam. `assetRoot()`/`assetConfigPath()`/`assetPromptsDir()`/`assetToolsDir()` resolve immutable assets from `${CLAUDE_PLUGIN_ROOT}` (installed plugin) else `~/.claude/code-review` (install.sh symlink); `assetRootForHome(home)` is the test-injection variant; `stateRoot()` always returns the `$HOME` tree for mutable state. Imported by the config/prompt hub tools (`stark_config_lib`, `dispatcher_base_lib`, `stark_review*`, `copilot_dispatch`, `self_healer`, `skill_router`, `context_compactor`, `plan_to_tasks_validate`).
+- `tools/asset_root_lib.ts` — the plugin-resolution seam. `assetRoot()`/`assetConfigPath()`/`assetPromptsDir()`/`assetToolsDir()` resolve immutable assets from `${CLAUDE_PLUGIN_ROOT}` (installed plugin) else `~/.claude/code-review` (fallback for direct non-plugin invocations); `assetRootForHome(home)` is the test-injection variant; `stateRoot()` always returns the `$HOME` tree for mutable state. Imported by the config/prompt hub tools (`stark_config_lib`, `dispatcher_base_lib`, `stark_review*`, `copilot_dispatch`, `self_healer`, `skill_router`, `context_compactor`, `plan_to_tasks_validate`).
 - `tools/runtime_env_lib.ts` — isolated subprocess env builder (allowlist, GitHub App token injection, process-scoped temp dirs, `CLAUDE_PLUGIN_ROOT` propagation to sub-agents)
 - `tools/vertex_config_lib.ts` — resolves the Vertex AI project/location for headless Gemini dispatch **without hardcoding a GCP project id in source**. `resolveVertexProject()` precedence: `STARK_GEMINI_VERTEX_PROJECT` env > `models.gemini.vertex_project` config (ships empty) > `GOOGLE_CLOUD_PROJECT` env > cached `gcloud config get-value project` > null (caller degrades to the `GEMINI_API_KEY` path; the "must specify `GOOGLE_CLOUD_PROJECT`" error is in the fallback patterns). `resolveVertexLocation()` = `STARK_GEMINI_VERTEX_LOCATION` env > config > `"global"` (preview models are global-only; ambient `GOOGLE_CLOUD_LOCATION` is deliberately ignored). Imported by `gemini_utils_lib.ts`, `copilot_dispatch.ts`, `agent_gemini.ts` — the three former hardcode sites.
 - GitHub App auth lives entirely in `tools/github_app{,_lib}.ts` (TS) — mints installation tokens, imported directly by `runtime_env_lib.ts`.
@@ -121,15 +122,16 @@ The red-team subsystem is **pure TypeScript** under `tools/`. All Python red-tea
 
 ## Commands
 
-```bash
-./install.sh              # install (symlink to ~/.claude/code-review/)
-./install.sh --status     # check installation
-./install.sh --uninstall  # remove symlinks
+```
+# In Claude Code — install/update from the marketplace:
+/plugin marketplace add 21-Stark-AI/stark-marketplace
+/plugin install stark-analyze@stark-marketplace   # + stark-plan, stark-implement, stark-gh, stark-ops, ...
+/plugin update  stark-analyze@stark-marketplace   # pull the latest published version
 ```
 
 ## Skills
 
-All skills live in `skill/stark-*/SKILL.md` and are symlinked to `~/.claude/skills/` via install.sh.
+All skills live in `skill/stark-*/SKILL.md` and are packaged into marketplace plugins (see Distribution above).
 
 ### Pipeline (end-to-end, in order)
 

@@ -66,7 +66,7 @@ test("integration: validatePrMergePlan + writePlan + readPlan round-trips throug
 });
 
 test("integration: plugin.json registers pr-merge command", () => {
-  // Verify the plugin metadata file lists pr-merge so install.sh exposes it.
+  // Verify the plugin metadata file lists pr-merge so the marketplace exposes it.
   const repoRoot = path.resolve(import.meta.dirname ?? __dirname, "../../../../");
   const pluginJson = path.join(repoRoot, "plugins/stark-gh/.claude-plugin/plugin.json");
   if (!fs.existsSync(pluginJson)) {
