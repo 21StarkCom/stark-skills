@@ -22,6 +22,7 @@ Walk every item. Each missed item → blocking finding.
 9. **Auth threading** — Every verification curl / test / API call that needs auth must show the auth header / token explicitly. "Assume auth is set up" is not acceptable.
 10. **Interface contracts declared** — Every task whose output another task consumes must declare its `Interfaces` block (Consumes / Produces with exact names + signatures). A task that produces something later tasks depend on but names no interface is a blocking gap — the parallel/out-of-order implementer can't coordinate without it.
 11. **Behavior-changing tasks name a test** — Every task that changes runtime behavior must name the test that proves it and its key assertion. "Acceptance criteria" prose with no named test is a gap. (Don't demand full test code — demand that the proving test is identified.)
+12. **No second source of truth** — Flag any task that hardcodes a value, or re-implements a calculation / rule / route / parser, that already has an owner (config, registry, constant, shared module, or something an earlier task produces). "Hardcode the model id / threshold / URL" or "recompute X in the UI" instead of consuming the owner is a blocking finding — the copies will drift. Not a finding when the two genuinely differ in contract or lifecycle (same shape ≠ same responsibility).
 
 ## Calibration
 

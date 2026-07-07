@@ -67,3 +67,4 @@ For each phase:
 - **Infrastructure provisioning** (Terraform, cloud resources, IAM, database setup) must be explicit first-class tasks — never implicit or deferred to notes
 - **Thread auth and security** through all verification examples — if the spec requires auth headers, every curl/test command must include them
 - **Operational concerns** (monitoring, retention, partition maintenance) must be concrete scheduled tasks, not TODO comments
+- **Single source of truth:** a task needing a value/rule/route that already has an owner (config/registry/constant/shared module, or one an earlier task produces) must **consume the owner** — never hardcode a literal or re-derive the rule (no "hardcode 30s", no "recompute the discount in the UI"). Name the owner in **Interfaces → Consumes**. Don't plan a second source of truth.
