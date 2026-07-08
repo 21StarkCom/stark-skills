@@ -63,7 +63,7 @@ HISTORY="$HOME/.claude/code-review/history"
 Detect repo (or use `--repo` override): parse `org/repo` from `git remote get-url origin`.
 
 Resolve plan slug from argument:
-- If the argument is a file path (contains `/` or ends in `.md`): store as `PLAN_FILE`, extract slug from filename: strip directory and `.md` extension, strip trailing `-design`, `-spec`, or `-plan` suffix, keep date prefix. If slug exceeds 50 characters, truncate to 47 and append first 3 chars of MD5 hash. Example: `docs/superpowers/plans/2026-03-23-stark-signals.md` → `SLUG=2026-03-23-stark-signals`. **MUST match `/stark-plan-to-tasks`** slug algorithm.
+- If the argument is a file path (contains `/` or ends in `.md`): store as `PLAN_FILE`, extract slug from filename: strip directory and `.md` extension, strip trailing `-design`, `-spec`, or `-plan` suffix, keep date prefix. If slug exceeds 50 characters, truncate to 47 and append first 3 chars of MD5 hash. Example: `docs/plans/2026-03-23-stark-signals.md` → `SLUG=2026-03-23-stark-signals`. **MUST match `/stark-plan-to-tasks`** slug algorithm.
 - Otherwise: treat as slug directly.
 
 ---

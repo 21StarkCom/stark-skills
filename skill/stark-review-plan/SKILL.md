@@ -76,19 +76,71 @@ DOC="<first non-flag positional from $ARGUMENTS>"
 REPO_DIR="$(pwd)"
 ```
 
-## Phase 2: Detect PR + provision token (optional)
+## Phase 2: Relocate legacy path, detect/open PR + provision token
+
+**Every review's findings land on a PR — so if none exists, this skill opens
+one.** It also retires the legacy `docs/superpowers/` tree: a plan under
+`docs/superpowers/**` is moved to `docs/plans/` before the PR is opened.
+
+Provision a stark-claude installation token only when `GH_TOKEN` is unset
+(never overwrite a caller-provided token). Token failure is non-fatal — the
+dispatcher then runs without GitHub posting.
 
 ```bash
-pr_number=$(gh pr view --json number --jq .number 2>/dev/null)
-
 if [ -z "${GH_TOKEN:-}" ]; then
     if GH_TOKEN_TMP=$(node --experimental-strip-types "$TOOLS/github_app.ts" --app stark-claude token 2>/dev/null); then
         export GH_TOKEN="$GH_TOKEN_TMP"
     fi
 fi
+
+DEST_DIR="docs/plans"   # plans live here — never docs/superpowers/
+pr_number=$(gh pr view --json number --jq .number 2>/dev/null || true)
+
+# ensure_branch: guarantee we are on a feature branch (branch + PR for
+# everything — never commit plan-review changes onto the default branch).
+ensure_branch() {
+    DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name 2>/dev/null || echo main)
+    CUR_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    if [ "$CUR_BRANCH" = "$DEFAULT_BRANCH" ] || [ -z "$CUR_BRANCH" ] || [ "$CUR_BRANCH" = "HEAD" ]; then
+        CUR_BRANCH="review-plan/$(basename "$DOC" .md)"
+        git switch -c "$CUR_BRANCH" 2>/dev/null || git switch "$CUR_BRANCH"
+    fi
+}
 ```
 
-Token failure is non-fatal: the dispatcher runs without GitHub posting.
+**Relocate out of `docs/superpowers/`** (skip under `--dry-run`): move the plan
+into `docs/plans/` on a feature branch and commit the move so the new location
+is what gets reviewed and lands on the PR.
+
+```bash
+if [ -z "${DRY_RUN:-}" ] && printf '%s' "$DOC" | grep -q 'docs/superpowers/'; then
+    ensure_branch
+    NEW_DOC="$DEST_DIR/$(basename "$DOC")"
+    mkdir -p "$DEST_DIR"
+    git mv "$DOC" "$NEW_DOC" && DOC="$NEW_DOC"
+    git commit -m "docs: move $(basename "$NEW_DOC") to $DEST_DIR (retire docs/superpowers/)" -- . 2>/dev/null || true
+fi
+```
+
+**Open a PR when none exists** (skip under `--dry-run`): create/seed a feature
+branch, push, and open a PR authored by `stark-claude` so Phase 5 can post all
+findings onto it. A `--allow-empty` seed commit guarantees the branch is ahead
+of base even when the plan is already committed and unchanged.
+
+```bash
+if [ -z "$pr_number" ] && [ -z "${DRY_RUN:-}" ]; then
+    ensure_branch
+    git add -- "$DOC" 2>/dev/null || true
+    git commit -m "docs(review): stage $(basename "$DOC") for plan review" 2>/dev/null \
+        || git commit --allow-empty -m "chore(review): open PR to host plan-review findings for $(basename "$DOC")"
+    git push -u origin "$CUR_BRANCH" 2>/dev/null || git push origin "$CUR_BRANCH" || true
+    CREATE_OUT=$(node --experimental-strip-types "$TOOLS/github_app.ts" --app stark-claude pr create \
+        --head "$CUR_BRANCH" --base "$DEFAULT_BRANCH" \
+        --title "Plan review: $(basename "$DOC")" \
+        --body "Opened by \`/stark-review-plan\` to host review findings for \`$DOC\`." 2>/dev/null || true)
+    pr_number=$(printf '%s' "$CREATE_OUT" | sed -n 's/^Created PR #\([0-9]*\).*/\1/p')
+fi
+```
 
 ## Phase 3: Run dispatch
 
@@ -160,8 +212,9 @@ Fixes committed: {fixes_committed}
 History: {history_dir}
 ```
 
-If a PR was detected and `--dry-run` was not set, post the codex raw findings
-under `stark-codex[bot]` and the wing summary under `stark-claude[bot]`:
+If a PR was detected or opened in Phase 2 and `--dry-run` was not set, push any
+dispatcher fix commits (`git push 2>/dev/null || true`), then post the codex raw
+findings under `stark-codex[bot]` and the wing summary under `stark-claude[bot]`:
 
 ```bash
 node --experimental-strip-types "$TOOLS/github_app.ts" --app stark-codex pr review $pr_number \
