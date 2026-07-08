@@ -43,11 +43,9 @@ eval "$(jq -r "${_segsrc[@]}" '{
   cur_out:      (.context_window.current_usage.output_tokens // ""),
   cur_cw:       (.context_window.current_usage.cache_creation_input_tokens // ""),
   cur_cr:       (.context_window.current_usage.cache_read_input_tokens // ""),
-  cost_usd:     (.cost.total_cost_usd // ""),
   over_200k:    (.exceeds_200k_tokens // false),
   s_added:      (.cost.total_lines_added // ""),
   s_removed:    (.cost.total_lines_removed // ""),
-  total_dur_ms: (.cost.total_duration_ms // ""),
   skip:         ([($_seg[0] // {}) | objects | to_entries[] | select(.value == false) | .key] | join(" "))
 } | to_entries[] | "\(.key)=\(.value | tostring | @sh)"' 2>/dev/null)"
 
@@ -282,40 +280,6 @@ if [ -n "$_root" ]; then
   fi
 fi
 
-# ── Cost formatting ─────────────────────────────────────────────────────
-# cost.total_cost_usd is computed correctly client-side by Claude Code,
-# accounting for cache reads (10%), cache writes (1.25x/2x), and tier
-# pricing (Opus 4 1M context >200K = 2x). Use it directly.
-# Pure-bash fixed point in micro-dollars (replaces an awk fork); each
-# branch rounds to its display resolution with carry, matching %.Nf.
-session_cost="" cost_rate=""
-if [[ "$cost_usd" =~ ^([0-9]+)(\.([0-9]+))?$ ]]; then
-  _cf="${BASH_REMATCH[3]}000000"
-  _micro=$(( 10#${BASH_REMATCH[1]} * 1000000 + 10#${_cf:0:6} ))
-  if [ "$_micro" -gt 0 ]; then
-    if [ "$_micro" -lt 10000 ]; then        # < 1¢ → "0.42¢"
-      _r=$(( (_micro + 50) / 100 ))
-      printf -v session_cost '%d.%02d¢' $(( _r / 100 )) $(( _r % 100 ))
-    elif [ "$_micro" -lt 1000000 ]; then    # < $1 → "$0.123"
-      _r=$(( (_micro + 500) / 1000 ))
-      printf -v session_cost '$%d.%03d' $(( _r / 1000 )) $(( _r % 1000 ))
-    else                                    # ≥ $1 → "$3.46"
-      _r=$(( (_micro + 5000) / 10000 ))
-      printf -v session_cost '$%d.%02d' $(( _r / 100 )) $(( _r % 100 ))
-    fi
-    if [ -n "$total_dur_ms" ] && [ "$total_dur_ms" -gt 60000 ] 2>/dev/null; then
-      _rm=$(( _micro * 3600000 / total_dur_ms ))   # burn rate, micro-$/h
-      if [ "$_rm" -ge 10000000 ]; then             # ≥ $10/h → 1 decimal
-        _r=$(( (_rm + 50000) / 100000 ))
-        printf -v cost_rate '$%d.%d/h' $(( _r / 10 )) $(( _r % 10 ))
-      else
-        _r=$(( (_rm + 5000) / 10000 ))
-        printf -v cost_rate '$%d.%02d/h' $(( _r / 100 )) $(( _r % 100 ))
-      fi
-    fi
-  fi
-fi
-
 # ═════════════════════════════════════════════════════════════════════════
 # Line 1: repo · branch · model · operational
 # ═════════════════════════════════════════════════════════════════════════
@@ -365,7 +329,7 @@ _on session_name && [ -n "$session_name" ] && seg "${DIM}${session_name}${R}"
 _on vim_mode && [ -n "$vim_mode" ] && { [ "$vim_mode" = "NORMAL" ] && seg "${YEL}N${R}" || seg "${DIM}I${R}"; }
 
 # ═════════════════════════════════════════════════════════════════════════
-# Line 2: account · duration · gauges · tokens · cost
+# Line 2: account · duration · gauges · tokens
 # ═════════════════════════════════════════════════════════════════════════
 l2=""
 
@@ -458,13 +422,6 @@ if _on tokens && [ -n "$cur_in" ]; then
   [ "$ccr" -gt 0 ] && { fmt_n "$ccr"; tok="${tok} ${DIM}→ ${GRN}\U0001f4d6 ${FN} ${hit}%${R}"; }
   [ "$cot" -gt 0 ] && { fmt_n "$cot"; tok="${tok} ${DIM}→ ${PEACH}⬇ ${FN}${R}"; }
   seg2 "$tok"
-fi
-
-# Cost: real session cost + per-hour burn rate, merged into one segment.
-if _on cost && [ -n "$session_cost" ]; then
-  c="${PEACH}\U0001f4b0 ${session_cost}${R}"
-  _on cost_rate && [ -n "$cost_rate" ] && c="${c} ${DIM}· ${cost_rate}${R}"
-  seg2 "$c"
 fi
 
 # 5-hour rate-limit window: fixed-color "5H" label instead of a dynamic-
