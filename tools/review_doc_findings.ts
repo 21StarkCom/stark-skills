@@ -50,6 +50,22 @@ import {
   anchorLine,
 } from "./review_doc_findings_lib.ts";
 
+// ─── Reviewer-agent → GitHub App ───────────────────────────────────────────
+
+// Each finding thread is authored by the App of the LLM that produced the
+// finding (the lead reviewer), so PR comment authorship attributes findings to
+// the reviewing model for analytics. codex→stark-codex, claude→stark-claude,
+// gemini→stark-gemini. Unknown agents fall back to the run-level --app.
+const AGENT_APP: Record<string, AppName> = {
+  codex: "stark-codex",
+  claude: "stark-claude",
+  gemini: "stark-gemini",
+};
+
+function agentApp(agent: string, fallback: AppName): AppName {
+  return AGENT_APP[agent] ?? fallback;
+}
+
 // ─── Map file schema ─────────────────────────────────────────────────────
 
 interface MapEntry {
@@ -58,6 +74,11 @@ interface MapEntry {
   path: string;
   resolvable: boolean; // review thread (true) vs issue comment fallback (false)
   resolved: boolean;
+  /** Reviewing LLM that raised the finding (from the receipt). */
+  agent: string;
+  /** GitHub App that authored this thread — the reviewer's App. `resolve`
+   *  replies + resolves under the same App so the thread stays single-author. */
+  app: AppName;
   status: CollectedFinding["status"];
   severity: string;
   domain: string;
@@ -323,8 +344,12 @@ async function cmdPost(args: PostArgs): Promise<number> {
   let autoresolved = 0;
 
   for (const f of findings) {
+    // Author this finding's thread as the reviewing LLM's App (analytics).
+    const findingApp = agentApp(f.agent, args.app);
     const entryBase = {
       path: args.doc,
+      agent: f.agent,
+      app: findingApp,
       status: f.status,
       severity: f.severity,
       domain: f.domain,
@@ -352,7 +377,7 @@ async function cmdPost(args: PostArgs): Promise<number> {
     const res = await postFindingThread({
       repo: args.repo,
       pr: args.pr,
-      app: args.app,
+      app: findingApp,
       commitSha,
       path: args.doc,
       body,
@@ -366,13 +391,14 @@ async function cmdPost(args: PostArgs): Promise<number> {
       resolved: false,
     };
 
-    // Findings the wing already fixed: reply + resolve immediately.
+    // Findings the wing already fixed: reply + resolve immediately (same App
+    // as the thread author, so each thread stays single-author).
     if (f.status === "autofixed" && res.resolvable && res.comment_id !== null) {
       try {
         const ok = await replyAndResolve({
           repo: args.repo,
           pr: args.pr,
-          app: args.app,
+          app: findingApp,
           commentId: res.comment_id,
           reply: renderAutofixReply(args.commitSha),
         });
@@ -424,10 +450,14 @@ async function cmdResolve(args: ResolveArgs): Promise<number> {
     return 1;
   }
   const reply = renderManualFixReply({ summary: args.reply, commitSha: args.commitSha });
+  // Reply + resolve under the App that authored the thread (the reviewer's),
+  // so each finding thread stays single-author. Older maps without a per-entry
+  // app fall back to the run-level map.app.
+  const entryApp: AppName = entry.app ?? map.app;
 
   if (!entry.resolvable || entry.comment_id === null) {
     // Issue-comment fallback: no resolvable thread — post a follow-up note.
-    await prComment(map.repo, map.pr, `${reply}\n\n${findingMarker(args.findingId)}`, map.app);
+    await prComment(map.repo, map.pr, `${reply}\n\n${findingMarker(args.findingId)}`, entryApp);
     entry.resolved = true;
     writeMap(args.map, map);
     process.stdout.write(JSON.stringify({ ok: true, resolved: false, note_posted: true, finding_id: args.findingId }) + "\n");
@@ -437,7 +467,7 @@ async function cmdResolve(args: ResolveArgs): Promise<number> {
   const ok = await replyAndResolve({
     repo: map.repo,
     pr: map.pr,
-    app: map.app,
+    app: entryApp,
     commentId: entry.comment_id,
     reply,
   });
@@ -502,7 +532,9 @@ function usage(): string {
     "  --repo OWNER/NAME  target repo                             [required]",
     "  --pr N             PR number                               [required]",
     "  --map PATH         map file to write                       [required]",
-    "  --app NAME         GitHub App (default: stark-claude)",
+    "  --app NAME         fallback GitHub App for reads + unmapped agents (default: stark-claude);",
+    "                     each finding thread is authored by the reviewing LLM's App",
+    "                     (codex→stark-codex, claude→stark-claude, gemini→stark-gemini)",
     "  --commit-sha SHA   commit to cite in auto-resolve replies",
     "",
     "resolve — reply with the fix summary and resolve a finding's thread",
