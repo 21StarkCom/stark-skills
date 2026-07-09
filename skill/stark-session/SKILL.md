@@ -9,6 +9,12 @@ revision: 27e35f5d4b6b1e245c6bdd1adf11d8f1ff0233e6
 revision_date: 2026-05-18T09:14:41Z
 ---
 
+## Help
+
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+follow [standard help](../../standards/help.md): print this skill's purpose,
+usage, and arguments, then stop — do not run preflight or any phase.
+
 ## Preflight
 
 Run [standard preflight](../../standards/preflight.md) with `--workflow stark-session`.

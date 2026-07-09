@@ -9,6 +9,12 @@ description: >-
 argument-hint: "[save|resume|status] [--task slug]"
 ---
 
+## Help
+
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+follow [standard help](../../standards/help.md): print this skill's purpose,
+usage, and arguments, then stop — do not run preflight or any phase.
+
 # stark-handover
 
 Cross-`/clear` session continuity. Every **save** appends `handover_{N}.md`

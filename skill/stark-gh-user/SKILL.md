@@ -9,6 +9,12 @@ revision: 63e888043556dafb1b0c7e9743f127ae4a257c6f
 revision_date: 2026-05-18T18:34:12Z
 ---
 
+## Help
+
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+follow [standard help](../../standards/help.md): print this skill's purpose,
+usage, and arguments, then stop — do not run preflight or any phase.
+
 # stark-gh-user
 
 Toggle the GitHub user identity used by `gh` so rate-limited GraphQL/REST traffic can flow under a second admin account.

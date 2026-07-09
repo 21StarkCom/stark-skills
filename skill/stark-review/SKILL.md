@@ -10,6 +10,12 @@ revision: 7d4eb375d131624ff59927945d448856858d621c
 revision_date: 2026-05-18T16:33:25Z
 ---
 
+## Help
+
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+follow [standard help](../../standards/help.md): print this skill's purpose,
+usage, and arguments, then stop — do not run preflight or any phase.
+
 Single-agent PR review path. Keep this skill thin: do preflight, capture the
 trusted config root, set up the worktree, then hand off to the TS dispatcher
 (`tools/stark_review.ts`). All review logic — domain selection, agent dispatch,

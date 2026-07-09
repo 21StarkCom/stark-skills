@@ -12,6 +12,12 @@ revision: 63a8c794adafa2df8a713b4dcf9743a09e3c7cfc
 revision_date: 2026-05-18T19:17:41Z
 ---
 
+## Help
+
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+follow [standard help](../../standards/help.md): print this skill's purpose,
+usage, and arguments, then stop — do not run preflight or any phase.
+
 # stark-red-team-spec
 
 Adversarial committee challenge of a spec document. 5 personas attack the

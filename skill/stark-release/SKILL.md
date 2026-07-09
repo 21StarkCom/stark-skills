@@ -9,6 +9,12 @@ revision: 8a249169623b83c1677dcda2bee230a3dd9fa8d1
 revision_date: 2026-04-27T18:17:48Z
 ---
 
+## Help
+
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+follow [standard help](../../standards/help.md): print this skill's purpose,
+usage, and arguments, then stop — do not run preflight or any phase.
+
 # Release Management
 
 Reviews accumulated changes in CHANGELOG.md, bumps the version, creates a git tag,

@@ -5,12 +5,17 @@
  * Shared dispatcher for /stark-review-spec and /stark-review-plan.
  * Selected with `--prompts-dir spec-review|plan-review`.
  *
- *   Lead:  codex (gpt-5.5) at xhigh reasoning, dispatched per-domain in
- *          parallel (capped via --max-codex-concurrent).
- *   Wing:  claude (opus-4-8) — receives findings + current doc, emits a
- *          JSON {patches: [...]} block. Host applies patches sequentially
- *          with unique-match validation. On partial patch failure, retries
- *          the wing once with failures attached, then gives up the round.
+ *   Lead:  the reviewer, dispatched per-domain in parallel (capped via
+ *          --codex-concurrent). Default agent codex (gpt-5.5) at xhigh; set
+ *          --lead-agent claude to run it on a Claude model (defaults to
+ *          claude-fable-5). Model override: --lead-model.
+ *   Wing:  the fixer — receives findings + current doc, emits a JSON
+ *          {patches: [...]} block. Host applies patches sequentially with
+ *          unique-match validation; on partial failure it retries the wing
+ *          once with failures attached, then gives up the round. Default
+ *          agent claude (opus-4-8); set --wing-agent codex to run it on
+ *          codex (gpt-5.5 at xhigh). Model override: --wing-model. Lead and
+ *          wing agents/models are independent.
  *
  * Each fix round commits to git so the evolution of the doc is traceable.
  * A final review-only round runs after the last fix round (or after early
@@ -62,7 +67,19 @@ const DEFAULT_TIMEOUT_SEC = 600;
 const WING_TIMEOUT_SEC = 900;
 const CODEX_DEFAULT_MODEL = "gpt-5.5";
 const CLAUDE_DEFAULT_MODEL = "claude-opus-4-8";
+// Default lead-review model when the lead agent is claude (e.g. --lead-agent
+// claude). Fable 5 is Anthropic's most capable model; the lead reviewer only
+// runs on it when the operator explicitly opts in via --lead-agent claude.
+const CLAUDE_LEAD_DEFAULT_MODEL = "claude-fable-5";
 const CODEX_REASONING_EFFORT_XHIGH = 'model_reasoning_effort="xhigh"';
+
+const VALID_LEAD_AGENTS = ["codex", "claude"] as const;
+type LeadAgent = (typeof VALID_LEAD_AGENTS)[number];
+
+const VALID_WING_AGENTS = ["claude", "codex"] as const;
+type WingAgent = (typeof VALID_WING_AGENTS)[number];
+// Default fixer model when the wing agent is codex (e.g. --wing-agent codex).
+const CODEX_WING_DEFAULT_MODEL = "gpt-5.5";
 const DEFAULT_OUTPUT_CAP = 32 * 1024 * 1024;
 
 const VALID_PROMPTS_DIRS = ["spec-review", "plan-review"] as const;
@@ -385,6 +402,100 @@ async function runCodexReviewer(opts: {
   };
 }
 
+/**
+ * Claude lead reviewer. Same contract as runCodexReviewer (returns a
+ * LeadDispatchResult), but dispatches the review through the claude CLI in
+ * read-only mode. Used when --lead-agent claude is set (e.g. to run the lead
+ * review on Fable 5). Reasoning effort / codex `-c` flags do not apply.
+ */
+async function runClaudeReviewer(opts: {
+  domain: string;
+  prompt: string;
+  timeoutSec: number;
+  model: string;
+}): Promise<LeadDispatchResult> {
+  const t0 = process.hrtime.bigint();
+  const args = [
+    "-p",
+    "-",
+    "--output-format",
+    "json",
+    "--model",
+    opts.model,
+    "--no-session-persistence",
+    // The reviewer must return findings JSON, not mutate files. Restrict to
+    // read-only helpers so it can ground reasoning in the doc but not write.
+    "--allowedTools",
+    "Read,Glob,Grep",
+  ];
+  const res = await run("claude", args, {
+    env: claudeSubprocessEnv(),
+    stdin: opts.prompt,
+    timeoutSec: opts.timeoutSec,
+  });
+  const duration = elapsedSec(t0);
+
+  const base: Omit<LeadDispatchResult, "raw_output" | "findings" | "empty_ack" | "error" | "parse_error"> = {
+    agent: "claude",
+    domain: opts.domain,
+    model: opts.model,
+    duration_s: duration,
+  };
+
+  if (res.notFound) {
+    return { ...base, raw_output: "", findings: [], empty_ack: false, error: "agent_unavailable", parse_error: null };
+  }
+  if (res.timedOut) {
+    return { ...base, raw_output: "", findings: [], empty_ack: false, error: "timeout", parse_error: null };
+  }
+  if (res.signal !== null) {
+    return { ...base, raw_output: res.stdout, findings: [], empty_ack: false, error: `signal_${res.signal}`, parse_error: null };
+  }
+  if (res.code !== 0) {
+    return {
+      ...base,
+      raw_output: res.stdout,
+      findings: [],
+      empty_ack: false,
+      error: `cli_error_exit_${res.code}`,
+      parse_error: null,
+    };
+  }
+
+  const text = unwrapClaudeJson(res.stdout);
+  const parsed = parseReviewerOutput(text);
+  if (!parsed) {
+    return {
+      ...base,
+      raw_output: text,
+      findings: [],
+      empty_ack: false,
+      error: "parse_error",
+      parse_error: snippet(text, 200),
+    };
+  }
+
+  const findings: DocFinding[] = parsed.findings.map((f) => ({
+    id: docFindingId({ domain: opts.domain, agent: "claude", section: f.section, title: f.title }),
+    agent: "claude",
+    domain: opts.domain,
+    severity: f.severity,
+    section: f.section,
+    title: f.title,
+    description: f.description,
+    suggestion: f.suggestion,
+  }));
+
+  return {
+    ...base,
+    raw_output: text,
+    findings,
+    empty_ack: parsed.emptyAck,
+    error: null,
+    parse_error: null,
+  };
+}
+
 function snippet(s: string, n: number): string {
   const trimmed = s.trim();
   if (trimmed.length <= n) return trimmed;
@@ -462,6 +573,74 @@ async function runClaudeWing(opts: {
   return { raw_output: unwrapped, duration_s: duration, error: null, parsed: parsed.parsed, parse_error: null };
 }
 
+/**
+ * Codex wing fixer. Same WingDispatchResult contract as runClaudeWing, but
+ * dispatches the fix pass through the codex CLI (read-only sandbox) and parses
+ * its JSONL agent output. Used when --wing-agent codex is set (e.g. to run the
+ * wing on gpt-5.5 at xhigh). The wing must RETURN a patch, never mutate files —
+ * `-s read-only` enforces that.
+ */
+async function runCodexWing(opts: {
+  prompt: string;
+  timeoutSec: number;
+  model: string;
+  reasoningEffort: string;
+  cwd: string;
+}): Promise<WingDispatchResult> {
+  const t0 = process.hrtime.bigint();
+  const args = [
+    "exec",
+    "--json",
+    "--skip-git-repo-check",
+    "-s",
+    "read-only",
+    "-c",
+    opts.reasoningEffort,
+    "-m",
+    opts.model,
+    "-",
+  ];
+  const res = await run("codex", args, {
+    cwd: opts.cwd,
+    env: baseSubprocessEnv(),
+    stdin: opts.prompt,
+    timeoutSec: opts.timeoutSec,
+  });
+  const duration = elapsedSec(t0);
+
+  if (res.notFound) {
+    return { raw_output: "", duration_s: duration, error: "agent_unavailable", parsed: null, parse_error: null };
+  }
+  if (res.timedOut) {
+    return { raw_output: "", duration_s: duration, error: "timeout", parsed: null, parse_error: null };
+  }
+  if (res.signal !== null) {
+    return { raw_output: res.stdout, duration_s: duration, error: `signal_${res.signal}`, parsed: null, parse_error: null };
+  }
+  if (res.code !== 0) {
+    return {
+      raw_output: res.stdout,
+      duration_s: duration,
+      error: `cli_error_exit_${res.code}`,
+      parsed: null,
+      parse_error: null,
+    };
+  }
+
+  const text = extractCodexAgentText(res.stdout);
+  const parsed = parseFixerOutput(text);
+  if (!parsed.parsed) {
+    return {
+      raw_output: text,
+      duration_s: duration,
+      error: null,
+      parsed: null,
+      parse_error: parsed.error ?? "unknown_parse_error",
+    };
+  }
+  return { raw_output: text, duration_s: duration, error: null, parsed: parsed.parsed, parse_error: null };
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────
 
 function elapsedSec(t0: bigint): number {
@@ -536,6 +715,7 @@ async function runLeadReview(opts: {
   repoDir: string;
   maxConcurrent: number;
   timeoutSec: number;
+  leadAgent: LeadAgent;
   model: string;
   reasoningEffort: string;
 }): Promise<LeadDispatchResult[]> {
@@ -543,7 +723,7 @@ async function runLeadReview(opts: {
   try {
     return await pmap(opts.domains, opts.maxConcurrent, async (domain) => {
       const sources = resolveDocPromptSources({
-        agent: "codex",
+        agent: opts.leadAgent,
         domain,
         promptsDir: path.join(opts.promptsBase, opts.promptsDir),
         repoDir: opts.repoDir,
@@ -554,17 +734,24 @@ async function runLeadReview(opts: {
         domainPrompt: sources.domainPrompt,
         doc: opts.doc,
       });
-      log(`${ts()} → codex:${domain} dispatch (model=${opts.model})`);
-      const r = await runCodexReviewer({
-        domain,
-        prompt,
-        timeoutSec: opts.timeoutSec,
-        model: opts.model,
-        reasoningEffort: opts.reasoningEffort,
-        cwd,
-      });
+      log(`${ts()} → ${opts.leadAgent}:${domain} dispatch (model=${opts.model})`);
+      const r = opts.leadAgent === "claude"
+        ? await runClaudeReviewer({
+          domain,
+          prompt,
+          timeoutSec: opts.timeoutSec,
+          model: opts.model,
+        })
+        : await runCodexReviewer({
+          domain,
+          prompt,
+          timeoutSec: opts.timeoutSec,
+          model: opts.model,
+          reasoningEffort: opts.reasoningEffort,
+          cwd,
+        });
       log(
-        `${ts()} ← codex:${domain} ${r.error ? "error=" + r.error : "ok"} findings=${r.findings.length} ${r.duration_s.toFixed(1)}s`,
+        `${ts()} ← ${opts.leadAgent}:${domain} ${r.error ? "error=" + r.error : "ok"} findings=${r.findings.length} ${r.duration_s.toFixed(1)}s`,
       );
       return r;
     });
@@ -578,7 +765,9 @@ async function runWingFixRound(opts: {
   findings: DocFinding[];
   roundNum: number;
   wingTimeoutSec: number;
+  wingAgent: WingAgent;
   wingModel: string;
+  wingReasoningEffort: string;
   maxWingAttempts: number;
 }): Promise<{
   finalDoc: string;
@@ -594,7 +783,12 @@ async function runWingFixRound(opts: {
   const allApplied: FixerPatch[] = [];
   let lastSkipped: Array<{ finding_id: string; reason: string }> = [];
   let lastFailures: Array<{ patch: FixerPatch; reason: string }> = [];
+  // Codex needs a real cwd; use a throwaway dir + --skip-git-repo-check.
+  const codexCwd = opts.wingAgent === "codex"
+    ? fs.mkdtempSync(path.join(os.tmpdir(), "stark-doc-wing-"))
+    : null;
 
+  try {
   for (let attempt = 1; attempt <= opts.maxWingAttempts; attempt++) {
     const prompt = buildFixerPrompt({
       doc: currentDoc,
@@ -603,15 +797,23 @@ async function runWingFixRound(opts: {
       roundNum: opts.roundNum,
     });
     log(
-      `${ts()} → claude wing dispatch (round ${opts.roundNum}, attempt ${attempt}/${opts.maxWingAttempts}, ${opts.findings.length} findings)`,
+      `${ts()} → ${opts.wingAgent} wing dispatch (round ${opts.roundNum}, attempt ${attempt}/${opts.maxWingAttempts}, ${opts.findings.length} findings)`,
     );
-    const wing = await runClaudeWing({
-      prompt,
-      timeoutSec: opts.wingTimeoutSec,
-      model: opts.wingModel,
-    });
+    const wing = opts.wingAgent === "codex"
+      ? await runCodexWing({
+        prompt,
+        timeoutSec: opts.wingTimeoutSec,
+        model: opts.wingModel,
+        reasoningEffort: opts.wingReasoningEffort,
+        cwd: codexCwd!,
+      })
+      : await runClaudeWing({
+        prompt,
+        timeoutSec: opts.wingTimeoutSec,
+        model: opts.wingModel,
+      });
     if (wing.error) {
-      log(`${ts()} ← claude wing error=${wing.error}`);
+      log(`${ts()} ← ${opts.wingAgent} wing error=${wing.error}`);
       return {
         finalDoc: currentDoc,
         attempted: allAttempted,
@@ -622,7 +824,7 @@ async function runWingFixRound(opts: {
       };
     }
     if (!wing.parsed) {
-      log(`${ts()} ← claude wing parse_error=${wing.parse_error}`);
+      log(`${ts()} ← ${opts.wingAgent} wing parse_error=${wing.parse_error}`);
       if (attempt < opts.maxWingAttempts) {
         priorFailures = [
           { patch: { finding_id: "", old: "", new: "" }, reason: `wing output unparseable: ${wing.parse_error}` },
@@ -648,7 +850,7 @@ async function runWingFixRound(opts: {
     lastFailures = applyResult.failures;
 
     log(
-      `${ts()} ← claude wing applied=${applyResult.applied.length}/${patches.length} skipped=${skipped.length} failures=${applyResult.failures.length}`,
+      `${ts()} ← ${opts.wingAgent} wing applied=${applyResult.applied.length}/${patches.length} skipped=${skipped.length} failures=${applyResult.failures.length}`,
     );
 
     if (applyResult.failures.length === 0) break;
@@ -664,6 +866,9 @@ async function runWingFixRound(opts: {
     patch_failures: lastFailures,
     wing_error: null,
   };
+  } finally {
+    if (codexCwd) { try { fs.rmSync(codexCwd, { recursive: true, force: true }); } catch { /* ignore */ } }
+  }
 }
 
 // ─── Main loop ────────────────────────────────────────────────────────
@@ -678,7 +883,9 @@ export interface DispatchOptions {
   codexConcurrentOverride: number | null;
   dryRun: boolean;
   force: boolean;
+  leadAgent: LeadAgent;
   leadModel: string;
+  wingAgent: WingAgent;
   wingModel: string;
   leadTimeoutSec: number;
   wingTimeoutSec: number;
@@ -834,7 +1041,7 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
 
   log(`config: prompts=${opts.promptsDir} max_rounds=${maxRounds} fix_threshold=${opts.config.fix_threshold} codex_concurrent=${codexConcurrent} dry_run=${opts.dryRun}`);
   log(`domains: ${domainKeys.join(", ")}`);
-  log(`models: codex=${opts.leadModel} claude=${opts.wingModel}`);
+  log(`lead: ${opts.leadAgent}=${opts.leadModel} | wing: ${opts.wingAgent}=${opts.wingModel}`);
 
   const persistedRounds: PersistedRound[] = [];
   const receiptRounds: Receipt["rounds"] = [];
@@ -854,6 +1061,7 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       repoDir: opts.repoDir,
       maxConcurrent: codexConcurrent,
       timeoutSec: opts.leadTimeoutSec,
+      leadAgent: opts.leadAgent,
       model: opts.leadModel,
       reasoningEffort: CODEX_REASONING_EFFORT_XHIGH,
     });
@@ -926,7 +1134,9 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       findings: toFix,
       roundNum,
       wingTimeoutSec: opts.wingTimeoutSec,
+      wingAgent: opts.wingAgent,
       wingModel: opts.wingModel,
+      wingReasoningEffort: CODEX_REASONING_EFFORT_XHIGH,
       maxWingAttempts: opts.maxWingAttempts,
     });
 
@@ -1000,6 +1210,7 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       repoDir: opts.repoDir,
       maxConcurrent: codexConcurrent,
       timeoutSec: opts.leadTimeoutSec,
+      leadAgent: opts.leadAgent,
       model: opts.leadModel,
       reasoningEffort: CODEX_REASONING_EFFORT_XHIGH,
     });
@@ -1034,7 +1245,7 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       docPath: opts.docPath,
       promptsDir: opts.promptsDir,
       rounds: persistedRounds,
-      models: { codex: opts.leadModel, claude: opts.wingModel },
+      models: { lead: opts.leadModel, wing: opts.wingModel, lead_agent: opts.leadAgent, wing_agent: opts.wingAgent },
     });
   }
 
@@ -1045,7 +1256,7 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
     ok: !dispatchFailureEarlyExit,
     doc: opts.docPath,
     prompts_dir: opts.promptsDir,
-    models: { codex: opts.leadModel, claude: opts.wingModel },
+    models: { lead: opts.leadModel, wing: opts.wingModel, lead_agent: opts.leadAgent, wing_agent: opts.wingAgent },
     config: {
       fix_threshold: opts.config.fix_threshold,
       max_rounds: maxRounds,
@@ -1144,7 +1355,7 @@ function toPersisted(
   return {
     round: r.round,
     kind,
-    agents_run: ["codex"],
+    agents_run: [...new Set(r.results.map((x) => x.agent))],
     domains_run: r.results.map((x) => x.domain),
     results_count: r.results.length,
     failed_count: r.failed_results.length,
@@ -1171,7 +1382,7 @@ function errorReceipt(opts: DispatchOptions, code: string, message: string): Rec
     ok: false,
     doc: opts.docPath,
     prompts_dir: opts.promptsDir,
-    models: { codex: opts.leadModel, claude: opts.wingModel },
+    models: { lead: opts.leadModel, wing: opts.wingModel, lead_agent: opts.leadAgent, wing_agent: opts.wingAgent },
     config: {
       fix_threshold: opts.config.fix_threshold,
       max_rounds: opts.config.max_rounds,
@@ -1198,7 +1409,9 @@ interface CliArgs {
   force: boolean;
   rounds: number | null;
   codexConcurrent: number | null;
+  leadAgent: LeadAgent;
   leadModel: string;
+  wingAgent: WingAgent;
   wingModel: string;
   leadTimeoutSec: number;
   wingTimeoutSec: number;
@@ -1220,8 +1433,10 @@ function usage(): string {
     `  --prompts-base DIR         base prompt dir (default: ${DEFAULT_PROMPTS_BASE})`,
     "  --rounds N                 max fix rounds (default: from config)",
     "  --codex-concurrent N       cap on concurrent codex dispatches (default: from config)",
-    `  --lead-model MODEL         codex model id (default: ${CODEX_DEFAULT_MODEL})`,
-    `  --wing-model MODEL         claude model id (default: ${CLAUDE_DEFAULT_MODEL})`,
+    `  --lead-agent AGENT         lead reviewer agent: ${VALID_LEAD_AGENTS.join(", ")} (default: codex)`,
+    `  --lead-model MODEL         lead reviewer model id (default: ${CODEX_DEFAULT_MODEL} for codex, ${CLAUDE_LEAD_DEFAULT_MODEL} for claude)`,
+    `  --wing-agent AGENT         wing/fixer agent: ${VALID_WING_AGENTS.join(", ")} (default: claude). codex runs at ${CODEX_REASONING_EFFORT_XHIGH}`,
+    `  --wing-model MODEL         wing/fixer model id (default: ${CLAUDE_DEFAULT_MODEL} for claude, ${CODEX_WING_DEFAULT_MODEL} for codex)`,
     `  --lead-timeout SEC         per-codex timeout seconds (default: ${DEFAULT_TIMEOUT_SEC})`,
     `  --wing-timeout SEC         per-claude timeout seconds (default: ${WING_TIMEOUT_SEC})`,
     "  --max-wing-attempts N      wing retries within a round on patch miss (default: 2)",
@@ -1242,7 +1457,9 @@ function parseArgs(argv: ReadonlyArray<string>): CliArgs {
     force: false,
     rounds: null,
     codexConcurrent: null,
+    leadAgent: "codex",
     leadModel: CODEX_DEFAULT_MODEL,
+    wingAgent: "claude",
     wingModel: CLAUDE_DEFAULT_MODEL,
     leadTimeoutSec: DEFAULT_TIMEOUT_SEC,
     wingTimeoutSec: WING_TIMEOUT_SEC,
@@ -1261,6 +1478,8 @@ function parseArgs(argv: ReadonlyArray<string>): CliArgs {
     return n;
   };
   let sawPromptsDir = false;
+  let sawLeadModel = false;
+  let sawWingModel = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     switch (a) {
@@ -1278,8 +1497,24 @@ function parseArgs(argv: ReadonlyArray<string>): CliArgs {
       case "--prompts-base":       args.promptsBase = need(i, a); i++; break;
       case "--rounds":             args.rounds = asInt(need(i, a), a); i++; break;
       case "--codex-concurrent":   args.codexConcurrent = asInt(need(i, a), a); i++; break;
-      case "--lead-model":         args.leadModel = need(i, a); i++; break;
-      case "--wing-model":         args.wingModel = need(i, a); i++; break;
+      case "--lead-agent": {
+        const v = need(i, a); i++;
+        if (!(VALID_LEAD_AGENTS as readonly string[]).includes(v)) {
+          throw new Error(`--lead-agent must be one of: ${VALID_LEAD_AGENTS.join(", ")} (got ${v})`);
+        }
+        args.leadAgent = v as LeadAgent;
+        break;
+      }
+      case "--lead-model":         args.leadModel = need(i, a); sawLeadModel = true; i++; break;
+      case "--wing-agent": {
+        const v = need(i, a); i++;
+        if (!(VALID_WING_AGENTS as readonly string[]).includes(v)) {
+          throw new Error(`--wing-agent must be one of: ${VALID_WING_AGENTS.join(", ")} (got ${v})`);
+        }
+        args.wingAgent = v as WingAgent;
+        break;
+      }
+      case "--wing-model":         args.wingModel = need(i, a); sawWingModel = true; i++; break;
       case "--lead-timeout":       args.leadTimeoutSec = asInt(need(i, a), a); i++; break;
       case "--wing-timeout":       args.wingTimeoutSec = asInt(need(i, a), a); i++; break;
       case "--max-wing-attempts":  args.maxWingAttempts = asInt(need(i, a), a); i++; break;
@@ -1293,6 +1528,14 @@ function parseArgs(argv: ReadonlyArray<string>): CliArgs {
   }
   if (!args.doc) throw new Error("--doc is required");
   if (!sawPromptsDir) throw new Error("--prompts-dir is required");
+  // Default the lead model to the agent's default unless explicitly overridden.
+  if (!sawLeadModel && args.leadAgent === "claude") {
+    args.leadModel = CLAUDE_LEAD_DEFAULT_MODEL;
+  }
+  // Same for the wing: codex wing defaults to gpt-5.5 (run at xhigh).
+  if (!sawWingModel && args.wingAgent === "codex") {
+    args.wingModel = CODEX_WING_DEFAULT_MODEL;
+  }
   if (args.rounds !== null && (args.rounds < 1 || args.rounds > MAX_ROUNDS_CEILING)) {
     throw new Error(`--rounds must be 1..${MAX_ROUNDS_CEILING}`);
   }
@@ -1325,7 +1568,9 @@ async function main(): Promise<number> {
     codexConcurrentOverride: args.codexConcurrent,
     dryRun: args.dryRun,
     force: args.force,
+    leadAgent: args.leadAgent,
     leadModel: args.leadModel,
+    wingAgent: args.wingAgent,
     wingModel: args.wingModel,
     leadTimeoutSec: args.leadTimeoutSec,
     wingTimeoutSec: args.wingTimeoutSec,

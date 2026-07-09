@@ -9,6 +9,12 @@ revision: ea7268a18edb159e040db78148f2ab9cb324d76a
 revision_date: 2026-05-03T06:43:43Z
 ---
 
+## Help
+
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+follow [standard help](../../standards/help.md): print this skill's purpose,
+usage, and arguments, then stop — do not run preflight or any phase.
+
 # stark-review-spec-improvement
 
 Improve spec review prompts based on assessment feedback from `/stark-review-spec` runs.

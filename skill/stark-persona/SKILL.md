@@ -9,6 +9,12 @@ revision: fefc4b333b06e7ec73b8bd0e396449f25f4dd359
 revision_date: 2026-05-18T07:25:44Z
 ---
 
+## Help
+
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+follow [standard help](../../standards/help.md): print this skill's purpose,
+usage, and arguments, then stop — do not run preflight or any phase.
+
 # stark-persona
 
 Session persona system — assigns a character voice to Claude for the session.

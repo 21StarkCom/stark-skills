@@ -10,6 +10,12 @@ revision: 7d4eb375d131624ff59927945d448856858d621c
 revision_date: 2026-05-18T16:33:25Z
 ---
 
+## Help
+
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+follow [standard help](../../standards/help.md): print this skill's purpose,
+usage, and arguments, then stop — do not run preflight or any phase.
+
 # stark-plan-to-tasks
 
 Decompose a spec/design document into phased GitHub issues. Three LLM passes: quality gate → decomposition → validation. Extracts architectural knowledge to project docs.

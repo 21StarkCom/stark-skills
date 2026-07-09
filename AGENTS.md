@@ -106,9 +106,9 @@ All skills live in `skill/stark-*/SKILL.md` and are packaged into marketplace pl
 
 ### Pipeline (end-to-end, in order)
 
-- `/stark-review-spec <path>` — multi-agent spec review (N agents × 9 domains, default N=2). Every finding is posted as its own resolvable PR thread, fixed (asking the operator when ambiguous), and resolved with the fix — via `tools/review_doc_findings.ts`.
+- `/stark-review-spec <path> [--fable] [--lead-agent codex|claude] [--lead-model ID] [--wing-agent claude|codex] [--wing-model ID]` — lead/wing spec review over 9 domains (`tools/stark_review_doc.ts`): lead reviewer defaults to codex (gpt-5.5, xhigh), wing/fixer defaults to claude (opus-4-8); `--fable`/`--lead-agent claude` runs the lead on Fable 5, `--wing-agent codex` runs the fixer on codex — lead and wing are independent. Every finding is posted as its own resolvable PR thread, fixed (asking the operator when ambiguous), and resolved with the fix — via `tools/review_doc_findings.ts`.
 - `/stark-spec-to-plan <path>` — generate implementation plan from spec doc via paired lead/wing loop (default lead `claude`, wing `codex`); lead drafts, wing reviews and emits JSON verdict, fix-loop until approved. Cheaper and lower-variance than the prior 3-agent tournament.
-- `/stark-review-plan <path>` — multi-agent execution plan review (N agents × 5 adversarial domains, default N=2). Every finding is posted as its own resolvable PR thread, fixed (asking the operator when ambiguous), and resolved with the fix — via `tools/review_doc_findings.ts`.
+- `/stark-review-plan <path> [--fable] [--lead-agent codex|claude] [--lead-model ID] [--wing-agent claude|codex] [--wing-model ID]` — lead/wing execution plan review over 5 adversarial domains (same `tools/stark_review_doc.ts --prompts-dir plan-review`): lead defaults to codex (gpt-5.5, xhigh), wing defaults to claude (opus-4-8); `--fable`/`--lead-agent claude` runs the lead on Fable 5, `--wing-agent codex` runs the fixer on codex. Every finding is posted as its own resolvable PR thread, fixed (asking the operator when ambiguous), and resolved with the fix — via `tools/review_doc_findings.ts`.
 - `/stark-plan-to-tasks <path> [--dry-run] [--cleanup <slug>]` — decompose plan into phased GitHub issues (3 LLM passes)
 - `/stark-phase-execute <plan-slug> [--dry-run]` — autonomous phase execution: implement all tasks, PR, review, merge, release, dashboard
 - `/stark-copilot <plan-or-prompt> [--lead AGENT] [--wing AGENT] [--plan-slug SLUG]` — autonomous implementation with paired lead/wing subagents; issue-driven mode when plan has been decomposed via `/stark-plan-to-tasks`
@@ -135,6 +135,7 @@ All skills live in `skill/stark-*/SKILL.md` and are packaged into marketplace pl
 - Domain IDs are slugs derived from filenames: `01-architecture.md` → `architecture`
 - Config uses JSON, prompts use markdown
 - Agent preambles in `agent.md`, domain prompts in `NN-domain.md`
+- **Every skill honors `--help`** — each `skill/*/SKILL.md` opens with a `## Help` block after its frontmatter pointing at `standards/help.md`; a standalone `--help`/`-h`/`help` token prints the skill's purpose + usage + arguments and stops (no preflight, no phases). Guarded by `skill_smoke_test.test.ts`.
 
 ## GitHub Apps
 

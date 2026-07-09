@@ -11,6 +11,12 @@ disable-model-invocation: false
 model: opus
 ---
 
+## Help
+
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+follow [standard help](../../standards/help.md): print this skill's purpose,
+usage, and arguments, then stop — do not run preflight or any phase.
+
 # stark-blog-sharpen
 
 Take a long-form post and make it do two things at once: **matter** (one non-obvious idea per post, no padding) and **read human** (no AI tells, the voice of a blunt engineering manager, not a content team). This skill is the editing pass; `stark-voice` is the drafting voice and the source of truth for register. Read that skill's **Long-form register** section before you start - this skill assumes it.

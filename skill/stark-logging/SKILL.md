@@ -11,6 +11,12 @@ disable-model-invocation: false
 model: opus[1m]
 ---
 
+## Help
+
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+follow [standard help](../../standards/help.md): print this skill's purpose,
+usage, and arguments, then stop — do not run preflight or any phase.
+
 # stark-logging — writing logs a reviewer calls good
 
 ## Overview

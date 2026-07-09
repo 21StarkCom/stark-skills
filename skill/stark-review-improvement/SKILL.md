@@ -9,6 +9,12 @@ revision: e504ba02a12b6dd779ebd026fa4c07df76697ff2
 revision_date: 2026-05-15T18:20:11Z
 ---
 
+## Help
+
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+follow [standard help](../../standards/help.md): print this skill's purpose,
+usage, and arguments, then stop — do not run preflight or any phase.
+
 # stark-review-improvement
 
 Closes the feedback loop on stark-skills: reads the prompt improvement assessment from the current conversation, makes targeted edits to the prompt and orchestrator files, and commits a changelog entry.

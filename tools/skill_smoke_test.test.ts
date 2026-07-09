@@ -195,7 +195,23 @@ for (const name of SKILLS) {
       `frontmatter name '${c.fm.name}' doesn't match dir '${name}'`,
     );
   });
+
+  test(`skill smoke: ${name} — declares --help via standards/help.md`, () => {
+    const c = SKILL_CONTENT[name];
+    assert.ok(
+      c.text.includes("standards/help.md"),
+      `${name} SKILL.md has no reference to standards/help.md — every skill must honor --help`,
+    );
+  });
 }
+
+// The shared help protocol every skill points at must exist.
+test("skill smoke: standards/help.md exists", () => {
+  assert.ok(
+    fs.existsSync(path.join(REPO_ROOT, "standards", "help.md")),
+    "standards/help.md is missing but skills reference it",
+  );
+});
 
 // ---------------------------------------------------------------------------
 // 2 + 3. Every in-repo `tools/*.ts` and `scripts/*.py` reference resolves.

@@ -9,6 +9,12 @@ argument-hint: "[new \"<title>\" | list | supersede <n> \"<title>\"] [--status P
 disable-model-invocation: true
 ---
 
+## Help
+
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+follow [standard help](../../standards/help.md): print this skill's purpose,
+usage, and arguments, then stop — do not run preflight or any phase.
+
 # stark-adr
 
 Manage Architecture Decision Records the way the doc convention defines them:

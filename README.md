@@ -33,6 +33,8 @@ The human provides the idea and writes the spec. Everything after `/stark-plan-t
 
 ## Skills
 
+> Every skill supports `--help` (`/stark-<skill> --help`) — prints its purpose, usage, and arguments without running anything.
+
 ### Quality Gates
 
 Review artifacts before they ship. Each review skill dispatches the enabled LLM agents in parallel, classifies findings as real issues vs. noise, and applies fixes autonomously.
@@ -113,7 +115,7 @@ Start and end your work sessions with consistent context loading and cleanup.
 ```
 /stark-session start                          # context + briefing
                                               # write spec.md
-/stark-review-plan docs/specs/my-feature.md   # 3-LLM adversarial review
+/stark-review-plan docs/specs/my-feature.md   # lead/wing adversarial review
                                               # fix spec based on findings
 /stark-plan-to-tasks docs/specs/my-feature.md # decompose into GitHub issues
 /stark-phase-execute my-feature               # autonomous implementation

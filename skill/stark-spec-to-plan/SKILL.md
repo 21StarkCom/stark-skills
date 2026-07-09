@@ -9,6 +9,12 @@ revision: 6943b7a3856c1caabf33b8449f6ed1604d203423
 revision_date: 2026-05-19T05:45:53Z
 ---
 
+## Help
+
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+follow [standard help](../../standards/help.md): print this skill's purpose,
+usage, and arguments, then stop — do not run preflight or any phase.
+
 ## Preflight
 
 Run environment validation before proceeding:

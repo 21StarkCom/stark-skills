@@ -171,6 +171,7 @@ export interface ModelRate {
 export const DEFAULT_MODEL_RATES: Record<string, ModelRate> = {
   o3: { input_per_1m_usd: 15.0, output_per_1m_usd: 60.0 },
   "claude-opus-4-8": { input_per_1m_usd: 15.0, output_per_1m_usd: 75.0 },
+  "claude-fable-5": { input_per_1m_usd: 10.0, output_per_1m_usd: 50.0 },
   "gpt-5.4": { input_per_1m_usd: 5.0, output_per_1m_usd: 15.0 },
   "gpt-5.5": { input_per_1m_usd: 5.0, output_per_1m_usd: 15.0 },
   "gpt-5.4-pro": { input_per_1m_usd: 20.0, output_per_1m_usd: 80.0 },
@@ -193,6 +194,8 @@ export const DEFAULT_MODEL_LIMITS: Record<string, ModelLimits> = {
   // /api/docs/models/gpt-5.5-pro) — 1,050,000 context window, 128,000 max
   // output tokens.
   "gpt-5.5-pro": { max_output_tokens: 128_000, context_window: 1_050_000 },
+  // claude-fable-5: 1M context window, 128K max output tokens (Anthropic docs).
+  "claude-fable-5": { max_output_tokens: 128_000, context_window: 1_000_000 },
   // Conservative floor for models without an explicit entry. Deliberately
   // small so an unknown model never over-promises capacity it may not have;
   // add a real entry (with a sourced number) rather than relying on this.

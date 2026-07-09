@@ -12,6 +12,12 @@ description: >-
   on explicit save intent only for now — not yet on passively-observed facts.)
 ---
 
+## Help
+
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+follow [standard help](../../standards/help.md): print this skill's purpose,
+usage, and arguments, then stop — do not run preflight or any phase.
+
 # remember — write back to the second brain
 
 Capture durable knowledge into the Markdown vault at
