@@ -264,8 +264,13 @@ History: {history_dir}
 Write the receipt to a temp file and run the findings poster. For **every**
 distinct finding across every round it opens a file-level (resolvable) review
 thread on the spec; for findings the wing already fixed it replies + resolves
-the thread immediately. It prints the still-open findings (your work list) and
-writes a map file. Re-running is idempotent (findings already posted are
+the thread immediately. **Each thread is authored by the reviewing LLM's App**
+(the finding's `agent`: codex→stark-codex, claude→stark-claude,
+gemini→stark-gemini) so PR comment authorship attributes findings to the
+reviewer for analytics — `--app` below is only the fallback for reads +
+unmapped agents. It prints the still-open findings (your work list) and
+writes a map file (each entry records its authoring App, so 5c resolves under
+the same one). Re-running is idempotent (findings already posted are
 skipped via an HTML marker).
 
 ```bash
