@@ -73,6 +73,7 @@ export interface SaveResult {
   seq: number;
   handoverPath: string;
   progressPath: string | null;
+  warnings: string[];
 }
 
 export interface ResumeOpts {
@@ -92,7 +93,7 @@ export interface ResumePayload {
   progressContent: string | null;
   chain: ChainEntry[];
   /** All task slugs under this project/worktree, newest first. */
-  tasks: string[];
+  taskSlugs: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +199,13 @@ export function deriveGitContext(opts: DeriveGitOpts = {}): GitContext {
 export const PROGRESS_FILE = "PROGRESS.md";
 
 const HANDOVER_RE = /^handover_(\d+)\.md$/;
+const DIR_MODE = 0o700;
+const FILE_MODE = 0o600;
+let tmpCounter = 0;
+
+function isErrnoException(err: unknown): err is NodeJS.ErrnoException {
+  return err instanceof Error && "code" in err;
+}
 
 export function taskDirFor(root: string, ctx: GitContext, task: string): string {
   return path.join(root, ctx.project, ctx.worktree, sanitizeSlug(task));
@@ -208,7 +216,8 @@ export function chainFiles(dir: string): ChainEntry[] {
   let names: string[];
   try {
     names = fs.readdirSync(dir);
-  } catch {
+  } catch (err) {
+    if (!isErrnoException(err) || err.code !== "ENOENT") throw err;
     return [];
   }
   const out: ChainEntry[] = [];
@@ -232,7 +241,8 @@ export function listTasks(root: string, ctx: GitContext): TaskInfo[] {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(base, { withFileTypes: true });
-  } catch {
+  } catch (err) {
+    if (!isErrnoException(err) || err.code !== "ENOENT") throw err;
     return [];
   }
   const out: TaskInfo[] = [];
@@ -281,10 +291,73 @@ export function pickTask(root: string, ctx: GitContext, task?: string): string |
 // Save
 // ---------------------------------------------------------------------------
 
+function chmodIfExists(file: string, mode: number): void {
+  try {
+    fs.chmodSync(file, mode);
+  } catch (err) {
+    if (!isErrnoException(err) || err.code !== "ENOENT") throw err;
+  }
+}
+
+function ensurePrivateDir(dir: string): void {
+  fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+  chmodIfExists(dir, DIR_MODE);
+}
+
+function tempPathFor(file: string): string {
+  tmpCounter += 1;
+  return `${file}.tmp-${process.pid}-${Date.now()}-${tmpCounter}`;
+}
+
+function writeTempFile(file: string, content: string): string {
+  const tmp = tempPathFor(file);
+  fs.writeFileSync(tmp, content, { encoding: "utf8", mode: FILE_MODE });
+  chmodIfExists(tmp, FILE_MODE);
+  return tmp;
+}
+
 function atomicWrite(file: string, content: string): void {
-  const tmp = `${file}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, content, "utf8");
-  fs.renameSync(tmp, file);
+  const tmp = writeTempFile(file, content);
+  try {
+    fs.renameSync(tmp, file);
+    chmodIfExists(file, FILE_MODE);
+  } catch (err) {
+    fs.rmSync(tmp, { force: true });
+    throw err;
+  }
+}
+
+function exclusiveAtomicWrite(file: string, content: string): boolean {
+  const tmp = writeTempFile(file, content);
+  try {
+    fs.linkSync(tmp, file);
+    chmodIfExists(file, FILE_MODE);
+    return true;
+  } catch (err) {
+    if (isErrnoException(err) && err.code === "EEXIST") return false;
+    throw err;
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
+}
+
+function redactSensitiveContent(content: string): { content: string; warnings: string[] } {
+  const warnings = new Set<string>();
+  let redacted = content.replace(
+    /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+    () => {
+      warnings.add("private key block redacted");
+      return "[REDACTED PRIVATE KEY]";
+    },
+  );
+  redacted = redacted.replace(
+    /(^|\n)([^\n]*(?:api[_-]?key|access[_-]?key|authorization|bearer|password|private[_-]?key|secret|token)[^\n]*[:=]\s*)(["']?)[^\s"'`]{8,}\3/gi,
+    (_match, lineStart: string, prefix: string, quote: string) => {
+      warnings.add("possible secret value redacted");
+      return `${lineStart}${prefix}${quote}[REDACTED]${quote}`;
+    },
+  );
+  return { content: redacted, warnings: [...warnings] };
 }
 
 function buildFrontmatter(opts: {
@@ -311,28 +384,40 @@ function buildFrontmatter(opts: {
 }
 
 /** Write the next `handover_{N}.md` (frontmatter + body) and, when given,
- *  replace `PROGRESS.md`. Both writes are atomic (tmp + rename). */
+ *  replace `PROGRESS.md`. Handover files use exclusive creation so concurrent
+ *  saves cannot overwrite an already-allocated sequence. */
 export function saveHandover(opts: SaveOpts): SaveResult {
   const task = sanitizeSlug(opts.task);
   const dir = taskDirFor(opts.root, opts.ctx, task);
-  fs.mkdirSync(dir, { recursive: true });
+  ensurePrivateDir(dir);
 
-  const chain = chainFiles(dir);
-  const seq = chain.length === 0 ? 1 : chain[chain.length - 1].seq + 1;
-  const prev = chain.length === 0 ? null : chain[chain.length - 1].file;
   const createdIso = (opts.nowIso ?? (() => new Date().toISOString()))();
+  const body = redactSensitiveContent(opts.body);
+  const progress = opts.progress === undefined ? null : redactSensitiveContent(opts.progress);
+  const warnings = [...new Set([...body.warnings, ...(progress?.warnings ?? [])])];
 
-  const handoverPath = path.join(dir, `handover_${seq}.md`);
-  const frontmatter = buildFrontmatter({ task, seq, ctx: opts.ctx, createdIso, prev });
-  atomicWrite(handoverPath, frontmatter + opts.body);
-
-  let progressPath: string | null = null;
-  if (opts.progress !== undefined) {
-    progressPath = path.join(dir, PROGRESS_FILE);
-    atomicWrite(progressPath, opts.progress);
+  let seq = 0;
+  let handoverPath = "";
+  for (let attempt = 0; attempt < 1000; attempt++) {
+    const chain = chainFiles(dir);
+    seq = chain.length === 0 ? 1 : chain[chain.length - 1].seq + 1;
+    const prev = chain.length === 0 ? null : chain[chain.length - 1].file;
+    handoverPath = path.join(dir, `handover_${seq}.md`);
+    const frontmatter = buildFrontmatter({ task, seq, ctx: opts.ctx, createdIso, prev });
+    if (exclusiveAtomicWrite(handoverPath, frontmatter + body.content)) break;
+    seq = 0;
+  }
+  if (seq === 0) {
+    throw new Error(`could not allocate a handover sequence under ${dir}`);
   }
 
-  return { task, dir, seq, handoverPath, progressPath };
+  let progressPath: string | null = null;
+  if (progress !== null) {
+    progressPath = path.join(dir, PROGRESS_FILE);
+    atomicWrite(progressPath, progress.content);
+  }
+
+  return { task, dir, seq, handoverPath, progressPath, warnings };
 }
 
 // ---------------------------------------------------------------------------
@@ -375,6 +460,6 @@ export function resumePayload(opts: ResumeOpts): ResumePayload | null {
     progressPath: progressContent === null ? null : progressPath,
     progressContent,
     chain,
-    tasks: listTasks(opts.root, opts.ctx).map((t) => t.task),
+    taskSlugs: listTasks(opts.root, opts.ctx).map((t) => t.task),
   };
 }

@@ -9,7 +9,7 @@
  *
  * Subcommands:
  *   resolve [--task T]                                  context + chain + tasks
- *   save [--task T] --handover-file F [--progress-file P]   write handover_{N}.md (+ PROGRESS.md)
+ *   save [--task T] --handover-file F --progress-file P     write handover_{N}.md + PROGRESS.md
  *   resume [--task T]                                   latest handover + progress payload
  *   list [--all]                                        tasks here (or across all projects)
  *
@@ -41,9 +41,9 @@ const USAGE = `Usage: stark_handover.ts <resolve|save|resume|list> [options]
 Subcommands:
   resolve [--task T]        Print storage context: root, project, worktree,
                             picked task, next seq, chain, known tasks.
-  save [--task T] --handover-file F [--progress-file P]
+  save [--task T] --handover-file F --progress-file P
                             Append handover_{N}.md from F's content (frontmatter
-                            added) and, when P given, replace PROGRESS.md.
+                            added) and replace PROGRESS.md from P's content.
                             --task defaults to the most recent task; required
                             for a task's first save.
   resume [--task T]         Print the latest handover + PROGRESS.md contents
@@ -128,6 +128,7 @@ function cmdResolve(root: string, ctx: GitContext, task?: string): void {
 
 function cmdSave(root: string, ctx: GitContext, args: Args): void {
   if (!args.handoverFile) fail("save requires --handover-file");
+  if (!args.progressFile) fail("save requires --progress-file");
   let body: string;
   try {
     body = fs.readFileSync(args.handoverFile, "utf8");
@@ -136,13 +137,11 @@ function cmdSave(root: string, ctx: GitContext, args: Args): void {
   }
   if (body.trim() === "") fail("--handover-file is empty — refusing to save a blank handover");
 
-  let progress: string | undefined;
-  if (args.progressFile) {
-    try {
-      progress = fs.readFileSync(args.progressFile, "utf8");
-    } catch {
-      fail(`cannot read --progress-file: ${args.progressFile}`);
-    }
+  let progress: string;
+  try {
+    progress = fs.readFileSync(args.progressFile, "utf8");
+  } catch {
+    fail(`cannot read --progress-file: ${args.progressFile}`);
   }
 
   const task = args.task ?? pickTask(root, ctx) ?? undefined;
@@ -158,6 +157,7 @@ function cmdSave(root: string, ctx: GitContext, args: Args): void {
     seq: res.seq,
     handover_path: res.handoverPath,
     progress_path: res.progressPath,
+    warnings: res.warnings,
   });
 }
 
@@ -180,8 +180,24 @@ function cmdResume(root: string, ctx: GitContext, task?: string): void {
     progress_path: payload.progressPath,
     progress_content: payload.progressContent,
     chain: payload.chain,
-    tasks: payload.tasks,
+    task_slugs: payload.taskSlugs,
   });
+}
+
+function isErrnoException(err: unknown): err is NodeJS.ErrnoException {
+  return err instanceof Error && "code" in err;
+}
+
+function readdirDirsOrEmpty(dir: string): string[] {
+  try {
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+  } catch (err) {
+    if (!isErrnoException(err) || err.code !== "ENOENT") throw err;
+    return [];
+  }
 }
 
 function cmdList(root: string, ctx: GitContext, all: boolean): void {
@@ -194,25 +210,9 @@ function cmdList(root: string, ctx: GitContext, all: boolean): void {
   }
   // --all: walk {root}/{project}/{worktree} and reuse listTasks per pair.
   const entries: unknown[] = [];
-  let projects: string[] = [];
-  try {
-    projects = fs
-      .readdirSync(root, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name);
-  } catch {
-    // missing root → empty listing
-  }
+  const projects = readdirDirsOrEmpty(root);
   for (const project of projects) {
-    let worktrees: string[] = [];
-    try {
-      worktrees = fs
-        .readdirSync(path.join(root, project), { withFileTypes: true })
-        .filter((d) => d.isDirectory())
-        .map((d) => d.name);
-    } catch {
-      continue;
-    }
+    const worktrees = readdirDirsOrEmpty(path.join(root, project));
     for (const worktree of worktrees) {
       const fakeCtx: GitContext = { ...ctx, project, worktree };
       for (const t of listTasks(root, fakeCtx)) {
@@ -245,21 +245,25 @@ if (isMain()) {
   const root = resolveRoot({ configRoot: getHandoverConfig().root });
   const ctx = deriveGitContext();
 
-  switch (args.cmd) {
-    case "resolve":
-      cmdResolve(root, ctx, args.task);
-      break;
-    case "save":
-      cmdSave(root, ctx, args);
-      break;
-    case "resume":
-      cmdResume(root, ctx, args.task);
-      break;
-    case "list":
-      cmdList(root, ctx, args.all);
-      break;
-    default:
-      process.stderr.write(`unknown subcommand: ${args.cmd}\n${USAGE}\n`);
-      process.exit(2);
+  try {
+    switch (args.cmd) {
+      case "resolve":
+        cmdResolve(root, ctx, args.task);
+        break;
+      case "save":
+        cmdSave(root, ctx, args);
+        break;
+      case "resume":
+        cmdResume(root, ctx, args.task);
+        break;
+      case "list":
+        cmdList(root, ctx, args.all);
+        break;
+      default:
+        process.stderr.write(`unknown subcommand: ${args.cmd}\n${USAGE}\n`);
+        process.exit(2);
+    }
+  } catch (err) {
+    fail(err instanceof Error ? err.message : String(err));
   }
 }

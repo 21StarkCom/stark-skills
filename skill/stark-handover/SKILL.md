@@ -121,7 +121,7 @@ $HANDOVER_CLI resume             # or: resume --task "<slug>"
 
 Exit 2 → nothing to resume: say so, show `$HANDOVER_CLI list`, ask what to
 work on. Otherwise the JSON carries `handover_content` (latest in chain),
-`progress_content`, `chain`, `tasks`.
+`progress_content`, `chain`, `task_slugs`.
 
 ### Phase 2 — Ingest + brief
 

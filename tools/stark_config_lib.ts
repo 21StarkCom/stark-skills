@@ -259,7 +259,6 @@ export const DEFAULT_COST = {
  */
 export const DEFAULT_HANDOVER = {
   root: "~/Code/Handovers",
-  max_progress_lines: 50,
 };
 
 /**

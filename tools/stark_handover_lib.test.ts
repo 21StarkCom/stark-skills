@@ -233,6 +233,33 @@ test("saveHandover: first save creates chain + PROGRESS.md with frontmatter", ()
   assert.equal(fs.readFileSync(res.progressPath!, "utf8"), "# Progress\n- [ ] step one\n");
 });
 
+test("saveHandover: stores task directory and artifacts with private modes", () => {
+  const root = tmpRoot();
+  const res = saveHandover({ root, ctx: CTX, task: "private", body: "body", progress: "progress" });
+
+  assert.equal(fs.statSync(res.dir).mode & 0o777, 0o700);
+  assert.equal(fs.statSync(res.handoverPath).mode & 0o777, 0o600);
+  assert.ok(res.progressPath);
+  assert.equal(fs.statSync(res.progressPath!).mode & 0o777, 0o600);
+});
+
+test("saveHandover: redacts likely secrets before persisting", () => {
+  const root = tmpRoot();
+  const res = saveHandover({
+    root,
+    ctx: CTX,
+    task: "redact",
+    body: "token: abcdefghijklmnop\nkeep: value\n",
+    progress: "password = supersecretvalue\n",
+  });
+
+  const handover = fs.readFileSync(res.handoverPath, "utf8");
+  assert.ok(handover.includes("token: [REDACTED]"));
+  assert.ok(!handover.includes("abcdefghijklmnop"));
+  assert.equal(fs.readFileSync(res.progressPath!, "utf8"), "password = [REDACTED]\n");
+  assert.deepEqual(res.warnings, ["possible secret value redacted"]);
+});
+
 test("saveHandover: second save increments seq and links prev; progress replaced", () => {
   const root = tmpRoot();
   const first = saveHandover({
@@ -305,6 +332,14 @@ test("listTasks: empty/missing root → []", () => {
   assert.equal(pickTask(root, CTX), null);
 });
 
+test("listTasks: non-directory storage path surfaces filesystem errors", () => {
+  const root = tmpRoot();
+  const base = path.join(root, CTX.project, CTX.worktree);
+  fs.mkdirSync(path.dirname(base), { recursive: true });
+  fs.writeFileSync(base, "not a directory");
+  assert.throws(() => listTasks(root, CTX), /ENOTDIR/);
+});
+
 // ---------------------------------------------------------------------------
 // resumePayload
 // ---------------------------------------------------------------------------
@@ -325,6 +360,7 @@ test("resumePayload: returns latest handover + progress + chain", () => {
     payload!.chain.map((c) => c.seq),
     [1, 2],
   );
+  assert.deepEqual(payload!.taskSlugs, ["fix-auth"]);
 });
 
 test("resumePayload: explicit task + missing progress tolerated", () => {
