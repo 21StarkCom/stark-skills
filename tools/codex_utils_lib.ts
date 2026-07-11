@@ -12,7 +12,7 @@ import { getModelId, isAgentEnabled } from "./stark_config_lib.ts";
 export { AgentDisabledError };
 
 /** Default model — pinned to avoid silent changes from CLI updates. */
-export const CODEX_MODEL = "gpt-5.5";
+export const CODEX_MODEL = "gpt-5.6-sol";
 
 /** Reasoning-effort config for the `-c` flag (TOML key=value format). */
 export const CODEX_REASONING_EFFORT_XHIGH = 'model_reasoning_effort="xhigh"';

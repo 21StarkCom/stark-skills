@@ -13,7 +13,7 @@ export interface DraftConfig {
 
 const DEFAULTS: DraftConfig = {
   agent: "codex",
-  model: "gpt-5.5",
+  model: "gpt-5.6-sol",
   reasoningEffort: "medium",
   timeoutSeconds: 180,
 };

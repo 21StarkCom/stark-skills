@@ -57,7 +57,7 @@ export interface ModelEntry {
 
 export const DEFAULT_MODELS: Record<string, ModelEntry> = {
   claude: { enabled: true, model_id: "claude-opus-4-8" },
-  codex: { enabled: true, model_id: "gpt-5.5" },
+  codex: { enabled: true, model_id: "gpt-5.6-sol" },
   gemini: { enabled: true, model_id: "gemini-3.1-pro-preview" },
 };
 
@@ -174,6 +174,11 @@ export const DEFAULT_MODEL_RATES: Record<string, ModelRate> = {
   "claude-fable-5": { input_per_1m_usd: 10.0, output_per_1m_usd: 50.0 },
   "gpt-5.4": { input_per_1m_usd: 5.0, output_per_1m_usd: 15.0 },
   "gpt-5.5": { input_per_1m_usd: 5.0, output_per_1m_usd: 15.0 },
+  // gpt-5.6 family (2026-07-09): sol is the flagship tier; terra/luna are the
+  // cheaper tiers. Rates from developers.openai.com/api/docs/pricing.
+  "gpt-5.6-sol": { input_per_1m_usd: 5.0, output_per_1m_usd: 30.0 },
+  "gpt-5.6-terra": { input_per_1m_usd: 2.5, output_per_1m_usd: 15.0 },
+  "gpt-5.6-luna": { input_per_1m_usd: 1.0, output_per_1m_usd: 6.0 },
   "gpt-5.4-pro": { input_per_1m_usd: 20.0, output_per_1m_usd: 80.0 },
   "gpt-5.5-pro": { input_per_1m_usd: 25.0, output_per_1m_usd: 100.0 },
   _fallback: { input_per_1m_usd: 100.0, output_per_1m_usd: 300.0 },
@@ -194,6 +199,10 @@ export const DEFAULT_MODEL_LIMITS: Record<string, ModelLimits> = {
   // /api/docs/models/gpt-5.5-pro) — 1,050,000 context window, 128,000 max
   // output tokens.
   "gpt-5.5-pro": { max_output_tokens: 128_000, context_window: 1_050_000 },
+  // gpt-5.6-sol: verified from OpenAI docs (developers.openai.com,
+  // /api/docs/models/gpt-5.6-sol) — same 1,050,000 context window and
+  // 128,000 max output tokens as gpt-5.5-pro.
+  "gpt-5.6-sol": { max_output_tokens: 128_000, context_window: 1_050_000 },
   // claude-fable-5: 1M context window, 128K max output tokens (Anthropic docs).
   "claude-fable-5": { max_output_tokens: 128_000, context_window: 1_000_000 },
   // Conservative floor for models without an explicit entry. Deliberately

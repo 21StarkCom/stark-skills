@@ -53,7 +53,7 @@ export const LEAD_MAX_TURNS = 100;
 export const LEAD_MAX_BUDGET_USD = 12;
 
 const CLAUDE_DEFAULT_MODEL = "claude-opus-4-8";
-const CODEX_DEFAULT_MODEL = "gpt-5.5";
+const CODEX_DEFAULT_MODEL = "gpt-5.6-sol";
 const GEMINI_DEFAULT_MODEL = "gemini-3.1-pro-preview";
 const CODEX_REASONING_EFFORT_MEDIUM = 'model_reasoning_effort="medium"';
 

@@ -90,7 +90,7 @@ already centralized the things people reflexively hardcode; in another repo the
 
 | You're about to hardcode… | The owner this repo exposes | The general pattern |
 |---|---|---|
-| a **model id** (`claude-opus-4-8`, `gpt-5.5`…) | `stark_config_lib.getModelId()` / `isAgentEnabled()` | model choice → a config/registry, never a literal in a tool |
+| a **model id** (`claude-opus-4-8`, `gpt-5.6-sol`…) | `stark_config_lib.getModelId()` / `isAgentEnabled()` | model choice → a config/registry, never a literal in a tool |
 | a **GCP project / region / location** | `vertex_config_lib.resolveVertexProject()` / `resolveVertexLocation()` | environment identity → runtime resolver, never committed in source |
 | a machine-specific **path** (`~/.claude/code-review/{tools,prompts}`) | `asset_root_lib.assetRoot()/assetPromptsDir()/stateRoot()` | path roots → one resolver seam, so relocation/packaging doesn't break |
 | a **credential/App id / key location** | the `APPS` map in `github_app_lib.ts` | auth identity → one map; callers mint through it |

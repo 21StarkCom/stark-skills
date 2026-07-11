@@ -4,7 +4,7 @@ If sub-agents return 0 findings or errors, check the dispatch layer:
 
 - **Orchestrator**: `$TOOLS/stark_review_doc.ts` — lead/wing flow. The lead
   reviews each domain in parallel via `child_process.spawn`; the wing emits JSON
-  patches that the host applies. Default lead is codex (gpt-5.5,
+  patches that the host applies. Default lead is codex (gpt-5.6-sol,
   `model_reasoning_effort=xhigh`), default wing is claude (opus-4-8); either is
   swappable via `--lead-agent`/`--wing-agent` (+ `--lead-model`/`--wing-model`).
   There is no Gemini agent in this flow.

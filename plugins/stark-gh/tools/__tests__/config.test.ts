@@ -5,7 +5,7 @@ import { resolveDraftConfig } from "../lib/config.ts";
 test("defaults applied when no overrides", () => {
   const c = resolveDraftConfig({});
   assert.equal(c.agent, "codex");
-  assert.equal(c.model, "gpt-5.5");
+  assert.equal(c.model, "gpt-5.6-sol");
   assert.equal(c.reasoningEffort, "medium");
   assert.equal(c.timeoutSeconds, 180);
 });

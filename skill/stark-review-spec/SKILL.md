@@ -1,7 +1,7 @@
 ---
 name: stark-review-spec
 description: >-
-  Multi-domain spec review with lead/wing fix loop. Codex (gpt-5.5, xhigh
+  Multi-domain spec review with lead/wing fix loop. Codex (gpt-5.6-sol, xhigh
   reasoning) reviews 9 domains in parallel; Claude (opus-4-8) wing fixes findings.
   Use for review spec, review architecture.
 argument-hint: "<path> [--rounds N] [--dry-run] [--force] [--codex-concurrent N] [--fable] [--lead-agent codex|claude] [--lead-model ID] [--wing-agent claude|codex] [--wing-model ID]"
@@ -32,13 +32,13 @@ Lead/wing multi-round spec review:
 - **Lead reviewer** dispatches 1 review per domain in parallel — 9 domains by
   default for spec review (`completeness`, `security`, `scope`, `api-design`,
   `data-modeling`, `consistency`, `accessibility`, `test-plan`). Default agent
-  is codex (gpt-5.5, `model_reasoning_effort=xhigh`); `--lead-agent claude`
+  is codex (gpt-5.6-sol, `model_reasoning_effort=xhigh`); `--lead-agent claude`
   (or `--fable`) runs it on a Claude model (defaults to `claude-fable-5`).
   Concurrency is capped via `--codex-concurrent N` (default 3, raises the safe
   per-agent ceiling for this skill above the global stark-review cap of 1).
 - **Wing fixer** receives the document + classified `fix` findings and emits a
   JSON `{patches: [{old, new}], skipped: [...]}` block. Default agent is claude
-  (opus-4-8); `--wing-agent codex` runs the fixer on codex (gpt-5.5 at xhigh).
+  (opus-4-8); `--wing-agent codex` runs the fixer on codex (gpt-5.6-sol at xhigh).
   The dispatcher validates each patch (`old` must occur exactly once) and applies
   it surgically; on partial failure it retries the wing once with the failures
   attached. Lead and wing agents are independent.
@@ -57,10 +57,10 @@ Answers the question: **"Is this the right system?"**
 - `--force` — proceed even if the spec file has uncommitted changes
 - `--codex-concurrent N` — cap on concurrent codex dispatches (default: 3)
 - `--lead-agent codex|claude` — which agent runs the lead review (default: `codex`). Use `claude` to run the lead on a Claude model (e.g. Fable). The wing/fixer stays `claude`/opus-4-8 regardless.
-- `--lead-model ID` — override the lead reviewer model (default: `gpt-5.5` for codex, `claude-fable-5` for claude)
+- `--lead-model ID` — override the lead reviewer model (default: `gpt-5.6-sol` for codex, `claude-fable-5` for claude)
 - `--fable` — shorthand for `--lead-agent claude --lead-model claude-fable-5`: run the lead review on Fable 5. Only when explicitly requested.
-- `--wing-agent claude|codex` — which agent runs the wing/fixer (default: `claude`/opus-4-8). `codex` runs the fixer on gpt-5.5 at `model_reasoning_effort="xhigh"`.
-- `--wing-model ID` — override the wing/fixer model (default: `claude-opus-4-8` for claude, `gpt-5.5` for codex)
+- `--wing-agent claude|codex` — which agent runs the wing/fixer (default: `claude`/opus-4-8). `codex` runs the fixer on gpt-5.6-sol at `model_reasoning_effort="xhigh"`.
+- `--wing-model ID` — override the wing/fixer model (default: `claude-opus-4-8` for claude, `gpt-5.6-sol` for codex)
 
 **Raw input:** `$ARGUMENTS`
 
@@ -96,7 +96,7 @@ flags `--rounds N`, `--dry-run`, `--force`, `--codex-concurrent N`,
 so the dispatcher defaults to `claude-fable-5`); explicit
 `--lead-agent`/`--lead-model` take precedence. `--wing-agent`/`--wing-model`
 set `WING_AGENT`/`WING_MODEL` (leave `WING_MODEL` unset for the agent default —
-`gpt-5.5` at xhigh for codex). Bind the
+`gpt-5.6-sol` at xhigh for codex). Bind the
 path to `DOC` — **never `path`**: under zsh the lowercase `path` parameter is
 tied to `$PATH`, so `path=…` silently clobbers the command search path and
 every dispatched `codex`/`node`/`gh` call dies with `agent_unavailable`.

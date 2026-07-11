@@ -6,7 +6,7 @@
  * Selected with `--prompts-dir spec-review|plan-review`.
  *
  *   Lead:  the reviewer, dispatched per-domain in parallel (capped via
- *          --codex-concurrent). Default agent codex (gpt-5.5) at xhigh; set
+ *          --codex-concurrent). Default agent codex (gpt-5.6-sol) at xhigh; set
  *          --lead-agent claude to run it on a Claude model (defaults to
  *          claude-fable-5). Model override: --lead-model.
  *   Wing:  the fixer — receives findings + current doc, emits a JSON
@@ -14,7 +14,7 @@
  *          unique-match validation; on partial failure it retries the wing
  *          once with failures attached, then gives up the round. Default
  *          agent claude (opus-4-8); set --wing-agent codex to run it on
- *          codex (gpt-5.5 at xhigh). Model override: --wing-model. Lead and
+ *          codex (gpt-5.6-sol at xhigh). Model override: --wing-model. Lead and
  *          wing agents/models are independent.
  *
  * Each fix round commits to git so the evolution of the doc is traceable.
@@ -65,7 +65,7 @@ const HOME = os.homedir();
 const DEFAULT_PROMPTS_BASE = assetPromptsDir();
 const DEFAULT_TIMEOUT_SEC = 600;
 const WING_TIMEOUT_SEC = 900;
-const CODEX_DEFAULT_MODEL = "gpt-5.5";
+const CODEX_DEFAULT_MODEL = "gpt-5.6-sol";
 const CLAUDE_DEFAULT_MODEL = "claude-opus-4-8";
 // Default lead-review model when the lead agent is claude (e.g. --lead-agent
 // claude). Fable 5 is Anthropic's most capable model; the lead reviewer only
@@ -79,7 +79,7 @@ type LeadAgent = (typeof VALID_LEAD_AGENTS)[number];
 const VALID_WING_AGENTS = ["claude", "codex"] as const;
 type WingAgent = (typeof VALID_WING_AGENTS)[number];
 // Default fixer model when the wing agent is codex (e.g. --wing-agent codex).
-const CODEX_WING_DEFAULT_MODEL = "gpt-5.5";
+const CODEX_WING_DEFAULT_MODEL = "gpt-5.6-sol";
 const DEFAULT_OUTPUT_CAP = 32 * 1024 * 1024;
 
 const VALID_PROMPTS_DIRS = ["spec-review", "plan-review"] as const;
@@ -577,7 +577,7 @@ async function runClaudeWing(opts: {
  * Codex wing fixer. Same WingDispatchResult contract as runClaudeWing, but
  * dispatches the fix pass through the codex CLI (read-only sandbox) and parses
  * its JSONL agent output. Used when --wing-agent codex is set (e.g. to run the
- * wing on gpt-5.5 at xhigh). The wing must RETURN a patch, never mutate files —
+ * wing on gpt-5.6-sol at xhigh). The wing must RETURN a patch, never mutate files —
  * `-s read-only` enforces that.
  */
 async function runCodexWing(opts: {
@@ -1532,7 +1532,7 @@ function parseArgs(argv: ReadonlyArray<string>): CliArgs {
   if (!sawLeadModel && args.leadAgent === "claude") {
     args.leadModel = CLAUDE_LEAD_DEFAULT_MODEL;
   }
-  // Same for the wing: codex wing defaults to gpt-5.5 (run at xhigh).
+  // Same for the wing: codex wing defaults to gpt-5.6-sol (run at xhigh).
   if (!sawWingModel && args.wingAgent === "codex") {
     args.wingModel = CODEX_WING_DEFAULT_MODEL;
   }
