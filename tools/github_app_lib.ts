@@ -32,12 +32,15 @@ export interface AppConfig {
 
 // Repointed 2026-06-19 from the aryeh-evinced-owned apps to NEW least-privilege
 // apps owned by aryeh-stark (slugs stark-{claude,codex,gemini}-21s), installed on
-// both GetEvinced and 21-Stark-AI. Old app ids/installs kept in
+// both GetEvinced and the personal org (renamed 21-Stark-AI -> 21StarkCom
+// 2026-07-11; install ids are org-id-bound and survived — both keys map to the
+// same install, old key kept for the GetEvinced-tail deferral). Old app
+// ids/installs kept in
 // github_app_lib.ts.bak-pre-21s for rollback.
 const STARK_CLAUDE: AppConfig = {
   appId: "4094779",
   installationId: "141330785",
-  installations: { GetEvinced: "141330785", "21-Stark-AI": "141330560" },
+  installations: { GetEvinced: "141330785", "21-Stark-AI": "141330560", "21StarkCom": "141330560" },
   keychainService: "STARK_CLAUDE_PRIVATE_KEY_21S",
 };
 
@@ -58,13 +61,13 @@ export const APPS: AppRegistry = {
   "stark-codex": {
     appId: "4094776",
     installationId: "141330738",
-    installations: { GetEvinced: "141330738", "21-Stark-AI": "141330526" },
+    installations: { GetEvinced: "141330738", "21-Stark-AI": "141330526", "21StarkCom": "141330526" },
     keychainService: "STARK_CODEX_PRIVATE_KEY_21S",
   },
   "stark-gemini": {
     appId: "4094781",
     installationId: "141330831",
-    installations: { GetEvinced: "141330831", "21-Stark-AI": "141330618" },
+    installations: { GetEvinced: "141330831", "21-Stark-AI": "141330618", "21StarkCom": "141330618" },
     keychainService: "STARK_GEMINI_PRIVATE_KEY_21S",
   },
   // `default` is a legacy alias for stark-claude; both point at the same

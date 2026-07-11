@@ -1,0 +1,25 @@
+{
+  "_comment": "SSOT registry of immutable GitHub identities used by WIF conditions/members across the Terraform roots (org-rename plan r2 #26). Slugs are informational only — IDs are what auth binds to. Captured 2026-07-11.",
+  "orgs": {
+    "21StarkCom": { "id": "294881062", "note": "personal org; formerly 21-Stark-AI (renamed 2026-07-11), formerly-formerly the GetEvinced-hosted fleet" },
+    "GetEvinced": { "id": "44191670", "note": "work org — migration tail still consumes the shared infra-ai-platform provider" }
+  },
+  "repos": {
+    "infra-ai-platform": "1174741804",
+    "agent-native-gcp": "1283877975",
+    "2nd-brain": "1297138170",
+    "stark-personal": "1273559649",
+    "stark-visual": "1233991112",
+    "ev-infra-group": "1273574919",
+    "stark-marketplace": "1261112162",
+    "stark-voice-to-text": "1244424284",
+    "stark-showcase": "1203193005",
+    "meridian": "1284131721",
+    "stark-team": "1193069366"
+  },
+  "consumers": [
+    "infra-ai-platform/infra/{wif.tf,ci.tf} (provider condition + vtt CEL + ci/plan members)",
+    "ev-infra-group/infra/{wif.tf,ci.tf,brain-hub.tf,stark-personal.tf,stark-visual-mcp.tf,stark-marketplace.tf} + infra-stark-showcase/iam.tf",
+    "agent-native-gcp/terraform/{wif.tf,variables.tf} (github_repo_id tfvar)"
+  ]
+}
