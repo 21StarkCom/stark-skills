@@ -10,7 +10,8 @@ description: >-
   even if they don't say "plan" explicitly. Planning only: never modifies,
   moves, renames, or deletes source.
 argument-hint: "[target-dir] (defaults to current repo root)"
-disable-model-invocation: truemodel: opus
+disable-model-invocation: true
+model: opus
 ---
 
 ## Help

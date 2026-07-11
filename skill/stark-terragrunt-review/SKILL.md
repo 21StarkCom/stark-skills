@@ -11,7 +11,8 @@ description: >-
   dependency ordering / mock outputs / state keys / include hierarchy. Review-only;
   defers resource/module HCL to stark-terraform-review.
 argument-hint: "[path] [--agents claude,codex,gemini] [--changed] [--no-tools] [--min-severity ...] [--pr N --repo O/R] [--dry-run] [--json]"
-disable-model-invocation: truemodel: opus
+disable-model-invocation: true
+model: opus
 ---
 
 ## Help

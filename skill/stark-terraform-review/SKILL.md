@@ -10,7 +10,8 @@ description: >-
   or points at a module/directory and wants findings. Review-only. For Terragrunt
   orchestration use stark-terragrunt-review.
 argument-hint: "[path] [--agents claude,codex,gemini] [--changed] [--no-tools] [--min-severity ...] [--pr N --repo O/R] [--dry-run] [--json]"
-disable-model-invocation: truemodel: opus
+disable-model-invocation: true
+model: opus
 ---
 
 ## Help

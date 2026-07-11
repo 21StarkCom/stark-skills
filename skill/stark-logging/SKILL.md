@@ -7,7 +7,8 @@ description: >-
   fmt.Sprintf/printf into a message, everything at INFO, log-and-return, no
   correlation id, secrets in logs, per-item spam in loops, logs nobody can grep.
 argument-hint: "[file-or-package to instrument or review]"
-disable-model-invocation: truemodel: opus[1m]
+disable-model-invocation: true
+model: opus[1m]
 ---
 
 ## Help

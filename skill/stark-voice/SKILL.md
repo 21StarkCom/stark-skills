@@ -5,7 +5,8 @@ description: >-
   (Kiovetsky) or "in my voice / my style / how I'd write it" - especially to
   Evinced / Israeli colleagues, reports, or peers. Covers Hebrew⇄English
   code-switching, message bursting, tone, and his feedback/praise/decision formulas.
-disable-model-invocation: truemodel: opus
+disable-model-invocation: true
+model: opus
 ---
 
 ## Help
