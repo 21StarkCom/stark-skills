@@ -12,6 +12,23 @@ REPO="${1:?usage: gha-repo-actions-drill.sh <owner/repo> [since=YYYY-MM-DD]}"
 SINCE="${2:-$(date -u +%Y-%m-01)}"   # default: start of current month
 : "${GH_TOKEN:?set GH_TOKEN}"; export GH_TOKEN
 
+# STEP 0 — visibility. Public repos get UNLIMITED FREE GitHub-hosted Actions
+# minutes AND storage. If this repo is public, its Actions runs cost $0 no matter
+# how many or how long — stop here and look at what the workflow *touches*
+# (see the downstream-resource note below), not the runs.
+VIS=$(gh api "repos/$REPO" --jq '.visibility' 2>/dev/null || echo unknown)
+echo "### $REPO  (visibility: $VIS)"
+if [ "$VIS" = "public" ]; then
+  cat <<EOF
+  PUBLIC repo -> GitHub-hosted Actions minutes + storage are FREE (\$0).
+  If a bill still looks high, the cost is NOT the Actions run — it's the resource
+  the workflow touches (image pushed to a registry, artifact stored, service
+  deployed). Chase THAT (e.g. GCP Artifact Registry storage + Cloud Run), on the
+  cloud bill, attributed to the project — not GitHub. Stopping the run drill.
+EOF
+  exit 0
+fi
+
 echo "### $REPO — runs since $SINCE"
 echo "-- run count + per-workflow volume --"
 gh api "repos/$REPO/actions/workflows" --jq '.workflows[] | "\(.id)\t\(.name)"' 2>/dev/null | while IFS=$'\t' read -r id name; do

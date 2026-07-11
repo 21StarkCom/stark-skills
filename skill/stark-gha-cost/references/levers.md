@@ -20,6 +20,25 @@ Key consequences:
   dependency review. Turning it off is pure savings.
 - Secret scanning enables **without** `advanced_security` (that's Code Security).
 
+## Visibility first — public repos are free
+
+**Public repos get unlimited free GitHub-hosted Actions minutes AND storage.**
+Check `gh api repos/O/R --jq .visibility` before treating any Actions usage as a
+cost. A public repo won't even appear as an Actions charge in the billing
+breakdown — so if its bill looks high, the cost is a **downstream resource**, not
+the run (next section).
+
+## The cost is the resource, not the trigger
+
+A build/deploy workflow can bill ~$0 in Actions yet be genuinely expensive
+because of what it *touches*: a Docker image pushed to a registry (**GCP
+Artifact Registry** storage), a large stored artifact, or a **Cloud Run** service
+it deploys. That spend lands on the **cloud** bill, attributed to the project,
+not GitHub. Trace the workflow (build → push → deploy) and check the resource's
+cloud billing. On GCP: `gcp_artifact_registry` (`idle_repositories`, repo
+storage) + Cloud Run. Editing triggers/concurrency won't move this — cleaning or
+right-sizing the resource will.
+
 ## Runner cost math (why per-job rounding matters)
 
 - **Every job is billed rounded UP to a full minute.** A 9-second job bills 1
@@ -93,6 +112,11 @@ Key consequences:
   at enterprise scope → perpetual diff; leave false).
 - **`gh issue/pr list` defaults to 30 items** — pass `--limit 200` before
   trusting a completeness/count check.
+- **Disabling a workflow tied to a REQUIRED status check freezes the repo.** The
+  required check never reports → no PR can merge; `enforce_admins: true` blocks
+  admins too. Always read `repos/O/R/branches/BRANCH/protection` and drop the
+  check from `required_status_checks` in the same change as disabling the
+  workflow/CodeQL-setup that produced it.
 - **Billing report vs timing API disagreeing by ~100×+** is the anomaly signal:
   all runs short, no matrix, `runs/{id}/timing` reports `billable ~0`, yet the
   bill shows tens of thousands of minutes. Workflow edits can't fix mis-billing —

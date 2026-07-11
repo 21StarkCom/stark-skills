@@ -38,6 +38,15 @@ minutes — never the seat bill. Don't conflate them; the user often will.
 
 ## Workflow
 
+### 0. Check repo visibility FIRST — public Actions are free
+
+Before calling any Actions usage "expensive," check whether the repo is public.
+**Public repos get unlimited free GitHub-hosted Actions minutes AND storage** —
+a busy public repo costs $0 no matter how many runs. `gh api repos/OWNER/REPO
+--jq .visibility`. If it's public and a bill still looks high, the runs aren't
+the cost — jump to "chase the resource" below. Skipping this step is how you end
+up optimizing a $0 line item.
+
 ### 1. Diagnose — find where the money actually goes
 
 Never guess. Run the breakdown before proposing anything:
@@ -59,15 +68,26 @@ GH_TOKEN=<pat> scripts/gha-repo-actions-drill.sh <owner/repo> [since=YYYY-MM-DD]
 This classifies the driver: high run **volume**, matrix **fan-out** (jobs ≫ 1),
 a few **long** runs, or **none of the above**. The script prints how to read it.
 
-### 2. Decide — is it real spend or a billing anomaly?
+### 2. Decide — Actions minutes, a downstream resource, or a billing anomaly?
 
-- **Real spend** (volume / fan-out / long runs explain the minutes) → go to
-  step 3, apply levers.
-- **Anomaly** — runs are short, no matrix, and `runs/{id}/timing` reports
+The trigger/workflow is rarely the cost itself — **chase the resource the
+workflow touches.**
+
+- **Actions minutes** (private repo, volume / fan-out / long runs explain it) →
+  step 3, apply the runner levers.
+- **A downstream cloud resource.** A "deploy" or "build" workflow may bill almost
+  nothing in Actions but push a Docker image to a **registry** (GCP Artifact
+  Registry storage), stash a large **artifact**, or spin up **Cloud Run** — the
+  real charge lands on the *cloud* bill, attributed to the project, not GitHub.
+  Trace what the workflow does (build → push → deploy) and check the cloud
+  billing for those resources. On GCP this is `gcp_artifact_registry`
+  (`idle_repositories` / repo storage) + Cloud Run. Editing the workflow's
+  triggers won't touch this; right-sizing/cleaning the resource will.
+- **A billing anomaly** — runs are short, no matrix, `runs/{id}/timing` reports
   `billable ~0`, yet the bill shows huge minutes. Workflow edits **cannot** fix
-  mis-billing. Draft a Support ticket from `references/support-ticket.md` and
-  tell the user plainly this is the lever that might claw money back. Still do
-  step 3 for the legit portion, but don't oversell it as the fix.
+  mis-billing. Draft a Support ticket from `references/support-ticket.md` and say
+  plainly this is the lever that might claw money back. Still do step 3 for any
+  legit portion, but don't oversell it as the fix.
 
 ### 3. Apply levers — highest value ÷ friction first
 
@@ -102,6 +122,14 @@ setup, backfilling secret scanning) are API calls — note them in the PR body.
 
 ## Guardrails
 
+- **Disabling a workflow that feeds a REQUIRED status check freezes the repo.**
+  If you turn off (or path-filter away) a workflow whose check is required by
+  branch protection, PRs can never satisfy that check → nothing merges. Worse
+  with `enforce_admins: true` (admins can't override either). Before disabling
+  a workflow/check, inspect branch protection
+  (`gh api repos/O/R/branches/BRANCH/protection`) and **remove the check from
+  `required_status_checks` in the same change** — or the repo locks up. Same
+  applies when you disable CodeQL default setup if its check was required.
 - **`default_workflow_permissions: read` can break writers.** Scan for workflows
   that push/release/comment via the implicit token and lack an explicit
   `permissions:` block *before* flipping — fix those first.
