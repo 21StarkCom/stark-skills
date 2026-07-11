@@ -6,8 +6,8 @@ AI-powered development workflow system for Claude Code. 18 skills covering the f
 
 ```bash
 # Install the plugins from the marketplace (in Claude Code)
-/plugin marketplace add 21StarkCom/stark-bifrost
-/plugin install stark-analyze@stark-bifrost   # + stark-plan, stark-implement, stark-gh, stark-ops, ...
+/plugin marketplace add 21StarkCom/bifrost
+/plugin install stark-analyze@bifrost   # + stark-plan, stark-implement, stark-gh, stark-ops, ...
 
 # Start a work session (context loading, health checks, briefing)
 /stark-session start
@@ -185,15 +185,15 @@ stark-skills/
 
 ## Distribution
 
-This repo is the **source of truth** for the skills + tools; they ship as self-contained Claude Code plugins via the [stark-bifrost](https://github.com/21StarkCom/stark-bifrost) marketplace.
+This repo is the **source of truth** for the skills + tools; they ship as self-contained Claude Code plugins via the [bifrost](https://github.com/21StarkCom/bifrost) marketplace.
 
 - The marketplace `catalog/` is **generated from this repo** by `stark sync`, and its engine vendors `tools/` + `global/` (config + prompts) into each plugin — so an install needs no symlinks and no local setup step.
 - CI auto-publishes: `.github/workflows/marketplace-sync.yml` regenerates the marketplace and opens a PR on every push to `main` touching a vendored asset root — `skill/`, `tools/`, `global/`, `scripts/`, `standards/`, or `plugins/stark-gh/`.
 
 ```
-/plugin marketplace add 21StarkCom/stark-bifrost
-/plugin install stark-analyze@stark-bifrost   # then stark-plan, stark-implement, stark-gh, stark-ops, ...
-/plugin update  stark-analyze@stark-bifrost   # pull the latest published version
+/plugin marketplace add 21StarkCom/bifrost
+/plugin install stark-analyze@bifrost   # then stark-plan, stark-implement, stark-gh, stark-ops, ...
+/plugin update  stark-analyze@bifrost   # pull the latest published version
 ```
 
 Immutable assets (tools/prompts/config) resolve from the installed plugin root (`${CLAUDE_PLUGIN_ROOT}`) via `tools/asset_root_lib.ts`; mutable state (`history/`, `sessions/`, `locks/`, …) lives under `~/.claude/code-review/` (`stateRoot()`).

@@ -18,7 +18,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 
 This repo is the **source of truth** for the skills + tools. Distribution is **marketplace-only** — the former `install.sh` symlink installer was removed (2026-07-07); there is no local symlink install step.
 
-- **stark-bifrost** (the marketplace; formerly `stark-marketplace`, renamed 2026-07-11) — the `stark-bifrost` repo packages these skills as self-contained Claude Code plugins (`/plugin marketplace add 21StarkCom/stark-bifrost`, then `/plugin install <bundle>@stark-bifrost`). Its `catalog/` is **generated from this repo** by `stark sync`, and its engine vendors `tools/`+`global/` (config + prompts) into each plugin so an install needs no symlinks and no setup step. `/plugin update <bundle>@stark-bifrost` pulls the latest published version. CI auto-publishes: `.github/workflows/marketplace-sync.yml` regenerates the marketplace and opens a PR on every push to `main` touching a vendored asset root — `skill/`, `tools/`, `global/`, `scripts/`, `standards/`, or `plugins/stark-gh/`.
+- **bifrost** (the marketplace; formerly `stark-marketplace`, renamed 2026-07-11) — the `bifrost` repo packages these skills as self-contained Claude Code plugins (`/plugin marketplace add 21StarkCom/bifrost`, then `/plugin install <bundle>@bifrost`). Its `catalog/` is **generated from this repo** by `stark sync`, and its engine vendors `tools/`+`global/` (config + prompts) into each plugin so an install needs no symlinks and no setup step. `/plugin update <bundle>@bifrost` pulls the latest published version. CI auto-publishes: `.github/workflows/marketplace-sync.yml` regenerates the marketplace and opens a PR on every push to `main` touching a vendored asset root — `skill/`, `tools/`, `global/`, `scripts/`, `standards/`, or `plugins/stark-gh/`.
 - **Local dev is no longer live.** Editing a file in this repo does not take effect until the change is published (merge to `main` → `marketplace-sync` PR → merge) and the plugin is reinstalled/updated (`/plugin update …`). To test an in-progress edit against a real install, run `stark sync` in the marketplace repo and `/plugin update` locally.
 - **Assets plugins don't cover** (user `~/.claude/settings.json`, statusline, output-styles, `org/evinced` overrides, mutable-state dirs, git hooks) are now managed by hand — the installer no longer provisions them.
 
@@ -32,7 +32,7 @@ This repo is the **source of truth** for the skills + tools. Distribution is **m
 - `org/evinced/` — Evinced org config overrides
 - `data/` — persona roster, review coverage HTML, generated showcase pages
 - `automation/` — CCR automation fleet: 12 triggers, prompts, logs, cost tracking, reports
-- `.github/workflows/` — GitHub Actions: project sync, gate checks, stale detection, heartbeat, `marketplace-sync` (auto-publish to stark-bifrost)
+- `.github/workflows/` — GitHub Actions: project sync, gate checks, stale detection, heartbeat, `marketplace-sync` (auto-publish to bifrost)
 - `docs/` — specs, plans, ADRs, retrospectives, generated skill docs
 - `standards/` — org-wide doc templates and workflows
 - `plugins/stark-gh/` — local plugin source, packaged by the marketplace
@@ -126,9 +126,9 @@ The red-team subsystem is **pure TypeScript** under `tools/`. All Python red-tea
 
 ```
 # In Claude Code — install/update from the marketplace:
-/plugin marketplace add 21StarkCom/stark-bifrost
-/plugin install stark-analyze@stark-bifrost   # + stark-plan, stark-implement, stark-gh, stark-ops, ...
-/plugin update  stark-analyze@stark-bifrost   # pull the latest published version
+/plugin marketplace add 21StarkCom/bifrost
+/plugin install stark-analyze@bifrost   # + stark-plan, stark-implement, stark-gh, stark-ops, ...
+/plugin update  stark-analyze@bifrost   # pull the latest published version
 ```
 
 ## Skills

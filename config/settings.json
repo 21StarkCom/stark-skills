@@ -64,18 +64,18 @@
     "commit-commands@claude-plugins-official": true,
     "playground@claude-plugins-official": true,
     "gopls-lsp@claude-plugins-official": true,
-    "stark-analyze@stark-bifrost": true,
-    "stark-constitution@stark-bifrost": true,
-    "stark-gh@stark-bifrost": true,
-    "stark-implement@stark-bifrost": true,
-    "stark-ops@stark-bifrost": true,
-    "stark-plan@stark-bifrost": true
+    "stark-analyze@bifrost": true,
+    "stark-constitution@bifrost": true,
+    "stark-gh@bifrost": true,
+    "stark-implement@bifrost": true,
+    "stark-ops@bifrost": true,
+    "stark-plan@bifrost": true
   },
   "extraKnownMarketplaces": {
-    "stark-bifrost": {
+    "bifrost": {
       "source": {
         "source": "github",
-        "repo": "21StarkCom/stark-bifrost"
+        "repo": "21StarkCom/bifrost"
       }
     },
     "claude-code-lsps": {

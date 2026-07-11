@@ -1,11 +1,11 @@
-# Auto-publish: regenerate stark-bifrost (the marketplace) from this repo (the
+# Auto-publish: regenerate bifrost (the marketplace) from this repo (the
 # source of truth) and open a PR there. The marketplace's own CI (validate /
 # build --check / check-bumps / tests / gitleaks) gates the PR before merge.
 #
 # PREREQUISITES (one-time, set in this repo's settings):
 #   - Secret STARK_CLAUDE_APP_ID        = the Stark Claude 21S GitHub App ID (4094779)
 #   - Secret STARK_CLAUDE_PRIVATE_KEY   = the Stark Claude 21S App private key (PEM)
-#   - The Stark Claude 21S App must be INSTALLED on 21StarkCom/stark-bifrost with
+#   - The Stark Claude 21S App must be INSTALLED on 21StarkCom/bifrost with
 #     `contents: write` + `pull_requests: write` (it mints a scoped token here).
 #
 # The engine is pure Go (no Node needed): `stark sync` copies the .ts tools
@@ -35,34 +35,34 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Mint stark-claude token (scoped to stark-bifrost)
+      - name: Mint stark-claude token (scoped to bifrost)
         id: app-token
         uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ secrets.STARK_CLAUDE_APP_ID }}
           private-key: ${{ secrets.STARK_CLAUDE_PRIVATE_KEY }}
           owner: 21StarkCom
-          repositories: stark-bifrost
+          repositories: bifrost
 
       - name: Checkout stark-skills (source of truth)
         uses: actions/checkout@v4
         with:
           path: stark-skills
 
-      - name: Checkout stark-bifrost (the marketplace)
+      - name: Checkout bifrost (the marketplace)
         uses: actions/checkout@v4
         with:
-          repository: 21StarkCom/stark-bifrost
-          path: stark-bifrost
+          repository: 21StarkCom/bifrost
+          path: bifrost
           token: ${{ steps.app-token.outputs.token }}
 
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24"
-          cache-dependency-path: stark-bifrost/engine/go.sum
+          cache-dependency-path: bifrost/engine/go.sum
 
       - name: Regenerate, auto-bump changed bundles, rebuild, gate
-        working-directory: stark-bifrost
+        working-directory: bifrost
         run: |
           set -euo pipefail
           SK="$GITHUB_WORKSPACE/stark-skills"
@@ -93,7 +93,7 @@ jobs:
             go run ./cmd/stark check-bumps ../catalog )
 
       - name: Open or update the sync PR
-        working-directory: stark-bifrost
+        working-directory: bifrost
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           SRC_SHA: ${{ github.sha }}
@@ -111,7 +111,7 @@ jobs:
           git add -A
           git commit -m "chore(sync): regenerate from stark-skills@${short}"
           git push --force -u origin "$branch"
-          gh pr create --repo 21StarkCom/stark-bifrost \
+          gh pr create --repo 21StarkCom/bifrost \
             --head "$branch" --base main \
             --title "chore(sync): regenerate from stark-skills@${short}" \
             --body "Automated regeneration from stark-skills@${SRC_SHA} by the marketplace-sync workflow. Merges once this repo's CI is green." \

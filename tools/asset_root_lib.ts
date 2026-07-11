@@ -8,7 +8,7 @@
  *   - `assetRoot()` — IMMUTABLE shipped assets: `tools/`, `prompts/`,
  *     `standards/`, `config.json`, `forge_heuristics.json`, `orchestrator.md`.
  *     In an installed plugin Claude Code sets `CLAUDE_PLUGIN_ROOT` to the
- *     plugin's cache dir, which the stark-bifrost engine populates with
+ *     plugin's cache dir, which the bifrost engine populates with
  *     these assets (vendored per bundle). For direct (non-plugin) invocations
  *     `CLAUDE_PLUGIN_ROOT` is unset and we fall back to the canonical
  *     `~/.claude/code-review` tree. `STARK_ASSET_ROOT` overrides both
@@ -115,7 +115,7 @@ export function stateRoot(): string {
  * The shipped global config file. Layout-robust: the install.sh symlink tree
  * and the vendored marketplace plugin keep it FLAT at `<assetRoot>/config.json`
  * (the marketplace engine drops the `global/` layer when bundling — see
- * `stark-bifrost/engine/internal/importer/vendor.go`), but a raw source
+ * `bifrost/engine/internal/importer/vendor.go`), but a raw source
  * checkout keeps it under `<assetRoot>/global/config.json`. Try the flat layout
  * first, then the source layout, then fall back to the flat path for
  * back-compat when neither exists on disk yet.

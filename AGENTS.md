@@ -92,12 +92,12 @@ This is a **personal playground**, not production. No customers depend on it; th
 
 ## Distribution
 
-Skills + tools ship as self-contained Claude Code plugins via the [stark-bifrost](https://github.com/21StarkCom/stark-bifrost) marketplace — its `catalog/` is generated from this repo by `stark sync`, and each plugin vendors the `tools/` + `global/` it needs (no symlinks, no local install step). `.github/workflows/marketplace-sync.yml` auto-publishes on every push to `main` touching a vendored asset root — `skill/`, `tools/`, `global/`, `scripts/`, `standards/`, or `plugins/stark-gh/`.
+Skills + tools ship as self-contained Claude Code plugins via the [bifrost](https://github.com/21StarkCom/bifrost) marketplace — its `catalog/` is generated from this repo by `stark sync`, and each plugin vendors the `tools/` + `global/` it needs (no symlinks, no local install step). `.github/workflows/marketplace-sync.yml` auto-publishes on every push to `main` touching a vendored asset root — `skill/`, `tools/`, `global/`, `scripts/`, `standards/`, or `plugins/stark-gh/`.
 
 ```
-/plugin marketplace add 21StarkCom/stark-bifrost
-/plugin install stark-analyze@stark-bifrost   # + stark-plan, stark-implement, stark-gh, stark-ops, ...
-/plugin update  stark-analyze@stark-bifrost   # pull the latest published version
+/plugin marketplace add 21StarkCom/bifrost
+/plugin install stark-analyze@bifrost   # + stark-plan, stark-implement, stark-gh, stark-ops, ...
+/plugin update  stark-analyze@bifrost   # pull the latest published version
 ```
 
 ## Skills
