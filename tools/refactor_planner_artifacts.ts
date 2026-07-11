@@ -191,7 +191,7 @@ export function writeArtifacts(root: string, m: PlanModel): WriteResult {
 // ── cell / formatting helpers ─────────────────────────────────────────────────
 
 function cell(v: string): string {
-  return (v || "—").replace(/\r?\n/g, " ").replace(/\|/g, "\\|").trim() || "—";
+  return (v || "—").replace(/\r?\n/g, " ").replace(/\\/g, "\\\\").replace(/\|/g, "\\|").trim() || "—";
 }
 function cap(v: string): string { return v ? v.charAt(0).toUpperCase() + v.slice(1) : "—"; }
 function plan(cmd: string): string { return cmd && cmd !== "unknown" ? cmd : "# unknown — not resolved from the repo"; }
