@@ -31,7 +31,7 @@ Closes the feedback loop on stark-skills: reads the prompt improvement assessmen
 ## Constants
 
 ```
-STARK_REPO  = ~/Code/Playground/stark-skills
+STARK_REPO  = ~/Code/21Stark/stark-skills
 PROMPTS     = $STARK_REPO/global/prompts
 TOOLS       = $STARK_REPO/tools
 CONFIG      = $STARK_REPO/global/config.json

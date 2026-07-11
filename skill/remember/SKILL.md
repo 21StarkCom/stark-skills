@@ -21,7 +21,7 @@ usage, and arguments, then stop — do not run preflight or any phase.
 # remember — write back to the second brain
 
 Capture durable knowledge into the Markdown vault at
-`/Users/aryeh/Code/Playground/2nd-brain/second-brain` so it survives the session.
+`/Users/aryeh/Code/Vaults/main-vault` so it survives the session.
 The vault is the source of truth; this skill is a thin, safe wrapper over the
 brain write tools. Markdown on disk *is* the memory — and once written, validated,
 and secret-scanned, the skill lands it on `main` via a branch + PR (see step 5).
@@ -80,7 +80,7 @@ record the pointer ("the X token lives in `.private/…`"), never the value.
 pass the vault explicitly:
 
 ```bash
-VAULT=/Users/aryeh/Code/Playground/2nd-brain/second-brain
+VAULT=/Users/aryeh/Code/Vaults/main-vault
 brain --vault "$VAULT" memory add <category> "<fact>" [--source "<attribution>"]
 brain --vault "$VAULT" upsert <type> <slug> --set key=value --section "Heading=content"
 ```

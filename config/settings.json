@@ -111,7 +111,7 @@
   "useAutoModeDuringPlan": false,
   "autoMode": {
     "allow": [
-      "Pushing branches and opening/merging PRs in /Users/aryeh/Code/Playground/stark-data-core is permitted — it is a trusted sibling repo in Aryeh's workspace alongside stark-night-watch and is covered by the same review workflow."
+      "Pushing branches and opening/merging PRs in repos under /Users/aryeh/Code/21Stark/ is permitted — trusted repos in Aryeh’s workspace covered by the same review workflow. (stark-data-core/stark-night-watch note retired 2026-07-11: archived, clones deleted in the Code reorg.)"
     ]
   },
   "enableWorkflows": true

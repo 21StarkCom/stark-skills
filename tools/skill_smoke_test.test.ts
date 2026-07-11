@@ -19,7 +19,7 @@
 //      cleanly (status 0 or 1) on `--help`. Crashes (status > 1,
 //      signal, timeout) mean the CLI is broken.
 //
-// Cross-repo references (e.g. `~/Code/Playground/stark-insights/...`)
+// Cross-repo references (e.g. `~/Code/21Stark/stark-insights/...`)
 // are skipped by an explicit prefix allowlist — those targets aren't
 // owned by this repo, and the SKILL.md sites are already defensive
 // (`if [ -f "$X" ]`).
@@ -37,7 +37,7 @@ const SKILLS_ROOT = path.join(REPO_ROOT, "skill");
 // machine. References inside these are skipped by every check below.
 // Add new entries here if a skill ever references another sibling repo.
 const CROSS_REPO_PREFIXES: readonly string[] = [
-  "~/Code/Playground/stark-insights/",
+  "~/Code/21Stark/stark-insights/",
   // The Evinced production repos are mounted at ~/Code/Evinced; if a
   // skill ever references them directly, it would also be cross-repo.
   "~/Code/Evinced/",
