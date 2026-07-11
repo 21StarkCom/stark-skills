@@ -70,6 +70,16 @@ process.env.STARK_QUEUE_DIR = fs.mkdtempSync(
   path.join(os.tmpdir(), "red-team-queue-test-"),
 );
 
+// Anchor the asset-root seam at this source checkout so prompt-reading tests
+// (loadPersonaPrompts / assemblePrompt / dispatch / fix-plan) resolve
+// `global/prompts/red-team/` from the repo. Without this the seam falls back
+// to `~/.claude/code-review/prompts`, which no longer exists now that
+// distribution is marketplace-only (the symlink installer was removed) — so
+// every prompt-reading test ENOENT'd. `??=` respects an operator/CI override
+// (e.g. a vendored plugin dir) and the dedicated seam tests below save/restore
+// STARK_ASSET_ROOT around themselves, so this default doesn't perturb them.
+process.env.STARK_ASSET_ROOT ??= REPO_ROOT;
+
 function tmpDb(): string {
   return path.join(
     fs.mkdtempSync(path.join(os.tmpdir(), "red-team-lib-test-")),
