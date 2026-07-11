@@ -2,7 +2,7 @@
 name: stark-phase-execute
 description: >-
   Autonomously execute a dev phase: implement tasks, PR, review, fix, merge, release. Use for execute phase, run plan.
-argument-hint: "<plan-slug-or-path> [--dry-run] [--skip-deploy] [--skip-release] [--start-from <issue-number>] [--rounds <N>] [--repo ORG/REPO]"
+argument-hint: "<plan-slug-or-path> [--dry-run] [--skip-deploy] [--skip-release] [--start-from <issue-number>] [--rounds <N>] [--repo ORG/REPO] [--ready]"
 disable-model-invocation: true
 context: fork
 model: opus
@@ -55,6 +55,7 @@ After all tasks: regression tests, version bump, deploy, dashboard, memory updat
 | `--rounds <N>` | 3 | Max review-fix rounds per PR |
 | `--repo ORG/REPO` | auto-detect | Override repo detection from git remote |
 | `--no-goal` | off (goal-driven is ON) | Disable the goal-driven implement loop; fall back to the bounded Agent-tool subagent (§1.2) |
+| `--ready` | off (PRs open as draft) | Open each task's PR ready-for-review instead of draft. By default PRs open as drafts so draft-guarded target-repo CI stays idle during the local review loop; §1.5 un-drafts before merge. |
 | `--parallel` | off | Run independent tasks (no cross-task `depends_on`) concurrently via a Workflow instead of strictly sequentially. Dependent tasks stay sequential. See [Phase 1P](#phase-1p-parallel-execution-opt-in). |
 
 **Raw input:** `$ARGUMENTS`
@@ -241,7 +242,7 @@ unset GH_TOKEN
 git push -u origin $(git branch --show-current)
 ```
 
-Write PR body to a temp file (`mktemp`, `chmod 600`) — never interpolate LLM output in shell. Body includes: Summary implementing #{NUMBER}, Changes from `git diff --stat`, `Closes #{NUMBER}`, attribution line. Create PR with `gh pr create`, extract PR_NUM from URL. No draft PRs.
+Write PR body to a temp file (`mktemp`, `chmod 600`) — never interpolate LLM output in shell. Body includes: Summary implementing #{NUMBER}, Changes from `git diff --stat`, `Closes #{NUMBER}`, attribution line. Create the PR as a **draft** by default so the target-repo CI (guarded on `github.event.pull_request.draft == false`) stays idle while the review loop runs locally: `gh pr create --draft ...` unless the operator passed `--ready` (then omit `--draft`). Extract PR_NUM from the URL. The PR is un-drafted in §1.5 right before the merge, which fires CI.
 
 ### 1.4 Multi-agent review (up to N rounds)
 
@@ -273,8 +274,13 @@ After loop, post review summary via stark-claude[bot]: `export GH_TOKEN=$(node -
 
 > **Warning:** Do not update project Status here — the project-pr-sync GitHub Action handles transitions automatically.
 
+The PR opened in §1.3 is a draft (unless `--ready` was passed), so its CI has
+not run yet. **Mark it ready-for-review first** — that fires the target-repo CI
+(via the `ready_for_review` event) — *then* wait for checks, *then* merge:
+
 ```bash
 unset GH_TOKEN
+gh pr ready $PR_NUM 2>/dev/null || true   # un-draft → triggers CI (no-op if already ready)
 gh pr checks $PR_NUM --watch --fail-level all 2>/dev/null || true
 gh pr merge $PR_NUM --squash --admin --delete-branch
 git checkout main && git pull --rebase origin main && git fetch --prune
@@ -352,7 +358,7 @@ const results = await pipeline(
              { label: `impl:#${t.number}`, phase: 'Implement', isolation: 'worktree', schema: IMPL_SCHEMA }),
   (impl, t) => agent(`Review the diff for issue #${t.number}. Return findings.`,
              { label: `review:#${t.number}`, phase: 'Review', schema: REVIEW_SCHEMA }),
-  (review, t) => agent(`Merge PR for issue #${t.number} once CI is green.`,
+  (review, t) => agent(`Mark PR for issue #${t.number} ready-for-review (gh pr ready — the PR was opened draft), wait for CI to go green, then merge it.`,
              { label: `merge:#${t.number}`, phase: 'Merge', schema: MERGE_SCHEMA }),
 )
 return results.filter(Boolean)

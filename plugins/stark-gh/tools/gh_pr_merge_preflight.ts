@@ -304,10 +304,11 @@ async function main(argv: string[]): Promise<number> {
   if (pr.mergeable === "CONFLICTING") {
     die(MergeExit.CONFLICT_OR_DIRTY, `PR is CONFLICTING; resolve conflicts first`);
   }
+  // Draft-by-default policy: a WIP PR is EXPECTED to be a draft at merge time.
+  // pr-merge un-drafts it (execute marks it ready after push, which fires the
+  // target-repo CI), so a draft is no longer a rejection — it's recorded in the
+  // plan (pr.wasDraft, set above) and the execute step handles the transition.
   // --force-bypassable gates
-  if (pr.isDraft && !userArgs.force) {
-    die(MergeExit.PR_GATE, `PR is draft; pass --force --force-reason '<text>' to merge a draft`);
-  }
   if (pr.reviewDecision === "CHANGES_REQUESTED" && !userArgs.force) {
     die(MergeExit.PR_GATE, `PR has CHANGES_REQUESTED; pass --force --force-reason to override`);
   }
@@ -317,7 +318,13 @@ async function main(argv: string[]): Promise<number> {
   // failing state. This is --force-bypassable per the gate matrix. Pending
   // checks are tolerated here (default-watch will wait; --no-watch enforces a
   // green requirement at execute time per spec section 145).
-  try {
+  //
+  // SKIP entirely when the PR is still a draft: draft-guarded CI has not run
+  // yet (and a vacuous rollup would false-trip the "no required checks" trap).
+  // Execute marks the PR ready after push, which fires the CI the watcher then
+  // waits on. A --no-watch merge of a draft still gets its green enforced at
+  // execute time, post-mark-ready.
+  if (!pr.isDraft) try {
     const preflightRollup = await fetchRequiredCheckRollup({
       owner: pr.headRepositoryOwner?.login ?? repoInfo.owner,
       repo: pr.headRepository?.name ?? repoInfo.name,
@@ -449,6 +456,7 @@ async function main(argv: string[]): Promise<number> {
       headRepositoryOwner: pr.headRepositoryOwner?.login ?? repoInfo.owner,
       headRepositoryName: pr.headRepository?.name ?? repoInfo.name,
       isCrossRepository: pr.isCrossRepository,
+      wasDraft: pr.isDraft === true,
     },
     baseOid,
     originalHeadOid: pr.headRefOid,

@@ -53,6 +53,7 @@ interface CliArgs {
   model: string | null;
   dryRun: boolean;
   noPr: boolean;
+  ready: boolean;
   json: boolean;
 }
 
@@ -66,6 +67,7 @@ function parseArgs(argv: string[]): CliArgs {
     model: null,
     dryRun: false,
     noPr: false,
+    ready: false,
     json: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -100,6 +102,10 @@ function parseArgs(argv: string[]): CliArgs {
       case "--no-pr":
         args.noPr = true;
         break;
+      case "--ready":
+      case "--no-draft":
+        args.ready = true;
+        break;
       case "--json":
         args.json = true;
         break;
@@ -124,7 +130,7 @@ function printHelp(): void {
                         [--fix-plan-json FIX_PLAN_JSON]
                         [--source-run-id SOURCE_RUN_ID] [--force-stale]
                         [--model MODEL]
-                        [--dry-run] [--no-pr] [--json]
+                        [--dry-run] [--no-pr] [--ready] [--json]
 
 Fold a red-team fix plan into its artifact (TS dispatcher).
 
@@ -144,6 +150,7 @@ options:
   --model MODEL              Override the decider model (Claude CLI only; default red_team.fold.model).
   --dry-run                  Triage only — no writes, no audit, no git, no PR.
   --no-pr                    runFold still writes + audits; the CLI does no git/PR.
+  --ready                    Open the fold PR ready-for-review (default: draft, since fold PRs are reviewable-and-never-merged).
   --json                     Emit the FoldResult (+ artifact/branch/pr_url) as JSON on stdout.
 `);
 }
@@ -361,6 +368,7 @@ async function main(argv: string[]): Promise<number> {
             artifactRelPath,
             sourceRunId: result.source_run_id,
             app: "stark-claude",
+            draft: !args.ready,
           });
           prUrl = pr.pr_url;
         }

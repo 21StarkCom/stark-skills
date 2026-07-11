@@ -59,7 +59,11 @@ export function parseRawArgs(raw: string): UserArgs {
     commitAll: true,
     fullContext: false,
     noWatch: false,
-    draft: false,
+    // Draft-by-default: WIP PRs open as drafts so target-repo CI (guarded on
+    // `github.event.pull_request.draft == false`) stays idle until they're
+    // marked ready. Opt out with --ready / --no-draft. Un-drafting happens at
+    // merge time via /stark-gh:pr-merge, never here.
+    draft: true,
     allowSecretCommit: false,
     allowSecretToLlm: false,
   };
@@ -131,7 +135,12 @@ export function parseRawArgs(raw: string): UserArgs {
         a.noWatch = true;
         break;
       case "--draft":
+        // Retained for back-compat; draft is now the default. Explicit no-op.
         a.draft = true;
+        break;
+      case "--ready":
+      case "--no-draft":
+        a.draft = false;
         break;
       case "--allow-secret-commit":
         a.allowSecretCommit = true;

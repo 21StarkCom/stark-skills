@@ -717,9 +717,37 @@ export async function prCreate(repo: string, opts: PrCreateOpts): Promise<unknow
       base: opts.base ?? "main",
       title: opts.title,
       body: opts.body ?? "",
-      draft: opts.draft ?? false,
+      // Draft-by-default policy: a caller that omits `draft` gets a draft PR so
+      // WIP stays out of draft-guarded CI. Callers opt into ready with draft:false.
+      draft: opts.draft ?? true,
     },
     opts.app,
+  );
+}
+
+/**
+ * Mark a PR ready-for-review (un-draft). REST has no ready endpoint, so this
+ * uses the GraphQL `markPullRequestReadyForReview` mutation (needs the PR node
+ * id, resolved from REST). Idempotent: a no-op when the PR is already ready.
+ */
+export async function prReady(
+  repo: string,
+  number: number,
+  app?: AppName,
+): Promise<unknown> {
+  const pr = (await apiGet(
+    `/repos/${repo}/pulls/${number}`,
+    undefined,
+    app,
+  )) as { node_id: string; draft?: boolean };
+  if (pr.draft === false) return pr; // already ready — idempotent
+  return graphql(
+    `mutation($id: ID!) {
+      markPullRequestReadyForReview(input: { pullRequestId: $id }) {
+        pullRequest { number isDraft }
+      }
+    }`,
+    { variables: { id: pr.node_id }, app },
   );
 }
 

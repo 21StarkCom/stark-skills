@@ -8,7 +8,7 @@ description: >-
   the challenge skills (`/stark-red-team-spec`, `/stark-red-team-plan`) only
   surface a proposed fix plan; they do NOT apply it. Use for fold red-team fix
   plan, apply red-team fix plan, accept red-team counter-proposals into the doc.
-argument-hint: "<artifact> [--source-spec <path>] [--fix-plan-json <path>] [--source-run-id <id>] [--force-stale] [--model <id>] [--dry-run] [--no-pr] [--json]"
+argument-hint: "<artifact> [--source-spec <path>] [--fix-plan-json <path>] [--source-run-id <id>] [--force-stale] [--model <id>] [--dry-run] [--no-pr] [--ready] [--json]"
 disable-model-invocation: true
 model: opus
 ---
@@ -97,6 +97,9 @@ Raw input: `$ARGUMENTS`
 - `--no-pr` — the dispatcher still writes the revised artifact + decision log and
   audits, but does **no git and no PR**. Use to fold locally and stage the PR
   yourself.
+- `--ready` (alias `--no-draft`) — open the fold PR ready-for-review. By default
+  the fold PR opens as a **draft** (it's reviewable-and-never-merged, so draft is
+  its natural state and keeps draft-guarded CI idle).
 - `--json` — emit the fold envelope as a single JSON object on stdout (the skill
   renders from this).
 

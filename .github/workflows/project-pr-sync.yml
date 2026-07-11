@@ -5,7 +5,10 @@ name: Project PR Sync
 
 on:
   pull_request:
-    types: [opened, synchronize, closed]
+    # `ready_for_review` fires when a draft PR is un-drafted — the job's draft
+    # guard below skips all draft activity, so this is what re-engages sync once
+    # a WIP PR is marked ready.
+    types: [opened, synchronize, closed, ready_for_review]
   pull_request_review:
     types: [submitted]
 
@@ -18,6 +21,11 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    # Skip-draft guard: draft PRs are WIP under the draft-by-default policy — do
+    # not touch the project board until the PR is ready-for-review. `ready_for_review`
+    # re-engages it; `closed` on a merged PR always has draft == false, so "Done"
+    # still fires. (A pull_request_review on a draft is intentionally skipped too.)
+    if: github.event.pull_request.draft == false
     steps:
       # Skip the whole job cleanly when PROJECT_TOKEN isn't configured
       # (e.g. forks, or repos that haven't set up Project sync yet).
@@ -173,7 +181,10 @@ jobs:
             let resetReleaseApproval = false;
 
             if (eventName === 'pull_request') {
-              if (action === 'opened') {
+              if (action === 'opened' || action === 'ready_for_review') {
+                // Draft PRs are guarded out at the job level, so 'opened' only
+                // reaches here for non-draft PRs; 'ready_for_review' brings a
+                // just-un-drafted WIP PR into review.
                 newStatus = 'Human Review';
               } else if (action === 'synchronize') {
                 newStatus = 'Human Review';

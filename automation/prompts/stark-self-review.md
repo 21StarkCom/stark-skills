@@ -96,7 +96,7 @@ If underperformers are found:
 2. Apply the drafted prompt changes to the relevant files in `global/prompts/`
 3. Open a PR:
    ```bash
-   gh pr create --repo GetEvinced/stark-skills \
+   gh pr create --repo GetEvinced/stark-skills --draft \
      --title "[stark-self-review] Prompt improvements — {date}" \
      --label "automation,automation:stark-self-review" \
      --body "## Review Quality Analysis — {date range}

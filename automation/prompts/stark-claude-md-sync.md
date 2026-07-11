@@ -64,10 +64,12 @@ If inconsistencies are found:
    git add CLAUDE.md
    git commit -m "fix: sync CLAUDE.md with org conventions"
    git push -u origin HEAD
-   gh pr create --repo GetEvinced/{repo} \
+   gh pr create --repo GetEvinced/{repo} --draft \
      --title "[stark-claude-md-sync] Fix CLAUDE.md inconsistencies" \
      --label "automation,automation:stark-claude-md-sync" \
      --body "{detailed list of fixes}"
+   # Draft-by-default: opens as a draft for human review; mark ready
+   # (gh pr ready <N>) to run CI + merge.
    ```
 2. If a PR already exists with label `automation:stark-claude-md-sync`, add a comment instead
 

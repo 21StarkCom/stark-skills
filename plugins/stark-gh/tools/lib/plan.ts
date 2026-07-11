@@ -215,6 +215,10 @@ export interface PrMergePlan {
     headRepositoryOwner: string;
     headRepositoryName: string;
     isCrossRepository: boolean;
+    // True when the PR was still a draft at preflight time. Execute marks it
+    // ready-for-review after push (which fires the target-repo CI) before the
+    // watch/merge steps. Optional for back-compat with pre-policy plan files.
+    wasDraft?: boolean;
   };
   baseOid: string;
   originalHeadOid: string;
@@ -272,6 +276,7 @@ export function validatePrMergePlan(p: unknown): asserts p is PrMergePlan {
     requirePlan(typeof pr[f] === "string", `pr.${f} must be string`);
   }
   requirePlan(typeof pr.isCrossRepository === "boolean", "pr.isCrossRepository must be boolean");
+  requirePlan(pr.wasDraft === undefined || typeof pr.wasDraft === "boolean", "pr.wasDraft must be boolean when present");
 
   requirePlan(isObj(o.changelog), "changelog missing");
   const cl = o.changelog as Record<string, unknown>;

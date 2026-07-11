@@ -8,7 +8,8 @@
  *   github_app.ts [--app APP] [--repo OWNER/NAME] repo
  *   github_app.ts [--app APP] [--repo OWNER/NAME] pr list
  *   github_app.ts [--app APP] [--repo OWNER/NAME] pr view NUMBER
- *   github_app.ts [--app APP] [--repo OWNER/NAME] pr create --head H --title T [--body B] [--base main] [--draft]
+ *   github_app.ts [--app APP] [--repo OWNER/NAME] pr create --head H --title T [--body B] [--base main] [--ready]
+ *   github_app.ts [--app APP] [--repo OWNER/NAME] pr ready  NUMBER
  *   github_app.ts [--app APP] [--repo OWNER/NAME] pr review NUMBER --approve|--request-changes|--comment --body B
  *   github_app.ts [--app APP] [--repo OWNER/NAME] pr merge  NUMBER --squash|--merge|--rebase [--title T]
  *   github_app.ts [--app APP] [--repo OWNER/NAME] pr comment NUMBER --body B
@@ -31,6 +32,7 @@ import {
   prCreate,
   prList,
   prMerge,
+  prReady,
   prReview,
   prView,
   repoInfo,
@@ -46,7 +48,9 @@ Commands:
   repo                   Show repo summary
   pr list                List open PRs
   pr view NUMBER         View PR details (JSON)
-  pr create --head H --title T [--body B] [--base main] [--draft]
+  pr create --head H --title T [--body B] [--base main] [--ready]
+                         Opens a DRAFT PR by default; pass --ready to open ready-for-review
+  pr ready NUMBER        Mark a draft PR ready-for-review (un-draft)
   pr review NUMBER --approve|--request-changes|--comment [--body B]
   pr merge NUMBER --squash|--merge|--rebase [--title T]
   pr comment NUMBER --body B
@@ -78,7 +82,9 @@ const KNOWN_VALUE_OPTS = new Set([
 ]);
 const MULTI_VALUE_OPTS = new Set(["labels"]);
 const KNOWN_FLAGS = new Set([
-  "draft",
+  "draft", // retained for back-compat; draft is now the default (no-op)
+  "ready", // open the PR ready-for-review (opt out of draft default)
+  "no-draft", // alias for --ready
   "approve",
   "request-changes",
   "comment",
@@ -86,6 +92,15 @@ const KNOWN_FLAGS = new Set([
   "merge",
   "rebase",
 ]);
+
+/**
+ * `pr create` draft resolution. Draft-by-default: a PR is created as a draft
+ * unless the operator opts out with --ready / --no-draft. (The legacy --draft
+ * flag stays accepted as an explicit, now-redundant, opt-in.)
+ */
+export function draftFromFlags(flags: Map<string, true>): boolean {
+  return !flags.has("ready") && !flags.has("no-draft");
+}
 
 /** `pr review` flag → GitHub review event. Defaults to `COMMENT`. */
 export function reviewEventFromFlags(
@@ -233,15 +248,25 @@ async function runPr(parsed: Parsed): Promise<void> {
     if (!head || !title) {
       throw new Error("pr create: --head and --title are required");
     }
+    const draft = draftFromFlags(parsed.flags);
     const result = (await prCreate(repo, {
       head,
       title,
       body: parsed.options.get("body") ?? "",
       base: parsed.options.get("base") ?? "main",
-      draft: parsed.flags.has("draft"),
+      draft,
       app: parsed.app,
     })) as { number: number; html_url: string };
-    process.stdout.write(`Created PR #${result.number}: ${result.html_url}\n`);
+    process.stdout.write(
+      `Created ${draft ? "draft " : ""}PR #${result.number}: ${result.html_url}\n`,
+    );
+    return;
+  }
+  if (action === "ready") {
+    const number = Number(rest[0]);
+    if (!Number.isFinite(number)) throw new Error("pr ready: missing NUMBER");
+    await prReady(repo, number, parsed.app);
+    process.stdout.write(`Marked PR #${number} ready-for-review\n`);
     return;
   }
   if (action === "review") {

@@ -108,7 +108,8 @@ git checkout -b memory/<short-slug>                       # e.g. memory/2026-07-
 git add -A
 git commit -m "docs(brain): <one-line summary of what was captured>"
 git push -u origin HEAD
-gh pr create --fill
+gh pr create --fill --draft                               # draft-by-default policy
+gh pr ready                                               # un-draft so it can merge (vault has no CI, so "green" is immediate)
 gh pr merge --squash --delete-branch                      # merges to main (immediate — no CI)
 git checkout main && git pull --ff-only
 ```

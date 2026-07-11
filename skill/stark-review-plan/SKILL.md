@@ -4,7 +4,7 @@ description: >-
   Multi-domain execution plan review with lead/wing fix loop. Codex (gpt-5.6-sol,
   xhigh reasoning) reviews 5 adversarial domains in parallel; Claude (opus-4-8)
   wing fixes findings. Use for review plan, audit deployment plan.
-argument-hint: "<path> [--rounds N] [--dry-run] [--force] [--codex-concurrent N] [--fable] [--lead-agent codex|claude] [--lead-model ID] [--wing-agent claude|codex] [--wing-model ID]"
+argument-hint: "<path> [--rounds N] [--dry-run] [--force] [--ready] [--codex-concurrent N] [--fable] [--lead-agent codex|claude] [--lead-model ID] [--wing-agent claude|codex] [--wing-model ID]"
 disable-model-invocation: true
 model: opus
 revision: 7d4eb375d131624ff59927945d448856858d621c
@@ -57,6 +57,7 @@ For domain definitions and finding-classification criteria, see
 - `--rounds N` — max fix cycles (default: from config `plan_review.max_rounds`, ceiling 10)
 - `--dry-run` — review only, no wing fixes, no commits
 - `--force` — proceed even if the plan file has uncommitted changes
+- `--ready` (alias `--no-draft`) — when this run **opens** a PR to host findings, open it ready-for-review. By default an auto-opened PR is a **draft** so the target repo's draft-guarded CI stays idle until it's marked ready.
 - `--codex-concurrent N` — cap on concurrent codex dispatches (default: 3)
 - `--lead-agent codex|claude` — which agent runs the lead review (default: `codex`). Use `claude` to run the lead on a Claude model (e.g. Fable). The wing/fixer stays `claude`/opus-4-8 regardless.
 - `--lead-model ID` — override the lead reviewer model (default: `gpt-5.6-sol` for codex, `claude-fable-5` for claude)
@@ -77,8 +78,9 @@ PROMPTS_BASE="${STARK_REVIEW_PROMPTS_BASE:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/c
 
 Parse `$ARGUMENTS` for `<path>` (first non-flag positional) and flags
 `--rounds N`, `--dry-run`, `--force`, `--codex-concurrent N`,
-`--lead-agent AGENT`, `--lead-model ID`, `--fable`, `--wing-agent AGENT`, and
-`--wing-model ID`. `--fable` sets
+`--lead-agent AGENT`, `--lead-model ID`, `--fable`, `--wing-agent AGENT`,
+`--wing-model ID`, and `--ready` (alias `--no-draft`) → set `READY=1` (used
+only when this run **opens** a PR). `--fable` sets
 `LEAD_AGENT=claude` (leave `LEAD_MODEL` unset so the dispatcher defaults to
 `claude-fable-5`); explicit `--lead-agent`/`--lead-model` take precedence.
 `--wing-agent`/`--wing-model` set `WING_AGENT`/`WING_MODEL` (leave `WING_MODEL`
@@ -155,7 +157,8 @@ if [ -z "$pr_number" ] && [ -z "${DRY_RUN:-}" ]; then
     git commit -m "docs(review): stage $(basename "$DOC") for plan review" 2>/dev/null \
         || git commit --allow-empty -m "chore(review): open PR to host plan-review findings for $(basename "$DOC")"
     git push -u origin "$CUR_BRANCH" 2>/dev/null || git push origin "$CUR_BRANCH" || true
-    CREATE_OUT=$(node --experimental-strip-types "$TOOLS/github_app.ts" --app stark-claude pr create \
+    ready_flag=(); [ -n "${READY:-}" ] && ready_flag=(--ready)
+    CREATE_OUT=$(node --experimental-strip-types "$TOOLS/github_app.ts" --app stark-claude pr create "${ready_flag[@]}" \
         --head "$CUR_BRANCH" --base "$DEFAULT_BRANCH" \
         --title "Plan review: $(basename "$DOC")" \
         --body "Opened by \`/stark-review-plan\` to host review findings for \`$DOC\`." 2>/dev/null || true)

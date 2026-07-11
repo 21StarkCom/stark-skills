@@ -241,6 +241,18 @@ async function main(argv: string[]): Promise<number> {
       `HEAD ${headAfterPush} drifted from pre-push ${aboutToPushSha} during push (concurrent local mutation)`);
   }
 
+  // Draft-by-default policy: un-draft the PR NOW — after the final head is
+  // pushed — so the target-repo CI (guarded on `draft == false`, fired by the
+  // `ready_for_review` event) runs on the pushed head. The watcher below then
+  // waits for it to go green before merging. Idempotent if already ready.
+  if (plan.pr.wasDraft) {
+    ghLib.markPrReady(plan.pr.number, { repoSlug: plan.pr.nameWithOwner });
+    process.stdout.write(JSON.stringify({
+      event: "marked-ready",
+      prNumber: plan.pr.number,
+    }) + "\n");
+  }
+
   // Step 7+: branch on watch mode
   if (!plan.execute.watch) {
     return await runNoWatch(plan, planFile);
@@ -267,6 +279,10 @@ async function runNoWatch(plan: PrMergePlan, planFile: string): Promise<number> 
   }
   const verdict = summarizeVerdict(rollup.contexts!);
   if (verdict.vacuous && !plan.execute.allowNoRequiredChecks) {
+    if (plan.pr.wasDraft) {
+      die(MergeExit.CHECK_FAIL,
+        `PR was just un-drafted; its CI (fired by the ready_for_review event) has not registered yet, so --no-watch sees a vacuous rollup. Re-run with default-watch (drop --no-watch) so the merge waits for the now-triggered checks, or pass --allow-no-required-checks if the target repo genuinely has none.`);
+    }
     die(MergeExit.CHECK_FAIL,
       `no required checks observed on pushedHeadOid; --no-watch refuses vacuous pass. Pass --allow-no-required-checks (audited) or use default-watch.`);
   }

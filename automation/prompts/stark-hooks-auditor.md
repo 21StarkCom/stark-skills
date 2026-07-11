@@ -97,10 +97,12 @@ If actionable recommendations are found:
    git add automation/hooks/registry.md automation/hooks/recommendations.md
    git commit -m "automation(stark-hooks-auditor): update hook registry and recommendations"
    git push -u origin HEAD
-   gh pr create --repo GetEvinced/stark-skills \
+   gh pr create --repo GetEvinced/stark-skills --draft \
      --title "[stark-hooks-auditor] Hook registry update" \
      --label "automation,automation:stark-hooks-auditor" \
      --body "{summary of findings and recommendations}"
+   # Draft-by-default: this automation PR opens as a draft for human review;
+   # mark it ready (gh pr ready <N>) when you're ready to run CI + merge.
    ```
 
 ## Output Protocol

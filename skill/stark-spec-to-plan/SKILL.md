@@ -2,7 +2,7 @@
 name: stark-spec-to-plan
 description: >-
   Convert spec docs into phased implementation plans via paired lead/wing agents. Lead drafts, wing reviews, fix-loop until approved. Use for plan from spec.
-argument-hint: "<path> [--lead claude|codex|gemini] [--wing claude|codex|gemini] [--max-rounds N] [--timeout N] [--wing-timeout N] [--dry-run] [--force]"
+argument-hint: "<path> [--lead claude|codex|gemini] [--wing claude|codex|gemini] [--max-rounds N] [--timeout N] [--wing-timeout N] [--dry-run] [--force] [--ready]"
 disable-model-invocation: true
 model: opus
 revision: 6943b7a3856c1caabf33b8449f6ed1604d203423
@@ -51,6 +51,7 @@ Fills the pipeline gap: `/stark-review-spec` → **`/stark-spec-to-plan`** → `
 - `--wing-timeout N` — per-wing-invocation timeout in seconds (default: 600)
 - `--dry-run` — generate plan but don't write output files or post to PR
 - `--force` — proceed even if spec file has uncommitted changes
+- `--ready` (alias `--no-draft`) — when this run **opens** a PR, open it ready-for-review. By default an auto-opened PR is a **draft** so the target repo's draft-guarded CI stays idle until it's marked ready.
 
 If `--lead` and `--wing` resolve to the same agent, error and stop:
 > Error: --lead and --wing must be different agents.
@@ -216,6 +217,8 @@ lead_app="stark-$lead"   # stark-claude | stark-codex | stark-gemini
 # Open a fresh PR this run? Only when none exists (never in --dry-run — 3d is skipped entirely there).
 open_pr=0
 [ -z "$pr_number" ] && open_pr=1
+# Draft-by-default: an auto-opened PR is a draft unless --ready/--no-draft was
+# passed. open_ready is non-empty when either token is present in $ARGUMENTS.
 ```
 
 **3d.i — Ensure a working branch (never commit to the default branch).** The spec is already committed (Phase 1 aborts on a dirty spec without `--force`); the plan + summary written in 3b/3c are new files to land on a branch:
@@ -252,8 +255,10 @@ If the commit fails (hook rejection, nothing new to commit), warn and continue �
 ```bash
 if [ "$open_pr" = 1 ]; then
   git push -u origin HEAD
+  ready_flag=()
+  [ -n "$open_ready" ] && ready_flag=(--ready)
   created=$(node --experimental-strip-types "$TOOLS/github_app.ts" --app "$lead_app" \
-      --repo "$REPO" pr create \
+      --repo "$REPO" pr create "${ready_flag[@]}" \
       --head "$branch" \
       --base "$default_branch" \
       --title "Plan: $(basename -- "$path")" \

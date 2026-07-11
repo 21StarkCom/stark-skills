@@ -1,11 +1,15 @@
 name: Doc Staleness Check
 on:
   pull_request:
-    types: [opened, synchronize]
+    # `ready_for_review` re-engages the check when a draft PR is un-drafted.
+    types: [opened, synchronize, ready_for_review]
 
 jobs:
   check-staleness:
     runs-on: ubuntu-latest
+    # Skip-draft guard — see standards/workflows/skip-draft-guard.md. Draft PRs
+    # are WIP; don't run CI on them until they're marked ready-for-review.
+    if: github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v4
         with:

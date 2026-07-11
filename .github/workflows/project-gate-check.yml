@@ -9,7 +9,8 @@ on:
   pull_request_review:
     types: [submitted]
   pull_request:
-    types: [synchronize]
+    # `ready_for_review` re-engages the gate once a draft WIP PR is un-drafted.
+    types: [synchronize, ready_for_review]
 
 # Collapse the check_run storm: many check_run.completed events fire per commit
 # (one per sibling check). Group by commit/PR and cancel superseded runs so only
@@ -26,6 +27,12 @@ permissions:
 jobs:
   gate-check:
     runs-on: ubuntu-latest
+    # Skip-draft guard. Use `!= true` (NOT `== false`): `check_run` events carry
+    # no `pull_request` object, so `draft` is undefined there — `!= true` keeps
+    # those (the main trigger) running, and only skips an explicit-draft
+    # `pull_request` event. A draft never reaches 'Ready to Merge' anyway, so
+    # this is belt-and-suspenders with the gate's own status check.
+    if: github.event.pull_request.draft != true
     steps:
       # Same guard as project-pr-sync.yml — github-script@v7 hard-requires
       # github-token, so an unset PROJECT_TOKEN fails every PR with

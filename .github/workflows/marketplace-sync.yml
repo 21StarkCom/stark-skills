@@ -111,6 +111,10 @@ jobs:
           git add -A
           git commit -m "chore(sync): regenerate from stark-skills@${short}"
           git push --force -u origin "$branch"
+          # NOT draft (exempt from the draft-by-default policy): this is an
+          # automated publish PR that must run bifrost's CI and merge once green —
+          # there is no local-test/WIP phase to keep it out of CI for. See
+          # standards/workflows/skip-draft-guard.md ("What is NOT guarded").
           gh pr create --repo 21StarkCom/bifrost \
             --head "$branch" --base main \
             --title "chore(sync): regenerate from stark-skills@${short}" \

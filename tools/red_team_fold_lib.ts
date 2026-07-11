@@ -615,6 +615,9 @@ export interface OpenOrEditFoldPrArgs {
   artifactRelPath: string;
   sourceRunId: string;
   app: AppName;
+  /** Open the fold PR as a draft. Defaults to true (draft-by-default policy);
+   *  the fold PR is reviewable-and-never-merged, so a draft is the natural state. */
+  draft?: boolean;
 }
 
 /** The PR-side shape shared by `openOrEditFoldPr` and injected test doubles. */
@@ -629,6 +632,8 @@ export interface RunFoldOpts {
   dryRun: boolean;
   /** Whether the caller wants a PR opened/edited (AND `red_team.fold.open_pr`). */
   openPr: boolean;
+  /** Open the fold PR as a draft (default true). CLI `--ready` sets this false. */
+  draft?: boolean;
 
   /** Pre-resolved fix-plan source (tests + a CLI that resolved upstream). When
    *  omitted, runFold resolves it via `resolveFoldFixPlanSource`. */
@@ -853,6 +858,7 @@ export async function openOrEditFoldPr(
       body:
         `${a.marker}\n\nFolded the red-team fix plan into \`${a.artifactRelPath}\` ` +
         `(source run \`${a.sourceRunId}\`). Decision log posted as a comment below.`,
+      draft: a.draft ?? true,
       app,
     })) as Record<string, unknown>;
     prNumber = typeof created["number"] === "number" ? (created["number"] as number) : null;
@@ -1114,6 +1120,7 @@ export async function runFold(opts: RunFoldOpts): Promise<FoldResult> {
       artifactRelPath,
       sourceRunId: src.sourceRunId,
       app: "stark-claude",
+      draft: opts.draft ?? true,
     });
     prUrl = pr.pr_url;
     opts.onPr?.();

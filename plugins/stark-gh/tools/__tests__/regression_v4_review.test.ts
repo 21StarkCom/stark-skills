@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { buildPlan, collectState } from "../gh_pr_open_preflight.ts";
 import { assembleBody } from "../gh_pr_open_execute.ts";
 import { redactSecrets } from "../lib/redact.ts";
-import { prCreate, prEdit } from "../lib/gh.ts";
+import { markPrReady, prCreate, prEdit } from "../lib/gh.ts";
 
 const fakeRepoView = JSON.stringify({
   nameWithOwner: "evinced/x",
@@ -121,6 +121,31 @@ test("prCreate omits --draft when draft is false", () => {
   prCreate({ title: "t", bodyFile: "/tmp/b", base: "main", draft: false }, { exec });
   const argv = captured! as unknown as readonly string[];
   assert.equal(argv.includes("--draft"), false);
+});
+
+test("markPrReady issues `gh pr ready NUMBER` with repo slug", () => {
+  let captured: readonly string[] | null = null;
+  const exec = ((_cmd: string, args: readonly string[]) => {
+    captured = args;
+    return Buffer.from("");
+  }) as never;
+  markPrReady(42, { repoSlug: "o/r" }, { exec });
+  assert.deepEqual(captured, ["pr", "ready", "42", "--repo", "o/r"]);
+});
+
+test("markPrReady swallows the already-ready error (idempotent)", () => {
+  const exec = (() => {
+    throw new Error("already open for review");
+  }) as never;
+  // Must NOT throw — readying an already-ready PR is a no-op success.
+  assert.doesNotThrow(() => markPrReady(7, {}, { exec }));
+});
+
+test("markPrReady rethrows an unrelated failure", () => {
+  const exec = (() => {
+    throw new Error("network unreachable");
+  }) as never;
+  assert.throws(() => markPrReady(7, {}, { exec }), /network unreachable/);
 });
 
 test("prEdit argv routes metadata-only flags through --add-*", () => {

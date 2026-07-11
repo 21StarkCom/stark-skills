@@ -103,7 +103,13 @@ async function main(argv: string[]): Promise<number> {
     }
   }
 
-  // Step 3: merge via shared helper (atomic --match-head-commit)
+  // Step 3: merge via shared helper (atomic --match-head-commit).
+  // Defense-in-depth: execute already un-drafted a wasDraft PR before spawning
+  // the watcher, but re-assert readiness here so a draft can never reach the
+  // merge call (a draft merge would hard-fail). Idempotent no-op if ready.
+  if (plan.pr.wasDraft) {
+    ghLib.markPrReady(plan.pr.number, { repoSlug: plan.pr.nameWithOwner });
+  }
   let mergeSha = "";
   try {
     const r = ghLib.mergeSquashPr({

@@ -75,6 +75,24 @@ export function prCreate(args: {
   gh(argv, opts);
 }
 
+// Mark a draft PR ready-for-review (un-draft) so its target-repo CI fires.
+// `gh pr ready` issues the GraphQL markPullRequestReadyForReview mutation.
+// Idempotent: readying an already-ready PR is treated as a no-op success.
+export function markPrReady(prNumber: number, args: {
+  repoSlug?: string;
+} = {}, opts: { exec?: ExecFn } = {}): void {
+  const argv = ["pr", "ready", String(prNumber)];
+  if (args.repoSlug) argv.push("--repo", args.repoSlug);
+  try {
+    gh(argv, opts);
+  } catch (err) {
+    const msg = String((err as Error)?.message ?? err);
+    if (!/already .*review|not a draft|already open for review/i.test(msg)) {
+      throw err;
+    }
+  }
+}
+
 export function prEdit(number: number, args: {
   title?: string;
   bodyFile?: string;

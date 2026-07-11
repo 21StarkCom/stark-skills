@@ -1,8 +1,8 @@
 ---
 name: pr-open
 description: >-
-  Open or update a PR with Codex-drafted prose, stage-all commit (default), push, and CI watcher.
-argument-hint: "[--title T] [--body B] [--body-file F] [--commit-message M] [--commit-message-file F] [--base BRANCH] [--reviewer LIST] [--label LIST] [--assignee LIST] [--staged-only] [--commit-all] [--full-context] [--no-watch] [--draft] [--allow-secret-commit] [--allow-secret-to-llm]"
+  Open or update a PR with Codex-drafted prose, stage-all commit (default), push, and CI watcher. New PRs open as DRAFT by default (override --ready).
+argument-hint: "[--title T] [--body B] [--body-file F] [--commit-message M] [--commit-message-file F] [--base BRANCH] [--reviewer LIST] [--label LIST] [--assignee LIST] [--staged-only] [--commit-all] [--full-context] [--no-watch] [--ready] [--allow-secret-commit] [--allow-secret-to-llm]"
 allowed-tools: Bash, Read
 model: sonnet
 ---
@@ -11,6 +11,13 @@ model: sonnet
 
 Open or update a GitHub pull request through a fixed three-stage pipeline:
 preflight, draft, execute.
+
+**Draft-by-default:** a newly created PR opens as a **draft** so target-repo CI
+(guarded on `github.event.pull_request.draft == false`) stays idle while you
+test locally. Pass `--ready` (alias `--no-draft`) to open it ready-for-review
+instead. Un-drafting a WIP PR happens later via `/stark-gh:pr-merge` (which
+marks it ready, waits for CI, then squash-merges) — never in this command.
+Updating an existing PR never changes its draft state.
 
 YOU MUST NOT splice user input into shell commands. Forward the entire
 `$ARGUMENTS` value to preflight as one quoted `--raw-args` value. Do not parse

@@ -17,10 +17,18 @@ test("parse empty raw-args", () => {
     commitAll: true,
     fullContext: false,
     noWatch: false,
-    draft: false,
+    draft: true,
     allowSecretCommit: false,
     allowSecretToLlm: false,
   });
+});
+
+test("draft defaults to true; --ready / --no-draft opt out", () => {
+  assert.equal(parseRawArgs("").draft, true);
+  assert.equal(parseRawArgs("--ready").draft, false);
+  assert.equal(parseRawArgs("--no-draft").draft, false);
+  // --draft is a redundant explicit opt-in to the new default.
+  assert.equal(parseRawArgs("--draft").draft, true);
 });
 
 test("bare integer sets pr", () => {

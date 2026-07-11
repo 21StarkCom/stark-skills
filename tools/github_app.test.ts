@@ -9,6 +9,7 @@ import { strict as assert } from "node:assert";
 import test from "node:test";
 
 import {
+  draftFromFlags,
   mergeMethodFromFlags,
   parseArgs,
   reviewEventFromFlags,
@@ -164,6 +165,24 @@ test("parseArgs: pr create --draft sets the flag", () => {
   ]);
   assert.equal(p.flags.has("draft"), true);
   assert.equal(p.options.get("head"), "feature/x");
+});
+
+test("parseArgs: --ready / --no-draft are recognized flags", () => {
+  assert.equal(parseArgs(["pr", "create", "--ready"]).flags.has("ready"), true);
+  assert.equal(
+    parseArgs(["pr", "create", "--no-draft"]).flags.has("no-draft"),
+    true,
+  );
+});
+
+test("draftFromFlags: draft-by-default, --ready / --no-draft opt out", () => {
+  // No flags → draft (the new default).
+  assert.equal(draftFromFlags(new Map()), true);
+  // Legacy explicit opt-in still draft.
+  assert.equal(draftFromFlags(new Map([["draft", true]])), true);
+  // Opt out with either override.
+  assert.equal(draftFromFlags(new Map([["ready", true]])), false);
+  assert.equal(draftFromFlags(new Map([["no-draft", true]])), false);
 });
 
 test("parseArgs: missing value for known option throws", () => {
