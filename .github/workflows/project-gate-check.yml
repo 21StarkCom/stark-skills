@@ -11,6 +11,14 @@ on:
   pull_request:
     types: [synchronize]
 
+# Collapse the check_run storm: many check_run.completed events fire per commit
+# (one per sibling check). Group by commit/PR and cancel superseded runs so only
+# the latest gate evaluation per commit survives. Keys are a SHA / PR number —
+# safe as a concurrency string, never shell-interpolated.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.check_run.head_sha || github.event.pull_request.number || github.event.pull_request_review.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   statuses: write
