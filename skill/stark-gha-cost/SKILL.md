@@ -16,8 +16,7 @@ description: >-
   escalates genuine mis-billing to Support. Reach for it even when the user only
   says "GitHub is expensive this month" or "our CI is too slow" without naming
   Actions.
-disable-model-invocation: false
-model: opus
+disable-model-invocation: truemodel: opus
 ---
 
 ## Help

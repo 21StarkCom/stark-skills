@@ -1,5 +1,6 @@
 ---
 name: stark-gh-user
+disable-model-invocation: true
 description: >-
   Switch the active GitHub user identity (primary ↔ secondary) for `gh`
   invocations to dodge per-user GraphQL/REST rate limits. Tokens live in macOS

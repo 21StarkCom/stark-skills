@@ -1,5 +1,6 @@
 ---
 name: stark-handover
+disable-model-invocation: true
 description: >-
   Use when pausing or splitting work across sessions — before /clear, when
   context runs low, end of day, switching tasks — or when resuming after one.

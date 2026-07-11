@@ -1,5 +1,6 @@
 ---
 name: remember
+disable-model-invocation: true
 description: >-
   Persist a durable fact or note into Aryeh's second-brain vault via the brain
   MCP (or the brain CLI as fallback). Use whenever the user EXPLICITLY asks to

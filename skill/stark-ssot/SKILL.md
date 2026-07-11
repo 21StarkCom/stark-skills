@@ -11,8 +11,7 @@ description: >-
   re-pasted dispatch/env helper, a duplicated `>=`/threshold check. Do NOT use
   for code that only looks similar but answers a different question.
 argument-hint: "[file-or-area to consolidate or review]"
-disable-model-invocation: false
-model: opus[1m]
+disable-model-invocation: truemodel: opus[1m]
 ---
 
 ## Help

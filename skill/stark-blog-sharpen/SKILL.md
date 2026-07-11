@@ -7,8 +7,7 @@ description: >-
   real person wrote it / does this read AI / tighten this essay". Two jobs: kill
   filler so the post earns every word, and scrub the AI tells so it reads like a
   human manager. Editing/diagnosis only - pairs with stark-voice (which drafts).
-disable-model-invocation: false
-model: opus
+disable-model-invocation: truemodel: opus
 ---
 
 ## Help
