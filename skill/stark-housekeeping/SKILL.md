@@ -175,7 +175,7 @@ INFRA_JSON=$(node --experimental-strip-types "$TOOLS/housekeeping_infra.ts" \
   ${DRY_RUN:+--dry-run} --json)
 ```
 
-The tool runs all six sub-phases in one pass, returning a receipt the skill
+The tool runs all seven sub-phases in one pass, returning a receipt the skill
 renders into the Phase 4 summary block:
 
 | Sub-phase | Target | Threshold |
@@ -186,10 +186,12 @@ renders into the Phase 4 summary block:
 | 5.4 | `healer.jsonl`, `preflight.jsonl`, `approach-contracts.jsonl` | keep last 1000 lines |
 | 5.5 | `~/.claude/code-review/logs/*.stderr` | 14 days |
 | 5.6 | `automation/logs/` and `~/.claude/code-review/history/autopilot/` | tar.gz files older than 30 days, grouped by YYYY-MM into `~/.claude/code-review/archives/` |
+| 5.7 | Legacy stark-skills asset symlinks under `~/.claude` (`ASSET_SYMLINKS`) | Repoint when **dangling** or the target carries a renamed segment (`STALE_SEGMENT_RENAMES`, e.g. `Code/Playground/`→`Code/21Stark/`). Repairs only when the corrected target exists; else reported in `errors`, link never deleted. |
 
 Receipt: `{ dryRun, sessionsRemoved[], checkpointsRemoved[],
 staleLocksRemoved[], validationLogsRemoved[], logsRotated[],
-artifactsArchived[{archive, files[]}], errors[] }`. Exit code is non-zero
+artifactsArchived[{archive, files[]}], symlinksRepaired[{path, from, to}],
+errors[] }`. Exit code is non-zero
 only when `errors` is non-empty (e.g. an unlink permission error). Tar
 archive creation verifies via `tar -tzf` before unlinking originals; on
 verification failure the originals are left in place and `errors` notes it.
