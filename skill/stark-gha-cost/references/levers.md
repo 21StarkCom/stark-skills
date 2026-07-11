@@ -78,10 +78,18 @@ right-sizing the resource will.
    only when Mac-only code (`**/*_darwin.go`) changes. Separate workflow +
    `on.push/pull_request.paths:` → skipped-and-free when untouched. Scope the job
    to just the affected package, and drop `-race` if Linux already ran it.
-7. **Self-hosted runners** — only worth it for **sustained** Linux minutes after
-   the above. Never for a runaway (you'd pay GCP for the same runaway). **macOS
-   can't be self-hosted on GCP** (no Mac instances). Never on **public** repos
-   (untrusted PR code on your infra).
+7. **When the driver is a test matrix**, the cost is `job_count ×
+   per-job_overhead` and the overhead is usually *setup* (cold compile, dep
+   download, no cache sharing), not tests. Bucket/shard jobs down, share/warm the
+   build cache, template-clone DBs, and path-filter the matrix off infra-only
+   PRs. Full playbook: `matrix-runners.md`.
+8. **Self-hosted runners** — the default "rarely worth it" **flips when you
+   already own idle compute.** If the project already runs on a cluster (esp. GKE
+   Autopilot), ARC ephemeral runners take GitHub-billed minutes to ~0 — often the
+   single biggest lever. Standing up *new* compute just for CI is usually not
+   worth it (you'd trade the GitHub bill for a GCP bill + ops). Never for a
+   runaway, never **macOS** (no GCP Macs), never **public** repos (untrusted PR
+   code on your infra). See `matrix-runners.md`.
 
 ## Enabling / backfilling security features
 

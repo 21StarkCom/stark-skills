@@ -68,6 +68,13 @@ GH_TOKEN=<pat> scripts/gha-repo-actions-drill.sh <owner/repo> [since=YYYY-MM-DD]
 This classifies the driver: high run **volume**, matrix **fan-out** (jobs ≫ 1),
 a few **long** runs, or **none of the above**. The script prints how to read it.
 
+**Expect one thing to dominate (Pareto).** Usually a single workflow/matrix is
+80–98% of the bill and everything else is rounding error — don't spread effort
+evenly. Pull **real per-job timings** with `gh run view <run-id>` (not vibes) to
+find it. If the driver is a **test matrix**, the cost is almost always per-job
+*setup* (token mint, dep download, cold compilation, no cache sharing) × job
+count — not test logic. Read `references/matrix-runners.md` before optimizing it.
+
 ### 2. Decide — Actions minutes, a downstream resource, or a billing anomaly?
 
 The trigger/workflow is rarely the cost itself — **chase the resource the
@@ -101,10 +108,17 @@ version, in order:
 4. Cut over-frequent crons (hourly → daily).
 5. `concurrency: cancel-in-progress` on PR / `check_run` workflows (collapses the
    per-commit check storm).
-6. Path-filter expensive-runner jobs (macOS) into their own workflow — skipped
-   and free when untouched. A detector job is worse: it still bills 1 rounded
-   minute every run.
-7. Self-hosted runners: only for sustained Linux minutes, never a runaway, never
+6. Path-filter expensive-runner jobs (macOS) / heavy matrices into their own
+   workflow — skipped and free when untouched. A detector job is worse: it still
+   bills 1 rounded minute every run. A `.github/**` trigger-all that runs the
+   whole test matrix on infra-only PRs is a classic quiet overspend.
+7. **When the driver is a test matrix**, attack `job_count × per-job_overhead`:
+   bucket/shard jobs down (drop isolation the code already enforces), share/warm
+   the build cache, template-clone DBs instead of replaying migrations. See
+   `references/matrix-runners.md`.
+8. Self-hosted runners: marginal if you'd stand up new compute, but **the biggest
+   lever if you already own a cluster** — ARC ephemeral runners on an existing
+   GKE (esp. Autopilot) take GitHub-billed minutes to ~0. Never a runaway, never
    macOS (no GCP Macs), never public repos.
 
 Right-size seats too: if `code_security` committers = 0, you don't need the $30
@@ -122,6 +136,15 @@ setup, backfilling secret scanning) are API calls — note them in the PR body.
 
 ## Guardrails
 
+- **Validating a CI cost-fix can itself cost a full run (chicken-and-egg).** An
+  infra/CI PR often trigger-alls the very matrix you're trimming, so you pay one
+  expensive run to prove the reduction. Sequence deliberately: land the **trigger
+  narrowing first** so later cost PRs don't re-run the matrix; accept one costly
+  validation when unavoidable. You pay once to stop paying forever.
+- **local-green ≠ CI-green.** A warm local module/build cache hides problems CI
+  hits cold (e.g. a dependency that stopped resolving after a module move). A
+  broken CI blocks *both* cost work and correctness work — fix the correctness
+  break first, or they mask each other.
 - **Disabling a workflow that feeds a REQUIRED status check freezes the repo.**
   If you turn off (or path-filter away) a workflow whose check is required by
   branch protection, PRs can never satisfy that check → nothing merges. Worse
