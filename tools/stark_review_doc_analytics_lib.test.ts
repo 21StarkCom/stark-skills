@@ -6,6 +6,7 @@ import {
   countLines,
   DEFAULT_ANALYTICS_THRESHOLDS,
   evaluateGuards,
+  hasNetConvergence,
   judgeGrade,
   renderAnalyticsMarkdown,
   type RoundStat,
@@ -109,6 +110,49 @@ test("coherence and final-review rounds are ignored by the guards", () => {
   ];
   const v = evaluateGuards(1000, rounds, DEFAULT_ANALYTICS_THRESHOLDS);
   assert.equal(v.abort, false);
+});
+
+test("decline-then-rise trajectory flags no_net_convergence and grades degraded", () => {
+  // The Atlas spec-review shape: 44 → 35 → 45 fix rounds, 48 unresolved at final.
+  const rounds = [
+    stat({ round: 1, to_fix: 44 }),
+    stat({ round: 2, to_fix: 35 }),
+    stat({ round: 3, to_fix: 45 }),
+    stat({ round: 4, kind: "final-review", to_fix: 48 }),
+  ];
+  const a = buildAnalytics({
+    doc: "d.md",
+    promptsDir: "spec-review",
+    originalDoc: "a".repeat(1000),
+    finalDoc: "a".repeat(1300),
+    roundStats: rounds,
+    thresholds: DEFAULT_ANALYTICS_THRESHOLDS,
+    abortedEarly: false,
+    abortReason: null,
+  });
+  assert.ok(a.flags.includes("no_net_convergence"));
+  assert.equal(a.grade, "degraded");
+  assert.ok(a.notes.some((n) => n.startsWith("No net convergence")));
+});
+
+test("real convergence does not trip no_net_convergence", () => {
+  const rounds = [
+    stat({ round: 1, to_fix: 20 }),
+    stat({ round: 2, to_fix: 8 }),
+    stat({ round: 3, kind: "final-review", to_fix: 3 }),
+  ];
+  const a = buildAnalytics({
+    doc: "d.md", promptsDir: "spec-review",
+    originalDoc: "a".repeat(1000), finalDoc: "a".repeat(1100),
+    roundStats: rounds, thresholds: DEFAULT_ANALYTICS_THRESHOLDS,
+    abortedEarly: false, abortReason: null,
+  });
+  assert.ok(!a.flags.includes("no_net_convergence"));
+  assert.equal(a.grade, "healthy");
+});
+
+test("single fix round never trips no_net_convergence", () => {
+  assert.equal(hasNetConvergence([stat({ round: 1, to_fix: 40 }), stat({ round: 2, kind: "final-review", to_fix: 40 })]), true);
 });
 
 test("buildAnalytics assembles payload with trajectory notes", () => {

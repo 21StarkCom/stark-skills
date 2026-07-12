@@ -55,6 +55,7 @@ export type HealthFlag =
   | "runaway_growth"      // doc grew past max_doc_growth_ratio × original
   | "round_growth_spike"  // a single round grew the doc past max_round_growth_ratio
   | "non_convergent"      // to_fix did not decline for N consecutive rounds
+  | "no_net_convergence"  // the run ended with as many findings as it started with
   | "churn"               // recurring findings dominate — fixes aren't sticking
   | "patch_thrash";       // most attempted patches failed to apply
 
@@ -171,6 +172,27 @@ export function judgeGrade(flags: readonly HealthFlag[]): HealthGrade {
   return "healthy";
 }
 
+/**
+ * Net-convergence check across the WHOLE run (advisory, not loop-stopping —
+ * it needs the final review, which only exists after the loop).
+ *
+ * The consecutive-rounds breaker misses the decline-then-rise shape
+ * (44 → 35 → 45): each pair alternates so `stuck` never reaches N, yet the
+ * run ends with as many open findings as it started with. Judge that here:
+ * the last measured findings count (the final review's `to_fix` when present,
+ * else the last fix round's) must be meaningfully below round 1's, or the
+ * review process spent its rounds treading water.
+ */
+export function hasNetConvergence(roundStats: readonly RoundStat[]): boolean {
+  const fixRounds = roundStats.filter((r) => r.kind === "review-fix");
+  if (fixRounds.length < 2) return true; // too short to judge
+  const first = fixRounds[0]!;
+  if (first.to_fix === 0) return true;
+  const finalReview = [...roundStats].reverse().find((r) => r.kind === "final-review");
+  const last = finalReview ?? fixRounds[fixRounds.length - 1]!;
+  return last.to_fix < first.to_fix * 0.8;
+}
+
 export function buildAnalytics(opts: {
   doc: string;
   promptsDir: string;
@@ -184,6 +206,9 @@ export function buildAnalytics(opts: {
 }): ReviewAnalytics {
   const guard = evaluateGuards(opts.originalDoc.length, opts.roundStats, opts.thresholds);
   const flags = [...new Set([...guard.flags, ...(opts.extraFlags ?? [])])];
+  if (!hasNetConvergence(opts.roundStats) && !flags.includes("non_convergent")) {
+    flags.push("no_net_convergence");
+  }
   const originalChars = opts.originalDoc.length;
   const finalChars = opts.finalDoc.length;
 
@@ -203,6 +228,7 @@ export function buildAnalytics(opts: {
     const delta = coherence.doc_chars_after - coherence.doc_chars_before;
     notes.push(`Coherence pass: ${coherence.patches_applied} patch(es), ${delta <= 0 ? "removed" : "added"} ${Math.abs(delta)} chars.`);
   }
+  if (flags.includes("no_net_convergence")) notes.push("No net convergence: the run ended with roughly as many open findings as round 1 started with — the rounds spent their budget treading water. Consider tighter prompts or reviewing the unresolved list by hand instead of more rounds.");
   if (flags.includes("churn")) notes.push("Churn: a large share of findings recur across rounds — fixes are not sticking or reviewers keep re-flagging authored content.");
   if (flags.includes("patch_thrash")) notes.push("Patch thrash: most wing patches failed unique-match validation.");
   if (flags.includes("round_growth_spike")) notes.push("At least one round grew the document sharply — fixes are adding prose instead of tightening it.");
