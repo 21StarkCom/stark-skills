@@ -52,6 +52,16 @@ export interface DocReviewConfig {
   /** Skill-local cap on concurrent codex dispatches (codex serializes hard on
    * ChatGPT-tier accounts; bump cautiously). */
   max_codex_concurrent: number;
+  /** Run the single coherence pass (contradictions / repetitions / fluff /
+   * leftovers) after the fix loop, before the final review. */
+  coherence_pass: boolean;
+  /** Process-health circuit breakers — see stark_review_doc_analytics_lib.ts. */
+  analytics: {
+    max_doc_growth_ratio: number;
+    max_round_growth_ratio: number;
+    non_convergent_rounds: number;
+    churn_recurring_share: number;
+  };
 }
 
 export const DEFAULT_DOC_REVIEW_CONFIG: DocReviewConfig = {
@@ -60,6 +70,13 @@ export const DEFAULT_DOC_REVIEW_CONFIG: DocReviewConfig = {
   disabled_domains: [],
   max_rounds: 3,
   max_codex_concurrent: 3,
+  coherence_pass: true,
+  analytics: {
+    max_doc_growth_ratio: 2.0,
+    max_round_growth_ratio: 1.5,
+    non_convergent_rounds: 2,
+    churn_recurring_share: 0.5,
+  },
 };
 
 /** Hard ceiling — mirrors `stark_review.ts` MAX_ROUNDS_CEILING. Stops runaway
@@ -588,6 +605,45 @@ export function parseFixerOutput(raw: string): FixerParseOutcome {
     });
   }
   return { parsed: { summary, patches, skipped }, error: null };
+}
+
+// ─── Coherence pass ──────────────────────────────────────────────────────
+
+/**
+ * Build the prompt for the single post-fix-loop coherence pass. Reuses the
+ * WING_FIXER_CONTRACT patch shape (finding_id = "coherence") and the same
+ * applier, so no new parse path is needed.
+ *
+ * The pass is a net-reducer: after several fix rounds the document tends to
+ * accumulate contradictions between patched sections, repeated statements,
+ * filler prose, and leftovers (references to text a patch removed). This
+ * pass tightens; it must never add new requirements or grow the document.
+ */
+export function buildCoherencePrompt(opts: { doc: string }): string {
+  return [
+    "# Document Coherence Pass",
+    "",
+    "You are the **coherence editor** for stark-review-doc. The document below has been through several automated review-fix rounds. Patches from different rounds may have left it internally inconsistent. Your ONLY job is to tighten it — you must NOT add new requirements, sections, caveats, or content.",
+    "",
+    "Look for exactly these four defect classes:",
+    "",
+    "1. **Contradictions** — two passages that state incompatible things (a limit set to different values, a step described as both required and optional, a decision reversed elsewhere). Keep the version consistent with the document's overall intent; fix or remove the other.",
+    "2. **Repetitions** — the same statement, rule, or explanation appearing more than once (verbatim or paraphrased). Keep the best-placed occurrence; delete the rest.",
+    "3. **Fluff** — filler that adds no information: restated context, hedging boilerplate, empty summaries, sentences that only announce what the next sentence says.",
+    "4. **Leftovers** — artifacts of prior edits: references to sections/terms that no longer exist, orphaned transition sentences, duplicated headings, stale numbering, half-merged paragraphs.",
+    "",
+    "Rules:",
+    "- Every patch must REDUCE or preserve the document's length. If a rewrite would grow it, don't make it.",
+    "- Do not change the technical meaning of any requirement. When resolving a contradiction, prefer the reading most consistent with the rest of the document.",
+    "- If the document is already coherent, emit an empty `patches` array. That is a good outcome, not a failure.",
+    "- Use `finding_id: \"coherence\"` on every patch.",
+    "",
+    "## Document",
+    "",
+    opts.doc,
+    "",
+    WING_FIXER_CONTRACT,
+  ].join("\n");
 }
 
 // ─── Patch applier ──────────────────────────────────────────────────────

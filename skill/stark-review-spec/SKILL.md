@@ -44,8 +44,21 @@ Lead/wing multi-round spec review:
   attached. Lead and wing agents are independent.
 - Each fix round commits the patched document to git so the spec's evolution
   is traceable.
+- A single **coherence pass** (wing dispatch) runs after the fix loop, before
+  the final review: it hunts contradictions, repetitions, fluff, and leftovers
+  the fix rounds introduced, and may only shrink the document (a growing result
+  is rejected wholesale). Disable with `--no-coherence`.
 - After the last fix round (or early termination on zero findings), a
   **final review-only round** captures unresolved findings.
+- **Process analytics + circuit breakers:** every run computes per-round
+  metrics (doc growth, findings trajectory, recurring share, patch failures)
+  and a health grade (`healthy`/`degraded`/`runaway`), written to
+  `analytics.json` in the history dir, a `<spec>.review-analytics.md` sidecar
+  next to the doc, and the receipt's `analytics` block. Inline guards stop the
+  loop early when the doc grows past `analytics.max_doc_growth_ratio` (default
+  2x the original) or findings fail to decline for
+  `analytics.non_convergent_rounds` consecutive rounds — no more 200-line specs
+  ballooning through 10 rounds.
 
 Answers the question: **"Is this the right system?"**
 
@@ -55,6 +68,7 @@ Answers the question: **"Is this the right system?"**
 - `--rounds N` — max fix cycles (default: from config `spec_review.max_rounds`, ceiling 10)
 - `--dry-run` — review only, no wing fixes, no commits
 - `--force` — proceed even if the spec file has uncommitted changes
+- `--no-coherence` — skip the post-fix-loop coherence pass (default: runs; also gated by config `coherence_pass`)
 - `--ready` (alias `--no-draft`) — when this run **opens** a PR to host findings, open it ready-for-review. By default an auto-opened PR is a **draft** so the target repo's draft-guarded CI stays idle until it's marked ready.
 - `--codex-concurrent N` — cap on concurrent codex dispatches (default: 3)
 - `--lead-agent codex|claude` — which agent runs the lead review (default: `codex`). Use `claude` to run the lead on a Claude model (e.g. Fable). The wing/fixer stays `claude`/opus-4-8 regardless.
@@ -85,7 +99,8 @@ node --experimental-strip-types "$TOOLS/stark_review_doc.ts" \
     ${WING_AGENT:+--wing-agent "$WING_AGENT"} \
     ${WING_MODEL:+--wing-model "$WING_MODEL"} \
     ${DRY_RUN:+--dry-run} \
-    ${FORCE:+--force}
+    ${FORCE:+--force} \
+    ${NO_COHERENCE:+--no-coherence}
 ```
 
 ## Phase 1: Parse arguments + validate
@@ -198,7 +213,8 @@ RECEIPT_JSON=$(node --experimental-strip-types "$TOOLS/stark_review_doc.ts" \
     ${WING_AGENT:+--wing-agent "$WING_AGENT"} \
     ${WING_MODEL:+--wing-model "$WING_MODEL"} \
     ${DRY_RUN:+--dry-run} \
-    ${FORCE:+--force})
+    ${FORCE:+--force} \
+    ${NO_COHERENCE:+--no-coherence})
 TS_EXIT=$?
 set -e
 ```
@@ -259,6 +275,8 @@ Rounds: {len(rounds)}
   ...
   final-review: {findings} findings, {unresolved} unresolved
 Fixes committed: {fixes_committed}
+Coherence: {coherence.patches_applied} patches ({coherence.chars_delta} chars)
+Analytics: {analytics.grade} — growth {analytics.growth_ratio}x, flags [{analytics.flags}]
 History: {history_dir}
 ```
 

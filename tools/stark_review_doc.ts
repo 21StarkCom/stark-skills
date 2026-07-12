@@ -57,6 +57,15 @@ import {
   resolveDocPromptSources,
   selectFindingsToFix,
 } from "./stark_review_doc_lib.ts";
+import { buildCoherencePrompt } from "./stark_review_doc_lib.ts";
+import {
+  buildAnalytics,
+  countLines,
+  evaluateGuards,
+  renderAnalyticsMarkdown,
+  type ReviewAnalytics,
+  type RoundStat,
+} from "./stark_review_doc_analytics_lib.ts";
 import { assetConfigPath, assetPromptsDir } from "./asset_root_lib.ts";
 
 // ─── Constants ─────────────────────────────────────────────────────────
@@ -702,6 +711,20 @@ function loadDocReviewConfig(promptsDir: PromptsDir): DocReviewConfig {
   if (typeof section.max_codex_concurrent === "number" && section.max_codex_concurrent > 0) {
     cfg.max_codex_concurrent = Math.floor(section.max_codex_concurrent);
   }
+  if (typeof section.coherence_pass === "boolean") {
+    cfg.coherence_pass = section.coherence_pass;
+  }
+  if (isPlainObject(section.analytics)) {
+    const a = section.analytics;
+    const num = (v: unknown, min: number): number | null =>
+      typeof v === "number" && Number.isFinite(v) && v >= min ? v : null;
+    cfg.analytics = {
+      max_doc_growth_ratio: num(a.max_doc_growth_ratio, 1) ?? cfg.analytics.max_doc_growth_ratio,
+      max_round_growth_ratio: num(a.max_round_growth_ratio, 1) ?? cfg.analytics.max_round_growth_ratio,
+      non_convergent_rounds: num(a.non_convergent_rounds, 1) ?? cfg.analytics.non_convergent_rounds,
+      churn_recurring_share: num(a.churn_recurring_share, 0) ?? cfg.analytics.churn_recurring_share,
+    };
+  }
   return cfg;
 }
 
@@ -891,6 +914,7 @@ export interface DispatchOptions {
   wingTimeoutSec: number;
   maxWingAttempts: number;
   commitFixes: boolean;
+  coherencePass: boolean;
 }
 
 interface Receipt {
@@ -945,6 +969,16 @@ interface Receipt {
   unresolved: DocFinding[];
   fixes_committed: number;
   history_dir: string;
+  /** Process-health analytics — monitors and judges the review run itself. */
+  analytics: ReviewAnalytics | null;
+  coherence: {
+    ran: boolean;
+    patches_applied: number;
+    patches_attempted: number;
+    chars_delta: number;
+    commit_sha: string | null;
+    error: string | null;
+  } | null;
   error: { code: string; message: string } | null;
 }
 
@@ -1034,6 +1068,10 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
   }
 
   let currentDoc = fs.readFileSync(docAbs, "utf-8");
+  const originalDoc = currentDoc;
+  const roundStats: RoundStat[] = [];
+  let abortedEarly = false;
+  let abortReason: string | null = null;
   const maxRounds = opts.maxRoundsOverride !== null
     ? Math.min(MAX_ROUNDS_CEILING, Math.max(1, opts.maxRoundsOverride))
     : opts.config.max_rounds;
@@ -1089,6 +1127,25 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
     });
     const toFix = selectFindingsToFix(classified);
     log(`round ${roundNum}: ${allRaw.length} raw findings → ${toFix.length} to fix (threshold=${opts.config.fix_threshold})`);
+    const docBeforeRound = currentDoc;
+    const recurringCount = toFix.filter((f) => f.classification === "recurring").length;
+    const pushRoundStat = (fix: { attempted: number; applied: number; failures: number } | null, durationS: number): void => {
+      roundStats.push({
+        round: roundNum,
+        kind: "review-fix",
+        doc_chars_before: docBeforeRound.length,
+        doc_chars_after: currentDoc.length,
+        doc_lines_before: countLines(docBeforeRound),
+        doc_lines_after: countLines(currentDoc),
+        raw_findings: allRaw.length,
+        to_fix: toFix.length,
+        recurring: recurringCount,
+        patches_attempted: fix?.attempted ?? 0,
+        patches_applied: fix?.applied ?? 0,
+        patch_failures: fix?.failures ?? 0,
+        duration_s: durationS,
+      });
+    };
 
     let fixSummary: Receipt["rounds"][number]["fix"] | undefined;
 
@@ -1107,6 +1164,7 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       persistedRounds.push(
         toPersisted(receiptRounds[receiptRounds.length - 1]!, "review-fix"),
       );
+      pushRoundStat(null, elapsedSec(roundT0));
       break;
     }
 
@@ -1125,6 +1183,7 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       persistedRounds.push(
         toPersisted(receiptRounds[receiptRounds.length - 1]!, "review-fix"),
       );
+      pushRoundStat(null, elapsedSec(roundT0));
       break;
     }
 
@@ -1190,11 +1249,113 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
     });
     receiptRounds.push(roundReceipt);
     persistedRounds.push(toPersisted(roundReceipt, "review-fix"));
+    pushRoundStat(
+      {
+        attempted: wingOutcome.attempted.length,
+        applied: wingOutcome.applied.length,
+        failures: wingOutcome.patch_failures.length,
+      },
+      elapsedSec(roundT0),
+    );
+
+    // Process-health circuit breakers — stop a pathological loop (runaway
+    // doc growth, non-converging findings) instead of grinding to maxRounds.
+    const guard = evaluateGuards(originalDoc.length, roundStats, opts.config.analytics);
+    if (guard.abort) {
+      abortedEarly = true;
+      abortReason = guard.abort_reason;
+      log(`round ${roundNum}: CIRCUIT BREAKER — ${guard.abort_reason}. Stopping fix loop.`);
+      break;
+    }
 
     if (wingOutcome.applied.length === 0) {
       log(`round ${roundNum}: wing applied 0 patches — terminating fix loop`);
       break;
     }
+  }
+
+  // Coherence pass — a single wing dispatch that tightens the post-fix-loop
+  // document: contradictions, repetitions, fluff, leftovers. Net-reducing by
+  // contract; runs even after a circuit-breaker abort (that's when the doc
+  // needs it most). Skipped on dispatch failure or dry-run.
+  let coherenceReceipt: Receipt["coherence"] = null;
+  if (opts.coherencePass && !dispatchFailureEarlyExit && !opts.dryRun) {
+    log("── Coherence pass ──");
+    const cohT0 = process.hrtime.bigint();
+    const docBefore = currentDoc;
+    const prompt = buildCoherencePrompt({ doc: currentDoc });
+    const codexCwd = opts.wingAgent === "codex"
+      ? fs.mkdtempSync(path.join(os.tmpdir(), "stark-doc-coherence-"))
+      : null;
+    let wing: WingDispatchResult;
+    try {
+      wing = opts.wingAgent === "codex"
+        ? await runCodexWing({
+          prompt,
+          timeoutSec: opts.wingTimeoutSec,
+          model: opts.wingModel,
+          reasoningEffort: CODEX_REASONING_EFFORT_XHIGH,
+          cwd: codexCwd!,
+        })
+        : await runClaudeWing({
+          prompt,
+          timeoutSec: opts.wingTimeoutSec,
+          model: opts.wingModel,
+        });
+    } finally {
+      if (codexCwd) { try { fs.rmSync(codexCwd, { recursive: true, force: true }); } catch { /* ignore */ } }
+    }
+    let applied = 0;
+    let attempted = 0;
+    let commitSha: string | null = null;
+    const cohError = wing.error ?? (wing.parsed ? null : `parse_error:${wing.parse_error}`);
+    if (wing.parsed) {
+      attempted = wing.parsed.patches.length;
+      const applyResult = applyPatches(currentDoc, wing.parsed.patches);
+      applied = applyResult.applied.length;
+      if (applied > 0 && applyResult.newDoc.length <= docBefore.length * 1.02) {
+        // Guard the guard: a "coherence" result that grows the doc >2% is
+        // rejected wholesale — the pass exists to shrink, not to author.
+        currentDoc = applyResult.newDoc;
+        fs.writeFileSync(docAbs, currentDoc);
+        if (opts.commitFixes) {
+          commitSha = await gitCommitDoc({
+            repoDir: opts.repoDir,
+            docPath: opts.docPath,
+            message: `docs: ${opts.promptsDir} coherence pass (${applied} patches, ${docBefore.length - currentDoc.length} chars removed)\n\nCo-Authored-By: stark-review-doc <noreply@anthropic.com>`,
+          });
+          if (commitSha) fixesCommitted++;
+        }
+      } else if (applied > 0) {
+        log(`coherence: rejected — result grew the doc (${docBefore.length} → ${applyResult.newDoc.length} chars)`);
+        applied = 0;
+      }
+    }
+    const cohDuration = elapsedSec(cohT0);
+    log(`coherence: applied=${applied}/${attempted} delta=${currentDoc.length - docBefore.length} chars${cohError ? ` error=${cohError}` : ""}`);
+    roundStats.push({
+      round: roundStats.length + 1,
+      kind: "coherence",
+      doc_chars_before: docBefore.length,
+      doc_chars_after: currentDoc.length,
+      doc_lines_before: countLines(docBefore),
+      doc_lines_after: countLines(currentDoc),
+      raw_findings: 0,
+      to_fix: 0,
+      recurring: 0,
+      patches_attempted: attempted,
+      patches_applied: applied,
+      patch_failures: attempted - applied,
+      duration_s: cohDuration,
+    });
+    coherenceReceipt = {
+      ran: true,
+      patches_applied: applied,
+      patches_attempted: attempted,
+      chars_delta: currentDoc.length - docBefore.length,
+      commit_sha: commitSha,
+      error: cohError,
+    };
   }
 
   // Final review-only round (skipped on dispatch failure or dry-run)
@@ -1232,6 +1393,21 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
     });
     receiptRounds.push(finalReceipt);
     persistedRounds.push(toPersisted(finalReceipt, "final-review"));
+    roundStats.push({
+      round: roundStats.length + 1,
+      kind: "final-review",
+      doc_chars_before: currentDoc.length,
+      doc_chars_after: currentDoc.length,
+      doc_lines_before: countLines(currentDoc),
+      doc_lines_after: countLines(currentDoc),
+      raw_findings: allRaw.length,
+      to_fix: unresolved.length,
+      recurring: unresolved.filter((f) => f.classification === "recurring").length,
+      patches_attempted: 0,
+      patches_applied: 0,
+      patch_failures: 0,
+      duration_s: elapsedSec(finalT0),
+    });
   }
 
   const historyDir = buildHistoryDir({
@@ -1248,6 +1424,31 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       models: { lead: opts.leadModel, wing: opts.wingModel, lead_agent: opts.leadAgent, wing_agent: opts.wingAgent },
     });
   }
+
+  // Analytics — monitor + judge the run itself, then persist as sidecars:
+  // machine-readable analytics.json in the history dir, human-readable
+  // <doc>.review-analytics.md next to the document (red-team sidecar pattern).
+  const analytics = buildAnalytics({
+    doc: opts.docPath,
+    promptsDir: opts.promptsDir,
+    originalDoc,
+    finalDoc: currentDoc,
+    roundStats,
+    thresholds: opts.config.analytics,
+    abortedEarly,
+    abortReason,
+  });
+  const analyticsSidecar = docAbs.replace(/\.md$/i, "") + ".review-analytics.md";
+  if (!opts.dryRun) {
+    try {
+      fs.mkdirSync(historyDir, { recursive: true });
+      fs.writeFileSync(path.join(historyDir, "analytics.json"), JSON.stringify(analytics, null, 2));
+      fs.writeFileSync(analyticsSidecar, renderAnalyticsMarkdown(analytics));
+    } catch (err) {
+      log(`analytics sidecar write failed: ${(err as Error).message}`);
+    }
+  }
+  log(`analytics: grade=${analytics.grade} growth=${analytics.growth_ratio}x flags=[${analytics.flags.join(", ")}]${abortedEarly ? ` aborted="${abortReason}"` : ""}`);
 
   const anyFailedResults = receiptRounds.some((r) => r.failed_results.length > 0);
   const exitCode = dispatchFailureEarlyExit || anyFailedResults ? 1 : 0;
@@ -1268,6 +1469,8 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
     unresolved,
     fixes_committed: fixesCommitted,
     history_dir: historyDir,
+    analytics,
+    coherence: coherenceReceipt,
     error: dispatchFailureEarlyExit
       ? { code: "dispatch_failure", message: "All lead reviewers failed in a round; see rounds[].failed_results" }
       : null,
@@ -1394,6 +1597,8 @@ function errorReceipt(opts: DispatchOptions, code: string, message: string): Rec
     unresolved: [],
     fixes_committed: 0,
     history_dir: "",
+    analytics: null,
+    coherence: null,
     error: { code, message },
   };
 }
@@ -1417,6 +1622,7 @@ interface CliArgs {
   wingTimeoutSec: number;
   maxWingAttempts: number;
   commitFixes: boolean;
+  coherencePass: boolean;
   json: boolean;
 }
 
@@ -1443,6 +1649,7 @@ function usage(): string {
     "  --dry-run                  review only, skip wing fixes and commits",
     "  --force                    proceed even if doc has uncommitted changes",
     "  --no-commit                apply fixes in-place but skip git commit",
+    "  --no-coherence             skip the post-fix-loop coherence pass (contradictions/repetitions/fluff/leftovers)",
     "  --json                     emit receipt JSON to stdout (default true; here for clarity)",
   ].join("\n");
 }
@@ -1465,6 +1672,7 @@ function parseArgs(argv: ReadonlyArray<string>): CliArgs {
     wingTimeoutSec: WING_TIMEOUT_SEC,
     maxWingAttempts: 2,
     commitFixes: true,
+    coherencePass: true,
     json: true,
   };
   const need = (i: number, flag: string): string => {
@@ -1521,6 +1729,7 @@ function parseArgs(argv: ReadonlyArray<string>): CliArgs {
       case "--dry-run":            args.dryRun = true; break;
       case "--force":              args.force = true; break;
       case "--no-commit":          args.commitFixes = false; break;
+      case "--no-coherence":       args.coherencePass = false; break;
       case "--json":               args.json = true; break;
       case "-h": case "--help":    process.stdout.write(usage() + "\n"); process.exit(0);
       default: throw new Error(`unknown arg: ${a}`);
@@ -1576,6 +1785,7 @@ async function main(): Promise<number> {
     wingTimeoutSec: args.wingTimeoutSec,
     maxWingAttempts: args.maxWingAttempts,
     commitFixes: args.commitFixes,
+    coherencePass: args.coherencePass && config.coherence_pass,
   };
 
   const { receipt, exitCode } = await dispatchDocReview(dispatchOpts);
