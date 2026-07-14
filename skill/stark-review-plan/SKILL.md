@@ -201,8 +201,11 @@ set -e
 ```
 
 Exit codes:
-- `0` — ok and no failed results
-- `1` — partial or terminal failure
+- `0` — ok: every domain completed a review at least once (transient dispatch
+  failures that recovered in a later round no longer fail the run)
+- `1` — terminal failure OR coverage gap (`coverage_gaps` nonempty: ≥1 domain
+  never completed a review in any round — its zero findings mean "never ran",
+  not "clean")
 - `2` — bad CLI arguments
 
 ## Phase 4: Surface failures
@@ -218,10 +221,12 @@ let raw=''; process.stdin.on('data',c=>raw+=c).on('end',()=>{
 OK=$(parse 'out.push(String(d.ok ?? null).toLowerCase());')
 ERR_CODE=$(parse 'out.push((d.error||{}).code||"");')
 ERR_MSG=$(parse 'out.push((d.error||{}).message||"");')
-FAILED_LIST=$(parse '
+GAPS=$(parse 'out.push((d.coverage_gaps||[]).join(", "));')
+TRANSIENT=$(parse '
+const gaps=new Set(d.coverage_gaps||[]);
 for (const r of (d.rounds||[]))
   for (const f of (r.failed_results||[]))
-    out.push(`round ${r.round}: ${f.agent}/${f.domain} — ${f.error}`);
+    if (!gaps.has(f.domain)) out.push(`round ${r.round}: ${f.agent}/${f.domain} — ${f.error}`);
 ')
 WING_ERRORS=$(parse '
 for (const r of (d.rounds||[])) {
@@ -234,10 +239,16 @@ for (const r of (d.rounds||[])) {
 
 failed=0
 if [ "$OK" = "false" ]; then error "Review failed: $ERR_CODE — $ERR_MSG"; failed=1; fi
-if [ -n "$FAILED_LIST" ]; then error "Lead dispatch failures:"; printf '  %s\n' "$FAILED_LIST" >&2; failed=1; fi
+if [ -n "$GAPS" ]; then error "COVERAGE GAP — these domains never completed a review in any round: $GAPS"; failed=1; fi
+if [ -n "$TRANSIENT" ]; then printf 'WARN: transient lead dispatch failures (domain recovered in another round):\n' >&2; printf '  %s\n' "$TRANSIENT" >&2; fi
 if [ -n "$WING_ERRORS" ]; then error "Wing fixer issues:"; printf '  %s\n' "$WING_ERRORS" >&2; failed=1; fi
 [ "$failed" -ne 0 ] && exit 1
 ```
+
+Blocking = `ok=false`, a coverage gap, or wing-fixer errors. Transient lead
+dispatch failures (the domain recovered in another round) are a **warning,
+not an abort** — do not soften the coverage-gap stop, and do not escalate
+transient warnings into one.
 
 ## Phase 5: Post every finding, fix it, resolve its thread
 
@@ -261,6 +272,7 @@ Rounds: {len(rounds)}
 Fixes committed: {fixes_committed}
 Coherence: {coherence.patches_applied} patches ({coherence.chars_delta} chars)
 Analytics: {analytics.grade} — growth {analytics.growth_ratio}x, flags [{analytics.flags}]
+Coverage: {all N domains completed | ⚠️ GAP: {coverage_gaps} never completed a review}
 History: {history_dir}
 ```
 

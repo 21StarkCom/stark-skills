@@ -9,13 +9,17 @@ import {
   buildFixerPrompt,
   buildReviewerPrompt,
   classifyFindings,
+  computeCoverage,
+  deriveRunOutcome,
   discoverDomains,
   docFindingId,
   extractFixerJson,
+  nextDomainTimeout,
   parseFixerOutput,
   parseReviewerOutput,
   pmap,
   resolveDocPromptSources,
+  scaleTimeoutForDocSize,
   selectFindingsToFix,
   WING_FIXER_CONTRACT,
   type DocFinding,
@@ -442,5 +446,93 @@ describe("pmap", () => {
 
   test("rejects on limit <= 0", async () => {
     await assert.rejects(pmap([1], 0, async (x) => x));
+  });
+});
+
+// ─── Coverage + adaptive timeouts ────────────────────────────────────────
+
+describe("computeCoverage", () => {
+  test("clean run has no gaps", () => {
+    const rounds = [{ results: [{ domain: "viability", error: null }, { domain: "security", error: null }] }];
+    const c = computeCoverage(rounds, ["viability", "security"]);
+    assert.deepEqual(c.gaps, []);
+    assert.equal(c.domains.viability!.completions, 1);
+    assert.equal(c.domains.viability!.attempts, 1);
+  });
+
+  test("domain that only ever timed out is a gap", () => {
+    const rounds = [
+      { results: [{ domain: "viability", error: "timeout" }, { domain: "security", error: null }] },
+      { results: [{ domain: "viability", error: "timeout" }, { domain: "security", error: null }] },
+    ];
+    const c = computeCoverage(rounds, ["viability", "security"]);
+    assert.deepEqual(c.gaps, ["viability"]);
+    assert.equal(c.domains.viability!.timeouts, 2);
+    assert.equal(c.domains.viability!.completions, 0);
+    assert.equal(c.domains.viability!.last_error, "timeout");
+  });
+
+  test("timeout then success is transient, NOT a gap", () => {
+    const rounds = [
+      { results: [{ domain: "viability", error: "timeout" }] },
+      { results: [{ domain: "viability", error: null }] },
+    ];
+    const c = computeCoverage(rounds, ["viability"]);
+    assert.deepEqual(c.gaps, []);
+    assert.equal(c.domains.viability!.timeouts, 1);
+    assert.equal(c.domains.viability!.completions, 1);
+  });
+
+  test("parse_error-only domain is a gap (never produced a usable review)", () => {
+    const c = computeCoverage([{ results: [{ domain: "ssot", error: "parse_error" }] }], ["ssot"]);
+    assert.deepEqual(c.gaps, ["ssot"]);
+    assert.equal(c.domains.ssot!.timeouts, 0);
+    assert.equal(c.domains.ssot!.last_error, "parse_error");
+  });
+
+  test("gaps are sorted and multi-domain", () => {
+    const rounds = [{ results: [
+      { domain: "viability", error: "timeout" },
+      { domain: "completeness", error: "timeout" },
+      { domain: "security", error: null },
+    ] }];
+    const c = computeCoverage(rounds, ["viability", "completeness", "security"]);
+    assert.deepEqual(c.gaps, ["completeness", "viability"]);
+  });
+});
+
+describe("adaptive timeouts", () => {
+  test("nextDomainTimeout escalates 600→1200→1800 and caps at 3× base", () => {
+    assert.equal(nextDomainTimeout(600, 600), 1200);
+    assert.equal(nextDomainTimeout(1200, 600), 1800);
+    assert.equal(nextDomainTimeout(1800, 600), 1800);
+  });
+
+  test("scaleTimeoutForDocSize: 1× small docs, linear growth, 3× cap", () => {
+    assert.equal(scaleTimeoutForDocSize(600, 8_000), 600);
+    assert.equal(scaleTimeoutForDocSize(600, 16_000), 600);
+    assert.equal(scaleTimeoutForDocSize(600, 28_000), 1050);
+    assert.equal(scaleTimeoutForDocSize(600, 200_000), 1800);
+  });
+});
+
+describe("deriveRunOutcome", () => {
+  test("coverage gaps → ok=false, exit 1, coverage_gap error", () => {
+    const r = deriveRunOutcome({ dispatchFailureEarlyExit: false, coverageGaps: ["viability"] });
+    assert.equal(r.ok, false);
+    assert.equal(r.exitCode, 1);
+    assert.equal(r.error!.code, "coverage_gap");
+    assert.match(r.error!.message, /viability/);
+  });
+
+  test("dispatch failure wins over gaps", () => {
+    const r = deriveRunOutcome({ dispatchFailureEarlyExit: true, coverageGaps: ["viability"] });
+    assert.equal(r.error!.code, "dispatch_failure");
+    assert.equal(r.exitCode, 1);
+  });
+
+  test("transient-only failures → ok=true, exit 0", () => {
+    const r = deriveRunOutcome({ dispatchFailureEarlyExit: false, coverageGaps: [] });
+    assert.deepEqual(r, { ok: true, exitCode: 0, error: null });
   });
 });

@@ -220,14 +220,19 @@ set -e
 ```
 
 Exit codes:
-- `0` — `ok=true` AND no `failed_results` in any round
-- `1` — `ok=false` (dispatch failure) OR partial failure (failed lead dispatches, wing errors, unparseable findings)
+- `0` — ok: every domain completed a review at least once (transient dispatch
+  failures that recovered in a later round no longer fail the run)
+- `1` — terminal failure OR coverage gap (`coverage_gaps` nonempty: ≥1 domain
+  never completed a review in any round — its zero findings mean "never ran",
+  not "clean")
 - `2` — bad CLI arguments
 
 ## Phase 4: Surface failures
 
-Parse the receipt JSON. Every failure surface independently forces a non-zero
-exit so the user can act.
+Parse the receipt JSON. Blocking = `ok=false`, a coverage gap, or wing-fixer
+errors. Transient lead dispatch failures (the domain recovered in another
+round) are a **warning, not an abort** — do not soften the coverage-gap stop,
+and do not escalate transient warnings into one.
 
 ```bash
 parse() { printf '%s' "$RECEIPT_JSON" | jq -r "$1"; }
@@ -235,9 +240,12 @@ parse() { printf '%s' "$RECEIPT_JSON" | jq -r "$1"; }
 OK=$(parse '(.ok // false) | tostring')
 ERR_CODE=$(parse '.error.code // ""')
 ERR_MSG=$(parse '.error.message // ""')
-FAILED_LIST=$(parse '
-  (.rounds // [])[] as $r
+GAPS=$(parse '(.coverage_gaps // []) | join(", ")')
+TRANSIENT=$(parse '
+  (.coverage_gaps // []) as $gaps
+  | (.rounds // [])[] as $r
   | ($r.failed_results // [])[]
+  | select(.domain as $d | ($gaps | index($d)) | not)
   | "round \($r.round): \(.agent)/\(.domain) — \(.error)"
 ')
 WING_ERRORS=$(parse '
@@ -250,7 +258,8 @@ WING_ERRORS=$(parse '
 
 failed=0
 if [ "$OK" = "false" ]; then error "Review failed: $ERR_CODE — $ERR_MSG"; failed=1; fi
-if [ -n "$FAILED_LIST" ]; then error "Lead dispatch failures:"; printf '  %s\n' "$FAILED_LIST" >&2; failed=1; fi
+if [ -n "$GAPS" ]; then error "COVERAGE GAP — these domains never completed a review in any round: $GAPS"; failed=1; fi
+if [ -n "$TRANSIENT" ]; then printf 'WARN: transient lead dispatch failures (domain recovered in another round):\n' >&2; printf '  %s\n' "$TRANSIENT" >&2; fi
 if [ -n "$WING_ERRORS" ]; then error "Wing fixer issues:"; printf '  %s\n' "$WING_ERRORS" >&2; failed=1; fi
 [ "$failed" -ne 0 ] && exit 1
 ```
@@ -277,6 +286,7 @@ Rounds: {len(rounds)}
 Fixes committed: {fixes_committed}
 Coherence: {coherence.patches_applied} patches ({coherence.chars_delta} chars)
 Analytics: {analytics.grade} — growth {analytics.growth_ratio}x, flags [{analytics.flags}]
+Coverage: {all N domains completed | ⚠️ GAP: {coverage_gaps} never completed a review}
 History: {history_dir}
 ```
 

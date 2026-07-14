@@ -205,3 +205,64 @@ test("aborted runaway analytics renders the abort reason", () => {
   assert.match(md, /🔴 runaway/);
   assert.match(md, /stopped early/);
 });
+
+// ─── Coverage gaps in analytics ──────────────────────────────────────────
+
+test("coverage gap caps the grade at degraded and renders in the sidecar", () => {
+  const a = buildAnalytics({
+    doc: "d.md",
+    promptsDir: "plan-review",
+    originalDoc: "x".repeat(1000),
+    finalDoc: "x".repeat(1100),
+    roundStats: [stat({ to_fix: 3 }), stat({ round: 2, to_fix: 1 })],
+    thresholds: DEFAULT_ANALYTICS_THRESHOLDS,
+    abortedEarly: false,
+    abortReason: null,
+    coverage: {
+      viability: { attempts: 3, completions: 0, timeouts: 3, last_error: "timeout" },
+      security: { attempts: 3, completions: 3, timeouts: 0, last_error: null },
+    },
+    coverageGaps: ["viability"],
+  });
+  assert.equal(a.grade, "degraded");
+  assert.ok(a.flags.includes("coverage_gap"));
+  assert.deepEqual(a.coverage_gaps, ["viability"]);
+  assert.ok(a.notes.some((n) => n.includes("Coverage gap")));
+  const md = renderAnalyticsMarkdown(a);
+  assert.match(md, /Coverage:.*GAP.*viability \(0\/3, 3 timeouts\)/);
+});
+
+test("clean coverage stays healthy and renders the all-domains line", () => {
+  const a = buildAnalytics({
+    doc: "d.md",
+    promptsDir: "plan-review",
+    originalDoc: "x".repeat(1000),
+    finalDoc: "x".repeat(1100),
+    roundStats: [stat({ to_fix: 3 }), stat({ round: 2, to_fix: 1 })],
+    thresholds: DEFAULT_ANALYTICS_THRESHOLDS,
+    abortedEarly: false,
+    abortReason: null,
+    coverage: { security: { attempts: 2, completions: 2, timeouts: 0, last_error: null } },
+    coverageGaps: [],
+  });
+  assert.equal(a.grade, "healthy");
+  assert.ok(!a.flags.includes("coverage_gap"));
+  assert.match(renderAnalyticsMarkdown(a), /all 1 domains completed/);
+});
+
+test("runaway stays runaway even with coverage gaps (gap does not downgrade)", () => {
+  const a = buildAnalytics({
+    doc: "d.md",
+    promptsDir: "spec-review",
+    originalDoc: "x".repeat(1000),
+    finalDoc: "x".repeat(3000),
+    roundStats: [stat({ doc_chars_before: 1000, doc_chars_after: 3000, to_fix: 5 })],
+    thresholds: DEFAULT_ANALYTICS_THRESHOLDS,
+    abortedEarly: true,
+    abortReason: "doc grew 3.00x vs original (limit 2x)",
+    coverage: { viability: { attempts: 1, completions: 0, timeouts: 1, last_error: "timeout" } },
+    coverageGaps: ["viability"],
+  });
+  assert.equal(a.grade, "runaway");
+  assert.ok(a.flags.includes("coverage_gap"));
+});

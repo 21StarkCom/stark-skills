@@ -781,3 +781,90 @@ export async function pmap<T, U>(
   await Promise.all(runners);
   return out;
 }
+
+// ─── Coverage + adaptive timeouts ────────────────────────────────────────
+
+export interface DomainCoverage {
+  attempts: number;
+  completions: number;
+  timeouts: number;
+  last_error: string | null;
+}
+
+export interface CoverageReport {
+  domains: Record<string, DomainCoverage>;
+  /** Sorted keys of domains with attempts > 0 && completions === 0. */
+  gaps: string[];
+}
+
+/**
+ * Aggregate per-domain completion across every round of a run. A domain that
+ * was attempted but never completed in ANY round is a coverage gap — the
+ * review it was responsible for never happened, which is not the same thing
+ * as a clean pass.
+ */
+export function computeCoverage(
+  rounds: ReadonlyArray<{ results: ReadonlyArray<{ domain: string; error: string | null }> }>,
+  allDomains: readonly string[],
+): CoverageReport {
+  const domains: Record<string, DomainCoverage> = {};
+  for (const d of allDomains) domains[d] = { attempts: 0, completions: 0, timeouts: 0, last_error: null };
+  for (const round of rounds) {
+    for (const r of round.results) {
+      const c = domains[r.domain] ?? (domains[r.domain] = { attempts: 0, completions: 0, timeouts: 0, last_error: null });
+      c.attempts++;
+      if (r.error === null) c.completions++;
+      else {
+        if (r.error === "timeout") c.timeouts++;
+        c.last_error = r.error;
+      }
+    }
+  }
+  const gaps = Object.keys(domains)
+    .filter((d) => domains[d]!.attempts > 0 && domains[d]!.completions === 0)
+    .sort();
+  return { domains, gaps };
+}
+
+/** Doubling escalation capped at 3× base: 600 → 1200 → 1800 → 1800. A domain
+ * that timed out gets a bigger ceiling on its next attempt instead of
+ * re-failing at the same one every round. */
+export function nextDomainTimeout(currentSec: number, baseSec: number): number {
+  return Math.min(baseSec * 3, currentSec * 2);
+}
+
+export const TIMEOUT_SCALE_CHARS = 16_000;
+
+/** Scale the base lead timeout with document size: 1× up to
+ * TIMEOUT_SCALE_CHARS, linear above, capped at 3× base. A 200-line spec
+ * reviews fine at 600s; a 700-line plan starved at the same ceiling. */
+export function scaleTimeoutForDocSize(baseSec: number, docChars: number): number {
+  const scaled = Math.round(baseSec * (docChars / TIMEOUT_SCALE_CHARS));
+  return Math.min(baseSec * 3, Math.max(baseSec, scaled));
+}
+
+/** Single source of truth for run outcome: a coverage gap is a failed run —
+ * `ok` and the exit code must say so, not just a buried per-round error. */
+export function deriveRunOutcome(opts: {
+  dispatchFailureEarlyExit: boolean;
+  coverageGaps: readonly string[];
+}): { ok: boolean; exitCode: 0 | 1; error: { code: string; message: string } | null } {
+  if (opts.dispatchFailureEarlyExit) {
+    return {
+      ok: false,
+      exitCode: 1,
+      error: { code: "dispatch_failure", message: "All lead reviewers failed in a round; see rounds[].failed_results" },
+    };
+  }
+  if (opts.coverageGaps.length > 0) {
+    return {
+      ok: false,
+      exitCode: 1,
+      error: {
+        code: "coverage_gap",
+        message: `domains never completed a review in any round: ${opts.coverageGaps.join(", ")}`,
+      },
+    };
+  }
+  return { ok: true, exitCode: 0, error: null };
+}

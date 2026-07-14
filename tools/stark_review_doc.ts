@@ -25,8 +25,10 @@
  * stderr: human-readable progress + summary.
  *
  * Exit codes:
- *   0 — ok and no failed_results / unposted reviews
- *   1 — partial or terminal failure
+ *   0 — ok: every domain completed a review at least once (transient
+ *       dispatch failures that recovered in a later round do not fail the run)
+ *   1 — terminal failure OR coverage gap (≥1 domain never completed a
+ *       review in any round — reported in receipt.coverage_gaps)
  *   2 — bad arguments
  */
 import { spawn } from "node:child_process";
@@ -42,19 +44,24 @@ import {
   buildReviewerPrompt,
   buildHistoryDir,
   classifyFindings,
+  computeCoverage,
   DEFAULT_DOC_REVIEW_CONFIG,
+  deriveRunOutcome,
   type DocFinding,
   type DocReviewConfig,
+  type DomainCoverage,
   discoverDomains,
   docFindingId,
   type FixerPatch,
   MAX_ROUNDS_CEILING,
+  nextDomainTimeout,
   parseFixerOutput,
   parseReviewerOutput,
   persistRoundsHistory,
   type PersistedRound,
   pmap,
   resolveDocPromptSources,
+  scaleTimeoutForDocSize,
   selectFindingsToFix,
 } from "./stark_review_doc_lib.ts";
 import { buildCoherencePrompt } from "./stark_review_doc_lib.ts";
@@ -737,7 +744,8 @@ async function runLeadReview(opts: {
   promptsBase: string;
   repoDir: string;
   maxConcurrent: number;
-  timeoutSec: number;
+  /** Per-domain timeout — escalated across rounds for domains that timed out. */
+  timeoutSecFor: (domain: string) => number;
   leadAgent: LeadAgent;
   model: string;
   reasoningEffort: string;
@@ -762,13 +770,13 @@ async function runLeadReview(opts: {
         ? await runClaudeReviewer({
           domain,
           prompt,
-          timeoutSec: opts.timeoutSec,
+          timeoutSec: opts.timeoutSecFor(domain),
           model: opts.model,
         })
         : await runCodexReviewer({
           domain,
           prompt,
-          timeoutSec: opts.timeoutSec,
+          timeoutSec: opts.timeoutSecFor(domain),
           model: opts.model,
           reasoningEffort: opts.reasoningEffort,
           cwd,
@@ -929,6 +937,12 @@ interface Receipt {
     disabled_domains: string[];
   };
   domains: string[];
+  /** Per-domain completion across the whole run. Zero findings from a domain
+   * that never completed means "never ran", not "clean". */
+  coverage: Record<string, DomainCoverage>;
+  /** Domains that never completed a review in ANY round — a coverage gap.
+   * Nonempty gaps make the run not-ok (exit 1). */
+  coverage_gaps: string[];
   rounds: Array<{
     round: number;
     kind: "review-fix" | "final-review";
@@ -1077,6 +1091,27 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
     : opts.config.max_rounds;
   const codexConcurrent = opts.codexConcurrentOverride ?? opts.config.max_codex_concurrent;
 
+  // Adaptive lead timeouts: base scales with document size, and a domain that
+  // timed out gets an escalated ceiling on its next attempt (600 → 1200 →
+  // 1800) instead of re-failing at the same one every round.
+  const effectiveBase = scaleTimeoutForDocSize(opts.leadTimeoutSec, originalDoc.length);
+  if (effectiveBase !== opts.leadTimeoutSec) {
+    log(`lead timeout scaled for doc size: ${opts.leadTimeoutSec}s → ${effectiveBase}s (${originalDoc.length} chars)`);
+  }
+  const domainTimeouts = new Map<string, number>(domainKeys.map((d) => [d, effectiveBase]));
+  const timeoutSecFor = (domain: string): number => domainTimeouts.get(domain) ?? effectiveBase;
+  const escalateTimeouts = (results: LeadDispatchResult[]): void => {
+    for (const r of results) {
+      if (r.error !== "timeout") continue;
+      const cur = domainTimeouts.get(r.domain) ?? effectiveBase;
+      const next = nextDomainTimeout(cur, effectiveBase);
+      if (next > cur) {
+        log(`timeout escalation: ${r.domain} ${cur}s → ${next}s on next attempt`);
+        domainTimeouts.set(r.domain, next);
+      }
+    }
+  };
+
   log(`config: prompts=${opts.promptsDir} max_rounds=${maxRounds} fix_threshold=${opts.config.fix_threshold} codex_concurrent=${codexConcurrent} dry_run=${opts.dryRun}`);
   log(`domains: ${domainKeys.join(", ")}`);
   log(`lead: ${opts.leadAgent}=${opts.leadModel} | wing: ${opts.wingAgent}=${opts.wingModel}`);
@@ -1098,11 +1133,12 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       promptsBase: opts.promptsBase,
       repoDir: opts.repoDir,
       maxConcurrent: codexConcurrent,
-      timeoutSec: opts.leadTimeoutSec,
+      timeoutSecFor,
       leadAgent: opts.leadAgent,
       model: opts.leadModel,
       reasoningEffort: CODEX_REASONING_EFFORT_XHIGH,
     });
+    escalateTimeouts(leadResults);
     const succeeded = leadResults.filter((r) => r.error === null).length;
     if (succeeded === 0) {
       log(`round ${roundNum}: dispatch failure (0/${leadResults.length} succeeded). Aborting fix loop.`);
@@ -1370,7 +1406,7 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       promptsBase: opts.promptsBase,
       repoDir: opts.repoDir,
       maxConcurrent: codexConcurrent,
-      timeoutSec: opts.leadTimeoutSec,
+      timeoutSecFor,
       leadAgent: opts.leadAgent,
       model: opts.leadModel,
       reasoningEffort: CODEX_REASONING_EFFORT_XHIGH,
@@ -1425,6 +1461,14 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
     });
   }
 
+  // Coverage — per-domain completion across the whole run. A domain that
+  // never completed in any round is a coverage gap: the receipt, analytics,
+  // ok flag, and exit code all say so.
+  const coverageReport = computeCoverage(receiptRounds, domainKeys);
+  if (coverageReport.gaps.length > 0) {
+    log(`COVERAGE GAP: ${coverageReport.gaps.join(", ")} never completed a review in any round`);
+  }
+
   // Analytics — monitor + judge the run itself, then persist as sidecars:
   // machine-readable analytics.json in the history dir, human-readable
   // <doc>.review-analytics.md next to the document (red-team sidecar pattern).
@@ -1437,6 +1481,8 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
     thresholds: opts.config.analytics,
     abortedEarly,
     abortReason,
+    coverage: coverageReport.domains,
+    coverageGaps: coverageReport.gaps,
   });
   const analyticsSidecar = docAbs.replace(/\.md$/i, "") + ".review-analytics.md";
   if (!opts.dryRun) {
@@ -1450,11 +1496,15 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
   }
   log(`analytics: grade=${analytics.grade} growth=${analytics.growth_ratio}x flags=[${analytics.flags.join(", ")}]${abortedEarly ? ` aborted="${abortReason}"` : ""}`);
 
-  const anyFailedResults = receiptRounds.some((r) => r.failed_results.length > 0);
-  const exitCode = dispatchFailureEarlyExit || anyFailedResults ? 1 : 0;
+  // Outcome — single source of truth (deriveRunOutcome): a coverage gap is a
+  // failed run; transient failures that recovered in a later round are not.
+  const outcome = deriveRunOutcome({
+    dispatchFailureEarlyExit,
+    coverageGaps: coverageReport.gaps,
+  });
 
   const receipt: Receipt = {
-    ok: !dispatchFailureEarlyExit,
+    ok: outcome.ok,
     doc: opts.docPath,
     prompts_dir: opts.promptsDir,
     models: { lead: opts.leadModel, wing: opts.wingModel, lead_agent: opts.leadAgent, wing_agent: opts.wingAgent },
@@ -1465,17 +1515,17 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       disabled_domains: opts.config.disabled_domains,
     },
     domains: domainKeys,
+    coverage: coverageReport.domains,
+    coverage_gaps: coverageReport.gaps,
     rounds: receiptRounds,
     unresolved,
     fixes_committed: fixesCommitted,
     history_dir: historyDir,
     analytics,
     coherence: coherenceReceipt,
-    error: dispatchFailureEarlyExit
-      ? { code: "dispatch_failure", message: "All lead reviewers failed in a round; see rounds[].failed_results" }
-      : null,
+    error: outcome.error,
   };
-  return { receipt, exitCode };
+  return { receipt, exitCode: outcome.exitCode };
 }
 
 function countByDomain(findings: DocFinding[]): Record<string, number> {
@@ -1593,6 +1643,8 @@ function errorReceipt(opts: DispatchOptions, code: string, message: string): Rec
       disabled_domains: opts.config.disabled_domains,
     },
     domains: [],
+    coverage: {},
+    coverage_gaps: [],
     rounds: [],
     unresolved: [],
     fixes_committed: 0,
@@ -1796,7 +1848,7 @@ async function main(): Promise<number> {
     0,
   );
   log(
-    `done: rounds=${receipt.rounds.length} findings=${totalFindings} unresolved=${receipt.unresolved.length} fixes_committed=${receipt.fixes_committed} ok=${receipt.ok}`,
+    `done: rounds=${receipt.rounds.length} findings=${totalFindings} unresolved=${receipt.unresolved.length} fixes_committed=${receipt.fixes_committed} ok=${receipt.ok} coverage_gaps=${receipt.coverage_gaps.length > 0 ? receipt.coverage_gaps.join(",") : "none"}`,
   );
   return exitCode;
 }
