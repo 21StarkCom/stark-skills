@@ -1429,6 +1429,9 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       log(`round ${roundNum}: CIRCUIT BREAKER — ${guard.abort_reason}. Stopping fix loop.`);
       break;
     }
+    if (guard.growth_ack_required) {
+      log(`round ${roundNum}: GROWTH WARNING — doc grew past ${opts.config.analytics.max_doc_growth_ratio}x while findings decline; continuing (operator ack required before Phase 5 — receipt analytics.growth_ack_required)`);
+    }
 
     if (wingOutcome.applied.length === 0) {
       log(`round ${roundNum}: wing applied 0 patches — terminating fix loop`);

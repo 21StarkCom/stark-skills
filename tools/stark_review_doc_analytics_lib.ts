@@ -70,6 +70,10 @@ export interface GuardVerdict {
   abort_reason: string | null;
   /** All flags raised so far (abort-worthy or advisory). */
   flags: HealthFlag[];
+  /** Growth breached the ratio limit but findings are converging — the run
+   * continues, but the operator must ack the growth before findings are
+   * posted (the skills' Phase 4 gate). */
+  growth_ack_required: boolean;
 }
 
 export interface ReviewAnalytics {
@@ -85,6 +89,9 @@ export interface ReviewAnalytics {
   grade: HealthGrade;
   aborted_early: boolean;
   abort_reason: string | null;
+  /** Doc grew past the ratio limit while findings kept declining — the run
+   * completed, but the operator must ack the growth before Phase 5 posts. */
+  growth_ack_required: boolean;
   /** Domains that never completed a review in any round (coverage gaps). */
   coverage_gaps: string[];
   /** Per-domain completion counts across the whole run (null when the
@@ -145,36 +152,53 @@ export function evaluateGuards(
     }
   }
 
-  // Abort: total growth vs original.
-  if (last && ratio(last.doc_chars_after, originalChars) > thresholds.max_doc_growth_ratio) {
-    flags.add("runaway_growth");
-    abort = true;
-    abortReason = `doc grew ${ratio(last.doc_chars_after, originalChars).toFixed(2)}x vs original (limit ${thresholds.max_doc_growth_ratio}x)`;
-  }
+  // Growth vs original — a real signal but NOT a hard stop on its own:
+  // legitimate gap-filling on a thin document is indistinguishable from
+  // padding by this ratio alone (a real spec review tripped at 2.63× while
+  // findings were declining — correct behavior, punished). Growth alone
+  // demands an operator ack; growth AND non-convergence together abort.
+  const growthRatio = last ? ratio(last.doc_chars_after, originalChars) : 0;
+  const growthBreach = growthRatio > thresholds.max_doc_growth_ratio;
+  if (growthBreach) flags.add("runaway_growth");
 
-  // Abort: non-convergence — to_fix did not decline for N consecutive rounds.
+  // Non-convergence — to_fix did not decline for N consecutive rounds: the
+  // wing is spinning its wheels. Aborts on its own.
   const n = thresholds.non_convergent_rounds;
-  if (!abort && fixRounds.length >= n + 1) {
+  let nonConvergent = false;
+  if (fixRounds.length >= n + 1) {
     let stuck = 0;
     for (let i = fixRounds.length - n; i < fixRounds.length; i++) {
       const cur = fixRounds[i]!;
       const prev = fixRounds[i - 1]!;
       if (cur.to_fix > 0 && cur.to_fix >= prev.to_fix) stuck++;
     }
-    if (stuck >= n) {
-      flags.add("non_convergent");
-      abort = true;
-      abortReason = `findings did not decline for ${n} consecutive rounds (last: ${last?.to_fix ?? 0} to fix)`;
-    }
+    nonConvergent = stuck >= n;
+  }
+  if (nonConvergent) flags.add("non_convergent");
+
+  if (nonConvergent && growthBreach) {
+    abort = true;
+    abortReason = `doc grew ${growthRatio.toFixed(2)}x vs original (limit ${thresholds.max_doc_growth_ratio}x) AND findings did not decline for ${n} consecutive rounds — the loop is padding, not converging`;
+  } else if (nonConvergent) {
+    abort = true;
+    abortReason = `findings did not decline for ${n} consecutive rounds (last: ${last?.to_fix ?? 0} to fix)`;
   }
 
-  return { abort, abort_reason: abortReason, flags: [...flags] };
+  return {
+    abort,
+    abort_reason: abortReason,
+    flags: [...flags],
+    growth_ack_required: growthBreach && !abort,
+  };
 }
 
 // ─── Final judgment ──────────────────────────────────────────────────────
 
 export function judgeGrade(flags: readonly HealthFlag[]): HealthGrade {
-  if (flags.includes("runaway_growth") || flags.includes("non_convergent")) return "runaway";
+  // Growth alone is degraded, not runaway: it needs an operator's judgment
+  // (gap-filling vs padding), not a verdict. Non-convergence — with or
+  // without growth — is the loop demonstrably failing: runaway.
+  if (flags.includes("non_convergent")) return "runaway";
   if (flags.length > 0) return "degraded";
   return "healthy";
 }
@@ -241,6 +265,9 @@ export function buildAnalytics(opts: {
     const delta = coherence.doc_chars_after - coherence.doc_chars_before;
     notes.push(`Coherence pass: ${coherence.patches_applied} patch(es), ${delta <= 0 ? "removed" : "added"} ${Math.abs(delta)} chars.`);
   }
+  if (guard.growth_ack_required) {
+    notes.push(`Growth ack required: the doc grew ${(opts.finalDoc.length / Math.max(1, opts.originalDoc.length)).toFixed(2)}x (limit ${opts.thresholds.max_doc_growth_ratio}x) while findings kept declining. The breaker did not stop the run — legitimate gap-filling on a thin doc looks like this — but the operator must judge growth vs padding before findings are posted.`);
+  }
   if (coverageGaps.length > 0) {
     const detail = coverageGaps
       .map((d) => {
@@ -267,6 +294,7 @@ export function buildAnalytics(opts: {
     grade: judgeGrade(flags),
     aborted_early: opts.abortedEarly,
     abort_reason: opts.abortReason,
+    growth_ack_required: guard.growth_ack_required,
     coverage_gaps: coverageGaps,
     coverage: opts.coverage ?? null,
     notes,
@@ -305,6 +333,7 @@ export function renderAnalyticsMarkdown(a: ReviewAnalytics): string {
     `- **Pipeline:** ${a.prompts_dir}`,
     `- **Doc size:** ${a.original.lines} → ${a.final.lines} lines (${a.original.chars} → ${a.final.chars} chars, ${a.growth_ratio}x)`,
     `- **Rounds:** ${a.rounds.length}${a.aborted_early ? ` — **stopped early:** ${a.abort_reason}` : ""}`,
+    ...(a.growth_ack_required ? [`- **⚠️ Growth ack required:** ${a.growth_ratio}x growth with declining findings — operator must judge gap-filling vs padding`] : []),
     renderCoverageLine(a),
     `- **Generated:** ${a.generated_at}`,
     "",

@@ -253,6 +253,21 @@ dispatch failures (the domain recovered in another round) are a **warning,
 not an abort** — do not soften the coverage-gap stop, and do not escalate
 transient warnings into one.
 
+**Growth ack gate:** when the receipt has `analytics.growth_ack_required =
+true`, the doc grew past the ratio limit while findings kept declining — the
+breaker deliberately did NOT stop the run (legitimate gap-filling on a thin
+plan looks exactly like this), but the operator must judge it before findings
+are posted. Ask via `AskUserQuestion`: *"Doc grew {analytics.growth_ratio}×
+(limit {config.analytics.max_doc_growth_ratio}×) but findings are declining —
+legitimate gap-filling or padding?"* with options **Continue (growth is
+legitimate)** / **Stop here (inspect the doc)**. On Continue: proceed and add
+`growth acked by operator` to the 5c summary. On Stop — or when running
+headless with no operator to ask — exit 1.
+
+```bash
+GROWTH_ACK=$(parse 'out.push(String((d.analytics||{}).growth_ack_required ?? false));')
+```
+
 ## Phase 5: Post every finding, fix it, resolve its thread
 
 **Contract: every finding lands on the PR as its own resolvable thread, every

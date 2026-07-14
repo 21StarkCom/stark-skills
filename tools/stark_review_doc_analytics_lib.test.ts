@@ -48,15 +48,31 @@ test("healthy run raises no flags and does not abort", () => {
   assert.equal(judgeGrade(v.flags), "healthy");
 });
 
-test("runaway growth vs original aborts", () => {
+test("growth alone (findings declining) warns + requires ack — no abort, degraded", () => {
+  // The 2026-07-14 incident shape: 2.1× growth while findings decline 3 → 2.
   const rounds = [
     stat({ round: 1, doc_chars_after: 1400 }),
     stat({ round: 2, to_fix: 2, doc_chars_before: 1400, doc_chars_after: 2100 }),
   ];
   const v = evaluateGuards(1000, rounds, DEFAULT_ANALYTICS_THRESHOLDS);
-  assert.equal(v.abort, true);
+  assert.equal(v.abort, false);
+  assert.equal(v.growth_ack_required, true);
   assert.ok(v.flags.includes("runaway_growth"));
-  assert.match(v.abort_reason!, /2\.10x/);
+  assert.equal(judgeGrade(v.flags), "degraded");
+});
+
+test("growth AND non-convergence together hard-stop with a composite reason", () => {
+  const rounds = [
+    stat({ round: 1, to_fix: 4, doc_chars_after: 1400 }),
+    stat({ round: 2, to_fix: 5, doc_chars_before: 1400, doc_chars_after: 1800 }),
+    stat({ round: 3, to_fix: 6, doc_chars_before: 1800, doc_chars_after: 2100 }),
+  ];
+  const v = evaluateGuards(1000, rounds, DEFAULT_ANALYTICS_THRESHOLDS);
+  assert.equal(v.abort, true);
+  assert.equal(v.growth_ack_required, false);
+  assert.ok(v.flags.includes("runaway_growth"));
+  assert.ok(v.flags.includes("non_convergent"));
+  assert.match(v.abort_reason!, /AND findings did not decline/);
   assert.equal(judgeGrade(v.flags), "runaway");
 });
 
@@ -186,24 +202,45 @@ test("buildAnalytics assembles payload with trajectory notes", () => {
 });
 
 test("aborted runaway analytics renders the abort reason", () => {
+  // Non-convergence is the abort-worthy runaway; growth alone is degraded +
+  // ack (see the composite-signal tests above).
   const rounds = [
-    stat({ round: 1, doc_chars_after: 3000 }),
+    stat({ round: 1, to_fix: 4 }),
+    stat({ round: 2, to_fix: 5 }),
+    stat({ round: 3, to_fix: 6 }),
   ];
   const a = buildAnalytics({
     doc: "d.md",
     promptsDir: "plan-review",
     originalDoc: "a".repeat(1000),
-    finalDoc: "a".repeat(3000),
+    finalDoc: "a".repeat(1100),
     roundStats: rounds,
     thresholds: DEFAULT_ANALYTICS_THRESHOLDS,
     abortedEarly: true,
-    abortReason: "doc grew 3.00x vs original (limit 2x)",
+    abortReason: "findings did not decline for 2 consecutive rounds (last: 6 to fix)",
   });
   assert.equal(a.grade, "runaway");
   assert.equal(a.aborted_early, true);
   const md = renderAnalyticsMarkdown(a);
   assert.match(md, /🔴 runaway/);
   assert.match(md, /stopped early/);
+});
+
+test("growth-ack analytics: degraded grade, field set, sidecar warns", () => {
+  const a = buildAnalytics({
+    doc: "d.md",
+    promptsDir: "plan-review",
+    originalDoc: "a".repeat(1000),
+    finalDoc: "a".repeat(3000),
+    roundStats: [stat({ round: 1, to_fix: 3, doc_chars_after: 2000 }), stat({ round: 2, to_fix: 1, doc_chars_before: 2000, doc_chars_after: 3000 })],
+    thresholds: DEFAULT_ANALYTICS_THRESHOLDS,
+    abortedEarly: false,
+    abortReason: null,
+  });
+  assert.equal(a.grade, "degraded");
+  assert.equal(a.growth_ack_required, true);
+  assert.ok(a.notes.some((n) => n.includes("Growth ack required")));
+  assert.match(renderAnalyticsMarkdown(a), /Growth ack required/);
 });
 
 // ─── Coverage gaps in analytics ──────────────────────────────────────────
@@ -255,11 +292,15 @@ test("runaway stays runaway even with coverage gaps (gap does not downgrade)", (
     doc: "d.md",
     promptsDir: "spec-review",
     originalDoc: "x".repeat(1000),
-    finalDoc: "x".repeat(3000),
-    roundStats: [stat({ doc_chars_before: 1000, doc_chars_after: 3000, to_fix: 5 })],
+    finalDoc: "x".repeat(1100),
+    roundStats: [
+      stat({ round: 1, to_fix: 4 }),
+      stat({ round: 2, to_fix: 5 }),
+      stat({ round: 3, to_fix: 6 }),
+    ],
     thresholds: DEFAULT_ANALYTICS_THRESHOLDS,
     abortedEarly: true,
-    abortReason: "doc grew 3.00x vs original (limit 2x)",
+    abortReason: "findings did not decline for 2 consecutive rounds (last: 6 to fix)",
     coverage: { viability: { attempts: 1, completions: 0, timeouts: 1, last_error: "timeout" } },
     coverageGaps: ["viability"],
   });
