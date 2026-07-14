@@ -323,3 +323,137 @@ export function renderAnalyticsMarkdown(a: ReviewAnalytics): string {
   lines.push("");
   return lines.join("\n");
 }
+
+// ─── PR-cycle (code review) analytics ────────────────────────────────────
+
+/** One review round of the PR cycle, as recorded in its round-N.json history
+ * files (`stark_review.ts` writeRoundHistory). Structural — pass the parsed
+ * history payloads straight in. */
+export interface CodeReviewRoundInput {
+  round: number;
+  results: ReadonlyArray<{
+    agent: string;
+    domain: string;
+    duration_s: number;
+    error: string | null;
+    findings: ReadonlyArray<{ domain?: string; classification?: string }>;
+  }>;
+}
+
+export interface CodeReviewAnalytics {
+  kind: "code-review";
+  repo: string;
+  pr: number;
+  generated_at: string;
+  grade: HealthGrade;
+  flags: HealthFlag[];
+  /** Domains that never completed a review in any round of this run. */
+  coverage_gaps: string[];
+  per_domain: Record<string, {
+    attempts: number;
+    completions: number;
+    timeouts: number;
+    total_duration_s: number;
+    findings_by_classification: Record<string, number>;
+  }>;
+  rounds: number;
+  total_findings: number;
+  total_duration_s: number;
+  notes: string[];
+}
+
+/** Aggregate a PR-review run's rounds into the two answers the operator asks:
+ * where did the time go (per-domain durations + outcomes) and who produces
+ * signal vs noise (per-domain classification counts). Coverage gaps cap the
+ * grade exactly like the doc cycle. */
+export function buildCodeReviewAnalytics(opts: {
+  repo: string;
+  pr: number;
+  rounds: readonly CodeReviewRoundInput[];
+}): CodeReviewAnalytics {
+  const per: CodeReviewAnalytics["per_domain"] = {};
+  let totalFindings = 0;
+  let totalDuration = 0;
+  const bucket = (domain: string) =>
+    per[domain] ?? (per[domain] = {
+      attempts: 0, completions: 0, timeouts: 0,
+      total_duration_s: 0, findings_by_classification: {},
+    });
+  for (const round of opts.rounds) {
+    for (const r of round.results) {
+      const b = bucket(r.domain);
+      b.attempts++;
+      b.total_duration_s += r.duration_s;
+      totalDuration += r.duration_s;
+      if (r.error === null) b.completions++;
+      else if (r.error === "timeout") b.timeouts++;
+      for (const f of r.findings) {
+        const c = f.classification ?? "unclassified";
+        const fb = bucket(f.domain ?? r.domain);
+        fb.findings_by_classification[c] = (fb.findings_by_classification[c] ?? 0) + 1;
+        totalFindings++;
+      }
+    }
+  }
+  const gaps = Object.keys(per)
+    .filter((d) => per[d]!.attempts > 0 && per[d]!.completions === 0)
+    .sort();
+  const flags: HealthFlag[] = gaps.length > 0 ? ["coverage_gap"] : [];
+  const notes: string[] = [];
+  if (gaps.length > 0) {
+    notes.push(`Coverage gap: ${gaps.join(", ")} never completed a review in this run — zero findings from these domains means "never ran", not "clean".`);
+  }
+  const noisy = Object.entries(per)
+    .map(([d, b]) => {
+      const fx = b.findings_by_classification;
+      const noise = (fx.noise ?? 0) + (fx.false_positive ?? 0);
+      const total = Object.values(fx).reduce((a, n) => a + n, 0);
+      return { d, noise, total };
+    })
+    .filter((x) => x.total >= 3 && x.noise / x.total > 0.5);
+  for (const n of noisy) {
+    notes.push(`Noisy domain: ${n.d} — ${n.noise}/${n.total} findings classified noise/false_positive. Candidate for /stark-review-improvement.`);
+  }
+  return {
+    kind: "code-review",
+    repo: opts.repo,
+    pr: opts.pr,
+    generated_at: new Date().toISOString(),
+    grade: judgeGrade(flags),
+    flags,
+    coverage_gaps: gaps,
+    per_domain: per,
+    rounds: opts.rounds.length,
+    total_findings: totalFindings,
+    total_duration_s: Number(totalDuration.toFixed(1)),
+    notes,
+  };
+}
+
+export function renderCodeReviewAnalyticsMarkdown(a: CodeReviewAnalytics): string {
+  const lines: string[] = [
+    `# Review process analytics — ${a.repo}#${a.pr}`,
+    "",
+    `- **Grade:** ${GRADE_BADGE[a.grade]}${a.flags.length > 0 ? ` (${a.flags.join(", ")})` : ""}`,
+    `- **Rounds:** ${a.rounds} — ${a.total_findings} findings, ${a.total_duration_s.toFixed(0)}s total review time`,
+    a.coverage_gaps.length > 0
+      ? `- **Coverage:** ⚠️ GAP — never completed: ${a.coverage_gaps.join("; ")}`
+      : `- **Coverage:** all ${Object.keys(a.per_domain).length} domains completed`,
+    `- **Generated:** ${a.generated_at}`,
+    "",
+    "| Domain | Runs (ok/timeout) | Time | fix | noise | fp | ignored |",
+    "|--------|-------------------|------|-----|-------|----|---------|",
+  ];
+  for (const [d, b] of Object.entries(a.per_domain).sort()) {
+    const fx = b.findings_by_classification;
+    lines.push(
+      `| ${d} | ${b.completions}/${b.attempts}${b.timeouts > 0 ? ` (${b.timeouts} t/o)` : ""} | ${b.total_duration_s.toFixed(0)}s | ${fx.fix ?? 0} | ${fx.noise ?? 0} | ${fx.false_positive ?? 0} | ${fx.ignored ?? 0} |`,
+    );
+  }
+  if (a.notes.length > 0) {
+    lines.push("", "## Judgment", "");
+    for (const n of a.notes) lines.push(`- ${n}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}

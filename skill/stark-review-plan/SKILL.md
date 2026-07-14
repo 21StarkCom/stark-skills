@@ -237,10 +237,13 @@ for (const r of (d.rounds||[])) {
 }
 ')
 
+PERSIST_ERRS=$(parse 'out.push(...(d.persistence_errors||[]));')
+
 failed=0
 if [ "$OK" = "false" ]; then error "Review failed: $ERR_CODE — $ERR_MSG"; failed=1; fi
 if [ -n "$GAPS" ]; then error "COVERAGE GAP — these domains never completed a review in any round: $GAPS"; failed=1; fi
 if [ -n "$TRANSIENT" ]; then printf 'WARN: transient lead dispatch failures (domain recovered in another round):\n' >&2; printf '  %s\n' "$TRANSIENT" >&2; fi
+if [ -n "$PERSIST_ERRS" ]; then printf 'WARN: history persistence errors (run records may be incomplete):\n' >&2; printf '  %s\n' "$PERSIST_ERRS" >&2; fi
 if [ -n "$WING_ERRORS" ]; then error "Wing fixer issues:"; printf '  %s\n' "$WING_ERRORS" >&2; failed=1; fi
 [ "$failed" -ne 0 ] && exit 1
 ```

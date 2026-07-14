@@ -536,3 +536,60 @@ describe("deriveRunOutcome", () => {
     assert.deepEqual(r, { ok: true, exitCode: 0, error: null });
   });
 });
+
+// ─── Run-record durability helpers ──────────────────────────────────────
+
+import {
+  buildHistoryDir,
+  newRunId,
+  pruneRunDirs,
+  updateLatestPointer,
+  writeJsonAtomic,
+} from "./stark_review_doc_lib.ts";
+import { readFileSync, readdirSync, readlinkSync, symlinkSync, existsSync } from "node:fs";
+
+describe("run-record durability helpers", () => {
+  test("newRunId is sortable timestamp + pid", () => {
+    const id = newRunId(new Date(2026, 6, 14, 9, 5, 3));
+    assert.match(id, /^20260714-090503-\d+$/);
+  });
+
+  test("buildHistoryDir nests slug/runId", () => {
+    const dir = buildHistoryDir({ home: "/h", promptsDir: "plan-review", docPath: "docs/plans/x.md", runId: "r1" });
+    assert.equal(dir, "/h/.claude/code-review/history/plan-reviews/x/r1");
+  });
+
+  test("writeJsonAtomic leaves valid JSON and no tmp file", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "wja-"));
+    try {
+      const f = path.join(dir, "out.json");
+      writeJsonAtomic(f, { a: 1 });
+      assert.deepEqual(JSON.parse(readFileSync(f, "utf8")), { a: 1 });
+      assert.deepEqual(readdirSync(dir), ["out.json"]);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  test("updateLatestPointer repoints atomically", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "latest-"));
+    try {
+      updateLatestPointer(dir, "run-a");
+      updateLatestPointer(dir, "run-b");
+      assert.equal(readlinkSync(path.join(dir, "latest")), "run-b");
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  test("pruneRunDirs keeps newest N, skips latest pointer, returns pruned", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "prune-"));
+    try {
+      for (const r of ["20260101-000000-1", "20260102-000000-1", "20260103-000000-1"]) {
+        mkdirSync(path.join(dir, r), { recursive: true });
+      }
+      symlinkSync("20260103-000000-1", path.join(dir, "latest"));
+      const pruned = pruneRunDirs(dir, 2);
+      assert.deepEqual(pruned, ["20260101-000000-1"]);
+      assert.ok(!existsSync(path.join(dir, "20260101-000000-1")));
+      assert.ok(existsSync(path.join(dir, "20260103-000000-1")));
+      assert.equal(readlinkSync(path.join(dir, "latest")), "20260103-000000-1");
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});

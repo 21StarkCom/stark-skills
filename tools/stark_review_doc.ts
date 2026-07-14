@@ -54,15 +54,19 @@ import {
   docFindingId,
   type FixerPatch,
   MAX_ROUNDS_CEILING,
+  newRunId,
   nextDomainTimeout,
   parseFixerOutput,
   parseReviewerOutput,
   persistRoundsHistory,
   type PersistedRound,
   pmap,
+  pruneRunDirs,
   resolveDocPromptSources,
   scaleTimeoutForDocSize,
   selectFindingsToFix,
+  updateLatestPointer,
+  writeJsonAtomic,
 } from "./stark_review_doc_lib.ts";
 import { buildCoherencePrompt } from "./stark_review_doc_lib.ts";
 import {
@@ -721,6 +725,9 @@ function loadDocReviewConfig(promptsDir: PromptsDir): DocReviewConfig {
   if (typeof section.coherence_pass === "boolean") {
     cfg.coherence_pass = section.coherence_pass;
   }
+  if (typeof section.history_keep_runs === "number" && Number.isFinite(section.history_keep_runs) && section.history_keep_runs >= 1) {
+    cfg.history_keep_runs = Math.floor(section.history_keep_runs);
+  }
   if (isPlainObject(section.analytics)) {
     const a = section.analytics;
     const num = (v: unknown, min: number): number | null =>
@@ -982,7 +989,13 @@ interface Receipt {
   }>;
   unresolved: DocFinding[];
   fixes_committed: number;
+  /** Unique id of this run; the history dir is `<slug>/<run_id>` so re-runs
+   * never clobber earlier records. */
+  run_id: string;
   history_dir: string;
+  /** History/analytics writes that failed ("phase: message") — surfaced, never
+   * swallowed. Persistence failures warn; they do not fail the run. */
+  persistence_errors: string[];
   /** Process-health analytics — monitors and judges the review run itself. */
   analytics: ReviewAnalytics | null;
   coherence: {
@@ -1122,6 +1135,59 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
   let fixesCommitted = 0;
   let dispatchFailureEarlyExit = false;
 
+  // Run-record durability: per-run history dir + incremental persistence so a
+  // dead process leaves partials on disk, not nothing. Write failures are
+  // surfaced in the receipt (persistence_errors), never swallowed — but they
+  // warn rather than fail the run.
+  const runId = newRunId();
+  const historyDir = buildHistoryDir({ home: HOME, promptsDir: opts.promptsDir, docPath: opts.docPath, runId });
+  const persistenceErrors: string[] = [];
+  const persistFailed = (phase: string, err: unknown): void => {
+    const msg = `${phase}: ${(err as Error).message}`;
+    persistenceErrors.push(msg);
+    log(`WARN history persistence failed — ${msg}`);
+  };
+  const runModels = { lead: opts.leadModel, wing: opts.wingModel, lead_agent: opts.leadAgent, wing_agent: opts.wingAgent };
+  const persistRunSnapshot = (phase: string, final = false): void => {
+    if (opts.dryRun) return;
+    try {
+      persistRoundsHistory({
+        historyDir,
+        docPath: opts.docPath,
+        promptsDir: opts.promptsDir,
+        runId,
+        rounds: persistedRounds,
+        models: runModels,
+      });
+    } catch (err) { persistFailed(`${phase}/rounds`, err); }
+    try {
+      const cov = computeCoverage(receiptRounds, domainKeys);
+      const snap = buildAnalytics({
+        doc: opts.docPath,
+        promptsDir: opts.promptsDir,
+        originalDoc,
+        finalDoc: currentDoc,
+        roundStats,
+        thresholds: opts.config.analytics,
+        abortedEarly,
+        abortReason,
+        coverage: cov.domains,
+        coverageGaps: cov.gaps,
+      });
+      writeJsonAtomic(path.join(historyDir, "analytics.json"), final ? snap : { ...snap, partial: true });
+    } catch (err) { persistFailed(`${phase}/analytics`, err); }
+  };
+  if (!opts.dryRun) {
+    try {
+      fs.mkdirSync(historyDir, { recursive: true });
+      updateLatestPointer(path.dirname(historyDir), runId);
+      const pruned = pruneRunDirs(path.dirname(historyDir), opts.config.history_keep_runs);
+      if (pruned.length > 0) log(`history retention: pruned ${pruned.length} old run(s) (keep ${opts.config.history_keep_runs})`);
+    } catch (err) {
+      persistFailed("init", err);
+    }
+  }
+
   for (let roundNum = 1; roundNum <= maxRounds; roundNum++) {
     const roundT0 = process.hrtime.bigint();
     log(`── Round ${roundNum} (review-fix) ──`);
@@ -1152,6 +1218,7 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       });
       receiptRounds.push(failedRound);
       persistedRounds.push(toPersisted(failedRound, "review-fix"));
+      persistRunSnapshot(`round-${roundNum}`);
       dispatchFailureEarlyExit = true;
       break;
     }
@@ -1201,6 +1268,7 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
         toPersisted(receiptRounds[receiptRounds.length - 1]!, "review-fix"),
       );
       pushRoundStat(null, elapsedSec(roundT0));
+      persistRunSnapshot(`round-${roundNum}`);
       break;
     }
 
@@ -1220,6 +1288,7 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
         toPersisted(receiptRounds[receiptRounds.length - 1]!, "review-fix"),
       );
       pushRoundStat(null, elapsedSec(roundT0));
+      persistRunSnapshot(`round-${roundNum}`);
       break;
     }
 
@@ -1293,6 +1362,7 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       },
       elapsedSec(roundT0),
     );
+    persistRunSnapshot(`round-${roundNum}`);
 
     // Process-health circuit breakers — stop a pathological loop (runaway
     // doc growth, non-converging findings) instead of grinding to maxRounds.
@@ -1392,6 +1462,7 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       commit_sha: commitSha,
       error: cohError,
     };
+    persistRunSnapshot("coherence");
   }
 
   // Final review-only round (skipped on dispatch failure or dry-run)
@@ -1444,21 +1515,7 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       patch_failures: 0,
       duration_s: elapsedSec(finalT0),
     });
-  }
-
-  const historyDir = buildHistoryDir({
-    home: HOME,
-    promptsDir: opts.promptsDir,
-    docPath: opts.docPath,
-  });
-  if (!opts.dryRun) {
-    persistRoundsHistory({
-      historyDir,
-      docPath: opts.docPath,
-      promptsDir: opts.promptsDir,
-      rounds: persistedRounds,
-      models: { lead: opts.leadModel, wing: opts.wingModel, lead_agent: opts.leadAgent, wing_agent: opts.wingAgent },
-    });
+    persistRunSnapshot("final-review");
   }
 
   // Coverage — per-domain completion across the whole run. A domain that
@@ -1488,10 +1545,10 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
   if (!opts.dryRun) {
     try {
       fs.mkdirSync(historyDir, { recursive: true });
-      fs.writeFileSync(path.join(historyDir, "analytics.json"), JSON.stringify(analytics, null, 2));
+      writeJsonAtomic(path.join(historyDir, "analytics.json"), analytics);
       fs.writeFileSync(analyticsSidecar, renderAnalyticsMarkdown(analytics));
     } catch (err) {
-      log(`analytics sidecar write failed: ${(err as Error).message}`);
+      persistFailed("final/analytics", err);
     }
   }
   log(`analytics: grade=${analytics.grade} growth=${analytics.growth_ratio}x flags=[${analytics.flags.join(", ")}]${abortedEarly ? ` aborted="${abortReason}"` : ""}`);
@@ -1520,11 +1577,22 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
     rounds: receiptRounds,
     unresolved,
     fixes_committed: fixesCommitted,
+    run_id: runId,
     history_dir: historyDir,
+    persistence_errors: persistenceErrors,
     analytics,
     coherence: coherenceReceipt,
     error: outcome.error,
   };
+  // The receipt itself lands in the run dir too — today it exists only on
+  // stdout, which is exactly what evaporates when the process dies.
+  if (!opts.dryRun) {
+    try {
+      writeJsonAtomic(path.join(historyDir, "receipt.json"), receipt);
+    } catch (err) {
+      persistFailed("final/receipt", err);
+    }
+  }
   return { receipt, exitCode: outcome.exitCode };
 }
 
@@ -1648,7 +1716,9 @@ function errorReceipt(opts: DispatchOptions, code: string, message: string): Rec
     rounds: [],
     unresolved: [],
     fixes_committed: 0,
+    run_id: "",
     history_dir: "",
+    persistence_errors: [],
     analytics: null,
     coherence: null,
     error: { code, message },

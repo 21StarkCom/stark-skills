@@ -55,6 +55,9 @@ export interface DocReviewConfig {
   /** Run the single coherence pass (contradictions / repetitions / fluff /
    * leftovers) after the fix loop, before the final review. */
   coherence_pass: boolean;
+  /** Per-doc history retention: keep this many run dirs (`<slug>/<run-id>/`),
+   * prune older ones. */
+  history_keep_runs: number;
   /** Process-health circuit breakers — see stark_review_doc_analytics_lib.ts. */
   analytics: {
     max_doc_growth_ratio: number;
@@ -71,6 +74,7 @@ export const DEFAULT_DOC_REVIEW_CONFIG: DocReviewConfig = {
   max_rounds: 3,
   max_codex_concurrent: 3,
   coherence_pass: true,
+  history_keep_runs: 20,
   analytics: {
     max_doc_growth_ratio: 2.0,
     max_round_growth_ratio: 1.5,
@@ -715,10 +719,25 @@ export interface PersistedRound {
   duration_s: number;
 }
 
+/** Run id: sortable timestamp + pid — unique per process, lexicographic
+ * order == chronological order. */
+export function newRunId(now: Date = new Date()): string {
+  const p = (n: number, w = 2): string => String(n).padStart(w, "0");
+  return (
+    `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}` +
+    `-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}` +
+    `-${process.pid}`
+  );
+}
+
+/** Per-RUN history dir: `<home>/.claude/code-review/history/<promptsDir>s/<slug>/<runId>`.
+ * A re-run of the same doc gets its own dir — previous runs are never
+ * clobbered (the analytics contract). */
 export function buildHistoryDir(opts: {
   home: string;
   promptsDir: string;
   docPath: string;
+  runId: string;
 }): string {
   const base = path.join(
     opts.home,
@@ -728,13 +747,58 @@ export function buildHistoryDir(opts: {
     opts.promptsDir + "s",
   );
   const slug = path.basename(opts.docPath).replace(/\.md$/i, "");
-  return path.join(base, slug);
+  return path.join(base, slug, opts.runId);
+}
+
+/** Atomic JSON write: tmp file + rename, so a crash mid-write never leaves a
+ * truncated file where a reader expects valid JSON. */
+export function writeJsonAtomic(filePath: string, data: unknown): void {
+  const tmp = `${filePath}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+  fs.renameSync(tmp, filePath);
+}
+
+/** Point `<slugDir>/latest` at the given run (atomic symlink swap; falls back
+ * to a `latest.txt` pointer file on filesystems without symlink support). */
+export function updateLatestPointer(slugDir: string, runId: string): void {
+  const link = path.join(slugDir, "latest");
+  const tmp = `${link}.tmp-${process.pid}`;
+  try {
+    try { fs.unlinkSync(tmp); } catch { /* stale tmp from a dead run */ }
+    fs.symlinkSync(runId, tmp);
+    fs.renameSync(tmp, link);
+  } catch {
+    try { fs.unlinkSync(tmp); } catch { /* ignore */ }
+    fs.writeFileSync(path.join(slugDir, "latest.txt"), runId + "\n");
+  }
+}
+
+/** Keep the newest `keep` run dirs under `<slugDir>` (run-ids sort
+ * lexicographically == chronologically), remove the rest. Never touches the
+ * `latest` pointer entries. Returns the pruned run-ids. */
+export function pruneRunDirs(slugDir: string, keep: number): string[] {
+  if (!fs.existsSync(slugDir) || keep <= 0) return [];
+  const runs = fs
+    .readdirSync(slugDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && !e.isSymbolicLink() && e.name !== "latest")
+    .map((e) => e.name)
+    .sort()
+    .reverse();
+  const pruned: string[] = [];
+  for (const name of runs.slice(keep)) {
+    try {
+      fs.rmSync(path.join(slugDir, name), { recursive: true, force: true });
+      pruned.push(name);
+    } catch { /* best-effort retention */ }
+  }
+  return pruned;
 }
 
 export function persistRoundsHistory(opts: {
   historyDir: string;
   docPath: string;
   promptsDir: string;
+  runId: string;
   rounds: PersistedRound[];
   models: Record<string, string>;
 }): void {
@@ -742,14 +806,12 @@ export function persistRoundsHistory(opts: {
   const payload = {
     doc: opts.docPath,
     prompts_dir: opts.promptsDir,
+    run_id: opts.runId,
     models: opts.models,
     rounds: opts.rounds,
     generated_at: new Date().toISOString(),
   };
-  fs.writeFileSync(
-    path.join(opts.historyDir, "rounds.json"),
-    JSON.stringify(payload, null, 2),
-  );
+  writeJsonAtomic(path.join(opts.historyDir, "rounds.json"), payload);
 }
 
 // ─── Concurrency primitives ────────────────────────────────────────────

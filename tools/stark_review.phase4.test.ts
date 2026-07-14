@@ -1008,6 +1008,7 @@ test("renderHumanSummary + emitReceipt --json: stdout is JSON, stderr is text", 
       failed_results: [], parse_errors: [], classifier_errors: [], duration_ms: 1,
     }],
     fixes_pushed: 0, comments_posted: 0, unposted_reviews: [], history_files: [],
+    analytics: null, persistence_errors: [],
   };
   const outChunks: string[] = [];
   const errChunks: string[] = [];
@@ -1024,6 +1025,7 @@ test("computeExitCode: 0 only when ok, no failures, no unposted", () => {
     ok: true, schema_version: 1, repo: "o/r", pr: 1,
     agent: null, agents_resolved: {}, domains: [], rounds: [],
     fixes_pushed: 0, comments_posted: 0, unposted_reviews: [], history_files: [],
+    analytics: null, persistence_errors: [],
   };
   assert.equal(computeExitCode(base), 0);
   assert.equal(computeExitCode({ ...base, unposted_reviews: [{ round: 1, reason: "5xx" }] }), 1);

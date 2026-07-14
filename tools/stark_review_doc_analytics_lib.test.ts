@@ -266,3 +266,55 @@ test("runaway stays runaway even with coverage gaps (gap does not downgrade)", (
   assert.equal(a.grade, "runaway");
   assert.ok(a.flags.includes("coverage_gap"));
 });
+
+// ─── PR-cycle analytics ──────────────────────────────────────────────────
+
+import { buildCodeReviewAnalytics, renderCodeReviewAnalyticsMarkdown } from "./stark_review_doc_analytics_lib.ts";
+
+test("buildCodeReviewAnalytics aggregates per-domain time, noise, and coverage", () => {
+  const a = buildCodeReviewAnalytics({
+    repo: "o/r",
+    pr: 7,
+    rounds: [
+      {
+        round: 1,
+        results: [
+          { agent: "codex", domain: "security", duration_s: 120, error: null,
+            findings: [{ domain: "security", classification: "fix" }, { domain: "security", classification: "noise" }] },
+          { agent: "codex", domain: "behavior", duration_s: 600, error: "timeout", findings: [] },
+        ],
+      },
+      {
+        round: 2,
+        results: [
+          { agent: "codex", domain: "security", duration_s: 100, error: null,
+            findings: [{ domain: "security", classification: "false_positive" }] },
+          { agent: "codex", domain: "behavior", duration_s: 600, error: "timeout", findings: [] },
+        ],
+      },
+    ],
+  });
+  assert.equal(a.kind, "code-review");
+  assert.deepEqual(a.coverage_gaps, ["behavior"]);
+  assert.equal(a.grade, "degraded");
+  assert.equal(a.per_domain.security!.total_duration_s, 220);
+  assert.equal(a.per_domain.behavior!.timeouts, 2);
+  assert.equal(a.per_domain.security!.findings_by_classification.fix, 1);
+  assert.equal(a.total_findings, 3);
+  const md = renderCodeReviewAnalyticsMarkdown(a);
+  assert.match(md, /GAP — never completed: behavior/);
+  assert.match(md, /\| security \| 2\/2 /);
+});
+
+test("buildCodeReviewAnalytics: clean run is healthy with no notes about gaps", () => {
+  const a = buildCodeReviewAnalytics({
+    repo: "o/r",
+    pr: 8,
+    rounds: [
+      { round: 1, results: [{ agent: "codex", domain: "security", duration_s: 60, error: null, findings: [] }] },
+    ],
+  });
+  assert.equal(a.grade, "healthy");
+  assert.deepEqual(a.coverage_gaps, []);
+  assert.match(renderCodeReviewAnalyticsMarkdown(a), /all 1 domains completed/);
+});

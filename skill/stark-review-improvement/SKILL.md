@@ -70,10 +70,12 @@ If neither exists, check the most recent history directory for the matching revi
 ```bash
 # For PR code review (default; recurses per-repo-slug subdirs):
 find $HISTORY -name "*.json" | sort | tail -1
-# For spec-review:
-ls -td $HISTORY/spec-reviews/*/ | head -1
+# For spec/plan review the layout is per-run: <slug>/<run-id>/ with a `latest`
+# pointer per slug (rounds.json, analytics.json, receipt.json inside each run).
+# For spec-review (newest run dir across all docs):
+ls -td $HISTORY/spec-reviews/*/*/ 2>/dev/null | grep -v '/latest/$' | head -1
 # For plan-review:
-ls -td $HISTORY/plan-reviews/*/ | head -1
+ls -td $HISTORY/plan-reviews/*/*/ 2>/dev/null | grep -v '/latest/$' | head -1
 ```
 
 Read `prompt-assessment.md` or `summary.md` from that directory.

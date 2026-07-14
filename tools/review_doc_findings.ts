@@ -455,13 +455,14 @@ async function cmdPost(args: PostArgs): Promise<number> {
     // Findings the wing already fixed: reply + resolve immediately (same App
     // as the thread author, so each thread stays single-author).
     if (f.status === "autofixed" && res.resolvable && res.comment_id !== null) {
+      const commentId = res.comment_id; // narrowed const — the closure below defeats property narrowing
       try {
         const ok = await withRateLimitRetry(`resolve ${f.id}`, () =>
           replyAndResolve({
             repo: args.repo,
             pr: args.pr,
             app: findingApp,
-            commentId: res.comment_id,
+            commentId,
             reply: renderAutofixReply(args.commitSha),
           }),
         );
@@ -531,12 +532,13 @@ async function cmdResolve(args: ResolveArgs): Promise<number> {
     return 0;
   }
 
+  const commentId = entry.comment_id; // narrowed const — the closure below defeats property narrowing
   const ok = await withRateLimitRetry(`resolve ${args.findingId}`, () =>
     replyAndResolve({
       repo: map.repo,
       pr: map.pr,
       app: entryApp,
-      commentId: entry.comment_id,
+      commentId,
       reply,
     }),
   );
