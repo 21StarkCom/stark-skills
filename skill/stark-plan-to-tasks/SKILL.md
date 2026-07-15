@@ -113,6 +113,8 @@ If split is warranted, stop here and tell the user: "This plan looks like N sepa
 
 **Checklist:** Completeness, File paths (concrete files referenced), Decisions made (no unresolved forks), Dependencies explicit, Boundaries clear, Acceptance criteria exist, Edge cases/error handling addressed, Security/performance constraints stated.
 
+**Scope-match, don't demand ceremony.** This gate checks the plan is *decomposable*, not that it's *production-hardened*. Most of these plans are single-user, playground-scoped tools (one operator, a laptop, no fleet, no SLA). When the plan declares that scope, the **absence** of security/performance hardening, error-recovery machinery, rollback procedures, or monitoring is **correct, not a gap** — do not flag it. "Edge cases / Security / performance" are satisfied by whatever the plan's actual scope warrants (often "n/a — single-user local tool"); only flag them as gaps when the plan takes on real external users, shared state, or cloud infra and then leaves the concern undefined. Never turn this gate into a demand for platform machinery the plan didn't scope.
+
 ### 2.3 No-Placeholders canon (auto-reject)
 
 Any of these in the plan is a Pass 1 failure — flag them as gaps regardless of the rest of the checklist:
@@ -182,6 +184,8 @@ Guardrails:
 **GitHub Issue Type:** Map `feature→Feature`, `task→Task`, `bug→Bug` via `--field type="{GH_ISSUE_TYPE}"`. Do NOT use `type:bug`/`type:feature`/`type:task` labels — use the native GitHub Issue Type field exclusively. If API call fails due to missing types, warn and continue without type (no label fallback).
 
 **Sizing guardrails:** Split if > 5 criteria, > 4 files, or > 500 words in `how`. Merge if only 1 criterion and 1 file. Max 6–8 phases, 8–10 tasks per phase — exceeding this signals the plan should be split.
+
+**Scope guardrail — decompose the plan, don't inflate it.** Every task must trace to work the plan actually specifies. Do **not** manufacture tasks the plan didn't ask for — rollback/recovery, monitoring/alerting/retention jobs, cloud-infra provisioning the plan doesn't deploy, credential rotation, migration/backfill frameworks, an E2E/load-test pyramid, or adversarial-input hardening — for a single-user playground tool. If the plan doesn't contain it, there is no task for it. Inventing hardening tasks is exactly the bloat that wastes the executor's time and tokens downstream.
 
 **Output:** Write to `TMPFILE="/tmp/stark-plan-to-tasks-${RANDOM}${RANDOM}.json"` (`chmod 600`):
 
