@@ -68,9 +68,13 @@ returns a `ReviewAnalytics`. No overloads.
 
 ### 2. The adapter mapping
 
-Each `PlanRoundResult` → one `RoundStat` with `kind: "review-fix"` (so every plan
-round counts as a fix round in `evaluateGuards`; it filters
-`roundStats.filter(r => r.kind === "review-fix")`):
+Each **completed** `PlanRoundResult` → one `RoundStat` with `kind: "review-fix"`
+(so every completed plan round counts as a fix round in `evaluateGuards`, which
+filters `roundStats.filter(r => r.kind === "review-fix")`). An **errored round**
+(dispatch failure, no verdict) is **omitted from the list entirely** — not mapped
+to a stat — so the function never sees it in either the growth or the convergence
+comparison. Omission, not a sentinel stat, is what keeps a transient error out of
+the metrics:
 
 | `RoundStat` field | Source (plan round) |
 |---|---|
@@ -82,7 +86,14 @@ round counts as a fix round in `evaluateGuards`; it filters
 | `scope_findings` | `countOverEngineeringFindings(blocking_findings)` |
 | `recurring` | `0` (no recurring-classification in generation) |
 | `raw_findings` | `blocking_findings.length` |
-| `patches_attempted` / `patches_applied` / `patch_failures` | `0` (not applicable — the churn/patch-thrash advisory flags never fire, correct for a text loop) |
+| `patches_attempted` / `patches_applied` / `patch_failures` | `0` (not applicable — the **churn** and **patch-thrash** advisory flags need `recurring`/patch fields the adapter zeroes, so they stay inert) |
+
+Note: of the three advisory (non-aborting) flags the shared brain computes,
+**`round_growth_spike` is live and useful here, not inert** — `doc_chars_before`
+and `doc_chars_after` map to consecutive drafts, so a single revise round that
+grows the draft past `max_round_growth_ratio` (1.5×) legitimately raises it. It is
+retained as an advisory signal (it never aborts). Only churn and patch-thrash are
+inert.
 | `duration_s` | `duration_s` |
 
 `originalChars` = **round-1 `draft_length`** (the baseline; plan generation has no
@@ -91,12 +102,12 @@ measures against).
 
 **Deterministic metrics.** The baseline is always > 0 — an empty round-1 draft
 aborts as `lead_round1_empty_draft` *before* analytics run, so the ratio never
-divides by zero. A round that errored (dispatch failure, no verdict) is **not** a
-growth or convergence data point: its `RoundStat` carries the prior draft's length
-(so a transient error reads as neither growth nor shrink) and it is excluded from
-the non-convergence comparison rather than counted as "did not decline."
-Non-convergence compares `to_fix` across consecutive *completed* review-fix rounds
-only. These rules make every metric single-valued for any round sequence.
+divides by zero. An errored round contributes **no `RoundStat` at all** (§2
+omission rule), so it is neither a growth nor a convergence data point — it cannot
+read as "did not decline" or as a spike, because `evaluateGuards` never receives
+it. Growth is measured on the last *completed* review-fix round; non-convergence
+compares `to_fix` across consecutive completed review-fix rounds. These rules make
+every metric single-valued for any round sequence.
 
 ### 3. Over-engineering detection (invent-then-condemn)
 
@@ -115,15 +126,18 @@ the padding abort: on the kotodama run every finding was a real execution bug an
 fires only when the doc ballooned **and** the wing itself is condemning the scope
 — the review manufactured scope it now flags.
 
-**One owner for the category (SSOT).** The **wing** is the sole authority on
-whether a finding is over-engineering — it applies the `over-engineering` label
-(per #678). `countOverEngineeringFindings` is a **pure counter** over that label;
-it never independently re-classifies a finding's scope-inflation status. So the
-classification has one producer (the wing) and one consumer (the host counter),
-not two competing owners. (A future refinement could have the wing emit a
-structured `category` field instead of a text tag; the string match is the
-low-friction path and is a strict superset of the labeled findings — it ships
-first.)
+**Category authority (SSOT, honestly scoped).** The **wing** decides whether a
+finding is over-engineering — it applies the `over-engineering` label (per #678).
+`countOverEngineeringFindings` is a **detector** of that label via a text match,
+**not an independent re-classifier** — but because the signal is a regex over
+free-text prose, it is a *heuristic*: a finding whose description merely contains
+"over-engineer" without the wing intending the tag could be miscounted. Two things
+bound that risk to negligible: the wing is instructed to use the literal
+`over-engineering` label (the match is narrow, not semantic), and invent-then-condemn
+**additionally** requires a soft-growth breach — so a stray text match alone can
+never trip the abort. The structured-`category`-per-finding refinement (open
+question 1) removes the heuristic entirely; the narrow text match ships first as
+the low-friction path and is a strict superset of the labeled findings.
 
 ### 4. Wiring the verdict into the loop
 
@@ -224,11 +238,13 @@ the "two owners / contradictory ownership" findings.
 ## Config
 
 New `spec_to_plan.analytics` section in `stark_config_lib.ts` exposing **only the
-three thresholds that can fire in a text loop**: `max_doc_growth_ratio` (soft,
+thresholds that drive an abort in a text loop**: `max_doc_growth_ratio` (soft,
 default 2), `hard_doc_growth_ratio` (default 3), `non_convergent_rounds` (default
-2). The `AnalyticsThresholds` fields the adapter zeroes — round-growth-spike,
-churn, patch-thrash — are **not** part of plan config; `buildPlanAnalytics` fills
-them from `DEFAULT_ANALYTICS_THRESHOLDS` internally so they stay inert and add no
+2). The other `AnalyticsThresholds` fields are **not** part of plan config:
+`max_round_growth_ratio` is live but advisory (it raises `round_growth_spike`,
+never aborts) and uses the shared 1.5× default internally; the churn / patch-thrash
+thresholds are inert (their input fields are zeroed). `buildPlanAnalytics` fills
+all of these from `DEFAULT_ANALYTICS_THRESHOLDS` internally so they add no
 operator-facing surface. The three exposed defaults are **read from** the same
 `DEFAULT_ANALYTICS_THRESHOLDS` constants, not re-literaled, so the two loops can't
 silently drift. Kill switch `STARK_PLAN_ANALYTICS_KILL` per §6.
