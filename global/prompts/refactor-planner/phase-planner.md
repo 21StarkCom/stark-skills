@@ -14,7 +14,13 @@ behavior-preserving phases.
   (5) Dependency cleanup, (6) Configuration cleanup, (7) Test cleanup,
   (8) Documentation and final validation.
 - Each phase must be independently validatable — give the real validation
-  commands and a rollback note.
+  commands, and a rollback note **only when the change isn't trivially
+  git-revertable**. For a single-user playground repo, `git revert` + re-run
+  is the rollback; don't manufacture per-phase rollback ceremony.
+- **Scope-match the phases.** Don't add phases for production concerns the repo
+  doesn't have (monitoring, migration frameworks, HA, CI/CD hardening) — plan
+  only the refactor the findings actually justify. Omit any of the 8 phase types
+  above that the repo's scope doesn't warrant rather than inventing work to fill it.
 - Prefer many small phases over a few large ones.
 - Output ONLY the JSON object below.
 

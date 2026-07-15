@@ -7,6 +7,7 @@ rules, grounded in the current architecture and the findings in your context.
 
 ## Rules
 
+- **Scope-match the target.** Most repos here are single-user playground tools (one operator, a laptop, no fleet, no SLA). Do not propose production layering, service boundaries, hexagonal/DDD ceremony, or abstraction a laptop-scoped tool doesn't need. The target is the smallest structure that fixes the real findings, not an idealized platform architecture. When the repo declares production scope, structure to it; otherwise stay lean.
 - Avoid unnecessary abstraction. Do not invent layers the codebase doesn't need.
 - Every proposed directory must have a single responsibility and explicit
   allowed/forbidden dependencies that keep the direction pointing toward domain

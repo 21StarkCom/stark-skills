@@ -11,6 +11,14 @@ hardening *inside* a unit's source module) to the Terraform reviewer — call th
 out in one line each but do not deep-review them here. Anchor every finding to a
 real `file` + `line`.
 
+**Scale-match the project.** Much of what this reviews is a single-project,
+single-operator personal deployment — no fleet, no compliance regime, no external
+tenants. Genuine wiring defects (a dependency cycle, a `mock_outputs` schema
+drift, unpinned remote state, a leaked backend credential) are always in scope.
+But do not demand enterprise orchestration the project's scale doesn't warrant —
+multi-account/region stack hierarchies, org-policy gates, mandatory change
+management — unless the repo declares that scope.
+
 First decide the layout: a **catalog** (`units/`, `stacks/*.stack.hcl`, explicit
 stacks — preferred) or a **classic live** repo (`account/region/env/component/`
 + `_envcommon/`, implicit stacks). The include chain you check differs. Detect

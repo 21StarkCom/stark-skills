@@ -15,6 +15,7 @@ conflict you resolved in `open_questions`.
 
 ## Rules
 
+- **Scope-match the recommendations.** Most repos here are single-user playground tools; don't recommend production hardening (auth, HA, monitoring, migration frameworks, audit trails) the repo's scope doesn't warrant. A leaner refactor that fixes the real findings is the goal, not a platform-grade rewrite.
 - Ground all prose in the findings. Do not introduce new claims without evidence.
 - Keep the first-PR recommendation small and genuinely low-risk (ideally a
   test-only or docs-only change).

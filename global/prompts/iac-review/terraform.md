@@ -11,6 +11,19 @@ Anchor every finding to a real `file` + `line` from the numbered context. Do not
 re-report what a scanner already flagged unless you add severity or context it
 missed. Do not invent low-value nits.
 
+## Scale-match the project (read first)
+
+Match findings to the deployment's declared scale. Much of what this reviews is a
+**single-project, single-operator personal deployment** — one cloud project, no
+fleet, no compliance regime, no external tenants. Genuine infra defects are
+always in scope at any scale: a publicly-exposed bucket/DB, an over-broad IAM
+binding, unencrypted or committed state/secrets, a `destroy` without backup. But
+do **not** demand enterprise controls the project's scale doesn't warrant —
+multi-region HA/DR, org-policy/SCP hierarchies, full audit-log sinks, mandatory
+CMEK on every resource, ticketed change management, or 10x capacity planning —
+unless the config declares that scope. Scale-match; a personal project is not a
+regulated multi-tenant platform.
+
 ## Version-aware guard (read first)
 
 Detect the version floor from `required_version` / `terraform.tf` / `versions.tf`.
