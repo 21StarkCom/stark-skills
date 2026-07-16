@@ -770,8 +770,13 @@ function loadDocReviewConfig(promptsDir: PromptsDir): DocReviewConfig {
   if (typeof section.max_fixes_per_round === "number" && Number.isFinite(section.max_fixes_per_round) && section.max_fixes_per_round >= 0) {
     cfg.max_fixes_per_round = Math.floor(section.max_fixes_per_round);
   }
-  if (typeof section.compress_retry_growth_ratio === "number" && Number.isFinite(section.compress_retry_growth_ratio) && section.compress_retry_growth_ratio >= 0) {
-    cfg.compress_retry_growth_ratio = section.compress_retry_growth_ratio;
+  if (typeof section.compress_retry_growth_ratio === "number" && Number.isFinite(section.compress_retry_growth_ratio)) {
+    // 0 disables; otherwise a GROWTH ratio must be >= 1 — a value in (0,1)
+    // (the "+0.15 means +15%" misread) would trigger compress on every round
+    // including shrinking ones. Reject nonsense, keep the default.
+    const v = section.compress_retry_growth_ratio;
+    if (v === 0 || v >= 1) cfg.compress_retry_growth_ratio = v;
+    else log(`config: ignoring compress_retry_growth_ratio=${v} — must be 0 (disable) or >= 1 (a growth ratio)`);
   }
   if (typeof section.max_codex_concurrent === "number" && section.max_codex_concurrent > 0) {
     cfg.max_codex_concurrent = Math.floor(section.max_codex_concurrent);
@@ -1061,6 +1066,10 @@ interface Receipt {
        * DISCARDED by a round revert — these fixes do NOT exist in the doc
        * and must not be treated as autofixed. */
       discarded_finding_ids: string[];
+      /** the in-round compress pass, when it ran: how many patches landed and
+       * the char delta it produced — so the round's commit diff reconciles
+       * with the receipt. Null when compress didn't run. */
+      compress: { patches_applied: number; chars_delta: number } | null;
       patch_failures: Array<{ finding_id: string; old: string; reason: string }>;
       wing_error: string | null;
       commit_sha: string | null;
@@ -1337,6 +1346,10 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
   // raised so far + how it was resolved, threaded into later lead prompts so
   // resolved/accepted concerns are not re-derived round after round.
   const priorDispositions: PriorDisposition[] = [];
+  // Findings pushed out by max_fixes_per_round, re-queued host-side into the
+  // next round's fix batch — the disposition block tells the lead not to
+  // re-derive them, so nothing else would ever fix them.
+  let deferredBacklog: DocFinding[] = [];
   let fixesCommitted = 0;
   let dispatchFailureEarlyExit = false;
 
@@ -1448,10 +1461,17 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       fixThreshold: opts.config.fix_threshold,
     });
     // Per-round fix cap: the wing gets only the top-N by severity; the
-    // overflow stays recorded as findings (final review + Phase 5 pick them
-    // up). Bulk medium "add detail" batches are what compound doc growth.
-    const eligible = selectFindingsToFix(classified);
+    // overflow re-queues into the NEXT round's batch host-side (the
+    // disposition block suppresses lead re-derivation, so the host must own
+    // the backlog). Bulk medium "add detail" batches are what compound growth.
+    const eligibleNew = selectFindingsToFix(classified);
+    const backlogCarry = deferredBacklog.filter((b) => !eligibleNew.some((e) => e.id === b.id));
+    if (backlogCarry.length > 0) {
+      log(`round ${roundNum}: re-queued ${backlogCarry.length} deferred finding(s) from the previous round's fix-cap overflow`);
+    }
+    const eligible = selectFindingsToFix([...eligibleNew, ...backlogCarry]);
     const { selected: toFix, deferred } = capFindingsToFix(eligible, opts.config.max_fixes_per_round);
+    deferredBacklog = deferred;
     log(`round ${roundNum}: ${allRaw.length} raw findings → ${eligible.length} to fix (threshold=${opts.config.fix_threshold})${deferred.length > 0 ? `, ${deferred.length} deferred by max_fixes_per_round=${opts.config.max_fixes_per_round}` : ""}`);
     const docBeforeRound = currentDoc;
     // Convergence is measured on the UNCAPPED eligible count — a capped
@@ -1551,6 +1571,11 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
         maxRoundGrowthRatio: opts.config.analytics.max_round_growth_ratio,
       });
     let commitSha: string | null = null;
+    // Compress bookkeeping: what the in-round shrink pass did, and which wing
+    // patches it removed — those findings are NOT fixed and must not be
+    // reported (or disposition-recorded) as such.
+    let compressInfo: { patches_applied: number; chars_delta: number } | null = null;
+    let compressedAway: FixerPatch[] = [];
     if (roundReverted) {
       extraAnalyticsFlags.push("scope_growth_round_reverted");
       abortedEarly = true;
@@ -1576,7 +1601,20 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
           // Same guard as the coherence pass: only a non-growing result lands.
           if (applyResult.applied.length > 0 && applyResult.newDoc.length <= roundDoc.length * 1.02) {
             log(`round ${roundNum}: compress removed ${roundDoc.length - applyResult.newDoc.length} chars (${applyResult.applied.length} patches)`);
+            compressInfo = {
+              patches_applied: applyResult.applied.length,
+              chars_delta: applyResult.newDoc.length - roundDoc.length,
+            };
             roundDoc = applyResult.newDoc;
+            // Survivor check: a compress pass that removed (or rewrote) the
+            // text a wing patch just added has UN-fixed that finding —
+            // re-open it instead of reporting a fix that isn't in the doc.
+            compressedAway = wingOutcome.applied.filter(
+              (p) => p.new.length > 0 && !roundDoc.includes(p.new),
+            );
+            if (compressedAway.length > 0) {
+              log(`round ${roundNum}: compress removed the fix text of ${compressedAway.length} applied patch(es) — re-opening those findings`);
+            }
           } else if (applyResult.applied.length > 0) {
             log(`round ${roundNum}: compress rejected — result grew the doc`);
           }
@@ -1602,28 +1640,43 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
         if (commitSha) fixesCommitted++;
       }
       // Accumulate across rounds (not overwrite): with 3+ rounds, round 1's
-      // fix text would otherwise become churn bait again by round 3. The
-      // renderer's size cap keeps the prompt bounded.
-      lastAppliedPatches.push(...wingOutcome.applied);
+      // fix text would otherwise become churn bait again by round 3. Only
+      // compress SURVIVORS — quoting removed text as "protected fix text"
+      // would mislead the next round's lead. The renderer's size cap keeps
+      // the prompt bounded.
+      const survivors = wingOutcome.applied.filter((p) => !compressedAway.includes(p));
+      lastAppliedPatches.push(...survivors);
     }
 
-    // On a revert the wing's patches do NOT exist in the doc — report them
-    // as discarded, never as applied, or downstream thread-resolution marks
-    // findings "autofixed" for fixes that were thrown away.
+    // On a revert (or a compress removal) the wing's patches do NOT exist in
+    // the doc — report them as discarded/failed, never as applied, or
+    // downstream thread-resolution marks findings "autofixed" for fixes that
+    // were thrown away.
+    const survivingApplied = roundReverted
+      ? []
+      : wingOutcome.applied.filter((p) => !compressedAway.includes(p));
     fixSummary = {
       attempted: wingOutcome.attempted.length,
-      applied: roundReverted ? 0 : wingOutcome.applied.length,
+      applied: survivingApplied.length,
       skipped_by_wing: wingOutcome.skipped.length,
-      applied_finding_ids: roundReverted ? [] : wingOutcome.applied.map((p) => p.finding_id),
+      applied_finding_ids: survivingApplied.map((p) => p.finding_id),
       skipped_finding_ids: wingOutcome.skipped.map((s) => s.finding_id),
       deferred_by_cap: deferred.length,
       round_reverted: roundReverted,
       discarded_finding_ids: roundReverted ? wingOutcome.applied.map((p) => p.finding_id) : [],
-      patch_failures: wingOutcome.patch_failures.map((pf) => ({
-        finding_id: pf.patch.finding_id,
-        old: snippet(pf.patch.old, 100),
-        reason: pf.reason,
-      })),
+      compress: compressInfo,
+      patch_failures: [
+        ...wingOutcome.patch_failures.map((pf) => ({
+          finding_id: pf.patch.finding_id,
+          old: snippet(pf.patch.old, 100),
+          reason: pf.reason,
+        })),
+        ...compressedAway.map((p) => ({
+          finding_id: p.finding_id,
+          old: snippet(p.old, 100),
+          reason: "removed_by_compress",
+        })),
+      ],
       wing_error: wingOutcome.wing_error,
       commit_sha: commitSha,
     };
@@ -1634,17 +1687,22 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
     // same (untouched) findings `recurring` and fake a churn signal.
     if (!roundReverted) for (const f of toFix) priorFixed.push(f);
 
-    // Disposition memory for later rounds' lead prompts.
+    // Disposition memory for later rounds' lead prompts. "fixed" only for
+    // compress SURVIVORS; a compress-removed fix re-opens as patch_failed.
+    // Deferred findings get NO entry — the host re-queues them itself
+    // (deferredBacklog), so telling the lead anything about them just risks
+    // suppressing a legitimate re-raise.
     {
-      const appliedIds = new Set(roundReverted ? [] : wingOutcome.applied.map((p) => p.finding_id));
+      const survivingIds = new Set(survivingApplied.map((p) => p.finding_id));
+      const compressedIds = new Set(compressedAway.map((p) => p.finding_id));
       const skippedById = new Map(wingOutcome.skipped.map((s) => [s.finding_id, s.reason]));
       for (const f of toFix) {
         if (roundReverted) priorDispositions.push({ finding: f, disposition: "discarded", round: roundNum });
-        else if (appliedIds.has(f.id)) priorDispositions.push({ finding: f, disposition: "fixed", round: roundNum });
+        else if (survivingIds.has(f.id)) priorDispositions.push({ finding: f, disposition: "fixed", round: roundNum });
+        else if (compressedIds.has(f.id)) priorDispositions.push({ finding: f, disposition: "patch_failed", round: roundNum, reason: "fix text removed by in-round compress" });
         else if (skippedById.has(f.id)) priorDispositions.push({ finding: f, disposition: "skipped", round: roundNum, reason: skippedById.get(f.id) ?? "" });
         else priorDispositions.push({ finding: f, disposition: "patch_failed", round: roundNum });
       }
-      for (const f of deferred) priorDispositions.push({ finding: f, disposition: "deferred", round: roundNum });
     }
 
     const roundReceipt = buildRoundReceipt({
@@ -1815,7 +1873,9 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       ...(convergeSources ? { promptSourcesOverride: convergeSources } : {}),
     });
     const allRaw: DocFinding[] = finalLead.flatMap((r) => r.findings);
-    const classified = classifyFindings(allRaw, {
+    // Same cross-domain dedup as the fix rounds — the final round's findings
+    // become PR threads, the most user-visible place for refraction noise.
+    const classified = classifyFindings(dedupeDocFindings(allRaw), {
       priorFixed,
       fixThreshold: opts.config.fix_threshold,
     });

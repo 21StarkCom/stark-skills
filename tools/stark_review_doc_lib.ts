@@ -455,10 +455,11 @@ export function dedupeDocFindings(findings: DocFinding[]): DocFinding[] {
     let placed = false;
     for (const g of groups) {
       const h = g[0]!;
-      const sameSection =
-        normText(h.section) === normText(f.section) ||
-        h.section.trim() === "" ||
-        f.section.trim() === "";
+      // Sections must MATCH (both-empty counts as a match). No empty-section
+      // wildcard: a section-less finding merging into any section on generic
+      // token overlap silently drops distinct findings — losing a real
+      // finding is strictly worse than posting a duplicate.
+      const sameSection = normText(h.section) === normText(f.section);
       const sameTitle = normText(h.title) === normText(f.title);
       if (sameSection && (sameTitle || findingsOverlap(h, f))) {
         g.push(f);
@@ -502,8 +503,13 @@ export function classifyFindings(
   raw: DocFinding[],
   ctx: ClassifyContext,
 ): DocFinding[] {
+  // Recurring keys span the canonical domain AND every cross_validated_by
+  // domain — dedup picks the canonical by severity, so the same refracted
+  // concern can surface under a different canonical domain next round; keying
+  // on one domain only would blind the recurring/churn detection.
+  const domainsOf = (f: DocFinding): string[] => [f.domain, ...(f.cross_validated_by ?? [])];
   const priorKeys = new Set(
-    ctx.priorFixed.map((f) => `${f.section}|${f.domain}|${f.agent}`),
+    ctx.priorFixed.flatMap((f) => domainsOf(f).map((d) => `${f.section}|${d}|${f.agent}`)),
   );
   const seenAgentTitle = new Set<string>();
   const out: DocFinding[] = [];
@@ -513,7 +519,7 @@ export function classifyFindings(
     if (!severityMeetsThreshold(f.severity, ctx.fixThreshold)) {
       classification = "ignored";
       reason = `severity ${f.severity} < threshold ${ctx.fixThreshold}`;
-    } else if (priorKeys.has(`${f.section}|${f.domain}|${f.agent}`)) {
+    } else if (domainsOf(f).some((d) => priorKeys.has(`${f.section}|${d}|${f.agent}`))) {
       classification = "recurring";
       reason = "same (section, domain, agent) flagged in a prior round";
     } else {
@@ -900,10 +906,16 @@ export function renderPriorDispositions(
   const label: Record<FindingDisposition, string> = {
     fixed: "fixed via patch",
     skipped: "skipped by fixer",
-    deferred: "deferred (fix cap) — will be handled, do not re-derive",
+    deferred: "deferred to a later fix round — still open",
     patch_failed: "patch failed — still open",
     discarded: "fix discarded by a round revert — still open",
   };
+  // Reconcile: one entry per finding, the LATEST disposition wins — a finding
+  // deferred in round 1 and fixed in round 2 must not render two
+  // contradictory lines.
+  const byId = new Map<string, PriorDisposition>();
+  for (const d of dispositions) byId.set(d.finding.id, d);
+  const reconciled = [...byId.values()];
   const header = [
     "## Findings already raised in earlier rounds — and how each was resolved",
     "",
@@ -911,12 +923,12 @@ export function renderPriorDispositions(
     "",
   ].join("\n");
   const lines: string[] = [];
-  let used = 0;
-  for (const d of dispositions) {
+  let used = header.length;
+  for (const d of reconciled) {
     const f = d.finding;
     const line = `- [${f.severity}/${f.domain}] ${f.section || "(no section)"} — ${f.title}: **${label[d.disposition]}** (round ${d.round}${d.reason ? `; ${d.reason}` : ""})`;
     if (used + line.length > maxChars) {
-      lines.push(`- …(${dispositions.length - lines.length} more omitted)`);
+      lines.push(`- …(${reconciled.length - lines.length} more omitted)`);
       break;
     }
     lines.push(line);
