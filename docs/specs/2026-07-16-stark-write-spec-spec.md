@@ -58,9 +58,11 @@ returns a JSON verdict, bounded revise loop, no worktree, no tool use):
 **Why this cannot ratchet like review-spec:** the wing does not emit
 free-form findings. It returns one status per contract section from a closed
 enum, and the host parser **drops any section id not in the contract** — the
-wing structurally cannot ask for a 10th section. Growth is bounded by
-construction; no growth breakers, coherence passes, or rollback machinery are
-needed here.
+wing structurally cannot ask for a 10th section. A per-item `note` is
+advisory and scoped to its section's done-when bar — the revise prompt
+directs the lead to treat anything beyond that bar as non-binding. Growth is
+bounded by construction; no growth breakers, coherence passes, or rollback
+machinery are needed here.
 
 **Loop vs single pass:** the loop degrades to exactly one verify pass when
 the first draft is clean (early exit on `done`), so a bounded loop costs the
@@ -105,6 +107,10 @@ Contract rules:
   weaken sections — deliberately, and without needing the red-team
   locked-fields machinery (that enforcement is `getRedTeamConfig`-specific
   and stays that way). Config carries knobs only (models, rounds, timeouts).
+  `contract.md` is the **canonical** encoding of the section-id list; the
+  parser enum and agent prompts mirror it, and `test_contract_ids_match_asset`
+  binds the mirrors to the asset so drift fails tests instead of silently
+  dropping a renamed section as unknown.
 
 ### Wing verdict schema
 
@@ -134,8 +140,11 @@ shape and does not apply):
   able to say "this section manufactures ceremony beyond the declared scope
   — cut it", not only demand more. The revise step **removes** content for
   `over_scoped` items.
-- `done` = every item `satisfied | n_a`. Host recomputes it from `items`
-  rather than trusting the field.
+- `done` = every item `satisfied | n_a`, recomputed by the host over the
+  **full 9-id set** — never trusted from the wing. A known id **absent** from
+  `items` is treated as `missing`, and an `n_a` without a reason string as
+  `underspecified` — a partial or lazy verdict can only fail closed (another
+  round), never produce a false `done`.
 - A malformed verdict gets **one** retry with a format reminder (same
   pattern as `plan_dispatch.ts`); a second failure terminates the run as
   `wing_unparseable` with the current draft preserved.
@@ -187,6 +196,14 @@ Every non-crash exit **still writes the spec file and the receipt**. On
    Questions section verbatim, honest and visible to review-spec.
 3. **Abort** — branch is left for inspection, no PR.
 
+Terminal semantics: *answer* → the single re-dispatch's verdict is final;
+*accept* → `final_verdict` stays `max_rounds_unsatisfied` with the parked
+items recorded as `accepted_gaps[]` in the receipt and exit 0
+(operator-accepted); *abort* → exit 1. Headless/`--json` runs have no
+operator: gap-fill is skipped (pre-dispatch unknowns go straight to Open
+Questions) and `max_rounds_unsatisfied` auto-resolves to *accept with gaps*,
+flagged in the receipt.
+
 ### Output & landing
 
 - Spec at `docs/specs/YYYY-MM-DD-<topic>-spec.md` (repo doc conventions;
@@ -203,7 +220,9 @@ Every non-crash exit **still writes the spec file and the receipt**. On
   already exist, check the branch out, commit the regenerated spec **on
   top**, and push normally — never force-push (workspace rule: review
   threads must survive), never mint a parallel branch. The PR trail keeps
-  every generation.
+  every generation. Landing is **create-or-adopt and idempotent**: a run that
+  died after commit but before push (or before PR creation) is retried by
+  re-invoking — it lands on the same branch and adopts any existing PR.
 - Handoff line: `next: /stark-review-spec <spec-path>`. Review-spec's
   existing "reuse a PR if one exists" behavior picks up the write-spec PR —
   author and review share one branch/PR trail end to end.
@@ -240,7 +259,9 @@ Dispatcher (`node --experimental-strip-types tools/write_spec.ts`):
 
 `--dry-run` (both layers): assemble the brief, resolve config/models/prompts,
 print the planned dispatch, and exit — no LLM calls, no file writes outside
-the scratchpad, no git (sibling parity with spec-to-plan/review-spec).
+the scratchpad, no git, and **no run record** (a dry run has no rounds, so
+the incremental-persistence rule below never engages — no history dir is
+created; sibling parity with spec-to-plan/review-spec).
 
 Receipt (single stdout JSON object, parity with sibling dispatchers):
 
@@ -284,18 +305,20 @@ authoring buy quiet reviews downstream).
 Prompts (`global/prompts/write-spec/`):
 
 ```
-contract.md                      — the Spec Contract (shared SSOT, all agents)
-{claude,codex,gemini}/generate.md — draft against the contract
-{claude,codex,gemini}/verify.md   — contract check → verdict JSON (NOT a review)
-{claude,codex,gemini}/revise.md   — revise non-satisfied sections only
+contract.md                — the Spec Contract (canonical SSOT, all agents)
+{claude,codex}/generate.md — draft against the contract
+{claude,codex}/verify.md   — contract check → verdict JSON (NOT a review)
+{claude,codex}/revise.md   — revise non-satisfied sections only
 ```
 
 `generate`/`revise` match the spec-to-plan naming; `verify.md` (not
 `review.md`) is a deliberate divergence — the name encodes that this prompt
-checks a checklist and must never drift into a critic prompt. All three
-agent dirs ship at v1 (cheap adaptations, parity with every sibling). All
-prompt resolution goes through `assetPromptsDir()` — never a hardcoded
-`~/.claude/code-review` path.
+checks a checklist and must never drift into a critic prompt. Claude + codex
+dirs ship at v1 — the default lead/wing pair; gemini prompts are deferred
+until a gemini lead or wing is actually configured (the dispatcher stays
+agent-generic via `VALID_AGENTS`; three-way parity up front was premature —
+review scope finding, accepted). All prompt resolution goes through
+`assetPromptsDir()` — never a hardcoded `~/.claude/code-review` path.
 
 ## SSOT & Dependencies
 
@@ -321,7 +344,8 @@ Scope-proportional — single-user local tooling on the operator's machine:
 - **Subprocess isolation is inherited, not new:** agents dispatch through
   `buildAgentEnv` (allowlisted env). Lead and wing are text-in/text-out like
   `plan_dispatch.ts` — no tool use, no worktree, no repo mutation by agents;
-  only the host writes files.
+  only the host writes files. The no-tool boundary is prompt- and flag-level
+  discipline, not OS enforcement — accepted for single-user local scope.
 - **The intent brief is operator-authored by definition** (their prompt,
   their notes, their conversation). It is *not* an adversarial artifact, so
   there is deliberately **no injection gate** — that machinery
@@ -347,6 +371,11 @@ Named proving tests (`tools/write_spec_lib.test.ts`):
   `underspecified` (fail-safe toward another round, never toward false-done).
 - `test_done_recomputed_from_items` — wing `done:true` with an
   `underspecified` item → host says not done.
+- `test_partial_verdict_fails_closed` — a verdict omitting a known section id
+  (or carrying a reason-less `n_a`) → item `missing`/`underspecified`, never
+  a false `done`.
+- `test_contract_ids_match_asset` — the parser's 9-id enum and the agent
+  prompts stay bound to `contract.md`'s canonical section list.
 - `test_over_scoped_routes_to_revise` — `over_scoped` item appears in the
   revise payload with cut semantics.
 - `test_early_exit_single_pass` — clean first draft → exactly 1 lead + 1
