@@ -66,7 +66,8 @@ Mirror `00_System/Memory Policy.md`. **Never** write passwords, API tokens,
 private keys, session cookies, recovery codes, or unredacted secret-bearing
 config. The write path secret-scans and fails closed, but don't rely on it —
 redact at the source. If the thing worth remembering is *that a secret exists*,
-record the pointer ("the X token lives in `.private/…`"), never the value.
+record the pointer ("the X token lives in the private-credentials store"),
+never the value.
 
 ## 4. Write it
 
@@ -133,4 +134,4 @@ Input: "save that stark-visual is now 14 binaries plus the in-repo cmd/stark-mcp
 
 **Pointer, not secret:**
 Input: "remember the HubSpot token"
-→ Do NOT store the value. `append_to_memory(category="locations", content="HubSpot API token lives in .private/ (see .private/INDEX.md); read into the consuming process, never paste.")`
+→ Do NOT store the value. `append_to_memory(category="locations", content="HubSpot API token lives in the private-credentials store (see its INDEX); read into the consuming process, never paste.")`
