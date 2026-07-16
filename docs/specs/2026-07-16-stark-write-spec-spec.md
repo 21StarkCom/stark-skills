@@ -196,13 +196,16 @@ Every non-crash exit **still writes the spec file and the receipt**. On
    Questions section verbatim, honest and visible to review-spec.
 3. **Abort** — branch is left for inspection, no PR.
 
-Terminal semantics: *answer* → the single re-dispatch's verdict is final;
-*accept* → `final_verdict` stays `max_rounds_unsatisfied` with the parked
-items recorded as `accepted_gaps[]` in the receipt and exit 0
-(operator-accepted); *abort* → exit 1. Headless/`--json` runs have no
-operator: gap-fill is skipped (pre-dispatch unknowns go straight to Open
-Questions) and `max_rounds_unsatisfied` auto-resolves to *accept with gaps*,
-flagged in the receipt.
+Terminal semantics live at the layer that owns them. The **dispatcher's**
+exit contract is uniform and unchanged: `max_rounds_unsatisfied` → `ok=false`,
+non-zero exit — acceptance never rewrites a dispatcher receipt. *Answer* →
+the single re-dispatch's verdict is final. *Accept* is a **skill-layer**
+resolution: the skill appends the parked items to the spec's Open Questions,
+records `accepted_gaps[]` in its own summary (and the PR body), and exits 0 —
+the pipeline outcome is "authored, with accepted gaps". *Abort* → skill exits
+1. Headless/`--json` skill runs have no operator: gap-fill is skipped
+(pre-dispatch unknowns go straight to Open Questions) and max-rounds
+auto-resolves to *accept with gaps*, flagged in the skill output.
 
 ### Output & landing
 
@@ -245,8 +248,8 @@ and `persistence_errors` (surfaced by the skill as warnings, never silently).
 Skill:
 
 ```
-/stark-write-spec <path|"intent"> [--out PATH] [--lead claude|codex|gemini]
-  [--wing claude|codex|gemini] [--lead-model ID] [--wing-model ID]
+/stark-write-spec <path|"intent"> [--out PATH] [--lead claude|codex]
+  [--wing claude|codex] [--lead-model ID] [--wing-model ID]
   [--max-rounds N] [--dry-run] [--ready] [--no-pr] [--json]
 ```
 
@@ -314,10 +317,13 @@ contract.md                — the Spec Contract (canonical SSOT, all agents)
 `generate`/`revise` match the spec-to-plan naming; `verify.md` (not
 `review.md`) is a deliberate divergence — the name encodes that this prompt
 checks a checklist and must never drift into a critic prompt. Claude + codex
-dirs ship at v1 — the default lead/wing pair; gemini prompts are deferred
-until a gemini lead or wing is actually configured (the dispatcher stays
-agent-generic via `VALID_AGENTS`; three-way parity up front was premature —
-review scope finding, accepted). All prompt resolution goes through
+dirs ship at v1 — the default lead/wing pair; gemini prompts are deferred,
+and until they ship `gemini` is **rejected at argument validation in both
+layers** with a clear unsupported-agent error — the advertised CLI surface
+matches what resolves. (The dispatcher core stays agent-generic via
+`VALID_AGENTS`, so enabling gemini later is prompt files + lifting the guard;
+three-way parity up front was premature — review scope finding, accepted.)
+All prompt resolution goes through
 `assetPromptsDir()` — never a hardcoded `~/.claude/code-review` path.
 
 ## SSOT & Dependencies
