@@ -58,9 +58,15 @@ returns a JSON verdict, bounded revise loop, no worktree, no tool use):
 **Why this cannot ratchet like review-spec:** the wing does not emit
 free-form findings. It returns one status per contract section from a closed
 enum, and the host parser **drops any section id not in the contract** — the
-wing structurally cannot ask for a 10th section. Growth is bounded by
-construction; no growth breakers, coherence passes, or rollback machinery are
-needed here.
+wing structurally cannot ask for a 10th section, so the *number* of sections
+is fixed by construction. The per-item `note` is advisory prose scoped to its
+section's contract criteria (not a new requirement), and the revise step acts
+only on the named non-satisfied sections; a note that strays beyond its
+section's done-when bar is discretionary input the lead may decline, not a
+mandatory finding. Growth in *section count* is bounded absolutely; growth in
+*section depth* is bounded by the contract's per-section done-when bar plus
+the `over_scoped` cut path — no growth breakers, coherence passes, or
+rollback machinery are needed here.
 
 **Loop vs single pass:** the loop degrades to exactly one verify pass when
 the first draft is clean (early exit on `done`), so a bounded loop costs the
@@ -105,6 +111,14 @@ Contract rules:
   weaken sections — deliberately, and without needing the red-team
   locked-fields machinery (that enforcement is `getRedTeamConfig`-specific
   and stays that way). Config carries knobs only (models, rounds, timeouts).
+  The contract is encoded in four places that must move together —
+  `contract.md`, the parser's canonical nine-id list in
+  `normalizeContractVerdict`, the agent prompts, and the review-spec domains
+  it inverts. A generated registry is over-scoped for a playground (rule of
+  three); instead a **single regression test** (`test_asset_contract`, below)
+  binds `contract.md`'s section ids to the parser set and to the domain names
+  review-spec judges by, so a renamed/added section fails CI loudly instead
+  of being silently dropped as unknown.
 
 ### Wing verdict schema
 
@@ -133,9 +147,19 @@ shape and does not apply):
   `over_scoped` is the bidirectional-gate lesson from #677: the wing must be
   able to say "this section manufactures ceremony beyond the declared scope
   — cut it", not only demand more. The revise step **removes** content for
-  `over_scoped` items.
-- `done` = every item `satisfied | n_a`. Host recomputes it from `items`
-  rather than trusting the field.
+  `over_scoped` items. An **unknown status string fails safe to
+  `underspecified`** (toward another round, never toward a false `done`).
+- `done` is **host-recomputed, never trusted from the wing.** The parser
+  first normalizes `items` into a **fixed nine-section map keyed by the
+  canonical ids, every slot initialized to `missing`**; each returned item
+  overwrites its slot. **Duplicate ids fail closed** — the more-severe status
+  wins (`missing` > `underspecified`/`over_scoped` > `n_a` > `satisfied`), so
+  a conflicting duplicate can never upgrade a section to done. An `n_a` slot
+  is honored **only with a non-empty `note`** (the stated reason); a
+  reason-less `n_a` degrades to `underspecified`. `done = true` **only when
+  all nine slots are present and every one is `satisfied` or a valid `n_a`** —
+  an empty or partial `items` array therefore leaves ≥1 slot `missing` and
+  can never vacuously satisfy the contract.
 - A malformed verdict gets **one** retry with a format reminder (same
   pattern as `plan_dispatch.ts`); a second failure terminates the run as
   `wing_unparseable` with the current draft preserved.
@@ -168,26 +192,63 @@ round (≤4 questions) covering only load-bearing unknowns the brief cannot
 answer: topic/slug, scope declaration if not inferable, out path if
 non-standard. Everything else the lead resolves or parks under Open
 Questions. Brief size is capped at `write_spec.max_input_chars` (default
-200 000); source material truncates with an explicit marker.
+200 000) via **deterministic per-section budgeting**: Ask + Constraints +
+Target are reserved first (never truncated); the remaining budget is split
+between Source material and Conversation context, each truncated with an
+explicit marker (source first, then conversation) when it overflows its
+share. If the reserved sections **alone** exceed the cap, the run fails fast
+with an explicit `brief_too_large` error rather than truncating protected
+content.
 
 ### Termination & gap resolution
 
-`final_verdict` ∈ `contract_satisfied | max_rounds_unsatisfied |
-lead_empty_draft | unchanged_revision | wing_unparseable` (naming parity
-with `plan_dispatch.ts`'s `FinalVerdict`). `unchanged_revision` = a revise
-round returned a byte-identical document — the lead is stuck, stop paying.
+`final_verdict` (dispatcher-level) ∈ `contract_satisfied |
+max_rounds_unsatisfied | lead_empty_draft | unchanged_revision |
+wing_unparseable` (naming parity with `plan_dispatch.ts`'s `FinalVerdict`).
+`unchanged_revision` = a revise round returned a byte-identical document —
+the lead is stuck, stop paying. On a `max_rounds_unsatisfied` run the skill's
+finalized receipt **overrides this with a skill-level outcome** —
+`accepted_with_gaps` or `aborted` (see the terminal-state machine below).
 
-Every non-crash exit **still writes the spec file and the receipt**. On
-`max_rounds_unsatisfied` the skill (not the dispatcher) offers, via
-`AskUserQuestion`:
+Every non-crash exit (dry-run excepted) **still writes the spec file and the
+receipt**. On `max_rounds_unsatisfied` the skill (not the dispatcher) offers,
+via `AskUserQuestion`, a bounded terminal-state machine — each branch defines
+its own finalized receipt, `ok`, and exit status:
 
 1. **Answer the gaps** — operator fills the missing information; skill
-   enriches the brief and re-dispatches **once** (hard bound: one retry).
-2. **Accept with gaps** — unsatisfied items are appended to the spec's Open
-   Questions section verbatim, honest and visible to review-spec.
-3. **Abort** — branch is left for inspection, no PR.
+   enriches the brief and re-dispatches **once** (hard bound: one retry). The
+   retry is a new dispatcher `run_id` whose receipt records `parent_run_id`;
+   its terminal verdict is the run's outcome (`contract_satisfied` →
+   `ok:true`; another `max_rounds_unsatisfied` does **not** recurse and falls
+   through to Accept-with-gaps / Abort).
+2. **Accept with gaps** — only `missing`/`underspecified` items are appended
+   to the spec's Open Questions section verbatim (genuine unknowns), honest
+   and visible to review-spec; **`over_scoped` items are never questions** —
+   they are cut from the draft, or (if the lead couldn't cut them) listed in
+   the receipt as `unresolved_over_scoped`, not parked in Open Questions. The
+   skill records `gap_resolution:"accepted"` + `accepted_items[]`, sets
+   `final_verdict:"accepted_with_gaps"`, lands the spec normally
+   (branch/commit/PR), and exits **0** — an intentional, review-visible
+   outcome is a success.
+3. **Abort** — no PR and no branch (branch creation is part of landing, which
+   never runs here); only the scratchpad brief and the already-written spec +
+   receipt are left for inspection. Receipt records `gap_resolution:"aborted"`,
+   `ok:false`, exit non-zero.
+
+The finalized receipt (after any branch) is the single authoritative record
+and matches the committed spec + PR status table.
 
 ### Output & landing
+
+**Landing owner = the skill layer, not the dispatcher.** The dispatcher is
+pure author: it runs the lead/wing loop, writes the spec + run record, and
+emits a receipt with `pr: null`. All git + GitHub work (branch, commit, push,
+PR) is the skill's, via the `github_app.ts` CLI; the skill then **finalizes
+the receipt** — rewriting the persisted `receipt.json` with the `pr` result
+and the landing-aware `ok` — so the on-disk record matches the committed spec
+and PR. `--ready`/`--no-pr` are skill-only flags (the dispatcher never opens
+a PR). The dispatcher's `prCreate`/`getToken` dependency below is consumed by
+this skill layer, not the headless loop.
 
 - Spec at `docs/specs/YYYY-MM-DD-<topic>-spec.md` (repo doc conventions;
   slug via `sanitizeSlug` from `stark_handover_lib.ts` — the out path is
@@ -212,35 +273,69 @@ Every non-crash exit **still writes the spec file and the receipt**. On
 
 Per the fleet's analytics bar (every run leaves a crash-proof record):
 history at `~/.claude/code-review/history/write-spec/<slug>/<run-id>/` with
-`receipt.json` + `rounds.json` written **incrementally after every round**
-plus `brief.md` (the assembled intent brief, copied in at dispatch so every
-run is reproducible from its record alone), a `latest` pointer, and
+`rounds.json` (the **canonical** per-round record) + `receipt.json` written
+**incrementally after every round** — the receipt's `rounds` summary and
+`contract_status` are **derived from `rounds.json`** (regenerated/validated
+against it when a run is read), so a torn write never leaves two records that
+silently disagree
+plus `brief.md` (the assembled intent brief, copied in at dispatch) and
+`resolved.json` (the effective config, resolved model ids, and the
+content-hash + version of every prompt asset used — `contract.md`,
+`generate`/`verify`/`revise` — plus the tool git sha), a `latest` pointer, and
 `history_keep_runs` retention (default 20) — reusing
 `stark_review_doc_lib.ts`'s exported `writeJsonAtomic` /
 `updateLatestPointer` / `pruneRunDirs`. Receipt
 includes per-round durations, `cost_usd` via `cost_lib.computeDispatchCost`,
 and `persistence_errors` (surfaced by the skill as warnings, never silently).
+With `resolved.json` capturing config + prompt hashes + tool sha alongside the
+brief, a run is **auditable and diagnosable from its record alone** — the
+exact inputs and asset versions are known. This is deliberately *not* a
+byte-exact replay guarantee (model sampling is nondeterministic).
 
 ## Interfaces
 
 Skill:
 
 ```
-/stark-write-spec <path|"intent"> [--out PATH] [--lead claude|codex|gemini]
-  [--wing claude|codex|gemini] [--lead-model ID] [--wing-model ID]
-  [--max-rounds N] [--dry-run] [--ready] [--no-pr] [--json]
+/stark-write-spec [<path|"intent">] [--source PATH] [--intent TEXT]
+  [--out PATH] [--lead claude|codex|gemini] [--wing claude|codex|gemini]
+  [--lead-model ID] [--wing-model ID] [--max-rounds N] [--dry-run] [--ready]
+  [--no-pr] [--json]
+```
+
+The positional argument is a convenience: treated as `--source` **iff it
+resolves to an existing readable file**, else as `--intent` prose. Explicit
+`--source`/`--intent` override the positional and disambiguate the corner
+cases (an intended-but-missing path, or intent text that matches a filename);
+both may be supplied together (source doc + extra intent), and supplying
+neither is an error.
+
+```
 ```
 
 Dispatcher (`node --experimental-strip-types tools/write_spec.ts`):
 
 ```
 --intent-brief PATH --out PATH [--lead A --wing A --lead-model ID
-  --wing-model ID --max-rounds N --timeout N --wing-timeout N --json]
+  --wing-model ID --max-rounds N --timeout N --wing-timeout N --dry-run --json]
 ```
 
 `--dry-run` (both layers): assemble the brief, resolve config/models/prompts,
 print the planned dispatch, and exit — no LLM calls, no file writes outside
 the scratchpad, no git (sibling parity with spec-to-plan/review-spec).
+**Dry-run is explicitly exempt from the "every non-crash exit writes the
+spec + receipt" and "every run leaves a history record" rules** — it writes
+nothing but the scratchpad brief and produces no `run_id`/history dir; its
+JSON output is the resolved plan (agents, models, out path, brief size) with
+`ok:true` and a dry-run-only `final_verdict:"dry_run"` sentinel (outside the
+run-verdict enum).
+
+**`--json` is non-interactive:** the skill's `AskUserQuestion` gap-fill and
+the `max_rounds_unsatisfied` resolution are suppressed; instead of pausing,
+the skill emits a structured `{"ok":false,"needs_input":{...}}` object (typed
+questions + missing brief fields) on stdout and exits non-zero, so a headless
+caller can answer and re-invoke. stdout carries only the final JSON object;
+all diagnostics go to stderr.
 
 Receipt (single stdout JSON object, parity with sibling dispatchers):
 
@@ -260,8 +355,13 @@ Receipt (single stdout JSON object, parity with sibling dispatchers):
 }
 ```
 
-`ok` = `final_verdict === "contract_satisfied"`; any other verdict exits
-non-zero with `error.code` set, spec + receipt still written.
+`ok` = `final_verdict === "contract_satisfied"` **and** the requested landing
+operation succeeded (a PR was opened, or `--no-pr`/`--dry-run` waived it): a
+contract-satisfied run whose push or PR failed is finalized `ok:false` with
+`error.code` naming the failed landing stage (git/push/pr). Any
+non-`contract_satisfied` verdict also exits non-zero with `error.code` set.
+The spec + receipt are still written on every non-crash exit (dry-run
+excepted — see Interfaces).
 
 Config (`write_spec` section, `DEFAULT_WRITE_SPEC` + `getWriteSpecConfig()`
 following the existing section-accessor pattern):
@@ -318,6 +418,16 @@ shared abstraction — rule of three; see Open Questions.
 
 Scope-proportional — single-user local tooling on the operator's machine:
 
+- **Trust boundaries (named, not gated):** the intent brief (prompt, notes,
+  distilled chat) crosses three boundaries — the LLM provider (Claude/Codex/
+  Gemini) at dispatch, GitHub at PR time, and the local run-history record.
+  All three are the operator's own accounts on their own machine, so the
+  handling rule is disclosure, not enforcement: the skill echoes the resolved
+  provider + target repo before dispatch/push, and the run-history dir (brief
+  + `resolved.json`) is written user-only under `stateRoot()`. No
+  credential-scan or sensitive-data confirmation gate is added — that is the
+  red-team injection machinery, deliberately out of scope for an
+  operator-authored brief (see the injection-gate note below).
 - **Subprocess isolation is inherited, not new:** agents dispatch through
   `buildAgentEnv` (allowlisted env). Lead and wing are text-in/text-out like
   `plan_dispatch.ts` — no tool use, no worktree, no repo mutation by agents;
@@ -358,20 +468,41 @@ Named proving tests (`tools/write_spec_lib.test.ts`):
   simulated round-2 crash.
 - `test_intent_brief_truncation` — oversize source material truncates with
   marker, ask/constraints never truncated.
+- `test_done_fails_closed` — table-driven over the nine ids: empty `items`,
+  partial `items` (omitted ids), duplicate ids (conflicting statuses), and
+  reason-less `n_a` each leave ≥1 non-satisfied slot → `done:false`, never
+  `contract_satisfied`.
+- `test_revision_loop_converges` — scripted lead + wing doubles force
+  draft → `underspecified` verdict → targeted revise → `satisfied`: asserts
+  call order, full-document preservation, that only non-satisfied items reach
+  the lead, `revised_sections`, per-round receipts, and the final written doc.
+- `test_asset_contract` — the canonical section ids in `contract.md` equal
+  the parser's exported id set and the referenced review-spec domain names,
+  and every agent's `generate`/`verify`/`revise` prompt resolves and states
+  the verdict schema + status enum.
 
 Plus: `skill_smoke_test.test.ts` picks the skill up automatically
 (frontmatter, `standards/help.md` reference, tool refs resolve,
-`write_spec.ts --help` exits clean). Live e2e (playground rules — real
-surface, no ceremony): author one real spec from a canned intent in this
-repo, then run `/stark-review-spec` on it.
+`write_spec.ts --help` exits clean). A skill-behavior test in a temp git repo
+(`test_skill_landing`) mocks `AskUserQuestion` + the `github_app` CLI and
+covers the three gap-resolution choices + the one-retry bound, `--dry-run`
+side-effect exclusion, `--ready`/`--no-pr`, fresh-vs-existing branch/PR reuse
+(non-force push, PR lookup-before-create), and PR body/status-table
+construction. Live e2e (playground rules — real surface, no ceremony): author
+one real spec from a canned intent in this repo, then run `/stark-review-spec`
+on it.
 
 **Success criteria (DoD):**
 
 1. Live-run receipt reaches `contract_satisfied` within 3 rounds.
-2. `/stark-review-spec` on an authored spec produces **materially fewer
-   round-1 findings** than the recent historical baseline for hand-written
-   specs (compare against existing `review-analytics` sidecars/history;
-   directional spot-check, not a stats regime).
+2. `/stark-review-spec` on an authored spec produces fewer round-1 findings
+   than hand-written specs against a **frozen baseline**: take 3 recent
+   hand-written specs from `history/spec-reviews/`, record their **unique
+   round-1 findings at `medium`+ severity** (dedup by section+title) as the
+   baseline set, and require an authored spec of comparable scope to land at
+   **≤50% of that per-spec median**. The baseline numbers are stored in the
+   ADR so the comparison is reproducible; a directional spot-check of the
+   finding *text* stays as supplementary qualitative evidence, not the gate.
 3. No growth breaker (`growth_ack_required`, hard cap, invent-then-condemn)
    trips when review-spec runs on an authored spec.
 4. Docs updated in the same change: CLAUDE.md (pipeline list, TS tools,
