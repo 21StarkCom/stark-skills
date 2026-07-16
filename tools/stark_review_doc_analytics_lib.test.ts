@@ -153,12 +153,10 @@ test("declining findings do not trip non-convergence", () => {
   assert.equal(v.abort, false);
 });
 
-test("advisory flags: round spike, churn, patch thrash — degraded, no abort", () => {
+test("advisory flags: churn + patch thrash — degraded, no abort", () => {
   const rounds = [
     stat({
       round: 1,
-      doc_chars_before: 1000,
-      doc_chars_after: 1600, // 1.6x round growth > 1.5
       to_fix: 4,
       recurring: 3, // 0.75 > 0.5 churn share
       patches_attempted: 4,
@@ -168,10 +166,105 @@ test("advisory flags: round spike, churn, patch thrash — degraded, no abort", 
   ];
   const v = evaluateGuards(1000, rounds, DEFAULT_ANALYTICS_THRESHOLDS);
   assert.equal(v.abort, false);
-  assert.ok(v.flags.includes("round_growth_spike"));
   assert.ok(v.flags.includes("churn"));
   assert.ok(v.flags.includes("patch_thrash"));
   assert.equal(judgeGrade(v.flags), "degraded");
+});
+
+// ─── Round-spike halt (the early tripwire) ───────────────────────────────
+
+test("round-1 spike with no findings decline halts immediately for ack — the kotodama acceptance case", () => {
+  // A 1.6x round-1 balloon previously stayed advisory and ground to the
+  // cumulative 2x/3x breakers over 3 paid rounds before rollback. Now the
+  // FIRST spiking round with non-declining findings stops the loop.
+  const rounds = [
+    stat({
+      round: 1,
+      doc_chars_before: 1000,
+      doc_chars_after: 1600, // 1.6x round growth > 1.5
+      to_fix: 4,
+    }),
+  ];
+  const v = evaluateGuards(1000, rounds, DEFAULT_ANALYTICS_THRESHOLDS);
+  assert.equal(v.abort, true);
+  assert.ok(v.flags.includes("round_growth_spike"));
+  assert.ok(v.flags.includes("round_spike_halt"));
+  assert.match(v.abort_reason!, /grew the doc 1\.60x in a single round/);
+  // Halt-FOR-ACK: operator judges gap-filling vs padding; no rollback.
+  assert.equal(v.growth_ack_required, true);
+  assert.equal(v.rollback_recommended, false);
+  assert.equal(judgeGrade(v.flags), "degraded");
+});
+
+test("round spike WITH declining findings stays advisory — legitimate gap-fill (#675 shape)", () => {
+  const rounds = [
+    stat({ round: 1, to_fix: 6, doc_chars_after: 1100 }),
+    stat({
+      round: 2,
+      to_fix: 2, // declining vs 6
+      doc_chars_before: 1100,
+      doc_chars_after: 1800, // 1.64x round growth > 1.5
+    }),
+  ];
+  const v = evaluateGuards(1000, rounds, DEFAULT_ANALYTICS_THRESHOLDS);
+  assert.equal(v.abort, false);
+  assert.ok(v.flags.includes("round_growth_spike"));
+  assert.ok(!v.flags.includes("round_spike_halt"));
+});
+
+test("round-2 spike with flat findings halts (not just round 1)", () => {
+  const rounds = [
+    stat({ round: 1, to_fix: 4, doc_chars_after: 1100 }),
+    stat({
+      round: 2,
+      to_fix: 4, // flat
+      doc_chars_before: 1100,
+      doc_chars_after: 1800, // 1.64x
+    }),
+  ];
+  const v = evaluateGuards(1000, rounds, DEFAULT_ANALYTICS_THRESHOLDS);
+  assert.equal(v.abort, true);
+  assert.ok(v.flags.includes("round_spike_halt"));
+  assert.equal(v.growth_ack_required, true);
+});
+
+test("hard growth cap takes precedence over the spike halt (rollback, not ack)", () => {
+  const rounds = [
+    stat({ round: 1, to_fix: 5, doc_chars_before: 1000, doc_chars_after: 4500 }),
+  ];
+  const v = evaluateGuards(1000, rounds, DEFAULT_ANALYTICS_THRESHOLDS);
+  assert.equal(v.abort, true);
+  assert.match(v.abort_reason!, /hard cap/);
+  assert.equal(v.rollback_recommended, true);
+  assert.equal(v.growth_ack_required, false);
+});
+
+// ─── Scope-growth round revert (per-round invent-then-condemn) ───────────
+
+import { shouldRevertScopeGrowthRound } from "./stark_review_doc_analytics_lib.ts";
+
+test("shouldRevertScopeGrowthRound: growth under scope condemnation reverts; either alone does not", () => {
+  assert.equal(shouldRevertScopeGrowthRound({ docCharsBefore: 1000, docCharsAfter: 1400, scopeFindings: 2 }), true);
+  assert.equal(shouldRevertScopeGrowthRound({ docCharsBefore: 1000, docCharsAfter: 1400, scopeFindings: 0 }), false);
+  assert.equal(shouldRevertScopeGrowthRound({ docCharsBefore: 1000, docCharsAfter: 900, scopeFindings: 3 }), false);
+  assert.equal(shouldRevertScopeGrowthRound({ docCharsBefore: 1000, docCharsAfter: 1000, scopeFindings: 3 }), false);
+});
+
+test("scope_growth_round_reverted extraFlag grades degraded and renders a note", () => {
+  const a = buildAnalytics({
+    doc: "d.md",
+    promptsDir: "spec-review",
+    originalDoc: "a".repeat(1000),
+    finalDoc: "a".repeat(1000),
+    roundStats: [stat({ round: 1, to_fix: 4 })],
+    thresholds: DEFAULT_ANALYTICS_THRESHOLDS,
+    abortedEarly: true,
+    abortReason: "round 1 fixes grew the doc while the scope domain condemned it",
+    extraFlags: ["scope_growth_round_reverted"],
+  });
+  assert.ok(a.flags.includes("scope_growth_round_reverted"));
+  assert.equal(a.grade, "degraded");
+  assert.ok(a.notes.some((n) => n.startsWith("Scope-growth round reverted")));
 });
 
 test("coherence and final-review rounds are ignored by the guards", () => {

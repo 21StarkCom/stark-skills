@@ -645,3 +645,143 @@ describe("convergence helpers", () => {
     }
   });
 });
+
+// ─── capFindingsToFix (per-round fix cap, #4) ───────────────────────────
+
+import { capFindingsToFix } from "./stark_review_doc_lib.ts";
+
+describe("capFindingsToFix", () => {
+  const sorted = [
+    mkFinding({ id: "c1", classification: "fix", severity: "critical" }),
+    mkFinding({ id: "h1", classification: "fix", severity: "high" }),
+    mkFinding({ id: "m1", classification: "fix", severity: "medium" }),
+    mkFinding({ id: "m2", classification: "recurring", severity: "medium" }),
+  ];
+
+  test("caps to top-N by severity, defers the rest", () => {
+    const { selected, deferred } = capFindingsToFix(sorted, 2);
+    assert.deepEqual(selected.map((f) => f.id), ["c1", "h1"]);
+    assert.deepEqual(deferred.map((f) => f.id), ["m1", "m2"]);
+  });
+
+  test("cap 0 means uncapped", () => {
+    const { selected, deferred } = capFindingsToFix(sorted, 0);
+    assert.equal(selected.length, 4);
+    assert.equal(deferred.length, 0);
+  });
+
+  test("cap >= length passes everything through", () => {
+    const { selected, deferred } = capFindingsToFix(sorted, 10);
+    assert.equal(selected.length, 4);
+    assert.equal(deferred.length, 0);
+  });
+
+  test("severity bias end-to-end: selectFindingsToFix + cap keeps high/critical, defers medium", () => {
+    const findings = [
+      mkFinding({ id: "a", classification: "fix", severity: "medium" }),
+      mkFinding({ id: "b", classification: "fix", severity: "critical" }),
+      mkFinding({ id: "c", classification: "fix", severity: "medium" }),
+      mkFinding({ id: "d", classification: "recurring", severity: "high" }),
+    ];
+    const { selected, deferred } = capFindingsToFix(selectFindingsToFix(findings), 2);
+    assert.deepEqual(selected.map((f) => f.id), ["b", "d"]);
+    assert.equal(deferred.every((f) => f.severity === "medium"), true);
+  });
+});
+
+// ─── Deferred-scope fixer guard (#1) ────────────────────────────────────
+
+describe("WING_FIXER_CONTRACT deferred-scope guard", () => {
+  test("contract carries both the playground guard and the deferred-boundary guard", () => {
+    assert.match(WING_FIXER_CONTRACT, /SCOPE GUARD — do not add production machinery to a playground document/);
+    assert.match(WING_FIXER_CONTRACT, /DEFERRED-SCOPE GUARD — the document's own V1 boundary is binding, even on a production system/);
+    assert.match(WING_FIXER_CONTRACT, /author deferred to V1 boundary \/ out of scope/);
+    assert.match(WING_FIXER_CONTRACT, /What this is NOT/);
+    assert.match(WING_FIXER_CONTRACT, /deferred to Phase 2/);
+  });
+
+  test("buildFixerPrompt ships the deferred-scope guard to the wing", () => {
+    const prompt = buildFixerPrompt({
+      doc: "# Spec\n\nV1 = listener only; SLOs/validation/retention deferred to Phase 2.",
+      findings: [mkFinding({ id: "f1" })],
+      roundNum: 1,
+    });
+    assert.match(prompt, /DEFERRED-SCOPE GUARD/);
+    assert.match(prompt, /author deferred to V1 boundary \/ out of scope/);
+  });
+});
+
+// ─── renderPriorRoundChanges + reviewer anti-churn note (#5) ─────────────
+
+import { renderPriorRoundChanges } from "./stark_review_doc_lib.ts";
+
+describe("renderPriorRoundChanges", () => {
+  test("empty applied list renders nothing", () => {
+    assert.equal(renderPriorRoundChanges([]), "");
+  });
+
+  test("renders the anti-churn instruction plus patch excerpts", () => {
+    const out = renderPriorRoundChanges([
+      { finding_id: "a", old: "x", new: "Added SLO section body" },
+      { finding_id: "b", old: "gone", new: "" },
+    ]);
+    assert.match(out, /do not re-review it/);
+    assert.match(out, /the correct finding is \*\*"revert it"\*\*, not "extend it"/);
+    assert.match(out, /Added SLO section body/);
+    assert.match(out, /\(text removed\)/);
+  });
+
+  test("caps total size and notes omitted patches", () => {
+    const patches = Array.from({ length: 20 }, (_, i) => ({
+      finding_id: `f${i}`, old: "x", new: "y".repeat(700),
+    }));
+    const out = renderPriorRoundChanges(patches, 2000);
+    assert.ok(out.length < 4000);
+    assert.match(out, /more patch\(es\) omitted/);
+  });
+
+  test("buildReviewerPrompt places the note before the document", () => {
+    const note = renderPriorRoundChanges([{ finding_id: "a", old: "x", new: "fix text" }]);
+    const prompt = buildReviewerPrompt({
+      agentMd: "AGENT", domainPrompt: "DOMAIN", doc: "# Doc body", priorRoundNote: note,
+    });
+    const noteIdx = prompt.indexOf("do not re-review it");
+    const docIdx = prompt.indexOf("## Document under review");
+    assert.ok(noteIdx !== -1 && docIdx !== -1 && noteIdx < docIdx);
+  });
+
+  test("buildReviewerPrompt without a note is unchanged", () => {
+    const prompt = buildReviewerPrompt({ agentMd: "AGENT", domainPrompt: "DOMAIN", doc: "# Doc" });
+    assert.ok(!prompt.includes("do not re-review it"));
+  });
+});
+
+// ─── isReviewMutationCommitSubject (growth-baseline pinning, #6) ─────────
+
+import { isReviewMutationCommitSubject } from "./stark_review_doc_lib.ts";
+
+describe("isReviewMutationCommitSubject", () => {
+  test("matches the pipeline's own mutations", () => {
+    for (const s of [
+      "docs: spec-review round 2 fixes (8 applied)",
+      "docs: plan-review round 1 fixes (3 applied)",
+      "docs: spec-review coherence pass (4 patches, 120 chars removed)",
+      "revert(review-doc): discard padding — hard growth cap breaker",
+      "docs(review-spec): fix missing test plan (test-plan/high)",
+      "docs(review-plan): fix sequencing gap (sequencing/medium)",
+    ]) {
+      assert.equal(isReviewMutationCommitSubject(s), true, s);
+    }
+  });
+
+  test("does NOT match authored commits — including the stage commit (the baseline itself)", () => {
+    for (const s of [
+      "docs(review): stage kotodama-spec.md for spec review",
+      "docs: add kotodama V1 spec",
+      "feat(kotodama): listener slice",
+      "docs: spec-reviewed and approved", // near-miss prefix
+    ]) {
+      assert.equal(isReviewMutationCommitSubject(s), false, s);
+    }
+  });
+});

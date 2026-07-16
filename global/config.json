@@ -156,7 +156,8 @@
     ],
     "fix_threshold": "medium",
     "disabled_domains": [],
-    "max_rounds": 3,
+    "max_rounds": 2,
+    "max_fixes_per_round": 8,
     "triage": {
       "mode": "conservative"
     }

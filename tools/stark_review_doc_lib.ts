@@ -49,6 +49,11 @@ export interface DocReviewConfig {
   fix_threshold: Severity;
   disabled_domains: string[];
   max_rounds: number;
+  /** Cap on patches handed to the wing per round, top-N by severity. The
+   * overflow stays recorded as findings (final review + Phase 5 catch them)
+   * but is not patched — bulk medium "add detail" batches are what compound
+   * doc growth. 0 = uncapped. */
+  max_fixes_per_round: number;
   /** Skill-local cap on concurrent codex dispatches (codex serializes hard on
    * ChatGPT-tier accounts; bump cautiously). */
   max_codex_concurrent: number;
@@ -75,7 +80,12 @@ export const DEFAULT_DOC_REVIEW_CONFIG: DocReviewConfig = {
   agents: ["codex"],
   fix_threshold: "medium",
   disabled_domains: [],
-  max_rounds: 3,
+  // 2, not 3: with the fix cap + anti-churn feedback in place, round 3 was
+  // where runs padded rather than converged (the kotodama balloon paid for a
+  // third round only to roll it back). A run that genuinely needs more passes
+  // opts in via --rounds.
+  max_rounds: 2,
+  max_fixes_per_round: 8,
   max_codex_concurrent: 3,
   coherence_pass: true,
   history_keep_runs: 20,
@@ -246,6 +256,11 @@ export function buildReviewerPrompt(opts: {
   agentMd: string;
   domainPrompt: string;
   doc: string;
+  /** Rendered summary of the previous round's wing patches (see
+   * renderPriorRoundChanges) — the anti-churn feedback that stops reviewers
+   * from re-raising findings against text that was just added to resolve
+   * their prior findings. */
+  priorRoundNote?: string;
 }): string {
   const parts = [
     opts.agentMd.trim(),
@@ -254,11 +269,52 @@ export function buildReviewerPrompt(opts: {
     "",
     DOC_FINDINGS_FORMAT,
     "",
+    ...(opts.priorRoundNote ? [opts.priorRoundNote, ""] : []),
     "## Document under review",
     "",
     opts.doc,
   ];
   return parts.filter((p, i) => p.length > 0 || i === 0).join("\n");
+}
+
+/**
+ * Render the previous round's applied wing patches as reviewer context.
+ *
+ * The `priorFixed` recurring-dedup keys on (section, domain, agent) — which
+ * freshly-ADDED sections evade (new section names → new keys), so reviewers
+ * kept piling findings onto last round's fix text and the loop churned. This
+ * block shows reviewers exactly what the previous round added and forbids
+ * "extend it" findings against it; "revert it" stays legitimate.
+ *
+ * Per-patch excerpts are truncated and the whole block is capped so a big
+ * fix round cannot crowd out the document itself.
+ */
+export function renderPriorRoundChanges(
+  applied: readonly FixerPatch[],
+  maxChars = 6000,
+): string {
+  if (applied.length === 0) return "";
+  const header = [
+    "## Text added by the previous fix round (do not re-review it)",
+    "",
+    "The excerpts below were added or rewritten by the previous round's fixer to resolve findings already raised. **Do not raise findings against this text** — not \"expand it\", not \"add detail\", not \"also cover X\": that creates a churn loop where every fix becomes next round's finding. If text added in the previous round is WRONG or overreaches the document's scope, the correct finding is **\"revert it\"**, not \"extend it\".",
+    "",
+  ].join("\n");
+  const parts: string[] = [];
+  let used = 0;
+  const perPatchCap = 800;
+  for (const p of applied) {
+    const body = p.new.length > 0 ? p.new : "(text removed)";
+    const excerpt = body.length > perPatchCap ? body.slice(0, perPatchCap) + "\n…(truncated)" : body;
+    const block = "```\n" + excerpt + "\n```";
+    if (used + block.length > maxChars) {
+      parts.push(`…(${applied.length - parts.length} more patch(es) omitted)`);
+      break;
+    }
+    parts.push(block);
+    used += block.length;
+  }
+  return header + parts.join("\n\n");
 }
 
 /**
@@ -402,6 +458,27 @@ export function selectFindingsToFix(findings: DocFinding[]): DocFinding[] {
   ).sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
 }
 
+export interface FixSelection {
+  /** The per-round wing batch: top-`cap` by severity. */
+  selected: DocFinding[];
+  /** Eligible findings deferred by the cap — recorded, not patched this
+   * round (the final review + Phase 5 pick them up). */
+  deferred: DocFinding[];
+}
+
+/**
+ * Cap the per-round fix batch. `sorted` must already be severity-sorted
+ * (selectFindingsToFix's output). Uncapped runs passed 16-21 patches to the
+ * wing per round — mostly medium "add detail" — which is what compounds doc
+ * growth; the cap keeps each round to the top-N most severe findings and
+ * lets the rest accumulate as recorded findings instead of patches.
+ * `cap <= 0` means uncapped.
+ */
+export function capFindingsToFix(sorted: DocFinding[], cap: number): FixSelection {
+  if (cap <= 0 || sorted.length <= cap) return { selected: sorted, deferred: [] };
+  return { selected: sorted.slice(0, cap), deferred: sorted.slice(cap) };
+}
+
 // ─── Wing fixer prompt + patch contract ─────────────────────────────────
 
 /**
@@ -439,6 +516,7 @@ export const WING_FIXER_CONTRACT = [
   "- Make the MINIMUM change needed to address each finding. Do not rewrite whole sections when a sentence-level edit will do.",
   "- Group multiple findings that touch the same paragraph into ONE patch with all the needed edits.",
   "- **SCOPE GUARD — do not add production machinery to a playground document.** If the document declares single-user / local / personal / playground scope (or states a small scale), and a finding would have you ADD platform hardening — HA / failover / distributed-recovery or crash-consistency semantics, audit trails or append-only history, credential/token rotation, homoglyph / adversarial-input / injection defenses, schema-version counters or migration/backfill frameworks for a local single-writer store, rate limiting / pagination / backpressure / budget circuit-breakers, fleet alerting or multi-tenant isolation — do NOT patch it. Put it in `skipped` with reason \"out of scope for declared playground scope\". You are the amplifier that turns an over-scoped finding into committed doc growth; refuse. The reviewer being technically correct in the abstract does not make the machinery in scope. When in doubt between adding a subsystem and skipping, skip.",
+  "- **DEFERRED-SCOPE GUARD — the document's own V1 boundary is binding, even on a production system.** Playground scope is not the only protection. When the document EXPLICITLY defers a concern — a \"What this is NOT\" section, \"Out of scope for V1\", \"deferred to Phase 2\", a \"dark by default\" rollout statement — the absence of that concern is the author's decision, not a gap, no matter how production-grade the surrounding system is (IAP / Cloud Run / Secret Manager around the slice do not void the boundary). If a finding would have you ADD an explicitly-deferred concern (SLOs, validation, retention policies, monitoring, hardening, migrations, …), do NOT patch it. Put it in `skipped` with reason \"author deferred to V1 boundary / out of scope\". If the deferral itself is genuinely dangerous, the only in-bounds patch is one that flags or adjusts the boundary statement — never one that smuggles in the deferred machinery.",
   "- If you cannot address a finding (out of scope, requires author judgment, etc.), put it in `skipped` with a one-sentence reason. Do not silently drop findings.",
   "- Output ONLY the JSON object after your reasoning. No prose after the closing brace.",
 ].join("\n");
@@ -703,6 +781,24 @@ export function applyPatches(doc: string, patches: readonly FixerPatch[]): Patch
     applied.push(patch);
   }
   return { newDoc: current, applied, failures };
+}
+
+// ─── Growth baseline pinning ────────────────────────────────────────────
+
+/**
+ * True when a git commit subject is one of this pipeline's own mutations of
+ * the document — a wing fix round, the coherence pass, a padding revert, or a
+ * Phase-5b manual finding fix. Used to pin the growth baseline: a re-run or
+ * resumed review walks past these commits to the last AUTHORED version of the
+ * doc, so growth is measured against the first-staged content instead of a
+ * moving baseline that already contains previous rounds' growth.
+ */
+export function isReviewMutationCommitSubject(subject: string): boolean {
+  return (
+    /^docs: (spec|plan)-review (round \d+ fixes|coherence pass)/.test(subject) ||
+    /^revert\(review-doc\):/.test(subject) ||
+    /^docs\(review-(spec|plan)\): fix /.test(subject)
+  );
 }
 
 // ─── Round persistence ─────────────────────────────────────────────────

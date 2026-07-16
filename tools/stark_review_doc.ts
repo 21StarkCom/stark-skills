@@ -44,6 +44,7 @@ import {
   buildFixerPrompt,
   buildReviewerPrompt,
   buildHistoryDir,
+  capFindingsToFix,
   classifyFindings,
   computeCoverage,
   DEFAULT_DOC_REVIEW_CONFIG,
@@ -54,6 +55,7 @@ import {
   discoverDomains,
   docFindingId,
   type FixerPatch,
+  isReviewMutationCommitSubject,
   MAX_ROUNDS_CEILING,
   newRunId,
   nextDomainTimeout,
@@ -64,6 +66,7 @@ import {
   pmap,
   type PromptSources,
   pruneRunDirs,
+  renderPriorRoundChanges,
   resolveConvergencePromptSources,
   resolveDocPromptSources,
   scaleTimeoutForDocSize,
@@ -76,9 +79,11 @@ import {
   buildAnalytics,
   countLines,
   evaluateGuards,
+  type HealthFlag,
   renderAnalyticsMarkdown,
   type ReviewAnalytics,
   type RoundStat,
+  shouldRevertScopeGrowthRound,
 } from "./stark_review_doc_analytics_lib.ts";
 import { assetConfigPath, assetPromptsDir } from "./asset_root_lib.ts";
 
@@ -729,6 +734,9 @@ function loadDocReviewConfig(promptsDir: PromptsDir): DocReviewConfig {
   if (typeof section.max_rounds === "number" && Number.isFinite(section.max_rounds)) {
     cfg.max_rounds = Math.min(MAX_ROUNDS_CEILING, Math.max(1, Math.floor(section.max_rounds)));
   }
+  if (typeof section.max_fixes_per_round === "number" && Number.isFinite(section.max_fixes_per_round) && section.max_fixes_per_round >= 0) {
+    cfg.max_fixes_per_round = Math.floor(section.max_fixes_per_round);
+  }
   if (typeof section.max_codex_concurrent === "number" && section.max_codex_concurrent > 0) {
     cfg.max_codex_concurrent = Math.floor(section.max_codex_concurrent);
   }
@@ -771,6 +779,9 @@ async function runLeadReview(opts: {
   leadAgent: LeadAgent;
   model: string;
   reasoningEffort: string;
+  /** Anti-churn feedback: rendered summary of the previous round's applied
+   * wing patches (renderPriorRoundChanges). */
+  priorRoundNote?: string;
   /** Convergence mode: bypass per-domain prompt resolution (there is no
    * NN-<domain>.md for "convergence") and use these sources for every domain. */
   promptSourcesOverride?: PromptSources;
@@ -789,6 +800,7 @@ async function runLeadReview(opts: {
         agentMd: sources.agentMd,
         domainPrompt: sources.domainPrompt,
         doc: opts.doc,
+        ...(opts.priorRoundNote ? { priorRoundNote: opts.priorRoundNote } : {}),
       });
       log(`${ts()} → ${opts.leadAgent}:${domain} dispatch (model=${opts.model})`);
       const r = opts.leadAgent === "claude"
@@ -961,6 +973,7 @@ interface Receipt {
   config: {
     fix_threshold: string;
     max_rounds: number;
+    max_fixes_per_round: number;
     max_codex_concurrent: number;
     disabled_domains: string[];
   };
@@ -1002,6 +1015,12 @@ interface Receipt {
       applied_finding_ids: string[];
       /** finding ids the wing explicitly declined to patch this round. */
       skipped_finding_ids: string[];
+      /** eligible findings deferred by max_fixes_per_round (recorded, not
+       * patched this round). */
+      deferred_by_cap: number;
+      /** the round's net result grew the doc under an open scope-domain
+       * condemnation — the result was discarded, nothing written/committed. */
+      round_reverted: boolean;
       patch_failures: Array<{ finding_id: string; old: string; reason: string }>;
       wing_error: string | null;
       commit_sha: string | null;
@@ -1070,6 +1089,45 @@ async function gitCommitDoc(opts: {
   }
   const sha = await runGit(["rev-parse", "HEAD"], opts.repoDir, 15);
   return sha.code === 0 ? sha.stdout.trim() : null;
+}
+
+/**
+ * Pin the growth baseline to the first-staged doc version. A re-run or
+ * resumed review otherwise measures growth against run-start HEAD — which
+ * already contains previous rounds' committed growth, so the ratio guards
+ * silently reset every re-run. Walk the doc's history past this pipeline's
+ * own commits (round fixes, coherence, reverts, Phase-5b fixes) to the last
+ * authored version and use its content. Falls back to `runStartDoc` when git
+ * is unavailable or every reachable commit is a pipeline mutation.
+ */
+async function resolveGrowthBaseline(opts: {
+  repoDir: string;
+  docPath: string;
+  docAbs: string;
+  runStartDoc: string;
+}): Promise<string> {
+  const logRes = await runGit(
+    ["log", "--format=%H%x09%s", "-n", "100", "--", opts.docPath],
+    opts.repoDir,
+    30,
+  );
+  if (logRes.code !== 0) return opts.runStartDoc;
+  for (const line of logRes.stdout.split("\n")) {
+    if (!line.trim()) continue;
+    const tab = line.indexOf("\t");
+    if (tab === -1) continue;
+    const sha = line.slice(0, tab);
+    const subject = line.slice(tab + 1);
+    if (isReviewMutationCommitSubject(subject)) continue;
+    // `:./path` resolves relative to the git cwd (repoDir), matching how the
+    // doc path is used everywhere else in this dispatcher.
+    const rel = path.isAbsolute(opts.docPath)
+      ? path.relative(opts.repoDir, opts.docAbs)
+      : opts.docPath;
+    const show = await runGit(["show", `${sha}:./${rel}`], opts.repoDir, 30);
+    return show.code === 0 ? show.stdout : opts.runStartDoc;
+  }
+  return opts.runStartDoc;
 }
 
 export async function dispatchDocReview(opts: DispatchOptions): Promise<{
@@ -1168,6 +1226,25 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
   let abortedEarly = false;
   let abortReason: string | null = null;
   let rolledBackToOriginal = false;
+  // Dispatcher-driven analytics flags (e.g. a scope-growth round revert) that
+  // evaluateGuards cannot derive from round stats alone.
+  const extraAnalyticsFlags: HealthFlag[] = [];
+  // Growth baseline: pinned to the first-staged (last authored) doc version,
+  // not run-start HEAD — a re-run otherwise measures growth against content
+  // that already contains previous rounds' committed growth. Rollback still
+  // restores run-start content (originalDoc); only the ratio guards and
+  // analytics use the baseline.
+  const baselineDoc = convergeMode
+    ? originalDoc
+    : await resolveGrowthBaseline({
+      repoDir: opts.repoDir,
+      docPath: opts.docPath,
+      docAbs,
+      runStartDoc: originalDoc,
+    });
+  if (baselineDoc !== originalDoc) {
+    log(`growth baseline pinned to first-staged doc version (${baselineDoc.length} chars; run-start is ${originalDoc.length})`);
+  }
   const maxRounds = opts.maxRoundsOverride !== null
     ? Math.min(MAX_ROUNDS_CEILING, Math.max(1, opts.maxRoundsOverride))
     : opts.config.max_rounds;
@@ -1194,13 +1271,16 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
     }
   };
 
-  log(`config: prompts=${opts.promptsDir} max_rounds=${maxRounds} fix_threshold=${opts.config.fix_threshold} codex_concurrent=${codexConcurrent} dry_run=${opts.dryRun}`);
+  log(`config: prompts=${opts.promptsDir} max_rounds=${maxRounds} fix_threshold=${opts.config.fix_threshold} max_fixes_per_round=${opts.config.max_fixes_per_round} codex_concurrent=${codexConcurrent} dry_run=${opts.dryRun}`);
   log(`domains: ${domainKeys.join(", ")}`);
   log(`lead: ${opts.leadAgent}=${opts.leadModel} | wing: ${opts.wingAgent}=${opts.wingModel}`);
 
   const persistedRounds: PersistedRound[] = [];
   const receiptRounds: Receipt["rounds"] = [];
   const priorFixed: DocFinding[] = [];
+  // Anti-churn feedback: the previous round's applied wing patches, rendered
+  // into the next review prompt so reviewers stop re-reviewing fix text.
+  let lastAppliedPatches: FixerPatch[] = [];
   let fixesCommitted = 0;
   let dispatchFailureEarlyExit = false;
 
@@ -1234,12 +1314,13 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       const snap = buildAnalytics({
         doc: opts.docPath,
         promptsDir: opts.promptsDir,
-        originalDoc,
+        originalDoc: baselineDoc,
         finalDoc: currentDoc,
         roundStats,
         thresholds: opts.config.analytics,
         abortedEarly,
         abortReason,
+        extraFlags: extraAnalyticsFlags,
         coverage: cov.domains,
         coverageGaps: cov.gaps,
       });
@@ -1261,6 +1342,9 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
     const roundT0 = process.hrtime.bigint();
     log(`── Round ${roundNum} (review-fix) ──`);
 
+    const priorRoundNote = lastAppliedPatches.length > 0
+      ? renderPriorRoundChanges(lastAppliedPatches)
+      : "";
     const leadResults = await runLeadReview({
       doc: currentDoc,
       domains: domainKeys,
@@ -1272,6 +1356,7 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       leadAgent: opts.leadAgent,
       model: opts.leadModel,
       reasoningEffort: CODEX_REASONING_EFFORT_XHIGH,
+      ...(priorRoundNote ? { priorRoundNote } : {}),
     });
     escalateTimeouts(leadResults);
     const succeeded = leadResults.filter((r) => r.error === null).length;
@@ -1297,10 +1382,16 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       priorFixed,
       fixThreshold: opts.config.fix_threshold,
     });
-    const toFix = selectFindingsToFix(classified);
-    log(`round ${roundNum}: ${allRaw.length} raw findings → ${toFix.length} to fix (threshold=${opts.config.fix_threshold})`);
+    // Per-round fix cap: the wing gets only the top-N by severity; the
+    // overflow stays recorded as findings (final review + Phase 5 pick them
+    // up). Bulk medium "add detail" batches are what compound doc growth.
+    const eligible = selectFindingsToFix(classified);
+    const { selected: toFix, deferred } = capFindingsToFix(eligible, opts.config.max_fixes_per_round);
+    log(`round ${roundNum}: ${allRaw.length} raw findings → ${eligible.length} to fix (threshold=${opts.config.fix_threshold})${deferred.length > 0 ? `, ${deferred.length} deferred by max_fixes_per_round=${opts.config.max_fixes_per_round}` : ""}`);
     const docBeforeRound = currentDoc;
-    const recurringCount = toFix.filter((f) => f.classification === "recurring").length;
+    // Convergence is measured on the UNCAPPED eligible count — a capped
+    // to_fix would sit flat at the cap and fake non-convergence.
+    const recurringCount = eligible.filter((f) => f.classification === "recurring").length;
     // High/critical over-engineering findings from the scope domain — the
     // invent-then-condemn signal. Counted from all raw findings (not just
     // above-threshold) since even a demoted scope critique proves the
@@ -1317,7 +1408,7 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
         doc_lines_before: countLines(docBeforeRound),
         doc_lines_after: countLines(currentDoc),
         raw_findings: allRaw.length,
-        to_fix: toFix.length,
+        to_fix: eligible.length,
         recurring: recurringCount,
         scope_findings: scopeFindings,
         patches_attempted: fix?.attempted ?? 0,
@@ -1329,7 +1420,7 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
 
     let fixSummary: Receipt["rounds"][number]["fix"] | undefined;
 
-    if (toFix.length === 0) {
+    if (eligible.length === 0) {
       log(`round ${roundNum}: zero findings at/above threshold — terminating early`);
       receiptRounds.push(
         buildRoundReceipt({
@@ -1381,8 +1472,24 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       maxWingAttempts: opts.maxWingAttempts,
     });
 
+    // Per-round invent-then-condemn (#3): a fix result that GROWS the doc
+    // while the scope domain condemned it this round is manufactured bloat —
+    // discard the round instead of committing it and carrying the growth into
+    // the cumulative breakers.
+    const roundReverted =
+      wingOutcome.applied.length > 0 &&
+      shouldRevertScopeGrowthRound({
+        docCharsBefore: docBeforeRound.length,
+        docCharsAfter: wingOutcome.finalDoc.length,
+        scopeFindings,
+      });
     let commitSha: string | null = null;
-    if (wingOutcome.applied.length > 0) {
+    if (roundReverted) {
+      extraAnalyticsFlags.push("scope_growth_round_reverted");
+      abortedEarly = true;
+      abortReason = `round ${roundNum} fixes grew the doc (${docBeforeRound.length} → ${wingOutcome.finalDoc.length} chars) while the scope domain raised ${scopeFindings} high/critical over-engineering finding(s) — the round's result was discarded (scope findings are fixed by cutting, not adding).`;
+      log(`round ${roundNum}: SCOPE-GROWTH REVERT — ${abortReason}`);
+    } else if (wingOutcome.applied.length > 0) {
       currentDoc = wingOutcome.finalDoc;
       fs.writeFileSync(docAbs, currentDoc);
       if (opts.commitFixes) {
@@ -1400,6 +1507,7 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
         });
         if (commitSha) fixesCommitted++;
       }
+      lastAppliedPatches = wingOutcome.applied;
     }
 
     fixSummary = {
@@ -1408,6 +1516,8 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       skipped_by_wing: wingOutcome.skipped.length,
       applied_finding_ids: wingOutcome.applied.map((p) => p.finding_id),
       skipped_finding_ids: wingOutcome.skipped.map((s) => s.finding_id),
+      deferred_by_cap: deferred.length,
+      round_reverted: roundReverted,
       patch_failures: wingOutcome.patch_failures.map((pf) => ({
         finding_id: pf.patch.finding_id,
         old: snippet(pf.patch.old, 100),
@@ -1441,9 +1551,16 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
     );
     persistRunSnapshot(`round-${roundNum}`);
 
+    if (roundReverted) {
+      // The round's result was discarded; continuing would re-review the same
+      // doc and reproduce the same conflict. Stop here — coherence + final
+      // review still run over the last good state.
+      break;
+    }
+
     // Process-health circuit breakers — stop a pathological loop (runaway
     // doc growth, non-converging findings) instead of grinding to maxRounds.
-    const guard = evaluateGuards(originalDoc.length, roundStats, opts.config.analytics);
+    const guard = evaluateGuards(baselineDoc.length, roundStats, opts.config.analytics);
     if (guard.abort) {
       abortedEarly = true;
       abortReason = guard.abort_reason;
@@ -1576,6 +1693,11 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
     const reviewInput = convergeMode
       ? buildConvergenceInput({ base: opts.convergeBase!, delta: convergeDelta, doc: currentDoc })
       : currentDoc;
+    // The final review gets the anti-churn note too: "revert it" stays a
+    // legitimate unresolved finding against fix text; "extend it" does not.
+    const finalPriorNote = !convergeMode && lastAppliedPatches.length > 0
+      ? renderPriorRoundChanges(lastAppliedPatches)
+      : "";
     const finalLead = await runLeadReview({
       doc: reviewInput,
       domains: domainKeys,
@@ -1587,6 +1709,7 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
       leadAgent: opts.leadAgent,
       model: opts.leadModel,
       reasoningEffort: CODEX_REASONING_EFFORT_XHIGH,
+      ...(finalPriorNote ? { priorRoundNote: finalPriorNote } : {}),
       ...(convergeSources ? { promptSourcesOverride: convergeSources } : {}),
     });
     const allRaw: DocFinding[] = finalLead.flatMap((r) => r.findings);
@@ -1654,12 +1777,13 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
   const analytics = buildAnalytics({
     doc: opts.docPath,
     promptsDir: opts.promptsDir,
-    originalDoc,
+    originalDoc: baselineDoc,
     finalDoc: currentDoc,
     roundStats,
     thresholds: opts.config.analytics,
     abortedEarly,
     abortReason,
+    extraFlags: extraAnalyticsFlags,
     coverage: coverageReport.domains,
     coverageGaps: coverageReport.gaps,
   });
@@ -1690,6 +1814,7 @@ export async function dispatchDocReview(opts: DispatchOptions): Promise<{
     config: {
       fix_threshold: opts.config.fix_threshold,
       max_rounds: maxRounds,
+      max_fixes_per_round: opts.config.max_fixes_per_round,
       max_codex_concurrent: codexConcurrent,
       disabled_domains: opts.config.disabled_domains,
     },
@@ -1831,6 +1956,7 @@ function errorReceipt(opts: DispatchOptions, code: string, message: string): Rec
     config: {
       fix_threshold: opts.config.fix_threshold,
       max_rounds: opts.config.max_rounds,
+      max_fixes_per_round: opts.config.max_fixes_per_round,
       max_codex_concurrent: opts.config.max_codex_concurrent,
       disabled_domains: opts.config.disabled_domains,
     },

@@ -191,11 +191,18 @@ if [ -z "$pr_number" ] && [ -z "${DRY_RUN:-}" ]; then
 fi
 ```
 
-## Phase 3: Run dispatch
+## Phase 3: Run dispatch — in the background, always
+
+Invoke the TS tool **as a background Bash task** (`run_in_background: true`),
+never foreground: a multi-round run routinely exceeds the ~10-minute
+foreground tool cap, and a killed foreground run loses the round in flight and
+double-spends on the re-run. Redirect the receipt to a file, wait for the
+background task to exit, then read the receipt and exit code from disk.
 
 ```bash
-set +e
-RECEIPT_JSON=$(node --experimental-strip-types "$TOOLS/stark_review_doc.ts" \
+RECEIPT_FILE=$(mktemp -t stark-review-receipt-XXXXXX)
+# Run via the Bash tool with run_in_background: true:
+node --experimental-strip-types "$TOOLS/stark_review_doc.ts" \
     --doc "$DOC" --prompts-dir plan-review \
     --repo-dir "$REPO_DIR" --prompts-base "$PROMPTS_BASE" \
     ${ROUNDS:+--rounds "$ROUNDS"} \
@@ -206,10 +213,14 @@ RECEIPT_JSON=$(node --experimental-strip-types "$TOOLS/stark_review_doc.ts" \
     ${WING_MODEL:+--wing-model "$WING_MODEL"} \
     ${DRY_RUN:+--dry-run} \
     ${FORCE:+--force} \
-    ${NO_COHERENCE:+--no-coherence})
-TS_EXIT=$?
-set -e
+    ${NO_COHERENCE:+--no-coherence} > "$RECEIPT_FILE"; echo "TS_EXIT=$?"
 ```
+
+When the background task completes: `RECEIPT_JSON=$(cat "$RECEIPT_FILE")`;
+`TS_EXIT` comes from the task's final `TS_EXIT=N` line. Even if the session is
+interrupted mid-run, the dispatcher's per-round persistence means
+`receipt.json` / `rounds.json` / `analytics.json` under the run's history dir
+hold everything committed so far — check there before re-running from scratch.
 
 Exit codes:
 - `0` — ok: every domain completed a review at least once (transient dispatch
@@ -265,10 +276,12 @@ not an abort** — do not soften the coverage-gap stop, and do not escalate
 transient warnings into one.
 
 **Growth ack gate:** when the receipt has `analytics.growth_ack_required =
-true`, the doc grew past the ratio limit while findings kept declining — the
-breaker deliberately did NOT stop the run (legitimate gap-filling on a thin
-plan looks exactly like this), but the operator must judge it before findings
-are posted. Ask via `AskUserQuestion`: *"Doc grew {analytics.growth_ratio}×
+true`, the operator must judge the growth before findings are posted. Two
+shapes fire it: cumulative growth past the ratio limit while findings kept
+declining (the run completed — legitimate gap-filling on a thin plan looks
+exactly like this), or the **round-spike halt** (a single round grew the doc
+past `max_round_growth_ratio` while findings were not declining — the loop
+stopped on that round; `analytics.flags` contains `round_spike_halt`). Ask via `AskUserQuestion`: *"Doc grew {analytics.growth_ratio}×
 (limit {config.analytics.max_doc_growth_ratio}×) but findings are declining —
 legitimate gap-filling or padding?"* with options **Continue (growth is
 legitimate)** / **Stop here (inspect the doc)**. On Continue: proceed and add

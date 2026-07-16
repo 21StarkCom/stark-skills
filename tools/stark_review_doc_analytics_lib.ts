@@ -70,6 +70,8 @@ export type HealthFlag =
   | "runaway_growth_hard"  // doc grew past hard_doc_growth_ratio × original — unconditional abort
   | "invent_then_condemn"  // doc breached soft growth AND the scope domain is condemning it
   | "round_growth_spike"   // a single round grew the doc past max_round_growth_ratio
+  | "round_spike_halt"     // a round spiked while findings were not declining — early halt-for-ack
+  | "scope_growth_round_reverted" // a fix round grew the doc under an open scope condemnation — round discarded
   | "non_convergent"       // to_fix did not decline for N consecutive rounds
   | "no_net_convergence"   // the run ended with as many findings as it started with
   | "churn"                // recurring findings dominate — fixes aren't sticking
@@ -173,6 +175,24 @@ export function evaluateGuards(
     }
   }
 
+  // Early tripwire — a round-growth spike while findings are NOT net-declining
+  // is the compounding balloon starting, and waiting for the cumulative 2x/3x
+  // breakers means paying for 2-3 more rounds of codex before the rollback
+  // discards them (the kotodama shape: 2.34x over 3 full rounds, all rolled
+  // back). Halt-for-ack on the round the spike is first seen. A spike WITH
+  // declining findings stays advisory — that is legitimate gap-filling (#675).
+  // Round 1 has no prior findings count, so it cannot demonstrate a decline
+  // and a round-1 spike halts — by design: the acceptance case is a 1.6x
+  // round-1 balloon that previously ground on to round 3.
+  const prevFix = fixRounds.length >= 2 ? fixRounds[fixRounds.length - 2] : undefined;
+  const lastRoundRatio = last ? ratio(last.doc_chars_after, last.doc_chars_before) : 0;
+  const findingsDeclined = last !== undefined && prevFix !== undefined && last.to_fix < prevFix.to_fix;
+  const spikeHalt =
+    last !== undefined &&
+    lastRoundRatio > thresholds.max_round_growth_ratio &&
+    !findingsDeclined;
+  if (spikeHalt) flags.add("round_spike_halt");
+
   // Growth vs original. The SOFT limit is a real signal but not a hard stop on
   // its own: legitimate gap-filling on a thin document is indistinguishable
   // from padding by this ratio alone (a real spec review tripped at 2.63× while
@@ -214,6 +234,7 @@ export function evaluateGuards(
   if (scopeCondemn) flags.add("invent_then_condemn");
 
   // Abort precedence — most specific / most confident reason first.
+  let abortedBySpike = false;
   if (hardBreach) {
     abort = true;
     abortReason = `doc grew ${growthRatio.toFixed(2)}x vs original — past the hard cap of ${thresholds.hard_doc_growth_ratio}x. No legitimate gap-fill triples a document; this is padding. Stopping now (before non-convergence can even be measured).`;
@@ -226,15 +247,37 @@ export function evaluateGuards(
   } else if (nonConvergent) {
     abort = true;
     abortReason = `findings did not decline for ${n} consecutive rounds (last: ${last?.to_fix ?? 0} to fix)`;
+  } else if (spikeHalt) {
+    abort = true;
+    abortedBySpike = true;
+    abortReason = `round ${last!.round} grew the doc ${lastRoundRatio.toFixed(2)}x in a single round (limit ${thresholds.max_round_growth_ratio}x) while findings did not decline — halting before the growth compounds. Operator must ack (gap-filling vs padding) before findings are posted.`;
   }
 
   return {
     abort,
     abort_reason: abortReason,
     flags: [...flags],
-    growth_ack_required: growthBreach && !abort,
+    // The spike halt is a halt-FOR-ACK: the loop stops, but the run is not
+    // condemned — the operator judges gap-filling vs padding, same gate as
+    // the soft cumulative-growth breach.
+    growth_ack_required: (growthBreach && !abort) || abortedBySpike,
     rollback_recommended: abort && (hardBreach || scopeCondemn),
   };
+}
+
+/**
+ * Fix-round rejection (the per-round invent-then-condemn): a wing fix pass
+ * whose net result GROWS the document while the scope domain has an open
+ * high/critical over-engineering finding this round is manufacturing the very
+ * bloat the committee is condemning — the dispatcher discards that round's
+ * result instead of committing it and carrying the growth forward.
+ */
+export function shouldRevertScopeGrowthRound(opts: {
+  docCharsBefore: number;
+  docCharsAfter: number;
+  scopeFindings: number;
+}): boolean {
+  return opts.docCharsAfter > opts.docCharsBefore && opts.scopeFindings > 0;
 }
 
 // ─── Final judgment ──────────────────────────────────────────────────────
@@ -317,7 +360,7 @@ export function buildAnalytics(opts: {
     const delta = coherence.doc_chars_after - coherence.doc_chars_before;
     notes.push(`Coherence pass: ${coherence.patches_applied} patch(es), ${delta <= 0 ? "removed" : "added"} ${Math.abs(delta)} chars.`);
   }
-  if (guard.growth_ack_required) {
+  if (guard.growth_ack_required && !flags.includes("round_spike_halt")) {
     notes.push(`Growth ack required: the doc grew ${(opts.finalDoc.length / Math.max(1, opts.originalDoc.length)).toFixed(2)}x (limit ${opts.thresholds.max_doc_growth_ratio}x) while findings kept declining. The breaker did not stop the run — legitimate gap-filling on a thin doc looks like this — but the operator must judge growth vs padding before findings are posted.`);
   }
   if (coverageGaps.length > 0) {
@@ -333,6 +376,8 @@ export function buildAnalytics(opts: {
   if (flags.includes("churn")) notes.push("Churn: a large share of findings recur across rounds — fixes are not sticking or reviewers keep re-flagging authored content.");
   if (flags.includes("patch_thrash")) notes.push("Patch thrash: most wing patches failed unique-match validation.");
   if (flags.includes("round_growth_spike")) notes.push("At least one round grew the document sharply — fixes are adding prose instead of tightening it.");
+  if (flags.includes("round_spike_halt")) notes.push("Round-spike halt: a single round grew the document past the per-round limit while findings were not declining — the loop stopped on that round (instead of grinding to the cumulative breakers) and the operator must ack the growth.");
+  if (flags.includes("scope_growth_round_reverted")) notes.push("Scope-growth round reverted: a fix round grew the document while the scope domain condemned it as over-engineered — that round's result was discarded rather than committed.");
 
   return {
     doc: opts.doc,

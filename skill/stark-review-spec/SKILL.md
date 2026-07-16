@@ -56,7 +56,11 @@ Lead/wing multi-round spec review:
   `analytics.json` in the history dir, a `<spec>.review-analytics.md` sidecar
   next to the doc, and the receipt's `analytics` block. Inline guards stop the
   loop early. **Soft growth** past `analytics.max_doc_growth_ratio` (default 2x)
-  while findings decline only warns + requires an operator ack (#675). Three
+  while findings decline only warns + requires an operator ack (#675). The
+  **round-spike tripwire** halts on the FIRST round that grows the doc past
+  `analytics.max_round_growth_ratio` (default 1.5x) while findings are not
+  declining — a halt-for-ack (`analytics.growth_ack_required`), so a compounding
+  balloon dies at round 1 instead of grinding to the cumulative breakers. Three
   signals hard-stop: **non-convergence** (findings fail to decline for
   `analytics.non_convergent_rounds` rounds), the **hard growth cap**
   (`analytics.hard_doc_growth_ratio`, default 3x — aborts on the round it's seen,
@@ -65,12 +69,25 @@ Lead/wing multi-round spec review:
   is raising high/critical over-engineering findings — the review manufactured
   scope it now condemns). The last two are unambiguous padding, so the doc is
   **rolled back to its pre-review state** (`analytics.rollback_on_hard_growth`,
-  default true) instead of leaving you the bloat. Prevention lives upstream too:
-  the review preambles + domains carry a **playground-scope guard** — a
-  single-user/local/playground spec is not held to HA, audit-trail, migration, or
-  adversarial-input standards, and the wing refuses to *add* that machinery to
-  resolve an over-scoped finding. No more 200-line specs ballooning through 10
-  rounds of invented production hardening.
+  default true) instead of leaving you the bloat. A per-round variant guards each
+  fix pass: a round whose net result **grows** the doc while the scope domain
+  raised high/critical over-engineering findings is **discarded before commit**
+  (receipt `fix.round_reverted`). Growth ratios are measured against the
+  **first-staged doc version** (pinned baseline — a re-run doesn't reset the
+  ruler to already-grown content). Prevention lives upstream too: the review
+  preambles + domains carry a **playground-scope guard** — a single-user/local/
+  playground spec is not held to HA, audit-trail, migration, or adversarial-input
+  standards — plus a **third scope tier**: a production system whose reviewed
+  slice declares a V1 boundary ("What this is NOT" / "out of scope for V1" /
+  "deferred to Phase 2" / "dark by default") has that boundary treated as
+  **binding** — reviewers must not raise, and the wing skips (reason `author
+  deferred to V1 boundary / out of scope`), findings that would add an
+  explicitly-deferred concern. Each fix round is capped at
+  `max_fixes_per_round` (default 8) patches, top-N by severity — the medium
+  "add detail" overflow stays recorded, not patched — and reviewers receive the
+  **previous round's applied patches** with an explicit anti-churn instruction
+  (wrong fix text ⇒ "revert it", never "extend it"). No more 200-line specs
+  ballooning through rounds of invented production hardening.
 
 Answers the question: **"Is this the right system?"**
 
@@ -208,14 +225,20 @@ if [ -z "$pr_number" ] && [ -z "${DRY_RUN:-}" ]; then
 fi
 ```
 
-## Phase 3: Run dispatch
+## Phase 3: Run dispatch — in the background, always
 
-Invoke the TS tool. Capture stdout (receipt JSON) and the exit code; stderr
-already streams human progress to the terminal.
+Invoke the TS tool **as a background Bash task** (`run_in_background: true`),
+never foreground: a multi-round run routinely exceeds the ~10-minute
+foreground tool cap, and a killed foreground run loses the round in flight and
+double-spends on the re-run. Redirect the receipt to a file, wait for the
+background task to exit (BashOutput/task notification — do not poll in a busy
+loop), then read the receipt and exit code from disk. stderr streams human
+progress into the task output as it runs.
 
 ```bash
-set +e
-RECEIPT_JSON=$(node --experimental-strip-types "$TOOLS/stark_review_doc.ts" \
+RECEIPT_FILE=$(mktemp -t stark-review-receipt-XXXXXX)
+# Run via the Bash tool with run_in_background: true:
+node --experimental-strip-types "$TOOLS/stark_review_doc.ts" \
     --doc "$DOC" --prompts-dir spec-review \
     --repo-dir "$REPO_DIR" --prompts-base "$PROMPTS_BASE" \
     ${ROUNDS:+--rounds "$ROUNDS"} \
@@ -226,10 +249,20 @@ RECEIPT_JSON=$(node --experimental-strip-types "$TOOLS/stark_review_doc.ts" \
     ${WING_MODEL:+--wing-model "$WING_MODEL"} \
     ${DRY_RUN:+--dry-run} \
     ${FORCE:+--force} \
-    ${NO_COHERENCE:+--no-coherence})
-TS_EXIT=$?
-set -e
+    ${NO_COHERENCE:+--no-coherence} > "$RECEIPT_FILE"; echo "TS_EXIT=$?"
 ```
+
+When the background task completes, recover the results:
+
+```bash
+RECEIPT_JSON=$(cat "$RECEIPT_FILE")
+# TS_EXIT comes from the background task's final "TS_EXIT=N" line.
+```
+
+Even if the session is interrupted mid-run, the dispatcher's per-round
+persistence means `receipt.json` / `rounds.json` / `analytics.json` under the
+run's history dir hold everything committed so far — check there before
+re-running from scratch.
 
 Exit codes:
 - `0` — ok: every domain completed a review at least once (transient dispatch
@@ -247,15 +280,19 @@ round) are a **warning, not an abort** — do not soften the coverage-gap stop,
 and do not escalate transient warnings into one.
 
 **Growth ack gate:** when the receipt has `analytics.growth_ack_required =
-true`, the doc grew past the ratio limit while findings kept declining — the
-breaker deliberately did NOT stop the run (legitimate gap-filling on a thin
-spec looks exactly like this), but the operator must judge it before findings
-are posted. Ask via `AskUserQuestion`: *"Doc grew {analytics.growth_ratio}×
-(limit {config.analytics.max_doc_growth_ratio}×) but findings are declining —
-legitimate gap-filling or padding?"* with options **Continue (growth is
-legitimate)** / **Stop here (inspect the doc)**. On Continue: proceed and add
-`growth acked by operator` to the 5c summary. On Stop — or when running
-headless with no operator to ask — exit 1.
+true`, the operator must judge the growth before findings are posted. Two
+shapes fire it: cumulative growth past the ratio limit while findings kept
+declining (the run completed — legitimate gap-filling on a thin spec looks
+exactly like this), or the **round-spike halt** (a single round grew the doc
+past `max_round_growth_ratio` while findings were not declining — the loop
+stopped on that round; `analytics.flags` contains `round_spike_halt`). Ask via
+`AskUserQuestion`: *"Doc grew {analytics.growth_ratio}× (limit
+{config.analytics.max_doc_growth_ratio}×) — legitimate gap-filling or
+padding?"* with options **Continue (growth is legitimate)** / **Stop here
+(inspect the doc)**. On Continue: proceed and add `growth acked by operator`
+to the 5c summary (after a spike halt, re-run with `--rounds` if more fix
+rounds are actually wanted). On Stop — or when running headless with no
+operator to ask — exit 1.
 
 ```bash
 GROWTH_ACK=$(parse '(.analytics.growth_ack_required // false) | tostring')
