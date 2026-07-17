@@ -112,6 +112,34 @@ Contract rules:
   binds the mirrors to the asset so drift fails tests instead of silently
   dropping a renamed section as unknown.
 
+- **Each done-when bar carries its review domain's concerns — bounded (#2).**
+  A section's done-when bar is not just "present"; it enumerates *what that
+  domain's reviewer looks for*, so the authoring agent knows what is expected
+  before review sees it. `contract.md` gives each section a short **review
+  lens** distilled from the corresponding `spec-review` domain prompt (e.g.
+  Security's bar = "trust boundaries named, failure modes enumerated,
+  scope-proportional" — the security domain's actual checklist, not its
+  open-ended hunt). Critically this **sharpens the bar, it does not open a
+  finding channel**: the wing still emits one status per section from the
+  closed enum, never free-form findings. Folding review's concerns into a
+  bounded checklist is the point — importing review's *unbounded critique*
+  into authoring is explicitly forbidden (that is what `/stark-review-spec`
+  is for, and why it stays mandatory).
+
+- **The contract learns from review — the feedback loop (#1).** `contract.md`
+  is the single interface between authoring and review, so it is where "what
+  is expected" is defined and tuned. When `/stark-review-spec` keeps raising
+  the *same class* of finding on write-spec-authored specs, that names a
+  done-when bar too weak to pre-empt it — the fix is to tighten that section's
+  lens in `contract.md`, not to make the wing a critic. The
+  `<doc>.review-analytics.md` sidecars + per-run history are the evidence
+  source (recurring-domain share per run). Tuning is **operator-driven and
+  manual** for v1 (a versioned prompt-asset edit, its own PR) — no automated
+  contract-rewrite loop. The consequence of authoring something review will
+  flag is therefore not silently absorbed: it is either fixed downstream in
+  the (now bounded) review, or, if recurring, promoted into the contract so
+  the *next* spec is authored against it.
+
 ### Wing verdict schema
 
 The wing's entire output contract (extracted with the existing
@@ -438,9 +466,11 @@ operator; no UI surface. (Explicit per contract section 8.)
 1. **Shared lead/wing loop lib** — extract from
    `plan_dispatch.ts`/`write_spec_lib.ts` when a third consumer appears
    (rule of three).
-2. **Contract tuning feedback loop** — review-spec analytics could reveal
-   which contract sections' done-when bars are too weak (domains that still
-   find real gaps) and feed `contract.md` revisions; manual for now.
+2. **Automated contract tuning** — the feedback loop itself is now a stated
+   design principle (see Contract rules #1/#2); what remains open is whether
+   to *automate* it. A future pass could mine recurring-domain shares across
+   `<doc>.review-analytics.md` sidecars and propose `contract.md` lens edits.
+   Deferred: manual operator-driven tuning is the v1 contract.
 3. **Brainstorm handoff** — should `superpowers:brainstorming`'s design-doc
    step hand its output to `/stark-write-spec` instead of writing the spec
    itself? Attractive, but touches a vendored plugin; revisit after v1.
