@@ -2,496 +2,377 @@
 
 ## 1. Overview
 
-Build **stage 0** of the spec pipeline: a thin skill (`skill/stark-write-spec/`) over a headless lead/wing TS dispatcher (`tools/write_spec.ts` + `write_spec_lib.ts`) plus a **skill-layer controller CLI** (`tools/write_spec_skill.ts`) that turns intent into a spec satisfying a fixed **Spec Contract**, then hands off to `/stark-review-spec`.
+Build the pipeline's missing **stage 0**: a spec-authoring skill + headless lead/wing dispatcher that turns intent into a spec satisfying a fixed **Spec Contract**, then hands off to `/stark-review-spec`. The approach deliberately **mirrors `tools/plan_dispatch.ts`** (lead drafts text, wing returns a JSON verdict, bounded revise loop, no worktree, no tool use) — reusing its already-exported dispatch primitives from `copilot_dispatch.ts` rather than extracting a shared lib (rule of three not yet met).
 
-**Key architectural decisions (all from the spec):**
-- **Mirror `plan_dispatch.ts`, don't extract** — two consumers don't justify a shared lib (rule of three; Open Question #1). The loop, dispatch primitives, and receipt shape are copied and adapted.
-- **The wing verifies a closed checklist, never emits findings** — `normalizeContractVerdict` over 9 fixed section ids; unknown ids dropped by the parser. This is the structural anti-ratchet bound, so no growth breakers/coherence/analytics-grading are ported.
-- **`contract.md` is the canonical SSOT** for the 9 section ids; the parser enum and prompts mirror it, bound by `test_contract_ids_match_asset`.
-- **The verdict parser cannot reuse `extractVerdictJson` verbatim.** That helper only accepts a fenced object carrying a top-level `verdict` key (the approve/revise/block shape); write-spec emits `{items, done, summary}`. Phase 2 adds `extractContractVerdictJson` (an `items`-keyed variant) rather than mutating the shared parser, and a regression test locks the existing `plan_dispatch.ts` verdict parsing so the port cannot silently break it.
-- **Token usage is parsed from the raw dispatch output, before text normalization.** `parseCodexJsonl`/`parseGeminiJson` discard token events, so cost cannot be recovered from their return value. Phase 3 pins raw-output usage parsers (`extractUsageFromRawCodex`, `extractUsageFromRawClaude`) that run on the raw stdout the `run` primitive returns, and defines the `DispatchUsage` shape before the loop consumes it.
-- **A markdown skill cannot import TypeScript.** Every deterministic skill-layer helper (`resolveSpecPaths` exposure, `prepareBranch`, `landSpec`, `resolveGaps`, `runSkillDryRun`, brief assembly) is exposed through a controller CLI `tools/write_spec_skill.ts` with explicit subcommands + JSON stdin/stdout contracts; `SKILL.md` invokes those `node --experimental-strip-types` commands and uses `AskUserQuestion` itself for the interactive steps. **The path/slug/branch triple is exposed to the markdown layer via a dedicated `resolve-paths` subcommand** — the skill computes it once, up front, and threads the identical slug/specPath/branch into build-brief, prepare-branch, the dispatcher, and landing.
-- **Every terminal verdict is routed.** `contract_satisfied` lands; `max_rounds_unsatisfied` enters interactive gap resolution; `lead_empty_draft`/`unchanged_revision`/`wing_unparseable` (and a failed Answer redispatch that returns a failure verdict) commit any written spec for inspection, open **no PR**, and exit non-zero. Named tests cover each route.
-- **Every non-crash exit writes the spec file and the receipt** — no exception. Even a first-round `lead_empty_draft` writes the (possibly empty) current draft to `specPath`, per the spec's uniform "every non-crash exit still writes the spec file and the receipt" contract.
-- **GitHub App auth uses the repo's real signature.** `getToken({ app, owner })` (object arg), `prCreate(..., { app: leadApp })`; `leadApp: AppName` is a declared field of `LandDeps`/`GapContext`/`prepareBranch`, threaded through every lookup/fetch/edit/create — including **remote branch adoption**, which must authenticate with the lead App token.
-- **The host owns the slug end to end.** The sanitized slug is host-computed once (`resolveSpecPaths`, surfaced via `resolve-paths`) and threaded to the dispatcher via an explicit `--slug` flag; the dispatcher never parses Markdown to recover it.
-- **Branch is created/adopted before the spec is written**, so a rerun on an existing slug can adopt the branch and commit the regenerated spec on top.
-- **PR bodies are host-rendered from a `LandingSummary`.** The contract-status table, per-round summary, accepted gaps, and redispatch-incomplete flag are assembled by the controller from the receipt and threaded into `landSpec` as an explicit `summary` opt, consumed identically by both `prCreate` (new PR) and `editPrBody` (adopted PR).
-- **Interactive vs headless is an explicit, user-facing state.** The dispatcher's internal `--json` (always passed by SKILL.md so the receipt is machine-parseable) does **not** imply headless. The skill threads the *user's* `--json` intent to `resolve-gaps` via an explicit `--headless` flag; interactive runs ask, headless runs auto-accept and set `auto_accepted_gaps:true`.
+Key architectural decisions:
+- **Completeness is a closed contract, not an open critique.** The wing emits one status per contract section from a closed enum; the host parser drops unknown section ids. The loop is bounded by construction — no growth breakers/coherence/analytics-grading needed.
+- **The 9 section ids are a fixed, host-side typed literal** (`SECTION_IDS`) — the code's authority, not read from the asset at runtime. `contract.md` is the canonical *prose* encoding; a binding test parses the asset and asserts it matches `SECTION_IDS` so drift fails tests rather than silently widening the accepted set. An asset-added 10th id is still rejected until `SECTION_IDS` is deliberately edited.
+- **The wing verdict is a distinct schema (`items`/`done`/`summary`), not the approve/revise/block shape** — so it needs its own JSON extractor (`extractContractVerdictJson`); the existing `extractVerdictJson` only returns objects containing a `"verdict"` key and cannot parse this schema.
+- **Agents are text-in/text-out with no tool access.** Both the Claude lead and the Claude wing dispatch through the repo's **no-tools least-privilege command configuration** (mirroring the fold decider / verify refuter: `disallowedTools` disables Bash/Edit/Write/Read/WebFetch/WebSearch/Task/NotebookEdit, and `allowedTools` is empty) — enforcing the spec's no-tool agent boundary at the command layer. This is asserted by a named test (`test_agent_commands_expose_no_tools`).
+- **Host owns all trust:** `done` recomputed over the full 9-id set (never trusted from the wing), the slug is **deterministically derived host-side from the `--out` path** (`deriveSlugFromOut`), git/PR by the host only.
+- **Landing is a host helper, not skill prose** — `tools/write_spec_land.ts` owns branch adoption, commit recovery, push, existing-PR lookup, PR-body marker merge, and `prCreate`, so idempotency and lead-App selection are unit-testable. **Branch adoption happens *before* the spec is written** (a `prepare-branch` subcommand the skill runs pre-dispatch), so the dispatcher writes the spec onto the already-adopted branch — never onto whatever branch the operator happened to be on. **`--dry-run` skips both `prepare-branch` and `publish` entirely** (no git side effects, per the spec's no-side-effect dry-run contract).
+- **Only the PR is App-authored, not the commit** — the spec commit uses the repo's configured git identity (the workspace per-repo `Aryeh Stark <aryeh@21stark.com>`); the *PR* is created/edited with the lead App's token.
+- **PR body is merged, not overwritten** — an existing PR body has only the owned `<!-- stark-write-spec -->` marker block replaced (or appended if absent); all other content is preserved (`mergePrBody`).
+- **Landing is create-or-adopt idempotent** — retriable branch/PR flow that never force-pushes.
 
-**Phases (5):** (1) contract asset + config + slug/path scaffolding; (2) verdict parser (with the `items`-keyed extractor + plan-dispatch regression) + host recompute logic; (3) raw-usage parsers + the lead/wing dispatch loop + prompt assembly + receipt + cost + incremental persistence; (4) the skill controller CLI + `SKILL.md` (path resolution, brief assembly, gap-fill, branch-first landing, dry-run, full terminal routing, App-authed landing, host-rendered PR bodies); (5) docs + ADR + live e2e.
+Phases build inside-out: config + contract asset → parser/normalizer + minimal record writer (the structural bound + durable exit, pure/unit-tested) → dispatch loop → history extension (incremental rounds, retention, cost) → skill + landing helper → docs/ADR. Each phase is independently testable and delivers a working increment.
 
 ## 2. Prerequisites
 
-- Read `tools/plan_dispatch.ts` and `tools/copilot_dispatch.ts` end to end — this plan mirrors them; the exact import set is spec'd in SSOT & Dependencies.
-- **Inspect `extractVerdictJson` in `tools/copilot_dispatch.ts`** and record its acceptance predicate. It is expected to return only fenced objects containing a top-level `verdict` key. Confirm this; the confirmation drives Phase 2 Task 1's decision to add `extractContractVerdictJson` (an `items`-keyed sibling) rather than call `extractVerdictJson`. If it turns out to already accept an `items`-keyed object, Phase 2 Task 1 collapses to "reuse it" and the regression test still guards plan-dispatch.
-- **Inspect the raw-output shape of each dispatch path** before Phase 3:
-  - Codex: run one real `run(...)` codex dispatch and capture its raw stdout JSONL. Record which JSONL event carries token usage (expected: a `token_count` / `usage` event with `input_tokens`/`output_tokens`, distinct from the message/text events `parseCodexJsonl` normalizes). Save a real captured line as the fixture for `test_extract_usage_codex_envelope`.
-  - Claude: run one real headless `claude -p` dispatch and capture its raw stdout. Record the final `result` object's `usage.input_tokens` / `usage.output_tokens` path. Save the real envelope as the fixture for `test_extract_usage_claude_envelope`.
-  - These two captured envelopes are the fixtures Phase 3 Task 4 tests against — no synthesized shapes.
-- Confirm the exports the spec claims already exist: `writeJsonAtomic`, `updateLatestPointer`, `pruneRunDirs` in `stark_review_doc_lib.ts`; `run`, `buildAgentEnv`, `setupGeminiHome`, `makeGeminiEnv`, `tryGeminiApiKeyFallback`, `shouldFallbackToApiKey`, `releaseAgentTempDir`, `parseCodexJsonl`, `parseGeminiJson`, `extractVerdictJson`, `isPlainObject`, `VALID_AGENTS`, `AgentName`, `resolveModel`, `isAgentEnabled` in `copilot_dispatch.ts`; `sanitizeSlug` in `stark_handover_lib.ts`; `computeDispatchCost` in `cost_lib.ts`; `prCreate`, `getToken`, `AppName` in `github_app_lib.ts`. Command:
+- Confirm these exports exist and their signatures match before Phase 3/4/5 (signatures below verified against the current source):
+  - `tools/copilot_dispatch.ts`: `run`, `buildAgentEnv`, `setupGeminiHome`, `makeGeminiEnv`, `tryGeminiApiKeyFallback`, `shouldFallbackToApiKey`, `releaseAgentTempDir`, `parseCodexJsonl`, `parseGeminiJson`, `isPlainObject`, `resolveModel`, `isAgentEnabled`, `VALID_AGENTS`, `AgentName`, `buildClaudeCmd` (supports `outputFormat: "json"`, `allowedTools`, and `disallowedTools`). **Not** `extractVerdictJson` (it hard-requires a `"verdict"` key — see Phase 2 Task 1).
+  - `tools/stark_review_doc_lib.ts`: `writeJsonAtomic`, `updateLatestPointer`, `pruneRunDirs`.
+  - `tools/stark_handover_lib.ts`: `sanitizeSlug`.
+  - `tools/github_app_lib.ts`: `prCreate(repo, opts)` (draft-by-default: `draft ?? true`), `getToken(opts: { app?, owner? })`, `prList(repo, state, app)` (returns all open PRs — **no head filter**, filter client-side), `apiPatch(pathStr, body, app, owner)`, `apiGet(pathStr, app, owner)` (to fetch an existing PR's current body before merge), `AppName`.
+  - `tools/cost_lib.ts`: `computeDispatchCost(model, inputTokens, outputTokens)`.
+  - Confirm the repo's **no-tools command flags** on `buildClaudeCmd` (the fold decider in `red_team_fold_lib.ts::dispatchDecider` and the verify refuter in `red_team_verify_lib.ts` are the reference call sites — read one before Phase 3 and copy its `disallowedTools` string verbatim into a `NO_TOOLS` const).
+  - Verify command (run before writing importing code):
+    ```
+    node --experimental-strip-types -e "import('./tools/copilot_dispatch.ts').then(m=>console.log(Object.keys(m).sort().join('\n')))"
+    ```
+    Repeat per module (`github_app_lib.ts`, `stark_review_doc_lib.ts`, `cost_lib.ts`, `stark_handover_lib.ts`), grepping the printed list for each name above.
+- Read `tools/plan_dispatch.ts` end-to-end as the reference implementation before Phase 3.
 
-  ```
-  node --experimental-strip-types -e '
-    import("./tools/copilot_dispatch.ts").then(m => console.log("copilot missing:",
-      ["run","buildAgentEnv","setupGeminiHome","makeGeminiEnv","tryGeminiApiKeyFallback",
-       "shouldFallbackToApiKey","releaseAgentTempDir","parseCodexJsonl","parseGeminiJson",
-       "extractVerdictJson","isPlainObject","resolveModel","isAgentEnabled","VALID_AGENTS"]
-      .filter(k => !(k in m))));'
-  ```
-  and the analogous one-liners for the other four modules. Any name printed as *missing* becomes a small first-class "add the export" task in the phase that consumes it (never re-implement).
-
-- **Confirm the `getToken` signature** in `github_app_lib.ts` is the object form `getToken({ app, owner }): Promise<string>` and that `AppName` is the exported union used by `prCreate`. Confirm `prCreate` accepts `{ app: AppName, draft?: boolean, ... }`. Record the exact `owner` value source (repo remote). Phase 4 Tasks 1/5/6 depend on these exact shapes.
-- **Confirm the `getToken` → `gh` env pattern** in `tools/runtime_env_lib.ts`: it imports `getToken` directly and injects the minted token as `GH_TOKEN` into a subprocess env. Pin the env-var name (`GH_TOKEN`) before Phase 4 Tasks 1/6.
-- **Map lead agent → App name** once, from the repo's existing convention: `claude`→`stark-claude`, `codex`→`stark-codex` (the `AppName` values in `github_app_lib.ts`'s `APPS` map). This mapping (`leadAppFor(agent): AppName`) is used by `prepare-branch`, `route`, `resolve-gaps`, and `landSpec`.
-
-**Parallelizable with Phase 1:** authoring `global/prompts/write-spec/{claude,codex}/{generate,verify,revise}.md` (Phase 3 owns them but they have no code dependency).
+**Parallel with Phase 1:** authoring `contract.md` and the `{claude,codex}/{generate,verify,revise}.md` prompts (Phase 2 Task 2) can proceed alongside the config section (Phase 1) — no code dependency between them.
 
 ## 2.5 Global Constraints
 
-- **Language:** TypeScript only, run via `node --experimental-strip-types`. No new Python.
-- **Node runtime:** built-ins style (`node:*`) — no npm deps added.
-- **Asset resolution:** all prompt + history paths through `assetPromptsDir()` / `stateRoot()` — **never** hardcode `~/.claude/code-review`.
-- **Models:** resolve via `resolveModel()`/`getModelId()` — never hardcode model ids.
-- **Config defaults (verbatim):** `lead_agent: "claude"`, `wing_agent: "codex"`, `wing_reasoning_effort: "xhigh"`, `max_rounds: 3`, `timeout_s: 900`, `wing_timeout_s: 600`, `max_input_chars: 200000`, `history_keep_runs: 20`, `open_pr: true`.
-- **The 9 contract section ids (verbatim):** `intent`, `scope`, `interfaces`, `behavior`, `ssot`, `security`, `test-plan`, `accessibility`, `open-questions`.
-- **Status enum (verbatim):** `satisfied | underspecified | missing | over_scoped | n_a`.
-- **`final_verdict` enum (verbatim):** `contract_satisfied | max_rounds_unsatisfied | lead_empty_draft | unchanged_revision | wing_unparseable`.
-- **Every non-crash exit writes `specPath` + `receipt.json`.** No verdict is exempt; `lead_empty_draft` writes the current draft even when it is empty/whitespace.
-- **Draft-by-default:** `prCreate` with `draft ?? true`; `--ready` opts out, `--no-pr` skips.
-- **GitHub App auth (verbatim):** `getToken({ app: leadApp, owner })`, `prCreate(..., { app: leadApp })`; `leadApp: AppName` derived from the lead agent via `leadAppFor` (`claude`→`stark-claude`, `codex`→`stark-codex`). `leadApp` is threaded into **every** authenticated git/gh call, including `prepareBranch`'s remote lookup/fetch.
-- **Slug is host-owned:** computed once by `resolveSpecPaths` (Phase 1), surfaced to the markdown layer via `resolve-paths`, passed to the dispatcher as an explicit `--slug` flag and to landing helpers as an argument. The dispatcher never derives the slug from the brief or the out path, and the model never influences it.
-- **Branch:** `write-spec/<slug>`; out path `docs/specs/YYYY-MM-DD-<topic>-spec.md`, **host-computed** from sanitized slug. Never force-push.
-- **Staging scope:** git commits stage an **exact, explicitly-named file list** via `git add -- <path...>` — never `git add .`/`-A`. The only in-repo generated file is the spec at `specPath`; the run record lives under `stateRoot()` and is never staged.
-- **Interactive vs headless is explicit:** the dispatcher's internal `--json` never implies headless. The skill threads the user's `--json` intent to `resolve-gaps` as `--headless`.
-- **Every skill:** `## Help` block referencing `standards/help.md`.
-- **`gemini` is rejected at argument validation in all three layers** (skill, controller CLI, dispatcher) until gemini prompts ship; dispatcher core stays agent-generic via `VALID_AGENTS`.
+- **No new Python** — TypeScript only, run via `node --experimental-strip-types`.
+- **Agents at v1:** `claude` (lead default) + `codex` (wing default) only. `gemini` is **rejected at argument validation in both layers** with a clear unsupported-agent error until gemini prompts ship. Dispatcher core stays agent-generic via `VALID_AGENTS`.
+- **No tool use — text-in/text-out.** All Claude dispatches (lead + wing) use the repo's no-tools least-privilege configuration: `NO_TOOLS` const (copied verbatim from the fold decider's `disallowedTools`) passed as `disallowedTools`, with `allowedTools` empty. Codex dispatches run `exec -s read-only`. Asserted by `test_agent_commands_expose_no_tools`.
+- **Wing runs codex at `xhigh`** reasoning effort (deliberate; not spec-to-plan's `medium`).
+- **Model ids never hardcoded** — resolve through `resolveModel()` / `getModelId()`.
+- **All immutable-asset reads go through `assetPromptsDir()`** (zero-argument; join `"write-spec"` onto its return) — never a hardcoded `~/.claude/code-review` path; mutable state via `stateRoot()`.
+- **`max_rounds` default = 3**; `max_input_chars` default = 200000; `history_keep_runs` default = 20.
+- **Slug is host-derived from `--out`**, never model-chosen and never a separate source of truth: `deriveSlugFromOut(outPath)` (Phase 3) parses the canonical `docs/specs/YYYY-MM-DD-<slug>-spec.md` shape. The skill computes the out path from the resolved topic + any `--out` override (Phase 5), then passes only `--out`; the dispatcher recovers the slug from it for the receipt + history path.
+- **The 9 fixed section ids** (verbatim, the `SECTION_IDS` literal): `intent`, `scope`, `interfaces`, `behavior`, `ssot`, `security`, `test-plan`, `accessibility`, `open-questions`.
+- **Status enum** (verbatim): `satisfied | underspecified | missing | over_scoped | n_a`.
+- **`final_verdict` enum** (verbatim): `contract_satisfied | max_rounds_unsatisfied | lead_empty_draft | unchanged_revision | wing_unparseable`.
+- **Lead-agent → GitHub App mapping** (verbatim, used only for the PR token): `claude → stark-claude`, `codex → stark-codex`. No hardcoded App.
+- **Draft PR by default** (`prCreate`, `draft ?? true`); `--ready` opts out, `--no-pr` skips. **Only the PR is App-authored; the commit uses the repo's configured git identity.**
+- **`--dry-run` performs no git and no file writes outside the scratchpad** — the skill skips `prepare-branch` and `publish`; the dispatcher skips all LLM calls, all writes outside the scratchpad, and creates no history dir.
+- **Every non-crash exit still writes the spec file and the receipt** (non-dry runs).
+- **Acceptance is a skill-layer resolution, never a dispatcher-receipt rewrite** — the accepted-gaps summary is emitted by the skill (Phase 5 Task 3), the dispatcher's receipt exit contract is uniform and untouched.
+- **Docs updated in the same change** (CLAUDE.md + ADR).
 
 ## 3. Phases
 
-## Phase 1: Contract asset, config section, path/slug scaffolding
-**Goal:** The fixed-and-known ground the rest builds on — the contract prompt asset, the `write_spec` config section, and host-computed path/slug helpers — with the id list defined in exactly one place.
+---
+
+### Phase 1: Config section + contract prompt asset
+**Goal:** `write_spec` config resolves with defaults; the canonical contract asset exists and is discoverable.
 **Dependencies:** none
-**Estimated effort:** M
+**Estimated effort:** S
 
-### Tasks
+#### Tasks
 
-1. **Author `global/prompts/write-spec/contract.md`**
-   - What: encode the Spec Contract — the 9 sections, each with its **done-when bar** and a short **review lens** distilled from the corresponding `spec-review` domain prompt (bounded checklist, not open-ended hunt). Mark it the canonical SSOT of the section-id list. Include the `n_a`-with-reason rule and the Scope-declaration anti-inflation note.
-   - **Canonical id-extraction format (decided here, consumed by Phase 2 Task 3):** each section is an H2 heading of the exact form `## <id> — <Title>` where `<id>` is one of the 9 verbatim ids. The machine-readable list is the ordered sequence of the `<id>` tokens. No other H2 headings appear in the file (sub-content uses H3+). `extractContractIds(md)` matches `/^## ([a-z-]+) — /gm`.
-   - Files: `global/prompts/write-spec/contract.md`
-   - Interfaces — **Produces:** the canonical ordered section-id list (`intent, scope, interfaces, behavior, ssot, security, test-plan, accessibility, open-questions`) as `## <id> — <Title>` H2 headings that `extractContractIds` parses.
-   - Acceptance: the 9 ids appear exactly once each as `## <id> — ...` headings, in order; each has a done-when bar + review lens as body text; the file states config cannot override it.
-
-2. **Add `write_spec` config section to `stark_config_lib.ts`**
-   - What: `DEFAULT_WRITE_SPEC` with the verbatim defaults from Global Constraints; `getWriteSpecConfig()` following the existing section-accessor + deep-merge pattern. **No locked-fields machinery.**
+1. **Add `write_spec` config section to `stark_config_lib.ts`**
+   - What: add `DEFAULT_WRITE_SPEC` and a `getWriteSpecConfig()` accessor following the existing section-accessor pattern (deep merge against defaults). No locked-fields machinery — that stays `getRedTeamConfig`-specific.
    - Files: `tools/stark_config_lib.ts`
-   - Interfaces — **Consumes:** existing `DEFAULT_*` + section-accessor pattern, deep-merge. **Produces:** `DEFAULT_WRITE_SPEC`, `getWriteSpecConfig(): WriteSpecConfig`, `WriteSpecConfig` type.
-   - Test: `test_write_spec_config_defaults` — accessor returns defaults with no config file; a partial override deep-merges (e.g. `max_rounds: 2` overrides, other keys retain defaults).
-   - Acceptance: defaults match the spec verbatim; override merges; no key can inject a contract change.
+   - Interfaces — **Consumes:** the existing `DEFAULT_*` + section-accessor pattern, `getModelId`. **Produces:** `DEFAULT_WRITE_SPEC` const and `getWriteSpecConfig(): WriteSpecConfig` returning `{ lead_agent, wing_agent, wing_reasoning_effort, max_rounds, timeout_s, wing_timeout_s, max_input_chars, history_keep_runs, open_pr }` with the Global-Constraints defaults.
+   - Test: `test_write_spec_config_defaults` (in `tools/stark_config_lib.test.ts`) — accessor returns the documented defaults with no config file; a partial override deep-merges.
+   - Acceptance: defaults match the spec's config block exactly.
 
-3. **Host-computed out-path + slug + branch helpers**
-   - What: derive `<slug>` via `sanitizeSlug`, out path `docs/specs/<today>-<slug>-spec.md`, branch `write-spec/<slug>`. Date is host-supplied (`new Date()` at the CLI entry, passed down — keep lib pure/injectable). **The slug is derived from `topic` regardless of `--out`** — an `--out` override sets only `specPath`; `slug` and `branch` always come from `sanitizeSlug(topic)`. Also add `leadAppFor(agent: AgentName): AppName` here (the single owner of the agent→App mapping) so every landing/branch helper consumes it rather than re-deriving.
-   - Files: `tools/write_spec_lib.ts` (new)
-   - Interfaces — **Consumes:** `sanitizeSlug` from `stark_handover_lib.ts`; `AppName`, `AgentName`. **Produces:** `resolveSpecPaths(topic: string, today: string, outOverride?: string): { slug, specPath, branch }` — `today` is `YYYY-MM-DD`; `leadAppFor(agent): AppName`.
-   - Test: `test_out_path_host_computed` — a topic with unsafe chars yields a sanitized slug, dated path `docs/specs/2026-07-20-<slug>-spec.md`, and `write-spec/<slug>` branch; `--out` override sets the path but slug/branch stay sanitized-from-topic. `test_lead_app_mapping` — `leadAppFor("claude")==="stark-claude"`, `leadAppFor("codex")==="stark-codex"`.
-   - Acceptance: model never influences the path; slug is deterministic and identical whether or not `--out` is passed; agent→App mapping has one owner.
+2. **Author the Spec Contract asset**
+   - What: write `global/prompts/write-spec/contract.md` — the canonical prose encoding of the 9-section list, each with its **Done-when bar** and a short **review lens** distilled from the corresponding `spec-review` domain prompt (bounded checklist, NOT an open hunt). Include the `n_a`-with-reason rule and the Scope-declaration anti-inflation anchor. Section ids appear in a machine-parseable form: each section header is `## <id> — <Title>` so the binding test can extract ids with `^## ([a-z-]+) —`.
+   - Files: `global/prompts/write-spec/contract.md`
+   - Interfaces — **Produces:** a markdown asset whose section-id list is asserted (by `test_contract_ids_match_asset`, Phase 2) to equal the host `SECTION_IDS` literal. The asset is *documentation authority*, not runtime authority.
+   - Test: covered by `test_contract_ids_match_asset` in Phase 2.
+   - Acceptance: all 9 ids present with a done-when bar + lens each, each under a `## <id> — Title` header; no config-overridable language.
 
-### Risks
-- **contract.md id extraction is brittle** (a heading rename silently drops a section): mitigation — the `## <id> — Title` format is simple and explicit, and `test_contract_ids_match_asset` (Phase 2) fails the build on drift.
+#### Risks
+- Lens text drifts from actual `spec-review` domain prompts: mitigate by copying each domain's checklist, not paraphrasing its intent.
 
-### Verification
-```
-npm --prefix tools test -- write_spec_lib.test.ts
-grep -nE '^## [a-z-]+ — ' global/prompts/write-spec/contract.md
-```
-Expect `test_write_spec_config_defaults` + `test_out_path_host_computed` + `test_lead_app_mapping` green, and exactly 9 heading lines in the verbatim order.
+#### Verification
+- `node --experimental-strip-types --test tools/stark_config_lib.test.ts` green (includes `test_write_spec_config_defaults`).
+- Asset resolves via `assetPromptsDir()` (zero-arg; join `"write-spec"`):
+  ```
+  node --experimental-strip-types -e "import('./tools/asset_root_lib.ts').then(m=>{const path=require('node:path');const fs=require('node:fs');const p=path.join(m.assetPromptsDir(),'write-spec','contract.md');console.log(p, fs.existsSync(p));})"
+  ```
+  prints the resolved path and `true`.
 
-## Phase 2: Verdict parser + host-side done recomputation (the risk core)
-**Goal:** The structural anti-ratchet: extract the `items`-keyed wing JSON (without breaking the existing `verdict`-keyed parser), drop unknown ids, fail closed on partial/lazy verdicts, recompute `done` over the full 9-id set. Pure functions, TDD.
-**Dependencies:** Phase 1 (contract id list)
+---
+
+### Phase 2: Wing verdict parser + agent prompts (the structural bound)
+**Goal:** the closed-enum verdict parser exists with a fixed host-side id set, fully unit-tested; agent prompts drafted.
+**Dependencies:** Phase 1
 **Estimated effort:** M
 
-### Tasks
+#### Tasks
 
-1. **`extractContractVerdictJson` — the `items`-keyed fence extractor + plan-dispatch regression**
-   - What: the existing `extractVerdictJson` only returns a fenced object carrying a top-level `verdict` key (confirmed in Prerequisites), so it rejects write-spec's `{items, done, summary}` — every valid wing response would become `wing_unparseable`. Add a **sibling** extractor rather than mutating the shared one:
-     - `extractContractVerdictJson(raw: string): unknown | null` — scans fenced ```` ```json ```` blocks (falling back to the last balanced `{...}` object, mirroring `extractVerdictJson`'s scan strategy exactly), and returns the first parsed object for which `isPlainObject(obj) && Array.isArray(obj.items)`. Returns `null` when none matches.
-   - The `verdict`-vs-`items` predicate is the only difference from `extractVerdictJson`; keep the scanning/parsing logic identical by factoring the shared scan into a local `scanFencedObjects(raw): unknown[]` helper used by the new function (do **not** touch `copilot_dispatch.ts`; if a shared scan helper isn't exported there, replicate it locally in `write_spec_lib.ts` — no cross-module refactor).
-   - **Regression guard:** `test_plan_dispatch_verdict_parsing_preserved` — import `extractVerdictJson` from `copilot_dispatch.ts` and assert, against a captured real plan-dispatch wing response fixture, that it still returns the `{verdict, blocking_findings, ...}` object unchanged. This test fails if anyone later "generalizes" the shared parser and breaks plan-dispatch. It is added here even though this phase does not modify `copilot_dispatch.ts` — it locks the boundary the port must not cross.
-   - Files: `tools/write_spec_lib.ts` (`extractContractVerdictJson`, `scanFencedObjects`), `tools/write_spec_lib.test.ts`
-   - Interfaces — **Consumes:** `isPlainObject` (from `copilot_dispatch.ts`), `extractVerdictJson` (regression test only). **Produces:** `extractContractVerdictJson`.
-   - Test: `test_extract_contract_verdict_from_fence` — an `{items,...}` object in a json fence is returned; a `{verdict,...}` object (no `items`) returns `null`; prose-only returns `null`. Plus `test_plan_dispatch_verdict_parsing_preserved`.
-   - Acceptance: write-spec verdicts parse; plan-dispatch parsing provably unchanged.
+1. **`SECTION_IDS` literal + `extractContractVerdictJson` + `normalizeContractVerdict` + host `done` recomputation in `write_spec_lib.ts`**
+   - What: create `tools/write_spec_lib.ts`.
+     - Define `SECTION_IDS` as a **typed literal tuple** — `export const SECTION_IDS = ['intent','scope','interfaces','behavior','ssot','security','test-plan','accessibility','open-questions'] as const;` with `export type SectionId = typeof SECTION_IDS[number];`. The parser reads from this literal, **never** from `contract.md` at runtime.
+     - **`extractContractVerdictJson(text): Record<string, unknown> | null`** — a contract-shaped JSON extractor. The existing `copilot_dispatch.ts::extractVerdictJson` cannot be reused: it only returns a candidate object when `"verdict" in obj`, whereas a contract verdict has keys `items` / `done` / `summary` and **no** `verdict` key. `extractContractVerdictJson` reuses the same balanced-brace + fenced-block candidate scan (extract a shared `collectJsonCandidates(text): string[]` helper in `copilot_dispatch.ts` and call it from both — preferred over copying, to avoid drift) but accepts the **last** candidate that parses to a plain object containing an `items` **array** and a `done` key. Returns `null` when none matches.
+     - **`normalizeContractVerdict(raw)`**: given the extracted object, drop items whose `section` ∉ `SECTION_IDS` (record in `dropped_sections`); coerce unknown `status` → `underspecified`; a known id **absent** from `items` → synthesized `missing`; `n_a` without a non-empty `note`/reason string → `underspecified`. Recompute `done` over the full `SECTION_IDS` set (`done = every id present and status ∈ {satisfied, n_a}`) via `computeDone` — never trust the wing's `done`. An asset-added 10th id is dropped as unknown until `SECTION_IDS` is edited (drift caught by the test below, not silently accepted).
+   - Files: `tools/write_spec_lib.ts` (new); `tools/copilot_dispatch.ts` (add exported `collectJsonCandidates`).
+   - Interfaces — **Consumes:** `isPlainObject`, `collectJsonCandidates` from `copilot_dispatch.ts`. **Produces:** `SECTION_IDS: readonly SectionId[]`, `STATUS_VALUES`, `type ContractVerdict = { items: {section: SectionId, status: string, note: string}[], done: boolean, summary: string }`, `extractContractVerdictJson(text): Record<string, unknown> | null`, `normalizeContractVerdict(raw): { verdict: ContractVerdict, droppedSections: string[] }`, `computeDone(items): boolean`.
+   - Test (all in `tools/write_spec_lib.test.ts`):
+     - `test_contract_verdict_extracted` — a fenced block holding `{"items":[{"section":"scope","status":"satisfied","note":""}],"done":false,"summary":"x"}` (no `verdict` key) is returned by `extractContractVerdictJson` **before** normalization; a control string carrying only an approve/revise/block `{"verdict":"approve"}` object returns `null` (proves the two extractors are distinct and the contract one doesn't grab the wrong shape).
+     - `test_parser_drops_unknown_sections` (a 10th id → dropped, in `dropped_sections`, `done` from the 9).
+     - `test_status_enum_rejects_unknown` (bad status → `underspecified`).
+     - `test_done_recomputed_from_items` (wing `done:true` + one non-`satisfied`/`n_a` item → host `done=false`).
+     - `test_partial_verdict_fails_closed` (omitted known id → `missing`; reason-less `n_a` → `underspecified`; never false `done`).
+     - `test_contract_ids_match_asset` (parse `## ([a-z-]+) —` headers from `contract.md` via `assetPromptsDir()`+join and assert the set === `SECTION_IDS`; an asset with a 10th header **fails** this test while `normalizeContractVerdict` still drops that id at runtime — proving code, not asset, is authority).
+   - Acceptance: all six parser tests green; `SECTION_IDS` is the sole runtime id authority; a valid contract verdict parses before normalization; asset drift fails the binding test.
 
-2. **`normalizeContractVerdict` + `recomputeDone`**
-   - What: given raw text, call `extractContractVerdictJson`; if `null` → throw `ContractVerdictUnparseable` (the loop catches it for the retry/terminate path). Otherwise for each item keep only ids in the canonical 9, record dropped ids; coerce unknown `status` → `underspecified`; a known id **absent** from `items` → `missing`; an `n_a` with empty/absent reason → `underspecified`. `done` = every one of the 9 is `satisfied | n_a`, recomputed by the host — never trusted from the wing.
-   - Files: `tools/write_spec_lib.ts`
-   - Interfaces — **Consumes:** `extractContractVerdictJson`, the canonical id list (Phase 1). **Produces:** `normalizeContractVerdict(raw: string, contractIds: string[]): ContractVerdict`; types `ContractItem = { section: string, status: ContractStatus, note: string }`, `ContractStatus = "satisfied"|"underspecified"|"missing"|"over_scoped"|"n_a"`, `ContractVerdict = { items: ContractItem[], done: boolean, summary: string, dropped: string[] }`, `ContractVerdictUnparseable` (Error subclass).
-   - Test: `test_parser_drops_unknown_sections`, `test_status_enum_rejects_unknown`, `test_done_recomputed_from_items`, `test_partial_verdict_fails_closed`. Key assertion: no input can produce a false `done:true`.
-   - Acceptance: all tests green; `dropped[]` populated; done recomputed.
-
-3. **`revisePayloadFromVerdict` (non-satisfied selection + over_scoped cut semantics)**
-   - What: given a normalized verdict, produce the sections the lead must revise: every item not `satisfied | n_a`; `over_scoped` items carry **cut** intent, all others **fill** intent, each with its `note`.
-   - Files: `tools/write_spec_lib.ts`
-   - Interfaces — **Consumes:** `ContractVerdict`. **Produces:** `revisePayloadFromVerdict(v: ContractVerdict): { section: string, action: "fill"|"cut", note: string }[]`.
-   - Test: `test_over_scoped_routes_to_revise` — `over_scoped` → `action:"cut"`; `underspecified`/`missing` → `action:"fill"`; `satisfied`/`n_a` excluded.
-   - Acceptance: cut vs fill correctly routed.
-
-4. **`extractContractIds` + `test_contract_ids_match_asset` binding test**
-   - What: `extractContractIds(md: string): string[]` matches `/^## ([a-z-]+) — /gm` against `contract.md` (read via `assetPromptsDir()`), returns the ordered ids. The parser's canonical enum is a single exported `const CONTRACT_IDS`; the test asserts `extractContractIds(read(contract.md))` deep-equals `CONTRACT_IDS`.
-   - Files: `tools/write_spec_lib.ts` (`extractContractIds`, `CONTRACT_IDS`), `tools/write_spec_lib.test.ts`
-   - Interfaces — **Consumes:** `assetPromptsDir` from `asset_root_lib.ts`. **Produces:** `extractContractIds`, `CONTRACT_IDS`.
-   - Acceptance: passes now; a deliberate rename in either the asset or `CONTRACT_IDS` fails it.
-
-### Risks
-- **A "lazy" wing verdict faking done:** mitigated by construction — `done` is host-recomputed; `test_partial_verdict_fails_closed` locks it.
-- **A future "generalize the shared parser" refactor breaks plan-dispatch:** mitigated by `test_plan_dispatch_verdict_parsing_preserved`.
-
-### Verification
-```
-npm --prefix tools test -- write_spec_lib.test.ts
-```
-Expect green: `test_extract_contract_verdict_from_fence`, `test_plan_dispatch_verdict_parsing_preserved`, `test_parser_drops_unknown_sections`, `test_status_enum_rejects_unknown`, `test_done_recomputed_from_items`, `test_partial_verdict_fails_closed`, `test_over_scoped_routes_to_revise`, `test_contract_ids_match_asset`.
-
-## Phase 3: Raw-usage parsers, prompt assembly, lead/wing dispatch loop, receipt, cost, incremental persistence
-**Goal:** The headless dispatcher — usage parsing pinned to the raw envelopes, prompt construction, draft→verify→revise loop with early exit, all termination paths (every non-crash exit writing spec + receipt), token-cost aggregation, receipt emission, and per-round crash-proof history. Takes an explicit `--slug` + `--out`. Mirrors `plan_dispatch.ts`.
-**Dependencies:** Phases 1–2
-**Estimated effort:** L
-
-### Tasks
-
-1. **Author the 6 prompt files** (parallelizable, started in Phase 2's prerequisites)
-   - What: `{claude,codex}/generate.md` (draft against `contract.md`), `verify.md` (contract check → verdict JSON, **never a review**), `revise.md` (revise non-satisfied sections only; carries the #677 playground-scope discipline block + "an unknown you cannot resolve goes under Open Questions — never invent an answer"). `generate.md` additionally instructs: **"any items under `## Pre-dispatch open questions` in the intent brief are unresolved unknowns — seed them verbatim into the spec's Open Questions section; do not invent answers."**
+2. **Author `{claude,codex}/{generate,verify,revise}.md` prompts**
+   - What: write the six per-agent prompts under `global/prompts/write-spec/`. `generate.md` — draft against the contract. `verify.md` — contract check → verdict JSON (explicitly NOT a review; closed enum; never free-form findings; preamble: "you check a checklist, you do not open findings"; must output the exact `{items,done,summary}` shape). `revise.md` — revise only non-satisfied sections; carry the #677 playground-scope discipline block + "unknown you cannot resolve → Open Questions, never invent"; `over_scoped` items → **remove** content.
    - Files: `global/prompts/write-spec/{claude,codex}/{generate,verify,revise}.md`
-   - Interfaces — **Produces:** three prompt templates per agent with literal `{{TOKEN}}` placeholders — generate: `{{CONTRACT}}`, `{{INTENT_BRIEF}}`; verify: `{{CONTRACT}}`, `{{SPEC_DRAFT}}`; revise: `{{CONTRACT}}`, `{{PRIOR_DRAFT}}`, `{{REVISE_ITEMS}}`.
-   - Acceptance: verify prompt emits the exact `{items,done,summary}` schema fenced as ```` ```json ````; revise prompt receives only non-satisfied items; generate prompt routes pre-dispatch unknowns to Open Questions.
+   - Interfaces — **Consumes:** `contract.md` (all prompts reference the canonical section list by the same ids). **Produces:** prompt assets loaded by the dispatcher in Phase 3.
+   - Test: `test_prompts_reference_canonical_ids` — every `verify.md`/`generate.md`/`revise.md` mentions each `SECTION_IDS` id at least once (binds prompts to the literal alongside the asset).
+   - Acceptance: `verify.md` output contract matches the `ContractVerdict` schema; naming (`generate`/`revise`/`verify`) as specified.
 
-2. **Raw-output usage parsers + `DispatchUsage` (pinned before text normalization)**
-   - What: the shared `run(...)` primitive returns raw subprocess stdout; `parseCodexJsonl`/`parseGeminiJson` normalize it to text and discard token events. Add usage parsers that operate on the **raw stdout string**, using the real envelopes captured in Prerequisites:
-     - `extractUsageFromRawCodex(rawStdout: string): { input_tokens: number, output_tokens: number } | null` — scans the JSONL lines for the token/usage event recorded in Prerequisites (e.g. `type: "token_count"` or a `usage` field), returns its `input_tokens`/`output_tokens`; `null` when absent.
-     - `extractUsageFromRawClaude(rawStdout: string): { input_tokens: number, output_tokens: number } | null` — parses the final `result` object and reads `usage.input_tokens`/`usage.output_tokens`; `null` when absent.
-     - `extractUsage(agent: AgentName, rawStdout: string, model: string): DispatchUsage` — dispatches to the per-agent parser; on `null` returns `{ input_tokens: 0, output_tokens: 0, model, missing: true }`.
-   - `DispatchUsage = { input_tokens: number, output_tokens: number, model: string, missing?: boolean }`. Each dispatch in the loop captures the raw stdout, computes text via the existing normalizer **and** usage via `extractUsage` — the two are parsed from the same raw string independently, so normalization discarding token events is irrelevant.
-   - Files: `tools/write_spec_lib.ts`
-   - Interfaces — **Consumes:** the raw stdout returned by `run(...)`; `AgentName`. **Produces:** `DispatchUsage`, `extractUsageFromRawCodex`, `extractUsageFromRawClaude`, `extractUsage`.
-   - Test: `test_extract_usage_codex_envelope` — the captured real codex JSONL fixture yields the recorded token counts; `test_extract_usage_claude_envelope` — the captured real claude `result` fixture yields its counts; `test_extract_usage_missing` — stdout with no usage event → zeros + `missing:true`.
-   - Acceptance: usage is recoverable from the raw envelope for both real formats; a missing event degrades to a zero floor, never a crash.
+#### Risks
+- Wing prompt drifts toward critique: mitigate via the `verify.md` name + the explicit checklist-not-findings preamble.
 
-3. **Prompt-construction interfaces (host-side assembly)**
-   - What: the host reads every asset (via `assetPromptsDir()`) and assembles the exact stdin each agent receives:
-     - `loadWriteSpecPrompts(leadAgent, wingAgent)` reads `contract.md`, `<leadAgent>/{generate,revise}.md`, `<wingAgent>/verify.md`. Returns `{ contract, generate, revise, verify }`.
-     - `buildLeadInput(kind, prompts, brief, opts)`: `kind:"generate"` → substitute `{{CONTRACT}}`, `{{INTENT_BRIEF}}`; `kind:"revise"` → substitute `{{CONTRACT}}`, `{{PRIOR_DRAFT}}` (prior full document), `{{REVISE_ITEMS}}` = `renderRevisePayload(revisePayloadFromVerdict(verdict))` (one bullet per non-satisfied item: `- **<section>** (<action>): <note>`).
-     - `buildWingInput(prompts, draft)` → substitute `{{CONTRACT}}`, `{{SPEC_DRAFT}}`.
-     - `withFormatReminder(input)` → append a fixed trailer instructing a JSON-only fenced verdict; used exactly once on the malformed-verdict retry.
-   - Substitution is literal `{{TOKEN}}` replace; a template missing a required token throws (config/asset error, not a run failure).
-   - Files: `tools/write_spec_lib.ts`
-   - Interfaces — **Consumes:** `assetPromptsDir`, `revisePayloadFromVerdict`. **Produces:** `loadWriteSpecPrompts`, `buildLeadInput`, `buildWingInput`, `withFormatReminder`, `renderRevisePayload`.
-   - Test: `test_prompt_assembly` — generate input contains full contract + brief and no unresolved `{{`; revise input contains only non-satisfied sections; `withFormatReminder` appends once. `test_prompt_missing_token_throws`.
-   - Acceptance: each agent's exact input is reproducible from (assets, brief, prior draft, verdict).
+#### Verification
+- `node --experimental-strip-types --test tools/write_spec_lib.test.ts` green (extractor + parser + drift + prompt-binding tests).
 
-4. **Argument validation + agent guard + explicit `--slug`/`--out`**
-   - What: parse `--intent-brief --out --slug --lead --wing --lead-model --wing-model --max-rounds --timeout --wing-timeout --json --dry-run`. **`--intent-brief`, `--out`, `--slug` all required** (`--dry-run` still requires all three to plan). The dispatcher never parses the brief or out path to recover the slug. Reject `gemini` for `--lead`/`--wing` with a clear error (core stays generic via `VALID_AGENTS`; only the guard blocks it).
-   - Files: `tools/write_spec.ts` (new CLI)
-   - Interfaces — **Consumes:** `VALID_AGENTS`, `AgentName`, `isAgentEnabled`; `getWriteSpecConfig`, `resolveModel`/`getModelId`. **Produces:** `WriteSpecCliArgs = { intentBrief, out, slug, lead, wing, leadModel?, wingModel?, maxRounds, timeout, wingTimeout, json, dryRun }`.
-   - Test: `test_reject_gemini_agent` — `--lead gemini` nonzero + `unsupported agent: gemini (claude|codex only)`; `test_dispatcher_requires_slug` — no `--slug` → nonzero + `--slug is required`; `test_reject_unknown_flag`.
-   - Acceptance: advertised CLI matches what resolves; slug is a typed host contract.
+---
 
-5. **The loop core**
-   - What: round 1..N — lead dispatch (`buildLeadInput("generate")` round 1, `buildLeadInput("revise", ...)` after) → wing dispatch (`buildWingInput`) → `normalizeContractVerdict` → `recomputeDone`. Early exit on `done` → `contract_satisfied`. `ContractVerdictUnparseable` (or `extractContractVerdictJson` null) → **one** retry with `withFormatReminder(buildWingInput(...))` → else `wing_unparseable`. Detect `lead_empty_draft` (lead whitespace-only) and `unchanged_revision` (byte-identical to prior draft). Exhaust rounds → `max_rounds_unsatisfied`.
-   - **Uniform write-on-every-non-crash-exit (finding #7):** the loop tracks `lastDraft: string` (the most recent lead output, defaulting to `""`). On **every** terminal verdict the host writes `lastDraft` to `--out` before returning — **including first-round `lead_empty_draft`, where `lastDraft` is the empty/whitespace string the lead produced.** There is no "skip the write when the draft is empty" branch; the receipt's `spec_path` is always populated and the file always exists (possibly empty). This makes the dispatcher's exit contract match the spec's "every non-crash exit still writes the spec file and the receipt" verbatim.
-   - Files: `tools/write_spec_lib.ts`, `tools/write_spec.ts`
-   - Interfaces — **Consumes:** `run`, `buildAgentEnv`, `setupGeminiHome`, `makeGeminiEnv`, `tryGeminiApiKeyFallback`, `shouldFallbackToApiKey`, `releaseAgentTempDir`, `parseCodexJsonl`, `parseGeminiJson`, `resolveModel`, `isAgentEnabled`, `VALID_AGENTS`, `AgentName`; Task 2's usage parsers; Task 3's assembly; Phase 2's parser. **Produces:** `runWriteSpec(opts: WriteSpecCliArgs, deps): Promise<WriteSpecReceipt>` (deps carries injectable `dispatch` returning `{ text, rawStdout }` for tests) + the receipt shape.
-   - Test: `test_early_exit_single_pass` (clean draft → 1 lead + 1 wing call, `contract_satisfied`); `test_termination_max_rounds`, `test_termination_empty_draft`, `test_termination_unchanged_revision`, `test_termination_wing_unparseable` — each yields the right `final_verdict`, nonzero exit, and **spec + receipt on disk in every case**; `test_empty_draft_still_writes_spec` — a first-round whitespace-only lead output produces an on-disk `specPath` (empty file) plus receipt, `final_verdict:"lead_empty_draft"`. Injected `dispatch` returns canned strings — no real LLM in unit tests.
-   - Acceptance: all termination paths produce the correct verdict; early exit costs one verify pass; **no exit path skips the spec write.**
-
-6. **Per-dispatch cost aggregation**
-   - What: the loop appends **every** dispatch's `DispatchUsage` (lead + wing + the one retry) to a run-level `usages: DispatchUsage[]`. `accumulateCost(usages) = Σ computeDispatchCost(u.model, u.input_tokens, u.output_tokens)`; `cost_usd = accumulateCost(usages)`. A `missing:true` usage contributes 0 and pushes `usage_missing:<agent>:<round>` into `cost_notes[]`.
-   - Files: `tools/write_spec_lib.ts`
-   - Interfaces — **Consumes:** `computeDispatchCost` (cost_lib), `DispatchUsage`. **Produces:** `accumulateCost`.
-   - Test: `test_cost_aggregates_all_dispatches` — a 2-round run with a retry accumulates 5 usages; `cost_usd` equals the sum over all five; a missing-usage dispatch contributes 0 + a `cost_notes` entry.
-   - Acceptance: `cost_usd` reproducible from `usages[]`; no dispatch double-counted or dropped.
-
-7. **Receipt + incremental per-round persistence (incl. structured brief)**
-   - What: emit the single stdout JSON receipt (`ok`, `final_verdict`, `spec_path`, `slug`, `run_id`, `rounds[]`, `contract_status[]`, `dropped_sections[]`, `models{}`, `cost_usd`, `cost_notes[]`, `pr`, `persistence_errors[]`, `history_dir`). `slug` echoed from `--slug`; `ok = final_verdict === "contract_satisfied"`. Write history under `stateRoot()/history/write-spec/<slug>/<run-id>/` — `receipt.json` + `rounds.json` **after every round** (atomic via `writeJsonAtomic`), plus `brief.md` copied in at dispatch start, `latest` pointer via `updateLatestPointer`, `history_keep_runs` retention via `pruneRunDirs`. `run_id` host-generated at CLI entry (`<today>-<hh-mm-ss>-<4hex>`, injected). The receipt also carries `history_dir` (the absolute run dir) so downstream tooling never re-derives the layout.
-   - **Structured brief persistence (finding #5):** in addition to the rendered `brief.md`, the dispatcher also writes **`brief.json`** — the `BriefSections` object supplied by the skill (threaded via a new `--sections PATH` dispatcher flag; the skill's `build-brief` already produced it) — into the run dir at dispatch start. This makes the *structured* brief part of the reproducible run record, so the Answer-path redispatch (Phase 4 Task 5) can reconstruct `BriefSections`, append operator answers to `conversationContext`, and re-render — instead of trying to enrich the flat `brief.md`. `--sections` is optional for the raw dispatcher (a direct CLI dispatch without a skill may omit it; then only `brief.md` is written and `brief.json` is absent), required in practice from the skill path.
-   - `--dry-run` writes **no run record.**
-   - Files: `tools/write_spec_lib.ts`, `tools/write_spec.ts`
-   - Interfaces — **Consumes:** `writeJsonAtomic`, `updateLatestPointer`, `pruneRunDirs`; `stateRoot`; Task 6's cost. **Produces:** `WriteSpecReceipt` type (incl. `history_dir`), `persistRound(runDir, roundState)`, `persistBriefJson(runDir, sections)`.
-   - Test: `test_receipt_incremental_persistence` — receipt/rounds present after a simulated round-2 crash (injected dispatch throws round 3); history-write failure surfaces in `persistence_errors`, never fatal. `test_brief_json_persisted` — a run given `--sections` writes `brief.json` deep-equal to the input sections. `test_dry_run_no_history`.
-   - Acceptance: crash mid-run leaves a partial but valid record; every non-crash exit writes spec + receipt; `brief.json` reproduces the structured brief.
-
-8. **Dispatcher `--dry-run` path**
-   - What: resolve brief/config/models/prompts (`loadWriteSpecPrompts`), print the planned dispatch (resolved lead/wing agents+models, round budget, brief path, out path, slug), exit — no LLM, no writes outside scratchpad, no git, no run record.
-   - Files: `tools/write_spec.ts`
-   - Test: `test_dispatcher_dry_run` — zero agent calls (injected dispatch asserts never invoked), no history dir; stdout carries the planned-dispatch JSON with the echoed slug.
-   - Acceptance: matches sibling dispatcher dry-run behavior.
-
-### Risks
-- **A claimed export from a sibling isn't actually exported:** Prerequisites verification catches it; add the export in a small first-class change.
-- **Usage event shape differs from the captured fixture:** `extractUsage` isolates per-agent field access with a fallback-to-zero + `cost_notes` note, so a wrong assumption degrades cost accuracy, never crashes; the fixtures are real captures, not guesses.
-- **An empty spec file confuses review-spec:** accepted — an empty `lead_empty_draft` file exits non-zero with a clear note; the skill never hands off to review-spec on a failure verdict, and the empty file is committed only for inspection (Phase 4 Task 5), never pushed/PR'd.
-
-### Verification
-```
-npm --prefix tools test -- write_spec_lib.test.ts
-```
-Then a live smoke dispatch:
-```
-printf '## Ask\nAuthor a one-paragraph spec for a CLI that prints the current git branch.\n## Constraints\nSingle-user playground; TypeScript.\n## Target\nout=docs/specs/2026-07-20-branch-printer-spec.md slug=branch-printer\n' > /tmp/write-spec-smoke-brief.md
-node --experimental-strip-types tools/write_spec.ts --intent-brief /tmp/write-spec-smoke-brief.md --out docs/specs/2026-07-20-branch-printer-spec.md --slug branch-printer --lead claude --wing codex --json
-```
-Expect stdout receipt `final_verdict: "contract_satisfied"` (or a bounded non-crash verdict), `spec_path` written, `slug: "branch-printer"`, `cost_usd > 0`, `history_dir` set, and that dir containing `receipt.json`, `rounds.json`, `brief.md`.
-
-## Phase 4: Skill controller CLI + interactive layer — path resolution, brief, gap-fill, branch-first landing, full terminal routing
-**Goal:** A **controller CLI** (`tools/write_spec_skill.ts`) exposing every deterministic skill-layer helper as a subcommand with a JSON contract — including host path resolution surfaced to the markdown layer, App-authed remote branch adoption, host-rendered PR bodies, and explicit interactive/headless state — plus the `SKILL.md` that orchestrates them and owns the interactive `AskUserQuestion` steps. Named proving tests target the pure helpers in `write_spec_lib.ts`; the CLI is a thin wrapper.
-**Dependencies:** Phase 3
+### Phase 3: Lead/wing dispatch loop + durable exit writer
+**Goal:** `tools/write_spec.ts` runs the bounded loop headlessly with no-tools agents, derives the slug from `--out`, writes the spec + a minimum receipt on every non-crash exit, and emits the receipt JSON.
+**Dependencies:** Phase 2
 **Estimated effort:** L
 
-### Tasks
+> Ordering fix: this phase owns the **minimum** durable writer (spec file + `receipt.json` in the run dir) because Phase 3's termination acceptance requires spec+receipt on disk at every non-crash exit. Phase 4 *extends* the same writer with per-round incremental `rounds.json`, the `latest` pointer, retention, and cost — it does not introduce persistence from scratch.
 
-1. **`tools/write_spec_skill.ts` — the controller CLI (the markdown↔TS seam)**
-   - What: a subcommand CLI SKILL.md invokes via `node --experimental-strip-types tools/write_spec_skill.ts <sub>`. Each subcommand reads its input JSON from a `--input PATH` file (or explicit flags) and writes a single JSON object to stdout — the contract SKILL.md consumes. Subcommands:
-     - **`resolve-paths --topic <t> --today <d> [--out <path>]`** → `{ slug, specPath, branch }` (finding #1). This is the **only** way the markdown layer obtains the host-computed path triple; every later subcommand + the dispatcher receive these exact values as arguments. Thin wrapper over `resolveSpecPaths`.
-     - `build-brief --input <sections.json> --slug <slug> --out <specPath>` → writes `brief.md` **and** copies `sections.json` to the scratchpad as the canonical structured brief; returns `{ brief_path, sections_path, char_count, truncated: bool, pre_dispatch_unknowns: string[] }`. (`sections.json` carries the `BriefSections` fields the skill/Claude assembled, incl. distilled conversation context.) The `sections_path` is later threaded into the dispatcher as `--sections` and into `resolve-gaps` as `--sections`.
-     - `prepare-branch --slug <slug> --lead <agent>` → `{ branch, adopted }` (finding #2). Computes `leadApp = leadAppFor(lead)`, and performs remote lookup/fetch using the **lead App token** via the `gitAuthEnv` askpass helper (see `prepareBranch` below — `GH_TOKEN` alone does not authenticate git). Rejects `gemini`.
-     - `route --receipt <path> --slug <slug> --lead <agent> [--ready] [--no-pr]` → routes a **non-max-rounds** verdict (called for `contract_satisfied` and every failure verdict); computes `leadApp = leadAppFor(lead)`, builds the `LandingSummary` from the receipt, and returns `{ exit_code, final_verdict, pr, committed, pushed, note }`. `--ready`/`--no-pr` are **skill-layer** flags consumed here (they never reach the dispatcher).
-     - `resolve-gaps --receipt <path> --slug <slug> --lead <agent> --choice <answer|accept|abort> [--answers <path>] [--sections <path>] [--headless] [--ready] [--no-pr]` → the max-rounds interactive resolution; returns `GapResult` JSON. `--headless` (finding #4) is set by the skill iff the *user* passed `--json`; it is independent of the dispatcher's internal `--json`. `--sections` (finding #5) points at the structured brief so the Answer path can enrich `conversationContext`.
-     - `dry-run --input <sections.json> --slug <slug> --out <specPath> --lead <a> --wing <a>` → prints the assembled brief + resolved plan; mutates nothing.
-   - Every subcommand rejects `gemini` for `--lead`/`--wing`. All are thin wrappers over `write_spec_lib.ts` pure functions (`resolveSpecPaths`, `truncateBrief`/`renderBrief`, `prepareBranch`, `routeOutcome`, `resolveGaps`, `runSkillDryRun`) with real `git`/`gh`/`getToken`/`prCreate` deps wired in.
-   - Files: `tools/write_spec_skill.ts` (new)
-   - Interfaces — **Consumes:** all Phase-4 `write_spec_lib.ts` helpers; `getToken`, `prCreate`, `leadAppFor`. **Produces:** the 6 subcommands' JSON contracts (documented verbatim in SKILL.md).
-   - Test: `test_controller_resolve_paths_subcommand` — `resolve-paths --topic "Foo Bar!"` returns the sanitized slug/specPath/branch triple; `test_controller_route_subcommand` — `route` on a `contract_satisfied` receipt (injected fake deps) returns `exit_code:0` and a `pr` object; `test_controller_prepare_branch_lead_app` — `prepare-branch --lead codex` mints the token with `getToken({ app: "stark-codex", owner })` (recorded), never the default App; `test_controller_rejects_gemini` — any subcommand with `--lead gemini` exits nonzero.
-   - Acceptance: SKILL.md never imports TS; the path triple, branch adoption, routing, and gap resolution are all documented CLI calls with JSON contracts; remote branch adoption authenticates with the lead App.
+#### Tasks
 
-2. **`skill/stark-write-spec/SKILL.md` — frontmatter, Help, phase flow, exact invocations (full flag propagation + receipt plumbing)**
-   - What: frontmatter (`name: stark-write-spec`); `## Help` block referencing `standards/help.md`; a preflight phase (`tools/preflight.ts`); the phase flow with the **exact controller invocations and full flag propagation** (finding #3). The skill parses the user CLI surface (`<path|"intent"> [--out] [--lead] [--wing] [--lead-model] [--wing-model] [--max-rounds] [--dry-run] [--ready] [--no-pr] [--json]`) and threads each flag to the layer that owns it:
-     1. Classify positional + distill conversation context → write `sections.json`.
-     2. `node … write_spec_skill.ts resolve-paths --topic <topic> --today <today> [--out <userOut>]` → capture `{slug, specPath, branch}`. (Topic derived per Task 3.)
-     3. `AskUserQuestion` (≤4 load-bearing gaps) — SKILL.md's own tool call. **Skipped entirely when the user passed `--json`** (headless): pre-dispatch unknowns go straight into `sections.json`'s `preDispatchOpenQuestions`.
-     4. `node … write_spec_skill.ts build-brief --input sections.json --slug <slug> --out <specPath>` → capture `brief_path` + `sections_path`.
-     5. `node … write_spec_skill.ts prepare-branch --slug <slug> --lead <lead>` (branch before dispatch, App-authed).
-     6. **Dispatcher invocation — every advertised option propagated:**
-        ```
-        node --experimental-strip-types tools/write_spec.ts \
-          --intent-brief <brief_path> --out <specPath> --slug <slug> --sections <sections_path> \
-          --lead <lead> --wing <wing> \
-          [--lead-model <leadModel>] [--wing-model <wingModel>] [--max-rounds <n>] \
-          --json > <scratch>/receipt.json
-        ```
-        The dispatcher's `--json` is **always** present (the skill needs a parseable receipt); `--lead-model`/`--wing-model`/`--max-rounds` are forwarded only when the user supplied them. **`--ready`/`--no-pr` are NOT passed to the dispatcher** — they are skill-layer landing flags. The skill **captures the dispatcher's single stdout JSON object by redirecting to `<scratch>/receipt.json`** — this is the `--receipt <path>` every later subcommand consumes. (The dispatcher also persists an identical `receipt.json` at `<history_dir>/receipt.json`; the scratchpad copy is what the controller reads, and `history_dir` inside it points at the persisted twin. The two are byte-identical because the stdout object and the persisted object are the same serialized value.)
-     7. Branch on `receipt.final_verdict`:
-        - `contract_satisfied` → `write_spec_skill.ts route --receipt <scratch>/receipt.json --slug <slug> --lead <lead> [--ready] [--no-pr]` → print handoff.
-        - `max_rounds_unsatisfied` → if user passed `--json` → `resolve-gaps … --choice accept --headless …` (auto-accept); else `AskUserQuestion` (Answer / Accept / Abort) → `resolve-gaps --receipt <path> --slug <slug> --lead <lead> --choice <c> [--answers <answers.json>] --sections <sections_path> [--ready] [--no-pr]`.
-        - `lead_empty_draft | unchanged_revision | wing_unparseable` → `write_spec_skill.ts route --receipt <path> --slug <slug> --lead <lead>` (routes as a failure: commit-for-inspection, no PR, exit 1).
-     8. Print the controller's returned `note`/handoff; propagate its `exit_code`.
-     - **Dry-run:** the user's `--dry-run` routes to `write_spec_skill.ts dry-run …` (skill-layer, before any branch/dispatch) — it never invokes the dispatcher.
-   - Files: `skill/stark-write-spec/SKILL.md`
-   - Interfaces — **Consumes:** `standards/help.md`, `tools/preflight.ts`, `tools/write_spec.ts`, `tools/write_spec_skill.ts`.
-   - Acceptance: `skill_smoke_test.test.ts` picks it up (frontmatter parses, name matches, `standards/help.md` referenced, tool refs resolve, `write_spec.ts --help` + `write_spec_skill.ts --help` exit clean); every advertised user flag maps to a concrete layer (dispatcher vs skill-layer) with the receipt captured to a named scratchpad path.
+1. **Slug derivation + dispatch loop in `write_spec_lib.ts` + `write_spec.ts` CLI**
+   - What: implement `runWriteSpec(opts)` and the CLI.
+     - **`deriveSlugFromOut(outPath): string`** — the canonical slug contract. Parse the basename against `^\d{4}-\d{2}-\d{2}-(?<slug>.+)-spec\.md$`; return the `slug` group. **Throw** a clear error (`out path must match docs/specs/YYYY-MM-DD-<slug>-spec.md; got <basename>`) when it does not match — the dispatcher never invents a slug and never accepts a `--slug` flag (single source of truth is the host-computed out path from Phase 5). The receipt `slug` and the history path `stateRoot()/history/write-spec/<slug>/<run-id>/` both come from this one call.
+     - `runWriteSpec`: round 1..N — lead drafts/revises against the contract, wing verifies → `ContractVerdict`. Early-exit on `done`. On non-`done`: pass lead its prior draft + **only** non-satisfied items (with notes) + `revise.md`. Malformed wing JSON (`extractContractVerdictJson` returns `null`, or `normalizeContractVerdict` throws) → **one** retry with a format reminder, second failure → terminate `wing_unparseable` (draft preserved). Detect `lead_empty_draft`, `unchanged_revision` (byte-identical revise). Compute `final_verdict`.
+     - **Contract composition (finding: agents have no file tools).** The agent prompts *reference* the contract but cannot read it — so `composePrompt(agentPromptText, contractText)` reads `contract.md` **once** at dispatch start (`readFile(path.join(assetPromptsDir(), "write-spec", "contract.md"))`) and **prepends its full contents** (under a `## Spec Contract (authoritative — the 9 sections and their done-when bars)` header) into **every** generate/verify/revise request, before the per-agent template and the intent brief. The canonical done-when bars + review lenses thus reach the lead and wing in-band, not by reference. `runWriteSpec` fails fast if `contract.md` is missing/empty. Test `test_contract_text_reaches_agents`: stub the dispatch layer, assert the composed prompt string for a generate, a verify, and a revise call each contains a sentinel line from `contract.md` (proves composition, not mere reference).
+     - CLI parses `--intent-brief --out [--lead --wing --lead-model --wing-model --max-rounds --timeout --wing-timeout --dry-run --json]` (**no `--slug`** — derived from `--out`); reject `gemini` at validation with `unsupported agent: gemini (claude|codex only at v1)`. `--dry-run` assembles/prints the planned dispatch (including the derived slug) and exits (no LLM, no writes outside scratchpad, no run record).
+   - **No-tools least-privilege dispatch + exact per-agent commands + output parsers:**
+     - Define `const NO_TOOLS = <verbatim disallowed-tools string from the fold decider>` at module top (Bash/Edit/Write/Read/WebFetch/WebSearch/Task/NotebookEdit).
+     - **Lead (claude):** `buildClaudeCmd({ promptArg: <prompt>, outputFormat: "json", allowedTools: "", disallowedTools: NO_TOOLS })` — **JSON output format** (unlike `plan_dispatch.ts`'s text lead) so Phase 4 can read the `usage` block, **and no tool access**. The draft text is the envelope's `result` field. Add `parseClaudeJson(raw): { text: string, usage: { input_tokens: number, output_tokens: number } | null }` in `write_spec_lib.ts`: `JSON.parse` the stdout, return `{ text: obj.result ?? "", usage: obj.usage ?? null }`; on parse failure return `{ text: raw, usage: null }` (a text-mode fallback never crashes the loop).
+     - **Lead (codex, when `--lead codex`):** `run` with the codex command (`exec -s read-only`), text via `parseCodexJsonl`.
+     - **Wing (codex default):** codex `exec -s read-only` at `model_reasoning_effort="xhigh"`; verdict text via `parseCodexJsonl`, then `extractContractVerdictJson` → `normalizeContractVerdict`.
+     - **Wing (claude, when `--wing claude`):** `buildClaudeCmd({ outputFormat: "json", allowedTools: "", disallowedTools: NO_TOOLS })`, text via `parseClaudeJson(...).text`.
+   - Minimum durable writer: `writeExitArtifacts(runDir, specText, receipt)` writes the spec to `--out` and `receipt.json` to the run dir (atomic tmp+rename via `writeJsonAtomic`) on **every** non-crash return, including all terminal verdicts. This is the base Phase 4 extends.
+   - Files: `tools/write_spec_lib.ts`, `tools/write_spec.ts` (new CLI)
+   - Interfaces — **Consumes:** `run`, `buildAgentEnv`, `setupGeminiHome`, `makeGeminiEnv`, `tryGeminiApiKeyFallback`, `shouldFallbackToApiKey`, `releaseAgentTempDir`, `parseCodexJsonl`, `parseGeminiJson`, `buildClaudeCmd`, `resolveModel`, `isAgentEnabled`, `VALID_AGENTS`, `AgentName` (`copilot_dispatch.ts`); `getWriteSpecConfig`, `getModelId` (`stark_config_lib.ts`); `assetPromptsDir`, `stateRoot` (`asset_root_lib.ts`); `writeJsonAtomic` (`stark_review_doc_lib.ts`); `extractContractVerdictJson`, `normalizeContractVerdict` (Phase 2). **Produces:** `deriveSlugFromOut(outPath): string`; `runWriteSpec(opts): Promise<WriteSpecReceipt>`; `parseClaudeJson(raw)`; `buildLeadCmd`/`buildWingCmd` (the command builders, exported for the no-tools test); `type WriteSpecReceipt`; `type FinalVerdict`; `writeExitArtifacts(...)`.
+   - Test (`tools/write_spec_lib.test.ts`, stubbed `run` for deterministic agent output):
+     - `test_derive_slug_from_out` — `docs/specs/2026-07-20-example-spec.md` → `example`; a non-conforming path (`/tmp/foo.md`) throws the documented error; a multi-word slug (`2026-07-20-multi-word-topic-spec.md` → `multi-word-topic`) round-trips.
+     - `test_agent_commands_expose_no_tools` — `buildLeadCmd({agent:'claude',...})` and `buildWingCmd({agent:'claude',...})` produce argv containing the `NO_TOOLS` `disallowedTools` string and an **empty** `allowedTools` (assert no `Read`/`Glob`/`Grep`/`Bash`/`Write` token is grantable); the codex builders include `-s read-only`. Proves the no-tool boundary at the command layer.
+     - `test_early_exit_single_pass` (clean draft → exactly 1 lead + 1 wing call, `contract_satisfied`).
+     - `test_over_scoped_routes_to_revise` (`over_scoped` item in the revise payload with cut semantics).
+     - `test_parse_claude_json_envelope` (a canned `{"result":"…","usage":{"input_tokens":10,"output_tokens":20}}` → `{text, usage}`; a non-JSON stdout → `{text:raw, usage:null}`).
+     - `test_termination_max_rounds`, `test_termination_empty_draft`, `test_termination_unchanged_revision`, `test_termination_wing_unparseable` (each → right `final_verdict`, `ok=false`, non-zero exit, and **spec + receipt.json on disk** — asserts `writeExitArtifacts` ran, and the run dir path used the slug from `deriveSlugFromOut`).
+   - Acceptance: `ok === (final_verdict === "contract_satisfied")`; non-`contract_satisfied` exits non-zero with `error.code`; spec + `receipt.json` present after every terminal verdict; the receipt `slug` + history path both derive from `--out`; both Claude commands expose no tools; the lead claude command uses `--output-format json` and its text comes from `result`.
 
-3. **Positional-arg classification + brief assembly**
-   - What: `classifyPositional(arg)`: `kind:"path"` iff `fs.existsSync(arg) && fs.statSync(arg).isFile()`, else `kind:"intent"`. Topic/slug: from `--out` basename (strip `YYYY-MM-DD-` prefix + `-spec.md` suffix) if given, else from an AskUserQuestion answer, else derived by the skill from the Ask's leading noun-phrase; the topic is fed to `resolve-paths` → the single `slug`. `BriefSections = { ask, sourceMaterial, conversationContext, constraints, target, preDispatchOpenQuestions }`. `truncateBrief(sections, maxChars)`: render fixed-order sections `## Ask`, `## Source material`, `## Conversation context`, `## Constraints`, `## Target`, `## Pre-dispatch open questions`; `ask`/`constraints`/`target`/`preDispatchOpenQuestions` never truncated (throw `brief_fixed_overflow` if fixed content alone exceeds cap); split remaining budget `sourceMaterial` then `conversationContext`, each truncated by byte length with marker `\n\n…[truncated N chars]…\n`; result `<= maxChars`.
-   - Files: `tools/write_spec_lib.ts` (`classifyPositional`, `truncateBrief`, `renderBrief`, `BriefSections`); `write_spec_skill.ts build-brief` wraps them.
-   - Interfaces — **Consumes:** `resolveSpecPaths`. **Produces:** `classifyPositional`, `truncateBrief`, `renderBrief`, `BriefSections`.
-   - Test: `test_classify_positional`; `test_intent_brief_truncation` — oversize `sourceMaterial` truncates with marker, total ≤ cap, load-bearing sections untruncated; `test_pre_dispatch_unknowns_in_brief` — a `preDispatchOpenQuestions` list renders as `## Pre-dispatch open questions`, never truncated; `test_brief_fixed_overflow`.
-   - Acceptance: classification deterministic; brief never exceeds cap; load-bearing sections never lost; pre-dispatch unknowns reach the lead via the brief.
+2. **Intent brief assembly + truncation**
+   - What: read the `--intent-brief PATH` file; enforce `max_input_chars` cap — source material truncates with an explicit marker (`\n\n<!-- TRUNCATED: source material exceeded max_input_chars -->`), Ask/Constraints/Target never truncated.
+   - Files: `tools/write_spec_lib.ts`
+   - Interfaces — **Consumes:** `write_spec.max_input_chars`. **Produces:** `assembleBriefForDispatch(briefText, cap): string`.
+   - Test: `test_intent_brief_truncation` — oversize source material truncates with the marker; ask/constraints preserved verbatim.
+   - Acceptance: brief never exceeds cap; marker present iff truncated.
 
-4. **`--help` block** — standalone `--help`/`-h`/`help` prints purpose + usage + `## Arguments` and stops (no preflight, no phases, side-effect-free). CLI surface: `<path|"intent"> [--out PATH] [--lead claude|codex] [--wing claude|codex] [--lead-model ID] [--wing-model ID] [--max-rounds N] [--dry-run] [--ready] [--no-pr] [--json]`.
+#### Risks
+- Loop churn: bounded by `max_rounds` + `unchanged_revision` breaker; the closed-enum verdict prevents section growth.
+- Wing agent-env drift from `plan_dispatch.ts`: mitigate by reusing the exact imported primitives, not reimplementing env isolation.
 
-5. **Terminal-verdict routing + gap resolution (all verdicts, structured-brief enrichment, explicit headless)**
-   - What: two named pure helpers with injected deps, wrapped by the controller's `route`/`resolve-gaps`:
+#### Verification
+- `node --experimental-strip-types --test tools/write_spec_lib.test.ts` green (slug + no-tools + loop + claude-envelope + all four termination + truncation tests).
+- **Dry-run preserves git state byte-for-byte + creates no output/history** (capture-before / compare-after, works in a pre-existing dirty tree):
+  ```
+  printf '## Ask\nauthor a spec for X\n' > /tmp/brief.md
+  OUT="/tmp/wsdry-$(date +%s)-spec.md"                 # unique, outside the repo tree
+  HIST="$(node --experimental-strip-types -e "import('./tools/asset_root_lib.ts').then(m=>console.log(m.stateRoot()))")/history/write-spec"
+  BEFORE_HIST="$(ls -1 "$HIST" 2>/dev/null | sort)"     # slug dirs present before, if any
+  git status --porcelain > /tmp/ws-git-before.txt       # capture full status, not a count
+  node --experimental-strip-types tools/write_spec.ts --intent-brief /tmp/brief.md --out "$OUT" --dry-run
+  git status --porcelain > /tmp/ws-git-after.txt
+  diff /tmp/ws-git-before.txt /tmp/ws-git-after.txt && echo "git-state-unchanged OK"   # byte-for-byte
+  test ! -e "$OUT" && echo "no-out-file OK"
+  [ "$BEFORE_HIST" = "$(ls -1 "$HIST" 2>/dev/null | sort)" ] && echo "no-history-dir OK"
+  ```
+  All three lines print: the working tree is identical before and after (proving dry-run made no changes even in a dirty worktree), no spec file was created, and no history dir appeared.
 
-     **`routeOutcome(ctx, deps): RouteResult`** — the non-interactive router for `contract_satisfied` and the three failure verdicts:
-     - `RouteResult = { exitCode, finalVerdict, pr: PrInfo | null, committed, pushed, note }`.
-     - `ctx` carries `{ receipt, specPath, slug, branch, leadApp, summary: LandingSummary, openPr, ready }`.
-     - `contract_satisfied` → `landSpec(specPath, slug, { push:true, openPr: ctx.openPr, ready: ctx.ready, leadApp, summary: ctx.summary }, deps)` → `{ exitCode:0, pr }`, note = `next: /stark-review-spec <specPath>`.
-     - `lead_empty_draft` → the dispatcher already wrote `specPath` (possibly empty, finding #7). `landSpec(..., { push:false, openPr:false, leadApp, summary })` commits it for inspection. `{ exitCode:1, pr:null, note:"lead produced no usable draft; branch left for inspection" }`.
-     - `unchanged_revision` → `landSpec(..., { push:false, openPr:false, leadApp, summary })` (commit the last draft for inspection), `{ exitCode:1, pr:null, note:"lead stuck (unchanged revision); branch left for inspection" }`.
-     - `wing_unparseable` → `landSpec(..., { push:false, openPr:false, leadApp, summary })`, `{ exitCode:1, pr:null, note:"wing verdict unparseable; draft committed for inspection" }`.
-     - **No failure verdict ever opens a PR or pushes** — this is the finding-#4 (round-4) guarantee.
+---
 
-     **`resolveGaps(ctx, choice, deps): GapResult`** — the `max_rounds_unsatisfied` path only:
-     - `GapContext = { receipt, specPath, slug, branch, leadApp, sections: BriefSections, unsatisfied, headless, openPr, ready }` — `sections` is the **structured** brief (finding #5), read from `--sections`'s `sections.json` (falling back to the run record's `brief.json`), so the Answer path can append to `conversationContext` structurally.
-     - `GapChoice = "answer" | "accept" | "abort"`; `GapDeps = { runWriteSpec, appendAcceptedGaps, landSpec, renderBrief, writeFile, readFile, buildLandingSummary, redispatchCount }` (injectable).
-     - **`answer`** — append the operator's answers to `ctx.sections.conversationContext` (typed append to the structured object), re-render the brief via `renderBrief`/`truncateBrief`, write the new `brief.md` + `sections.json`, and call `deps.runWriteSpec` **exactly once more** with `--sections` pointing at the enriched file (hard single-retry counter). Route the new receipt:
-       - new verdict `contract_satisfied` → `routeOutcome` land path (rebuild `summary` from the new receipt), `exitCode:0`.
-       - new verdict `max_rounds_unsatisfied` → **accept-with-gaps fallback**: append remaining unsatisfied to Open Questions, land (`push:true`, `summary` flags `answer_redispatch_incomplete:true`), `exitCode:0`.
-       - new verdict a **failure verdict** (`lead_empty_draft`/`unchanged_revision`/`wing_unparseable`) → delegate to `routeOutcome` (commit-for-inspection, no PR, `exitCode:1`).
-     - **`accept`** — read `specPath`, `appendAcceptedGaps(spec, ctx.unsatisfied)`, write back, `acceptedGaps = ctx.unsatisfied`, build `summary` with `accepted_gaps`, then `landSpec` (commit edited spec, push, PR body carries accepted gaps), `exitCode:0`, `finalVerdict:"max_rounds_unsatisfied"` (dispatcher receipt never rewritten).
-     - **`abort`** — commit the dispatch's spec to the branch via `landSpec({ push:false, openPr:false, leadApp, summary })`, `exitCode:1`, no PR.
-     - **Headless (`ctx.headless`, finding #4):** no interactive prompt; auto-`accept`, output flags `auto_accepted_gaps:true`. `ctx.headless` is set from the controller's explicit `--headless` flag (user `--json`), **never** inferred from the dispatcher's internal `--json`.
-     - `GapResult = { exitCode, finalVerdict, acceptedGaps, redispatched, pr, autoAccepted }`.
-
-     `appendAcceptedGaps(spec, items)`: locate `/^##+\s+Open Questions\s*$/mi` (append the section if absent); render each item `- **[<section>]** <note or "unspecified — needs an answer">`; dedup exact bullets (idempotent); preserve order.
-   - Files: `tools/write_spec_lib.ts` (`routeOutcome`, `resolveGaps`, `appendAcceptedGaps`, `RouteResult`/`GapContext`/`GapChoice`/`GapDeps`/`GapResult` types); wrapped by `write_spec_skill.ts route`/`resolve-gaps`.
-   - Interfaces — **Consumes:** `landSpec`, `buildLandingSummary` (Task 6), `renderBrief`, `BriefSections`. **Produces:** `routeOutcome`, `resolveGaps`, `appendAcceptedGaps`.
-   - Test:
-     - `test_route_satisfied_lands` — `contract_satisfied` → land + PR + `exitCode:0`.
-     - `test_route_empty_draft_no_pr` — `lead_empty_draft` → `landSpec` called `{push:false,openPr:false}`, no PR, no push, `exitCode:1`.
-     - `test_route_unchanged_revision_no_pr` — commit-for-inspection, no PR, `exitCode:1`.
-     - `test_route_wing_unparseable_no_pr` — commit-for-inspection, no PR, `exitCode:1`.
-     - `test_answer_single_redispatch_bound` — `answer` calls `runWriteSpec` exactly once more (counter asserted).
-     - `test_answer_enriches_structured_conversation` — operator answers are appended to `sections.conversationContext` (structured), the redispatch's `--sections` file contains them; the flat `brief.md` is regenerated from the structured object, never hand-patched.
-     - `test_answer_redispatch_failure_verdict_no_pr` — the answer redispatch returns `wing_unparseable` → no PR, `exitCode:1`.
-     - `test_answer_redispatch_max_rounds_accepts_gaps` — the answer redispatch returns `max_rounds_unsatisfied` → gaps appended, lands with `answer_redispatch_incomplete:true`, `exitCode:0`.
-     - `test_accept_exit_zero_receipt_unchanged` — `accept` edits Open Questions, `exitCode:0`, dispatcher `receipt.json` byte-identical.
-     - `test_abort_exit_one_no_pr` — `abort` → `landSpec({push:false,openPr:false})` (commit on branch, no push/PR), `exitCode:1`.
-     - `test_headless_auto_accept` — `headless:true` + `max_rounds` → gaps appended, `auto_accepted_gaps:true`, receipt unchanged.
-     - `test_interactive_vs_headless_distinct` — a `resolve-gaps` call **without** `--headless` never auto-accepts (requires an explicit `--choice`); a call with `--headless` auto-accepts even when `--choice` is omitted — proving the dispatcher's internal `--json` does not leak headless state.
-     - `test_append_accepted_gaps_creates_section`, `test_append_accepted_gaps_dedup`.
-   - Acceptance: every terminal verdict is routed; no failure verdict opens a PR; the Answer redispatch is bounded to one, enriches the structured brief, and its verdict routed; acceptance never rewrites a dispatcher receipt; headless is an explicit user-facing state distinct from the dispatcher's `--json`.
-
-6. **Host-rendered PR body (`LandingSummary`) + branch-first landing — prepare-before-dispatch, create-or-adopt, exact staging, explicit App auth, never force-push**
-   - What: a host-owned PR-body model plus the landing helpers, all with injected `git`/`gh`/`getToken`/`prCreate` runners:
-
-     **`buildLandingSummary(receipt, extra): LandingSummary`** (finding #6) — assembled from the dispatcher receipt (+ any accept/redispatch extras):
-     - `LandingSummary = { slug, finalVerdict, contractStatus: ContractItem[], rounds: RoundSummary[], acceptedGaps: {section,note}[], flags: { answer_redispatch_incomplete?: boolean, auto_accepted_gaps?: boolean }, cost_usd, model: {lead,wing} }` (`RoundSummary = { round, revisedSections, durationS }` from `receipt.rounds[]`).
-     - `renderPrBody(summary): string` renders the markdown: a **contract-status table** (section / status / note), a **per-round summary** table, an **accepted-gaps** list (when non-empty), and any **redispatch-incomplete / auto-accepted flags**. Includes the stable `write-spec:<slug>` marker line the adoption lookup keys on.
-
-     **`prepareBranch(slug, leadApp, deps): { branch, adopted }`** — called before dispatch (finding #2):
-     1. `branch = write-spec/<slug>`.
-     2. local branch exists → `git checkout <branch>`.
-     3. else remote-only exists (`git ls-remote --heads origin <branch>` non-empty) → `git fetch origin <branch> && git checkout -b <branch> --track origin/<branch>`.
-     4. else → `git checkout -b <branch>`.
-     Checkout happens on a clean tree (dispatcher hasn't written `specPath` yet), so an existing tracked spec never blocks checkout. **git remote auth (finding #2):** `GH_TOKEN` in the environment does **not** authenticate `git` over HTTPS — git ignores it. Remote ops (`ls-remote`, `fetch`, `push`) authenticate via a **scoped askpass helper**: `gitAuthEnv(leadApp, owner, deps)` mints `token = await getToken({ app: leadApp, owner })`, writes a throwaway `GIT_ASKPASS` script (mode 0700, under the process temp dir) that echoes the token, and returns `{ GIT_ASKPASS, GIT_TERMINAL_PROMPT: "0" }` merged into the git subprocess env — never the ambient identity. All three git remote verbs run through it. `test_git_remote_uses_askpass` asserts the askpass mechanism (not a bare `GH_TOKEN`) is what carries the credential.
-
-     **`landSpec(specPath, slug, opts, deps): { branch, committed, pushed, pr }`** — `opts = { push, openPr, ready, leadApp, summary: LandingSummary }`:
-     1. assert `git rev-parse --abbrev-ref HEAD === branch`; refuse otherwise.
-     2. **Exact staging:** `git add -- <specPath>` — a single explicit pathspec, no glob, no `git add .`. The run record lives under `stateRoot()` (outside the repo) and is never staged.
-     3. **Commit:** if `git diff --cached --quiet -- <specPath>` shows no staged diff and HEAD already carries `write-spec: <slug>` → no-diff regeneration (skip commit, proceed idempotently); else if no diff → surface `nothing_to_land` (still proceed to PR adoption if `opts.openPr`); else `git commit -m "write-spec: <slug>"`.
-     4. **Push (skipped when `opts.push === false`):** `git push -u origin <branch>` (plain, **never `--force`/`--force-with-lease`**). Non-fast-forward → `git pull --ff-only origin <branch>` then retry once; still-failing → `push_failed` (spec already committed locally).
-     5. **PR lookup/adoption with explicit App auth + host-rendered body:** all `gh` calls run through `deps.gh(cmd, { env })` where `env.GH_TOKEN = await getToken({ app: opts.leadApp, owner })` (the `runtime_env_lib.ts` pattern), never the ambient identity. `const body = renderPrBody(opts.summary)` is computed once and used identically by create and edit:
-        - `findExistingPr(branch, repo, deps)` = `gh pr list --repo <owner/repo> --head <branch> --json number,url,isDraft` → single open match (>1 → adopt the open one, log the rest).
-        - exists → `editPrBody(prNumber, body, repo, deps)` = `gh pr edit <number> --repo <owner/repo> --body <body>`; **do not open a second PR** — the adopted PR's body is **refreshed** with the current contract-status table / per-round summary / accepted gaps / flags. **Adopted-draft readiness (finding #3):** if `opts.ready` and the adopted PR `isDraft`, also run `gh pr ready <number> --repo <owner/repo>` — App installation tokens cannot un-draft, so this one call runs under the **ambient user identity** (no App-token env), matching the repo's documented merge-path pattern; an already-ready PR is left untouched (idempotent). Body edits keep App auth.
-        - none and `opts.openPr` → `prCreate(..., { app: opts.leadApp, draft: opts.ready ? false : (draft ?? true), body })`; `opts.openPr === false` → skip PR.
-     6. Handoff line last: `next: /stark-review-spec <spec-path>`.
-   - Files: `tools/write_spec_lib.ts` (`buildLandingSummary`, `renderPrBody`, `LandingSummary`/`RoundSummary` types, `prepareBranch`, `landSpec`, `findExistingPr`, `editPrBody`, `LandDeps`); wrapped by the controller subcommands.
-   - Interfaces — **Consumes:** `getToken`, `prCreate`, `AppName` (github_app_lib); `leadAppFor`. **Produces:** `buildLandingSummary`, `renderPrBody`, `prepareBranch`, `landSpec`, `findExistingPr`, `editPrBody`, `LandDeps = { git, gh, getToken, prCreate, owner, repo }`.
-   - Test (injected fake `git`/`gh`/`getToken` runners record invocations):
-     - `test_prepare_branch_remote_uses_lead_app` (finding #2) — a remote-only `write-spec/<slug>` with `leadApp="stark-codex"` → both `git ls-remote` and `git fetch` recorded running through `gitAuthEnv` with a token from `getToken({ app: "stark-codex", owner })` (a `GIT_ASKPASS` env entry, not a bare `GH_TOKEN`); a codex-lead run never mints the default `stark-claude` token for adoption.
-     - `test_adopted_draft_marked_ready` (finding #3) — adopted branch, existing **draft** PR, `opts.ready=true` → `gh pr ready <n>` invoked exactly once **without** the App-token env (ambient identity); with an already-ready PR or `opts.ready=false`, `gh pr ready` is never called.
-     - `test_prepare_branch_before_write` — existing tracked spec on a remote branch → `prepareBranch` adopts on a clean tree; checkout succeeds, no "would be overwritten" path.
-     - `test_land_first_time` — no branch → create, stage only `specPath`, commit, push, draft PR via `prCreate` with `{ app: leadApp, body }`; no `--force`.
-     - `test_pr_body_rendered_from_summary` (finding #6) — `renderPrBody` output contains the contract-status table, per-round summary, and (when present) accepted-gaps list + flags; `prCreate` receives that exact `body`.
-     - `test_adopted_pr_body_refresh` (finding #6) — adopted branch with an existing open PR → `editPrBody` invoked with the freshly rendered `body` (asserts the current contract-status table + round summary present), **exactly one PR edit, zero creates.**
-     - `test_land_rerun_differing_spec` — adopted branch, differing tracked spec → checkout, overwrite, commit on top, push, **exactly one PR edit** (not create).
-     - `test_land_recovery_commit_before_push` — un-pushed commit, no diff on re-run → skip commit, push, adopt/create PR.
-     - `test_land_exact_staging` — an unrelated tracked `README.md` and untracked `notes.md` modified → `git add` invoked exactly once as `git add -- <specPath>`; neither unrelated file staged.
-     - `test_land_pr_uses_app_token` — every `gh pr list`/`gh pr edit` recorded with `env.GH_TOKEN` from `getToken({ app: leadApp, owner })` and `--repo <owner/repo> --head <branch>` scoping; no `gh` call without the App-token env.
-     - `test_land_getToken_object_arg` — `getToken` is called with the object form `{ app, owner }` (asserts the recorded arg shape), never positional.
-     - `test_land_no_force_push` — every recorded push is plain `git push`.
-   - Acceptance: branch adopted before any spec write, with remote adoption authenticated by the lead App; PR bodies (create + adopt) are host-rendered from `LandingSummary` and refreshed on adoption; rerun on a differing tracked spec commits on top; staging is exactly `[specPath]`; every authenticated `gh` command carries the lead-App token via the object-form `getToken`; force-push rule provably honored.
-
-7. **Skill-layer `--dry-run` (`runSkillDryRun`)**
-   - What: `runSkillDryRun(argv, deps)`: classify the positional, resolve the path triple (`resolveSpecPaths`), assemble + `truncateBrief` the brief, resolve config/models, and **print** the assembled brief + resolved plan (agents, models, round budget, out path, branch, slug, PR-would-open, `preDispatchOpenQuestions` as "would ask: …"). Skips everything mutating: no `AskUserQuestion`, no `prepareBranch`, no dispatcher, no spec write, no git, no PR, no history. Exposed as `write_spec_skill.ts dry-run`.
-   - Files: `tools/write_spec_lib.ts` (`runSkillDryRun`); `write_spec_skill.ts dry-run`.
-   - Interfaces — **Consumes:** `classifyPositional`, `truncateBrief`, `renderBrief`, `resolveSpecPaths`, `getWriteSpecConfig`, `resolveModel`. **Produces:** `runSkillDryRun`.
-   - Test: `test_skill_dry_run_side_effect_free` — injected fakes; zero dispatch/git/gh/AskUserQuestion/prepareBranch calls, no files written; stdout contains the assembled brief + resolved out path + branch + slug.
-   - Acceptance: skill `--dry-run` prints brief + resolved plan and mutates nothing.
-
-### Risks
-- **Distilling conversation context is skill-judgment:** the structured brief is persisted (`sections.json` + run-record `brief.json`) so every run is reproducible and the Answer path enriches it structurally; gap-fill catches load-bearing omissions, and unresolved ones go into `preDispatchOpenQuestions` (visible to review-spec).
-- **A rerun's dispatcher overwrites the tracked spec before commit:** `prepareBranch` runs first so the overwrite lands on the correct branch's working tree; `test_land_rerun_differing_spec` locks the commit-on-top path.
-- **`gh` silently using ambient identity:** every `gh` call (including `prepareBranch`'s remote adoption) routes through the App token; `test_land_pr_uses_app_token` + `test_prepare_branch_remote_uses_lead_app` fail if any omits it.
-
-### Verification
-```
-npm --prefix tools test -- write_spec_lib.test.ts skill_smoke_test.test.ts
-```
-Then a concrete manual skill run (real surface, playground rules):
-```
-/stark-write-spec "a CLI subcommand that lists the last 5 write-spec runs from the history dir" --lead claude --wing codex
-```
-Assert: path triple resolved, brief assembled, `write-spec/<slug>` checked out before dispatch, `docs/specs/<today>-<slug>-spec.md` written, only that file staged, a **draft** PR authored by stark-claude whose body carries the contract-status table + per-round summary, `next: /stark-review-spec <spec-path>` printed. Confirm:
-```
-git log -1 --format=%s                    # write-spec: <slug>
-git show --stat HEAD | grep -c '\.md'     # exactly the one spec file
-gh pr view --json body -q .body           # contract-status table + round summary present
-```
-A **codex-lead** adoption check (finding #2):
-```
-/stark-write-spec "same intent" --lead codex --wing claude   # rerun after pushing the branch
-```
-Assert the remote branch is adopted and the PR edit is authored by **stark-codex** (not the default App). Dry-run:
-```
-/stark-write-spec "same intent as above" --dry-run
-```
-Assert: prints brief + resolved plan, no branch (`git branch --list 'write-spec/*'` unchanged), no spec file, no PR. Headless (finding #4):
-```
-/stark-write-spec "thin intent" --max-rounds 1 --json
-```
-Assert: no `AskUserQuestion`, receipt/summary carry `auto_accepted_gaps:true`, exit 0. Abort (interactive, max-rounds forced via `--max-rounds 1`): choose Abort → `git branch --list write-spec/*` shows the branch with a committed spec and `gh pr list --head write-spec/<slug>` is empty.
-
-## Phase 5: Docs, ADR, live e2e
-**Goal:** Close the DoD — docs updated in the same change, the architectural ADR written, and the pipeline proven end to end on a real spec.
-**Dependencies:** Phases 1–4
+### Phase 4: Run record extension (incremental history + cost)
+**Goal:** every non-dry run leaves an incrementally-persisted, reproducible record; the receipt carries accurate cost across every agent invocation.
+**Dependencies:** Phase 3
 **Estimated effort:** M
 
-### Tasks
+#### Tasks
 
-1. **Docs in the same change (CLAUDE.md + AGENTS.md, both unconditional)**
-   - What: update **`CLAUDE.md`** — add `/stark-write-spec` to the Pipeline skills list (stage 0, before review-spec), the TS tools section (`write_spec.ts`/`write_spec_lib.ts`/`write_spec_skill.ts`, noting the `--slug` host contract, the controller-CLI markdown↔TS seam incl. the `resolve-paths` subcommand, the App-authed remote branch adoption, the host-rendered `LandingSummary`/`renderPrBody`, the explicit `--headless` state, the `items`-keyed `extractContractVerdictJson`, the write-on-every-non-crash-exit rule, and branch-first landing), the prompts-layout section (`global/prompts/write-spec/`), and the config section list (`getWriteSpecConfig`). **Also update `AGENTS.md`** — the repository instructions require both `AGENTS.md` and `CLAUDE.md` to be updated for behavior, structure, command, and tooling changes; write-spec adds a pipeline stage, three tools, a prompts dir, and a config section, so the `AGENTS.md` pipeline/tool/prompt documentation is updated to mirror the CLAUDE.md changes. This is an **unconditional** task (finding #8) — not gated on "if applicable."
-   - Files: `CLAUDE.md`, `AGENTS.md`
-   - Acceptance: `CLAUDE.md` pipeline list shows write-spec ahead of review-spec with tool + prompt + config entries; `AGENTS.md` carries the mirrored pipeline/tool/prompt entries; both are committed in the same PR set. If `AGENTS.md` does not exist in the repo, create it with the write-spec entries rather than skipping the update.
+1. **Per-agent token accounting + cost aggregation**
+   - What: capture input/output token counts per agent invocation and aggregate into receipt `cost_usd`. The base text parsers do not surface usage, so add `extractAgentUsage(agent, rawOutput): AgentUsage` reading each agent's native usage fields:
+     - **claude** — via `parseClaudeJson(rawOutput).usage` (Phase 3 dispatches lead/claude-wing with `--output-format json`): `{ inputTokens: usage.input_tokens, outputTokens: usage.output_tokens }`. If `usage` is `null` (text fallback path), return `{0,0}` + a `cost_notes[]` entry.
+     - **codex** — sum the JSONL `token_count` events; take `input_tokens` + `output_tokens` from the final/last usage event.
+     - **gemini** — (deferred agent, but keep the branch generic) read `usageMetadata.promptTokenCount` / `candidatesTokenCount`.
+     - Any absent usage field → `{inputTokens:0, outputTokens:0}` and push `{invocation, reason:"usage_unavailable"}` to receipt `cost_notes[]` — cost degrades to a floor, never crashes.
+   - Aggregation rule: `cost_usd = Σ over every invocation` — each lead draft/revise call, each wing verify call, **and each parse-retry re-dispatch** — of `computeDispatchCost(model, usage.inputTokens, usage.outputTokens)`, where `model` is the resolved id for that invocation's agent. Every invocation appends an `{agent, model, inputTokens, outputTokens, cost_usd}` row to receipt `cost_breakdown[]`.
+   - Files: `tools/write_spec_lib.ts`
+   - Interfaces — **Consumes:** `computeDispatchCost` (`cost_lib.ts`); `parseClaudeJson` (Phase 3); raw agent output already captured by the dispatch loop. **Produces:** `type AgentUsage = {inputTokens:number, outputTokens:number}`; `extractAgentUsage(agent: AgentName, rawOutput: string): AgentUsage`; receipt fields `cost_usd`, `cost_breakdown[]`, `cost_notes[]`.
+   - Test: `test_receipt_cost_counts_all_invocations` — a stubbed 2-round run (lead×2, wing×2) plus one wing parse-retry → `cost_breakdown` has 5 rows and `cost_usd` equals the sum of `computeDispatchCost` over all 5 (retry included); `test_usage_extraction_per_agent` — a canned claude JSON envelope and codex JSONL each yield the expected token pair; a usage-less output yields `{0,0}` + a `cost_notes` entry.
+   - Acceptance: receipt cost includes every lead call, wing call, and retry; claude usage is read from the JSON envelope Phase 3 emits; missing usage degrades to floor with a note, never crashes.
 
-2. **ADR** `docs/adr/NNNN-spec-authoring-contract-bounded.md`
-   - What: MADR-lite, next monotonic number (compute via `ls docs/adr/ | sort | tail -1`). Decision: add a contract-bounded authoring stage upstream of review; rationale = the inflation root cause (implicit completeness → adversarial invention); the closed-enum wing as the structural bound; the sibling `extractContractVerdictJson` (not a shared-parser mutation) preserving plan-dispatch; the controller-CLI seam (incl. `resolve-paths`) letting a markdown skill drive TS helpers; rule-of-three deferral of the shared loop lib. Record the load-bearing host contracts: host-owned slug via `--slug`, branch-before-dispatch landing with App-authed remote adoption, object-form `getToken({ app, owner })`, host-rendered PR bodies, write-on-every-non-crash-exit, and explicit interactive/headless state.
-   - Files: `docs/adr/NNNN-spec-authoring-contract-bounded.md`
-   - Acceptance: immutable ADR present; referenced from the spec's DoD.
+2. **Incremental history + retention**
+   - What: extend `writeExitArtifacts`/the loop to write history under `stateRoot()/history/write-spec/<slug>/<run-id>/` (slug from `deriveSlugFromOut`) — `rounds.json` written atomically **after every round** (partial-safe), `receipt.json` rewritten after every round and at exit, plus `brief.md` (the assembled brief copied in at dispatch), a `latest` pointer, and `history_keep_runs` retention pruning. Receipt gains per-round durations and `persistence_errors[]` (never fatal). Dry runs create no history dir.
+   - Files: `tools/write_spec_lib.ts`
+   - Interfaces — **Consumes:** `writeJsonAtomic`, `updateLatestPointer`, `pruneRunDirs` (`stark_review_doc_lib.ts`); `stateRoot` (`asset_root_lib.ts`); `write_spec.history_keep_runs`. **Produces:** history dir layout + `latest` pointer; `persistence_errors[]` in the receipt.
+   - Test: `test_receipt_incremental_persistence` — after a simulated round-2 crash (throw inside round 3), `rounds.json` holds 2 rounds and `receipt.json` reflects rounds-so-far; `test_history_retention` — creating `history_keep_runs + 2` run dirs prunes to `history_keep_runs`, `latest` points to the newest; `test_persistence_error_non_fatal` — a stubbed write-failure surfaces in `persistence_errors` and the run still returns its verdict.
+   - Acceptance: after any round, `rounds.json` + `receipt.json` on disk; retention prunes correctly; write failure is non-fatal and surfaced.
 
-3. **Live e2e (playground rules — real surface, no ceremony)**
-   - What: run the full pipeline on one real spec with a **canned intent** and record the DoD evidence.
-     - **Canned intent (verbatim):** `"a CLI subcommand 'stark write-spec runs' that lists the last N write-spec runs (slug, run-id, final_verdict, cost_usd) read from the history dir, N defaulting to 10"`.
-     - **Author:** `/stark-write-spec "<canned intent above>" --lead claude --wing codex`
-     - **Resulting spec path:** captured from the write-spec receipt's `spec_path` (do not assume the filename; slug is host-derived).
-     - **Review:** `/stark-review-spec <spec_path>`
-     - **Baseline-comparison procedure (DoD #2), receipt-derived paths:**
-       1. Capture the `/stark-review-spec` run's receipt and read its `history_dir` field (the per-run dir `…/history/spec-reviews/<full-document-basename>/<run-id>/`, where `<full-document-basename>` is the spec's on-disk basename incl. the date and `-spec` suffix — **not** the bare topic slug and **not** `latest`).
-       2. Read `<history_dir>/rounds.json`; the round-1 finding count = sum of `findings[]` lengths across all domains in the `rounds[0]` (round 1) entry. (`rounds.json` is the canonical per-run round record `stark_review_doc` writes; there is no `round-1.json` file.)
-       3. For the two most recent **hand-written** spec reviews: list `…/history/spec-reviews/*/` dirs, resolve each's `latest` pointer to its run dir, read that run's `rounds.json`, take its round-1 finding count. Pick the two by run-dir mtime, excluding the authored spec's basename.
-       4. Record all three counts on the PR; the authored count should be **materially lower** (directional spot-check).
-   - Files: none (records land in history dirs; numbers recorded on the PR)
-   - Acceptance: (a) write-spec receipt reaches `contract_satisfied` within 3 rounds; (b) authored spec's round-1 finding count materially lower than the two-baseline average, numbers posted on the PR; (c) no growth breaker trips in the review-spec run (assert via the review run's `analytics.json` — read from the same `history_dir` — carrying no `growth_ack_required`/hard-cap/invent-then-condemn flags).
+#### Risks
+- Partial writes on crash: mitigated by atomic tmp+rename (reusing `writeJsonAtomic`).
 
-### Risks
-- **DoD criterion #2 is directional, not statistical:** accepted by the spec — a spot-check against existing per-run `rounds.json` records. Record the comparison numbers on the PR for future contract-lens tuning (Open Question #2).
-- **Canned-intent slug drift:** the slug is host-derived; capture the actual `spec_path` and the review receipt's `history_dir` rather than assuming filenames.
+#### Verification
+- `node --experimental-strip-types --test tools/write_spec_lib.test.ts` green (cost + usage + incremental + retention + non-fatal tests).
 
-### Verification
-```
-npm --prefix tools test
-```
-Expect green (all `write_spec_lib.test.ts` named tests + `skill_smoke_test.test.ts`). Then confirm the e2e records via the **receipt-derived** paths:
-```
-# write-spec receipt (capture its history_dir + spec_path)
-cat "$(node -e 'const r=require("os").homedir()+"/.claude/code-review/history/write-spec"; /* read latest/receipt.json history_dir */')"
-# review-spec run: read history_dir from the review receipt, then:
-#   rounds.json  -> round-1 finding count
-#   analytics.json -> assert no growth-breaker flags
-```
-Assert the write-spec receipt `final_verdict:"contract_satisfied"` with `rounds` length ≤ 3, the review `rounds.json` round-1 count materially below the two hand-written baselines, and the review `analytics.json` carries no `growth_ack_required`/hard-cap/invent-then-condemn flags. Docs (`CLAUDE.md` **and** `AGENTS.md`) + ADR merged in the same PR set.
+---
 
-## Ambiguities resolved (from the spec + wing findings, for the implementer)
+### Phase 5: Skill interactive layer + landing helper
+**Goal:** `/stark-write-spec` assembles inputs, resolves gaps in one question round, then honors/computes the out path, derives the slug, adopts the branch (skipped on dry-run), dispatches, lands a lead-App-authored draft PR via a testable host helper that merges (not overwrites) an existing PR body, emits a skill-layer summary (including any accepted gaps), and hands off.
+**Dependencies:** Phase 3 (dispatcher), Phase 4 (record)
+**Estimated effort:** L
 
-- **Path resolution not reachable from markdown (round-5 finding #1)** — resolved: Phase 4 Task 1 adds the `resolve-paths --topic --today [--out]` controller subcommand → `{slug, specPath, branch}`, the single way the markdown layer obtains the host-computed triple; `build-brief`, `prepare-branch`, the dispatcher, and landing all receive those exact values.
-- **Remote branch adoption unauthenticated (round-5 finding #2)** — resolved: `prepareBranch(slug, leadApp, deps)` and `prepare-branch --slug --lead` thread the lead App through the `gitAuthEnv` **askpass** helper (`GH_TOKEN` does not authenticate git over HTTPS); `git ls-remote`/`git fetch`/`git push` carry a `GIT_ASKPASS` credential from `getToken({ app: leadApp, owner })`. `test_prepare_branch_remote_uses_lead_app` + `test_git_remote_uses_askpass` prove it.
-- **Adopted draft PR left as draft under `--ready` (round-5 finding #3)** — resolved: `landSpec` runs `gh pr ready <n>` (ambient identity — App tokens can't un-draft) when an adopted PR is a draft and `opts.ready`; idempotent for already-ready PRs. `test_adopted_draft_marked_ready` covers it.
-- **Verification commands unrunnable from repo root (round-5 finding #1)** — resolved: all test invocations use `npm --prefix tools test …` (the `package.json` lives in `tools/`, not the repo root).
-- **Flag propagation + receipt plumbing undefined (round-5 finding #3)** — resolved: Phase 4 Task 2 specifies the exact dispatcher invocation forwarding `--lead-model`/`--wing-model`/`--max-rounds` (skill-layer `--ready`/`--no-pr` stay off the dispatcher), and captures the dispatcher's stdout receipt to `<scratch>/receipt.json` — the `--receipt <path>` every controller subcommand consumes, byte-identical to the persisted `<history_dir>/receipt.json`.
-- **No executable headless path (round-5 finding #4)** — resolved: `resolve-gaps` gains an explicit `--headless` flag set only from the *user's* `--json`; the dispatcher's internal `--json` never implies headless. `test_interactive_vs_headless_distinct` + `test_headless_auto_accept` prove interactive asks, headless auto-accepts + sets `auto_accepted_gaps:true`.
-- **Answer path lacked structured brief (round-5 finding #5)** — resolved: the dispatcher persists `brief.json` (the `BriefSections`) via `--sections`; `resolveGaps` carries `sections: BriefSections`, appends operator answers to `conversationContext` structurally, re-renders, and re-dispatches once. `test_answer_enriches_structured_conversation` locks it.
-- **PR body lacked required data (round-5 finding #6)** — resolved: `buildLandingSummary(receipt, extra)` + `renderPrBody(summary)` produce the contract-status table, per-round summary, accepted gaps, and redispatch/auto-accept flags; `landSpec`'s `opts.summary` is consumed identically by `prCreate` and `editPrBody`. `test_pr_body_rendered_from_summary` + `test_adopted_pr_body_refresh` cover create + adopt.
-- **First-round `lead_empty_draft` skipped the spec write (round-5 finding #7)** — resolved: Phase 3 Task 5 makes the write uniform — the loop tracks `lastDraft` and writes it (even empty) to `specPath` on **every** non-crash exit, matching the spec's contract verbatim; the exception is gone. `test_empty_draft_still_writes_spec` locks it.
-- **AGENTS.md update was conditional (round-5 finding #8)** — resolved: Phase 5 Task 1 makes updating **both** `CLAUDE.md` and `AGENTS.md` an unconditional task (create `AGENTS.md` with the entries if absent), per the repository instructions.
-- **Wing schema is not `verdict`-keyed (round-4 finding #1)** — resolved: Phase 2 Task 1 adds `extractContractVerdictJson`; `test_plan_dispatch_verdict_parsing_preserved` locks plan-dispatch.
-- **Usage counts unavailable after normalization (round-4 finding #2)** — resolved: Phase 3 Task 2 pins raw-envelope usage parsers against real captures.
-- **Markdown can't invoke TS helpers (round-4 finding #3)** — resolved: `tools/write_spec_skill.ts` controller CLI; SKILL.md invokes its subcommands.
-- **Unrouted terminal verdicts (round-4 finding #4)** — resolved: `routeOutcome` + `resolveGaps` route every verdict; no failure verdict opens a PR.
-- **`getToken` signature (round-4 finding #5)** — resolved: object-form `getToken({ app, owner })` everywhere; `test_land_getToken_object_arg` asserts it.
-- **Baseline paths don't match the review-history layout (round-4 finding #6)** — resolved: Phase 5 Task 3 reads the review receipt's `history_dir` + `rounds.json` and resolves baselines via `latest` pointers.
-- **Slug → dispatcher contract** — resolved: `resolveSpecPaths` computes the slug once; passed via required `--slug`.
-- **Branch-before-write + Abort inspectable state** — resolved: `prepareBranch` adopts on a clean tree before dispatch; abort/failure routes commit via `landSpec({push:false,openPr:false})`.
-- **Exact staging scope** — resolved: `landSpec` stages exactly `git add -- <specPath>`.
+> Ordering fix (finding #1): the single `AskUserQuestion` round runs **first** — because it may supply the topic/slug or a non-standard `--out` path that the rest of the flow depends on. Only after answers are in does the skill honor/validate `--out` (or compute the default path), derive the slug, adopt/create the branch, and dispatch. On a real (non-dry) run the branch is adopted **before** the spec is written so the dispatcher writes onto the target branch; `--dry-run` skips `prepare-branch` and `publish` entirely. The abort path leaves the prepared branch for inspection.
 
-No SSOT violations introduced — every value, path, and rule consumes an existing owner (config accessor, `sanitizeSlug`, `resolveModel`, `assetPromptsDir`, `computeDispatchCost`, `getToken`, `leadAppFor`, the sibling dispatch + history primitives) rather than re-deriving or hardcoding.
+#### Tasks
+
+1. **`skill/stark-write-spec/SKILL.md`**
+   - What: author the skill. **Ordered** phases (order is load-bearing — inputs and the question round resolve before any path/slug/branch work):
+     1. `## Help` block (references `standards/help.md`).
+     2. Preflight: `node --experimental-strip-types tools/preflight.ts --workflow write-spec`.
+     3. **Assemble inputs (no side effects):** parse `$ARGUMENTS` into the raw prompt/source path and flags (`--out`, `--lead`, `--wing`, `--dry-run`, `--ready`, `--no-pr`, `--json`, model/round overrides); read the source doc if a path was given; distill chat-context decisions. Do **not** compute a slug or path yet.
+     4. **One `AskUserQuestion` round — before any path/slug/branch resolution** (≤4 load-bearing gaps: **topic/slug**, **scope declaration** if not inferable, **non-standard out path** if the operator wants one) — **enforced answer-once**: the skill asks at most one round and never re-prompts the same field. Skipped entirely in headless/`--json` mode (pre-dispatch unknowns flow to Open Questions instead).
+     5. **Honor or compute the out path (post-answers):** if `--out PATH` was passed on the CLI **or supplied by the question round**, validate it against the canonical `docs/specs/YYYY-MM-DD-<slug>-spec.md` shape by running `node --experimental-strip-types tools/write_spec_land.ts validate-out --out "<PATH>"` (prints the extracted slug or exits non-zero with the deriveSlugFromOut error message) and use that PATH + slug. **Else** compute the default: `SLUG=$(node --experimental-strip-types tools/write_spec_land.ts resolve-slug --topic "<topic>")` and `OUT="docs/specs/$(date +%F)-$SLUG-spec.md"`. Either way the out path is now fixed and its slug known; the dispatcher re-derives the same slug from `--out` via `deriveSlugFromOut`, so the two agree by construction.
+     6. **Dry-run branch:** if `--dry-run` is present, **skip `prepare-branch`**, run the dispatcher with `--dry-run` (which itself writes nothing), and **skip `publish`** — the run has zero git and zero out-of-scratchpad file effects. State this explicitly in the skill prose.
+     7. **Non-dry only — adopt/create the target branch BEFORE dispatch:** `node --experimental-strip-types tools/write_spec_land.ts prepare-branch --slug "$SLUG"` (Task 2) — errors on a dirty tree, else checks out or creates `write-spec/<slug>`.
+     8. **Assemble intent brief** (prompt + source doc + distilled chat context + constraints + resolved Target: out path + slug → session scratchpad file).
+     9. **Dispatch:** `node --experimental-strip-types tools/write_spec.ts --intent-brief PATH --out "$OUT" …` (writes the spec onto the already-adopted branch; on dry-run, `--dry-run` is appended and nothing is written).
+     10. **Non-dry only — Land + summarize:** `node --experimental-strip-types tools/write_spec_land.ts publish …` (Task 2), then emit the skill-layer summary (Task 3).
+   - Files: `skill/stark-write-spec/SKILL.md`
+   - Interfaces — **Consumes:** `tools/write_spec_land.ts` (`resolve-slug`, `validate-out`, `prepare-branch`, `publish`), `tools/write_spec.ts`, `tools/preflight.ts`, `standards/help.md`, `AskUserQuestion`. **Produces:** the `/stark-write-spec` skill surface with the documented CLI flags.
+   - Test: `skill_smoke_test.test.ts` picks it up (frontmatter parses, `name:` matches dir, `standards/help.md` referenced, tool refs resolve, `write_spec.ts --help` + `write_spec_land.ts --help` exit clean). Plus the named path/order guards colocated in `write_spec_land_lib.test.ts`: `test_validate_out_extracts_slug` and `test_skill_dry_run_no_git` (below, pure guards).
+   - Acceptance: `--help` prints purpose/usage/arguments and stops (side-effect-free); the question round runs **before** slug/out/branch resolution; a `--out` override (from CLI or the answer round) is honored and validated; the default path is computed only when no override exists; on `--dry-run` neither `prepare-branch` nor `publish` runs (no git side effects); on a real run the branch is adopted before dispatch; skill validates.
+
+2. **`tools/write_spec_land.ts` — create-or-adopt idempotent landing helper (with PR-body merge)**
+   - What: a host CLI owning all git + PR side effects (making idempotency + lead-App selection + body-merge unit-testable). Subcommands:
+     - **`resolve-slug --topic "<t>"`** → prints `sanitizeSlug(t)`.
+     - **`validate-out --out PATH [--json]`** → run `deriveSlugFromOut(PATH)` (imported from `write_spec_lib.ts`); on match print the extracted slug (JSON `{ "slug": "…", "out": PATH }` under `--json`) and exit 0; on mismatch exit non-zero with the documented `out path must match docs/specs/YYYY-MM-DD-<slug>-spec.md; got <basename>` error. This is how the skill honors + validates an operator-supplied `--out` before it becomes the dispatcher's `--out`.
+     - **`prepare-branch --slug SLUG [--json]`** → adopt-or-create, run **before** the spec is written (never on dry-run — the skill gates it):
+       1. Refuse on a dirty tree: if `git status --porcelain` is non-empty, exit non-zero with `working tree not clean; commit or stash before authoring`.
+       2. `git rev-parse --verify --quiet write-spec/<slug>` — **local branch exists:** `git checkout write-spec/<slug>`, then **fetch + fast-forward** from the remote so regeneration never starts off a stale commit (and the later plain push can't be rejected): `git fetch origin write-spec/<slug>` and, if the remote ref exists, `git merge --ff-only origin/write-spec/<slug>`; a **non-fast-forwardable** local branch (genuine divergence) is a hard error surfaced to the operator — never force-reset, never a parallel branch. **Else if** `git ls-remote --heads origin write-spec/<slug>` is non-empty → `git fetch origin write-spec/<slug> && git checkout -B write-spec/<slug> origin/write-spec/<slug>`; **else** `git checkout -b write-spec/<slug>`. (`planBranchAction(localExists, remoteExists)` returns `checkout-ff` | `checkout-track` | `create` accordingly; `test_branch_adopt_or_create` covers all three, and `test_stale_local_ff` asserts the existing-local path fetches and fast-forwards.)
+     - **`publish --spec PATH --slug SLUG --lead <claude|codex> --run-receipt PATH [--accepted-gaps PATH] [--ready] [--no-pr] [--json]`** → commit/push/PR (branch already current from `prepare-branch`):
+       1. **Commit (no empty, no dup), repo git identity:** `git add <spec>`. If `git diff --cached --quiet` (nothing staged), **skip the commit** and proceed to push. Else `git commit -m "spec(<slug>): author via stark-write-spec"`. **The commit uses the repo's configured `user.name`/`user.email` — NOT App-authored.**
+       2. **Push:** `git push -u origin write-spec/<slug>` (plain push, never `--force`). Remote already having the commit → no-op success.
+       3. **Existing-PR lookup + create-or-adopt (App-authored, body merged):** resolve the lead-App token owner via `getToken({ app: appForLead(lead) })`. List open PRs with `prList(repo, "open", appForLead(lead))` and **filter client-side** (`pickPrForHead`) for `pr.head.ref === "write-spec/<slug>"`. 
+          - **If one exists:** fetch its **current body** via `apiGet("/repos/" + repo + "/pulls/" + pr.number, appForLead(lead))`, compute the merged body `mergePrBody(existingBody, ownedBlock)` (Task-defined below), then `apiPatch("/repos/" + repo + "/pulls/" + pr.number, { body: mergedBody }, appForLead(lead))`. **The whole body is never blindly overwritten** — only the owned marker block is replaced or appended. **Adopted-draft readiness (finding):** if `--ready` and the adopted PR is a draft (`apiGet` returned `draft:true`), also mark it ready — App installation tokens **cannot** un-draft (`prReady` via the App 403s), so this one call shells `gh pr ready <n> --repo <repo>` under the **ambient user identity** (the documented merge-path pattern), never the App token. Idempotent: an already-ready PR (or `--ready` absent) skips it. Test `test_adopted_draft_ready_uses_gh` asserts `gh pr ready` fires once for a draft-under-`--ready` and never otherwise.
+          - **Else** `prCreate(repo, { head: "write-spec/<slug>", title, body: ownedBlock, draft: !ready, app: appForLead(lead) })` unless `--no-pr`.
+       - `ownedBlock` = the `<!-- stark-write-spec -->` … `<!-- /stark-write-spec -->` fenced block built by `buildOwnedBlock(receipt, acceptedGaps)`: final contract-status table + per-round summary + `accepted_gaps[]` (from `--accepted-gaps PATH` when present), wrapped in the open/close markers.
+       - `mergePrBody(existingBody, ownedBlock)`: if `existingBody` contains a `<!-- stark-write-spec -->…<!-- /stark-write-spec -->` span, **replace that span in place** (regex on the paired markers, non-greedy); otherwise **append** `\n\n` + `ownedBlock` to the end of `existingBody`. All non-owned content is preserved verbatim. An empty/undefined `existingBody` → just `ownedBlock`.
+       - `appForLead(lead)`: `claude → 'stark-claude'`, `codex → 'stark-codex'` (typed `AppName`) — no hardcoded App.
+   - Files: `tools/write_spec_land.ts`, `tools/write_spec_land_lib.ts` (pure logic: `appForLead`, `planBranchAction`, `shouldSkipCommit`, `buildOwnedBlock`, `mergePrBody`, `pickPrForHead`, `shouldRunGitStep`)
+   - Interfaces — **Consumes:** `deriveSlugFromOut` (`write_spec_lib.ts`, for `validate-out`); `prCreate`, `getToken`, `prList`, `apiGet`, `apiPatch`, `AppName` (`github_app_lib.ts`); `sanitizeSlug` (`stark_handover_lib.ts`); the run receipt JSON from Phase 3/4; the optional accepted-gaps JSON file. **Produces:** `appForLead(lead: 'claude'|'codex'): 'stark-claude'|'stark-codex'`; `planBranchAction(localExists, remoteExists): 'checkout'|'checkout-track'|'create'`; `shouldSkipCommit(stagedDiffEmpty: boolean): boolean`; `pickPrForHead(openPrs, headRef): {number,url}|null`; `buildOwnedBlock(receipt, acceptedGaps): string`; `mergePrBody(existingBody: string, ownedBlock: string): string`; `shouldRunGitStep(dryRun: boolean): boolean`; a `publish` result `{branch, committed:boolean, pushed:boolean, pr:{number,url,app}|null}`.
+   - Test (`tools/write_spec_land_lib.test.ts`, pure-fn assertions):
+     - `test_lead_app_mapping` (`appForLead('claude')==='stark-claude'`, `appForLead('codex')==='stark-codex'`).
+     - `test_validate_out_extracts_slug` — `validate-out` accepts a canonical `docs/specs/2026-07-20-example-spec.md` and yields slug `example`; a non-conforming `--out` fails with the `deriveSlugFromOut` error (proves the skill's honor-`--out` path shares the one slug contract).
+     - `test_branch_adopt_or_create` (`planBranchAction` → `checkout`/`checkout-track`/`create` for the three combos).
+     - `test_commit_idempotent` (`shouldSkipCommit(true)===true`; `shouldSkipCommit(false)===false`).
+     - `test_pick_pr_for_head` (`pickPrForHead` returns the matching-head PR, `null` otherwise — proves the client-side filter compensating for `prList`'s missing head param).
+     - `test_pr_body_merge_preserves_other_content` — the proving test for finding #4: `mergePrBody("intro text\n\n<!-- stark-write-spec -->\nOLD\n<!-- /stark-write-spec -->\n\ntrailer text", "<!-- stark-write-spec -->\nNEW\n<!-- /stark-write-spec -->")` returns a body where `intro text` and `trailer text` are **preserved verbatim**, `OLD` is gone, and `NEW` is present exactly once; `mergePrBody("plain body no marker", ownedBlock)` **appends** the block and keeps `plain body no marker`; `mergePrBody("", ownedBlock)===ownedBlock`; a second `mergePrBody` on the already-merged result is idempotent (still one owned block, trailer intact).
+     - `test_dry_run_skips_git_steps` (`shouldRunGitStep(true)===false`, `shouldRunGitStep(false)===true` — encodes that dry-run performs no `prepare-branch`/`publish`).
+     - Live coverage of the real git/PR surface is the DoD e2e.
+   - Acceptance: `validate-out` honors + validates an operator `--out` against the one slug contract; PR created/edited by the lead's App per the mapping; the commit is NOT App-authored (repo identity); an existing PR body has only the owned block replaced/appended (all other content preserved), never wholesale overwritten; re-run adopts the same branch/PR; a run that died post-commit/pre-push is retried by re-invoking `prepare-branch`+`publish`; `accepted_gaps[]` flow from `--accepted-gaps` into the owned block.
+
+3. **Skill-layer gap resolution + accepted-gaps summary contract**
+   - What: on `max_rounds_unsatisfied`, offer via `AskUserQuestion`: (1) **Answer the gaps** → enrich brief, re-dispatch **once** (hard bound, enforced by a flag the skill sets so a second max-rounds cannot re-offer answer); (2) **Accept with gaps** → append the unsatisfied items verbatim to the spec's Open Questions, write them to a scratchpad `accepted-gaps.json`, then `publish --accepted-gaps <that-file>`, and emit the skill summary (below) with `outcome:"authored_with_accepted_gaps"`, exit 0; (3) **Abort** → **skip `publish`**; the branch is already prepared (Task 1), left checked out for inspection with the draft spec on disk; emit the skill summary with `outcome:"aborted"`; exit 1. Headless/`--json`: skip gap-fill (pre-dispatch unknowns → Open Questions), max-rounds **auto-resolves to accept-with-gaps** with `headless_auto_accept:true` in the summary. On `contract_satisfied` the summary carries `outcome:"contract_satisfied"` and an empty `accepted_gaps[]`. The dispatcher exit contract stays uniform (acceptance is skill-layer, never rewrites the dispatcher receipt).
+   - **Skill output/summary contract (the finding-#2 requirement)** — the skill, on every terminal path, prints a single JSON object to stdout (distinct from the dispatcher receipt; the dispatcher receipt is read from `--run-receipt` and echoed unmodified under `dispatcher_receipt`), shape:
+     ```json
+     {
+       "skill": "stark-write-spec",
+       "outcome": "contract_satisfied | authored_with_accepted_gaps | aborted",
+       "spec_path": "docs/specs/2026-07-20-example-spec.md",
+       "slug": "example",
+       "final_verdict": "contract_satisfied | max_rounds_unsatisfied | …",
+       "accepted_gaps": [ { "section": "test-plan", "status": "underspecified", "note": "no named test for the revise path" } ],
+       "headless_auto_accept": false,
+       "pr": { "number": 0, "url": "…", "app": "stark-claude" },
+       "dispatcher_receipt": { "…": "the Phase 3/4 receipt echoed verbatim, never rewritten" }
+     }
+     ```
+     `accepted_gaps[]` = the exact non-`satisfied`/`n_a` `contract_status` items the skill appended to Open Questions (empty on `contract_satisfied` and on `aborted`). `headless_auto_accept` = `true` only on the headless max-rounds auto-accept path, else `false`. The interactive accept path emits the same shape with `headless_auto_accept:false`. In non-`--json` mode the skill renders the same fields as a short human summary but the JSON object is the contract for downstream tooling.
+   - Files: `skill/stark-write-spec/SKILL.md`, plus `applyAcceptedGaps(specText, unsatisfiedItems): string` and `buildSkillSummary(args): SkillSummary` in `tools/write_spec_land_lib.ts` (both pure, testable).
+   - Interfaces — **Consumes:** the dispatcher receipt's `final_verdict` + `contract_status`; the resolved `pr` result from `publish`. **Produces:** `applyAcceptedGaps(...)` (appends items under the spec's `## Open Questions`); `buildSkillSummary({ outcome, receipt, acceptedGaps, headlessAutoAccept, pr }): SkillSummary` (the JSON contract above, echoing `receipt` verbatim under `dispatcher_receipt`); the scratchpad `accepted-gaps.json` consumed by `publish --accepted-gaps`.
+   - Test (`tools/write_spec_land_lib.test.ts`):
+     - `test_accept_with_gaps_mutation` (`applyAcceptedGaps` appends each unsatisfied item verbatim under Open Questions, creating the section if absent, idempotent on re-apply).
+     - `test_answer_once_bound` (`nextGapAction(priorAnswered, verdict)` returns `answer` only when `!priorAnswered`, else `accept`/`abort`).
+     - `test_headless_auto_accept` (`resolveHeadlessGapAction(verdict)==='accept'` for `max_rounds_unsatisfied`).
+     - `test_abort_skips_publish` (`shouldPublish(action)` returns `false` for `abort`, `true` for `accept`).
+     - **`test_skill_summary_emits_accepted_gaps`** (the finding-#2 proving test) — `buildSkillSummary` for an `accept` outcome emits `outcome:"authored_with_accepted_gaps"`, `accepted_gaps[]` equal to the receipt's non-`satisfied`/`n_a` `contract_status` items (verbatim `section`/`status`/`note`), `headless_auto_accept:false`, and `dispatcher_receipt` **byte-identical** to the input receipt (proves the summary never rewrites it); the headless variant (`buildSkillSummary({...headlessAutoAccept:true})`) sets `headless_auto_accept:true`; the `contract_satisfied` variant emits `accepted_gaps:[]` and `outcome:"contract_satisfied"`.
+   - Acceptance: each branch behaves as specified; answer offered at most once; headless has no operator prompt and auto-accepts with `headless_auto_accept:true`; abort opens no PR but leaves the prepared branch + draft spec on disk; the skill emits the summary JSON on every terminal path with `accepted_gaps[]` populated from the receipt and the dispatcher receipt echoed unmodified.
+
+#### Risks
+- Chat-context distillation quality (skill-only, can't be unit-tested): mitigate by keeping distillation scoped to explicit decisions and parking anything uncertain under Open Questions.
+- Injection: **none added** — the intent brief is operator-authored, not adversarial (stated explicitly so review-spec's security domain doesn't manufacture a gate).
+
+#### Verification
+- `node --experimental-strip-types --test tools/write_spec_land_lib.test.ts` green (lead-App mapping, validate-out slug, branch adopt, commit idempotency, PR head-filter, **PR-body merge preserving other content**, dry-run skips git, accept-with-gaps, answer-once, headless auto-accept, abort-skips-publish, **skill-summary emits accepted_gaps without rewriting the receipt**).
+- `node --experimental-strip-types --test tools/skill_smoke_test.test.ts` green (picks up the new skill; `write_spec.ts`/`write_spec_land.ts --help` exit clean).
+- Live e2e (playground rules — real surface, one run), exact commands:
+  ```
+  printf '## Ask\nauthor a spec for a trivial CLI greeting tool\n## Target\ntopic: e2e-greeting\n' > /tmp/ws-e2e-brief.md
+  SLUG=$(node --experimental-strip-types tools/write_spec_land.ts resolve-slug --topic "e2e-greeting")
+  OUT="docs/specs/$(date +%F)-$SLUG-spec.md"
+  node --experimental-strip-types tools/write_spec_land.ts validate-out --out "$OUT"   # prints slug, exits 0
+  node --experimental-strip-types tools/write_spec_land.ts prepare-branch --slug "$SLUG"
+  node --experimental-strip-types tools/write_spec.ts --intent-brief /tmp/ws-e2e-brief.md --out "$OUT" --json > /tmp/ws-e2e-receipt.json
+  node --experimental-strip-types tools/write_spec_land.ts publish --spec "$OUT" --slug "$SLUG" --lead claude --run-receipt /tmp/ws-e2e-receipt.json --json
+  ```
+  A draft PR opens on `write-spec/$SLUG`, authored by stark-claude. Re-run the `publish` line a second time and confirm the PR body's owned block is replaced in place (no duplication, any manually-added body text preserved). Then run `/stark-review-spec "$OUT"`.
+
+---
+
+### Phase 6: Docs + ADR
+**Goal:** the change is documented in the same PR.
+**Dependencies:** Phases 1–5 landed behaviorally
+**Estimated effort:** S
+
+#### Tasks
+
+1. **Update CLAUDE.md + write the ADR**
+   - What: add `/stark-write-spec` to the pipeline skill list (as stage 0, before review-spec), add `tools/write_spec.ts`/`write_spec_lib.ts`/`write_spec_land.ts`/`write_spec_land_lib.ts` to the TS-tools section, add `global/prompts/write-spec/` to the prompts layout, add the `write_spec` config section note. Write ADR `docs/adr/NNNN-spec-authoring-contract-bounded.md` (MADR-lite). Determine `NNNN` via `ls docs/adr/ | sort | tail -1` + 1.
+   - Files: `CLAUDE.md`, `AGENTS.md` (only if it mirrors the skill list — check first), `docs/adr/NNNN-spec-authoring-contract-bounded.md`
+   - Interfaces — n/a (docs).
+   - Test: n/a.
+   - Acceptance: pipeline list, TS tools, prompts layout, config all reflect the new stage; ADR uses the next monotonic `NNNN`.
+
+#### Verification
+- `rg -n "stark-write-spec" CLAUDE.md` returns hits in both the pipeline skill list and the TS-tools section.
+- `rg -n "global/prompts/write-spec|write_spec config|write_spec section" CLAUDE.md` returns hits.
+- `ls docs/adr/*spec-authoring-contract-bounded.md` resolves exactly one file with the next `NNNN`.
+- `rg -c "stark-review-spec" AGENTS.md` first — if `AGENTS.md` mirrors the skill list, then `rg -n "stark-write-spec" AGENTS.md` returns a hit; else no change expected.
+- `node --experimental-strip-types --test tools/skill_smoke_test.test.ts` still green after doc edits.
+
+## 5. Testing Strategy
+
+Scope-proportional (single-user playground tooling — no E2E pyramid, no load testing):
+
+- **Unit tests carry the weight** — `tools/write_spec_lib.test.ts` covers the contract-verdict extractor (distinct from `extractVerdictJson`), the parser + `SECTION_IDS` drift guard, `deriveSlugFromOut`, the no-tools command builders, the loop/termination matrix, the claude JSON-envelope parser, brief truncation, cost/usage accounting, and incremental persistence, all with a stubbed `run`. `tools/write_spec_land_lib.test.ts` covers lead-App mapping, `validate-out` slug, branch adopt/create, commit idempotency, PR head-filter, **PR-body merge preserving non-owned content**, dry-run-skips-git, accept-with-gaps mutation, answer-once bound, headless auto-accept, abort-skips-publish, and **the skill-summary accepted-gaps contract (emits `accepted_gaps[]` + `headless_auto_accept` without rewriting the dispatcher receipt)** — all pure-function assertions. `tools/stark_config_lib.test.ts` covers the config defaults. Test the extractor + parser + `deriveSlugFromOut` first — the invariants the whole design rests on.
+- **`skill_smoke_test.test.ts`** picks up the skill automatically.
+- **Live e2e (playground rules — real surface, one run):** the exact command block in Phase 5 — `validate-out` → `prepare-branch` → dispatch → `publish` → re-`publish` (body-merge check) → `/stark-review-spec`. The deterministic tests own every idempotency/mapping/gap-resolution/summary/body-merge/dry-run path; the live run exercises the real git+PR+LLM surface end to end.
+
+Run everything with `npm --prefix tools test` (the package.json lives in `tools/`, not the repo root); targeted runs use `node --experimental-strip-types --test <file>`.
+
+**Success criteria (DoD):**
+1. Live-run receipt reaches `contract_satisfied` within 3 rounds.
+2. `/stark-review-spec` on an authored spec produces materially fewer round-1 findings than the hand-written baseline (directional spot-check against existing `review-analytics` sidecars).
+3. No growth breaker trips when review-spec runs on an authored spec.
+4. Docs updated in the same change (Phase 6).
+
+---
+
+*Rollback Plan, Integration Points, monitoring/operational tasks, and infra-provisioning sections are omitted deliberately: this is single-user local tooling with no cloud infra, no shared state, and no migrations — a `git revert` of the branch fully undoes it. Subprocess isolation, the PR/git surface, and history persistence are all inherited from existing siblings, not new infrastructure.*
+
+**Flagged ambiguities (for the wing / review-spec):**
+- The spec leaves the **shared lead/wing loop lib** extraction to "rule of three" (Open Question 1) — this plan mirrors `plan_dispatch.ts` rather than extracting, consistent with the spec's stated decision.
+- **Automated contract tuning** (Open Question 2) is explicitly v1-deferred to manual operator edits — no task planned.
+- **Brainstorm handoff** (Open Question 3) touches a vendored plugin and is deferred — no task planned.

@@ -1,17 +1,17 @@
-# Spec-to-Plan review summary — 2026-07-16-stark-write-spec
+# Spec-to-Plan review summary — 2026-07-16-stark-write-spec (v2, post-convergence-fix)
 
-- Lead: claude · Wing: codex · Rounds: 5 · Duration: ~31m
-- Dispatcher verdict: `max_rounds_unresolved` (blocking 7→7→6→8→3, converging)
-- **Resolution:** the 3 residual round-5 findings were correct + narrow; fixed by hand rather than a 6th dispatch round. See the plan's "Round-5 findings resolved" log.
-
-## Round-5 blocking findings (all resolved in the committed plan)
-1. Test commands unrunnable from repo root → `npm --prefix tools test …` (package.json is in tools/).
-2. `GH_TOKEN` env doesn't authenticate git over HTTPS → `gitAuthEnv` GIT_ASKPASS helper for ls-remote/fetch/push.
-3. Adopted draft PR stayed draft under `--ready` → `gh pr ready` (ambient identity) for adopted drafts, idempotent.
+- Lead: claude · Wing: codex · Rounds: 5 · Re-run after PR #687 (convergence discipline)
+- Trajectory: **7→7→5→2→2** (was 7→7→6→8→3 pre-fix) — monotonic, no mid-loop spike, no re-litigation (each round's findings were new/deeper, not re-raised).
+- Verdict: `max_rounds_unresolved` — find-convergence limited by genuine spec depth, not churn. The convergence fix worked; 4 rounds is short for a spec this large.
+- **Resolution:** 4 residual findings (all correct, all different across rounds 4→5) fixed by hand:
+  1. contract.md referenced but never composed into agent requests (agents have no file tools) → `composePrompt` prepends contract contents to every generate/verify/revise call + test.
+  2. Existing local branch checked out without fetch+ff → stale-branch guard (fetch + `merge --ff-only`, hard error on divergence) + test.
+  3. Adopted draft PR never marked ready under `--ready` → `gh pr ready` (ambient identity, idempotent) + test.
+  4. Bare `npm test` (no root package.json) → `npm --prefix tools test`.
 
 ## Per-round verdicts
-- Round 1: revise — 7 blocking, 1 suggestions
-- Round 2: revise — 7 blocking, 0 suggestions
-- Round 3: revise — 6 blocking, 2 suggestions
-- Round 4: revise — 8 blocking, 0 suggestions
-- Round 5: revise — 3 blocking, 1 suggestions
+- Round ?: revise — 7 blocking
+- Round ?: revise — 7 blocking
+- Round ?: revise — 5 blocking
+- Round ?: revise — 2 blocking
+- Round ?: revise — 2 blocking
