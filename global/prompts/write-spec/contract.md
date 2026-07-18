@@ -10,7 +10,7 @@ Each section below states its **Done-when bar** (the objective bar the section m
 
 ## The n/a-with-reason rule
 
-A section may be marked **n/a**, but only *with a one-line reason* stating why it does not apply to this spec (e.g. `accessibility: n/a — headless CLI, no user-facing surface`). A section left empty, or marked `n/a` with no reason, is **incomplete**, not exempt. The reason is the artifact that makes the omission reviewable.
+A section may be marked not-applicable — the canonical status token the wing emits is **`n_a`** (the wing verdict enum has no `n/a`; always use `n_a`) — but only *with a one-line reason* stating why it does not apply to this spec (e.g. `accessibility: n_a — headless CLI, no user-facing surface`). A section left empty, or marked `n_a` with no reason, is **incomplete**, not exempt. The reason is the artifact that makes the omission reviewable.
 
 ## Scope-declaration anti-inflation anchor
 
@@ -52,9 +52,9 @@ When the spec declares its scope, that declaration answers the concern. A concre
 
 ## interfaces — Interfaces & Contracts
 
-**Done-when:** Every API surface the spec introduces has a fully specified contract — request/response schemas with field names, types, required-vs-optional, error semantics, and idempotency for mutations — sufficient for a consumer to implement against.
+**Done-when:** Every interface the spec introduces — API surface, CLI command/flag surface, file format, and local-store / data model — has a fully specified contract: request/response and data schemas with field names, types, required-vs-optional, relationships and cardinality, error semantics, and idempotency for mutations — sufficient for a consumer to implement against.
 
-**Review lens** (from `spec-review/domains/04-api-design.md`):
+**Review lens** (from `spec-review/domains/04-api-design.md` and `spec-review/domains/05-data-modeling.md`):
 - Are API contracts fully specified? Are request/response schemas defined with field names, types, required vs. optional, and constraints?
 - Are error responses consistent and actionable? Is there a standard error envelope with error code, human-readable message, and remediation hint?
 - Are HTTP status codes (or equivalent RPC codes) used correctly and consistently across all endpoints?
@@ -62,18 +62,26 @@ When the spec declares its scope, that declaration answers the concern. A concre
 - Are list/collection endpoints paginated? Is the pagination model specified — cursor vs. offset, max page size, sort order guarantees?
 - Are naming conventions consistent across endpoints, field names, and enum values? Do they follow a documented standard?
 - Can all stated use cases be accomplished with the defined API surface, or are there missing endpoints?
+- Are entities and their attributes defined with types, constraints, and cardinality?
+- Are relationships between entities explicit — foreign keys, ownership hierarchies, many-to-many join semantics?
+- Are nullable fields justified? Does the model distinguish between "unknown" and "not applicable"?
+- Is ownership of each entity clear — which service is the system of record?
 
 ## behavior — Behavior & Correctness
 
-**Done-when:** The spec specifies the behavior for the stated inputs — happy path, error paths, and edge cases (empty input, zero-state, concurrent mutations, duplicate events) — rather than describing only the happy path.
+**Done-when:** The spec specifies the behavior for the stated inputs — happy path, error paths, and edge cases (empty input, zero-state, concurrent mutations, duplicate events) — rather than describing only the happy path, and its flows, states, and termination conditions are internally consistent with the rest of the spec.
 
-**Review lens** (from `spec-review/domains/01-completeness.md`, Completeness, plus `codex/02-behavior.md`):
+**Review lens** (from `spec-review/domains/01-completeness.md`, Completeness, plus `spec-review/domains/06-consistency.md`):
 - Are error paths and failure behaviors specified, or does the spec only describe the happy path?
 - Are edge cases addressed? (empty input, zero-state, concurrent mutations, duplicate events)
 - **Prefer fail-fast over silent fallbacks, retries, or compatibility shims.** A design that masks errors with defaults, retries forever on flaky deps, or carries v1/v2 shims for hypothetical migrations is adding complexity without value. Flag those patterns.
-- Are incorrect conditionals, inverted logic, or missing cases in the described flow avoided?
-- Are TOCTOU / non-atomic check-and-act races on shared state addressed where the design implies concurrent access?
 - Is logging / observability covered at the level needed for self-debugging? (Don't demand SRE-grade dashboards — just "where do logs go, what's traceable.")
+- Are terms defined in one section used with a different meaning in another?
+- Does a section introduce a constraint that another section silently violates?
+- Are component responsibilities stated in multiple places with conflicting scope?
+- Are numeric values (limits, timeouts, sizes) stated inconsistently across sections?
+- Are architectural decisions stated in one section contradicted by the approach taken in another?
+- Are assumptions stated in one section contradicted by facts given in another?
 
 ## ssot — Single Source of Truth
 
@@ -106,27 +114,38 @@ When the spec declares its scope, that declaration answers the concern. A concre
 
 **Done-when:** The spec names, for each behavior-changing claim, a concrete test that would prove it — with a described break scenario, not a generic "add tests." Every gap flagged names a specific input whose breakage would go silently uncaught.
 
-**Review lens** (from `codex/05-test-coverage.md`):
-- For every test gap, describe a **specific** scenario: "If someone changes X, this test gap means Y would silently break." No break scenario → not a finding.
-- Every public entry point / prop has at least one test; every variant, size, or enum value is exercised.
-- Edge cases: empty/undefined/null for optional inputs, boundary enum values, boolean both states.
-- Error paths, async behavior, data transformations, external-service boundary mocking, and destructive-operation safeguards are covered (backend).
-- Tests assert **behavior, not implementation**; tests are independent — no shared mutable state.
-- Schema-introspection / signature-validation tests are a valid pattern — do not rate them critical/high merely because they don't execute the underlying logic.
-- Declarative config (Terraform, dashboards, rules) is validated by `plan`/`apply`, not unit tests — do not demand unit tests for it.
+**Review lens** (from `spec-review/codex/08-test-plan.md`):
+- Test strategy present — names required types (unit, integration, contract, E2E, load, regression)
+- Acceptance criteria defined per feature; engineer can determine when "done"
+- Error paths and failure scenarios covered, not just happy path
+- Regression strategy with automated tests on critical paths
+- Edge cases addressed (empty input, zero-state, max concurrency, rate limits, malformed payloads, expired tokens)
+- Security-relevant behaviors in test plan (auth bypass, injection, privilege escalation)
+- Test environment strategy specified (local, staging, production-mirror); parity gaps called out
+- External dependencies tested via real services, test doubles, or contract tests — tradeoff justified
+- Performance/load tests specified where throughput, latency SLAs, or scaling claims exist
+- Migration/rollout test plan present (data migrations, feature flags, canary rollouts)
+- Observability signals (logs, metrics, traces) validated in tests, not assumed working
 
 ## accessibility — Accessibility
 
-**Done-when:** Every user-facing surface the spec introduces states its accessibility requirements — semantic roles, keyboard operability, ARIA/labels, and contrast — or the section is marked `n/a` with a reason (e.g. headless/CLI, no user-facing surface).
+**Done-when:** Every user-facing surface the spec introduces states its accessibility requirements — semantic roles, keyboard operability, ARIA/labels, and contrast — or the section is marked `n_a` with a reason (e.g. headless/CLI, no user-facing surface).
 
-**Review lens** (distilled from the ARIA/a11y items in `codex/05-test-coverage.md`; there is no dedicated spec-review accessibility domain):
-- Are semantic elements / roles specified for interactive and structural components (heading levels, landmarks, buttons vs. links)?
-- Is keyboard operability specified — focus order, focus-visible, no keyboard traps, all actions reachable without a pointer?
-- Are ARIA attributes and accessible names/labels specified where native semantics are insufficient?
-- Are `data-*` / `aria-*` pass-through and `className` merging preserved on wrapper components?
-- Are color-contrast and non-color-dependent state indicators addressed for visual surfaces?
-- Is there a stated way to verify the above (role/label assertions in tests, an axe-style check)?
-- **Scope note:** a headless, CLI, or service-only surface has no accessibility bar — mark this section `n/a` with that reason rather than manufacturing one.
+**Review lens** (from `spec-review/codex/07-accessibility.md`):
+- Semantic HTML structure specified (heading hierarchy, landmarks, form labels)
+- Keyboard interaction patterns defined for all interactive elements
+- ARIA roles/states/properties specified where semantic HTML isn't enough
+- Screen reader announcements for dynamic content (live regions, toasts)
+- Color contrast requirements specified; no color-only information
+- Focus indicators defined and visible
+- Reduced motion preferences addressed (`prefers-reduced-motion`)
+- Touch targets ≥ 44×44px
+- Text scaling survives 200% zoom
+- Error messages programmatically associated with form fields
+- Alt text strategy for images/icons
+- Loading/progress states announced to screen readers
+- Data viz has alternative representations (tables, summaries)
+- **Scope note:** a headless, CLI, or service-only surface has no accessibility bar — mark this section `n_a` with that reason rather than manufacturing one.
 
 ## open-questions — Open Questions
 
