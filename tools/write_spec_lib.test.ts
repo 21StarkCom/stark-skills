@@ -789,6 +789,50 @@ test("assembleBriefForDispatch: protected sections survive under a tiny cap", ()
   assert.ok(got.endsWith(TRUNCATION_MARKER));
 });
 
+test("assembleBriefForDispatch: protected sections ALONE exceeding cap are preserved verbatim", () => {
+  // Pathological branch: Ask/Constraints/Target alone already exceed `cap`, so
+  // sourceBudget clamps to 0 and ALL source is dropped. The documented invariant
+  // exception is that protected text is NEVER truncated — the result therefore
+  // exceeds `cap`, but every protected section survives verbatim.
+  const brief = ASK_SECTION + CONSTRAINTS_SECTION + TARGET_SECTION + "## Source\nextra\n";
+  const protectedLen = ASK_SECTION.length + CONSTRAINTS_SECTION.length + TARGET_SECTION.length;
+  const cap = protectedLen - 20; // strictly below the protected total
+  const got = assembleBriefForDispatch(brief, cap);
+  // Protected text is never truncated — all three survive verbatim, in order.
+  assert.ok(got.includes(ASK_SECTION), "Ask section verbatim");
+  assert.ok(got.includes(CONSTRAINTS_SECTION), "Constraints section verbatim");
+  assert.ok(got.includes(TARGET_SECTION), "Target section verbatim");
+  // All source material was dropped (sourceBudget clamped to 0).
+  assert.ok(!got.includes("extra"), "source material dropped");
+  assert.ok(got.endsWith(TRUNCATION_MARKER), "marker appended (truncation occurred)");
+  // Behavior is well-defined: the result is exactly protected text + marker, and
+  // it deliberately exceeds the cap rather than corrupting protected content.
+  assert.equal(got, ASK_SECTION + CONSTRAINTS_SECTION + TARGET_SECTION + TRUNCATION_MARKER);
+  assert.ok(got.length > cap, "protected-alone result exceeds cap by design");
+});
+
+// ── Model-override argv pinning: --model must appear EXACTLY ONCE ─────────
+// Guards the pinModelFlag replace-vs-append branch: claudeAgentCmd/codexAgentCmd
+// already emit a default `--model <default>`, and pinModelFlag must REPLACE that
+// value in place, never append a second flag (last-wins CLI ambiguity).
+
+test("buildLeadCmd: model override yields exactly one --model flag", () => {
+  const cmd = buildLeadCmd("claude", "claude-fable-5");
+  const modelFlags = cmd.args.filter((a) => a === "--model");
+  assert.equal(modelFlags.length, 1, "exactly one --model flag");
+  const idx = cmd.args.indexOf("--model");
+  assert.equal(cmd.args[idx + 1], "claude-fable-5", "override value pinned");
+});
+
+test("buildWingCmd: model override yields exactly one model flag", () => {
+  // Codex's model flag is `-m` (modelFlagFor). Assert it appears exactly once.
+  const cmd = buildWingCmd("codex", "xhigh", "gpt-5.6-sol");
+  const modelFlags = cmd.args.filter((a) => a === "-m");
+  assert.equal(modelFlags.length, 1, "exactly one -m flag");
+  const idx = cmd.args.indexOf("-m");
+  assert.equal(cmd.args[idx + 1], "gpt-5.6-sol", "override value pinned");
+});
+
 // ── Per-agent token accounting + cost aggregation (#703) ─────────────────
 
 /** A claude `--output-format json` envelope carrying a usage block. */

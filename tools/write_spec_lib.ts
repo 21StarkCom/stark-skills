@@ -35,7 +35,7 @@ import {
   CODEX_REASONING_EFFORT_XHIGH,
 } from "./codex_utils_lib.ts";
 import { assetPromptsDir, stateRoot } from "./asset_root_lib.ts";
-import { getModelId, getWriteSpecConfig } from "./stark_config_lib.ts";
+import { DEFAULT_WRITE_SPEC, getModelId, getWriteSpecConfig } from "./stark_config_lib.ts";
 import { computeDispatchCost } from "./cost_lib.ts";
 import { writeJsonAtomic } from "./stark_review_doc_lib.ts";
 
@@ -768,11 +768,11 @@ export interface WriteSpecDefaults {
 export function resolveWriteSpecDefaults(): WriteSpecDefaults {
   const cfg = getWriteSpecConfig();
   return {
-    maxRounds: Number(cfg.max_rounds) || 3,
-    leadTimeoutS: Number(cfg.timeout_s) || 900,
-    wingTimeoutS: Number(cfg.wing_timeout_s) || 600,
-    wingEffort: String(cfg.wing_reasoning_effort || "xhigh"),
-    inputCap: Number(cfg.max_input_chars) || 200_000,
+    maxRounds: Number(cfg.max_rounds) || DEFAULT_WRITE_SPEC.max_rounds,
+    leadTimeoutS: Number(cfg.timeout_s) || DEFAULT_WRITE_SPEC.timeout_s,
+    wingTimeoutS: Number(cfg.wing_timeout_s) || DEFAULT_WRITE_SPEC.wing_timeout_s,
+    wingEffort: String(cfg.wing_reasoning_effort || DEFAULT_WRITE_SPEC.wing_reasoning_effort),
+    inputCap: Number(cfg.max_input_chars) || DEFAULT_WRITE_SPEC.max_input_chars,
   };
 }
 
@@ -965,8 +965,8 @@ export async function runWriteSpec(
   opts: RunWriteSpecOpts,
   deps?: Partial<WriteSpecDeps>,
 ): Promise<WriteSpecReceipt> {
-  const leadAgent: WriteSpecAgent = opts.leadAgent ?? "claude";
-  const wingAgent: WriteSpecAgent = opts.wingAgent ?? "codex";
+  const leadAgent: WriteSpecAgent = opts.leadAgent ?? (DEFAULT_WRITE_SPEC.lead_agent as WriteSpecAgent);
+  const wingAgent: WriteSpecAgent = opts.wingAgent ?? (DEFAULT_WRITE_SPEC.wing_agent as WriteSpecAgent);
   const defaults = resolveWriteSpecDefaults();
   const maxRounds = Math.max(1, opts.maxRounds ?? defaults.maxRounds);
   // Enforce the input budget on the operator's intent brief up front: only
