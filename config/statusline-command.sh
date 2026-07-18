@@ -148,7 +148,7 @@ gradient() { # text [palette] → sets GRAD: per-account color sweep
   # the field a frame, but it no longer animates on a clock. Palette ($2)
   # selects the account's color family: gold (Max/Com), violet (Max/Net), blue
   # (Enterprise), magenta→orange spectrum (Team#0 magenta / #1 pink / #2 coral /
-  # #3 orange). Pure bash fixed-point math, no forks. GRAD holds
+  # #3 orange) plus emerald→teal (Team#4). Pure bash fixed-point math, no forks. GRAD holds
   # interpreted ESC bytes (printf -v %b) — embed directly, don't re-%b it.
   local text="$1" pal="${2:-gold}" RST=$'\033[0m'
   local -a PR PG PB
@@ -159,6 +159,7 @@ gradient() { # text [palette] → sets GRAD: per-account color sweep
     team1)  PR=(255 255 255 245) PG=(77  128 105 90 ) PB=(148 180 160 140) ;;  # hot pink — Team#1
     team2)  PR=(255 255 255 250) PG=(110 145 125 100) PB=(110 120 100 90 ) ;;  # coral/salmon — Team#2
     team3)  PR=(255 255 255 250) PG=(150 178 138 160) PB=(40  75  30  55 ) ;;  # orange — Team#3
+    team4)  PR=(52  45  34  110) PG=(211 212 211 231) PB=(153 191 238 183) ;;  # emerald→teal→cyan — Team#4
     *)      PR=(230 255 255 250) PG=(150 190 224 204) PB=(0   0   60  15 ) ;;  # amber→gold — Max/Com
   esac
   local n=${#PR[@]} len=${#text}
@@ -366,6 +367,7 @@ if _on account; then
           aryeh.kiovetsky1) acct_label="Team#1" ;;
           aryeh.kiovetsky2) acct_label="Team#2" ;;
           aryeh.kiovetsky3) acct_label="Team#3" ;;
+          aryeh.kiovetsky4) acct_label="Team#4" ;;
           *)                acct_label="Team#0" ;;
         esac; fi ;;
       *) acct_label="$acct_dom" ;;
@@ -373,7 +375,7 @@ if _on account; then
     if [ -n "$acct_label" ]; then
       # Color family per account: Max/Net → violet, Max/Com → gold, Enterprise →
       # blue. The Team accounts share a magenta→orange spectrum, one shade each:
-      # Team#0 magenta, Team#1 pink, Team#2 coral, Team#3 orange.
+      # Team#0 magenta, Team#1 pink, Team#2 coral, Team#3 orange, Team#4 emerald→teal.
       case "$acct_label" in
         Max/Net)    _pal=violet ;;
         Max/*)      _pal=gold ;;
@@ -382,6 +384,7 @@ if _on account; then
         Team#1)     _pal=team1 ;;
         Team#2)     _pal=team2 ;;
         Team#3)     _pal=team3 ;;
+        Team#4)     _pal=team4 ;;
         Team*)      _pal=team0 ;;
         *)          _pal=gold ;;
       esac
