@@ -15,6 +15,7 @@ import {
   composePrompt,
   computeDone,
   deriveSlugFromOut,
+  extractAgentUsage,
   extractContractVerdictJson,
   loadContractText,
   normalizeContractVerdict,
@@ -29,6 +30,7 @@ import type {
   WriteSpecReceipt,
 } from "./write_spec_lib.ts";
 import { DECIDER_DISALLOWED_TOOLS } from "./red_team_fold_lib.ts";
+import { computeDispatchCost } from "./cost_lib.ts";
 import { assetPromptsDir } from "./asset_root_lib.ts";
 
 // Route the drift check through the real asset resolver (the runtime seam),
@@ -704,6 +706,9 @@ test("test_write_exit_artifacts_atomic", () => {
       contract_status: ALL_SATISFIED,
       dropped_sections: [],
       summary: "done",
+      cost_usd: 0,
+      cost_breakdown: [],
+      cost_notes: [],
     };
     writeExitArtifacts(dir, "SPEC BODY", receipt);
     assert.equal(fs.readFileSync(out, "utf8"), "SPEC BODY");
@@ -782,4 +787,186 @@ test("assembleBriefForDispatch: protected sections survive under a tiny cap", ()
   assert.ok(got.includes(CONSTRAINTS_SECTION));
   assert.ok(got.includes(TARGET_SECTION));
   assert.ok(got.endsWith(TRUNCATION_MARKER));
+});
+
+// ── Per-agent token accounting + cost aggregation (#703) ─────────────────
+
+/** A claude `--output-format json` envelope carrying a usage block. */
+function claudeRaw(text: string, input: number, output: number): string {
+  return JSON.stringify({
+    type: "result",
+    result: text,
+    usage: { input_tokens: input, output_tokens: output },
+  });
+}
+
+/**
+ * A MULTI-EVENT codex JSONL stream. The `token_count` events are cumulative;
+ * only the FINAL one carries the run totals `(input, output)`. An earlier event
+ * carries smaller running totals to prove the extractor takes the last, not the
+ * sum.
+ */
+function codexRaw(input: number, output: number): string {
+  const early = {
+    type: "token_count",
+    info: { total_token_usage: { input_tokens: Math.floor(input / 2), output_tokens: Math.floor(output / 3) } },
+  };
+  const final = {
+    type: "token_count",
+    info: { total_token_usage: { input_tokens: input, output_tokens: output } },
+  };
+  return [JSON.stringify(early), JSON.stringify(final)].join("\n");
+}
+
+// test_usage_extraction_per_agent — claude envelope + a multi-event codex JSONL
+// both yield the expected token pair (codex reads the LAST event, not a sum);
+// a usage-less output yields {0,0} + available:false.
+test("test_usage_extraction_per_agent", () => {
+  // claude: read from the JSON envelope.
+  const c = extractAgentUsage("claude", claudeRaw("spec text", 111, 222));
+  assert.deepEqual(
+    { inputTokens: c.inputTokens, outputTokens: c.outputTokens, available: c.available },
+    { inputTokens: 111, outputTokens: 222, available: true },
+  );
+
+  // codex: cumulative — take the FINAL event, never sum across events.
+  const cx = extractAgentUsage("codex", codexRaw(900, 600));
+  assert.equal(cx.inputTokens, 900, "codex input = last event, not a sum");
+  assert.equal(cx.outputTokens, 600, "codex output = last event, not a sum");
+  assert.equal(cx.available, true);
+  // Prove it is NOT the sum of the two events (early = 450/200, final = 900/600).
+  assert.notEqual(cx.inputTokens, 450 + 900);
+  assert.notEqual(cx.outputTokens, 200 + 600);
+
+  // claude with null usage → floor + unavailable.
+  const bare = extractAgentUsage("claude", JSON.stringify({ type: "result", result: "x" }));
+  assert.deepEqual(
+    { inputTokens: bare.inputTokens, outputTokens: bare.outputTokens, available: bare.available },
+    { inputTokens: 0, outputTokens: 0, available: false },
+  );
+
+  // codex with no token_count events → floor + unavailable (never throws).
+  const noTok = extractAgentUsage("codex", '{"type":"item.completed","item":{"type":"agent_message","text":"hi"}}');
+  assert.deepEqual(
+    { inputTokens: noTok.inputTokens, outputTokens: noTok.outputTokens, available: noTok.available },
+    { inputTokens: 0, outputTokens: 0, available: false },
+  );
+
+  // gemini: generic usageMetadata branch.
+  const g = extractAgentUsage(
+    "gemini",
+    JSON.stringify({ usageMetadata: { promptTokenCount: 7, candidatesTokenCount: 9 } }),
+  );
+  assert.deepEqual(
+    { inputTokens: g.inputTokens, outputTokens: g.outputTokens, available: g.available },
+    { inputTokens: 7, outputTokens: 9, available: true },
+  );
+
+  // Garbage input never throws.
+  assert.equal(extractAgentUsage("claude", "not json").available, false);
+  assert.equal(extractAgentUsage("gemini", "not json").available, false);
+});
+
+/** Deps whose dispatches return rich {text, raw} envelopes carrying usage. */
+function costMockDeps(cfg: {
+  leadDrafts: { text: string; raw: string }[];
+  wingReplies: { text: string; raw: string }[];
+}): Partial<WriteSpecDeps> {
+  let leadCalls = 0;
+  let wingCalls = 0;
+  return {
+    loadContract: () => "CONTRACT TEXT",
+    loadAgentPrompt: (agent, role) => `[${agent}:${role}]`,
+    dispatchLead: async () => cfg.leadDrafts[leadCalls++] ?? { text: "", raw: "" },
+    dispatchWing: async () => cfg.wingReplies[wingCalls++] ?? { text: "no json", raw: "no json" },
+  };
+}
+
+// test_receipt_cost_counts_all_invocations — a 2-round run (lead x2, wing x2)
+// plus one wing parse-retry → cost_breakdown has 5 rows and cost_usd equals the
+// sum over all 5 (retry included).
+test("test_receipt_cost_counts_all_invocations", async () => {
+  const { dir, out, cleanup } = tmpRun();
+  try {
+    const nonDone = wingJson(withIntent("underspecified"));
+    const done = wingJson(ALL_SATISFIED);
+    const LEAD_MODEL = "claude-opus-4-8";
+    const WING_MODEL = "gpt-5.6-sol";
+
+    const deps = costMockDeps({
+      leadDrafts: [
+        { text: "draft one", raw: claudeRaw("draft one", 1000, 500) }, // round 1 generate
+        { text: "draft two", raw: claudeRaw("draft two", 1200, 700) }, // round 2 revise
+      ],
+      wingReplies: [
+        { text: nonDone, raw: codexRaw(2000, 300) }, // round 1 verify (non-done → revise)
+        { text: "unparseable", raw: codexRaw(2100, 100) }, // round 2 attempt 1 (parse-retry)
+        { text: done, raw: codexRaw(2200, 400) }, // round 2 attempt 2 (done)
+      ],
+    });
+
+    const receipt = await runWriteSpec(
+      { out, brief: "b", runDir: dir, leadModel: LEAD_MODEL, wingModel: WING_MODEL, maxRounds: 3 },
+      deps,
+    );
+
+    assert.equal(receipt.final_verdict, "contract_satisfied");
+    assert.equal(receipt.rounds, 2);
+    // 5 invocations: 2 lead + 3 wing (one of which is the parse-retry).
+    assert.equal(receipt.cost_breakdown.length, 5, "one row per invocation");
+
+    // cost_usd equals the sum over all 5 rows (retry included).
+    const expected =
+      computeDispatchCost(LEAD_MODEL, 1000, 500) +
+      computeDispatchCost(LEAD_MODEL, 1200, 700) +
+      computeDispatchCost(WING_MODEL, 2000, 300) +
+      computeDispatchCost(WING_MODEL, 2100, 100) +
+      computeDispatchCost(WING_MODEL, 2200, 400);
+    assert.ok(Math.abs(receipt.cost_usd - expected) < 1e-12, "cost_usd = sum of all 5 rows");
+
+    // Each row's cost_usd is internally consistent with its tokens + model.
+    const sumRows = receipt.cost_breakdown.reduce((n, r) => n + r.cost_usd, 0);
+    assert.ok(Math.abs(receipt.cost_usd - sumRows) < 1e-12);
+
+    // Agents attributed correctly: 2 lead (claude), 3 wing (codex).
+    assert.equal(receipt.cost_breakdown.filter((r) => r.agent === "claude").length, 2);
+    assert.equal(receipt.cost_breakdown.filter((r) => r.agent === "codex").length, 3);
+    // The parse-retry row is present (a codex wing invocation with 2100 input).
+    assert.ok(receipt.cost_breakdown.some((r) => r.agent === "codex" && r.inputTokens === 2100));
+    // All usage was available → no cost notes.
+    assert.equal(receipt.cost_notes.length, 0);
+
+    // Persisted to disk with the cost fields.
+    const persisted = JSON.parse(fs.readFileSync(path.join(dir, "receipt.json"), "utf8"));
+    assert.equal(persisted.cost_breakdown.length, 5);
+    assert.ok(Math.abs(persisted.cost_usd - expected) < 1e-12);
+  } finally {
+    cleanup();
+  }
+});
+
+// test_missing_usage_degrades_to_note — a dispatch that surfaces no usage
+// (bare-string return, as with the text-fallback path) floors to {0,0} and
+// pushes a cost_notes entry per invocation; the run never crashes.
+test("test_missing_usage_degrades_to_note", async () => {
+  const { dir, out, cleanup } = tmpRun();
+  try {
+    const m = mockDeps({
+      leadDrafts: ["the spec draft"],
+      wingReplies: [wingJson(ALL_SATISFIED)],
+    });
+    const receipt = await runWriteSpec({ out, brief: "make it", runDir: dir }, m.deps);
+    assert.equal(receipt.final_verdict, "contract_satisfied");
+    // 1 lead + 1 wing, neither surfaced usage → 2 notes, all usage_unavailable.
+    assert.equal(receipt.cost_breakdown.length, 2);
+    assert.equal(receipt.cost_notes.length, 2);
+    assert.ok(receipt.cost_notes.every((n) => n.reason === "usage_unavailable"));
+    assert.equal(receipt.cost_usd, 0, "floor cost when no usage");
+    for (const r of receipt.cost_breakdown) {
+      assert.equal(r.inputTokens, 0);
+      assert.equal(r.outputTokens, 0);
+    }
+  } finally {
+    cleanup();
+  }
 });

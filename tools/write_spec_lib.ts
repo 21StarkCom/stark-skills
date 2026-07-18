@@ -35,7 +35,8 @@ import {
   CODEX_REASONING_EFFORT_XHIGH,
 } from "./codex_utils_lib.ts";
 import { assetPromptsDir, stateRoot } from "./asset_root_lib.ts";
-import { getWriteSpecConfig } from "./stark_config_lib.ts";
+import { getModelId, getWriteSpecConfig } from "./stark_config_lib.ts";
+import { computeDispatchCost } from "./cost_lib.ts";
 import { writeJsonAtomic } from "./stark_review_doc_lib.ts";
 
 /**
@@ -398,6 +399,140 @@ export function parseClaudeJson(raw: string): ClaudeEnvelope {
   return { text: raw, usage: null };
 }
 
+// ── Per-agent token accounting + cost aggregation (#703) ─────────────────
+//
+// Cost visibility is a first-class receipt field: every invocation (each lead
+// draft/revise, each wing verify, and each parse-retry re-dispatch) records the
+// tokens it burned and its dollar cost. Usage is read from each agent's NATIVE
+// stdout shape. A missing usage field degrades to a {0,0} floor plus a
+// `cost_notes[]` entry — the loop must NEVER crash because an agent omitted a
+// token count.
+
+/** Token counts extracted from one agent invocation's raw stdout. */
+export interface AgentUsage {
+  inputTokens: number;
+  outputTokens: number;
+  /** False when no usage field was present (→ {0,0} floor + a cost note). */
+  available: boolean;
+}
+
+/** One row per invocation in the receipt's `cost_breakdown`. */
+export interface CostBreakdownRow {
+  agent: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cost_usd: number;
+}
+
+/** One entry per invocation whose usage was unavailable. */
+export interface CostNote {
+  invocation: string;
+  reason: string;
+}
+
+const USAGE_UNAVAILABLE: AgentUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  available: false,
+};
+
+/** Read a finite numeric field from a plain object, else null. */
+function numField(obj: Record<string, unknown>, key: string): number | null {
+  const v = obj[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/**
+ * Pull cumulative input/output tokens out of ONE codex `token_count` event.
+ * Codex nests the running totals under `info.total_token_usage` (newer CLI);
+ * older shapes put them directly on `info` or the event itself. Returns null
+ * when neither token field is present.
+ */
+function usageFromCodexEvent(
+  ev: Record<string, unknown>,
+): { input: number; output: number } | null {
+  const info = isPlainObject(ev["info"]) ? ev["info"] : ev;
+  const usage = isPlainObject(info["total_token_usage"])
+    ? info["total_token_usage"]
+    : info;
+  const i = numField(usage, "input_tokens");
+  const o = numField(usage, "output_tokens");
+  if (i === null && o === null) return null;
+  return { input: i ?? 0, output: o ?? 0 };
+}
+
+/**
+ * Extract token usage for one agent invocation from its RAW stdout.
+ *
+ * - `claude` — `parseClaudeJson(raw).usage` (`input_tokens`/`output_tokens`).
+ *   A `null` usage (text-fallback path) yields the unavailable floor.
+ * - `codex` — the JSONL `token_count` events are CUMULATIVE. Take the totals
+ *   from the FINAL `token_count` event; NEVER sum across events (summing
+ *   cumulative snapshots overcounts).
+ * - `gemini` — generic `usageMetadata.promptTokenCount`/`candidatesTokenCount`.
+ *
+ * Any absent usage → `{0,0}` with `available: false`. Never throws.
+ */
+export function extractAgentUsage(
+  agent: WriteSpecAgent | string,
+  rawOutput: string,
+): AgentUsage {
+  if (agent === "claude") {
+    const env = parseClaudeJson(rawOutput);
+    if (env.usage) {
+      const i = numField(env.usage, "input_tokens");
+      const o = numField(env.usage, "output_tokens");
+      if (i !== null || o !== null) {
+        return { inputTokens: i ?? 0, outputTokens: o ?? 0, available: true };
+      }
+    }
+    return USAGE_UNAVAILABLE;
+  }
+
+  if (agent === "codex") {
+    // Walk every line; the LAST token_count event holds the cumulative totals.
+    let last: { input: number; output: number } | null = null;
+    for (const line of rawOutput.split("\n")) {
+      const t = line.trim();
+      if (!t.startsWith("{")) continue;
+      let ev: unknown;
+      try {
+        ev = JSON.parse(t);
+      } catch {
+        continue;
+      }
+      if (!isPlainObject(ev) || ev["type"] !== "token_count") continue;
+      const u = usageFromCodexEvent(ev);
+      if (u) last = u; // final event wins — never accumulate
+    }
+    if (last) {
+      return { inputTokens: last.input, outputTokens: last.output, available: true };
+    }
+    return USAGE_UNAVAILABLE;
+  }
+
+  if (agent === "gemini") {
+    try {
+      const obj = JSON.parse(rawOutput);
+      const source = Array.isArray(obj) ? obj[obj.length - 1] : obj;
+      if (isPlainObject(source) && isPlainObject(source["usageMetadata"])) {
+        const um = source["usageMetadata"];
+        const i = numField(um, "promptTokenCount");
+        const o = numField(um, "candidatesTokenCount");
+        if (i !== null || o !== null) {
+          return { inputTokens: i ?? 0, outputTokens: o ?? 0, available: true };
+        }
+      }
+    } catch {
+      /* not JSON — fall through to the unavailable floor */
+    }
+    return USAGE_UNAVAILABLE;
+  }
+
+  return USAGE_UNAVAILABLE;
+}
+
 /** Header the contract is prepended under, so every agent sees it in-band. */
 export const CONTRACT_HEADER =
   "## Spec Contract (authoritative — the 9 sections and their done-when bars)";
@@ -588,6 +723,12 @@ export interface WriteSpecReceipt {
   contract_status: ContractItem[];
   dropped_sections: string[];
   summary: string;
+  /** Total USD across EVERY invocation (lead + wing + parse-retries). */
+  cost_usd: number;
+  /** One row per invocation, in invocation order. */
+  cost_breakdown: CostBreakdownRow[];
+  /** One entry per invocation whose usage was unavailable (floored to {0,0}). */
+  cost_notes: CostNote[];
   error?: { code: string; message: string };
 }
 
@@ -640,15 +781,25 @@ export function resolveWriteSpecDefaults(): WriteSpecDefaults {
  * defaults to a real implementation via {@link defaultWriteSpecDeps}; tests
  * pass mocks for the dispatch + write surfaces.
  */
+/**
+ * A dispatch return. A bare string is the parsed text (usage then reads over
+ * that same string — typically unavailable, as with test mocks). The rich form
+ * carries both the parsed `text` and the untouched `raw` stdout so token usage
+ * can be extracted from the agent's native envelope.
+ */
+export type AgentDispatchResult = string | { text: string; raw: string };
+
 export interface WriteSpecDeps {
   loadContract: () => string;
   loadAgentPrompt: (agent: WriteSpecAgent, role: WriteSpecRole) => string;
-  /** Lead authoring dispatch — returns the raw spec draft text. */
-  dispatchLead: (ctx: { round: number; prompt: string }) => Promise<string>;
-  /** Wing verify dispatch — returns raw text containing the verdict JSON. */
+  /** Lead authoring dispatch — returns the raw spec draft text (or {text,raw}). */
+  dispatchLead: (
+    ctx: { round: number; prompt: string },
+  ) => Promise<AgentDispatchResult>;
+  /** Wing verify dispatch — returns the verdict text (or {text,raw}). */
   dispatchWing: (
     ctx: { round: number; attempt: number; prompt: string },
-  ) => Promise<string>;
+  ) => Promise<AgentDispatchResult>;
   /** FATAL spec + receipt writer (never swallow a failure). */
   writeArtifacts: (
     runDir: string,
@@ -764,7 +915,7 @@ export function defaultWriteSpecDeps(
     cmd: AgentCommand,
     prompt: string,
     timeoutSec: number,
-  ): Promise<string> {
+  ): Promise<{ text: string; raw: string }> {
     const { env, tempDir } = await buildAgentEnv(agent, "local");
     try {
       const res = await run(cmd.cmd, cmd.args, {
@@ -780,9 +931,12 @@ export function defaultWriteSpecDeps(
           `write-spec: ${agent} exited ${res.code}: ${res.stderr.slice(0, 400)}`,
         );
       }
-      return agent === "codex"
-        ? parseCodexJsonl(res.stdout)
-        : parseClaudeJson(res.stdout).text;
+      // Return BOTH the parsed text and the untouched stdout so the loop can
+      // read native token usage off the raw envelope.
+      const raw = res.stdout;
+      const text =
+        agent === "codex" ? parseCodexJsonl(raw) : parseClaudeJson(raw).text;
+      return { text, raw };
     } finally {
       releaseAgentTempDir(tempDir);
     }
@@ -834,6 +988,41 @@ export async function runWriteSpec(
     opts.runDir ?? path.join(stateRoot(), "write-spec", "history", slug);
   const contractText = d.loadContract();
 
+  // Per-role model ids (override → configured → agent name floor) drive the
+  // cost math; an unknown model falls back to the `_fallback` rate.
+  const leadModel = opts.leadModel ?? getModelId(leadAgent) ?? leadAgent;
+  const wingModel = opts.wingModel ?? getModelId(wingAgent) ?? wingAgent;
+
+  // Cost accounting accumulators — one breakdown row per invocation.
+  const costBreakdown: CostBreakdownRow[] = [];
+  const costNotes: CostNote[] = [];
+  let costUsd = 0;
+
+  /** Record one invocation's usage + cost; return its parsed text. */
+  function recordInvocation(
+    result: AgentDispatchResult,
+    agent: WriteSpecAgent,
+    model: string,
+    invocation: string,
+  ): string {
+    const { text, raw } =
+      typeof result === "string" ? { text: result, raw: result } : result;
+    const usage = extractAgentUsage(agent, raw);
+    if (!usage.available) {
+      costNotes.push({ invocation, reason: "usage_unavailable" });
+    }
+    const cost = computeDispatchCost(model, usage.inputTokens, usage.outputTokens);
+    costUsd += cost;
+    costBreakdown.push({
+      agent,
+      model,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cost_usd: cost,
+    });
+    return text;
+  }
+
   let priorDraft: string | null = null;
   let specText = "";
   let lastGoodVerdict: ContractVerdict | null = null;
@@ -861,7 +1050,13 @@ export async function runWriteSpec(
       contractText,
       leadBrief,
     );
-    const draft = await d.dispatchLead({ round, prompt: leadPrompt });
+    const leadResult = await d.dispatchLead({ round, prompt: leadPrompt });
+    const draft = recordInvocation(
+      leadResult,
+      leadAgent,
+      leadModel,
+      `lead round ${round} (${leadRole})`,
+    );
 
     if (draft.trim().length === 0) {
       // Empty draft: preserve any prior draft as the on-disk spec.
@@ -884,7 +1079,13 @@ export async function runWriteSpec(
       const brief =
         buildVerifyBrief(draft) + (attempt === 2 ? WING_FORMAT_REMINDER : "");
       const wingPrompt = composePrompt(verifyTemplate, contractText, brief);
-      const wingRaw = await d.dispatchWing({ round, attempt, prompt: wingPrompt });
+      const wingResult = await d.dispatchWing({ round, attempt, prompt: wingPrompt });
+      const wingRaw = recordInvocation(
+        wingResult,
+        wingAgent,
+        wingModel,
+        `wing round ${round} attempt ${attempt}`,
+      );
       const extracted = extractContractVerdictJson(wingRaw);
       if (extracted) {
         try {
@@ -928,6 +1129,9 @@ export async function runWriteSpec(
     contract_status: contractStatus,
     dropped_sections: droppedSections,
     summary,
+    cost_usd: costUsd,
+    cost_breakdown: costBreakdown,
+    cost_notes: costNotes,
     ...(ok
       ? {}
       : {
