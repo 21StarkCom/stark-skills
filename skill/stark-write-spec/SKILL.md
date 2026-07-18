@@ -196,23 +196,61 @@ node --experimental-strip-types "$TOOLS/write_spec.ts" \
 
 Then parse `$receipt_path` and branch on `(RC, parseable receipt)`:
 
-- **`RC == 0`** → `final_verdict == "contract_satisfied"`. Proceed to publish.
+- **`RC == 0`** → `final_verdict == "contract_satisfied"`. Proceed to publish
+  (Phase 10) with `outcome=contract_satisfied` and **no** accepted gaps.
 - **`RC != 0` + a parseable receipt** whose `final_verdict` is a **handled
   breaker** (`max_rounds_unsatisfied`, `lead_empty_draft`, `unchanged_revision`,
-  `wing_unparseable`) → route into **gap resolution (Task 5-3)** — the receipt's
-  `contract_status` names the unsatisfied sections. *(Task 5-3 may not exist
-  yet; reference it as the downstream handler.)* Still publish the partial spec
-  so the unsatisfied contract lands on a PR for the operator.
+  `wing_unparseable`) → route into **gap resolution (Phase 9b)** — the receipt's
+  `contract_status` names the unsatisfied sections.
 - **`RC != 0` + an unparseable receipt** → **hard error.** Report the dispatcher
-  failure verbatim and stop.
+  failure verbatim and stop (no summary — there is no receipt to echo).
 
-The single scratch receipt file is the one artifact threaded to both publish
-(Phase 10) and Task 5-3.
+The single scratch receipt file is the one artifact threaded to both gap
+resolution (Phase 9b) and publish (Phase 10).
+
+## Phase 9b: Gap resolution (handled breaker only)
+
+The receipt's **unsatisfied items** are its `contract_status` entries whose
+`status` is anything other than `satisfied`/`n_a` (i.e. `underspecified` /
+`missing` / `over_scoped`). Verbatim gap strings for the Open Questions section
+are rendered as `` `<section>` — <status>: <note> `` per unsatisfied item.
+
+**Headless / `--json`:** skip the interactive round entirely. A handled breaker
+**auto-resolves to accept** — set `headless_auto_accept: true`, mark every
+non-`satisfied`/`n_a` item accepted, and continue to publish with
+`outcome=authored_with_accepted_gaps`. Never prompt.
+
+**Interactive:** run **exactly one** `AskUserQuestion` round (flag-enforced —
+the answer is offered at most once) offering three resolutions:
+
+1. **Answer the gaps** — re-dispatch **once** (hard bound; the re-dispatch flag
+   is single-shot). Re-run Phase 9's dispatch invocation with the operator's
+   added intent appended to the brief. Whatever the second run returns is
+   terminal — a still-unsatisfied second result falls through to accept.
+2. **Accept with gaps** — write the accepted-gaps.json to the scratchpad, then
+   publish with `--accepted-gaps`, `outcome=authored_with_accepted_gaps`,
+   `headless_auto_accept: false`. Exit 0.
+3. **Abort** — **skip publish.** Leave the prepared branch + draft spec on disk,
+   open no PR. Emit the summary with `outcome=aborted`, then exit 1.
+
+The accepted-gaps.json is a JSON array of `{section,status,note}` (one entry per
+accepted unsatisfied item):
+
+```bash
+gaps_path="$(mktemp -t write-spec-gaps.XXXXXX).json"
+# …write the [{section,status,note}, …] array to "$gaps_path"…
+```
+
+Before publish on the accept path, also append the accepted items verbatim to
+the spec's `## Open Questions` section via `applyAcceptedGaps` (idempotent) so
+the landed spec records them.
 
 ## Phase 10: Publish + summary (non-dry only)
 
-Skip if `--dry-run` (Phase 6) or `--no-pr`. Otherwise publish, consuming the
-**same** scratch receipt file from Phase 9:
+Skip publish if `--dry-run` (Phase 6), `--no-pr`, or **abort** (Phase 9b). On
+`--dry-run` the summary is still emitted (Phase 11) with `outcome=dry_run`.
+Otherwise publish, consuming the **same** scratch receipt file from Phase 9 and
+the accepted-gaps file from Phase 9b (if any):
 
 ```bash
 ready_flag=()
@@ -222,7 +260,7 @@ node --experimental-strip-types "$TOOLS/write_spec_land.ts" publish \
     --branch "$branch" \
     --spec "$out" \
     --receipt "$receipt_path" \
-    ${accepted_gaps:+--accepted-gaps "$accepted_gaps"} \
+    ${gaps_path:+--accepted-gaps "$gaps_path"} \
     ${lead:+--lead "$lead"} \
     "${ready_flag[@]}" \
     --json
@@ -231,21 +269,40 @@ node --experimental-strip-types "$TOOLS/write_spec_land.ts" publish \
 `publish` adds/commits (repo identity) the spec, pushes (plain, never force),
 adopts-or-creates the PR (App-authored), and merges only its owned body block.
 `--ready` shells `gh pr ready` under the ambient user (App tokens cannot
-un-draft). If Task 5-3 produced accepted gaps, thread them via
-`--accepted-gaps`.
+un-draft). The resolved PR object from `publish` is threaded into the summary.
 
-Then emit the skill summary (verdict, unsatisfied sections if any, PR link,
-cost/rounds) — the terminal summary is owned by Task 5-3.
+## Phase 11: Terminal summary (every terminal path)
+
+Build the `SkillSummary` via `buildSkillSummary` in `write_spec_land_lib.ts` and
+emit it on **every** terminal path (success, accepted-gaps, abort, dry-run):
+
+```
+{ skill, outcome, spec_path, slug, final_verdict, accepted_gaps[],
+  headless_auto_accept, pr, dispatcher_receipt }
+```
+
+`outcome ∈ { contract_satisfied | authored_with_accepted_gaps | aborted |
+dry_run }`. `dispatcher_receipt` echoes the Phase 9 receipt **byte-for-byte**
+(null on a dry run, which produced no receipt); `final_verdict` mirrors it (null
+on dry run); `accepted_gaps` is empty on `contract_satisfied` and `dry_run`.
+
+**STDOUT contract:**
+
+- **`--json`** → print **exactly one** JSON object (the `SkillSummary`) to
+  stdout and **nothing else**. All human narration goes to stderr.
+- **Human mode** → print **only** a human rendering of the same fields to
+  stdout (verdict, unsatisfied/accepted sections, PR link, cost/rounds). **No
+  JSON on stdout.**
 
 ## Output Contract
 
 | final_verdict | RC | Meaning |
 |---------------|----|---------|
 | `contract_satisfied` | 0 | Every required section satisfied. Spec passes. |
-| `max_rounds_unsatisfied` | ≠0 | Bounded rounds exhausted with sections still unsatisfied → Task 5-3 gap resolution. |
-| `lead_empty_draft` | ≠0 | Lead emitted an empty draft → Task 5-3. |
-| `unchanged_revision` | ≠0 | A revision was byte-identical to the prior → Task 5-3. |
-| `wing_unparseable` | ≠0 | The wing verdict never parsed → Task 5-3. |
+| `max_rounds_unsatisfied` | ≠0 | Bounded rounds exhausted with sections still unsatisfied → Phase 9b gap resolution. |
+| `lead_empty_draft` | ≠0 | Lead emitted an empty draft → Phase 9b. |
+| `unchanged_revision` | ≠0 | A revision was byte-identical to the prior → Phase 9b. |
+| `wing_unparseable` | ≠0 | The wing verdict never parsed → Phase 9b. |
 | (dispatcher crash) | ≠0 | Unparseable receipt → hard error, reported verbatim. |
 
 Handled breakers still land the partial spec on a PR; only an unparseable
@@ -259,5 +316,5 @@ receipt is a hard error.
 - **Draft-by-default.** An auto-opened PR is a draft unless `--ready`/`--no-draft`
   is passed; the merge path un-drafts via `gh pr ready`.
 - **Scratch receipt is the single artifact.** The same `$receipt_path` file is
-  captured in Phase 9 and passed to `publish --receipt` and to Task 5-3 — never
+  captured in Phase 9 and passed to `publish --receipt` and to Phase 9b — never
   re-run the dispatcher to regenerate it.

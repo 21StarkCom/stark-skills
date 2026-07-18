@@ -27,6 +27,7 @@ import type { AppName } from "./github_app_lib.ts";
 import {
   SECTION_IDS,
   type ContractItem,
+  type FinalVerdict,
   type SectionId,
   type WriteSpecAgent,
   type WriteSpecReceipt,
@@ -268,4 +269,135 @@ export function mergePrBody(existingBody: string | null | undefined, ownedBlock:
   }
   // No owned span — append, preserving the existing content verbatim.
   return body.replace(/\s+$/, "") + "\n\n" + ownedBlock + "\n";
+}
+
+// ── Accepted-gaps → Open Questions mutation (#707) ──────────────────────────
+
+/** The canonical Open Questions heading applyAcceptedGaps owns. */
+export const OPEN_QUESTIONS_HEADING = "## Open Questions";
+
+/**
+ * Append each unsatisfied item VERBATIM as a bullet under the spec's
+ * `## Open Questions` section, creating the section at the end of the doc if it
+ * is absent. IDEMPOTENT: an item whose exact bullet already exists in the
+ * section is not re-added, so `applyAcceptedGaps(applyAcceptedGaps(t, xs), xs)`
+ * equals `applyAcceptedGaps(t, xs)` for any text `t` and items `xs`. Pure — no
+ * IO. Items are flattened (newlines → spaces) and prefixed with `- ` unless they
+ * already carry a `-`/`*` bullet marker; blank items are dropped.
+ */
+export function applyAcceptedGaps(
+  specText: string,
+  unsatisfiedItems: readonly string[],
+): string {
+  const bullets = unsatisfiedItems
+    .map((s) => String(s).replace(/\r?\n/g, " ").trim())
+    .filter((s) => s.length > 0)
+    .map((s) => (/^[-*] /.test(s) ? s : `- ${s}`));
+  if (bullets.length === 0) return specText;
+
+  const lines = specText.split("\n");
+  const headingIdx = lines.findIndex((l) => /^##\s+open questions\s*$/i.test(l.trim()));
+
+  if (headingIdx === -1) {
+    // No section — create it at the end of the doc, preserving prior content.
+    const base = specText.replace(/\s+$/, "");
+    const head = base === "" ? [] : [base, ""];
+    return [...head, OPEN_QUESTIONS_HEADING, "", ...bullets].join("\n") + "\n";
+  }
+
+  // Section exists — find its extent (until the next heading or EOF).
+  let end = lines.length;
+  for (let i = headingIdx + 1; i < lines.length; i++) {
+    if (/^#{1,6}\s/.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  const existing = new Set(lines.slice(headingIdx + 1, end).map((l) => l.trim()));
+  const toAdd = bullets.filter((b) => !existing.has(b.trim()));
+  if (toAdd.length === 0) return specText; // idempotent re-apply
+
+  // Insert after the section's last non-blank line, before any trailing blanks.
+  let insertAt = end;
+  while (insertAt > headingIdx + 1 && lines[insertAt - 1].trim() === "") insertAt--;
+  // Ensure a blank line separates the heading from a freshly-populated section.
+  const prefix =
+    insertAt === headingIdx + 1 ? [""] : [];
+  return [
+    ...lines.slice(0, insertAt),
+    ...prefix,
+    ...toAdd,
+    ...lines.slice(insertAt),
+  ].join("\n");
+}
+
+// ── Skill terminal summary (#707) ───────────────────────────────────────────
+
+/**
+ * The closed set of skill-layer terminal outcomes. `contract_satisfied` is the
+ * dispatcher's success; `authored_with_accepted_gaps` is the operator accepting
+ * the remaining gaps; `aborted` skips publish; `dry_run` produced no receipt.
+ */
+export type SkillOutcome =
+  | "contract_satisfied"
+  | "authored_with_accepted_gaps"
+  | "aborted"
+  | "dry_run";
+
+/**
+ * The stable downstream summary the skill emits on EVERY terminal path. It
+ * carries the skill-layer resolution (`outcome`, `accepted_gaps`,
+ * `headless_auto_accept`) while echoing the dispatcher receipt BYTE-FOR-BYTE
+ * under `dispatcher_receipt` — the summary never rewrites the receipt.
+ */
+export interface SkillSummary {
+  skill: "stark-write-spec";
+  outcome: SkillOutcome;
+  spec_path: string | null;
+  slug: string | null;
+  final_verdict: FinalVerdict | null;
+  accepted_gaps: AcceptedGap[];
+  headless_auto_accept: boolean;
+  pr: unknown | null;
+  dispatcher_receipt: WriteSpecReceipt | null;
+}
+
+/** Inputs to {@link buildSkillSummary}. */
+export interface BuildSkillSummaryInput {
+  outcome: SkillOutcome;
+  /** The dispatcher receipt, echoed verbatim. Null/absent for a dry run. */
+  receipt?: WriteSpecReceipt | null;
+  acceptedGaps?: readonly AcceptedGap[];
+  headlessAutoAccept?: boolean;
+  /** The resolved publish PR result, echoed verbatim. Null when no PR opened. */
+  pr?: unknown | null;
+  /** Explicit spec path (dry-run has no receipt); falls back to the receipt. */
+  specPath?: string | null;
+  /** Explicit slug (dry-run has no receipt); falls back to the receipt. */
+  slug?: string | null;
+}
+
+/**
+ * Build the terminal {@link SkillSummary}. The dispatcher receipt is echoed by
+ * reference — `dispatcher_receipt` is byte-identical to `receipt`. A `dry_run`
+ * has NO receipt: `dispatcher_receipt` and `final_verdict` are null and
+ * `accepted_gaps` is `[]` regardless of what was passed (a dry run resolves no
+ * gaps). Pure — no IO.
+ */
+export function buildSkillSummary(input: BuildSkillSummaryInput): SkillSummary {
+  const { outcome } = input;
+  const isDryRun = outcome === "dry_run";
+  const receipt = isDryRun ? null : input.receipt ?? null;
+  const acceptedGaps = isDryRun ? [] : [...(input.acceptedGaps ?? [])];
+  return {
+    skill: "stark-write-spec",
+    outcome,
+    spec_path: input.specPath ?? receipt?.spec_path ?? null,
+    slug: input.slug ?? receipt?.slug ?? null,
+    final_verdict: receipt?.final_verdict ?? null,
+    accepted_gaps: acceptedGaps,
+    headless_auto_accept: input.headlessAutoAccept === true,
+    pr: input.pr ?? null,
+    dispatcher_receipt: receipt,
+  };
 }
