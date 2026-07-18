@@ -1,0 +1,120 @@
+/**
+ * write_spec.test.ts — CLI-boundary tests for the write-spec dispatcher.
+ *
+ * The CLI runs `main` on import, so these exercise it as a real subprocess
+ * (`node --experimental-strip-types tools/write_spec.ts ...`) — the same shape
+ * the skill invokes. Covers: --help, the gemini v1 rejection message, argument
+ * validation, and the side-effect-free --dry-run contract.
+ */
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const CLI = fileURLToPath(new URL("./write_spec.ts", import.meta.url));
+
+function runCli(args: string[]): { code: number; stdout: string; stderr: string } {
+  const r = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", CLI, ...args],
+    { encoding: "utf8" },
+  );
+  return { code: r.status ?? -1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+}
+
+// A canonical basename so deriveSlugFromOut resolves rather than throwing.
+function canonicalOut(tag: string): string {
+  return path.join("/tmp", `2026-07-18-wsdry-${tag}-${process.pid}-spec.md`);
+}
+
+test("write_spec --help exits 0 and prints usage", () => {
+  const r = runCli(["--help"]);
+  assert.equal(r.code, 0);
+  assert.match(r.stdout, /usage: write_spec\.ts/);
+  assert.match(r.stdout, /--intent-brief/);
+});
+
+test("gemini is rejected at validation with the exact v1 message", () => {
+  const r = runCli([
+    "--intent-brief", "x",
+    "--out", canonicalOut("gem"),
+    "--lead", "gemini",
+  ]);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /unsupported agent: gemini \(claude\|codex only at v1\)/);
+});
+
+test("gemini rejected on --wing too", () => {
+  const r = runCli([
+    "--intent-brief", "x",
+    "--out", canonicalOut("gemw"),
+    "--wing", "gemini",
+  ]);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /unsupported agent: gemini \(claude\|codex only at v1\)/);
+});
+
+test("missing required flags exit 2", () => {
+  assert.equal(runCli(["--out", canonicalOut("noBrief")]).code, 2);
+  assert.equal(runCli(["--intent-brief", "x"]).code, 2);
+});
+
+test("unknown argument exits 2", () => {
+  const r = runCli(["--intent-brief", "x", "--out", canonicalOut("unk"), "--bogus"]);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /unknown argument: --bogus/);
+});
+
+test("non-canonical --out is rejected before dispatch", () => {
+  const r = runCli(["--intent-brief", "x", "--out", "/tmp/not-a-spec.md", "--dry-run"]);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /must match docs\/specs\/YYYY-MM-DD-<slug>-spec\.md/);
+});
+
+test("--dry-run prints the planned dispatch (with derived slug) and writes nothing", () => {
+  const out = canonicalOut("plan");
+  // Guard: ensure a clean slate.
+  if (fs.existsSync(out)) fs.rmSync(out);
+  const r = runCli([
+    "--intent-brief", "Build a widget",
+    "--out", out,
+    "--lead", "claude",
+    "--wing", "codex",
+    "--json",
+    "--dry-run",
+  ]);
+  assert.equal(r.code, 0);
+  const plan = JSON.parse(r.stdout);
+  assert.equal(plan.dry_run, true);
+  assert.equal(plan.slug, `wsdry-plan-${process.pid}`);
+  assert.equal(plan.out, out);
+  assert.equal(plan.lead_agent, "claude");
+  assert.equal(plan.wing_agent, "codex");
+  assert.ok(Array.isArray(plan.lead_cmd) && plan.lead_cmd.length > 0);
+  assert.ok(Array.isArray(plan.wing_cmd) && plan.wing_cmd.length > 0);
+  // Side-effect-free: no --out file created by the dry run.
+  assert.equal(fs.existsSync(out), false);
+});
+
+test("--dry-run threads model overrides into the planned argv", () => {
+  const out = canonicalOut("model");
+  const r = runCli([
+    "--intent-brief", "x",
+    "--out", out,
+    "--lead", "claude",
+    "--lead-model", "claude-fable-5",
+    "--wing", "codex",
+    "--wing-model", "gpt-5.6-sol",
+    "--json",
+    "--dry-run",
+  ]);
+  assert.equal(r.code, 0);
+  const plan = JSON.parse(r.stdout);
+  assert.equal(plan.lead_model, "claude-fable-5");
+  assert.equal(plan.wing_model, "gpt-5.6-sol");
+  assert.ok(plan.lead_cmd.includes("claude-fable-5"));
+  assert.ok(plan.wing_cmd.includes("gpt-5.6-sol"));
+  assert.equal(fs.existsSync(out), false);
+});
