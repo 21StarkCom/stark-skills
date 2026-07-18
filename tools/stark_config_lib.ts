@@ -332,6 +332,34 @@ export const DEFAULT_FORGED_REVIEW = {
   auto_merge_when_clean: true,
 };
 
+/** `write_spec` section (lead/wing spec-authoring dispatch). */
+export interface WriteSpecConfig {
+  lead_agent: string;
+  wing_agent: string;
+  wing_reasoning_effort: string;
+  max_rounds: number;
+  timeout_s: number;
+  wing_timeout_s: number;
+  max_input_chars: number;
+  history_keep_runs: number;
+  open_pr: boolean;
+  [key: string]: unknown;
+}
+
+// timeout_s / wing_timeout_s mirror plan_dispatch.ts DEFAULT_TIMEOUT_SEC (900)
+// and WING_TIMEOUT_DEFAULT_SEC (600) — authoritative sibling values, not TBD.
+export const DEFAULT_WRITE_SPEC: WriteSpecConfig = {
+  lead_agent: "claude",
+  wing_agent: "codex",
+  wing_reasoning_effort: "xhigh",
+  max_rounds: 3,
+  timeout_s: 900,
+  wing_timeout_s: 600,
+  max_input_chars: 200_000,
+  history_keep_runs: 20,
+  open_pr: true,
+};
+
 // ---------------------------------------------------------------------------
 // Locked-field paths (red_team) — repo/org overrides on these paths are
 // rejected at config load, matching `scripts/config_loader.py` rt1 + rt2.
@@ -521,6 +549,9 @@ export function getForgeConfig(): typeof DEFAULT_FORGE {
 }
 export function getForgedReviewConfig(): typeof DEFAULT_FORGED_REVIEW {
   return getSection(DEFAULT_FORGED_REVIEW, "forged_review");
+}
+export function getWriteSpecConfig(): WriteSpecConfig {
+  return getSection(DEFAULT_WRITE_SPEC, "write_spec");
 }
 export function getIacReviewConfig(): typeof DEFAULT_IAC_REVIEW {
   return getSection(DEFAULT_IAC_REVIEW, "iac_review");

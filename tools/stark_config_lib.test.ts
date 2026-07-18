@@ -30,6 +30,7 @@ import {
   getSelfHealConfig,
   getSkillActivationConfig,
   getValidationGateConfig,
+  getWriteSpecConfig,
   isAgentEnabled,
   loadGlobalConfig,
 } from "./stark_config_lib.ts";
@@ -450,6 +451,38 @@ test("getRuntimeConfig: partial override merges, sibling defaults survive", asyn
     // Untouched defaults survive the partial override.
     assert.equal(cfg.lock_ttl_minutes, 30);
     assert.equal(cfg.temp_dir_prefix, "stark-env");
+  });
+});
+
+test("test_write_spec_config_defaults: concrete defaults with no config file", async () => {
+  await withScratchHome(() => {
+    const cfg = getWriteSpecConfig();
+    assert.equal(cfg.lead_agent, "claude");
+    assert.equal(cfg.wing_agent, "codex");
+    assert.equal(cfg.wing_reasoning_effort, "xhigh");
+    assert.equal(cfg.max_rounds, 3);
+    assert.equal(cfg.timeout_s, 900);
+    assert.equal(cfg.wing_timeout_s, 600);
+    assert.equal(cfg.max_input_chars, 200000);
+    assert.equal(cfg.history_keep_runs, 20);
+    assert.equal(cfg.open_pr, true);
+  });
+});
+
+test("getWriteSpecConfig: partial override deep-merges, sibling defaults survive", async () => {
+  await withScratchHome((home) => {
+    writeGlobalConfig(home, { write_spec: { max_rounds: 5, open_pr: false } });
+    const cfg = getWriteSpecConfig();
+    assert.equal(cfg.max_rounds, 5);
+    assert.equal(cfg.open_pr, false);
+    // Untouched defaults survive the partial override.
+    assert.equal(cfg.lead_agent, "claude");
+    assert.equal(cfg.wing_agent, "codex");
+    assert.equal(cfg.wing_reasoning_effort, "xhigh");
+    assert.equal(cfg.timeout_s, 900);
+    assert.equal(cfg.wing_timeout_s, 600);
+    assert.equal(cfg.max_input_chars, 200000);
+    assert.equal(cfg.history_keep_runs, 20);
   });
 });
 
