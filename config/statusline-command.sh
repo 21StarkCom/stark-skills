@@ -464,17 +464,22 @@ if _on code_churn; then
 fi
 
 # ═════════════════════════════════════════════════════════════════════════
-# Line 3: session clocks — started · elapsed · last reply · now
+# Line 3: session clocks — started · prompt+elapsed · last output · now
 # ═════════════════════════════════════════════════════════════════════════
 # "Started" = when the Claude Code PROCESS opened (survives /clear, unlike
 # cost.total_duration_ms which resets per session), read from the parent
 # process' start time (ps lstart → epoch). Cached per PPID so the ps+date
-# forks run once per Claude Code run, not every render. Elapsed = NOW − that.
-# "Last reply" has no payload field, so it's derived: the monotonic
+# forks run once per Claude Code run, not every render.
+# "Prompt" + "elapsed" originate from ONE event: prompt submission, stamped
+# to ~/.claude/.statusline-prompt-<sid> by the UserPromptSubmit hook
+# (config/statusline-prompt-hook.sh). Elapsed = NOW − that stamp — never any
+# other on-screen time. No stamp yet (hook not fired this session) → the
+# pair is hidden rather than faked from process start.
+# "Last output" has no payload field, so it's derived: the monotonic
 # cost.total_api_duration_ms only advances when an API call completes, so a
-# change since the previous render marks THIS render as the reply — we stamp
+# change since the previous render marks THIS render as the output — we stamp
 # NOW and cache {sig,ts} per session. Timer (refreshInterval) renders leave
-# the signature unchanged, so the stamp holds between replies.
+# the signature unchanged, so the stamp holds between outputs.
 l3=""
 if _on session_times; then
   # Claude Code execs the statusline directly, so $PPID is the `claude`
@@ -509,12 +514,21 @@ if _on session_times; then
   fi
   if [ "$_procstart" -gt 0 ] 2>/dev/null; then
     printf -v _startc '%(%H:%M)T' "$_procstart"
-    fmt_dur $(( NOW - _procstart ))
     seg3 "${DIM}\U0001f7e2 ${_startc}${R}"        # started (CC opened)
-    seg3 "${TEAL}⏱ ${FD}${R}"                # elapsed since open
   fi
 
-  # Last reply — api-duration signature cached per session (sid keeps
+  # Prompt + elapsed — both read the UserPromptSubmit hook's stamp, so they
+  # share one origin event: the moment the command was submitted.
+  _ppf="$HOME/.claude/.statusline-prompt-${sid:-default}"
+  _pt=""
+  [ -r "$_ppf" ] && IFS= read -r _pt < "$_ppf"
+  if [ "$_pt" -gt 0 ] 2>/dev/null; then
+    printf -v _ptc '%(%H:%M)T' "$_pt"
+    fmt_dur $(( NOW - _pt ))
+    seg3 "${PEACH}\U0001f4e4 ${_ptc}${R} ${TEAL}⏱ ${FD}${R}"  # prompt · elapsed since it
+  fi
+
+  # Last output — api-duration signature cached per session (sid keeps
   # concurrent sessions from clobbering each other's stamp).
   _lrf="$HOME/.claude/.statusline-lastreply-${sid:-default}"
   _sig="${api_dur_ms:-0}" _psig="" _lrt=""
@@ -526,7 +540,7 @@ if _on session_times; then
   if [ "$_lrt" -gt 0 ] 2>/dev/null; then
     printf -v _lrc '%(%H:%M)T' "$_lrt"
     fmt_dur $(( NOW - _lrt ))
-    seg3 "${GRN}\U0001f4ac ${_lrc}${DIM} (${FD} ago)${R}"   # last reply
+    seg3 "${GRN}\U0001f4ac ${_lrc}${DIM} (${FD} ago)${R}"   # last output
   fi
 
   printf -v _nowc '%(%H:%M)T' "$NOW"

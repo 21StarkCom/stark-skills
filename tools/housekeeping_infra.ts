@@ -206,7 +206,8 @@ export function findStaleCheckpointFiles(
 }
 
 // Per-run / per-session statusline state files live directly under ~/.claude
-// (`.statusline-procstart-<pid>`, `.statusline-lastreply-<sid>`). One accretes
+// (`.statusline-procstart-<pid>`, `.statusline-lastreply-<sid>`,
+// `.statusline-prompt-<sid>`). One accretes
 // per Claude Code process / session, so they pile up over time. They are tiny
 // and self-rebuild on the next render, so anything untouched for a while is
 // safe to drop. The single-file caches (`.statusline-git-dirty-cache`,
@@ -224,7 +225,8 @@ export function findStaleStatuslineStateFiles(
       const base = path.basename(rel);
       if (
         !base.startsWith(".statusline-procstart-") &&
-        !base.startsWith(".statusline-lastreply-")
+        !base.startsWith(".statusline-lastreply-") &&
+        !base.startsWith(".statusline-prompt-")
       ) {
         return false;
       }
