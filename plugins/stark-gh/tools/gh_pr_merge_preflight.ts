@@ -146,8 +146,19 @@ export function inferSection(labels: { name: string }[]): PrMergePlan["changelog
 }
 
 // Self-modifying PR gate (PR4-claude H06). Refuses if any changed file path
-// matches a guarded prefix.
-export function isSelfModifying(files: { path: string }[]): { offending: string | null } {
+// matches a guarded prefix — but only in the stark-skills repo itself. The
+// guarded prefixes are generic dir names (tools/, scripts/, …) that exist in
+// unrelated repos too, and the gate exists to stop the tool rewriting its own
+// runtime mid-run, not to police other repos' merges. Matched by repo NAME
+// (not owner/name) so an org migration doesn't silently disable the guard.
+const SELF_REPO_NAME = "stark-skills";
+
+export function isSelfModifying(
+  files: { path: string }[],
+  repoNameWithOwner: string,
+): { offending: string | null } {
+  const repoName = repoNameWithOwner.split("/").pop() ?? "";
+  if (repoName !== SELF_REPO_NAME) return { offending: null };
   for (const f of files) {
     for (const prefix of GUARDED_PREFIXES) {
       if (f.path.startsWith(prefix)) return { offending: f.path };
@@ -242,7 +253,7 @@ async function main(argv: string[]): Promise<number> {
   }
 
   // Step 4: self-modifying gate
-  const sm = isSelfModifying(pr.files);
+  const sm = isSelfModifying(pr.files, repoInfo.nameWithOwner);
   if (sm.offending) {
     die(MergeExit.SELF_MODIFYING_PR,
       `PR modifies stark-skills runtime files (${sm.offending}); refuse to self-execute. Merge via plain 'gh pr merge' after manual review.`);

@@ -96,33 +96,52 @@ test("inferSection: default Added", () => {
   assert.equal(inferSection([{ name: "documentation" }]), "Added");
 });
 
-test("isSelfModifying: catches plugins/stark-gh/** path", () => {
-  const r = isSelfModifying([{ path: "plugins/stark-gh/tools/lib/secret.ts" }]);
+const SELF = "21StarkCom/stark-skills";
+
+test("isSelfModifying: catches plugins/stark-gh/** path in the self repo", () => {
+  const r = isSelfModifying([{ path: "plugins/stark-gh/tools/lib/secret.ts" }], SELF);
   assert.equal(r.offending, "plugins/stark-gh/tools/lib/secret.ts");
 });
 
-test("isSelfModifying: catches scripts/** path", () => {
-  const r = isSelfModifying([{ path: "scripts/preflight.py" }]);
+test("isSelfModifying: catches scripts/** path in the self repo", () => {
+  const r = isSelfModifying([{ path: "scripts/preflight.py" }], SELF);
   assert.equal(r.offending, "scripts/preflight.py");
 });
 
-test("isSelfModifying: catches every guarded prefix", () => {
+test("isSelfModifying: catches every guarded prefix in the self repo", () => {
   const guarded = ["plugins/stark-gh/", "scripts/", "tools/", "global/", "skill/", "standards/"];
   for (const prefix of guarded) {
-    const r = isSelfModifying([{ path: prefix + "x.ts" }]);
+    const r = isSelfModifying([{ path: prefix + "x.ts" }], SELF);
     assert.equal(r.offending, prefix + "x.ts", `should match ${prefix}`);
   }
 });
 
-test("isSelfModifying: docs/ and root .md OK", () => {
-  const r1 = isSelfModifying([{ path: "docs/x.md" }]);
+test("isSelfModifying: guarded prefixes are inert in other repos", () => {
+  // Regression: Atlas's tools/CLAUDE.md blocked a docs-only merge (guard
+  // matched the generic tools/ prefix in a repo that is not stark-skills).
+  const r1 = isSelfModifying([{ path: "tools/CLAUDE.md" }], "21StarkCom/Atlas");
   assert.equal(r1.offending, null);
-  const r2 = isSelfModifying([{ path: "README.md" }]);
+  const r2 = isSelfModifying(
+    [{ path: "scripts/deploy.sh" }, { path: "plugins/stark-gh/x.ts" }],
+    "21StarkCom/some-other-repo",
+  );
+  assert.equal(r2.offending, null);
+});
+
+test("isSelfModifying: matches by repo name, not owner — survives org moves", () => {
+  const r = isSelfModifying([{ path: "tools/x.ts" }], "GetEvinced/stark-skills");
+  assert.equal(r.offending, "tools/x.ts");
+});
+
+test("isSelfModifying: docs/ and root .md OK in the self repo", () => {
+  const r1 = isSelfModifying([{ path: "docs/x.md" }], SELF);
+  assert.equal(r1.offending, null);
+  const r2 = isSelfModifying([{ path: "README.md" }], SELF);
   assert.equal(r2.offending, null);
 });
 
 test("isSelfModifying: empty file list OK", () => {
-  assert.equal(isSelfModifying([]).offending, null);
+  assert.equal(isSelfModifying([], SELF).offending, null);
 });
 
 test("workingTreeBlocker: clean tree returns null", () => {
