@@ -145,6 +145,17 @@ mkbar() { # pct gradarray → sets BAR: railed █ bar, filled cells fading ligh
   BAR="${_BORD}▐${R}${_fb[filled]}${DIM}${_E10:0:10-filled}${_BORD}▌${R}"
 }
 
+# Enterprise variant: rate-limit bars fill with 🔸 instead of the gradient
+# (org plan — the windows aren't the personal quota story, so the fill is a
+# marker, not a heat gradient).
+_D10=$'\U0001f538\U0001f538\U0001f538\U0001f538\U0001f538\U0001f538\U0001f538\U0001f538\U0001f538\U0001f538'
+mkbar_ent() { # pct → sets BAR: railed 🔸 bar
+  local filled=$(( ($1 * 10 + 50) / 100 ))
+  (( filled > 10 )) && filled=10
+  (( filled < 0 )) && filled=0
+  BAR="${_BORD}▐${R}${_D10:0:filled}${DIM}${_E10:0:10-filled}${_BORD}▌${R}"
+}
+
 gradient() { # text [palette] → sets GRAD: per-account color sweep
   # Static spatial gradient across the label. A 30s `refreshInterval` (settings.json)
   # re-runs the command on a timer so time-based segments (CTX / 5H / 7D, git
@@ -351,7 +362,10 @@ l2=""
 # stdin payload doesn't carry it. ~/.claude.json is big and changes rarely
 # relative to the 1s tick, so the jq parse is mtime-cached ([ -nt ] is a
 # builtin — zero forks on the hot path).
-if _on account; then
+# Resolved unconditionally (not just when the account segment is shown):
+# the 5H/7D gauges below key their fill style off acct_label (Enterprise → 🔸).
+acct_label=""
+{
   acct_email="" acct_otype=""
   _ac="$HOME/.claude/.statusline-account-cache"
   if [ -f "$_ac" ] && ! [ "$HOME/.claude.json" -nt "$_ac" ]; then
@@ -364,7 +378,6 @@ if _on account; then
   fi
   if [ -n "$acct_email" ]; then
     acct_dom=${acct_email##*@}            # evinced.com / evinced.net
-    acct_label=""
     case "$acct_dom" in
       *.com)
         if [ "$acct_otype" = "claude_max" ]; then acct_label="Max/Com"
@@ -383,7 +396,7 @@ if _on account; then
         esac; fi ;;
       *) acct_label="$acct_dom" ;;
     esac
-    if [ -n "$acct_label" ]; then
+    if _on account && [ -n "$acct_label" ]; then
       # Color family per account: Max/Net → violet, Max/Com → gold, Enterprise →
       # blue. The Team accounts share a magenta→orange spectrum, one shade each:
       # Team#0 magenta, Team#1 pink, Team#2 coral, Team#3 orange, Team#4 emerald→teal.
@@ -404,14 +417,13 @@ if _on account; then
       seg2 "${MAUVE}\U0001f464${R} ${GRAD}"
     fi
   fi
-fi
+}
 
-# Context capacity gauge — how full is the window.
-if _on ctx_usage && [ -n "$used_pct" ]; then
-  printf -v ctx '%.0f' "$used_pct"
-  tcolor "$ctx" 80 50; mkbar "$ctx" _CTX_FB
-  seg2 "${CTX_COL}CTX${R} ${BAR} ${TC}${ctx}%${R}"
-fi
+# Context capacity gauge — how full is the window. Always visible: a payload
+# without the field renders as 0% rather than hiding the gauge.
+printf -v ctx '%.0f' "${used_pct:-0}"
+tcolor "$ctx" 80 50; mkbar "$ctx" _CTX_FB
+seg2 "${CTX_COL}CTX${R} ${BAR} ${TC}${ctx}%${R}"
 
 # Turn flow — what flowed in/out on the last API call, read as one
 # narrative connected with arrows:
@@ -432,18 +444,18 @@ fi
 
 # 5-hour rate-limit window: fixed-color "5H" label instead of a dynamic-
 # colored emoji; countdown is a bare duration, no emoji/label of its own.
-if _on five_hour_rl && [ -n "$five_pct" ]; then
-  printf -v _fpct '%.0f' "$five_pct"
-  tcolor "$_fpct" 80 50; mkbar "$_fpct" _5H_FB; fmt_remain "$five_reset" ""
-  seg2 "${FIVEHR_COL}5H${R} ${BAR} ${TC}${_fpct}%${FR}${R}"
-fi
+# Always visible (missing pct → 0%); Enterprise fills with 🔸 instead of
+# the gradient.
+printf -v _fpct '%.0f' "${five_pct:-0}"
+tcolor "$_fpct" 80 50; fmt_remain "$five_reset" ""
+if [ "$acct_label" = "Enterprise" ]; then mkbar_ent "$_fpct"; else mkbar "$_fpct" _5H_FB; fi
+seg2 "${FIVEHR_COL}5H${R} ${BAR} ${TC}${_fpct}%${FR}${R}"
 # 7-day rate-limit window: fixed-color "7D" label instead of the dynamic-
 # colored 📅 emoji; countdown is a bare duration, matching 5H.
-if _on weekly_rl && [ -n "$week_pct" ]; then
-  printf -v _wpct '%.0f' "$week_pct"
-  tcolor "$_wpct" 80 50; mkbar "$_wpct" _7D_FB; fmt_remain "$week_reset" ""
-  seg2 "${DAY_COL}7D${R} ${BAR} ${TC}${_wpct}%${FR}${R}"
-fi
+printf -v _wpct '%.0f' "${week_pct:-0}"
+tcolor "$_wpct" 80 50; fmt_remain "$week_reset" ""
+if [ "$acct_label" = "Enterprise" ]; then mkbar_ent "$_wpct"; else mkbar "$_wpct" _7D_FB; fi
+seg2 "${DAY_COL}7D${R} ${BAR} ${TC}${_wpct}%${FR}${R}"
 
 _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
 
