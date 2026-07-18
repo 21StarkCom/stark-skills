@@ -8,6 +8,8 @@ import {
   CONTRACT_HEADER,
   NO_TOOLS,
   SECTION_IDS,
+  TRUNCATION_MARKER,
+  assembleBriefForDispatch,
   buildLeadCmd,
   buildWingCmd,
   composePrompt,
@@ -710,4 +712,74 @@ test("test_write_exit_artifacts_atomic", () => {
   } finally {
     cleanup();
   }
+});
+
+// ── Intent-brief assembly + truncation (#702) ────────────────────────────
+
+const ASK_SECTION = "## Ask\nBuild the write-spec intent brief loader.\n\n";
+const CONSTRAINTS_SECTION =
+  "## Constraints\nTypeScript only; immutable-asset reads via assetPromptsDir().\n\n";
+const TARGET_SECTION = "## Target\ntools/write_spec_lib.ts\n\n";
+
+// test_intent_brief_under_cap_passthrough
+test("assembleBriefForDispatch: under cap returns verbatim, no marker", () => {
+  const brief =
+    ASK_SECTION + CONSTRAINTS_SECTION + TARGET_SECTION + "## Source\nsome context\n";
+  const got = assembleBriefForDispatch(brief, 100_000);
+  assert.equal(got, brief);
+  assert.equal(got.includes(TRUNCATION_MARKER), false);
+});
+
+// test_intent_brief_truncation
+test("assembleBriefForDispatch: over cap truncates source only, marker present", () => {
+  const bulk = "## Source Material\n" + "x".repeat(50_000) + "\n";
+  const brief = ASK_SECTION + CONSTRAINTS_SECTION + TARGET_SECTION + bulk;
+  const cap = 2_000;
+  const got = assembleBriefForDispatch(brief, cap);
+
+  // Cap honored and marker present iff truncation occurred.
+  assert.ok(got.length <= cap, `expected <= ${cap}, got ${got.length}`);
+  assert.ok(got.endsWith(TRUNCATION_MARKER), "expected truncation marker at end");
+  assert.equal(
+    got.indexOf(TRUNCATION_MARKER),
+    got.lastIndexOf(TRUNCATION_MARKER),
+    "marker must appear exactly once",
+  );
+
+  // Ask / Constraints / Target preserved VERBATIM.
+  assert.ok(got.includes(ASK_SECTION), "Ask section must be verbatim");
+  assert.ok(got.includes(CONSTRAINTS_SECTION), "Constraints section must be verbatim");
+  assert.ok(got.includes(TARGET_SECTION), "Target section must be verbatim");
+
+  // The bulk source material was actually cut.
+  assert.ok(!got.includes("x".repeat(50_000)), "source material must be truncated");
+});
+
+// test_intent_brief_boundary_passthrough
+test("assembleBriefForDispatch: exactly at cap is passthrough (no marker)", () => {
+  const brief = ASK_SECTION + "## Source\n" + "y".repeat(20) + "\n";
+  const got = assembleBriefForDispatch(brief, brief.length);
+  assert.equal(got, brief);
+  assert.equal(got.includes(TRUNCATION_MARKER), false);
+});
+
+// test_intent_brief_protected_sections_never_truncated
+test("assembleBriefForDispatch: protected sections survive under a tiny cap", () => {
+  const brief =
+    ASK_SECTION +
+    CONSTRAINTS_SECTION +
+    TARGET_SECTION +
+    "## Source\n" +
+    "bulk ".repeat(1000);
+  const cap =
+    ASK_SECTION.length +
+    CONSTRAINTS_SECTION.length +
+    TARGET_SECTION.length +
+    TRUNCATION_MARKER.length +
+    10;
+  const got = assembleBriefForDispatch(brief, cap);
+  assert.ok(got.includes(ASK_SECTION));
+  assert.ok(got.includes(CONSTRAINTS_SECTION));
+  assert.ok(got.includes(TARGET_SECTION));
+  assert.ok(got.endsWith(TRUNCATION_MARKER));
 });

@@ -31,24 +31,18 @@
  */
 
 import {
-  buildAgentEnv,
-  parseCodexJsonl,
-  releaseAgentTempDir,
-  run,
-} from "./copilot_dispatch.ts";
-import {
-  type AgentCommand,
+  assembleBriefForDispatch,
   buildLeadCmd,
   buildWingCmd,
+  composePrompt,
   deriveSlugFromOut,
   loadAgentPromptText,
   loadContractText,
-  parseClaudeJson,
+  resolveWriteSpecDefaults,
   runWriteSpec,
   type WriteSpecAgent,
-  type WriteSpecDeps,
   type WriteSpecReceipt,
-  writeExitArtifacts,
+  type WriteSpecRole,
 } from "./write_spec_lib.ts";
 import { getWriteSpecConfig } from "./stark_config_lib.ts";
 
@@ -191,96 +185,26 @@ options:
 }
 
 /**
- * Pin a model id into a built agent argv by replacing the value after the
- * model flag (`--model` for claude, `-m` for codex). The lib's
- * `buildLeadCmd`/`buildWingCmd` already emit a config-resolved model; this
- * swaps that value for the CLI override without duplicating the flag.
- */
-function pinModel(cmd: AgentCommand, agent: WriteSpecAgent, model: string): AgentCommand {
-  const flag = agent === "codex" ? "-m" : "--model";
-  const args = [...cmd.args];
-  const idx = args.indexOf(flag);
-  if (idx >= 0 && idx + 1 < args.length) {
-    args[idx + 1] = model;
-  } else {
-    args.push(flag, model);
-  }
-  return { cmd: cmd.cmd, args };
-}
-
-/** Resolve the lead argv (with optional model pin) for a run/dry-run. */
-function resolveLeadCmd(a: CliArgs): AgentCommand {
-  const base = buildLeadCmd(a.lead);
-  return a.leadModel ? pinModel(base, a.lead, a.leadModel) : base;
-}
-
-/** Resolve the wing argv (with optional model pin) for a run/dry-run. */
-function resolveWingCmd(a: CliArgs): AgentCommand {
-  const cfg = getWriteSpecConfig();
-  const base = buildWingCmd(a.wing, String(cfg.wing_reasoning_effort || "xhigh"));
-  return a.wingModel ? pinModel(base, a.wing, a.wingModel) : base;
-}
-
-/**
- * Build custom dispatch+write deps ONLY when the CLI supplies model/timeout
- * overrides the lib's `RunWriteSpecOpts` cannot carry. Mirrors
- * `defaultWriteSpecDeps` (isolated agent env, run, codex/claude output parse,
- * fatal exit writer) with the resolved argv + timeouts substituted in. Returns
- * `undefined` when there is nothing to override, so `runWriteSpec` uses its own
- * defaults unchanged.
- */
-function buildOverrideDeps(a: CliArgs): Partial<WriteSpecDeps> | undefined {
-  if (!a.leadModel && !a.wingModel && a.timeout == null && a.wingTimeout == null) {
-    return undefined;
-  }
-  const cfg = getWriteSpecConfig();
-  const leadTimeout = a.timeout ?? (Number(cfg.timeout_s) || 900);
-  const wingTimeout = a.wingTimeout ?? (Number(cfg.wing_timeout_s) || 600);
-  const leadCmd = resolveLeadCmd(a);
-  const wingCmd = resolveWingCmd(a);
-
-  async function dispatch(
-    agent: WriteSpecAgent,
-    cmd: AgentCommand,
-    prompt: string,
-    timeoutSec: number,
-  ): Promise<string> {
-    const { env, tempDir } = await buildAgentEnv(agent, "local");
-    try {
-      const res = await run(cmd.cmd, cmd.args, { env, stdin: prompt, timeoutSec });
-      if (res.notFound) {
-        throw new Error(`write-spec: ${agent} CLI not found (${cmd.cmd})`);
-      }
-      if (res.code !== 0) {
-        throw new Error(
-          `write-spec: ${agent} exited ${res.code}: ${res.stderr.slice(0, 400)}`,
-        );
-      }
-      return agent === "codex"
-        ? parseCodexJsonl(res.stdout)
-        : parseClaudeJson(res.stdout).text;
-    } finally {
-      releaseAgentTempDir(tempDir);
-    }
-  }
-
-  return {
-    loadContract: loadContractText,
-    loadAgentPrompt: loadAgentPromptText,
-    dispatchLead: ({ prompt }) => dispatch(a.lead, leadCmd, prompt, leadTimeout),
-    dispatchWing: ({ prompt }) => dispatch(a.wing, wingCmd, prompt, wingTimeout),
-    writeArtifacts: writeExitArtifacts,
-  };
-}
-
-/**
  * Assemble the planned-dispatch object for `--dry-run`. Pure — resolves the
- * derived slug + the exact lead/wing argv WITHOUT dispatching or writing.
+ * derived slug, the exact lead/wing argv, AND the fully-composed lead/wing
+ * prompts (contract + per-agent template + assembled brief) WITHOUT dispatching
+ * or writing. Resolving the prompts here means a dry run surfaces a missing or
+ * broken prompt asset (absent contract.md / per-agent template) — the whole
+ * point of a dry run — and never redeclares the lib's default constants
+ * (`resolveWriteSpecDefaults`), so the printed numbers match a real run.
  */
 function buildDryRunPlan(a: CliArgs) {
-  const cfg = getWriteSpecConfig();
-  const lead = resolveLeadCmd(a);
-  const wing = resolveWingCmd(a);
+  const defaults = resolveWriteSpecDefaults();
+  const lead = buildLeadCmd(a.lead, a.leadModel ?? undefined);
+  const wing = buildWingCmd(a.wing, defaults.wingEffort, a.wingModel ?? undefined);
+
+  // Resolve + compose the planned prompts. Throws if any asset is missing or
+  // the contract is empty — exactly the failure a dry run should expose.
+  const contractText = loadContractText();
+  const assembledBrief = assembleBriefForDispatch(a.intentBrief, defaults.inputCap);
+  const composeFor = (agent: WriteSpecAgent, role: WriteSpecRole): string =>
+    composePrompt(loadAgentPromptText(agent, role), contractText, assembledBrief);
+
   return {
     dry_run: true,
     slug: deriveSlugFromOut(a.out),
@@ -289,12 +213,40 @@ function buildDryRunPlan(a: CliArgs) {
     wing_agent: a.wing,
     lead_model: a.leadModel,
     wing_model: a.wingModel,
-    max_rounds: a.maxRounds ?? (Number(cfg.max_rounds) || 3),
-    lead_timeout_s: a.timeout ?? (Number(cfg.timeout_s) || 900),
-    wing_timeout_s: a.wingTimeout ?? (Number(cfg.wing_timeout_s) || 600),
+    max_rounds: a.maxRounds ?? defaults.maxRounds,
+    lead_timeout_s: a.timeout ?? defaults.leadTimeoutS,
+    wing_timeout_s: a.wingTimeout ?? defaults.wingTimeoutS,
     lead_cmd: [lead.cmd, ...lead.args],
     wing_cmd: [wing.cmd, ...wing.args],
+    lead_prompt: composeFor(a.lead, "generate"),
+    wing_prompt: composeFor(a.wing, "verify"),
   };
+}
+
+/**
+ * Human-readable rendering of a real-run receipt (emitted when `--json` is NOT
+ * passed). `--json` prints the raw receipt object instead; the two paths carry
+ * the same information so the flag's advertised effect is consistent with the
+ * dry-run path.
+ */
+function renderReceipt(r: WriteSpecReceipt): string {
+  const lines: string[] = [];
+  lines.push(`write-spec ${r.ok ? "OK" : "FAILED"} — ${r.final_verdict}`);
+  lines.push(`  slug:      ${r.slug}`);
+  lines.push(`  spec_path: ${r.spec_path}`);
+  lines.push(`  run_dir:   ${r.run_dir}`);
+  lines.push(`  rounds:    ${r.rounds}`);
+  lines.push(`  lead/wing: ${r.lead_agent}/${r.wing_agent}`);
+  lines.push("  contract:");
+  for (const it of r.contract_status) {
+    lines.push(`    [${it.status}] ${it.section}${it.note ? `: ${it.note}` : ""}`);
+  }
+  if (r.dropped_sections.length > 0) {
+    lines.push(`  dropped:   ${r.dropped_sections.join(", ")}`);
+  }
+  if (r.summary) lines.push(`  summary:   ${r.summary}`);
+  if (r.error) lines.push(`  error:     ${r.error.code}: ${r.error.message}`);
+  return lines.join("\n") + "\n";
 }
 
 async function main(argv: string[]): Promise<number> {
@@ -317,7 +269,14 @@ async function main(argv: string[]): Promise<number> {
 
   // ── Dry run: print the planned dispatch, exit 0, zero side effects ──────
   if (args.dryRun) {
-    const plan = buildDryRunPlan(args);
+    let plan: ReturnType<typeof buildDryRunPlan>;
+    try {
+      plan = buildDryRunPlan(args);
+    } catch (err) {
+      // A missing/empty prompt asset is exactly what a dry run should surface.
+      process.stderr.write(`write_spec: ${(err as Error).message}\n`);
+      return 2;
+    }
     if (args.json) {
       process.stdout.write(JSON.stringify(plan, null, 2) + "\n");
     } else {
@@ -331,6 +290,8 @@ async function main(argv: string[]): Promise<number> {
       process.stdout.write(`  wing_timeout:  ${plan.wing_timeout_s}s\n`);
       process.stdout.write(`  lead_cmd:      ${plan.lead_cmd.join(" ")}\n`);
       process.stdout.write(`  wing_cmd:      ${plan.wing_cmd.join(" ")}\n`);
+      process.stdout.write(`  lead_prompt:   ${plan.lead_prompt.length} chars (assembled)\n`);
+      process.stdout.write(`  wing_prompt:   ${plan.wing_prompt.length} chars (assembled)\n`);
     }
     return 0;
   }
@@ -338,16 +299,17 @@ async function main(argv: string[]): Promise<number> {
   // ── Real run ────────────────────────────────────────────────────────────
   let receipt: WriteSpecReceipt;
   try {
-    receipt = await runWriteSpec(
-      {
-        out: args.out,
-        brief: args.intentBrief,
-        leadAgent: args.lead,
-        wingAgent: args.wing,
-        maxRounds: args.maxRounds ?? undefined,
-      },
-      buildOverrideDeps(args),
-    );
+    receipt = await runWriteSpec({
+      out: args.out,
+      brief: args.intentBrief,
+      leadAgent: args.lead,
+      wingAgent: args.wing,
+      maxRounds: args.maxRounds ?? undefined,
+      leadModel: args.leadModel,
+      wingModel: args.wingModel,
+      leadTimeoutS: args.timeout,
+      wingTimeoutS: args.wingTimeout,
+    });
   } catch (err) {
     const envelope = {
       ok: false,
@@ -355,11 +317,16 @@ async function main(argv: string[]): Promise<number> {
       spec_path: args.out,
       error: { code: "dispatch_failed", message: (err as Error).message },
     };
+    // The failure envelope is inherently structured; emit it as JSON either way.
     process.stdout.write(JSON.stringify(envelope, null, 2) + "\n");
     return 1;
   }
 
-  process.stdout.write(JSON.stringify(receipt, null, 2) + "\n");
+  if (args.json) {
+    process.stdout.write(JSON.stringify(receipt, null, 2) + "\n");
+  } else {
+    process.stdout.write(renderReceipt(receipt));
+  }
   // Exit 0 iff the contract was satisfied; otherwise non-zero (the skill 5-1
   // captures the handled verdict without aborting).
   return receipt.ok ? 0 : 1;

@@ -73,6 +73,45 @@ test("non-canonical --out is rejected before dispatch", () => {
   assert.match(r.stderr, /must match docs\/specs\/YYYY-MM-DD-<slug>-spec\.md/);
 });
 
+test("a non-agent --lead value hits the generic rejection (not the gemini branch)", () => {
+  const r = runCli([
+    "--intent-brief", "x",
+    "--out", canonicalOut("badlead"),
+    "--lead", "grok",
+  ]);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /--lead must be claude or codex; got grok/);
+  // NOT the gemini-specific message.
+  assert.doesNotMatch(r.stderr, /unsupported agent/);
+});
+
+test("a non-agent --wing value hits the generic rejection", () => {
+  const r = runCli([
+    "--intent-brief", "x",
+    "--out", canonicalOut("badwing"),
+    "--wing", "llama",
+  ]);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /--wing must be claude or codex; got llama/);
+});
+
+for (const [flag, value] of [
+  ["--max-rounds", "abc"], // NaN
+  ["--max-rounds", "0"], // not positive
+  ["--timeout", "-5"], // negative
+  ["--wing-timeout", "1.5"], // non-integer
+] as const) {
+  test(`parsePosInt rejects ${flag} ${value}`, () => {
+    const r = runCli([
+      "--intent-brief", "x",
+      "--out", canonicalOut(`pos-${flag.slice(2)}-${value.replace(/\W/g, "")}`),
+      flag, value,
+    ]);
+    assert.equal(r.code, 2);
+    assert.match(r.stderr, new RegExp(`\\${flag} must be a positive integer; got ${value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  });
+}
+
 test("--dry-run prints the planned dispatch (with derived slug) and writes nothing", () => {
   const out = canonicalOut("plan");
   // Guard: ensure a clean slate.

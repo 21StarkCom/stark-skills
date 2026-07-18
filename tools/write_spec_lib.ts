@@ -270,14 +270,42 @@ export interface AgentCommand {
 }
 
 /**
+ * The per-agent model flag. This is command-surface knowledge the lib owns
+ * (claude pins via `--model`, codex via `-m`); the CLI passes a model id as
+ * DATA and never reaches into the produced argv itself.
+ */
+function modelFlagFor(agent: WriteSpecAgent): string {
+  return agent === "codex" ? "-m" : "--model";
+}
+
+/**
+ * Pin `model` into a freshly-built agent argv by replacing the value after the
+ * agent's model flag (appending the flag if the base builder didn't emit it).
+ * Mutates + returns `args`. Used only by the lib's own builders, so no external
+ * caller depends on argv ordering.
+ */
+function pinModelFlag(agent: WriteSpecAgent, args: string[], model: string): string[] {
+  const flag = modelFlagFor(agent);
+  const idx = args.indexOf(flag);
+  if (idx >= 0 && idx + 1 < args.length) {
+    args[idx + 1] = model;
+  } else {
+    args.push(flag, model);
+  }
+  return args;
+}
+
+/**
  * Claude argv: the shared headless-Claude command (`buildClaudeCmd`,
  * `--output-format json`) with NO tools grantable (empty `allowedTools`, so
  * `--allowedTools` is never emitted) plus `--disallowedTools <NO_TOOLS...>`
  * appended at the END (mirrors `red_team_fold_lib.ts::buildDeciderCommand`).
  */
-function claudeAgentCmd(): AgentCommand {
+function claudeAgentCmd(model?: string): AgentCommand {
   const built = buildClaudeCmd({ outputFormat: "json", allowedTools: "" });
-  return { cmd: built.cmd, args: [...built.args, "--disallowedTools", ...NO_TOOLS] };
+  const args = [...built.args, "--disallowedTools", ...NO_TOOLS];
+  if (model) pinModelFlag("claude", args, model);
+  return { cmd: built.cmd, args };
 }
 
 /** Reasoning-effort levels a write-spec codex agent may run at. */
@@ -305,33 +333,40 @@ function codexReasoningEffort(effort: string): string {
  * the `codex exec` command surface) for the read-only cmd/base args, overriding
  * the reasoning effort with the resolved `-c` flag from `codex_utils_lib.ts`.
  */
-function codexAgentCmd(effort: string): AgentCommand {
+function codexAgentCmd(effort: string, model?: string): AgentCommand {
   const built = buildCodexCmd({
     readOnly: true,
     reasoningEffort: codexReasoningEffort(effort),
   });
-  return { cmd: built.cmd, args: built.args };
+  const args = built.args;
+  if (model) pinModelFlag("codex", args, model);
+  return { cmd: built.cmd, args };
 }
 
 /**
  * Build the LEAD (spec author) command for `agent`. Claude runs no-tools;
- * codex runs read-only at `high` effort.
+ * codex runs read-only at `high` effort. An optional `model` id is pinned into
+ * the argv via the agent's model flag (the `--lead-model` CLI override, passed
+ * as data — never post-hoc argv surgery).
  */
-export function buildLeadCmd(agent: WriteSpecAgent): AgentCommand {
-  return agent === "codex" ? codexAgentCmd("high") : claudeAgentCmd();
+export function buildLeadCmd(agent: WriteSpecAgent, model?: string): AgentCommand {
+  return agent === "codex" ? codexAgentCmd("high", model) : claudeAgentCmd(model);
 }
 
 /**
  * Build the WING (contract verifier) command for `agent`. Claude runs
  * no-tools; codex runs read-only at the configured `effort` (default `xhigh` —
  * the adversarial pass gets the higher reasoning budget). `effort` is threaded
- * from `write_spec.wing_reasoning_effort` so the config knob is honored.
+ * from `write_spec.wing_reasoning_effort` so the config knob is honored. An
+ * optional `model` id is pinned into the argv via the agent's model flag (the
+ * `--wing-model` CLI override).
  */
 export function buildWingCmd(
   agent: WriteSpecAgent,
   effort: string = "xhigh",
+  model?: string,
 ): AgentCommand {
-  return agent === "codex" ? codexAgentCmd(effort) : claudeAgentCmd();
+  return agent === "codex" ? codexAgentCmd(effort, model) : claudeAgentCmd(model);
 }
 
 /** The text + token usage unwrapped from a claude `--output-format json` run. */
@@ -413,6 +448,103 @@ export function composePrompt(
   ].join("\n");
 }
 
+// ── Intent-brief assembly + source-material truncation (#702) ────────────
+//
+// The composed prompt must stay under the model input budget
+// (`write_spec.max_input_chars`) without ever dropping the operator's actual
+// ask. Only bulk SOURCE MATERIAL is trimmed — the Ask / Constraints / Target
+// sections are preserved VERBATIM, and a visible marker is appended iff any
+// source content was actually cut. `assembleBriefForDispatch` is PURE.
+
+/**
+ * The exact marker appended when (and only when) source material was truncated.
+ * A downstream agent seeing this knows bulk context was cut — while the Ask /
+ * Constraints / Target it must honor are still present verbatim.
+ */
+export const TRUNCATION_MARKER =
+  "\n\n<!-- TRUNCATED: source material exceeded max_input_chars -->";
+
+/**
+ * Heading words that mark a section as protected (never truncated). Matched
+ * case-insensitively against the leading word of an ATX heading's text.
+ */
+const PROTECTED_HEADINGS = /^(ask|constraints|target)\b/i;
+
+interface BriefSection {
+  text: string;
+  isProtected: boolean;
+}
+
+/**
+ * Split a brief into sections at ATX-heading (`#`..`######`) boundaries,
+ * keeping each heading with the body that follows it (and any preamble before
+ * the first heading as an unprotected leading section). A section is protected
+ * when its heading's leading word is Ask / Constraints / Target.
+ */
+function splitBriefSections(briefText: string): BriefSection[] {
+  const parts = briefText.split(/(?=^#{1,6}[ \t]+)/m);
+  const sections: BriefSection[] = [];
+  for (const part of parts) {
+    if (part.length === 0) continue;
+    const m = /^(#{1,6})[ \t]+(.*)$/m.exec(part.split("\n", 1)[0] ?? "");
+    const headingText = m ? m[2]!.trim() : "";
+    sections.push({ text: part, isProtected: PROTECTED_HEADINGS.test(headingText) });
+  }
+  return sections;
+}
+
+/**
+ * Assemble the intent brief for dispatch, enforcing the `cap`
+ * (`write_spec.max_input_chars`) input budget.
+ *
+ * - Under cap → returned VERBATIM (passthrough, no marker).
+ * - Over cap → only SOURCE MATERIAL (non Ask/Constraints/Target sections) is
+ *   truncated, in document order, until the result fits within `cap`; the
+ *   Ask / Constraints / Target sections are kept verbatim in place, and
+ *   {@link TRUNCATION_MARKER} is appended.
+ *
+ * Invariants: the marker is present iff truncation actually occurred, and the
+ * result never exceeds `cap` — except the pathological case where the protected
+ * sections alone exceed `cap` (they are never truncated, so they still win).
+ */
+export function assembleBriefForDispatch(briefText: string, cap: number): string {
+  if (briefText.length <= cap) return briefText;
+
+  const sections = splitBriefSections(briefText);
+  const protectedTotal = sections
+    .filter((s) => s.isProtected)
+    .reduce((n, s) => n + s.text.length, 0);
+
+  // Budget for source material after reserving protected text + the marker.
+  const sourceBudget = Math.max(0, cap - protectedTotal - TRUNCATION_MARKER.length);
+
+  let remaining = sourceBudget;
+  let truncated = false;
+  const out: string[] = [];
+  for (const s of sections) {
+    if (s.isProtected) {
+      out.push(s.text);
+      continue;
+    }
+    if (remaining <= 0) {
+      truncated = true;
+      continue;
+    }
+    if (s.text.length <= remaining) {
+      out.push(s.text);
+      remaining -= s.text.length;
+    } else {
+      out.push(s.text.slice(0, remaining));
+      remaining = 0;
+      truncated = true;
+    }
+  }
+
+  let result = out.join("");
+  if (truncated) result += TRUNCATION_MARKER;
+  return result;
+}
+
 // ── The lead/wing loop + durable exit writer (#700) ──────────────────────
 //
 // The bounded round 1..N state machine: the lead drafts (round 1) or revises
@@ -468,8 +600,39 @@ export interface RunWriteSpecOpts {
   leadAgent?: WriteSpecAgent;
   wingAgent?: WriteSpecAgent;
   maxRounds?: number;
+  /** Override the lead model id (`--lead-model`). Passed as data to the builder. */
+  leadModel?: string | null;
+  /** Override the wing model id (`--wing-model`). Passed as data to the builder. */
+  wingModel?: string | null;
+  /** Override the lead dispatch timeout in seconds (`--timeout`). */
+  leadTimeoutS?: number | null;
+  /** Override the wing dispatch timeout in seconds (`--wing-timeout`). */
+  wingTimeoutS?: number | null;
   /** Override the slug-derived run dir (tests point this at a temp tree). */
   runDir?: string;
+}
+
+/** The config-resolved default knobs, read once. The SOLE home for the
+ * write-spec fallback literals — the CLI and the loop both consume these so a
+ * dry-run's printed numbers can never diverge from what a real run uses. */
+export interface WriteSpecDefaults {
+  maxRounds: number;
+  leadTimeoutS: number;
+  wingTimeoutS: number;
+  wingEffort: string;
+  inputCap: number;
+}
+
+/** Resolve the write-spec defaults from config (with the built-in fallbacks). */
+export function resolveWriteSpecDefaults(): WriteSpecDefaults {
+  const cfg = getWriteSpecConfig();
+  return {
+    maxRounds: Number(cfg.max_rounds) || 3,
+    leadTimeoutS: Number(cfg.timeout_s) || 900,
+    wingTimeoutS: Number(cfg.wing_timeout_s) || 600,
+    wingEffort: String(cfg.wing_reasoning_effort || "xhigh"),
+    inputCap: Number(cfg.max_input_chars) || 200_000,
+  };
 }
 
 /**
@@ -571,14 +734,30 @@ function buildVerifyBrief(draft: string): string {
   ].join("\n");
 }
 
-/** The real dispatch + write dependencies. */
+/** Per-run overrides the CLI threads through as DATA (never argv surgery). */
+export interface WriteSpecDispatchOverrides {
+  leadModel?: string | null;
+  wingModel?: string | null;
+  leadTimeoutS?: number | null;
+  wingTimeoutS?: number | null;
+}
+
+/** The real dispatch + write dependencies. Model/timeout overrides are passed
+ * as data and threaded into the lib's own argv builders + `run` timeouts. */
 export function defaultWriteSpecDeps(
   leadAgent: WriteSpecAgent,
   wingAgent: WriteSpecAgent,
+  overrides: WriteSpecDispatchOverrides = {},
 ): WriteSpecDeps {
-  const cfg = getWriteSpecConfig();
-  const leadTimeout = Number(cfg.timeout_s) || 900;
-  const wingTimeout = Number(cfg.wing_timeout_s) || 600;
+  const defaults = resolveWriteSpecDefaults();
+  const leadTimeout = overrides.leadTimeoutS ?? defaults.leadTimeoutS;
+  const wingTimeout = overrides.wingTimeoutS ?? defaults.wingTimeoutS;
+  const leadCmd = buildLeadCmd(leadAgent, overrides.leadModel ?? undefined);
+  const wingCmd = buildWingCmd(
+    wingAgent,
+    defaults.wingEffort,
+    overrides.wingModel ?? undefined,
+  );
 
   async function dispatch(
     agent: WriteSpecAgent,
@@ -612,15 +791,8 @@ export function defaultWriteSpecDeps(
   return {
     loadContract: loadContractText,
     loadAgentPrompt: loadAgentPromptText,
-    dispatchLead: ({ prompt }) =>
-      dispatch(leadAgent, buildLeadCmd(leadAgent), prompt, leadTimeout),
-    dispatchWing: ({ prompt }) =>
-      dispatch(
-        wingAgent,
-        buildWingCmd(wingAgent, String(cfg.wing_reasoning_effort || "xhigh")),
-        prompt,
-        wingTimeout,
-      ),
+    dispatchLead: ({ prompt }) => dispatch(leadAgent, leadCmd, prompt, leadTimeout),
+    dispatchWing: ({ prompt }) => dispatch(wingAgent, wingCmd, prompt, wingTimeout),
     writeArtifacts: writeExitArtifacts,
   };
 }
@@ -641,11 +813,19 @@ export async function runWriteSpec(
 ): Promise<WriteSpecReceipt> {
   const leadAgent: WriteSpecAgent = opts.leadAgent ?? "claude";
   const wingAgent: WriteSpecAgent = opts.wingAgent ?? "codex";
-  const cfg = getWriteSpecConfig();
-  const maxRounds = Math.max(1, opts.maxRounds ?? (Number(cfg.max_rounds) || 3));
+  const defaults = resolveWriteSpecDefaults();
+  const maxRounds = Math.max(1, opts.maxRounds ?? defaults.maxRounds);
+  // Enforce the input budget on the operator's intent brief up front: only
+  // source material is trimmed; Ask/Constraints/Target survive verbatim.
+  const assembledBrief = assembleBriefForDispatch(opts.brief, defaults.inputCap);
 
   const d: WriteSpecDeps = {
-    ...defaultWriteSpecDeps(leadAgent, wingAgent),
+    ...defaultWriteSpecDeps(leadAgent, wingAgent, {
+      leadModel: opts.leadModel,
+      wingModel: opts.wingModel,
+      leadTimeoutS: opts.leadTimeoutS,
+      wingTimeoutS: opts.wingTimeoutS,
+    }),
     ...deps,
   };
 
@@ -668,7 +848,7 @@ export async function runWriteSpec(
     let leadRole: WriteSpecRole;
     if (round === 1 || priorDraft === null) {
       leadRole = "generate";
-      leadBrief = opts.brief;
+      leadBrief = assembledBrief;
     } else {
       leadRole = "revise";
       const unsatisfied = (lastGoodVerdict?.items ?? []).filter(
