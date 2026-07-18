@@ -45,6 +45,7 @@ import {
   type WriteSpecRole,
 } from "./write_spec_lib.ts";
 import { getWriteSpecConfig } from "./stark_config_lib.ts";
+import { pathToFileURL } from "node:url";
 
 /** The v1 agent allowlist. `gemini` is a KNOWN-but-unsupported name (distinct
  * error message); anything else is an unknown value. */
@@ -229,7 +230,7 @@ function buildDryRunPlan(a: CliArgs) {
  * the same information so the flag's advertised effect is consistent with the
  * dry-run path.
  */
-function renderReceipt(r: WriteSpecReceipt): string {
+export function renderReceipt(r: WriteSpecReceipt): string {
   const lines: string[] = [];
   lines.push(`write-spec ${r.ok ? "OK" : "FAILED"} — ${r.final_verdict}`);
   lines.push(`  slug:      ${r.slug}`);
@@ -237,6 +238,15 @@ function renderReceipt(r: WriteSpecReceipt): string {
   lines.push(`  run_dir:   ${r.run_dir}`);
   lines.push(`  rounds:    ${r.rounds}`);
   lines.push(`  lead/wing: ${r.lead_agent}/${r.wing_agent}`);
+  // Cost is a first-class receipt field (#703) — surface it on the human path
+  // too, not only under --json, so both output paths carry the same info.
+  {
+    const n = r.cost_breakdown.length;
+    const unavailable = r.cost_notes.length > 0 ? " (some usage unavailable)" : "";
+    lines.push(
+      `  cost:      $${r.cost_usd.toFixed(4)} (${n} invocation${n === 1 ? "" : "s"})${unavailable}`,
+    );
+  }
   lines.push("  contract:");
   for (const it of r.contract_status) {
     lines.push(`    [${it.status}] ${it.section}${it.note ? `: ${it.note}` : ""}`);
@@ -332,9 +342,14 @@ async function main(argv: string[]): Promise<number> {
   return receipt.ok ? 0 : 1;
 }
 
-main(process.argv.slice(2))
-  .then((code) => process.exit(code))
-  .catch((err) => {
-    process.stderr.write(`write_spec: unhandled: ${(err as Error).stack ?? err}\n`);
-    process.exit(1);
-  });
+// Run `main` only when executed as the entry point — NOT when imported (e.g. a
+// unit test importing `renderReceipt`), so importing this module is side-effect
+// free.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main(process.argv.slice(2))
+    .then((code) => process.exit(code))
+    .catch((err) => {
+      process.stderr.write(`write_spec: unhandled: ${(err as Error).stack ?? err}\n`);
+      process.exit(1);
+    });
+}

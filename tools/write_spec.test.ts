@@ -12,8 +12,35 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { renderReceipt } from "./write_spec.ts";
+import type { WriteSpecReceipt } from "./write_spec_lib.ts";
 
 const CLI = fileURLToPath(new URL("./write_spec.ts", import.meta.url));
+
+/** A minimal receipt for exercising the human render. */
+function fakeReceipt(over: Partial<WriteSpecReceipt> = {}): WriteSpecReceipt {
+  return {
+    ok: true,
+    final_verdict: "contract_satisfied",
+    slug: "s",
+    spec_path: "docs/specs/2026-07-18-s-spec.md",
+    run_dir: "/tmp/run",
+    run_id: "r1",
+    rounds: 1,
+    lead_agent: "claude",
+    wing_agent: "codex",
+    contract_status: [],
+    dropped_sections: [],
+    summary: "",
+    cost_usd: 0.1234,
+    cost_breakdown: [
+      { agent: "claude", model: "m", inputTokens: 1, outputTokens: 2, cost_usd: 0.1234 },
+    ],
+    cost_notes: [],
+    persistence_errors: [],
+    ...over,
+  };
+}
 
 function runCli(args: string[]): { code: number; stdout: string; stderr: string } {
   const r = spawnSync(
@@ -28,6 +55,27 @@ function runCli(args: string[]): { code: number; stdout: string; stderr: string 
 function canonicalOut(tag: string): string {
   return path.join("/tmp", `2026-07-18-wsdry-${tag}-${process.pid}-spec.md`);
 }
+
+test("renderReceipt surfaces cost on the human path", () => {
+  const out = renderReceipt(fakeReceipt());
+  assert.match(out, /cost:\s+\$0\.1234 \(1 invocation\)/);
+  // No unavailable note when cost_notes is empty.
+  assert.doesNotMatch(out, /some usage unavailable/);
+});
+
+test("renderReceipt flags unavailable usage and pluralizes invocations", () => {
+  const out = renderReceipt(
+    fakeReceipt({
+      cost_usd: 0.5,
+      cost_breakdown: [
+        { agent: "claude", model: "m", inputTokens: 1, outputTokens: 2, cost_usd: 0.3 },
+        { agent: "codex", model: "m", inputTokens: 0, outputTokens: 0, cost_usd: 0 },
+      ],
+      cost_notes: [{ invocation: "wing:verify", reason: "usage_unavailable" }],
+    }),
+  );
+  assert.match(out, /cost:\s+\$0\.5000 \(2 invocations\) \(some usage unavailable\)/);
+});
 
 test("write_spec --help exits 0 and prints usage", () => {
   const r = runCli(["--help"]);

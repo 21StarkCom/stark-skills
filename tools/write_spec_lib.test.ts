@@ -913,6 +913,34 @@ test("test_usage_extraction_per_agent", () => {
   assert.equal(extractAgentUsage("gemini", "not json").available, false);
 });
 
+// The extractor documents supporting the OLDER/FLAT codex `token_count` shape
+// where the totals sit directly on `info` (or on the event) with no nested
+// `total_token_usage`. Exercise both flat variants to lock that branch.
+test("codex flat/older token_count shapes extract correctly", () => {
+  // Flat on `info` (no nested total_token_usage).
+  const flatOnInfo = JSON.stringify({
+    type: "token_count",
+    info: { input_tokens: 321, output_tokens: 123 },
+  });
+  const a = extractAgentUsage("codex", flatOnInfo);
+  assert.deepEqual(
+    { inputTokens: a.inputTokens, outputTokens: a.outputTokens, available: a.available },
+    { inputTokens: 321, outputTokens: 123, available: true },
+  );
+
+  // Flat on the event itself (no `info` object at all — oldest CLI shape).
+  const flatOnEvent = JSON.stringify({
+    type: "token_count",
+    input_tokens: 50,
+    output_tokens: 60,
+  });
+  const b = extractAgentUsage("codex", flatOnEvent);
+  assert.deepEqual(
+    { inputTokens: b.inputTokens, outputTokens: b.outputTokens, available: b.available },
+    { inputTokens: 50, outputTokens: 60, available: true },
+  );
+});
+
 /** Deps whose dispatches return rich {text, raw} envelopes carrying usage. */
 function costMockDeps(cfg: {
   leadDrafts: { text: string; raw: string }[];
