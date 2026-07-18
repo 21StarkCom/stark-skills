@@ -17,6 +17,13 @@ import type { WriteSpecReceipt } from "./write_spec_lib.ts";
 
 const CLI = fileURLToPath(new URL("./write_spec.ts", import.meta.url));
 
+// `--intent-brief` is a PATH to a markdown brief file (not inline text), so the
+// tests write a real temp brief and pass its path. BRIEF_MARKER is a distinctive
+// token used to assert the file CONTENTS (not the path string) flow through.
+const BRIEF_MARKER = `WS-BRIEF-CONTENTS-${process.pid}`;
+const BRIEF = path.join("/tmp", `ws-brief-${process.pid}.md`);
+fs.writeFileSync(BRIEF, `Ask: Build a widget\nConstraints: none\n${BRIEF_MARKER}\n`);
+
 /** A minimal receipt for exercising the human render. */
 function fakeReceipt(over: Partial<WriteSpecReceipt> = {}): WriteSpecReceipt {
   return {
@@ -86,7 +93,7 @@ test("write_spec --help exits 0 and prints usage", () => {
 
 test("gemini is rejected at validation with the exact v1 message", () => {
   const r = runCli([
-    "--intent-brief", "x",
+    "--intent-brief", BRIEF,
     "--out", canonicalOut("gem"),
     "--lead", "gemini",
   ]);
@@ -96,7 +103,7 @@ test("gemini is rejected at validation with the exact v1 message", () => {
 
 test("gemini rejected on --wing too", () => {
   const r = runCli([
-    "--intent-brief", "x",
+    "--intent-brief", BRIEF,
     "--out", canonicalOut("gemw"),
     "--wing", "gemini",
   ]);
@@ -106,24 +113,24 @@ test("gemini rejected on --wing too", () => {
 
 test("missing required flags exit 2", () => {
   assert.equal(runCli(["--out", canonicalOut("noBrief")]).code, 2);
-  assert.equal(runCli(["--intent-brief", "x"]).code, 2);
+  assert.equal(runCli(["--intent-brief", BRIEF]).code, 2);
 });
 
 test("unknown argument exits 2", () => {
-  const r = runCli(["--intent-brief", "x", "--out", canonicalOut("unk"), "--bogus"]);
+  const r = runCli(["--intent-brief", BRIEF, "--out", canonicalOut("unk"), "--bogus"]);
   assert.equal(r.code, 2);
   assert.match(r.stderr, /unknown argument: --bogus/);
 });
 
 test("non-canonical --out is rejected before dispatch", () => {
-  const r = runCli(["--intent-brief", "x", "--out", "/tmp/not-a-spec.md", "--dry-run"]);
+  const r = runCli(["--intent-brief", BRIEF, "--out", "/tmp/not-a-spec.md", "--dry-run"]);
   assert.equal(r.code, 2);
   assert.match(r.stderr, /must match docs\/specs\/YYYY-MM-DD-<slug>-spec\.md/);
 });
 
 test("a non-agent --lead value hits the generic rejection (not the gemini branch)", () => {
   const r = runCli([
-    "--intent-brief", "x",
+    "--intent-brief", BRIEF,
     "--out", canonicalOut("badlead"),
     "--lead", "grok",
   ]);
@@ -135,7 +142,7 @@ test("a non-agent --lead value hits the generic rejection (not the gemini branch
 
 test("a non-agent --wing value hits the generic rejection", () => {
   const r = runCli([
-    "--intent-brief", "x",
+    "--intent-brief", BRIEF,
     "--out", canonicalOut("badwing"),
     "--wing", "llama",
   ]);
@@ -151,7 +158,7 @@ for (const [flag, value] of [
 ] as const) {
   test(`parsePosInt rejects ${flag} ${value}`, () => {
     const r = runCli([
-      "--intent-brief", "x",
+      "--intent-brief", BRIEF,
       "--out", canonicalOut(`pos-${flag.slice(2)}-${value.replace(/\W/g, "")}`),
       flag, value,
     ]);
@@ -165,7 +172,7 @@ test("--dry-run prints the planned dispatch (with derived slug) and writes nothi
   // Guard: ensure a clean slate.
   if (fs.existsSync(out)) fs.rmSync(out);
   const r = runCli([
-    "--intent-brief", "Build a widget",
+    "--intent-brief", BRIEF,
     "--out", out,
     "--lead", "claude",
     "--wing", "codex",
@@ -188,7 +195,7 @@ test("--dry-run prints the planned dispatch (with derived slug) and writes nothi
 test("--dry-run threads model overrides into the planned argv", () => {
   const out = canonicalOut("model");
   const r = runCli([
-    "--intent-brief", "x",
+    "--intent-brief", BRIEF,
     "--out", out,
     "--lead", "claude",
     "--lead-model", "claude-fable-5",
@@ -204,4 +211,37 @@ test("--dry-run threads model overrides into the planned argv", () => {
   assert.ok(plan.lead_cmd.includes("claude-fable-5"));
   assert.ok(plan.wing_cmd.includes("gpt-5.6-sol"));
   assert.equal(fs.existsSync(out), false);
+});
+
+test("--intent-brief pointing at a missing file fails with a clear error", () => {
+  const missing = path.join("/tmp", `ws-brief-missing-${process.pid}.md`);
+  if (fs.existsSync(missing)) fs.rmSync(missing);
+  const r = runCli([
+    "--intent-brief", missing,
+    "--out", canonicalOut("missing"),
+    "--dry-run",
+  ]);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /cannot read --intent-brief PATH/);
+  assert.match(r.stderr, new RegExp(missing.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("--intent-brief file CONTENTS (not the path) flow through to the assembled prompt", () => {
+  const out = canonicalOut("contents");
+  const r = runCli([
+    "--intent-brief", BRIEF,
+    "--out", out,
+    "--lead", "claude",
+    "--wing", "codex",
+    "--json",
+    "--dry-run",
+  ]);
+  assert.equal(r.code, 0);
+  const plan = JSON.parse(r.stdout);
+  // The distinctive marker from the brief file's CONTENTS must appear in the
+  // composed lead prompt (the assembled brief), proving the file was read.
+  assert.ok(plan.lead_prompt.includes(BRIEF_MARKER));
+  assert.ok(plan.wing_prompt.includes(BRIEF_MARKER));
+  // And the raw path string is NOT what got assembled as the brief body.
+  assert.ok(!plan.lead_prompt.includes(BRIEF));
 });

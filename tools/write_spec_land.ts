@@ -36,6 +36,7 @@ import {
   type AppName,
 } from "./github_app_lib.ts";
 import { deriveSlugFromOut, type WriteSpecReceipt } from "./write_spec_lib.ts";
+import { getWriteSpecConfig } from "./stark_config_lib.ts";
 import { sanitizeSlug } from "./stark_handover_lib.ts";
 import {
   appForLead,
@@ -264,7 +265,7 @@ async function cmdPublish(argv: string[]): Promise<number> {
   const spec = str(flags, "spec");
   const receiptPath = str(flags, "receipt");
   const acceptedGapsPath = str(flags, "accepted-gaps");
-  const lead = str(flags, "lead") || "claude";
+  const lead = str(flags, "lead") || getWriteSpecConfig().lead_agent;
   const base = str(flags, "base") || "main";
   const title = str(flags, "title");
   const cwd = str(flags, "repo-dir") || process.cwd();

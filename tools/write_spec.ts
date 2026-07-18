@@ -45,6 +45,7 @@ import {
   type WriteSpecRole,
 } from "./write_spec_lib.ts";
 import { getWriteSpecConfig } from "./stark_config_lib.ts";
+import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 /** The v1 agent allowlist. `gemini` is a KNOWN-but-unsupported name (distinct
@@ -52,6 +53,8 @@ import { pathToFileURL } from "node:url";
 const VALID_AGENTS: ReadonlySet<string> = new Set(["claude", "codex"]);
 
 interface CliArgs {
+  /** Filesystem PATH to the intent brief (a markdown file); its CONTENTS are
+   * read at dispatch time and passed as the brief. Never the brief text. */
   intentBrief: string;
   out: string;
   lead: WriteSpecAgent;
@@ -157,8 +160,24 @@ function parseArgs(argv: string[]): CliArgs {
   return args;
 }
 
+/**
+ * Read the intent brief from the PATH passed via `--intent-brief`. The flag is a
+ * filesystem path (a markdown brief written to the session scratchpad), per the
+ * spec's dispatcher interface — NOT inline text. Throws a clear error if the
+ * file is missing or unreadable so a bad path fails before any dispatch.
+ */
+function readIntentBrief(briefPath: string): string {
+  try {
+    return readFileSync(briefPath, "utf8");
+  } catch (err) {
+    throw new Error(
+      `cannot read --intent-brief PATH ${briefPath}: ${(err as Error).message}`,
+    );
+  }
+}
+
 function printHelp(): void {
-  process.stdout.write(`usage: write_spec.ts [-h] --intent-brief BRIEF --out PATH
+  process.stdout.write(`usage: write_spec.ts [-h] --intent-brief PATH --out PATH
                      [--lead claude|codex] [--wing claude|codex]
                      [--lead-model ID] [--wing-model ID]
                      [--max-rounds N] [--timeout SEC] [--wing-timeout SEC]
@@ -171,7 +190,7 @@ match docs/specs/YYYY-MM-DD-<slug>-spec.md.
 
 options:
   -h, --help              show this help message and exit
-  --intent-brief BRIEF    Concrete intent the spec must satisfy (required).
+  --intent-brief PATH     Path to a markdown brief file whose CONTENTS are the concrete intent (required).
   --out PATH              Destination docs/specs/YYYY-MM-DD-<slug>-spec.md (required).
   --lead AGENT            Lead (author) agent: claude|codex (default from config).
   --wing AGENT            Wing (contract verifier) agent: claude|codex (default from config).
@@ -194,7 +213,7 @@ options:
  * point of a dry run — and never redeclares the lib's default constants
  * (`resolveWriteSpecDefaults`), so the printed numbers match a real run.
  */
-function buildDryRunPlan(a: CliArgs) {
+function buildDryRunPlan(a: CliArgs, briefText: string) {
   const defaults = resolveWriteSpecDefaults();
   const lead = buildLeadCmd(a.lead, a.leadModel ?? undefined);
   const wing = buildWingCmd(a.wing, defaults.wingEffort, a.wingModel ?? undefined);
@@ -202,7 +221,7 @@ function buildDryRunPlan(a: CliArgs) {
   // Resolve + compose the planned prompts. Throws if any asset is missing or
   // the contract is empty — exactly the failure a dry run should expose.
   const contractText = loadContractText();
-  const assembledBrief = assembleBriefForDispatch(a.intentBrief, defaults.inputCap);
+  const assembledBrief = assembleBriefForDispatch(briefText, defaults.inputCap);
   const composeFor = (agent: WriteSpecAgent, role: WriteSpecRole): string =>
     composePrompt(loadAgentPromptText(agent, role), contractText, assembledBrief);
 
@@ -277,11 +296,21 @@ async function main(argv: string[]): Promise<number> {
     return 2;
   }
 
+  // Read the intent brief from its PATH before any dispatch, so a missing or
+  // unreadable file fails fast (and identically on the dry-run + real paths).
+  let briefText: string;
+  try {
+    briefText = readIntentBrief(args.intentBrief);
+  } catch (err) {
+    process.stderr.write(`write_spec: ${(err as Error).message}\n`);
+    return 2;
+  }
+
   // ── Dry run: print the planned dispatch, exit 0, zero side effects ──────
   if (args.dryRun) {
     let plan: ReturnType<typeof buildDryRunPlan>;
     try {
-      plan = buildDryRunPlan(args);
+      plan = buildDryRunPlan(args, briefText);
     } catch (err) {
       // A missing/empty prompt asset is exactly what a dry run should surface.
       process.stderr.write(`write_spec: ${(err as Error).message}\n`);
@@ -311,7 +340,7 @@ async function main(argv: string[]): Promise<number> {
   try {
     receipt = await runWriteSpec({
       out: args.out,
-      brief: args.intentBrief,
+      brief: briefText,
       leadAgent: args.lead,
       wingAgent: args.wing,
       maxRounds: args.maxRounds ?? undefined,
