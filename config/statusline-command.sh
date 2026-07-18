@@ -149,11 +149,13 @@ mkbar() { # pct gradarray → sets BAR: railed █ bar, filled cells fading ligh
 # (org plan — the windows aren't the personal quota story, so the fill is a
 # marker, not a heat gradient).
 _D10=$'\U0001f538\U0001f538\U0001f538\U0001f538\U0001f538\U0001f538\U0001f538\U0001f538\U0001f538\U0001f538'
-mkbar_ent() { # pct → sets BAR: railed 🔸 bar
+mkbar_ent() { # pct → sets BAR: railed 🔸 bar, width-matched to the █ bars
+  # 🔸 renders 2 cells wide, so d diamonds + (10 − 2d) ░ keeps the 10-cell rail.
   local filled=$(( ($1 * 10 + 50) / 100 ))
   (( filled > 10 )) && filled=10
   (( filled < 0 )) && filled=0
-  BAR="${_BORD}▐${R}${_D10:0:filled}${DIM}${_E10:0:10-filled}${_BORD}▌${R}"
+  local d=$(( (filled + 1) / 2 ))
+  BAR="${_BORD}▐${R}${_D10:0:d}${DIM}${_E10:0:10-2*d}${_BORD}▌${R}"
 }
 
 gradient() { # text [palette] → sets GRAD: per-account color sweep
