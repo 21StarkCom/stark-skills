@@ -935,11 +935,13 @@ export function buildClaudeCmd(opts: {
   return { cmd: "claude", args };
 }
 
-function buildCodexCmd(opts: { readOnly: boolean }): { cmd: string; args: string[] } {
+export function buildCodexCmd(
+  opts: { readOnly: boolean; reasoningEffort?: string },
+): { cmd: string; args: string[] } {
   const args = [
     "exec",
     "-m", resolveModel("codex"),
-    "-c", CODEX_REASONING_EFFORT_MEDIUM,
+    "-c", opts.reasoningEffort ?? CODEX_REASONING_EFFORT_MEDIUM,
     "--ephemeral", "--json",
   ];
   if (opts.readOnly) args.push("-s", "read-only");

@@ -11,15 +11,32 @@
  * `verdict` key, so the two must never grab each other's objects. Both share
  * the `collectJsonCandidates` scan (copilot_dispatch.ts) to avoid drift.
  */
-import { readFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
+  buildAgentEnv,
   buildClaudeCmd,
+  buildCodexCmd,
   collectJsonCandidates,
   isPlainObject,
-  resolveModel,
+  parseCodexJsonl,
+  releaseAgentTempDir,
+  run,
 } from "./copilot_dispatch.ts";
-import { assetPromptsDir } from "./asset_root_lib.ts";
+import {
+  CODEX_REASONING_EFFORT_HIGH,
+  CODEX_REASONING_EFFORT_MEDIUM,
+  CODEX_REASONING_EFFORT_XHIGH,
+} from "./codex_utils_lib.ts";
+import { assetPromptsDir, stateRoot } from "./asset_root_lib.ts";
+import { getWriteSpecConfig } from "./stark_config_lib.ts";
+import { writeJsonAtomic } from "./stark_review_doc_lib.ts";
 
 /**
  * The sole runtime authority for spec section ids. A host typed literal — the
@@ -227,6 +244,10 @@ export function deriveSlugFromOut(outPath: string): string {
  * mutating/exfil primitives means even a jailbroken model has no Bash/Write/
  * WebFetch primitive to run a command, touch the filesystem, or make a
  * network call from inside the subprocess.
+ *
+ * Keep in sync with `red_team_fold_lib.ts::DECIDER_DISALLOWED_TOOLS` (copied
+ * verbatim to avoid coupling this module to the fold subsystem's audit/git/DB
+ * transitive deps).
  */
 export const NO_TOOLS = [
   "Bash",
@@ -259,23 +280,37 @@ function claudeAgentCmd(): AgentCommand {
   return { cmd: built.cmd, args: [...built.args, "--disallowedTools", ...NO_TOOLS] };
 }
 
+/** Reasoning-effort levels a write-spec codex agent may run at. */
+export type CodexEffort = "medium" | "high" | "xhigh";
+
 /**
- * Codex argv: `codex exec` at the given reasoning effort, `-s read-only`
- * (never mutates the target), prompt on stdin (`-`). Mirrors
- * `copilot_dispatch.ts::buildCodexCmd`.
+ * Map a config effort string to the canonical `-c model_reasoning_effort="…"`
+ * flag string owned by `codex_utils_lib.ts` (never re-derived inline). Unknown
+ * values fall back to `xhigh` (the adversarial-pass default).
  */
-function codexAgentCmd(effort: "high" | "xhigh"): AgentCommand {
-  return {
-    cmd: "codex",
-    args: [
-      "exec",
-      "-m", resolveModel("codex"),
-      "-c", `model_reasoning_effort="${effort}"`,
-      "--ephemeral", "--json",
-      "-s", "read-only",
-      "-",
-    ],
-  };
+function codexReasoningEffort(effort: string): string {
+  switch (effort) {
+    case "medium":
+      return CODEX_REASONING_EFFORT_MEDIUM;
+    case "high":
+      return CODEX_REASONING_EFFORT_HIGH;
+    case "xhigh":
+    default:
+      return CODEX_REASONING_EFFORT_XHIGH;
+  }
+}
+
+/**
+ * Codex argv: consumes `copilot_dispatch.ts::buildCodexCmd` (the SOLE owner of
+ * the `codex exec` command surface) for the read-only cmd/base args, overriding
+ * the reasoning effort with the resolved `-c` flag from `codex_utils_lib.ts`.
+ */
+function codexAgentCmd(effort: string): AgentCommand {
+  const built = buildCodexCmd({
+    readOnly: true,
+    reasoningEffort: codexReasoningEffort(effort),
+  });
+  return { cmd: built.cmd, args: built.args };
 }
 
 /**
@@ -288,11 +323,15 @@ export function buildLeadCmd(agent: WriteSpecAgent): AgentCommand {
 
 /**
  * Build the WING (contract verifier) command for `agent`. Claude runs
- * no-tools; codex runs read-only at `xhigh` effort (the adversarial pass gets
- * the higher reasoning budget).
+ * no-tools; codex runs read-only at the configured `effort` (default `xhigh` —
+ * the adversarial pass gets the higher reasoning budget). `effort` is threaded
+ * from `write_spec.wing_reasoning_effort` so the config knob is honored.
  */
-export function buildWingCmd(agent: WriteSpecAgent): AgentCommand {
-  return agent === "codex" ? codexAgentCmd("xhigh") : claudeAgentCmd();
+export function buildWingCmd(
+  agent: WriteSpecAgent,
+  effort: string = "xhigh",
+): AgentCommand {
+  return agent === "codex" ? codexAgentCmd(effort) : claudeAgentCmd();
 }
 
 /** The text + token usage unwrapped from a claude `--output-format json` run. */
@@ -372,4 +411,355 @@ export function composePrompt(
     "",
     briefText.trimEnd(),
   ].join("\n");
+}
+
+// ── The lead/wing loop + durable exit writer (#700) ──────────────────────
+//
+// The bounded round 1..N state machine: the lead drafts (round 1) or revises
+// (rounds 2+), the wing verifies the draft into a ContractVerdict, and the
+// host early-exits on a host-recomputed `done`. Every non-crash return writes
+// the spec (--out) + receipt.json to disk — those two writes are FATAL. The
+// loop is bounded by max_rounds and short-circuits on three terminal failure
+// modes (empty draft, byte-identical revision, unparseable wing verdict) so it
+// can never spin.
+
+/** Which write-spec agent role a prompt template drives. */
+export type WriteSpecRole = "generate" | "verify" | "revise";
+
+/**
+ * The closed set of terminal outcomes. `contract_satisfied` is the ONLY
+ * success; the other four are bounded-loop breakers that each map to a
+ * distinct `error.code`.
+ */
+export type FinalVerdict =
+  | "contract_satisfied"
+  | "max_rounds_unsatisfied"
+  | "lead_empty_draft"
+  | "unchanged_revision"
+  | "wing_unparseable";
+
+/**
+ * The durable run record. `contract_status` is the FINAL normalized
+ * nine-section {section,status,note} array (every SECTION_IDS id present) that
+ * Tasks 5-2/5-3 read to build the PR table, select unsatisfied items, mutate
+ * Open Questions, and emit accepted_gaps.
+ */
+export interface WriteSpecReceipt {
+  ok: boolean;
+  final_verdict: FinalVerdict;
+  slug: string;
+  spec_path: string;
+  run_dir: string;
+  rounds: number;
+  lead_agent: string;
+  wing_agent: string;
+  contract_status: ContractItem[];
+  dropped_sections: string[];
+  summary: string;
+  error?: { code: string; message: string };
+}
+
+/** Options for a single write-spec run. */
+export interface RunWriteSpecOpts {
+  /** Destination spec path — `docs/specs/YYYY-MM-DD-<slug>-spec.md`. */
+  out: string;
+  /** The concrete brief / intent the spec must satisfy. */
+  brief: string;
+  leadAgent?: WriteSpecAgent;
+  wingAgent?: WriteSpecAgent;
+  maxRounds?: number;
+  /** Override the slug-derived run dir (tests point this at a temp tree). */
+  runDir?: string;
+}
+
+/**
+ * Injectable seam so the loop is testable without real LLM calls. Each field
+ * defaults to a real implementation via {@link defaultWriteSpecDeps}; tests
+ * pass mocks for the dispatch + write surfaces.
+ */
+export interface WriteSpecDeps {
+  loadContract: () => string;
+  loadAgentPrompt: (agent: WriteSpecAgent, role: WriteSpecRole) => string;
+  /** Lead authoring dispatch — returns the raw spec draft text. */
+  dispatchLead: (ctx: { round: number; prompt: string }) => Promise<string>;
+  /** Wing verify dispatch — returns raw text containing the verdict JSON. */
+  dispatchWing: (
+    ctx: { round: number; attempt: number; prompt: string },
+  ) => Promise<string>;
+  /** FATAL spec + receipt writer (never swallow a failure). */
+  writeArtifacts: (
+    runDir: string,
+    specText: string,
+    receipt: WriteSpecReceipt,
+  ) => void;
+}
+
+/** An all-`missing` nine-id array — the fail-closed contract_status floor. */
+function allMissingItems(): ContractItem[] {
+  return SECTION_IDS.map((id) => ({ section: id, status: "missing", note: "" }));
+}
+
+/** The reminder appended to the wing's ONE retry after a malformed verdict. */
+const WING_FORMAT_REMINDER =
+  "\n\n---\nYour previous reply did not contain a parseable ContractVerdict. " +
+  "Reply with EXACTLY ONE fenced ```json block whose object has `items` " +
+  "(an array of {section,status,note}), `done`, and `summary` — nothing else.";
+
+/**
+ * Read a per-agent role template from
+ * `<assetPromptsDir>/write-spec/<agent>/<role>.md`.
+ */
+export function loadAgentPromptText(
+  agent: WriteSpecAgent,
+  role: WriteSpecRole,
+): string {
+  const p = path.join(assetPromptsDir(), "write-spec", agent, `${role}.md`);
+  return readFileSync(p, "utf8");
+}
+
+/** Atomic text write (tmp + rename in the same dir). */
+function writeTextAtomic(filePath: string, text: string): void {
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  const tmp = path.join(
+    path.dirname(filePath),
+    `.${path.basename(filePath)}.tmp-${process.pid}`,
+  );
+  writeFileSync(tmp, text);
+  renameSync(tmp, filePath);
+}
+
+/**
+ * FATAL exit writer: writes the spec to `receipt.spec_path` and `receipt.json`
+ * to `runDir`, both atomically. Called on EVERY non-crash return. If either
+ * write throws, the caller must NOT swallow it — a verdict reported without the
+ * spec on disk is a lie.
+ */
+export function writeExitArtifacts(
+  runDir: string,
+  specText: string,
+  receipt: WriteSpecReceipt,
+): void {
+  mkdirSync(runDir, { recursive: true });
+  writeTextAtomic(receipt.spec_path, specText);
+  writeJsonAtomic(path.join(runDir, "receipt.json"), receipt);
+}
+
+/** Build the concrete-brief text a revise round hands the lead. */
+function buildReviseBrief(priorDraft: string, unsatisfied: ContractItem[]): string {
+  const lines = unsatisfied.map(
+    (it) => `- [${it.status}] ${it.section}: ${it.note || "(no note)"}`,
+  );
+  return [
+    "Revise the spec draft below. Address ONLY these non-satisfied contract",
+    "items — do not re-open or rewrite already-satisfied sections:",
+    "",
+    ...lines,
+    "",
+    "--- CURRENT DRAFT ---",
+    priorDraft,
+  ].join("\n");
+}
+
+/** Build the concrete-brief text the wing verifies against. */
+function buildVerifyBrief(draft: string): string {
+  return [
+    "Verify the spec draft below against the authoritative contract. Emit a",
+    "ContractVerdict JSON (items/done/summary) covering every contract section.",
+    "",
+    "--- DRAFT UNDER REVIEW ---",
+    draft,
+  ].join("\n");
+}
+
+/** The real dispatch + write dependencies. */
+export function defaultWriteSpecDeps(
+  leadAgent: WriteSpecAgent,
+  wingAgent: WriteSpecAgent,
+): WriteSpecDeps {
+  const cfg = getWriteSpecConfig();
+  const leadTimeout = Number(cfg.timeout_s) || 900;
+  const wingTimeout = Number(cfg.wing_timeout_s) || 600;
+
+  async function dispatch(
+    agent: WriteSpecAgent,
+    cmd: AgentCommand,
+    prompt: string,
+    timeoutSec: number,
+  ): Promise<string> {
+    const { env, tempDir } = await buildAgentEnv(agent, "local");
+    try {
+      const res = await run(cmd.cmd, cmd.args, {
+        env,
+        stdin: prompt,
+        timeoutSec,
+      });
+      if (res.notFound) {
+        throw new Error(`write-spec: ${agent} CLI not found (${cmd.cmd})`);
+      }
+      if (res.code !== 0) {
+        throw new Error(
+          `write-spec: ${agent} exited ${res.code}: ${res.stderr.slice(0, 400)}`,
+        );
+      }
+      return agent === "codex"
+        ? parseCodexJsonl(res.stdout)
+        : parseClaudeJson(res.stdout).text;
+    } finally {
+      releaseAgentTempDir(tempDir);
+    }
+  }
+
+  return {
+    loadContract: loadContractText,
+    loadAgentPrompt: loadAgentPromptText,
+    dispatchLead: ({ prompt }) =>
+      dispatch(leadAgent, buildLeadCmd(leadAgent), prompt, leadTimeout),
+    dispatchWing: ({ prompt }) =>
+      dispatch(
+        wingAgent,
+        buildWingCmd(wingAgent, String(cfg.wing_reasoning_effort || "xhigh")),
+        prompt,
+        wingTimeout,
+      ),
+    writeArtifacts: writeExitArtifacts,
+  };
+}
+
+/**
+ * Run the bounded lead/wing write-spec loop. Loads the contract ONCE, then for
+ * each round the lead drafts/revises and the wing verifies into a
+ * host-recomputed ContractVerdict. Early-exits on `done`; otherwise revises
+ * with only the non-satisfied items. Terminates on empty draft, byte-identical
+ * revision, unparseable wing verdict (after ONE retry), or max_rounds. Writes
+ * the spec + receipt.json on EVERY non-crash return (FATAL writes).
+ *
+ * `ok === (final_verdict === 'contract_satisfied')`.
+ */
+export async function runWriteSpec(
+  opts: RunWriteSpecOpts,
+  deps?: Partial<WriteSpecDeps>,
+): Promise<WriteSpecReceipt> {
+  const leadAgent: WriteSpecAgent = opts.leadAgent ?? "claude";
+  const wingAgent: WriteSpecAgent = opts.wingAgent ?? "codex";
+  const cfg = getWriteSpecConfig();
+  const maxRounds = Math.max(1, opts.maxRounds ?? (Number(cfg.max_rounds) || 3));
+
+  const d: WriteSpecDeps = {
+    ...defaultWriteSpecDeps(leadAgent, wingAgent),
+    ...deps,
+  };
+
+  const slug = deriveSlugFromOut(opts.out);
+  const runDir =
+    opts.runDir ?? path.join(stateRoot(), "write-spec", "history", slug);
+  const contractText = d.loadContract();
+
+  let priorDraft: string | null = null;
+  let specText = "";
+  let lastGoodVerdict: ContractVerdict | null = null;
+  let roundsRun = 0;
+  let finalVerdict: FinalVerdict = "max_rounds_unsatisfied";
+
+  for (let round = 1; round <= maxRounds; round++) {
+    roundsRun = round;
+
+    // ── Lead: draft (round 1) or revise (rounds 2+) ──────────────────────
+    let leadBrief: string;
+    let leadRole: WriteSpecRole;
+    if (round === 1 || priorDraft === null) {
+      leadRole = "generate";
+      leadBrief = opts.brief;
+    } else {
+      leadRole = "revise";
+      const unsatisfied = (lastGoodVerdict?.items ?? []).filter(
+        (it) => it.status !== "satisfied" && it.status !== "n_a",
+      );
+      leadBrief = buildReviseBrief(priorDraft, unsatisfied);
+    }
+    const leadPrompt = composePrompt(
+      d.loadAgentPrompt(leadAgent, leadRole),
+      contractText,
+      leadBrief,
+    );
+    const draft = await d.dispatchLead({ round, prompt: leadPrompt });
+
+    if (draft.trim().length === 0) {
+      // Empty draft: preserve any prior draft as the on-disk spec.
+      finalVerdict = "lead_empty_draft";
+      specText = priorDraft ?? "";
+      break;
+    }
+    if (priorDraft !== null && draft === priorDraft) {
+      // Byte-identical revision: the lead is stuck; break the loop.
+      finalVerdict = "unchanged_revision";
+      specText = draft;
+      break;
+    }
+    specText = draft;
+
+    // ── Wing: verify → ContractVerdict (ONE retry on malformed JSON) ─────
+    const verifyTemplate = d.loadAgentPrompt(wingAgent, "verify");
+    let normalized: NormalizedContractVerdict | null = null;
+    for (let attempt = 1; attempt <= 2 && !normalized; attempt++) {
+      const brief =
+        buildVerifyBrief(draft) + (attempt === 2 ? WING_FORMAT_REMINDER : "");
+      const wingPrompt = composePrompt(verifyTemplate, contractText, brief);
+      const wingRaw = await d.dispatchWing({ round, attempt, prompt: wingPrompt });
+      const extracted = extractContractVerdictJson(wingRaw);
+      if (extracted) {
+        try {
+          normalized = normalizeContractVerdict(extracted);
+        } catch {
+          normalized = null;
+        }
+      }
+    }
+
+    if (!normalized) {
+      // Two malformed verdicts → terminate with the draft preserved.
+      finalVerdict = "wing_unparseable";
+      break;
+    }
+
+    lastGoodVerdict = normalized.verdict;
+    if (normalized.verdict.done) {
+      finalVerdict = "contract_satisfied";
+      break;
+    }
+
+    // Non-done → carry the draft forward for a revise round.
+    priorDraft = draft;
+  }
+
+  const contractStatus = lastGoodVerdict?.items ?? allMissingItems();
+  const droppedSections: string[] = [];
+  const ok = finalVerdict === "contract_satisfied";
+  const summary = lastGoodVerdict?.summary ?? "";
+
+  const receipt: WriteSpecReceipt = {
+    ok,
+    final_verdict: finalVerdict,
+    slug,
+    spec_path: opts.out,
+    run_dir: runDir,
+    rounds: roundsRun,
+    lead_agent: leadAgent,
+    wing_agent: wingAgent,
+    contract_status: contractStatus,
+    dropped_sections: droppedSections,
+    summary,
+    ...(ok
+      ? {}
+      : {
+          error: {
+            code: finalVerdict,
+            message: summary || `write-spec terminated: ${finalVerdict}`,
+          },
+        }),
+  };
+
+  // FATAL: never report a verdict without the spec + receipt on disk.
+  d.writeArtifacts(runDir, specText, receipt);
+
+  return receipt;
 }

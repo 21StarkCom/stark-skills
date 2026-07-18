@@ -17,6 +17,14 @@ import {
   loadContractText,
   normalizeContractVerdict,
   parseClaudeJson,
+  runWriteSpec,
+  writeExitArtifacts,
+} from "./write_spec_lib.ts";
+import type {
+  ContractItem,
+  FinalVerdict,
+  WriteSpecDeps,
+  WriteSpecReceipt,
 } from "./write_spec_lib.ts";
 import { DECIDER_DISALLOWED_TOOLS } from "./red_team_fold_lib.ts";
 import { assetPromptsDir } from "./asset_root_lib.ts";
@@ -168,6 +176,30 @@ test("test_partial_verdict_fails_closed", () => {
   assert.equal(naNoReason.verdict.done, false);
 });
 
+// A non-object raw (JSON array / string / null) is not a valid verdict shape.
+// The isPlainObject guard must fail closed: no items trusted, all 9 sections
+// synthesized as missing, done=false, empty summary — never throw, never
+// fabricate a truthy done.
+test("test_non_object_raw_fails_closed", () => {
+  for (const raw of [
+    [{ section: "intent", status: "satisfied", note: "ok" }],
+    "done",
+    42,
+    null,
+    true,
+  ] as unknown[]) {
+    const { verdict, droppedSections } = normalizeContractVerdict(raw);
+    assert.equal(verdict.items.length, SECTION_IDS.length);
+    assert.ok(
+      verdict.items.every((i) => i.status === "missing"),
+      "all sections synthesized missing",
+    );
+    assert.equal(verdict.done, false);
+    assert.equal(verdict.summary, "");
+    assert.deepEqual(droppedSections, []);
+  }
+});
+
 // Duplicate sections: first occurrence of a known section wins; a later
 // contradictory duplicate cannot flip the recorded status nor fabricate a
 // false done. Each SECTION_ID is counted once by computeDone.
@@ -308,6 +340,23 @@ test("test_agent_commands_expose_no_tools", () => {
   assert.ok(buildLeadCmd("codex").args.some((a) => a.includes('model_reasoning_effort="high"')));
 });
 
+// A configured wing_reasoning_effort override reaches the codex wing argv
+// (threaded through buildWingCmd, not literal-coded to xhigh).
+test("test_wing_reasoning_effort_config_honored", () => {
+  const overridden = buildWingCmd("codex", "high");
+  assert.ok(
+    overridden.args.some((a) => a.includes('model_reasoning_effort="high"')),
+    "config override 'high' reaches the wing argv",
+  );
+  assert.ok(
+    !overridden.args.some((a) => a.includes('model_reasoning_effort="xhigh"')),
+    "override replaces the default xhigh",
+  );
+  // Still consumes the read-only codex command surface.
+  const si = overridden.args.indexOf("-s");
+  assert.ok(si >= 0 && overridden.args[si + 1] === "read-only");
+});
+
 // test_parse_claude_json_envelope
 test("test_parse_claude_json_envelope", () => {
   const canned = JSON.stringify({
@@ -376,4 +425,289 @@ test("test_contract_ids_match_asset", () => {
     [...SECTION_IDS],
     "contract.md section headers drifted from SECTION_IDS",
   );
+});
+
+// ── runWriteSpec loop + durable exit writer (#700) ───────────────────────
+
+/** All nine sections satisfied — the host recomputes `done` true. */
+const ALL_SATISFIED: ContractItem[] = SECTION_IDS.map((section) => ({
+  section,
+  status: "satisfied",
+  note: "ok",
+}));
+
+/** Nine sections with `intent` set to a blocking `status`. */
+function withIntent(status: string): ContractItem[] {
+  return SECTION_IDS.map((section) => ({
+    section,
+    status: section === "intent" ? (status as ContractItem["status"]) : "satisfied",
+    note: section === "intent" ? "needs work" : "ok",
+  }));
+}
+
+/** Fence a ContractVerdict object as wing stdout. `done` is never trusted. */
+function wingJson(items: ContractItem[], summary = "s"): string {
+  return "```json\n" + JSON.stringify({ items, done: true, summary }) + "\n```";
+}
+
+interface MockConfig {
+  leadDrafts: string[];
+  wingReplies: string[];
+  writeArtifacts?: WriteSpecDeps["writeArtifacts"];
+}
+
+interface MockHandle {
+  deps: Partial<WriteSpecDeps>;
+  leadPrompts: string[];
+  wingPrompts: string[];
+  counts: () => { leadCalls: number; wingCalls: number };
+}
+
+function mockDeps(cfg: MockConfig): MockHandle {
+  let leadCalls = 0;
+  let wingCalls = 0;
+  const leadPrompts: string[] = [];
+  const wingPrompts: string[] = [];
+  const deps: Partial<WriteSpecDeps> = {
+    loadContract: () => "CONTRACT TEXT",
+    loadAgentPrompt: (agent, role) => `[${agent}:${role}]`,
+    dispatchLead: async ({ prompt }) => {
+      leadPrompts.push(prompt);
+      return cfg.leadDrafts[leadCalls++] ?? "";
+    },
+    dispatchWing: async ({ prompt }) => {
+      wingPrompts.push(prompt);
+      return cfg.wingReplies[wingCalls++] ?? "no json here at all";
+    },
+  };
+  if (cfg.writeArtifacts) deps.writeArtifacts = cfg.writeArtifacts;
+  return {
+    deps,
+    leadPrompts,
+    wingPrompts,
+    counts: () => ({ leadCalls, wingCalls }),
+  };
+}
+
+/** A temp run dir + conforming --out path for on-disk assertions. */
+function tmpRun(): { dir: string; out: string; cleanup: () => void } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "write-spec-run-"));
+  const out = path.join(dir, "2026-07-18-loop-test-spec.md");
+  return { dir, out, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+}
+
+// test_early_exit_single_pass — a clean first draft exits in ONE round with
+// exactly one lead + one wing call.
+test("test_early_exit_single_pass", async () => {
+  const { dir, out, cleanup } = tmpRun();
+  try {
+    const m = mockDeps({
+      leadDrafts: ["the spec draft"],
+      wingReplies: [wingJson(ALL_SATISFIED)],
+    });
+    const receipt = await runWriteSpec({ out, brief: "make it", runDir: dir }, m.deps);
+    assert.equal(receipt.final_verdict, "contract_satisfied");
+    assert.equal(receipt.ok, true);
+    assert.equal(receipt.error, undefined);
+    assert.equal(receipt.rounds, 1);
+    assert.deepEqual(m.counts(), { leadCalls: 1, wingCalls: 1 });
+    // Spec + receipt on disk.
+    assert.equal(fs.readFileSync(out, "utf8"), "the spec draft");
+    const persisted = JSON.parse(fs.readFileSync(path.join(dir, "receipt.json"), "utf8"));
+    assert.equal(persisted.final_verdict, "contract_satisfied");
+  } finally {
+    cleanup();
+  }
+});
+
+// test_over_scoped_routes_to_revise — an over_scoped section on round 1 blocks
+// done and routes to a revise round; the second lead prompt is a revise carrying
+// the non-satisfied item.
+test("test_over_scoped_routes_to_revise", async () => {
+  const { dir, out, cleanup } = tmpRun();
+  try {
+    const m = mockDeps({
+      leadDrafts: ["draft one", "draft two"],
+      wingReplies: [wingJson(withIntent("over_scoped")), wingJson(ALL_SATISFIED)],
+    });
+    const receipt = await runWriteSpec({ out, brief: "b", runDir: dir }, m.deps);
+    assert.equal(receipt.final_verdict, "contract_satisfied");
+    assert.equal(receipt.ok, true);
+    assert.equal(receipt.rounds, 2);
+    assert.deepEqual(m.counts(), { leadCalls: 2, wingCalls: 2 });
+    // Round-2 lead prompt is a revise carrying the over_scoped item.
+    assert.ok(m.leadPrompts[1]!.includes("[claude:revise]"), "round-2 uses revise template");
+    assert.ok(m.leadPrompts[1]!.includes("over_scoped"), "revise brief names the item");
+    assert.ok(m.leadPrompts[1]!.includes("draft one"), "revise brief carries prior draft");
+    assert.ok(m.leadPrompts[0]!.includes("[claude:generate]"), "round-1 uses generate");
+    assert.equal(fs.readFileSync(out, "utf8"), "draft two");
+  } finally {
+    cleanup();
+  }
+});
+
+// test_termination_matrix — each breaker yields the right final_verdict, ok=false,
+// error.code, and spec + receipt.json on disk.
+test("test_termination_matrix", async () => {
+  const cases: {
+    name: FinalVerdict;
+    cfg: MockConfig;
+    maxRounds?: number;
+    expectRounds: number;
+    expectSpec: string;
+  }[] = [
+    {
+      name: "max_rounds_unsatisfied",
+      cfg: {
+        leadDrafts: ["d1", "d2"],
+        wingReplies: [wingJson(withIntent("underspecified")), wingJson(withIntent("underspecified"))],
+      },
+      maxRounds: 2,
+      expectRounds: 2,
+      expectSpec: "d2",
+    },
+    {
+      name: "lead_empty_draft",
+      cfg: { leadDrafts: [""], wingReplies: [] },
+      expectRounds: 1,
+      expectSpec: "",
+    },
+    {
+      name: "unchanged_revision",
+      cfg: {
+        leadDrafts: ["same", "same"],
+        wingReplies: [wingJson(withIntent("missing"))],
+      },
+      maxRounds: 3,
+      expectRounds: 2,
+      expectSpec: "same",
+    },
+    {
+      name: "wing_unparseable",
+      cfg: { leadDrafts: ["a draft"], wingReplies: ["nope", "still nope"] },
+      expectRounds: 1,
+      expectSpec: "a draft",
+    },
+  ];
+
+  for (const c of cases) {
+    const { dir, out, cleanup } = tmpRun();
+    try {
+      const m = mockDeps(c.cfg);
+      const receipt = await runWriteSpec(
+        { out, brief: "b", runDir: dir, maxRounds: c.maxRounds },
+        m.deps,
+      );
+      assert.equal(receipt.final_verdict, c.name, `${c.name}: final_verdict`);
+      assert.equal(receipt.ok, false, `${c.name}: ok=false`);
+      assert.equal(receipt.error?.code, c.name, `${c.name}: error.code`);
+      assert.equal(receipt.rounds, c.expectRounds, `${c.name}: rounds`);
+      // Spec + receipt on disk in the slug-derived run dir.
+      assert.equal(fs.readFileSync(out, "utf8"), c.expectSpec, `${c.name}: spec text`);
+      const persisted = JSON.parse(
+        fs.readFileSync(path.join(dir, "receipt.json"), "utf8"),
+      ) as WriteSpecReceipt;
+      assert.equal(persisted.final_verdict, c.name, `${c.name}: persisted verdict`);
+      assert.equal(persisted.slug, "loop-test", `${c.name}: slug`);
+    } finally {
+      cleanup();
+    }
+  }
+});
+
+// test_receipt_contract_status_persisted — contract_status is the full
+// nine-section array on EVERY terminal verdict (5-2/5-3's input contract).
+test("test_receipt_contract_status_persisted", async () => {
+  const cases: { name: string; cfg: MockConfig; maxRounds?: number }[] = [
+    {
+      name: "satisfied",
+      cfg: { leadDrafts: ["d"], wingReplies: [wingJson(ALL_SATISFIED)] },
+    },
+    {
+      name: "max_rounds",
+      cfg: {
+        leadDrafts: ["d1", "d2"],
+        wingReplies: [wingJson(withIntent("underspecified")), wingJson(withIntent("underspecified"))],
+      },
+      maxRounds: 2,
+    },
+    // No good verdict was ever produced → all-missing nine-id floor.
+    { name: "empty_draft", cfg: { leadDrafts: [""], wingReplies: [] } },
+    {
+      name: "wing_unparseable",
+      cfg: { leadDrafts: ["d"], wingReplies: ["x", "y"] },
+    },
+  ];
+  for (const c of cases) {
+    const { dir, out, cleanup } = tmpRun();
+    try {
+      const receipt = await runWriteSpec(
+        { out, brief: "b", runDir: dir, maxRounds: c.maxRounds },
+        mockDeps(c.cfg).deps,
+      );
+      assert.equal(
+        receipt.contract_status.length,
+        SECTION_IDS.length,
+        `${c.name}: nine items`,
+      );
+      assert.deepEqual(
+        receipt.contract_status.map((i) => i.section),
+        [...SECTION_IDS],
+        `${c.name}: every section id present`,
+      );
+      for (const it of receipt.contract_status) {
+        assert.ok(typeof it.status === "string" && typeof it.note === "string");
+      }
+    } finally {
+      cleanup();
+    }
+  }
+});
+
+// test_spec_write_failure_is_fatal — a stubbed spec/receipt write failure fails
+// the run (distinct from Phase 4 non-fatal history writes).
+test("test_spec_write_failure_is_fatal", async () => {
+  const { dir, out, cleanup } = tmpRun();
+  try {
+    const m = mockDeps({
+      leadDrafts: ["draft"],
+      wingReplies: [wingJson(ALL_SATISFIED)],
+      writeArtifacts: () => {
+        throw new Error("disk full");
+      },
+    });
+    await assert.rejects(
+      () => runWriteSpec({ out, brief: "b", runDir: dir }, m.deps),
+      /disk full/,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+// writeExitArtifacts writes spec (to receipt.spec_path) + receipt.json (to
+// runDir) atomically; both are real files afterward.
+test("test_write_exit_artifacts_atomic", () => {
+  const { dir, out, cleanup } = tmpRun();
+  try {
+    const receipt: WriteSpecReceipt = {
+      ok: true,
+      final_verdict: "contract_satisfied",
+      slug: "loop-test",
+      spec_path: out,
+      run_dir: dir,
+      rounds: 1,
+      lead_agent: "claude",
+      wing_agent: "codex",
+      contract_status: ALL_SATISFIED,
+      dropped_sections: [],
+      summary: "done",
+    };
+    writeExitArtifacts(dir, "SPEC BODY", receipt);
+    assert.equal(fs.readFileSync(out, "utf8"), "SPEC BODY");
+    const persisted = JSON.parse(fs.readFileSync(path.join(dir, "receipt.json"), "utf8"));
+    assert.equal(persisted.slug, "loop-test");
+  } finally {
+    cleanup();
+  }
 });
