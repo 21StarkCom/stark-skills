@@ -26,8 +26,7 @@
  * Arg-parsing house style mirrors `write_spec.ts` / `red_team_fold.ts`.
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { pathToFileURL } from "node:url";
+import { readFileSync, realpathSync } from "node:fs";
 import {
   apiGet,
   apiPatch,
@@ -440,7 +439,20 @@ async function main(argv: string[]): Promise<number> {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Resolve both sides through `realpathSync`: skills invoke this tool via the
+// `~/.claude/code-review/tools` symlink, and a raw path comparison never matches
+// through a symlink — `main()` would silently never run and exit 0 regardless.
+function isMain(): boolean {
+  try {
+    const argv1 = process.argv[1];
+    if (!argv1) return false;
+    return realpathSync(argv1) === realpathSync(new URL(import.meta.url).pathname);
+  } catch {
+    return false;
+  }
+}
+
+if (isMain()) {
   main(process.argv.slice(2))
     .then((code) => process.exit(code))
     .catch((err) => {

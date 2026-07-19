@@ -45,8 +45,7 @@ import {
   type WriteSpecRole,
 } from "./write_spec_lib.ts";
 import { DEFAULT_WRITE_SPEC, getWriteSpecConfig } from "./stark_config_lib.ts";
-import { readFileSync } from "node:fs";
-import { pathToFileURL } from "node:url";
+import { readFileSync, realpathSync } from "node:fs";
 
 /** The v1 agent allowlist. `gemini` is a KNOWN-but-unsupported name (distinct
  * error message); anything else is an unknown value. */
@@ -374,7 +373,20 @@ async function main(argv: string[]): Promise<number> {
 // Run `main` only when executed as the entry point — NOT when imported (e.g. a
 // unit test importing `renderReceipt`), so importing this module is side-effect
 // free.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Resolve both sides through `realpathSync`: skills invoke this tool via the
+// `~/.claude/code-review/tools` symlink, and a raw path comparison never matches
+// through a symlink — `main()` would silently never run and exit 0 regardless.
+function isMain(): boolean {
+  try {
+    const argv1 = process.argv[1];
+    if (!argv1) return false;
+    return realpathSync(argv1) === realpathSync(new URL(import.meta.url).pathname);
+  } catch {
+    return false;
+  }
+}
+
+if (isMain()) {
   main(process.argv.slice(2))
     .then((code) => process.exit(code))
     .catch((err) => {
