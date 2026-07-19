@@ -418,3 +418,9 @@ All new deterministic logic lives in the pure library `forge_state_lib.ts` and i
 - **`merge_timeout_s` default calibration.** Proposed 1800s. Real CI green time across target repos hasn't been measured; the default may need tuning after the first live run. *Owner:* operator, post-first-run. Non-blocking.
 - **Slug collision across concurrent runs.** V1 assumes a single operator runs one forge chain at a time. Two concurrent runs on the same intent would share a slug and race on the `latest` pointer. Deemed out of scope for the single-user tier — parked, not solved. *Owner:* deferred; revisit only if concurrent runs become a real usage pattern.
 - **`--until` on a merged partial pipeline — re-entry as a fresh forge run.** When `--until review-plan` leaves a merged plan on `main`, a later `/stark-forge <plan-path>` (auto-detecting `review-plan`) will re-review an already-reviewed plan. Whether forge should detect "this artifact was already carried by a prior forge run" and skip ahead is deferred — V1 relies on the operator using `--from`. *Owner:* deferred. Non-blocking.
+
+## Open Questions
+
+- [object Object]
+- [object Object]
+- [object Object]
