@@ -37,6 +37,7 @@ import {
   requiredOutputsFor,
   requiresBaseSync,
   resolveChain,
+  sanitizeSlug,
   stageArtifact,
   transition,
 } from "./forge_state_lib.ts";
@@ -999,6 +1000,41 @@ test("grep guard: outcome:\"crashed\" produced only inside reconcileRunningStage
     idx > reconcileStart && idx < nextExport,
     "crashed literal is inside reconcileRunningStage",
   );
+});
+
+// ---------------------------------------------------------------------------
+// Test #14 — slug sanitization: a path-traversal intent cannot escape the dir
+// ---------------------------------------------------------------------------
+
+test("slug sanitization: a path-traversal intent cannot escape the history dir", () => {
+  // Traversal / separator / dot-file attempts all collapse to safe kebab.
+  const attacks: [string, string][] = [
+    ["../../etc/passwd", "etc-passwd"],
+    ["..", "run"],
+    [".", "run"],
+    ["...", "run"],
+    ["/absolute/path", "absolute-path"],
+    [".hidden", "hidden"],
+    ["a/b/c", "a-b-c"],
+    ["My Cool Intent!", "my-cool-intent"],
+    ["", "run"],
+    ["   ", "run"],
+    ["___", "run"],
+    ["Foo..Bar", "foo-bar"],
+  ];
+  for (const [raw, want] of attacks) {
+    const slug = sanitizeSlug(raw);
+    assert.equal(slug, want, `sanitizeSlug(${JSON.stringify(raw)})`);
+    // Structural traversal guarantees, regardless of the exact mapping:
+    assert.doesNotMatch(slug, /[/\\]/, "no path separator");
+    assert.doesNotMatch(slug, /^\./, "no leading dot");
+    assert.ok(slug !== "." && slug !== "..", "never a dot-dir");
+    assert.match(slug, /^[a-z0-9][a-z0-9-]*$/, "kebab, leading alnum");
+  }
+  // Long input is capped and never left with a trailing dash.
+  const long = sanitizeSlug("x".repeat(500));
+  assert.ok(long.length <= 80);
+  assert.doesNotMatch(long, /-$/);
 });
 
 test("lib imports nothing network/clock/disk", () => {

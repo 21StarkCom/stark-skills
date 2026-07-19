@@ -1062,6 +1062,36 @@ export function renderStageCommand(state: RunState, stage: Stage): string {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 3 — Slug sanitization (T2, issue #759)
+// ---------------------------------------------------------------------------
+
+/** Upper bound on a sanitized slug — long enough for a descriptive intent
+ * fragment, short enough to keep the history dir name sane. Mirrors the
+ * handover slug cap. */
+const MAX_SLUG_LEN = 80;
+
+/**
+ * Sanitize an arbitrary intent/path into a kebab slug safe to use as a single
+ * history directory-name segment (T2). Pure — no I/O. Path-traversal-safe by
+ * construction: the only surviving characters are `[a-z0-9]` and `-`
+ * (everything else, INCLUDING `/`, `.`, and the `..` sequence, collapses to a
+ * single `-`), leading/trailing dashes are stripped, so the result can never be
+ * `.`/`..`, carry a leading dot, or contain a path separator and thus cannot
+ * escape the host's per-slug history directory. Mirrors
+ * `stark_handover_lib.ts::sanitizeSlug`. Empty/all-punctuation input falls back
+ * to `"run"` so a directory name always exists.
+ */
+export function sanitizeSlug(raw: string): string {
+  const slug = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, MAX_SLUG_LEN)
+    .replace(/^-+|-+$/g, "");
+  return slug || "run";
+}
+
+// ---------------------------------------------------------------------------
 // initializeRun — the pure run-state constructor (T7)
 // ---------------------------------------------------------------------------
 
