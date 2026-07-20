@@ -10,6 +10,7 @@ import test from "node:test";
 
 import {
   DEFAULT_FORGE,
+  DEFAULT_FORGE_PIPELINE,
   DEFAULT_MODELS,
   DEFAULT_MODEL_LIMITS,
   DEFAULT_MODEL_RATES,
@@ -19,6 +20,7 @@ import {
   getContextCompactionConfig,
   getCostConfig,
   getForgeConfig,
+  getForgePipelineConfig,
   getForgedReviewConfig,
   getModelId,
   getModelLimit,
@@ -483,6 +485,60 @@ test("getWriteSpecConfig: partial override deep-merges, sibling defaults survive
     assert.equal(cfg.wing_timeout_s, 600);
     assert.equal(cfg.max_input_chars, 200000);
     assert.equal(cfg.history_keep_runs, 20);
+  });
+});
+
+test("forge_pipeline is a separate section from forge — no symbol collision", async () => {
+  await withScratchHome(() => {
+    // Both the existing review-routing keys AND the new pipeline keys resolve.
+    assert.equal(getForgeConfig().domain_routing.security, "codex");
+    assert.equal(getForgePipelineConfig().history_keep_runs, 20);
+    assert.equal(getForgePipelineConfig().merge_timeout_s, 1800);
+  });
+});
+
+test("getForgePipelineConfig: partial override merges, forge section untouched", async () => {
+  await withScratchHome((home) => {
+    writeGlobalConfig(home, {
+      forge_pipeline: { history_keep_runs: 5 },
+      forge: { max_rounds: 9 },
+    });
+    assert.equal(getForgePipelineConfig().history_keep_runs, 5);
+    // Sibling pipeline default survives.
+    assert.equal(getForgePipelineConfig().merge_timeout_s, 1800);
+    // The disjoint forge section is unaffected.
+    assert.equal(getForgeConfig().max_rounds, 9);
+    assert.equal(getForgeConfig().domain_routing.completeness, "claude");
+  });
+});
+
+test("getForgePipelineConfig: malformed/zero/negative/fractional overrides fall back to defaults", async () => {
+  const bad: unknown[] = ["garbage", 0, -1, 1.5, null, true, [], {}, NaN, Infinity];
+  for (const v of bad) {
+    await withScratchHome((home) => {
+      writeGlobalConfig(home, {
+        forge_pipeline: { history_keep_runs: v, merge_timeout_s: v },
+      });
+      const cfg = getForgePipelineConfig();
+      assert.equal(
+        cfg.history_keep_runs,
+        DEFAULT_FORGE_PIPELINE.history_keep_runs,
+        `history_keep_runs should reject ${JSON.stringify(v)}`,
+      );
+      assert.equal(
+        cfg.merge_timeout_s,
+        DEFAULT_FORGE_PIPELINE.merge_timeout_s,
+        `merge_timeout_s should reject ${JSON.stringify(v)}`,
+      );
+    });
+  }
+  // A valid positive integer override still applies.
+  await withScratchHome((home) => {
+    writeGlobalConfig(home, {
+      forge_pipeline: { history_keep_runs: 3, merge_timeout_s: 42 },
+    });
+    assert.equal(getForgePipelineConfig().history_keep_runs, 3);
+    assert.equal(getForgePipelineConfig().merge_timeout_s, 42);
   });
 });
 

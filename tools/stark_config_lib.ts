@@ -315,6 +315,16 @@ export const DEFAULT_FORGE = {
   fix_timeout: 900,
 };
 
+/**
+ * `forge_pipeline` section — the `/stark-forge` pipeline orchestrator's durable
+ * knobs. Deliberately SEPARATE from `DEFAULT_FORGE` (review-routing) above:
+ * same-prefixed name, disjoint concern, no symbol collision.
+ */
+export const DEFAULT_FORGE_PIPELINE = {
+  history_keep_runs: 20,
+  merge_timeout_s: 1800,
+};
+
 export const DEFAULT_FORGED_REVIEW = {
   forge_threshold: 4,
   max_rounds: 3,
@@ -546,6 +556,33 @@ export function getCostConfig(): typeof DEFAULT_COST {
 }
 export function getForgeConfig(): typeof DEFAULT_FORGE {
   return getSection(DEFAULT_FORGE, "forge");
+}
+/** Coerce `value` to a positive finite integer, else fall back safely. Guards
+ * against a malformed `forge_pipeline` override (e.g. `history_keep_runs:
+ * "garbage"` / 0 / -1 / 1.5) reaching `Array.slice` in `pruneRunDirs`, which
+ * would coerce to 0 and prune every run, orphaning the `latest` pointer. */
+function positiveIntOr(value: unknown, fallback: number): number {
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    value > 0
+    ? value
+    : fallback;
+}
+
+export function getForgePipelineConfig(): typeof DEFAULT_FORGE_PIPELINE {
+  const merged = getSection(DEFAULT_FORGE_PIPELINE, "forge_pipeline");
+  // Both settings drive filesystem retention / timeouts — validate at the read
+  // boundary so no malformed override propagates downstream.
+  return {
+    history_keep_runs: positiveIntOr(
+      merged.history_keep_runs,
+      DEFAULT_FORGE_PIPELINE.history_keep_runs,
+    ),
+    merge_timeout_s: positiveIntOr(
+      merged.merge_timeout_s,
+      DEFAULT_FORGE_PIPELINE.merge_timeout_s,
+    ),
+  };
 }
 export function getForgedReviewConfig(): typeof DEFAULT_FORGED_REVIEW {
   return getSection(DEFAULT_FORGED_REVIEW, "forged_review");
