@@ -100,6 +100,41 @@ export type RunState = {
   stages: StageRecord[];
 };
 
+/**
+ * The action a resume must take at the target stage (Phase 4, T1). The pure lib
+ * computes exactly one per reachable non-abandoned state:
+ *   - `reinvoke`  — re-enter the stage skill (checkpoint absent / plan-to-tasks
+ *                   marker absent); executor first does the `failed→running` CAS.
+ *   - `advance`   — enter the next `pending` stage (executor does `pending→running`).
+ *   - `complete`  — the sliced chain is fully `done`; nothing left to run.
+ *   - `merge_only`— checkpointed merge-point stage short of all merges (or an
+ *                   open fold PR): retry ONLY the merge, never the stage skill.
+ *   - `abandon`   — a documented dead end (author PR merged early / a registry PR
+ *                   closed): no in-run continuation; operator runs `abandon`.
+ */
+export type ResumeAction =
+  | "reinvoke"
+  | "advance"
+  | "complete"
+  | "merge_only"
+  | "abandon";
+
+/**
+ * The resume descriptor — the SOLE command/routing channel both executors (the
+ * Phase 5 driver renderer, the Phase 6 in-session SKILL.md) consume. `command`
+ * and `requires_base_sync` are populated by the pure lib alone (via
+ * `renderStageCommand`/`requiresBaseSync`); executors never call those helpers.
+ */
+export type ResumeTarget = {
+  run_id: string;
+  slug: string;
+  target_stage: Stage;
+  action: ResumeAction;
+  reconciled: boolean;
+  requires_base_sync: boolean;
+  command: string | null;
+};
+
 /** Resolved-run descriptor consumed by `initializeRun` (T7). */
 export type ResolvedRun = {
   chain: Stage[];
@@ -207,6 +242,22 @@ function clone<T>(v: T): T {
   return structuredClone(v);
 }
 
+/**
+ * Guard every mutating entry point against an abandoned run. Abandonment is
+ * terminal (spec §6: no operation mutates the old run afterward), so
+ * `recordOutput`/`transition`/`reconcileRunningStage` reject an abandoned state
+ * regardless of the stage's own status (pending/running/…). Only `abandonRun`
+ * itself stays reachable — and it is idempotent.
+ */
+function assertActiveRun(state: RunState, op: string): void {
+  if (state.abandoned_at) {
+    throw err(
+      "run_abandoned",
+      `Run '${state.run_id}' (slug '${state.slug}') is abandoned (${state.abandoned_at}); ${op} cannot mutate a terminal run.`,
+    );
+  }
+}
+
 function stageIndex(state: RunState, stage: Stage): number {
   const idx = state.stages.findIndex((s) => s.stage === stage);
   if (idx === -1) {
@@ -312,6 +363,7 @@ export function recordOutput(
     at: string;
   },
 ): RunState {
+  assertActiveRun(state, "recordOutput");
   const next = clone(state);
   const idx = stageIndex(next, args.stage);
   const rec = next.stages[idx];
@@ -452,6 +504,7 @@ export function transition(
   },
   readPr?: PrReader,
 ): RunState {
+  assertActiveRun(state, "transition");
   const current = state.stages[stageIndex(state, args.stage)].status;
 
   // Replay-safe no-op reprint: re-issuing a transition whose `to` already
@@ -560,6 +613,7 @@ export function reconcileRunningStage(
   },
   readPr: PrReader,
 ): RunState {
+  assertActiveRun(state, "reconcileRunningStage");
   const idx0 = stageIndex(state, args.stage);
   const current = state.stages[idx0].status;
   if (current !== "running") {
@@ -575,11 +629,13 @@ export function reconcileRunningStage(
     );
   }
 
-  // For a `→done` reconciliation, record each observed merge that has NO
-  // existing entry as {pr, merged_by_forge: false} (monotonic — recordOutput
-  // never demotes an existing `true`).
+  // Record each observed merge that has NO existing entry as {pr,
+  // merged_by_forge: false} (monotonic — recordOutput never demotes an existing
+  // `true`). Applies to BOTH `→done` and `→halted` reconciliation: an already-
+  // merged registry PR is recorded even while the merge overall stays pending
+  // (criterion #16 — partial merges are never discarded).
   let next =
-    args.to === "done" && args.observedMerges && args.observedMerges.length > 0
+    args.observedMerges && args.observedMerges.length > 0
       ? recordOutput(state, {
           stage: args.stage,
           merges: args.observedMerges.map((m) => ({
@@ -1128,4 +1184,419 @@ export function initializeRun(
     abandoned_at: null,
     stages,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 — Resume reconciliation + resume-target (T1–T4)
+//
+// PURITY: still no clock/disk/net/git — the ONLY external observation is the
+// injected `readPr`. Reconciliation mutates and RETURNS the reconciled state;
+// the pure lib performs NO persistence (the CLI writes it, Phase 5). Re-entry
+// (`halted/failed → running`) belongs to the RESUME EXECUTOR, never here —
+// `resumeTarget` always leaves the target at `done`/`halted`/`failed`.
+// ---------------------------------------------------------------------------
+
+/** Halt gate reasons that mean "the artifact can never merge in this run". */
+const DEAD_END_HALT_REASONS = new Set<string>([
+  "author_pr_merged_early",
+  "artifact_pr_closed",
+]);
+
+/**
+ * Whether a non-merge stage recorded its checkpoint: its required outputs (spec
+ * §4) AND — for a PR-backed stage (`stageArtifact !== null`) — its adopted/opened
+ * PR. The PR clause is load-bearing: red-team-chain `review-spec`/`review-plan`
+ * are non-merge-point stages whose `requiredOutputsFor` list is EMPTY, so an
+ * outputs-only check returns true vacuously — a crash before the stage records
+ * its adopted PR would then reconcile it to `done` and silently skip the review.
+ * plan-to-tasks (`stageArtifact === null`) stays keyed to its `issue_numbers`
+ * marker only.
+ */
+function checkpointOutputsRecorded(rec: StageRecord): boolean {
+  const outputsRecorded = requiredOutputsFor(rec.stage).every((field) =>
+    isRecorded((rec.artifacts as Record<string, unknown>)[field], field),
+  );
+  if (!outputsRecorded) return false;
+  if (stageArtifact(rec.stage) !== null) return rec.prs.length > 0;
+  return true;
+}
+
+/** Whether the stage owns a merge point (spec §6 registry merge). */
+function isMergePointStage(state: RunState, stage: Stage): boolean {
+  return state.merge_points.some((m) => m.after_stage === stage);
+}
+
+/** Whether a stopped stage recorded its checkpoint (merge point: a PR
+ * observation; non-merge: its required outputs). */
+function checkpointRecorded(state: RunState, rec: StageRecord): boolean {
+  return isMergePointStage(state, rec.stage)
+    ? rec.prs.length > 0
+    : checkpointOutputsRecorded(rec);
+}
+
+/**
+ * Derive the resume action for a stage already at `halted`/`failed` (either from
+ * a prior reconciliation the caller persisted, or a normal episode-end). Shared
+ * by the post-reconciliation recompute AND the no-running-stage frontier scan so
+ * a re-loaded halted/failed run maps to the same action without re-reconciling.
+ *
+ * The action is derived from merge-point membership + checkpoint presence, NOT
+ * from status alone: a checkpointed merge point that failed post-checkpoint (e.g.
+ * `ci_red`) has completed its review/copilot work and only needs the merge
+ * retried → `merge_only`, never `reinvoke` (which would repeat that work). A
+ * checkpoint-absent stopped stage never got past its work → `reinvoke`. Dead-end
+ * halts (author PR merged early / registry PR closed) have no in-run
+ * continuation → `abandon`.
+ */
+function actionForStoppedStage(
+  state: RunState,
+  rec: StageRecord,
+  readPr: PrReader,
+): ResumeAction {
+  if (rec.gate && DEAD_END_HALT_REASONS.has(rec.gate.reason)) return "abandon";
+  if (!checkpointRecorded(state, rec)) return "reinvoke";
+  if (!isMergePointStage(state, rec.stage)) {
+    // Checkpoint present on a non-merge stage. Derive the action from status,
+    // NOT from a hard-coded dead-end reason list: a `halted` non-merge stage is
+    // terminal — the authoring already completed (checkpoint present), so its
+    // remaining path is nothing → `abandon` (re-invoking would repeat completed
+    // authoring). A `failed` non-merge stage still has work to redo → reinvoke.
+    return rec.status === "halted" ? "abandon" : "reinvoke";
+  }
+  // A merge point only has the merge left to retry — but LIVE-CHECK the registry
+  // first. A merge_pending/fold_pr_open halt was persisted while its PR was open;
+  // if that PR has since been CLOSED (not merged) the artifact can never merge, so
+  // the dead-end recovery is `abandon`, never an endless `merge_only` retry.
+  const artifact = stageArtifact(rec.stage);
+  const registry = artifact === null ? [] : state.artifact_prs[artifact] ?? [];
+  if (registry.some((pr) => readPr(pr) === "closed")) return "abandon";
+  return "merge_only";
+}
+
+/**
+ * Given a state with NO `running` stage (either never had one, or the crashed
+ * stage was just reconciled), find the frontier and its action. Sequential
+ * chain ⇒ the first non-`done` stage is the frontier; a `halted`/`failed` stage
+ * stops the chain (T3) — the scan lands on it before any downstream `pending`,
+ * so no downstream stage is ever auto-entered.
+ */
+function forwardTargetAndAction(
+  state: RunState,
+  readPr: PrReader,
+): {
+  target_stage: Stage;
+  action: ResumeAction;
+} {
+  const frontier = state.stages.find((s) => s.status !== "done");
+  if (!frontier) {
+    // Whole sliced chain done → complete. target_stage is the last chain stage
+    // (its `requires_base_sync` is still reported; `command` will be null).
+    return { target_stage: state.chain[state.chain.length - 1], action: "complete" };
+  }
+  switch (frontier.status) {
+    case "pending":
+      return { target_stage: frontier.stage, action: "advance" };
+    case "halted":
+    case "failed":
+      return { target_stage: frontier.stage, action: actionForStoppedStage(state, frontier, readPr) };
+    case "running":
+      // Unreachable: a running frontier is reconciled before this runs.
+      throw err(
+        "unreconciled_running",
+        `forwardTargetAndAction reached a 'running' stage '${frontier.stage}' — it must be reconciled first.`,
+      );
+    default:
+      throw err(
+        "unexpected_status",
+        `forwardTargetAndAction: unexpected status '${frontier.status}' for '${frontier.stage}'.`,
+      );
+  }
+}
+
+/**
+ * Reconcile the one crashed (`running`) stage per spec `behavior` → Resume
+ * reconciliation. Returns the reconciled state (target left at done/halted/
+ * failed). Read-only on the outside world beyond `readPr`.
+ */
+function reconcileFrontier(
+  state: RunState,
+  rec: StageRecord,
+  readPr: PrReader,
+  at: string,
+): RunState {
+  const stage = rec.stage;
+  const artifact = stageArtifact(stage);
+  const isMergePoint = state.merge_points.some((m) => m.after_stage === stage);
+  const crashedGate = (reason: string, detail: string): Gate => ({ reason, detail });
+
+  if (isMergePoint) {
+    // Checkpoint = the stage recorded its own PR observation before merging.
+    if (rec.prs.length === 0) {
+      return reconcileRunningStage(
+        state,
+        {
+          stage,
+          to: "failed",
+          gate: crashedGate(
+            "reconciled_after_crash",
+            `Merge-point stage '${stage}' crashed before recording its PR checkpoint; re-invoking idempotently.`,
+          ),
+          at,
+        },
+        readPr,
+      );
+    }
+    const registry = state.artifact_prs[artifact as "spec" | "plan" | "impl"] ?? [];
+    // Snapshot every registry PR state ONCE so `done` and `halted` reconciliation
+    // agree on what was observed (readPr is the sole external observation).
+    const registryStates = registry.map((pr) => ({ pr, state: readPr(pr) }));
+    // Every already-merged PR is persisted (merged_by_forge:false) even when the
+    // merge overall stays pending — partial merges are never discarded (#16).
+    const observedMerges = registryStates
+      .filter((r) => r.state === "merged")
+      .map((r) => ({ pr: r.pr }));
+    // A registry PR CLOSED (not merged) = the artifact can never merge → dead end.
+    if (registryStates.some((r) => r.state === "closed")) {
+      return reconcileRunningStage(
+        state,
+        {
+          stage,
+          to: "halted",
+          observedMerges,
+          gate: crashedGate(
+            "artifact_pr_closed",
+            `A registry PR for '${artifact}' was closed without merging; the artifact can no longer merge in this run.`,
+          ),
+          at,
+        },
+        readPr,
+      );
+    }
+    const allMerged =
+      registryStates.length > 0 && registryStates.every((r) => r.state === "merged");
+    const openFold = (rec.fold_prs ?? []).some((pr) => readPr(pr) === "open");
+    if (allMerged && !openFold) {
+      return reconcileRunningStage(
+        state,
+        { stage, to: "done", observedMerges, at },
+        readPr,
+      );
+    }
+    // Execution completed, only the merge remains → merge_only (never re-invoke).
+    // Observed merges are recorded monotonically even while the merge is pending.
+    return reconcileRunningStage(
+      state,
+      {
+        stage,
+        to: "halted",
+        observedMerges,
+        gate: openFold
+          ? crashedGate(
+              "fold_pr_open",
+              `Merge-point stage '${stage}' has an open fold PR blocking the artifact merge.`,
+            )
+          : crashedGate(
+              "merge_pending",
+              `Merge-point stage '${stage}' has un-merged registry PR(s); retry the merge only.`,
+            ),
+        at,
+      },
+      readPr,
+    );
+  }
+
+  // --- non-merge-point stage (author stages + plan-to-tasks marker) ---
+  // Checkpoint = the stage's required outputs (spec §4) are all recorded. For
+  // plan-to-tasks this IS the `issue_numbers` marker (T4). Absent → re-invoke.
+  if (!checkpointOutputsRecorded(rec)) {
+    return reconcileRunningStage(
+      state,
+      {
+        stage,
+        to: "failed",
+        gate: crashedGate(
+          "reconciled_after_crash",
+          `Stage '${stage}' crashed before recording its required outputs; re-invoking idempotently.`,
+        ),
+        at,
+      },
+      readPr,
+    );
+  }
+
+  // Checkpoint present. A PR-backed author stage's PR is MEANT to stay open until
+  // its paired review, so both terminal PR states are dead ends:
+  //   - externally MERGED before the paired review → shared-PR model broken.
+  //   - CLOSED without merging → the artifact can never merge (a closed author PR
+  //     cannot be adopted by the paired review).
+  if (artifact !== null) {
+    const registry = state.artifact_prs[artifact] ?? [];
+    if (registry.some((pr) => readPr(pr) === "merged")) {
+      return reconcileRunningStage(
+        state,
+        {
+          stage,
+          to: "halted",
+          gate: crashedGate(
+            "author_pr_merged_early",
+            `The author PR for '${artifact}' was merged before its paired review stage; the shared-PR model is broken.`,
+          ),
+          at,
+        },
+        readPr,
+      );
+    }
+    if (registry.some((pr) => readPr(pr) === "closed")) {
+      return reconcileRunningStage(
+        state,
+        {
+          stage,
+          to: "halted",
+          gate: crashedGate(
+            "artifact_pr_closed",
+            `The author PR for '${artifact}' was closed without merging; a closed author PR cannot be adopted by the paired review.`,
+          ),
+          at,
+        },
+        readPr,
+      );
+    }
+  }
+
+  // Healthy: execution completed, PR still open (or no PR) → done.
+  return reconcileRunningStage(state, { stage, to: "done", at }, readPr);
+}
+
+/**
+ * Inspect a run at resume and return the reconciled state + the action
+ * descriptor (T1). If the frontier stage is `running` (crashed) it is
+ * reconciled first (mutating + returning the state) and the action recomputed
+ * from the reconciled chain — never an unconditional `advance`. The descriptor
+ * is the sole command/routing channel: `requires_base_sync = requiresBaseSync(
+ * target_stage)` and `command` = the action-appropriate rendered stage command
+ * (`renderStageCommand` for `reinvoke`/`advance`; `null` for
+ * `merge_only`/`complete`/`abandon`).
+ *
+ * PURITY: no clock. The reconciliation timestamp is derived deterministically
+ * from the crashed frontier's own `started_at` (falling back to the run's
+ * `updated_at`) — the last known-good moment recorded before the crash — so the
+ * two-argument contract holds without a host-supplied `at`. When no
+ * reconciliation happens the input state is returned verbatim.
+ */
+export function resumeTarget(
+  state: RunState,
+  readPr: PrReader,
+): { state: RunState; target: ResumeTarget } {
+  if (state.abandoned_at) {
+    throw err(
+      "run_abandoned",
+      `Run '${state.run_id}' (slug '${state.slug}') is abandoned (${state.abandoned_at}); it is excluded from resume-target.`,
+    );
+  }
+
+  // Locate the SEQUENTIAL FRONTIER first — the first non-`done` stage — never
+  // "the first running stage anywhere in the chain". A crash reconciles ONLY the
+  // frontier: if an earlier stage is `failed`/`halted` it stops the chain (T3),
+  // so a later `running` stage must NOT be reconciled (no downstream mutation, no
+  // PR read). Fail closed on any such downstream `running` stage — an impossible
+  // state under the sequential executor, so it is an error, not a silent skip.
+  const frontier = state.stages.find((s) => s.status !== "done");
+  let workState = state;
+  let reconciled = false;
+  if (frontier) {
+    // Reject a `running` stage past the frontier BEFORE any reconciliation,
+    // regardless of the frontier's own status. If the frontier itself is
+    // running, reconciling it (→failed/halted/done) while a downstream stage is
+    // still running would violate T3 — a stopped/reconciled stage must never
+    // have a live downstream episode. Checked up front so no PR read or mutation
+    // happens in the two-running-stages invariant-violation case.
+    const frontierIdx = state.stages.indexOf(frontier);
+    const downstreamRunning = state.stages
+      .slice(frontierIdx + 1)
+      .find((s) => s.status === "running");
+    if (downstreamRunning) {
+      throw err(
+        "downstream_running",
+        `Stage '${downstreamRunning.stage}' is 'running' downstream of frontier '${frontier.stage}' (${frontier.status}); a stopped/reconciled stage halts the chain (T3) and its downstream must not be reconciled.`,
+      );
+    }
+    if (frontier.status === "running") {
+      // Deterministic reconciliation timestamp (no clock — `resumeTarget` is a
+      // two-argument API, so there is no host-supplied `at` here). It MUST be
+      // the run's last-recorded update, never the crashed stage's `started_at`:
+      // a `record-output` checkpoint taken mid-stage advances `updated_at` past
+      // `started_at`, so starting from `started_at` would move `updated_at`
+      // backward and backdate the crashed attempt's `ended_at` to before the
+      // outputs it is reconciling. `updated_at` is monotonic by construction.
+      const at = state.updated_at;
+      workState = reconcileFrontier(state, frontier, readPr, at);
+      reconciled = true;
+    }
+  }
+
+  const { target_stage, action } = forwardTargetAndAction(workState, readPr);
+  const requires_base_sync = requiresBaseSync(target_stage);
+  const command =
+    action === "reinvoke" || action === "advance"
+      ? renderStageCommand(workState, target_stage)
+      : null;
+
+  return {
+    state: reconciled ? workState : state,
+    target: {
+      run_id: workState.run_id,
+      slug: workState.slug,
+      target_stage,
+      action,
+      reconciled,
+      requires_base_sync,
+      command,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 — abandon semantics + resume-run selection (T2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Mark a run terminally abandoned (T2, issue #763): stamps run-level
+ * `abandoned_at`. An abandoned run is excluded from resume selection and
+ * `resumeTarget`; the host summary reports `status: abandoned`. No stage
+ * transition is involved — the closed §6 stage matrix is untouched. Idempotent:
+ * re-abandoning preserves the original timestamp.
+ */
+export function abandonRun(state: RunState, at: string): RunState {
+  const next = clone(state);
+  if (next.abandoned_at) return next; // already abandoned — no-op, keep original
+  next.abandoned_at = at;
+  next.updated_at = at;
+  return next;
+}
+
+/** Whether every stage in the run's chain is `done`. */
+function isFullyDone(run: RunState): boolean {
+  return run.stages.length > 0 && run.stages.every((s) => s.status === "done");
+}
+
+/**
+ * Select which run to resume (T2): the latest run that is neither fully `done`
+ * nor abandoned. "Latest" is defined by **`created_at`** — spec `behavior`:
+ * "`--resume` (no arg) selects the latest non-`done`, non-abandoned run (across
+ * slugs, by `created_at`/mtime)". Deliberately NOT `updated_at`: an older run
+ * that merely saw a recent checkpoint would otherwise displace a genuinely newer
+ * run, and the operator's "resume what I started last" expectation is about when
+ * the run began. Tie-broken by `run_id` (monotonic, host-allocated) for
+ * determinism. Returns null when no resumable run remains, so a fleet of
+ * done/abandoned runs never re-selects a terminal dead end.
+ */
+export function selectResumeRun(runs: RunState[]): RunState | null {
+  const candidates = runs.filter((r) => !r.abandoned_at && !isFullyDone(r));
+  if (candidates.length === 0) return null;
+  return candidates.reduce((best, r) => {
+    if (r.created_at !== best.created_at) {
+      return r.created_at > best.created_at ? r : best;
+    }
+    return r.run_id > best.run_id ? r : best;
+  });
 }

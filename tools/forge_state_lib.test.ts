@@ -23,8 +23,11 @@ import {
   type StageArtifacts,
   type StageStatus,
   LEGAL_TRANSITIONS,
+  abandonRun,
   encodeIntent,
   initializeRun,
+  resumeTarget,
+  selectResumeRun,
   isLegalTransition,
   isRenderableArg,
   mergePointsFor,
@@ -1638,4 +1641,707 @@ test("initializeRun: two runs of the same slug get distinct host-supplied run_id
   assert.equal(a.slug, b.slug);
   assert.notEqual(a.run_id, b.run_id);
   assert.equal(b.mode, "driver");
+});
+
+// ---------------------------------------------------------------------------
+// Phase 4 — resumeTarget / abandon / selectResumeRun (T1–T4)
+// ---------------------------------------------------------------------------
+
+const AT4 = "2026-07-19T03:00:00Z";
+
+/** PR-state reader from a fixed map (default "open" for unknown PRs). */
+function prMap(m: Record<number, "open" | "merged" | "closed">): PrReader {
+  return (pr) => m[pr] ?? "open";
+}
+
+/** Put stage[0] of `chain` into `running`, optionally recording a checkpoint. */
+function crashRunning(
+  chain: Stage[],
+  overrides: Partial<Parameters<typeof resolved>[2]> = {},
+  checkpoint?: {
+    prs?: number[];
+    foldPrs?: number[];
+    artifacts?: Partial<StageArtifacts>;
+  },
+): RunState {
+  const mps = mergePointsFor(chain);
+  let s = mkRun(chain, mps, overrides as any);
+  const stage = chain[0];
+  s = transition(s, { stage, to: "running", at: AT });
+  if (checkpoint) {
+    s = recordOutput(s, {
+      stage,
+      prs: checkpoint.prs,
+      foldPrs: checkpoint.foldPrs,
+      artifacts: checkpoint.artifacts,
+      at: AT2,
+    });
+  }
+  return s;
+}
+
+// --- #1: merged merge-point → done → advance/complete; author early-merge → abandon
+test("#1 merge-point all merged → done + recompute (advance to next pending)", () => {
+  // write-spec (author) done already, review-spec (merge point) crashed after
+  // recording its adopted PR; the spec PR is merged → reconcile done → advance.
+  const chain: Stage[] = ["review-spec", "spec-to-plan"];
+  let s = crashRunning(
+    chain,
+    { initial_artifacts: { spec_path: "docs/specs/2026-07-19-x-spec.md" } },
+    { prs: [10] },
+  );
+  const { state, target } = resumeTarget(s, prMap({ 10: "merged" }));
+  assert.equal(target.reconciled, true);
+  assert.equal(target.action, "advance");
+  assert.equal(target.target_stage, "spec-to-plan");
+  // reconciled state carries the mutation: review-spec is done with a crashed attempt
+  const rs = state.stages.find((x) => x.stage === "review-spec")!;
+  assert.equal(rs.status, "done");
+  assert.equal(rs.attempts.filter((a) => a.outcome === "crashed").length, 1);
+  // advance → command rendered, requires_base_sync from the target (spec-to-plan)
+  assert.equal(target.requires_base_sync, true);
+  assert.equal(target.command, "/stark-spec-to-plan docs/specs/2026-07-19-x-spec.md");
+});
+
+test("#1 non-merge author stage with an externally-merged PR → abandon", () => {
+  const chain: Stage[] = ["write-spec", "review-spec"];
+  const s = crashRunning(chain, {}, {
+    prs: [10],
+    artifacts: { spec_path: "docs/specs/2026-07-19-x-spec.md" },
+  });
+  const { state, target } = resumeTarget(s, prMap({ 10: "merged" }));
+  assert.equal(target.action, "abandon");
+  assert.equal(target.target_stage, "write-spec");
+  assert.equal(target.command, null);
+  assert.equal(target.requires_base_sync, false);
+  const ws = state.stages.find((x) => x.stage === "write-spec")!;
+  assert.equal(ws.status, "halted");
+  assert.equal(ws.gate?.reason, "author_pr_merged_early");
+  assert.equal(ws.attempts.filter((a) => a.outcome === "crashed").length, 1);
+});
+
+// --- #2: checkpoint present vs absent decides done/merge_only vs reinvoke
+test("#2 merge-point checkpoint present but merge pending → halted merge_pending + merge_only", () => {
+  const chain: Stage[] = ["copilot"];
+  const s = crashRunning(chain, {}, { prs: [1, 2] });
+  const { state, target } = resumeTarget(s, prMap({ 1: "merged", 2: "open" }));
+  assert.equal(target.action, "merge_only");
+  assert.equal(target.target_stage, "copilot");
+  assert.equal(target.command, null);
+  assert.equal(target.requires_base_sync, true);
+  const cp = state.stages.find((x) => x.stage === "copilot")!;
+  assert.equal(cp.status, "halted");
+  assert.equal(cp.gate?.reason, "merge_pending");
+});
+
+test("#2 merge-point checkpoint absent → failed reconciled_after_crash + reinvoke", () => {
+  const chain: Stage[] = ["review-spec", "spec-to-plan"];
+  const s = crashRunning(chain, {
+    initial_artifacts: { spec_path: "docs/specs/2026-07-19-x-spec.md" },
+  });
+  const { state, target } = resumeTarget(s, allOpen);
+  assert.equal(target.action, "reinvoke");
+  assert.equal(target.target_stage, "review-spec");
+  assert.equal(target.command, "/stark-review-spec docs/specs/2026-07-19-x-spec.md");
+  assert.equal(target.requires_base_sync, false);
+  const rs = state.stages.find((x) => x.stage === "review-spec")!;
+  assert.equal(rs.status, "failed");
+  assert.equal(rs.gate?.reason, "reconciled_after_crash");
+});
+
+// --- #3: plan-to-tasks issue_numbers marker
+test("#3 plan-to-tasks marker present → done + advance, no re-run", () => {
+  const chain: Stage[] = ["plan-to-tasks", "copilot"];
+  const s = crashRunning(
+    chain,
+    {
+      initial_artifacts: {
+        plan_path: "docs/plans/2026-07-19-x-plan.md",
+        plan_slug: "x",
+      },
+    },
+    { artifacts: { issue_numbers: [11, 12] } },
+  );
+  const { state, target } = resumeTarget(s, allOpen);
+  assert.equal(target.action, "advance");
+  assert.equal(target.target_stage, "copilot");
+  assert.equal(target.command, "/stark-copilot --plan-slug x");
+  assert.equal(target.requires_base_sync, true);
+  assert.equal(state.stages.find((x) => x.stage === "plan-to-tasks")!.status, "done");
+});
+
+test("#3 plan-to-tasks marker absent → failed + reinvoke with --plan-slug", () => {
+  const chain: Stage[] = ["plan-to-tasks", "copilot"];
+  const s = crashRunning(chain, {
+    initial_artifacts: {
+      plan_path: "docs/plans/2026-07-19-x-plan.md",
+      plan_slug: "x",
+    },
+  });
+  const { state, target } = resumeTarget(s, allOpen);
+  assert.equal(target.action, "reinvoke");
+  assert.equal(target.target_stage, "plan-to-tasks");
+  assert.equal(
+    target.command,
+    "/stark-plan-to-tasks docs/plans/2026-07-19-x-plan.md --plan-slug x",
+  );
+  assert.equal(target.requires_base_sync, true);
+  assert.equal(state.stages.find((x) => x.stage === "plan-to-tasks")!.status, "failed");
+});
+
+// --- terminal-slice --until crash → done + complete
+test("terminal --until write-spec crash-after-output → done + complete", () => {
+  const s = crashRunning(["write-spec"], {}, {
+    prs: [10],
+    artifacts: { spec_path: "docs/specs/2026-07-19-x-spec.md" },
+  });
+  const { state, target } = resumeTarget(s, prMap({ 10: "open" }));
+  assert.equal(target.action, "complete");
+  assert.equal(target.target_stage, "write-spec");
+  assert.equal(target.command, null);
+  assert.equal(target.requires_base_sync, false);
+  assert.equal(state.stages[0].status, "done");
+});
+
+test("terminal --until spec-to-plan crash-after-output → done + complete (requires_base_sync true, command null)", () => {
+  const s = crashRunning(
+    ["spec-to-plan"],
+    { initial_artifacts: { spec_path: "docs/specs/2026-07-19-x-spec.md" } },
+    {
+      prs: [20],
+      artifacts: {
+        plan_path: "docs/plans/2026-07-19-x-plan.md",
+        plan_slug: "x",
+      },
+    },
+  );
+  const { target } = resumeTarget(s, prMap({ 20: "open" }));
+  assert.equal(target.action, "complete");
+  assert.equal(target.target_stage, "spec-to-plan");
+  assert.equal(target.command, null);
+  assert.equal(target.requires_base_sync, true);
+});
+
+// --- pending target → advance (resume right after init)
+test("pending target → advance into the first pending stage (no reconciliation)", () => {
+  const chain: Stage[] = ["write-spec", "review-spec"];
+  const s = mkRun(chain, mergePointsFor(chain));
+  const { state, target } = resumeTarget(s, allOpen);
+  assert.equal(target.reconciled, false);
+  assert.equal(state, s); // input returned unchanged
+  assert.equal(target.action, "advance");
+  assert.equal(target.target_stage, "write-spec");
+  assert.equal(target.command, '/stark-write-spec "do a thing"');
+  assert.equal(target.requires_base_sync, false);
+});
+
+// --- #20: crash-before-output every input kind → failed + reinvoke
+test("#20 crash-before-output intent/spec-path/plan-path → reinvoke with the entry command", () => {
+  // intent → write-spec
+  {
+    const s = crashRunning(["write-spec", "review-spec"]);
+    const { target } = resumeTarget(s, allOpen);
+    assert.equal(target.action, "reinvoke");
+    assert.equal(target.target_stage, "write-spec");
+    assert.equal(target.command, '/stark-write-spec "do a thing"');
+    assert.equal(target.requires_base_sync, false);
+  }
+  // spec-path → review-spec
+  {
+    const s = crashRunning(["review-spec", "spec-to-plan"], {
+      initial_artifacts: { spec_path: "docs/specs/2026-07-19-x-spec.md" },
+    });
+    const { target } = resumeTarget(s, allOpen);
+    assert.equal(target.action, "reinvoke");
+    assert.equal(target.command, "/stark-review-spec docs/specs/2026-07-19-x-spec.md");
+  }
+  // plan-path → review-plan
+  {
+    const s = crashRunning(["review-plan", "plan-to-tasks"], {
+      initial_artifacts: { plan_path: "docs/plans/2026-07-19-x-plan.md" },
+    });
+    const { target } = resumeTarget(s, allOpen);
+    assert.equal(target.action, "reinvoke");
+    assert.equal(target.command, "/stark-review-plan docs/plans/2026-07-19-x-plan.md");
+  }
+});
+
+// --- #16: multi-impl-PR merge_only + partial merges recorded monotonically
+test("#16 copilot multi-PR, one merged one open → merge_only", () => {
+  const s = crashRunning(["copilot"], {}, { prs: [1, 2, 3] });
+  const { state, target } = resumeTarget(
+    s,
+    prMap({ 1: "merged", 2: "merged", 3: "open" }),
+  );
+  assert.equal(target.action, "merge_only");
+  assert.equal(target.command, null);
+  // The already-merged PRs are recorded merged_by_forge:false even while the
+  // merge overall stays pending (partial merges are never discarded, #16). PR 3
+  // (still open) is NOT recorded as merged.
+  const cp = state.stages.find((x) => x.stage === "copilot")!;
+  assert.equal(cp.status, "halted");
+  assert.equal(cp.gate?.reason, "merge_pending");
+  assert.deepEqual(cp.merges, [
+    { pr: 1, merged_by_forge: false },
+    { pr: 2, merged_by_forge: false },
+  ]);
+});
+
+// --- #17: fold PR blocks then unblocks
+test("#17 open fold PR blocks the merge → fold_pr_open + merge_only", () => {
+  const s = crashRunning(["copilot"], {}, { prs: [1], foldPrs: [5] });
+  const { state, target } = resumeTarget(s, prMap({ 1: "merged", 5: "open" }));
+  assert.equal(target.action, "merge_only");
+  assert.equal(state.stages[0].gate?.reason, "fold_pr_open");
+});
+
+test("#17 fold PR merged + registry merged → done + complete", () => {
+  const s = crashRunning(["copilot"], {}, { prs: [1], foldPrs: [5] });
+  const { state, target } = resumeTarget(s, prMap({ 1: "merged", 5: "merged" }));
+  assert.equal(target.action, "complete");
+  assert.equal(state.stages[0].status, "done");
+});
+
+// --- closed registry PR → dead end
+test("registry PR reported closed → halted artifact_pr_closed + abandon", () => {
+  const s = crashRunning(["copilot"], {}, { prs: [1, 2] });
+  const { state, target } = resumeTarget(s, prMap({ 1: "merged", 2: "closed" }));
+  assert.equal(target.action, "abandon");
+  assert.equal(target.command, null);
+  assert.equal(state.stages[0].status, "halted");
+  assert.equal(state.stages[0].gate?.reason, "artifact_pr_closed");
+});
+
+// --- actionForStoppedStage keys off merge-point membership + checkpoint, not status
+test("persisted failed merge-point WITH checkpoint (ci_red) → merge_only, not reinvoke", () => {
+  // copilot (merge point) recorded its PR, then CI went red post-checkpoint — a
+  // real episode-end failure, not a crash. The review/copilot work is done; only
+  // the merge needs retrying → merge_only (reinvoke would repeat completed work).
+  let s = crashRunning(["copilot"], {}, { prs: [1] });
+  s = transition(s, {
+    stage: "copilot",
+    to: "failed",
+    gate: { reason: "ci_red", detail: "CI failed on the impl PR" },
+    at: AT3,
+  });
+  const { state, target } = resumeTarget(s, prMap({ 1: "open" }));
+  assert.equal(target.reconciled, false); // no running stage
+  assert.equal(state, s);
+  assert.equal(target.action, "merge_only");
+  assert.equal(target.command, null);
+  assert.equal(target.target_stage, "copilot");
+});
+
+test("persisted halted merge-point WITHOUT checkpoint → reinvoke, not merge_only", () => {
+  // A halted merge point that never recorded its PR observation has no completed
+  // merge to retry — its work must be re-invoked.
+  let s = crashRunning(["copilot"], {
+    initial_artifacts: { plan_slug: "x" },
+  });
+  s = transition(s, {
+    stage: "copilot",
+    to: "halted",
+    gate: { reason: "merge_pending", detail: "no PR recorded" },
+    at: AT3,
+  });
+  const { target } = resumeTarget(s, allOpen);
+  assert.equal(target.action, "reinvoke");
+  assert.equal(target.command, "/stark-copilot --plan-slug x");
+  assert.equal(target.target_stage, "copilot");
+});
+
+// --- closed author PR (non-merge author stage) → dead end
+test("checkpointed non-merge author stage, PR closed without merge → halted artifact_pr_closed + abandon", () => {
+  // write-spec recorded its spec + author PR, crashed, and that PR was then
+  // closed without merging. A closed author PR can't be adopted by the paired
+  // review → dead end (abandon), never a fall-through to done + advance.
+  const chain: Stage[] = ["write-spec", "review-spec"];
+  const s = crashRunning(chain, {}, {
+    prs: [10],
+    artifacts: { spec_path: "docs/specs/2026-07-19-x-spec.md" },
+  });
+  const { state, target } = resumeTarget(s, prMap({ 10: "closed" }));
+  assert.equal(target.action, "abandon");
+  assert.equal(target.target_stage, "write-spec");
+  assert.equal(target.command, null);
+  const ws = state.stages.find((x) => x.stage === "write-spec")!;
+  assert.equal(ws.status, "halted");
+  assert.equal(ws.gate?.reason, "artifact_pr_closed");
+  // review-spec is never entered
+  assert.equal(state.stages.find((x) => x.stage === "review-spec")!.status, "pending");
+});
+
+// --- #18: failed/halted stage stops the chain, never auto-skipped
+test("#18 a failed stage stops the chain — target is that stage, no downstream entry", () => {
+  const chain: Stage[] = ["write-spec", "review-spec", "spec-to-plan"];
+  let s = mkRun(chain, mergePointsFor(chain));
+  // write-spec → done
+  s = transition(s, { stage: "write-spec", to: "running", at: AT });
+  s = recordOutput(s, {
+    stage: "write-spec",
+    prs: [10],
+    artifacts: { spec_path: "docs/specs/2026-07-19-x-spec.md" },
+    at: AT,
+  });
+  s = transition(s, { stage: "write-spec", to: "done", at: AT2 });
+  // review-spec → running → failed (a real episode-end, not a crash)
+  s = transition(s, { stage: "review-spec", to: "running", at: AT2 });
+  s = transition(s, {
+    stage: "review-spec",
+    to: "failed",
+    gate: { reason: "domain_error", detail: "x" },
+    at: AT3,
+  });
+  const { state, target } = resumeTarget(s, prMap({ 10: "open" }));
+  assert.equal(target.reconciled, false); // no running stage → no reconciliation
+  assert.equal(state, s);
+  assert.equal(target.target_stage, "review-spec");
+  assert.equal(target.action, "reinvoke");
+  assert.equal(target.command, "/stark-review-spec docs/specs/2026-07-19-x-spec.md");
+  // downstream spec-to-plan is still pending and never selected
+  assert.equal(state.stages.find((x) => x.stage === "spec-to-plan")!.status, "pending");
+});
+
+test("#18 an already-persisted halted merge-point stage → merge_only without reconciliation", () => {
+  let s = crashRunning(["copilot"], {}, { prs: [1] });
+  // Persist a prior reconciliation: halt merge_pending, then re-load (no running).
+  const first = resumeTarget(s, prMap({ 1: "open" }));
+  assert.equal(first.target.action, "merge_only");
+  // Feed the reconciled state back in — no running stage now.
+  const second = resumeTarget(first.state, prMap({ 1: "open" }));
+  assert.equal(second.target.reconciled, false);
+  assert.equal(second.target.action, "merge_only");
+  assert.equal(second.target.target_stage, "copilot");
+});
+
+// --- red-team-chain review stages are non-merge-point + PR-backed (finding #1):
+// their requiredOutputsFor list is EMPTY, so the checkpoint gate must key off the
+// adopted PR — a crash before the PR is recorded must NOT reconcile to done.
+test("red-team chain: review-spec crash BEFORE recording adopted PR → reinvoke, not done-skip", () => {
+  // ["review-spec", "red-team-spec"] → red-team-spec is the spec merge point,
+  // review-spec is non-merge + PR-backed. review-spec crashes with no PR recorded.
+  const chain: Stage[] = ["review-spec", "red-team-spec"];
+  const s = crashRunning(chain, {
+    initial_artifacts: { spec_path: "docs/specs/2026-07-19-x-spec.md" },
+  });
+  const { state, target } = resumeTarget(s, allOpen);
+  assert.equal(target.action, "reinvoke");
+  assert.equal(target.target_stage, "review-spec");
+  assert.equal(target.command, "/stark-review-spec docs/specs/2026-07-19-x-spec.md");
+  const rs = state.stages.find((x) => x.stage === "review-spec")!;
+  assert.equal(rs.status, "failed");
+  assert.equal(rs.gate?.reason, "reconciled_after_crash");
+  // red-team-spec is never entered (review not silently skipped)
+  assert.equal(state.stages.find((x) => x.stage === "red-team-spec")!.status, "pending");
+});
+
+test("red-team chain: review-spec crash AFTER recording adopted PR → done + advance", () => {
+  const chain: Stage[] = ["review-spec", "red-team-spec"];
+  const s = crashRunning(
+    chain,
+    { initial_artifacts: { spec_path: "docs/specs/2026-07-19-x-spec.md" } },
+    { prs: [10] },
+  );
+  const { state, target } = resumeTarget(s, prMap({ 10: "open" }));
+  assert.equal(target.action, "advance");
+  assert.equal(target.target_stage, "red-team-spec");
+  assert.equal(state.stages.find((x) => x.stage === "review-spec")!.status, "done");
+});
+
+test("red-team chain: review-plan crash BEFORE recording adopted PR → reinvoke, not done-skip", () => {
+  const chain: Stage[] = ["review-plan", "red-team-plan"];
+  const s = crashRunning(chain, {
+    initial_artifacts: { plan_path: "docs/plans/2026-07-19-x-plan.md" },
+  });
+  const { state, target } = resumeTarget(s, allOpen);
+  assert.equal(target.action, "reinvoke");
+  assert.equal(target.target_stage, "review-plan");
+  assert.equal(target.command, "/stark-review-plan docs/plans/2026-07-19-x-plan.md");
+  const rp = state.stages.find((x) => x.stage === "review-plan")!;
+  assert.equal(rp.status, "failed");
+  assert.equal(rp.gate?.reason, "reconciled_after_crash");
+  assert.equal(state.stages.find((x) => x.stage === "red-team-plan")!.status, "pending");
+});
+
+test("red-team chain: review-plan crash AFTER recording adopted PR → done + advance", () => {
+  const chain: Stage[] = ["review-plan", "red-team-plan"];
+  const s = crashRunning(
+    chain,
+    { initial_artifacts: { plan_path: "docs/plans/2026-07-19-x-plan.md" } },
+    { prs: [20] },
+  );
+  const { state, target } = resumeTarget(s, prMap({ 20: "open" }));
+  assert.equal(target.action, "advance");
+  assert.equal(target.target_stage, "red-team-plan");
+  assert.equal(state.stages.find((x) => x.stage === "review-plan")!.status, "done");
+});
+
+// --- persisted merge_pending re-routed to abandon once its PR is closed (finding
+// #2): a checkpointed stopped merge point must live-check the registry, never
+// retry merge_only forever against a PR that can no longer merge.
+test("persisted merge_pending then PR closed on re-resume → abandon, not endless merge_only", () => {
+  const s = crashRunning(["copilot"], {}, { prs: [1] });
+  // First resume: PR open → merge_pending halt → merge_only.
+  const first = resumeTarget(s, prMap({ 1: "open" }));
+  assert.equal(first.target.action, "merge_only");
+  const cp = first.state.stages.find((x) => x.stage === "copilot")!;
+  assert.equal(cp.status, "halted");
+  assert.equal(cp.gate?.reason, "merge_pending");
+  // Second resume on the persisted state: the registry PR is now closed → abandon.
+  const second = resumeTarget(first.state, prMap({ 1: "closed" }));
+  assert.equal(second.target.reconciled, false); // no running stage
+  assert.equal(second.target.action, "abandon");
+  assert.equal(second.target.target_stage, "copilot");
+  assert.equal(second.target.command, null);
+});
+
+// --- T2: abandonRun + selectResumeRun
+test("#13 selectResumeRun picks latest non-done non-abandoned; abandonRun excludes", () => {
+  const doneRun = (() => {
+    let s = crashRunning(["write-spec"], {}, {
+      prs: [10],
+      artifacts: { spec_path: "docs/specs/2026-07-19-a-spec.md" },
+    });
+    s = transition(s, { stage: "write-spec", to: "done", at: AT2 });
+    s.run_id = "run-done";
+    s.updated_at = "2026-07-19T09:00:00Z";
+    return s;
+  })();
+  let abandoned = crashRunning(["copilot"], {}, { prs: [1] });
+  abandoned = resumeTarget(abandoned, prMap({ 1: "closed" })).state;
+  abandoned = abandonRun(abandoned, "2026-07-19T10:00:00Z");
+  abandoned.run_id = "run-abandoned";
+  assert.equal(abandoned.abandoned_at, "2026-07-19T10:00:00Z");
+
+  const halted = (() => {
+    let s = crashRunning(["copilot"], {}, { prs: [1] });
+    s = resumeTarget(s, prMap({ 1: "open" })).state; // halted merge_pending
+    s.run_id = "run-halted";
+    s.updated_at = "2026-07-19T08:00:00Z";
+    return s;
+  })();
+
+  const pick = selectResumeRun([doneRun, abandoned, halted]);
+  assert.ok(pick);
+  assert.equal(pick!.run_id, "run-halted");
+
+  // abandoned + done runs excluded from resumeTarget selection entirely
+  assert.equal(selectResumeRun([doneRun, abandoned]), null);
+});
+
+test("abandonRun is idempotent and resumeTarget refuses an abandoned run", () => {
+  let s = crashRunning(["copilot"], {}, { prs: [1] });
+  s = abandonRun(s, "2026-07-19T10:00:00Z");
+  const again = abandonRun(s, "2026-07-19T11:00:00Z");
+  assert.equal(again.abandoned_at, "2026-07-19T10:00:00Z"); // original preserved
+  assert.throws(() => resumeTarget(s, allOpen), /abandoned/);
+});
+
+// --- descriptor identity fields
+test("resumeTarget descriptor carries run_id + slug", () => {
+  const s = crashRunning(["write-spec"], {}, {
+    prs: [10],
+    artifacts: { spec_path: "docs/specs/2026-07-19-x-spec.md" },
+  });
+  const { target } = resumeTarget(s, prMap({ 10: "open" }));
+  assert.equal(target.run_id, s.run_id);
+  assert.equal(target.slug, s.slug);
+});
+
+// --- finding 1: frontier-first reconciliation (T3 stop invariant)
+// A stopped (failed/halted) earlier stage halts the chain; a later `running`
+// stage must NOT be reconciled — no downstream mutation, no PR read.
+test("failed frontier with a downstream running stage → fail closed, no downstream mutation or PR read", () => {
+  const chain: Stage[] = ["write-spec", "review-spec", "spec-to-plan"];
+  let s = mkRun(chain, mergePointsFor(chain), {
+    initial_artifacts: { spec_path: "docs/specs/2026-07-19-x-spec.md" },
+  });
+  s = transition(s, { stage: "write-spec", to: "running", at: AT });
+  s = transition(s, {
+    stage: "write-spec",
+    to: "failed",
+    gate: { reason: "domain_error", detail: "x" },
+    at: AT2,
+  });
+  // Force an impossible downstream running episode (invariant violation).
+  s = transition(s, { stage: "review-spec", to: "running", at: AT2 });
+  const before = JSON.stringify(s);
+  let prRead = false;
+  const spyReader: PrReader = (pr) => {
+    prRead = true;
+    return "open";
+  };
+  assert.throws(() => resumeTarget(s, spyReader), /downstream/);
+  assert.equal(prRead, false, "no PR read when failing closed on downstream running");
+  assert.equal(JSON.stringify(s), before, "input state not mutated");
+});
+
+test("running frontier with a downstream running stage → fail closed BEFORE reconciling the frontier (no PR read or mutation)", () => {
+  // Two running stages: the frontier is itself running AND a later stage is
+  // running. Reconciling the frontier (→failed/halted/done) while the downstream
+  // episode is still live would violate T3 — so the check must run BEFORE any
+  // reconciliation, regardless of the frontier's own status.
+  const chain: Stage[] = ["write-spec", "review-spec", "spec-to-plan"];
+  let s = mkRun(chain, mergePointsFor(chain), {
+    initial_artifacts: { spec_path: "docs/specs/2026-07-19-x-spec.md" },
+  });
+  s = transition(s, { stage: "write-spec", to: "running", at: AT });
+  // Force an impossible second live episode downstream of the running frontier.
+  s = transition(s, { stage: "review-spec", to: "running", at: AT2 });
+  const before = JSON.stringify(s);
+  let prRead = false;
+  const spyReader: PrReader = () => {
+    prRead = true;
+    return "open";
+  };
+  assert.throws(() => resumeTarget(s, spyReader), /downstream/);
+  assert.equal(prRead, false, "no PR read when the frontier is running too");
+  assert.equal(JSON.stringify(s), before, "input state not mutated");
+});
+
+test("two-argument reconciliation never moves updated_at backward or backdates ended_at", () => {
+  // `resumeTarget` is a two-argument API, so reconciliation derives its own
+  // timestamp with no clock. It must use the run's last-recorded `updated_at`,
+  // NOT the crashed stage's `started_at`: a mid-stage `record-output` checkpoint
+  // advances `updated_at` past `started_at`, so keying off `started_at` would
+  // rewind the run's clock and stamp the crashed attempt's `ended_at` *before*
+  // the very outputs it is reconciling.
+  const chain: Stage[] = ["review-spec", "spec-to-plan"];
+  const s = crashRunning(
+    chain,
+    { initial_artifacts: { spec_path: "docs/specs/2026-07-19-x-spec.md" } },
+    { prs: [10] },
+  );
+  const rec = s.stages.find((x) => x.stage === "review-spec")!;
+  const startedAt = rec.started_at!;
+  assert.ok(startedAt, "precondition: the crashed frontier recorded a started_at");
+  // Simulate the checkpoint that advances the run clock past the stage start.
+  const later = "2026-07-19T23:59:59Z";
+  assert.ok(later > startedAt, "precondition: checkpoint is after the stage start");
+  s.updated_at = later;
+
+  const { state, target } = resumeTarget(s, prMap({ 10: "merged" }));
+  assert.equal(target.reconciled, true);
+  const rs = state.stages.find((x) => x.stage === "review-spec")!;
+  assert.equal(rs.status, "done");
+  // Monotonic: the run clock never decreases.
+  assert.ok(
+    state.updated_at >= later,
+    `updated_at must not move backward: ${state.updated_at} < ${later}`,
+  );
+  // And the crashed attempt is not backdated before the outputs it reconciles.
+  const crashed = rs.attempts.filter((a) => a.outcome === "crashed");
+  assert.equal(crashed.length, 1, "exactly one crashed attempt");
+  assert.ok(
+    rs.ended_at! >= startedAt,
+    `ended_at must not predate the stage start: ${rs.ended_at} < ${startedAt}`,
+  );
+});
+
+test("selectResumeRun picks the newest run by created_at, not most-recently-updated", () => {
+  // Spec `behavior`: no-arg `--resume` selects the latest non-done,
+  // non-abandoned run "across slugs, by created_at/mtime". An OLDER run that
+  // merely saw a recent checkpoint must not displace a genuinely NEWER run.
+  const older = crashRunning(["write-spec"], {}, {});
+  older.slug = "older";
+  older.run_id = "20260719-000000-aaa";
+  older.created_at = "2026-07-19T00:00:00Z";
+  older.updated_at = "2026-07-19T23:00:00Z"; // updated most recently
+
+  const newer = crashRunning(["write-spec"], {}, {});
+  newer.slug = "newer";
+  newer.run_id = "20260719-120000-bbb";
+  newer.created_at = "2026-07-19T12:00:00Z"; // created later
+  newer.updated_at = "2026-07-19T12:30:00Z"; // but updated earlier
+
+  const picked = selectResumeRun([older, newer]);
+  assert.equal(picked?.slug, "newer", "created_at wins over updated_at");
+  // Order of the input array must not matter.
+  assert.equal(selectResumeRun([newer, older])?.slug, "newer");
+});
+
+// --- finding 2: a checkpointed HALTED non-merge author stage → abandon, not
+// reinvoke (re-invoking would repeat already-completed authoring). Derived from
+// checkpoint + status, NOT from a hard-coded dead-end gate reason.
+test("checkpointed halted write-spec with a non-special gate reason → abandon, not reinvoke", () => {
+  const chain: Stage[] = ["write-spec", "review-spec"];
+  let s = crashRunning(chain, {}, {
+    prs: [10],
+    artifacts: { spec_path: "docs/specs/2026-07-19-x-spec.md" },
+  });
+  // Normal episode-end halt with a non-dead-end reason (not merged-early/closed).
+  s = transition(s, {
+    stage: "write-spec",
+    to: "halted",
+    gate: { reason: "operator_halt", detail: "stopped by hand" },
+    at: AT3,
+  });
+  const { target } = resumeTarget(s, prMap({ 10: "open" }));
+  assert.equal(target.reconciled, false); // no running stage
+  assert.equal(target.action, "abandon");
+  assert.equal(target.target_stage, "write-spec");
+  assert.equal(target.command, null);
+});
+
+test("checkpointed halted spec-to-plan with a non-special gate reason → abandon", () => {
+  const chain: Stage[] = ["spec-to-plan", "plan-to-tasks"];
+  let s = crashRunning(chain, {}, {
+    prs: [10],
+    artifacts: { plan_path: "docs/plans/2026-07-19-x-plan.md", plan_slug: "x" },
+  });
+  s = transition(s, {
+    stage: "spec-to-plan",
+    to: "halted",
+    gate: { reason: "operator_halt", detail: "stopped by hand" },
+    at: AT3,
+  });
+  const { target } = resumeTarget(s, allOpen);
+  assert.equal(target.action, "abandon");
+  assert.equal(target.target_stage, "spec-to-plan");
+  assert.equal(target.command, null);
+});
+
+// --- finding 3: abandonment is terminal — every mutating entry point rejects an
+// abandoned run (pending AND running), while abandonRun stays idempotent.
+test("abandoned run rejects recordOutput/transition/reconcileRunningStage; abandonRun idempotent", () => {
+  // running abandoned state
+  let running = crashRunning(["copilot"], {}, { prs: [1] });
+  running = abandonRun(running, "2026-07-19T10:00:00Z");
+  assert.throws(
+    () => recordOutput(running, { stage: "copilot", prs: [2], at: AT4 }),
+    /abandoned/,
+  );
+  assert.throws(
+    () =>
+      transition(running, {
+        stage: "copilot",
+        to: "halted",
+        gate: { reason: "x", detail: "y" },
+        at: AT4,
+      }),
+    /abandoned/,
+  );
+  assert.throws(
+    () =>
+      reconcileRunningStage(
+        running,
+        { stage: "copilot", to: "failed", gate: { reason: "x", detail: "y" }, at: AT4 },
+        allOpen,
+      ),
+    /abandoned/,
+  );
+
+  // pending abandoned state — still rejects mutation
+  let pending = mkRun(["write-spec"], mergePointsFor(["write-spec"]), {
+    initial_artifacts: { spec_path: "docs/specs/2026-07-19-x-spec.md" },
+  });
+  pending = abandonRun(pending, "2026-07-19T10:00:00Z");
+  assert.throws(
+    () => transition(pending, { stage: "write-spec", to: "running", at: AT4 }),
+    /abandoned/,
+  );
+
+  // abandonRun itself remains reachable + idempotent on an abandoned run
+  const again = abandonRun(running, "2026-07-19T12:00:00Z");
+  assert.equal(again.abandoned_at, "2026-07-19T10:00:00Z");
 });
