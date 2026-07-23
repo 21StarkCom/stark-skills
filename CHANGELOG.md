@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.1] - 2026-07-23
+
+### Added
+- **stark-copilot: DAG-planned execution with default Workflow wave fan-out (#780).** `/stark-copilot` now plans its own execution before implementing: it builds a **task-level** dependency DAG (issue `## Dependencies` + phase `depends_on`, or plan-text edges; ambiguous ⇒ dependent, fail-closed; an open human-led dependency skips its dependents instead of building on missing work), **chain-collapses** linear task runs into single steps (a fully-linear phase stays exactly one step — zero overhead regression), levels the steps into waves with phase boundaries as barriers, and fans each multi-step wave out concurrently via the Workflow tool — one lead/wing dispatcher loop per step, each in its own worktree, diffs applied in deterministic wave order. Parallelism is on by default; `--sequential` disables it, `--parallel` force-collapses all steps into one wave. Fan-out hardening: atomic §2f apply (reset on failed 3-way; file-copy fallback forbidden in fan-out), clean-tree precondition, seeded re-dispatch (`-r2` step id, diff travels as a file, bounded round, dual cleanup), per-step result files so a multi-hundred-KB `final_diff` never round-trips through model output, and `collectDiff` split into a textual wing-review diff vs a `--binary --full-index` apply diff (+ regression test).
+
+### Fixed
+- handover,session: zsh doesn't word-split `$CLI` — use a function (#779)
+
 ## [v0.9.0] - 2026-07-20
 
 ### Added
