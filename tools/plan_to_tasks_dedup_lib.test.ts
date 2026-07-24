@@ -34,6 +34,26 @@ describe("buildTaskMarker / hasTaskMarker", () => {
     const body2 = "<!-- stark-task: demo-plan/task-1-1-bar -->";
     assert.equal(hasTaskMarker(body2, "demo-plan", "task-1-1-foo"), false);
   });
+
+  // Regression for the Critical finding: buildTaskMarker(plan_slug, task_id)
+  // concatenated as `${plan_slug}/${task_id}` with no escaping. The forge
+  // token grammar permits `/` inside EITHER field, so two distinct
+  // (plan_slug, task_id) pairs could render the identical marker string —
+  // e.g. plan_slug="team", task_id="x/y" collides with
+  // plan_slug="team/x", task_id="y" (both would render "team/x/y").
+  // The fix must make this impossible, not merely unlikely: a `/` in
+  // either field is now rejected at marker-build time, so neither pair in
+  // the collision below can ever produce a marker — confirming they can no
+  // longer be confused with each other or with any other pair.
+  test("buildTaskMarker rejects the team/x/y collision pair — team,x/y vs team/x,y can never collide", () => {
+    assert.throws(() => buildTaskMarker("team", "x/y"), /"\/"/);
+    assert.throws(() => buildTaskMarker("team/x", "y"), /"\/"/);
+  });
+
+  test("hasTaskMarker also rejects a slash-bearing plan_slug or task_id (fails closed, never fuzzy-matches)", () => {
+    assert.throws(() => hasTaskMarker("<!-- stark-task: team/x/y -->", "team", "x/y"));
+    assert.throws(() => hasTaskMarker("<!-- stark-task: team/x/y -->", "team/x", "y"));
+  });
 });
 
 // --- computePlanToTasksDedup: required gate tests --------------------------

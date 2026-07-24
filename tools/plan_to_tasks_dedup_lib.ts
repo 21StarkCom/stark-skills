@@ -21,12 +21,41 @@
 
 /**
  * Build the exact HTML-comment marker stamped into a task issue's body.
- * `plan_slug` and `task_id` are threaded artifact tokens (already validated
- * upstream against the forge grammar `^[A-Za-z0-9._:=/][A-Za-z0-9._:=/-]*$`),
- * so no further escaping is needed here.
+ *
+ * The marker renders as `{plan_slug}/{task_id}` joined by a literal `/`.
+ * The forge token grammar `^[A-Za-z0-9._:=/][A-Za-z0-9._:=/-]*$` permits `/`
+ * *inside* both `plan_slug` and `task_id` individually — which means a plain
+ * concatenation is NOT injective: `("team", "x/y")` and `("team/x", "y")`
+ * both render `team/x/y`, so a marker match could silently attribute one
+ * plan's task to a different plan's already-created issue (or vice versa).
+ * That is exactly the ambiguity this dedup gate exists to rule out, so `/`
+ * is rejected here rather than merely documented as "shouldn't happen" —
+ * the field itself must not contain the join delimiter. Reject fails
+ * closed (throws) rather than silently escaping, since a silently-escaped
+ * marker would still need every past-written issue body to agree on the
+ * escaping scheme.
  */
 export function buildTaskMarker(planSlug: string, taskId: string): string {
+  assertNoDelimiterAmbiguity("plan_slug", planSlug);
+  assertNoDelimiterAmbiguity("task_id", taskId);
   return `<!-- stark-task: ${planSlug}/${taskId} -->`;
+}
+
+/**
+ * Reject a `/` anywhere in a field destined for the `{plan_slug}/{task_id}`
+ * marker join — the one character that would make the join ambiguous given
+ * the forge grammar allows `/` inside either field. Throws rather than
+ * escaping/stripping: silent mutation would let two distinct inputs still
+ * collide (or diverge from what the caller believes it stamped).
+ */
+function assertNoDelimiterAmbiguity(fieldName: "plan_slug" | "task_id", value: string): void {
+  if (value.includes("/")) {
+    throw new Error(
+      `buildTaskMarker: ${fieldName} ${JSON.stringify(value)} contains "/", which is ambiguous in the ` +
+        `"{plan_slug}/{task_id}" marker join (e.g. plan_slug="team", task_id="x/y" would render identically ` +
+        `to plan_slug="team/x", task_id="y"). Reject or re-slug the value before calling buildTaskMarker.`,
+    );
+  }
 }
 
 /**
