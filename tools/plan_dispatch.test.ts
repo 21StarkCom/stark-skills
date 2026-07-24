@@ -1,6 +1,8 @@
 import { test, describe } from "node:test";
 import * as assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 
 import {
@@ -11,10 +13,13 @@ import {
   DEFAULT_MAX_ROUNDS,
   DEFAULT_TIMEOUT_SEC,
   DEFAULT_WING,
+  deriveSpecSlug,
+  derivePlanTarget,
   isPlainObject,
   runPlanDispatch,
   WING_TIMEOUT_DEFAULT_SEC,
 } from "./plan_dispatch.ts";
+import { parsePlanSlug, planPathFor } from "./forge_state_lib.ts";
 
 // --- Defaults sanity --------------------------------------------------------
 
@@ -155,6 +160,75 @@ describe("isPlainObject (re-exported)", () => {
   });
 });
 
+// --- spec-to-plan reports authoritative plan_path + plan_slug + plan PR in
+// --- the spec convention (T1, standards/stage-completion-line.md) ----------
+//
+// `stark-spec-to-plan` is the sole producer of `plan_path`/`plan_slug`
+// (spec §4 SSOT) — plan-to-tasks/copilot only ever consume the recorded
+// slug. This suite pins the derivation itself: spec-slug extraction, the
+// `docs/plans/YYYY-MM-DD-<slug>-plan.md` convention, and the round-trip
+// through `forge_state_lib.ts`'s `parsePlanSlug`/`planPathFor` pair — the
+// single owner of that path pattern, which this module must consume rather
+// than re-encode.
+
+describe("spec-to-plan reports authoritative plan_path + plan_slug + plan PR in the spec convention", () => {
+  test("deriveSpecSlug strips date prefix and -spec suffix", () => {
+    assert.equal(deriveSpecSlug("docs/specs/2026-03-27-auth-spec.md"), "auth");
+  });
+
+  test("deriveSpecSlug strips date prefix and -design suffix", () => {
+    assert.equal(deriveSpecSlug("docs/specs/2026-03-27-auth-design.md"), "auth");
+  });
+
+  test("deriveSpecSlug handles a multi-word slug and nested path", () => {
+    assert.equal(
+      deriveSpecSlug("/abs/repo/docs/specs/2026-07-19-stark-forge-plan-scaffold-spec.md"),
+      "stark-forge-plan-scaffold",
+    );
+  });
+
+  test("deriveSpecSlug sanitizes an unconventional filename into a renderable token", () => {
+    const slug = deriveSpecSlug("Some Weird File Name!!.md");
+    assert.match(slug, /^[A-Za-z0-9._][A-Za-z0-9._-]*$/);
+  });
+
+  test("derivePlanTarget emits the docs/plans/YYYY-MM-DD-<slug>-plan.md convention", () => {
+    const { plan_slug, plan_path } = derivePlanTarget(
+      "docs/specs/2026-03-27-auth-spec.md",
+      "2026-07-24",
+    );
+    assert.equal(plan_slug, "auth");
+    assert.equal(plan_path, "docs/plans/2026-07-24-auth-plan.md");
+    assert.match(plan_path, /^docs\/plans\/\d{4}-\d{2}-\d{2}-[^/]+-plan\.md$/);
+  });
+
+  test("plan_slug is the SPEC-slug derivation, not a re-parse of the plan filename", () => {
+    // A plan filename that happened to differ from the spec's slug would
+    // prove a re-parse; deriving from the spec path must ignore it entirely.
+    const { plan_slug } = derivePlanTarget(
+      "docs/specs/2026-03-27-checkout-flow-spec.md",
+      "2026-07-24",
+    );
+    assert.equal(plan_slug, "checkout-flow");
+    assert.notEqual(plan_slug, "unrelated-plan-name");
+  });
+
+  test("round-trips through forge_state_lib's parsePlanSlug/planPathFor pair", () => {
+    const { plan_slug, plan_path } = derivePlanTarget(
+      "docs/specs/2026-03-27-auth-spec.md",
+      "2026-07-24",
+    );
+    assert.equal(parsePlanSlug(plan_path), plan_slug);
+    assert.equal(plan_path, planPathFor(plan_slug, "2026-07-24"));
+  });
+
+  test("defaults the date segment to today (UTC) when --plan-date/date arg is omitted", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const { plan_path } = derivePlanTarget("docs/specs/2026-03-27-auth-spec.md");
+    assert.ok(plan_path.startsWith(`docs/plans/${today}-`));
+  });
+});
+
 // --- CLI smoke -------------------------------------------------------------
 
 describe("CLI", () => {
@@ -203,5 +277,52 @@ describe("CLI", () => {
       const stderr = e.stderr?.toString() ?? "";
       assert.match(stderr, /unknown arg: --bogus-flag/);
     }
+  });
+
+  test("stdout JSON carries plan_path/plan_slug even on a synchronous preflight rejection", () => {
+    // lead === wing short-circuits inside runPlanDispatch before any agent
+    // spawn (see "runPlanDispatch preflight" above) — this exercises the
+    // real CLI main() end-to-end (arg parse -> file reads -> derivePlanTarget
+    // -> JSON stdout) fast and deterministically, no agent CLI required.
+    const file = path.resolve(import.meta.dirname ?? "", "plan_dispatch.ts");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "plan-dispatch-cli-test-"));
+    const specFile = path.join(dir, "2026-03-27-auth-spec.md");
+    const genFile = path.join(dir, "g.md");
+    const revFile = path.join(dir, "r.md");
+    const revisFile = path.join(dir, "v.md");
+    fs.writeFileSync(specFile, "spec content");
+    fs.writeFileSync(genFile, "GEN");
+    fs.writeFileSync(revFile, "REV");
+    fs.writeFileSync(revisFile, "REVISE");
+
+    let out = "";
+    try {
+      execFileSync(
+        "node",
+        [
+          "--experimental-strip-types", file,
+          "--spec-file", specFile,
+          "--generate-prompt-file", genFile,
+          "--review-prompt-file", revFile,
+          "--revise-prompt-file", revisFile,
+          "--lead", "claude",
+          "--wing", "claude",
+          "--plan-date", "2026-07-24",
+        ],
+        { encoding: "utf-8" },
+      );
+      assert.fail("should have exited non-zero (lead_eq_wing)");
+    } catch (err) {
+      const e = err as { status?: number; stdout?: string };
+      assert.equal(e.status, 1);
+      out = e.stdout ?? "";
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+
+    const parsed = JSON.parse(out);
+    assert.equal(parsed.error, "lead_eq_wing");
+    assert.equal(parsed.plan_slug, "auth");
+    assert.equal(parsed.plan_path, "docs/plans/2026-07-24-auth-plan.md");
   });
 });

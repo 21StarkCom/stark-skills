@@ -37,6 +37,7 @@ import {
   VALID_AGENTS,
   type AgentName,
 } from "./copilot_dispatch.ts";
+import { planPathFor, sanitizeSlug } from "./forge_state_lib.ts";
 
 // Constants ---------------------------------------------------------------
 
@@ -256,6 +257,53 @@ async function callAgent(
 
   out.duration_s = elapsedSec(t0);
   return out;
+}
+
+// Plan path/slug derivation (T1, spec §4 SSOT) -----------------------------
+//
+// `stark-spec-to-plan` is the SOLE producer of `plan_path`/`plan_slug` (see
+// standards/stage-completion-line.md). The derivation lives here — not in
+// SKILL.md prose — so it has exactly one callable, testable owner; the skill
+// only reads these fields back off this CLI's JSON output and never
+// recomputes them. `planPathFor`/`parsePlanSlug` (forge_state_lib.ts) already
+// own the `docs/plans/YYYY-MM-DD-<slug>-plan.md` convention — this module
+// adds the other half: turning the SPEC path into the slug that convention
+// takes as input.
+
+/**
+ * Derive the plan slug from the **spec** path (never from a plan filename —
+ * that would be the exact re-derivation the SSOT rule forbids). Mirrors
+ * `write_spec_lib.ts::deriveSlugFromOut`'s spirit: strip a leading
+ * `YYYY-MM-DD-` date prefix and a trailing `-spec`/`-design` suffix from the
+ * spec's filename stem, then run the result through `sanitizeSlug` so it is
+ * guaranteed a clean renderable token (`^[A-Za-z0-9._][A-Za-z0-9._-]*$`,
+ * itself a subset of the spec's `^[A-Za-z0-9._:=/][A-Za-z0-9._:=/-]*$`
+ * threaded-arg grammar) regardless of how the input spec was named.
+ */
+export function deriveSpecSlug(specPath: string): string {
+  const stem = path.basename(specPath).replace(/\.md$/i, "");
+  const noDate = stem.replace(/^\d{4}-\d{2}-\d{2}-/, "");
+  const noSuffix = noDate.replace(/-(spec|design)$/i, "");
+  return sanitizeSlug(noSuffix);
+}
+
+/** Today's date as `YYYY-MM-DD` (UTC), the default host-supplied date for `planPathFor`. */
+export function todayDateStr(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * Derive `{plan_slug, plan_path}` from the spec path alone (T1). Pure
+ * composition of `deriveSpecSlug` + `planPathFor` — the exact pair the CLI
+ * attaches to every dispatch result so the skill never reconstructs the
+ * `docs/plans/…` path itself.
+ */
+export function derivePlanTarget(
+  specPath: string,
+  date: string = todayDateStr(),
+): { plan_slug: string; plan_path: string } {
+  const plan_slug = deriveSpecSlug(specPath);
+  return { plan_slug, plan_path: planPathFor(plan_slug, date) };
 }
 
 // Prompt builders ---------------------------------------------------------
@@ -574,6 +622,10 @@ interface CliArgs {
   maxRounds: number;
   timeoutSec: number;
   wingTimeoutSec: number;
+  /** Host-supplied date for `planPathFor` (T1). Defaults to today (UTC); a
+   *  flag exists only so callers (tests, a re-run continuing a prior date)
+   *  can pin it — the skill never needs to pass it. */
+  planDate: string | undefined;
 }
 
 function usage(): string {
@@ -593,6 +645,7 @@ function usage(): string {
     `  --max-rounds N                  Max fix rounds (default ${DEFAULT_MAX_ROUNDS})`,
     `  --timeout N                     Per-lead-invocation timeout sec (default ${DEFAULT_TIMEOUT_SEC})`,
     `  --wing-timeout N                Per-wing-invocation timeout sec (default ${WING_TIMEOUT_DEFAULT_SEC})`,
+    "  --plan-date YYYY-MM-DD           Date segment for the derived plan_path (default: today, UTC)",
   ].join("\n");
 }
 
@@ -607,6 +660,7 @@ function parseArgs(argv: ReadonlyArray<string>): CliArgs {
     maxRounds: DEFAULT_MAX_ROUNDS,
     timeoutSec: DEFAULT_TIMEOUT_SEC,
     wingTimeoutSec: WING_TIMEOUT_DEFAULT_SEC,
+    planDate: undefined,
   };
   const need = (i: number, flag: string): string => {
     const v = argv[i + 1];
@@ -634,6 +688,7 @@ function parseArgs(argv: ReadonlyArray<string>): CliArgs {
       case "--max-rounds":           args.maxRounds = asInt(need(i, a), a); i++; break;
       case "--timeout":              args.timeoutSec = asInt(need(i, a), a); i++; break;
       case "--wing-timeout":         args.wingTimeoutSec = asInt(need(i, a), a); i++; break;
+      case "--plan-date":            args.planDate = need(i, a); i++; break;
       case "-h":
       case "--help":                 process.stdout.write(usage() + "\n"); process.exit(0);
       default: throw new Error(`unknown arg: ${a}`);
@@ -677,7 +732,15 @@ async function main(): Promise<number> {
     wingTimeoutSec: args.wingTimeoutSec,
   });
 
-  process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+  // Attach the authoritative plan_path/plan_slug (T1) unconditionally — the
+  // derivation is pure and needs no successful dispatch to compute. The
+  // skill decides whether the run's outcome earns the right to actually
+  // write a file there and surface it on the STARK_STAGE_SUMMARY line; this
+  // CLI's job is only to be the single place that computes the value.
+  const planTarget = derivePlanTarget(args.specFile, args.planDate);
+  const output = { ...result, ...planTarget };
+
+  process.stdout.write(JSON.stringify(output, null, 2) + "\n");
   return "final_verdict" in result && result.final_verdict === "approved" ? 0 : 1;
 }
 
