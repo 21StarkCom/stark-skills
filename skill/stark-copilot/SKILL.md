@@ -2,7 +2,7 @@
 name: stark-copilot
 description: >-
   Autonomous lead/wing implementation: lead subagent implements, wing subagent reviews, fix-loop until wing approves. Use for copilot, paired build.
-argument-hint: '<plan-or-prompt> [--plan-slug SLUG] [--test-command CMD] [--lead claude|codex|gemini] [--wing claude|codex|gemini] [--max-rounds N] [--timeout N] [--sequential] [--parallel] [--dry-run]'
+argument-hint: '<plan-or-prompt> [--plan-slug SLUG] [--test-command CMD] [--lead claude|codex|gemini] [--wing claude|codex|gemini] [--max-rounds N] [--timeout N] [--sequential] [--parallel] [--ready] [--dry-run]'
 disable-model-invocation: true
 model: opus
 revision: 63a8c794adafa2df8a713b4dcf9743a09e3c7cfc
@@ -53,6 +53,7 @@ re-implement that logic here.
 - `--no-goal` — disable the goal-driven lead loop. When the lead is `claude` (the default), the lead's implement prompt is prefixed with a `/goal` directive (§2a) so it keeps iterating until tests pass; `--no-goal` reverts to a single bounded pass. Ignored when the lead is `codex`/`gemini` (`/goal` is a Claude Code feature).
 - `--parallel` — force-treat ALL steps as mutually independent (one wave), overriding the dependency DAG. Use only when you know the deps metadata is over-conservative. Parallelism within a wave is otherwise **on by default** via the execution DAG (§1.4); see [Parallel waves](#parallel-waves-default).
 - `--sequential` — disable DAG-driven parallelism entirely; run every step one at a time in dependency order (the pre-DAG behavior).
+- `--ready` (alias `--no-draft`) — open the impl PR ready-for-review instead of draft. Draft is the repo default (§2.6 lands the impl PR as a draft unless this is passed). `open_ready` (used in §2.6) is non-empty when either token is present in `$ARGUMENTS`.
 - `--dry-run` — show what would happen without executing
 
 If `--lead` and `--wing` resolve to the same agent, error and stop:
@@ -107,7 +108,7 @@ Three input modes, resolved in this order:
 
 **Inline prompt:** If input is a description (not a file path, no `--plan-slug`), decompose into steps yourself.
 
-When a plan file path is available, retain it as `plan_path` for the approach contract step. When in inline mode, leave `plan_path` unset.
+When a plan file path is available, retain it as `plan_path` for the approach contract step. When in inline mode, leave `plan_path` unset. Retain the raw `<plan-or-prompt>` positional value itself (flags stripped) as `plan_or_prompt` — §1.7 uses it as the inline-mode branch-name fallback.
 
 ### 1.2 Extract steps
 
@@ -209,6 +210,29 @@ Only when `plan_path` is set (plan-file or issue-driven mode that originated fro
 ```bash
 [ -n "$plan_path" ] && node --experimental-strip-types --no-warnings ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/approach_contract.ts --plan-file "$plan_path" --force-confirm
 ```
+
+### 1.7 Prepare the impl branch
+
+Historically copilot committed every step directly onto whatever branch was checked out and never opened a PR — forge had no impl PR number to record or merge. Fix that here, **before any step commits**: adopt-or-create a deterministic impl branch so §2g's per-step commits land somewhere reachable, and resolve the repo + default branch §2.6 needs to land the PR.
+
+```bash
+repo="${ORG_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)}"
+default_branch=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')
+default_branch=${default_branch:-main}
+
+# fallback_slug only matters in inline mode — issue-driven and plan-file mode
+# already derived PLAN_SLUG in §1.1. Slugify the raw <plan-or-prompt> arg.
+fallback_slug=$(printf '%s' "$plan_or_prompt" | tr '[:upper:]' '[:lower:]' \
+  | tr -c 'a-z0-9' '-' | sed -E 's/-+/-/g; s/^-|-$//g' | cut -c1-40)
+
+branch=$(node --experimental-strip-types "$TOOLS/copilot_land.ts" branch-name \
+  --plan-slug "${PLAN_SLUG:-}" --fallback-slug "$fallback_slug")
+
+node --experimental-strip-types "$TOOLS/copilot_land.ts" prepare-branch \
+  --branch "$branch" --json
+```
+
+`branch-name` is deterministic (`copilot/<slug>`) — a re-invocation with the same plan slug (or, in inline mode, the same raw input) always names the same branch, and `prepare-branch` adopts it (ff-only merge against a matching local/remote branch; a genuinely diverged local branch is a hard error, never forced — see `tools/copilot_land_lib.ts`). Don't re-implement this logic in prose; both subcommands are the single source of truth.
 
 ## Phase 2: Execute Waves
 
@@ -393,12 +417,44 @@ After ALL steps complete, run the full import chain test, smoke test, and SDK AP
 
 If ANY check fails, fix before proceeding to Phase 3.
 
+## Phase 2.6: Land the impl PR
+
+Push the branch prepared in §1.7 and adopt-or-open its PR. Steps only commit **locally** (§2g) — this phase is what makes that work reachable as a reviewable PR, and is what fixes copilot never having had an impl PR number to report or merge.
+
+Skip entirely if no step ever reached §2g (every step failed before its first commit) — there is nothing to push. Leave `pr_number` and `prs` unset for Phase 3/4.
+
+```bash
+title="Impl: ${PLAN_SLUG:-$(basename -- "${plan_path:-$plan_or_prompt}")}"
+body="Autonomous copilot implementation (lead \`$LEAD\`, wing \`$WING\`). $steps_total step(s) across $waves_total wave(s), $rounds_total total review round(s)."
+
+ready_flag=()
+[ -n "$open_ready" ] && ready_flag=(--ready)
+
+landed=$(node --experimental-strip-types "$TOOLS/copilot_land.ts" land \
+  --repo "$repo" \
+  --branch "$branch" \
+  --base "$default_branch" \
+  --title "$title" \
+  --body "$body" \
+  --lead "$LEAD" \
+  "${ready_flag[@]}" \
+  --json)
+
+pr_number=$(printf '%s' "$landed" | node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(0,"utf8")).pr.number))')
+prs_csv=$(printf '%s' "$landed" | node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("fs").readFileSync(0,"utf8")).prs))')
+```
+
+`land` pushes plainly — **never** `--force` (`tools/copilot_land_lib.ts`) — then adopts the open PR whose head is `$branch` or opens a fresh one, draft by default (`--ready`/`--no-draft` opts out), authored by the lead's GitHub App. A rejected (non-fast-forward) push is a hard error from the CLI — stop the run and surface it; never force past it.
+
+`pr_number` is this run's branch's PR. `prs_csv` is the JSON array `land` returned — the complete set of impl PRs this run knows about (newly opened plus adopted) — carried into Phase 3's summary, §4b's comment, and the §4c completion line.
+
 ## Phase 3: Summary
 
 Print:
 - Per-step results: step_id, title, rounds count, final verdict, test pass/fail, files changed
 - Aggregate: total rounds across all steps, average rounds per step, lead/wing identities, total duration
 - Code stats: lines added/removed, files touched
+- Impl PR: `$pr_number` (or "(none — no step committed)" when §2.6 was skipped)
 
 ## Phase 4: Persist
 
@@ -413,9 +469,9 @@ Write:
 - `summary.md` — human-readable summary
 - `review-log.jsonl` — flatten every round across every step into a JSONL audit trail with `{step_id, round, verdict, blocking_findings, summary, parse_retry_used}`
 
-### 4b. Post to PR (if PR detected)
+### 4b. Post to PR
 
-If the working tree is on a branch with an open PR (detect via `gh pr view --json number,headRefName --jq .number 2>/dev/null`), post the summary as a PR comment under the lead's GitHub App identity:
+Post the summary as a PR comment to the PR §2.6 already resolved (`$pr_number`), under the lead's GitHub App identity. Do **not** re-detect the PR here (e.g. via a second `gh pr view`) — §2.6 is the single source of truth for which PR this run's work landed on, and re-checking would just be a second, potentially divergent story.
 
 | Lead | App identity |
 |---|---|
@@ -423,7 +479,22 @@ If the working tree is on a branch with an open PR (detect via `gh pr view --jso
 | `codex` | stark-codex |
 | `gemini` | stark-gemini |
 
+Skip this step if `$pr_number` is unset (§2.6 never ran).
+
 For the `gh api` posting snippet, see [references/issue-management.md](references/issue-management.md).
+
+### 4c. Completion line
+
+As the literal last line of output, on **every** path through this skill — success or not — print exactly one `STARK_STAGE_SUMMARY` line (`standards/stage-completion-line.md`). It is additive: everything above it (Phase 3's summary, §4b's comment) is unchanged, and this line is not gated behind any `--json` flag (this skill has none).
+
+```bash
+if [ -n "$PLAN_SLUG" ]; then plan_slug_json="\"$PLAN_SLUG\""; else plan_slug_json=null; fi
+cat <<EOF
+STARK_STAGE_SUMMARY {"skill":"stark-copilot","outcome":"$outcome","plan_slug":$plan_slug_json,"prs":${prs_csv:-[]}}
+EOF
+```
+
+`outcome` is this run's own terminal verdict: `all_approved` when every step in every wave reached `final_verdict=approved` and §2.6 landed cleanly; otherwise the specific halt reason already in play — `blocked`, `aborted`, `max_rounds_unresolved`, `unresolved` (§2d), `no_actionable_steps` (§1.5's no-op case), or `dry_run` (§1.5's `--dry-run` stop, which precedes everything from §1.7 onward). `plan_slug` mirrors `PLAN_SLUG` verbatim — `null` in inline mode, never re-derived. `prs` is `$prs_csv` from §2.6 — `[]` whenever §2.6 was skipped (dry-run, no-op, or every step failed before its first commit).
 
 ## Parallel waves (default)
 
