@@ -87,10 +87,6 @@ One self-contained markdown doc: `docs/specs/YYYY-MM-DD-<slug>-spec.md`
 
 ```
 # <slug> — spec+plan            | header: date · author · accepted-base: (filled at gate)
-## Operator digest              | ≤20 short lines, simple English, no jargon: what this
-                                | does · what it will NOT do · how we prove it works ·
-                                | what I decided for you (the voiced ambiguities + defaults).
-                                | NON-normative — on any conflict, the body wins.
 ## Intent                       | 1 short para: why + user-visible effect. No fluff.
 ## Scope boundary               | IN: bullets. OUT: bullets — mandatory, ≥1 real entry.
 ## Repo context (non-derivable) | pitfalls, rationale, divergent conventions, exact
@@ -123,10 +119,13 @@ scripted probe (Playwright/CLI harness) → screenshot diff vs accepted
 baseline → named human checklist item at the gate, last resort. Pick one
 explicitly per task that needs it. [RQ3]
 
-**Two audiences, one file.** The body is the LLM implementer's source of
-truth. The `Operator digest` is the human's read — short sentences, plain
-English. Regenerate it on every revision; it must never carry a decision the
-body lacks. The gate (Phase 5) still runs against the body — the digest is
+**Two files, one truth.** Alongside the spec, write the operator digest as a
+sidecar: `docs/specs/YYYY-MM-DD-<slug>-spec.human.md` — ≤20 short lines,
+simple English, no jargon: what this does · what it will NOT do · how we
+prove it works · what I decided for you (the voiced ambiguities + their
+defaults). NON-normative: on any conflict the spec wins. Regenerate the
+sidecar on every spec revision — it must never carry a decision the spec
+lacks. The gate (Phase 5) still runs against the spec — the digest is
 orientation, not the gate.
 
 **Length follows tier.** There is no doc-length quota; what's bounded is the
@@ -176,7 +175,8 @@ human's deltas (human-driven; this is not a review loop) · **abandon** → stop
 On accept (all git via Bash; never touch the default branch):
 
 1. `base=$(git rev-parse HEAD)` — stamp the doc header: `accepted-base: <base>`.
-2. Branch `spec/<slug>` from the default branch; commit the doc; push.
+2. Branch `spec/<slug>` from the default branch; commit **both files** (the
+   spec and its `.human.md` sidecar); push.
 3. Open a **draft** PR (authored by stark-claude; `--ready` opts out):
 
 ```bash
