@@ -120,13 +120,13 @@ baseline → named human checklist item at the gate, last resort. Pick one
 explicitly per task that needs it. [RQ3]
 
 **Two files, one truth.** Alongside the spec, write the operator digest as a
-sidecar: `docs/specs/YYYY-MM-DD-<slug>-spec.human.md` — ≤20 short lines,
-simple English, no jargon: what this does · what it will NOT do · how we
-prove it works · what I decided for you (the voiced ambiguities + their
-defaults). NON-normative: on any conflict the spec wins. Regenerate the
-sidecar on every spec revision — it must never carry a decision the spec
-lacks. The gate (Phase 5) still runs against the spec — the digest is
-orientation, not the gate.
+sidecar: `docs/specs/YYYY-MM-DD-<slug>-spec.human.md` — **≤50 lines, simple
+English, short sentences**, no jargon: what this does · what it will NOT
+do · how we prove it works · what I decided for you (the voiced ambiguities
++ their defaults) · the task list in one line each. NON-normative: on any
+conflict the spec wins. Regenerate the sidecar on every spec revision — it
+must never carry a decision the spec lacks. The gate (Phase 5) still runs
+against the spec — the digest is orientation, not the gate.
 
 **Length follows tier.** There is no doc-length quota; what's bounded is the
 gate read (Phase 5). If the doc outgrows one gate sitting, the tier was
