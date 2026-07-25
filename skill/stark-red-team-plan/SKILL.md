@@ -458,7 +458,18 @@ fold_prs_json="[]"
 if [ -n "$fold" ] && [ -s "$FOLD_STDERR_FILE" ]; then
   fold_pr_number=$(grep -oE '^PR: +https://[^ ]+/pull/[0-9]+' "$FOLD_STDERR_FILE" \
       | grep -oE '[0-9]+$' | tail -n1)
-  [ -n "$fold_pr_number" ] && fold_prs_json="[$fold_pr_number]"
+  if [ -n "$fold_pr_number" ]; then
+    fold_prs_json="[$fold_pr_number]"
+  elif grep -qE '/pull/[0-9]+' "$FOLD_STDERR_FILE"; then
+    # A PR URL is present in the fold step's routed output but didn't match
+    # the expected `PR: <url>` line shape — the grep is scraping
+    # `red_team_fold.ts::printSummary`'s human text, not a structured field
+    # (its JSON envelope has a real `pr_number`, but we deliberately never
+    # pass `--json` to fold — see Phase 2.1 step 7). Fail LOUD instead of
+    # silently reporting `fold_prs:[]`: the fold step likely opened a PR
+    # this run cannot report.
+    echo "WARNING: stark-red-team-plan: fold step appears to have opened/edited a PR but its number could not be parsed from the fold summary (format may have drifted) — check $FOLD_STDERR_FILE" >&2
+  fi
 fi
 
 cat <<EOF
@@ -467,7 +478,11 @@ EOF
 ```
 
 An all-rejected or no-diff fold deliberately opens no PR — `fold_prs` stays
-`[]` in that case, which is not an error.
+`[]` in that case, which is not an error. A PR URL present in the fold
+output that the parser couldn't extract a number from is NOT silently
+folded into `[]` — it prints a `WARNING:` line to stderr instead, so a
+future change to `red_team_fold.ts::printSummary`'s wording surfaces
+immediately rather than reverting `fold_prs` recovery with no signal.
 
 ## Output Contract
 
