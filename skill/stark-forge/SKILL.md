@@ -175,15 +175,21 @@ just decided.
   completed but its artifact PR left the shared-PR model unrecoverable for
   this run — see spec `behavior` → Resume reconciliation,
   `author_pr_merged_early`/`artifact_pr_closed`). Fetch and print
-  `$FORGE driver-block --slug "$slug" --run-id "$run_id"` verbatim — it is the
+  `$FORGE driver-block --slug "$slug"` verbatim — it is the
   one place this exact explanation is rendered. **Do not run `abandon`
   automatically** — that is the operator's call, not this skill's. Stop.
 - **`advance` / `reinvoke` / `merge_only`** — continue to 3.3.
 
 ### 3.3 Enter running
 
+The re-entry is compare-and-set: read the stage's currently-recorded status
+(absent stage record ⇒ `pending`, mirroring the tool's own default) and pass
+it as `--from`, so a replayed transition never silently overwrites a status
+this skill didn't expect:
+
 ```bash
-$FORGE transition --slug "$slug" --run-id "$run_id" --stage "$target_stage" --to running --at "$(NOW)"
+cur_status=$($FORGE get --slug "$slug" --run-id "$run_id" | jq -r --arg s "$target_stage" '(.stages[] | select(.stage == $s) | .status) // "pending"')
+$FORGE transition --slug "$slug" --run-id "$run_id" --stage "$target_stage" --from "$cur_status" --to running --at "$(NOW)"
 ```
 
 ### 3.4 Base sync — only when `requires_base_sync` is true
@@ -262,10 +268,11 @@ the JSON that follows the prefix.
 ### 3.6 Merge-point check
 
 ```bash
-$FORGE get --slug "$slug" --run-id "$run_id" | jq -e --arg s "$target_stage" '.merge_points[] | select(.after_stage == $s)'
+mp=$($FORGE get --slug "$slug" --run-id "$run_id" | jq -c --arg s "$target_stage" '.merge_points[] | select(.after_stage == $s)')
 ```
 
-- **No match** (not a merge point — a paired author stage, or `plan-to-tasks`):
+- **No match / empty** (not a merge point — a paired author stage, or
+  `plan-to-tasks`):
 
   ```bash
   $FORGE transition --slug "$slug" --run-id "$run_id" --stage "$target_stage" --from running --to done --at "$(NOW)"
@@ -274,42 +281,90 @@ $FORGE get --slug "$slug" --run-id "$run_id" | jq -e --arg s "$target_stage" '.m
   Go to 3.1 for the next stage.
 
 - **Match** (this is also where `merge_only` re-enters, since a merge-point
-  stage is the only kind that ever produces that action) — go to 3.7.
+  stage is the only kind that ever produces that action) — capture `.artifact`
+  (`spec`/`plan`/`impl`) from `$mp` and go to 3.7.
 
 ### 3.7 Merge at a merge point — fold check first, then merge, no shell wrapper
 
-`forge_state.ts driver-block` is the **single renderer** of the fold-PR check
-commands, the per-PR `/stark-gh:pr-merge` invocations, and the operator
-deadline (`merge_timeout_s`, read by the tool from `getForgePipelineConfig()`
-— never restated or recomputed here). This skill reuses that exact rendering
-instead of reconstructing any of it in markdown:
+In-session mode merges from **recorded state**, not from `driver-block`'s
+rendering. `driver-block` is the driver-mode operator's script — on a fresh
+`advance`/`reinvoke` it necessarily prints symbolic `<REPORTED: …>`
+placeholders for PR numbers a human is meant to fill in from the stage's
+just-printed output; running those tokens as literal arguments in-session
+(`gh pr view <REPORTED: fold_pr>`) would be wrong. This skill instead reads
+the exact same registry `record-output` already persisted — the state-owned
+source, so nothing here is re-derived:
 
 ```bash
-$FORGE driver-block --slug "$slug" --run-id "$run_id"
+state=$($FORGE get --slug "$slug" --run-id "$run_id")
+artifact=$(echo "$mp" | jq -r '.artifact')
+rec=$(echo "$state" | jq -c --arg s "$target_stage" '.stages[] | select(.stage == $s)')
+fold_prs=$(echo "$rec" | jq -r '.fold_prs[]?')
+merged_prs=$(echo "$rec" | jq -r '.merges[]?.pr')
+artifact_prs=$(echo "$state" | jq -r --arg a "$artifact" '.artifact_prs[$a][]?')
+remaining_prs=$(comm -23 <(echo "$artifact_prs" | sort -n) <(echo "$merged_prs" | sort -n))
+repo_owner=$(echo "$state" | jq -r '.repo.owner')
+repo_name=$(echo "$state" | jq -r '.repo.name')
 ```
 
-Execute the block's own lines, in order, exactly as an operator would — this
-skill just does it itself instead of stopping for one:
+(This is the same computation `driver-block` does internally for its
+`merge_only` branch, so it is correct for `advance`/`reinvoke` too — after
+3.5's `record-output` the registry is already populated either way. You may
+instead take these numbers straight from the fields just parsed out of the
+stage's `STARK_STAGE_SUMMARY` line in 3.5, when this iteration actually ran
+3.5 — same values. But `merge_only` skips 3.5 entirely on this iteration, so
+reading `$FORGE get` here is the one path that works uniformly for all three
+actions; stay consistent and always read state here.)
 
-1. **Fold check.** Run every `gh pr view <fold-pr> ...` line the block prints.
-   If any fold PR the block lists is still `OPEN`, run the block's own
-   `--to halted --gate-reason fold_pr_open` transition line (filling in the
-   detail/timestamp) and stop — this must happen **before** any merge.
-2. **Merge, one PR at a time, in the order the block lists them.** For each
-   `/stark-gh:pr-merge --pr <pr>` line: record the current time, invoke it
-   in-session, and on return compare elapsed time against the deadline named
-   in the block's comment. **There is no shell `timeout` wrapper that can
-   bound a nested slash-command invocation** — the deadline is enforced only
-   at the points forge actually has: the start-time record here and this
-   check on return. A merge that never returns is recovered by the crash
+The operator deadline (`merge_timeout_s`) is not exposed by any other
+subcommand — read the single number `driver-block` renders it as, without
+executing any of that block's other (symbolic) lines:
+
+```bash
+merge_timeout_s=$($FORGE driver-block --slug "$slug" | grep -oE 'deadline [0-9]+s' | grep -oE '[0-9]+')
+```
+
+1. **Fold check first.** For each PR in `$fold_prs`:
+
+   ```bash
+   gh pr view <pr> --repo "$repo_owner/$repo_name" --json state --jq .state
+   ```
+
+   If any is `OPEN`:
+
+   ```bash
+   $FORGE transition --slug "$slug" --run-id "$run_id" --stage "$target_stage" \
+     --from running --to halted --gate-reason fold_pr_open --gate-detail "<pr>" --at "$(NOW)"
+   ```
+
+   Stop — this must happen **before** any merge.
+
+2. **Merge, one PR at a time, in the order listed in `$remaining_prs`**
+   (already-merged PRs are excluded by construction, so a resumed
+   `merge_only` retries only what's left). For each PR: record the current
+   time, invoke `/stark-gh:pr-merge --pr <pr>` **in-session** — it is a slash
+   command, so **there is no shell `timeout` wrapper that can bound a nested
+   slash-command invocation** — and on return compare elapsed time against
+   `$merge_timeout_s`. A merge that never returns is recovered by the crash
    path (kill the session → `/stark-forge --resume` → `merge_only` retries
    only the still-open PRs).
-   - **Within deadline and successful** — immediately run the block's
-     `record-output --merges <pr>:true` line for that PR (before merging the
-     next one, so a crash between merges never loses attribution), then
-     continue to the next PR.
-   - **Overrun, or `/stark-gh:pr-merge` itself failed** — run the block's
-     `--to halted --gate-reason merge_timeout` transition line and stop.
+   - **Within deadline and successful** — immediately record it (before
+     merging the next one, so a crash between merges never loses
+     attribution):
+
+     ```bash
+     $FORGE record-output --slug "$slug" --run-id "$run_id" --stage "$target_stage" --merges "<pr>:true" --at "$(NOW)"
+     ```
+
+     then continue to the next PR.
+   - **Overrun, or `/stark-gh:pr-merge` itself failed**:
+
+     ```bash
+     $FORGE transition --slug "$slug" --run-id "$run_id" --stage "$target_stage" \
+       --from running --to halted --gate-reason merge_timeout --gate-detail "<pr>" --at "$(NOW)"
+     ```
+
+     Stop.
 3. **All listed PRs merged** — transition to `done` (this call is
    reader-validated: it will itself refuse if anything is still unmerged, so
    this skill does not need to re-verify):
@@ -343,7 +398,7 @@ inside `forge_state.ts`; defaults to in-session, forced to `"driver"` only by
 Phase 3's loop autonomously. Instead, each time it would act, it:
 
 1. Calls `$FORGE resume-target ${slug:+--slug "$slug"}` to find the target,
-   then `$FORGE driver-block --slug "$slug" --run-id "$run_id"`.
+   then `$FORGE driver-block --slug "$slug"`.
 2. Prints that block **verbatim** — it already contains the compare-and-set
    re-entry, the base-sync prelude (only if applicable), the stage command,
    the exact `record-output` template, and (at a merge point) the fold-check
