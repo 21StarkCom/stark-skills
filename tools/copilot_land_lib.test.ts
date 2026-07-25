@@ -222,3 +222,120 @@ describe("landImpl — idempotent create-or-adopt", () => {
     assert.equal(calls.create, 0);
   });
 });
+
+describe("landImpl — adopt path un-drafts on --ready (Important finding fix)", () => {
+  test("adopting a DRAFT PR with --ready marks it ready via deps.markReady", async () => {
+    const markReadyCalls: number[] = [];
+    const { deps } = makeDeps({
+      listOpenPrs: async () => [
+        { number: 812, head: { ref: "copilot/widget-system" }, html_url: "https://github.com/o/r/pull/812", draft: true },
+      ],
+      markReady: async (n) => {
+        markReadyCalls.push(n);
+        return { ok: true };
+      },
+    });
+
+    const result = await landImpl(
+      {
+        branch: "copilot/widget-system",
+        base: "main",
+        title: "impl: widget-system",
+        body: "body",
+        lead: "claude",
+        ready: true,
+        hasUpstream: true,
+        knownPrs: [],
+      },
+      deps,
+    );
+
+    assert.deepEqual(markReadyCalls, [812], "markReady must be called exactly once for the adopted draft PR");
+    assert.equal(result.pr.adopted, true);
+    assert.equal(result.pr.number, 812);
+  });
+
+  test("adopting a DRAFT PR WITHOUT --ready never calls markReady, leaves it a draft", async () => {
+    const markReadyCalls: number[] = [];
+    const { deps } = makeDeps({
+      listOpenPrs: async () => [
+        { number: 812, head: { ref: "copilot/widget-system" }, html_url: "https://github.com/o/r/pull/812", draft: true },
+      ],
+      markReady: async (n) => {
+        markReadyCalls.push(n);
+        return { ok: true };
+      },
+    });
+
+    await landImpl(
+      {
+        branch: "copilot/widget-system",
+        base: "main",
+        title: "impl: widget-system",
+        body: "body",
+        lead: "claude",
+        ready: false,
+        hasUpstream: true,
+        knownPrs: [],
+      },
+      deps,
+    );
+
+    assert.deepEqual(markReadyCalls, [], "markReady must not be called when --ready was not passed");
+  });
+
+  test("adopting an ALREADY-READY PR with --ready is a harmless no-op: markReady is not called", async () => {
+    const markReadyCalls: number[] = [];
+    const { deps } = makeDeps({
+      listOpenPrs: async () => [
+        { number: 812, head: { ref: "copilot/widget-system" }, html_url: "https://github.com/o/r/pull/812", draft: false },
+      ],
+      markReady: async (n) => {
+        markReadyCalls.push(n);
+        return { ok: true };
+      },
+    });
+
+    const result = await landImpl(
+      {
+        branch: "copilot/widget-system",
+        base: "main",
+        title: "impl: widget-system",
+        body: "body",
+        lead: "claude",
+        ready: true,
+        hasUpstream: true,
+        knownPrs: [],
+      },
+      deps,
+    );
+
+    assert.deepEqual(markReadyCalls, [], "markReady must not be called when the adopted PR is already ready");
+    assert.equal(result.pr.adopted, true);
+  });
+
+  test("markReady failure surfaces as a rejection (never silently swallowed)", async () => {
+    const { deps } = makeDeps({
+      listOpenPrs: async () => [
+        { number: 812, head: { ref: "copilot/widget-system" }, html_url: "https://github.com/o/r/pull/812", draft: true },
+      ],
+      markReady: async () => ({ ok: false, stderr: "gh: pull request already merged" }),
+    });
+
+    await assert.rejects(() =>
+      landImpl(
+        {
+          branch: "copilot/widget-system",
+          base: "main",
+          title: "t",
+          body: "b",
+          lead: "claude",
+          ready: true,
+          hasUpstream: true,
+          knownPrs: [],
+        },
+        deps,
+      ),
+    );
+  });
+});

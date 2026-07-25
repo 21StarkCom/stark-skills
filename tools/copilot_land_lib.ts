@@ -67,6 +67,7 @@ export interface OpenPr {
   number: number;
   head?: { ref?: string };
   html_url?: string;
+  draft?: boolean;
 }
 
 /**
@@ -137,7 +138,7 @@ export interface LandResult {
 export interface LandDeps {
   /** Push the impl branch. NEVER passes a force flag (see `buildPushArgs`). */
   push: () => { ok: boolean; stderr?: string };
-  /** List open PRs for the target repo, scoped to the lead's App. */
+  /** List open PRs for the target repo. Auth only — NOT scoped to any one App's authored PRs. */
   listOpenPrs: () => Promise<readonly OpenPr[]>;
   /** Open a fresh PR (only called when no open PR targets `branch`). */
   createPr: (opts: {
@@ -148,6 +149,14 @@ export interface LandDeps {
     draft: boolean;
     app: AppName;
   }) => Promise<{ number: number; html_url?: string }>;
+  /**
+   * Mark an adopted PR ready-for-review. Only called on the adopt path when
+   * `input.ready` is set AND the adopted PR is currently a draft — mirrors
+   * `write_spec_land.ts`'s `gh pr ready` fallback (App tokens cannot call the
+   * GraphQL un-draft mutation). Optional so existing stubs/tests that never
+   * exercise this branch don't need to supply it.
+   */
+  markReady?: (prNumber: number) => Promise<{ ok: boolean; stderr?: string }>;
 }
 
 /**
@@ -156,9 +165,14 @@ export interface LandDeps {
  *  1. Push (never force — a re-run's new commits go on top of what's already
  *     pushed; a rejected non-ff push is surfaced as a thrown error, never
  *     silently forced).
- *  2. List open PRs (scoped to the lead's App) and adopt one whose head is
- *     `input.branch` if it exists — `createPr` is NOT called in this path,
- *     so a bare re-invocation never opens a duplicate.
+ *  2. List open PRs and adopt one whose head is `input.branch` if it exists
+ *     — `createPr` is NOT called in this path, so a bare re-invocation never
+ *     opens a duplicate. When `input.ready` is set and the adopted PR is
+ *     still a draft, mark it ready via `deps.markReady` (mirrors
+ *     `write_spec_land.ts`'s `gh pr ready` fallback — App tokens cannot
+ *     un-draft via the GraphQL mutation). Adopting an already-ready PR with
+ *     `--ready` is a harmless no-op (`markReady` is not called); adopting a
+ *     draft WITHOUT `--ready` leaves it a draft.
  *  3. Otherwise open a fresh PR, draft by default (`draft: !input.ready`),
  *     authored by the lead's App.
  *  4. Union `input.knownPrs` with the landed/adopted number — re-reporting a
@@ -176,6 +190,15 @@ export async function landImpl(input: LandInput, deps: LandDeps): Promise<LandRe
 
   let pr: LandedPr;
   if (existing) {
+    if (input.ready && existing.draft === true) {
+      if (!deps.markReady) {
+        throw new Error("copilot_land: --ready requires deps.markReady to un-draft the adopted PR");
+      }
+      const readied = await deps.markReady(existing.number);
+      if (!readied.ok) {
+        throw new Error(`copilot_land: mark ready failed: ${readied.stderr ?? "unknown error"}`);
+      }
+    }
     pr = {
       number: existing.number,
       url: existing.html_url ?? "",

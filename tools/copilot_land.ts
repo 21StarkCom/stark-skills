@@ -57,6 +57,11 @@ function git(args: string[], cwd: string = process.cwd()): Shell {
   return { code: r.status ?? 1, stdout: (r.stdout ?? "").trim(), stderr: (r.stderr ?? "").trim() };
 }
 
+function gh(args: string[], cwd: string = process.cwd()): Shell {
+  const r = spawnSync("gh", args, { cwd, encoding: "utf8", timeout: 60_000 });
+  return { code: r.status ?? 1, stdout: (r.stdout ?? "").trim(), stderr: (r.stderr ?? "").trim() };
+}
+
 function treeIsDirty(cwd: string): boolean {
   return git(["status", "--porcelain"], cwd).stdout.length > 0;
 }
@@ -291,6 +296,12 @@ async function cmdLand(argv: string[]): Promise<number> {
         draft: opts.draft,
         app: opts.app,
       })) as { number: number; html_url?: string },
+    // App tokens cannot un-draft — shell 'gh pr ready' under the ambient user
+    // (mirrors write_spec_land.ts).
+    markReady: async (prNumber) => {
+      const r = gh(["pr", "ready", String(prNumber), "--repo", repo], cwd);
+      return { ok: r.code === 0, stderr: r.stderr };
+    },
   };
 
   let result;
