@@ -36,6 +36,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { detectRepo } from "./github_app_lib.ts";
+import { isMainModule } from "./main_module_lib.ts";
 import { resolveDb } from "./red_team_db_resolver.ts";
 import {
   foldSidecarPathFor,
@@ -194,11 +195,23 @@ function emitError(json: boolean, message: string): void {
   }
 }
 
-type Envelope = FoldResult & {
+export type Envelope = FoldResult & {
   artifact: string;
   branch: string | null;
   pr_url: string | null;
+  pr_number: number | null;
 };
+
+/** Pure envelope assembly, extracted so the pr_number-survival contract is
+ * unit-testable without the git/PR side effects. */
+export function buildEnvelope(
+  result: FoldResult,
+  artifact: string,
+  branch: string | null,
+  pr: { pr_url: string | null; pr_number: number | null },
+): Envelope {
+  return { ...result, artifact, branch, pr_url: pr.pr_url, pr_number: pr.pr_number };
+}
 
 function printSummary(
   env: Envelope,
@@ -310,7 +323,10 @@ async function main(argv: string[]): Promise<number> {
 
   // 2) Git + PR — only for a real doc diff, and only when not --dry-run/--no-pr.
   let branch: string | null = null;
-  let prUrl: string | null = result.pr_url;
+  let prResult: { pr_url: string | null; pr_number: number | null } = {
+    pr_url: result.pr_url,
+    pr_number: null,
+  };
   const realDiff = result.status === "ok" && result.revised_doc !== originalArtifact;
   const doPr = !args.dryRun && !args.noPr && realDiff;
 
@@ -370,7 +386,7 @@ async function main(argv: string[]): Promise<number> {
             app: "stark-claude",
             draft: !args.ready,
           });
-          prUrl = pr.pr_url;
+          prResult = pr;
         }
       }
     } catch (err) {
@@ -381,7 +397,7 @@ async function main(argv: string[]): Promise<number> {
   }
 
   // 3) Output.
-  const envelope: Envelope = { ...result, artifact: artifactPath, branch, pr_url: prUrl };
+  const envelope: Envelope = buildEnvelope(result, artifactPath, branch, prResult);
   if (args.json) {
     process.stdout.write(JSON.stringify(envelope, null, 2) + "\n");
   } else {
@@ -392,9 +408,11 @@ async function main(argv: string[]): Promise<number> {
   return 0;
 }
 
-main(process.argv.slice(2))
-  .then((code) => process.exit(code))
-  .catch((err) => {
-    process.stderr.write(`red_team_fold: unhandled: ${(err as Error).stack ?? err}\n`);
-    process.exit(1);
-  });
+if (isMainModule(import.meta.url)) {
+  main(process.argv.slice(2))
+    .then((code) => process.exit(code))
+    .catch((err) => {
+      process.stderr.write(`red_team_fold: unhandled: ${(err as Error).stack ?? err}\n`);
+      process.exit(1);
+    });
+}

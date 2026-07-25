@@ -143,10 +143,16 @@ flags=()
 [ -n "$fold" ] && flags+=(--fold)
 
 # TOOLS was set in the preflight preamble.
+#
+# FOLD_STDERR_FILE captures stderr (tee'd so it still streams live) so
+# Phase 5 can recover the fold step's PR number: under `--json` the fold
+# step's own human summary — including its `PR: <url>` line — is routed to
+# our stderr, never into the challenge's stdout JSON.
+FOLD_STDERR_FILE=$(mktemp -t stark-red-team-fold-stderr-XXXXXX)
 output=$(node --experimental-strip-types "$TOOLS/red_team_plan.ts" \
     --plan "$plan_path" \
     "${flags[@]}" \
-    --json)
+    --json 2> >(tee "$FOLD_STDERR_FILE" >&2))
 ```
 
 The dispatcher:
@@ -417,6 +423,66 @@ the red-team SQLite via `tools/red_team_audit_lib.ts` (run metadata, findings,
 and fix-plan outcome). That row is the only audit surface — no insights events
 and no remote emit/queue (insights telemetry was decommissioned). The audit
 write does not control the skill's status.
+
+## Phase 5: Completion line
+
+**Completion line (`standards/stage-completion-line.md`).** As the literal
+last line of output, on every path through this skill — success or not —
+print exactly one `STARK_STAGE_SUMMARY` line, appended after everything
+above (Phase 3's rendered summary, the Phase 4 persistence steps). Not gated
+behind any flag (this skill has none — `--json` here is `red_team_plan.ts`'s
+own flag, always passed in Phase 2.1).
+
+- `outcome` is the challenge's own `status` (`clean` / `halted` /
+  `halted_human_review` / `error`).
+- `artifact_path` is `$plan_path` — durable (the sidecar was written and
+  committed) whenever `status != "error"` and `--dry-run` was not passed;
+  otherwise `null`.
+- `pr` is `$pr_number` once Phase 4.2 resolved it — `null` under
+  `--dry-run`, `--no-pr-comment`, or when opening the PR failed.
+- `fold_prs` is `[]` unless `--fold` was passed AND the fold step opened or
+  edited a PR. Recover its number from `$FOLD_STDERR_FILE` (captured in
+  Phase 2.1) — the fold step's own human summary line is `PR:
+  <url>` (`tools/red_team_fold.ts::printSummary`), trailing digits are the
+  PR number:
+
+```bash
+if [ "$status" = "error" ] || [ -n "$dry_run" ]; then
+  ARTIFACT_JSON="null"
+else
+  ARTIFACT_JSON="\"$plan_path\""
+fi
+PR_JSON="${pr_number:-null}"
+
+fold_prs_json="[]"
+if [ -n "$fold" ] && [ -s "$FOLD_STDERR_FILE" ]; then
+  fold_pr_number=$(grep -oE '^PR: +https://[^ ]+/pull/[0-9]+' "$FOLD_STDERR_FILE" \
+      | grep -oE '[0-9]+$' | tail -n1)
+  if [ -n "$fold_pr_number" ]; then
+    fold_prs_json="[$fold_pr_number]"
+  elif grep -qE '/pull/[0-9]+' "$FOLD_STDERR_FILE"; then
+    # A PR URL is present in the fold step's routed output but didn't match
+    # the expected `PR: <url>` line shape — the grep is scraping
+    # `red_team_fold.ts::printSummary`'s human text, not a structured field
+    # (its JSON envelope has a real `pr_number`, but we deliberately never
+    # pass `--json` to fold — see Phase 2.1 step 7). Fail LOUD instead of
+    # silently reporting `fold_prs:[]`: the fold step likely opened a PR
+    # this run cannot report.
+    echo "WARNING: stark-red-team-plan: fold step appears to have opened/edited a PR but its number could not be parsed from the fold summary (format may have drifted) — check $FOLD_STDERR_FILE" >&2
+  fi
+fi
+
+cat <<EOF
+STARK_STAGE_SUMMARY {"skill":"stark-red-team-plan","outcome":"$status","artifact_path":$ARTIFACT_JSON,"pr":$PR_JSON,"fold_prs":$fold_prs_json}
+EOF
+```
+
+An all-rejected or no-diff fold deliberately opens no PR — `fold_prs` stays
+`[]` in that case, which is not an error. A PR URL present in the fold
+output that the parser couldn't extract a number from is NOT silently
+folded into `[]` — it prints a `WARNING:` line to stderr instead, so a
+future change to `red_team_fold.ts::printSummary`'s wording surfaces
+immediately rather than reverting `fold_prs` recovery with no signal.
 
 ## Output Contract
 

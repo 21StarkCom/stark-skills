@@ -1592,3 +1592,56 @@ test("#21 driver-block reconciles a checkpoint-ABSENT crash to reinvoke: persist
 
   fs.rmSync(stateRoot, { recursive: true, force: true });
 });
+
+// --- config: pure read, never mutates state (2026-07-25 merge-timeout fix) --
+
+test("config prints the forge_pipeline config and NEVER loads, reconciles, or persists state", () => {
+  const stateRoot = tmpStateRoot();
+  const slug = "purecfg";
+  const rid = "20260720-090000-pc1";
+  // A LIVE `running` merge stage — exactly the shape that made `driver-block`
+  // misdetect a crash (via selectAndReconcile -> resumeTarget) and persist a
+  // spurious `halted` reconciliation out from under an in-flight merge. If
+  // `config` ever touched state loading/reconciliation this fixture would
+  // reproduce that corruption.
+  const live = makeState({
+    slug,
+    run_id: rid,
+    chain: ["write-spec", "review-spec"],
+    artifact_prs: { spec: [10] },
+    stages: [
+      stageRec("write-spec", {
+        status: "done",
+        prs: [10],
+        artifacts: { spec_path: "docs/specs/2026-07-20-purecfg-spec.md" },
+      }),
+      stageRec("review-spec", { status: "running", started_at: "2026-07-20T00:00:00Z" }),
+    ],
+  });
+  persistFixture(stateRoot, live);
+  const stateFile = path.join(stateRoot, "history", "forge", slug, rid, "state.json");
+  const before = fs.readFileSync(stateFile, "utf8");
+
+  const r = runCli(["config"], { stateRoot });
+  assert.equal(r.status, 0, r.stderr);
+  const cfg = JSON.parse(r.stdout);
+  assert.equal(typeof cfg.merge_timeout_s, "number");
+  assert.equal(typeof cfg.history_keep_runs, "number");
+
+  // No slug/run touched: state.json is byte-identical, and no OTHER run dir
+  // was created as a side effect.
+  const after = fs.readFileSync(stateFile, "utf8");
+  assert.equal(after, before, "config must not mutate the on-disk state it never even loads");
+  const runDirs = fs.readdirSync(path.join(stateRoot, "history", "forge", slug)).sort();
+  assert.deepEqual(runDirs, [rid, "latest"].sort(), "config must not create or touch any run dir");
+
+  fs.rmSync(stateRoot, { recursive: true, force: true });
+});
+
+test("config takes no flags and rejects an unknown one bad_args", () => {
+  const stateRoot = tmpStateRoot();
+  const r = runCli(["config", "--slug", "whatever"], { stateRoot });
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes("bad_args"), r.stderr);
+  fs.rmSync(stateRoot, { recursive: true, force: true });
+});

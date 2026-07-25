@@ -255,6 +255,7 @@ the accepted-gaps file from Phase 9b (if any):
 ```bash
 ready_flag=()
 [ -n "$open_ready" ] && ready_flag=(--ready)
+publish_json_path="$(mktemp -t write-spec-publish.XXXXXX).json"
 node --experimental-strip-types "$TOOLS/write_spec_land.ts" publish \
     --repo "$REPO" \
     --branch "$branch" \
@@ -263,13 +264,17 @@ node --experimental-strip-types "$TOOLS/write_spec_land.ts" publish \
     ${gaps_path:+--accepted-gaps "$gaps_path"} \
     ${lead:+--lead "$lead"} \
     "${ready_flag[@]}" \
-    --json
+    --json > "$publish_json_path"
 ```
 
 `publish` adds/commits (repo identity) the spec, pushes (plain, never force),
 adopts-or-creates the PR (App-authored), and merges only its owned body block.
 `--ready` shells `gh pr ready` under the ambient user (App tokens cannot
-un-draft). The resolved PR object from `publish` is threaded into the summary.
+un-draft). The captured `$publish_json_path` (the `PublishResult` — `{ok,
+branch, committed, pushed, pr: {number, url, app, adopted} | null}`) is the PR
+source for Phase 11: extract the PR number with
+`pr_number=$(jq -r '.pr.number // empty' "$publish_json_path")` — populated
+only on a real (non-dry, non-`--no-pr`) publish that opened or adopted a PR.
 
 ## Phase 11: Terminal summary (every terminal path)
 
@@ -290,9 +295,38 @@ on dry run); `accepted_gaps` is empty on `contract_satisfied` and `dry_run`.
 
 - **`--json`** → print **exactly one** JSON object (the `SkillSummary`) to
   stdout and **nothing else**. All human narration goes to stderr.
-- **Human mode** → print **only** a human rendering of the same fields to
-  stdout (verdict, unsatisfied/accepted sections, PR link, cost/rounds). **No
-  JSON on stdout.**
+- **Human mode** → print a human rendering of the same fields to stdout
+  (verdict, unsatisfied/accepted sections, PR link, cost/rounds), then, as
+  the literal last line, one `STARK_STAGE_SUMMARY` line
+  (`standards/stage-completion-line.md`) — the sole exception to "no JSON on
+  stdout" in human mode, since this is the channel `/stark-forge` reads
+  (it always invokes this skill without `--json`, per spec §2):
+
+```bash
+if [ "$outcome" = "contract_satisfied" ] || [ "$outcome" = "authored_with_accepted_gaps" ]; then
+  ARTIFACT_JSON="\"$out\""
+  pr_number="$(jq -r '.pr.number // empty' "$publish_json_path" 2>/dev/null)"
+  PR_JSON="${pr_number:-null}"
+else
+  ARTIFACT_JSON="null"
+  PR_JSON="null"
+fi
+cat <<EOF
+STARK_STAGE_SUMMARY {"skill":"stark-write-spec","outcome":"$outcome","spec_path":$ARTIFACT_JSON,"pr":$PR_JSON}
+EOF
+```
+
+  `spec_path` sources `$out` — the resolved spec output path bound in Phase 5
+  (or Phase 5's `validate-out` echo, on the `--out`-override path) and passed
+  as `--spec "$out"`/`--out "$out"` to every dispatcher call, so it is
+  guaranteed non-empty on both landing outcomes. `pr` sources the `$out`-sibling
+  `$publish_json_path` written by Phase 10's publish invocation — its `.pr.number`
+  field, extracted with `jq`. `spec_path`/`pr` are populated only for the two
+  outcomes that landed a durable spec on a PR (`contract_satisfied`,
+  `authored_with_accepted_gaps`) — the only two outcomes that reach Phase 10's
+  publish step at all; `aborted` and `dry_run` skip publish entirely (Phase 10),
+  so `$publish_json_path` is never set on those paths and both fields report
+  `null` — no durable artifact exists.
 
 ## Output Contract
 

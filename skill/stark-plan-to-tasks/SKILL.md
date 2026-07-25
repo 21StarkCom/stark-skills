@@ -2,7 +2,7 @@
 name: stark-plan-to-tasks
 description: >-
   Decompose spec/plan into phased GitHub issues with story points and risk labels. Use for plan to tasks, decompose plan.
-argument-hint: "<path-to-spec> [--dry-run] [--cleanup <slug>] [--agents codex,gemini]"
+argument-hint: "<path-to-spec> [--plan-slug <slug>] [--dry-run] [--cleanup <slug>] [--agents codex,gemini]"
 disable-model-invocation: true
 context: fork
 model: opus
@@ -23,6 +23,7 @@ Decompose a spec/design document into phased GitHub issues. Three LLM passes: qu
 ## Arguments
 
 - `<path-to-spec>` — path to spec/plan markdown file (required, must be `.md`)
+- `--plan-slug <slug>` — the plan-scoped slug to stamp on every created issue and to key the dedup pre-check by. **When `/stark-forge` invokes this skill, it always passes the slug `stark-spec-to-plan` recorded** (spec §4 SSOT — see `standards/stage-completion-line.md`) — never re-derive it from the plan filename in that case; it is threaded identically on the first run and on a crash-reentry re-run, so the dedup identity can't drift between them. When absent (a standalone, non-forge run), fall back to deriving it from the filename as in Phase 1.7 below. Must match the threaded-artifact-token grammar `^[A-Za-z0-9._:=/][A-Za-z0-9._:=/-]*$`.
 - `--dry-run` — run all three passes, preview issue payloads, write to `/tmp/stark-plan-to-tasks-preview-{plan-slug}.md`, stop before creating issues or modifying files
 - `--cleanup <plan-slug>` — find all issues with `plan:{slug}` label, list them, and offer to close with a "Cleaned up by stark-plan-to-tasks" comment
 - `--agents <list>` — comma-separated subset of `codex`, `gemini` for the Pass 3 validation agent. Overrides `validation_agents` from config (default: `codex`). Pass 1 (quality gate) and Pass 2 (decomposition) are always run by Claude as orchestrator and are not affected by this flag.
@@ -83,7 +84,9 @@ Verify each resolved agent is in PATH. Fail with install instructions if missing
 
 ### 1.7 Re-run detection
 
-Derive `PLAN_SLUG` from filename: strip `.md`, strip trailing `-design`/`-spec`/`-plan`. Truncate to 47 chars + 3-char hash if > 50 chars. Query `gh issue list --label "plan:{PLAN_SLUG}" --repo {ORG_REPO} --json number,title,state`. If issues found, display them and ask: [s]kip / [u]pdate / [f]resh. Abort if user skips. Set `RERUN_MODE`.
+**Resolve `PLAN_SLUG`:** if `--plan-slug` was supplied, validate it against the threaded-artifact-token grammar `^[A-Za-z0-9._:=/][A-Za-z0-9._:=/-]*$` (abort with a clear error if it doesn't match), then use it verbatim — it is the value `stark-spec-to-plan` recorded (spec §4 SSOT), consumed here, never re-derived. Otherwise (standalone, non-forge run) derive it from the filename: strip `.md`, strip trailing `-design`/`-spec`/`-plan`. Truncate to 47 chars + 3-char hash if > 50 chars. This filename-derivation path is the fallback ONLY — under `/stark-forge` the slug always arrives via `--plan-slug`.
+
+Query `gh issue list --label "plan:{PLAN_SLUG}" --repo {ORG_REPO} --json number,title,state`. If issues found, display them and ask: [s]kip / [u]pdate / [f]resh. Abort if user skips. Set `RERUN_MODE`.
 
 ### 1.8 Read target project docs tree
 
@@ -276,17 +279,32 @@ unset GH_TOKEN  # Use user's native gh auth for issue creation
 
 > **Warning:** Never interpolate LLM-generated content into shell commands. Write issue bodies to temp files (`chmod 600`) and use `gh api --field body="$(cat $BODY_FILE)"` or `--field` for titles.
 
+**Dedup pre-check (BLOCKING BUILD GATE — do this before creating anything):** fetch this plan's existing issues **once**:
+
+```bash
+GH_TOKEN="$GH_TOKEN" gh issue list --label "plan:${PLAN_SLUG}" --repo "$ORG_REPO" --state all --json number,title,body > "$EXISTING_ISSUES_FILE"
+```
+
+Write the Phase 3 task breakdown's tasks (`{task_id, title, phase_id}` per task) to `$PLANNED_TASKS_FILE`, then call the dedup helper:
+
+```bash
+node --experimental-strip-types "$TOOLS/plan_to_tasks_dedup.ts" \
+  --plan-slug "$PLAN_SLUG" \
+  --existing-issues-file "$EXISTING_ISSUES_FILE" \
+  --planned-tasks-file "$PLANNED_TASKS_FILE"
+```
+
+This prints `{"toCreate": [...], "toSkip": [...], "issueNumbers": [...]}`. `toSkip` entries are tasks a prior (crashed) run already created for **this exact `plan_slug`** — identified by an **exact marker match**, never a title match, so a same-titled task from a different plan is unaffected (`tools/plan_to_tasks_dedup_lib.ts` is the tested decision logic — see its test file for the false-positive guard). Only create issues for `toCreate`; for `toSkip` entries, reuse the reported `issue_number` as if it had just been created (dependency links, phase checklists, etc. all resolve the same way).
+
 **Creation order (4 passes):**
 1. Create all phase tracking issues (get issue numbers).
-2. Create all task issues in dependency order. Use `[pending]` for Dependencies. Record `task_id → issue_number` mapping.
+2. Create task issues for `toCreate` only, in dependency order. Use `[pending]` for Dependencies. Stamp every created task issue's body with its marker (`<!-- stark-task: {PLAN_SLUG}/{task_id} -->` — `tools/plan_to_tasks_dedup_lib.ts::buildTaskMarker`), appended after the template in [references/issue-body-template.md](references/issue-body-template.md). Record `task_id → issue_number` for every task (both freshly created and `toSkip`-reused).
 3. Patch pass: update each task's Dependencies section with `#NNN` links.
 4. Update phase tracking issues with final task checklist: `- [ ] #42 — {task title}`.
 
 GitHub limit: 65,536 chars per body. If exceeded, truncate with "Full detail available in decomposition output." Never split an issue.
 
-Task issue body format: see [references/issue-body-template.md](references/issue-body-template.md).
-
-**Run manifest:** Append `{task_id, issue_number, phase_id}` after each successful creation. On re-run, cross-reference manifest to skip already-created issues.
+**Dedup mechanism — single source of truth:** the per-task marker stamped into each issue's body, checked via the exact-match pre-check above, is the ONLY re-run-safety mechanism this skill uses. There is no separate run-manifest file — an unwritten "run manifest" promise previously lived here with no path or format ever specified; it is removed rather than left as a second, unimplemented dedup story.
 
 ### 5.1 GitHub Projects Integration
 
@@ -333,6 +351,8 @@ If commit fails: warn, leave changes unstaged.
 
 Print: phases/issues/story points created, risk/confidence/AI suitability distributions, links to phase tracking issues.
 
+Compute `ISSUE_NUMBERS` — the array of every issue this plan now has: those actually created this run, plus every `toSkip` issue number the dedup pre-check reported (so a resumed run reports the complete set, not just what it freshly created). Use `tools/plan_to_tasks_dedup_lib.ts::mergeIssueNumbers(toSkip_numbers, created_this_run_numbers)`.
+
 ### Execution handoff
 
 End the summary with an explicit two-option framing. Do not just dump the `/stark-copilot` command — make the user's next move a choice:
@@ -350,6 +370,16 @@ Which approach?
 ```
 
 Don't loop on the answer — present, then exit. The user picks up from here.
+
+**Completion line (`standards/stage-completion-line.md`).** As the literal last line of output, on every success path through this skill (issues created or reused via dedup), print exactly one `STARK_STAGE_SUMMARY` line — not gated behind any flag, appended after the human output above:
+
+```bash
+cat <<EOF
+STARK_STAGE_SUMMARY {"skill":"stark-plan-to-tasks","outcome":"issues_created","plan_slug":"$PLAN_SLUG","issue_numbers":[$ISSUE_NUMBERS_CSV]}
+EOF
+```
+
+On an aborted/halted path (Pass 1 gaps unresolved after 3 rounds, Pass 3 validation not converged, `--dry-run`, or `--cleanup`), print the same line with `issue_numbers` as `[]` and `outcome` set to the specific halt reason (`gaps_unresolved`, `validation_unresolved`, `dry_run`, `cleanup`) — no issues exist yet on those paths, so there is nothing to report. On a Phase 1 setup failure (before `PLAN_SLUG` is even resolved), `plan_slug` is `null` too.
 
 Append to `~/.claude/code-review/logs/stark-plan-to-tasks.jsonl`:
 ```json
