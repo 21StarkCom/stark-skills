@@ -47,7 +47,7 @@ re-implement that logic here.
 - `--test-command CMD` — test command to run after each lead pass (e.g., `npm test`, `pytest`)
 - `--lead AGENT` — lead implementer agent ID (default: `claude`). One of `claude`, `codex`, `gemini`.
 - `--wing AGENT` — wing reviewer agent ID (default: `codex`). Must differ from `--lead`.
-- `--max-rounds N` — maximum **fix** rounds after the initial implement (default: `4`). The wing reviews up to `N+1` times.
+- `--max-rounds N` — maximum **fix** rounds after the initial implement (default: `1`). The wing reviews up to `N+1` times. One round is the evidence-backed default — retry budget past first-failure buys review churn, not fixes (2026-07-25 autopsy); unresolved-after-one goes to the human.
 - `--timeout N` — per-lead-invocation timeout in seconds (default: 900)
 - `--wing-timeout N` — per-wing-invocation timeout in seconds (default: 600)
 - `--no-goal` — disable the goal-driven lead loop. When the lead is `claude` (the default), the lead's implement prompt is prefixed with a `/goal` directive (§2a) so it keeps iterating until tests pass; `--no-goal` reverts to a single bounded pass. Ignored when the lead is `codex`/`gemini` (`/goal` is a Claude Code feature).
@@ -270,11 +270,14 @@ node --experimental-strip-types "$TOOLS/copilot_dispatch.ts" \
   --wing "$WING" \
   --max-rounds "$max_rounds" \
   --timeout "$timeout" \
+  --diff-out /tmp/stark-copilot-$$/step-$step_id-final.diff \
   [--test-command "$test_command"] \
   [--goal-condition "the step is fully implemented and the project's test suite passes" --goal-max-budget-usd "${STARK_GOAL_MAX_BUDGET_USD:-10}"]
 ```
 
-Pass `--goal-condition` **by default when `LEAD` is `claude`** (omit it when `--no-goal` is set or the lead is `codex`/`gemini`). With it set, the dispatcher prefixes the lead's prompt with `/goal …` and runs it as a `-p`-argument goal loop that iterates until tests pass, bounded by `--goal-max-budget-usd` and `--timeout`. The condition omits "committed" on purpose — rule 6 of the implement prompt keeps the lead from committing; the dispatcher owns git and the wing reviews the worktree diff.
+`--test-command` is optional even when the repo has tests: when omitted, the dispatcher auto-detects one from the trusted repo root (`stark_review_lib.ts::detectTestCommand` — Makefile `test:`, `npm test`, `go test`, …) and runs it in the worktree after every round. **A wing `approve` over red or never-ran tests does not land** — the dispatcher returns `unresolved` with `error=approved_but_tests_red`; completion is the runnable check, never the wing's verdict.
+
+Pass `--goal-condition` **by default when `LEAD` is `claude`** (omit it when `--no-goal` is set or the lead is `codex`/`gemini`). With it set, the dispatcher prefixes the lead's prompt with `/goal …` and runs **round 1** as a `-p`-argument goal loop that iterates until tests pass, bounded by `--goal-max-budget-usd` and `--timeout`. Fix rounds are never goal loops — the dispatcher enforces single-pass targeted patches regardless of this flag. The condition omits "committed" on purpose — rule 6 of the implement prompt keeps the lead from committing; the dispatcher owns git and the wing reviews the worktree diff.
 
 > **Budget guard:** `--goal-max-budget-usd` is mandatory in goal mode. A missing, zero, or non-numeric value never disables the guard — the dispatcher falls back to its built-in default ($10) rather than running unbounded.
 >
@@ -318,11 +321,14 @@ The dispatcher prints a JSON object with this shape:
       "error": null
     }
   ],
-  "final_diff": "..."
+  "final_diff": "",
+  "final_diff_path": "/tmp/stark-copilot-$$/step-$step_id-final.diff"
 }
 ```
 
-Read the lead's diff from `final_diff`. The worktree path is at `worktree_path`.
+With `--diff-out` (the §2b default), `final_diff` is blanked and the diff lives at
+`final_diff_path` — read/apply it from disk; never pull the bytes into context
+(diffs run to hundreds of KB). The worktree path is at `worktree_path`.
 Per-round metadata (verdict, findings, parse retries) lives in `rounds[]` for the
 audit trail (Phase 4).
 
@@ -334,7 +340,7 @@ audit trail (Phase 4).
 | `blocked` | Stop the run. Print the wing's `summary` and `blocking_findings` from the last round. Do not retry. Clean up worktree (§2h). |
 | `aborted` | Lead's first round failed (timeout, empty diff, or CLI error). Stop the run, surface the round-1 `error`. Clean up worktree. |
 | `max_rounds_unresolved` | Wing did not approve within `--max-rounds` fix rounds. Stop the run, print all rounds' findings. Clean up worktree. |
-| `unresolved` | Loop terminated for another reason (wing parse retry exhausted, empty-diff revision, mid-loop lead failure). Stop the run, surface the `error` field and the latest findings. Clean up worktree. |
+| `unresolved` | Loop terminated for another reason (wing parse retry exhausted, empty-diff revision, mid-loop lead failure, or `error=approved_but_tests_red` — the wing approved but the host-run test command was red or never ran; the check outranks the verdict). Stop the run, surface the `error` field and the latest findings. Clean up worktree. |
 
 In every non-`approved` case, do **not** apply the diff or commit. Surface what's
 needed to address the failure manually, then exit.
@@ -351,19 +357,19 @@ Run the gates against the lead's worktree (use `worktree_path` from §2c). If a 
 
 **Seeded re-dispatch** (used here and by the fan-out conflict path): a re-dispatch with the same `--step-id` force-recreates the worktree from HEAD — the dispatcher has no resume mode — so the approved work must be seeded back in. Seed it as a **diff file the prompt references by path**, never pasted inline (a diff can run to hundreds of KB):
 
-1. Write the step's approved `final_diff` to `/tmp/stark-copilot-$$/step-$step_id-approved.diff`.
+1. The approved diff is already on disk at the step's `final_diff_path` (§2b `--diff-out`); copy it to `/tmp/stark-copilot-$$/step-$step_id-approved.diff` (only write it from JSON if the run predates `--diff-out`).
 2. Re-stage prompt files under a **suffixed step id** (`$step_id-r2`, so the original run's artifacts and worktree aren't clobbered). The implement prompt uses "REVISION" framing: first `git apply --3way /tmp/stark-copilot-$$/step-$step_id-approved.diff` in your worktree (resolving any conflicts), then address the listed findings.
 3. Invoke with `--step-id $step_id-r2 --max-rounds 1` and **without** `--goal-condition` — the retry is one bounded fix round, not a fresh goal loop with a fresh budget.
 4. Afterwards run §2h cleanup for **both** step ids.
 
 ### 2f. Apply approved diff
 
-Apply the dispatcher's `final_diff` to the main working tree:
+Apply the dispatcher's final diff **from disk** (`final_diff_path`, §2b `--diff-out`) to the main working tree — never round-trip the bytes through context:
 
-`final_diff` is the dispatcher's `--binary --full-index` rendering, so binary and rename-heavy changes replay correctly. The working tree must be clean before applying (guaranteed by the Phase 2 precondition + per-step commits). On failure, **reset before doing anything else** — `git apply --3way` exits non-zero having already written conflict markers/partial hunks into the tree, and §2g's `git add -A` would commit that garbage:
+The diff is the dispatcher's `--binary --full-index` rendering, so binary and rename-heavy changes replay correctly. The working tree must be clean before applying (guaranteed by the Phase 2 precondition + per-step commits). On failure, **reset before doing anything else** — `git apply --3way` exits non-zero having already written conflict markers/partial hunks into the tree, and §2g's `git add -A` would commit that garbage:
 
 ```bash
-git apply --3way <<< "$final_diff" || { git reset --hard HEAD && git clean -fd && apply_failed=1; }
+git apply --3way "$final_diff_path" || { git reset --hard HEAD && git clean -fd && apply_failed=1; }
 ```
 
 (`git clean -fd` is safe here **only** because the tree was clean pre-apply — the only untracked files are ones the failed apply just created. That is what the Phase 2 precondition buys.)
@@ -500,7 +506,7 @@ EOF
 
 Multi-step waves from the §1.4 execution DAG fan out via the **Workflow** tool: one `copilot_dispatch.ts` lead/wing loop per step, concurrently, each in its own worktree (the dispatcher already isolates per step, so no extra `isolation` flag is needed beyond distinct `--step-id`s). All worktrees in a wave branch from the same HEAD — the previous wave's merged result — which is exactly what the DAG guarantees is sufficient context.
 
-Stage each step's three prompt files (§2a) and issue transitions (§2a0) **before** invoking the Workflow. Compose each step's §2b command **fully expanded** — concrete absolute paths, no `$TOOLS`/`$step_id` shell variables (the subagent's shell doesn't have the orchestrator's variables) — and redirect its stdout to a per-step result file: `… > /tmp/stark-copilot-$$/step-$step_id-result.json`. A dispatcher `final_diff` can run to hundreds of KB; the redirect keeps it out of model output — the subagent returns only a small verdict record, and the orchestrator reads the full JSON from the file itself. Then run one Workflow per multi-step wave:
+Stage each step's three prompt files (§2a) and issue transitions (§2a0) **before** invoking the Workflow. Compose each step's §2b command **fully expanded** — concrete absolute paths, no `$TOOLS`/`$step_id` shell variables (the subagent's shell doesn't have the orchestrator's variables) — and redirect its stdout to a per-step result file: `… > /tmp/stark-copilot-$$/step-$step_id-result.json`. With §2b's `--diff-out` the diff bytes already live in their own file; the stdout redirect keeps the rest of the JSON out of model output too — the subagent returns only a small verdict record, and the orchestrator reads the full JSON from the file itself. Then run one Workflow per multi-step wave:
 
 ```js
 export const meta = {
@@ -527,7 +533,7 @@ Then Read ${s.result_file} and return {step_id, final_verdict, exit_code, error}
 return results.filter(Boolean)
 ```
 
-After the Workflow returns, read each step's `result_file` for the full §2c JSON (`final_diff`, `worktree_path`, `rounds`), then for each step **in deterministic wave order**: verify gates (§2e) → apply diff (§2f) → commit (§2g) → close issues (§2g1) → cleanup (§2h). Caveats specific to fan-out:
+After the Workflow returns, read each step's `result_file` for the full §2c JSON (`final_diff_path`, `worktree_path`, `rounds`), then for each step **in deterministic wave order**: verify gates (§2e) → apply diff (§2f) → commit (§2g) → close issues (§2g1) → cleanup (§2h). Caveats specific to fan-out:
 
 - **Cross-step apply conflicts:** every worktree branched from the same HEAD, so a later step's `git apply --3way` may conflict with an earlier step's just-committed diff (the DAG missed a real file-level overlap). §2f already resets the tree on failure; do NOT hand-merge or file-copy — run a **seeded re-dispatch** (§2e) against the new HEAD, with the conflicting files named alongside the findings. Or stop and surface it.
 - **A null result** (skipped/dead subagent) or a missing/unparseable `result_file` is a failed step — treat as non-`approved`.
