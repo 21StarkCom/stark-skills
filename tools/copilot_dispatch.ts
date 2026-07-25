@@ -31,6 +31,7 @@ import * as path from "node:path";
 
 import { assetConfigPath } from "./asset_root_lib.ts";
 import { applyClaudeAuth } from "./claude_auth_lib.ts";
+import { detectTestCommand } from "./stark_review_lib.ts";
 import { geminiAuthSettings, resolveGeminiAuthMode } from "./gemini_auth_lib.ts";
 import { resolveVertexLocation, resolveVertexProject } from "./vertex_config_lib.ts";
 
@@ -41,7 +42,10 @@ export type AgentName = (typeof VALID_AGENTS)[number];
 
 export const DEFAULT_LEAD: AgentName = "claude";
 export const DEFAULT_WING: AgentName = "codex";
-export const DEFAULT_MAX_ROUNDS = 4;
+// One fix round only: retry budget past first-failure buys review churn, not
+// fixes (2026-07-25 autopsy: 36/36 rounds test_passed=false, diffs grew 2x,
+// deletions ~0). Unfixed-after-one-round goes to the human, not another loop.
+export const DEFAULT_MAX_ROUNDS = 1;
 export const DEFAULT_TIMEOUT_SEC = 900;
 export const WING_TIMEOUT_DEFAULT_SEC = 600;
 export const DEFAULT_GOAL_MAX_BUDGET_USD = 10;
@@ -1360,6 +1364,11 @@ export interface CopilotResult {
     error: string | null;
   }>;
   final_diff: string;
+  // Set by the CLI when --diff-out is given: the diff lives at this path and
+  // the inline final_diff is blanked so a multi-hundred-KB diff never rides
+  // through model context (parallel mode already redirected stdout to a file;
+  // this closes the sequential-mode hole).
+  final_diff_path?: string | null;
 }
 
 export interface RunCopilotOpts {
@@ -1408,6 +1417,12 @@ export async function runCopilotStep(
   if (!VALID_AGENTS.includes(lead) || !VALID_AGENTS.includes(wing)) {
     return { step_id: stepId, error: "invalid_agent", rounds: [] };
   }
+  // Tests must actually RUN (autopsy F1: 36/36 rounds test_passed=false, steps
+  // merged on wing taste anyway). When the caller passes no --test-command,
+  // auto-detect one from the TRUSTED repo root (never the lead-mutated
+  // worktree — same RCE guard as stark_review). The command still executes in
+  // the worktree so it tests the lead's change.
+  const effectiveTestCommand = testCommand ?? detectTestCommand(repoRoot);
   if (!isAgentEnabled(lead)) {
     return { step_id: stepId, error: `lead_disabled:${lead}`, rounds: [] };
   }
@@ -1442,8 +1457,8 @@ export async function runCopilotStep(
   r1.test_passed = sr.test_passed;
   r1.error = sr.error;
   r1.duration_s = sr.duration_s;
-  if (testCommand && !sr.error) {
-    const { passed } = await runTestCommand(testCommand, worktreePath);
+  if (effectiveTestCommand && !sr.error) {
+    const { passed } = await runTestCommand(effectiveTestCommand, worktreePath);
     if (passed !== null) r1.test_passed = passed;
   }
   if (sr.error) {
@@ -1549,6 +1564,15 @@ export async function runCopilotStep(
     rounds.push(currentRound);
 
     if (currentRound.verdict === "approve") {
+      // Completion is the runnable check, never the wing's verdict: with a test
+      // command in effect, an approve over red (or never-ran) tests does NOT
+      // land — it goes to the human as unresolved. The wing is read-only by
+      // contract, so the round-end host test result is still valid here.
+      if (effectiveTestCommand && currentRound.test_passed !== true) {
+        finalVerdict = "unresolved";
+        error = "approved_but_tests_red";
+        break;
+      }
       finalVerdict = "approved";
       break;
     }
@@ -1568,7 +1592,10 @@ export async function runCopilotStep(
     const fixPrompt = buildFixPrompt(
       implementPrompt, stepTask, currentRound.blocking_findings, nextRoundNum,
     );
-    const srFix = await runImplementationAgent(lead, fixPrompt, worktreePath, timeoutSec, goalCondition, goalMaxBudgetUsd);
+    // Fix rounds are bounded targeted patches, never /goal loops: a goal-driven
+    // fix round re-explores the repo with a fresh budget each time (autopsy F2 —
+    // work paid 2-5x per step). Goal mode applies to round 1 only.
+    const srFix = await runImplementationAgent(lead, fixPrompt, worktreePath, timeoutSec, null, null);
     const nextRound = newRound(nextRoundNum);
     nextRound.diff = srFix.diff;
     nextRound.apply_diff = srFix.apply_diff;
@@ -1578,8 +1605,8 @@ export async function runCopilotStep(
     nextRound.test_passed = srFix.test_passed;
     nextRound.error = srFix.error;
     nextRound.duration_s = srFix.duration_s;
-    if (testCommand && !srFix.error) {
-      const { passed } = await runTestCommand(testCommand, worktreePath);
+    if (effectiveTestCommand && !srFix.error) {
+      const { passed } = await runTestCommand(effectiveTestCommand, worktreePath);
       if (passed !== null) nextRound.test_passed = passed;
     }
     if (srFix.error) {
@@ -1680,6 +1707,7 @@ interface CliArgs {
   cleanup: boolean;
   goalCondition: string | null;
   goalMaxBudgetUsd: number | null;
+  diffOut: string | null;
 }
 
 function usage(): string {
@@ -1701,8 +1729,9 @@ function usage(): string {
     `  --max-rounds N                  Max fix rounds (default ${DEFAULT_MAX_ROUNDS})`,
     `  --timeout N                     Per-lead-invocation timeout sec (default ${DEFAULT_TIMEOUT_SEC})`,
     `  --wing-timeout N                Per-wing-invocation timeout sec (default ${WING_TIMEOUT_DEFAULT_SEC})`,
-    "  --test-command CMD              Optional test command to run after each round",
-    "  --goal-condition TEXT           Run the claude lead as a /goal loop until TEXT holds",
+    "  --test-command CMD              Test command run after each round (default: auto-detected from the repo root)",
+    "  --diff-out PATH                 Write the final diff to PATH and blank the inline final_diff (keeps big diffs out of model context)",
+    "  --goal-condition TEXT           Run the claude lead as a /goal loop until TEXT holds (round 1 only; fix rounds never loop)",
     "                                  (ignored when lead is codex/gemini)",
     `  --goal-max-budget-usd N         Runaway guard for the goal loop (default ${DEFAULT_GOAL_MAX_BUDGET_USD}; must be > 0)`,
     "  --cleanup                       Remove the lead's worktree for --step-id and exit",
@@ -1725,6 +1754,7 @@ function parseArgs(argv: ReadonlyArray<string>): CliArgs {
     cleanup: false,
     goalCondition: null,
     goalMaxBudgetUsd: null,
+    diffOut: null,
   };
   const need = (i: number, flag: string): string => {
     const v = argv[i + 1];
@@ -1754,6 +1784,7 @@ function parseArgs(argv: ReadonlyArray<string>): CliArgs {
       case "--timeout":              args.timeoutSec = asInt(need(i, a), a); i++; break;
       case "--wing-timeout":         args.wingTimeoutSec = asInt(need(i, a), a); i++; break;
       case "--test-command":         args.testCommand = need(i, a); i++; break;
+      case "--diff-out":             args.diffOut = need(i, a); i++; break;
       case "--goal-condition":       args.goalCondition = need(i, a); i++; break;
       case "--goal-max-budget-usd": {
         const v = Number.parseFloat(need(i, a));
@@ -1820,6 +1851,12 @@ async function main(): Promise<number> {
     goalMaxBudgetUsd: args.goalMaxBudgetUsd,
   });
 
+  if (args.diffOut && "final_diff" in result) {
+    const r = result as CopilotResult;
+    writeFileSync(args.diffOut, r.final_diff, "utf-8");
+    r.final_diff_path = args.diffOut;
+    r.final_diff = "";
+  }
   process.stdout.write(JSON.stringify(result, null, 2) + "\n");
   return (result as CopilotResult).final_verdict === "approved" ? 0 : 1;
 }
