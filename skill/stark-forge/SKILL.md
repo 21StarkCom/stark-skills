@@ -316,12 +316,17 @@ stage's `STARK_STAGE_SUMMARY` line in 3.5, when this iteration actually ran
 reading `$FORGE get` here is the one path that works uniformly for all three
 actions; stay consistent and always read state here.)
 
-The operator deadline (`merge_timeout_s`) is not exposed by any other
-subcommand — read the single number `driver-block` renders it as, without
-executing any of that block's other (symbolic) lines:
+The operator deadline (`merge_timeout_s`) comes from the pure `config`
+subcommand — a read-only print of the `forge_pipeline` config with no state
+load, no reconcile, and no persist. **Never** read it off `driver-block` here:
+`driver-block` runs `selectAndReconcile` → `resumeTarget` internally, and on
+this iteration's live `running` merge stage that misdetects a crash, halts
+the run, and persists that halted state out from under the merge in
+progress — corrupting state before the terminal `transition --to done` below
+even runs.
 
 ```bash
-merge_timeout_s=$($FORGE driver-block --slug "$slug" | grep -oE 'deadline [0-9]+s' | grep -oE '[0-9]+')
+merge_timeout_s=$($FORGE config | jq -r '.merge_timeout_s')
 ```
 
 1. **Fold check first.** For each PR in `$fold_prs`:

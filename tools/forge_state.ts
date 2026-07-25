@@ -1592,6 +1592,7 @@ const SUBCOMMAND_FLAGS: Record<string, ReadonlySet<string>> = {
     "artifact-issue-numbers", "gate-reason", "gate-detail",
   ]),
   get: new Set(["slug", "run-id"]),
+  config: new Set([]),
   abandon: new Set(["slug", "run-id", "at"]),
   summary: new Set(["slug", "run-id"]),
   "resume-target": new Set(["slug"]),
@@ -2210,6 +2211,20 @@ function cmdGet(argv: string[]): number {
   return 0;
 }
 
+/**
+ * PURE read of the `forge_pipeline` config — no state load, no
+ * `selectAndReconcile`/`resumeTarget`, no persist. Exists so callers that
+ * only need a static config value (e.g. `merge_timeout_s` for the 3.7
+ * in-session merge deadline) never have to go through `driver-block`, whose
+ * `selectAndReconcile` mutates+persists on a live `running` stage (a crash
+ * misdetection that corrupts state — see the 2026-07-25 fix).
+ */
+function cmdConfig(argv: string[]): number {
+  parseOpts(argv, SUBCOMMAND_FLAGS.config);
+  out(getForgePipelineConfig());
+  return 0;
+}
+
 function cmdAbandon(argv: string[]): number {
   const opts = parseOpts(argv, SUBCOMMAND_FLAGS.abandon);
   const slug = reqStr(opts, "slug");
@@ -2322,6 +2337,8 @@ subcommands:
   record-output             Record a running stage's PRs/fold PRs/merges/artifacts.
   transition                Apply one legal status transition.
   get                       Print the full run object.
+  config                    Print the forge_pipeline config as JSON (pure
+                            read — no state load, no reconcile, no persist).
   abandon                   Mark the run terminally abandoned.
   summary                   Print the §9 final-summary object.
   resume-target             Reconcile + print the next resume action descriptor.
@@ -2350,6 +2367,8 @@ export function main(argv: string[]): number {
         return cmdTransition(rest);
       case "get":
         return cmdGet(rest);
+      case "config":
+        return cmdConfig(rest);
       case "abandon":
         return cmdAbandon(rest);
       case "summary":
