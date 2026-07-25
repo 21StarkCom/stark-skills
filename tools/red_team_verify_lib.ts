@@ -99,7 +99,7 @@ export interface VerifyConfig {
 
 export const DEFAULT_VERIFY_CONFIG: VerifyConfig = {
   enabled: true,
-  model: "claude-opus-4-8",
+  model: "claude-opus-5[1m]",
   timeout_s: 300,
   votes: 1,
   max_input_chars: 200_000,

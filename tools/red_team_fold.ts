@@ -27,7 +27,7 @@
  *     [--source-spec path/to/spec.md] \
  *     [--fix-plan-json path/to/plan.json] \
  *     [--source-run-id RUN_ID] [--force-stale] \
- *     [--model claude-opus-4-8] \
+ *     [--model claude-opus-5[1m]] \
  *     [--dry-run] [--no-pr] [--json]
  */
 

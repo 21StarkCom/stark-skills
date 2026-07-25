@@ -4,7 +4,7 @@ import type { BuildContext, BuiltCommand, ParseError, ParseResult } from "./agen
 import { resolvedPath } from "./agent_env_lib.ts";
 import { applyClaudeAuth } from "./claude_auth_lib.ts";
 
-export const CLAUDE_DEFAULT_MODEL = "claude-opus-4-8";
+export const CLAUDE_DEFAULT_MODEL = "claude-opus-5[1m]";
 
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set<Severity>([
   "critical", "high", "medium", "low",

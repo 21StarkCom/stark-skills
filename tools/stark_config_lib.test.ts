@@ -6,6 +6,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import {
@@ -303,7 +304,7 @@ test("getRedTeamConfig: fold defaults present", async () => {
   await withScratchHome(() => {
     const cfg = getRedTeamConfig();
     assert.equal(cfg.fold.enabled, true);
-    assert.equal(cfg.fold.model, "claude-opus-4-8");
+    assert.equal(cfg.fold.model, "claude-opus-5[1m]");
     assert.equal(cfg.fold.max_cost_usd, 15);
   });
 });
@@ -323,7 +324,7 @@ test("getRedTeamConfig: fold.model is locked against repo override", async () =>
       const cfg = getRedTeamConfig();
       assert.equal(
         cfg.fold.model,
-        "claude-opus-4-8",
+        "claude-opus-5[1m]",
         "fold.model is locked — repo cannot override",
       );
     } finally {
@@ -420,7 +421,7 @@ test("discoverConfig: keys not present at the more-specific layer fall through t
 
 test("getModelId: returns the configured model id, null for unknown agent", async () => {
   await withScratchHome(() => {
-    assert.equal(getModelId("claude"), "claude-opus-4-8");
+    assert.equal(getModelId("claude"), "claude-opus-5[1m]");
     assert.equal(getModelId("nonexistent"), null);
   });
 });
@@ -565,4 +566,35 @@ test("getValidationGateConfig: surfaces extra keys like per_repo_commands", asyn
     // Default fields still present.
     assert.equal((cfg as { timeout_seconds: number }).timeout_seconds, 60);
   });
+});
+
+// ---------------------------------------------------------------------------
+// CLI — `--model <agent>` (consumed by stark-phase-execute's goal loop)
+// ---------------------------------------------------------------------------
+
+test("CLI: --model prints the resolved id; unknown agent exits 1 with no stdout", () => {
+  const cli = path.join(import.meta.dirname, "stark_config_lib.ts");
+  const pluginRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cfg-cli-"));
+  fs.writeFileSync(
+    path.join(pluginRoot, "config.json"),
+    JSON.stringify({ models: { claude: { enabled: true, model_id: "test-model-id" } } }),
+  );
+  const run = (args: string[]) =>
+    spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", cli, ...args], {
+      encoding: "utf8",
+      env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot },
+    });
+
+  const ok = run(["--model", "claude"]);
+  assert.equal(ok.status, 0);
+  assert.equal(ok.stdout.trim(), "test-model-id");
+
+  // Unknown agent → exit 1 and empty stdout, so a caller's
+  // `$(… || echo <fallback>)` guard actually fires.
+  const missing = run(["--model", "nonexistent"]);
+  assert.equal(missing.status, 1);
+  assert.equal(missing.stdout, "");
+
+  // --help stays side-effect-free and exits cleanly (skill smoke-test contract).
+  assert.equal(run(["--help"]).status, 0);
 });

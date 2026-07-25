@@ -31,6 +31,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { assetConfigPath, assetRoot } from "./asset_root_lib.ts";
+import { isMainModule } from "./main_module_lib.ts";
 
 
 // ---------------------------------------------------------------------------
@@ -59,7 +60,7 @@ export const DEFAULT_MODELS: Record<string, ModelEntry> = {
   // auth: "subscription" is the only mode — headless claude dispatches on the
   // logged-in account's OAuth credentials. The metered-API mode was removed;
   // any other value warns and is ignored. See claude_auth_lib.ts.
-  claude: { enabled: true, model_id: "claude-opus-4-8", auth: "subscription" },
+  claude: { enabled: true, model_id: "claude-opus-5[1m]", auth: "subscription" },
   codex: { enabled: true, model_id: "gpt-5.6-sol" },
   // auth: "oauth" rides the logged-in Google account's Code Assist seat;
   // "vertex" = per-token Vertex billing; "api-key" = GEMINI_API_KEY.
@@ -141,7 +142,7 @@ export const DEFAULT_RED_TEAM: RedTeamConfig = {
   // downgraded (never upgraded). See docs/specs/red-team-refutation-pass-*.md.
   verify: {
     enabled: true,
-    model: "claude-opus-4-8",
+    model: "claude-opus-5[1m]",
     timeout_s: 300,
     votes: 1,
     max_input_chars: 200_000,
@@ -157,7 +158,7 @@ export const DEFAULT_RED_TEAM: RedTeamConfig = {
   },
   fold: {
     enabled: true,
-    model: "claude-opus-4-8",
+    model: "claude-opus-5[1m]",
     timeout_s: 1200,
     max_input_chars: 200_000,
     max_cost_usd: 15,
@@ -176,6 +177,11 @@ export interface ModelRate {
 
 export const DEFAULT_MODEL_RATES: Record<string, ModelRate> = {
   o3: { input_per_1m_usd: 15.0, output_per_1m_usd: 60.0 },
+  // claude-opus-5: $5/$25 per MTok (Anthropic pricing). The `[1m]` suffix is
+  // the Claude Code 1M-context variant of the same model — same rates; both
+  // keys are listed so cost lookups hit an exact entry either way.
+  "claude-opus-5[1m]": { input_per_1m_usd: 5.0, output_per_1m_usd: 25.0 },
+  "claude-opus-5": { input_per_1m_usd: 5.0, output_per_1m_usd: 25.0 },
   "claude-opus-4-8": { input_per_1m_usd: 15.0, output_per_1m_usd: 75.0 },
   "claude-fable-5": { input_per_1m_usd: 10.0, output_per_1m_usd: 50.0 },
   "gpt-5.4": { input_per_1m_usd: 5.0, output_per_1m_usd: 15.0 },
@@ -209,6 +215,13 @@ export const DEFAULT_MODEL_LIMITS: Record<string, ModelLimits> = {
   // /api/docs/models/gpt-5.6-sol) — same 1,050,000 context window and
   // 128,000 max output tokens as gpt-5.5-pro.
   "gpt-5.6-sol": { max_output_tokens: 128_000, context_window: 1_050_000 },
+  // claude-opus-5[1m]: 1M context window, 64K max output tokens — read off a
+  // live `claude -p --model 'claude-opus-5[1m]' --output-format json` run
+  // (`modelUsage.contextWindow` / `maxOutputTokens`, 2026-07-25) — the CLI
+  // caps output at 64K. The bare `claude-opus-5` id is the API model: 1M
+  // context, 128K max output (Anthropic docs).
+  "claude-opus-5[1m]": { max_output_tokens: 64_000, context_window: 1_000_000 },
+  "claude-opus-5": { max_output_tokens: 128_000, context_window: 1_000_000 },
   // claude-fable-5: 1M context window, 128K max output tokens (Anthropic docs).
   "claude-fable-5": { max_output_tokens: 128_000, context_window: 1_000_000 },
   // Conservative floor for models without an explicit entry. Deliberately
@@ -764,4 +777,35 @@ export function discoverConfig(opts: DiscoverConfigOpts = {}): DiscoveredConfig 
     }
   }
   return merged;
+}
+
+// ---------------------------------------------------------------------------
+// CLI — `stark_config_lib.ts --model <agent>` prints the resolved model id.
+// The stark-phase-execute skill shells out to this to pin the goal loop's
+// `--model` from config instead of hardcoding one; before it existed the
+// invocation exited 0 with no output and the `|| echo <fallback>` guard never
+// fired, so `--model ""` was passed. Exits 1 (no output) on an unknown agent
+// so the caller's fallback runs.
+// ---------------------------------------------------------------------------
+
+const USAGE = "usage: stark_config_lib.ts --model <agent>\n";
+
+function main(argv: string[]): number {
+  if (argv.includes("--help") || argv.includes("-h") || argv.includes("help")) {
+    process.stdout.write(USAGE);
+    return 0;
+  }
+  const i = argv.indexOf("--model");
+  if (i === -1 || !argv[i + 1]) {
+    process.stderr.write(USAGE);
+    return 1;
+  }
+  const id = getModelId(argv[i + 1]);
+  if (!id) return 1;
+  process.stdout.write(`${id}\n`);
+  return 0;
+}
+
+if (isMainModule(import.meta.url)) {
+  process.exitCode = main(process.argv.slice(2));
 }
