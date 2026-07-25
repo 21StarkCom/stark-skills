@@ -165,26 +165,24 @@ gradient() { # text [palette] → sets GRAD: per-account color sweep
   # EPOCHREALTIME and drifts the gradient a frame (30s cadence, not a smooth
   # animation clock). Palette ($2)
   # selects the account's color family: gold (Max/Com), violet (Max/Net), blue
-  # (Enterprise), magenta→orange spectrum (Team#0 magenta / #1 pink / #2 coral /
-  # #3 orange) plus emerald→teal (Team#4), ice/cyan (Max/S1), lime (Max/S2),
-  # crimson→rose (Max/S3). Pure bash fixed-point math, no forks. GRAD holds
+  # (Enterprise), magenta (Team#0 fallback), plus a shade per stark account —
+  # ice/cyan (S1), lime (S2), crimson→rose (S3), emerald→teal (S4) — with a
+  # darker Team/S sibling each. Pure bash fixed-point math, no forks. GRAD holds
   # interpreted ESC bytes (printf -v %b) — embed directly, don't re-%b it.
   local text="$1" pal="${2:-gold}" RST=$'\033[0m'
   local -a PR PG PB
   case "$pal" in
     violet) PR=(203 180 224 150) PG=(140 110 120 90 ) PB=(247 250 255 240) ;;  # purple→magenta — Max/Net
     blue)   PR=(0   64  138 33 ) PG=(160 196 224 182) PB=(255 255 255 255) ;;  # strong light blue — Enterprise
-    team0)  PR=(225 255 240 210) PG=(60  95  72  48 ) PB=(200 230 215 190) ;;  # magenta/fuchsia — Team#0
-    team1)  PR=(255 255 255 245) PG=(77  128 105 90 ) PB=(148 180 160 140) ;;  # hot pink — Team#1
-    team2)  PR=(255 255 255 250) PG=(110 145 125 100) PB=(110 120 100 90 ) ;;  # coral/salmon — Team#2
-    team3)  PR=(255 255 255 250) PG=(150 178 138 160) PB=(40  75  30  55 ) ;;  # orange — Team#3
-    team4)  PR=(52  45  34  110) PG=(211 212 211 231) PB=(153 191 238 183) ;;  # emerald→teal→cyan — Team#4
+    team0)  PR=(225 255 240 210) PG=(60  95  72  48 ) PB=(200 230 215 190) ;;  # magenta/fuchsia — Team#0 (.net fallback)
     stark1) PR=(56  103 125 80 ) PG=(189 232 240 210) PB=(248 249 255 250) ;;  # ice/cyan→sky — Max/S1
     stark2) PR=(190 214 163 235) PG=(242 255 230 250) PB=(100 133 80  120) ;;  # lime→chartreuse — Max/S2
     stark1t) PR=(30  72  96  52 ) PG=(148 196 214 172) PB=(210 238 248 226) ;; # steel/deep cyan — Team/S1
     stark2t) PR=(150 178 128 196) PG=(196 214 176 226) PB=(60  92  48  110) ;; # olive→moss — Team/S2
     stark3) PR=(255 255 240 250) PG=(90  130 70  105) PB=(110 150 95  130) ;;  # crimson→rose — Max/S3
     stark3t) PR=(178 205 150 196) PG=(52  88  38  70 ) PB=(72  105 60  90 ) ;; # wine/maroon — Team/S3
+    stark4) PR=(52  45  34  110) PG=(211 212 211 231) PB=(153 191 238 183) ;;  # emerald→teal→cyan — Max/S4
+    stark4t) PR=(34  30  24  76 ) PG=(150 152 150 168) PB=(108 138 172 132) ;; # deep emerald→slate teal — Team/S4
     *)      PR=(230 255 255 250) PG=(150 190 224 204) PB=(0   0   60  15 ) ;;  # amber→gold — Max/Com
   esac
   local n=${#PR[@]} len=${#text}
@@ -393,48 +391,42 @@ acct_label=""
         else acct_label="Enterprise"; fi ;;
       *.net)
         # Several accounts share the .net domain — disambiguate by the email
-        # local part: aryeh.kiovetsky{1,2,3} → Team#{1,2,3}, the base
-        # aryeh.kiovetsky → Team#0. The Max ones split too:
-        # aryeh.stark.{1,2,3} → Max/S{1,2,3}; anything else → Max/Net. The same
-        # three stark emails also carry a Team plan → Team/S{1,2,3}.
+        # local part: aryeh.stark.{1,2,3,4} → Max/S{1..4} on a Max plan,
+        # Team/S{1..4} on a Team plan (the old aryeh.kiovetsky{1-4} Team
+        # accounts are retired). Anything else → Max/Net or Team#0.
         if [ "$acct_otype" = "claude_max" ]; then
           case "${acct_email%%@*}" in
             aryeh.stark.1) acct_label="Max/S1" ;;
             aryeh.stark.2) acct_label="Max/S2" ;;
             aryeh.stark.3) acct_label="Max/S3" ;;
+            aryeh.stark.4) acct_label="Max/S4" ;;
             *)             acct_label="Max/Net" ;;
           esac
         else case "${acct_email%%@*}" in
-          aryeh.kiovetsky1) acct_label="Team#1" ;;
-          aryeh.kiovetsky2) acct_label="Team#2" ;;
-          aryeh.kiovetsky3) acct_label="Team#3" ;;
-          aryeh.kiovetsky4) acct_label="Team#4" ;;
-          aryeh.stark.1)    acct_label="Team/S1" ;;
-          aryeh.stark.2)    acct_label="Team/S2" ;;
-          aryeh.stark.3)    acct_label="Team/S3" ;;
-          *)                acct_label="Team#0" ;;
+          aryeh.stark.1) acct_label="Team/S1" ;;
+          aryeh.stark.2) acct_label="Team/S2" ;;
+          aryeh.stark.3) acct_label="Team/S3" ;;
+          aryeh.stark.4) acct_label="Team/S4" ;;
+          *)             acct_label="Team#0" ;;
         esac; fi ;;
       *) acct_label="$acct_dom" ;;
     esac
     if _on account && [ -n "$acct_label" ]; then
       # Color family per account: Max/Net → violet, Max/Com → gold, Enterprise →
-      # blue. The Team accounts share a magenta→orange spectrum, one shade each:
-      # Team#0 magenta, Team#1 pink, Team#2 coral, Team#3 orange, Team#4 emerald→teal.
+      # blue. Each stark account gets its own shade — Max/S{1..4} bright,
+      # Team/S{1..4} the darker sibling; Team#0 magenta is the .net fallback.
       case "$acct_label" in
         Max/Net)    _pal=violet ;;
         Max/S1)     _pal=stark1 ;;
         Max/S2)     _pal=stark2 ;;
         Max/S3)     _pal=stark3 ;;
+        Max/S4)     _pal=stark4 ;;
         Max/*)      _pal=gold ;;
         Enterprise) _pal=blue ;;
-        Team#0)     _pal=team0 ;;
-        Team#1)     _pal=team1 ;;
-        Team#2)     _pal=team2 ;;
-        Team#3)     _pal=team3 ;;
-        Team#4)     _pal=team4 ;;
         Team/S1)    _pal=stark1t ;;
         Team/S2)    _pal=stark2t ;;
         Team/S3)    _pal=stark3t ;;
+        Team/S4)    _pal=stark4t ;;
         Team*)      _pal=team0 ;;
         *)          _pal=gold ;;
       esac
