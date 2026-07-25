@@ -2,7 +2,7 @@
 name: stark-review-plan
 description: >-
   Multi-domain execution plan review with lead/wing fix loop. Codex (gpt-5.6-sol,
-  xhigh reasoning) reviews 5 adversarial domains in parallel; Claude (opus-4-8)
+  xhigh reasoning) reviews 5 adversarial domains in parallel; Claude (opus-5 1m)
   wing fixes findings. Use for review plan, audit deployment plan.
 argument-hint: "<path> [--rounds N] [--dry-run] [--force] [--ready] [--codex-concurrent N] [--fable] [--lead-agent codex|claude] [--lead-model ID] [--wing-agent claude|codex] [--wing-model ID]"
 disable-model-invocation: true
@@ -37,7 +37,7 @@ Lead/wing multi-round execution plan review:
   `--codex-concurrent N` (default 3).
 - **Wing fixer** receives the plan + classified `fix` findings and emits a JSON
   patch block; the dispatcher validates each patch's `old` text is unique and
-  applies surgically. Default agent is claude (opus-4-8); `--wing-agent codex`
+  applies surgically. Default agent is claude (opus-5 1m); `--wing-agent codex`
   runs the fixer on codex (gpt-5.6-sol at xhigh). Lead and wing agents are
   independent.
 - Each fix round commits the patched plan to git for traceability.
@@ -84,11 +84,11 @@ For domain definitions and finding-classification criteria, see
 - `--no-coherence` — skip the post-fix-loop coherence pass (default: runs; also gated by config `coherence_pass`)
 - `--ready` (alias `--no-draft`) — when this run **opens** a PR to host findings, open it ready-for-review. By default an auto-opened PR is a **draft** so the target repo's draft-guarded CI stays idle until it's marked ready.
 - `--codex-concurrent N` — cap on concurrent codex dispatches (default: 3)
-- `--lead-agent codex|claude` — which agent runs the lead review (default: `codex`). Use `claude` to run the lead on a Claude model (e.g. Fable). The wing/fixer stays `claude`/opus-4-8 regardless.
+- `--lead-agent codex|claude` — which agent runs the lead review (default: `codex`). Use `claude` to run the lead on a Claude model (e.g. Fable). The wing/fixer stays `claude`/opus-5-1m regardless.
 - `--lead-model ID` — override the lead reviewer model (default: `gpt-5.6-sol` for codex, `claude-fable-5` for claude)
 - `--fable` — shorthand for `--lead-agent claude --lead-model claude-fable-5`: run the lead review on Fable 5. Only when explicitly requested.
-- `--wing-agent claude|codex` — which agent runs the wing/fixer (default: `claude`/opus-4-8). `codex` runs the fixer on gpt-5.6-sol at `model_reasoning_effort="xhigh"`.
-- `--wing-model ID` — override the wing/fixer model (default: `claude-opus-4-8` for claude, `gpt-5.6-sol` for codex)
+- `--wing-agent claude|codex` — which agent runs the wing/fixer (default: `claude`/opus-5-1m). `codex` runs the fixer on gpt-5.6-sol at `model_reasoning_effort="xhigh"`.
+- `--wing-model ID` — override the wing/fixer model (default: `claude-opus-5[1m]` for claude, `gpt-5.6-sol` for codex)
 
 **Raw input:** `$ARGUMENTS`
 

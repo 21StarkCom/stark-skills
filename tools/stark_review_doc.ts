@@ -13,7 +13,7 @@
  *          {patches: [...]} block. Host applies patches sequentially with
  *          unique-match validation; on partial failure it retries the wing
  *          once with failures attached, then gives up the round. Default
- *          agent claude (opus-4-8); set --wing-agent codex to run it on
+ *          agent claude (opus-5 1m); set --wing-agent codex to run it on
  *          codex (gpt-5.6-sol at xhigh). Model override: --wing-model. Lead and
  *          wing agents/models are independent.
  *
@@ -98,7 +98,7 @@ const DEFAULT_PROMPTS_BASE = assetPromptsDir();
 const DEFAULT_TIMEOUT_SEC = 600;
 const WING_TIMEOUT_SEC = 900;
 const CODEX_DEFAULT_MODEL = "gpt-5.6-sol";
-const CLAUDE_DEFAULT_MODEL = "claude-opus-4-8";
+const CLAUDE_DEFAULT_MODEL = "claude-opus-5[1m]";
 // Default lead-review model when the lead agent is claude (e.g. --lead-agent
 // claude). Fable 5 is Anthropic's most capable model; the lead reviewer only
 // runs on it when the operator explicitly opts in via --lead-agent claude.

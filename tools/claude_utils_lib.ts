@@ -15,7 +15,7 @@ import { getModelId, isAgentEnabled } from "./stark_config_lib.ts";
 export { AgentDisabledError };
 
 /** Default model — pinned to avoid drift when the CLI default changes. */
-export const CLAUDE_MODEL = "claude-opus-4-8";
+export const CLAUDE_MODEL = "claude-opus-5[1m]";
 
 /**
  * Return an allowlisted env for headless dispatch. Delegates to

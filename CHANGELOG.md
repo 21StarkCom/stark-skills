@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- models: the default Claude model is now **`claude-opus-5[1m]`** (Opus 5, 1M context) everywhere it was `claude-opus-4-8` — `models.claude.model_id`, the review-doc wing/fixer, copilot/agent_claude/claude_utils dispatch defaults, `red_team.verify.model`, `red_team.fold.model`, the skill-description optimizer, the automation-fleet model, and the sentinel preflight probe. `global/config.json` gains matching `model_rates` ($5/$25 per MTok) and `model_limits` (1M context, 64K max output — read off a live `claude -p --output-format json` run) entries for both `claude-opus-5[1m]` and `claude-opus-5`; the `claude-opus-4-8` rate entry stays so historical run costs still resolve. Red-team provider labels emit `anthropic-claude-opus-5`, with the old label kept in the legacy classification allowlist so already-annotated artifacts don't fail the gate. `--fable` still runs the doc-review lead on `claude-fable-5`.
+
+### Fixed
+- phase-execute: the goal loop's `--model "$(… stark_config_lib.ts --model claude || echo <fallback>)"` passed an **empty** model — `stark_config_lib.ts` had no CLI, so it exited 0 with no output and the `||` fallback never fired. Added the `--model <agent>` CLI (prints the resolved id; exit 1 + empty stdout on an unknown agent, `--help` exits 0) and quoted the fallback so `[1m]` isn't glob-expanded.
+
 ### Added
 <!-- stark-gh:pr-merge pr=792 runId=9c0c7296-57bd-45c9-9c98-6075e519169a -->
 - Add statusline labels and distinct Max and Team palettes for the third Stark account.

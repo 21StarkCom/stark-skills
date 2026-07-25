@@ -643,7 +643,7 @@ export interface RunFoldOpts {
 
   /** Optional decider-model override (operator `--model`). The fold decider
    *  runs on the Claude CLI (`buildDeciderCommand`), so this must be a Claude
-   *  model id; omitted → `red_team.fold.model` (claude-opus-4-8). */
+   *  model id; omitted → `red_team.fold.model` (claude-opus-5[1m]). */
   model?: string;
 
   /** System/triage-contract prompt. When omitted, read from
