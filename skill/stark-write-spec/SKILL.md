@@ -290,9 +290,29 @@ on dry run); `accepted_gaps` is empty on `contract_satisfied` and `dry_run`.
 
 - **`--json`** → print **exactly one** JSON object (the `SkillSummary`) to
   stdout and **nothing else**. All human narration goes to stderr.
-- **Human mode** → print **only** a human rendering of the same fields to
-  stdout (verdict, unsatisfied/accepted sections, PR link, cost/rounds). **No
-  JSON on stdout.**
+- **Human mode** → print a human rendering of the same fields to stdout
+  (verdict, unsatisfied/accepted sections, PR link, cost/rounds), then, as
+  the literal last line, one `STARK_STAGE_SUMMARY` line
+  (`standards/stage-completion-line.md`) — the sole exception to "no JSON on
+  stdout" in human mode, since this is the channel `/stark-forge` reads
+  (it always invokes this skill without `--json`, per spec §2):
+
+```bash
+if [ "$outcome" = "contract_satisfied" ] || [ "$outcome" = "authored_with_accepted_gaps" ]; then
+  ARTIFACT_JSON="\"$spec_path\""
+  PR_JSON="${pr_number:-null}"
+else
+  ARTIFACT_JSON="null"
+  PR_JSON="null"
+fi
+cat <<EOF
+STARK_STAGE_SUMMARY {"skill":"stark-write-spec","outcome":"$outcome","spec_path":$ARTIFACT_JSON,"pr":$PR_JSON}
+EOF
+```
+
+  `spec_path`/`pr` are populated only for the two outcomes that landed a
+  durable spec on a PR (`contract_satisfied`, `authored_with_accepted_gaps`);
+  `aborted` and `dry_run` report both `null` — no durable artifact exists.
 
 ## Output Contract
 

@@ -125,6 +125,19 @@ Answers the question: **"Is this the right system?"**
 ```bash
 TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
 PROMPTS_BASE="${STARK_REVIEW_PROMPTS_BASE:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/prompts}"
+
+# Completion line (standards/stage-completion-line.md) — see Phase 7. Every
+# stopping point (Phase 4 failure, dry-run/no-PR skip, Phase 6 convergence
+# outcome) sets $OUTCOME then calls this before it stops.
+print_completion_line() {
+    case "$OUTCOME" in
+        converged_*) ARTIFACT_JSON="\"$DOC\""; PR_JSON="${pr_number:-null}" ;;
+        *)           ARTIFACT_JSON="null"; PR_JSON="null" ;;
+    esac
+    cat <<EOF
+STARK_STAGE_SUMMARY {"skill":"stark-review-spec","outcome":"$OUTCOME","artifact_path":$ARTIFACT_JSON,"pr":$PR_JSON}
+EOF
+}
 ```
 
 To call the dispatcher:
@@ -312,7 +325,8 @@ padding?"* with options **Continue (growth is legitimate)** / **Stop here
 (inspect the doc)**. On Continue: proceed and add `growth acked by operator`
 to the 5c summary (after a spike halt, re-run with `--rounds` if more fix
 rounds are actually wanted). On Stop — or when running headless with no
-operator to ask — exit 1.
+operator to ask — set `OUTCOME="review_failed"`, call `print_completion_line`
+(Phase 7), and exit 1.
 
 ```bash
 GROWTH_ACK=$(parse '(.analytics.growth_ack_required // false) | tostring')
@@ -348,7 +362,7 @@ if [ -n "$GAPS" ]; then error "COVERAGE GAP — these domains never completed a 
 if [ -n "$TRANSIENT" ]; then printf 'WARN: transient lead dispatch failures (domain recovered in another round):\n' >&2; printf '  %s\n' "$TRANSIENT" >&2; fi
 if [ -n "$PERSIST_ERRS" ]; then printf 'WARN: history persistence errors (run records may be incomplete):\n' >&2; printf '  %s\n' "$PERSIST_ERRS" >&2; fi
 if [ -n "$WING_ERRORS" ]; then error "Wing fixer issues:"; printf '  %s\n' "$WING_ERRORS" >&2; failed=1; fi
-[ "$failed" -ne 0 ] && exit 1
+if [ "$failed" -ne 0 ]; then OUTCOME="review_failed"; print_completion_line; exit 1; fi
 ```
 
 ## Phase 5: Post every finding, fix it, resolve its thread
@@ -359,8 +373,12 @@ already ran the lead/wing loop and auto-fixed what it could; this phase posts
 *all* findings, closes the loop on whatever the wing didn't resolve, and
 resolves each thread. Nothing is dropped and nothing is left open.
 
-Skip this whole phase under `--dry-run` or when no PR was detected/opened in
-Phase 2 (there is nowhere to post). First always print the human summary:
+Skip this whole phase — and Phase 6 below — under `--dry-run` or when no PR
+was detected/opened in Phase 2 (there is nowhere to post). In that case set
+`OUTCOME="dry_run"` (`--dry-run` was passed) or `OUTCOME="no_pr"` (no PR, not
+a dry run), call `print_completion_line` (Phase 7), and stop — that line is
+still the mandatory last line of output. Otherwise, first always print the
+human summary:
 
 ```text
 Spec Review Complete — {doc}
@@ -498,11 +516,13 @@ review $pr_number --comment`) carrying the exact claim, and print the same
 line as the final operator message. **Silence is not a valid terminal state.**
 
 - `CONV_EXIT != 0` or `C_OK != true` → **`⚠️ NOT converged — delta
-  unreviewed`** (include the receipt `error`); exit 1. An unreviewed delta is
+  unreviewed`** (include the receipt `error`); set `OUTCOME="not_converged"`,
+  call `print_completion_line` (Phase 7), exit 1. An unreviewed delta is
   a failed run.
 - `C_DELTA = 0` → **`✅ Converged — empty delta`** (nothing changed since the
-  final review round). Done.
-- `C_FINDINGS = 0` → **`✅ Converged — delta reviewed, clean`**. Done.
+  final review round). Set `OUTCOME="converged_empty_delta"`. Done.
+- `C_FINDINGS = 0` → **`✅ Converged — delta reviewed, clean`**. Set
+  `OUTCOME="converged_clean"`. Done.
 - `C_FINDINGS > 0` → they are normal findings under the full contract. Write
   `CONV_RECEIPT` to a temp file and run the 5a → 5b loop over it (post as
   resolvable threads via `review_doc_findings.ts post` with a **fresh map
@@ -512,10 +532,37 @@ line as the final operator message. **Silence is not a valid terminal state.**
     convergence pass over the fixes themselves — `--converge --base
     "$CONV_BASE_HEAD"` — and handle its findings the same way. Never a third
     pass: post **`✅ Converged — delta reviewed, N findings (all resolved;
-    second pass: M)`**, or **`⚠️ NOT converged — unresolved high-severity
-    delta findings`** + exit 1 if the second pass still produced
-    `high`/`critical`.
-  - else post **`✅ Converged — delta reviewed, N findings (all resolved)`**.
+    second pass: M)`** and set `OUTCOME="converged_delta_reviewed"`, or
+    **`⚠️ NOT converged — unresolved high-severity delta findings`**, set
+    `OUTCOME="not_converged"`, call `print_completion_line` (Phase 7), and
+    exit 1 if the second pass still produced `high`/`critical`.
+  - else post **`✅ Converged — delta reviewed, N findings (all resolved)`**
+    and set `OUTCOME="converged_delta_reviewed"`.
+
+## Phase 7: Completion line
+
+**Completion line (`standards/stage-completion-line.md`).** As the literal
+last line of output, on every path through this skill — success or not —
+print exactly one `STARK_STAGE_SUMMARY` line via `print_completion_line`
+(defined in Constants). It is additive: everything above (the human summary,
+the convergence claim) is unchanged, and this line is not gated behind any
+`--json` flag (this skill has none).
+
+`OUTCOME` is the last terminal state actually reached: `review_failed`
+(Phase 4 gate, or the growth-ack Stop path), `dry_run` (`--dry-run`), `no_pr`
+(no PR detected/opened in Phase 2), or Phase 6's convergence claim —
+`not_converged` / `converged_empty_delta` / `converged_clean` /
+`converged_delta_reviewed`. `artifact_path` and `pr` are populated only for
+`converged_*` outcomes — the doc's changes are durable on a PR; every other
+outcome reports both `null`:
+
+```bash
+print_completion_line
+```
+
+If a non-`converged_*` branch above already called `print_completion_line`
+and exited, this final call is unreached — that is expected, the line has
+already been printed.
 
 ## Debugging Dispatch Failures
 
