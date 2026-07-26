@@ -23,11 +23,15 @@ Evidence base: [references/stage1-dossier.md](references/stage1-dossier.md)
 (61 claims, 3-vote adversarial verification; `[RQn]` tags below cite it).
 
 **Non-negotiables:**
-- **No LLM-reviews-LLM loop.** One advisory pass max; its findings die at the
-  human. Never revise from them autonomously, never re-run. [A1][A2]
+- **No LLM-reviews-LLM loop.** One advisory pass per *body of text*; its
+  findings die at the human. Never revise from them autonomously, never re-run
+  a pass over text it already saw. [A1][A2] Text the gate ADDS is unreviewed
+  text, not a re-review — see Phase 4's expiry rule.
 - **One writer.** This session authors everything; subagents only read. [A4]
-- **Every task carries a machine-checkable done-when** — downstream loops
-  terminate on pass/fail checks, never on a model verdict. [A3][RQ3]
+- **Every task carries a machine-checkable done-when that is also
+  NON-VACUOUS** — it must fail if the work were never done. A check that
+  passes on an untouched repo is worse than no check: it reads as proof.
+  [A3][RQ3]
 - **You are drafting for a fresh implementer session** that knows nothing the
   doc doesn't say. Pin decisions; leave the greppable out. [RQ8]
 
@@ -114,6 +118,19 @@ than the headline one. [RQ4] **Edges are author-declared**, default
 independent; add an edge only when a named artifact (file/interface) forces
 it. A cycle is a defect — fix the decomposition. [RQ4]
 
+**Vacuous done-whens — the named anti-patterns.** Each of these is
+machine-checkable AND proves nothing. Reject them at authoring time:
+- a test-filter that may match **zero** tests (`go test ./... -run 'Docs'`
+  when no `Docs*` test covers this area — it exits 0 on an untouched repo)
+- a multi-file `grep`/`rg` whose exit code doesn't require **every** file to
+  match (`rg -c a.md b.md c.md` exits 0 when only one matched)
+- a build/lint/format command standing in for a behavior check
+- any assertion on a mock the same task defines
+
+The general test: **would this check still pass if the task were never
+done?** If yes, it is not a done-when. Prefer a check that names the exact
+artifact and fails per-item.
+
 **Verification fallback ladder** (only when no single command can prove it):
 scripted probe (Playwright/CLI harness) → screenshot diff vs accepted
 baseline → named human checklist item at the gate, last resort. Pick one
@@ -140,12 +157,25 @@ only the doc path and this contract, never your reasoning or the interview:
 > Read <doc path>. Report ONLY gaps that affect correctness or the stated
 > requirements — contradictions, criteria that cannot be checked as written,
 > named files/interfaces that don't exist, tasks whose done-when is not
-> machine-checkable. Everything else is optional and unwanted. Zero findings
-> is a valid, expected answer for a sound doc.
+> machine-checkable, and tasks whose done-when is machine-checkable but
+> VACUOUS (it would pass on an untouched repo — e.g. a test-filter matching
+> zero tests, or a multi-file grep that exits 0 on a partial match). Run the
+> done-when commands where you can rather than reasoning about them.
+> Everything else is optional and unwanted. Zero findings is a valid,
+> expected answer for a sound doc.
 
 Append its findings verbatim under `## Advisory findings (gate)` — they are
 input for the human, not for you. Do not act on them, reply to them, or
-re-run the pass. [RQ5][A1][A2]
+re-run the pass over text it already saw. [RQ5][A1][A2]
+
+**Expiry — the pass covers the doc it read, not the doc you ship.** If the
+Phase 5 gate sends you back to Phase 2 and the operator's deltas ADD tasks or
+behavior criteria, the shipped doc now contains material nothing has reviewed.
+Before re-presenting, run ONE further pass **scoped to the added sections
+only** — name them explicitly in the prompt, and tell the subagent to ignore
+the rest. This is not a re-review and does not violate the no-loop rule: it is
+a first review of new text. Findings still die at the human. A revision that
+only edits or deletes existing text triggers no new pass.
 
 ## Phase 5 — Human gate
 
@@ -160,9 +190,12 @@ the checklist — every item demands a **stated value**, never yes/no [RQ5]:
 4. Read the verification command; describe what a false PASS would look like.
 5. Name the task you'd cut first, and why that is safe or not.
 6. For each unwanted-behaviour criterion: name a trigger it misses, or say "none".
-7. Answer or explicitly accept each marked ambiguity — no silent defaults
+7. Name a done-when that would still pass if the work were never done — or
+   say "none". (The one item aimed at vacuous checks; they are invisible to a
+   reader who only asks "is this checkable?".)
+8. Answer or explicitly accept each marked ambiguity — no silent defaults
    through the gate.
-8. Edit the doc directly.
+9. Edit the doc directly.
 
 **Tripwires:** a Full-tier doc accepted in under a minute, or with zero human
 edits, is a rubber-stamp signature — say so and re-present ONCE. [RQ5]
