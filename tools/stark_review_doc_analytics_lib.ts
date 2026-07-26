@@ -12,7 +12,13 @@
  * 10 rounds because every round's fixes create next round's findings. The
  * guards catch that at round 2-3 instead of round 10.
  */
-import type { DomainCoverage } from "./stark_review_doc_lib.ts";
+/** Per-domain coverage record (inlined from the retired stark_review_doc_lib). */
+export interface DomainCoverage {
+  attempts: number;
+  completions: number;
+  timeouts: number;
+  last_error: string | null;
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────
 

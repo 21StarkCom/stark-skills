@@ -104,21 +104,22 @@ test("returns false for a module that is imported, not the entrypoint", () => {
   });
 });
 
-test("write_spec_land.ts runs its command when reached through a symlink", () => {
+test("copilot_land.ts runs its command when reached through a symlink", () => {
   // End-to-end proof on a REAL tool: the exact class the report hit. A symlink
-  // to the CLI must still produce the validate-out receipt, not a silent no-op.
+  // to the CLI must still produce the branch name, not a silent no-op.
   withTempDir((dir) => {
-    const link = path.join(dir, "write_spec_land-link.ts");
-    fs.symlinkSync(path.join(HERE, "write_spec_land.ts"), link);
+    const link = path.join(dir, "copilot_land-link.ts");
+    fs.symlinkSync(path.join(HERE, "copilot_land.ts"), link);
     const r = run(link, [
-      "validate-out",
-      "--out",
-      "docs/specs/2026-07-24-example-spec.md",
+      "branch-name",
+      "--plan-slug",
+      "example",
+      "--fallback-slug",
+      "fallback",
       "--json",
     ]);
     assert.equal(r.status, 0, r.stderr);
     const parsed = JSON.parse(r.stdout);
-    assert.equal(parsed.ok, true);
-    assert.equal(parsed.slug, "example");
+    assert.equal(parsed.branch, "copilot/example");
   });
 });

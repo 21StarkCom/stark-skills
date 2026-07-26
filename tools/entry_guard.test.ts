@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /** CLI entry points that must survive being invoked through a symlink. */
-const CLI_TOOLS = ["write_spec.ts", "write_spec_land.ts", "preflight.ts"];
+const CLI_TOOLS = ["copilot_land.ts", "copilot_dispatch.ts", "preflight.ts"];
 
 function runThroughSymlink(tool: string, args: string[]): { stdout: string; status: number | null } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "entry-guard-"));
@@ -53,12 +53,14 @@ for (const tool of CLI_TOOLS) {
   });
 }
 
-test("write_spec_land resolve-slug works through a symlinked path", () => {
-  const { stdout, status } = runThroughSymlink("write_spec_land.ts", [
-    "resolve-slug",
-    "--topic",
-    "live vault adoption sync",
+test("copilot_land branch-name works through a symlinked path", () => {
+  const { stdout, status } = runThroughSymlink("copilot_land.ts", [
+    "branch-name",
+    "--plan-slug",
+    "live-vault-adoption-sync",
+    "--fallback-slug",
+    "fallback",
   ]);
   assert.equal(status, 0);
-  assert.equal(stdout.trim(), "live-vault-adoption-sync");
+  assert.equal(stdout.trim(), "copilot/live-vault-adoption-sync");
 });

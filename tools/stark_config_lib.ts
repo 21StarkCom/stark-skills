@@ -199,34 +199,6 @@ export const DEFAULT_IAC_REVIEW = {
   max_bytes_per_file: 100_000,
 };
 
-/** `write_spec` section (lead/wing spec-authoring dispatch). */
-export interface WriteSpecConfig {
-  lead_agent: string;
-  wing_agent: string;
-  wing_reasoning_effort: string;
-  max_rounds: number;
-  timeout_s: number;
-  wing_timeout_s: number;
-  max_input_chars: number;
-  history_keep_runs: number;
-  open_pr: boolean;
-  [key: string]: unknown;
-}
-
-// timeout_s / wing_timeout_s mirror plan_dispatch.ts DEFAULT_TIMEOUT_SEC (900)
-// and WING_TIMEOUT_DEFAULT_SEC (600) — authoritative sibling values, not TBD.
-export const DEFAULT_WRITE_SPEC: WriteSpecConfig = {
-  lead_agent: "claude",
-  wing_agent: "codex",
-  wing_reasoning_effort: "xhigh",
-  max_rounds: 3,
-  timeout_s: 900,
-  wing_timeout_s: 600,
-  max_input_chars: 200_000,
-  history_keep_runs: 20,
-  open_pr: true,
-};
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -366,9 +338,6 @@ export function getHandoverConfig(): typeof DEFAULT_HANDOVER {
 }
 export function getCostConfig(): typeof DEFAULT_COST {
   return getSection(DEFAULT_COST, "cost");
-}
-export function getWriteSpecConfig(): WriteSpecConfig {
-  return getSection(DEFAULT_WRITE_SPEC, "write_spec");
 }
 export function getIacReviewConfig(): typeof DEFAULT_IAC_REVIEW {
   return getSection(DEFAULT_IAC_REVIEW, "iac_review");

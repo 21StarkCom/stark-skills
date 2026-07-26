@@ -29,8 +29,9 @@ usage, and arguments, then stop — do not run preflight or any phase.
 > domain. The 2026-07-26 rewrite retired the auto-fired `ssot` lens after
 > telemetry showed it produced **18 of the fleet's 28 review-noise labels (45%
 > noise among its classified findings)** while its 22 real fixes all shared one
-> shape: a nameable existing owner. The doc-review trees (`/stark-review-spec`,
-> `/stark-review-plan`) still carry an `ssot` domain until their demolition.
+> shape: a nameable existing owner. The doc-review loops were demolished on
+> 2026-07-26 — authoring runs through `/stark-author`, implementation through
+> `/stark-build`.
 > **This skill is the consolidation workflow** — the actual "give it one owner
 > and route the copies through it" refactor. Use it to fix what review (or
 > you) found.

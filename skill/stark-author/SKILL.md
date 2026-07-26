@@ -206,7 +206,7 @@ self-report. [RQ9]
 
 ## What this replaces
 
-For new work, this single session replaces `/stark-write-spec`,
-`/stark-review-spec`, `/stark-red-team-spec`, `/stark-spec-to-plan`, and
-`/stark-review-plan`. Those skills remain installed for legacy artifacts
-until removed.
+This single session replaced `/stark-write-spec`, `/stark-review-spec`,
+`/stark-red-team-spec`, `/stark-spec-to-plan`, and `/stark-review-plan` —
+all five were deleted in the 2026-07-26 demolition. This is the authoring
+stage; `/stark-build` is the implementation stage.
