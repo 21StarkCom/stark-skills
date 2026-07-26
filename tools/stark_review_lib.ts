@@ -123,18 +123,20 @@ Emit one JSON object per finding. Each line MUST be a JSON object with these fie
 - \`id\` (string, required) — stable identifier for this finding within the run (e.g. a short slug or hash)
 - \`domain\` (string, required) — the review domain slug (e.g. \`architecture\`, \`security\`)
 - \`agent\` (string, required) — one of \`claude\`, \`codex\`, \`gemini\`
-- \`severity\` (string, required) — one of \`critical\`, \`high\`, \`medium\`, \`low\`
 - \`file\` (string | null, required) — repo-relative path, or \`null\` for repo-wide findings
 - \`line\` (number | null, required) — 1-based line number, or \`null\` when not applicable
 - \`title\` (string, required) — short, single-line summary
-- \`body\` (string, required) — full explanation including evidence and recommended fix
+- \`body\` (string, required) — the evidence: quoted span from the diff, then the concrete failure scenario, then an optional one-line fix hint
+- \`severity\` (string, required) — one of \`critical\`, \`high\`, \`medium\`, \`low\`
 - \`classification\` (string, optional) — one of \`fix\`, \`false_positive\`, \`noise\`, \`ignored\`. Omit at initial emission; the classifier stage fills it.
 - \`classification_reason\` (string, optional) — one-sentence justification, paired with \`classification\`.
 - \`extra\` (object, optional) — open-ended metadata for domain-specific fields.
 
+Write the keys of each finding in the order listed above — \`title\` and \`body\` (the evidence) BEFORE \`severity\` — and derive the severity from the failure scenario you just wrote, using your preamble's severity ladder. A severity emitted before its evidence is a guess.
+
 Example finding line:
 
-{"id":"sec-001","domain":"security","agent":"codex","severity":"high","file":"src/api/handler.ts","line":42,"title":"Unvalidated input forwarded to query builder","body":"The handler reads req.query.id and passes it directly to db.raw(...). Validate or parameterize.","extra":{}}
+{"id":"sec-001","domain":"security","agent":"codex","file":"src/api/handler.ts","line":42,"title":"Unvalidated input forwarded to query builder","body":"Span: db.raw(req.query.id). Scenario: a request with id=1;DROP TABLE users reaches the query builder unparameterized. Fix: validate or parameterize.","severity":"high","extra":{}}
 
 Do NOT emit a JSON array. Do NOT wrap output in code fences. Do NOT include any preamble or trailing commentary. If you found nothing, emit the no-findings sentinel — never both findings AND the sentinel in the same run.
 `;

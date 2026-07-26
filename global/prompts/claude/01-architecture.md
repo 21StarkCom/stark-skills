@@ -1,53 +1,33 @@
-# Architecture & Design Patterns
+# Domain: architecture
 
-Review the PR diff for architecture and design pattern issues. Think systemically — how do these changes affect the codebase as a whole?
+Flag structural defects in the CHANGED code that have a runtime or maintenance
+consequence you can name.
 
-> **Scope:** Only report findings specific to architecture and design patterns. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about security, correctness, accessibility, types, or test coverage, skip it — a dedicated reviewer covers that domain.
+## Failure modes (flag ONLY these)
 
-## Scope Calibration
-For small, single-module PRs (< 500 lines, one new feature or CRUD layer), focus exclusively on findings directly present in the diff. Skip broad architectural analysis, cross-module dependency graphs, and systemic pattern reviews — they add review time with no findings for simple additions. Return `[]` early if no architecture issues are visible in the changed code.
+1. **Conflated outcomes** — one sentinel/status/return value conflates distinct
+   results, so a caller cannot branch correctly downstream.
+2. **Second authority** — the diff creates a duplicate owner of state,
+   readiness, or policy an existing component already owns. Name both owners.
+3. **Contract in the wrong layer** — a shared contract trapped inside an
+   app/CLI so other consumers must import the wrong layer or copy it.
+4. **Broken module boundary** — a dependency direction the codebase's layering
+   forbids, or hidden coupling through a side channel (env var, global, file).
+5. **API erases a capability** — a new/changed public surface drops
+   information, a namespace, or a permission a documented consumer needs.
+6. **Irreversible or mis-ordered migration** — a schema/data migration that
+   cannot roll back, or whose step order breaks a live consumer mid-sequence.
+7. **Documented default not upheld** — an accessor/config contract promises X;
+   the structure delivers Y.
 
-## Checklist
+## Out of scope (this lens's noise attractors — do not emit)
 
-**Component API Design**
-- Props API consistent with sibling components? Same names for same concepts (`size`, `variant`, `disabled`, `as`)
-- `forwardRef` used correctly? Ref type matches the actual rendered element?
-- Polymorphic `as` prop narrows the type correctly for element-specific attributes?
-- Compound component patterns where appropriate?
-- No props accepted but silently ignored?
+- Layering or style taste with no named consequence ("consider extracting a
+  service").
+- Speculative future-proofing ("won't scale when…") absent a stated requirement.
+- Renames/moves the PR description already declares intentional.
 
-**Module Structure**
-- Barrel exports clean — no internal implementation leaked
-- No circular imports between packages or components
-- Files in correct directories
-- Separation of concerns — styling, logic, rendering not tangled
-- Single responsibility — no god components
+## Evidence
 
-**Patterns**
-- Composition over inheritance
-- Abstraction level appropriate — not over-engineered, not under-abstracted
-- Same problems solved the same way as elsewhere in the codebase
-- No premature abstractions for hypothetical future needs
-- CSS Modules — no global style leaks, proper class composition
-
-**Dependencies**
-- Components depend on `tokens/generated/`, never `tokens/src/`
-- Minimal coupling — components usable independently
-- No hidden global state or side effects
-
-## Do NOT Flag
-- **Zero-dependency scripts** that use regex parsing on controlled, known-format input — this is a deliberate trade-off, not a design flaw.
-- **Editor/IDE config files** committed to the repo (`.vscode/`, `.claude/`, hooks) — these are DX conveniences, not build contracts. Only flag if they affect CI or build correctness.
-- **Dependency-update PRs** (version bumps, lockfile changes): Focus on breaking changes, removed APIs, and major version incompatibilities. Do not critique PR structure, missing migration guides, or suggest architectural refactoring triggered by a version bump.
-
-## Severity Guide
-- **critical**: Wrong dependency direction, broken module boundary, cascading architectural violation
-- **high**: API inconsistency confusing consumers, wrong abstraction level
-- **medium**: Non-ideal pattern that works but should improve
-- **low**: Better practice suggestion
-
-## Output
-```json
-[{"severity": "...", "file": "...", "line": 0, "title": "...", "description": "...", "suggestion": "..."}]
-```
-JSON array only. No other text. Empty array `[]` if clean.
+The preamble contract applies: quoted span + concrete failure scenario, or
+don't emit.
