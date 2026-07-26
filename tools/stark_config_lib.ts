@@ -13,8 +13,7 @@
  *   - Section accessors (`getModelsConfig`, `getRuntimeConfig`,
  *     `getSelfHealConfig`, `getValidationGateConfig`,
  *     `getSkillActivationConfig`, `getContextCompactionConfig`,
- *     `getCostConfig`, `getForgeConfig`, `getForgedReviewConfig`,
- *     `getModelRates`) — deep-merge default + global.
+ *     `getCostConfig`, `getModelRates`) — deep-merge default + global.
  *   - `isAgentEnabled(agent)` / `getModelId(agent)` — model convenience
  *   - `discoverConfig({cwd})` — minimal hierarchical merge (preflight)
  *
@@ -200,62 +199,6 @@ export const DEFAULT_IAC_REVIEW = {
   max_bytes_per_file: 100_000,
 };
 
-export const DEFAULT_FORGE = {
-  domain_routing: {
-    completeness: "claude",
-    security: "codex",
-    scope: "claude",
-    "api-design": "codex",
-    "data-modeling": "codex",
-    consistency: "claude",
-    accessibility: "claude",
-    "test-plan": "codex",
-  },
-  plan_review_routing: {
-    completeness: "claude",
-    security: "codex",
-    sequencing: "claude",
-    viability: "codex",
-  },
-  agent_fallback_order: ["claude", "codex", "gemini"],
-  consensus_domains: ["security"],
-  consensus_threshold: 2,
-  max_rounds: 3,
-  workers: 3,
-  fix_threshold: "medium",
-  noise_improvement_threshold: 0.33,
-  heuristic_consolidation_threshold: 50,
-  review_timeout: 300,
-  fix_timeout: 900,
-};
-
-/**
- * `forge_pipeline` section — the `/stark-forge` pipeline orchestrator's durable
- * knobs. Deliberately SEPARATE from `DEFAULT_FORGE` (review-routing) above:
- * same-prefixed name, disjoint concern, no symbol collision.
- */
-export const DEFAULT_FORGE_PIPELINE = {
-  history_keep_runs: 20,
-  merge_timeout_s: 1800,
-};
-
-export const DEFAULT_FORGED_REVIEW = {
-  forge_threshold: 4,
-  max_rounds: 3,
-  domain_pairs: {
-    architecture: { leader: "claude", second: "codex" },
-    behavior: { leader: "codex", second: "claude" },
-    "type-safety": { leader: "codex", second: "gemini" },
-    security: { leader: "gemini", second: "codex" },
-    "test-coverage": { leader: "codex", second: "gemini" },
-    "spec-conformance": { leader: "claude", second: "codex" },
-  },
-  always_on_domains: ["behavior"],
-  triage_agent: "claude",
-  delta_rereview: true,
-  auto_merge_when_clean: true,
-};
-
 /** `write_spec` section (lead/wing spec-authoring dispatch). */
 export interface WriteSpecConfig {
   lead_agent: string;
@@ -423,39 +366,6 @@ export function getHandoverConfig(): typeof DEFAULT_HANDOVER {
 }
 export function getCostConfig(): typeof DEFAULT_COST {
   return getSection(DEFAULT_COST, "cost");
-}
-export function getForgeConfig(): typeof DEFAULT_FORGE {
-  return getSection(DEFAULT_FORGE, "forge");
-}
-/** Coerce `value` to a positive finite integer, else fall back safely. Guards
- * against a malformed `forge_pipeline` override (e.g. `history_keep_runs:
- * "garbage"` / 0 / -1 / 1.5) reaching `Array.slice` in `pruneRunDirs`, which
- * would coerce to 0 and prune every run, orphaning the `latest` pointer. */
-function positiveIntOr(value: unknown, fallback: number): number {
-  return typeof value === "number" &&
-    Number.isInteger(value) &&
-    value > 0
-    ? value
-    : fallback;
-}
-
-export function getForgePipelineConfig(): typeof DEFAULT_FORGE_PIPELINE {
-  const merged = getSection(DEFAULT_FORGE_PIPELINE, "forge_pipeline");
-  // Both settings drive filesystem retention / timeouts — validate at the read
-  // boundary so no malformed override propagates downstream.
-  return {
-    history_keep_runs: positiveIntOr(
-      merged.history_keep_runs,
-      DEFAULT_FORGE_PIPELINE.history_keep_runs,
-    ),
-    merge_timeout_s: positiveIntOr(
-      merged.merge_timeout_s,
-      DEFAULT_FORGE_PIPELINE.merge_timeout_s,
-    ),
-  };
-}
-export function getForgedReviewConfig(): typeof DEFAULT_FORGED_REVIEW {
-  return getSection(DEFAULT_FORGED_REVIEW, "forged_review");
 }
 export function getWriteSpecConfig(): WriteSpecConfig {
   return getSection(DEFAULT_WRITE_SPEC, "write_spec");

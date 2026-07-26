@@ -44,8 +44,6 @@ Rules:
 | `stark-write-spec` | `spec_path: string\|null`, `pr: number\|null` |
 | `stark-review-spec` | `artifact_path: string\|null`, `pr: number\|null` |
 | `stark-review-plan` | `artifact_path: string\|null`, `pr: number\|null` |
-| `stark-spec-to-plan` | `plan_path: string\|null`, `plan_slug: string\|null`, `pr: number\|null` |
-| `stark-plan-to-tasks` | `plan_slug: string\|null`, `issue_numbers: number[]` |
 | `stark-copilot` | `plan_slug: string\|null`, `prs: number[]` |
 
 `pr` is the artifact PR the stage opened **or adopted** — the number forge
@@ -61,8 +59,6 @@ Forge maps the line straight onto `forge_state.ts record-output`:
 |---|---|
 | write-spec | `--artifact-spec-path <spec_path> --prs <pr>` |
 | review-spec / review-plan | `--prs <pr>` |
-| spec-to-plan | `--artifact-plan-path <plan_path> --artifact-plan-slug <plan_slug> --prs <pr>` |
-| plan-to-tasks | `--artifact-issue-numbers <issue_numbers csv>` |
 | copilot | `--prs <prs csv>` |
 
 ## Ownership

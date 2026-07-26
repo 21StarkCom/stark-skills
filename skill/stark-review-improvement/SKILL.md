@@ -44,7 +44,7 @@ When `--prompts-dir` is set:
 
 ```
 PROMPT_ROOT = $PROMPTS/{prompts-dir}/{agent}/   # e.g., $PROMPTS/spec-review/claude/
-ORCHESTRATOR = $TOOLS/stark_review_doc.ts  # instead of multi_review.ts
+ORCHESTRATOR = $TOOLS/stark_review_doc.ts
 HISTORY_SUB  = spec-reviews                    # history subdirectory
 ```
 
@@ -52,7 +52,7 @@ When `--prompts-dir` is NOT set (default — PR code review):
 
 ```
 PROMPT_ROOT = $PROMPTS/{agent}/                  # e.g., $PROMPTS/claude/
-ORCHESTRATOR = $TOOLS/multi_review.ts
+ORCHESTRATOR = $TOOLS/stark_review.ts
 HISTORY_SUB  = (org/repo/pr structure)
 ```
 
@@ -145,7 +145,7 @@ Read the target prompt file. Apply the minimum edit needed.
 
 Read the relevant function. Apply targeted fix. The orchestrator depends on `--prompts-dir`:
 
-**For PR code review (`multi_review.ts`):**
+**For PR code review (`stark_review.ts`):**
 
 | Issue                            | Where                           | Fix                                          |
 | -------------------------------- | ------------------------------- | -------------------------------------------- |
