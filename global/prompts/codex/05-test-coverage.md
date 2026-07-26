@@ -1,40 +1,33 @@
-# Test Coverage & Quality
+# Domain: test-coverage
 
-Review the diff for test coverage gaps. Read the test files carefully and check what's missing.
+Flag CHANGED behavior that lacks the specific test that would catch its
+specific regression.
 
-> **Scope:** Only report findings specific to test coverage and test quality. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about architecture, security, accessibility, correctness, or types, skip it — a dedicated reviewer covers that domain.
+## The span rule (this lens's evidence bar)
 
-Critical rules:
-- Do NOT suggest adding tests unless there is a concrete logic bug risk. Generic "no tests" findings are noise. For every test gap you flag, you MUST describe a specific scenario: "If someone changes X, this test gap means Y would silently break." If you can't articulate the break scenario, don't flag it.
-- Scripts with built-in `--check` / `--verify` / `--dry-run` modes have implicit integration coverage. Only flag missing tests for specific breakable inputs that the self-check doesn't exercise.
-- Unit tests that verify their stated scope are valid. Do NOT flag a unit test for "not exercising the real pipeline" or "using mock data instead of production behavior." Unit tests test units. Integration tests test integration. Evaluate each test against its own stated scope.
-- Schema introspection tests and signature validation tests are a valid test pattern — they verify that the public API surface hasn't regressed. Do NOT rate these as critical or high severity simply because they don't execute the underlying logic. At most, note them as medium ("consider adding behavioral tests") if there is a specific logic bug risk.
-- **Infrastructure/config repos** (majority `.tf`, `.alloy`, `.yml`, `.json` config files): Only flag test gaps for custom scripts or application logic. Do NOT request CI fixtures, unit tests, or integration tests for declarative config (Terraform resources, Grafana dashboards, Prometheus rules, Alloy pipelines). Declarative config is validated by `plan`/`apply`, not unit tests.
-- **Before reporting a missing test, verify no existing test covers the symbol.** Search test file names and test function names in the diff context for the class/function/enum name. If a test already exists, do not flag it as missing.
+Name the exact untested changed branch or contract — the file:line of the
+changed code and the input that would expose the gap. "Add more tests" without
+a named branch is banned.
 
-Check:
-- Every public prop has at least one test
-- Every variant/size/color value tested
-- Ref forwarding tested (ref.current points to expected element)
-- className merging tested (user className preserved alongside internal)
-- ...rest spread tested (data-*, aria-* pass through)
-- Default values tested (omitting optional props = correct defaults)
-- as prop tested (changes rendered element tag)
-- Edge cases: empty/undefined/null for optional props, boundary enum values, boolean both states
-- No children, single child, multiple children scenarios
-- Semantic element assertions (el.tagName === 'H1' for h1 variant)
-- ARIA attributes verified in tests
-- Tests assert behavior not implementation
-- Tests independent — no shared mutable state
-- screen.getByRole/getByLabelText preferred over getByTestId
-- No duplicate tests covering same scenario
-- Test file alongside component, describe blocks by feature
-- Stories exist covering key variants
+## Failure modes (flag ONLY these)
 
-**Stack Adaptation:** The React-specific items above (props, refs, className, Stories, getByRole) apply only to frontend code. For Python/backend: check error paths, async behavior, data transformations, external service boundary mocking, and destructive operation safeguards.
+1. **New contract untested** — a new schema, response field, flag, or API shape
+   has no assertion anywhere.
+2. **Changed risky branch untested** — an error path, boundary, or fail-closed
+   path this diff changed has no test.
+3. **Test masks the behavior** — a test passes for a different reason than its
+   name claims (asserts on the wrong actor, over-broad mock, tautology).
+4. **Flaky by construction** — a new test depends on wall-clock/period
+   boundaries, ordering, or shared state and will intermittently fail.
+5. **Removed or weakened assertion** — coverage that existed no longer proves
+   the property it used to.
 
-Severities: **Do not** use `critical` for test-harness or assertion-style gaps (e.g., "the disabled-path test does not pass a mock client"). Those are **high** at most. Reserve `critical` for wrong assertions on primary production paths or missing tests where the PR ships an exploitable boundary with zero coverage. Otherwise: critical = test passes but tests wrong thing, primary use case untested. high = missing test for public prop, missing a11y test. medium = missing edge case. low = nice-to-have test.
+## Out of scope
 
-Output a JSON array only:
-[{"severity": "...", "file": "...", "line": 0, "title": "...", "description": "...", "suggestion": "..."}]
-Empty array [] if clean. No other text.
+- Coverage-percentage complaints; tests for unchanged code.
+- E2E/test-pyramid demands beyond the change's actual risk (preamble guard).
+
+## Evidence
+
+The preamble contract applies — for this lens the span is the changed code
+lines whose behavior is untested, plus the exposing input.

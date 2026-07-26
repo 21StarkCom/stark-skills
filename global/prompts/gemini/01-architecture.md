@@ -1,48 +1,33 @@
-# Architecture & Design Patterns
+# Domain: architecture
 
-First, run these commands to understand the changes:
-1. Run `git diff <base>...HEAD` to see what changed
-2. Read each changed file in full
-3. Read sibling components in the same directory for pattern comparison
+Flag structural defects in the CHANGED code that have a runtime or maintenance
+consequence you can name.
 
-> **Scope:** Only report findings specific to architecture and design patterns. Do not flag missing design specs, PR template violations, or other process issues. If a finding is primarily about security, correctness, accessibility, types, or test coverage, skip it — a dedicated reviewer covers that domain.
+## Failure modes (flag ONLY these)
 
-Then review for architecture issues:
+1. **Conflated outcomes** — one sentinel/status/return value conflates distinct
+   results, so a caller cannot branch correctly downstream.
+2. **Second authority** — the diff creates a duplicate owner of state,
+   readiness, or policy an existing component already owns. Name both owners.
+3. **Contract in the wrong layer** — a shared contract trapped inside an
+   app/CLI so other consumers must import the wrong layer or copy it.
+4. **Broken module boundary** — a dependency direction the codebase's layering
+   forbids, or hidden coupling through a side channel (env var, global, file).
+5. **API erases a capability** — a new/changed public surface drops
+   information, a namespace, or a permission a documented consumer needs.
+6. **Irreversible or mis-ordered migration** — a schema/data migration that
+   cannot roll back, or whose step order breaks a live consumer mid-sequence.
+7. **Documented default not upheld** — an accessor/config contract promises X;
+   the structure delivers Y.
 
-**Component API**
-- Props API consistent with sibling components? Compare names: size, variant, disabled, as
-- forwardRef used correctly? Ref type matches rendered element?
-- Polymorphic as prop narrows types for element-specific attributes?
-- No props silently ignored?
+## Out of scope (this lens's noise attractors — do not emit)
 
-**Module Structure**
-- Barrel exports clean — no internals leaked
-- No circular imports
-- Files in correct directories
-- Components consume tokens/generated/, never tokens/src/
+- Layering or style taste with no named consequence ("consider extracting a
+  service").
+- Speculative future-proofing ("won't scale when…") absent a stated requirement.
+- Renames/moves the PR description already declares intentional.
 
-**Patterns**
-- Same patterns as sibling components for same problems
-- CSS Modules — no global style leaks
-- No premature abstractions
-- Composition over inheritance
+## Evidence
 
-**Dependencies**
-- Minimal coupling between components
-- No hidden global state or side effects
-
-**Do NOT Flag:**
-- Zero-dependency scripts that use regex parsing on controlled, known-format input — this is a deliberate trade-off, not a design flaw.
-- Editor/IDE config files committed to the repo (`.vscode/`, `.claude/`, hooks) — these are DX conveniences, not build contracts. Only flag if they affect CI or build correctness.
-
-Severities:
-- critical: Broken module boundary, cascading architectural violation
-- high: API inconsistency confusing consumers, wrong abstraction
-- medium: Non-ideal pattern that works
-- low: Suggestion
-
-IMPORTANT: Output ONLY a raw JSON array. Do NOT wrap it in markdown code fences. Do NOT add any text before or after the array.
-
-[{"severity": "...", "file": "...", "line": 0, "title": "...", "description": "...", "suggestion": "..."}]
-
-If no issues found, output exactly: []
+The preamble contract applies: quoted span + concrete failure scenario, or
+don't emit.

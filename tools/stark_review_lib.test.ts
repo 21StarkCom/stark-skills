@@ -63,12 +63,12 @@ test("stripLegacyOutputSection is idempotent", () => {
   assert.equal(twice, clean);
 });
 
-test("listDomainPromptFiles finds all 18 NN-*.md prompts", () => {
+test("listDomainPromptFiles finds all 15 NN-*.md prompts (5 domains × 3 agents)", () => {
   const files = listDomainPromptFiles(repoRoot);
-  assert.ok(files.length >= 18, `expected ≥18 prompts, got ${files.length}`);
+  assert.ok(files.length >= 15, `expected ≥15 prompts, got ${files.length}`);
   for (const agent of ["claude", "codex", "gemini"]) {
     const count = files.filter((f) => f.includes(`/global/prompts/${agent}/`)).length;
-    assert.ok(count >= 6, `expected ≥6 prompts for ${agent}, got ${count}`);
+    assert.ok(count >= 5, `expected ≥5 prompts for ${agent}, got ${count}`);
   }
 });
 
@@ -95,21 +95,6 @@ test("rendered domain prompts contain zero legacy schema markers", () => {
     }
   }
   assert.deepEqual(offenders, [], `legacy markers leaked into rendered prompts:\n${offenders.join("\n")}`);
-});
-
-test("source NN-*.md files are NOT modified (Python compat)", () => {
-  // The contract: the legacy text MUST remain in the source files because the
-  // Python multi_review.py pipeline still parses it. Ensure at least one
-  // legacy marker still exists in each source file as a guard against
-  // accidental edits in this phase.
-  for (const file of listDomainPromptFiles(repoRoot)) {
-    const raw = fs.readFileSync(file, "utf8");
-    assert.match(
-      raw,
-      /\[\{"severity"/,
-      `${path.relative(repoRoot, file)} no longer contains legacy JSON-array example — Python pipeline would break`,
-    );
-  }
 });
 
 test("renderDomainPrompt strips claude-style ## Output section", () => {
