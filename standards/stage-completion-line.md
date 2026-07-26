@@ -41,9 +41,6 @@ Rules:
 
 | Skill | Fields beyond `skill` + `outcome` |
 |---|---|
-| `stark-write-spec` | `spec_path: string\|null`, `pr: number\|null` |
-| `stark-review-spec` | `artifact_path: string\|null`, `pr: number\|null` |
-| `stark-review-plan` | `artifact_path: string\|null`, `pr: number\|null` |
 | `stark-copilot` | `plan_slug: string\|null`, `prs: number[]` |
 
 `pr` is the artifact PR the stage opened **or adopted** — the number forge
@@ -57,8 +54,6 @@ Forge maps the line straight onto `forge_state.ts record-output`:
 
 | Stage | `record-output` flags |
 |---|---|
-| write-spec | `--artifact-spec-path <spec_path> --prs <pr>` |
-| review-spec / review-plan | `--prs <pr>` |
 | copilot | `--prs <prs csv>` |
 
 ## Ownership

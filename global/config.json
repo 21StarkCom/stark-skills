@@ -147,25 +147,6 @@
     "conservative_confidence_threshold": 0.8,
     "insights_url": "http://localhost:7420"
   },
-  "spec_review": {
-    "agents": [
-      "claude",
-      "codex"
-    ],
-    "fix_threshold": "medium",
-    "disabled_domains": [],
-    "max_rounds": 2,
-    "max_fixes_per_round": 12,
-    "compress_retry_growth_ratio": 1.15,
-    "triage": {
-      "mode": "conservative"
-    }
-  },
-  "plan_review": {
-    "triage": {
-      "mode": "conservative"
-    }
-  },
   "model_rates": {
     "o3": {
       "input_per_1m_usd": 15,

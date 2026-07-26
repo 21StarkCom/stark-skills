@@ -2,7 +2,7 @@
 name: stark-review-improvement
 description: >-
   Improve review prompts based on Prompt Improvement Assessment from completed reviews. Use for fix review prompts.
-argument-hint: "[--prompts-dir spec-review] (reads assessment from context or latest history)"
+argument-hint: "(reads assessment from context or latest history)"
 disable-model-invocation: true
 model: opus
 revision: e504ba02a12b6dd779ebd026fa4c07df76697ff2
@@ -21,10 +21,7 @@ Closes the feedback loop on stark-skills: reads the prompt improvement assessmen
 
 ## Arguments
 
-- `--prompts-dir DIR` — which prompt set to target (default: agent root = `$PROMPTS/{agent}/`). When set, prompts resolve to `$PROMPTS/{DIR}/{agent}/`. Common values:
-  - *(omitted)* — PR code review prompts (`global/prompts/{claude,codex,gemini}/`; gemini disabled by default)
-  - `spec-review` — spec review prompts (`global/prompts/spec-review/{claude,codex,gemini}/`; gemini disabled by default)
-  - `plan-review` — plan review prompts (`global/prompts/plan-review/{claude,codex,gemini}/`; gemini disabled by default)
+- None — targets the PR code review prompts (`global/prompts/{claude,codex,gemini}/`; gemini disabled by default). The former `--prompts-dir spec-review|plan-review` modes died with the doc-review loops (demolition 2026-07-26).
 
 **Raw input:** `$ARGUMENTS`
 
@@ -40,16 +37,6 @@ HISTORY     = ~/.claude/code-review/history
 CHANGELOG   = $STARK_REPO/docs/prompt-changelog.md
 ```
 
-When `--prompts-dir` is set:
-
-```
-PROMPT_ROOT = $PROMPTS/{prompts-dir}/{agent}/   # e.g., $PROMPTS/spec-review/claude/
-ORCHESTRATOR = $TOOLS/stark_review_doc.ts
-HISTORY_SUB  = spec-reviews                    # history subdirectory
-```
-
-When `--prompts-dir` is NOT set (default — PR code review):
-
 ```
 PROMPT_ROOT = $PROMPTS/{agent}/                  # e.g., $PROMPTS/claude/
 ORCHESTRATOR = $TOOLS/stark_review.ts
@@ -62,20 +49,14 @@ HISTORY_SUB  = (org/repo/pr structure)
 
 Look in the **current conversation context** for either:
 
-- A "Prompt Improvement Assessment" section (from a `/stark-review` or `/stark-review-spec` run)
-- A `prompt-assessment.md` or `*.spec-review.md` file path referenced in conversation
+- A "Prompt Improvement Assessment" section (from a `/stark-review` run)
+- A `prompt-assessment.md` file path referenced in conversation
 
-If neither exists, check the most recent history directory for the matching review type:
+If neither exists, check the most recent history directory:
 
 ```bash
-# For PR code review (default; recurses per-repo-slug subdirs):
+# PR code review (recurses per-repo-slug subdirs):
 find $HISTORY -name "*.json" | sort | tail -1
-# For spec/plan review the layout is per-run: <slug>/<run-id>/ with a `latest`
-# pointer per slug (rounds.json, analytics.json, receipt.json inside each run).
-# For spec-review (newest run dir across all docs):
-ls -td $HISTORY/spec-reviews/*/*/ 2>/dev/null | grep -v '/latest/$' | head -1
-# For plan-review:
-ls -td $HISTORY/plan-reviews/*/*/ 2>/dev/null | grep -v '/latest/$' | head -1
 ```
 
 Read `prompt-assessment.md` or `summary.md` from that directory.
@@ -111,7 +92,7 @@ For each approved action item, in order:
 
 Read the target prompt file. Apply the minimum edit needed.
 
-**Common fixes for PR code review prompts (`--prompts-dir` not set):**
+**Common fixes for PR code review prompts:**
 
 | Issue                                 | Fix Location                                 | What to Change                                                                                             |
 | ------------------------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -121,17 +102,6 @@ Read the target prompt file. Apply the minimum edit needed.
 | Agent produces no findings            | `agent.md` strengths section                 | Tune to be less conservative; add concrete examples                                                        |
 | Output not parseable as JSON          | `agent.md` output rules                      | Strengthen JSON-only instruction                                                                           |
 | Cross-domain duplicate findings       | Not a prompt fix → `orchestrator-edit`       | —                                                                                                          |
-
-**Common fixes for spec/plan review prompts (`--prompts-dir spec-review` or `plan-review`):**
-
-| Issue                                                              | Fix Location                    | What to Change                                                                                                          |
-| ------------------------------------------------------------------ | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Scope creep — agents flag v2/future concerns as v1 issues          | `03-scope.md`                   | Add: "Calibrate findings to the spec's stated scope and scale. Do not flag deferred/Phase 2 items as issues."         |
-| Same finding surfaces in 3+ domains                                | `agent.md`                      | Add: "If a finding primarily belongs to another domain, mention it briefly and defer to that domain's review."          |
-| One agent generates disproportionately more findings               | Agent-specific `agent.md`       | Tighten severity calibration: "A finding is high only if it would block implementation or cause a production incident." |
-| Over-engineering for scale (low-volume system gets scale critique) | Relevant domain prompt           | Add: "Consider the stated traffic volume. Do not recommend horizontal scaling for systems under 100 runs/day."          |
-| False positives on explicit design decisions                       | Domain prompt (relevant domain) | Add: "If the spec explicitly addresses this concern in another section, do not flag it."                              |
-| Findings about missing features that are out of scope              | `01-completeness.md`            | Add: "Only flag missing items that are within the stated scope. Out-of-scope omissions are not completeness issues."    |
 
 **Rules for prompt edits:**
 
@@ -143,7 +113,7 @@ Read the target prompt file. Apply the minimum edit needed.
 
 ### 2b. Orchestrator edits (`$ORCHESTRATOR`)
 
-Read the relevant function. Apply targeted fix. The orchestrator depends on `--prompts-dir`:
+Read the relevant function. Apply the targeted fix:
 
 **For PR code review (`stark_review.ts`):**
 
@@ -152,14 +122,6 @@ Read the relevant function. Apply targeted fix. The orchestrator depends on `--p
 | Agent doesn't receive `base` ref | `_run_subagent()`               | Inject `{base}` into the prompt string       |
 | No file exclusion filtering      | `_run_subagent()` or new helper | Filter diff output before passing to agents  |
 | Missing post-processing (dedup)  | After `_parse_findings()`       | Add cross-agent dedup by file+line proximity |
-
-**For spec/plan review (`stark_review_doc.ts`):**
-
-| Issue                                      | Where                                 | Fix                                                                                    |
-| ------------------------------------------ | ------------------------------------- | -------------------------------------------------------------------------------------- |
-| Cross-domain duplicate findings            | After collecting all results          | Add dedup: same section + same concern across domains → keep highest-severity instance |
-| Agent produces too many low-value findings | Prompt construction in `_run_agent()` | Inject max-findings instruction: "Return at most N findings, prioritized by severity"  |
-| Findings reference wrong section numbers   | Prompt construction                   | Include document table of contents as context                                          |
 
 **Rules for orchestrator edits:**
 
@@ -203,7 +165,7 @@ Create or append to `$CHANGELOG`:
 ## YYYY-MM-DD — {source description}
 
 **Source:** PR #{number} in {repo} (or "spec review of {filename}" or "manual assessment")
-**Prompts dir:** {prompts-dir or "default (PR code review)"}
+**Prompts dir:** PR code review
 **Assessment:** {1-line summary of what was wrong}
 
 ### Changes Made
