@@ -23,12 +23,17 @@ usage, and arguments, then stop — do not run preflight or any phase.
 
 # stark-ssot — one owner per responsibility
 
-> **Skill vs. review domain.** SSOT is *also* an automated detection lens: the
-> `ssot` domain fires on every `/stark-review` (code), `/stark-review-spec`, and
-> `/stark-review-plan` run and posts findings to the PR. That domain *detects*
-> duplicate sources of truth; **this skill is the consolidation workflow** — the
-> actual "give it one owner and route the copies through it" refactor. Use the
-> skill to fix what review (or you) found.
+> **Skill vs. review lens.** Automated SSOT *detection* in PR review lives
+> inside the `spec-conformance` domain (failure mode: "second source of truth
+> introduced"), triage-selected — it is no longer a standalone always-on
+> domain. The 2026-07-26 rewrite retired the auto-fired `ssot` lens after
+> telemetry showed it produced **18 of the fleet's 28 review-noise labels (45%
+> noise among its classified findings)** while its 22 real fixes all shared one
+> shape: a nameable existing owner. The doc-review trees (`/stark-review-spec`,
+> `/stark-review-plan`) still carry an `ssot` domain until their demolition.
+> **This skill is the consolidation workflow** — the actual "give it one owner
+> and route the copies through it" refactor. Use it to fix what review (or
+> you) found.
 
 ## Overview
 
@@ -212,19 +217,29 @@ and hold test fixtures that intentionally duplicate a value for readability
 
 ## Reviewing someone else's diff
 
-Flag the change if **any** is true:
+**The evidence bar (non-negotiable — this is what separated the lens's 22 real
+fixes from its 18 noise findings):** an SSOT finding must name **BOTH sides** —
+the new copy (file:line, quoted span from the diff) and the **existing owner**
+(file:line, quoted span). **No nameable owner → not a finding.** "These two
+things look duplicated" without an owner is a design-taste comment; keep it out
+of the review channel.
+
+With both sides named, flag the change if **any** is true:
 
 - a value with an owner (model id, project, cost, route, threshold, App id) is
-  hardcoded instead of imported
-- the same calculation or policy appears in two files that must change together
+  hardcoded instead of imported from that owner
+- the same calculation or policy appears in two files that must change
+  together — name which existing file is the owner
 - a "just this one" local branch overrides a registry/provider decision
-- a parser/regex/helper is copied rather than shared
-- a fallback default sits at a call site instead of the owner
+- a parser/regex/helper is copied rather than imported from its existing home
+- a fallback default sits at a call site while the owner already defines one
 - a UI re-derives a business rule instead of formatting the owner's value
 
-Post the finding on the PR (inline where anchored) — don't fold it into a vague
-recap. If a duplication is deliberate, the diff should already say why and how
-drift is prevented; if it doesn't, that's the finding.
+Each finding also carries the concrete drift scenario: *"when <owner> changes
+X, <copy> silently keeps Y"* — the failure, not the aesthetic. Post it on the
+PR (inline where anchored) — don't fold it into a vague recap. If a duplication
+is deliberate, the diff should already say why and how drift is prevented; if
+it doesn't, **that** is the finding.
 
 ## Final answer shape
 
@@ -242,3 +257,4 @@ When this skill shaped the work, close with:
 - "I'll add one local branch just for this case" → that's how a registry rots; put it in the owner.
 - "Quicker to recompute it in the UI" → the UI may format the value, never re-derive the rule.
 - "I'll wrap the call site with a fallback default" → that's a second source of truth for the default; centralize it.
+- (reviewing) "This looks duplicated, I'll flag it" without a nameable owner → not a finding; that instinct produced 45% noise. Name both sides or stay silent.
