@@ -29,7 +29,7 @@ This repo is the **source of truth** for the skills + tools. Distribution is **m
 
 - `global/` — global config + prompts, vendored into each marketplace plugin
 - `scripts/` — shell helpers + JSON (`register_triggers.sh`, `healer_patterns.json`), vendored into plugins. The orchestrator + dispatch infra were migrated to `tools/` (TypeScript) — see the Python→TS migration spec.
-- `skill/` — all skills (`skill/stark-*/SKILL.md`, 32 skills), packaged as marketplace plugins
+- `skill/` — all skills (`skill/stark-*/SKILL.md`, 33 skills), packaged as marketplace plugins
 - `org/evinced/` — Evinced org config overrides
 - `data/` — persona roster, review coverage HTML, generated showcase pages
 - `automation/` — CCR automation fleet: 12 triggers, prompts, logs, cost tracking, reports
@@ -170,6 +170,8 @@ All skills live in `skill/stark-*/SKILL.md` and are packaged into marketplace pl
 - `/stark-terragrunt-review [path] [--agents a,b] [--changed] [--no-tools] [--min-severity ...] [--pr N --repo O/R] [--dry-run] [--json]` — **multi-agent** Terragrunt **orchestration-layer** review (include/dependency/generate/remote_state, mock-output schema, DAG cycles, values/DRY, state isolation, stack composition, git source refspec). Host scanners: `terragrunt hcl validate`, `terragrunt find --dag --dependencies`. Defers resource/module HCL to `/stark-terraform-review`. Thin skill → `tools/iac_review.ts --kind terragrunt`; rubric in `global/prompts/iac-review/terragrunt.md`. Same configurable `iac_review.agents`. Adapted from jfr992/terragrunt-skill (Apache-2.0) + TerraShark.
 
 ### Workflow & Ops
+
+- `/stark-fresh-eyes <doc-path> [--focus "aspect"] [--model opus|fable]` — **one-shot zero-context review of a prompt/brief/spec/doc before it ships.** Dispatches ONE read-only subagent (Fable by default) with zero shared context that re-verifies every checkable claim by a **DIFFERENT method** than the doc's own (recount recursively, recompute numbers from raw sources, test paths, `--help` cited commands) and reports defects only — wrong facts with measurements, contradictions, two-reading ambiguities, unresolvable references, cannot-verify claims, missing definitions. **One dispatch per document revision, findings dispositioned once (fix/reject/accept-as-known), never a round 2** — fresh eyes work through method difference, not repetition (the 39-vs-34 file-count lesson; LLM-review loops are non-convergent per the 2026-07-25 autopsy). Zero findings is a valid output. Pure protocol skill, zero TS. Skill `skill/stark-fresh-eyes/SKILL.md`.
 
 - `/stark-session [start|end]` — session management: briefing on start, cleanup on end
 - `/stark-handover [save|resume|status] [--task slug]` — cross-`/clear` session continuity: **save** mines the conversation into the next `handover_{N}.md` (numbered chain, frontmatter-linked `prev`) and rewrites the `PROGRESS.md` done-vs-todo tracker under `~/Code/Handovers/{project}/{worktree}/{task}/`; **resume** loads the latest handover + tracker in one call so a fresh session continues with zero recap; **status** lists tasks. Storage engine = `tools/stark_handover.ts` (root: `STARK_HANDOVER_ROOT` env > `handover.root` config > `~/Code/Handovers`)
