@@ -48,13 +48,6 @@
     ],
     "pr_merge_strategy": "squash"
   },
-  "plan_to_tasks": {
-    "validation_agents": [
-      "codex"
-    ],
-    "max_quality_gate_rounds": 3,
-    "max_validation_iterations": 2
-  },
   "models": {
     "claude": {
       "enabled": true,
@@ -172,81 +165,6 @@
     "triage": {
       "mode": "conservative"
     }
-  },
-  "forge": {
-    "domain_routing": {
-      "completeness": "claude",
-      "security": "codex",
-      "scope": "claude",
-      "api-design": "codex",
-      "data-modeling": "codex",
-      "consistency": "claude",
-      "accessibility": "claude",
-      "test-plan": "codex",
-      "ssot": "codex"
-    },
-    "plan_review_routing": {
-      "completeness": "claude",
-      "security": "codex",
-      "sequencing": "claude",
-      "viability": "codex",
-      "ssot": "codex"
-    },
-    "agent_fallback_order": [
-      "claude",
-      "codex"
-    ],
-    "consensus_domains": [
-      "security"
-    ],
-    "consensus_threshold": 2,
-    "max_rounds": 3,
-    "workers": 3,
-    "fix_threshold": "medium",
-    "noise_improvement_threshold": 0.33,
-    "heuristic_consolidation_threshold": 50,
-    "timeout": 900
-  },
-  "forged_review": {
-    "forge_threshold": 4,
-    "max_rounds": 3,
-    "domain_pairs": {
-      "architecture": {
-        "leader": "claude",
-        "second": "codex"
-      },
-      "behavior": {
-        "leader": "codex",
-        "second": "claude"
-      },
-      "type-safety": {
-        "leader": "codex",
-        "second": "claude"
-      },
-      "security": {
-        "leader": "codex",
-        "second": "claude"
-      },
-      "test-coverage": {
-        "leader": "codex",
-        "second": "claude"
-      },
-      "spec-conformance": {
-        "leader": "claude",
-        "second": "codex"
-      },
-      "ssot": {
-        "leader": "codex",
-        "second": "claude"
-      }
-    },
-    "always_on_domains": [
-      "behavior"
-    ],
-    "triage_agent": "claude",
-    "delta_rereview": true,
-    "auto_merge_when_clean": true,
-    "max_diff_chars_per_domain": 60000
   },
   "model_rates": {
     "o3": {
