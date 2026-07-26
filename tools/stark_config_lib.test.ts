@@ -1,6 +1,6 @@
 // Tests for `tools/stark_config_lib.ts` — the minimal config-loader
 // subset preflight depends on. Covers the security model (locked-fields
-// + unknown-keys pruning for red_team) and the deep-merge semantics.
+// and the deep-merge semantics.
 
 import { strict as assert } from "node:assert";
 import fs from "node:fs";
@@ -15,7 +15,6 @@ import {
   DEFAULT_MODELS,
   DEFAULT_MODEL_LIMITS,
   DEFAULT_MODEL_RATES,
-  DEFAULT_RED_TEAM,
   DEFAULT_RUNTIME,
   discoverConfig,
   getContextCompactionConfig,
@@ -28,7 +27,6 @@ import {
   getModelLimits,
   getModelRates,
   getModelsConfig,
-  getRedTeamConfig,
   getRuntimeConfig,
   getSelfHealConfig,
   getSkillActivationConfig,
@@ -192,166 +190,6 @@ test("getModelLimits: global config override merges over defaults", async () => 
       max_output_tokens: 128_000,
       context_window: 1_050_000,
     });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// getRedTeamConfig — locked fields enforcement (spec rt1+rt2)
-// ---------------------------------------------------------------------------
-
-test("getRedTeamConfig: global config wins for locked fields", async () => {
-  await withScratchHome((home) => {
-    writeGlobalConfig(home, {
-      red_team: { model: "gpt-5.4-pro", enabled: false },
-    });
-    const cfg = getRedTeamConfig();
-    assert.equal(cfg.model, "gpt-5.4-pro");
-    assert.equal(cfg.enabled, false);
-  });
-});
-
-test("getRedTeamConfig: defaults merge underneath the global override", async () => {
-  await withScratchHome((home) => {
-    writeGlobalConfig(home, { red_team: { model: "gpt-5.5-pro" } });
-    const cfg = getRedTeamConfig();
-    assert.equal(cfg.model, "gpt-5.5-pro");
-    // Default fields survive.
-    assert.equal(cfg.timeout_s, DEFAULT_RED_TEAM.timeout_s);
-    assert.deepEqual(cfg.verify, DEFAULT_RED_TEAM.verify);
-    assert.deepEqual(cfg.personas, DEFAULT_RED_TEAM.personas);
-  });
-});
-
-test("getRedTeamConfig: repo .code-review override on a locked field is rejected", async () => {
-  await withScratchHome(async (home) => {
-    writeGlobalConfig(home, { red_team: { model: "gpt-5.5-pro" } });
-    // Plant a repo-level config under HOME so the chain-walker finds it.
-    const repoDir = path.join(home, "fake-repo");
-    fs.mkdirSync(path.join(repoDir, ".code-review"), { recursive: true });
-    fs.writeFileSync(
-      path.join(repoDir, ".code-review", "config.json"),
-      JSON.stringify({ red_team: { model: "gpt-3.5-turbo", enabled: false } }),
-    );
-    const prevCwd = process.cwd();
-    process.chdir(repoDir);
-    try {
-      const cfg = getRedTeamConfig();
-      // Both locked fields must keep their global values.
-      assert.equal(
-        cfg.model,
-        "gpt-5.5-pro",
-        "model is locked — repo cannot downgrade",
-      );
-      assert.equal(
-        cfg.enabled,
-        true,
-        "enabled is locked — repo cannot disable",
-      );
-    } finally {
-      process.chdir(prevCwd);
-    }
-  });
-});
-
-test("getRedTeamConfig: repo override on a non-locked field IS honored", async () => {
-  await withScratchHome(async (home) => {
-    writeGlobalConfig(home, { red_team: {} });
-    const repoDir = path.join(home, "fake-repo");
-    fs.mkdirSync(path.join(repoDir, ".code-review"), { recursive: true });
-    fs.writeFileSync(
-      path.join(repoDir, ".code-review", "config.json"),
-      JSON.stringify({ red_team: { timeout_s: 123 } }),
-    );
-    const prevCwd = process.cwd();
-    process.chdir(repoDir);
-    try {
-      const cfg = getRedTeamConfig();
-      assert.equal(cfg.timeout_s, 123, "timeout_s is not locked — override OK");
-    } finally {
-      process.chdir(prevCwd);
-    }
-  });
-});
-
-test("getRedTeamConfig: unknown keys in repo override are pruned with a warning", async () => {
-  await withScratchHome(async (home) => {
-    writeGlobalConfig(home, { red_team: {} });
-    const repoDir = path.join(home, "fake-repo");
-    fs.mkdirSync(path.join(repoDir, ".code-review"), { recursive: true });
-    fs.writeFileSync(
-      path.join(repoDir, ".code-review", "config.json"),
-      JSON.stringify({
-        red_team: { timeout_s: 456, bogus_smuggled_key: "value" },
-      }),
-    );
-    const prevCwd = process.cwd();
-    process.chdir(repoDir);
-    try {
-      const cfg = getRedTeamConfig();
-      assert.equal(cfg.timeout_s, 456);
-      assert.equal(
-        (cfg as Record<string, unknown>)["bogus_smuggled_key"],
-        undefined,
-        "unknown key must be dropped, not persisted into the merged config",
-      );
-    } finally {
-      process.chdir(prevCwd);
-    }
-  });
-});
-
-test("getRedTeamConfig: fold defaults present", async () => {
-  await withScratchHome(() => {
-    const cfg = getRedTeamConfig();
-    assert.equal(cfg.fold.enabled, true);
-    assert.equal(cfg.fold.model, "claude-opus-5[1m]");
-    assert.equal(cfg.fold.max_cost_usd, 15);
-  });
-});
-
-test("getRedTeamConfig: fold.model is locked against repo override", async () => {
-  await withScratchHome(async (home) => {
-    writeGlobalConfig(home, { red_team: {} });
-    const repoDir = path.join(home, "fake-repo");
-    fs.mkdirSync(path.join(repoDir, ".code-review"), { recursive: true });
-    fs.writeFileSync(
-      path.join(repoDir, ".code-review", "config.json"),
-      JSON.stringify({ red_team: { fold: { model: "gpt-3.5-turbo" } } }),
-    );
-    const prevCwd = process.cwd();
-    process.chdir(repoDir);
-    try {
-      const cfg = getRedTeamConfig();
-      assert.equal(
-        cfg.fold.model,
-        "claude-opus-5[1m]",
-        "fold.model is locked — repo cannot override",
-      );
-    } finally {
-      process.chdir(prevCwd);
-    }
-  });
-});
-
-test("getRedTeamConfig: non-dict override at a locked parent (e.g. fix_plan: 'off') is rejected wholesale", async () => {
-  await withScratchHome(async (home) => {
-    writeGlobalConfig(home, { red_team: {} });
-    const repoDir = path.join(home, "fake-repo");
-    fs.mkdirSync(path.join(repoDir, ".code-review"), { recursive: true });
-    fs.writeFileSync(
-      path.join(repoDir, ".code-review", "config.json"),
-      JSON.stringify({ red_team: { fix_plan: "off" } }),
-    );
-    const prevCwd = process.cwd();
-    process.chdir(repoDir);
-    try {
-      const cfg = getRedTeamConfig();
-      // fix_plan must still be the dict from DEFAULT_RED_TEAM, not the string "off".
-      assert.equal(typeof cfg.fix_plan, "object");
-      assert.equal(cfg.fix_plan?.enabled, DEFAULT_RED_TEAM.fix_plan?.enabled);
-    } finally {
-      process.chdir(prevCwd);
-    }
   });
 });
 

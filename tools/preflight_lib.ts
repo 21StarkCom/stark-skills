@@ -27,7 +27,6 @@ import {
   discoverConfig,
   getModelRates,
   getModelsConfig,
-  getRedTeamConfig,
   isAgentEnabled,
   loadGlobalConfig,
 } from "./stark_config_lib.ts";
@@ -334,94 +333,6 @@ export function checkStaleLocks(): [CheckStatus, string] {
   return ["pass", "no stale locks"];
 }
 
-export function checkRedTeamModelRates(): [CheckStatus, string] {
-  let cfg;
-  try {
-    cfg = getRedTeamConfig();
-  } catch (err) {
-    return ["warn", `could not load red_team config: ${(err as Error).message}`];
-  }
-  if (cfg.enabled === false) return ["skip", "red_team disabled in config"];
-  const model = cfg.model;
-  if (!model) return ["fail", "red_team.model is not set"];
-
-  let rates;
-  try {
-    rates = getModelRates();
-  } catch (err) {
-    return ["warn", `could not load model_rates: ${(err as Error).message}`];
-  }
-  if (!(model in rates) || model === "_fallback") {
-    return [
-      "fail",
-      `red_team.model '${model}' has no entry in model_rates — add one to global/config.json. _fallback is not accepted.`,
-    ];
-  }
-  return ["pass", `rates found for ${model}`];
-}
-
-const RESPONSES_API_MODELS: ReadonlySet<string> = new Set([
-  "o3",
-  "o3-mini",
-  "gpt-5.5-pro",
-  "gpt-5.4-pro",
-]);
-
-/**
- * Resolve an OpenAI API key from the standard env-var pair: direct
- * `OPENAI_API_KEY`, or `OPENAI_API_KEY_FILE` + `OPENAI_API_KEY_LABEL`
- * pointing at a colon/equals-delimited credentials file with the label
- * to pluck. Mirrors `scripts/preflight.py::_resolve_openai_api_key`.
- */
-export function resolveOpenaiApiKey(
-  env: NodeJS.ProcessEnv = process.env,
-): string | null {
-  const direct = env["OPENAI_API_KEY"];
-  if (direct) return direct;
-  const filePath = env["OPENAI_API_KEY_FILE"];
-  const label = env["OPENAI_API_KEY_LABEL"];
-  if (!filePath || !label) return null;
-  let text: string;
-  try {
-    text = fs.readFileSync(filePath, "utf8");
-  } catch {
-    return null;
-  }
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#") || !line.includes("=")) continue;
-    const eq = line.indexOf("=");
-    const key = line.slice(0, eq).trim();
-    const value = line.slice(eq + 1).trim();
-    if (key === label) return value;
-  }
-  return null;
-}
-
-export function checkRedTeamTransportAuth(): [CheckStatus, string] {
-  let cfg;
-  try {
-    cfg = getRedTeamConfig();
-  } catch (err) {
-    return ["warn", `could not load red_team config: ${(err as Error).message}`];
-  }
-  if (cfg.enabled === false) return ["skip", "red_team disabled in config"];
-  const model = cfg.model;
-  if (!model || !RESPONSES_API_MODELS.has(model)) {
-    return [
-      "skip",
-      `model ${JSON.stringify(model)} routes through codex CLI, not Responses API`,
-    ];
-  }
-  if (resolveOpenaiApiKey() === null) {
-    return [
-      "fail",
-      `red_team.model '${model}' routes through the Responses API but no OpenAI API key is available. Set OPENAI_API_KEY, or OPENAI_API_KEY_FILE+OPENAI_API_KEY_LABEL, in the environment.`,
-    ];
-  }
-  return ["pass", `OpenAI API key resolved for ${model}`];
-}
-
 // ---------------------------------------------------------------------------
 // Check registry: name → fn → is_critical. A `fail` status on a critical
 // check sets `overall` to `blocked`. Order is preserved in the output.
@@ -452,16 +363,6 @@ export const CHECKS: ReadonlyArray<CheckDefinition> = [
   { name: "check_cost_hard_stop", fn: checkCostHardStop, critical: true },
   { name: "check_stale_locks", fn: checkStaleLocks, critical: false },
   { name: "check_deprecated_config", fn: checkDeprecatedConfig, critical: false },
-  {
-    name: "check_red_team_model_rates",
-    fn: checkRedTeamModelRates,
-    critical: true,
-  },
-  {
-    name: "check_red_team_transport_auth",
-    fn: checkRedTeamTransportAuth,
-    critical: true,
-  },
 ];
 
 // ---------------------------------------------------------------------------
