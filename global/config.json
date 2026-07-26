@@ -27,7 +27,10 @@
   "severity_overrides": {},
   "iac_review": {
     "enabled": true,
-    "agents": ["codex", "gemini"],
+    "agents": [
+      "codex",
+      "gemini"
+    ],
     "timeout_sec": 600,
     "max_files": 80,
     "max_bytes_per_file": 100000
@@ -244,60 +247,6 @@
     "delta_rereview": true,
     "auto_merge_when_clean": true,
     "max_diff_chars_per_domain": 60000
-  },
-  "red_team": {
-    "enabled": true,
-    "agent": "codex",
-    "model": "gpt-5.5-pro",
-    "halt_on_unresolved": true,
-    "stages": {
-      "spec": {
-        "enabled": true
-      },
-      "plan": {
-        "enabled": false
-      }
-    },
-    "personas": [
-      "security-trust",
-      "reliability-distsys",
-      "data",
-      "product-dx",
-      "cost-ops"
-    ],
-    "min_severity_to_block": "high",
-    "timeout_s": 900,
-    "per_run_budget_usd": 30,
-    "max_input_chars": 200000,
-    "allow_human_review_halt": true,
-    "verify": {
-      "enabled": true,
-      "model": "claude-opus-5[1m]",
-      "timeout_s": 300,
-      "votes": 1,
-      "max_input_chars": 200000
-    },
-    "fix_plan": {
-      "enabled": true,
-      "model": "gpt-5.5-pro",
-      "reasoning_effort": "xhigh",
-      "timeout_s": 1200,
-      "min_moves": 2,
-      "max_moves": 6,
-      "max_input_chars": 200000
-    },
-    "fold": {
-      "enabled": true,
-      "model": "claude-opus-5[1m]",
-      "timeout_s": 1200,
-      "max_input_chars": 200000,
-      "max_cost_usd": 15,
-      "open_pr": true
-    },
-    "audit": {
-      "retain_full_text": false,
-      "excerpt_max_chars": 240
-    }
   },
   "model_rates": {
     "o3": {

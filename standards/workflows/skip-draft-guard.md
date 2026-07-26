@@ -1,6 +1,6 @@
 # Skip-draft guard — keep CI off WIP pull requests
 
-**Policy:** PRs open as **drafts** by default (the stark-gh / review / red-team /
+**Policy:** PRs open as **drafts** by default (the stark-gh / review /
 phase-execute / spec-to-plan skills all do this). Work is verified locally while
 the PR is a draft; when it's ready, it's marked ready-for-review — which is the
 moment CI should run. A draft PR should **not** burn CI minutes or trigger any

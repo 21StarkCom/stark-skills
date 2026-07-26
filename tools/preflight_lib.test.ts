@@ -10,7 +10,6 @@
 //   - `checkCostHardStop` — file existence
 //   - `checkStaleLocks` — picks up isLockStale results
 //   - `checkDeprecatedConfig` — automation.model_pins detector
-//   - `resolveOpenaiApiKey` — direct + file+label pair, missing both
 //   - `renderTable` — output shape sanity
 
 import { strict as assert } from "node:assert";
@@ -25,7 +24,6 @@ import {
   checkDeprecatedConfig,
   checkStaleLocks,
   renderTable,
-  resolveOpenaiApiKey,
   runPreflight,
   type CheckDefinition,
   type CheckStatus,
@@ -298,69 +296,6 @@ test("checkDeprecatedConfig: warns when automation.model_pins is present", async
     const [status, msg] = checkDeprecatedConfig();
     assert.equal(status, "warn");
     assert.match(msg, /model_pins/);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// resolveOpenaiApiKey
-// ---------------------------------------------------------------------------
-
-test("resolveOpenaiApiKey: returns null when neither direct nor file+label is set", () => {
-  assert.equal(resolveOpenaiApiKey({}), null);
-});
-
-test("resolveOpenaiApiKey: returns OPENAI_API_KEY directly when present", () => {
-  assert.equal(
-    resolveOpenaiApiKey({ OPENAI_API_KEY: "sk-direct" }),
-    "sk-direct",
-  );
-});
-
-test("resolveOpenaiApiKey: file+label parses simple `key=value` lines", async () => {
-  await withScratchHome((home) => {
-    const file = path.join(home, "creds");
-    fs.writeFileSync(
-      file,
-      `# comment line\n  alpha = sk-aaa  \nbeta=sk-bbb\n=ignored\nlabel=sk-target\n`,
-    );
-    assert.equal(
-      resolveOpenaiApiKey({
-        OPENAI_API_KEY_FILE: file,
-        OPENAI_API_KEY_LABEL: "label",
-      }),
-      "sk-target",
-    );
-    assert.equal(
-      resolveOpenaiApiKey({
-        OPENAI_API_KEY_FILE: file,
-        OPENAI_API_KEY_LABEL: "beta",
-      }),
-      "sk-bbb",
-    );
-  });
-});
-
-test("resolveOpenaiApiKey: missing file returns null without throwing", () => {
-  assert.equal(
-    resolveOpenaiApiKey({
-      OPENAI_API_KEY_FILE: "/nonexistent/path",
-      OPENAI_API_KEY_LABEL: "x",
-    }),
-    null,
-  );
-});
-
-test("resolveOpenaiApiKey: file present but label absent returns null", async () => {
-  await withScratchHome((home) => {
-    const file = path.join(home, "creds");
-    fs.writeFileSync(file, "alpha=value\n");
-    assert.equal(
-      resolveOpenaiApiKey({
-        OPENAI_API_KEY_FILE: file,
-        OPENAI_API_KEY_LABEL: "missing-label",
-      }),
-      null,
-    );
   });
 });
 

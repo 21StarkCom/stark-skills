@@ -29,7 +29,6 @@ import type {
   WriteSpecDeps,
   WriteSpecReceipt,
 } from "./write_spec_lib.ts";
-import { DECIDER_DISALLOWED_TOOLS } from "./red_team_fold_lib.ts";
 import { computeDispatchCost } from "./cost_lib.ts";
 import { assetPromptsDir } from "./asset_root_lib.ts";
 
@@ -308,8 +307,12 @@ test("test_derive_slug_from_out", () => {
 
 // test_agent_commands_expose_no_tools
 test("test_agent_commands_expose_no_tools", () => {
-  // NO_TOOLS is the fold decider's disallowed set, verbatim.
-  assert.deepEqual([...NO_TOOLS], [...DECIDER_DISALLOWED_TOOLS]);
+  // The full token-less disallowed set (formerly kept in sync with the
+  // red-team fold decider, retired 2026-07-26).
+  assert.deepEqual(
+    [...NO_TOOLS],
+    ["Bash", "Edit", "Write", "Read", "WebFetch", "WebSearch", "Task", "NotebookEdit"],
+  );
 
   for (const build of [buildLeadCmd, buildWingCmd]) {
     // claude builder: no-tools, empty allowedTools (never grantable).
