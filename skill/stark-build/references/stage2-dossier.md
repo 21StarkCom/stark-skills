@@ -2,6 +2,8 @@
 
 **Date:** 2026-07-25 · **Feeds:** this week's implementer build · **Input:** Stage 1 accepted spec (fixed interface) · **Substrate:** Claude Code primitives only.
 
+> **This document is the research as of 2026-07-25, not a description of the shipped skill.** One conclusion has since been overridden by operator decision: §1.8's advisory-only, no-fix-round contract. `/stark-build` now runs one bounded fix round over medium+ findings — see **§6.4a** for what was overridden, what the override kept, and the metric that retroactively settles it. Everything else still stands. Where the two disagree, this dossier records the evidence and the skill records the decision; neither is silently edited to match the other.
+
 ---
 
 ## 1. EXECUTIVE VERDICT
@@ -15,7 +17,7 @@ The correct Stage 2 is a **fresh session per task, gated by checks the agent can
 5. An explicit **abort option** cuts cheating ~5x (54%→9%). Build "give up and log a deviation" as a first-class exit.
 6. One task per session, progress file + git as the only cross-session memory. Anthropic's proven long-run shape; context-rot data backs it.
 7. Sequential single writer by default. Parallel writers only on file-disjoint DAG-independent tasks — and your own F6 shows the merge tax.
-8. ONE fresh-context advisory review of the final diff+spec, preferably cross-vendor (self-preference bias is measured). Findings die at the human. No fix loop — this is stricter than Anthropic's own guidance, which endorses scoped fix-and-re-review (rejected here per A1).
+8. ONE fresh-context advisory review of the final diff+spec, preferably cross-vendor (self-preference bias is measured). Findings die at the human. No fix loop — this is stricter than Anthropic's own guidance, which endorses scoped fix-and-re-review (rejected here per A1). **[OVERRIDDEN 2026-07-26 — see §6.4a. The shipped skill runs one bounded fix round over medium+ findings. This paragraph records what the research concluded, not what ships.]**
 9. Budget per task, not per run; on timeout, resume from committed state — never re-dispatch from zero (F2/F4).
 10. Commit per green task; one draft PR per spec; CI is the last deterministic gate; the human reads the digest + deviations + advisory findings, not 3,000 lines.
 11. RQ9 (metrics) is an evidence desert. Instrument locally; expect nothing from the literature.
@@ -134,7 +136,7 @@ Sequential single writer. Exception requires ALL of: DAG-independent per spec ·
 
 ### 3.7 Advisory review contract
 
-One review, end of run only. Input: full diff + the spec (conformance is in scope). Reviewer: fresh context, zero shared state with the implementer, **different model family** where available; else same-family with forced long chain-of-thought before verdict (MEASURED mitigation). Prompt is scoped: "report defects and spec deviations; absence of findings is a valid output" — an open-ended gap-hunt manufactures F3. Output: severity-tagged findings as PR comments. Terminal: findings die at the human. Skip when diff is trivial (§2 RQ6 rule, SPECULATIVE). [RQ6, A1] Prevents F3 — no fix round exists for the ratchet to live in.
+One review, end of run only. Input: full diff + the spec (conformance is in scope). Reviewer: fresh context, zero shared state with the implementer, **different model family** where available; else same-family with forced long chain-of-thought before verdict (MEASURED mitigation). Prompt is scoped: "report defects and spec deviations; absence of findings is a valid output" — an open-ended gap-hunt manufactures F3. Output: severity-tagged findings as PR comments. Terminal: findings die at the human. Skip when diff is trivial (§2 RQ6 rule, SPECULATIVE). [RQ6, A1] Prevents F3 — no fix round exists for the ratchet to live in. **[OVERRIDDEN 2026-07-26 — §6.4a: a bounded fix round now exists; the reviewer is never re-run, so the ratchet still has nowhere to live.]**
 
 ### 3.8 Deviation protocol
 
@@ -184,6 +186,12 @@ Five tasks with author-declared edges; two are DAG-independent with disjoint fil
 2. **Benchmark→codebase transfer.** All cheating rates are from-scratch/benchmark settings; Stage 2 is incremental edits in existing repos. **A/B:** track the task-green/e2e-red divergence rate locally as the transfer measurement.
 3. **Mitigation composition for Claude-family.** Read-only tests + abort option measured separately; composition unmeasured, and abort was "weaker for Claude models" (ImpossibleBench). **A/B:** toggle abort-language on/off across runs; count deviation-aborts vs suspicious greens.
 4. **Axiom-tension log (per brief rule).** A1 vs Tier A: Anthropic's harness used "That feedback flowed back to the generator as input for the next iteration" (harness-design, OBSERVED) and its measured 6h/$200-vs-20min/$9 run showed "immediately apparent" quality gains — a loop-shaped harness with MEASURED cost and observed quality benefit on a greenfield app. If a local A/B ever shows one bounded feedback round beating advisory-only on merged-PR quality per dollar, A1 is the axiom it would change. Logged, not adopted.
+4a. **A1 RELAXED BY OPERATOR DECISION, 2026-07-26 — ahead of the evidence §6.4 asked for.** Item 4 above named the falsification condition: *"if a local A/B ever shows one bounded feedback round beating advisory-only on merged-PR quality per dollar."* **That A/B was never run.** `/stark-build` Phase 4b — one fix pass over medium+ advisory findings — shipped on operator judgment (stark-skills#807), not on data. Recorded here rather than folded into §1/§4 so the research and the decision stay separable: §1.8 and §4-RQ6 still say what the evidence supported, and this note says what overrode them.
+
+    **What the override kept.** The fix round is single-pass and terminal; the advisory reviewer is NEVER re-run; only deterministic gates (every task check + the held-out e2e) grade the fix, and a regression reverts the fix commit. So the generator↔evaluator loop of §5 is still absent — what shipped is one bounded pass, strictly weaker than the fix-and-re-review Anthropic endorses and than the F3 ratchet this dossier measured. The cited evidence against retry budgets (ImpossibleBench 33%→38%, SpecBench severity-vs-search) is about *repeated* submission against reviewer feedback, which Phase 4b does not do; it is silent on a single pass. That is a reason the override is defensible, not evidence that it is correct.
+
+    **What settles it retroactively.** Fix-round yield, already instrumented in the skill's Measurement section: medium+ findings selected vs fixed-and-still-green vs rejected vs regressed. A round that mostly rejects or regresses is A1 vindicated and Phase 4b should be deleted. A round that consistently converts real findings to green at low cost is the §6.4 A/B answering itself in production. **Do not cite this dossier as evidence for Phase 4b — it is evidence against it, pending that data.**
+
 5. **A3 vs deterministic-TDD feasibility.** Can "code beyond current test requirements" be gated without a model judge (tdd-guard couldn't)? **Local test:** ship the deterministic subset (failing-check-first + protected tests) and measure whether over-implementation actually hurts, before considering any judge.
 6. **Advisory-review skip threshold & yield (RQ6/RQ9 gap).** No measured bugs-per-PR yield exists. **A/B:** run the advisory pass on every PR for a month; classify each finding real/noise at merge; derive the skip rule from local data.
 7. **Per-task budget sizing.** No external guidance. Instrument turns + $ per green task from day one; tune caps to p90.
