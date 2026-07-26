@@ -1,8 +1,8 @@
 ---
 name: stark-build
 description: >-
-  Stage 2 — autonomous implementation from an accepted stark-author spec: one fresh headless session per task, gated by checks the agent cannot edit (PreToolUse path-deny + Stop-hook gate), evidence per task, commit per green task, held-out e2e gate, one cross-vendor advisory review, draft PR. No LLM review loops. Use for build, implement a spec.
-argument-hint: '<spec-path> [--dry-run] [--no-advisory] [--stay-draft] [--max-turns N] [--model ID]'
+  Stage 2 — autonomous implementation from an accepted stark-author spec: one fresh headless session per task, gated by checks the agent cannot edit (PreToolUse path-deny + Stop-hook gate), evidence per task, commit per green task, held-out e2e gate, one cross-vendor advisory review, ONE bounded fix round for medium+ findings, draft PR. No LLM review loops. Use for build, implement a spec.
+argument-hint: '<spec-path> [--dry-run] [--no-advisory] [--no-fix] [--stay-draft] [--max-turns N] [--model ID]'
 disable-model-invocation: true
 ---
 
@@ -34,8 +34,12 @@ Evidence base: [references/stage2-dossier.md](references/stage2-dossier.md)
   cross-session memory. [RQ3]
 - **Sequential single writer.** No parallel writers in this skill — the
   serialized-integration exception in [§3.5] is future work. [RQ4]
-- **ONE advisory review, cross-vendor, at the end. Findings die at the
-  human.** No fix loop exists for a ratchet to live in. [RQ6]
+- **ONE advisory review, cross-vendor, at the end — then AT MOST ONE fix
+  round for medium+ findings.** The fix round is single-pass and terminal:
+  its output is verified by the deterministic gates only, and the advisory
+  reviewer is NEVER re-run. There is no second opinion for a ratchet to
+  live in. Everything below medium, and everything still open after the one
+  round, dies at the human. [RQ6][A1]
 
 **Raw input:** `$ARGUMENTS`
 
@@ -177,13 +181,68 @@ codex exec -s read-only "$(cat "$STATE/advisory-prompt.md")" > "$STATE/advisory.
 
 `advisory-prompt.md` = the spec text + the full diff + this contract
 verbatim: *"Report defects and spec deviations only — bugs, contradictions
-with the spec, unmet done-whens, unsafe changes. Severity-tag each finding.
-Absence of findings is a valid, expected output for sound work. Do not
-propose refactors, hardening, or scope the spec did not ask for."*
+with the spec, unmet done-whens, unsafe changes. Absence of findings is a
+valid, expected output for sound work. Do not propose refactors, hardening,
+or scope the spec did not ask for. Open every finding with a line of exactly
+`SEVERITY: critical|high|medium|low` followed by the file:line it anchors to,
+a quoted span of the offending code, and the concrete failure scenario. No
+other severity words — the runner filters on this token. Severity is the
+consequence if left unfixed: critical = data loss / crash on the normal path
+/ security hole; high = wrong output or a broken spec contract; medium = a
+real defect on a reachable edge path; low = everything else."*
 
 Post the findings as ONE PR comment authored by stark-codex
-(`github_app.ts --app stark-codex pr comment ...`). Do not act on them,
-answer them, or re-run the pass — they are input for the human. [RQ6][A1]
+(`github_app.ts --app stark-codex pr comment ...`) — ALL of them, every
+severity, before any fixing. Then re-run the pass NEVER, whatever Phase 4b
+does. [RQ6][A1]
+
+## Phase 4b — ONE fix round, medium+ only (skip with `--no-fix`) [§3.7]
+
+Exactly one pass. Not a loop, and there is no round 2 under any outcome —
+red gates after the round mean the human decides, never another dispatch.
+Repeated submissions against reviewer feedback *raise* cheating (33%→38%,
+ImpossibleBench) and longer search raises hack severity (SpecBench), so the
+budget past the first attempt is deliberately zero. [RQ1][RQ2]
+
+1. **Select.** Parse `SEVERITY:` tokens from `$STATE/advisory.out` into
+   `$STATE/findings.json`; keep `critical|high|medium`. Drop `low` (posted,
+   human's). An unparseable or severity-less block counts as `medium` —
+   fail toward a look, never toward a silent skip. No medium+ → log
+   `fix_round=skipped_no_findings` and go to Phase 5.
+2. **Scope guard.** Discard any finding anchored OUTSIDE the run's diff or
+   demanding scope the spec never asked for — those are the reviewer
+   overreaching, not defects. Log each discard with its reason; if that
+   empties the set, treat it as no-findings.
+3. **Dispatch ONE fresh headless session** — same harness as Phase 2, so
+   the spec and every gated existing test stay hook-protected and the
+   Stop-gate check is the **e2e command** (fixes cross task boundaries):
+
+   ```bash
+   T=$STATE/tasks/fix; mkdir -p "$T"; printf '0' > "$T/blocks"
+   # $T/check.sh = the spec's ## Verification command(s), verbatim
+   # $T/settings.json = Phase 2's, with Stop -> stop-gate.sh $T/check.sh ...
+   claude -p --model "<--model | claude-opus-5>" --settings "$T/settings.json" \
+     --max-turns "<--max-turns | 30>" --dangerously-skip-permissions \
+     "$(cat "$T/prompt.md")" > "$T/session.log" 2>&1
+   ```
+
+   `$T/prompt.md`: the spec, the selected findings verbatim, and — *"Fix
+   these findings and nothing else. The spec is immutable and the gated
+   tests are hook-protected. Do not refactor, do not harden, do not touch a
+   file no finding names. A finding you judge WRONG is not fixed — append
+   `- [finding-rejected] id=<n> <one-line reason>` to PROGRESS.md and move
+   on; rejecting on evidence is a success, faking a fix is not. Finish with
+   exactly one commit: `fix(<slug>): advisory round`."*
+4. **Verify (you, deterministically — the reviewer is not consulted again):**
+   re-run EVERY task's `check.sh` plus the e2e command yourself. Any check
+   that was green before the round and is red after → `git revert` the fix
+   commit, log `class=fix-regression`, PR stays draft. All green → keep it.
+   Tamper + scope checks run exactly as in Phase 2 §Verify.
+5. **Record.** Append to PROGRESS.md: findings selected, fixed, rejected
+   (with reasons), gate outcome. Post ONE follow-up PR comment listing what
+   was fixed, what was rejected and why, and what remains open — CLAUDE.md's
+   nothing-lost rule: a finding is fixed, or answered on the thread. Open
+   medium+ findings after the round → **PR stays draft.**
 
 ## Phase 5 — Land [§3.9]
 
@@ -194,24 +253,32 @@ answer them, or re-run the pass — they are input for the human. [RQ6][A1]
 2. Push (plain, never force). Post the run summary comment on the PR:
    tasks green/deviation counts, per-task check tails, evidence dir path,
    e2e outcome, blocks histogram.
-3. e2e green + CI green + advisory posted → flip ready (`gh pr ready <n>`)
-   unless `--stay-draft`. Anything red → stays draft.
+3. e2e green + CI green + advisory posted + no medium+ finding left open
+   → flip ready (`gh pr ready <n>`) unless `--stay-draft`. Anything red, or
+   any medium+ still open (unfixed, rejected-by-the-agent, or regressed) →
+   stays draft. A rejection is the agent's claim, not a resolution — only
+   you close it.
 4. Clean up: `git worktree remove <wt>` only when the tree is clean and
    everything is pushed.
 
 ## Phase 6 — Report
 
 Final message, in the operator's read order [§3.9]: PR number · spec digest
-path (`.human.md`) · deviations (verbatim) · advisory findings summary ·
-evidence dir · e2e verdict · the diff hot spots worth a human spot-check.
-The human is the merge gate — never merge, never resolve findings yourself.
+path (`.human.md`) · deviations (verbatim) · advisory findings split into
+**fixed / rejected-with-reason / still-open** · evidence dir · e2e verdict ·
+the diff hot spots worth a human spot-check. Every rejection prints its
+reason — that is the line you audit. The human is the merge gate: never
+merge, and never treat a fix round as having closed a finding.
 
 ## Measurement [RQ9]
 
 Per run, from git/PR metadata + `$STATE` only: tasks green first dispatch ·
 re-dispatch count · deviation count by class · Stop-block histogram ·
 task-green/e2e-red divergence · advisory findings later confirmed by the
-human. No wall-clock, no self-report, no completion-rate dashboards.
+human · **fix-round yield** (medium+ selected vs fixed-and-still-green vs
+rejected vs regressed). That last one is the kill-switch metric: a round
+that mostly rejects or regresses is the loop earning its way back out.
+No wall-clock, no self-report, no completion-rate dashboards.
 
 ## What this replaces
 
