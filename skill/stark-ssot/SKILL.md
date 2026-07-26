@@ -7,7 +7,7 @@ description: >-
   fallback default wired at a call site, or a value re-derived in the UI. Also on
   requests to centralize, deduplicate, unify, or "why is this implemented
   manually / in two places". Symptoms in a diff: a hardcoded model id or GCP
-  project, `~/.claude/code-review/...` typed out, a hand-rolled token→USD cost, a
+  project, `~/.claude/code-review/...` typed out, a
   re-pasted dispatch/env helper, a duplicated `>=`/threshold check. Do NOT use
   for code that only looks similar but answers a different question.
 argument-hint: "[file-or-area to consolidate or review]"
@@ -100,8 +100,7 @@ already centralized the things people reflexively hardcode; in another repo the
 | a **GCP project / region / location** | `vertex_config_lib.resolveVertexProject()` / `resolveVertexLocation()` | environment identity → runtime resolver, never committed in source |
 | a machine-specific **path** (`~/.claude/code-review/{tools,prompts}`) | `asset_root_lib.assetRoot()/assetPromptsDir()/stateRoot()` | path roots → one resolver seam, so relocation/packaging doesn't break |
 | a **credential/App id / key location** | the `APPS` map in `github_app_lib.ts` | auth identity → one map; callers mint through it |
-| a **cost / unit-conversion** calc | `cost_lib.computeDispatchCost()` | shared math → one function so every caller agrees |
-| a **dispatch/env helper** (`run`, `buildAgentEnv`, gemini-home, parsers) | import from `copilot_dispatch.ts` (`plan_dispatch`/`iac_review` already do) | shared plumbing → export once, import; don't re-paste |
+| a **dispatch/env helper** (`run`, `buildAgentEnv`, gemini-home, parsers) | import from `copilot_dispatch.ts` (`iac_review` already does) | shared plumbing → export once, import; don't re-paste |
 
 The right-hand *pattern* is what travels; the middle column is just this repo's
 instance of it. In a Terraform repo the "owner" is a `locals` block or a shared
@@ -199,7 +198,6 @@ const remaining = Math.max(0, FREE_SHIPPING_THRESHOLD - cartTotal);          // 
 | hardcoded model id / GCP project / API URL / timeout in a tool | drifts from config the day it changes | call the repo's config/env resolver (`stark_config_lib` / `vertex_config_lib`) |
 | a machine-specific path typed out (`~/.claude/code-review/{tools,prompts}`) | breaks when relocated/packaged | route through the path resolver (`asset_root_lib`) |
 | a credential / App id / key literal | second source vs the auth map | mint through the auth owner (the `APPS` map / `github_app_lib`) |
-| a hand-rolled cost / unit conversion | callers disagree as rates change | one shared function (`cost_lib.computeDispatchCost`) |
 | re-pasted plumbing helper (`run`/`buildAgentEnv`/env setup) | copies drift silently | import the shared helper (`copilot_dispatch`) |
 | the same calculation in UI and server | one moves, the other lies | one owner; UI formats, doesn't re-derive |
 | "just this one" local branch for behavior owned elsewhere | how a registry rots | put the decision in the provider/router |
