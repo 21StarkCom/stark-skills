@@ -39,7 +39,9 @@ Evidence base: [references/stage2-dossier.md](references/stage2-dossier.md)
   its output is verified by the deterministic gates only, and the advisory
   reviewer is NEVER re-run. There is no second opinion for a ratchet to
   live in. Everything below medium, and everything still open after the one
-  round, dies at the human. [RQ6][A1]
+  round, dies at the human. [RQ6][A1 — relaxed by operator decision
+  2026-07-26 ahead of the A/B the dossier asked for; the dossier's §1.8
+  still argues against this round. Read §6.4a before widening it.]
 
 **Raw input:** `$ARGUMENTS`
 
