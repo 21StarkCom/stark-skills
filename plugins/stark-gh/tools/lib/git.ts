@@ -3,20 +3,30 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import type { ExecFn } from "./types.ts";
 
-const defaultExec: ExecFn = (cmd, args, opts) =>
-  execFileSync(cmd, args, {
-    ...opts,
-    stdio: ["pipe", "pipe", "pipe"],
+const defaultExec: ExecFn = (cmd, args, opts) => {
+  const { streamStderr, ...rest } = opts ?? {};
+  return execFileSync(cmd, args, {
+    ...rest,
+    // stderr is INHERITED when the caller opts in. `git push` fires the repo's pre-push hook, and
+    // a hook that runs a build + test suite prints for minutes (Mímir's `make ci`: ~110s). Captured,
+    // none of that reaches the terminal until the push finishes — and only then if it FAILED — so a
+    // perfectly healthy push is indistinguishable from a hang. Inherited, hook progress streams
+    // live. Safe only because every streaming caller ignores the returned string.
+    stdio: ["pipe", "pipe", streamStderr ? "inherit" : "pipe"],
     // Node's default maxBuffer is 1 MiB; large feature-branch diffs
     // (e.g. >100 file changes, >1 MiB combined patch) trip ENOBUFS on
     // `git diff`/`git log -p`. 64 MiB is comfortable headroom while
     // still bounded against accidental runaway output.
     maxBuffer: 64 * 1024 * 1024,
   });
+};
 
-export function git(args: string[], opts: { exec?: ExecFn; input?: string } = {}): string {
+export function git(
+  args: string[],
+  opts: { exec?: ExecFn; input?: string; streamStderr?: boolean } = {},
+): string {
   const exec = opts.exec ?? defaultExec;
-  return exec("git", args, { input: opts.input }).toString("utf8");
+  return exec("git", args, { input: opts.input, streamStderr: opts.streamStderr }).toString("utf8");
 }
 
 export function isGitRepo(opts: { exec?: ExecFn } = {}): boolean {
@@ -88,8 +98,9 @@ export function commitWithMessageFile(messageFile: string, opts: { exec?: ExecFn
   git(["commit", "-F", messageFile], opts);
 }
 
+// Streams stderr: this is where a pre-push hook runs, and its progress belongs on screen.
 export function pushExplicit(branch: string, opts: { exec?: ExecFn } = {}): void {
-  git(["push", "origin", `HEAD:refs/heads/${branch}`], opts);
+  git(["push", "origin", `HEAD:refs/heads/${branch}`], { ...opts, streamStderr: true });
 }
 
 export function setUpstream(branch: string, opts: { exec?: ExecFn } = {}): void {
@@ -191,7 +202,8 @@ export function forcePushWithLease(args: {
       args.remote,
       `HEAD:refs/heads/${args.headRef}`,
     ],
-    opts,
+    // Same reason as pushExplicit: the pre-push hook runs here, so let it be seen.
+    { ...opts, streamStderr: true },
   );
 }
 

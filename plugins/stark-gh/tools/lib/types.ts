@@ -1,7 +1,14 @@
 export type ExecFn = (
   command: string,
   args: readonly string[],
-  options?: { cwd?: string; env?: NodeJS.ProcessEnv; input?: string },
+  options?: {
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    input?: string;
+    /** Inherit the child's stderr instead of capturing it, so long-running commands show
+     *  progress live. Only for callers that ignore the returned string — see `lib/git.ts`. */
+    streamStderr?: boolean;
+  },
 ) => Buffer;
 
 export type Confidence = "high" | "low";
