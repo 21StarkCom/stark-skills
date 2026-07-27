@@ -90,17 +90,20 @@ test("push succeeds through a slow, chatty pre-push hook", () => {
   );
 });
 
-test("a failing pre-push hook still fails the push", () => {
+// Runs the REAL streaming stdio (stderr inherited), not a capture-mode stand-in: streaming must
+// not swallow a non-zero exit. The hook's "gate says no" appears in this test's own output —
+// that is the point of the feature, and exactly what the operator sees.
+test("a failing pre-push hook still fails the push, with stderr inherited", () => {
   withLocalRemote(
     "#!/bin/sh\necho 'gate says no' >&2\nexit 1\n",
     (_remote, work) => {
       const exec = ((cmd: string, args: readonly string[], opts?: Record<string, unknown>) =>
         execFileSync(cmd, ["-C", work, ...args], {
           ...opts,
-          stdio: ["pipe", "pipe", opts?.streamStderr ? "pipe" : "pipe"], // capture, keep test output clean
+          stdio: ["pipe", "pipe", opts?.streamStderr ? "inherit" : "pipe"],
           maxBuffer: 64 * 1024 * 1024,
         })) as never;
-      assert.throws(() => pushExplicit("probe", { exec }));
+      assert.throws(() => pushExplicit("probe", { exec }), /Command failed|ENOENT|exited/);
       const refs = execFileSync("git", ["-C", work, "ls-remote", "--heads", "origin", "probe"])
         .toString();
       assert.equal(refs.trim(), "");   // nothing published when the gate refuses
