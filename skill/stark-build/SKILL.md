@@ -54,7 +54,10 @@ Evidence base: [references/stage2-dossier.md](references/stage2-dossier.md)
 2. Parse `## Tasks`: per task — id, title, declared file set, done-when
    command, depends-on. **Every task needs a machine-checkable done-when**;
    any task without one → stop, return the spec to the operator (that is a
-   Stage-1 defect, not yours to improvise). Topo-sort by declared edges;
+   Stage-1 defect, not yours to improvise). A done-when containing `grep -q`
+   in a pipeline is refused the same way — a fails-on-success gate: under
+   `pipefail` it can SIGPIPE a still-writing producer, failing the gate on
+   success (return to `/stark-author`). Topo-sort by declared edges;
    ties keep spec order.
 3. Verify `git cat-file -e <accepted-base>` in the target repo; run
    `git status --porcelain` — a dirty tree is a hard stop.
@@ -97,7 +100,8 @@ For each task `<id>`, in topo order:
 
 **Prepare** (`T=$STATE/tasks/<id>`): write `$T/check.sh` = the task's
 done-when command verbatim, running in the worktree (`set -euo pipefail; cd
-<wt>; <done-when>`); `$T/settings.json`:
+<wt>; <done-when>`) — a piped `grep -q` here means Phase 0 missed a
+fails-on-success gate: stop, never silently rewrite; `$T/settings.json`:
 
 ```json
 {"hooks": {
