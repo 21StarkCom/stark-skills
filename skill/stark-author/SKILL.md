@@ -131,6 +131,13 @@ The general test: **would this check still pass if the task were never
 done?** If yes, it is not a done-when. Prefer a check that names the exact
 artifact and fails per-item.
 
+**Fails-on-success gates — the inverse defect.** `cmd | grep -q X` under
+`set -o pipefail` SIGPIPEs the producer when grep exits at first match, so
+the gate fails nondeterministically on SUCCESS (proven live on the
+2026-07-27 db-dwh-replan build run — 3/3 e2e runs false-negative).
+Done-when and verification commands must use pipeline-safe forms:
+`grep -e X >/dev/null` (reads to EOF), or capture-then-match.
+
 **Verification fallback ladder** (only when no single command can prove it):
 scripted probe (Playwright/CLI harness) → screenshot diff vs accepted
 baseline → named human checklist item at the gate, last resort. Pick one

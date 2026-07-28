@@ -97,7 +97,10 @@ For each task `<id>`, in topo order:
 
 **Prepare** (`T=$STATE/tasks/<id>`): write `$T/check.sh` = the task's
 done-when command verbatim, running in the worktree (`set -euo pipefail; cd
-<wt>; <done-when>`); `$T/settings.json`:
+<wt>; <done-when>`) — a done-when containing `grep -q` in a pipeline is a
+Stage-1 defect: flag it, never silently rewrite (under `pipefail` the
+producer SIGPIPEs when grep exits at first match, failing the gate on
+success); `$T/settings.json`:
 
 ```json
 {"hooks": {
