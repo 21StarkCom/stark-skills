@@ -33,7 +33,10 @@ import * as path from "node:path";
 
 import {
   KEYCHAIN,
+  applyOrder,
   describeProjection,
+  nextInCycle,
+  orderedProfiles,
   seatKeyOf,
   parseSnapshot,
   projectUsage,
@@ -150,6 +153,9 @@ function readRegistry(): Profile[] {
             ? { seatKey: r["seatKey"] }
             : {}),
           ...(typeof r["label"] === "string" ? { label: r["label"] } : {}),
+          ...(typeof r["order"] === "number" && Number.isFinite(r["order"])
+            ? { order: r["order"] }
+            : {}),
         },
       ];
     });
@@ -267,11 +273,16 @@ function cmdList(): void {
     return;
   }
   const active = currentSeatKey()?.toLowerCase();
-  for (const p of profiles) {
+  // Listed in CYCLE order, not alphabetically — `list` is how you check the
+  // sequence `next` will walk, so it must show that sequence.
+  for (const p of orderedProfiles(profiles)) {
     const mark = p.seatKey && p.seatKey.toLowerCase() === active ? "*" : " ";
     const stored = securityOrNull(readProfileArgv(p.name)) !== null;
     const state = stored ? "" : "  (no stored credentials — re-run `add`)";
-    console.log(`${mark} ${p.name.padEnd(8)} ${p.email}${orgSuffix(p)}${state}`);
+    const pos = p.order === undefined ? "  -" : String(p.order + 1).padStart(3);
+    console.log(
+      `${mark}${pos}  ${p.name.padEnd(8)} ${p.email}${orgSuffix(p)}${state}`,
+    );
   }
 }
 
@@ -333,7 +344,16 @@ function cmdAdd(name: string): void {
   const profiles = existing.filter(
     (p) => p.name !== name && p.seatKey !== seatKey,
   );
-  profiles.push({ name, email, seatKey, ...(label ? { label } : {}) });
+  // Inherit the displaced entry's slot when this is a rename of the same seat;
+  // otherwise leave `order` unset so the new account joins the END of the cycle
+  // rather than shifting a sequence the user deliberately arranged.
+  profiles.push({
+    name,
+    email,
+    seatKey,
+    ...(label ? { label } : {}),
+    ...(displaced?.order !== undefined ? { order: displaced.order } : {}),
+  });
   profiles.sort((a, b) => a.name.localeCompare(b.name));
   writeRegistry(profiles);
 
@@ -417,25 +437,84 @@ function cmdLimits(): void {
   );
 }
 
-function cmdNext(apply: boolean): void {
+/**
+ * Walk the rotation cycle: the profile AFTER the active one, wrapping.
+ *
+ * This is a fixed sequence, not a headroom ranking — you asked for a
+ * predictable round-robin, and predictability is the point: you always know
+ * which account comes next without reading percentages. `--best` still exposes
+ * the ranked pick (provably-reset > lowest floor > unknown) when you want the
+ * emptiest window instead of the next one in line.
+ *
+ * Profiles without stored credentials are skipped: they cannot be switched to,
+ * so stopping on one would dead-end the cycle.
+ */
+function cmdNext(apply: boolean, best: boolean): void {
   const profiles = readRegistry();
   const active = currentSeatKey();
-  const ranked = rankProfiles(profiles, loadSnapshots(), nowSec(), {
-    exclude: active ? [active] : [],
-  });
-  const best = ranked[0];
-  if (!best) {
+  const hasCreds = (p: Profile) =>
+    securityOrNull(readProfileArgv(p.name)) !== null;
+
+  let target: Profile | null;
+  let why: string;
+  if (best) {
+    const ranked = rankProfiles(profiles, loadSnapshots(), nowSec(), {
+      exclude: active ? [active] : [],
+    }).filter((r) => hasCreds(r.profile));
+    target = ranked[0]?.profile ?? null;
+    why = ranked[0] ? describeProjection(ranked[0].projection) : "";
+  } else {
+    target = nextInCycle(profiles, active, hasCreds);
+    why = "next in rotation";
+  }
+
+  if (!target) {
     fail("no candidate profile — register one with `add <name>`");
+  }
+  if (target.seatKey && active && target.seatKey.toLowerCase() === active.toLowerCase()) {
+    console.log(`${target.name} is the only switchable profile — already active`);
+    return;
   }
   if (!apply) {
     console.log(
-      `${best.profile.name}  ${best.profile.email}${orgSuffix(best.profile)}  ` +
-        `${describeProjection(best.projection)}`,
+      `${target.name}  ${target.email}${orgSuffix(target)}  ${why}`,
     );
     console.log("# re-run with --apply to switch");
     return;
   }
-  cmdUse(best.profile.name);
+  cmdUse(target.name);
+}
+
+/**
+ * Show or set the rotation order.
+ *
+ * `order` with no names prints the current cycle; with names it places them in
+ * that sequence. Unlisted profiles keep their place after the listed ones, so a
+ * partial reorder never drops an account out of the cycle.
+ */
+function cmdOrder(names: string[]): void {
+  const profiles = readRegistry();
+  if (profiles.length === 0) {
+    console.log("no profiles registered — run `cc_account.ts add <name>`");
+    return;
+  }
+  if (names.length === 0) {
+    for (const [i, p] of orderedProfiles(profiles).entries()) {
+      const placed = p.order === undefined ? " (unplaced)" : "";
+      console.log(`${String(i + 1).padStart(3)}  ${p.name}${placed}`);
+    }
+    return;
+  }
+  const known = new Set(profiles.map((p) => p.name.toLowerCase()));
+  const unknown = names.filter((n) => !known.has(n.toLowerCase()));
+  if (unknown.length > 0) {
+    fail(`unknown profile(s): ${unknown.join(", ")}`);
+  }
+  writeRegistry(applyOrder(profiles, names));
+  console.log(`rotation order set (${names.length} placed)`);
+  for (const [i, p] of orderedProfiles(readRegistry()).entries()) {
+    console.log(`${String(i + 1).padStart(3)}  ${p.name}`);
+  }
 }
 
 // ── plumbing ────────────────────────────────────────────────────────────
@@ -456,7 +535,8 @@ const USAGE = `usage: cc_account.ts <command>
   add <name>        store the current login as profile <name>
   use <name>        switch to profile <name>
   limits            headroom for every profile, best target first
-  next [--apply]    best target other than the active one
+  next [--apply]    next profile in the rotation ( --best = emptiest instead )
+  order [names...]  show the rotation cycle, or set it
 `;
 
 export function main(argv: string[] = process.argv.slice(2)): void {
@@ -476,7 +556,9 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     case "limits":
       return cmdLimits();
     case "next":
-      return cmdNext(rest.includes("--apply"));
+      return cmdNext(rest.includes("--apply"), rest.includes("--best"));
+    case "order":
+      return cmdOrder(rest.filter((a) => !a.startsWith("-")));
     case "-h":
     case "--help":
     case "help":

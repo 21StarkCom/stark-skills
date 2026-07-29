@@ -81,6 +81,13 @@ export interface Profile {
   seatKey?: string;
   /** Org name, e.g. `Evinced RD` — display only, disambiguates shared emails. */
   label?: string;
+  /**
+   * Position in the rotation cycle that `next` walks. Lower comes first.
+   * Absent means "not placed yet" — those sort after every placed profile, so a
+   * freshly `add`ed account joins the end of the cycle instead of silently
+   * displacing the sequence you set.
+   */
+  order?: number;
 }
 
 /** Both halves of a stored account, as persisted under `stark-cc-token`. */
@@ -302,6 +309,77 @@ export function projectUsage(
     certainty: fiveRolled ? "reset" : "floor",
     ageSec,
   };
+}
+
+/**
+ * The rotation cycle, in order.
+ *
+ * Placed profiles (an explicit `order`) come first, ascending; unplaced ones
+ * follow, by name. The sort is total and stable so `next` is deterministic —
+ * it is used non-interactively, and the same state must always pick the same
+ * account.
+ */
+export function orderedProfiles(profiles: readonly Profile[]): Profile[] {
+  return [...profiles].sort((a, b) => {
+    const ao = a.order ?? Number.POSITIVE_INFINITY;
+    const bo = b.order ?? Number.POSITIVE_INFINITY;
+    if (ao !== bo) return ao - bo;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+/**
+ * The profile after `activeSeatKey` in the cycle, wrapping at the end.
+ *
+ * `eligible` filters out profiles that cannot actually be switched to (no
+ * stored credentials) — skipping them keeps the cycle usable rather than
+ * dead-ending on a broken entry.
+ *
+ * Returns null when nothing is eligible. When the active seat is not in the
+ * list — an unregistered login, or the active profile itself ineligible — the
+ * cycle starts from its beginning rather than failing: "the next one" is still
+ * well-defined.
+ *
+ * Single eligible profile returns that profile: a cycle of one is itself, which
+ * `use` treats as a no-op switch. Callers that want "somewhere else" should
+ * compare against the active seat.
+ */
+export function nextInCycle(
+  profiles: readonly Profile[],
+  activeSeatKey: string | null,
+  eligible: (p: Profile) => boolean = () => true,
+): Profile | null {
+  const cycle = orderedProfiles(profiles).filter(eligible);
+  if (cycle.length === 0) return null;
+  const active = activeSeatKey?.toLowerCase() ?? null;
+  const at = active
+    ? cycle.findIndex((p) => p.seatKey?.toLowerCase() === active)
+    : -1;
+  if (at < 0) return cycle[0] ?? null;
+  return cycle[(at + 1) % cycle.length] ?? null;
+}
+
+/**
+ * Apply an explicit ordering by profile name.
+ *
+ * Names not present in the registry are ignored; registered profiles the caller
+ * omitted keep their place AFTER the listed ones (they become unplaced), so a
+ * partial list reorders the front of the cycle without dropping anyone.
+ */
+export function applyOrder(
+  profiles: readonly Profile[],
+  names: readonly string[],
+): Profile[] {
+  const rank = new Map<string, number>();
+  names.forEach((n, i) => rank.set(n.toLowerCase(), i));
+  return profiles.map((p) => {
+    const r = rank.get(p.name.toLowerCase());
+    if (r === undefined) {
+      const { order: _drop, ...rest } = p;
+      return rest;
+    }
+    return { ...p, order: r };
+  });
 }
 
 export interface RankedProfile {
