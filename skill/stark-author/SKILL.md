@@ -146,13 +146,47 @@ baseline → named human checklist item at the gate, last resort. Pick one
 explicitly per task that needs it. [RQ3]
 
 **Two files, one truth.** Alongside the spec, write the operator digest as a
-sidecar: `docs/specs/YYYY-MM-DD-<slug>-spec.human.md` — **≤50 lines, simple
-English, short sentences**, no jargon: what this does · what it will NOT
-do · how we prove it works · what I decided for you (the voiced ambiguities
-+ their defaults) · the task list in one line each. NON-normative: on any
-conflict the spec wins. Regenerate the sidecar on every spec revision — it
-must never carry a decision the spec lacks. The gate (Phase 5) still runs
-against the spec — the digest is orientation, not the gate.
+sidecar: `docs/specs/YYYY-MM-DD-<slug>-spec.human.md`. NON-normative: on any
+conflict the spec wins, and the gate (Phase 5) still runs against the spec.
+Regenerate it on every spec revision — it must never carry a decision the
+spec lacks.
+
+**Its job is not summary — it is the gate's raw material in plain English.**
+A digest that prose-summarizes strips exactly what the checklist bites on
+(the interfaces, the verification command, the IF/THEN criteria, the
+done-whens), so the human forms their whole picture from it and arrives at
+the gate with nothing to catch. Fixed sections, one per gate item:
+
+| Digest section | Feeds gate item | Contents |
+|---|---|---|
+| What this does | 1 | 2–3 short sentences, plain English |
+| What it will NOT do | 2 | every OUT bullet, verbatim |
+| Files and interfaces I claim exist | 3 | one line each: path + the exact signature |
+| How we prove it works | 4 | the closing verification command **verbatim**, plus one line on what a real pass prints |
+| What must NOT happen | 6 | every unwanted-behaviour criterion, one plain line each — none dropped, none merged |
+| Tasks and their checks | 5, 7 | table: # · what it does in one line · its done-when **command verbatim** |
+| What I decided for you | 8 | each marked ambiguity as a question + the default I took |
+| What the advisory pass flagged | — | one line per finding, each marked open/addressed; "none" if none |
+
+**Verbatim wherever it is checkable.** Commands, interface signatures, and
+unwanted-behaviour criteria are copied exactly, in code spans. Paraphrasing
+`go test ./... -run 'Docs'` into "runs the docs tests" is precisely how a
+vacuous check survives the gate — item 7 cannot fire on prose.
+
+**Material, never verdicts.** The digest hands over the evidence and stops.
+Banned, because each is a checklist item's *answer* and pre-supplying it is
+what makes rubber-stamping easy: what a false PASS would look like · what's
+missing from OUT · which done-when is weak · which task is safe to cut · any
+reassurance about risk, quality, or simplicity.
+
+**Budget: ≤60 lines at Full tier, ≤20 at Short.** The bound is density, not
+brevity of content: every line traces to a gate item. Background, rationale,
+architecture narration, and restated repo context are what make digests long
+— cut them, they live in the spec. If the mandatory sections alone blow the
+budget, the tier was wrong or the scope is two changes.
+
+Before presenting: if any gate item has no material in the digest, the digest
+is defective — regenerate it, don't present.
 
 **Length follows tier.** There is no doc-length quota; what's bounded is the
 gate read (Phase 5). If the doc outgrows one gate sitting, the tier was
@@ -206,8 +240,13 @@ the checklist — every item demands a **stated value**, never yes/no [RQ5]:
    through the gate.
 9. Edit the doc directly.
 
-**Tripwires:** a Full-tier doc accepted in under a minute, or with zero human
-edits, is a rubber-stamp signature — say so and re-present ONCE. [RQ5]
+**Tripwires** — each is a rubber-stamp signature, not a pass:
+- A Full-tier doc accepted in under a minute, or with zero human edits — say
+  so and re-present ONCE. [RQ5]
+- An answer that reproduces the digest's own wording (items 1, 2, 6 are the
+  parrotable ones). That is an echo, not a value — re-ask that item once with
+  the digest closed. The digest carries material so the human has something
+  to catch defects WITH; it never supplies the catch.
 
 Gate verdicts: **accept** → Phase 6 · **revise** → back to Phase 2 with the
 human's deltas (human-driven; this is not a review loop) · **abandon** → stop.
