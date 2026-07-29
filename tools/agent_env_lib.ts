@@ -58,8 +58,9 @@ export function resolvedPath(
  * Deliberately minimal — GH_TOKEN/GITHUB_TOKEN/STARK_PUSH_TOKEN and the
  * Anthropic keys are excluded so a reviewer subprocess cannot exfiltrate
  * posting credentials. This is the single owner of that list; the three
- * agent modules import it rather than each keeping a copy, because they
- * previously kept three copies and they drifted (see USER below).
+ * agent modules and `optimize_skill_description.ts` import it rather than
+ * each keeping a copy, because they previously kept four copies and they
+ * drifted (see USER below).
  *
  * USER is load-bearing, not cosmetic. Without it the claude CLI cannot
  * resolve its Keychain identity and degrades to an unauthenticated path,
