@@ -373,15 +373,19 @@ l2=""
 # the 5H/7D gauges below key their fill style off acct_label (Enterprise → 🔸).
 acct_label=""
 {
-  acct_email="" acct_otype=""
+  acct_email="" acct_otype="" acct_org=""
   _ac="$HOME/.claude/.statusline-account-cache"
   if [ -f "$_ac" ] && ! [ "$HOME/.claude.json" -nt "$_ac" ]; then
-    IFS=$'\t' read -r acct_email acct_otype < "$_ac"
-  else
-    IFS=$'\t' read -r acct_email acct_otype < <(
-      jq -r '.oauthAccount | "\(.emailAddress // "")\t\(.organizationType // "")"' \
+    IFS=$'\t' read -r acct_email acct_otype acct_org < "$_ac"
+  fi
+  # Re-parse on a miss OR on a 2-field cache left by the pre-org-uuid version:
+  # that file stays valid by mtime, so without this the org key would read empty
+  # until ~/.claude.json next changed, silently suspending usage snapshots.
+  if [ -z "$acct_org" ]; then
+    IFS=$'\t' read -r acct_email acct_otype acct_org < <(
+      jq -r '.oauthAccount | "\(.emailAddress // "")\t\(.organizationType // "")\t\(.organizationUuid // "")"' \
         "$HOME/.claude.json" 2>/dev/null)
-    printf '%s\t%s\n' "$acct_email" "$acct_otype" > "$_ac" 2>/dev/null
+    printf '%s\t%s\t%s\n' "$acct_email" "$acct_otype" "$acct_org" > "$_ac" 2>/dev/null
   fi
   if [ -n "$acct_email" ]; then
     acct_dom=${acct_email##*@}            # evinced.com / evinced.net
@@ -485,17 +489,22 @@ _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
 # here is free: the values are already parsed above, and the write is a bash
 # redirect (no fork), matching the account/git caches alongside it.
 #
+# Keyed by organizationUuid, NOT email: one address can hold seats in several
+# orgs (a Team seat and a personal Max plan share aryeh.kiovetsky@evinced.net),
+# and those have INDEPENDENT rate-limit budgets. Keying by address pointed both
+# at one file, so each reported the other's usage.
+#
 # Guarded on the RAW $five_pct, not the rounded $_fpct: when the payload omits
 # rate_limits entirely, $_fpct is 0, and persisting that would claim the account
 # is completely free. Skipping the write leaves the previous (older but true)
 # snapshot in place, which the reader ages honestly.
 #
-# `email=` is written LAST so a torn read degrades to "unknown" rather than to a
-# falsely-low percentage — see cc_account_lib.ts::formatSnapshot.
-if [ -n "$acct_email" ] && [ -n "$five_pct" ]; then
-  printf 'five_pct=%s\nfive_reset=%s\nweek_pct=%s\nweek_reset=%s\nstamped_at=%s\nemail=%s\n' \
-    "$_fpct" "${five_reset:-0}" "$_wpct" "${week_reset:-0}" "$NOW" "$acct_email" \
-    > "$HOME/.claude/.cc-usage-${acct_email}" 2>/dev/null
+# `org_uuid=` is written LAST so a torn read degrades to "unknown" rather than
+# to a falsely-low percentage — see cc_account_lib.ts::formatSnapshot.
+if [ -n "$acct_org" ] && [ -n "$five_pct" ]; then
+  printf 'five_pct=%s\nfive_reset=%s\nweek_pct=%s\nweek_reset=%s\nstamped_at=%s\nemail=%s\norg_uuid=%s\n' \
+    "$_fpct" "${five_reset:-0}" "$_wpct" "${week_reset:-0}" "$NOW" "$acct_email" "$acct_org" \
+    > "$HOME/.claude/.cc-usage-${acct_org}" 2>/dev/null
 fi
 
 # Cumulative session tokens — opt-in (off by default; misleading because

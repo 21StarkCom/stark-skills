@@ -8,7 +8,8 @@ import {
   parseSnapshot,
   projectUsage,
   rankProfiles,
-  sanitizeEmail,
+  orgUuidOf,
+  sanitizeKey,
   snapshotPath,
   validateStoredProfile,
   writeClaudeCredsArgv,
@@ -21,6 +22,7 @@ const NOW = 1_800_000_000;
 
 function snap(over: Partial<UsageSnapshot> = {}): UsageSnapshot {
   return {
+    orgUuid: "org-a",
     email: "a@evinced.net",
     fivePct: 40,
     fiveReset: NOW + 3600,
@@ -40,23 +42,24 @@ test("snapshot: round-trips through format/parse", () => {
 });
 
 test("snapshot: parse tolerates missing numeric fields", () => {
-  const out = parseSnapshot("email=x@y.net\nfive_pct=\n");
-  assert.equal(out?.email, "x@y.net");
+  const out = parseSnapshot("org_uuid=org-x\nemail=x@y.net\nfive_pct=\n");
+  assert.equal(out?.orgUuid, "org-x");
   assert.equal(out?.fivePct, 0);
   assert.equal(out?.fiveReset, 0);
 });
 
-test("snapshot: parse rejects a record with no email", () => {
+test("snapshot: parse rejects a record with no org key", () => {
   assert.equal(parseSnapshot("five_pct=10\n"), null);
+  assert.equal(parseSnapshot("email=x@y.net\nfive_pct=10\n"), null);
   assert.equal(parseSnapshot(""), null);
 });
 
 test("snapshot: no truncation can understate usage", () => {
   // The statusline redirects onto the file with no temp+rename (a fork per
   // tick), so a reader can observe a partial write. The safety property is NOT
-  // "no prefix parses" — a cut inside the trailing `email=` line still yields
-  // an email. It is that `email` is written LAST, so any prefix that parses at
-  // all necessarily contains every preceding line complete. A record can
+  // "no prefix parses" — a cut inside the trailing `org_uuid=` line still
+  // yields a key. It is that `org_uuid` is written LAST, so any prefix that
+  // parses at all necessarily contains every preceding line complete. A record can
   // therefore never be read with a falsely LOW percentage, which is the only
   // direction that causes harm: it would sort the account first and route work
   // to a window that may in fact be exhausted.
@@ -76,34 +79,28 @@ test("snapshot: no truncation can understate usage", () => {
   assert.ok(parsedAny, "at least the complete record parses");
 });
 
-test("snapshot: an email truncated mid-write matches no profile, so it reads unknown", () => {
-  const full = formatSnapshot(
-    snap({ email: "aryeh.stark.1@evinced.net", fivePct: 96 }),
-  );
+test("snapshot: an org key truncated mid-write matches no profile, so it reads unknown", () => {
+  const full = formatSnapshot(snap({ orgUuid: "org-s1", fivePct: 96 }));
   const partial = parseSnapshot(full.slice(0, full.length - 5));
   assert.notEqual(partial, null, "this prefix does still parse");
-  assert.notEqual(
-    partial?.email,
-    "aryeh.stark.1@evinced.net",
-    "but the email is truncated",
-  );
+  assert.notEqual(partial?.orgUuid, "org-s1", "but the org key is truncated");
   // So the real profile finds no snapshot and is ranked `unknown` (last),
   // rather than inheriting a stray reading.
   const ranked = rankProfiles(
-    [{ name: "s1", email: "aryeh.stark.1@evinced.net" }],
-    new Map([[sanitizeEmail(partial!.email), partial!]]),
+    [{ name: "s1", email: "a@evinced.net", orgUuid: "org-s1" }],
+    new Map([[sanitizeKey(partial!.orgUuid), partial!]]),
     NOW,
   );
   assert.equal(ranked[0]?.projection.certainty, "unknown");
 });
 
 test("snapshot: parse ignores junk lines rather than throwing", () => {
-  const out = parseSnapshot("email=x@y.net\n\n# comment\nfive_pct=7\n");
+  const out = parseSnapshot("org_uuid=o\n\n# comment\nfive_pct=7\n");
   assert.equal(out?.fivePct, 7);
 });
 
 test("snapshot: non-numeric values degrade to 0, never NaN", () => {
-  const out = parseSnapshot("email=x@y.net\nfive_pct=abc\n");
+  const out = parseSnapshot("org_uuid=o\nfive_pct=abc\n");
   assert.equal(out?.fivePct, 0);
   assert.ok(!Number.isNaN(out?.fivePct));
 });
@@ -163,9 +160,9 @@ test("projectUsage: age never goes negative on a future-stamped snapshot", () =>
 // ── ranking ─────────────────────────────────────────────────────────────
 
 const PROFILES: Profile[] = [
-  { name: "com", email: "aryeh.kiovetsky@evinced.com" },
-  { name: "s1", email: "aryeh.stark.1@evinced.net" },
-  { name: "s2", email: "aryeh.stark.2@evinced.net" },
+  { name: "com", email: "aryeh.kiovetsky@evinced.com", orgUuid: "org-com" },
+  { name: "s1", email: "aryeh.stark.1@evinced.net", orgUuid: "org-s1" },
+  { name: "s2", email: "aryeh.stark.2@evinced.net", orgUuid: "org-s2" },
 ];
 
 function snapMap(entries: Record<string, UsageSnapshot>) {
@@ -176,16 +173,8 @@ test("rankProfiles: provably-reset beats a low live floor", () => {
   const ranked = rankProfiles(
     PROFILES,
     snapMap({
-      "aryeh.stark.1@evinced.net": snap({
-        email: "aryeh.stark.1@evinced.net",
-        fivePct: 5,
-        fiveReset: NOW + 600,
-      }),
-      "aryeh.stark.2@evinced.net": snap({
-        email: "aryeh.stark.2@evinced.net",
-        fivePct: 99,
-        fiveReset: NOW - 1,
-      }),
+      "org-s1": snap({ orgUuid: "org-s1", fivePct: 5, fiveReset: NOW + 600 }),
+      "org-s2": snap({ orgUuid: "org-s2", fivePct: 99, fiveReset: NOW - 1 }),
     }),
     NOW,
   );
@@ -197,11 +186,7 @@ test("rankProfiles: unknown sorts last — never optimistically assumed free", (
   const ranked = rankProfiles(
     PROFILES,
     snapMap({
-      "aryeh.stark.1@evinced.net": snap({
-        email: "aryeh.stark.1@evinced.net",
-        fivePct: 88,
-        fiveReset: NOW + 600,
-      }),
+      "org-s1": snap({ orgUuid: "org-s1", fivePct: 88, fiveReset: NOW + 600 }),
     }),
     NOW,
   );
@@ -209,28 +194,28 @@ test("rankProfiles: unknown sorts last — never optimistically assumed free", (
   assert.equal(ranked.at(-1)?.projection.certainty, "unknown");
 });
 
-test("rankProfiles: excludes by profile name and by email", () => {
+test("rankProfiles: excludes by profile name and by orgUuid", () => {
   const byName = rankProfiles(PROFILES, new Map(), NOW, { exclude: ["s1"] });
   assert.deepEqual(byName.map((r) => r.profile.name), ["com", "s2"]);
 
-  const byEmail = rankProfiles(PROFILES, new Map(), NOW, {
-    exclude: ["aryeh.kiovetsky@evinced.com"],
+  const byOrg = rankProfiles(PROFILES, new Map(), NOW, {
+    exclude: ["org-com"],
   });
-  assert.deepEqual(byEmail.map((r) => r.profile.name), ["s1", "s2"]);
+  assert.deepEqual(byOrg.map((r) => r.profile.name), ["s1", "s2"]);
 });
 
 test("rankProfiles: exclusion is case-insensitive", () => {
   const out = rankProfiles(PROFILES, new Map(), NOW, {
-    exclude: ["ARYEH.STARK.1@EVINCED.NET", "COM"],
+    exclude: ["ORG-S1", "COM"],
   });
   assert.deepEqual(out.map((r) => r.profile.name), ["s2"]);
 });
 
-test("rankProfiles: snapshot lookup is case-insensitive on email", () => {
+test("rankProfiles: snapshot lookup is case-insensitive on orgUuid", () => {
   const ranked = rankProfiles(
-    [{ name: "s1", email: "Aryeh.Stark.1@Evinced.NET" }],
+    [{ name: "s1", email: "x@evinced.net", orgUuid: "ORG-S1" }],
     snapMap({
-      "aryeh.stark.1@evinced.net": snap({ fivePct: 42, fiveReset: NOW + 60 }),
+      "org-s1": snap({ orgUuid: "org-s1", fivePct: 42, fiveReset: NOW + 60 }),
     }),
     NOW,
   );
@@ -240,8 +225,8 @@ test("rankProfiles: snapshot lookup is case-insensitive on email", () => {
 
 test("rankProfiles: ties break deterministically by name", () => {
   const m = snapMap({
-    "aryeh.stark.1@evinced.net": snap({ fivePct: 10, fiveReset: NOW + 60 }),
-    "aryeh.stark.2@evinced.net": snap({ fivePct: 10, fiveReset: NOW + 60 }),
+    "org-s1": snap({ orgUuid: "org-s1", fivePct: 10, fiveReset: NOW + 60 }),
+    "org-s2": snap({ orgUuid: "org-s2", fivePct: 10, fiveReset: NOW + 60 }),
   });
   const a = rankProfiles(PROFILES, m, NOW).map((r) => r.profile.name);
   const b = rankProfiles([...PROFILES].reverse(), m, NOW).map(
@@ -254,21 +239,111 @@ test("rankProfiles: empty profile list yields empty ranking", () => {
   assert.deepEqual(rankProfiles([], new Map(), NOW), []);
 });
 
+// ── two orgs, one email (the real-world case that broke this) ───────────
+//
+// aryeh.kiovetsky@evinced.net holds BOTH a seat in the Evinced RD team org and
+// a personal Max org. Same address, same accountUuid, different organizationUuid
+// — and entirely independent rate-limit budgets. The first cut keyed on email
+// and conflated them.
+
+const SHARED_EMAIL = "aryeh.kiovetsky@evinced.net";
+const TWO_ORGS: Profile[] = [
+  { name: "Net-T0", email: SHARED_EMAIL, orgUuid: "org-team", label: "Evinced RD" },
+  { name: "Net-M0", email: SHARED_EMAIL, orgUuid: "org-max", label: "personal" },
+];
+
+test("same-email profiles keep independent usage readings", () => {
+  const ranked = rankProfiles(
+    TWO_ORGS,
+    snapMap({
+      "org-team": snap({ orgUuid: "org-team", fivePct: 92, fiveReset: NOW + 600 }),
+      "org-max": snap({ orgUuid: "org-max", fivePct: 4, fiveReset: NOW + 600 }),
+    }),
+    NOW,
+  );
+  // Keyed by email these collapsed to one file and reported each other's usage.
+  assert.equal(ranked[0]?.profile.name, "Net-M0");
+  assert.equal(ranked[0]?.projection.fivePct, 4);
+  assert.equal(ranked[1]?.projection.fivePct, 92);
+});
+
+test("excluding the active org does not exclude its same-email sibling", () => {
+  const out = rankProfiles(TWO_ORGS, new Map(), NOW, { exclude: ["org-team"] });
+  assert.deepEqual(out.map((r) => r.profile.name), ["Net-M0"]);
+});
+
+test("a profile with no orgUuid ranks unknown rather than borrowing a reading", () => {
+  const ranked = rankProfiles(
+    [{ name: "legacy", email: SHARED_EMAIL }],
+    snapMap({
+      "org-team": snap({ orgUuid: "org-team", fivePct: 7, fiveReset: NOW + 600 }),
+    }),
+    NOW,
+  );
+  assert.equal(ranked[0]?.projection.certainty, "unknown");
+});
+
+test("snapshotPath: same-email orgs get distinct files", () => {
+  assert.notEqual(
+    snapshotPath("/h", "org-team"),
+    snapshotPath("/h", "org-max"),
+  );
+});
+
+test("pre-fix snapshots (no org_uuid) are rejected, not misattributed", () => {
+  // The old wire format ended at `email=`. Such a file cannot be assigned to
+  // one of several same-email orgs, so it must not parse at all.
+  const legacy =
+    "five_pct=88\nfive_reset=0\nweek_pct=10\nweek_reset=0\n" +
+    `stamped_at=${NOW}\nemail=${SHARED_EMAIL}\n`;
+  assert.equal(parseSnapshot(legacy), null);
+});
+
+test("orgUuidOf: reads the key, rejects absent/blank/non-string", () => {
+  assert.equal(orgUuidOf({ organizationUuid: "org-x" }), "org-x");
+  assert.equal(orgUuidOf({ organizationUuid: "" }), null);
+  assert.equal(orgUuidOf({ organizationUuid: 42 }), null);
+  assert.equal(orgUuidOf({}), null);
+  assert.equal(orgUuidOf(null), null);
+  assert.equal(orgUuidOf(undefined), null);
+});
+
 // ── stored profile validation ───────────────────────────────────────────
 
 test("validateStoredProfile: accepts a well-formed record", () => {
   const ok = validateStoredProfile({
     credentials: "{\"accessToken\":\"x\"}",
-    oauthAccount: { emailAddress: "a@evinced.net", organizationType: "team" },
+    oauthAccount: {
+      emailAddress: "a@evinced.net",
+      organizationType: "team",
+      organizationUuid: "org-a",
+    },
   });
   assert.equal(ok.oauthAccount["emailAddress"], "a@evinced.net");
+  assert.equal(ok.oauthAccount["organizationUuid"], "org-a");
+});
+
+test("validateStoredProfile: rejects a record with no organizationUuid", () => {
+  // Without the org key a stored profile cannot be told apart from a sibling
+  // org on the same address — so it is refused rather than stored ambiguously.
+  assert.throws(
+    () =>
+      validateStoredProfile({
+        credentials: "x",
+        oauthAccount: { emailAddress: "a@evinced.net" },
+      }),
+    /organizationUuid/,
+  );
 });
 
 test("validateStoredProfile: rejects half-valid records", () => {
   // A record missing either half would desync the CLI from ~/.claude.json.
   assert.throws(() => validateStoredProfile(null), /not an object/);
   assert.throws(
-    () => validateStoredProfile({ oauthAccount: { emailAddress: "a@b.net" } }),
+    () =>
+      validateStoredProfile({
+        oauthAccount: { emailAddress: "a@b.net", organizationUuid: "o" },
+      }),
     /credentials/,
   );
   assert.throws(
@@ -283,19 +358,27 @@ test("validateStoredProfile: rejects half-valid records", () => {
     () => validateStoredProfile({ credentials: "x", oauthAccount: {} }),
     /emailAddress/,
   );
+  assert.throws(
+    () =>
+      validateStoredProfile({
+        credentials: "x",
+        oauthAccount: { emailAddress: "a@b.net", organizationUuid: "" },
+      }),
+    /organizationUuid/,
+  );
 });
 
 // ── paths + formatting ──────────────────────────────────────────────────
 
-test("sanitizeEmail: lowercases and strips path-hostile characters", () => {
-  assert.equal(sanitizeEmail("Aryeh.Stark.1@Evinced.NET"), "aryeh.stark.1@evinced.net");
-  assert.equal(sanitizeEmail("a/../../b@x.net"), "a_.._.._b@x.net");
-  assert.ok(!sanitizeEmail("a/b@x.net").includes("/"), "no path separators");
+test("sanitizeKey: lowercases and strips path-hostile characters", () => {
+  assert.equal(sanitizeKey("B5C2BF52-78F2-4DD7"), "b5c2bf52-78f2-4dd7");
+  assert.equal(sanitizeKey("a/../../b"), "a_.._.._b");
+  assert.ok(!sanitizeKey("a/b").includes("/"), "no path separators");
 });
 
-test("snapshotPath: lands under the home .claude dir", () => {
-  const p = snapshotPath("/Users/aryeh", "aryeh.stark.1@evinced.net");
-  assert.equal(p, "/Users/aryeh/.claude/.cc-usage-aryeh.stark.1@evinced.net");
+test("snapshotPath: keyed by org, lands under the home .claude dir", () => {
+  const p = snapshotPath("/Users/aryeh", "b5c2bf52-78f2-4dd7");
+  assert.equal(p, "/Users/aryeh/.claude/.cc-usage-b5c2bf52-78f2-4dd7");
 });
 
 test("keychain argv: writes use -U so an existing item updates in place", () => {
