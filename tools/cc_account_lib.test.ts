@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   applyOrder,
+  deleteProfileArgv,
   describeProjection,
   mergeProfile,
   nextInCycle,
@@ -14,6 +15,7 @@ import {
   projectUsage,
   rankProfiles,
   readClaudeCredsArgv,
+  removeProfile,
   resolveClaudeKeychainAccount,
   seatKeyOf,
   sanitizeKey,
@@ -426,6 +428,59 @@ test("validateStoredProfile: rejects half-valid records", () => {
   );
 });
 
+// ── removal ─────────────────────────────────────────────────────────────
+
+test("removeProfile: drops the named entry and reports it", () => {
+  const { profiles, removed } = removeProfile(
+    [
+      { name: "Com-Max", email: "a@x.com", seatKey: "a:1", order: 0 },
+      { name: "Net-T0", email: "b@x.net", seatKey: "b:2", order: 1 },
+    ],
+    "Net-T0",
+  );
+  assert.equal(removed?.name, "Net-T0");
+  assert.deepEqual(
+    profiles.map((p) => p.name),
+    ["Com-Max"],
+  );
+});
+
+test("removeProfile: name match is case-insensitive", () => {
+  const { removed } = removeProfile(
+    [{ name: "Net-T0", email: "b@x.net", seatKey: "b:2" }],
+    "net-t0",
+  );
+  assert.equal(removed?.name, "Net-T0");
+});
+
+test("removeProfile: an unknown name removes nothing", () => {
+  const { profiles, removed } = removeProfile(
+    [{ name: "Com-Max", email: "a@x.com", seatKey: "a:1" }],
+    "nope",
+  );
+  assert.equal(removed, undefined);
+  assert.equal(profiles.length, 1);
+});
+
+test("removeProfile: survivors keep their slots, gaps and all", () => {
+  // Order values are a sort key, not positions — renumbering after a removal
+  // would silently rewrite an arrangement the user set by hand.
+  const { profiles } = removeProfile(
+    [
+      { name: "a", email: "a@x", seatKey: "a:1", order: 0 },
+      { name: "b", email: "b@x", seatKey: "b:2", order: 1 },
+      { name: "c", email: "c@x", seatKey: "c:3", order: 2 },
+    ],
+    "b",
+  );
+  assert.equal(profiles.find((p) => p.name === "a")?.order, 0);
+  assert.equal(profiles.find((p) => p.name === "c")?.order, 2);
+  assert.deepEqual(
+    orderedProfiles(profiles).map((p) => p.name),
+    ["a", "c"],
+  );
+});
+
 // ── next flags ──────────────────────────────────────────────────────────
 
 test("parseNextFlags: switching is the default — no flag needed", () => {
@@ -550,6 +605,17 @@ test("resolveClaudeKeychainAccount: mirrors the CLI — USER env, `unknown` fall
   assert.equal(resolveClaudeKeychainAccount({}), "unknown");
   assert.equal(resolveClaudeKeychainAccount({ USER: "" }), "unknown");
   assert.equal(resolveClaudeKeychainAccount({ USER: "   " }), "unknown");
+});
+
+test("keychain argv: profile deletes are scoped to one profile item", () => {
+  const argv = deleteProfileArgv("s1");
+  assert.ok(argv.includes("delete-generic-password"));
+  assert.ok(argv.includes("stark-cc-token"));
+  assert.ok(argv.includes("s1"));
+  // A delete that named no account, or named the live service, would wipe the
+  // login the user is currently authenticated as.
+  assert.ok(argv.includes("-a"));
+  assert.ok(!argv.includes("Claude Code-credentials"));
 });
 
 test("keychain argv: profile writes target the stark-cc-token service", () => {
