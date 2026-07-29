@@ -12,7 +12,7 @@
  *   add <name>           capture the CURRENT login as profile <name>
  *   use <name>           switch to profile <name>
  *   limits               headroom for every profile, best target first
- *   next [--apply]       print the best target (and optionally switch to it)
+ *   next [--dry-run]     switch to the next profile in the rotation
  *
  * Switching takes effect on the NEXT `claude` launch — the CLI reads its
  * credentials once at startup. Every mutating path says so on stdout.
@@ -41,6 +41,7 @@ import {
   parseSnapshot,
   projectUsage,
   mergeProfile,
+  parseNextFlags,
   rankProfiles,
   readClaudeCredsArgv,
   readProfileArgv,
@@ -441,6 +442,8 @@ function cmdLimits(): void {
  *
  * Profiles without stored credentials are skipped: they cannot be switched to,
  * so stopping on one would dead-end the cycle.
+ *
+ * Switches by default — `--dry-run` to preview the pick instead.
  */
 function cmdNext(apply: boolean, best: boolean): void {
   const profiles = readRegistry();
@@ -472,7 +475,7 @@ function cmdNext(apply: boolean, best: boolean): void {
     console.log(
       `${target.name}  ${target.email}${orgSuffix(target)}  ${why}`,
     );
-    console.log("# re-run with --apply to switch");
+    console.log("# --dry-run: not switched");
     return;
   }
   cmdUse(target.name);
@@ -528,7 +531,8 @@ const USAGE = `usage: cc_account.ts <command>
   add <name>        store the current login as profile <name>
   use <name>        switch to profile <name>
   limits            headroom for every profile, best target first
-  next [--apply]    next profile in the rotation ( --best = emptiest instead )
+  next              switch to the next profile in the rotation
+                    ( --dry-run = preview only · --best = emptiest instead )
   order [names...]  show the rotation cycle, or set it
 `;
 
@@ -548,8 +552,10 @@ export function main(argv: string[] = process.argv.slice(2)): void {
       return cmdUse(rest[0]);
     case "limits":
       return cmdLimits();
-    case "next":
-      return cmdNext(rest.includes("--apply"), rest.includes("--best"));
+    case "next": {
+      const { apply, best } = parseNextFlags(rest);
+      return cmdNext(apply, best);
+    }
     case "order":
       return cmdOrder(rest.filter((a) => !a.startsWith("-")));
     case "-h":

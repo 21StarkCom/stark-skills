@@ -7,6 +7,7 @@ import {
   mergeProfile,
   nextInCycle,
   orderedProfiles,
+  parseNextFlags,
   formatAge,
   formatSnapshot,
   parseSnapshot,
@@ -423,6 +424,39 @@ test("validateStoredProfile: rejects half-valid records", () => {
       }),
     /organizationUuid/,
   );
+});
+
+// ── next flags ──────────────────────────────────────────────────────────
+
+test("parseNextFlags: switching is the default — no flag needed", () => {
+  // `next` exists to advance the rotation. Requiring `--apply` made the common
+  // case two commands and the bare form a no-op that looked like a failure.
+  assert.deepEqual(parseNextFlags([]), { apply: true, best: false });
+});
+
+test("parseNextFlags: --dry-run previews without switching", () => {
+  assert.deepEqual(parseNextFlags(["--dry-run"]), { apply: false, best: false });
+});
+
+test("parseNextFlags: --apply still accepted, now a no-op", () => {
+  // Kept for muscle memory and any script that already passes it.
+  assert.deepEqual(parseNextFlags(["--apply"]), { apply: true, best: false });
+});
+
+test("parseNextFlags: --dry-run wins over --apply", () => {
+  // The safe reading of a contradictory pair: never switch unasked.
+  assert.deepEqual(parseNextFlags(["--apply", "--dry-run"]), {
+    apply: false,
+    best: false,
+  });
+});
+
+test("parseNextFlags: --best composes with both modes", () => {
+  assert.deepEqual(parseNextFlags(["--best"]), { apply: true, best: true });
+  assert.deepEqual(parseNextFlags(["--best", "--dry-run"]), {
+    apply: false,
+    best: true,
+  });
 });
 
 // ── registry merge ──────────────────────────────────────────────────────
