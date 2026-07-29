@@ -5,7 +5,7 @@ import os from "node:os";
 import type { AgentName, Finding, Severity } from "./stark_review_lib.ts";
 import { findingId } from "./stark_review_lib.ts";
 import type { BuildContext, BuiltCommand, ParseError, ParseResult } from "./agent_codex.ts";
-import { resolvedPath } from "./agent_env_lib.ts";
+import { AGENT_ENV_ALLOWLIST, resolvedPath } from "./agent_env_lib.ts";
 import { resolveVertexLocation, resolveVertexProject } from "./vertex_config_lib.ts";
 import { geminiAuthSettings, resolveGeminiAuthMode } from "./gemini_auth_lib.ts";
 
@@ -21,7 +21,7 @@ const KNOWN_FINDING_KEYS: ReadonlySet<string> = new Set([
   "title", "body", "classification", "classification_reason", "extra",
 ]);
 
-const ENV_ALLOWLIST = ["PATH", "HOME", "LANG", "LC_ALL", "TMPDIR"] as const;
+// Allowlist owner is agent_env_lib.ts — see AGENT_ENV_ALLOWLIST there.
 
 /** Mirror scripts/gemini_utils.py:setup_gemini_home. Creates a per-call temp
  * GEMINI_CLI_HOME with .gemini/{settings.json, projects.json} so that
@@ -77,7 +77,7 @@ function shouldTrustWorkspace(projectDir: string, ctx?: BuildContext): boolean {
 
 function buildEnv(geminiHome: string, apiKey: string | null, trustWorkspace: boolean): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const key of ENV_ALLOWLIST) {
+  for (const key of AGENT_ENV_ALLOWLIST) {
     const v = process.env[key];
     if (typeof v === "string") env[key] = v;
   }

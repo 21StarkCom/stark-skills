@@ -32,6 +32,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { AGENT_ENV_ALLOWLIST } from "./agent_env_lib.ts";
 import { applyClaudeAuth } from "./claude_auth_lib.ts";
 
 // ---------------------------------------------------------------------------
@@ -157,13 +158,15 @@ export function buildImprovePrompt(opts: BuildImprovePromptOpts): string {
 // Clean env for `claude -p` dispatch
 // ---------------------------------------------------------------------------
 
-const ENV_ALLOWLIST = ["PATH", "HOME", "LANG", "LC_ALL", "TMPDIR"] as const;
+// Allowlist comes from `agent_env_lib.ts` — the single owner. This site kept
+// its own copy and drifted (no USER), which is the failure that constant
+// exists to end.
 
 export function buildCleanEnv(
   source: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const key of ENV_ALLOWLIST) {
+  for (const key of AGENT_ENV_ALLOWLIST) {
     const v = source[key];
     if (typeof v === "string") env[key] = v;
   }
