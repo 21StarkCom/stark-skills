@@ -5,6 +5,7 @@ import {
   buildCommand,
   extractStructuredOutput,
   normalizeOutput,
+  parseOutput,
   serializeJsonSchema,
 } from "./agent_claude.ts";
 
@@ -47,24 +48,52 @@ describe("buildCommand --json-schema", () => {
     }
   });
 
-  test("a falsy-but-present schema still emits the flag", () => {
-    // `false` is a legal JSON Schema (matches nothing). Guarding on
-    // `!== undefined` rather than truthiness keeps that meaningful.
-    const { args } = buildCommand("hi", undefined, { jsonSchema: false });
-    assert.equal(args[args.indexOf("--json-schema") + 1], "false");
+  test("rejects a non-object schema the CLI would exit 1 on", () => {
+    // The CLI accepts a JSON *object* only — `false`, `null`, a string and an
+    // array each make it print "--json-schema must be a JSON object" and exit 1
+    // (verified against 2.1.220). Fail here, attributed, instead of there.
+    for (const bad of [false, null, 0, "{}", [{ type: "object" }]]) {
+      assert.throws(
+        () => buildCommand("hi", undefined, { jsonSchema: bad }),
+        /--json-schema: schema must be a JSON object/,
+        `rejected ${JSON.stringify(bad)}`,
+      );
+    }
   });
 });
 
 describe("serializeJsonSchema", () => {
-  test("rejects a non-serializable schema instead of emitting undefined", () => {
+  test("rejects a cyclic schema with an attributed error, not a bare TypeError", () => {
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
-    assert.throws(() => serializeJsonSchema(cyclic));
+    // Without the try/catch around JSON.stringify this throws
+    // "Converting circular structure to JSON", naming neither the flag nor the
+    // argument — the matcher is what makes the guard load-bearing.
+    assert.throws(
+      () => serializeJsonSchema(cyclic),
+      /--json-schema: schema is not JSON-serializable/,
+    );
+  });
+
+  test("rejects a schema whose toJSON erases it", () => {
+    const erasing = { toJSON: () => undefined } as unknown;
+    assert.throws(
+      () => serializeJsonSchema(erasing),
+      /--json-schema: schema is not JSON-serializable/,
+    );
   });
 
   test("rejects a schema over the argv budget", () => {
     const huge = { type: "object", description: "x".repeat(300 * 1024) };
     assert.throws(() => serializeJsonSchema(huge), /argv budget/);
+  });
+
+  test("the budget stays under the Linux per-argv-string cap (128 KiB)", () => {
+    // MAX_ARG_STRLEN = 32 * PAGE_SIZE = 131072 bytes for a *single* argument.
+    // A schema at the budget must therefore still spawn; probe the boundary.
+    const atCap = { type: "object", description: "x".repeat(118 * 1024) };
+    const s = serializeJsonSchema(atCap);
+    assert.ok(Buffer.byteLength(s, "utf8") < 128 * 1024, "under MAX_ARG_STRLEN");
   });
 });
 
@@ -85,9 +114,34 @@ describe("extractStructuredOutput", () => {
     assert.equal(extractStructuredOutput(envelope), null);
   });
 
-  test("returns null on an errored envelope — a partial object is not a reply", () => {
-    const envelope = JSON.stringify({ is_error: true, structured_output: { answer: 1 } });
-    assert.equal(extractStructuredOutput(envelope), null);
+  test("throws on an errored envelope, carrying the CLI's own message", () => {
+    // Returning null here would make an exhausted account indistinguishable
+    // from "no schema was passed", sending the caller off to scrape prose that
+    // will never contain the reply.
+    const envelope = JSON.stringify({
+      is_error: true,
+      result: "Credit balance is too low",
+      structured_output: { answer: 1 },
+    });
+    assert.throws(() => extractStructuredOutput(envelope), /Credit balance is too low/);
+  });
+
+  test("throws with a fallback detail when an errored envelope has no result text", () => {
+    const envelope = JSON.stringify({ is_error: true, subtype: "error_max_turns" });
+    assert.throws(() => extractStructuredOutput(envelope), /error_max_turns/);
+  });
+
+  test("null on a normalizeOutput-ed envelope is a caller mistake, documented as such", () => {
+    // normalizeOutput unwraps to `.result`, dropping structured_output — this
+    // pins that the composition returns null so the JSDoc's "pass RAW stdout"
+    // warning stays honest.
+    const envelope = JSON.stringify({
+      type: "result",
+      is_error: false,
+      result: '{"answer":391}',
+      structured_output: { answer: 391 },
+    });
+    assert.equal(extractStructuredOutput(normalizeOutput(envelope)), null);
   });
 
   test("returns null on non-JSON stdout rather than throwing", () => {
@@ -104,6 +158,65 @@ describe("extractStructuredOutput", () => {
   test("null structured_output reads as absent, not as a value", () => {
     const envelope = JSON.stringify({ is_error: false, structured_output: null });
     assert.equal(extractStructuredOutput(envelope), null);
+  });
+});
+
+describe("parseOutput reads a schema-constrained reply", () => {
+  const FINDING = {
+    domain: "behavior", agent: "claude", severity: "high",
+    file: "a.ts", line: 3, title: "t", body: "b",
+  };
+
+  test("reads findings out of a { findings: [...] } structured_output", () => {
+    const envelope = JSON.stringify({
+      type: "result", is_error: false,
+      result: JSON.stringify({ findings: [FINDING] }),
+      structured_output: { findings: [FINDING] },
+    });
+    const { findings, parseErrors } = parseOutput(envelope);
+    assert.equal(parseErrors.length, 0);
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0]!.title, "t");
+    assert.equal(findings[0]!.severity, "high");
+  });
+
+  test("reads findings out of a bare-array structured_output", () => {
+    const envelope = JSON.stringify({
+      is_error: false, structured_output: [FINDING, { ...FINDING, title: "u" }],
+    });
+    const { findings } = parseOutput(envelope);
+    assert.deepEqual(findings.map((f) => f.title), ["t", "u"]);
+  });
+
+  test("an empty structured findings list is a no-findings ack, not a failed domain", () => {
+    const envelope = JSON.stringify({ is_error: false, structured_output: { findings: [] } });
+    const res = parseOutput(envelope);
+    assert.equal(res.findings.length, 0);
+    assert.equal(res.noFindingsAck, true);
+  });
+
+  test("surfaces the CLI's error text instead of an empty parse", () => {
+    const envelope = JSON.stringify({ is_error: true, result: "Credit balance is too low" });
+    const { findings, parseErrors } = parseOutput(envelope);
+    assert.equal(findings.length, 0);
+    assert.match(parseErrors[0]!.reason, /Credit balance is too low/);
+  });
+
+  test("reports an unrecognized structured shape rather than parsing nothing", () => {
+    const envelope = JSON.stringify({ is_error: false, structured_output: { answer: 391 } });
+    const { findings, parseErrors } = parseOutput(envelope);
+    assert.equal(findings.length, 0);
+    assert.match(parseErrors[0]!.reason, /neither an array of findings/);
+  });
+
+  test("the pre-existing JSONL path is untouched when no schema was used", () => {
+    const envelope = JSON.stringify({
+      type: "result", is_error: false, result: JSON.stringify(FINDING),
+    });
+    const { findings, parseErrors } = parseOutput(envelope);
+    assert.equal(parseErrors.length, 0);
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0]!.title, "t");
   });
 });
 
