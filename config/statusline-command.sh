@@ -477,6 +477,27 @@ seg2 "${DAY_COL}7D${R} ${BAR} ${TC}${_wpct}%${FR}${R}"
 
 _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
 
+# Persist this account's rate-limit windows for `/stark-cc-user limits`.
+#
+# These four fields arrive ONLY in the statusline stdin payload — they are not
+# written to ~/.claude.json or anywhere else on disk, so a tool asking "how much
+# headroom does my other account have?" has no source but this. Snapshotting
+# here is free: the values are already parsed above, and the write is a bash
+# redirect (no fork), matching the account/git caches alongside it.
+#
+# Guarded on the RAW $five_pct, not the rounded $_fpct: when the payload omits
+# rate_limits entirely, $_fpct is 0, and persisting that would claim the account
+# is completely free. Skipping the write leaves the previous (older but true)
+# snapshot in place, which the reader ages honestly.
+#
+# `email=` is written LAST so a torn read degrades to "unknown" rather than to a
+# falsely-low percentage — see cc_account_lib.ts::formatSnapshot.
+if [ -n "$acct_email" ] && [ -n "$five_pct" ]; then
+  printf 'five_pct=%s\nfive_reset=%s\nweek_pct=%s\nweek_reset=%s\nstamped_at=%s\nemail=%s\n' \
+    "$_fpct" "${five_reset:-0}" "$_wpct" "${week_reset:-0}" "$NOW" "$acct_email" \
+    > "$HOME/.claude/.cc-usage-${acct_email}" 2>/dev/null
+fi
+
 # Cumulative session tokens — opt-in (off by default; misleading because
 # every API call's full input is summed, including cache rereads).
 if _on tokens_total && { [ -n "$tokens_in" ] || [ -n "$tokens_out" ]; }; then
