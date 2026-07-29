@@ -134,6 +134,14 @@ using two properties that make stale data far more useful than it sounds:
 An account with no snapshot is `unknown` and sorts **last** — never
 optimistically assumed free, because guessing wrong sends you into a wall.
 
+For the same reason the statusline **skips** the write for a few ticks after a
+`/login`: `~/.claude.json` flips to the new seat at once, but the running
+process keeps reporting the window it was already on, so an early write would
+file the previous account's percentages under the new seat. The tell is
+`five_reset` — while a seat change still carries the old window's reset epoch,
+nothing is written. Expect a newly-added account to read `unknown` for a moment
+after switching to it; that is the guard, not a fault.
+
 `next` ranks provably-reset first, then lowest floor, then name (deterministic:
 the same state always picks the same account).
 

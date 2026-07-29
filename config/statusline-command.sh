@@ -510,10 +510,34 @@ _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
 #
 # `seat_key=` is written LAST so a torn read degrades to "unknown" rather than
 # to a falsely-low percentage — see cc_account_lib.ts::formatSnapshot.
-if [ -n "$acct_seat" ] && [ -n "$five_pct" ]; then
+#
+# GUARD — an in-process /login makes the payload unattributable for a few
+# seconds. `~/.claude.json` flips to the new seat immediately, but the running
+# process keeps reporting the window it was already on, so the first ticks after
+# a switch would file the OLD account's percentages under the NEW seat's key.
+# Observed live on 2026-07-29: 46% landed under a seat actually at 57% — an
+# UNDERSTATEMENT, the one direction that misleads (it makes an account look
+# freer than it is, and `floor` semantics promise the opposite).
+#
+# The tell is `five_reset`: the payload is still describing the previous
+# account's window until that epoch changes. So remember the seat+reset of the
+# last write for THIS pid, and while a seat change still carries the previous
+# seat's reset epoch, skip the write. Once the epoch moves, the payload has
+# caught up and writing resumes. Skipping leaves the seat `unknown` (sorted
+# last) rather than confidently wrong — fail-safe, same as everywhere else here.
+_swf="$HOME/.claude/.statusline-seat-$PPID"
+_prev_seat="" _prev_reset=""
+[ -r "$_swf" ] && IFS=$'\t' read -r _prev_seat _prev_reset < "$_swf"
+_seat_ok=1
+if [ -n "$_prev_seat" ] && [ "$_prev_seat" != "$acct_seat" ] &&
+   [ "${five_reset:-0}" = "$_prev_reset" ]; then
+  _seat_ok=0                                  # identity moved, payload has not
+fi
+if [ -n "$acct_seat" ] && [ -n "$five_pct" ] && [ "$_seat_ok" = 1 ]; then
   printf 'five_pct=%s\nfive_reset=%s\nweek_pct=%s\nweek_reset=%s\nstamped_at=%s\nemail=%s\nseat_key=%s\n' \
     "$_fpct" "${five_reset:-0}" "$_wpct" "${week_reset:-0}" "$NOW" "$acct_email" "$acct_seat" \
     > "$HOME/.claude/.cc-usage-${acct_seat//:/_}" 2>/dev/null
+  printf '%s\t%s\n' "$acct_seat" "${five_reset:-0}" > "$_swf" 2>/dev/null
 fi
 
 # Cumulative session tokens — opt-in (off by default; misleading because
