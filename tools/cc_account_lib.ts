@@ -47,13 +47,29 @@
  * assumed empty, because guessing wrong sends you to a wall.
  */
 
-/** A named account this machine can switch to. */
+/**
+ * A named account this machine can switch to.
+ *
+ * The identity key is `orgUuid`, NOT `email`. One address can hold seats in
+ * several orgs — `aryeh.kiovetsky@evinced.net` is both a member of the Evinced
+ * RD team org and the owner of a personal Max org. Those are separate accounts
+ * with separate rate-limit budgets that happen to share a login address (and
+ * even an `accountUuid`; only the org differs). Keying on email conflated them:
+ * it deduped one out of the registry on `add`, and pointed both at a single
+ * snapshot file so each reported the other's usage.
+ */
 export interface Profile {
   /** Keychain account under service `stark-cc-token`, e.g. `s1`. */
   name: string;
-  /** Address the account logs in as. Joins a profile to its snapshot. */
+  /** Address the account logs in as. Display + disambiguation only. */
   email: string;
-  /** Statusline label, e.g. `Max/S1` — display only. */
+  /**
+   * `oauthAccount.organizationUuid` — the identity key. Joins a profile to its
+   * usage snapshot. Optional only to tolerate pre-fix registry entries, which
+   * the CLI backfills from the stored record on read.
+   */
+  orgUuid?: string;
+  /** Org name, e.g. `Evinced RD` — display only, disambiguates shared emails. */
   label?: string;
 }
 
@@ -67,6 +83,9 @@ export interface StoredProfile {
 
 /** One statusline render's view of an account's rate-limit windows. */
 export interface UsageSnapshot {
+  /** The org this reading belongs to — the join key. */
+  orgUuid: string;
+  /** Login address at capture time. Display only; not unique across orgs. */
   email: string;
   fivePct: number;
   /** Unix seconds when the 5h window rolls. 0 when absent. */
@@ -154,14 +173,19 @@ export function writeProfileArgv(name: string, blob: string): string[] {
   ];
 }
 
-/** Snapshot file path for an account. One file per email, atomic per render. */
-export function snapshotPath(home: string, email: string): string {
-  return `${home}/.claude/.cc-usage-${sanitizeEmail(email)}`;
+/**
+ * Snapshot file path for an account — one file per ORG, not per email.
+ *
+ * Two profiles sharing a login address must not share a file: their windows
+ * are independent, and a shared file makes each report the other's usage.
+ */
+export function snapshotPath(home: string, orgUuid: string): string {
+  return `${home}/.claude/.cc-usage-${sanitizeKey(orgUuid)}`;
 }
 
-/** Filesystem-safe form of an email. Collision-free for realistic addresses. */
-export function sanitizeEmail(email: string): string {
-  return email.trim().toLowerCase().replace(/[^a-z0-9._@+-]/g, "_");
+/** Filesystem-safe form of an identity key (uuid, or a legacy email). */
+export function sanitizeKey(key: string): string {
+  return key.trim().toLowerCase().replace(/[^a-z0-9._@+-]/g, "_");
 }
 
 /**
@@ -169,13 +193,17 @@ export function sanitizeEmail(email: string): string {
  * writer is `statusline-command.sh` on a 1s tick, where a `jq` fork is the
  * thing the whole script is built to avoid — bash can emit this with `printf`.
  *
- * `email` is emitted LAST, and that ordering is load-bearing. The writer
+ * `org_uuid` is emitted LAST, and that ordering is load-bearing. The writer
  * redirects straight onto the file (no temp-file + rename, which would cost a
  * fork per tick), so a reader can catch a partially-written file. `parse`
- * treats a record with no `email` as unmarked — so a truncated write degrades
- * to `unknown` (sorted last) instead of to a record showing `five_pct=0`,
- * which would read as "this account is completely free" and send a caller
- * straight into a wall. Fail-safe by construction, not by locking.
+ * treats a record with no `org_uuid` as unmarked — so a truncated write
+ * degrades to `unknown` (sorted last) instead of to a record showing
+ * `five_pct=0`, which would read as "this account is completely free" and send
+ * a caller straight into a wall. Fail-safe by construction, not by locking.
+ *
+ * A record without `org_uuid` is also how PRE-FIX snapshots (keyed by email,
+ * with no org field) are rejected: they cannot be attributed to one of several
+ * same-email orgs, so they are dropped rather than guessed at.
  */
 export function formatSnapshot(s: UsageSnapshot): string {
   return (
@@ -186,6 +214,7 @@ export function formatSnapshot(s: UsageSnapshot): string {
       `week_reset=${s.weekReset}`,
       `stamped_at=${s.stampedAt}`,
       `email=${s.email}`,
+      `org_uuid=${s.orgUuid}`,
     ].join("\n") + "\n"
   );
 }
@@ -196,8 +225,8 @@ export function parseSnapshot(text: string): UsageSnapshot | null {
     const i = line.indexOf("=");
     if (i > 0) kv.set(line.slice(0, i).trim(), line.slice(i + 1).trim());
   }
-  const email = kv.get("email");
-  if (!email) return null;
+  const orgUuid = kv.get("org_uuid");
+  if (!orgUuid) return null;
   const num = (k: string): number => {
     const raw = kv.get(k);
     if (raw === undefined || raw === "") return 0;
@@ -205,7 +234,8 @@ export function parseSnapshot(text: string): UsageSnapshot | null {
     return Number.isFinite(n) ? n : 0;
   };
   return {
-    email,
+    orgUuid,
+    email: kv.get("email") ?? "",
     fivePct: num("five_pct"),
     fiveReset: num("five_reset"),
     weekPct: num("week_pct"),
@@ -255,6 +285,14 @@ const CERTAINTY_RANK: Record<Certainty, number> = {
 /**
  * Order profiles best-target-first.
  *
+ * Snapshots are keyed by `orgUuid`. A profile with no `orgUuid` (a pre-fix
+ * registry entry the CLI could not backfill) joins to nothing and ranks
+ * `unknown` — correct, since its usage genuinely cannot be attributed.
+ *
+ * `exclude` matches on profile name or orgUuid. It deliberately does NOT match
+ * on email: excluding the active account by address would also exclude a
+ * different org that merely shares it.
+ *
  * Sort is total and deterministic: certainty class, then 5h floor, then 7d
  * floor, then name. Deterministic ordering matters because `next` is used
  * non-interactively — the same state must always pick the same account.
@@ -265,17 +303,21 @@ export function rankProfiles(
   now: number,
   opts: { exclude?: readonly string[] } = {},
 ): RankedProfile[] {
-  const excluded = new Set((opts.exclude ?? []).map((e) => e.toLowerCase()));
+  const excluded = new Set(
+    (opts.exclude ?? []).filter(Boolean).map((e) => e.toLowerCase()),
+  );
   return profiles
     .filter(
       (p) =>
         !excluded.has(p.name.toLowerCase()) &&
-        !excluded.has(p.email.toLowerCase()),
+        !(p.orgUuid && excluded.has(p.orgUuid.toLowerCase())),
     )
     .map((profile) => ({
       profile,
       projection: projectUsage(
-        snapshots.get(profile.email.toLowerCase()),
+        profile.orgUuid
+          ? snapshots.get(profile.orgUuid.toLowerCase())
+          : undefined,
         now,
       ),
     }))
@@ -311,13 +353,27 @@ export function validateStoredProfile(v: unknown): StoredProfile {
   if (typeof acct !== "object" || acct === null) {
     throw new Error("profile record is missing an `oauthAccount` object");
   }
-  if (typeof (acct as Record<string, unknown>)["emailAddress"] !== "string") {
+  const a = acct as Record<string, unknown>;
+  if (typeof a["emailAddress"] !== "string") {
     throw new Error("profile `oauthAccount` is missing `emailAddress`");
   }
-  return {
-    credentials: rec["credentials"],
-    oauthAccount: acct as Record<string, unknown>,
-  };
+  // The identity key. Without it a stored profile cannot be told apart from a
+  // sibling org on the same address, so it is required rather than defaulted.
+  if (typeof a["organizationUuid"] !== "string" || a["organizationUuid"] === "") {
+    throw new Error(
+      "profile `oauthAccount` is missing `organizationUuid` — re-run `add` " +
+        "while logged in as this account",
+    );
+  }
+  return { credentials: rec["credentials"], oauthAccount: a };
+}
+
+/** Read the org key off a live/stored `oauthAccount`, or null if absent. */
+export function orgUuidOf(
+  account: Record<string, unknown> | null | undefined,
+): string | null {
+  const v = account?.["organizationUuid"];
+  return typeof v === "string" && v !== "" ? v : null;
 }
 
 /** Human-readable headroom line, e.g. `5H 12% (floor, 4m old) · 7D 61%`. */
