@@ -79,6 +79,29 @@ once at startup; a running session keeps the old account until restarted.
 `use` also re-captures the OUTGOING account before overwriting it, so a token
 refreshed during the session isn't lost.
 
+## The identity key is the ORG, not the email
+
+One address can hold seats in several orgs. `aryeh.kiovetsky@evinced.net` is
+both a member of the **Evinced RD** team org and the owner of a **personal Max**
+org — same address, same `accountUuid`, different `organizationUuid`, and
+entirely independent rate-limit budgets.
+
+So `oauthAccount.organizationUuid` is what identifies a profile: it keys the
+registry, the snapshot filename, ranking joins, and the active-profile marker.
+Email is display only. `list` and `next` print the org name so two profiles
+sharing an address stay distinguishable.
+
+Two consequences worth knowing:
+
+- **`add` replaces by org, not by address.** Registering a second account on an
+  address you already use adds it; it does not overwrite the first. Re-running
+  `add` with a new name for the *same org* renames it and says so.
+- **Pre-`0.3.1` state migrates itself.** Registry entries written before this
+  backfill their org key from the stored Keychain record on first read.
+  Snapshots written before it lack an org key entirely and are dropped rather
+  than guessed at — so those profiles read `unknown` until the statusline
+  renders once under each account.
+
 ## How `limits` knows anything about an inactive account
 
 It cannot ask. The 5h/7d percentages exist **only** in the statusline's stdin
@@ -86,7 +109,7 @@ payload (`.rate_limits.*`) at render time — nothing persists them, and probing
 an account live would spend quota from the window being measured.
 
 So `config/statusline-command.sh` snapshots the four fields to
-`~/.claude/.cc-usage-<email>` on each render (free — already parsed, and a
+`~/.claude/.cc-usage-<orgUuid>` on each render (free — already parsed, and a
 fork-free bash redirect). `cc_account_lib.ts` then reasons over the snapshots
 using two properties that make stale data far more useful than it sounds:
 
