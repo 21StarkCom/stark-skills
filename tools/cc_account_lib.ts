@@ -8,7 +8,9 @@
  *
  * `gh` needs a token in an env var. Claude Code needs both:
  *   - macOS Keychain, class `genp`, service `Claude Code-credentials`,
- *     account `root` — the OAuth blob (access/refresh token, expiry, scopes).
+ *     account = the login user (`USER` env, `unknown` fallback — see
+ *     `resolveClaudeKeychainAccount`) — the OAuth blob (access/refresh token,
+ *     expiry, scopes).
  *   - `~/.claude.json` → `oauthAccount` — the identity metadata
  *     (`emailAddress`, `organizationType`, `organizationUuid`, `seatTier`, …).
  *
@@ -131,35 +133,53 @@ export interface Projection {
 }
 
 const SERVICE_CLAUDE = "Claude Code-credentials";
-const ACCOUNT_CLAUDE = "root";
 const SERVICE_PROFILES = "stark-cc-token";
 
 export const KEYCHAIN = {
   claudeService: SERVICE_CLAUDE,
-  claudeAccount: ACCOUNT_CLAUDE,
   profileService: SERVICE_PROFILES,
 } as const;
 
 /**
- * Read the live Claude credential blob.
+ * The Keychain ACCOUNT the Claude CLI keys its credentials item by.
+ *
+ * The CLI resolves this from the `USER` env var, with a literal `unknown`
+ * fallback when it is unset (an `acct=unknown` item created by a USER-less
+ * headless run is the observed evidence — `os.userInfo()` can never produce
+ * that string). This mirrors that resolution exactly, so every read and write
+ * here targets the entry the CLI itself will use in the same environment.
+ *
+ * The original release hardcoded `root` — a stale relic item — which made
+ * `use` write credentials the CLI never read and `add` capture a long-dead
+ * token into every stored profile. Never hardcode this account.
+ */
+export function resolveClaudeKeychainAccount(
+  env: Record<string, string | undefined>,
+): string {
+  const user = env["USER"]?.trim();
+  return user ? user : "unknown";
+}
+
+/**
+ * Read the live Claude credential blob for `account`.
  *
  * `security` takes the secret on argv for writes, so it is visible to `ps` for
  * processes owned by the same user. That is the standard scripting tradeoff on
  * macOS and matches how the `stark-gh-token` entries are managed; it is not an
  * exposure to *other* users. Callers must still not log the returned value.
  */
-export function readClaudeCredsArgv(): string[] {
+export function readClaudeCredsArgv(account: string): string[] {
   return [
     "find-generic-password",
     "-s",
     SERVICE_CLAUDE,
     "-a",
-    ACCOUNT_CLAUDE,
+    account,
     "-w",
   ];
 }
 
-export function writeClaudeCredsArgv(blob: string): string[] {
+export function writeClaudeCredsArgv(account: string, blob: string): string[] {
   // -U updates in place instead of erroring on an existing item.
   return [
     "add-generic-password",
@@ -167,7 +187,7 @@ export function writeClaudeCredsArgv(blob: string): string[] {
     "-s",
     SERVICE_CLAUDE,
     "-a",
-    ACCOUNT_CLAUDE,
+    account,
     "-w",
     blob,
   ];
@@ -380,6 +400,42 @@ export function applyOrder(
     }
     return { ...p, order: r };
   });
+}
+
+/**
+ * Merge a freshly-captured profile into the registry.
+ *
+ * Dedupe is on name and SEAT — never on email or org alone. One address can
+ * hold seats in several orgs, and one org holds many members, so filtering by
+ * either component would evict a distinct seat that merely shares it.
+ *
+ * The rotation slot survives both refresh shapes: re-`add`ing the same name
+ * (documented as the token-refresh path) keeps its own `order`; renaming a
+ * seat inherits the displaced entry's. Only a genuinely new seat joins
+ * unplaced, at the END of the cycle, so a refresh never reshuffles a sequence
+ * the user deliberately arranged.
+ */
+export function mergeProfile(
+  existing: readonly Profile[],
+  entry: { name: string; email: string; seatKey: string; label?: string },
+): { profiles: Profile[]; displaced?: Profile } {
+  const prior = existing.find((p) => p.name === entry.name);
+  const displaced = existing.find(
+    (p) => p.name !== entry.name && p.seatKey === entry.seatKey,
+  );
+  const profiles = existing.filter(
+    (p) => p.name !== entry.name && p.seatKey !== entry.seatKey,
+  );
+  const order = prior?.order ?? displaced?.order;
+  profiles.push({
+    name: entry.name,
+    email: entry.email,
+    seatKey: entry.seatKey,
+    ...(entry.label ? { label: entry.label } : {}),
+    ...(order !== undefined ? { order } : {}),
+  });
+  profiles.sort((a, b) => a.name.localeCompare(b.name));
+  return { profiles, ...(displaced ? { displaced } : {}) };
 }
 
 export interface RankedProfile {

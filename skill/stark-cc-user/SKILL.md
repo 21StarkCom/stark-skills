@@ -68,7 +68,7 @@ writing only one leaves the machine incoherent:
 
 | Half | Where | What breaks if skipped |
 |---|---|---|
-| OAuth blob | Keychain `genp`, service `Claude Code-credentials`, account `root` | CLI still authenticates as the old account |
+| OAuth blob | Keychain `genp`, service `Claude Code-credentials`, account = the login user (`USER` env, `unknown` fallback — never hardcode; a hardcoded `root` shipped in the first release and made every switch a no-op) | CLI still authenticates as the old account |
 | Identity metadata | `~/.claude.json` → `oauthAccount` | Statusline and every `oauthAccount` reader report the wrong account |
 
 `use` writes both from one stored record, Keychain first (it is the half that

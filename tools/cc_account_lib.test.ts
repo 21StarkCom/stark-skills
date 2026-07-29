@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   applyOrder,
   describeProjection,
+  mergeProfile,
   nextInCycle,
   orderedProfiles,
   formatAge,
@@ -11,6 +12,8 @@ import {
   parseSnapshot,
   projectUsage,
   rankProfiles,
+  readClaudeCredsArgv,
+  resolveClaudeKeychainAccount,
   seatKeyOf,
   sanitizeKey,
   snapshotPath,
@@ -422,6 +425,54 @@ test("validateStoredProfile: rejects half-valid records", () => {
   );
 });
 
+// ── registry merge ──────────────────────────────────────────────────────
+
+test("mergeProfile: re-adding the same name keeps its rotation slot", () => {
+  // `add` is documented as safe to re-run to refresh a rotated token — that
+  // must not silently unplace the profile from the cycle.
+  const { profiles } = mergeProfile(
+    [
+      { name: "Com-Max", email: "a@x.com", seatKey: "a:1", order: 0 },
+      { name: "Net-T0", email: "b@x.net", seatKey: "b:2", order: 1 },
+    ],
+    { name: "Com-Max", email: "a@x.com", seatKey: "a:1" },
+  );
+  assert.equal(profiles.find((p) => p.name === "Com-Max")?.order, 0);
+  assert.equal(profiles.length, 2);
+});
+
+test("mergeProfile: renaming a seat inherits the displaced entry's slot", () => {
+  const { profiles, displaced } = mergeProfile(
+    [{ name: "old", email: "a@x.com", seatKey: "a:1", order: 3 }],
+    { name: "new", email: "a@x.com", seatKey: "a:1" },
+  );
+  assert.equal(displaced?.name, "old");
+  assert.equal(profiles.find((p) => p.name === "new")?.order, 3);
+  assert.ok(!profiles.some((p) => p.name === "old"));
+});
+
+test("mergeProfile: a genuinely new seat joins unplaced", () => {
+  const { profiles, displaced } = mergeProfile(
+    [{ name: "a", email: "a@x.com", seatKey: "a:1", order: 0 }],
+    { name: "b", email: "b@x.net", seatKey: "b:2" },
+  );
+  assert.equal(displaced, undefined);
+  assert.equal(profiles.find((p) => p.name === "b")?.order, undefined);
+});
+
+test("mergeProfile: dedupes on name and seat, never on email or org", () => {
+  // Two seats sharing an address must both survive an add of either.
+  const { profiles } = mergeProfile(
+    [
+      { name: "T0", email: "a@x.net", seatKey: "acct:org-t", order: 0 },
+      { name: "M0", email: "a@x.net", seatKey: "acct:org-m", order: 1 },
+    ],
+    { name: "T0", email: "a@x.net", seatKey: "acct:org-t" },
+  );
+  assert.ok(profiles.some((p) => p.name === "M0"));
+  assert.equal(profiles.length, 2);
+});
+
 // ── paths + formatting ──────────────────────────────────────────────────
 
 test("sanitizeKey: lowercases, strips path-hostile chars, keeps seats distinct", () => {
@@ -436,8 +487,35 @@ test("snapshotPath: keyed by seat, lands under the home .claude dir", () => {
 });
 
 test("keychain argv: writes use -U so an existing item updates in place", () => {
-  assert.ok(writeClaudeCredsArgv("blob").includes("-U"));
+  assert.ok(writeClaudeCredsArgv("aryeh", "blob").includes("-U"));
   assert.ok(writeProfileArgv("s1", "blob").includes("-U"));
+});
+
+test("keychain argv: live-creds access targets the caller's account, never `root`", () => {
+  // The Claude CLI keys its `Claude Code-credentials` item by the login user.
+  // The original release hardcoded `root` — a stale relic entry — so `use`
+  // wrote credentials the CLI never read and `add` captured a dead Feb token
+  // into every profile. The account is now caller-supplied.
+  const read = readClaudeCredsArgv("aryeh");
+  assert.deepEqual(read.slice(read.indexOf("-a"), read.indexOf("-a") + 2), [
+    "-a",
+    "aryeh",
+  ]);
+  assert.ok(!read.includes("root"));
+  const write = writeClaudeCredsArgv("aryeh", "blob");
+  assert.ok(write.includes("aryeh"));
+  assert.ok(!write.includes("root"));
+});
+
+test("resolveClaudeKeychainAccount: mirrors the CLI — USER env, `unknown` fallback", () => {
+  // Evidence for the mirror: the CLI itself left an `acct=unknown` item behind
+  // when run with USER unset. Matching its resolution exactly means this tool
+  // always touches the entry the CLI will actually read in the same env.
+  assert.equal(resolveClaudeKeychainAccount({ USER: "aryeh" }), "aryeh");
+  assert.equal(resolveClaudeKeychainAccount({ USER: " aryeh " }), "aryeh");
+  assert.equal(resolveClaudeKeychainAccount({}), "unknown");
+  assert.equal(resolveClaudeKeychainAccount({ USER: "" }), "unknown");
+  assert.equal(resolveClaudeKeychainAccount({ USER: "   " }), "unknown");
 });
 
 test("keychain argv: profile writes target the stark-cc-token service", () => {
