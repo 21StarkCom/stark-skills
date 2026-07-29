@@ -406,6 +406,10 @@ function jitter(seconds: number, pct = 0.2): number {
 interface PollOutcome {
   kind: "wait" | "ready" | "head_moved" | "fatal";
   reason?: string;
+  // Set only on a `wait` produced by a rollup with ZERO required contexts. See
+  // decideVacuousTransition for why that case is time-bounded rather than
+  // waited on indefinitely.
+  vacuous?: boolean;
 }
 
 // Constants exported for the unit-test of decideHeadMovedTransition.
@@ -423,6 +427,40 @@ export function decideHeadMovedTransition(
   return consecutiveCount < required ? "reconfirm" : "terminal";
 }
 
+// How long a VACUOUS rollup (zero REQUIRED contexts) may persist before the
+// watcher gives up instead of polling to its 6h timeout.
+export const NO_REQUIRED_CHECKS_GRACE_SEC = 300;
+
+// Pure: a vacuous rollup is ambiguous, and the two readings need opposite
+// handling.
+//
+//   TRANSIENT — the push just landed and GitHub has not attached the check
+//     runs yet, so nothing is required *yet*. Waiting fixes it, usually within
+//     seconds.
+//   PERMANENT — the base branch has no required status checks at all
+//     (unprotected branch, or protection without required contexts). Waiting
+//     can NEVER fix this: `required` is 0 because of branch configuration, and
+//     no amount of polling changes branch configuration.
+//
+// They are indistinguishable in a single sample, so time separates them: past
+// the grace window, treat it as configuration and stop.
+//
+// This is the bug that motivated the helper. A PR into an UNPROTECTED base
+// branch left the watcher polling happily for its full 6h timeout —
+// `status: "watching"`, `consecutiveGreen: 0`, `lastError: null` — while every
+// check run on the head was green and the PR was MERGEABLE/CLEAN. Nothing ever
+// merged and nothing said why, because `evaluateRollup`'s wait reason was
+// computed and then dropped (see writeStatus at the call site, now fixed too).
+// Observed on 21StarkCom/kotodama#861, whose base `build/gke-api-auth-boundary`
+// carried no branch protection; `main` requires one context, so every prior run
+// had exercised only the non-vacuous path.
+export function decideVacuousTransition(
+  vacuousElapsedSec: number,
+  graceSec: number = NO_REQUIRED_CHECKS_GRACE_SEC,
+): "wait" | "terminal" {
+  return vacuousElapsedSec < graceSec ? "wait" : "terminal";
+}
+
 // Pure function: maps a rollup result (mismatch | contexts) + plan policy
 // into a PollOutcome. Easy to unit-test.
 export function evaluateRollup(
@@ -433,7 +471,10 @@ export function evaluateRollup(
   const v = summarizeVerdict(rollup.contexts!);
   if (v.vacuous) {
     if (policy.allowNoRequiredChecks) return { kind: "ready", reason: "vacuous-allowed" };
-    return { kind: "wait", reason: "no required checks observed yet" };
+    // `vacuous: true` is carried on the outcome so the caller can time-bound it
+    // (decideVacuousTransition) instead of waiting on a condition that may be
+    // permanent. The reason string is not a marker — callers must not parse it.
+    return { kind: "wait", reason: "no required checks observed yet", vacuous: true };
   }
   if (v.anyFailing) return { kind: "fatal", reason: `failing checks: ${v.failing}` };
   if (v.allPassing) return { kind: "ready", reason: "all required passing" };
@@ -538,6 +579,10 @@ async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
   const maxMs = args.watchTimeoutHours * 60 * 60 * 1000;
   const backoff: BackoffState = { consecErrors: 0, rateLimitDelaySec: 0 };
   let consecutiveGreen = 0;
+  // When the CURRENT run of vacuous polls began (null = not currently vacuous).
+  // Timestamped rather than counted so the grace window is wall-clock and stays
+  // meaningful as the poll interval backs off under rate limiting.
+  let vacuousSinceMs: number | null = null;
   const REQUIRED_GREEN = 2; // PR4-claude H13 debounce
   // Tolerate transient head-OID mismatch right after force-push: GitHub's
   // GraphQL `pullRequest.headRefOid` can lag the push receiver by hundreds
@@ -632,7 +677,8 @@ async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
     }
     if (outcome!.kind === "ready") {
       consecutiveGreen++;
-      writeStatus({ consecutiveGreen, status: "watching" });
+      vacuousSinceMs = null;
+      writeStatus({ consecutiveGreen, status: "watching", lastWait: null });
       if (consecutiveGreen >= REQUIRED_GREEN) {
         // Fire callback. Spawn detached so its lifetime is independent.
         const { pid } = spawnCallback(callbackPath, args.planFile);
@@ -647,7 +693,36 @@ async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
       }
     } else {
       consecutiveGreen = 0;
-      writeStatus({ consecutiveGreen, status: "watching" });
+      // SURFACE THE REASON. This used to write only the counter, so a watcher
+      // that could never progress was indistinguishable from one waiting on a
+      // check that was about to finish: `status: "watching"`, `lastError: null`
+      // and nothing else. The reason is the entire diagnosis.
+      writeStatus({ consecutiveGreen, status: "watching", lastWait: outcome!.reason ?? null });
+
+      // A vacuous rollup may be transient (checks not attached yet) or permanent
+      // (the base branch requires no checks at all). Bound it: past the grace
+      // window, stop rather than poll to the 6h timeout with nothing to wait for.
+      if (outcome!.vacuous) {
+        if (vacuousSinceMs === null) vacuousSinceMs = Date.now();
+        const elapsedSec = (Date.now() - vacuousSinceMs) / 1000;
+        if (decideVacuousTransition(elapsedSec) === "terminal") {
+          const reason =
+            `no REQUIRED status checks on this PR after ${Math.round(elapsedSec)}s — the base branch has none configured, ` +
+            `so this will never turn green no matter how long it is watched. Check runs on the head may all be passing and the ` +
+            `PR MERGEABLE; the watcher gates on REQUIRED contexts, and there are none. Either add required checks to the base ` +
+            `branch's protection, or re-run the merge with --allow-no-required-checks to accept a vacuous pass.`;
+          writeStatus({ status: "no_required_checks", finishedAt: new Date().toISOString(), reason });
+          atomicWriteJson(latestPointer(host, plan.pr.headRepositoryOwner, plan.pr.headRepositoryName, plan.pr.number), {
+            headSha: plan.pushedHeadOid,
+            status: "no_required_checks",
+            updatedAt: new Date().toISOString(),
+          });
+          releaseAllMerge();
+          return 0;
+        }
+      } else {
+        vacuousSinceMs = null;
+      }
     }
     await new Promise(r => setTimeout(r, jitter(args.pollSeconds) * 1000));
   }

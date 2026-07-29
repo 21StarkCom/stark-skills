@@ -6,7 +6,9 @@ import {
   jitter,
   evaluateRollup,
   decideHeadMovedTransition,
+  decideVacuousTransition,
   HEAD_MOVED_REQUIRED_RECONFIRMS,
+  NO_REQUIRED_CHECKS_GRACE_SEC,
 } from "../gh_watch_runs.ts";
 
 test("parsePrMergeArgs: returns null when --on-green absent", () => {
@@ -95,6 +97,45 @@ test("evaluateRollup: vacuous wait when not allowed", () => {
 test("evaluateRollup: vacuous ready when allowNoRequiredChecks", () => {
   const r = evaluateRollup({ mismatch: false, contexts: [], headRefOid: "sha" }, { allowNoRequiredChecks: true });
   assert.equal(r.kind, "ready");
+});
+
+// A vacuous wait must be MARKED as vacuous, so the loop can time-bound it. Without
+// the flag the caller cannot tell "no required checks configured — never resolves"
+// from "a required check is still running", and polls the full watch timeout.
+test("evaluateRollup: vacuous wait carries the vacuous flag", () => {
+  const r = evaluateRollup({ mismatch: false, contexts: [], headRefOid: "sha" }, { allowNoRequiredChecks: false });
+  assert.equal(r.kind, "wait");
+  assert.equal(r.vacuous, true);
+});
+
+// ...and a NON-vacuous wait must not, or a PR legitimately waiting on a slow
+// required check would be abandoned after the grace window.
+test("evaluateRollup: pending required check is a wait that is NOT vacuous", () => {
+  const ctx = [
+    { kind: "CheckRun", name: "ci", isRequired: true, conclusion: null, status: "IN_PROGRESS" },
+  ];
+  const r = evaluateRollup({ mismatch: false, contexts: ctx, headRefOid: "sha" }, { allowNoRequiredChecks: false });
+  assert.equal(r.kind, "wait");
+  assert.ok(!r.vacuous);
+});
+
+// The regression this exists for: 21StarkCom/kotodama#861 targeted an UNPROTECTED
+// base branch, so the rollup was permanently vacuous. The watcher polled for its
+// full 6h timeout with consecutiveGreen stuck at 0 and lastError null, while every
+// check run was green and the PR was MERGEABLE/CLEAN. Waiting cannot fix branch
+// configuration, so past the grace window the watcher must stop.
+test("decideVacuousTransition: waits inside the grace window, terminal past it", () => {
+  assert.equal(decideVacuousTransition(0), "wait");
+  assert.equal(decideVacuousTransition(NO_REQUIRED_CHECKS_GRACE_SEC - 1), "wait");
+  assert.equal(decideVacuousTransition(NO_REQUIRED_CHECKS_GRACE_SEC), "terminal");
+  assert.equal(decideVacuousTransition(NO_REQUIRED_CHECKS_GRACE_SEC + 600), "terminal");
+});
+
+// The grace window exists because the SAME vacuous reading is legitimately
+// transient right after a push, before GitHub attaches the check runs.
+test("decideVacuousTransition: grace window is configurable", () => {
+  assert.equal(decideVacuousTransition(10, 60), "wait");
+  assert.equal(decideVacuousTransition(60, 60), "terminal");
 });
 
 test("evaluateRollup: all-passing → ready", () => {
