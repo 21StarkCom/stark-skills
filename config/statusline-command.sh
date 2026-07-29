@@ -373,19 +373,25 @@ l2=""
 # the 5H/7D gauges below key their fill style off acct_label (Enterprise → 🔸).
 acct_label=""
 {
-  acct_email="" acct_otype="" acct_org=""
+  acct_email="" acct_otype="" acct_seat=""
   _ac="$HOME/.claude/.statusline-account-cache"
   if [ -f "$_ac" ] && ! [ "$HOME/.claude.json" -nt "$_ac" ]; then
-    IFS=$'\t' read -r acct_email acct_otype acct_org < "$_ac"
+    IFS=$'\t' read -r acct_email acct_otype acct_seat < "$_ac"
   fi
-  # Re-parse on a miss OR on a 2-field cache left by the pre-org-uuid version:
-  # that file stays valid by mtime, so without this the org key would read empty
-  # until ~/.claude.json next changed, silently suspending usage snapshots.
-  if [ -z "$acct_org" ]; then
-    IFS=$'\t' read -r acct_email acct_otype acct_org < <(
-      jq -r '.oauthAccount | "\(.emailAddress // "")\t\(.organizationType // "")\t\(.organizationUuid // "")"' \
+  # Re-parse on a miss OR on a cache left by an earlier keying scheme (2 fields,
+  # or 3 with a bare org uuid): those files stay valid by mtime, so without this
+  # the seat key would read empty or wrong until ~/.claude.json next changed —
+  # silently suspending usage snapshots, or worse, writing them under a key that
+  # merges two seats. The `:` is what distinguishes a seat key from a bare uuid.
+  case "$acct_seat" in
+    *:*) ;;                                  # already a seat key
+    *)   acct_seat="" ;;
+  esac
+  if [ -z "$acct_seat" ]; then
+    IFS=$'\t' read -r acct_email acct_otype acct_seat < <(
+      jq -r '.oauthAccount | "\(.emailAddress // "")\t\(.organizationType // "")\t" + (if (.accountUuid // "") != "" and (.organizationUuid // "") != "" then "\(.accountUuid):\(.organizationUuid)" else "" end)' \
         "$HOME/.claude.json" 2>/dev/null)
-    printf '%s\t%s\t%s\n' "$acct_email" "$acct_otype" "$acct_org" > "$_ac" 2>/dev/null
+    printf '%s\t%s\t%s\n' "$acct_email" "$acct_otype" "$acct_seat" > "$_ac" 2>/dev/null
   fi
   if [ -n "$acct_email" ]; then
     acct_dom=${acct_email##*@}            # evinced.com / evinced.net
@@ -489,22 +495,25 @@ _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
 # here is free: the values are already parsed above, and the write is a bash
 # redirect (no fork), matching the account/git caches alongside it.
 #
-# Keyed by organizationUuid, NOT email: one address can hold seats in several
-# orgs (a Team seat and a personal Max plan share aryeh.kiovetsky@evinced.net),
-# and those have INDEPENDENT rate-limit budgets. Keying by address pointed both
-# at one file, so each reported the other's usage.
+# Keyed by SEAT — accountUuid:organizationUuid — because neither component is
+# unique. One address holds seats in several orgs (a Team seat and a personal Max
+# plan share aryeh.kiovetsky@evinced.net) and one org holds many members
+# (aryeh.kiovetsky and aryeh.stark.1 both sit in Evinced RD). Team limits are
+# per-member, so every (account, org) pair has its own budget. Keying by either
+# component alone pointed two seats at one file, so each reported the other's
+# usage. The `:` is replaced by `_` on disk (see sanitizeKey).
 #
 # Guarded on the RAW $five_pct, not the rounded $_fpct: when the payload omits
 # rate_limits entirely, $_fpct is 0, and persisting that would claim the account
 # is completely free. Skipping the write leaves the previous (older but true)
 # snapshot in place, which the reader ages honestly.
 #
-# `org_uuid=` is written LAST so a torn read degrades to "unknown" rather than
+# `seat_key=` is written LAST so a torn read degrades to "unknown" rather than
 # to a falsely-low percentage — see cc_account_lib.ts::formatSnapshot.
-if [ -n "$acct_org" ] && [ -n "$five_pct" ]; then
-  printf 'five_pct=%s\nfive_reset=%s\nweek_pct=%s\nweek_reset=%s\nstamped_at=%s\nemail=%s\norg_uuid=%s\n' \
-    "$_fpct" "${five_reset:-0}" "$_wpct" "${week_reset:-0}" "$NOW" "$acct_email" "$acct_org" \
-    > "$HOME/.claude/.cc-usage-${acct_org}" 2>/dev/null
+if [ -n "$acct_seat" ] && [ -n "$five_pct" ]; then
+  printf 'five_pct=%s\nfive_reset=%s\nweek_pct=%s\nweek_reset=%s\nstamped_at=%s\nemail=%s\nseat_key=%s\n' \
+    "$_fpct" "${five_reset:-0}" "$_wpct" "${week_reset:-0}" "$NOW" "$acct_email" "$acct_seat" \
+    > "$HOME/.claude/.cc-usage-${acct_seat//:/_}" 2>/dev/null
 fi
 
 # Cumulative session tokens — opt-in (off by default; misleading because
