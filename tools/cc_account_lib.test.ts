@@ -8,7 +8,7 @@ import {
   parseSnapshot,
   projectUsage,
   rankProfiles,
-  orgUuidOf,
+  seatKeyOf,
   sanitizeKey,
   snapshotPath,
   validateStoredProfile,
@@ -22,7 +22,7 @@ const NOW = 1_800_000_000;
 
 function snap(over: Partial<UsageSnapshot> = {}): UsageSnapshot {
   return {
-    orgUuid: "org-a",
+    seatKey: "acct-a:org-a",
     email: "a@evinced.net",
     fivePct: 40,
     fiveReset: NOW + 3600,
@@ -42,13 +42,13 @@ test("snapshot: round-trips through format/parse", () => {
 });
 
 test("snapshot: parse tolerates missing numeric fields", () => {
-  const out = parseSnapshot("org_uuid=org-x\nemail=x@y.net\nfive_pct=\n");
-  assert.equal(out?.orgUuid, "org-x");
+  const out = parseSnapshot("seat_key=org-x\nemail=x@y.net\nfive_pct=\n");
+  assert.equal(out?.seatKey, "org-x");
   assert.equal(out?.fivePct, 0);
   assert.equal(out?.fiveReset, 0);
 });
 
-test("snapshot: parse rejects a record with no org key", () => {
+test("snapshot: parse rejects a record with no seat key", () => {
   assert.equal(parseSnapshot("five_pct=10\n"), null);
   assert.equal(parseSnapshot("email=x@y.net\nfive_pct=10\n"), null);
   assert.equal(parseSnapshot(""), null);
@@ -57,7 +57,7 @@ test("snapshot: parse rejects a record with no org key", () => {
 test("snapshot: no truncation can understate usage", () => {
   // The statusline redirects onto the file with no temp+rename (a fork per
   // tick), so a reader can observe a partial write. The safety property is NOT
-  // "no prefix parses" — a cut inside the trailing `org_uuid=` line still
+  // "no prefix parses" — a cut inside the trailing `seat_key=` line still
   // yields a key. It is that `org_uuid` is written LAST, so any prefix that
   // parses at all necessarily contains every preceding line complete. A record can
   // therefore never be read with a falsely LOW percentage, which is the only
@@ -79,28 +79,28 @@ test("snapshot: no truncation can understate usage", () => {
   assert.ok(parsedAny, "at least the complete record parses");
 });
 
-test("snapshot: an org key truncated mid-write matches no profile, so it reads unknown", () => {
-  const full = formatSnapshot(snap({ orgUuid: "org-s1", fivePct: 96 }));
+test("snapshot: a seat key truncated mid-write matches no profile, so it reads unknown", () => {
+  const full = formatSnapshot(snap({ seatKey: "acct-s1:org-s1", fivePct: 96 }));
   const partial = parseSnapshot(full.slice(0, full.length - 5));
   assert.notEqual(partial, null, "this prefix does still parse");
-  assert.notEqual(partial?.orgUuid, "org-s1", "but the org key is truncated");
+  assert.notEqual(partial?.seatKey, "org-s1", "but the org key is truncated");
   // So the real profile finds no snapshot and is ranked `unknown` (last),
   // rather than inheriting a stray reading.
   const ranked = rankProfiles(
-    [{ name: "s1", email: "a@evinced.net", orgUuid: "org-s1" }],
-    new Map([[sanitizeKey(partial!.orgUuid), partial!]]),
+    [{ name: "s1", email: "a@evinced.net", seatKey: "acct-s1:org-s1" }],
+    new Map([[sanitizeKey(partial!.seatKey), partial!]]),
     NOW,
   );
   assert.equal(ranked[0]?.projection.certainty, "unknown");
 });
 
 test("snapshot: parse ignores junk lines rather than throwing", () => {
-  const out = parseSnapshot("org_uuid=o\n\n# comment\nfive_pct=7\n");
+  const out = parseSnapshot("seat_key=o\n\n# comment\nfive_pct=7\n");
   assert.equal(out?.fivePct, 7);
 });
 
 test("snapshot: non-numeric values degrade to 0, never NaN", () => {
-  const out = parseSnapshot("org_uuid=o\nfive_pct=abc\n");
+  const out = parseSnapshot("seat_key=o\nfive_pct=abc\n");
   assert.equal(out?.fivePct, 0);
   assert.ok(!Number.isNaN(out?.fivePct));
 });
@@ -160,9 +160,9 @@ test("projectUsage: age never goes negative on a future-stamped snapshot", () =>
 // ── ranking ─────────────────────────────────────────────────────────────
 
 const PROFILES: Profile[] = [
-  { name: "com", email: "aryeh.kiovetsky@evinced.com", orgUuid: "org-com" },
-  { name: "s1", email: "aryeh.stark.1@evinced.net", orgUuid: "org-s1" },
-  { name: "s2", email: "aryeh.stark.2@evinced.net", orgUuid: "org-s2" },
+  { name: "com", email: "aryeh.kiovetsky@evinced.com", seatKey: "acct-com:org-com" },
+  { name: "s1", email: "aryeh.stark.1@evinced.net", seatKey: "acct-s1:org-s1" },
+  { name: "s2", email: "aryeh.stark.2@evinced.net", seatKey: "acct-s2:org-s2" },
 ];
 
 function snapMap(entries: Record<string, UsageSnapshot>) {
@@ -173,8 +173,8 @@ test("rankProfiles: provably-reset beats a low live floor", () => {
   const ranked = rankProfiles(
     PROFILES,
     snapMap({
-      "org-s1": snap({ orgUuid: "org-s1", fivePct: 5, fiveReset: NOW + 600 }),
-      "org-s2": snap({ orgUuid: "org-s2", fivePct: 99, fiveReset: NOW - 1 }),
+      "acct-s1:org-s1": snap({ seatKey: "acct-s1:org-s1", fivePct: 5, fiveReset: NOW + 600 }),
+      "acct-s2:org-s2": snap({ seatKey: "acct-s2:org-s2", fivePct: 99, fiveReset: NOW - 1 }),
     }),
     NOW,
   );
@@ -186,7 +186,7 @@ test("rankProfiles: unknown sorts last — never optimistically assumed free", (
   const ranked = rankProfiles(
     PROFILES,
     snapMap({
-      "org-s1": snap({ orgUuid: "org-s1", fivePct: 88, fiveReset: NOW + 600 }),
+      "acct-s1:org-s1": snap({ seatKey: "acct-s1:org-s1", fivePct: 88, fiveReset: NOW + 600 }),
     }),
     NOW,
   );
@@ -194,28 +194,28 @@ test("rankProfiles: unknown sorts last — never optimistically assumed free", (
   assert.equal(ranked.at(-1)?.projection.certainty, "unknown");
 });
 
-test("rankProfiles: excludes by profile name and by orgUuid", () => {
+test("rankProfiles: excludes by profile name and by seatKey", () => {
   const byName = rankProfiles(PROFILES, new Map(), NOW, { exclude: ["s1"] });
   assert.deepEqual(byName.map((r) => r.profile.name), ["com", "s2"]);
 
   const byOrg = rankProfiles(PROFILES, new Map(), NOW, {
-    exclude: ["org-com"],
+    exclude: ["acct-com:org-com"],
   });
   assert.deepEqual(byOrg.map((r) => r.profile.name), ["s1", "s2"]);
 });
 
 test("rankProfiles: exclusion is case-insensitive", () => {
   const out = rankProfiles(PROFILES, new Map(), NOW, {
-    exclude: ["ORG-S1", "COM"],
+    exclude: ["ACCT-S1:ORG-S1", "COM"],
   });
   assert.deepEqual(out.map((r) => r.profile.name), ["s2"]);
 });
 
-test("rankProfiles: snapshot lookup is case-insensitive on orgUuid", () => {
+test("rankProfiles: snapshot lookup is case-insensitive on seatKey", () => {
   const ranked = rankProfiles(
-    [{ name: "s1", email: "x@evinced.net", orgUuid: "ORG-S1" }],
+    [{ name: "s1", email: "x@evinced.net", seatKey: "ACCT-S1:ORG-S1" }],
     snapMap({
-      "org-s1": snap({ orgUuid: "org-s1", fivePct: 42, fiveReset: NOW + 60 }),
+      "acct-s1:org-s1": snap({ seatKey: "acct-s1:org-s1", fivePct: 42, fiveReset: NOW + 60 }),
     }),
     NOW,
   );
@@ -225,8 +225,8 @@ test("rankProfiles: snapshot lookup is case-insensitive on orgUuid", () => {
 
 test("rankProfiles: ties break deterministically by name", () => {
   const m = snapMap({
-    "org-s1": snap({ orgUuid: "org-s1", fivePct: 10, fiveReset: NOW + 60 }),
-    "org-s2": snap({ orgUuid: "org-s2", fivePct: 10, fiveReset: NOW + 60 }),
+    "acct-s1:org-s1": snap({ seatKey: "acct-s1:org-s1", fivePct: 10, fiveReset: NOW + 60 }),
+    "acct-s2:org-s2": snap({ seatKey: "acct-s2:org-s2", fivePct: 10, fiveReset: NOW + 60 }),
   });
   const a = rankProfiles(PROFILES, m, NOW).map((r) => r.profile.name);
   const b = rankProfiles([...PROFILES].reverse(), m, NOW).map(
@@ -248,16 +248,16 @@ test("rankProfiles: empty profile list yields empty ranking", () => {
 
 const SHARED_EMAIL = "aryeh.kiovetsky@evinced.net";
 const TWO_ORGS: Profile[] = [
-  { name: "Net-T0", email: SHARED_EMAIL, orgUuid: "org-team", label: "Evinced RD" },
-  { name: "Net-M0", email: SHARED_EMAIL, orgUuid: "org-max", label: "personal" },
+  { name: "Net-T0", email: SHARED_EMAIL, seatKey: "acct-t0:org-team", label: "Evinced RD" },
+  { name: "Net-M0", email: SHARED_EMAIL, seatKey: "acct-t0:org-max", label: "personal" },
 ];
 
 test("same-email profiles keep independent usage readings", () => {
   const ranked = rankProfiles(
     TWO_ORGS,
     snapMap({
-      "org-team": snap({ orgUuid: "org-team", fivePct: 92, fiveReset: NOW + 600 }),
-      "org-max": snap({ orgUuid: "org-max", fivePct: 4, fiveReset: NOW + 600 }),
+      "acct-t0:org-team": snap({ seatKey: "acct-t0:org-team", fivePct: 92, fiveReset: NOW + 600 }),
+      "acct-t0:org-max": snap({ seatKey: "acct-t0:org-max", fivePct: 4, fiveReset: NOW + 600 }),
     }),
     NOW,
   );
@@ -267,16 +267,45 @@ test("same-email profiles keep independent usage readings", () => {
   assert.equal(ranked[1]?.projection.fivePct, 92);
 });
 
-test("excluding the active org does not exclude its same-email sibling", () => {
-  const out = rankProfiles(TWO_ORGS, new Map(), NOW, { exclude: ["org-team"] });
+test("excluding the active seat does not exclude its same-email sibling", () => {
+  const out = rankProfiles(TWO_ORGS, new Map(), NOW, { exclude: ["acct-t0:org-team"] });
   assert.deepEqual(out.map((r) => r.profile.name), ["Net-M0"]);
 });
 
-test("a profile with no orgUuid ranks unknown rather than borrowing a reading", () => {
+// The inverse collision, which org-only keying missed: aryeh.kiovetsky and
+// aryeh.stark.1 are BOTH members of Evinced RD. Same org, different member,
+// and Team limits are per-member — so two independent budgets.
+const SAME_ORG: Profile[] = [
+  { name: "Net-T0", email: "aryeh.kiovetsky@evinced.net", seatKey: "acct-t0:org-team", label: "Evinced RD" },
+  { name: "Net-T1", email: "aryeh.stark.1@evinced.net", seatKey: "acct-t1:org-team", label: "Evinced RD" },
+];
+
+test("same-org profiles keep independent usage readings", () => {
+  const ranked = rankProfiles(
+    SAME_ORG,
+    snapMap({
+      "acct-t0:org-team": snap({ seatKey: "acct-t0:org-team", fivePct: 95, fiveReset: NOW + 600 }),
+      "acct-t1:org-team": snap({ seatKey: "acct-t1:org-team", fivePct: 3, fiveReset: NOW + 600 }),
+    }),
+    NOW,
+  );
+  assert.equal(ranked[0]?.profile.name, "Net-T1");
+  assert.equal(ranked[0]?.projection.fivePct, 3);
+  assert.equal(ranked[1]?.projection.fivePct, 95);
+});
+
+test("excluding one member of an org does not exclude the other", () => {
+  const out = rankProfiles(SAME_ORG, new Map(), NOW, {
+    exclude: ["acct-t0:org-team"],
+  });
+  assert.deepEqual(out.map((r) => r.profile.name), ["Net-T1"]);
+});
+
+test("a profile with no seatKey ranks unknown rather than borrowing a reading", () => {
   const ranked = rankProfiles(
     [{ name: "legacy", email: SHARED_EMAIL }],
     snapMap({
-      "org-team": snap({ orgUuid: "org-team", fivePct: 7, fiveReset: NOW + 600 }),
+      "acct-t0:org-team": snap({ seatKey: "acct-team:org-team", fivePct: 7, fiveReset: NOW + 600 }),
     }),
     NOW,
   );
@@ -290,22 +319,33 @@ test("snapshotPath: same-email orgs get distinct files", () => {
   );
 });
 
-test("pre-fix snapshots (no org_uuid) are rejected, not misattributed", () => {
-  // The old wire format ended at `email=`. Such a file cannot be assigned to
-  // one of several same-email orgs, so it must not parse at all.
+test("snapshots from earlier keying schemes are rejected, not misattributed", () => {
+  // Earlier wire formats ended at `email=`, then at `org_uuid=`. Neither can be
+  // assigned to one specific seat, so neither may parse at all.
   const legacy =
     "five_pct=88\nfive_reset=0\nweek_pct=10\nweek_reset=0\n" +
     `stamped_at=${NOW}\nemail=${SHARED_EMAIL}\n`;
   assert.equal(parseSnapshot(legacy), null);
+  const orgKeyed = legacy + "org_uuid=org-team\n";
+  assert.equal(parseSnapshot(orgKeyed), null);
 });
 
-test("orgUuidOf: reads the key, rejects absent/blank/non-string", () => {
-  assert.equal(orgUuidOf({ organizationUuid: "org-x" }), "org-x");
-  assert.equal(orgUuidOf({ organizationUuid: "" }), null);
-  assert.equal(orgUuidOf({ organizationUuid: 42 }), null);
-  assert.equal(orgUuidOf({}), null);
-  assert.equal(orgUuidOf(null), null);
-  assert.equal(orgUuidOf(undefined), null);
+test("seatKeyOf: requires BOTH halves — either alone would merge seats", () => {
+  assert.equal(
+    seatKeyOf({ accountUuid: "a1", organizationUuid: "o1" }),
+    "a1:o1",
+  );
+  assert.equal(seatKeyOf({ accountUuid: "a1" }), null, "org missing");
+  assert.equal(seatKeyOf({ organizationUuid: "o1" }), null, "account missing");
+  assert.equal(
+    seatKeyOf({ accountUuid: "", organizationUuid: "o1" }),
+    null,
+    "blank account",
+  );
+  assert.equal(seatKeyOf({ accountUuid: "a1", organizationUuid: 42 }), null);
+  assert.equal(seatKeyOf({}), null);
+  assert.equal(seatKeyOf(null), null);
+  assert.equal(seatKeyOf(undefined), null);
 });
 
 // ── stored profile validation ───────────────────────────────────────────
@@ -316,24 +356,27 @@ test("validateStoredProfile: accepts a well-formed record", () => {
     oauthAccount: {
       emailAddress: "a@evinced.net",
       organizationType: "team",
+      accountUuid: "acct-a",
       organizationUuid: "org-a",
     },
   });
   assert.equal(ok.oauthAccount["emailAddress"], "a@evinced.net");
-  assert.equal(ok.oauthAccount["organizationUuid"], "org-a");
+  assert.equal(seatKeyOf(ok.oauthAccount), "acct-a:org-a");
 });
 
-test("validateStoredProfile: rejects a record with no organizationUuid", () => {
-  // Without the org key a stored profile cannot be told apart from a sibling
-  // org on the same address — so it is refused rather than stored ambiguously.
-  assert.throws(
-    () =>
-      validateStoredProfile({
-        credentials: "x",
-        oauthAccount: { emailAddress: "a@evinced.net" },
-      }),
-    /organizationUuid/,
-  );
+test("validateStoredProfile: rejects a record missing either seat half", () => {
+  // Without both halves a stored profile cannot be told apart from a sibling
+  // seat sharing its address or its org — refused, not stored ambiguously.
+  for (const acct of [
+    { emailAddress: "a@evinced.net" },
+    { emailAddress: "a@evinced.net", accountUuid: "a1" },
+    { emailAddress: "a@evinced.net", organizationUuid: "o1" },
+  ]) {
+    assert.throws(
+      () => validateStoredProfile({ credentials: "x", oauthAccount: acct }),
+      /accountUuid.*organizationUuid/,
+    );
+  }
 });
 
 test("validateStoredProfile: rejects half-valid records", () => {
@@ -342,7 +385,11 @@ test("validateStoredProfile: rejects half-valid records", () => {
   assert.throws(
     () =>
       validateStoredProfile({
-        oauthAccount: { emailAddress: "a@b.net", organizationUuid: "o" },
+        oauthAccount: {
+          emailAddress: "a@b.net",
+          accountUuid: "a",
+          organizationUuid: "o",
+        },
       }),
     /credentials/,
   );
@@ -362,7 +409,11 @@ test("validateStoredProfile: rejects half-valid records", () => {
     () =>
       validateStoredProfile({
         credentials: "x",
-        oauthAccount: { emailAddress: "a@b.net", organizationUuid: "" },
+        oauthAccount: {
+          emailAddress: "a@b.net",
+          accountUuid: "a1",
+          organizationUuid: "",
+        },
       }),
     /organizationUuid/,
   );
@@ -370,15 +421,15 @@ test("validateStoredProfile: rejects half-valid records", () => {
 
 // ── paths + formatting ──────────────────────────────────────────────────
 
-test("sanitizeKey: lowercases and strips path-hostile characters", () => {
-  assert.equal(sanitizeKey("B5C2BF52-78F2-4DD7"), "b5c2bf52-78f2-4dd7");
+test("sanitizeKey: lowercases, strips path-hostile chars, keeps seats distinct", () => {
+  assert.equal(sanitizeKey("A1:B5C2BF52-78F2-4DD7"), "a1_b5c2bf52-78f2-4dd7");
   assert.equal(sanitizeKey("a/../../b"), "a_.._.._b");
   assert.ok(!sanitizeKey("a/b").includes("/"), "no path separators");
 });
 
-test("snapshotPath: keyed by org, lands under the home .claude dir", () => {
-  const p = snapshotPath("/Users/aryeh", "b5c2bf52-78f2-4dd7");
-  assert.equal(p, "/Users/aryeh/.claude/.cc-usage-b5c2bf52-78f2-4dd7");
+test("snapshotPath: keyed by seat, lands under the home .claude dir", () => {
+  const p = snapshotPath("/Users/aryeh", "67ce42fe:32e87edd");
+  assert.equal(p, "/Users/aryeh/.claude/.cc-usage-67ce42fe_32e87edd");
 });
 
 test("keychain argv: writes use -U so an existing item updates in place", () => {

@@ -50,13 +50,23 @@
 /**
  * A named account this machine can switch to.
  *
- * The identity key is `orgUuid`, NOT `email`. One address can hold seats in
- * several orgs — `aryeh.kiovetsky@evinced.net` is both a member of the Evinced
- * RD team org and the owner of a personal Max org. Those are separate accounts
- * with separate rate-limit budgets that happen to share a login address (and
- * even an `accountUuid`; only the org differs). Keying on email conflated them:
- * it deduped one out of the registry on `add`, and pointed both at a single
- * snapshot file so each reported the other's usage.
+ * The identity is the SEAT: the `accountUuid` + `organizationUuid` pair. Neither
+ * component is unique on its own, as one machine's real profiles show:
+ *
+ *   Net-T0  account f05d659e  org 32e87edd   (Evinced RD team seat)
+ *   Net-M0  account f05d659e  org b5c2bf52   <- same account, different org
+ *   Net-T1  account 67ce42fe  org 32e87edd   <- same org, different account
+ *
+ * One address can hold seats in several orgs (a team seat plus a personal Max
+ * plan), and one org holds many members. Team-plan limits are per-member, so
+ * every (account, org) pair has its own independent budget — the pair is the
+ * finest grain that maps 1:1 to a rate-limit window, and the coarsest that
+ * never merges two.
+ *
+ * Both narrower keys were tried and both lost data: keying on email merged
+ * T0/M0, keying on org alone merged T0/T1. In each case `add` deduped one
+ * profile out of the registry and both shared a snapshot file, so each reported
+ * the other's usage.
  */
 export interface Profile {
   /** Keychain account under service `stark-cc-token`, e.g. `s1`. */
@@ -64,11 +74,11 @@ export interface Profile {
   /** Address the account logs in as. Display + disambiguation only. */
   email: string;
   /**
-   * `oauthAccount.organizationUuid` — the identity key. Joins a profile to its
-   * usage snapshot. Optional only to tolerate pre-fix registry entries, which
-   * the CLI backfills from the stored record on read.
+   * `accountUuid:organizationUuid` — the identity key, joining a profile to its
+   * usage snapshot. Optional only to tolerate registry entries written by
+   * earlier versions, which the CLI backfills from the stored record on read.
    */
-  orgUuid?: string;
+  seatKey?: string;
   /** Org name, e.g. `Evinced RD` — display only, disambiguates shared emails. */
   label?: string;
 }
@@ -83,8 +93,8 @@ export interface StoredProfile {
 
 /** One statusline render's view of an account's rate-limit windows. */
 export interface UsageSnapshot {
-  /** The org this reading belongs to — the join key. */
-  orgUuid: string;
+  /** The seat this reading belongs to — the join key. */
+  seatKey: string;
   /** Login address at capture time. Display only; not unique across orgs. */
   email: string;
   fivePct: number;
@@ -174,18 +184,41 @@ export function writeProfileArgv(name: string, blob: string): string[] {
 }
 
 /**
- * Snapshot file path for an account — one file per ORG, not per email.
+ * Snapshot file path for an account — one file per SEAT.
  *
- * Two profiles sharing a login address must not share a file: their windows
- * are independent, and a shared file makes each report the other's usage.
+ * Two profiles sharing a login address, or sharing an org, must not share a
+ * file: their windows are independent, and a shared file makes each report the
+ * other's usage.
  */
-export function snapshotPath(home: string, orgUuid: string): string {
-  return `${home}/.claude/.cc-usage-${sanitizeKey(orgUuid)}`;
+export function snapshotPath(home: string, seatKey: string): string {
+  return `${home}/.claude/.cc-usage-${sanitizeKey(seatKey)}`;
 }
 
-/** Filesystem-safe form of an identity key (uuid, or a legacy email). */
+/**
+ * Filesystem-safe form of an identity key.
+ *
+ * `:` is not in the allowed set, so a `<account>:<org>` seat key lands as
+ * `<account>_<org>` on disk. That is fine — the mapping is injective over
+ * uuids, which contain no `_`.
+ */
 export function sanitizeKey(key: string): string {
   return key.trim().toLowerCase().replace(/[^a-z0-9._@+-]/g, "_");
+}
+
+/**
+ * Build the seat key for an `oauthAccount`, or null if either half is missing.
+ *
+ * Both halves are required: a key missing one component would silently collide
+ * with every other seat sharing the component it does have.
+ */
+export function seatKeyOf(
+  account: Record<string, unknown> | null | undefined,
+): string | null {
+  const acct = account?.["accountUuid"];
+  const org = account?.["organizationUuid"];
+  if (typeof acct !== "string" || acct === "") return null;
+  if (typeof org !== "string" || org === "") return null;
+  return `${acct}:${org}`;
 }
 
 /**
@@ -193,17 +226,17 @@ export function sanitizeKey(key: string): string {
  * writer is `statusline-command.sh` on a 1s tick, where a `jq` fork is the
  * thing the whole script is built to avoid — bash can emit this with `printf`.
  *
- * `org_uuid` is emitted LAST, and that ordering is load-bearing. The writer
+ * `seat_key` is emitted LAST, and that ordering is load-bearing. The writer
  * redirects straight onto the file (no temp-file + rename, which would cost a
  * fork per tick), so a reader can catch a partially-written file. `parse`
- * treats a record with no `org_uuid` as unmarked — so a truncated write
+ * treats a record with no `seat_key` as unmarked — so a truncated write
  * degrades to `unknown` (sorted last) instead of to a record showing
  * `five_pct=0`, which would read as "this account is completely free" and send
  * a caller straight into a wall. Fail-safe by construction, not by locking.
  *
- * A record without `org_uuid` is also how PRE-FIX snapshots (keyed by email,
- * with no org field) are rejected: they cannot be attributed to one of several
- * same-email orgs, so they are dropped rather than guessed at.
+ * A record without `seat_key` is also how snapshots from earlier versions
+ * (keyed by email, then by org alone) are rejected: neither can be attributed
+ * to one specific seat, so they are dropped rather than guessed at.
  */
 export function formatSnapshot(s: UsageSnapshot): string {
   return (
@@ -214,7 +247,7 @@ export function formatSnapshot(s: UsageSnapshot): string {
       `week_reset=${s.weekReset}`,
       `stamped_at=${s.stampedAt}`,
       `email=${s.email}`,
-      `org_uuid=${s.orgUuid}`,
+      `seat_key=${s.seatKey}`,
     ].join("\n") + "\n"
   );
 }
@@ -225,8 +258,8 @@ export function parseSnapshot(text: string): UsageSnapshot | null {
     const i = line.indexOf("=");
     if (i > 0) kv.set(line.slice(0, i).trim(), line.slice(i + 1).trim());
   }
-  const orgUuid = kv.get("org_uuid");
-  if (!orgUuid) return null;
+  const seatKey = kv.get("seat_key");
+  if (!seatKey) return null;
   const num = (k: string): number => {
     const raw = kv.get(k);
     if (raw === undefined || raw === "") return 0;
@@ -234,7 +267,7 @@ export function parseSnapshot(text: string): UsageSnapshot | null {
     return Number.isFinite(n) ? n : 0;
   };
   return {
-    orgUuid,
+    seatKey,
     email: kv.get("email") ?? "",
     fivePct: num("five_pct"),
     fiveReset: num("five_reset"),
@@ -285,13 +318,13 @@ const CERTAINTY_RANK: Record<Certainty, number> = {
 /**
  * Order profiles best-target-first.
  *
- * Snapshots are keyed by `orgUuid`. A profile with no `orgUuid` (a pre-fix
- * registry entry the CLI could not backfill) joins to nothing and ranks
- * `unknown` — correct, since its usage genuinely cannot be attributed.
+ * Snapshots are keyed by `seatKey`. A profile with no `seatKey` (an entry the
+ * CLI could not backfill) joins to nothing and ranks `unknown` — correct, since
+ * its usage genuinely cannot be attributed.
  *
- * `exclude` matches on profile name or orgUuid. It deliberately does NOT match
- * on email: excluding the active account by address would also exclude a
- * different org that merely shares it.
+ * `exclude` matches on profile name or seatKey. It deliberately does NOT match
+ * on email or org alone: excluding the active account by either would also
+ * exclude a different seat that merely shares that component.
  *
  * Sort is total and deterministic: certainty class, then 5h floor, then 7d
  * floor, then name. Deterministic ordering matters because `next` is used
@@ -310,13 +343,13 @@ export function rankProfiles(
     .filter(
       (p) =>
         !excluded.has(p.name.toLowerCase()) &&
-        !(p.orgUuid && excluded.has(p.orgUuid.toLowerCase())),
+        !(p.seatKey && excluded.has(p.seatKey.toLowerCase())),
     )
     .map((profile) => ({
       profile,
       projection: projectUsage(
-        profile.orgUuid
-          ? snapshots.get(profile.orgUuid.toLowerCase())
+        profile.seatKey
+          ? snapshots.get(profile.seatKey.toLowerCase())
           : undefined,
         now,
       ),
@@ -357,23 +390,16 @@ export function validateStoredProfile(v: unknown): StoredProfile {
   if (typeof a["emailAddress"] !== "string") {
     throw new Error("profile `oauthAccount` is missing `emailAddress`");
   }
-  // The identity key. Without it a stored profile cannot be told apart from a
-  // sibling org on the same address, so it is required rather than defaulted.
-  if (typeof a["organizationUuid"] !== "string" || a["organizationUuid"] === "") {
+  // Both halves of the seat key. Without them a stored profile cannot be told
+  // apart from a sibling seat sharing its address or its org, so they are
+  // required rather than defaulted.
+  if (!seatKeyOf(a)) {
     throw new Error(
-      "profile `oauthAccount` is missing `organizationUuid` — re-run `add` " +
-        "while logged in as this account",
+      "profile `oauthAccount` is missing `accountUuid`/`organizationUuid` — " +
+        "re-run `add` while logged in as this account",
     );
   }
   return { credentials: rec["credentials"], oauthAccount: a };
-}
-
-/** Read the org key off a live/stored `oauthAccount`, or null if absent. */
-export function orgUuidOf(
-  account: Record<string, unknown> | null | undefined,
-): string | null {
-  const v = account?.["organizationUuid"];
-  return typeof v === "string" && v !== "" ? v : null;
 }
 
 /** Human-readable headroom line, e.g. `5H 12% (floor, 4m old) · 7D 61%`. */

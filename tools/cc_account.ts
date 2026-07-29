@@ -34,13 +34,12 @@ import * as path from "node:path";
 import {
   KEYCHAIN,
   describeProjection,
-  orgUuidOf,
+  seatKeyOf,
   parseSnapshot,
   projectUsage,
   rankProfiles,
   readClaudeCredsArgv,
   readProfileArgv,
-  sanitizeKey,
   validateStoredProfile,
   writeClaudeCredsArgv,
   writeProfileArgv,
@@ -115,19 +114,19 @@ function currentEmail(): string | null {
   return typeof email === "string" ? email : null;
 }
 
-/** Org key of the live login — the identity of the active account. */
-function currentOrgUuid(): string | null {
-  return orgUuidOf(currentAccount());
+/** Seat key of the live login — the identity of the active account. */
+function currentSeatKey(): string | null {
+  return seatKeyOf(currentAccount());
 }
 
 // ── profile registry ────────────────────────────────────────────────────
 
 /**
- * Read the registry, backfilling `orgUuid` on pre-fix entries.
+ * Read the registry, backfilling `seatKey` on entries from earlier versions.
  *
- * Early versions keyed profiles by email. That is wrong — one address can hold
- * seats in several orgs — so entries written then carry no org key. The stored
- * Keychain record always has one, so it is recovered from there and the
+ * Earlier versions keyed profiles by email, then by org alone. Both merged
+ * distinct seats. Entries written then carry no seat key; the stored Keychain
+ * record always holds both halves, so the key is recovered from there and the
  * registry rewritten. An entry whose record is gone keeps its (unusable) shape
  * and simply ranks `unknown`, rather than being silently dropped.
  */
@@ -147,7 +146,9 @@ function readRegistry(): Profile[] {
         {
           name: r["name"],
           email: r["email"],
-          ...(typeof r["orgUuid"] === "string" ? { orgUuid: r["orgUuid"] } : {}),
+          ...(typeof r["seatKey"] === "string"
+            ? { seatKey: r["seatKey"] }
+            : {}),
           ...(typeof r["label"] === "string" ? { label: r["label"] } : {}),
         },
       ];
@@ -158,19 +159,19 @@ function readRegistry(): Profile[] {
 
   let changed = false;
   const migrated = parsed.map((p): Profile => {
-    if (p.orgUuid) return p;
+    if (p.seatKey) return p;
     const stored = securityOrNull(readProfileArgv(p.name));
     if (!stored) return p;
     try {
       const acct = (JSON.parse(stored) as { oauthAccount?: unknown })
         .oauthAccount as Record<string, unknown> | undefined;
-      const orgUuid = orgUuidOf(acct);
-      if (!orgUuid) return p;
+      const seatKey = seatKeyOf(acct);
+      if (!seatKey) return p;
       changed = true;
       const label = acct?.["organizationName"];
       return {
         ...p,
-        orgUuid,
+        seatKey,
         ...(typeof label === "string" ? { label } : {}),
       };
     } catch {
@@ -198,16 +199,22 @@ function writeRegistry(profiles: Profile[]): void {
 // ── usage snapshots (written by statusline-command.sh) ──────────────────
 
 /**
- * Load every snapshot the statusline has written, keyed by lowercased orgUuid.
+ * Load every snapshot the statusline has written, keyed by lowercased seatKey.
  *
  * Read by directory scan rather than by iterating the registry, so a profile
  * that has never been registered still contributes a reading — and so a
  * renamed profile does not silently lose its history.
  *
- * Keyed on the record's own `org_uuid` rather than on the filename: the two
- * agree, and trusting the content means a stale email-named file from before
- * the org-keying fix cannot be mistaken for a valid entry (it has no
- * `org_uuid`, so `parseSnapshot` rejects it outright).
+ * Keyed on the record's own `seat_key` rather than on the filename: the two
+ * agree, and trusting the content means a file left by an earlier keying scheme
+ * cannot be mistaken for a valid entry (it has no `seat_key`, so
+ * `parseSnapshot` rejects it outright).
+ *
+ * The map key is the RAW lowercased seat key, never `sanitizeKey`'d.
+ * `sanitizeKey` exists only to make a key safe as a FILENAME — it rewrites `:`
+ * to `_`, so using it here would key the map on a form that no caller looks up
+ * (`rankProfiles` joins on `profile.seatKey`). That mismatch silently reported
+ * every profile as `unknown`.
  */
 function loadSnapshots(): Map<string, UsageSnapshot> {
   const out = new Map<string, UsageSnapshot>();
@@ -223,7 +230,7 @@ function loadSnapshots(): Map<string, UsageSnapshot> {
       const snap = parseSnapshot(
         readFileSync(path.join(SNAPSHOT_DIR, name), "utf8"),
       );
-      if (snap) out.set(sanitizeKey(snap.orgUuid), snap);
+      if (snap) out.set(snap.seatKey.toLowerCase(), snap);
     } catch {
       // A partially-written snapshot is skipped, not fatal — the statusline
       // rewrites it on the next tick.
@@ -244,9 +251,9 @@ function cmdShow(): void {
   const org = String(acct["organizationName"] ?? "?");
   const type = String(acct["organizationType"] ?? "?");
   const seat = String(acct["seatTier"] ?? "?");
-  const orgUuid = orgUuidOf(acct);
-  const snap = orgUuid
-    ? loadSnapshots().get(sanitizeKey(orgUuid))
+  const seatKey = seatKeyOf(acct);
+  const snap = seatKey
+    ? loadSnapshots().get(seatKey.toLowerCase())
     : undefined;
   console.log(`active   ${email}`);
   console.log(`org      ${org} (${type}, seat ${seat})`);
@@ -259,9 +266,9 @@ function cmdList(): void {
     console.log("no profiles registered — run `cc_account.ts add <name>`");
     return;
   }
-  const active = currentOrgUuid()?.toLowerCase();
+  const active = currentSeatKey()?.toLowerCase();
   for (const p of profiles) {
-    const mark = p.orgUuid && p.orgUuid.toLowerCase() === active ? "*" : " ";
+    const mark = p.seatKey && p.seatKey.toLowerCase() === active ? "*" : " ";
     const stored = securityOrNull(readProfileArgv(p.name)) !== null;
     const state = stored ? "" : "  (no stored credentials — re-run `add`)";
     console.log(`${mark} ${p.name.padEnd(8)} ${p.email}${orgSuffix(p)}${state}`);
@@ -300,9 +307,12 @@ function cmdAdd(name: string): void {
     fail("~/.claude.json has no oauthAccount.emailAddress — log in first");
   }
   const email = acct["emailAddress"] as string;
-  const orgUuid = orgUuidOf(acct);
-  if (!orgUuid) {
-    fail("~/.claude.json has no oauthAccount.organizationUuid — log in first");
+  const seatKey = seatKeyOf(acct);
+  if (!seatKey) {
+    fail(
+      "~/.claude.json oauthAccount is missing accountUuid/organizationUuid — " +
+        "log in first",
+    );
   }
   const label =
     typeof acct["organizationName"] === "string"
@@ -313,23 +323,23 @@ function cmdAdd(name: string): void {
   validateStoredProfile(JSON.parse(record));
   security(writeProfileArgv(name, record));
 
-  // Dedupe on name and ORG, never on email: one address can hold seats in
-  // several orgs (a team seat and a personal plan), and filtering by address
-  // would evict a distinct account that merely shares it.
+  // Dedupe on name and SEAT — never on email or org alone. One address can
+  // hold seats in several orgs, and one org holds many members, so filtering by
+  // either component would evict a distinct seat that merely shares it.
   const existing = readRegistry();
   const displaced = existing.find(
-    (p) => p.name !== name && p.orgUuid === orgUuid,
+    (p) => p.name !== name && p.seatKey === seatKey,
   );
   const profiles = existing.filter(
-    (p) => p.name !== name && p.orgUuid !== orgUuid,
+    (p) => p.name !== name && p.seatKey !== seatKey,
   );
-  profiles.push({ name, email, orgUuid, ...(label ? { label } : {}) });
+  profiles.push({ name, email, seatKey, ...(label ? { label } : {}) });
   profiles.sort((a, b) => a.name.localeCompare(b.name));
   writeRegistry(profiles);
 
   console.log(`stored profile ${name} → ${email}${label ? ` (${label})` : ""}`);
   if (displaced) {
-    console.log(`replaced ${displaced.name} — same org, renamed`);
+    console.log(`replaced ${displaced.name} — same seat, renamed`);
   }
 }
 
@@ -352,15 +362,16 @@ function cmdUse(name: string): void {
   // account that was never `add`ed loses it permanently — the Keychain item is
   // about to be overwritten and OAuth blobs cannot be re-derived.
   //
-  // Matched by ORG, not email. Matching by address would write the outgoing
-  // account's credentials into a DIFFERENT org's stored profile whenever the
-  // two share a login — silently corrupting the profile it overwrote.
-  const outgoingOrg = currentOrgUuid();
+  // Matched by SEAT, not email or org. Matching by either component would
+  // write the outgoing account's credentials into a DIFFERENT seat's stored
+  // profile whenever the two share that component — silently corrupting the
+  // profile it overwrote.
+  const outgoingSeat = currentSeatKey();
   const outgoingCreds = securityOrNull(readClaudeCredsArgv());
   const outgoingAcct = currentAccount();
-  if (outgoingOrg && outgoingCreds && outgoingAcct) {
+  if (outgoingSeat && outgoingCreds && outgoingAcct) {
     const known = readRegistry().find(
-      (p) => p.orgUuid?.toLowerCase() === outgoingOrg.toLowerCase(),
+      (p) => p.seatKey?.toLowerCase() === outgoingSeat.toLowerCase(),
     );
     if (known) {
       security(
@@ -391,11 +402,11 @@ function cmdLimits(): void {
     console.log("no profiles registered — run `cc_account.ts add <name>`");
     return;
   }
-  const active = currentOrgUuid()?.toLowerCase();
+  const active = currentSeatKey()?.toLowerCase();
   const ranked = rankProfiles(profiles, loadSnapshots(), nowSec());
   for (const { profile, projection } of ranked) {
     const mark =
-      profile.orgUuid && profile.orgUuid.toLowerCase() === active ? "*" : " ";
+      profile.seatKey && profile.seatKey.toLowerCase() === active ? "*" : " ";
     console.log(
       `${mark} ${profile.name.padEnd(8)} ${describeProjection(projection)}`,
     );
@@ -408,7 +419,7 @@ function cmdLimits(): void {
 
 function cmdNext(apply: boolean): void {
   const profiles = readRegistry();
-  const active = currentOrgUuid();
+  const active = currentSeatKey();
   const ranked = rankProfiles(profiles, loadSnapshots(), nowSec(), {
     exclude: active ? [active] : [],
   });

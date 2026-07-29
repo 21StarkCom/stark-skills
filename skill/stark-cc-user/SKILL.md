@@ -79,28 +79,40 @@ once at startup; a running session keeps the old account until restarted.
 `use` also re-captures the OUTGOING account before overwriting it, so a token
 refreshed during the session isn't lost.
 
-## The identity key is the ORG, not the email
+## The identity is the SEAT, not the email and not the org
 
-One address can hold seats in several orgs. `aryeh.kiovetsky@evinced.net` is
-both a member of the **Evinced RD** team org and the owner of a **personal Max**
-org — same address, same `accountUuid`, different `organizationUuid`, and
-entirely independent rate-limit budgets.
+Neither email nor org is unique. Real profiles on one machine:
 
-So `oauthAccount.organizationUuid` is what identifies a profile: it keys the
+| profile | accountUuid | organizationUuid |
+|---|---|---|
+| `Net-T0` | `f05d659e` | `32e87edd` (Evinced RD) |
+| `Net-M0` | `f05d659e` ← same account | `b5c2bf52` (personal Max) |
+| `Net-T1` | `67ce42fe` | `32e87edd` ← same org |
+
+One address holds seats in several orgs (a team seat plus a personal Max plan);
+one org holds many members. **Team-plan limits are per-member**, so every
+`(account, org)` pair has its own independent budget.
+
+So the key is `accountUuid:organizationUuid` — the finest grain that maps 1:1 to
+a rate-limit window, and the coarsest that never merges two. It keys the
 registry, the snapshot filename, ranking joins, and the active-profile marker.
-Email is display only. `list` and `next` print the org name so two profiles
-sharing an address stay distinguishable.
+Email is display only; `list` and `next` print the org name so profiles sharing
+an address stay readable.
+
+Both narrower keys were tried and both lost data — email merged T0/M0, org alone
+merged T0/T1. In each case `add` deduped one profile out of the registry and the
+two shared a snapshot file, so each reported the other's usage.
 
 Two consequences worth knowing:
 
-- **`add` replaces by org, not by address.** Registering a second account on an
-  address you already use adds it; it does not overwrite the first. Re-running
-  `add` with a new name for the *same org* renames it and says so.
-- **Pre-`0.3.1` state migrates itself.** Registry entries written before this
-  backfill their org key from the stored Keychain record on first read.
-  Snapshots written before it lack an org key entirely and are dropped rather
-  than guessed at — so those profiles read `unknown` until the statusline
-  renders once under each account.
+- **`add` replaces by seat.** Registering another account that shares an address
+  or an org with one you already have adds it; it does not overwrite. Re-running
+  `add` with a new name for the *same seat* renames it and says so.
+- **Older state migrates itself.** Registry entries written by earlier versions
+  backfill their seat key from the stored Keychain record on first read.
+  Snapshots written by them carry no seat key and are dropped rather than
+  guessed at — so those profiles read `unknown` until the statusline renders
+  once under each account.
 
 ## How `limits` knows anything about an inactive account
 
@@ -109,7 +121,7 @@ payload (`.rate_limits.*`) at render time — nothing persists them, and probing
 an account live would spend quota from the window being measured.
 
 So `config/statusline-command.sh` snapshots the four fields to
-`~/.claude/.cc-usage-<orgUuid>` on each render (free — already parsed, and a
+`~/.claude/.cc-usage-<accountUuid>_<organizationUuid>` on each render (free — already parsed, and a
 fork-free bash redirect). `cc_account_lib.ts` then reasons over the snapshots
 using two properties that make stale data far more useful than it sounds:
 
