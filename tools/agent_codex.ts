@@ -1,6 +1,6 @@
 import type { AgentName, Finding, Severity } from "./stark_review_lib.ts";
 import { findingId } from "./stark_review_lib.ts";
-import { resolvedPath } from "./agent_env_lib.ts";
+import { AGENT_ENV_ALLOWLIST, resolvedPath } from "./agent_env_lib.ts";
 
 export interface BuiltCommand {
   cmd: string;
@@ -65,11 +65,10 @@ const KNOWN_FINDING_KEYS: ReadonlySet<string> = new Set([
   "extra",
 ]);
 
-const ENV_ALLOWLIST = ["PATH", "HOME", "LANG", "LC_ALL", "TMPDIR"] as const;
-
+// Allowlist owner is agent_env_lib.ts — see AGENT_ENV_ALLOWLIST there.
 function buildMinimalEnv(): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const key of ENV_ALLOWLIST) {
+  for (const key of AGENT_ENV_ALLOWLIST) {
     const v = process.env[key];
     if (typeof v === "string") env[key] = v;
   }

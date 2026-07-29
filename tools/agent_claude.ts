@@ -1,7 +1,7 @@
 import type { AgentName, Finding, Severity } from "./stark_review_lib.ts";
 import { findingId } from "./stark_review_lib.ts";
 import type { BuildContext, BuiltCommand, ParseError, ParseResult } from "./agent_codex.ts";
-import { resolvedPath } from "./agent_env_lib.ts";
+import { AGENT_ENV_ALLOWLIST, resolvedPath } from "./agent_env_lib.ts";
 import { applyClaudeAuth } from "./claude_auth_lib.ts";
 
 export const CLAUDE_DEFAULT_MODEL = "claude-opus-5[1m]";
@@ -15,17 +15,14 @@ const KNOWN_FINDING_KEYS: ReadonlySet<string> = new Set([
   "title", "body", "classification", "classification_reason", "extra",
 ]);
 
-// Strict allowlist: PATH/HOME for the binary + model auth (see
-// claude_auth_lib.ts — subscription-only, so the CLI rides HOME's OAuth
-// credentials and no Anthropic API key is ever forwarded).
-// GH_TOKEN/GITHUB_TOKEN/STARK_PUSH_TOKEN are
-// intentionally excluded so the reviewer subprocess cannot exfiltrate
-// posting credentials.
-const ENV_ALLOWLIST = ["PATH", "HOME", "LANG", "LC_ALL", "TMPDIR"] as const;
-
+// Allowlist owner is agent_env_lib.ts — see AGENT_ENV_ALLOWLIST there for why
+// USER is load-bearing. Auth is subscription-only (see claude_auth_lib.ts), so
+// the CLI rides HOME's OAuth credentials and no Anthropic API key is ever
+// forwarded; GH_TOKEN/GITHUB_TOKEN/STARK_PUSH_TOKEN stay excluded so the
+// reviewer subprocess cannot exfiltrate posting credentials.
 function buildEnv(): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const key of ENV_ALLOWLIST) {
+  for (const key of AGENT_ENV_ALLOWLIST) {
     const v = process.env[key];
     if (typeof v === "string") env[key] = v;
   }

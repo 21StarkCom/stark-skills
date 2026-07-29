@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
+import { AGENT_ENV_ALLOWLIST } from "./agent_env_lib.ts";
 import { buildCommand, extractLastAgentText, parseOutput } from "./agent_codex.ts";
 
 test("buildCommand: emits codex exec --json with high reasoning effort via -c", () => {
@@ -34,10 +35,25 @@ test("buildCommand: model flag included only when caller passes one", () => {
 test("buildCommand: env contains only allowlisted keys", () => {
   const built = buildCommand("p");
   for (const key of Object.keys(built.env)) {
+    // Asserted against the shared constant, not a local copy. A hardcoded list
+    // here would be a second source of truth and would drift from the real
+    // allowlist exactly the way the three agent modules already did.
     assert.ok(
-      ["PATH", "HOME", "LANG", "LC_ALL", "TMPDIR"].includes(key),
+      AGENT_ENV_ALLOWLIST.includes(key),
       `unexpected env key: ${key}`,
     );
+  }
+});
+
+test("buildCommand: env never forwards credential-bearing vars", () => {
+  // The allowlist is the mechanism; this is the property it exists to protect.
+  // Pinned separately so widening the list can never silently widen this.
+  const built = buildCommand("p");
+  for (const forbidden of [
+    "GH_TOKEN", "GITHUB_TOKEN", "STARK_PUSH_TOKEN",
+    "ANTHROPIC_API_KEY", "ANTHROPIC_AGENTS", "OPENAI_API_KEY",
+  ]) {
+    assert.ok(!(forbidden in built.env), `credential leaked to agent env: ${forbidden}`);
   }
 });
 
