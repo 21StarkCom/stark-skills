@@ -2,7 +2,10 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import {
+  applyOrder,
   describeProjection,
+  nextInCycle,
+  orderedProfiles,
   formatAge,
   formatSnapshot,
   parseSnapshot,
@@ -462,4 +465,107 @@ test("describeProjection: labels reset, floor, and unknown distinctly", () => {
     /floor/,
   );
   assert.match(describeProjection(projectUsage(undefined, NOW)), /unknown/);
+});
+
+
+// ── rotation cycle ──────────────────────────────────────────────────────
+
+const CYCLE: Profile[] = [
+  { name: "Com-Max", email: "k@evinced.com", seatKey: "a0:o0", order: 0 },
+  { name: "Net-T0", email: "k@evinced.net", seatKey: "a1:team", order: 1 },
+  { name: "Net-M0", email: "k@evinced.net", seatKey: "a1:max", order: 2 },
+  { name: "Net-T1", email: "s1@evinced.net", seatKey: "a2:team", order: 3 },
+];
+
+test("orderedProfiles: placed ascend, unplaced follow by name", () => {
+  const mixed: Profile[] = [
+    { name: "zeta", email: "z@x.net", seatKey: "z:1" },
+    { name: "alpha", email: "a@x.net", seatKey: "a:1" },
+    { name: "second", email: "s@x.net", seatKey: "s:1", order: 1 },
+    { name: "first", email: "f@x.net", seatKey: "f:1", order: 0 },
+  ];
+  assert.deepEqual(
+    orderedProfiles(mixed).map((p) => p.name),
+    ["first", "second", "alpha", "zeta"],
+  );
+});
+
+test("orderedProfiles: does not mutate its input", () => {
+  const input = [...CYCLE].reverse();
+  const before = input.map((p) => p.name);
+  orderedProfiles(input);
+  assert.deepEqual(input.map((p) => p.name), before);
+});
+
+test("nextInCycle: advances one step", () => {
+  assert.equal(nextInCycle(CYCLE, "a1:team")?.name, "Net-M0");
+  assert.equal(nextInCycle(CYCLE, "a1:max")?.name, "Net-T1");
+});
+
+test("nextInCycle: wraps at the end", () => {
+  assert.equal(nextInCycle(CYCLE, "a2:team")?.name, "Com-Max");
+});
+
+test("nextInCycle: case-insensitive on the active seat", () => {
+  assert.equal(nextInCycle(CYCLE, "A1:TEAM")?.name, "Net-M0");
+});
+
+test("nextInCycle: an unregistered active seat starts the cycle", () => {
+  assert.equal(nextInCycle(CYCLE, "unknown:seat")?.name, "Com-Max");
+  assert.equal(nextInCycle(CYCLE, null)?.name, "Com-Max");
+});
+
+test("nextInCycle: skips profiles that cannot be switched to", () => {
+  // No stored credentials => stopping there would dead-end the rotation.
+  const ok = (p: Profile) => p.name !== "Net-M0";
+  assert.equal(nextInCycle(CYCLE, "a1:team", ok)?.name, "Net-T1");
+});
+
+test("nextInCycle: skipping the active profile still advances", () => {
+  const ok = (p: Profile) => p.name !== "Net-T0";
+  // active is Net-T0 itself, which is filtered out — fall back to cycle start
+  assert.equal(nextInCycle(CYCLE, "a1:team", ok)?.name, "Com-Max");
+});
+
+test("nextInCycle: a single eligible profile returns itself", () => {
+  const ok = (p: Profile) => p.name === "Com-Max";
+  assert.equal(nextInCycle(CYCLE, "a0:o0", ok)?.name, "Com-Max");
+});
+
+test("nextInCycle: nothing eligible returns null", () => {
+  assert.equal(nextInCycle(CYCLE, "a1:team", () => false), null);
+  assert.equal(nextInCycle([], "a1:team"), null);
+});
+
+test("nextInCycle: full lap visits every profile exactly once", () => {
+  const seen: string[] = [];
+  let seat = "a0:o0";
+  for (let i = 0; i < CYCLE.length; i++) {
+    const n = nextInCycle(CYCLE, seat);
+    assert.ok(n, "cycle must not dead-end");
+    seen.push(n.name);
+    seat = n.seatKey;
+  }
+  assert.deepEqual(seen, ["Net-T0", "Net-M0", "Net-T1", "Com-Max"]);
+  assert.equal(new Set(seen).size, CYCLE.length, "no repeats within one lap");
+});
+
+test("applyOrder: places listed names in the given sequence", () => {
+  const out = applyOrder(CYCLE, ["Net-T1", "Com-Max"]);
+  assert.deepEqual(
+    orderedProfiles(out).map((p) => p.name),
+    ["Net-T1", "Com-Max", "Net-M0", "Net-T0"], // unlisted fall back to name order
+  );
+});
+
+test("applyOrder: omitted profiles stay in the cycle, just unplaced", () => {
+  const out = applyOrder(CYCLE, ["Net-T1"]);
+  assert.equal(out.length, CYCLE.length, "nobody is dropped");
+  assert.equal(out.find((p) => p.name === "Net-T1")?.order, 0);
+  assert.equal(out.find((p) => p.name === "Com-Max")?.order, undefined);
+});
+
+test("applyOrder: is case-insensitive and ignores unknown names", () => {
+  const out = applyOrder(CYCLE, ["net-t1", "ghost"]);
+  assert.equal(out.find((p) => p.name === "Net-T1")?.order, 0);
 });

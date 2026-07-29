@@ -5,7 +5,7 @@ description: >-
   Switch the active Claude Code account between stored profiles when a 5-hour
   or 7-day rate-limit window runs out. Credentials live in macOS Keychain
   (service `stark-cc-token`); headroom comes from statusline snapshots.
-argument-hint: "[show|list|add <name>|use <name>|limits|next] [--apply]"
+argument-hint: "[show|list|add <name>|use <name>|limits|next|order] [--apply] [--best]"
 ---
 
 ## Help
@@ -29,7 +29,9 @@ still has room. Sibling of `stark-gh-user`, but the mechanics differ — read
 - `/stark-cc-user add <name>` — store the CURRENT login as profile `<name>`
 - `/stark-cc-user use <name>` — switch to profile `<name>`
 - `/stark-cc-user limits` — headroom for every profile, best target first
-- `/stark-cc-user next [--apply]` — best target other than the active one
+- `/stark-cc-user next [--apply]` — **next profile in the rotation**
+- `/stark-cc-user next --best [--apply]` — emptiest window instead of the next one
+- `/stark-cc-user order [names...]` — show the rotation cycle, or set it
 
 ## Behavior
 
@@ -151,8 +153,33 @@ contributing. Practical consequences:
 - Long-running windows on older accounts stop refreshing their own seat. That is
   honest: nothing else on the machine can attribute their numbers.
 
-`next` ranks provably-reset first, then lowest floor, then name (deterministic:
-the same state always picks the same account).
+`next --best` ranks provably-reset first, then lowest floor, then name
+(deterministic: the same state always picks the same account).
+
+## The rotation cycle
+
+`next` walks a **fixed sequence**, not a ranking. Predictability is the point —
+you always know which account comes next without reading percentages, and the
+cycle visits every seat before repeating any.
+
+```
+/stark-cc-user order Com-Max Net-T0 Net-M0 Net-T1 Net-M1 …
+/stark-cc-user order                 # show the current cycle
+/stark-cc-user list                  # same order, with live status
+/stark-cc-user next --apply          # advance one step
+```
+
+- **Wraps** at the end, so repeated `next --apply` laps the whole fleet.
+- **Skips profiles with no stored credentials** — they cannot be switched to, so
+  stopping on one would dead-end the rotation.
+- **`add` appends** rather than inserting: a new account joins the end of the
+  cycle instead of shifting a sequence you arranged. Re-`add`ing an existing
+  seat under a new name keeps its slot.
+- Profiles you leave out of `order` stay in the cycle, just after the placed
+  ones — a partial reorder never drops an account.
+
+Use `next --best` when you want the emptiest window rather than the next in
+line; the ranking logic is unchanged.
 
 ## Notes
 
