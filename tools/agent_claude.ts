@@ -34,16 +34,51 @@ function buildEnv(): Record<string, string> {
   return env;
 }
 
-export function buildCommand(prompt: string, model?: string, _ctx?: BuildContext): BuiltCommand {
+/**
+ * argv ceiling for the serialized schema. macOS ARG_MAX is ~1 MiB for the whole
+ * argument vector; 256 KiB leaves generous room for the rest of the command and
+ * fails loudly here instead of as an opaque E2BIG from spawn.
+ */
+const MAX_SCHEMA_BYTES = 256 * 1024;
+
+/**
+ * Serialize a JSON Schema for `--json-schema`.
+ *
+ * The flag takes **inline JSON only** — passing a file path fails with
+ * `--json-schema is not valid JSON` (verified against 2.1.220), so there is no
+ * temp-file variant to fall back on.
+ */
+export function serializeJsonSchema(schema: unknown): string {
+  const s = JSON.stringify(schema);
+  if (typeof s !== "string") {
+    throw new Error("--json-schema: schema is not JSON-serializable");
+  }
+  if (Buffer.byteLength(s, "utf8") > MAX_SCHEMA_BYTES) {
+    throw new Error(
+      `--json-schema: serialized schema is ${Buffer.byteLength(s, "utf8")} bytes, ` +
+        `over the ${MAX_SCHEMA_BYTES}-byte argv budget`,
+    );
+  }
+  return s;
+}
+
+export function buildCommand(prompt: string, model?: string, ctx?: BuildContext): BuiltCommand {
   const m = model ?? CLAUDE_DEFAULT_MODEL;
+  const args = [
+    "-p", "-",
+    "--output-format", "json",
+    "--model", m,
+    "--no-session-persistence",
+  ];
+  // Structured output: the CLI forces a conforming reply and retries the model
+  // on mismatch, so the caller reads `structured_output` instead of scraping
+  // JSON out of prose. See extractStructuredOutput below.
+  if (ctx?.jsonSchema !== undefined) {
+    args.push("--json-schema", serializeJsonSchema(ctx.jsonSchema));
+  }
   return {
     cmd: "claude",
-    args: [
-      "-p", "-",
-      "--output-format", "json",
-      "--model", m,
-      "--no-session-persistence",
-    ],
+    args,
     stdin: prompt,
     env: buildEnv(),
   };
@@ -73,6 +108,34 @@ export function normalizeOutput(stdout: string): string {
     }
   } catch { /* fall through */ }
   return stdout;
+}
+
+/**
+ * Read the pre-parsed structured reply from a `--json-schema` run.
+ *
+ * When the schema is supplied the CLI envelope carries a top-level
+ * `structured_output` holding the reply **already parsed** — `.result` remains
+ * a *string* of the same JSON, so reading `structured_output` skips a parse
+ * rather than duplicating one.
+ *
+ * Returns null when the field is absent (no schema was passed, an older CLI, or
+ * a failed run), which is the caller's signal to fall back to tolerant text
+ * extraction. Errors are reported, never swallowed: an errored envelope returns
+ * null so a partial object is not mistaken for a complete reply.
+ */
+export function extractStructuredOutput(stdout: string): unknown | null {
+  const trimmed = stdout.trim();
+  if (!trimmed) return null;
+  let envelope: unknown;
+  try {
+    envelope = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  if (!isPlainObject(envelope)) return null;
+  if (envelope.is_error === true) return null;
+  const structured = envelope.structured_output;
+  return structured === undefined || structured === null ? null : structured;
 }
 
 function asStringOrNull(v: unknown): string | null {
