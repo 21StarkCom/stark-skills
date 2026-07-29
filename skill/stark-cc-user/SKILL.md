@@ -5,7 +5,7 @@ description: >-
   Switch the active Claude Code account between stored profiles when a 5-hour
   or 7-day rate-limit window runs out. Credentials live in macOS Keychain
   (service `stark-cc-token`); headroom comes from statusline snapshots.
-argument-hint: "[show|list|add <name>|use <name>|limits|next|order] [--dry-run] [--best]"
+argument-hint: "[show|list|add <name>|use <name>|remove <name>|prune|limits|next|order] [--dry-run] [--best]"
 ---
 
 ## Help
@@ -28,6 +28,8 @@ still has room. Sibling of `stark-gh-user`, but the mechanics differ — read
 - `/stark-cc-user list` — registered profiles (`*` marks the active one)
 - `/stark-cc-user add <name>` — store the CURRENT login as profile `<name>`
 - `/stark-cc-user use <name>` — switch to profile `<name>`
+- `/stark-cc-user remove <name>` — forget a profile (credentials + registry entry)
+- `/stark-cc-user prune [--dry-run]` — forget every profile with no stored credentials
 - `/stark-cc-user limits` — headroom for every profile, best target first
 - `/stark-cc-user next` — **switch to the next profile in the rotation**
 - `/stark-cc-user next --dry-run` — preview that pick without switching
@@ -61,6 +63,32 @@ claude /login          # log in as the account
 
 Repeat per account. `add` is also safe to re-run — it refreshes a stored
 profile whose token has since rotated.
+
+## Forgetting an account
+
+```
+/stark-cc-user remove <name>     # one profile: credentials + registry entry
+/stark-cc-user prune --dry-run   # list profiles with no stored credentials
+/stark-cc-user prune             # forget them
+```
+
+`remove` is **irreversible**. An OAuth blob cannot be re-derived, so recovering
+the account means `claude /login` + `add` again.
+
+Removing the **active** profile is allowed and warns. Nothing breaks
+immediately — the live credentials item is a separate Keychain entry and stays
+intact — but `use` re-captures the outgoing account only while it is still
+registered. Without its entry, switching away drops that seat's credentials for
+good.
+
+`prune` destroys nothing: an entry qualifies precisely because there is no
+credential left to destroy. `next` already skips these, so they only pad `list`
+and `order`. Keep them if you plan to re-`add` those accounts — a placeholder
+entry holds its slot in the rotation, while a pruned one rejoins at the end of
+the cycle and needs `order` run again.
+
+Survivors keep their `order` values, gaps and all — those are a sort key, not a
+position, so a removal never rewrites a cycle you arranged by hand.
 
 ## Why this isn't just a token swap
 

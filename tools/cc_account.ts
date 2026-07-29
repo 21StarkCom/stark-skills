@@ -11,6 +11,8 @@
  *   list                 registered profiles, active one marked
  *   add <name>           capture the CURRENT login as profile <name>
  *   use <name>           switch to profile <name>
+ *   remove <name>        forget a profile (credentials + registry entry)
+ *   prune                forget every profile with no stored credentials
  *   limits               headroom for every profile, best target first
  *   next [--dry-run]     switch to the next profile in the rotation
  *
@@ -40,11 +42,13 @@ import {
   seatKeyOf,
   parseSnapshot,
   projectUsage,
+  deleteProfileArgv,
   mergeProfile,
   parseNextFlags,
   rankProfiles,
   readClaudeCredsArgv,
   readProfileArgv,
+  removeProfile,
   resolveClaudeKeychainAccount,
   validateStoredProfile,
   writeClaudeCredsArgv,
@@ -410,6 +414,70 @@ function cmdUse(name: string): void {
   console.log("restart `claude` to pick it up (credentials load at startup)");
 }
 
+/**
+ * Forget a profile: its stored credentials AND its registry entry.
+ *
+ * Deleting the Keychain record is irreversible — an OAuth blob cannot be
+ * re-derived, so recovering the account means `claude /login` + `add` again.
+ * That is why removing the ACTIVE profile warns: the live credentials item is
+ * a separate entry and stays intact, so nothing breaks right now, but `use`
+ * re-captures the outgoing account only when it is still registered. Without
+ * its entry, switching away drops that seat's credentials for good.
+ */
+function cmdRemove(name: string): void {
+  const { profiles, removed } = removeProfile(readRegistry(), name);
+  const storedName = removed?.name ?? name;
+  const hadRecord = securityOrNull(readProfileArgv(storedName)) !== null;
+  if (!removed && !hadRecord) {
+    fail(`no profile ${JSON.stringify(name)} — nothing to remove`);
+  }
+
+  if (hadRecord) security(deleteProfileArgv(storedName));
+  if (removed) writeRegistry(profiles);
+
+  console.log(
+    `removed ${storedName}${removed?.email ? ` → ${removed.email}` : ""}` +
+      `${hadRecord ? "" : " (registry entry only — no stored credentials)"}`,
+  );
+  const active = currentSeatKey()?.toLowerCase();
+  if (removed?.seatKey && active && removed.seatKey.toLowerCase() === active) {
+    console.log(
+      "warning: that was the ACTIVE account. You stay logged in, but it is no " +
+        "longer registered — switching away will not preserve its credentials. " +
+        "Re-run `add` to keep it.",
+    );
+  }
+}
+
+/**
+ * Drop every registered profile that has no stored credentials.
+ *
+ * These are dead weight by construction: `next` already skips them because
+ * they cannot be switched to, so they only pad `list` and `order`. Nothing is
+ * destroyed — there is no credential left to destroy, which is precisely what
+ * qualifies an entry for pruning.
+ */
+function cmdPrune(dryRun: boolean): void {
+  const profiles = readRegistry();
+  const dead = profiles.filter(
+    (p) => securityOrNull(readProfileArgv(p.name)) === null,
+  );
+  if (dead.length === 0) {
+    console.log("nothing to prune — every profile has stored credentials");
+    return;
+  }
+  for (const p of dead) {
+    console.log(`${dryRun ? "would prune" : "pruned"}  ${p.name}  ${p.email}`);
+  }
+  if (dryRun) {
+    console.log(`# --dry-run: ${dead.length} kept`);
+    return;
+  }
+  const names = new Set(dead.map((p) => p.name));
+  writeRegistry(profiles.filter((p) => !names.has(p.name)));
+  console.log(`pruned ${dead.length} profile(s) with no stored credentials`);
+}
+
 function cmdLimits(): void {
   const profiles = readRegistry();
   if (profiles.length === 0) {
@@ -530,6 +598,9 @@ const USAGE = `usage: cc_account.ts <command>
   list              registered profiles ('*' = active)
   add <name>        store the current login as profile <name>
   use <name>        switch to profile <name>
+  remove <name>     forget profile <name> (credentials + registry entry)
+  prune             forget every profile with no stored credentials
+                    ( --dry-run = list them only )
   limits            headroom for every profile, best target first
   next              switch to the next profile in the rotation
                     ( --dry-run = preview only · --best = emptiest instead )
@@ -550,6 +621,12 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     case "use":
       if (!rest[0]) fail("use requires a profile name");
       return cmdUse(rest[0]);
+    case "remove":
+    case "rm":
+      if (!rest[0]) fail("remove requires a profile name");
+      return cmdRemove(rest[0]);
+    case "prune":
+      return cmdPrune(rest.includes("--dry-run"));
     case "limits":
       return cmdLimits();
     case "next": {

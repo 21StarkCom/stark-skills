@@ -197,6 +197,10 @@ export function readProfileArgv(name: string): string[] {
   return ["find-generic-password", "-s", SERVICE_PROFILES, "-a", name, "-w"];
 }
 
+export function deleteProfileArgv(name: string): string[] {
+  return ["delete-generic-password", "-s", SERVICE_PROFILES, "-a", name];
+}
+
 export function writeProfileArgv(name: string, blob: string): string[] {
   return [
     "add-generic-password",
@@ -400,6 +404,27 @@ export function applyOrder(
     }
     return { ...p, order: r };
   });
+}
+
+/**
+ * Drop a profile from the registry by name.
+ *
+ * Matching is case-insensitive to agree with every other name lookup here.
+ * Survivors keep their `order` untouched: those values are a sort key, not a
+ * position, so renumbering after a removal would silently rewrite a cycle the
+ * user arranged by hand. The resulting gap is invisible — `orderedProfiles`
+ * only compares.
+ */
+export function removeProfile(
+  existing: readonly Profile[],
+  name: string,
+): { profiles: Profile[]; removed?: Profile } {
+  const want = name.trim().toLowerCase();
+  const removed = existing.find((p) => p.name.toLowerCase() === want);
+  return {
+    profiles: existing.filter((p) => p.name.toLowerCase() !== want),
+    ...(removed ? { removed } : {}),
+  };
 }
 
 /**
