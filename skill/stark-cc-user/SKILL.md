@@ -134,13 +134,22 @@ using two properties that make stale data far more useful than it sounds:
 An account with no snapshot is `unknown` and sorts **last** — never
 optimistically assumed free, because guessing wrong sends you into a wall.
 
-For the same reason the statusline **skips** the write for a few ticks after a
-`/login`: `~/.claude.json` flips to the new seat at once, but the running
-process keeps reporting the window it was already on, so an early write would
-file the previous account's percentages under the new seat. The tell is
-`five_reset` — while a seat change still carries the old window's reset epoch,
-nothing is written. Expect a newly-added account to read `unknown` for a moment
-after switching to it; that is the guard, not a fault.
+For the same reason a snapshot is written **only by a process launched under
+the seat that is currently recorded**. `~/.claude.json` is global, but each
+`claude` process authenticates once at startup and then reports *its own*
+account's windows forever. With several windows open — eleven concurrent
+processes spanning three days is a real observed case — a process started
+before a `/login` keeps reporting the old account's numbers while reading the
+new account's identity, and would file one seat's usage under another's key.
+
+So the statusline records when the current seat first appeared and writes only
+from processes that started after that. A stale process simply stops
+contributing. Practical consequences:
+
+- A newly-switched account reads `unknown` until you **restart `claude`** under
+  it — the same restart the credentials themselves need.
+- Long-running windows on older accounts stop refreshing their own seat. That is
+  honest: nothing else on the machine can attribute their numbers.
 
 `next` ranks provably-reset first, then lowest floor, then name (deterministic:
 the same state always picks the same account).

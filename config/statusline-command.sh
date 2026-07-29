@@ -131,6 +131,44 @@ fmt_remain() { # reset_epoch [time_emoji] → sets FR: " ⏳ XdYh" or " XdYh" (e
   else FR=" ${lead}${m}m"; fi
 }
 
+# Claude Code start epoch → sets PROCSTART (0 when unresolvable).
+#
+# Hoisted out of the session-times block because the usage snapshot needs it
+# too: a snapshot is only attributable when the RENDERING process was launched
+# under the currently-recorded identity (see the snapshot guard below).
+#
+# Claude Code execs the statusline directly, so $PPID is the `claude` process —
+# stable across renders, distinct per window. Cached per-PPID: the warm path is
+# a single file read, zero forks (matching the git/account caches). Only a cold
+# miss touches ps+date. If a shell wrapper ever sits between (PPID != claude),
+# walk ancestors to find claude and skip the cache — the wrapper pid is
+# ephemeral, so caching it would leak a file per render and never hit anyway.
+resolve_procstart() {
+  PROCSTART=0
+  local _ccpid="$PPID" _psf="$HOME/.claude/.statusline-procstart-${PPID}"
+  local _v="" _ppcomm _p _c _ls
+  [ -r "$_psf" ] && IFS= read -r _v < "$_psf"
+  if [ "$_v" -gt 0 ] 2>/dev/null; then PROCSTART="$_v"; return; fi
+  _ppcomm=$(ps -o comm= -p "$PPID" 2>/dev/null); _ppcomm="${_ppcomm##*/}"
+  if [ "$_ppcomm" != "claude" ]; then             # resolve claude via ancestors
+    _p=$PPID
+    for _ in 1 2 3 4 5 6; do
+      _p=$(ps -o ppid= -p "$_p" 2>/dev/null); _p="${_p//[[:space:]]/}"
+      { [ -n "$_p" ] && [ "$_p" -gt 1 ] 2>/dev/null; } || break
+      _c=$(ps -o comm= -p "$_p" 2>/dev/null)
+      [ "${_c##*/}" = "claude" ] && { _ccpid="$_p"; break; }
+    done
+  fi
+  _ls=$(ps -o lstart= -p "$_ccpid" 2>/dev/null)
+  _ls="${_ls%"${_ls##*[![:space:]]}"}"            # rstrip trailing spaces
+  [ -n "$_ls" ] || return
+  _v=$(date -j -f "%a %b %d %T %Y" "$_ls" +%s 2>/dev/null) \
+    || _v=$(date -d "$_ls" +%s 2>/dev/null)       # GNU/Linux fallback
+  [ "$_v" -gt 0 ] 2>/dev/null || return
+  PROCSTART="$_v"
+  [ "$_ppcomm" = "claude" ] && printf '%s\n' "$_v" > "$_psf" 2>/dev/null
+}
+
 # All gauges render at width 10. Each gauge's filled prefixes are precomputed
 # by build_grad (light→dark), so mkbar is a pure array lookup + substring — no
 # per-cell loop.
@@ -511,33 +549,46 @@ _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
 # `seat_key=` is written LAST so a torn read degrades to "unknown" rather than
 # to a falsely-low percentage — see cc_account_lib.ts::formatSnapshot.
 #
-# GUARD — an in-process /login makes the payload unattributable for a few
-# seconds. `~/.claude.json` flips to the new seat immediately, but the running
-# process keeps reporting the window it was already on, so the first ticks after
-# a switch would file the OLD account's percentages under the NEW seat's key.
-# Observed live on 2026-07-29: 46% landed under a seat actually at 57% — an
-# UNDERSTATEMENT, the one direction that misleads (it makes an account look
-# freer than it is, and `floor` semantics promise the opposite).
+# GUARD — a snapshot is only attributable when the RENDERING process was
+# launched under the currently-recorded identity.
 #
-# The tell is `five_reset`: the payload is still describing the previous
-# account's window until that epoch changes. So remember the seat+reset of the
-# last write for THIS pid, and while a seat change still carries the previous
-# seat's reset epoch, skip the write. Once the epoch moves, the payload has
-# caught up and writing resumes. Skipping leaves the seat `unknown` (sorted
-# last) rather than confidently wrong — fail-safe, same as everywhere else here.
-_swf="$HOME/.claude/.statusline-seat-$PPID"
-_prev_seat="" _prev_reset=""
-[ -r "$_swf" ] && IFS=$'\t' read -r _prev_seat _prev_reset < "$_swf"
-_seat_ok=1
-if [ -n "$_prev_seat" ] && [ "$_prev_seat" != "$acct_seat" ] &&
-   [ "${five_reset:-0}" = "$_prev_reset" ]; then
-  _seat_ok=0                                  # identity moved, payload has not
+# `~/.claude.json` is global but each `claude` process authenticates ONCE at
+# startup and then reports ITS OWN account's rate_limits forever. So a process
+# started before a /login keeps reporting the previous account's window while
+# reading the new account's identity from the shared file — and files the wrong
+# percentages under the wrong seat.
+#
+# This is not hypothetical or brief. Observed live on 2026-07-29 with ELEVEN
+# concurrent claude processes spanning three days: one seat's snapshot thrashed
+# 60% -> 46% -> 73% as different processes rendered, and ten per-pid records
+# carried four distinct reset epochs under a single seat key. Both directions
+# occur, and the understating one is the harmful one — it breaks the `floor`
+# lower-bound promise and ranks an exhausted account first.
+#
+# The rule that holds: a process launched AFTER an identity became current is
+# authenticated to it. So track when the current seat first appeared, and write
+# only from processes that started later. A stale process simply stops
+# contributing — its seat reads `unknown` (sorted last) until a process started
+# under it renders, which is exactly the honest answer.
+#
+# This subsumes the /login settling window too: on a switch the marker's epoch
+# becomes now, so every already-running process is excluded until restart.
+_scf="$HOME/.claude/.statusline-seat-current"
+_cur_seat="" _cur_since=""
+[ -r "$_scf" ] && IFS=$'\t' read -r _cur_seat _cur_since < "$_scf"
+if [ -n "$acct_seat" ] && [ "$_cur_seat" != "$acct_seat" ]; then
+  _cur_seat="$acct_seat" _cur_since="$NOW"
+  printf '%s\t%s\n' "$acct_seat" "$NOW" > "$_scf" 2>/dev/null
 fi
-if [ -n "$acct_seat" ] && [ -n "$five_pct" ] && [ "$_seat_ok" = 1 ]; then
-  printf 'five_pct=%s\nfive_reset=%s\nweek_pct=%s\nweek_reset=%s\nstamped_at=%s\nemail=%s\nseat_key=%s\n' \
-    "$_fpct" "${five_reset:-0}" "$_wpct" "${week_reset:-0}" "$NOW" "$acct_email" "$acct_seat" \
-    > "$HOME/.claude/.cc-usage-${acct_seat//:/_}" 2>/dev/null
-  printf '%s\t%s\n' "$acct_seat" "${five_reset:-0}" > "$_swf" 2>/dev/null
+if [ -n "$acct_seat" ] && [ -n "$five_pct" ]; then
+  resolve_procstart
+  if [ "$PROCSTART" -gt 0 ] 2>/dev/null &&
+     [ "${_cur_since:-0}" -gt 0 ] 2>/dev/null &&
+     [ "$PROCSTART" -ge "$_cur_since" ]; then
+    printf 'five_pct=%s\nfive_reset=%s\nweek_pct=%s\nweek_reset=%s\nstamped_at=%s\nemail=%s\nseat_key=%s\n' \
+      "$_fpct" "${five_reset:-0}" "$_wpct" "${week_reset:-0}" "$NOW" "$acct_email" "$acct_seat" \
+      > "$HOME/.claude/.cc-usage-${acct_seat//:/_}" 2>/dev/null
+  fi
 fi
 
 # Cumulative session tokens — opt-in (off by default; misleading because
@@ -575,36 +626,7 @@ fi
 # the signature unchanged, so the stamp holds between outputs.
 l3=""
 if _on session_times; then
-  # Claude Code execs the statusline directly, so $PPID is the `claude`
-  # process — stable across renders, distinct per window. Its start epoch is
-  # cached per-PPID: the warm path is a single file read, zero forks (matching
-  # the git/account caches). Only a cold miss touches ps+date. If a shell
-  # wrapper ever sits between (PPID != claude), walk ancestors to find claude
-  # and skip the cache — the wrapper pid is ephemeral, so caching it would
-  # leak a file per render and never hit anyway.
-  _procstart="" _ccpid="$PPID"
-  _psf="$HOME/.claude/.statusline-procstart-${PPID}"
-  [ -r "$_psf" ] && IFS= read -r _procstart < "$_psf"
-  if ! [ "$_procstart" -gt 0 ] 2>/dev/null; then
-    _ppcomm=$(ps -o comm= -p "$PPID" 2>/dev/null); _ppcomm="${_ppcomm##*/}"
-    if [ "$_ppcomm" != "claude" ]; then           # resolve claude via ancestors
-      _p=$PPID
-      for _ in 1 2 3 4 5 6; do
-        _p=$(ps -o ppid= -p "$_p" 2>/dev/null); _p="${_p//[[:space:]]/}"
-        { [ -n "$_p" ] && [ "$_p" -gt 1 ] 2>/dev/null; } || break
-        _c=$(ps -o comm= -p "$_p" 2>/dev/null)
-        [ "${_c##*/}" = "claude" ] && { _ccpid="$_p"; break; }
-      done
-    fi
-    _ls=$(ps -o lstart= -p "$_ccpid" 2>/dev/null)
-    _ls="${_ls%"${_ls##*[![:space:]]}"}"          # rstrip trailing spaces
-    if [ -n "$_ls" ]; then
-      _procstart=$(date -j -f "%a %b %d %T %Y" "$_ls" +%s 2>/dev/null) \
-        || _procstart=$(date -d "$_ls" +%s 2>/dev/null)   # GNU/Linux fallback
-      [ "$_ppcomm" = "claude" ] && [ -n "$_procstart" ] && \
-        printf '%s\n' "$_procstart" > "$_psf" 2>/dev/null
-    fi
-  fi
+  resolve_procstart; _procstart="$PROCSTART"
   if [ "$_procstart" -gt 0 ] 2>/dev/null; then
     printf -v _startc '%(%H:%M)T' "$_procstart"
     seg3 "${DIM}\U0001f7e2 ${_startc}${R}"        # started (CC opened)
