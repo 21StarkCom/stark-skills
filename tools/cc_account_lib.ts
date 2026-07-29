@@ -403,6 +403,27 @@ export function applyOrder(
 }
 
 /**
+ * Flags for `next`.
+ *
+ * Switching is the DEFAULT: `next` exists to advance the rotation, and gating
+ * that behind `--apply` made the common case two commands while the bare form
+ * did nothing — which reads as a broken tool rather than as a preview.
+ *
+ * `--dry-run` is the preview. `--apply` is still accepted so muscle memory and
+ * any existing script keep working; it now simply names the default. A
+ * contradictory pair resolves to the safe reading — never switch unasked.
+ */
+export function parseNextFlags(args: readonly string[]): {
+  apply: boolean;
+  best: boolean;
+} {
+  return {
+    apply: !args.includes("--dry-run"),
+    best: args.includes("--best"),
+  };
+}
+
+/**
  * Merge a freshly-captured profile into the registry.
  *
  * Dedupe is on name and SEAT — never on email or org alone. One address can

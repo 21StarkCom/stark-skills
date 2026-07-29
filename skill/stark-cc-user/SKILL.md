@@ -5,7 +5,7 @@ description: >-
   Switch the active Claude Code account between stored profiles when a 5-hour
   or 7-day rate-limit window runs out. Credentials live in macOS Keychain
   (service `stark-cc-token`); headroom comes from statusline snapshots.
-argument-hint: "[show|list|add <name>|use <name>|limits|next|order] [--apply] [--best]"
+argument-hint: "[show|list|add <name>|use <name>|limits|next|order] [--dry-run] [--best]"
 ---
 
 ## Help
@@ -29,8 +29,9 @@ still has room. Sibling of `stark-gh-user`, but the mechanics differ — read
 - `/stark-cc-user add <name>` — store the CURRENT login as profile `<name>`
 - `/stark-cc-user use <name>` — switch to profile `<name>`
 - `/stark-cc-user limits` — headroom for every profile, best target first
-- `/stark-cc-user next [--apply]` — **next profile in the rotation**
-- `/stark-cc-user next --best [--apply]` — emptiest window instead of the next one
+- `/stark-cc-user next` — **switch to the next profile in the rotation**
+- `/stark-cc-user next --dry-run` — preview that pick without switching
+- `/stark-cc-user next --best` — emptiest window instead of the next one
 - `/stark-cc-user order [names...]` — show the rotation cycle, or set it
 
 ## Behavior
@@ -166,10 +167,13 @@ cycle visits every seat before repeating any.
 /stark-cc-user order Com-Max Net-T0 Net-M0 Net-T1 Net-M1 …
 /stark-cc-user order                 # show the current cycle
 /stark-cc-user list                  # same order, with live status
-/stark-cc-user next --apply          # advance one step
+/stark-cc-user next                  # advance one step (switches)
+/stark-cc-user next --dry-run        # show the pick without switching
 ```
 
-- **Wraps** at the end, so repeated `next --apply` laps the whole fleet.
+- **Switches by default.** `next` exists to advance the rotation; `--dry-run` is
+  the preview. (`--apply` is still accepted, and now just names the default.)
+- **Wraps** at the end, so repeated `next` laps the whole fleet.
 - **Skips profiles with no stored credentials** — they cannot be switched to, so
   stopping on one would dead-end the rotation.
 - **`add` appends** rather than inserting: a new account joins the end of the
