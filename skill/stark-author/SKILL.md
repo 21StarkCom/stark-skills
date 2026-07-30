@@ -118,6 +118,41 @@ than the headline one. [RQ4] **Edges are author-declared**, default
 independent; add an edge only when a named artifact (file/interface) forces
 it. A cycle is a defect — fix the decomposition. [RQ4]
 
+**Wiring-seam checklist — before a task's file set is final.** Ask: *if
+this task's diff were applied and nothing else, would the behavior
+criterion actually hold at runtime?* A done-when can pass while the
+answer is no — that is the highest-value failure mode the skill exists to
+prevent (observed: 5 of 8 tasks in the hibob-profiles-cache run required
+files outside their declared set, in the same four categories every time).
+
+For every task, scan these classes before locking the file set:
+
+- **Registration/dispatch** — does the task add a step, capability, route,
+  or handler? The registry/step-list/route-table that causes it to be
+  invoked MUST be in the set. A migration `.sql` is inert data without the
+  step list entry that makes the runner call it; a capability struct is
+  dead code without a catalog entry.
+- **Generated artifacts pinned by tests** — does the task add or change a
+  struct field, schema, or generated doc? `TestSchema_GoStructSync`,
+  `TestCatalogUpToDate`, and doc-conformance tests compare generated
+  artifacts against on-disk snapshots. Adding a field makes the snapshot
+  stale by construction; the snapshot file(s) and any catalog JSON must be
+  in the set.
+- **Call sites** — does the task add a new helper, function, or audit
+  point? A helper with zero callers is dead code behind a green gate. The
+  file(s) where the call or audit-append lives MUST be in the set; name
+  them explicitly. If no call site exists yet, the task is incomplete —
+  either add the call site or add a task for it.
+- **Doc/description generators** — does the task produce user-visible
+  text (descriptions, labels, help strings)? The file where the generator
+  reads or writes those descriptions (e.g. `dbdoc.go`, a `descriptions`
+  map) must be in the set, not just the struct or table definition.
+
+The question to answer for every task before moving on: **"if this task's
+diff were applied and nothing else, would the behavior criterion actually
+hold at runtime?"** If the honest answer is "no — something else must also
+change", add that something to the file set or add a task for it.
+
 **Vacuous done-whens — the named anti-patterns.** Each of these is
 machine-checkable AND proves nothing. Reject them at authoring time:
 - a test-filter that may match **zero** tests (`go test ./... -run 'Docs'`

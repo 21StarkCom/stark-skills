@@ -43,6 +43,34 @@ Evidence base: [references/stage2-dossier.md](references/stage2-dossier.md)
   2026-07-26 ahead of the A/B the dossier asked for; the dossier's §1.8
   still argues against this round. Read §6.4a before widening it.]
 
+**Harness subprocess rule — stdin closed, always.** Every dispatched
+subprocess (`claude -p`, `codex exec`) must have `</dev/null` before its
+output redirect. **A hung reviewer is indistinguishable from a thorough
+one.** Both CLIs read stdin *in addition to* the prompt argument, so an
+open pipe that never delivers EOF — which is what stdin is under a
+backgrounded or orchestrated shell — blocks them. `codex exec` blocks
+silently and forever (confirmed live: 5h14m, 39 bytes of output, all of it
+"Reading additional input from stdin..."). `claude -p` fails fast instead,
+but into the redirect file where nobody is looking (`Warning: no stdin data
+received in 3s` then `Execution error`). Add `</dev/null` before `>` on
+every dispatch below; any new dispatch inherits this rule.
+
+The rule covers **every** process this skill starts, not just the LLM
+dispatches:
+- **the hooks** — `stop-gate.sh` runs the task's check with stdin closed,
+  because a Stop hook's own stdin is the Claude Code payload pipe and a
+  gate that transitively reads stdin would hang turn-end inside the gate;
+- **the runner's own gate invocations** — Phase 2 §Verify 1, the Phase 3
+  e2e command, and the Phase 4b sweep all run under the orchestrated
+  shell's never-EOF stdin. A check that reads stdin therefore returns in
+  <1s under the Stop hook and blocks *forever* under the runner: the same
+  command, two verdicts. That asymmetry is the most likely explanation for
+  the undiagnosed "wrapper does not return" flake below, so close stdin
+  there before reaching for the fallback.
+
+`protect-paths.sh` is the one deliberate exception — it *must* read stdin
+to get the tool payload.
+
 **Raw input:** `$ARGUMENTS`
 
 ## Phase 0 — Preflight
@@ -76,8 +104,39 @@ State lives OUTSIDE the repo:
    ```bash
    TOOLS="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools"
    node --experimental-strip-types --no-warnings "$TOOLS/copilot_land.ts" \
-     prepare-branch --branch "build/<slug>" --repo-dir "<wt>"
+     prepare-branch --branch "build/<slug>" --repo-dir "<wt>" \
+     --require-base <accepted-base>
    ```
+   **`--require-base` is mandatory here.** Without it, a leftover
+   `origin/build/<slug>` from a prior abandoned run is adopted via
+   `git checkout -B <branch> origin/<branch>`, which silently resets HEAD
+   onto that older codebase — reporting `ok: true` while every subsequent
+   gate measures a tree predating the pin. Reproduced and fixed live; the
+   flag refuses the stale adoption without moving the worktree.
+
+   **Check the exit code FIRST, then assert.** A refusal is the guard
+   working, and it leaves HEAD exactly where it was — so a bare
+   `merge-base --is-ancestor <accepted-base> HEAD` compares the base to
+   itself, exits 0, and sails past a run that never got its branch. (The
+   downstream symptom is an opaque `src refspec build/<slug> does not
+   match any` from Phase 1 step 2, after an empty commit lands on a
+   detached HEAD.) Both checks are required — the assertion is the backstop
+   for an older vendored `copilot_land.ts` that predates the flag:
+   ```bash
+   node ... "$TOOLS/copilot_land.ts" prepare-branch ... --require-base <accepted-base> \
+     || { echo "HARD STOP: prepare-branch refused — read its message." >&2; exit 1; }
+   git -C "<wt>" rev-parse --abbrev-ref HEAD | grep -qx "build/<slug>" \
+     || { echo "HARD STOP: worktree is not on build/<slug> (detached or wrong branch)." >&2; exit 1; }
+   git -C "<wt>" merge-base --is-ancestor <accepted-base> HEAD \
+     || { echo "HARD STOP: HEAD does not contain accepted-base <sha>." >&2; exit 1; }
+   ```
+   **Remedy for a stale branch — do NOT reflexively delete the remote.**
+   `git push origin --delete build/<slug>` **closes any open PR on that head
+   ref**, taking its posted advisory findings and review threads with it —
+   which the nothing-lost rule forbids. Prefer, in order: (a) re-pin the
+   spec if the old run's work is superseded, (b) land this run on a
+   suffixed branch (`build/<slug>-2`), (c) delete the remote branch only
+   after confirming no PR on it holds findings you still need.
 2. **Draft PR immediately** — seed with
    `git commit --allow-empty -m "build(<slug>): run start (accepted-base <sha>)"`,
    then `copilot_land.ts land --repo <owner/repo> --branch "build/<slug>"
@@ -87,10 +146,16 @@ State lives OUTSIDE the repo:
    [references/hooks/protect-paths.sh](references/hooks/protect-paths.sh) and
    [references/hooks/stop-gate.sh](references/hooks/stop-gate.sh) into
    `$STATE/hooks/`, `chmod +x`. Write `$STATE/protected.list` — one absolute
-   path per line: the spec + its `.human.md` sidecar, every EXISTING test
-   file named by any done-when, `$STATE/hooks/`, `$STATE/tasks/` (check
-   scripts + settings), and the repo's CI config dir. [RQ1/RQ5 — read-only
-   tests, measured]
+   path per line, **no trailing slash on directory entries**: the spec + its
+   `.human.md` sidecar, every EXISTING test file named by any done-when,
+   `$STATE/hooks`, `$STATE/tasks` (check scripts + settings), and the repo's
+   CI config dir. [RQ1/RQ5 — read-only tests, measured]
+
+   A trailing slash builds the glob `<dir>//*`, whose double slash matches
+   **nothing** — the Edit/Write deny branch silently passes every file under
+   it, and a task session can rewrite its own `check.sh` and `stop-gate.sh`
+   to land a fabricated green. `protect-paths.sh` now normalizes trailing
+   slashes itself, so this is belt-and-braces; write them without anyway.
 4. **Materialize `$STATE/PROGRESS.md`** (append-only: per-task status,
    evidence pointers, deviations). [RQ3]
 
@@ -126,7 +191,8 @@ template — fill every `<>`:
 >    first write the task's verification per the spec's fallback ladder.
 > 3. Implement until the done-when passes. Gated files are hook-protected —
 >    add NEW tests freely, never edit existing ones.
-> 4. Evidence: run checks via `... 2>&1 | tee -a <$T>/evidence.log`.
+> 4. Evidence: run checks via `... 2>&1 | tee -a <$STATE>/evidence/<id>.log`.
+>    (`$STATE/tasks/` is write-protected; write evidence to `$STATE/evidence/` instead.)
 > 5. Touch only the declared files. If you must touch outside the set,
 >    append `- [deviation] task=<id> class=<blocked|spec-defect> ...` to
 >    PROGRESS.md; if the SCOPE BOUNDARY moves, log `class=scope-move` and
@@ -140,11 +206,71 @@ template — fill every `<>`:
 ```bash
 claude -p --model "<--model | claude-opus-5>" --settings "$T/settings.json" \
   --max-turns "<--max-turns | 30>" --dangerously-skip-permissions \
-  "$(cat "$T/prompt.md")" > "$T/session.log" 2>&1
+  "$(cat "$T/prompt.md")" </dev/null > "$T/session.log" 2>&1
 ```
 
 **Verify (you, deterministically — never ask the session how it went):**
-1. Gate: `bash $T/check.sh` yourself → green / red.
+1. Gate: run `bash "$T/check.sh" </dev/null` yourself → green / red.
+   Keep the `bash` prefix — `check.sh` is written without a shebang and is
+   never `chmod +x` (only `$STATE/hooks/` is), so executing it directly
+   returns `permission denied` (126) on **every** task: a false red
+   indistinguishable from a real one. `</dev/null` for the same reason the
+   dispatches carry it — the runner's own stdin is the orchestrated shell's
+   never-EOF pipe, so a gate that transitively reads stdin blocks forever
+   here even though it returns in <1s under the Stop hook.
+   **Background it — foreground timeouts leak children.** When the
+   orchestrating shell hits a wall-clock limit it stops waiting but does
+   NOT kill the child process tree. Every retry then competes with all
+   prior `go test` (or equivalent) processes for build caches, producing a
+   self-inflicted escalating slowdown that looks like external contention
+   and causes real misdiagnosis (observed: four concurrent T3/check.sh
+   processes, oldest at 52 min). Run long gates as background tasks and
+   terminate them via the harness's own task-stop, never via a foreground
+   timeout.
+   **macOS has no `timeout(1)`** (verified on this fleet — and `gtimeout`
+   is not installed by default either; it needs `brew install coreutils`).
+   A gate sweep written with `timeout 120 bash check.sh` reports every gate
+   as red in 0s, because `timeout: command not found` exits 127 — a **false
+   red that is indistinguishable from a correct one**. Never bare
+   `timeout`. Prefer the runner's own language-level bound (`go test
+   -timeout`), which kills the work it started and orphans nothing.
+   **Any wrapper that signals only the direct child leaks the tree** — that
+   includes `gtimeout` without `--kill-after`/process-group handling and
+   the `perl -e 'alarm N; exec @ARGV'` trick: `alarm` delivers SIGALRM to
+   the exec'd shell only, so `go test`'s compile/run children survive and
+   reproduce the exact contention above. If you need a hard bound outside
+   the language, run the gate in its own process group and kill the
+   **group** (`set -m`, then `kill -- -"$PGID"`), and verify nothing
+   survived before retrying.
+   **Broad kill patterns kill YOUR OWN gate first.** `pkill -f "go test"`
+   matches on command-line text, not on process ownership. In the live run
+   it killed the runner's own in-flight verification and produced
+   `rc=143` — which was then misread as a gate failure, not as
+   self-inflicted. It also killed a *different* concurrent `stark-build`
+   run (`auth0-write-surface`) mid-task, because that run's prompt text
+   contained the string `go test`. Any cleanup pattern must be scoped to
+   this run's unique `$STATE` path and dry-run listed **with the command
+   text visible** — `pgrep -lf "$STATE"` or `ps -eo pid,command | grep -F
+   "$STATE"`. **Not `pgrep -af`**: on macOS `-a` means "include process
+   ancestors in the match list", not "show the full command line", so it
+   prints bare PIDs (nothing to inspect) *and* widens the set to each
+   match's ancestors — which includes the orchestrating session, so
+   feeding that list to a kill terminates the run itself.
+   **Wrapper flake fallback.** If `bash "$T/check.sh"` does not return, the
+   runner may run the check's **own content verbatim** — meaning the whole
+   file including its `set -euo pipefail; cd <wt>` envelope, not just the
+   done-when line lifted out of the spec. Dropping the envelope is a
+   silent correctness change: without `cd <wt>` the command runs against
+   the **main checkout** and greens a task whose worktree implementation is
+   absent or broken; without `pipefail` a piped done-when exits with the
+   last stage's status and greens a failing suite. Both are the vacuous
+   green this skill exists to prevent. Re-run to confirm (Phase 3's ≤3×
+   flaky discipline applies), and record in PROGRESS.md that the wrapper
+   did not return, that direct invocation was used, and both outcomes.
+   Never paraphrase or adapt the command. The root cause here is
+   **undiagnosed** — do not invent one. The non-negotiable "completion is a
+   runnable check, never a model verdict" holds precisely because the
+   command and its envelope are identical and the runner still runs it.
 2. Tamper: `git -C <wt> diff --name-only <pre-sha>..HEAD` (plus dirty files)
    ∩ `protected.list` must be EMPTY — a hit aborts the whole run
    (`class=blocked`, harness-tamper note, straight to Phase 5 report).
@@ -167,6 +293,14 @@ Run the spec's `## Verification` command(s) yourself in the worktree — the
 per-task loop never iterates on them. Flaky discipline: re-run the IDENTICAL
 command ≤3×, log every outcome, never edit it.
 
+The e2e command is typically the longest-running gate in the run, so
+**Phase 2 §Verify 1's execution rules apply here in full**: run it with
+stdin closed (`</dev/null`), background it and stop it via the harness's
+own task-stop (a foreground timeout leaks the child process tree, and each
+leaked child then competes with the next attempt), never bare `timeout`,
+never a wrapper that signals only the direct child, and never a broad kill
+pattern.
+
 - **Green** → proceed.
 - **Red with all tasks green** → the divergence signal (build gamed or spec
   mis-decomposed [RQ9]): append to PROGRESS.md, continue to Phase 4, PR
@@ -182,7 +316,7 @@ One reviewer, different model family, fresh context, read-only — codex:
 
 ```bash
 git -C <wt> diff <accepted-base>..HEAD > "$STATE/final.diff"
-codex exec -s read-only "$(cat "$STATE/advisory-prompt.md")" > "$STATE/advisory.out" 2>&1
+codex exec -s read-only "$(cat "$STATE/advisory-prompt.md")" </dev/null > "$STATE/advisory.out" 2>&1
 ```
 
 `advisory-prompt.md` = the spec text + the full diff + this contract
@@ -229,7 +363,7 @@ budget past the first attempt is deliberately zero. [RQ1][RQ2]
    # $T/settings.json = Phase 2's, with Stop -> stop-gate.sh $T/check.sh ...
    claude -p --model "<--model | claude-opus-5>" --settings "$T/settings.json" \
      --max-turns "<--max-turns | 30>" --dangerously-skip-permissions \
-     "$(cat "$T/prompt.md")" > "$T/session.log" 2>&1
+     "$(cat "$T/prompt.md")" </dev/null > "$T/session.log" 2>&1
    ```
 
    `$T/prompt.md`: the spec, the selected findings verbatim, and — *"Fix
@@ -240,10 +374,18 @@ budget past the first attempt is deliberately zero. [RQ1][RQ2]
    on; rejecting on evidence is a success, faking a fix is not. Finish with
    exactly one commit: `fix(<slug>): advisory round`."*
 4. **Verify (you, deterministically — the reviewer is not consulted again):**
-   re-run EVERY task's `check.sh` plus the e2e command yourself. Any check
-   that was green before the round and is red after → `git revert` the fix
-   commit, log `class=fix-regression`, PR stays draft. All green → keep it.
-   Tamper + scope checks run exactly as in Phase 2 §Verify.
+   re-run EVERY task's `check.sh` plus the e2e command yourself. This is the
+   heaviest gate sweep in the run, so **Phase 2 §Verify 1's execution rules
+   apply to every check in it**: invoke each as `bash "$T/check.sh"
+   </dev/null` (no shebang, never chmod +x, and the runner's stdin never
+   EOFs), background each one and use task-stop, never a foreground timeout
+   (leaks children that then slow every later check), never bare `timeout`
+   (absent on macOS — reports the whole sweep as a false red in 0s), never a
+   broad kill pattern (it kills your own in-flight gate and other runs'
+   tasks). Any check that was green before the round and is
+   red after → `git revert` the fix commit, log `class=fix-regression`, PR
+   stays draft. All green → keep it. Tamper + scope checks run exactly as in
+   Phase 2 §Verify.
 5. **Record.** Append to PROGRESS.md: findings selected, fixed, rejected
    (with reasons), gate outcome. Post ONE follow-up PR comment listing what
    was fixed, what was rejected and why, and what remains open — CLAUDE.md's

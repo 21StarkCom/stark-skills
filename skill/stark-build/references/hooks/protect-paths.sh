@@ -21,11 +21,25 @@ deny() {
   exit 2
 }
 
+# Strip trailing slashes from a list entry. A directory written as
+# `/state/tasks/` would otherwise build the glob `/state/tasks//*`, whose double
+# slash matches NOTHING — silently disabling write protection for every file
+# under it while the entry looks correct. Verified: with the trailing slash,
+# `/state/tasks/T1/check.sh` is ALLOWED; without it, DENIED. The runner is an
+# LLM filling a template, so normalize here rather than relying on the prose.
+norm() {
+  p="$1"
+  while [ "${p%/}" != "$p" ] && [ "$p" != "/" ]; do p="${p%/}"; done
+  printf '%s' "$p"
+}
+
 case "$tool" in
   Edit|Write|NotebookEdit)
     path="$(printf '%s' "$payload" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')"
     [ -n "$path" ] || exit 0
     while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      p="$(norm "$p")"
       [ -n "$p" ] || continue
       case "$path" in "$p" | "$p"/*) deny "$path" ;; esac
     done < "$LIST"
@@ -34,6 +48,8 @@ case "$tool" in
     cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty')"
     [ -n "$cmd" ] || exit 0
     while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      p="$(norm "$p")"
       [ -n "$p" ] || continue
       esc="$(printf '%s' "$p" | sed 's/[.[\*^$/]/\\&/g')"
       # In-place mutation of the protected path, redirect INTO it, or sed -i

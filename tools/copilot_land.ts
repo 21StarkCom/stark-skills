@@ -14,11 +14,16 @@
  *   branch-name    --plan-slug SLUG|"" --fallback-slug SLUG
  *                  Print deriveImplBranch(planSlug, fallbackSlug).
  *
- *   prepare-branch --branch NAME [--repo-dir DIR] [--dry-run] [--json]
+ *   prepare-branch --branch NAME [--repo-dir DIR] [--require-base SHA]
+ *                  [--dry-run] [--json]
  *                  Adopt-or-create the branch on the CURRENT checkout
  *                  (refuses a dirty tree; ff-only merge for an existing
  *                  local — a non-ff divergence is a HARD error, never
  *                  force). Mirrors `write_spec_land.ts prepare-branch`.
+ *                  --require-base SHA refuses to adopt a remote branch that
+ *                  does not contain SHA, and asserts HEAD contains it after
+ *                  every path. Without it, a leftover remote branch from an
+ *                  abandoned run silently resets HEAD onto the old codebase.
  *
  *   land           --repo O/R --branch NAME --title T --body TEXT
  *                  [--base main] [--lead claude|codex|gemini] [--ready]
@@ -75,6 +80,27 @@ function remoteBranchExists(branch: string, cwd: string): boolean {
   return r.code === 0 && r.stdout.length > 0;
 }
 
+// Does `ref` contain `commitish` (i.e. is it an ancestor of, or equal to, ref)?
+// Used by prepare-branch's --require-base guard: adopting a leftover branch from
+// an abandoned run silently resets HEAD onto the OLD codebase, so every later
+// measurement is taken against a tree predating the caller's pin. Observed live
+// on a /stark-build run.
+//
+// TRI-STATE ON PURPOSE. `merge-base --is-ancestor` exits 0 (yes), 1 (no), or
+// 128 (could not evaluate — the ref does not resolve, e.g. a --single-branch or
+// --depth clone where refs/remotes/origin/<branch> was never created by the
+// fetch). Collapsing 128 into "no" makes the guard confidently report a healthy
+// branch as stale and tell the operator to DELETE it — data loss on a false
+// premise. Callers must handle "unresolvable" as its own outcome.
+type Containment = "yes" | "no" | "unresolvable";
+
+function refContains(ref: string, commitish: string, cwd: string): Containment {
+  const r = git(["merge-base", "--is-ancestor", commitish, ref], cwd);
+  if (r.code === 0) return "yes";
+  if (r.code === 1) return "no";
+  return "unresolvable";
+}
+
 function hasUpstream(cwd: string): boolean {
   return git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], cwd).code === 0;
 }
@@ -88,8 +114,11 @@ Create-or-adopt idempotent impl-PR landing helper for /stark-copilot.
 subcommands:
   branch-name    --plan-slug SLUG --fallback-slug SLUG [--json]
                  Print the deterministic impl branch name.
-  prepare-branch --branch NAME [--repo-dir DIR] [--dry-run] [--json]
+  prepare-branch --branch NAME [--repo-dir DIR] [--require-base SHA]
+                 [--dry-run] [--json]
                  Adopt-or-create the branch (ff-only; never force).
+                 --require-base SHA refuses a stale remote branch that
+                 does not contain SHA, and asserts HEAD contains it.
   land           --repo OWNER/REPO --branch NAME --title TEXT --body TEXT
                  [--base BRANCH] [--lead claude|codex|gemini] [--ready]
                  [--known-prs "812,819"] [--repo-dir DIR]
@@ -118,7 +147,11 @@ interface Flags {
 }
 
 /** Minimal flag parser: `--key value` and boolean `--flag`. */
-function parseFlags(argv: string[], booleans: Set<string>): Flags {
+// `values` is the allowlist of recognized value-taking flags. Unknown flags are
+// a HARD error, never a silent drop: a typo'd or renamed safety flag
+// (`--requirebase` for `--require-base`) must not quietly disable the guard it
+// names while the command still exits 0. Callers pass every flag they read.
+function parseFlags(argv: string[], booleans: Set<string>, values: Set<string>): Flags {
   const flags: Flags = {};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -127,6 +160,10 @@ function parseFlags(argv: string[], booleans: Set<string>): Flags {
     if (booleans.has(key)) {
       flags[key] = true;
       continue;
+    }
+    if (!values.has(key)) {
+      const known = [...booleans, ...values].sort().map((k) => `--${k}`).join(", ");
+      throw new Error(`unknown flag: --${key} (known flags: ${known})`);
     }
     const v = argv[++i];
     if (v === undefined) throw new Error(`--${key} requires a value`);
@@ -138,6 +175,13 @@ function parseFlags(argv: string[], booleans: Set<string>): Flags {
 function str(flags: Flags, key: string): string {
   const v = flags[key];
   return typeof v === "string" ? v : "";
+}
+
+// Distinguishes "flag absent" from "flag present but empty" — `str()` collapses
+// both to "", which let `--require-base ""` (an unresolved shell variable)
+// silently disable every base guard while still reporting ok:true.
+function present(flags: Flags, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(flags, key);
 }
 
 function parsePrCsv(csv: string): number[] {
@@ -155,7 +199,7 @@ function parsePrCsv(csv: string): number[] {
 // ── Subcommand: branch-name ──────────────────────────────────────────────────
 
 function cmdBranchName(argv: string[]): number {
-  const flags = parseFlags(argv, new Set(["json"]));
+  const flags = parseFlags(argv, new Set(["json"]), new Set(["plan-slug", "fallback-slug"]));
   const json = flags["json"] === true;
   const planSlug = str(flags, "plan-slug");
   const fallbackSlug = str(flags, "fallback-slug");
@@ -175,21 +219,65 @@ function cmdBranchName(argv: string[]): number {
 // need to re-derive — the branch/PR existence checks below are what matter).
 
 function cmdPrepareBranch(argv: string[]): number {
-  const flags = parseFlags(argv, new Set(["json", "dry-run"]));
+  const flags = parseFlags(
+    argv,
+    new Set(["json", "dry-run"]),
+    new Set(["branch", "repo-dir", "require-base"]),
+  );
   const json = flags["json"] === true;
   const dryRun = flags["dry-run"] === true;
   const branch = str(flags, "branch");
   const cwd = str(flags, "repo-dir") || process.cwd();
+  const requireBase = str(flags, "require-base");
   if (!branch) return fail(json, "--branch is required");
+  // Present-but-empty must fail, not no-op: `--require-base "$UNSET_VAR"` would
+  // otherwise disable every guard below while still reporting success.
+  if (present(flags, "require-base") && !requireBase) {
+    return fail(json, "--require-base requires a non-empty commit-ish", 1);
+  }
 
   const localExists = localBranchExists(branch, cwd);
   const remoteExists = remoteBranchExists(branch, cwd);
   const action = localExists ? "checkout-ff" : remoteExists ? "checkout-track" : "create";
 
+  // Validate the base BEFORE the dry-run return, so a preflight cannot green-light
+  // a bogus SHA that the real run rejects.
+  if (requireBase && git(["cat-file", "-e", `${requireBase}^{commit}`], cwd).code !== 0) {
+    return fail(json, `--require-base ${requireBase} is not a commit in ${cwd}`, 1);
+  }
+
+  // Evaluate the guard in dry-run too, so the preflight verdict matches the real
+  // one. Previously --dry-run returned ok:true for exactly the stale-remote case
+  // the real invocation hard-refuses.
   if (dryRun) {
-    const plan = { ok: true, dry_run: true, branch, action, localExists, remoteExists };
+    let wouldRefuse: string | null = null;
+    if (requireBase) {
+      if (action === "checkout-track") {
+        const c = refContains(`origin/${branch}`, requireBase, cwd);
+        if (c === "no") wouldRefuse = `origin/${branch} does not contain ${requireBase}`;
+        if (c === "unresolvable") {
+          wouldRefuse = `origin/${branch} could not be resolved (fetch it first)`;
+        }
+      } else if (action === "checkout-ff") {
+        const local = refContains(branch, requireBase, cwd);
+        const remote = remoteExists ? refContains(`origin/${branch}`, requireBase, cwd) : "no";
+        if (local !== "yes" && remote !== "yes") {
+          wouldRefuse = `neither ${branch} nor origin/${branch} contains ${requireBase}`;
+        }
+      }
+    }
+    const plan = {
+      ok: wouldRefuse === null,
+      dry_run: true,
+      branch,
+      action,
+      localExists,
+      remoteExists,
+      require_base: requireBase || null,
+      would_refuse: wouldRefuse,
+    };
     process.stdout.write(JSON.stringify(plan, null, 2) + "\n");
-    return 0;
+    return wouldRefuse === null ? 0 : 1;
   }
 
   if (treeIsDirty(cwd)) {
@@ -204,11 +292,40 @@ function cmdPrepareBranch(argv: string[]): number {
   };
 
   if (action === "checkout-ff") {
+    // Fetch FIRST (non-destructive) so the guard can see origin's tip, then guard,
+    // then check out. `git checkout <branch>` relocates the worktree, so a stale
+    // LOCAL branch must be refused BEFORE it runs — a post-condition alone leaves
+    // the caller stranded on the wrong tree with a remedy naming a remote branch
+    // that may not even exist.
+    if (remoteExists) {
+      const rf = runGit(["fetch", "origin", branch]);
+      if (rf.code !== 0) return fail(json, `fetch origin ${branch} failed: ${rf.stderr}`, 1);
+    }
+    if (requireBase) {
+      // The base may legitimately be absent from the local branch but present on
+      // the remote — the ff-merge below brings it in. Refuse only when NEITHER
+      // holds it, and report unresolvable refs as their own failure.
+      const local = refContains(branch, requireBase, cwd);
+      const remote = remoteExists ? refContains(`origin/${branch}`, requireBase, cwd) : "no";
+      if (local === "unresolvable") {
+        return fail(json, `cannot evaluate whether ${branch} contains ${requireBase}`, 1);
+      }
+      if (local !== "yes" && remote !== "yes") {
+        return fail(
+          json,
+          `refusing to adopt local branch ${branch}: neither it nor ` +
+            `${remoteExists ? `origin/${branch}` : "any remote counterpart"} contains ` +
+            `${requireBase}. That local branch is stale (likely a leftover from an ` +
+            `abandoned run); checking it out would move this worktree onto a codebase ` +
+            `predating the requested base. Delete the local branch ` +
+            `(git branch -D ${branch}) or re-pin, then retry. The worktree has not moved.`,
+          1,
+        );
+      }
+    }
     let r = runGit(["checkout", branch]);
     if (r.code !== 0) return fail(json, `checkout ${branch} failed: ${r.stderr}`, 1);
     if (remoteExists) {
-      r = runGit(["fetch", "origin", branch]);
-      if (r.code !== 0) return fail(json, `fetch origin ${branch} failed: ${r.stderr}`, 1);
       r = runGit(["merge", "--ff-only", `origin/${branch}`]);
       if (r.code !== 0) {
         return fail(
@@ -222,6 +339,40 @@ function cmdPrepareBranch(argv: string[]): number {
   } else if (action === "checkout-track") {
     let r = runGit(["fetch", "origin", branch]);
     if (r.code !== 0) return fail(json, `fetch origin ${branch} failed: ${r.stderr}`, 1);
+    // Guard BEFORE the destructive `checkout -B`: that command resets HEAD onto
+    // the remote branch, so a leftover branch from an abandoned run would
+    // silently replace the caller's pinned base with an older codebase. Checked
+    // here rather than only as a post-condition so the worktree is never moved.
+    if (requireBase) {
+      const c = refContains(`origin/${branch}`, requireBase, cwd);
+      // "unresolvable" is NOT staleness — in a --single-branch/--depth clone the
+      // fetch writes only FETCH_HEAD and refs/remotes/origin/<branch> never
+      // exists. Reporting that as stale would tell the operator to delete a
+      // healthy branch holding the previous run's pushed work.
+      if (c === "unresolvable") {
+        return fail(
+          json,
+          `cannot evaluate whether origin/${branch} contains ${requireBase}: the ref ` +
+            `does not resolve locally (a --single-branch or --depth clone fetches ` +
+            `into FETCH_HEAD without creating refs/remotes/origin/${branch}). This is ` +
+            `NOT evidence that the branch is stale — do not delete it. Fetch it ` +
+            `explicitly (git fetch origin ${branch}:refs/remotes/origin/${branch}) and retry.`,
+          1,
+        );
+      }
+      if (c === "no") {
+        return fail(
+          json,
+          `refusing to adopt origin/${branch}: it does not contain ${requireBase}. ` +
+            `That remote branch is stale (likely a leftover from an abandoned run) and ` +
+            `adopting it would reset HEAD onto a codebase predating the requested base. ` +
+            `Re-pin, or land this run on a suffixed branch (${branch}-2). Deleting ` +
+            `origin/${branch} also works but CLOSES any open PR on it — losing review ` +
+            `threads and posted findings. The worktree has not moved.`,
+          1,
+        );
+      }
+    }
     r = runGit(["checkout", "-B", branch, `origin/${branch}`]);
     if (r.code !== 0) return fail(json, `checkout tracking ${branch} failed: ${r.stderr}`, 1);
   } else {
@@ -229,7 +380,19 @@ function cmdPrepareBranch(argv: string[]): number {
     if (r.code !== 0) return fail(json, `create ${branch} failed: ${r.stderr}`, 1);
   }
 
-  const result = { ok: true, branch, action, steps };
+  // Universal post-condition: whichever path ran, HEAD must contain the base.
+  // Backstop only — every path above guards before it mutates the worktree.
+  if (requireBase && refContains("HEAD", requireBase, cwd) !== "yes") {
+    return fail(
+      json,
+      `branch ${branch} was prepared but HEAD does not contain ${requireBase} ` +
+        `(action=${action}). Refusing to report success — every gate measured ` +
+        `against this tree would be taken against the wrong codebase.`,
+      1,
+    );
+  }
+
+  const result = { ok: true, branch, action, steps, require_base: requireBase || null };
   process.stdout.write(JSON.stringify(result, null, 2) + "\n");
   return 0;
 }
@@ -237,7 +400,11 @@ function cmdPrepareBranch(argv: string[]): number {
 // ── Subcommand: land ──────────────────────────────────────────────────────
 
 async function cmdLand(argv: string[]): Promise<number> {
-  const flags = parseFlags(argv, new Set(["json", "dry-run", "ready"]));
+  const flags = parseFlags(
+    argv,
+    new Set(["json", "dry-run", "ready"]),
+    new Set(["repo", "branch", "title", "body", "base", "lead", "known-prs", "repo-dir"]),
+  );
   const json = flags["json"] === true;
   const dryRun = flags["dry-run"] === true;
   const ready = flags["ready"] === true;

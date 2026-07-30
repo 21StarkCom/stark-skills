@@ -228,9 +228,21 @@ fallback_slug=$(printf '%s' "$plan_or_prompt" | tr '[:upper:]' '[:lower:]' \
 branch=$(node --experimental-strip-types "$TOOLS/copilot_land.ts" branch-name \
   --plan-slug "${PLAN_SLUG:-}" --fallback-slug "$fallback_slug")
 
+base=$(git rev-parse HEAD)
 node --experimental-strip-types "$TOOLS/copilot_land.ts" prepare-branch \
-  --branch "$branch" --json
+  --branch "$branch" --require-base "$base" --json
 ```
+
+**`--require-base` is not optional here.** `branch-name` is deterministic, so
+a re-run whose earlier attempt was abandoned finds a leftover
+`copilot/<slug>` and adopts it via `git checkout -B <b> origin/<b>` — which
+**resets `$REPO_ROOT` onto that older codebase** while reporting `ok: true`.
+Every later wave then diffs, tests, and commits against the wrong tree.
+Copilot runs against the real checkout rather than a throwaway worktree, so
+the blast radius is larger than the `/stark-build` case this guard was first
+added for. Pinning the current `HEAD` is the correct base: a branch that
+legitimately continues this work already contains it, and one that doesn't is
+precisely the stale branch you must not silently rewind onto.
 
 `branch-name` is deterministic (`copilot/<slug>`) — a re-invocation with the same plan slug (or, in inline mode, the same raw input) always names the same branch, and `prepare-branch` adopts it (ff-only merge against a matching local/remote branch; a genuinely diverged local branch is a hard error, never forced — see `tools/copilot_land_lib.ts`). Don't re-implement this logic in prose; both subcommands are the single source of truth.
 
