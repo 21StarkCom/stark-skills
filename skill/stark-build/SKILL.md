@@ -43,6 +43,15 @@ Evidence base: [references/stage2-dossier.md](references/stage2-dossier.md)
   2026-07-26 ahead of the A/B the dossier asked for; the dossier's §1.8
   still argues against this round. Read §6.4a before widening it.]
 
+**Harness subprocess rule — stdin closed, always.** Every dispatched
+subprocess (`claude -p`, `codex exec`) must have `</dev/null` before its
+output redirect. A hung reviewer is indistinguishable from a thorough one:
+`codex exec` without stdin closure blocks silently and forever (confirmed
+live: 5h14m with 39 bytes of output — "Reading additional input from
+stdin..."). `claude -p` warns and exits, but the warning is silent under
+a background redirect. Add `</dev/null` before `>` on every dispatch
+command below. Any new dispatch added to this skill inherits this rule.
+
 **Raw input:** `$ARGUMENTS`
 
 ## Phase 0 — Preflight
@@ -77,6 +86,15 @@ State lives OUTSIDE the repo:
    TOOLS="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools"
    node --experimental-strip-types --no-warnings "$TOOLS/copilot_land.ts" \
      prepare-branch --branch "build/<slug>" --repo-dir "<wt>"
+   ```
+   **Assert the worktree contains the accepted base** — `prepare-branch`
+   may adopt a stale remote branch from a prior abandoned run and silently
+   reset HEAD to a different codebase (observed live: every gate
+   measurement would have been taken against a tree predating the re-pin):
+   ```bash
+   git -C "<wt>" merge-base --is-ancestor <accepted-base> HEAD \
+     || { echo "HARD STOP: HEAD does not contain accepted-base <sha>. \
+   Delete origin/build/<slug> and retry." >&2; exit 1; }
    ```
 2. **Draft PR immediately** — seed with
    `git commit --allow-empty -m "build(<slug>): run start (accepted-base <sha>)"`,
@@ -126,7 +144,8 @@ template — fill every `<>`:
 >    first write the task's verification per the spec's fallback ladder.
 > 3. Implement until the done-when passes. Gated files are hook-protected —
 >    add NEW tests freely, never edit existing ones.
-> 4. Evidence: run checks via `... 2>&1 | tee -a <$T>/evidence.log`.
+> 4. Evidence: run checks via `... 2>&1 | tee -a <$STATE>/evidence/<id>.log`.
+>    (`$STATE/tasks/` is write-protected; write evidence to `$STATE/evidence/` instead.)
 > 5. Touch only the declared files. If you must touch outside the set,
 >    append `- [deviation] task=<id> class=<blocked|spec-defect> ...` to
 >    PROGRESS.md; if the SCOPE BOUNDARY moves, log `class=scope-move` and
@@ -140,11 +159,38 @@ template — fill every `<>`:
 ```bash
 claude -p --model "<--model | claude-opus-5>" --settings "$T/settings.json" \
   --max-turns "<--max-turns | 30>" --dangerously-skip-permissions \
-  "$(cat "$T/prompt.md")" > "$T/session.log" 2>&1
+  "$(cat "$T/prompt.md")" </dev/null > "$T/session.log" 2>&1
 ```
 
 **Verify (you, deterministically — never ask the session how it went):**
-1. Gate: `bash $T/check.sh` yourself → green / red.
+1. Gate: run `$T/check.sh` yourself → green / red.
+   **Background it — foreground timeouts leak children.** When the
+   orchestrating shell hits a wall-clock limit it stops waiting but does
+   NOT kill the child process tree. Every retry then competes with all
+   prior `go test` (or equivalent) processes for build caches, producing a
+   self-inflicted escalating slowdown that looks like external contention
+   and causes real misdiagnosis (observed: four concurrent T3/check.sh
+   processes, oldest at 52 min). Run long gates as background tasks and
+   terminate them via the harness's own task-stop, never via a foreground
+   timeout.
+   **macOS has no `timeout(1)`.** A gate sweep written with
+   `timeout 120 bash check.sh` reports every gate as red in 0s because
+   `timeout: command not found` returns non-zero — a false red that looks
+   correct. Use `go test -timeout`, `gtimeout`, or `perl -e 'alarm N; exec
+   @ARGV' -- bash check.sh`. Never bare `timeout`.
+   **Broad kill patterns hit other runs.** `pkill -f "go test"` matches on
+   prompt text, not process ownership — it kills tasks in every concurrent
+   `stark-build` run whose prompt text contains those words. Any cleanup
+   pattern must be scoped to this run's unique `$STATE` path and dry-run
+   listed (`pgrep -af "$STATE"`) before executing.
+   **Wrapper flake fallback.** If `bash $T/check.sh` does not return and
+   the gate's content is known (the done-when command verbatim from the
+   spec), the runner may execute the content **verbatim and unmodified**
+   as a direct substitution — the determinism guarantee is on the command,
+   not the wrapper script. Record that the wrapper did not return and that
+   direct invocation was used. Never paraphrase or adapt the command; the
+   non-negotiable "completion is a runnable check" is preserved as long as
+   the command is identical.
 2. Tamper: `git -C <wt> diff --name-only <pre-sha>..HEAD` (plus dirty files)
    ∩ `protected.list` must be EMPTY — a hit aborts the whole run
    (`class=blocked`, harness-tamper note, straight to Phase 5 report).
@@ -182,7 +228,7 @@ One reviewer, different model family, fresh context, read-only — codex:
 
 ```bash
 git -C <wt> diff <accepted-base>..HEAD > "$STATE/final.diff"
-codex exec -s read-only "$(cat "$STATE/advisory-prompt.md")" > "$STATE/advisory.out" 2>&1
+codex exec -s read-only "$(cat "$STATE/advisory-prompt.md")" </dev/null > "$STATE/advisory.out" 2>&1
 ```
 
 `advisory-prompt.md` = the spec text + the full diff + this contract
@@ -229,7 +275,7 @@ budget past the first attempt is deliberately zero. [RQ1][RQ2]
    # $T/settings.json = Phase 2's, with Stop -> stop-gate.sh $T/check.sh ...
    claude -p --model "<--model | claude-opus-5>" --settings "$T/settings.json" \
      --max-turns "<--max-turns | 30>" --dangerously-skip-permissions \
-     "$(cat "$T/prompt.md")" > "$T/session.log" 2>&1
+     "$(cat "$T/prompt.md")" </dev/null > "$T/session.log" 2>&1
    ```
 
    `$T/prompt.md`: the spec, the selected findings verbatim, and — *"Fix
