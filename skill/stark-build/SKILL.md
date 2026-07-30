@@ -45,12 +45,21 @@ Evidence base: [references/stage2-dossier.md](references/stage2-dossier.md)
 
 **Harness subprocess rule — stdin closed, always.** Every dispatched
 subprocess (`claude -p`, `codex exec`) must have `</dev/null` before its
-output redirect. A hung reviewer is indistinguishable from a thorough one:
-`codex exec` without stdin closure blocks silently and forever (confirmed
-live: 5h14m with 39 bytes of output — "Reading additional input from
-stdin..."). `claude -p` warns and exits, but the warning is silent under
-a background redirect. Add `</dev/null` before `>` on every dispatch
-command below. Any new dispatch added to this skill inherits this rule.
+output redirect. **A hung reviewer is indistinguishable from a thorough
+one.** Both CLIs read stdin *in addition to* the prompt argument, so an
+open pipe that never delivers EOF — which is what stdin is under a
+backgrounded or orchestrated shell — blocks them. `codex exec` blocks
+silently and forever (confirmed live: 5h14m, 39 bytes of output, all of it
+"Reading additional input from stdin..."). `claude -p` fails fast instead,
+but into the redirect file where nobody is looking (`Warning: no stdin data
+received in 3s` then `Execution error`). Add `</dev/null` before `>` on
+every dispatch below; any new dispatch inherits this rule.
+
+The rule covers the **hooks too**, not just dispatches: `stop-gate.sh` runs
+the task's check with stdin closed, because a Stop hook's own stdin is the
+Claude Code payload pipe and a gate that transitively reads stdin would
+hang turn-end inside the gate. `protect-paths.sh` is the one deliberate
+exception — it *must* read stdin to get the tool payload.
 
 **Raw input:** `$ARGUMENTS`
 
@@ -85,12 +94,21 @@ State lives OUTSIDE the repo:
    ```bash
    TOOLS="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools"
    node --experimental-strip-types --no-warnings "$TOOLS/copilot_land.ts" \
-     prepare-branch --branch "build/<slug>" --repo-dir "<wt>"
+     prepare-branch --branch "build/<slug>" --repo-dir "<wt>" \
+     --require-base <accepted-base>
    ```
-   **Assert the worktree contains the accepted base** — `prepare-branch`
-   may adopt a stale remote branch from a prior abandoned run and silently
-   reset HEAD to a different codebase (observed live: every gate
-   measurement would have been taken against a tree predating the re-pin):
+   **`--require-base` is mandatory here.** Without it, a leftover
+   `origin/build/<slug>` from a prior abandoned run is adopted via
+   `git checkout -B <branch> origin/<branch>`, which silently resets HEAD
+   onto that older codebase — reporting `ok: true` while every subsequent
+   gate measures a tree predating the pin. Reproduced and fixed live; the
+   flag refuses the stale adoption without moving the worktree.
+
+   Then **assert it yourself anyway** — two lines, and it catches the class
+   even when the tool's guard is absent. This is not redundant: an older
+   `copilot_land.ts` vendored into an installed plugin **silently ignores**
+   unknown flags (verified — an unrecognized flag parses to no-op, exit 0),
+   so `--require-base` on a stale copy is a no-op that reads as protection:
    ```bash
    git -C "<wt>" merge-base --is-ancestor <accepted-base> HEAD \
      || { echo "HARD STOP: HEAD does not contain accepted-base <sha>. \
@@ -173,24 +191,35 @@ claude -p --model "<--model | claude-opus-5>" --settings "$T/settings.json" \
    processes, oldest at 52 min). Run long gates as background tasks and
    terminate them via the harness's own task-stop, never via a foreground
    timeout.
-   **macOS has no `timeout(1)`.** A gate sweep written with
-   `timeout 120 bash check.sh` reports every gate as red in 0s because
-   `timeout: command not found` returns non-zero — a false red that looks
-   correct. Use `go test -timeout`, `gtimeout`, or `perl -e 'alarm N; exec
-   @ARGV' -- bash check.sh`. Never bare `timeout`.
-   **Broad kill patterns hit other runs.** `pkill -f "go test"` matches on
-   prompt text, not process ownership — it kills tasks in every concurrent
-   `stark-build` run whose prompt text contains those words. Any cleanup
-   pattern must be scoped to this run's unique `$STATE` path and dry-run
-   listed (`pgrep -af "$STATE"`) before executing.
+   **macOS has no `timeout(1)`** (verified on this fleet — and `gtimeout`
+   is not installed by default either; it needs `brew install coreutils`).
+   A gate sweep written with `timeout 120 bash check.sh` reports every gate
+   as red in 0s, because `timeout: command not found` exits 127 — a **false
+   red that is indistinguishable from a correct one**. Prefer the runner's
+   own language-level bound (`go test -timeout`); otherwise `gtimeout` if
+   present, or `perl -e 'alarm N; exec @ARGV' -- bash check.sh` (verified:
+   kills at N seconds with exit 142, and passes real exit codes through
+   unchanged). Never bare `timeout`.
+   **Broad kill patterns kill YOUR OWN gate first.** `pkill -f "go test"`
+   matches on command-line text, not on process ownership. In the live run
+   it killed the runner's own in-flight verification and produced
+   `rc=143` — which was then misread as a gate failure, not as
+   self-inflicted. It also killed a *different* concurrent `stark-build`
+   run (`auth0-write-surface`) mid-task, because that run's prompt text
+   contained the string `go test`. Any cleanup pattern must be scoped to
+   this run's unique `$STATE` path, dry-run listed (`pgrep -af "$STATE"`),
+   and confirmed to match nothing foreign before it is used.
    **Wrapper flake fallback.** If `bash $T/check.sh` does not return and
    the gate's content is known (the done-when command verbatim from the
    spec), the runner may execute the content **verbatim and unmodified**
    as a direct substitution — the determinism guarantee is on the command,
-   not the wrapper script. Record that the wrapper did not return and that
-   direct invocation was used. Never paraphrase or adapt the command; the
-   non-negotiable "completion is a runnable check" is preserved as long as
-   the command is identical.
+   not on the wrapper script. Re-run it to confirm (Phase 3's ≤3× flaky
+   discipline applies), and record in PROGRESS.md that the wrapper did not
+   return and that direct invocation was used, with both outcomes. Never
+   paraphrase or adapt the command. The root cause here is **undiagnosed**
+   — do not invent one. The non-negotiable "completion is a runnable
+   check, never a model verdict" is preserved precisely because the
+   command is identical and the runner still runs it.
 2. Tamper: `git -C <wt> diff --name-only <pre-sha>..HEAD` (plus dirty files)
    ∩ `protected.list` must be EMPTY — a hit aborts the whole run
    (`class=blocked`, harness-tamper note, straight to Phase 5 report).
@@ -212,6 +241,12 @@ claude -p --model "<--model | claude-opus-5>" --settings "$T/settings.json" \
 Run the spec's `## Verification` command(s) yourself in the worktree — the
 per-task loop never iterates on them. Flaky discipline: re-run the IDENTICAL
 command ≤3×, log every outcome, never edit it.
+
+The e2e command is typically the longest-running gate in the run, so
+**Phase 2 §Verify 1's execution rules apply here in full**: background it
+and stop it via the harness's own task-stop (a foreground timeout leaks the
+child process tree, and each leaked child then competes with the next
+attempt), never bare `timeout`, and never a broad kill pattern.
 
 - **Green** → proceed.
 - **Red with all tasks green** → the divergence signal (build gamed or spec
@@ -286,10 +321,16 @@ budget past the first attempt is deliberately zero. [RQ1][RQ2]
    on; rejecting on evidence is a success, faking a fix is not. Finish with
    exactly one commit: `fix(<slug>): advisory round`."*
 4. **Verify (you, deterministically — the reviewer is not consulted again):**
-   re-run EVERY task's `check.sh` plus the e2e command yourself. Any check
-   that was green before the round and is red after → `git revert` the fix
-   commit, log `class=fix-regression`, PR stays draft. All green → keep it.
-   Tamper + scope checks run exactly as in Phase 2 §Verify.
+   re-run EVERY task's `check.sh` plus the e2e command yourself. This is the
+   heaviest gate sweep in the run, so **Phase 2 §Verify 1's execution rules
+   apply to every check in it**: background each one and use task-stop, never
+   a foreground timeout (leaks children that then slow every later check),
+   never bare `timeout` (absent on macOS — reports the whole sweep as a false
+   red in 0s), never a broad kill pattern (it kills your own in-flight gate
+   and other runs' tasks). Any check that was green before the round and is
+   red after → `git revert` the fix commit, log `class=fix-regression`, PR
+   stays draft. All green → keep it. Tamper + scope checks run exactly as in
+   Phase 2 §Verify.
 5. **Record.** Append to PROGRESS.md: findings selected, fixed, rejected
    (with reasons), gate outcome. Post ONE follow-up PR comment listing what
    was fixed, what was rejected and why, and what remains open — CLAUDE.md's

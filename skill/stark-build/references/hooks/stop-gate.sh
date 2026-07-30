@@ -16,7 +16,13 @@ PROGRESS="${3:?progress file}"
 TASK="${4:?task id}"
 MAX="${5:-7}"
 
-out="$(bash "$CHECK" 2>&1)"
+# stdin is CLOSED for the check: a Stop hook's own stdin is the Claude Code
+# payload pipe, which never delivers EOF. Any gate that transitively reads
+# stdin would block there forever — the same failure class that cost 5h14m on
+# a `codex exec` advisory, but worse, because it hangs turn-end inside the
+# gate and is indistinguishable from a slow task. Measured: without
+# `</dev/null` the check never returns; with it, rc=0 in <1s.
+out="$(bash "$CHECK" </dev/null 2>&1)"
 rc=$?
 if [ "$rc" -eq 0 ]; then
   printf '0' > "$COUNTER"

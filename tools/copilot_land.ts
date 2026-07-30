@@ -14,11 +14,16 @@
  *   branch-name    --plan-slug SLUG|"" --fallback-slug SLUG
  *                  Print deriveImplBranch(planSlug, fallbackSlug).
  *
- *   prepare-branch --branch NAME [--repo-dir DIR] [--dry-run] [--json]
+ *   prepare-branch --branch NAME [--repo-dir DIR] [--require-base SHA]
+ *                  [--dry-run] [--json]
  *                  Adopt-or-create the branch on the CURRENT checkout
  *                  (refuses a dirty tree; ff-only merge for an existing
  *                  local — a non-ff divergence is a HARD error, never
  *                  force). Mirrors `write_spec_land.ts prepare-branch`.
+ *                  --require-base SHA refuses to adopt a remote branch that
+ *                  does not contain SHA, and asserts HEAD contains it after
+ *                  every path. Without it, a leftover remote branch from an
+ *                  abandoned run silently resets HEAD onto the old codebase.
  *
  *   land           --repo O/R --branch NAME --title T --body TEXT
  *                  [--base main] [--lead claude|codex|gemini] [--ready]
@@ -75,6 +80,15 @@ function remoteBranchExists(branch: string, cwd: string): boolean {
   return r.code === 0 && r.stdout.length > 0;
 }
 
+// True when `commitish` is an ancestor of (or equal to) `ref`, i.e. `ref`
+// already contains that commit. Used by prepare-branch's --require-base guard:
+// adopting a leftover remote branch from an abandoned run silently resets HEAD
+// onto the OLD codebase, so every later measurement is taken against a tree
+// predating the caller's pin. Observed live on a /stark-build run.
+function refContains(ref: string, commitish: string, cwd: string): boolean {
+  return git(["merge-base", "--is-ancestor", commitish, ref], cwd).code === 0;
+}
+
 function hasUpstream(cwd: string): boolean {
   return git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], cwd).code === 0;
 }
@@ -88,8 +102,11 @@ Create-or-adopt idempotent impl-PR landing helper for /stark-copilot.
 subcommands:
   branch-name    --plan-slug SLUG --fallback-slug SLUG [--json]
                  Print the deterministic impl branch name.
-  prepare-branch --branch NAME [--repo-dir DIR] [--dry-run] [--json]
+  prepare-branch --branch NAME [--repo-dir DIR] [--require-base SHA]
+                 [--dry-run] [--json]
                  Adopt-or-create the branch (ff-only; never force).
+                 --require-base SHA refuses a stale remote branch that
+                 does not contain SHA, and asserts HEAD contains it.
   land           --repo OWNER/REPO --branch NAME --title TEXT --body TEXT
                  [--base BRANCH] [--lead claude|codex|gemini] [--ready]
                  [--known-prs "812,819"] [--repo-dir DIR]
@@ -180,6 +197,7 @@ function cmdPrepareBranch(argv: string[]): number {
   const dryRun = flags["dry-run"] === true;
   const branch = str(flags, "branch");
   const cwd = str(flags, "repo-dir") || process.cwd();
+  const requireBase = str(flags, "require-base");
   if (!branch) return fail(json, "--branch is required");
 
   const localExists = localBranchExists(branch, cwd);
@@ -187,9 +205,21 @@ function cmdPrepareBranch(argv: string[]): number {
   const action = localExists ? "checkout-ff" : remoteExists ? "checkout-track" : "create";
 
   if (dryRun) {
-    const plan = { ok: true, dry_run: true, branch, action, localExists, remoteExists };
+    const plan = {
+      ok: true,
+      dry_run: true,
+      branch,
+      action,
+      localExists,
+      remoteExists,
+      require_base: requireBase || null,
+    };
     process.stdout.write(JSON.stringify(plan, null, 2) + "\n");
     return 0;
+  }
+
+  if (requireBase && git(["cat-file", "-e", `${requireBase}^{commit}`], cwd).code !== 0) {
+    return fail(json, `--require-base ${requireBase} is not a commit in ${cwd}`, 1);
   }
 
   if (treeIsDirty(cwd)) {
@@ -222,6 +252,20 @@ function cmdPrepareBranch(argv: string[]): number {
   } else if (action === "checkout-track") {
     let r = runGit(["fetch", "origin", branch]);
     if (r.code !== 0) return fail(json, `fetch origin ${branch} failed: ${r.stderr}`, 1);
+    // Guard BEFORE the destructive `checkout -B`: that command resets HEAD onto
+    // the remote branch, so a leftover branch from an abandoned run would
+    // silently replace the caller's pinned base with an older codebase. Checked
+    // here rather than only as a post-condition so the worktree is never moved.
+    if (requireBase && !refContains(`origin/${branch}`, requireBase, cwd)) {
+      return fail(
+        json,
+        `refusing to adopt origin/${branch}: it does not contain ${requireBase}. ` +
+          `That remote branch is stale (likely a leftover from an abandoned run) and ` +
+          `adopting it would reset HEAD onto a codebase predating the requested base. ` +
+          `Delete origin/${branch} or re-pin, then retry.`,
+        1,
+      );
+    }
     r = runGit(["checkout", "-B", branch, `origin/${branch}`]);
     if (r.code !== 0) return fail(json, `checkout tracking ${branch} failed: ${r.stderr}`, 1);
   } else {
@@ -229,7 +273,20 @@ function cmdPrepareBranch(argv: string[]): number {
     if (r.code !== 0) return fail(json, `create ${branch} failed: ${r.stderr}`, 1);
   }
 
-  const result = { ok: true, branch, action, steps };
+  // Universal post-condition: whichever path ran, HEAD must contain the base.
+  // Catches the ff-merge path too (a stale local branch, or a remote whose
+  // ff-merge moved HEAD past the pin's line of descent).
+  if (requireBase && !refContains("HEAD", requireBase, cwd)) {
+    return fail(
+      json,
+      `branch ${branch} was prepared but HEAD does not contain ${requireBase} ` +
+        `(action=${action}). Refusing to report success — every gate measured ` +
+        `against this tree would be taken against the wrong codebase.`,
+      1,
+    );
+  }
+
+  const result = { ok: true, branch, action, steps, require_base: requireBase || null };
   process.stdout.write(JSON.stringify(result, null, 2) + "\n");
   return 0;
 }
