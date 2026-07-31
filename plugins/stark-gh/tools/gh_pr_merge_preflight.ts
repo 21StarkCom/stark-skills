@@ -29,7 +29,7 @@ import * as ghLib from "./lib/gh.ts";
 import { writePrMergePlan, type PrMergePlan } from "./lib/plan.ts";
 import { ensureRuntimeDirs, mktempInRuntime } from "./lib/runtime.ts";
 import { scanSecrets } from "./lib/secret.ts";
-import { evaluateLockLiveness, readLock, watcherLockPath, watcherStateLatestPath } from "./lib/watcher_lock.ts";
+import { evaluateLockLiveness, lockKind, preemptCiObserver, readLock, watcherLockPath, watcherStateLatestPath } from "./lib/watcher_lock.ts";
 import { appendPrMergeOverride, SECRET_TO_LLM_WARNING } from "./lib/audit.ts";
 import { resolveDraftConfig } from "./lib/config.ts";
 import { fetchRequiredCheckRollup, summarizeVerdict } from "./lib/checks_graphql.ts";
@@ -266,15 +266,29 @@ async function main(argv: string[]): Promise<number> {
   const existingLock = readLock(lockPath);
   if (existingLock !== null) {
     const liveness = evaluateLockLiveness(existingLock);
-    if (liveness.alive) {
-      // Live watcher exists — print resume hint, exit 34.
+    const kind = lockKind(existingLock);
+    if (liveness.alive && kind === "ci-observer") {
+      // A pr-open CI watcher is only REPORTING checks on the current head. We
+      // are about to rebase and force-push, which makes that head — and hence
+      // everything it is watching — obsolete. Blocking on it made
+      // `pr-open --ready` immediately followed by `pr-merge` fail with exit 34
+      // until the observer aged out on its own poll cadence. Pre-empt it.
+      const owner = existingLock as { pid: number };
+      preemptCiObserver(owner.pid, lockPath);
+      process.stderr.write(
+        `pre-empted pr-open CI watcher (pid ${owner.pid}) for PR #${pr.number}: `
+        + `its head becomes obsolete at force-push\n`);
+    } else if (liveness.alive) {
+      // A live merge-driver (or an unclassifiable lock, handled conservatively)
+      // will itself mark-ready and merge — do not race it.
       process.stdout.write(`STARK_GH_RESUME=attached\n`);
       process.stdout.write(`${latestPath}\n`);
       die(MergeExit.WATCHER_RUNNING,
-        `watcher already running for PR #${pr.number} (${liveness.reason}); state: ${latestPath}`);
+        `watcher already running for PR #${pr.number} (${liveness.reason}, kind=${kind}); state: ${latestPath}`);
+    } else {
+      // Stale lock: log and proceed (next watcher write replaces).
+      process.stderr.write(`stale watcher lock taken over: ${liveness.reason}\n`);
     }
-    // Stale lock: log and proceed (next watcher write replaces).
-    process.stderr.write(`stale watcher lock taken over: ${liveness.reason}\n`);
   }
 
   // Step 6: reject fork PRs BEFORE fetch (gate matrix v1).

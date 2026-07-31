@@ -8,6 +8,7 @@ import * as ghLib from "./lib/gh.ts";
 import { fetchRequiredCheckRollup, summarizeVerdict, type Context } from "./lib/checks_graphql.ts";
 import { resolveCallback } from "./lib/watcher_callbacks.ts";
 import { readPrMergePlan, type PrMergePlan } from "./lib/plan.ts";
+import type { WatcherKind } from "./lib/watcher_lock.ts";
 
 export interface LockFileContent {
   pid: number;
@@ -88,7 +89,11 @@ export function acquireLock(
 // Best-effort: if the mirror write fails (disk full, permissions), the
 // per-SHA lock still protects against a duplicate watcher; preflight will
 // just lose its fast-path attach signal.
-export function mirrorLockToLatest(latestLockPath: string, perShaLockContent: LockFileContent): void {
+export function mirrorLockToLatest(
+  latestLockPath: string,
+  perShaLockContent: LockFileContent,
+  kind: Exclude<WatcherKind, "unknown">,
+): void {
   try {
     // The mirror lock is consumed by lib/watcher_lock.ts.evaluateLockLiveness,
     // which compares `startedAt` to `ps -o lstart= -p <pid>`. We must write the
@@ -109,6 +114,7 @@ export function mirrorLockToLatest(latestLockPath: string, perShaLockContent: Lo
       startedAt: lstart,
       hostname: os.hostname(),
       ownerToken: perShaLockContent.ownerToken,
+      kind,
     };
     const tmp = `${latestLockPath}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(record), { mode: 0o600 });
@@ -244,7 +250,7 @@ async function mainAsync(): Promise<void> {
     headSha: args.headSha,
     command: "gh-watch-runs",
     ownerToken,
-  });
+  }, "ci-observer");
   // Wrapper to release per-SHA + mirror locks together at every exit point.
   const releaseAll = (): void => {
     releaseLockIfOwner(lf, ownerToken);
@@ -553,7 +559,7 @@ async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
     headSha: plan.pushedHeadOid,
     command: "gh-watch-runs",
     ownerToken,
-  });
+  }, "merge-driver");
   const releaseAllMerge = (): void => {
     releaseLockIfOwner(lf, ownerToken);
     releaseMirrorLatestLock(latestLockMerge, ownerToken);
