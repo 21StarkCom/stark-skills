@@ -44,8 +44,8 @@ RESUME_MODE=$(printf '%s\n' "$PREFLIGHT_OUT" | sed -n 's/^STARK_GH_RESUME=\(.*\)
 PLAN_FILE=$(printf '%s\n' "$PREFLIGHT_OUT" | grep -v '^STARK_GH_RESUME=' | tail -1)
 ```
 
-If `RESUME_MODE=attached`, the watcher is already running. Print the state-file
-path and stop — there's nothing more to do until it finishes:
+If `RESUME_MODE=attached`, a **merge-driver** watcher is already running. Print
+the state-file path and stop — there's nothing more to do until it finishes:
 
 ```bash
 if [ "$RESUME_MODE" = "attached" ]; then
@@ -53,6 +53,13 @@ if [ "$RESUME_MODE" = "attached" ]; then
   exit 0
 fi
 ```
+
+A live **ci-observer** watcher (the one `/stark-gh:pr-open` spawns) does NOT
+produce `attached` — preflight pre-empts it and proceeds, because the head it
+is watching is about to be invalidated by the rebase + force-push. So
+`pr-open --ready` immediately followed by `pr-merge` no longer fails with
+exit 34. Pre-kind locks written by an older watcher still classify as `unknown`
+and are treated as `attached`, conservatively.
 
 ## Cross-stage cleanup trap
 

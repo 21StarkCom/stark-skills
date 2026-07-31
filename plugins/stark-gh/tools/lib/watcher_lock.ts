@@ -10,11 +10,22 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 
+// Which command owns a live watcher. pr-merge preflight needs this because the
+// two kinds mean opposite things to it:
+//   ci-observer  — a pr-open watcher merely REPORTING check status on a head
+//                  that pr-merge is about to invalidate by rebasing and
+//                  force-pushing. Pre-emptible.
+//   merge-driver — a pr-merge watcher that will itself mark-ready and merge.
+//                  Genuinely attached; a second run must not race it.
+// Absent (pre-kind mirrors) ⇒ "unknown", handled conservatively as attached.
+export type WatcherKind = "ci-observer" | "merge-driver" | "unknown";
+
 export interface LockRecord {
   pid: number;
   startedAt: string;          // ISO 8601 of process start
   hostname: string;
   ownerToken: string;
+  kind?: Exclude<WatcherKind, "unknown">;   // optional: pre-kind mirrors omit it
 }
 
 export type ProcessAlive = (pid: number) => boolean;
@@ -65,6 +76,16 @@ export function isLockShape(v: unknown): v is LockRecord {
     && typeof o.ownerToken === "string";
 }
 
+// Classify a lock's owning command. Deliberately tolerant: any shape we don't
+// recognize, or a recognized shape with no/garbage `kind`, reads as "unknown"
+// so callers fall back to their conservative branch.
+export function lockKind(lock: unknown): WatcherKind {
+  if (typeof lock !== "object" || lock === null) return "unknown";
+  const k = (lock as Record<string, unknown>).kind;
+  if (k === "ci-observer" || k === "merge-driver") return k;
+  return "unknown";
+}
+
 export interface LivenessResult {
   alive: boolean;
   reason: string;
@@ -103,6 +124,37 @@ export function evaluateLockLiveness(
     };
   }
   return { alive: true, reason: "lock is live", shape: "new" };
+}
+
+// Stop a live ci-observer watcher and drop its mirror lock, so a pr-merge run
+// can proceed immediately instead of waiting for the observer's poll cadence.
+// SIGTERM first (the watcher releases its own per-SHA lock on the way out),
+// then SIGKILL if it hasn't gone after `graceMs`. Removing the mirror lock is
+// unconditional: even a wedged observer must not keep blocking pr-merge, and a
+// leftover per-SHA lock is self-healing (its pid reads dead on next acquire).
+export function preemptCiObserver(
+  pid: number,
+  mirrorLockPath: string,
+  opts: { kill?: (pid: number, sig: NodeJS.Signals) => void; alive?: ProcessAlive; graceMs?: number; sleep?: (ms: number) => void } = {},
+): void {
+  const kill = opts.kill ?? ((p, s) => process.kill(p, s));
+  const isAlive = opts.alive ?? defaultProcessAlive;
+  const graceMs = opts.graceMs ?? 2000;
+  const sleep = opts.sleep ?? ((ms: number) => {
+    // Synchronous: preflight is a straight-line script with no event loop to yield to.
+    const buf = new Int32Array(new SharedArrayBuffer(4));
+    Atomics.wait(buf, 0, 0, ms);
+  });
+
+  try { kill(pid, "SIGTERM"); } catch { /* already gone */ }
+  const step = 100;
+  for (let waited = 0; waited < graceMs && isAlive(pid); waited += step) {
+    sleep(step);
+  }
+  if (isAlive(pid)) {
+    try { kill(pid, "SIGKILL"); } catch { /* raced with its own exit */ }
+  }
+  try { fs.unlinkSync(mirrorLockPath); } catch { /* already released */ }
 }
 
 export function watcherStateLatestPath(host: string, owner: string, repo: string, prNumber: number, watchersRoot: string): string {
