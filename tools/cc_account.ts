@@ -50,6 +50,7 @@ import {
   readProfileArgv,
   removeProfile,
   resolveClaudeKeychainAccount,
+  seatIncoherence,
   validateStoredProfile,
   writeClaudeCredsArgv,
   writeProfileArgv,
@@ -344,7 +345,19 @@ function cmdAdd(name: string): void {
       : undefined;
 
   const record = JSON.stringify({ credentials: creds, oauthAccount: acct });
-  validateStoredProfile(JSON.parse(record));
+  const parsed = validateStoredProfile(JSON.parse(record));
+  // Refuse to bottle a mismatched pair. The live Keychain item is shared by
+  // every running `claude`, so a concurrent session's token refresh can land
+  // under this account's identity; storing that makes the profile permanently
+  // unusable and the failure surfaces much later as a billing error.
+  const bad = seatIncoherence(parsed);
+  if (bad) {
+    fail(
+      `refusing to store ${name}: ${bad}.\n` +
+        `Quit every other running \`claude\`, re-run \`claude /login\` as ` +
+        `${email}, pick the right organization, then \`add ${name}\` again.`,
+    );
+  }
   security(writeProfileArgv(name, record));
 
   const { profiles, displaced } = mergeProfile(readRegistry(), {
@@ -375,6 +388,22 @@ function cmdUse(name: string): void {
   } catch (err) {
     fail(`profile ${name} is corrupt: ${(err as Error).message}`);
   }
+  // A profile stored before this guard existed can still hold mismatched
+  // halves. Switching to it authenticates as the wrong plan, which the CLI
+  // reports as a credit-balance error rather than as an auth problem — so say
+  // it here, where the cause is still visible.
+  const incoherent = seatIncoherence(record);
+  if (incoherent) {
+    fail(
+      `profile ${name} is incoherent: ${incoherent}.\n` +
+        `Switching to it would authenticate as the wrong plan (the CLI reports ` +
+        `that as "Credit balance is too low"). Repair it: quit every other ` +
+        `running \`claude\`, \`claude /login\` as ` +
+        `${record.oauthAccount["emailAddress"]}, select the ` +
+        `${JSON.stringify(record.oauthAccount["organizationName"] ?? "")} ` +
+        `organization, then \`add ${name}\`.`,
+    );
+  }
 
   // Snapshot the outgoing login first. Without this, switching away from an
   // account that was never `add`ed loses it permanently — the Keychain item is
@@ -392,15 +421,25 @@ function cmdUse(name: string): void {
       (p) => p.seatKey?.toLowerCase() === outgoingSeat.toLowerCase(),
     );
     if (known) {
-      security(
-        writeProfileArgv(
-          known.name,
-          JSON.stringify({
-            credentials: outgoingCreds,
-            oauthAccount: outgoingAcct,
-          }),
-        ),
-      );
+      const snapshot = {
+        credentials: outgoingCreds,
+        oauthAccount: outgoingAcct,
+      };
+      // This write is where corruption is actually minted: if another live
+      // `claude` refreshed the shared credentials item since this account was
+      // selected, the pair on disk is already mismatched. Overwriting a good
+      // stored profile with it destroys a working credential, so skip instead
+      // — the outgoing account keeps whatever was last known good.
+      const stale = seatIncoherence(snapshot);
+      if (stale) {
+        console.error(
+          `warning: not re-capturing ${known.name} — ${stale}. ` +
+            `Another running \`claude\` likely refreshed the shared ` +
+            `credentials item; ${known.name} keeps its previous record.`,
+        );
+      } else {
+        security(writeProfileArgv(known.name, JSON.stringify(snapshot)));
+      }
     }
   }
 

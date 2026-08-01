@@ -110,6 +110,33 @@ once at startup; a running session keeps the old account until restarted.
 `use` also re-captures the OUTGOING account before overwriting it, so a token
 refreshed during the session isn't lost.
 
+### The Keychain item is global — quit other sessions before `add`
+
+There is **one** `Claude Code-credentials` entry per login user, and every
+running `claude` reads *and rewrites* it on token refresh. So a live session
+authenticated as account A can clobber the credentials half moments after you
+switch to B, while `~/.claude.json` still says B. `add` (and the outgoing
+re-capture) then bottle that pair verbatim: **A's token under B's identity.**
+
+The CLI presents A's token, the server resolves entitlement from it and not
+from B's seat, and a team seat carrying a personal-org token bills as metered
+API usage — surfacing as **"Credit balance is too low"** on an account that has
+no metered balance at all. Nothing in the message points at the switch.
+
+Hit live on 2026-08-01: profile `Net-T3` held a `max` token under an
+`Evinced RD` (`claude_team`) seat — the only incoherent one of five team
+profiles. `seatIncoherence()` now compares `credentials.claudeAiOauth`
+`.subscriptionType` against `oauthAccount.organizationType` and blocks all
+three write paths: `add` refuses to store a mismatched pair, `use` refuses to
+switch to one, and the outgoing re-capture **skips** rather than overwrite a
+good stored profile with a mismatched snapshot. It fails **open** — only a
+definite contradiction between two known plan types (`claude_team`↔`team`,
+`claude_max`↔`max`) blocks anything, so an unfamiliar `organizationType` or an
+unreadable blob never strands a working profile.
+
+**Repair a flagged profile:** quit every other running `claude`, `claude
+/login` as that address, select the right organization, `add <name>` again.
+
 ## The identity is the SEAT, not the email and not the org
 
 Neither email nor org is unique. Real profiles on one machine:
