@@ -20,6 +20,7 @@ import {
   seatKeyOf,
   sanitizeKey,
   snapshotPath,
+  seatIncoherence,
   validateStoredProfile,
   writeClaudeCredsArgv,
   writeProfileArgv,
@@ -355,6 +356,64 @@ test("seatKeyOf: requires BOTH halves — either alone would merge seats", () =>
   assert.equal(seatKeyOf({}), null);
   assert.equal(seatKeyOf(null), null);
   assert.equal(seatKeyOf(undefined), null);
+});
+
+// ── seat coherence ──────────────────────────────────────────────────────
+
+/** Build a stored profile whose halves can be set independently. */
+function pair(orgType: string, subType: unknown) {
+  const oauth =
+    subType === undefined ? {} : { claudeAiOauth: { subscriptionType: subType } };
+  return {
+    credentials: JSON.stringify(oauth),
+    oauthAccount: {
+      emailAddress: "a@evinced.net",
+      accountUuid: "acct-a",
+      organizationUuid: "org-a",
+      organizationName: "Evinced RD",
+      organizationType: orgType,
+    },
+  };
+}
+
+test("seatIncoherence: flags a max token stored under a team seat", () => {
+  // The live Net-T3 shape: `claude_team` seat, `max` credentials. Naming both
+  // sides matters — the message is the only place the cause is still visible
+  // by the time the CLI reports a billing error.
+  const why = seatIncoherence(pair("claude_team", "max"));
+  assert.match(String(why), /`max` token/);
+  assert.match(String(why), /`claude_team`/);
+  assert.match(String(why), /Evinced RD/);
+});
+
+test("seatIncoherence: flags a team token stored under a max seat", () => {
+  assert.match(String(seatIncoherence(pair("claude_max", "team"))), /`team` token/);
+});
+
+test("seatIncoherence: passes matched halves", () => {
+  assert.equal(seatIncoherence(pair("claude_team", "team")), null);
+  assert.equal(seatIncoherence(pair("claude_max", "max")), null);
+});
+
+test("seatIncoherence: fails open on anything it cannot read", () => {
+  // Only a DEFINITE contradiction between two KNOWN plan types blocks a
+  // switch. An unfamiliar org type, a missing field, or an unparseable
+  // credentials blob must never strand a working profile.
+  assert.equal(seatIncoherence(pair("claude_enterprise", "max")), null);
+  assert.equal(seatIncoherence(pair("claude_team", undefined)), null);
+  assert.equal(seatIncoherence(pair("claude_team", "")), null);
+  assert.equal(seatIncoherence(pair("claude_team", 7)), null);
+  assert.equal(
+    seatIncoherence({ ...pair("claude_team", "max"), credentials: "not json" }),
+    null,
+  );
+  assert.equal(
+    seatIncoherence({
+      credentials: JSON.stringify({ claudeAiOauth: { subscriptionType: "max" } }),
+      oauthAccount: { emailAddress: "a@b.net" },
+    }),
+    null,
+  );
 });
 
 // ── stored profile validation ───────────────────────────────────────────

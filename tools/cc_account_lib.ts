@@ -582,6 +582,63 @@ export function validateStoredProfile(v: unknown): StoredProfile {
   return { credentials: rec["credentials"], oauthAccount: a };
 }
 
+/**
+ * Detect a stored profile whose two halves describe different plans.
+ *
+ * The Keychain `Claude Code-credentials` item is GLOBAL — one entry per login
+ * user, shared by every running `claude` process — and a token refresh rewrites
+ * it in place. So a live session authenticated as account A can clobber the
+ * credentials half moments after `use B` wrote B's, while `~/.claude.json`
+ * still says B. `add`/the `use` re-capture then store that pair verbatim:
+ * A's token under B's identity. The CLI presents A's token, the server
+ * resolves entitlement from it rather than from B's seat, and a team seat with
+ * a personal-org token bills as metered API usage — surfacing as "credit
+ * balance is too low" on an account that has no metered balance at all.
+ *
+ * Observed live on 2026-08-01: profile `Net-T3` held a `max` token under an
+ * `Evinced RD` (`claude_team`) seat — the only incoherent one of five team
+ * profiles.
+ *
+ * Returns a human-readable reason, or null when the halves agree OR when
+ * either side is unreadable. Deliberately fail-open: only a DEFINITE
+ * contradiction between two known plan types is reported, so an unfamiliar
+ * `organizationType` never blocks a switch.
+ */
+export function seatIncoherence(rec: StoredProfile): string | null {
+  const orgType = rec.oauthAccount["organizationType"];
+  if (typeof orgType !== "string") return null;
+  const expected = EXPECTED_SUBSCRIPTION[orgType];
+  if (!expected) return null;
+
+  let sub: unknown;
+  try {
+    const creds = JSON.parse(rec.credentials) as Record<string, unknown>;
+    const oauth = creds["claudeAiOauth"];
+    if (typeof oauth !== "object" || oauth === null) return null;
+    sub = (oauth as Record<string, unknown>)["subscriptionType"];
+  } catch {
+    return null;
+  }
+  if (typeof sub !== "string" || sub === "" || sub === expected) return null;
+
+  const org = rec.oauthAccount["organizationName"];
+  const where = typeof org === "string" ? ` (${org})` : "";
+  return (
+    `stored credentials are a \`${sub}\` token but the seat is ` +
+    `\`${orgType}\`${where}, which expects \`${expected}\` — ` +
+    `the two halves came from different logins`
+  );
+}
+
+/**
+ * `organizationType` → the `subscriptionType` its OAuth token must carry.
+ * Org types absent from this map are not checked (see `seatIncoherence`).
+ */
+const EXPECTED_SUBSCRIPTION: Readonly<Record<string, string>> = {
+  claude_team: "team",
+  claude_max: "max",
+};
+
 /** Human-readable headroom line, e.g. `5H 12% (floor, 4m old) · 7D 61%`. */
 export function describeProjection(p: Projection): string {
   if (p.certainty === "unknown") return "no snapshot — headroom unknown";
