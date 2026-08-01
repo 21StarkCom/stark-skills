@@ -10,7 +10,6 @@ plugins:
 nav:
   - Start Here: index.md
   - Specs: specs/
-  - Plans: plans/
   - ADRs: adr/
   - Retros: retros/
   - Guides: guides/

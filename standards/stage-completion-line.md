@@ -16,7 +16,7 @@ As the **last line** of its terminal output, on **every success path**, the
 stage prints exactly one line:
 
 ```
-STARK_STAGE_SUMMARY {"skill":"stark-spec-to-plan","outcome":"approved","plan_path":"docs/plans/2026-07-19-auth-plan.md","plan_slug":"auth","pr":812}
+STARK_STAGE_SUMMARY {"skill":"stark-author","outcome":"accepted","spec_path":"docs/specs/2026-07-19-auth-spec.md","plan_slug":"auth","pr":812}
 ```
 
 Rules:
@@ -58,6 +58,7 @@ Forge maps the line straight onto `forge_state.ts record-output`:
 
 ## Ownership
 
-`plan_path` and `plan_slug` have exactly **one** producer: `stark-spec-to-plan`
-(spec §4 / `ssot`). `stark-plan-to-tasks` and `stark-copilot` **consume** the
-recorded slug via `--plan-slug` and never re-derive it from a filename.
+`spec_path` and `plan_slug` have exactly **one** producer: `stark-author` — the
+spec IS the plan, so there is no separate plan doc and no `plan_path`.
+Downstream stages (`stark-build`, `stark-copilot`) **consume** the recorded slug
+via `--plan-slug` and never re-derive it from a filename.

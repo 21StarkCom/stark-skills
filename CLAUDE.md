@@ -34,7 +34,7 @@ This repo is the **source of truth** for the skills + tools. Distribution is **m
 - `data/` — persona roster, review coverage HTML, generated showcase pages
 - `automation/` — CCR automation fleet: 12 triggers, prompts, logs, cost tracking, reports
 - `.github/workflows/` — GitHub Actions: project sync, gate checks, stale detection, heartbeat, `marketplace-sync` (auto-publish to bifrost)
-- `docs/` — specs, plans, ADRs, retrospectives, generated skill docs
+- `docs/` — specs, ADRs, retrospectives, generated skill docs (`docs/plans/` is a frozen archive — see Conventions)
 - `standards/` — org-wide doc templates and workflows
 - `plugins/stark-gh/` — local plugin source, packaged by the marketplace
 
@@ -149,6 +149,7 @@ All skills live in `skill/stark-*/SKILL.md` and are packaged into marketplace pl
 
 ## Conventions
 
+- **Docs live with the code** under `docs/`, folder per type: `adr/` (decisions — `NNNN-<topic>.md`, MADR-lite, immutable: supersede, don't edit), `specs/` (`YYYY-MM-DD-<topic>-spec.md`), `retros/` (`YYYY-MM-DD-<topic>-retro.md`). **There is no `docs/plans/`.** Since the `/stark-author` two-stage pipeline (2026-08-01) the plan IS part of the spec — the task DAG, per-task done-whens and the closing verification command live inside the spec doc, which `/stark-build` consumes. Never create `docs/plans/` or a `*-plan.md` doc. The existing `docs/plans/` files are historical archive: leave them in place, don't treat them as the pattern to follow. Tier by blast radius: trivial → PR only · feature → spec · architectural → ADR + spec. Guarded by `tools/doc_convention.test.ts`.
 - Prompts are per-agent: each LLM gets its own version of each domain
 - Domain IDs are slugs derived from filenames: `01-architecture.md` → `architecture`
 - Config uses JSON, prompts use markdown

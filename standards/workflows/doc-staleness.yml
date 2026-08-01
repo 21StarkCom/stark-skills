@@ -24,7 +24,7 @@ jobs:
             const { execSync } = require('child_process');
 
             // Load config
-            let config = { threshold_days: 90, exclude_paths: ['docs/adr/', 'docs/specs/', 'docs/plans/'] };
+            let config = { threshold_days: 90, exclude_paths: ['docs/adr/', 'docs/specs/', 'docs/retros/'] };
             try {
               const configFile = fs.readFileSync('.doc-staleness.yml', 'utf8');
               const lines = configFile.split('\n');
