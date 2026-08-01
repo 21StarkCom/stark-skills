@@ -3,12 +3,14 @@ import { test } from "node:test";
 
 import {
   applyOrder,
+  deleteAnyProfileArgv,
   deleteProfileArgv,
   describeProjection,
   mergeProfile,
   nextInCycle,
   orderedProfiles,
   parseNextFlags,
+  parseResetFlags,
   formatAge,
   formatSnapshot,
   parseSnapshot,
@@ -675,6 +677,48 @@ test("keychain argv: profile deletes are scoped to one profile item", () => {
   // login the user is currently authenticated as.
   assert.ok(argv.includes("-a"));
   assert.ok(!argv.includes("Claude Code-credentials"));
+});
+
+test("keychain argv: the un-named delete stays scoped to stark-cc-token", () => {
+  // `reset` loops this to drain orphaned records too, so it deliberately names
+  // NO account. The service scope is therefore the only thing standing between
+  // it and the live login — assert it hard.
+  const argv = deleteAnyProfileArgv();
+  assert.deepEqual(argv, [
+    "delete-generic-password",
+    "-s",
+    "stark-cc-token",
+  ]);
+  assert.ok(!argv.includes("Claude Code-credentials"));
+  assert.ok(!argv.includes("-a"), "naming an account would defeat the drain");
+});
+
+test("parseResetFlags: destroys nothing without --yes", () => {
+  assert.equal(parseResetFlags([]).confirmed, false);
+  assert.equal(parseResetFlags(["--snapshots"]).confirmed, false);
+  assert.equal(parseResetFlags(["--yes"]).confirmed, true);
+});
+
+test("parseResetFlags: --dry-run overrides --yes, in either order", () => {
+  // A contradictory pair must resolve to the reading that destroys nothing —
+  // OAuth blobs cannot be re-derived.
+  assert.equal(parseResetFlags(["--yes", "--dry-run"]).confirmed, false);
+  assert.equal(parseResetFlags(["--dry-run", "--yes"]).confirmed, false);
+});
+
+test("parseResetFlags: reports unknown flags instead of ignoring them", () => {
+  // `--snapshot` silently parsing to false would keep state the operator asked
+  // to clear, and a typo'd `--yes` reading as a no-op is only safe if it is
+  // explained. Both surface as unknown.
+  assert.deepEqual(parseResetFlags(["--snapshot"]).unknown, ["--snapshot"]);
+  assert.deepEqual(parseResetFlags(["--Yes"]).unknown, ["--Yes"]);
+  assert.deepEqual(parseResetFlags(["--yes", "--snapshots"]).unknown, []);
+});
+
+test("parseResetFlags: --snapshots is independent of confirmation", () => {
+  assert.equal(parseResetFlags(["--snapshots"]).snapshots, true);
+  assert.equal(parseResetFlags(["--yes", "--snapshots"]).snapshots, true);
+  assert.equal(parseResetFlags(["--yes"]).snapshots, false);
 });
 
 test("keychain argv: profile writes target the stark-cc-token service", () => {
