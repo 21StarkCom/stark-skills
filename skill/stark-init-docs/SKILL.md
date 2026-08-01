@@ -61,7 +61,7 @@ Create the standard docs structure. All operations are idempotent — skip files
 ### Step 1: Create directories
 
 ```bash
-mkdir -p docs/{adr,specs,plans,retros,guides,reference,architecture}
+mkdir -p docs/{adr,specs,retros,guides,reference,architecture}
 ```
 
 ### Step 2: Copy templates
@@ -147,7 +147,7 @@ Be CONSERVATIVE. Only generate ADRs for major technology choices:
 
 Each ADR follows the template in `docs/adr/0000-template.md`. Number them starting from `0001`. Set status to "Accepted" and date to the earliest commit that introduced the technology (from git log).
 
-For ADRs going forward, prefer `brain adr new "<title>"` (the `/stark-adr` skill), which auto-numbers and renders this same template; this backfill step is only for bootstrapping historical decisions. The layout follows the doc convention `docs/{adr,specs,plans,retros}/` (folder per type — `adr` stays the established acronym, the rest are plural; see `stark-2nd-brain-cli/docs/CONVENTIONS.md`).
+For ADRs going forward, prefer `brain adr new "<title>"` (the `/stark-adr` skill), which auto-numbers and renders this same template; this backfill step is only for bootstrapping historical decisions. The layout follows the doc convention `docs/{adr,specs,retros}/` (folder per type — `adr` stays the established acronym, the rest are plural; see `stark-2nd-brain-cli/docs/CONVENTIONS.md`). There is **no `docs/plans/`** — the spec carries the plan.
 
 Do NOT generate ADRs for:
 - Dev dependencies (linters, formatters, test frameworks)

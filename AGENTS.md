@@ -23,7 +23,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `data/` — persona roster, review coverage HTML, generated showcase pages
 - `automation/` — CCR automation fleet: 12 triggers, prompts, logs, cost tracking, reports
 - `.github/workflows/` — GitHub Actions: project sync, gate checks, stale detection, heartbeat, `marketplace-sync`
-- `docs/` — specs, plans, ADRs, retrospectives, generated skill docs
+- `docs/` — specs, ADRs, retrospectives, generated skill docs (`docs/plans/` is a frozen archive — see Conventions)
 - `standards/` — org-wide doc templates and workflows
 - `plugins/stark-gh/` — local plugin source, packaged by the marketplace
 
@@ -110,6 +110,7 @@ All skills live in `skill/stark-*/SKILL.md` and are packaged into marketplace pl
 
 ## Conventions
 
+- **Docs live with the code** under `docs/`, folder per type: `adr/` (`NNNN-<topic>.md`, immutable — supersede, don't edit), `specs/` (`YYYY-MM-DD-<topic>-spec.md`), `retros/` (`YYYY-MM-DD-<topic>-retro.md`). **There is no `docs/plans/`** — since `/stark-author` (2026-08-01) the spec carries the plan (task DAG, done-whens, closing verification command) and `/stark-build` consumes it. Never create `docs/plans/` or a `*-plan.md` doc; the existing ones are historical archive. Tier by blast radius: trivial → PR only · feature → spec · architectural → ADR + spec. Guarded by `tools/doc_convention.test.ts`.
 - Prompts are per-agent: each LLM gets its own version of each domain
 - Domain IDs are slugs derived from filenames: `01-architecture.md` → `architecture`
 - Config uses JSON, prompts use markdown

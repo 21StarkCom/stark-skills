@@ -65,8 +65,8 @@ After running `/stark-init-docs --template`, you get:
 
 ```
 docs/
-  specs/          # YYYY-MM-DD-slug.md
-  plans/          # YYYY-MM-DD-slug.md
+  specs/          # YYYY-MM-DD-slug-spec.md — intent + the task DAG that builds it
+  retros/         # YYYY-MM-DD-slug-retro.md
   adr/            # NNNN-slug.md (immutable once accepted)
   guides/         # living how-to docs and runbooks
   reference/      # API docs, config reference
@@ -90,7 +90,7 @@ mkdocs.yml
 The GitHub Action runs on every PR and warns (never blocks) when living docs haven't been touched in 3+ months.
 
 Checked: `guides/`, `reference/`, `architecture/`
-Skipped: `adr/` (immutable), `specs/`, `plans/` (point-in-time artifacts)
+Skipped: `adr/` (immutable), `specs/`, `retros/` (point-in-time artifacts)
 
 Configure the threshold in `.doc-staleness.yml`.
 

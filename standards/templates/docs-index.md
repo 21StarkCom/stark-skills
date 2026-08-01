@@ -43,8 +43,8 @@ touch docs/specs/your-feature.md
 
 | Path | Purpose |
 |------|---------|
-| `docs/specs/` | Feature specs — written before code |
-| `docs/plans/` | Implementation plans — how, not what |
+| `docs/specs/` | Feature specs — written before code; the spec carries the plan (task DAG, done-whens, verification command) |
+| `docs/retros/` | Retrospectives — what actually happened |
 | `docs/adr/` | Architecture Decision Records — why |
 | `docs/guides/` | How-to guides for humans |
 | `docs/reference/` | API / config reference |
