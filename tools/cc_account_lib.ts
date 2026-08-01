@@ -201,6 +201,20 @@ export function deleteProfileArgv(name: string): string[] {
   return ["delete-generic-password", "-s", SERVICE_PROFILES, "-a", name];
 }
 
+/**
+ * Delete ONE `stark-cc-token` item without naming it.
+ *
+ * `security` deletes a single matching item per call, so looping on this until
+ * it exits non-zero drains the whole service — including ORPHANS, records whose
+ * registry entry was lost and which `deleteProfileArgv` therefore cannot reach
+ * (nothing enumerates a Keychain service by name). That is why `reset` needs
+ * this and `remove` does not. Scoped to `stark-cc-token`, so it can never touch
+ * the live `Claude Code-credentials` item or any other service.
+ */
+export function deleteAnyProfileArgv(): string[] {
+  return ["delete-generic-password", "-s", SERVICE_PROFILES];
+}
+
 export function writeProfileArgv(name: string, blob: string): string[] {
   return [
     "add-generic-password",
@@ -445,6 +459,35 @@ export function parseNextFlags(args: readonly string[]): {
   return {
     apply: !args.includes("--dry-run"),
     best: args.includes("--best"),
+  };
+}
+
+/**
+ * Flags for `reset` — the irreversible one.
+ *
+ * `reset` PREVIEWS by default and acts only under `--yes`, the inverse of
+ * `next`. The asymmetry is deliberate: `next` is undone by another `next`,
+ * whereas an OAuth blob cannot be re-derived, so the default of every path here
+ * is the one that destroys nothing. That also means a mistyped flag degrades to
+ * a preview rather than to a wipe.
+ *
+ * Unknown flags are a hard error rather than ignored: `--snapshots` silently
+ * dropped to false would keep state the operator asked to clear, and a typo'd
+ * `--yes` reading as a no-op is only safe if the operator is told why nothing
+ * happened.
+ */
+export function parseResetFlags(args: readonly string[]): {
+  confirmed: boolean;
+  snapshots: boolean;
+  unknown: string[];
+} {
+  const known = new Set(["--yes", "--dry-run", "--snapshots"]);
+  return {
+    // `--dry-run` wins over `--yes`. A contradictory pair resolves to the
+    // reading that destroys nothing.
+    confirmed: args.includes("--yes") && !args.includes("--dry-run"),
+    snapshots: args.includes("--snapshots"),
+    unknown: args.filter((a) => !known.has(a)),
   };
 }
 

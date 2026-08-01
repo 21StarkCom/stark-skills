@@ -5,7 +5,7 @@ description: >-
   Switch the active Claude Code account between stored profiles when a 5-hour
   or 7-day rate-limit window runs out. Credentials live in macOS Keychain
   (service `stark-cc-token`); headroom comes from statusline snapshots.
-argument-hint: "[show|list|add <name>|use <name>|remove <name>|prune|limits|next|order] [--dry-run] [--best]"
+argument-hint: "[show|list|add <name>|use <name>|remove <name>|prune|reset|limits|next|order] [--dry-run] [--best] [--yes]"
 ---
 
 ## Help
@@ -30,6 +30,7 @@ still has room. Sibling of `stark-gh-user`, but the mechanics differ — read
 - `/stark-cc-user use <name>` — switch to profile `<name>`
 - `/stark-cc-user remove <name>` — forget a profile (credentials + registry entry)
 - `/stark-cc-user prune [--dry-run]` — forget every profile with no stored credentials
+- `/stark-cc-user reset [--yes] [--snapshots]` — forget **every** stored login and start over (previews unless `--yes`)
 - `/stark-cc-user limits` — headroom for every profile, best target first
 - `/stark-cc-user next` — **switch to the next profile in the rotation**
 - `/stark-cc-user next --dry-run` — preview that pick without switching
@@ -89,6 +90,45 @@ the cycle and needs `order` run again.
 
 Survivors keep their `order` values, gaps and all — those are a sort key, not a
 position, so a removal never rewrites a cycle you arranged by hand.
+
+## Starting over — `reset`
+
+```
+/stark-cc-user reset               # preview: exactly what would go
+/stark-cc-user reset --yes         # do it
+/stark-cc-user reset --yes --snapshots   # ...and clear headroom history too
+```
+
+Use it when the registry has drifted past repair — mismatched seats, profiles
+you can no longer account for, a keying scheme from an older version. Rebuilding
+from a clean slate is cheaper than auditing eleven records.
+
+**It previews by default and acts only under `--yes`** — the inverse of `next`,
+and deliberately so: `next` is undone by another `next`, whereas an OAuth blob
+cannot be re-derived. A mistyped flag therefore degrades to a preview, and
+`--dry-run` beats `--yes` if both appear. Unknown flags are a hard error, never
+ignored.
+
+**What it does NOT touch:** the live `Claude Code-credentials` item and
+`~/.claude.json`. You stay logged in as whoever you are right now, so `add
+<name>` re-registers that account immediately. A reset that logged you out would
+leave nothing to rebuild from.
+
+**It drains the whole `stark-cc-token` service**, looping an un-named
+`security delete-generic-password` rather than walking registry names. That
+catches **orphans** — stored credentials whose registry entry was lost, which
+nothing can enumerate by name and which a name-walk would leave behind
+invisibly. The output reports orphans separately from registered profiles.
+
+**Usage snapshots are kept unless `--snapshots`.** They are per-seat headroom
+readings that cannot be regenerated retroactively and stay valid for any seat
+you re-`add`; clearing them re-ranks every profile as `unknown` until the
+statusline has rendered once per account.
+
+Rebuild afterwards, one `claude /login` + `add` per account, then `order` to set
+the rotation. Quit every other running `claude` first — see the Keychain-is-
+global warning above, which is how mismatched profiles get minted in the first
+place.
 
 ## Why this isn't just a token swap
 

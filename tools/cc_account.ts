@@ -13,6 +13,7 @@
  *   use <name>           switch to profile <name>
  *   remove <name>        forget a profile (credentials + registry entry)
  *   prune                forget every profile with no stored credentials
+ *   reset [--yes]        forget EVERY stored login (irreversible; previews first)
  *   limits               headroom for every profile, best target first
  *   next [--dry-run]     switch to the next profile in the rotation
  *
@@ -28,6 +29,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import * as os from "node:os";
@@ -42,9 +44,11 @@ import {
   seatKeyOf,
   parseSnapshot,
   projectUsage,
+  deleteAnyProfileArgv,
   deleteProfileArgv,
   mergeProfile,
   parseNextFlags,
+  parseResetFlags,
   rankProfiles,
   readClaudeCredsArgv,
   readProfileArgv,
@@ -517,6 +521,110 @@ function cmdPrune(dryRun: boolean): void {
   console.log(`pruned ${dead.length} profile(s) with no stored credentials`);
 }
 
+/**
+ * Forget EVERY stored login and start over.
+ *
+ * Deliberately narrow: it drains the `stark-cc-token` Keychain service and
+ * deletes the registry. It does NOT touch the live `Claude Code-credentials`
+ * item or `~/.claude.json`, so you stay logged in as whoever you are right now
+ * and can `add` that account back immediately — a reset that logged you out
+ * would leave no account from which to rebuild.
+ *
+ * The drain loops `deleteAnyProfileArgv` instead of walking registry names, so
+ * ORPHANED records — stored credentials whose registry entry was lost — go too.
+ * Walking names would leave those behind invisibly, which is the exact state a
+ * "start over" is meant to clear.
+ *
+ * Usage snapshots are KEPT unless `--snapshots`: they are per-seat headroom
+ * readings that cannot be regenerated retroactively, and they stay valid for
+ * any seat you re-`add`. Losing them re-ranks every profile as `unknown`.
+ *
+ * Previews unless `--yes`. OAuth blobs cannot be re-derived — every account
+ * dropped here needs a fresh `claude /login`.
+ */
+function cmdReset(confirmed: boolean, snapshots: boolean): void {
+  const profiles = readRegistry();
+  const registryExists = existsSync(REGISTRY);
+  const snapFiles = snapshots ? listSnapshotFiles() : [];
+
+  if (profiles.length === 0 && !registryExists && snapFiles.length === 0) {
+    // Probe once: a drained registry can still hide orphaned records.
+    if (securityOrNull(deleteAnyProfileArgv()) === null) {
+      console.log("nothing stored — already clean");
+      return;
+    }
+    console.log("registry is empty but orphaned credential records exist");
+  }
+
+  const verb = confirmed ? "deleted" : "would delete";
+  for (const p of profiles) {
+    console.log(`${verb}  ${p.name.padEnd(8)} ${p.email}`);
+  }
+  for (const f of snapFiles) {
+    console.log(`${verb}  snapshot  ${f}`);
+  }
+
+  if (!confirmed) {
+    console.log("");
+    console.log(
+      `# preview only — ${profiles.length} profile(s)` +
+        `${snapshots ? ` + ${snapFiles.length} snapshot(s)` : ""} would be ` +
+        `forgotten IRREVERSIBLY (OAuth blobs cannot be re-derived).`,
+    );
+    console.log(
+      "# Re-run with --yes to do it. You stay logged in as the current " +
+        "account, so `add <name>` can register it again straight away.",
+    );
+    if (!snapshots) {
+      console.log(
+        "# Usage snapshots are kept — pass --snapshots to clear those too.",
+      );
+    }
+    return;
+  }
+
+  // Drain the service one item at a time; `security` deletes a single match per
+  // call and exits non-zero once none are left. Bounded so a `security` that
+  // keeps succeeding cannot spin forever.
+  let drained = 0;
+  const LIMIT = 500;
+  while (drained < LIMIT && securityOrNull(deleteAnyProfileArgv()) !== null) {
+    drained++;
+  }
+  if (drained >= LIMIT) {
+    fail(
+      `stopped after deleting ${LIMIT} credential records — ` +
+        `\`security\` never reported the service empty. Re-run to continue.`,
+    );
+  }
+
+  if (registryExists) rmSync(REGISTRY, { force: true });
+  for (const f of snapFiles) {
+    rmSync(path.join(SNAPSHOT_DIR, f), { force: true });
+  }
+
+  const orphans = drained - profiles.length;
+  console.log(
+    `reset: ${drained} credential record(s) deleted` +
+      `${orphans > 0 ? ` (${orphans} orphaned, not in the registry)` : ""}, ` +
+      `registry cleared` +
+      `${snapshots ? `, ${snapFiles.length} snapshot(s) removed` : ""}`,
+  );
+  console.log(
+    "You are still logged in as the current account — run `add <name>` to " +
+      "register it, then `claude /login` + `add` for each of the others.",
+  );
+}
+
+/** Snapshot filenames currently on disk, or `[]` if the dir is unreadable. */
+function listSnapshotFiles(): string[] {
+  try {
+    return readdirSync(SNAPSHOT_DIR).filter((n) => n.startsWith(SNAPSHOT_PREFIX));
+  } catch {
+    return [];
+  }
+}
+
 function cmdLimits(): void {
   const profiles = readRegistry();
   if (profiles.length === 0) {
@@ -640,6 +748,8 @@ const USAGE = `usage: cc_account.ts <command>
   remove <name>     forget profile <name> (credentials + registry entry)
   prune             forget every profile with no stored credentials
                     ( --dry-run = list them only )
+  reset             forget EVERY stored login and start over
+                    ( previews unless --yes · --snapshots also clears headroom )
   limits            headroom for every profile, best target first
   next              switch to the next profile in the rotation
                     ( --dry-run = preview only · --best = emptiest instead )
@@ -666,6 +776,16 @@ export function main(argv: string[] = process.argv.slice(2)): void {
       return cmdRemove(rest[0]);
     case "prune":
       return cmdPrune(rest.includes("--dry-run"));
+    case "reset": {
+      const { confirmed, snapshots, unknown } = parseResetFlags(rest);
+      if (unknown.length > 0) {
+        fail(
+          `reset: unknown flag(s) ${unknown.join(", ")} — ` +
+            `accepts --yes, --dry-run, --snapshots`,
+        );
+      }
+      return cmdReset(confirmed, snapshots);
+    }
     case "limits":
       return cmdLimits();
     case "next": {
