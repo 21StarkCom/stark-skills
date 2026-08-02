@@ -3,11 +3,11 @@ name: stark-story-judge
 description: >-
   Zero-context reader verdict on a long-form post. Use before publishing, after
   an edit pass, or whenever the ask is "how good is this / would a stranger
-  read this / fresh eyes on this post / grade it". Dispatches ONE cold subagent
-  that grades the reading experience on an anchored rubric with quoted
-  evidence, then relays the scorecard verbatim. Judges only - it never edits
-  (stark-story-edit rewrites, stark-blog-sharpen cuts) and never checks
-  publish machinery.
+  read this / fresh eyes on this post / grade it / second opinion". Dispatches
+  cold judges - one per vendor, never a re-roll - that grade the reading
+  experience on an anchored rubric with quoted evidence, then relays the
+  scorecards verbatim. Judges only - it never edits (stark-story-edit rewrites,
+  stark-blog-sharpen cuts) and never checks publish machinery.
 disable-model-invocation: true
 model: opus
 argument-hint: "<post-path-or-draft>"
@@ -56,18 +56,22 @@ Grades, never edits. A fix is named, not written.
    scorecard mentions your infrastructure, you leaked.
 3. **The judge gets no tools.** Say so in the dispatch: everything it needs is
    in the prompt. A cold reader does not grep your repo or google you.
-4. **ONE dispatch per revision.** Findings are dispositioned once - fix,
-   reject, or accept. A second opinion on the same text is noise with a
-   different seed; a re-grade is legal only after the text changed.
-   (Same law as `stark-fresh-eyes`: fresh eyes work through method
-   difference, not repetition.)
+4. **ONE dispatch per revision PER JUDGE.** Findings are dispositioned once -
+   fix, reject, or accept. Re-rolling the same judge on the same text is
+   noise with a different seed; a re-grade of the same judge is legal only
+   after the text changed. A SECOND OPINION is legal only as a different
+   vendor's model (see The second judge below) - that is method difference,
+   which is how fresh eyes work (`stark-fresh-eyes` law). There is no third
+   judge and no tiebreaker.
 5. **Relay the scorecard verbatim.** No softening, no re-scoring, no "but it
    read fine to me." You may add dispositions under it, clearly separated.
 
 | Rationalization | Reality |
 |---|---|
 | "The session already read the post - dispatching is overhead" | The session grades its own intent, not the text. That is the failure the skill exists to prevent. |
-| "A second judge would confirm the grade" | Two cold runs disagree in the noise band and you'll keep the one you like. Disposition once; re-judge after edits only. |
+| "I'll re-roll the same judge to confirm the grade" | Same-vendor runs disagree in the noise band and you'll keep the one you like. A second opinion means a different vendor, once. |
+| "The two judges disagree - a third breaks the tie" | No tiebreakers. Two scorecards plus your written disposition is the process; a third roll is shopping for the answer you prefer. |
+| "The first judge said A, skip the second" | On a publish call the second judge exists precisely to catch the first one's blind spots. |
 | "I'll just mention the author so it calibrates" | You just anchored the grade. The payload carries no author. |
 | "I'll add the house publish rules for completeness" | Machinery is not reading. The gate has its own tool. |
 
@@ -146,12 +150,61 @@ Body:
 {{BODY}}
 ````
 
+## The second judge (cross-vendor)
+
+A second opinion is a DIFFERENT vendor's model reading the same payload -
+never a re-roll. Run it when the grade gates a publish decision or when the
+author asks for another round; skip it for quick draft checks. The default
+second judge is the `codex` CLI at **xhigh** reasoning effort (grading is a
+hard-reasoning task and the CLI's ambient default is often low; the model id
+comes from config, never from this file).
+
+Dispatch shape - every detail is a scar, keep all of them:
+
+````bash
+# model from fleet config; empty var falls back to the CLI's own default
+CODEX_MODEL="$(node --experimental-strip-types \
+  "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/stark_config_lib.ts" \
+  --model codex 2>/dev/null || true)"
+cd "$(mktemp -d)" && codex exec --skip-git-repo-check -s read-only \
+  ${CODEX_MODEL:+-m "$CODEX_MODEL"} -c model_reasoning_effort="xhigh" \
+  "$(cat /path/to/judge-prompt.txt)" </dev/null > scorecard.txt 2> stderr.txt
+````
+
+- **The judge prompt is byte-identical for every judge.** Same template, same
+  payload, same rubric - a grade difference must come from the judge, never
+  from a prompt difference.
+- **`</dev/null` is mandatory.** `codex exec` reads stdin in addition to the
+  prompt argument; an orchestrated shell's stdin is a pipe that never EOFs
+  and the run hangs forever.
+- **Empty temp cwd + `--skip-git-repo-check` + `-s read-only`.** A cold
+  reader greps nothing; give it a directory with nothing to grep.
+- Write the prompt to a file and pass `"$(cat ...)"` - inlining a full post
+  into a shell heredoc invites quoting bugs.
+
+## Reading two scorecards
+
+- **Relay both verbatim.** Never average the totals, never merge rows into
+  one table with your own arithmetic.
+- **Convergence is the signal.** A problem both judges name independently
+  (same fix, same first-line-to-cut) outranks either judge's score. Act on
+  convergent findings first.
+- **A one-point score gap is the noise band.** Report it, don't adjudicate
+  it.
+- **A 2+ point gap on one dimension gets a written disposition:** re-read
+  that dimension with both quotes on the table and say which evidence holds.
+  That is a disposition, not a re-dispatch.
+- **Verdicts differ: the stricter one stands** for the publish decision
+  (NO STORY YET > REWRITE > PUBLISH AFTER FIXES > PUBLISH).
+
 ## Red flags - the run is invalid
 
 - A score arrived without a quote.
 - Every dimension scored 2 or higher on a first draft.
 - The scorecard mentions your repo, gates, frontmatter, or tooling.
-- You dispatched twice on the same revision.
+- You dispatched the SAME judge twice on the same revision.
+- A third judge broke a tie.
+- Two totals were averaged into one number.
 - The judge returned rewritten prose.
 - You adjusted a score while relaying.
 
