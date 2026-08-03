@@ -123,7 +123,9 @@ by your paste through the existing publish path.
 ## The one-clean-candidate short-circuit
 
 Exactly one CLEAN candidate means **you merge NOTHING**. Copy that candidate
-verbatim to `merge.md` and say which seats failed and why.
+verbatim to `merge.md` - byte for byte, nothing added, nothing framed. Which
+seats failed and why goes in the audit row and your session summary, never
+inside `merge.md`; the run's `verify/` records already name every violation.
 
 Arbitrating one opinion is theater. Reconciling a lone survivor against the
 source is you rewriting the post while calling it a merge, and it produces a
