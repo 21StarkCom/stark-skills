@@ -402,4 +402,32 @@ smoke command.
 
 ## Deviations (append-only)
 
-_None yet._
+- **2026-08-03 build run 20260803T143745Z (PR #838):** the closing verification
+  `cd tools && npm test` is RED at accepted-base itself: 2 pre-existing Node-26
+  environment failures (housekeeping_infra.test.ts symlink strip-types;
+  skill_optimize.test.ts api-timeout message drift), measured independently in
+  two environments. Build verdicts used failure-set equality against that
+  baseline; the build introduced zero new failures.
+- **2026-08-03 build run:** the DEFAULT panel's codex seat (gpt-5.5-pro) is
+  rejected by the installed codex CLI under ChatGPT-account auth (vendor 400:
+  "The 'gpt-5.5-pro' model is not supported when using Codex with a ChatGPT
+  account"). The smoke greens because the ladder tolerates a failed seat
+  ("a vendor being down is not a spec error"), but a 3-seat default-panel run
+  needs either a spec edit of the codex seat (gpt-5.6-sol:xhigh works under
+  this auth) or codex API-key auth. Operator decision, not improvised.
+- **2026-08-03 build run:** the gemini OAuth seat requires a licensing project:
+  export STARK_GEMINI_VERTEX_PROJECT (verified working: infra-ai-platform) or
+  set config.json models.gemini.vertex_project. The ambient GOOGLE_CLOUD_PROJECT
+  it silently relied on was removed fleet-wide 2026-08-01.
+- **2026-08-03 build run, harness adaptations (full detail in the run's
+  PROGRESS.md):** wave T1-T3 built in parallel isolated worktrees with
+  serialized integration (operator instruction); T1/T3's extendable existing
+  suites enforced additions-only by the runner instead of write-protection;
+  T7's smoke executed by the runner (3 attempts: env leak, missing licensing
+  project, then green); T3's multi-file test gate hardened with existence
+  preconditions after `node --test` proved to fail OPEN on a missing file arg.
+- **2026-08-03 advisory round:** finding "duplicate-dimension scorecard passes
+  CLEAN" REJECTED with audited evidence (the judge's own output shape requires
+  later dimension mentions); finding "SKILL.md one-candidate contradiction"
+  fixed. Recorded on PR #838.
+
