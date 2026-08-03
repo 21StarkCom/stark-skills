@@ -4,7 +4,7 @@
  * A panel is the set of seats a jury run fans out to, written as a
  * comma-separated list of `seat=model[:effort]` entries:
  *
- *   claude=claude-opus-5:max,codex=gpt-5.5-pro:xhigh,gemini=gemini-3.1-pro-preview
+ *   claude=claude-opus-5:max,codex=gpt-5.6-sol:xhigh,gemini=gemini-3.1-pro-preview
  *
  * Validation is deliberately STRICT and deliberately cheap — it runs before a
  * dispatch that costs dollars and minutes per seat, so a typo must die here
@@ -69,7 +69,7 @@ const TABLE_FALLBACK_KEY = "_fallback";
  * fail its own validation.
  */
 export const DEFAULT_PANEL_SPEC =
-  "claude=claude-opus-5:max,codex=gpt-5.5-pro:xhigh,gemini=gemini-3.1-pro-preview";
+  "claude=claude-opus-5:max,codex=gpt-5.6-sol:xhigh,gemini=gemini-3.1-pro-preview";
 
 // ---------------------------------------------------------------------------
 // Types

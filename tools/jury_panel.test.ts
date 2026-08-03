@@ -28,6 +28,7 @@ const TABLES: PanelDeps = {
   rates: {
     "claude-opus-5": {},
     "gpt-5.5-pro": {},
+    "gpt-5.6-sol": {},
     "gemini-3.1-pro-preview": {},
     "rates-only-model": {},
     _fallback: {},
@@ -35,6 +36,7 @@ const TABLES: PanelDeps = {
   limits: {
     "claude-opus-5": {},
     "gpt-5.5-pro": {},
+    "gpt-5.6-sol": {},
     "gemini-3.1-pro-preview": {},
     "limits-only-model": {},
     _fallback: {},
@@ -54,7 +56,7 @@ function errorsFor(spec: string, deps: PanelDeps = TABLES): string[] {
 test("default resolution: absent/empty spec resolves to DEFAULT_PANEL_SPEC", () => {
   const expected = [
     { seat: "claude", model: "claude-opus-5", effort: "max" },
-    { seat: "codex", model: "gpt-5.5-pro", effort: "xhigh" },
+    { seat: "codex", model: "gpt-5.6-sol", effort: "xhigh" },
     { seat: "gemini", model: "gemini-3.1-pro-preview", effort: null },
   ];
   for (const spec of [undefined, null, "", "   "]) {
