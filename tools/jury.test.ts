@@ -53,11 +53,13 @@ const PANEL_DEPS = {
   rates: {
     "claude-opus-5": { input_per_1m_usd: 5, output_per_1m_usd: 25 },
     "gpt-5.5-pro": { input_per_1m_usd: 15, output_per_1m_usd: 120 },
+    "gpt-5.6-sol": { input_per_1m_usd: 5, output_per_1m_usd: 30 },
     "gemini-3.1-pro-preview": { input_per_1m_usd: 2, output_per_1m_usd: 12 },
   },
   limits: {
     "claude-opus-5": { max_input_tokens: 200000, max_output_tokens: 64000 },
     "gpt-5.5-pro": { max_input_tokens: 400000, max_output_tokens: 128000 },
+    "gpt-5.6-sol": { max_input_tokens: 1050000, max_output_tokens: 128000 },
     "gemini-3.1-pro-preview": { max_input_tokens: 1048576, max_output_tokens: 65536 },
   },
 };
@@ -709,14 +711,14 @@ test("the handoff block carries the header, the paths, every verdict and the nex
   assert.equal(lines[0], HANDOFF_HEADER);
   assert.match(handoff, new RegExp(`run:\\s+${result.runId}`));
   assert.match(handoff, /skill:\s+voice\s+mode: rewrite/);
-  assert.match(handoff, /panel:\s+claude=claude-opus-5:max,codex=gpt-5\.5-pro:xhigh,gemini=gemini-3\.1-pro-preview/);
+  assert.match(handoff, /panel:\s+claude=claude-opus-5:max,codex=gpt-5\.6-sol:xhigh,gemini=gemini-3\.1-pro-preview/);
   assert.match(handoff, /outcome:\s+merge-ready\s+dispatch: complete/);
   assert.ok(handoff.includes(result.paths.dir));
   assert.ok(handoff.includes(result.paths.input));
   assert.ok(handoff.includes(result.paths.prompt));
   assert.match(handoff, /claude\s+claude-opus-5:max\s+CLEAN\s+candidates\/claude\.md/);
   assert.match(handoff, /gemini\s+gemini-3\.1-pro-preview\s+CLEAN/);
-  assert.match(handoff, /codex\s+gpt-5\.5-pro:xhigh\s+DISQUALIFIED/);
+  assert.match(handoff, /codex\s+gpt-5\.6-sol:xhigh\s+DISQUALIFIED/);
   assert.match(handoff, /^next: /m);
   assert.ok(handoff.includes(result.paths.audit), "the session is told where its audit row goes");
 });

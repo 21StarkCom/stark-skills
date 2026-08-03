@@ -56,7 +56,7 @@ function seat(id: SeatId, model: string, effort: string | null = null): PanelSea
 }
 
 const CLAUDE_SEAT = seat("claude", "claude-opus-5", "max");
-const CODEX_SEAT = seat("codex", "gpt-5.5-pro", "xhigh");
+const CODEX_SEAT = seat("codex", "gpt-5.6-sol", "xhigh");
 const GEMINI_SEAT = seat("gemini", "gemini-3.1-pro-preview", null);
 
 function panelOf(...seats: PanelSeat[]): Panel {
@@ -180,7 +180,7 @@ test("codex seat: -s read-only, --skip-git-repo-check and the effort override", 
   assert.equal(cmd.args.includes("--reasoning-effort"), false);
   // Model + stdin.
   const modelAt = cmd.args.indexOf("-m");
-  assert.equal(cmd.args[modelAt + 1], "gpt-5.5-pro");
+  assert.equal(cmd.args[modelAt + 1], "gpt-5.6-sol");
   assert.equal(cmd.stdin, PROMPT);
   assert.equal(cmd.cwd, "/tmp/scratch-codex");
 });

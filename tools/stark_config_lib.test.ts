@@ -348,7 +348,7 @@ test("the DEFAULT jury panel validates against the shipped model tables", () => 
   assert.ok(result.ok);
   assert.deepEqual(
     result.panel.seats.map((s) => s.model),
-    ["claude-opus-5", "gpt-5.5-pro", "gemini-3.1-pro-preview"],
+    ["claude-opus-5", "gpt-5.6-sol", "gemini-3.1-pro-preview"],
   );
 
   // Strictness checks both tables, so every default model needs both rows.

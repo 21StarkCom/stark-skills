@@ -43,7 +43,8 @@ Decided in the brainstorm (2026-08-03):
    execution and is AUDITED as one (see the run store).
 5. **The panel is parametric: model per seat, effort per seat WHERE THE
    VENDOR HAS THE CONCEPT.** Defaults: `claude=claude-opus-5:max`,
-   `codex=gpt-5.5-pro:xhigh`, `gemini=gemini-3.1-pro-preview` (gemini-cli
+   `codex=gpt-5.6-sol:xhigh` (was gpt-5.5-pro; amended 2026-08-03, see
+   Deviations), `gemini=gemini-3.1-pro-preview` (gemini-cli
    exposes no reasoning-effort knob; a gemini seat takes no effort field and
    the manifest records `effort: n/a`). The author moved the Claude seat from
    Fable 5 to Opus 5 during the brainstorm.
@@ -357,7 +358,7 @@ root.
   *Done-when (bifrost):* `stark build --check` exits 0 AND `node -e "const d=require('./bundles/stark-write.json');const n=new Set(d.artifacts.map(a=>a.name));for(const x of ['stark-story-edit','stark-blog-sharpen','stark-story-judge','stark-jury'])if(!n.has(x))process.exit(1)"` exits 0 (the generated artifact, checked - never written - by hand).
 - **T7 - live smoke, default panel.** (depends on T3, T5) One real run of
   `blog-sharpen` over a fixture post on the DEFAULT panel
-  `claude=claude-opus-5:max,codex=gpt-5.5-pro:xhigh,gemini=gemini-3.1-pro-preview`
+  `claude=claude-opus-5:max,codex=gpt-5.6-sol:xhigh,gemini=gemini-3.1-pro-preview`
   (author decision 2026-08-03: no cheap models - the smoke tests the panel
   that will actually run). T3's `gemini-3.1-pro-preview` rows complete the
   tables, so the panel validates by construction. Gated behind
@@ -430,4 +431,10 @@ smoke command.
   CLEAN" REJECTED with audited evidence (the judge's own output shape requires
   later dimension mentions); finding "SKILL.md one-candidate contradiction"
   fixed. Recorded on PR #838.
+- **2026-08-03 post-merge amendment (author decision):** the default codex
+  seat is now `gpt-5.6-sol:xhigh`, resolving the ChatGPT-auth constraint two
+  entries up. gpt-5.6-sol runs under this machine's codex auth (the spec's own
+  dual-review challenge used it) and sits in both config tables. gpt-5.5-pro
+  stays in the tables and remains selectable via `--panel` for API-key-auth
+  environments.
 

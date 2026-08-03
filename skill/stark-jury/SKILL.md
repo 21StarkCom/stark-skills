@@ -72,7 +72,7 @@ node --experimental-strip-types \
 ```
 
 Options: `--panel seat=model[:effort],...` (default
-`claude=claude-opus-5:max,codex=gpt-5.5-pro:xhigh,gemini=gemini-3.1-pro-preview`;
+`claude=claude-opus-5:max,codex=gpt-5.6-sol:xhigh,gemini=gemini-3.1-pro-preview`;
 gemini has no reasoning-effort knob and takes no effort field), `--name` for
 the run-store name, `--timeout-sec` (default 1800 per seat), `--json`.
 `list` and `show <run-id>` read the store. Exit codes: `0` ok, `1` the ladder
