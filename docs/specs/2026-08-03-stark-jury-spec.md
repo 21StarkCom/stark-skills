@@ -1,9 +1,9 @@
 # stark-jury - fan the writing skills across a model panel, merge anchored, audit everything
 
 - **Date:** 2026-08-03
-- **Status:** draft (awaiting author review; fresh-eyes + GPT-5.6-Sol xhigh challenge applied 2026-08-03; second fresh-eyes pass on the post-review revision applied 2026-08-03)
+- **Status:** accepted (author, 2026-08-03; fresh-eyes + GPT-5.6-Sol xhigh challenge applied 2026-08-03; second fresh-eyes pass on the post-review revision applied 2026-08-03; author decision folded in: no cheap models, T7 smokes the default panel)
 - **Branch:** `spec/stark-jury`
-- **accepted-base:** _stamp on acceptance_
+- **accepted-base:** `5e413ba4273deb4f92e6c0aee039f19977071ead`
 
 ## Intent
 
