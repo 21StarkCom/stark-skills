@@ -1,7 +1,7 @@
 # stark-jury - fan the writing skills across a model panel, merge anchored, audit everything
 
 - **Date:** 2026-08-03
-- **Status:** draft (awaiting author review; fresh-eyes + GPT-5.6-Sol xhigh challenge applied 2026-08-03)
+- **Status:** draft (awaiting author review; fresh-eyes + GPT-5.6-Sol xhigh challenge applied 2026-08-03; second fresh-eyes pass on the post-review revision applied 2026-08-03)
 - **Branch:** `spec/stark-jury`
 - **accepted-base:** _stamp on acceptance_
 
@@ -18,8 +18,8 @@ untouched: their SKILL.md files become payloads the jury dispatches, never
 edited.
 
 The design deliberately reuses the architecture the author already ran in
-production and wrote up in "Best-of-3 with a judge" (2026-06-11, external
-write-up): fan out where models disagree, merge anchored to the source under
+production and wrote up in "Best-of-3 with a judge" (published 2026-07-18,
+external write-up): fan out where models disagree, merge anchored to the source under
 no-add/no-remove rules, never score prose with a scalar, drop failed
 candidates on a ladder, audit every call.
 
@@ -111,12 +111,14 @@ Decided in the brainstorm (2026-08-03):
   `</dev/null` (which would deliver an EMPTY prompt through these builders).
 - **`stark_config_lib.ts` is the model SSOT, and it is INCOMPLETE for this
   spec today.** Present in both rates and limits tables: `claude-opus-5`,
-  `claude-fable-5`, `gpt-5.5-pro`, `gpt-5.6-sol`. ABSENT from both: every
-  gemini id, and every cheap-tier id this spec names (`claude-haiku-4-5`,
-  `gemini-3.1-flash`). Panel validation stays STRICT (unknown id = parse
-  error, typo protection); T3 therefore adds the missing rows, with rates
-  taken from the vendors' current price pages at build time and cited in the
-  PR, never invented here.
+  `claude-fable-5`, `gpt-5.5-pro`, `gpt-5.6-sol`. Present in the RATES table
+  only: `gpt-5.5` (no limits row). ABSENT from both: every gemini id, and
+  every cheap-tier id this spec names (`claude-haiku-4-5`,
+  `gemini-3.1-flash`). Panel validation stays STRICT and checks BOTH tables
+  (an id missing from either is a parse error, typo protection); T3
+  therefore adds the missing rows, with rates taken from the vendors'
+  current price pages at build time and cited in the PR, never invented
+  here.
 - **Codex effort is a `-c` override, not a flag** (codex-cli 0.128.0+
   removed `--reasoning-effort`; verified absent from 0.146.0 `--help`). The
   builder hardcodes `"high"` today; T1 parameterizes it. The codex SANDBOX
@@ -157,15 +159,23 @@ Decided in the brainstorm (2026-08-03):
   `dist/` are GENERATED, committed, `linguist-generated`, and guarded by a
   CI drift gate ("Never hand-edit `dist/`, `index.json`, or
   `bundles/*.json`"). Flow: edit `bundle.yaml` (bump version) -> `stark
-  sync` -> `stark build --fix` -> `stark build --check`. NOTE: the local
-  clone at `~/Code/21Stark/bifrost` can be BEHIND origin (it was during
-  spec review - it lacked `catalog/stark-write/bundle.yaml`, which exists
-  upstream at v0.2.0 carrying story-edit + sharpen); pull before working.
+  sync` -> `stark build --fix` -> `stark build --check`. NOTE: upstream
+  `catalog/stark-write/bundle.yaml` is at v0.3.2 (verified 2026-08-03),
+  already carrying story-edit + sharpen + story-judge; the local clone at
+  `~/Code/21Stark/bifrost` sat on a DIVERGED feature branch during spec
+  review and lacks the file entirely, so a plain `git pull` will not
+  materialize it - check out the default branch and fast-forward it before
+  working.
 - **The run-history root already exists:** `~/.claude/code-review/history/`
   is where stark-build keeps run state. Jury runs are operator state, never
   repo content.
 
 ## Behavior contract (EARS-shaped)
+
+Skill ids: `--skill` takes one of `voice | story-edit | blog-sharpen |
+story-judge`, resolving to `skill/stark-<id>/SKILL.md` in this repo. The
+verifier table's Applies-to column uses shorthand: edit = story-edit,
+sharpen = blog-sharpen, judge = story-judge.
 
 - WHEN `jury.ts run --skill <s> --input <file>` is invoked with a valid
   panel, the tool SHALL write the manifest skeleton FIRST, then dispatch the
@@ -314,9 +324,10 @@ root.
   parsing, default resolution, unknown-id rejection, effort-on-gemini
   rejection; store layout, manifest-first write, atomic final rename,
   0700, audit append. Add rates+limits rows to `stark_config_lib.ts` for:
-  `gemini-3.1-pro-preview`, the chosen cheap gemini id, and
-  `claude-haiku-4-5` - values from the vendors' current price pages,
-  cited in the PR.
+  `gemini-3.1-pro-preview`, `gemini-3.1-flash` (the cheap gemini seat) and
+  `claude-haiku-4-5`, plus the missing LIMITS row for `gpt-5.5` (rates-only
+  today; the T7 smoke seat needs it under both-tables validation) - values
+  from the vendors' current price pages, cited in the PR.
   *Done-when:* `node --experimental-strip-types --test tools/jury_panel.test.ts tools/jury_store.test.ts tools/stark_config_lib.test.ts` green, with a new case asserting the DEFAULT panel and the T7 smoke panel both validate.
 - **T4 - `jury_dispatch.ts` + tests.** (depends on T1) Command
   construction per seat via the builders (asserted, not executed),
@@ -334,10 +345,12 @@ root.
   skill doc lands in stark-skills: method, both mode contracts, the merge
   audit row, payload rules, the vendor-system-prompt limitation, cost note
   (expect $1-3 per run per skill at max/xhigh on a ~2,000-word post;
-  reasoning bills as output tokens). Bifrost half, in a separate PR on a
-  FRESH PULL of `~/Code/21Stark/bifrost`: edit the EXISTING
-  `catalog/stark-write/bundle.yaml` (v0.2.0 today) - add
-  `stark-story-judge` and `stark-jury` to its skills, bump the version -
+  reasoning bills as output tokens). Bifrost half, in a separate PR from
+  the fast-forwarded DEFAULT branch of `~/Code/21Stark/bifrost` (see the
+  bundle-pipeline note above): edit the EXISTING
+  `catalog/stark-write/bundle.yaml` (v0.3.2 upstream, already carrying
+  story-edit + sharpen + story-judge) - add `stark-jury` to its skills,
+  bump the version -
   then `stark sync` and `stark build --fix`, letting the generator emit
   `bundles/stark-write.json`; `stark build --check` green. Never hand-edit
   `bundles/`, `index.json`, or `dist/`.
@@ -345,9 +358,9 @@ root.
   *Done-when (bifrost):* `stark build --check` exits 0 AND `node -e "const d=require('./bundles/stark-write.json');const n=new Set(d.artifacts.map(a=>a.name));for(const x of ['stark-story-edit','stark-blog-sharpen','stark-story-judge','stark-jury'])if(!n.has(x))process.exit(1)"` exits 0 (the generated artifact, checked - never written - by hand).
 - **T7 - live smoke, cheap panel.** (depends on T3, T5) One real run of
   `blog-sharpen` over a fixture post on the cheap panel
-  `claude=claude-haiku-4-5,codex=gpt-5.5:low,gemini=<cheap gemini id>` -
-  the exact ids are the ones T3 added to the tables, so the smoke panel
-  validates by construction. Gated behind `JURY_SMOKE=1`. The smoke
+  `claude=claude-haiku-4-5,codex=gpt-5.5:low,gemini=gemini-3.1-flash` -
+  the exact ids are the ones T3 added or completed in the tables, so the
+  smoke panel validates by construction. Gated behind `JURY_SMOKE=1`. The smoke
   exercises dispatch, capture, verify and store on real CLIs; it does NOT
   exercise the default panel's cost tier or the session merge - the first
   real authored run is that test, watched.
