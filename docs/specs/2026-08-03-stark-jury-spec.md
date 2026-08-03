@@ -75,7 +75,8 @@ Decided in the brainstorm (2026-08-03):
   0700).
 - Bundle wiring, CROSS-REPO, in the bifrost repo (see T6 for the correct
   pipeline direction).
-- Live smoke on a cheap panel.
+- Live smoke on the DEFAULT panel (author decision 2026-08-03: no cheap
+  models - the smoke tests the panel that will actually run).
 
 **OUT (deliberately)**
 
@@ -111,10 +112,9 @@ Decided in the brainstorm (2026-08-03):
   `</dev/null` (which would deliver an EMPTY prompt through these builders).
 - **`stark_config_lib.ts` is the model SSOT, and it is INCOMPLETE for this
   spec today.** Present in both rates and limits tables: `claude-opus-5`,
-  `claude-fable-5`, `gpt-5.5-pro`, `gpt-5.6-sol`. Present in the RATES table
-  only: `gpt-5.5` (no limits row). ABSENT from both: every gemini id, and
-  every cheap-tier id this spec names (`claude-haiku-4-5`,
-  `gemini-3.1-flash`). Panel validation stays STRICT and checks BOTH tables
+  `claude-fable-5`, `gpt-5.5-pro`, `gpt-5.6-sol`. ABSENT from both: every
+  gemini id - including `gemini-3.1-pro-preview`, the default panel's own
+  gemini seat. Panel validation stays STRICT and checks BOTH tables
   (an id missing from either is a parse error, typo protection); T3
   therefore adds the missing rows, with rates taken from the vendors'
   current price pages at build time and cited in the PR, never invented
@@ -323,12 +323,11 @@ root.
 - **T3 - `jury_panel.ts` + `jury_store.ts` + config rows + tests.** Panel
   parsing, default resolution, unknown-id rejection, effort-on-gemini
   rejection; store layout, manifest-first write, atomic final rename,
-  0700, audit append. Add rates+limits rows to `stark_config_lib.ts` for:
-  `gemini-3.1-pro-preview`, `gemini-3.1-flash` (the cheap gemini seat) and
-  `claude-haiku-4-5`, plus the missing LIMITS row for `gpt-5.5` (rates-only
-  today; the T7 smoke seat needs it under both-tables validation) - values
-  from the vendors' current price pages, cited in the PR.
-  *Done-when:* `node --experimental-strip-types --test tools/jury_panel.test.ts tools/jury_store.test.ts tools/stark_config_lib.test.ts` green, with a new case asserting the DEFAULT panel and the T7 smoke panel both validate.
+  0700, audit append. Add rates+limits rows to `stark_config_lib.ts` for
+  `gemini-3.1-pro-preview` (the default panel's gemini seat, absent from
+  both tables today) - values from the vendors' current price pages, cited
+  in the PR.
+  *Done-when:* `node --experimental-strip-types --test tools/jury_panel.test.ts tools/jury_store.test.ts tools/stark_config_lib.test.ts` green, with a new case asserting the DEFAULT panel validates (T7 smokes on that same panel).
 - **T4 - `jury_dispatch.ts` + tests.** (depends on T1) Command
   construction per seat via the builders (asserted, not executed),
   including codex `-s read-only` and the claude isolation flags; parallel
@@ -356,14 +355,16 @@ root.
   `bundles/`, `index.json`, or `dist/`.
   *Done-when (stark-skills):* `test -f skill/stark-jury/SKILL.md` AND `cd tools && npm test` green.
   *Done-when (bifrost):* `stark build --check` exits 0 AND `node -e "const d=require('./bundles/stark-write.json');const n=new Set(d.artifacts.map(a=>a.name));for(const x of ['stark-story-edit','stark-blog-sharpen','stark-story-judge','stark-jury'])if(!n.has(x))process.exit(1)"` exits 0 (the generated artifact, checked - never written - by hand).
-- **T7 - live smoke, cheap panel.** (depends on T3, T5) One real run of
-  `blog-sharpen` over a fixture post on the cheap panel
-  `claude=claude-haiku-4-5,codex=gpt-5.5:low,gemini=gemini-3.1-flash` -
-  the exact ids are the ones T3 added or completed in the tables, so the
-  smoke panel validates by construction. Gated behind `JURY_SMOKE=1`. The smoke
-  exercises dispatch, capture, verify and store on real CLIs; it does NOT
-  exercise the default panel's cost tier or the session merge - the first
-  real authored run is that test, watched.
+- **T7 - live smoke, default panel.** (depends on T3, T5) One real run of
+  `blog-sharpen` over a fixture post on the DEFAULT panel
+  `claude=claude-opus-5:max,codex=gpt-5.5-pro:xhigh,gemini=gemini-3.1-pro-preview`
+  (author decision 2026-08-03: no cheap models - the smoke tests the panel
+  that will actually run). T3's `gemini-3.1-pro-preview` rows complete the
+  tables, so the panel validates by construction. Gated behind
+  `JURY_SMOKE=1`; expect real cost and minutes per seat (the Risks estimate
+  applies - accepted). The smoke exercises dispatch, capture, verify and
+  store on real CLIs at the real cost tier; it does NOT exercise the
+  session merge - the first real authored run is that test, watched.
   *Done-when:* `JURY_SMOKE=1 node --experimental-strip-types tools/jury.ts run --skill blog-sharpen --input <fixture>` exits 0 and the run dir contains 3 candidate files, 3 verify verdicts and a complete manifest.
 
 **Closing verification (held-out):**
@@ -382,8 +383,10 @@ smoke command.
 - **Reasoning-heavy seats are slow and expensive.** max/xhigh bill
   thinking as output tokens; expect $1-3 and minutes per seat on a
   2,000-word post. Mitigation: cost and latency in every manifest where
-  vendors report usage, the smoke on a cheap panel, the cost note in
-  SKILL.md, and the 45-post corpus explicitly NOT a default target.
+  vendors report usage, the cost note in SKILL.md, and the 45-post corpus
+  explicitly NOT a default target. The smoke deliberately runs the default
+  panel at full price (author decision: no cheap models); a few dollars per
+  smoke is accepted.
 - **Mechanical rules have known blind spots, stated.** Numbers-frozen is
   membership (a value reattached to the wrong claim passes); n-gram
   containment has a threshold (a heavily "sharpened" paragraph can trip
