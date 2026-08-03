@@ -24,6 +24,7 @@ import {
   tokenizeShell,
   DEFAULT_GOAL_MAX_BUDGET_USD,
   VALID_AGENTS,
+  run,
 } from "./copilot_dispatch.ts";
 
 // --- extractVerdictJson ----------------------------------------------------
@@ -496,4 +497,24 @@ describe("CLI", () => {
     assert.match(out, /--goal-condition/);
     assert.match(out, /--goal-max-budget-usd/);
   });
+});
+
+// --- run(): timeout must always settle -------------------------------------
+
+// Regression: run() resolved only once child "close" fired, and "close" needs
+// every stdio pipe to end. A descendant that inherits stdout and outlives the
+// kill therefore hung the promise forever. Reproduce with a backgrounded
+// sleeper holding stdout past its parent's exit.
+test("run(): a timed-out child whose descendant holds stdout still settles", async () => {
+  const started = Date.now();
+  const res = await run("sh", ["-c", "sleep 30 & echo up; sleep 30"], {
+    timeoutSec: 1,
+  });
+  const elapsed = Date.now() - started;
+  assert.equal(res.timedOut, true);
+  assert.match(res.stdout, /up/);
+  assert.ok(
+    elapsed < 25_000,
+    `run() took ${elapsed}ms — the last-resort settle did not fire`,
+  );
 });

@@ -329,6 +329,30 @@ export async function run(
       try { child.kill("SIGTERM"); } catch { /* ignore */ }
       setTimeout(() => {
         try { child.kill("SIGKILL"); } catch { /* ignore */ }
+        // Last resort: "close" needs BOTH the process to exit and every stdio
+        // pipe to end, so a descendant that inherited stdout and outlived the
+        // kill holds this promise open forever. After SIGKILL + a grace, tear
+        // the pipes down and synthesize the result: destroy() emits "close",
+        // never "end", so the tryFinish gate must be released by hand or this
+        // does nothing. Same hang class fixed in jury_dispatch's realRunner;
+        // this copy had it too.
+        setTimeout(() => {
+          if (settled) return;
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          stdoutEnded = true;
+          stderrEnded = true;
+          processClosed = true;
+          closedResult ??= {
+            code: null,
+            signal: "SIGKILL",
+            stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
+            stderr: Buffer.concat(stderrChunks).toString("utf-8"),
+            timedOut: true,
+            notFound: false,
+          };
+          tryFinish();
+        }, 2_000);
       }, 5_000);
     }, opts.timeoutSec * 1000);
 
