@@ -522,3 +522,52 @@ test("stripCodeFences honours tildes and longer closing fences", () => {
     !stripCodeFences(["````", "```", "hidden", "````"].join("\n")).includes("hidden"),
   );
 });
+
+// ---------------------------------------------------------------------------
+// code-review regressions (PR #838): row anchoring, list markers, verdict case
+// ---------------------------------------------------------------------------
+
+test("a prose line beginning with a dimension word does not steal the row", () => {
+  const card = ["Hook and landing are the weak points.", "", scorecard()].join("\n");
+  clean(verify("story-judge", JUDGE_SOURCE, card));
+  const parsed = parseScorecard(card);
+  assert.equal(parsed.rows.find((r) => r.dimension === "Hook")?.score, 3);
+});
+
+test("a prefix collision (Hooks) does not claim the Hook dimension", () => {
+  const collided = scorecard().replace("- Hook - 3", "- Hooks - 3");
+  const parsed = parseScorecard(collided);
+  assert.equal(parsed.rows.some((r) => r.dimension === "Hook"), false);
+});
+
+test("ordered-list markers introduced by a rewrite are not invented numbers", () => {
+  const source = [
+    "Three lessons:",
+    "",
+    "- rehearse the rollback",
+    "- mute nothing",
+    "- write it down",
+  ].join("\n");
+  const candidate = [
+    "Three lessons:",
+    "",
+    "1. rehearse the rollback",
+    "2. mute nothing",
+    "3. write it down",
+  ].join("\n");
+  clean(verify("story-edit", source, candidate));
+});
+
+test("a real invented number is still caught among list markers", () => {
+  const source = ["- rehearse the rollback", "- mute nothing"].join("\n");
+  const candidate = ["1. rehearse the rollback for 45 minutes", "2. mute nothing"].join("\n");
+  only(verify("story-edit", source, candidate), "numbers-frozen");
+});
+
+test("lowercase prose containing a verdict word is not a verdict", () => {
+  const card =
+    scorecard(BASE_ROWS, { verdict: null }) + "\nNote: this is not ready to publish yet.";
+  const r = verify("story-judge", JUDGE_SOURCE, card);
+  assert.equal(r.verdict, "DISQUALIFIED");
+  assert.ok(ruleIds(r).includes("scorecard-shape"));
+});

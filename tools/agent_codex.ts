@@ -99,7 +99,13 @@ function buildMinimalEnv(): Record<string, string> {
  * when the caller supplies one — otherwise the CLI's pinned default is used.
  * `ctx.effort` overrides the reasoning effort; absent it stays "high".
  */
-const DEFAULT_REASONING_EFFORT = "high";
+export const DEFAULT_REASONING_EFFORT = "high";
+
+/** The levels the codex CLI accepts for `model_reasoning_effort`
+ *  (developers.openai.com/codex). The hardcoded "high" this replaced was
+ *  codex-valid by construction; parameterizing without a vendor check would
+ *  let a shared-effort caller pass claude's "max" straight to dispatch. */
+export const CODEX_EFFORT_LEVELS = ["minimal", "low", "medium", "high", "xhigh"] as const;
 
 /**
  * Resolve the reasoning-effort value interpolated into the `-c` override.
@@ -115,6 +121,12 @@ function resolveReasoningEffort(effort?: string): string {
     throw new Error(
       `model_reasoning_effort: ${JSON.stringify(effort)} is not a bare word ` +
         `(the value is interpolated into a quoted -c config override)`,
+    );
+  }
+  if (!(CODEX_EFFORT_LEVELS as readonly string[]).includes(trimmed)) {
+    throw new Error(
+      `model_reasoning_effort: ${JSON.stringify(effort)} is not a codex level ` +
+        `(expected one of ${CODEX_EFFORT_LEVELS.join(", ")})`,
     );
   }
   return trimmed;

@@ -237,7 +237,21 @@ export function numberMatches(a: NumberToken, b: NumberToken): boolean {
   return a.unit === b.unit || a.unit === "bare" || b.unit === "bare";
 }
 
+/** Blank markdown ordered-list markers (`1.` / `2)` at line start) so a
+ *  bullets-to-numbers restructure is a formatting change, never an invented
+ *  number. Applied to BOTH sides so membership stays symmetric. */
+export function blankListMarkers(text: string): string {
+  return text.replace(/^(\s{0,3})\d{1,3}[.)](\s)/gm, "$1 $2");
+}
+
 function numbersMissingFrom(candidateBody: string, source: string): NumberToken[] {
+  return numbersMissingFromBlanked(
+    blankListMarkers(candidateBody),
+    blankListMarkers(source),
+  );
+}
+
+function numbersMissingFromBlanked(candidateBody: string, source: string): NumberToken[] {
   const src = extractNumbers(source);
   const missing: NumberToken[] = [];
   const seen = new Set<string>();
@@ -268,6 +282,21 @@ export interface Scorecard {
   verdict: string | null;
 }
 
+const dimensionRowCache = new Map<string, RegExp>();
+
+function dimensionRowRe(dim: string): RegExp {
+  let re = dimensionRowCache.get(dim);
+  if (re === undefined) {
+    const words = dim
+      .split(/\s+/)
+      .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("\\s+");
+    re = new RegExp(`^${words}\\s*[:\\-–—]`, "i");
+    dimensionRowCache.set(dim, re);
+  }
+  return re;
+}
+
 function stripRowMarkers(line: string): string {
   return line
     .replace(/[*_`>#|]/g, " ")
@@ -291,10 +320,13 @@ function parseTotal(lines: string[]): number | null {
 }
 
 function parseVerdict(text: string): string | null {
-  const upper = text.toUpperCase();
+  // Case-SENSITIVE: the judge contract emits verdicts in uppercase, and
+  // matching against an uppercased body read incidental prose ("not ready to
+  // publish yet") as a verdict, so the missing-verdict disqualification never
+  // fired.
   let best: { index: number; verdict: string } | null = null;
   for (const v of JUDGE_VERDICTS) {
-    const i = upper.indexOf(v);
+    const i = text.indexOf(v);
     if (i === -1) continue;
     if (
       best === null ||
@@ -323,9 +355,12 @@ export function parseScorecard(text: string): Scorecard {
   for (const line of lines) {
     const flat = stripRowMarkers(line);
     if (flat.length === 0) continue;
-    const lower = flat.toLowerCase();
+    // A row is the dimension name followed by a separator (colon, dash, en/em
+    // dash). Bare startsWith let a prose line ("Hook and landing are weak")
+    // or a prefix collision ("Hooks") steal the dimension, discarding the
+    // real scored row below it.
     const dim = JUDGE_DIMENSIONS.find(
-      (d) => !claimed.has(d) && lower.startsWith(d.toLowerCase()),
+      (d) => !claimed.has(d) && dimensionRowRe(d).test(flat),
     );
     if (dim === undefined) continue;
     claimed.add(dim);

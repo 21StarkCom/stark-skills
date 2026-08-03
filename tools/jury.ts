@@ -143,9 +143,29 @@ export function defaultRepoRoot(): string {
   return path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 }
 
-/** `skill/stark-<id>/SKILL.md` under the repo root. */
+/** The payload roots probed for `<dir>/stark-<id>/SKILL.md`, in order: an
+ *  explicit `STARK_JURY_SKILLS_ROOT` override, this repo's `skill/` layout,
+ *  and the vendored plugin `skills/` layout — bifrost copies `tools/` into
+ *  every bundle, where `skill/` does not exist. */
+export function skillPathCandidates(
+  skillId: SkillId,
+  repoRoot: string = defaultRepoRoot(),
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  const dir = skillDirName(skillId);
+  const override = env.STARK_JURY_SKILLS_ROOT;
+  return [
+    ...(override ? [path.join(override, dir, "SKILL.md")] : []),
+    path.join(repoRoot, "skill", dir, "SKILL.md"),
+    path.join(repoRoot, "skills", dir, "SKILL.md"),
+  ];
+}
+
+/** The first existing candidate path; falls back to the repo-layout path so a
+ *  missing payload still errors with a real, readable location. */
 export function skillPathFor(skillId: SkillId, repoRoot: string = defaultRepoRoot()): string {
-  return path.join(repoRoot, "skill", skillDirName(skillId), "SKILL.md");
+  const candidates = skillPathCandidates(skillId, repoRoot);
+  return candidates.find((p) => fs.existsSync(p)) ?? path.join(repoRoot, "skill", skillDirName(skillId), "SKILL.md");
 }
 
 // ---------------------------------------------------------------------------
@@ -636,7 +656,14 @@ export async function runJury(opts: RunOptions): Promise<JuryRunResult> {
     };
   });
 
-  const cleanSeats = seats.filter((s) => s.verdict === "CLEAN").map((s) => s.seat);
+  // A CLEAN verdict alone is not survival: a timed-out or truncated seat's
+  // partial output can still pass the rule table (voice's only disqualify is
+  // em-dash-zero), and a killed candidate must never drive the merge ladder.
+  // seatOutcomeFor folds dispatch failure in — "failed" beats any verdict —
+  // so "clean" here means dispatch-ok AND verdict CLEAN.
+  const cleanSeats = seats
+    .filter((s) => s.status === "clean")
+    .map((s) => s.seat);
   const outcome = outcomeFor(mode, cleanSeats.length);
 
   manifest.seats = dispatch.seats.map((r) => seatOutcomeFor(r, verdicts.get(r.seat) ?? null));

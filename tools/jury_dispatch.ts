@@ -50,7 +50,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { buildCommand as buildClaude, normalizeOutput as normalizeClaude } from "./agent_claude.ts";
-import { buildCommand as buildCodex, normalizeOutput as normalizeCodex } from "./agent_codex.ts";
+import { buildCommand as buildCodex, extractLastAgentText as lastCodexText } from "./agent_codex.ts";
 import { buildCommand as buildGemini, normalizeOutput as normalizeGemini } from "./agent_gemini.ts";
 import type { BuildContext, BuiltCommand } from "./agent_codex.ts";
 import { effortForManifest, type Panel, type PanelSeat, type SeatId } from "./jury_panel.ts";
@@ -73,6 +73,11 @@ export const DEFAULT_TIMEOUT_SEC = 30 * 60;
 export const LENGTH_FLOOR_FAIL = 0.15;
 /** Below this fraction it is a warning that travels into the report. */
 export const LENGTH_FLOOR_WARN = 0.4;
+
+/** After "exit", how long to wait for "close" before force-settling: an
+ *  escaped descendant (setsid, EPERM on the group kill) can inherit stdout and
+ *  hold the pipe open forever, and a survivor must never hang the whole run. */
+export const EXIT_CLOSE_GRACE_MS = 2_000;
 
 /** SIGTERM → grace → SIGKILL, then confirm the group is actually gone. */
 export const KILL_GRACE_MS = 5_000;
@@ -257,7 +262,10 @@ export const REAL_BUILDERS: Record<SeatId, SeatBuilder> = {
 
 const NORMALIZERS: Record<SeatId, (stdout: string) => string> = {
   claude: normalizeClaude,
-  codex: normalizeCodex,
+  // The LAST agent message only: normalizeOutput concatenates every
+  // agent_message including intermediate narration ("I'll apply the skill
+  // now..."), and the payload contract is the resulting document ALONE.
+  codex: lastCodexText,
   gemini: normalizeGemini,
 };
 
@@ -824,6 +832,18 @@ export const realRunner: SeatRunner = (req) =>
       notFound = e.code === "ENOENT";
       stderrChunks.push(Buffer.from(e.message ?? String(err)));
       finish(null, null);
+    });
+    // "close" requires every stdio pipe to end, and an escaped descendant can
+    // hold stdout open after the leader dies — so "exit" arms a grace timer
+    // and force-settles (destroying the streams) if "close" never comes.
+    // finish() is idempotent, so the normal close path is unaffected.
+    child.on("exit", (code, signal) => {
+      const grace = setTimeout(() => {
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        finish(code, signal);
+      }, EXIT_CLOSE_GRACE_MS);
+      child.once("close", () => clearTimeout(grace));
     });
     child.on("close", (code, signal) => finish(code, signal));
   });

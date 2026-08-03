@@ -952,3 +952,61 @@ test("no seat is spawned by the command-construction tests", () => {
   assert.equal(fs.existsSync("/tmp/never-spawned"), false);
   assert.equal(cmd.cmd, "claude");
 });
+
+// ---------------------------------------------------------------------------
+// code-review regressions (PR #838): escapee settling, codex narration
+// ---------------------------------------------------------------------------
+
+test("realRunner: an escaped pipe-holder cannot hang the run — exit settles after grace", async () => {
+  const dir = tmpDir("escapee");
+  try {
+    const started = Date.now();
+    const outcome = await realRunner({
+      seat: "codex",
+      cmd: "sh",
+      // The backgrounded sleep inherits our stdout pipe and outlives the
+      // shell, so "close" is held hostage for ~6s; "exit" fires immediately.
+      args: ["-c", "sleep 6 & echo up; exit 7"],
+      env: { PATH: process.env.PATH ?? "" },
+      cwd: dir,
+      stdin: "prompt",
+      timeoutMs: 30_000,
+    });
+    const elapsed = Date.now() - started;
+    assert.equal(outcome.code, 7);
+    assert.ok(outcome.stdout.includes("up"), `stdout captured before settle: ${outcome.stdout}`);
+    assert.ok(
+      elapsed < 5_500,
+      `settled in ${elapsed}ms — the exit-grace path did not fire before the escapee died`,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("codex seats keep only the LAST agent message — narration never becomes candidate text", async () => {
+  const narrationThenFinal = [
+    JSON.stringify({
+      type: "item.completed",
+      item: { type: "agent_message", text: "I'll apply the skill now..." },
+    }),
+    JSON.stringify({
+      type: "item.completed",
+      item: { type: "agent_message", text: "The final rewritten document." },
+    }),
+  ].join("\n");
+  const result = await dispatchPanel({
+    panel: panelOf(CLAUDE_SEAT, CODEX_SEAT, GEMINI_SEAT),
+    ...dispatchOpts(
+      fakeRunner({
+        claude: { stdout: "plain text" },
+        codex: { stdout: narrationThenFinal },
+        gemini: { stdout: "plain text" },
+      }),
+      "rewrite",
+    ),
+  });
+  const codex = result.seats.find((s) => s.seat === "codex");
+  assert.equal(codex?.output, "The final rewritten document.");
+  assert.ok(!codex?.output.includes("I'll apply the skill"));
+});

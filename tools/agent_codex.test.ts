@@ -316,3 +316,19 @@ test("buildCommand: effort passthrough leaves model flags after the -c override"
   const args = buildCommand("p", "gpt-5.5-pro", { effort: "xhigh" }).args;
   assert.ok(args.indexOf("-m") > args.indexOf("-c"));
 });
+
+// ---------------------------------------------------------------------------
+// code-review regressions (PR #838): vendor-valid effort at the builder
+// ---------------------------------------------------------------------------
+
+test("buildCommand: a non-codex effort level throws naming the allowed set", () => {
+  assert.throws(
+    () => buildCommand("p", "gpt-5.5", { effort: "max" }),
+    /minimal, low, medium, high, xhigh/,
+  );
+});
+
+test("buildCommand: xhigh is codex-valid and lands in the -c override", () => {
+  const cmd = buildCommand("p", "gpt-5.5", { effort: "xhigh" });
+  assert.ok(cmd.args.includes('model_reasoning_effort="xhigh"'));
+});

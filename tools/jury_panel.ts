@@ -235,10 +235,20 @@ export function parsePanel(spec?: string | null, deps: PanelDeps = {}): Panel {
   return result.panel;
 }
 
-/** What the manifest records for a seat's effort: the resolved level, or
- *  `n/a` for a vendor with no knob. */
+/** What the manifest records for a seat's effort: what actually RUNS, not
+ *  what the spec string said. An omitted codex effort still dispatches with
+ *  the builder's pinned "high" (agent_codex DEFAULT_REASONING_EFFORT — kept in
+ *  lockstep by test, not import, to preserve the module boundary); an omitted
+ *  claude effort adds no --effort flag, so the CLI's own default applies;
+ *  gemini has no knob at all. */
+export const CODEX_BUILDER_DEFAULT_EFFORT = "high";
+export const EFFORT_CLI_DEFAULT = "cli-default";
+
 export function effortForManifest(seat: PanelSeat): string {
-  return seat.effort ?? EFFORT_NOT_APPLICABLE;
+  if (seat.effort !== null) return seat.effort;
+  if (seat.seat === "codex") return CODEX_BUILDER_DEFAULT_EFFORT;
+  if (seat.seat === "claude") return EFFORT_CLI_DEFAULT;
+  return EFFORT_NOT_APPLICABLE;
 }
 
 /** Canonical spec string for a panel — round-trips through `parsePanel`. */

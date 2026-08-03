@@ -9,7 +9,9 @@ import { strict as assert } from "node:assert";
 import test from "node:test";
 
 import {
+  CODEX_BUILDER_DEFAULT_EFFORT,
   DEFAULT_PANEL_SPEC,
+  EFFORT_CLI_DEFAULT,
   EFFORT_NOT_APPLICABLE,
   PanelError,
   SEAT_EFFORT_LEVELS,
@@ -223,4 +225,33 @@ test("parsePanel throws PanelError carrying every error; the message lists them"
       return true;
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// code-review regressions (PR #838): the manifest records what actually runs
+// ---------------------------------------------------------------------------
+
+test("effortForManifest: an omitted codex effort records the builder's pinned default", () => {
+  assert.equal(
+    effortForManifest({ seat: "codex", model: "gpt-5.5-pro", effort: null }),
+    CODEX_BUILDER_DEFAULT_EFFORT,
+  );
+  assert.equal(
+    effortForManifest({ seat: "claude", model: "claude-opus-5", effort: null }),
+    EFFORT_CLI_DEFAULT,
+  );
+  assert.equal(
+    effortForManifest({ seat: "gemini", model: "gemini-3.1-pro-preview", effort: null }),
+    EFFORT_NOT_APPLICABLE,
+  );
+  assert.equal(
+    effortForManifest({ seat: "codex", model: "gpt-5.5-pro", effort: "xhigh" }),
+    "xhigh",
+  );
+});
+
+test("the builder-default constant stays in lockstep with agent_codex", async () => {
+  const codex = await import("./agent_codex.ts");
+  assert.equal(CODEX_BUILDER_DEFAULT_EFFORT, codex.DEFAULT_REASONING_EFFORT);
+  assert.deepEqual([...SEAT_EFFORT_LEVELS.codex ?? []], [...codex.CODEX_EFFORT_LEVELS]);
 });

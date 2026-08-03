@@ -35,6 +35,7 @@ import {
   resolveSkillId,
   runJury,
   showRun,
+  skillPathCandidates,
   skillPathFor,
   stripFrontmatter,
   type Io,
@@ -887,4 +888,61 @@ test("an invalid panel spec dies before anything is dispatched", async () => {
   assert.match(io.stderr, /takes no effort/);
   assert.equal(fake.requests.length, 0, "no seat was dispatched");
   assert.equal(fs.readdirSync(root).length, 0, "no run dir was created");
+});
+
+// ---------------------------------------------------------------------------
+// code-review regressions (PR #838): failed seats never drive the ladder;
+// skill payloads resolve in the vendored plugin layout
+// ---------------------------------------------------------------------------
+
+test("a failed seat whose partial output verifies CLEAN never drives the ladder", async () => {
+  const { result } = await scenario("voice", {
+    claude: cleanCandidate("a"),
+    codex: {
+      stdout: "a clean-looking fragment the timeout cut short",
+      code: null,
+      signal: "SIGKILL",
+      timedOut: true,
+    },
+    gemini: cleanCandidate("c"),
+  });
+  assert.deepEqual(result.cleanSeats, ["claude", "gemini"]);
+  const manifest = readJson(path.join(result.paths.dir, "manifest.json"));
+  assert.equal((manifest.clean_seats as string[]).includes("codex"), false);
+  const codexSeat = (manifest.seats as Array<Record<string, unknown>>).find(
+    (s) => s.seat === "codex",
+  );
+  assert.equal(codexSeat?.status, "failed");
+});
+
+test("skillPathFor probes the repo layout, then the vendored plugin layout", () => {
+  const root = tmpDir("layout");
+  try {
+    fs.mkdirSync(path.join(root, "skills", "stark-voice"), { recursive: true });
+    fs.writeFileSync(path.join(root, "skills", "stark-voice", "SKILL.md"), "x");
+    assert.equal(
+      skillPathFor("voice", root),
+      path.join(root, "skills", "stark-voice", "SKILL.md"),
+    );
+    // The repo layout wins when both exist.
+    fs.mkdirSync(path.join(root, "skill", "stark-voice"), { recursive: true });
+    fs.writeFileSync(path.join(root, "skill", "stark-voice", "SKILL.md"), "y");
+    assert.equal(
+      skillPathFor("voice", root),
+      path.join(root, "skill", "stark-voice", "SKILL.md"),
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("skillPathCandidates puts an explicit override first", () => {
+  const candidates = skillPathCandidates("voice", "/repo", {
+    STARK_JURY_SKILLS_ROOT: "/plugin/skills",
+  });
+  assert.deepEqual(candidates, [
+    path.join("/plugin/skills", "stark-voice", "SKILL.md"),
+    path.join("/repo", "skill", "stark-voice", "SKILL.md"),
+    path.join("/repo", "skills", "stark-voice", "SKILL.md"),
+  ]);
 });
