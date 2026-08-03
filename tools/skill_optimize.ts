@@ -1216,14 +1216,26 @@ async function openaiFetch(
   init: RequestInit,
   timeoutMs = 30000,
 ): Promise<ResponsesPayload> {
-  const response = await fetch(url, {
-    ...init,
-    // Disallow redirect following: a localhost mock that returned a 307
-    // could otherwise forward the bundle contents + Bearer token to an
-    // arbitrary origin even though the loopback URL check passed.
-    redirect: "error",
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...init,
+      // Disallow redirect following: a localhost mock that returned a 307
+      // could otherwise forward the bundle contents + Bearer token to an
+      // arbitrary origin even though the loopback URL check passed.
+      redirect: "error",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    // Own the timeout wording. The raw AbortSignal.timeout message is a
+    // runtime string that changed under us ("timed out" -> "The operation was
+    // aborted due to timeout"), so leaking it both broke a test and told the
+    // operator nothing about WHICH budget expired.
+    if (err instanceof Error && err.name === "TimeoutError") {
+      throw new Error(`OpenAI API request timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  }
   if (!response.ok) {
     // Bound the embedded body so a verbose OpenAI error (or an HTML 502
     // page from a proxy) doesn't dump kilobytes of raw text — including

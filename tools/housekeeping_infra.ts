@@ -688,7 +688,12 @@ function main(): void {
   } else {
     console.log(formatText(receipt));
   }
-  process.exit(receipt.errors.length ? 1 : 0);
+  // Set the code and RETURN — never process.exit() here. stdout writes are
+  // asynchronous on a pipe, so exiting immediately after console.log discards
+  // whatever is still buffered: the JSON receipt came back truncated
+  // mid-string (at 512 bytes piped, 65536 under execFileSync) and only looked
+  // whole on a TTY, where writes are synchronous.
+  process.exitCode = receipt.errors.length ? 1 : 0;
 }
 
 // Match against both the lexical and realpath form of argv[1]:
