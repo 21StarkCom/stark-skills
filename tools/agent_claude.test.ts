@@ -230,3 +230,57 @@ describe("normalizeOutput is unchanged by this feature", () => {
     assert.equal(normalizeOutput("bare text"), "bare text");
   });
 });
+
+describe("buildCommand effort + tool isolation", () => {
+  test("emits neither --effort nor --tools by default", () => {
+    const { args } = buildCommand("hi");
+    assert.equal(args.includes("--effort"), false);
+    assert.equal(args.includes("--tools"), false);
+  });
+
+  test("ctx without the new fields leaves the command byte-for-byte unchanged", () => {
+    assert.deepEqual(buildCommand("hi", "m", { cwd: "/tmp" }).args, buildCommand("hi", "m").args);
+  });
+
+  test("emits --effort <level> in the CLI's documented form", () => {
+    for (const level of ["low", "medium", "high", "xhigh", "max"]) {
+      const { args } = buildCommand("hi", undefined, { effort: level });
+      const i = args.indexOf("--effort");
+      assert.ok(i >= 0, `--effort present for ${level}`);
+      assert.equal(args[i + 1], level);
+    }
+  });
+
+  test("blank effort is treated as absent, never an empty --effort value", () => {
+    const { args } = buildCommand("hi", undefined, { effort: "   " });
+    assert.equal(args.includes("--effort"), false);
+  });
+
+  test("disableTools emits --tools with the empty-string value that disables all tools", () => {
+    const { args } = buildCommand("hi", undefined, { disableTools: true });
+    const i = args.indexOf("--tools");
+    assert.ok(i >= 0, "--tools present");
+    assert.equal(args[i + 1], "");
+  });
+
+  test("disableTools: false stays off", () => {
+    const { args } = buildCommand("hi", undefined, { disableTools: false });
+    assert.equal(args.includes("--tools"), false);
+  });
+
+  test("--tools is variadic: whatever follows it must start with a dash", () => {
+    const { args } = buildCommand("hi", undefined, { disableTools: true, jsonSchema: SCHEMA });
+    const after = args[args.indexOf("--tools") + 2];
+    assert.ok(after === undefined || after.startsWith("-"), `variadic swallow guard, got ${after}`);
+  });
+
+  test("effort, tool lockdown, model and schema compose in one command", () => {
+    const { args } = buildCommand("hi", "claude-opus-5", {
+      effort: "max", disableTools: true, jsonSchema: SCHEMA,
+    });
+    assert.equal(args[args.indexOf("--model") + 1], "claude-opus-5");
+    assert.equal(args[args.indexOf("--effort") + 1], "max");
+    assert.equal(args[args.indexOf("--tools") + 1], "");
+    assert.deepEqual(JSON.parse(args[args.indexOf("--json-schema") + 1]!), SCHEMA);
+  });
+});

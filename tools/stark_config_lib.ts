@@ -78,6 +78,13 @@ export const DEFAULT_MODEL_RATES: Record<string, ModelRate> = {
   "claude-opus-5": { input_per_1m_usd: 5.0, output_per_1m_usd: 25.0 },
   "claude-opus-4-8": { input_per_1m_usd: 15.0, output_per_1m_usd: 75.0 },
   "claude-fable-5": { input_per_1m_usd: 10.0, output_per_1m_usd: 50.0 },
+  // gemini-3.1-pro-preview: $2.00/$12.00 per MTok on the standard paid tier
+  // for prompts <= 200k tokens; above 200k the tier doubles to $4.00/$18.00.
+  // The <=200k rates are the ones recorded here because that is the tier a
+  // dispatch of a document-sized payload actually bills at — a run whose
+  // prompt crosses 200k under-reports and the manifest says which rate it
+  // used. Source: https://ai.google.dev/gemini-api/docs/pricing (2026-08-03).
+  "gemini-3.1-pro-preview": { input_per_1m_usd: 2.0, output_per_1m_usd: 12.0 },
   "gpt-5.4": { input_per_1m_usd: 5.0, output_per_1m_usd: 15.0 },
   "gpt-5.5": { input_per_1m_usd: 5.0, output_per_1m_usd: 15.0 },
   // gpt-5.6 family (2026-07-09): sol is the flagship tier; terra/luna are the
@@ -118,6 +125,12 @@ export const DEFAULT_MODEL_LIMITS: Record<string, ModelLimits> = {
   "claude-opus-5": { max_output_tokens: 128_000, context_window: 1_000_000 },
   // claude-fable-5: 1M context window, 128K max output tokens (Anthropic docs).
   "claude-fable-5": { max_output_tokens: 128_000, context_window: 1_000_000 },
+  // gemini-3.1-pro-preview: Google publishes an input token limit of 1,048,576
+  // and an output token limit of 65,536 — the input limit is what this table's
+  // `context_window` budgets against. Source:
+  // https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview
+  // (2026-08-03).
+  "gemini-3.1-pro-preview": { max_output_tokens: 65_536, context_window: 1_048_576 },
   // Conservative floor for models without an explicit entry. Deliberately
   // small so an unknown model never over-promises capacity it may not have;
   // add a real entry (with a sourced number) rather than relying on this.

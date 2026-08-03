@@ -331,3 +331,29 @@ test("CLI: --model prints the resolved id; unknown agent exits 1 with no stdout"
   // --help stays side-effect-free and exits cleanly (skill smoke-test contract).
   assert.equal(run(["--help"]).status, 0);
 });
+
+// --- stark-jury (T3) ------------------------------------------------------
+// The default jury panel is validated STRICTLY against BOTH model tables, so
+// a missing row turns the shipped default into a run that cannot start. The
+// gemini seat is the reason T3 adds `gemini-3.1-pro-preview` to each table.
+import { DEFAULT_PANEL_SPEC, validatePanelSpec } from "./jury_panel.ts";
+
+test("the DEFAULT jury panel validates against the shipped model tables", () => {
+  const result = validatePanelSpec(DEFAULT_PANEL_SPEC, {
+    rates: DEFAULT_MODEL_RATES,
+    limits: DEFAULT_MODEL_LIMITS,
+  });
+
+  assert.equal(result.ok, true, `default panel must validate: ${JSON.stringify(result)}`);
+  assert.ok(result.ok);
+  assert.deepEqual(
+    result.panel.seats.map((s) => s.model),
+    ["claude-opus-5", "gpt-5.5-pro", "gemini-3.1-pro-preview"],
+  );
+
+  // Strictness checks both tables, so every default model needs both rows.
+  for (const seat of result.panel.seats) {
+    assert.ok(DEFAULT_MODEL_RATES[seat.model], `${seat.model} missing from DEFAULT_MODEL_RATES`);
+    assert.ok(DEFAULT_MODEL_LIMITS[seat.model], `${seat.model} missing from DEFAULT_MODEL_LIMITS`);
+  }
+});
