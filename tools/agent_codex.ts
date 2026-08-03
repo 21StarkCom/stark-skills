@@ -28,6 +28,20 @@ export interface BuildContext {
    * field is safe to set unconditionally.
    */
   jsonSchema?: unknown;
+  /**
+   * Reasoning effort for this dispatch, in each vendor's own form: claude
+   * `--effort <level>`, codex `-c model_reasoning_effort="<level>"`. Vendors
+   * without the concept (gemini) ignore it. Absent or blank keeps each
+   * builder's existing default.
+   */
+  effort?: string;
+  /**
+   * Run the dispatch with the built-in tool set disabled, so the model works
+   * from the prompt alone and cannot read the filesystem. Honoured only by
+   * agents whose CLI can enforce it — currently `claude` (`--tools ""`).
+   * Codex isolation is the caller's `-s read-only`, not a builder flag.
+   */
+  disableTools?: boolean;
 }
 
 export interface ParseError {
@@ -83,8 +97,30 @@ function buildMinimalEnv(): Record<string, string> {
  * Mirrors the Python `multi_review.py` codex branch: `codex exec --json` with
  * high reasoning effort, prompt delivered on stdin. Model flag is included only
  * when the caller supplies one — otherwise the CLI's pinned default is used.
+ * `ctx.effort` overrides the reasoning effort; absent it stays "high".
  */
-export function buildCommand(prompt: string, model?: string, _ctx?: BuildContext): BuiltCommand {
+const DEFAULT_REASONING_EFFORT = "high";
+
+/**
+ * Resolve the reasoning-effort value interpolated into the `-c` override.
+ * Blank means "caller did not ask", which keeps the historical default. The
+ * value lands inside a quoted config expression, so anything outside a bare
+ * word is rejected here rather than silently producing a malformed — or
+ * override-injecting — `model_reasoning_effort="..." -c sandbox_mode="..."`.
+ */
+function resolveReasoningEffort(effort?: string): string {
+  const trimmed = effort?.trim();
+  if (!trimmed) return DEFAULT_REASONING_EFFORT;
+  if (!/^[A-Za-z0-9_-]+$/.test(trimmed)) {
+    throw new Error(
+      `model_reasoning_effort: ${JSON.stringify(effort)} is not a bare word ` +
+        `(the value is interpolated into a quoted -c config override)`,
+    );
+  }
+  return trimmed;
+}
+
+export function buildCommand(prompt: string, model?: string, ctx?: BuildContext): BuiltCommand {
   const modelFlags = model ? ["-m", model] : [];
   // codex-cli 0.128.0+ removed the `--reasoning-effort` argument; reasoning
   // effort is now a config override applied via `-c key=value`. The dispatcher
@@ -95,7 +131,7 @@ export function buildCommand(prompt: string, model?: string, _ctx?: BuildContext
     "--json",
     "--skip-git-repo-check",
     "-c",
-    `model_reasoning_effort="high"`,
+    `model_reasoning_effort="${resolveReasoningEffort(ctx?.effort)}"`,
     ...modelFlags,
   ];
   return {

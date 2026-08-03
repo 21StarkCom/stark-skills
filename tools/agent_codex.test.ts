@@ -282,3 +282,37 @@ test("extractLastAgentText: handles legacy message/output_text shape", () => {
 test("extractLastAgentText: returns raw input when no JSONL framing is present", () => {
   assert.equal(extractLastAgentText("plain text"), "plain text");
 });
+
+test("buildCommand: reasoning effort stays high when the caller opts out", () => {
+  assert.deepEqual(buildCommand("p", undefined, { cwd: "/tmp" }).args, buildCommand("p").args);
+  assert.ok(buildCommand("p").args.includes(`model_reasoning_effort="high"`));
+});
+
+test("buildCommand: effort override rides the -c model_reasoning_effort key", () => {
+  for (const level of ["low", "medium", "high", "xhigh"]) {
+    const args = buildCommand("p", undefined, { effort: level }).args;
+    const i = args.indexOf("-c");
+    assert.ok(i >= 0, `-c present for ${level}`);
+    assert.equal(args[i + 1], `model_reasoning_effort="${level}"`);
+    assert.ok(!args.includes("--reasoning-effort"), "0.128.0+ removed the flag form");
+  }
+});
+
+test("buildCommand: blank effort falls back to the default", () => {
+  assert.deepEqual(buildCommand("p", undefined, { effort: "  " }).args, buildCommand("p").args);
+});
+
+test("buildCommand: an effort value that would break the -c quoting is rejected", () => {
+  for (const bad of [`high" -c sandbox_mode="danger-full-access`, "high high", "hi;gh"]) {
+    assert.throws(
+      () => buildCommand("p", undefined, { effort: bad }),
+      /model_reasoning_effort/,
+      `expected rejection for ${JSON.stringify(bad)}`,
+    );
+  }
+});
+
+test("buildCommand: effort passthrough leaves model flags after the -c override", () => {
+  const args = buildCommand("p", "gpt-5.5-pro", { effort: "xhigh" }).args;
+  assert.ok(args.indexOf("-m") > args.indexOf("-c"));
+});

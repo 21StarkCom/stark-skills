@@ -97,6 +97,15 @@ export function buildCommand(prompt: string, model?: string, ctx?: BuildContext)
     "--model", m,
     "--no-session-persistence",
   ];
+  // Reasoning effort: `--effort <low|medium|high|xhigh|max>` (verified against
+  // CLI 2.1.220). Absent means the session default, i.e. today's behavior.
+  const effort = ctx?.effort?.trim();
+  if (effort) args.push("--effort", effort);
+  // Tool lockdown for a prompt-only dispatch: `--tools ""` disables the whole
+  // built-in set, per `claude --help` ("Use \"\" to disable all tools"). The
+  // flag is variadic, so it must never be followed by a bare value — every
+  // arg pushed after it below starts with a dash.
+  if (ctx?.disableTools) args.push("--tools", "");
   // Structured output: the CLI forces a conforming reply and retries the model
   // on mismatch, so the caller reads `structured_output` instead of scraping
   // JSON out of prose. See extractStructuredOutput below.
