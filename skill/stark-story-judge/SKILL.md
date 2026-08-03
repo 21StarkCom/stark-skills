@@ -3,10 +3,11 @@ name: stark-story-judge
 description: >-
   Zero-context reader verdict on a long-form post. Use before publishing, after
   an edit pass, or whenever the ask is "how good is this / would a stranger
-  read this / fresh eyes on this post / grade it / second opinion". Dispatches
-  cold judges - one per vendor, never a re-roll - that grade the reading
-  experience on an anchored rubric with quoted evidence, then relays the
-  scorecards verbatim. Judges only - it never edits (stark-story-edit rewrites,
+  read this / fresh eyes on this post / grade it / second opinion / would my
+  audience or LinkedIn crowd read this". Dispatches cold judges - one per
+  vendor, never a re-roll - that grade the reading experience on an anchored
+  rubric with quoted evidence, plus optional audience-persona lenses
+  (read/share verdicts, no grades), then relays the scorecards verbatim. Judges only - it never edits (stark-story-edit rewrites,
   stark-blog-sharpen cuts) and never checks publish machinery.
 disable-model-invocation: true
 model: opus
@@ -197,6 +198,77 @@ cd "$(mktemp -d)" && codex exec --skip-git-repo-check -s read-only \
 - **Verdicts differ: the stricter one stands** for the publish decision
   (NO STORY YET > REWRITE > PUBLISH AFTER FIXES > PUBLISH).
 
+## The audience lens (optional - a different question)
+
+Craft judges answer "is this good". A lens answers **"would THIS reader read,
+finish, and share it"**. Different question, so it does not count against the
+judge limits - but a lens is NOT a judge: it outputs **no dimension scores and
+no letter grade, and it can never move the craft grade**. Its verdict is a
+separate row; when lens and judge disagree (a skimmable block the craft judge
+dinged may be exactly what the audience wants), that disagreement is signal,
+dispositioned by the author.
+
+Run a lens when distribution matters (a post whose channel is LinkedIn, a
+targeted audience) or on request. Same discipline as judges: cold dispatch,
+byte-identical payload, no tools, the contamination list applies, ONE dispatch
+per revision per lens. A lens is a **simulation of a reader type** - useful
+directional signal on register and format, never ground truth about real
+audience behavior; channel analytics stay the measure.
+
+### Persona: israeli-linkedin-lead
+
+Israeli engineering leader, director/VP band. Native register is dugri:
+bluntness is normal, softened corporate phrasing reads as evasive, hedged
+praise reads as spin. Reads English tech content on LinkedIn mobile between
+meetings; skims first, reads only if captured; time budget about 90 seconds
+unless held. Allergic to AI vocabulary and guru formats (humble-brags,
+engagement bait) but VALUES skimmable structure - bold anchors and tight
+lists are native reading when they are earned. Shares what makes them look
+sharp and is defensible in the comments.
+
+Add personas as data blocks like this one; a run names which persona it used.
+
+### The lens prompt (template - fill the slots, send as-is)
+
+````text
+You are role-playing ONE specific reader, defined below. You know nothing
+about the author except what the text says. You have no tools; everything you
+need is below. Report this reader's honest reactions - where they stop, what
+they distrust, what they would repost - not a critique of the writing.
+
+READER: [paste the persona block]
+
+RULES:
+- No scores, no letter grades, no craft dimensions. That is another tool's job.
+- Do not rewrite anything and do not prescribe restructures. Name what breaks
+  this reader's attention; the author owns the fix.
+- No invented facts and no arithmetic: if the post withholds a number, flag
+  the coyness - do not compute the number.
+- Every claim about a reaction anchors to a verbatim quote from the post.
+- Frame everything as THIS reader's read, never as facts about real audiences.
+
+Return exactly this shape:
+1. VERDICT: WOULD SHARE / WOULD READ / WOULD SCROLL PAST - plus one sentence.
+2. The funnel - each stage with the quoted line where it holds or breaks:
+   STOP (do the first lines hold on a phone) · READ (past the first third) ·
+   FINISH · ACT (share, comment, or send to a colleague - and what they'd
+   say over it).
+3. Fake-detector: lines that read corporate, AI-flavored, or evasive to this
+   reader - quoted; or "none".
+4. Skim pass: what a 20-second skimmer leaves with (harvest the bold lines
+   and structure), and whether that harvest is the post's actual point.
+5. Share trigger: the one quotable line this reader would repost over, or
+   its absence.
+6. Top 2 audience fixes - named, tagged with the funnel stage each moves; no
+   prose, no rewrites.
+
+POST:
+Title: {{TITLE}}
+Summary: {{SUMMARY}}
+Body:
+{{BODY}}
+````
+
 ## Red flags - the run is invalid
 
 - A score arrived without a quote.
@@ -207,6 +279,9 @@ cd "$(mktemp -d)" && codex exec --skip-git-repo-check -s read-only \
 - Two totals were averaged into one number.
 - The judge returned rewritten prose.
 - You adjusted a score while relaying.
+- A lens returned scores or a letter grade, or its verdict was used to move
+  the craft grade.
+- A lens computed a number the post withheld.
 
 Invalid runs are re-dispatched with the leak fixed - they are not "close
 enough".
