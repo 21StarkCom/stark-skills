@@ -8,13 +8,21 @@
  *   github_app.ts [--app APP] [--repo OWNER/NAME] repo
  *   github_app.ts [--app APP] [--repo OWNER/NAME] pr list
  *   github_app.ts [--app APP] [--repo OWNER/NAME] pr view NUMBER
- *   github_app.ts [--app APP] [--repo OWNER/NAME] pr create --head H --title T [--body B] [--base main] [--ready]
- *   github_app.ts [--app APP] [--repo OWNER/NAME] pr ready  NUMBER
  *   github_app.ts [--app APP] [--repo OWNER/NAME] pr review NUMBER --approve|--request-changes|--comment --body B
- *   github_app.ts [--app APP] [--repo OWNER/NAME] pr merge  NUMBER --squash|--merge|--rebase [--title T]
  *   github_app.ts [--app APP] [--repo OWNER/NAME] pr comment NUMBER --body B
  *   github_app.ts [--app APP] [--repo OWNER/NAME] issue list
- *   github_app.ts [--app APP] [--repo OWNER/NAME] issue create --title T [--body B] [--labels L1 L2 ...]
+ *
+ * This CLI acts as a BOT (`app/stark-{claude,codex,gemini}`). Its whole
+ * remaining write surface is review posting, where three distinct bot authors
+ * are what makes multi-LLM attribution readable.
+ *
+ * `pr create`, `pr ready`, `pr merge` and `issue create` were REMOVED
+ * 2026-08-04 — those are Aryeh's acts and must carry his name, so they go
+ * through `gh` (logged in as `aryeh-stark`). They now exit 2 with the `gh`
+ * replacement rather than silently doing the wrong thing, since the old
+ * commands live on in shell history and older SKILL.md copies.
+ * Callers migrated in the same change: skill/stark-author (`pr create`
+ * --app stark-claude) and tools/copilot_land.ts (lib prCreate).
  */
 
 import fs from "node:fs";
@@ -26,20 +34,38 @@ import {
   detectRepo,
   getToken,
   isAppName,
-  issueCreate,
   issueList,
   prComment,
-  prCreate,
   prList,
-  prMerge,
-  prReady,
   prReview,
   prView,
   repoInfo,
   type AppName,
-  type PrMergeMethod,
   type PrReviewEvent,
 } from "./github_app_lib.ts";
+
+/**
+ * Actions removed by the identity policy → the `gh` command to run instead.
+ * Keyed `"<noun> <action>"`.
+ */
+export const HUMAN_ONLY_ACTIONS: Record<string, string> = {
+  "pr create": "gh pr create --title T --body B --base main [--draft]",
+  "pr ready": "gh pr ready NUMBER",
+  "pr merge": "gh pr merge NUMBER --squash",
+  "issue create": "gh issue create --title T --body B [--label L]",
+};
+
+/** Exit 2 with the `gh` replacement if this action may not run as a bot. */
+function refuseIfHumanOnly(noun: string, action: string | undefined): void {
+  const replacement = HUMAN_ONLY_ACTIONS[`${noun} ${action ?? ""}`];
+  if (!replacement) return;
+  process.stderr.write(
+    `github_app.ts: '${noun} ${action}' is not available — a GitHub App token ` +
+      `authors as a bot, and this action must carry Aryeh's name.\n` +
+      `Run instead (gh is logged in as aryeh-stark):\n  ${replacement}\n`,
+  );
+  process.exit(2);
+}
 
 const HELP = `usage: github_app.ts [--app APP] [--repo OWNER/NAME] <command> ...
 
@@ -48,14 +74,16 @@ Commands:
   repo                   Show repo summary
   pr list                List open PRs
   pr view NUMBER         View PR details (JSON)
-  pr create --head H --title T [--body B] [--base main] [--ready]
-                         Opens a DRAFT PR by default; pass --ready to open ready-for-review
-  pr ready NUMBER        Mark a draft PR ready-for-review (un-draft)
   pr review NUMBER --approve|--request-changes|--comment [--body B]
-  pr merge NUMBER --squash|--merge|--rebase [--title T]
   pr comment NUMBER --body B
   issue list             List open issues
-  issue create --title T [--body B] [--labels L1 L2 ...]
+
+Not available here — this CLI authors as a BOT, and these are Aryeh's acts.
+Use gh (logged in as aryeh-stark) instead:
+  pr create   -> gh pr create --title T --body B --base main [--draft]
+  pr ready    -> gh pr ready NUMBER
+  pr merge    -> gh pr merge NUMBER --squash
+  issue create-> gh issue create --title T --body B [--label L]
 
 Options:
   --app APP              ${Object.keys(APPS).join(" | ")} (default: ${DEFAULT_APP})
@@ -81,6 +109,11 @@ const KNOWN_VALUE_OPTS = new Set([
   "base",
 ]);
 const MULTI_VALUE_OPTS = new Set(["labels"]);
+// `head`/`title`/`base`/`labels` and the draft + merge-method flags below belong
+// to the removed human-only actions. They stay ACCEPTED on purpose: parseArgs
+// runs before runPr/runIssue, so rejecting them as unknown would answer an old
+// `pr create --head … --ready` with a generic usage error instead of the
+// identity reason and the `gh` command to run. Parse, then refuse informatively.
 const KNOWN_FLAGS = new Set([
   "draft", // retained for back-compat; draft is now the default (no-op)
   "ready", // open the PR ready-for-review (opt out of draft default)
@@ -93,15 +126,6 @@ const KNOWN_FLAGS = new Set([
   "rebase",
 ]);
 
-/**
- * `pr create` draft resolution. Draft-by-default: a PR is created as a draft
- * unless the operator opts out with --ready / --no-draft. (The legacy --draft
- * flag stays accepted as an explicit, now-redundant, opt-in.)
- */
-export function draftFromFlags(flags: Map<string, true>): boolean {
-  return !flags.has("ready") && !flags.has("no-draft");
-}
-
 /** `pr review` flag → GitHub review event. Defaults to `COMMENT`. */
 export function reviewEventFromFlags(
   flags: Map<string, true>,
@@ -111,14 +135,10 @@ export function reviewEventFromFlags(
   return "COMMENT";
 }
 
-/** `pr merge` flag → API merge method. Defaults to `squash`. */
-export function mergeMethodFromFlags(
-  flags: Map<string, true>,
-): PrMergeMethod {
-  if (flags.has("rebase")) return "rebase";
-  if (flags.has("merge")) return "merge";
-  return "squash";
-}
+// draftFromFlags / mergeMethodFromFlags removed 2026-08-04 with the `pr create`
+// and `pr merge` actions they served. The draft default now lives on the `gh`
+// path only — plugins/stark-gh/tools/gh_pr_open_execute.ts resolves it via the
+// shared draft config, so pr-open and pr-merge agree on one answer.
 
 export function parseArgs(argv: string[]): Parsed {
   const out: Parsed = {
@@ -220,6 +240,9 @@ async function runRepo(parsed: Parsed): Promise<void> {
 
 async function runPr(parsed: Parsed): Promise<void> {
   const [, action, ...rest] = parsed.positional;
+  // Refuse before resolveRepo so a removed action reports the identity reason,
+  // not an unrelated "cannot detect repo" error from outside a git checkout.
+  refuseIfHumanOnly("pr", action);
   const repo = resolveRepo(parsed);
 
   if (action === "list") {
@@ -242,33 +265,7 @@ async function runPr(parsed: Parsed): Promise<void> {
     jsonOut(await prView(repo, number, parsed.app));
     return;
   }
-  if (action === "create") {
-    const head = parsed.options.get("head");
-    const title = parsed.options.get("title");
-    if (!head || !title) {
-      throw new Error("pr create: --head and --title are required");
-    }
-    const draft = draftFromFlags(parsed.flags);
-    const result = (await prCreate(repo, {
-      head,
-      title,
-      body: parsed.options.get("body") ?? "",
-      base: parsed.options.get("base") ?? "main",
-      draft,
-      app: parsed.app,
-    })) as { number: number; html_url: string };
-    process.stdout.write(
-      `Created ${draft ? "draft " : ""}PR #${result.number}: ${result.html_url}\n`,
-    );
-    return;
-  }
-  if (action === "ready") {
-    const number = Number(rest[0]);
-    if (!Number.isFinite(number)) throw new Error("pr ready: missing NUMBER");
-    await prReady(repo, number, parsed.app);
-    process.stdout.write(`Marked PR #${number} ready-for-review\n`);
-    return;
-  }
+  // 'create' and 'ready' are handled by refuseIfHumanOnly above.
   if (action === "review") {
     const number = Number(rest[0]);
     if (!Number.isFinite(number)) throw new Error("pr review: missing NUMBER");
@@ -278,20 +275,7 @@ async function runPr(parsed: Parsed): Promise<void> {
     process.stdout.write(`Review submitted: ${event}\n`);
     return;
   }
-  if (action === "merge") {
-    const number = Number(rest[0]);
-    if (!Number.isFinite(number)) throw new Error("pr merge: missing NUMBER");
-    const method = mergeMethodFromFlags(parsed.flags);
-    await prMerge(
-      repo,
-      number,
-      method,
-      parsed.options.get("title") ?? "",
-      parsed.app,
-    );
-    process.stdout.write(`Merged PR #${number} via ${method}\n`);
-    return;
-  }
+  // 'merge' is handled by refuseIfHumanOnly above.
   if (action === "comment") {
     const number = Number(rest[0]);
     if (!Number.isFinite(number))
@@ -307,6 +291,7 @@ async function runPr(parsed: Parsed): Promise<void> {
 
 async function runIssue(parsed: Parsed): Promise<void> {
   const [, action] = parsed.positional;
+  refuseIfHumanOnly("issue", action);
   const repo = resolveRepo(parsed);
 
   if (action === "list") {
@@ -322,20 +307,7 @@ async function runIssue(parsed: Parsed): Promise<void> {
     }
     return;
   }
-  if (action === "create") {
-    const title = parsed.options.get("title");
-    if (!title) throw new Error("issue create: --title required");
-    const result = (await issueCreate(repo, {
-      title,
-      body: parsed.options.get("body") ?? "",
-      labels: parsed.multi.get("labels") ?? [],
-      app: parsed.app,
-    })) as { number: number; html_url: string };
-    process.stdout.write(
-      `Created issue #${result.number}: ${result.html_url}\n`,
-    );
-    return;
-  }
+  // 'create' is handled by refuseIfHumanOnly above.
   throw new Error(`issue: unknown action '${action ?? ""}'`);
 }
 

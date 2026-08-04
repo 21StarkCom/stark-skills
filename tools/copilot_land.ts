@@ -31,15 +31,18 @@
  *                  [--dry-run] [--json]
  *                  Push the already-committed branch (never --force),
  *                  adopt an existing open PR for that head or open a
- *                  fresh one (draft by default, authored by the lead's
- *                  App), and print `{pr, prs}` — `prs` is the union of
- *                  `--known-prs` with the landed/adopted number.
+ *                  fresh one (draft by default, authored by `aryeh-stark`
+ *                  via `gh` — NOT by the lead's GitHub App), and print
+ *                  `{pr, prs}` — `prs` is the union of `--known-prs` with
+ *                  the landed/adopted number. `--lead` still selects the
+ *                  App used for the READ (PR listing), which needs a token
+ *                  but confers no authorship.
  *
  * Arg-parsing house style mirrors `write_spec_land.ts` / `red_team_fold.ts`.
  */
 import { spawnSync } from "node:child_process";
 import { isMainModule } from "./main_module_lib.ts";
-import { prCreate, prList, type AppName } from "./github_app_lib.ts";
+import { prList, type AppName } from "./github_app_lib.ts";
 import {
   appForLead,
   buildPushArgs,
@@ -454,15 +457,37 @@ async function cmdLand(argv: string[]): Promise<number> {
       return { ok: r.code === 0, stderr: r.stderr };
     },
     listOpenPrs: async () => (await prList(repo, "open", app)) as OpenPr[],
-    createPr: async (opts) =>
-      (await prCreate(repo, {
-        head: opts.head,
-        base: opts.base,
-        title: opts.title,
-        body: opts.body,
-        draft: opts.draft,
-        app: opts.app,
-      })) as { number: number; html_url?: string },
+    // Opening the PR shells `gh` so it is authored by `aryeh-stark`, not by the
+    // lead agent's GitHub App. Changed 2026-08-04: this used to call
+    // `github_app_lib::prCreate`, which authors as `app/stark-<lead>[bot]` — a
+    // PR Aryeh is considered to have opened must carry his name. `gh pr create`
+    // prints the PR URL and offers no --json, so the number comes from the URL.
+    createPr: async (opts) => {
+      const argv = [
+        "pr", "create",
+        "--repo", repo,
+        "--head", opts.head,
+        "--base", opts.base,
+        "--title", opts.title,
+        "--body", opts.body,
+      ];
+      if (opts.draft) argv.push("--draft");
+      const r = gh(argv, cwd);
+      if (r.code !== 0) {
+        throw new Error(`gh pr create failed: ${r.stderr || r.stdout}`);
+      }
+      const url = r.stdout.split("\n").map((l) => l.trim())
+        .find((l) => /^https:\/\/github\.com\/.+\/pull\/\d+$/.test(l));
+      const number = Number(url?.match(/\/pull\/(\d+)$/)?.[1]);
+      if (!Number.isFinite(number)) {
+        // Never invent a number — a wrong one makes every later step (comments,
+        // ready, merge) act on somebody else's PR.
+        throw new Error(
+          `gh pr create succeeded but no PR URL was parseable from its output: ${r.stdout}`,
+        );
+      }
+      return { number, html_url: url };
+    },
     // App tokens cannot un-draft — shell 'gh pr ready' under the ambient user
     // (mirrors write_spec_land.ts).
     markReady: async (prNumber) => {

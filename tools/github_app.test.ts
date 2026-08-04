@@ -1,16 +1,19 @@
 // CLI parser + flag→API mapping tests for `tools/github_app.ts`.
 //
-// The pure helpers (`parseArgs`, `reviewEventFromFlags`,
-// `mergeMethodFromFlags`) are intentionally exported so that flag-mapping
-// regressions — e.g. `--approve` silently downgrading to `COMMENT` — get
-// caught at unit-test time instead of via live PR mishaps.
+// The pure helpers (`parseArgs`, `reviewEventFromFlags`) are intentionally
+// exported so that flag-mapping regressions — e.g. `--approve` silently
+// downgrading to `COMMENT` — get caught at unit-test time instead of via live
+// PR mishaps.
+//
+// `draftFromFlags` / `mergeMethodFromFlags` tests were dropped 2026-08-04 with
+// the `pr create` / `pr merge` actions. The identity guard that replaced them is
+// covered by the HUMAN_ONLY_ACTIONS tests below.
 
 import { strict as assert } from "node:assert";
 import test from "node:test";
 
 import {
-  draftFromFlags,
-  mergeMethodFromFlags,
+  HUMAN_ONLY_ACTIONS,
   parseArgs,
   reviewEventFromFlags,
 } from "./github_app.ts";
@@ -49,26 +52,30 @@ test("reviewEventFromFlags: --approve beats --request-changes when both set", ()
 });
 
 // ---------------------------------------------------------------------------
-// mergeMethodFromFlags
+// Identity policy — the bot may not author Aryeh's acts
 // ---------------------------------------------------------------------------
 
-test("mergeMethodFromFlags: --rebase → rebase", () => {
-  const flags = new Map<string, true>([["rebase", true]]);
-  assert.equal(mergeMethodFromFlags(flags), "rebase");
+test("HUMAN_ONLY_ACTIONS covers exactly the four bot-forbidden actions", () => {
+  assert.deepEqual(Object.keys(HUMAN_ONLY_ACTIONS).sort(), [
+    "issue create",
+    "pr create",
+    "pr merge",
+    "pr ready",
+  ]);
 });
 
-test("mergeMethodFromFlags: --merge → merge", () => {
-  const flags = new Map<string, true>([["merge", true]]);
-  assert.equal(mergeMethodFromFlags(flags), "merge");
+test("HUMAN_ONLY_ACTIONS: every entry names a gh replacement", () => {
+  // The refusal is only useful if it tells the operator what to run instead.
+  for (const [action, replacement] of Object.entries(HUMAN_ONLY_ACTIONS)) {
+    assert.match(replacement, /^gh /, `${action} must map to a gh command`);
+  }
 });
 
-test("mergeMethodFromFlags: --squash → squash", () => {
-  const flags = new Map<string, true>([["squash", true]]);
-  assert.equal(mergeMethodFromFlags(flags), "squash");
-});
-
-test("mergeMethodFromFlags: no flag → squash (safe default)", () => {
-  assert.equal(mergeMethodFromFlags(new Map()), "squash");
+test("HUMAN_ONLY_ACTIONS: review posting stays available to the bot", () => {
+  // Three distinct bot authors are what makes multi-LLM review attribution
+  // legible — locking these down too would destroy that.
+  assert.equal(HUMAN_ONLY_ACTIONS["pr review"], undefined);
+  assert.equal(HUMAN_ONLY_ACTIONS["pr comment"], undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -132,11 +139,13 @@ test("parseArgs: pr comment --body captures the body", () => {
   assert.equal(p.options.get("body"), "hello");
 });
 
-test("parseArgs: pr merge --rebase --title 'msg' parses", () => {
+// The removed actions must still PARSE, so that an old invocation reaches the
+// identity refusal (with the gh command to run) instead of a generic usage
+// error from parseArgs. These assert the flags stay accepted.
+test("parseArgs: pr merge --rebase --title 'msg' still parses", () => {
   const p = parseArgs(["pr", "merge", "5", "--rebase", "--title", "msg"]);
   assert.equal(p.flags.has("rebase"), true);
   assert.equal(p.options.get("title"), "msg");
-  assert.equal(mergeMethodFromFlags(p.flags), "rebase");
 });
 
 test("parseArgs: issue create --labels collects multi-value list", () => {
@@ -153,7 +162,7 @@ test("parseArgs: issue create --labels collects multi-value list", () => {
   assert.deepEqual(p.multi.get("labels"), ["bug", "priority-high"]);
 });
 
-test("parseArgs: pr create --draft sets the flag", () => {
+test("parseArgs: pr create --draft still parses", () => {
   const p = parseArgs([
     "pr",
     "create",
@@ -167,22 +176,12 @@ test("parseArgs: pr create --draft sets the flag", () => {
   assert.equal(p.options.get("head"), "feature/x");
 });
 
-test("parseArgs: --ready / --no-draft are recognized flags", () => {
+test("parseArgs: --ready / --no-draft are still recognized flags", () => {
   assert.equal(parseArgs(["pr", "create", "--ready"]).flags.has("ready"), true);
   assert.equal(
     parseArgs(["pr", "create", "--no-draft"]).flags.has("no-draft"),
     true,
   );
-});
-
-test("draftFromFlags: draft-by-default, --ready / --no-draft opt out", () => {
-  // No flags → draft (the new default).
-  assert.equal(draftFromFlags(new Map()), true);
-  // Legacy explicit opt-in still draft.
-  assert.equal(draftFromFlags(new Map([["draft", true]])), true);
-  // Opt out with either override.
-  assert.equal(draftFromFlags(new Map([["ready", true]])), false);
-  assert.equal(draftFromFlags(new Map([["no-draft", true]])), false);
 });
 
 test("parseArgs: missing value for known option throws", () => {
