@@ -677,7 +677,27 @@ export async function graphql(
 }
 
 // ---------------------------------------------------------------------------
-// High-level operations (parity with the Python module's surface).
+// High-level operations.
+//
+// IDENTITY POLICY (2026-08-04) — an installation token authors as the bot
+// (`app/stark-{claude,codex,gemini}`), never as a human. Anything Aryeh is
+// considered to have DONE must carry his name, so this module deliberately
+// exposes NO way to author it:
+//
+//   allowed here   reads (repoInfo/prList/prView/issueList) + review posting
+//                  (prReview/prComment). Three distinct bot authors are the
+//                  only thing that makes multi-LLM review attribution legible,
+//                  which is why those two stay.
+//   NOT here       opening a PR, merging, un-drafting, opening an issue.
+//                  Those go through the `gh` CLI (logged in as `aryeh-stark`):
+//                  plugins/stark-gh/tools/lib/gh.ts, or `gh` directly.
+//
+// `prCreate`, `prMerge`, `prReady` and `issueCreate` were removed here — see
+// the deletion note in tools/github_app.ts for the callers that moved.
+// CI is the one place a bot may open a PR (a workflow has no human token, and
+// putting Aryeh's PAT in Actions secrets would be strictly worse); those
+// workflows call `gh` with an `actions/create-github-app-token` token and never
+// route through this module.
 // ---------------------------------------------------------------------------
 
 export async function repoInfo(repo: string, app?: AppName): Promise<unknown> {
@@ -700,68 +720,17 @@ export async function prView(
   return apiGet(`/repos/${repo}/pulls/${number}`, undefined, app);
 }
 
-export interface PrCreateOpts {
-  head: string;
-  title: string;
-  body?: string;
-  base?: string;
-  draft?: boolean;
-  app?: AppName;
-}
-
-export async function prCreate(repo: string, opts: PrCreateOpts): Promise<unknown> {
-  return apiPost(
-    `/repos/${repo}/pulls`,
-    {
-      head: opts.head,
-      base: opts.base ?? "main",
-      title: opts.title,
-      body: opts.body ?? "",
-      // Draft-by-default policy: a caller that omits `draft` gets a draft PR so
-      // WIP stays out of draft-guarded CI. Callers opt into ready with draft:false.
-      draft: opts.draft ?? true,
-    },
-    opts.app,
-  );
-}
-
-/**
- * Mark a PR ready-for-review (un-draft). REST has no ready endpoint, so this
- * uses the GraphQL `markPullRequestReadyForReview` mutation (needs the PR node
- * id, resolved from REST). Idempotent: a no-op when the PR is already ready.
- *
- * CAVEAT — GitHub platform limitation (NOT a missing permission): all three
- * stark-{claude,codex,gemini} installs already hold `pull_requests: write` (the
- * permission this mutation is documented to require — verified live 2026-07-11),
- * yet every one returns `Resource not accessible by integration` on PR #662.
- * `markPullRequestReadyForReview` / `convertPullRequestToDraft` are simply NOT
- * exposed to GitHub App installation tokens — there is no grant that fixes it;
- * un-drafting needs a user/OAuth token. So the merge flows deliberately un-draft
- * via `gh pr ready` (the `gh` CLI's user auth) instead — see
- * `plugins/stark-gh/tools/lib/gh.ts::markPrReady`, stark-phase-execute §1.5, and
- * skill/remember. This helper is kept for a PAT/user-token caller; it fails
- * loudly under an App token.
- */
-export async function prReady(
-  repo: string,
-  number: number,
-  app?: AppName,
-): Promise<unknown> {
-  const pr = (await apiGet(
-    `/repos/${repo}/pulls/${number}`,
-    undefined,
-    app,
-  )) as { node_id: string; draft?: boolean };
-  if (pr.draft === false) return pr; // already ready — idempotent
-  return graphql(
-    `mutation($id: ID!) {
-      markPullRequestReadyForReview(input: { pullRequestId: $id }) {
-        pullRequest { number isDraft }
-      }
-    }`,
-    { variables: { id: pr.node_id }, app },
-  );
-}
+// prCreate / prReady removed 2026-08-04 — see the IDENTITY POLICY block above.
+// Opening a PR is Aryeh's act and must carry his name: use
+// `plugins/stark-gh/tools/lib/gh.ts::prCreate` (shells `gh pr create`).
+//
+// prReady was already unusable by design and is worth recording, so nobody
+// re-adds it expecting a permission grant to fix it: all three installs hold
+// `pull_requests: write` (the documented requirement, verified live 2026-07-11)
+// yet `markPullRequestReadyForReview` / `convertPullRequestToDraft` are simply
+// NOT exposed to GitHub App installation tokens — every call returns
+// `Resource not accessible by integration`. Un-drafting needs a user token.
+// Use `gh.ts::markPrReady` / `gh pr ready`.
 
 export type PrReviewEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
 
@@ -779,19 +748,8 @@ export async function prReview(
   );
 }
 
-export type PrMergeMethod = "squash" | "merge" | "rebase";
-
-export async function prMerge(
-  repo: string,
-  number: number,
-  method: PrMergeMethod = "squash",
-  commitTitle: string = "",
-  app?: AppName,
-): Promise<unknown> {
-  const payload: Record<string, unknown> = { merge_method: method };
-  if (commitTitle) payload["commit_title"] = commitTitle;
-  return apiPut(`/repos/${repo}/pulls/${number}/merge`, payload, app);
-}
+// prMerge removed 2026-08-04 — see the IDENTITY POLICY block above. A merge is
+// Aryeh's act; `/stark-gh:pr-merge` already does it through `gh`.
 
 export async function prComment(
   repo: string,
@@ -819,23 +777,5 @@ export async function issueList(
   return items.filter((i) => !("pull_request" in i));
 }
 
-export interface IssueCreateOpts {
-  title: string;
-  body?: string;
-  labels?: string[];
-  issueType?: string;
-  app?: AppName;
-}
-
-export async function issueCreate(
-  repo: string,
-  opts: IssueCreateOpts,
-): Promise<unknown> {
-  const payload: Record<string, unknown> = {
-    title: opts.title,
-    body: opts.body ?? "",
-  };
-  if (opts.labels && opts.labels.length > 0) payload["labels"] = opts.labels;
-  if (opts.issueType) payload["type"] = opts.issueType;
-  return apiPost(`/repos/${repo}/issues`, payload, opts.app);
-}
+// issueCreate removed 2026-08-04 — see the IDENTITY POLICY block above. An issue
+// opened on Aryeh's behalf carries his name: `gh issue create`.

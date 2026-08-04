@@ -293,12 +293,14 @@ On accept (all git via Bash; never touch the default branch):
 1. `base=$(git rev-parse HEAD)` — stamp the doc header: `accepted-base: <base>`.
 2. Branch `spec/<slug>` from the default branch; commit **both files** (the
    spec and its `.human.md` sidecar); push.
-3. Open a **draft** PR (authored by stark-claude; `--ready` opts out):
+3. Open a **draft** PR. It must be authored by **`aryeh-stark`**, so this goes
+   through `gh` — never `github_app.ts`, whose installation token authors as
+   `app/stark-claude[bot]`. (`--ready` on the skill opts out of draft.)
 
 ```bash
-node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/github_app.ts \
-  --app stark-claude pr create --head "spec/<slug>" \
-  --title "spec: <slug>" --body "Stage-1 authored spec+plan (stark-author). Gate: accepted by operator."
+gh pr create --head "spec/<slug>" --base main --draft \
+  --title "spec: <slug>" \
+  --body "Stage-1 authored spec+plan (stark-author). Gate: accepted by operator."
 ```
 
 ## Phase 7 — Handoff
