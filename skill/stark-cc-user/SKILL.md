@@ -17,10 +17,9 @@ usage, and arguments, then stop — do not run any phase.
 # stark-cc-user
 
 Toggle the Claude Code account so work can continue on a profile whose window
-still has room. Read "Why this isn't just a token swap" before changing
-anything. (It once had a sibling, `/stark-gh-user`, that swapped the **GitHub**
-identity for rate-limit relief; that was deleted 2026-08-04 — every GitHub
-action must be `aryeh-stark`, so there is no second identity to swap to.)
+still has room. Sibling of `stark-gh-user` (which does the same for the **GitHub**
+identity when a GraphQL/REST bucket runs dry), but the mechanics differ — read
+"Why this isn't just a token swap" before changing anything.
 
 ## Arguments
 
