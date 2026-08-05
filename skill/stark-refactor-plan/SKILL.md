@@ -85,8 +85,8 @@ Treat the text following the explicit skill mention as the arguments.
    Every example below is a separate shell invocation. Resolve the target and
    installed assets inside each block; do not rely on exported state from an
    earlier call. `STARK_ASSET_ROOT` is the portable installed-bundle override,
-   `STARK_PLUGIN_ROOT` is accepted for compatibility, and a host-provided
-   `CLAUDE_PLUGIN_ROOT` is the final compatibility fallback.
+   `STARK_PLUGIN_ROOT` is accepted for compatibility, with the active host's
+   plugin-root variable used only as a final fallback.
 
    Always pass the provider explicitly. Use the current host when the dispatcher
    supports it (`codex` on Codex, `claude` on Claude). On another host, ask which
