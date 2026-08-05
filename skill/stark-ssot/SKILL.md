@@ -8,7 +8,7 @@ description: >-
   requests to centralize, deduplicate, unify, or "why is this implemented
   manually / in two places". Symptoms in a diff: a hardcoded model id or GCP
   project, `~/.claude/code-review/...` typed out, a
-  re-pasted dispatch/env helper, a duplicated `>=`/threshold check. Do NOT use
+  re-pasted dispatch/env helper, or a duplicated threshold comparison. Do NOT use
   for code that only looks similar but answers a different question.
 argument-hint: "[file-or-area to consolidate or review]"
 disable-model-invocation: true
