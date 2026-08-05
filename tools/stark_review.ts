@@ -28,6 +28,7 @@ import {
   type Severity,
 } from "./stark_review_lib.ts";
 import type { BuildContext, BuiltCommand, ParseError, ParseResult } from "./agent_codex.ts";
+import { isCredentialEnvKey } from "./agent_env_lib.ts";
 import { assetToolsDir } from "./asset_root_lib.ts";
 import {
   buildCodeReviewAnalytics,
@@ -745,6 +746,43 @@ export interface DispatchResult {
 
 const FORBIDDEN_ENV_KEYS = ["GH_TOKEN", "GITHUB_TOKEN", "STARK_PUSH_TOKEN"] as const;
 
+/**
+ * Database DSNs, blocked HERE rather than in the shared credential denylist.
+ *
+ * They sit in `runtime.subagent_env_allowlist` because the copilot lead is
+ * their declared consumer — it implements against a real database. A reviewer
+ * subprocess is not: its entire input is untrusted PR diff text, and its
+ * output is posted to the PR by this file's own GitHub-App poster, so a
+ * prompt-injected diff that dumps the env publishes a live DSN on a public
+ * thread. Per-consumer split, not deletion; the trusted test-command runner
+ * has its own `test_env_allowlist` for genuine DB access.
+ */
+const FORBIDDEN_REVIEWER_ENV_KEYS = ["DATABASE_URL", "TEST_DATABASE_URL"] as const;
+
+/**
+ * True when a key must never reach a reviewer/classifier/fixer subprocess.
+ *
+ * This is the code-level backstop the path lacked: `runtime.subagent_env_allowlist`
+ * is a user-editable knob whose file is symlinked into the repo, so before this
+ * the allowlist DATA was the only thing keeping a credential out of a
+ * prompt-injectable subprocess — re-adding one entry re-armed the leak with
+ * zero test failures. The two sibling builders (`runtime_env_lib`,
+ * `copilot_dispatch`) both had such a block; this one did not.
+ */
+function isForbiddenReviewerEnvKey(key: string): boolean {
+  if (FORBIDDEN_ENV_KEYS.includes(key as (typeof FORBIDDEN_ENV_KEYS)[number])) {
+    return true;
+  }
+  if (
+    FORBIDDEN_REVIEWER_ENV_KEYS.includes(
+      key as (typeof FORBIDDEN_REVIEWER_ENV_KEYS)[number],
+    )
+  ) {
+    return true;
+  }
+  return isCredentialEnvKey(key);
+}
+
 export function pickAllowlistedEnv(
   source: NodeJS.ProcessEnv,
   allowlist: string[],
@@ -752,11 +790,13 @@ export function pickAllowlistedEnv(
   const out: Record<string, string> = {};
   const allow = new Set(allowlist);
   for (const k of allow) {
-    if (FORBIDDEN_ENV_KEYS.includes(k as (typeof FORBIDDEN_ENV_KEYS)[number])) continue;
+    if (isForbiddenReviewerEnvKey(k)) continue;
     const v = source[k];
     if (typeof v === "string") out[k] = v;
   }
-  for (const f of FORBIDDEN_ENV_KEYS) delete (out as Record<string, string>)[f];
+  for (const k of Object.keys(out)) {
+    if (isForbiddenReviewerEnvKey(k)) delete out[k];
+  }
   return out;
 }
 

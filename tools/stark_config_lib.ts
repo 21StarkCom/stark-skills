@@ -145,7 +145,7 @@ export const DEFAULT_MODEL_LIMITS: Record<string, ModelLimits> = {
 
 export const DEFAULT_RUNTIME = {
   lock_ttl_minutes: 30,
-  subagent_env_allowlist: ["PATH", "HOME", "USER", "SHELL", "LANG", "TERM", "ANTHROPIC_AGENTS"],
+  subagent_env_allowlist: ["PATH", "HOME", "USER", "SHELL", "LANG", "TERM"],
   max_concurrent_agents: 3,
   temp_dir_prefix: "stark-env",
 };

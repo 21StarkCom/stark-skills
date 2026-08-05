@@ -29,6 +29,7 @@ import { readFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import { isCredentialEnvKey } from "./agent_env_lib.ts";
 import { assetConfigPath } from "./asset_root_lib.ts";
 import { applyClaudeAuth } from "./claude_auth_lib.ts";
 import { detectTestCommand } from "./stark_review_lib.ts";
@@ -101,14 +102,16 @@ const DEFAULT_MODELS: Record<AgentName, AgentModelConfig> = {
   gemini: { enabled: true, model_id: GEMINI_DEFAULT_MODEL },
 };
 
-const DEFAULT_RUNTIME_ALLOWLIST: readonly string[] = [
+// Exported so `subagent_env_allowlist.test.ts` can pin it against the other
+// two hand-maintained copies of this list. They were already 8-vs-6 divergent
+// with nothing in the suite able to observe it.
+export const DEFAULT_RUNTIME_ALLOWLIST: readonly string[] = [
   "PATH",
   "HOME",
   "USER",
   "SHELL",
   "LANG",
   "TERM",
-  "ANTHROPIC_AGENTS",
 ];
 
 const DEFAULT_GITHUB_APPS: Record<AgentName, string> = {
@@ -170,7 +173,12 @@ function getEnvAllowlist(): readonly string[] {
   if (isPlainObject(runtime)) {
     const list = (runtime as Record<string, unknown>)["subagent_env_allowlist"];
     if (Array.isArray(list) && list.every((x) => typeof x === "string")) {
-      return list as string[];
+      // Union, not replace: the default is a FLOOR. Config extends it, and a
+      // config that omits an entry cannot silently drop it. Every default is a
+      // benign process var, so nothing here weakens the allowlist — whereas
+      // losing USER breaks claude dispatch with "Not logged in · Please run
+      // /login" and no signal that the env is at fault (agent_env_lib.ts:65).
+      return [...new Set([...DEFAULT_RUNTIME_ALLOWLIST, ...(list as string[])])];
     }
   }
   return DEFAULT_RUNTIME_ALLOWLIST;
@@ -426,6 +434,9 @@ async function runGit(
 
 // Env builders ------------------------------------------------------------
 
+// Superseded by `isCredentialEnvKey`, which covers these two plus the GitHub
+// and OpenAI credentials this set never named. Kept as the Anthropic-specific
+// half so the intent stays readable at the call sites.
 const BLOCKED_ENV_KEYS = new Set(["ANTHROPIC_API_KEY", "ANTHROPIC_AGENTS"]);
 const ANTHROPIC_PREFIX = "ANTHROPIC_";
 const ALLOWED_ANTHROPIC_KEYS = new Set(["ANTHROPIC_CODE_CLI"]);
@@ -587,6 +598,12 @@ export function makeGeminiEnv(
     if (typeof v !== "string") continue;
     if (BLOCKED_ENV_KEYS.has(k)) continue;
     if (k.startsWith(ANTHROPIC_PREFIX) && !ALLOWED_ANTHROPIC_KEYS.has(k)) continue;
+    // The gemini CLI needs enough ambient env that an allowlist would starve
+    // it, so this path is denylist-only — and until now the denylist named
+    // just the two Anthropic keys above. A gemini lead runs `--yolo` over
+    // attacker-controllable diff text, so every other posting credential in
+    // the operator's shell was one prompt injection from exfiltration.
+    if (isCredentialEnvKey(k)) continue;
     env[k] = v;
   }
   env["GEMINI_CLI_HOME"] = geminiHome;

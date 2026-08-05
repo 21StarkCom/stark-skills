@@ -82,3 +82,58 @@ export const AGENT_ENV_ALLOWLIST: readonly string[] = [
   "LC_ALL",
   "TMPDIR",
 ];
+
+/**
+ * Credentials an agent subprocess must never receive, by exact name.
+ *
+ * The allowlist above is the primary defense, but not every dispatch path
+ * uses one: `copilot_dispatch.ts::makeGeminiEnv` copies the ambient env
+ * wholesale because the gemini CLI needs its own auth vars, and a denylist is
+ * the only control available there. A gemini lead runs `--yolo` (every tool
+ * call auto-approved) over attacker-controllable diff text, so an inherited
+ * PAT or App private key is one prompt injection away from leaving the host.
+ *
+ * Deliberately NOT here: `DATABASE_URL` / `TEST_DATABASE_URL`. They are
+ * credentials, but the copilot lead is their declared consumer — blocking
+ * them globally would be a capability removal, not a hardening. The reviewer
+ * path blocks them locally instead (`stark_review.ts::FORBIDDEN_ENV_KEYS`),
+ * which is the per-consumer split the leak actually calls for.
+ */
+const CREDENTIAL_ENV_EXACT: ReadonlySet<string> = new Set([
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
+  "GITHUB_ADMIN_TOKEN",
+  "STARK_PUSH_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AGENTS",
+  "OPENAI_API_KEY",
+  "OPENAI_ADMIN_KEY",
+]);
+
+/**
+ * Keys that match a credential pattern but are an agent's OWN model auth, so
+ * withholding them breaks dispatch rather than protecting anything. Kept
+ * narrow by construction: only what a spawned agent CLI authenticates with.
+ */
+const CREDENTIAL_ENV_KEEP: ReadonlySet<string> = new Set([
+  "GEMINI_API_KEY",
+  "GOOGLE_APPLICATION_CREDENTIALS",
+]);
+
+/** Matches the credential-shaped names the exact list cannot enumerate — in
+ *  particular `STARK_{CLAUDE,CODEX,GEMINI}_PRIVATE_KEY_21S`, which
+ *  `github_app_lib` reads as its Keychain fallback. */
+const CREDENTIAL_ENV_PATTERN =
+  /PRIVATE_KEY|(^|_)(TOKEN|SECRET|PASSWORD)($|_)|_API_KEY$/;
+
+/**
+ * True when `key` names a credential that must not reach an agent subprocess.
+ * Single owner of that judgement — denylist sites import it rather than each
+ * keeping a two-key set, which is how the gemini path came to forward every
+ * posting credential the other builders deliberately withhold.
+ */
+export function isCredentialEnvKey(key: string): boolean {
+  if (CREDENTIAL_ENV_KEEP.has(key)) return false;
+  if (CREDENTIAL_ENV_EXACT.has(key)) return true;
+  return CREDENTIAL_ENV_PATTERN.test(key);
+}

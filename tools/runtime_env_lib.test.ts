@@ -4,6 +4,8 @@
 
 import { strict as assert } from "node:assert";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
@@ -11,6 +13,45 @@ import {
   cleanupStaleTempDirs,
   makeTempDir,
 } from "./runtime_env_lib.ts";
+
+/**
+ * Run `fn` against a scratch HOME holding exactly the given global config.
+ *
+ * Without this, `buildAgentEnv` → `getRuntimeConfig()` → `loadGlobalConfig()`
+ * reads whatever `~/.claude/code-review/config.json` happens to be on the host:
+ * a symlink into this repo on a dev Mac, absent in CI. That made the suite's
+ * config source machine-dependent and left both `subagent_env_allowlist`
+ * defaults completely unexercised — the three `buildAgentEnv` assertions passed
+ * under either config because they only check that a key `BLOCKED_KEYS` already
+ * removes unconditionally is absent.
+ *
+ * CLAUDE_PLUGIN_ROOT is cleared too: `assetConfigPath()` prefers it over HOME,
+ * so leaving it set would silently defeat the isolation.
+ */
+async function withConfigHome<T>(
+  config: unknown,
+  fn: (home: string) => Promise<T> | T,
+): Promise<T> {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "stark-runtime-env-test-"));
+  const dir = path.join(scratch, ".claude", "code-review");
+  fs.mkdirSync(dir, { recursive: true });
+  if (config !== undefined) {
+    fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify(config));
+  }
+  const prevHome = process.env["HOME"];
+  const prevPluginRoot = process.env["CLAUDE_PLUGIN_ROOT"];
+  process.env["HOME"] = scratch;
+  delete process.env["CLAUDE_PLUGIN_ROOT"];
+  try {
+    return await fn(scratch);
+  } finally {
+    if (prevHome === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = prevHome;
+    if (prevPluginRoot === undefined) delete process.env["CLAUDE_PLUGIN_ROOT"];
+    else process.env["CLAUDE_PLUGIN_ROOT"] = prevPluginRoot;
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+}
 
 function withEnv<T>(patch: Record<string, string | undefined>, fn: () => T): T {
   const prev: Record<string, string | undefined> = {};
@@ -112,4 +153,54 @@ test("buildAgentEnv: claude with no ANTHROPIC_AGENTS → succeeds (OAuth dispatc
   assert.equal(resolved["ANTHROPIC_API_KEY"], undefined);
   assert.ok(resolved["HOME"], "HOME carried so the CLI finds its OAuth credentials");
   fs.rmSync(resolved["STARK_AGENT_TMPDIR"], { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// allowlist floor — under REAL config isolation, so the assertion is about the
+// config layering rather than about whatever config the host happens to have
+// ---------------------------------------------------------------------------
+
+test("buildAgentEnv: a config allowlist that omits USER cannot strip it", async () => {
+  // The regression this pins: `deepMerge` replaces arrays wholesale, so a
+  // config trimming the list used to drop USER outright — and the claude CLI
+  // then fails with "Not logged in · Please run /login" with nothing naming
+  // the env as the cause. The default is a floor; config only extends it.
+  await withConfigHome(
+    { runtime: { subagent_env_allowlist: ["PATH", "HOME"] } },
+    async (home) => {
+      const resolved = await withEnv(
+        { USER: "someone", CUSTOM_THING: "kept" },
+        () => buildAgentEnv("claude", "implement"),
+      );
+      assert.equal(
+        (await resolved)["USER"],
+        "someone",
+        "USER must survive a config allowlist that omits it",
+      );
+      assert.ok(home);
+    },
+  );
+});
+
+test("buildAgentEnv: an allowlisted credential is still withheld", async () => {
+  // Defense in depth: the allowlist is user-editable data whose file is
+  // symlinked into this repo, so a config layer must not be able to re-arm
+  // credential forwarding into a subprocess that ingests untrusted diff text.
+  await withConfigHome(
+    {
+      runtime: {
+        subagent_env_allowlist: ["PATH", "HOME", "USER", "GH_TOKEN", "ANTHROPIC_AGENTS"],
+      },
+    },
+    async () => {
+      const resolved = await withEnv(
+        { GH_TOKEN: "ghp_leak", ANTHROPIC_AGENTS: "sk-ant-leak" },
+        () => buildAgentEnv("claude", "implement"),
+      );
+      const env = await resolved;
+      assert.equal(env["GH_TOKEN"], undefined, "GH_TOKEN must not be forwarded");
+      assert.equal(env["ANTHROPIC_AGENTS"], undefined, "Anthropic key must not be forwarded");
+      fs.rmSync(env["STARK_AGENT_TMPDIR"]!, { recursive: true, force: true });
+    },
+  );
 });

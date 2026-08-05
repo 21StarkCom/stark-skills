@@ -45,7 +45,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `tools/stark_config_lib.ts` — full config reader (DEFAULT_* sections, per-section accessors, deep merge).
 - `tools/runtime_env_lib.ts` — isolated subprocess env builder (allowlist, GitHub App token injection, temp dirs)
 - `tools/gemini_auth_lib.ts` — headless-gemini model auth SSOT: `oauth` (default — Code Assist seat via copied oauth creds + `GOOGLE_CLOUD_PROJECT`) vs `vertex` (per-token + ADC) vs `api-key`; `STARK_GEMINI_AUTH` env > `models.gemini.auth` config > `oauth`
-- `tools/claude_auth_lib.ts` — headless-claude model auth SSOT: `subscription` mode (default, no `ANTHROPIC_API_KEY` — CLI uses the logged-in account's OAuth creds) vs `api` mode (inject key from `ANTHROPIC_AGENTS`); `STARK_CLAUDE_AUTH` env > `models.claude.auth` config > `subscription`
+- `tools/claude_auth_lib.ts` — headless-claude model auth SSOT: **one mode, `subscription`** (no `ANTHROPIC_API_KEY` ever injected — the CLI uses the logged-in account's OAuth creds). The metered `api` mode was removed 2026-07-24; `STARK_CLAUDE_AUTH` / `models.claude.auth` are accepted-and-ignored, any non-`subscription` value warns. `ANTHROPIC_AGENTS` has no consumer left and is no longer in `subagent_env_allowlist` (PR #847)
 - `tools/github_projects_lib.ts` + `tools/github_projects.ts` — GitHub Projects V2 GraphQL operations (TS; replaces the deleted `scripts/github_projects.py`)
 
 ### Dispatch tools (TS)
