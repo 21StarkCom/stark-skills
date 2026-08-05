@@ -52,12 +52,39 @@ const SUPPORT_FILES = [
   "skill/stark-gha-cost/scripts/gha-cost-json.ts",
   "skill/stark-gha-cost/scripts/gha-repo-actions-drill.sh",
   "standards/help.md",
+  "standards/index.md",
   "standards/preflight.md",
+  "standards/stage-completion-line.md",
+  "standards/templates/docs-index.md",
+  "tools/alert_delivery_lib.ts",
+  "tools/approach_contract_lib.ts",
+  "tools/asset_root_lib.ts",
+  "tools/copilot_dispatch.ts",
+  "tools/copilot_land.ts",
+  "tools/failure_classifier_lib.ts",
+  "tools/gemini_utils_lib.ts",
+  "tools/healer_canary_lib.ts",
+  "tools/housekeeping_infra.ts",
   "tools/iac_review.ts",
   "tools/iac_review_lib.ts",
   "tools/jury.ts",
+  "tools/preflight_lib.ts",
+  "tools/runtime_env_lib.ts",
+  "tools/self_healer.ts",
+  "tools/self_healer_lib.ts",
+  "tools/session_id_lib.ts",
+  "tools/session_state_lib.ts",
+  "tools/skill_router_lib.ts",
+  "tools/stark_review.ts",
+  "tools/stark_review_doc_analytics_lib.ts",
+  "tools/stark_session_lib.ts",
+  "tools/validation_gate_lib.ts",
   "plugins/stark-gh/tools/cleanup_policy.ts",
   "plugins/stark-gh/tools/gh_cleanup.ts",
+  "plugins/stark-gh/tools/gh_pr_merge_complete.ts",
+  "plugins/stark-gh/tools/gh_pr_merge_execute.ts",
+  "plugins/stark-gh/tools/gh_pr_open_execute.ts",
+  "plugins/stark-gh/tools/lib/audit.ts",
   "plugins/stark-gh/tools/lib/runtime.ts",
   "plugins/stark-gh/tools/lib/watcher_paths.ts",
 ] as const;
@@ -88,7 +115,7 @@ test("Codex runtime override inventory is exact", () => {
   ].sort();
 
   assert.deepEqual(walkFiles(CODEX_ROOT), expected);
-  assert.equal(expected.length, 46);
+  assert.equal(expected.length, 73);
 });
 
 test("Codex cleanup dry-run never fetches or prunes refs", () => {
@@ -112,6 +139,13 @@ test("Codex GitHub state defaults are runtime-neutral", () => {
     assert.match(body, /"\.stark", "code-review"/);
     assert.doesNotMatch(body, /"\.claude", "code-review"/);
   }
+
+  const cleanup = fs.readFileSync(
+    path.join(CODEX_ROOT, "plugins/stark-gh/commands/cleanup.md"),
+    "utf8",
+  );
+  assert.match(cleanup, /~\/.stark\/code-review\/stark-gh\/watchers/);
+  assert.doesNotMatch(cleanup, /~\/.claude\/code-review\/stark-gh\/watchers/);
 });
 
 test("Codex artifact overrides preserve canonical identities", () => {
@@ -146,5 +180,56 @@ test("Codex artifact overrides preserve canonical identities", () => {
       frontmatterName(path.join(REPO_ROOT, "plugins", "stark-gh", "commands", `${name}.md`)),
       `command identity drift: ${name}`,
     );
+  }
+});
+
+test("Codex runtime instructions never target Claude-owned state", () => {
+  const portableClaudeAssetMarker = /\$\{CLAUDE_PLUGIN_ROOT:-\$HOME\/\.claude\/code-review\}/g;
+
+  for (const rel of walkFiles(CODEX_ROOT)) {
+    if (rel === "skill/stark-ssot/SKILL.md") continue;
+    const body = fs
+      .readFileSync(path.join(CODEX_ROOT, rel), "utf8")
+      .replace(portableClaudeAssetMarker, "${CLAUDE_PLUGIN_ROOT}");
+    assert.doesNotMatch(body, /~\/\.claude\/code-review|\$HOME\/\.claude\/code-review|"\.claude"\s*,\s*"code-review"/,
+      `Claude state path leaked into ${rel}`);
+  }
+
+  const housekeeping = fs.readFileSync(
+    path.join(CODEX_ROOT, "skill/stark-housekeeping/SKILL.md"),
+    "utf8",
+  );
+  assert.match(housekeeping, /~\/\.stark\/code-review/);
+  assert.doesNotMatch(housekeeping, /~\/\.claude/);
+
+  const ghUserHandler = fs.readFileSync(
+    path.join(CODEX_ROOT, "skill/stark-gh-user/scripts/handler.sh"),
+    "utf8",
+  );
+  assert.doesNotMatch(ghUserHandler, /CLAUDE_PLUGIN_ROOT|~\/\.claude/);
+});
+
+test("Codex user-facing output uses dollar skill invocation", () => {
+  const rels = [
+    ...COMMANDS.map((name) => `plugins/stark-gh/commands/${name}.md`),
+    "plugins/stark-gh/tools/gh_cleanup.ts",
+    "plugins/stark-gh/tools/gh_pr_merge_complete.ts",
+    "plugins/stark-gh/tools/gh_pr_merge_execute.ts",
+    "plugins/stark-gh/tools/gh_pr_open_execute.ts",
+    "standards/index.md",
+    "standards/stage-completion-line.md",
+    "standards/templates/docs-index.md",
+    "tools/copilot_land.ts",
+    "tools/stark_review_doc_analytics_lib.ts",
+  ];
+  const slashInvocation = /\/stark(?:-[a-z0-9]+)*(?::[a-z0-9-]+)?(?=[\s`'"(]|$)/i;
+
+  for (const rel of rels) {
+    const body = fs
+      .readFileSync(path.join(CODEX_ROOT, rel), "utf8")
+      .split("\n")
+      .filter((line) => !line.includes("on Claude Code"))
+      .join("\n");
+    assert.doesNotMatch(body, slashInvocation, `Claude slash invocation leaked into ${rel}`);
   }
 });

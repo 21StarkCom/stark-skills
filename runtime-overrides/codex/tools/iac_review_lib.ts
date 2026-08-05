@@ -4,7 +4,7 @@
  * Runs a Terraform/OpenTofu or Terragrunt review across one or more configured
  * LLM agents (claude / codex / gemini), each dispatched as its own headless
  * subagent (text-in, JSON-findings-out), then merges + cross-validates the
- * findings. Backs the /stark-terraform-review and /stark-terragrunt-review
+ * findings. Backs the $stark-terraform-review and $stark-terragrunt-review
  * skills. Agents are configurable (CLI `--agents` > config `iac_review.agents`
  * > default) so you can, e.g., run reviews with Gemini AND Codex.
  *

@@ -14,10 +14,8 @@ resolve_token_script() {
   local -a candidates=()
   [ -n "${STARK_ASSET_ROOT:-}" ] && candidates+=("$STARK_ASSET_ROOT/tools/user_token.ts")
   [ -n "${STARK_PLUGIN_ROOT:-}" ] && candidates+=("$STARK_PLUGIN_ROOT/tools/user_token.ts")
-  [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && candidates+=("$CLAUDE_PLUGIN_ROOT/tools/user_token.ts")
   candidates+=(
     "$HANDLER_DIR/../../../tools/user_token.ts"
-    "$HOME/.claude/code-review/tools/user_token.ts"
     "$HOME/.agents/stark/stark-ops/tools/user_token.ts"
   )
   for candidate in "${candidates[@]}"; do

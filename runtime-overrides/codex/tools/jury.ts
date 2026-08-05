@@ -15,7 +15,7 @@
  *     identity, no repo paths and no publish machinery; the document travels
  *     verbatim, because it is the subject of the work.
  *   - **The skill-reference lint.** A SKILL.md that points at companion files
- *     (`references/…`, `../../standards/help.md`, `~/.claude/…`) is not a
+ *     (`references/…`, `../../standards/help.md`, `~/.stark/…`) is not a
  *     self-contained payload: the seats run from an empty scratch cwd with the
  *     repo unreachable, so those files are simply absent. The lint WARNS and
  *     names every reference rather than failing the run — the skill still says
@@ -983,7 +983,8 @@ const USAGE = `Usage: jury.ts <run|list|show> [options]
       --panel   seat=model[:effort],... (default: ${DEFAULT_PANEL_SPEC})
       --name    run-store name (default: the input file's basename)
       --timeout-sec N   per-seat timeout override
-      --root    run-store root (default: ~/.claude/code-review/history/jury)
+      --root    run-store root (default: $STARK_STATE_ROOT/history/jury,
+                with $STARK_STATE_ROOT defaulting to ~/.stark/code-review)
 
   list [--name NAME] [--json] [--root DIR]
       Runs in the store, newest first.

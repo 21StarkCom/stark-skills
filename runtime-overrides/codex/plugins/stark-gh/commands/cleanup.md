@@ -67,7 +67,7 @@ worktree for that PR), removes its watcher state.
 
 ## Worktrees, stashes, objects
 
-- **Detached-HEAD review worktrees** — `/stark-review` provisions
+- **Detached-HEAD review worktrees** — `$stark-review` provisions
   `review-*-prN-single` worktrees with no branch ref, so the branch-pinned
   sweep can't see them. The full sweep matches them by path, confirms the PR
   is MERGED/CLOSED, and removes them only when the tree is clean (a dirty one
@@ -98,7 +98,7 @@ worktree for that PR), removes its watcher state.
 | `--dry-run` | Print plan, do not execute |
 | `--keep-branch NAME` | Add NAME to the protected set (repeatable) |
 | `--no-rebase` | Skip the rebase / fast-forward phase |
-| `--no-watcher-cleanup` | Skip the `~/.claude/code-review/stark-gh/watchers/...` sweep |
+| `--no-watcher-cleanup` | Skip the watcher-state sweep (`$STARK_STATE_ROOT/stark-gh/watchers`, default `~/.stark/code-review/stark-gh/watchers`; Codex sandboxes use temporary state) |
 | `--no-config` | Skip the linear-tree `git config` writes |
 | `--no-gc` | Skip the `git gc` repack step |
 | `--drop-stale-stashes` | Drop stashes whose base branch no longer exists (default: surface only) |
