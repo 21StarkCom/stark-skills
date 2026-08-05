@@ -6,18 +6,21 @@
 # check is the deterministic backstop for anything that slips through Bash.
 #
 # usage (in a generated settings.json hook command):
-#   protect-paths.sh <protected-list-file>
+#   protect-paths.sh <protected-list-file> <task-id>
 # The list file holds one absolute path (file or dir prefix) per line.
 set -euo pipefail
 
-LIST="${1:?usage: protect-paths.sh <protected-list-file>}"
-[ -f "$LIST" ] || exit 0
+LIST="${1:?usage: protect-paths.sh <protected-list-file> <task-id>}"
+TASK="${2:?usage: protect-paths.sh <protected-list-file> <task-id>}"
+case "$TASK" in '' | *[!A-Za-z0-9._-]*) echo "invalid task id" >&2; exit 2 ;; esac
+[ -f "$LIST" ] || { echo "BLOCKED: protected list is missing" >&2; exit 2; }
 
 payload="$(cat)"
 tool="$(printf '%s' "$payload" | jq -r '.tool_name // empty')"
 
 deny() {
-  echo "BLOCKED: '$1' is write-protected for this run (spec / gated check / harness). Add NEW files instead of editing gated ones. If the gate itself is wrong, append a deviation line to PROGRESS.md and stop — abort is a valid outcome." >&2
+  printf 'STARK_DEVIATION task=%s class=blocked message=attempted-write-to-runner-protected-path\n' "$TASK"
+  echo "BLOCKED: '$1' is runner-owned and write-protected. Stop; do not edit runner state. The runner will validate the stdout marker and record the deviation." >&2
   exit 2
 }
 

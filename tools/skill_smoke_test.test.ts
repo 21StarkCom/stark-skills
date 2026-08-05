@@ -12,7 +12,8 @@
 //   1. Frontmatter parses; `name` + `description` are present.
 //   2. `name:` field matches the directory name.
 //   3. Every in-repo `tools/X.ts` reference resolves to a real file.
-//   4. Every in-repo `scripts/X.py` reference resolves to a real file.
+//   4. Every in-repo `scripts/X.{ts,py,sh,mjs}` reference resolves, including
+//      conventional skill-local scripts shipped beside SKILL.md.
 //
 // Plus, ONCE across the whole skill set:
 //   5. Every distinct `tools/*.ts` CLI mentioned by any skill exits
@@ -84,15 +85,15 @@ function parseFrontmatter(text: string): Frontmatter | null {
 // `something_tools/X.ts` from matching, which would never be a real ref.
 // ---------------------------------------------------------------------------
 
-const REF_RE = /(?<!\w)([~./\w-]*?(tools|scripts)\/[\w_\-./]+\.(ts|py))/g;
+const REF_RE = /(?<!\w)([~./\w-]*?(tools|scripts)\/[\w_\-./]+\.(ts|py|sh|mjs))/g;
 
 interface FileRef {
   /** The full token as it appears in the SKILL.md, e.g. `~/.claude/code-review/tools/x.ts`. */
   full: string;
   /** The repo-relative path, e.g. `tools/x.ts`. */
   relative: string;
-  /** `ts` or `py`. */
-  kind: "ts" | "py";
+  /** Supporting-file extension. */
+  kind: "ts" | "py" | "sh" | "mjs";
   /** True iff `full` starts with a known cross-repo prefix. */
   crossRepo: boolean;
 }
@@ -117,7 +118,7 @@ function extractRefs(text: string): FileRef[] {
     refs.push({
       full,
       relative,
-      kind: m[3] as "ts" | "py",
+      kind: m[3] as FileRef["kind"],
       crossRepo: isCrossRepo(full),
     });
   }
@@ -131,10 +132,12 @@ function extractRefs(text: string): FileRef[] {
 function listSkills(): string[] {
   return fs
     .readdirSync(SKILLS_ROOT)
-    .filter((n) => n.startsWith("stark-"))
     .filter((n) => {
       try {
-        return fs.statSync(path.join(SKILLS_ROOT, n)).isDirectory();
+        return (
+          fs.statSync(path.join(SKILLS_ROOT, n)).isDirectory() &&
+          fs.existsSync(path.join(SKILLS_ROOT, n, "SKILL.md"))
+        );
       } catch {
         return false;
       }
@@ -166,10 +169,10 @@ for (const name of SKILLS) {
 //    in `listSkills()` itself.
 // ---------------------------------------------------------------------------
 
-test("skill smoke: discovers at least 15 stark-* skills", () => {
+test("skill smoke: discovers the complete skill inventory", () => {
   assert.ok(
-    SKILLS.length >= 15,
-    `expected >= 15 skills, found ${SKILLS.length}`,
+    SKILLS.length >= 27,
+    `expected >= 27 skills, found ${SKILLS.length}`,
   );
 });
 
@@ -203,6 +206,26 @@ for (const name of SKILLS) {
       `${name} SKILL.md has no reference to standards/help.md — every skill must honor --help`,
     );
   });
+
+  test(`skill smoke: ${name} — does not depend on a host-only argument placeholder`, () => {
+    const c = SKILL_CONTENT[name];
+    assert.ok(
+      !c.text.includes("$ARGUMENTS"),
+      `${name} still contains $ARGUMENTS, which Codex native skills do not expand`,
+    );
+  });
+
+  test(`skill smoke: ${name} — description meets Codex constraints`, () => {
+    const description = SKILL_CONTENT[name].fm?.description ?? "";
+    assert.ok(
+      [...description].length <= 1024,
+      `${name} description is ${[...description].length} characters; Codex allows at most 1024`,
+    );
+    assert.ok(
+      !/[<>]/.test(description),
+      `${name} description contains an angle bracket, which Codex rejects`,
+    );
+  });
 }
 
 // The shared help protocol every skill points at must exist.
@@ -214,17 +237,20 @@ test("skill smoke: standards/help.md exists", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 2 + 3. Every in-repo `tools/*.ts` and `scripts/*.py` reference resolves.
+// 2 + 3. Every in-repo tool/supporting-script reference resolves.
 // ---------------------------------------------------------------------------
 
 for (const name of SKILLS) {
-  test(`skill smoke: ${name} — every in-repo tools/*.ts + scripts/*.py reference resolves`, () => {
+  test(`skill smoke: ${name} — every in-repo tool/supporting-script reference resolves`, () => {
     const c = SKILL_CONTENT[name];
     const broken: string[] = [];
     for (const ref of c.refs) {
       if (ref.crossRepo) continue;
-      const file = path.join(REPO_ROOT, ref.relative);
-      if (!fs.existsSync(file)) {
+      const candidates = [
+        path.join(REPO_ROOT, ref.relative),
+        path.join(SKILLS_ROOT, name, ref.relative),
+      ];
+      if (!candidates.some((file) => fs.existsSync(file))) {
         broken.push(`${ref.relative} (from token '${ref.full}')`);
       }
     }
@@ -244,7 +270,9 @@ const ALL_TS_REFS = (() => {
     for (const r of c.refs) {
       if (r.crossRepo) continue;
       if (r.kind !== "ts") continue;
-      refs.add(r.relative);
+      // Only repository-global tools are CLI-smoked here. Skill-local helper
+      // scripts have their own focused tests and may not expose --help.
+      if (r.full.includes("tools/") && !r.full.includes("scripts/")) refs.add(r.relative);
     }
   }
   return [...refs].sort();

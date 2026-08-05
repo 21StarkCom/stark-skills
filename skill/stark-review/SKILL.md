@@ -2,8 +2,9 @@
 name: stark-review
 description: >-
   Single-agent PR review. Uses triage-selected PR review domains by default,
-  or one forced agent via `--agent`.
-argument-hint: "[PR_NUMBER] [--agent claude|codex|gemini] [--quick] [--domains a,b,c] [--dry-run] [--repo ORG/REPO]"
+  or one forced agent via `--agent`. Review-only by default: posting findings
+  and fixing/committing/pushing require separate explicit opt-ins.
+argument-hint: "[PR_NUMBER] [--agent claude|codex|gemini] [--quick] [--domains a,b,c] [--repo ORG/REPO] [--post] [--fix]"
 disable-model-invocation: true
 model: opus[1m]
 revision: 7d4eb375d131624ff59927945d448856858d621c
@@ -12,7 +13,7 @@ revision_date: 2026-05-18T16:33:25Z
 
 ## Help
 
-If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+If the current request asks for help (a standalone `--help`, `-h`, or `help` token),
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop — do not run preflight or any phase.
 
@@ -28,14 +29,32 @@ Run [standard preflight](../../standards/preflight.md) with `--workflow stark-re
 
 ## Arguments
 
-Raw input: `$ARGUMENTS`
+Treat the text following the explicit skill mention as the arguments.
 
 - `PR_NUMBER` — optional; detect from current branch with `gh pr view --json number --jq .number`
 - `--agent <name>` — force a single agent (claude|codex|gemini) across every selected domain
 - `--repo ORG/REPO` — override repo detection
 - `--quick` — use the `quick_domains` list from `config.json` (small fast subset). Errors out if `quick_domains` is empty in the resolved config
 - `--domains a,b,c` — escape hatch: explicit comma-separated domain slugs. Beats `--quick`. Use this when you want a surgical review on specific domains (e.g. `--domains security,test-coverage`)
-- `--dry-run` — run the full pipeline but skip GitHub posting; the receipt records what would have been posted
+- `--post` — explicitly authorize posting the review to GitHub. A PR number or
+  link alone is review context, not posting consent.
+- `--fix` — explicitly authorize the TS fix loop to modify the PR worktree,
+  run the trusted test command, commit, and push. Requires `--post`; reject
+  `--fix` by itself rather than silently broadening it.
+- `--dry-run` — accepted as an explicit spelling of the safe default: review
+  without posting or fixing.
+
+## Authorization boundary
+
+An ordinary request to review, inspect, audit, or report findings is read-only.
+For that path always pass both dispatcher safeguards: `--dry-run` prevents the
+GitHub POST and `--no-fix-loop` prevents edits, tests, commits, and pushes.
+
+Only omit `--dry-run` when the user explicitly asks to post. Only omit
+`--no-fix-loop` when the user explicitly asks to fix **and** post, after stating
+that the tool will modify the PR branch, run a trusted test command, commit, and
+push. Do not infer either permission from repository policy, a PR URL/number,
+or a request phrased only as “review.”
 
 If PR detection fails, list open PRs and ask:
 
@@ -46,8 +65,9 @@ gh pr list --json number,title,headRefName --jq '.[] | "#\(.number) \(.title) (\
 ## Constants
 
 ```bash
-SCRIPTS="${STARK_REVIEW_SCRIPTS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/scripts}"
-TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
+ASSET_ROOT="${STARK_ASSET_ROOT:-${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
+TOOLS="${STARK_REVIEW_TOOLS:-${ASSET_ROOT:+$ASSET_ROOT/tools}}"
+[ -n "$TOOLS" ] || { echo "Set STARK_REVIEW_TOOLS or STARK_PLUGIN_ROOT to the installed bundle assets" >&2; exit 1; }
 ```
 
 ## Configuration
@@ -88,44 +108,29 @@ read prompts from inside the PR head, which is an injection vector.
 CONFIG_ROOT="$(pwd)"
 ```
 
-### 2. Provision a GitHub token (only if unset)
+### 2. Verify read access and provision the worktree
 
-The TS tool authenticates via `gh api`, which uses `GH_TOKEN` if set. Provision
-a stark-claude installation token only when the caller has not already supplied
-one — never overwrite a caller-provided token.
-
-```bash
-if [ -z "${GH_TOKEN:-}" ]; then
-    if GH_TOKEN_TMP=$(node --experimental-strip-types "$TOOLS/github_app.ts" --app stark-claude token 2>/dev/null); then
-        export GH_TOKEN="$GH_TOKEN_TMP"
-    else
-        if [ -n "${DRY_RUN:-}" ]; then
-            warn "GH_TOKEN not set and github_app.ts token failed; --dry-run continues without posting auth"
-        else
-            error "GH_TOKEN not set and github_app.ts token failed; cannot post review"
-            exit 1
-        fi
-    fi
-fi
-```
-
-### 3. Verify gh and provision the worktree
+Use the caller's existing `gh` authentication for read access. Do not mint a
+provider-specific posting token in the wrapper. The dispatcher owns posting
+credentials, and reaches that path only after explicit `--post` consent.
 
 ```bash
-if [ -n "${GH_TOKEN:-}" ]; then
-    gh auth status
-elif [ -n "${DRY_RUN:-}" ]; then
-    warn "skipping 'gh auth status' (no GH_TOKEN provisioned; --dry-run continues)"
-else
-    gh auth status
-fi
+gh auth status
 
 SETUP_JSON=$(node --experimental-strip-types "$TOOLS/review_setup_worktree.ts" \
     --pr "$PR_NUM" --repo "$REPO" --mode single --json)
-WORKTREE_PATH=$(printf '%s' "$SETUP_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["worktreePath"])')
-HEAD_SHA=$(printf '%s'   "$SETUP_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["pr"]["headSha"])')
-BASE=$(printf '%s'        "$SETUP_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["pr"]["base"])')
-IS_FORK=$(printf '%s'     "$SETUP_JSON" | python3 -c 'import json,sys; print(str(json.load(sys.stdin)["pr"]["isFork"]).lower())')
+json_value() {
+    printf '%s' "$SETUP_JSON" | node -e '
+      const fs = require("node:fs");
+      let value = JSON.parse(fs.readFileSync(0, "utf8"));
+      for (const key of process.argv[1].split(".")) value = value[key];
+      process.stdout.write(String(value));
+    ' "$1"
+}
+WORKTREE_PATH=$(json_value worktreePath)
+HEAD_SHA=$(json_value pr.headSha)
+BASE=$(json_value pr.base)
+IS_FORK=$(json_value pr.isFork)
 ```
 
 `review_setup_worktree.ts` runs `gh pr view` to resolve `branch`, `headSha`,
@@ -156,7 +161,19 @@ review_args=(
 [ -n "${AGENT:-}"   ] && review_args+=(--agent "$AGENT")
 [ -n "${QUICK:-}"   ] && review_args+=(--quick)
 [ -n "${DOMAINS:-}" ] && review_args+=(--domains "$DOMAINS")
-[ -n "${DRY_RUN:-}" ] && review_args+=(--dry-run)
+
+# Safe defaults. POST_APPROVED and FIX_APPROVED become 1 only from the user's
+# explicit request; do not derive them from the presence of a PR number.
+if [ "${POST_APPROVED:-0}" != 1 ]; then
+    review_args+=(--dry-run)
+fi
+if [ "${FIX_APPROVED:-0}" != 1 ]; then
+    review_args+=(--no-fix-loop)
+fi
+if [ "${FIX_APPROVED:-0}" = 1 ] && [ "${POST_APPROVED:-0}" != 1 ]; then
+    echo "--fix requires explicit --post authorization" >&2
+    exit 2
+fi
 
 set +e
 RECEIPT_JSON=$(node --experimental-strip-types "$TOOLS/stark_review.ts" "${review_args[@]}")
@@ -173,76 +190,19 @@ human summary on **stderr** (terminal-friendly). It exits:
 
 ## Phase 2: Surface failures from the receipt
 
-Parse the receipt JSON. Each failure condition below independently
-forces a non-zero exit. Print specifics for each so the user can act.
+Parse the receipt JSON directly and treat each condition independently as a
+failure:
 
-```bash
-parse() { printf '%s' "$RECEIPT_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); $1"; }
+- `ok == false`: print `error.code` and `error.message`.
+- Any round has `failed_results`: print round, agent, domain, and error.
+- Any round has `parse_errors`: print round, sanitized reason, and at most 160
+  characters of the offending line.
+- `unposted_reviews` is non-empty: print round, reason, and status. On the safe
+  default this should remain empty because posting was deliberately skipped;
+  do not misreport `comments_posted == 0` as an error.
 
-OK=$(parse 'print(str(d.get("ok")).lower())')
-ERR_CODE=$(parse 'e=d.get("error") or {}; print(e.get("code","") or "")')
-ERR_MSG=$(parse 'e=d.get("error") or {}; print(e.get("message","") or "")')
-FAILED_LIST=$(parse '
-rounds = d.get("rounds") or []
-items = []
-for r in rounds:
-    rd = r.get("round")
-    for f in (r.get("failed_results") or []):
-        items.append("round {}: {}/{} — {}".format(rd, f.get("agent"), f.get("domain"), f.get("error")))
-print("\n".join(items))
-')
-PARSE_ERROR_LIST=$(parse '
-import re
-def clean(v):
-    return re.sub(r"[\x00-\x1f\x7f]", "", str(v or ""))[:160]
-rounds = d.get("rounds") or []
-items = []
-for r in rounds:
-    rd = r.get("round")
-    for e in (r.get("parse_errors") or []):
-        items.append("round {}: {} — {}".format(rd, clean(e.get("reason")), clean(e.get("line"))))
-print("\n".join(items))
-')
-UNPOSTED_LIST=$(parse '
-items = []
-for u in (d.get("unposted_reviews") or []):
-    items.append("round {}: {} status={}".format(u.get("round"), u.get("reason"), u.get("status","")))
-print("\n".join(items))
-')
-
-failed=0
-
-# (a) terminal failure
-if [ "$OK" = "false" ]; then
-    error "Review failed: $ERR_CODE — $ERR_MSG"
-    failed=1
-fi
-
-# (b) any round had failed_results
-if [ -n "$FAILED_LIST" ]; then
-    error "Some domain/agent dispatches failed:"
-    printf '  %s\n' "$FAILED_LIST" >&2
-    failed=1
-fi
-
-# (c) any agent output had parser errors
-if [ -n "$PARSE_ERROR_LIST" ]; then
-    error "Some domain/agent outputs had parser errors:"
-    printf '  %s\n' "$PARSE_ERROR_LIST" >&2
-    failed=1
-fi
-
-# (d) any review failed to post
-if [ -n "$UNPOSTED_LIST" ]; then
-    error "Some reviews could not be posted:"
-    printf '  %s\n' "$UNPOSTED_LIST" >&2
-    failed=1
-fi
-
-if [ "$failed" -ne 0 ]; then
-    exit 1
-fi
-```
+Use Node/TypeScript or the host's native JSON handling; do not introduce a
+Python parser into this TypeScript-only workflow.
 
 If the TS tool's exit code is non-zero but none of (a)/(b)/(c) is parseable
 (e.g. malformed JSON or empty stdout), treat it as a hard failure: print the
@@ -268,16 +228,18 @@ History: {len(history_files)} round file(s)
 Findings classification (`fix` / `noise` / `false_positive` / `ignored`) is
 performed by the TS tool's classifier stage. The wrapper does not re-classify.
 
-## Phase 4: Fix Loop
+## Phase 4: Fix Loop (explicit `--post --fix` only)
 
-The TS dispatcher runs the fix loop after each review round's POST lands —
+Skip this entire phase for an ordinary review. The TS dispatcher runs the fix
+loop after each review round's POST lands only when the user explicitly opted
+into both posting and fixing —
 including the final round — when the authorization gate allows it (Phase 9 —
 see `tools/stark_review_lib.ts` `evaluateFixLoopGate`). `--max-rounds` bounds
 review+fix cycles, not reviews: every round that finds fixable findings attempts
 a fix, and the trusted `test_command` is the per-round verification gate rather
 than a subsequent review round. The wrapper does not orchestrate the loop itself;
 it surfaces what the TS tool reports in the receipt (`fixes_pushed`,
-audit-log entries under `~/.claude/code-review/history/<org>/<repo>/<pr>/`).
+and the paths in `history_files`).
 
 ### Authorization
 
@@ -343,10 +305,9 @@ set — see Authorization above.
 
 ## Phase 5: Persist History
 
-The TS dispatcher writes history JSON to
-`~/.claude/code-review/history/{org}/{repo}/{pr}/round-{N}.json` itself. The
-receipt's `history_files` field lists the paths written. The wrapper does not
-manage history.
+The TS dispatcher writes its own history JSON. Treat the receipt's
+`history_files` entries as the authoritative paths; the wrapper neither assumes
+a host-specific history root nor manages those files.
 
 ## Phase 6: Cleanup
 
@@ -381,4 +342,4 @@ state — surface the path and let the user inspect.
 | Worktree creation fails                          | Stop; do not fall back to the main checkout |
 | Repo mismatch                                    | Stop and ask to run from the matching local checkout |
 | Fork PR                                          | Review-only; no fix-loop |
-| `GH_TOKEN` unset and `github_app.ts token` fails | `--dry-run` continues with a warning; otherwise stop |
+| `gh` read authentication unavailable             | Stop and ask the user to authenticate; do not mint or expose a token in the wrapper |

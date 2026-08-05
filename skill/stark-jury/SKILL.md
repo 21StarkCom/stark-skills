@@ -7,7 +7,7 @@ description: >-
   best of three / compare the models on this post / which model edits this
   best / jury this draft / second and third opinion on this edit". Dispatches
   the skill plus the document to claude, codex and gemini in parallel,
-  verifies every candidate against the skill's own iron rules, then THIS
+  verifies every candidate against the skill's own iron rules, then the current
   session merges anchored (rewrite skills) or writes the calibration report
   (story-judge). Never edits the four skills, never publishes.
 disable-model-invocation: true
@@ -17,7 +17,7 @@ argument-hint: "<skill-id> <input-path>"
 
 ## Help
 
-If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+If the current user request includes a standalone `--help`, `-h`, or `help` token,
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop - do not run any phase.
 
@@ -34,8 +34,12 @@ them either.
 
 ## Arguments
 
+- Read `<skill-id>` and `<input-path>` from the current user's explicit
+  invocation; do not depend on a host-populated argument placeholder.
 - `<skill-id>` - one of `voice`, `story-edit`, `blog-sharpen`, `story-judge`.
-  Resolves to `skill/stark-<id>/SKILL.md` in this repo.
+  Resolves to `stark-<id>/SKILL.md` below `STARK_JURY_SKILLS_ROOT`. In a source
+  checkout that root is `skill/`; in an installed bundle it is the host's
+  installed skills directory.
 - `<input-path>` - the document to work on. Read verbatim, never modified.
   Export a post to a file first; the jury reads files, not CMS records.
 
@@ -65,10 +69,24 @@ Three phases, all in the tool. You read the handoff block it prints.
    quote anchoring). Mechanical rules only. **Disqualification is not yours to
    override by judgement** - fix the rule or re-run.
 
+Resolve `JURY_SKILL_DIR` to the directory containing this `SKILL.md`, then use
+its parent as the payload root unless `STARK_JURY_SKILLS_ROOT` explicitly
+overrides it. Source and installed layouts both keep installed skills as
+siblings. Verify the requested payload exists before dispatch; for example,
+`voice` must stop with a clear missing-skill message when `stark-voice` was not
+installed.
+
 ```bash
-node --experimental-strip-types \
-  "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/jury.ts" \
-  run --skill blog-sharpen --input /path/to/post.md
+TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
+JURY_SKILL_DIR=/absolute/path/to/stark-jury
+SKILLS_ROOT="${STARK_JURY_SKILLS_ROOT:-$(dirname "$JURY_SKILL_DIR")}"
+SKILL_ID=blog-sharpen
+[ -f "$SKILLS_ROOT/stark-$SKILL_ID/SKILL.md" ] || {
+  echo "missing jury payload: $SKILLS_ROOT/stark-$SKILL_ID/SKILL.md" >&2
+  exit 2
+}
+STARK_JURY_SKILLS_ROOT="$SKILLS_ROOT" node --experimental-strip-types \
+  "$TOOLS/jury.ts" run --skill "$SKILL_ID" --input /path/to/post.md
 ```
 
 Options: `--panel seat=model[:effort],...` (default
@@ -78,10 +96,10 @@ the run-store name, `--timeout-sec` (default 1800 per seat), `--json`.
 `list` and `show <run-id>` read the store. Exit codes: `0` ok, `1` the ladder
 failed, `2` usage or I/O error.
 
-Every run lands under
-`~/.claude/code-review/history/jury/<name>/<run-id>/`: `manifest.json`,
-`input.md`, `prompt.md`, `candidates/`, `verify/`, `audit.jsonl`, and the
-`merge.md` or `report.md` **you** write.
+Use the run directory printed by the tool. Under the configured state root its
+shape is `history/jury/<name>/<run-id>/`, containing `manifest.json`, `input.md`,
+`prompt.md`, `candidates/`, `verify/`, `audit.jsonl`, and the `merge.md` or
+`report.md` **you** write.
 
 ## Payload rules (why the comparison is worth anything)
 

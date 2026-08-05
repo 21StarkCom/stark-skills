@@ -145,8 +145,9 @@ export function defaultRepoRoot(): string {
 
 /** The payload roots probed for `<dir>/stark-<id>/SKILL.md`, in order: an
  *  explicit `STARK_JURY_SKILLS_ROOT` override, this repo's `skill/` layout,
- *  and the vendored plugin `skills/` layout — bifrost copies `tools/` into
- *  every bundle, where `skill/` does not exist. */
+ *  the Claude plugin `skills/` layout, and the Codex install layout. Bifrost
+ *  installs this tool under `.agents/stark/<bundle>/tools/`, while native
+ *  Codex skills live two levels above that bundle root at `.agents/skills/`. */
 export function skillPathCandidates(
   skillId: SkillId,
   repoRoot: string = defaultRepoRoot(),
@@ -158,6 +159,7 @@ export function skillPathCandidates(
     ...(override ? [path.join(override, dir, "SKILL.md")] : []),
     path.join(repoRoot, "skill", dir, "SKILL.md"),
     path.join(repoRoot, "skills", dir, "SKILL.md"),
+    path.join(repoRoot, "..", "..", "skills", dir, "SKILL.md"),
   ];
 }
 

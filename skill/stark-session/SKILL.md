@@ -11,7 +11,7 @@ revision_date: 2026-05-18T09:14:41Z
 
 ## Help
 
-If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+If the current user request includes a standalone `--help`, `-h`, or `help` token,
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop — do not run preflight or any phase.
 
@@ -27,20 +27,20 @@ A single TS CLI gathers every fact you need into one JSON blob; you render the b
 
 ## Arguments
 
-- `/stark-session` or `/stark-session start` — starts a session (default)
-- `/stark-session end` — ends a session
+- no input or `start` — starts a session (default)
+- `end` — ends a session
 
-**Raw input:** `$ARGUMENTS`
+Read the mode from the current user's explicit invocation. Do not depend on a
+host-populated argument placeholder.
 
-## Constants
+## Execution rule
 
-```bash
-TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
-# A function, not a string var: zsh does NOT word-split `$VAR`, so a
-# multi-word command stuffed in a variable is run as one bogus command name.
-# Define this in the SAME Bash call that uses it (shells don't persist across calls).
-session() { node --experimental-strip-types --no-warnings "$TOOLS/stark_session.ts" "$@"; }
-```
+Shell state does not persist between tool calls. Every command below resolves
+`TOOLS` and consumes any variables in the same shell call. Resolve session
+identity from `STARK_SESSION_ID`, the active host's thread/session variable, or
+`session_id.ts`, in that order. Start time and start HEAD are persisted through
+`session_state.ts`; end mode reads that state instead of expecting variables
+from start mode to survive.
 
 ## Config
 
@@ -50,7 +50,7 @@ Path: `.code-review/config.json` (hierarchical: global → org → repo). Readin
 |-----|---------|-------|
 | `build_command` | `null` | Build command for end |
 | `test_command` | `null` | Falls back to top-level |
-| `doc_paths` | `["docs/", "CLAUDE.md"]` | Paths to stage on end |
+| `doc_paths` | `["docs/", "AGENTS.md", "CLAUDE.md"]` | Paths to stage on end |
 | `devlog_path` | `null` | Devlog directory |
 | `pr_merge_strategy` | `"squash"` | squash/merge/rebase |
 
@@ -60,29 +60,42 @@ Path: `.code-review/config.json` (hierarchical: global → org → repo). Readin
 
 ## Start Mode
 
-### Phase 0 — Record start HEAD
+### Phase 0 — Start-state contract
 
-```bash
-SESSION_ID="${CLAUDE_SESSION_ID:-$(node --experimental-strip-types --no-warnings "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/session_id.ts")}"
-START_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
-STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-```
+Phase 2 resolves the session ID, start HEAD, and timestamp, collects the
+briefing, and persists the start HEAD in one shell call. Do not split that block
+into separate calls.
 
 ### Phase 1 — Gather context (silent)
 
 Read and internalize — do NOT display:
-- `CLAUDE.md` from current directory and each parent up to `~`
-- Memory files: `~/.claude/projects/*/memory/` matching current project path
+- The active host's applicable repository-instruction chain from the current
+  directory up to the repository root: `AGENTS.md` for Codex-compatible hosts,
+  `CLAUDE.md` for Claude Code, or the host's equivalent when it provides one.
+  If the active host recognizes both files, read both and preserve normal
+  nearest-file precedence.
+- Project memories exposed by the current host, when that host provides them
 
 (Config + project board context are handled by the CLI in Phase 2.)
 
 ### Phase 2 — Collect session state
 
 ```bash
-STATE_JSON=$(session start \
+TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
+SESSION_ID="${STARK_SESSION_ID:-${CODEX_THREAD_ID:-${CLAUDE_SESSION_ID:-}}}"
+if [ -z "$SESSION_ID" ]; then
+  SESSION_ID=$(node --experimental-strip-types --no-warnings "$TOOLS/session_id.ts")
+fi
+START_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
+STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+STATE_JSON=$(node --experimental-strip-types --no-warnings "$TOOLS/stark_session.ts" start \
   --session-id "$SESSION_ID" \
   --start-head "$START_HEAD" \
   --started-at "$STARTED_AT" 2>/dev/null || echo '{}')
+node --experimental-strip-types --no-warnings "$TOOLS/session_state.ts" set \
+  --session-id "$SESSION_ID" --field start_head --value "$START_HEAD" \
+  2>/dev/null || true
+printf '%s\n' "$STATE_JSON"
 ```
 
 `STATE_JSON` is the structured briefing. Schema:
@@ -108,13 +121,11 @@ STATE_JSON=$(session start \
 }
 ```
 
-### Phase 3 — Persist start HEAD
+### Phase 3 — Confirm persistence
 
-```bash
-node --experimental-strip-types --no-warnings \
-  "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/session_state.ts" set \
-  --field start_head --value "$START_HEAD" 2>/dev/null || true
-```
+Phase 2 already persisted the start HEAD under the resolved session ID. If that
+best-effort write failed, note that end-mode diff statistics may be approximate;
+do not run a second shell call with stale or undefined variables.
 
 ### Phase 4 — Render briefing
 
@@ -141,7 +152,7 @@ Build a prioritized task list from the briefing data in this order, including on
 1. **Open PRs needing action** — review comments, failing checks, requested changes
 2. **Uncommitted changes** — dirty tree, staged files, stashes
 3. **Failing health checks**
-4. **Board items in flight** assigned to Claude
+4. **Board items in flight** assigned to the current operator
 5. **Alerts** still unacknowledged
 
 Ask: **"Task list look right? Say 'go' to start from the top, or tell me what to focus on."**
@@ -155,8 +166,9 @@ On "go", work sequentially without prompting between tasks — only pause for ge
 ### Phase 0 — Persona cleanup
 
 ```bash
+TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
 if [ -f "$HOME/.stark-persona/active.json" ]; then
-  node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/stark_persona.ts" session-end 2>/dev/null || true
+  node --experimental-strip-types "$TOOLS/stark_persona.ts" session-end 2>/dev/null || true
 fi
 ```
 Display the 20% fun-fact callout AFTER the summary (if any).
@@ -189,10 +201,17 @@ git commit -m "docs: session update — <summary>"
 ### Phase 3b — Session checkpoint
 
 ```bash
+TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
+SESSION_ID="${STARK_SESSION_ID:-${CODEX_THREAD_ID:-${CLAUDE_SESSION_ID:-}}}"
+if [ -z "$SESSION_ID" ]; then
+  SESSION_ID=$(node --experimental-strip-types --no-warnings "$TOOLS/session_id.ts")
+fi
 node --experimental-strip-types --no-warnings \
-  "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/context_compactor.ts" --json 2>/dev/null || true
+  "$TOOLS/context_compactor.ts" --session-id "$SESSION_ID" --json \
+  2>/dev/null || true
 node --experimental-strip-types --no-warnings \
-  "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/session_state.ts" --json 2>/dev/null || true
+  "$TOOLS/session_state.ts" --session-id "$SESSION_ID" --json \
+  2>/dev/null || true
 ```
 
 Both are best-effort. Note the checkpoint path in the summary.
@@ -213,18 +232,29 @@ In priority order, derive a slug (lowercase, hyphens, max 50 chars) from:
 2. Issues closed in this session
 3. Branch name
 4. Most common commit prefix
-5. `session-$SESSION_ID`
+5. `session-<persisted-session-id>`
 
 You compute this — no CLI call needed; you have all the inputs from accumulated phase results.
 
 ### Phase 6 — Collect end state + render summary
 
+Replace `<derived-session-name>` with the slug from Phase 5.5. Resolve the same
+host session ID again; the collector uses it to load start HEAD and start time
+from persisted state, then the same shell call stores the final name:
+
 ```bash
-END_JSON=$(session end \
-  --session-id "$SESSION_ID" \
-  --start-head "$START_HEAD" \
-  --started-at "$STARTED_AT" \
-  --name "$SESSION_NAME" 2>/dev/null || echo '{}')
+TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
+SESSION_ID="${STARK_SESSION_ID:-${CODEX_THREAD_ID:-${CLAUDE_SESSION_ID:-}}}"
+if [ -z "$SESSION_ID" ]; then
+  SESSION_ID=$(node --experimental-strip-types --no-warnings "$TOOLS/session_id.ts")
+fi
+SESSION_NAME="<derived-session-name>"
+END_JSON=$(node --experimental-strip-types --no-warnings "$TOOLS/stark_session.ts" end \
+  --session-id "$SESSION_ID" --name "$SESSION_NAME" 2>/dev/null || echo '{}')
+node --experimental-strip-types --no-warnings "$TOOLS/session_state.ts" set \
+  --session-id "$SESSION_ID" --field name --value "$SESSION_NAME" \
+  2>/dev/null || true
+printf '%s\n' "$END_JSON"
 ```
 
 Schema:
@@ -248,13 +278,8 @@ Render the end summary:
 3. **Diff**: `{added}+ / {removed}- across {file_count} files` + the key files list. Warn if `diff.approximate` is true (start HEAD wasn't recorded).
 4. **Branch**: ahead/behind vs upstream, PR link if `has_pr`.
 5. **Errors** (if non-empty): brief one-liner.
-6. **Persist session name**:
-
-```bash
-node --experimental-strip-types --no-warnings \
-  "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/session_state.ts" set \
-  --field name --value "$SESSION_NAME" 2>/dev/null || true
-```
+6. **Persist session name**: already performed in the collection block above;
+   report a warning if that best-effort write failed.
 
 ---
 

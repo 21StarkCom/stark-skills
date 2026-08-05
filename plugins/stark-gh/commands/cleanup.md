@@ -10,25 +10,23 @@ allowed-tools: Bash
 model: sonnet
 ---
 
-# /stark-gh:cleanup
+# cleanup
 
 One TypeScript stage. Reads state, optionally rebases, deletes merged branches
 (local + remote), removes worktree leftovers, and clears watcher state files
 for done PRs. Single source of truth: `plugins/stark-gh/tools/gh_cleanup.ts`.
 
-YOU MUST NOT splice user input into shell commands. Forward the entire
-`$ARGUMENTS` value as a single quoted `--raw-args` value to the tool.
-
-## Constants
-
-```bash
-TOOLS="${CLAUDE_PLUGIN_ROOT}/tools"
-```
+YOU MUST NOT splice user input into shell syntax. Take the argument tail from
+the current user request and pass it as one safely shell-quoted `--raw-args`
+value. The `RAW_ARGS` marker below must be replaced with that value; never
+execute the marker literally.
 
 ## Run
 
 ```bash
-node --experimental-strip-types "$TOOLS/gh_cleanup.ts" --raw-args "$ARGUMENTS"
+TOOLS="${CLAUDE_PLUGIN_ROOT}/tools"
+RAW_ARGS='<argument tail from the current user request, safely shell-quoted>'
+node --experimental-strip-types "$TOOLS/gh_cleanup.ts" --raw-args "$RAW_ARGS"
 ```
 
 The tool handles its own preflight (in-repo, gh authed, clean tree), discovery,

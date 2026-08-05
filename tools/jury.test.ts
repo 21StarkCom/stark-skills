@@ -917,7 +917,7 @@ test("a failed seat whose partial output verifies CLEAN never drives the ladder"
   assert.equal(codexSeat?.status, "failed");
 });
 
-test("skillPathFor probes the repo layout, then the vendored plugin layout", () => {
+test("skillPathFor probes repo, Claude plugin, then Codex install layouts", () => {
   const root = tmpDir("layout");
   try {
     fs.mkdirSync(path.join(root, "skills", "stark-voice"), { recursive: true });
@@ -933,6 +933,19 @@ test("skillPathFor probes the repo layout, then the vendored plugin layout", () 
       skillPathFor("voice", root),
       path.join(root, "skill", "stark-voice", "SKILL.md"),
     );
+
+    // A Codex tool bundle sits at .agents/stark/<bundle>; skills are its
+    // grandparent's `skills/` sibling.
+    fs.rmSync(path.join(root, "skill"), { recursive: true, force: true });
+    fs.rmSync(path.join(root, "skills"), { recursive: true, force: true });
+    const codexRoot = path.join(root, ".agents", "stark", "stark-write");
+    const codexSkill = path.join(root, ".agents", "skills", "stark-voice");
+    fs.mkdirSync(codexSkill, { recursive: true });
+    fs.writeFileSync(path.join(codexSkill, "SKILL.md"), "z");
+    assert.equal(
+      skillPathFor("voice", codexRoot),
+      path.join(codexSkill, "SKILL.md"),
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -946,5 +959,6 @@ test("skillPathCandidates puts an explicit override first", () => {
     path.join("/plugin/skills", "stark-voice", "SKILL.md"),
     path.join("/repo", "skill", "stark-voice", "SKILL.md"),
     path.join("/repo", "skills", "stark-voice", "SKILL.md"),
+    path.join("/repo", "..", "..", "skills", "stark-voice", "SKILL.md"),
   ]);
 });

@@ -8,20 +8,28 @@ allowed-tools: Bash, Read
 model: sonnet
 ---
 
-# /stark-gh:pr-merge
+# pr-merge
 
 Open-PR squash-merge pipeline. Three TS stages: preflight, draft, execute.
 
-YOU MUST NOT splice user input into shell commands. Forward `$ARGUMENTS`
-verbatim as a single quoted `--raw-args` value to preflight.
+YOU MUST NOT splice user input into shell syntax. Take the argument tail from
+the current user request and pass it verbatim as one safely shell-quoted
+`--raw-args` value to preflight. The `RAW_ARGS` marker below must be replaced
+with that value; never execute the marker literally.
 
 YOU MUST NOT draft any prose. Stage 2 owns drafting via the TypeScript draft
 tool, which subprocess-calls `codex exec` with a scrubbed env.
 
 ## Constants
 
+Every shell block below is a fragment of one stateful pipeline. Execute all
+fragments together, in order, in one shell call so `TOOLS`, `PLAN_FILE`, the
+restore trap, and the receipt variables cannot disappear between agent calls.
+
 ```bash
+set -euo pipefail
 TOOLS="${CLAUDE_PLUGIN_ROOT}/tools"
+RAW_ARGS='<argument tail from the current user request, safely shell-quoted>'
 ```
 
 ## Stage 1 — Preflight
@@ -29,19 +37,23 @@ TOOLS="${CLAUDE_PLUGIN_ROOT}/tools"
 The raw arg may be a bare PR number OR a flag list — the parser accepts both.
 
 ```bash
-PREFLIGHT_OUT=$(node --experimental-strip-types "$TOOLS/gh_pr_merge_preflight.ts" \
-  --raw-args "$ARGUMENTS" \
-  --emit-plan-path)
-PREFLIGHT_RC=$?
-[ $PREFLIGHT_RC -eq 0 ] || exit $PREFLIGHT_RC
+if PREFLIGHT_OUT="$(node --experimental-strip-types "$TOOLS/gh_pr_merge_preflight.ts" \
+  --raw-args "$RAW_ARGS" \
+  --emit-plan-path)"; then
+  :
+else
+  PREFLIGHT_RC=$?
+  exit "$PREFLIGHT_RC"
+fi
 ```
 
 Preflight may emit a `STARK_GH_RESUME=<mode>` line BEFORE the plan-file path.
 Parse both:
 
 ```bash
-RESUME_MODE=$(printf '%s\n' "$PREFLIGHT_OUT" | sed -n 's/^STARK_GH_RESUME=\(.*\)$/\1/p' | head -1)
-PLAN_FILE=$(printf '%s\n' "$PREFLIGHT_OUT" | grep -v '^STARK_GH_RESUME=' | tail -1)
+RESUME_MODE="$(printf '%s\n' "$PREFLIGHT_OUT" | sed -n 's/^STARK_GH_RESUME=\(.*\)$/\1/p')"
+PLAN_FILE="$(printf '%s\n' "$PREFLIGHT_OUT" | grep -v '^STARK_GH_RESUME=' | tail -1)"
+[ -n "$PLAN_FILE" ] || { echo "preflight did not return a plan path" >&2; exit 1; }
 ```
 
 If `RESUME_MODE=attached`, a **merge-driver** watcher is already running. Print
@@ -68,7 +80,15 @@ trap that calls `lib/restore_branch.ts` on any non-zero exit. Disarm the trap
 once Stage 3 reports a successful push.
 
 ```bash
-trap 'node --experimental-strip-types "$TOOLS/lib/restore_branch.ts" "$PLAN_FILE" >&2 || true' EXIT
+restore_on_failure() {
+  restore_rc=$?
+  trap - EXIT
+  if [ "$restore_rc" -ne 0 ]; then
+    node --experimental-strip-types "$TOOLS/lib/restore_branch.ts" "$PLAN_FILE" >&2 || true
+  fi
+  exit "$restore_rc"
+}
+trap restore_on_failure EXIT
 ```
 
 ## Stage 2 — Draft
@@ -90,13 +110,20 @@ plan-file.
 
 ```bash
 if [ "$RESUME_MODE" = "spawn-only" ]; then
-  EXECUTE_OUT=$(node --experimental-strip-types "$TOOLS/gh_pr_merge_execute.ts" \
-    --plan-file "$PLAN_FILE" --resume-from-spawn)
+  if EXECUTE_OUT="$(node --experimental-strip-types "$TOOLS/gh_pr_merge_execute.ts" \
+    --plan-file "$PLAN_FILE" --resume-from-spawn)"; then
+    EXECUTE_RC=0
+  else
+    EXECUTE_RC=$?
+  fi
 else
-  EXECUTE_OUT=$(node --experimental-strip-types "$TOOLS/gh_pr_merge_execute.ts" \
-    --plan-file "$PLAN_FILE")
+  if EXECUTE_OUT="$(node --experimental-strip-types "$TOOLS/gh_pr_merge_execute.ts" \
+    --plan-file "$PLAN_FILE")"; then
+    EXECUTE_RC=0
+  else
+    EXECUTE_RC=$?
+  fi
 fi
-EXECUTE_RC=$?
 ```
 
 The push happens inside execute. Once force-push has succeeded, execute prints
@@ -109,10 +136,11 @@ would only roll back local state, re-creating divergence the user has to clean
 up by hand:
 
 ```bash
-if printf '%s' "$EXECUTE_OUT" | grep -q '"event":"pushed"'; then
-  trap - EXIT
-fi
-exit $EXECUTE_RC
+case "$EXECUTE_OUT" in
+  *'"event":"pushed"'*) trap - EXIT ;;
+esac
+printf '%s\n' "$EXECUTE_OUT"
+exit "$EXECUTE_RC"
 ```
 
 Parse the execute JSON for `prUrl`, `mergeSha` (sync mode), or `watcherStateFile`
