@@ -16,6 +16,7 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 
+import { AGENT_ENV_ALLOWLIST, isCredentialEnvKey } from "./agent_env_lib.ts";
 import { getToken, resolveAppName } from "./github_app_lib.ts";
 import { getRuntimeConfig, loadGlobalConfig } from "./stark_config_lib.ts";
 import { applyClaudeAuth } from "./claude_auth_lib.ts";
@@ -146,7 +147,14 @@ export async function buildAgentEnv(
   const runtimeCfg = getRuntimeConfig();
   const fullCfg = loadGlobalConfig();
 
-  const allowlist = new Set(runtimeCfg.subagent_env_allowlist);
+  // Union with the shared default so the allowlist is a floor, not a
+  // replacement: `deepMerge` swaps arrays wholesale, so a config that sets
+  // `subagent_env_allowlist` without USER would otherwise strip it and break
+  // claude dispatch with an error that never names the env (agent_env_lib.ts:65).
+  const allowlist = new Set([
+    ...AGENT_ENV_ALLOWLIST,
+    ...runtimeCfg.subagent_env_allowlist,
+  ]);
   const githubAppsRaw = fullCfg["github_apps"];
   const githubApps: Record<string, string> =
     githubAppsRaw && typeof githubAppsRaw === "object" && !Array.isArray(githubAppsRaw)
@@ -156,7 +164,18 @@ export async function buildAgentEnv(
   // Start from allowlisted host env keys, excluding blocked keys.
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
-    if (v !== undefined && allowlist.has(k) && !BLOCKED_KEYS.has(k)) {
+    // `isCredentialEnvKey` covers what BLOCKED_KEYS never named: the GitHub
+    // and OpenAI credentials. Before this, an allowlist entry for GH_TOKEN
+    // forwarded the operator's PAT verbatim — the existing "no bot token for
+    // non-review ops" assertion only held because the shipped config happens
+    // not to list it. Review ops are unaffected: the App token is injected
+    // below, after this copy.
+    if (
+      v !== undefined &&
+      allowlist.has(k) &&
+      !BLOCKED_KEYS.has(k) &&
+      !isCredentialEnvKey(k)
+    ) {
       env[k] = v;
     }
   }
