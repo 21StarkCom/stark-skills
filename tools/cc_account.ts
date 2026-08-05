@@ -680,7 +680,36 @@ function cmdNext(apply: boolean, best: boolean): void {
   }
 
   if (!target) {
-    fail("no candidate profile — register one with `add <name>`");
+    // Three distinct dead ends, and telling them apart matters: only the first
+    // is fixed by `add`. `--best` always excludes the active seat, so it can
+    // never reach the "already active" branch below — without this split it
+    // reports an empty registry while a profile is registered and in use, and
+    // the remedy it names is a no-op.
+    if (profiles.length === 0) {
+      fail("no candidate profile — register one with `add <name>`");
+    }
+    const usable = profiles.filter(hasCreds);
+    if (usable.length === 0) {
+      fail(
+        "no profile has stored credentials — re-run `add <name>` for one of: " +
+          profiles.map((p) => p.name).join(", "),
+      );
+    }
+    const onlyActive =
+      active &&
+      usable.every(
+        (p) => p.seatKey && p.seatKey.toLowerCase() === active.toLowerCase(),
+      );
+    if (onlyActive) {
+      // Same outcome, same exit code, as the cycle-mode branch below: nothing
+      // to switch to is not an error, and a caller branching on `rc` must not
+      // get a different answer depending on which mode it asked for.
+      console.log(
+        `${usable[0].name} is the only switchable profile — already active`,
+      );
+      return;
+    }
+    fail("no candidate profile — nothing to switch to");
   }
   if (target.seatKey && active && target.seatKey.toLowerCase() === active.toLowerCase()) {
     console.log(`${target.name} is the only switchable profile — already active`);
