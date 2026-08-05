@@ -94,12 +94,16 @@ test("integration: commands/pr-merge.md is zero-LLM-logic body", () => {
   assert.doesNotMatch(codeBlocks, /\bcodex exec\b/, "code blocks must not directly call 'codex exec'");
   assert.doesNotMatch(codeBlocks, /\bcurl .*api\.openai/i, "code blocks must not call openai HTTP API");
   assert.doesNotMatch(codeBlocks, /\bcurl .*api\.anthropic/i, "code blocks must not call anthropic HTTP API");
-  // Must reference --raw-args pattern.
-  assert.match(content, /--raw-args "\$ARGUMENTS"/);
+  // Must forward the host-neutral raw-argument value, never a host-only
+  // placeholder that Codex native skills do not expand.
+  assert.match(content, /--raw-args "\$RAW_ARGS"/);
+  assert.doesNotMatch(content, /\$ARGUMENTS/);
+  assert.match(codeBlocks, /set -euo pipefail/);
   // Must invoke from the plugin install path via CLAUDE_PLUGIN_ROOT.
   assert.match(content, /\$\{CLAUDE_PLUGIN_ROOT\}\/tools/);
   // Kill-switch removed (operator opted in); must NOT contain the gate any more.
   assert.doesNotMatch(content, /STARK_GH_PR_MERGE_ENABLE/);
-  // Must install cross-stage cleanup trap.
-  assert.match(content, /trap.*restore_branch\.ts/);
+  // Must install the status-preserving cross-stage cleanup trap.
+  assert.match(codeBlocks, /trap restore_on_failure EXIT/);
+  assert.match(codeBlocks, /restore_branch\.ts/);
 });

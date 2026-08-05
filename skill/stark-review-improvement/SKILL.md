@@ -1,8 +1,10 @@
 ---
 name: stark-review-improvement
 description: >-
-  Improve review prompts based on Prompt Improvement Assessment from completed reviews. Use for fix review prompts.
-argument-hint: "(reads assessment from context or latest history)"
+  Improve review prompts based on a Prompt Improvement Assessment from a
+  completed review. Use for fixing review prompts or their current TypeScript
+  orchestration; edits and validation are local, and commit/push are opt-in.
+argument-hint: "[assessment-path] [--commit]"
 disable-model-invocation: true
 model: opus
 revision: e504ba02a12b6dd779ebd026fa4c07df76697ff2
@@ -11,57 +13,64 @@ revision_date: 2026-05-15T18:20:11Z
 
 ## Help
 
-If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+If the current request asks for help (a standalone `--help`, `-h`, or `help` token),
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop — do not run preflight or any phase.
 
 # stark-review-improvement
 
-Closes the feedback loop on stark-skills: reads the prompt improvement assessment from the current conversation, makes targeted edits to the prompt and orchestrator files, and commits a changelog entry.
+Closes the feedback loop on stark-skills: reads a prompt improvement assessment,
+makes targeted edits to prompt/orchestrator files, validates them, and records
+the learning in the prompt changelog. It commits only when explicitly asked.
 
 ## Arguments
 
-- None — targets the PR code review prompts (`global/prompts/{claude,codex,gemini}/`; gemini disabled by default). The former `--prompts-dir spec-review|plan-review` modes died with the doc-review loops (demolition 2026-07-26).
+- `[assessment-path]` — optional explicit assessment or review receipt path.
+  Otherwise use the assessment already present in the current conversation.
+- `--commit` — after showing the final diff, explicitly authorize staging the
+  listed changed files and committing them. Never implies push.
 
-**Raw input:** `$ARGUMENTS`
+Treat the text following the explicit skill mention as the arguments. This
+skill targets the PR review prompts in `global/prompts/{claude,codex,gemini}/`;
+the former spec/plan prompt modes are not supported.
 
 ## Constants
 
-```
-STARK_REPO  = ~/Code/21Stark/stark-skills
-PROMPTS     = $STARK_REPO/global/prompts
-TOOLS       = $STARK_REPO/tools
-CONFIG      = $STARK_REPO/global/config.json
-ORG_CONFIG  = $STARK_REPO/org/evinced/config.json
-HISTORY     = ~/.claude/code-review/history
-CHANGELOG   = $STARK_REPO/docs/prompt-changelog.md
+Resolve the source checkout from the current workspace or an explicit path;
+never assume a personal checkout location. Verify it by checking for both
+`tools/stark_review.ts` and `global/prompts/` before editing. If the current
+repository is not `stark-skills`, ask for its source checkout path.
+
+```bash
+STARK_REPO="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+test -f "$STARK_REPO/tools/stark_review.ts"
+test -d "$STARK_REPO/global/prompts"
+
+PROMPTS="$STARK_REPO/global/prompts"
+TOOLS="$STARK_REPO/tools"
+CONFIG="$STARK_REPO/global/config.json"
+ORG_CONFIG="$STARK_REPO/org/evinced/config.json"
+CHANGELOG="$STARK_REPO/docs/prompt-changelog.md"
 ```
 
 ```
 PROMPT_ROOT = $PROMPTS/{agent}/                  # e.g., $PROMPTS/claude/
 ORCHESTRATOR = $TOOLS/stark_review.ts
-HISTORY_SUB  = (org/repo/pr structure)
 ```
 
 ## Phase 1: Extract Assessment
 
 ### 1.1 Find the assessment
 
-Look in the **current conversation context** for either:
+Look in the **current conversation context** or the explicit argument for:
 
-- A "Prompt Improvement Assessment" section (from a `/stark-review` run)
+- A "Prompt Improvement Assessment" section (from a `stark-review` run)
 - A `prompt-assessment.md` file path referenced in conversation
+- A receipt whose `history_files` entries identify the relevant run artifacts
 
-If neither exists, check the most recent history directory:
-
-```bash
-# PR code review (recurses per-repo-slug subdirs):
-find $HISTORY -name "*.json" | sort | tail -1
-```
-
-Read `prompt-assessment.md` or `summary.md` from that directory.
-
-If nothing found → error: "No prompt improvement assessment found. Run the relevant review skill first."
+Do not crawl a hardcoded home/history directory or select “latest” by filename;
+that can pick another repo or review. If no assessment or receipt path is in
+context, ask the user for one and stop.
 
 ### 1.2 Parse into action items
 
@@ -86,7 +95,9 @@ Present the action items as a numbered list with proposed changes. Ask: "Proceed
 
 ## Phase 2: Apply Changes
 
-For each approved action item, in order:
+For each approved action item, in order. Maintain `EDITED_PATHS` as the
+deduplicated list of repo-relative files this run actually changed; it is the
+only staging allowlist in Phase 5.
 
 ### 2a. Prompt edits (`$PROMPT_ROOT/{agent}/*.md`)
 
@@ -119,9 +130,11 @@ Read the relevant function. Apply the targeted fix:
 
 | Issue                            | Where                           | Fix                                          |
 | -------------------------------- | ------------------------------- | -------------------------------------------- |
-| Agent doesn't receive `base` ref | `_run_subagent()`               | Inject `{base}` into the prompt string       |
-| No file exclusion filtering      | `_run_subagent()` or new helper | Filter diff output before passing to agents  |
-| Missing post-processing (dedup)  | After `_parse_findings()`       | Add cross-agent dedup by file+line proximity |
+| Agent doesn't receive the base ref | `resolvePromptSources()` / `renderReviewPrompt()` | Carry `baseRef` through the rendered assignment |
+| Dispatch context is wrong          | `runReviewPass()` assignment construction         | Fix the trusted prompt sources or PR payload before `dispatchDomains()` |
+| Finding classification is wrong    | `runClassifier()` / `applySeverityOverrides()`    | Correct classification or severity handling with tests |
+| Posting shape is wrong             | `partitionInlineVsBody()` / `buildReviewBody()` / `postReview()` | Fix the smallest current posting seam |
+| Fix-loop behavior is wrong         | `runFixer()` / `stageFiles()` / `runTrustedTest()` / `pushBranch()` | Preserve explicit-path staging and authorization gates |
 
 **Rules for orchestrator edits:**
 
@@ -143,7 +156,7 @@ Add new fields with safe defaults:
 **Rules for config edits:**
 
 - New fields MUST have empty/null defaults (backward compatible).
-- Document the field inline or in README.
+- Document the field in the relevant config schema or repository documentation.
 - If adding to org config, check that global config schema supports the field.
 
 ## Phase 3: Validate
@@ -151,7 +164,9 @@ Add new fields with safe defaults:
 After all edits:
 
 1. **Syntax check prompts** — ensure no broken markdown, no missing sections
-2. **TS type-check** — if orchestrator was edited: `node --experimental-strip-types --check "$ORCHESTRATOR"`
+2. **TS syntax + focused tests** — if the orchestrator was edited, run
+   `node --experimental-strip-types --check "$ORCHESTRATOR"` and the
+   `tools/stark_review*.test.ts` tests covering the touched seam
 3. **JSON validity** — if config was edited: `node -e "JSON.parse(require('fs').readFileSync('$CONFIG','utf8'))"`
 4. **Diff review** — show `git diff` in `$STARK_REPO` to the user for confirmation
 
@@ -181,32 +196,39 @@ Create or append to `$CHANGELOG`:
 - [ ] Config valid JSON
 ```
 
-### 4b. Copy assessment to history
+### 4b. Preserve the assessment only when requested
 
-If the assessment came from conversation context (not already saved):
+Do not infer or write to a host-specific history root. The current TS tool owns
+its review-history layout and exposes written paths through the receipt's
+`history_files`. If the user explicitly asks to preserve a conversation-only
+assessment, ask for the destination or use a destination they already supplied.
 
-```bash
-cp assessment → $HISTORY/{org}/{repo}/{pr}/prompt-assessment.md
-```
+## Phase 5: Optional commit
 
-## Phase 5: Commit
+Show the complete diff first. Commit only when the user supplied `--commit` or
+otherwise explicitly approved committing after seeing that diff. Stage only
+the files recorded in the change ledger; never stage unrelated workspace
+changes.
 
 ```bash
 cd $STARK_REPO
-git add -A
+git add -- "${EDITED_PATHS[@]}" docs/prompt-changelog.md
+git diff --cached --name-only
 git commit -m "improve: {1-line summary of changes}
 
 Source: {repo}#PR{number}
 Changes: {count} prompt edits, {count} orchestrator edits, {count} config edits"
 ```
 
-Do NOT push unless the user explicitly asks.
+Do NOT push unless the user separately and explicitly asks.
 
 ## Important Constraints
 
 - **Never rewrite an entire prompt file.** Targeted edits only.
-- **Never remove existing instructions.** Add constraints, don't delete capabilities.
+- **Do not remove unrelated instructions.** Replace an obsolete or conflicting
+  instruction only when the assessment identifies it as the defect.
 - **Backward compatible.** New config fields must have defaults. Prompt changes must not break existing output format.
 - **One concern per edit.** Don't bundle unrelated improvements in a single file change.
 - **Show diffs before committing.** The user reviews the changes.
-- **agent.md is the scoping file.** For PR reviews: diff scope instructions go there. For spec/plan reviews: document-level scoping (e.g., "calibrate to stated scope") goes there. Domain prompts handle domain-specific review criteria in both cases.
+- **agent.md is the PR-scoping file.** Diff-scope instructions go there; domain
+  prompts hold domain-specific review criteria.

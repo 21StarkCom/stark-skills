@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Cross-runtime skill contract tests now cover the complete 27-skill inventory,
+  enforce Codex's description limit, reject host-only argument placeholders,
+  and verify referenced per-skill support scripts. GitHub Actions cost probes
+  use a tested, dependency-free Node JSON summarizer.
+
+### Changed
+- All canonical skills and `stark-gh` commands now read invocation input from
+  the active request, resolve installed assets through portable runtime roots,
+  and keep executable shell blocks self-contained. Help text documents Claude
+  and Codex explicit invocation without baking either syntax into shared prose.
+- IaC reviews preview the exact file/provider set before any dispatch. Sending
+  file contents, including `.tfvars`, running source-evaluating scanners, and
+  posting to GitHub each require their own explicit authorization.
+- Per-skill support files use standard `references/`, `scripts/`, and `assets/`
+  locations. Session defaults include both `AGENTS.md` and `CLAUDE.md` alongside
+  `docs/`.
+
+### Fixed
+- Build, copilot, review, refactor, story-judge, persona, jury, handover,
+  release, housekeeping, and documentation flows no longer assume Claude-only
+  tools, models, argument expansion, persistent shell variables, or a personal
+  source checkout when installed under Codex.
+- `stark-gh-user` defers Keychain lookup to the user's shell and never prints a
+  PAT through agent-visible output. GitHub command pipelines now fail fast while
+  preserving the original stage status and merge-restore behavior.
+- GitHub Actions job estimates round per job and apply runner-OS multipliers;
+  the billing helpers no longer require Python.
+
 ### Changed
 - models: the default Claude model is now **`claude-opus-5[1m]`** (Opus 5, 1M context) everywhere it was `claude-opus-4-8` — `models.claude.model_id`, the review-doc wing/fixer, copilot/agent_claude/claude_utils dispatch defaults, `red_team.verify.model`, `red_team.fold.model`, the skill-description optimizer, the automation-fleet model, and the sentinel preflight probe. `global/config.json` gains matching `model_rates` ($5/$25 per MTok) and `model_limits` (1M context, 64K max output — read off a live `claude -p --output-format json` run) entries for both `claude-opus-5[1m]` and `claude-opus-5`; the `claude-opus-4-8` rate entry stays so historical run costs still resolve. Red-team provider labels emit `anthropic-claude-opus-5`, with the old label kept in the legacy classification allowlist so already-annotated artifacts don't fail the gate. `--fable` still runs the doc-review lead on `claude-fable-5`.
 

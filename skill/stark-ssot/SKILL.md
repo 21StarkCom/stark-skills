@@ -17,7 +17,7 @@ model: opus[1m]
 
 ## Help
 
-If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+If the current request asks for help (a standalone `--help`, `-h`, or `help` token),
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop — do not run preflight or any phase.
 
@@ -30,8 +30,8 @@ usage, and arguments, then stop — do not run preflight or any phase.
 > telemetry showed it produced **18 of the fleet's 28 review-noise labels (45%
 > noise among its classified findings)** while its 22 real fixes all shared one
 > shape: a nameable existing owner. The doc-review loops were demolished on
-> 2026-07-26 — authoring runs through `/stark-author`, implementation through
-> `/stark-build`.
+> 2026-07-26 — authoring runs through `stark-author`, implementation through
+> `stark-build`.
 > **This skill is the consolidation workflow** — the actual "give it one owner
 > and route the copies through it" refactor. Use it to fix what review (or
 > you) found.
@@ -130,10 +130,10 @@ sentence is the deliverable, not silence.
 ## Relationship to debugging
 
 If you hit this duplication while chasing a concrete failure, prove the
-mechanism first with `superpowers:systematic-debugging` — don't consolidate on a
-hunch. Once the proven cause **is** scattered truth, use this skill to give it
-one owner, then go back and verify the fix against the original symptom. Keep
-that failing case as a regression test at the call site.
+mechanism first with the host's normal debugging workflow — don't consolidate
+on a hunch. Once the proven cause **is** scattered truth, use this skill to give
+it one owner, then go back and verify the fix against the original symptom.
+Keep that failing case as a regression test at the call site.
 
 ## Workflow
 
@@ -214,6 +214,12 @@ and hold test fixtures that intentionally duplicate a value for readability
 
 ## Reviewing someone else's diff
 
+A request to review, audit, identify, or explain SSOT problems is **read-only**:
+report evidence and recommended ownership, but do not edit files, post review
+comments, commit, or push. Consolidate code only when the user explicitly asks
+to implement/fix the findings. Post to a PR only when the user explicitly asks
+for posting; a PR number or link alone is context, not posting consent.
+
 **The evidence bar (non-negotiable — this is what separated the lens's 22 real
 fixes from its 18 noise findings):** an SSOT finding must name **BOTH sides** —
 the new copy (file:line, quoted span from the diff) and the **existing owner**
@@ -233,10 +239,11 @@ With both sides named, flag the change if **any** is true:
 - a UI re-derives a business rule instead of formatting the owner's value
 
 Each finding also carries the concrete drift scenario: *"when <owner> changes
-X, <copy> silently keeps Y"* — the failure, not the aesthetic. Post it on the
-PR (inline where anchored) — don't fold it into a vague recap. If a duplication
-is deliberate, the diff should already say why and how drift is prevented; if
-it doesn't, **that** is the finding.
+X, <copy> silently keeps Y"* — the failure, not the aesthetic. Report it inline
+where anchored when the host supports local review annotations. Post it to the
+PR only with explicit posting consent; otherwise keep it in the response. If a
+duplication is deliberate, the diff should already say why and how drift is
+prevented; if it doesn't, **that** is the finding.
 
 ## Final answer shape
 
