@@ -10,9 +10,8 @@
  *
  * Reuses the proven dispatch primitives from copilot_dispatch.ts (subprocess
  * runner, isolated env, gemini-home + Vertex/API-key fallback, output parsers),
- * the same way plan_dispatch.ts does. Agent sandboxes are read-only and the
- * dispatcher never writes the target. Host scanners are opt-in because tools
- * labelled "validate" can still load repository/provider/plugin code.
+ * the same way plan_dispatch.ts does. Read-only: the dispatcher runs only
+ * read-only scanners and read-only agent sandboxes; it never mutates the target.
  */
 import { readFile } from "node:fs/promises";
 import {
@@ -101,11 +100,7 @@ export interface RunIacReviewOpts {
   agents?: string[] | null; // CLI override
   changed?: boolean;
   noTools?: boolean;
-  /** Explicitly acknowledge sending selected source text to external model CLIs. */
-  allowAgentDispatch?: boolean;
-  /** Include .tfvars files, which are excluded by default because they may hold secrets. */
-  includeTfvars?: boolean;
-  /** Vouch for the source so installed scanners/provider tools may run. */
+  /** Vouch for the source so HCL-evaluating scanners (terragrunt) may run. */
   trustSource?: boolean;
   minSeverity?: Severity;
   pr?: number | null;
@@ -135,8 +130,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 /** File globs per kind. Terragrunt is HCL-centric; Terraform is .tf-centric. */
-const TERRAFORM_RE = /\.tf$|\.tftest\.hcl$/;
-const TERRAFORM_WITH_TFVARS_RE = /\.(tf|tfvars)$|\.tftest\.hcl$/;
+const TERRAFORM_RE = /\.(tf|tfvars)$|\.tftest\.hcl$/;
 
 function isLikelyTerragruntFile(rel: string): boolean {
   // Terragrunt live/catalog repos use many named .hcl files (account/region/env,
@@ -252,7 +246,6 @@ export function collectFiles(
   changed: boolean,
   maxFiles: number,
   maxBytes: number,
-  includeTfvars: boolean = false,
 ): CollectedFile[] {
   const absTarget = path.resolve(target);
   const isDir = existsSync(absTarget) && statSync(absTarget).isDirectory();
@@ -276,7 +269,7 @@ export function collectFiles(
 
   const matcher =
     kind === "terraform"
-      ? (rel: string) => (includeTfvars ? TERRAFORM_WITH_TFVARS_RE : TERRAFORM_RE).test(rel)
+      ? (rel: string) => TERRAFORM_RE.test(rel)
       : (rel: string) => isLikelyTerragruntFile(rel);
 
   const out: CollectedFile[] = [];
@@ -360,10 +353,8 @@ function have(cmd: string): boolean {
 }
 
 /**
- * Run whichever scanners are installed after the operator has trusted the
- * source; capture their output as evidence for the agents. Even nominally
- * read-only commands can load repository configuration, provider binaries, or
- * plugins, so untrusted source skips the entire scanner layer. Never throws.
+ * Run whichever read-only scanners are installed; capture their output as
+ * evidence for the agents. Never throws; never mutates. Returns
  * { report, ran[] }.
  */
 export function runScanners(
@@ -374,15 +365,6 @@ export function runScanners(
   const ran: string[] = [];
   const skipped: string[] = [];
   const blocks: string[] = [];
-
-  if (!trustSource) {
-    return {
-      report: "",
-      ran,
-      skipped: ["all host scanners (source not trusted — pass --trust-source)"],
-    };
-  }
-
   const tf = have("terraform") ? "terraform" : have("tofu") ? "tofu" : null;
 
   const add = (label: string, res: { ok: boolean; out: string }) => {
@@ -391,6 +373,7 @@ export function runScanners(
     blocks.push(`### ${label}\n\n\`\`\`\n${out || "(no output)"}\n\`\`\``);
   };
 
+  // Static, side-effect-free scanners — safe on untrusted source.
   if (kind === "terraform" && tf) {
     add(`${tf} fmt -check`, spawnText(tf, ["fmt", "-check", "-recursive"], dir));
     add(`${tf} validate`, spawnText(tf, ["validate", "-no-color"], dir));
@@ -399,12 +382,19 @@ export function runScanners(
   if (have("trivy")) add("trivy config", spawnText("trivy", ["config", "--quiet", "."], dir));
   if (have("checkov")) add("checkov", spawnText("checkov", ["-d", ".", "--compact", "--quiet"], dir));
 
+  // Terragrunt config parsing can evaluate HCL functions (e.g. `run_cmd`),
+  // so these EXECUTE the reviewed source. Only run them when the operator
+  // vouches for the source via --trust-source (sec-001).
   if (kind === "terragrunt" && have("terragrunt")) {
-    add("terragrunt hcl validate", spawnText("terragrunt", ["hcl", "validate"], dir));
-    add(
-      "terragrunt find --dag --dependencies",
-      spawnText("terragrunt", ["find", "--dag", "--dependencies"], dir),
-    );
+    if (trustSource) {
+      add("terragrunt hcl validate", spawnText("terragrunt", ["hcl", "validate"], dir));
+      add(
+        "terragrunt find --dag --dependencies",
+        spawnText("terragrunt", ["find", "--dag", "--dependencies"], dir),
+      );
+    } else {
+      skipped.push("terragrunt hcl validate / find (HCL exec — pass --trust-source)");
+    }
   }
 
   return { report: blocks.join("\n\n"), ran, skipped };
@@ -470,10 +460,10 @@ function buildClaudeCmd(): { cmd: string; args: string[] } {
     args: ["-p", "-", "--output-format", "text", "--model", resolveModel("claude"), "--no-session-persistence"],
   };
 }
-export function buildCodexCmd(): { cmd: string; args: string[] } {
+function buildCodexCmd(): { cmd: string; args: string[] } {
   return {
     cmd: "codex",
-    args: ["exec", "--skip-git-repo-check", "-m", resolveModel("codex"), "-c", CODEX_REASONING_EFFORT, "--ephemeral", "--json", "-s", "read-only", "-"],
+    args: ["exec", "-m", resolveModel("codex"), "-c", CODEX_REASONING_EFFORT, "--ephemeral", "--json", "-s", "read-only", "-"],
   };
 }
 
@@ -750,21 +740,14 @@ export async function runIacReview(opts: RunIacReviewOpts): Promise<IacReviewRec
   const maxBytes = cfg.max_bytes_per_file ?? 100_000;
   const timeoutSec = opts.timeoutSec ?? cfg.timeout_sec ?? 600;
 
-  const files = collectFiles(
-    opts.kind,
-    opts.target,
-    !!opts.changed,
-    maxFiles,
-    maxBytes,
-    !!opts.includeTfvars,
-  );
+  const files = collectFiles(opts.kind, opts.target, !!opts.changed, maxFiles, maxBytes);
   const absTarget = path.resolve(opts.target);
   const dir = existsSync(absTarget) && statSync(absTarget).isDirectory() ? absTarget : path.dirname(absTarget);
 
   let scannerReport = "";
   let scannersRan: string[] = [];
   let scannersSkipped: string[] = [];
-  if (!opts.dryRun && !opts.noTools && files.length > 0) {
+  if (!opts.noTools && files.length > 0) {
     const s = runScanners(opts.kind, dir, !!opts.trustSource);
     scannerReport = s.report;
     scannersRan = s.ran;
@@ -798,12 +781,6 @@ export async function runIacReview(opts: RunIacReviewOpts): Promise<IacReviewRec
   if (files.length === 0) {
     log(`no ${opts.kind} files found under ${opts.target}`);
     return receipt;
-  }
-  if (!opts.allowAgentDispatch) {
-    throw new Error(
-      "refusing to send source files to model CLIs without --allow-agent-dispatch; " +
-        "run --dry-run first, review the selected files/agents, then opt in explicitly",
-    );
   }
 
   const rubric = await loadRubric(opts.kind);

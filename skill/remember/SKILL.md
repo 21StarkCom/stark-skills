@@ -6,7 +6,7 @@ description: >-
   MCP (or the brain CLI as fallback). Use whenever the user EXPLICITLY asks to
   remember, save, persist, capture, or "write back" something to the second
   brain / memory / vault — phrasings like "remember that…", "save this to my
-  brain", "add this to memory", or "note this down for later". Routes
+  brain", "add this to memory", "/remember …", "note this down for later". Routes
   one-line facts to append_to_memory and structured knowledge (a project, repo,
   tool, person, cloud resource) to upsert_note, validates + secret-scans, then
   commits and merges the capture to main. Companion to the brain MCP. (Triggers
@@ -15,7 +15,7 @@ description: >-
 
 ## Help
 
-If the current user request includes a standalone `--help`, `-h`, or `help` token,
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop — do not run preflight or any phase.
 
@@ -71,18 +71,15 @@ never the value.
 
 ## 4. Write it
 
-**Use the MCP tools only when the current host actually exposes the brain
-server's tools.** Tool availability is runtime/session state; never infer it from
-this skill text. When available, use:
+**Prefer the MCP tools when the brain server is connected** (this session has it):
 
 - `mcp__brain__append_to_memory` — args: `category`, `content`, optional `source`
   (attribution, e.g. a Slack channel + date, or "Aryeh, 2026-06-30").
 - `mcp__brain__upsert_note` — args: `type`, `slug`, `fields` (frontmatter map),
   `sections` (heading → body map).
 
-**Fallback — brain CLI.** Use this whenever those MCP tools are absent. Always
-set and pass the vault in the same shell call; shell variables do not persist
-between calls:
+**Fallback — brain CLI** (works in any session, even without the MCP). Always
+pass the vault explicitly:
 
 ```bash
 VAULT=/Users/aryeh/Code/Vaults/main-vault
@@ -99,7 +96,6 @@ After the write, both checks must pass (secret scan fails closed — treat any
 error as a finding, never "clean"):
 
 ```bash
-VAULT=/Users/aryeh/Code/Vaults/main-vault
 brain --vault "$VAULT" validate && brain --vault "$VAULT" secrets scan
 ```
 
@@ -109,7 +105,6 @@ directly (workspace HARD RULE: branch + PR for everything). The vault repo is
 capture from one session into a single branch/PR — don't open one PR per fact.
 
 ```bash
-VAULT=/Users/aryeh/Code/Vaults/main-vault
 cd "$VAULT"
 git checkout -b memory/<short-slug>                       # e.g. memory/2026-07-07-notarization
 git add -A
@@ -121,13 +116,8 @@ gh pr merge --squash --delete-branch                      # merges to main (imme
 git checkout main && git pull --ff-only
 ```
 
-For an optional diff sanity check before committing, use another self-contained
-call:
-
-```bash
-VAULT=/Users/aryeh/Code/Vaults/main-vault
-brain --vault "$VAULT" git summary
-```
+`brain --vault "$VAULT" git summary` shows the staged changes + a suggested
+message if you want to sanity-check the diff before committing.
 
 Then **report what changed** — the note path(s), a one-line summary, and the
 merged PR — and stop.

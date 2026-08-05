@@ -12,7 +12,7 @@ revision_date: 2026-05-18T18:34:12Z
 
 ## Help
 
-If the current user request includes a standalone `--help`, `-h`, or `help` token,
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop — do not run preflight or any phase.
 
@@ -23,7 +23,7 @@ Toggle the GitHub user identity used by `gh` so rate-limited GraphQL/REST traffi
 - **primary** → `aryeh-stark` — **THE identity.** Matches `gh`'s own keyring login. Everything authors as this unless Aryeh says otherwise.
 - **secondary** → a relief account, provisioned deliberately (`aryeh-evinced` and `aryeh-admin` both still exist and either can serve).
 
-**This skill is human-only, by design.** `disable-model-invocation: true` in the frontmatter means no model can select it — a swap happens only because Aryeh explicitly invoked `stark-gh-user`, never because an agent decided to. Nothing in the repo calls `tools/user_token.ts` automatically, and nothing should: a token left in `GH_TOKEN` re-authors every later `gh` call in that shell. When you're done with a relief window, revert (see Reverting below).
+**This skill is human-only, by design.** `disable-model-invocation: true` in the frontmatter means no model can select it — a swap happens because Aryeh typed `/stark-gh-user`, never because an agent decided to. Nothing in the repo calls `tools/user_token.ts` automatically, and nothing should: a token left in `GH_TOKEN` re-authors every later `gh` call in that shell. When you're done with a relief window, revert (see Reverting below).
 
 Bot calls (App installation tokens minted by `tools/github_app.ts`) are unaffected — they get their own pool per app, and their only sanctioned use is posting multi-LLM review findings.
 
@@ -35,25 +35,20 @@ security add-generic-password -U -s stark-gh-token -a primary-fine -w   # paste 
 
 ## Arguments
 
-- no input or `show` — show active user + remaining rate limits
-- `primary` — print export lines for the primary identity
-- `secondary` — print export lines for the secondary identity
-- `swap` — flip whichever is currently active
-- `limits` — show rate limits for both identities side-by-side
+**Raw input:** `$ARGUMENTS`
+
+- `/stark-gh-user` or `/stark-gh-user show` — show active user + remaining rate limits
+- `/stark-gh-user primary` — print export lines for the primary identity
+- `/stark-gh-user secondary` — print export lines for the secondary identity
+- `/stark-gh-user swap` — flip whichever is currently active
+- `/stark-gh-user limits` — show rate limits for both identities side-by-side
 - `--kind fine|classic|auto` — token kind (default: auto = fine-grained, fall back to classic)
 
-Read the subcommand and flags from the current user's explicit invocation. Do
-not depend on a host-populated argument placeholder.
-
-The activation modes do not mutate the user's shell. They emit deferred `export
-…` lines that resolve the token from Keychain only when the user evaluates them
-in their own shell. The handler must never print a PAT value into agent output.
+The token-printing modes do not mutate the user's shell. They emit `export …` lines the user is expected to wrap in `eval "$(…)"` to apply.
 
 ## Resolver
 
-The single source of truth is the bundle's `tools/user_token.ts`; the supporting
-`scripts/handler.sh` resolves that tool from the active runtime's asset root. It
-reads from macOS Keychain entries:
+The single source of truth is `tools/user_token.ts` (installed at `${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/user_token.ts`). It reads from macOS Keychain entries:
 
 - `stark-gh-token / primary-fine`
 - `stark-gh-token / primary-classic`
@@ -64,9 +59,9 @@ reads from macOS Keychain entries:
 
 ## Behavior
 
-Resolve `scripts/handler.sh` relative to this `SKILL.md` and pass it the
-subcommand and optional `--kind` flag as ordinary shell arguments. The handler
-parses `"$@"` without word-splitting. Default subcommand: `show`.
+Resolve the script path (worktree-relative `tools/user_token.ts`, falling back to `${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/user_token.ts`).
+
+Parse `$ARGUMENTS` into a subcommand and optional `--kind` flag. Default subcommand: `show`.
 
 ### `show`
 
@@ -78,31 +73,17 @@ parses `"$@"` without word-splitting. Default subcommand: `show`.
 ### `primary` / `secondary`
 
 1. Resolve token via `node --experimental-strip-types --no-warnings <script> --user <name> --kind <kind>`.
-2. Validate that the requested Keychain entry exists, discarding the resolved
-   value rather than printing it.
-3. Print one guarded deferred export block (no markdown or commentary), so the
-   user can `eval` it without the PAT passing through the conversation. Identity
-   markers are exported only after the deferred Keychain read succeeds:
+2. Print three lines exactly (no markdown, no commentary), so the user can `eval` them:
    ```
-   if GH_TOKEN="$(node .../user_token.ts --user <name> --kind <kind>)"; then
-     export GH_TOKEN
-     export GITHUB_TOKEN="$GH_TOKEN"
-     export STARK_GH_USER=<name>
-     export STARK_GH_TOKEN_KIND=<kind>
-   else
-     unset GH_TOKEN GITHUB_TOKEN
-     false
-   fi
+   export STARK_GH_USER=<name>
+   export GH_TOKEN=<token>
+   export GITHUB_TOKEN=<token>
    ```
-4. Do not add host-specific invocation hints to the export block. Tell the user
-   separately to evaluate the returned lines in the shell they want to change.
+3. After the block, print a one-line hint: `# eval "$(claude /stark-gh-user <name>)" to apply` — but only if the user invoked via Claude Code where slash output is not auto-evaluated. If you can't tell, omit the hint.
 
 ### `swap`
 
-Reject `$STARK_GH_USER` unless it is exactly `primary` or `secondary`. Resolve
-the opposite identity, validate its Keychain
-entry without printing it, emit the same guarded deferred export block, then a `#`
-comment indicating the direction of the swap.
+Run `node --experimental-strip-types --no-warnings <script> --swap` (forwarding `--kind` if provided). Pass through stdout verbatim. The script already emits the three export lines plus a `#` comment indicating the direction of the swap.
 
 ### `limits`
 
@@ -124,12 +105,9 @@ If a keychain entry is missing, render `MISSING` in place of the numbers and con
 
 ## Output rules
 
-- For `primary` / `secondary` / `swap`: print **only** deferred export lines
-  (and the trailing `#` comment if any). Never interpolate the token value into
-  stdout or stderr. The user is going to `eval "$(…)"` in a terminal.
+- For `primary` / `secondary` / `swap`: print **only** the export lines (and the trailing `#` comment if any). No prose. The user is going to `eval "$(…)"`.
 - For `show` / `limits`: human-readable, single short paragraph or a compact table. No emoji unless the user asked for it.
-- Never echo or truncate a token value in any mode. Refer only to the Keychain
-  account name.
+- Never echo the token value in `show` / `limits` output. Truncate to first 12 chars + `…` if you must reference it.
 
 ## Failure modes
 
@@ -151,25 +129,86 @@ gh api user --jq .login                     # confirm: expect aryeh-stark
 
 **Why it matters:** that blanket override is the whole mechanism *and* the whole hazard. A `secondary` token left in `GH_TOKEN` silently authors every later PR, comment, review-reply and merge in that shell as the relief account — with nothing in the output saying so. The rule is that Aryeh's GitHub activity reads as `aryeh-stark`; a forgotten `eval` breaks it quietly. So: swap for the rate-limited command, revert immediately after, and confirm the login rather than assuming.
 
-A swap is scoped to the one shell that `eval`'d it — it does not follow into
-other terminals or other agent sessions. It DOES follow into subprocesses that
-shell spawns.
+A swap is scoped to the one shell that `eval`'d it — it does not follow into other terminals or other Claude Code sessions. It DOES follow into subprocesses that shell spawns.
 
 ## How It Works
 
-Resolve `SKILL_DIR` to the directory containing this `SKILL.md`. Run the shipped
-handler with `bash`, passing the invocation input as real arguments. Set the
-asset root in the same call so both source checkouts and installed bundles can
-locate `user_token.ts`:
+Run `~/.claude/skills/stark-gh-user/handler.sh` with the subcommand as an argument. The handler resolves the script path, parses arguments, and delegates to `user_token.ts` or runs `gh api` calls.
 
 ```bash
-SKILL_DIR=/absolute/path/to/stark-gh-user
-ASSET_ROOT="${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}}"
-STARK_ASSET_ROOT="$ASSET_ROOT" \
-  bash "$SKILL_DIR/scripts/handler.sh" show
-```
+#!/bin/bash
+set -euo pipefail
 
-Replace `show` with the requested subcommand and pass `--kind` as two quoted
-arguments, for example `secondary --kind classic`. For an activation mode,
-the user applies the result in their terminal with `eval "$(...)"`; never eval it
-inside an unrelated agent subprocess.
+# Resolve script path: worktree-relative or global fallback
+SCRIPT=""
+if [[ -f "tools/user_token.ts" ]]; then
+  SCRIPT="tools/user_token.ts"
+elif [[ -f "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/user_token.ts" ]]; then
+  SCRIPT="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/user_token.ts"
+else
+  echo "Error: user_token.ts not found" >&2
+  exit 1
+fi
+
+run_token() { node --experimental-strip-types --no-warnings "$SCRIPT" "$@"; }
+
+# Parse arguments: extract subcommand and --kind flag
+SUBCOMMAND="show"
+KIND=""
+for arg in $ARGUMENTS; do
+  if [[ "$arg" == "--kind" ]]; then
+    # Next arg is the kind value, handled below
+    continue
+  elif [[ "$arg" == fine || "$arg" == classic || "$arg" == auto ]]; then
+    # Preceding arg was --kind, this is the value
+    KIND="--kind $arg"
+  elif [[ "$arg" == show || "$arg" == primary || "$arg" == secondary || "$arg" == swap || "$arg" == limits ]]; then
+    SUBCOMMAND="$arg"
+  fi
+done
+
+# Execute subcommand
+case "$SUBCOMMAND" in
+  primary|secondary)
+    # Print export lines for eval
+    run_token --user "$SUBCOMMAND" $KIND
+    ;;
+  swap)
+    # Print export + direction comment
+    run_token --swap $KIND
+    ;;
+  show)
+    # Show active user + rate limits
+    ACTIVE_USER="${STARK_GH_USER:-primary}"
+    TOKEN=$(run_token --user "$ACTIVE_USER" 2>/dev/null) || {
+      echo "Error: No token for '$ACTIVE_USER'. Add it to keychain: security add-generic-password -U -s stark-gh-token -a $ACTIVE_USER-fine -w '<token>'" >&2
+      exit 1
+    }
+    LOGIN=$(GH_TOKEN="$TOKEN" gh api user --jq .login 2>/dev/null) || LOGIN="(unknown)"
+    LIMITS=$(GH_TOKEN="$TOKEN" gh api rate_limit --jq '.resources | "\(.core.remaining)/\(.core.limit) core, \(.graphql.remaining)/\(.graphql.limit) graphql"' 2>/dev/null) || LIMITS="(unable to fetch)"
+    echo "Active: $ACTIVE_USER ($LOGIN) — $LIMITS"
+    ;;
+  limits)
+    # Show both identities side-by-side
+    echo "identity   core         graphql      login"
+    for user in primary secondary; do
+      TOKEN=$(run_token --user "$user" 2>/dev/null) || {
+        echo "$user      MISSING      MISSING      MISSING"
+        continue
+      }
+      LIMITS=$(GH_TOKEN="$TOKEN" gh api rate_limit --jq '.resources | "\(.core.remaining)/\(.core.limit),\(.graphql.remaining)/\(.graphql.limit)"' 2>/dev/null) || {
+        echo "$user      MISSING      MISSING      MISSING"
+        continue
+      }
+      CORE=$(echo "$LIMITS" | cut -d, -f1)
+      GRAPHQL=$(echo "$LIMITS" | cut -d, -f2)
+      LOGIN=$(GH_TOKEN="$TOKEN" gh api user --jq .login 2>/dev/null) || LOGIN="(unknown)"
+      printf "%-10s %-12s %-12s %s\n" "$user" "$CORE" "$GRAPHQL" "$LOGIN"
+    done
+    ;;
+  *)
+    echo "Error: unknown subcommand '$SUBCOMMAND'" >&2
+    exit 1
+    ;;
+esac
+```

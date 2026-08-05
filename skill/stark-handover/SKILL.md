@@ -2,8 +2,8 @@
 name: stark-handover
 disable-model-invocation: true
 description: >-
-  Use when pausing or splitting work across sessions — before clearing context,
-  when context runs low, at end of day, when switching tasks — or when resuming.
+  Use when pausing or splitting work across sessions — before /clear, when
+  context runs low, end of day, switching tasks — or when resuming after one.
   Triggers: "handover", "handoff", "save context", "save progress", "resume",
   "continue where we left off", "what was I doing". Persists a numbered
   handover chain + PROGRESS.md tracker per task; resume needs no recap.
@@ -12,13 +12,13 @@ argument-hint: "[save|resume|status] [--task slug]"
 
 ## Help
 
-If the current user request includes a standalone `--help`, `-h`, or `help` token,
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop — do not run preflight or any phase.
 
 # stark-handover
 
-Cross-session continuity. Every **save** appends `handover_{N}.md`
+Cross-`/clear` session continuity. Every **save** appends `handover_{N}.md`
 (numbered chain) and rewrites `PROGRESS.md` (done-vs-todo tracker) under
 `{root}/{project}/{worktree}/{task}/`; **resume** loads both in one call so a
 fresh session continues without a recap. Root default: `~/Code/Handovers`
@@ -27,20 +27,23 @@ fresh session continues without a recap. Root default: `~/Code/Handovers`
 The CLI owns paths/numbering/writes; **you** author the content — the value
 of a handover is what you mine from the conversation, which only you have.
 
-## Execution rule
+## Constants
 
-Shell state does not persist between tool calls. Every command below resolves
-`TOOLS` and invokes `stark_handover.ts` in the same shell call; do not create a
-function or command variable and expect a later call to inherit it.
+```bash
+TOOLS="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools"
+# A function, not a string var: zsh does NOT word-split `$VAR`, so a
+# multi-word command stuffed in a variable is run as one bogus command name.
+# Define this in the SAME Bash call that uses it (shells don't persist across calls).
+handover() { node --experimental-strip-types --no-warnings "$TOOLS/stark_handover.ts" "$@"; }
+```
 
 ## Arguments
 
-- no input or `save` — save a handover (default)
-- `resume` — resume the latest task; add `--task <slug>` to select one
-- `status` — list this project/worktree's tasks
+- `/stark-handover` or `/stark-handover save` — save a handover (default)
+- `/stark-handover resume` — resume the latest (or `--task <slug>`) task
+- `/stark-handover status` — list this project/worktree's tasks
 
-Read the mode and flags from the current user's explicit invocation. Do not
-depend on a host-populated argument placeholder.
+**Raw input:** `$ARGUMENTS`
 
 ## Guards
 
@@ -57,9 +60,7 @@ depend on a host-populated argument placeholder.
 ### Phase 1 — Resolve storage context
 
 ```bash
-TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
-node --experimental-strip-types --no-warnings \
-  "$TOOLS/stark_handover.ts" resolve            # add: --task "<slug>"
+handover resolve            # or: resolve --task "<slug>"
 ```
 
 Pick the task slug, in order: `--task` from arguments → the `task` field from
@@ -102,12 +103,9 @@ Write both to temp files, following the templates **exactly**
   in the chain.
 
 ```bash
-TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
 HB=$(mktemp -t stark-handover-body) && PB=$(mktemp -t stark-handover-progress)
 # Write handover body to $HB and progress to $PB, then:
-node --experimental-strip-types --no-warnings \
-  "$TOOLS/stark_handover.ts" save --task "<slug>" \
-  --handover-file "$HB" --progress-file "$PB"
+handover save --task "<slug>" --handover-file "$HB" --progress-file "$PB"
 ```
 
 ### Phase 4 — Report + the loop prompt
@@ -118,8 +116,8 @@ reporting if thin. Then tell the user:
 
 - Saved `handover_{N}.md` (+ chain length) and `PROGRESS.md` + paths
 - Done/remaining counts from the tracker
-- The loop: **"Start a fresh or cleared session, then explicitly invoke
-  `stark-handover` with `resume` — I'll pick up exactly here."**
+- The loop: **"Run `/clear`, then `/stark-handover resume` — I'll pick up
+  exactly here."**
 
 ---
 
@@ -128,9 +126,7 @@ reporting if thin. Then tell the user:
 ### Phase 1 — Load
 
 ```bash
-TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
-node --experimental-strip-types --no-warnings \
-  "$TOOLS/stark_handover.ts" resume             # add: --task "<slug>"
+handover resume             # or: resume --task "<slug>"
 ```
 
 Exit 2 → nothing to resume: say so, show `handover list`, ask what to
@@ -147,11 +143,9 @@ needed.
 
 ### Phase 3 — Rebuild task list + continue
 
-Recreate the tracker's **Next** items in the current host's task or plan tracker,
-when one is available, preserving order and skipping Done. If the host has no
-task-tracking surface, keep the ordered Next list in working context and update
-it explicitly as items finish. Run the handover's *Verify state* command if one
-is listed. Then start on the first Next item immediately — the whole point is
+Recreate the tracker's **Next** items as session tasks (TaskCreate, in
+order; skip Done). Run the handover's *Verify state* command if one is
+listed. Then start on the first Next item immediately — the whole point is
 zero recap friction. Pause only if the handover's *Open questions* block the
 first step; ask exactly those.
 
@@ -160,14 +154,11 @@ first step; ask exactly those.
 ## Status Mode
 
 ```bash
-TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
-node --experimental-strip-types --no-warnings \
-  "$TOOLS/stark_handover.ts" list               # add --all for every project/worktree
+handover list               # --all for every project/worktree
 ```
 
 Render as a table: task, latest seq, last activity, has tracker. Suggest
-explicitly invoking `stark-handover` with `resume --task <newest>` as the next
-move.
+`/stark-handover resume --task <newest>` as the next move.
 
 ## Failure Modes
 

@@ -11,7 +11,7 @@ revision_date: 2026-05-17T10:33:06Z
 
 ## Help
 
-If the invocation arguments contain a standalone `--help`, `-h`, or `help` token,
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop — do not run preflight or any phase.
 
@@ -27,14 +27,11 @@ Audits and cleans up project state: closes stale issues, deletes merged branches
 | `--repo ORG/REPO` | auto-detect | Override repo detection from git remote |
 | `--aggressive` | off | Also close issues with no activity in 30+ days |
 
-Parse options directly from the user's current request after the explicitly
-invoked skill name.
+**Raw input:** `$ARGUMENTS`
 
 ## Constants
 
-Detect the repo (or use `--repo` override) by parsing `org/repo` from
-`git remote get-url origin`. Resolve bundled tools locally in each shell call;
-do not rely on variables from an earlier call.
+Detect repo (or use `--repo` override): parse `org/repo` from `git remote get-url origin`. The `TOOLS` path (`${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools`) is set locally in Phase 5 where it is used.
 
 ---
 
@@ -43,8 +40,6 @@ do not rely on variables from an earlier call.
 ### 1.1 Fetch all open issues
 
 ```bash
-set -euo pipefail
-ORG_REPO="<resolved-org/repo>"
 unset GH_TOKEN
 gh api "/repos/${ORG_REPO}/issues?state=open&per_page=100&sort=created&direction=asc" \
   --paginate --jq '.[] | {number, title, body, labels: [.labels[].name], updated_at, pull_request}'
@@ -54,15 +49,15 @@ Filter out pull requests (GitHub returns PRs in the issues endpoint). Store as `
 
 ### 1.2 Close phase-tracking parents with all children done
 
-Phase-tracking issues have a body starting with `- [ ] #NNN` or `- [x] #NNN`. For each: extract all referenced issue numbers, check each via `gh api`. If ALL are closed → mark for closing with comment: `Closed by stark-housekeeping — all child tasks are complete.`
+Phase-tracking issues have a body starting with `- [ ] #NNN` or `- [x] #NNN`. For each: extract all referenced issue numbers, check each via `gh api`. If ALL are closed → mark for closing with comment: `Closed by /stark-housekeeping — all child tasks are complete.`
 
 ### 1.3 Close issues referenced by merged PRs
 
-Fetch merged PRs: `gh api "/repos/${ORG_REPO}/pulls?state=closed&per_page=100" --jq '.[] | select(.merged_at != null) | {number, body, merged_at}'`. Extract issue refs (`Closes #N`, `Fixes #N`, `Resolves #N` — case-insensitive). Cross-reference against `OPEN_ISSUES`. Close any that weren't auto-closed with comment: `Closed by stark-housekeeping — referenced by merged PR #{PR_NUM}.`
+Fetch merged PRs: `gh api "/repos/${ORG_REPO}/pulls?state=closed&per_page=100" --jq '.[] | select(.merged_at != null) | {number, body, merged_at}'`. Extract issue refs (`Closes #N`, `Fixes #N`, `Resolves #N` — case-insensitive). Cross-reference against `OPEN_ISSUES`. Close any that weren't auto-closed with comment: `Closed by /stark-housekeeping — referenced by merged PR #{PR_NUM}.`
 
 ### 1.4 Close plan parents where all siblings are done
 
-For each unique `plan:*` label on open issues: fetch ALL issues with that label (open + closed). If all are closed except the current phase-tracking issue → mark for closing with comment: `Closed by stark-housekeeping — all issues in plan:{SLUG} are complete.`
+For each unique `plan:*` label on open issues: fetch ALL issues with that label (open + closed). If all are closed except the current phase-tracking issue → mark for closing with comment: `Closed by /stark-housekeeping — all issues in plan:{SLUG} are complete.`
 
 ### 1.5 Detect duplicates
 
@@ -70,7 +65,7 @@ Group open issues by normalized title (lowercase, strip leading `Phase N —`, s
 
 ### 1.6 Aggressive mode (--aggressive only)
 
-Find issues with no activity in the last 30 days: `gh api "/repos/${ORG_REPO}/issues?state=open&sort=updated&direction=asc&per_page=100" --jq '.[] | select(.updated_at < "<30-days-ago>")'`. Mark for closing with comment: `Closed by stark-housekeeping (aggressive mode) — no activity for 30+ days. Reopen if still relevant.`
+Find issues with no activity in the last 30 days: `gh api "/repos/${ORG_REPO}/issues?state=open&sort=updated&direction=asc&per_page=100" --jq '.[] | select(.updated_at < "<30-days-ago>")'`. Mark for closing with comment: `Closed by /stark-housekeeping (aggressive mode) — no activity for 30+ days. Reopen if still relevant.`
 
 ### 1.7 Present and execute
 
@@ -102,21 +97,18 @@ Get merged PR head refs: `gh api "/repos/${ORG_REPO}/pulls?state=closed&per_page
 
 ### 2.5 Dangling skill symlinks
 
-Check each skill root that exists on this machine — `~/.claude/skills/`,
-`~/.codex/skills/`, `~/.agents/skills/`, and the current repository's
-`.agents/skills/` — for broken symlinks with
-`find <root> -type l ! -exec test -e {} \; -print`. Mark only the explicit
-paths returned by that audit for removal.
+`find ~/.claude/skills/ -type l ! -exec test -e {} \; -print 2>/dev/null` — broken symlinks from deleted/renamed skill directories. Mark for removal.
 
 ### 2.6 Present and execute
 
 Print branch cleanup summary (local, remote, worktrees, symlinks). If `--dry-run` → stop here. Otherwise:
 
-Execute only the exact branches and worktree paths shown in the approved
-preview: use `git branch -d -- <branch>` for a local branch,
-`git push origin --delete <branch>` for a remote branch, and
-`git worktree remove --force -- <validated-path>` for a worktree. Never use a
-broad `/tmp` glob; resolve and validate every cleanup path first.
+```bash
+git branch -d <branch>            # local (safe delete only)
+git push origin --delete <branch> # remote
+git worktree remove <path> --force
+rm -rf /tmp/review-${REPO}-*
+```
 
 Use `-d` (not `-D`) for local branches. If git refuses, the branch isn't fully merged — flag instead of force-delete.
 
@@ -146,25 +138,12 @@ Check open issues with `plan:` labels for missing `sp:*` and `risk:*`. **Report 
 
 ### 4.1 Unreleased commits
 
-Use a self-contained tag count that also handles repositories with no tags:
-
-```bash
-if LAST_TAG="$(git describe --tags --abbrev=0 2>/dev/null)"; then
-  UNRELEASED_COUNT="$(git rev-list "$LAST_TAG"..HEAD --count)"
-else
-  LAST_TAG="(no tags)"
-  UNRELEASED_COUNT="$(git rev-list HEAD --count)"
-fi
-printf '%s commits since %s\n' "$UNRELEASED_COUNT" "$LAST_TAG"
-```
-
-If the count is greater than 50, suggest explicitly invoking the
-`stark-release` skill.
+`LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null)` then `git rev-list ${LAST_TAG}..HEAD --count`. If > 50, suggest `/stark-release`.
 
 ### 4.2 Summary
 
 ```
-stark-housekeeping — {ORG_REPO}
+/stark-housekeeping — {ORG_REPO}
 {'DRY RUN — no changes made' if --dry-run}
 
 Issues closed: {N}  (Phase parents: {n}, PR-referenced: {n}, Plan parents: {n}, Aggressive: {n})
@@ -191,28 +170,10 @@ Unreleased commits: {N} since {last_tag}
 ## Phase 5: Infrastructure Cleanup
 
 ```bash
-set -euo pipefail
-if [ -f "skill/stark-housekeeping/SKILL.md" ] && [ -f "tools/housekeeping_infra.ts" ]; then
-  ASSET_ROOT="$(pwd)"
-else
-  ASSET_ROOT="${STARK_ASSET_ROOT:-${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
-fi
-TOOLS="${ASSET_ROOT:+$ASSET_ROOT/tools}"
-[ -n "$TOOLS" ] && [ -f "$TOOLS/housekeeping_infra.ts" ] || {
-  echo "bundled housekeeping tool not found; skipping infrastructure cleanup" >&2
-  exit 0
-}
-dry_run_args=()
-[ "<dry-run:true-or-false>" = "true" ] && dry_run_args=(--dry-run)
-INFRA_JSON="$(node --experimental-strip-types "$TOOLS/housekeeping_infra.ts" \
-  "${dry_run_args[@]}" --json)"
-printf '%s\n' "$INFRA_JSON"
+TOOLS="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools"
+INFRA_JSON=$(node --experimental-strip-types "$TOOLS/housekeeping_infra.ts" \
+  ${DRY_RUN:+--dry-run} --json)
 ```
-
-Replace the dry-run placeholder from the parsed invocation before running. This
-tool intentionally audits legacy/shared Stark state under `~/.claude`; invoking
-the skill from Codex or another host does not make those paths the host's own
-state. If that tree does not exist, render an empty infrastructure section.
 
 The tool runs all seven sub-phases in one pass, returning a receipt the skill
 renders into the Phase 4 summary block:

@@ -9,7 +9,7 @@ Multi-agent PR code review system. Claude, Codex, and Gemini are all enabled (Ge
 This is a **personal playground**, not production. No customers depend on it; the only user is the author.
 
 - **No rollout ceremony.** Skip soaking, gating, smoking, canary, and gradual-rollout patterns. Ship straight to main.
-- **Every PR action is `aryeh-stark`; bots only post reviews.** Open/comment/resolve/un-draft/merge, and opening issues, all go through `gh` (logged in as `aryeh-stark`). The `stark-{claude,codex,gemini}` Apps author as bots and are for **review posting only** — three authors = readable multi-LLM attribution. `github_app.ts` no longer offers `pr create` / `pr ready` / `pr merge` / `issue create` (removed 2026-08-04; they exit 2 naming the `gh` command). CI is the exception — it has no human token and mints an app token instead. The other exception is `/stark-gh-user`, a **human-invoked** swap to a relief account when `aryeh-stark`'s rate limit runs dry: `disable-model-invocation: true`, and no tool/skill/hook may call `tools/user_token.ts` — an automated swap would re-author whatever ran next. Its handler emits a deferred Keychain lookup for the user's shell, never the PAT value in agent output.
+- **Every PR action is `aryeh-stark`; bots only post reviews.** Open/comment/resolve/un-draft/merge, and opening issues, all go through `gh` (logged in as `aryeh-stark`). The `stark-{claude,codex,gemini}` Apps author as bots and are for **review posting only** — three authors = readable multi-LLM attribution. `github_app.ts` no longer offers `pr create` / `pr ready` / `pr merge` / `issue create` (removed 2026-08-04; they exit 2 naming the `gh` command). CI is the exception — it has no human token and mints an app token instead. The other exception is `/stark-gh-user`, a **human-invoked** swap to a relief account when `aryeh-stark`'s rate limit runs dry: `disable-model-invocation: true`, and no tool/skill/hook may call `tools/user_token.ts` — an automated swap would re-author whatever ran next.
 - **Draft PRs by default.** Every PR-opening path opens a **draft** so WIP stays out of draft-guarded CI; test locally, then un-draft to merge. The default is owned by the `gh` path (`plugins/stark-gh/tools/gh_pr_open_execute.ts`, shared draft config); opt out with `--ready`/`--no-draft`. Merge paths mark the PR ready-for-review first (`gh pr ready` — fires target CI via `ready_for_review`), then wait for green, then squash-merge. Target-repo `pull_request` workflows need the skip-draft guard for "no CI on WIP" to hold — see `standards/workflows/skip-draft-guard.md`.
 - **Language preference:** Go for backend, TypeScript for scripts. **Avoid Python at all costs** — the repo's tooling is now TypeScript-only (`tools/`); the former Python orchestrators + dispatch infra under `scripts/` were migrated out. Do not introduce new Python.
 - **Test live.** Local-only verification is not enough. If a flow touches GCP, exercise the real GCP surface.
@@ -17,9 +17,9 @@ This is a **personal playground**, not production. No customers depend on it; th
 
 ## Repo Layout
 
-- `global/` — shared config + prompts, vendored into each Bifrost runtime bundle
-- `scripts/` — shell helpers + JSON (`register_triggers.sh`, `healer_patterns.json`), vendored with bundle assets. The orchestrators + dispatch infra were migrated to `tools/` (TypeScript).
-- `skill/` — all 27 canonical skills (`skill/*/SKILL.md`), rendered by Bifrost for Claude Code, Codex, and Gemini
+- `global/` — global config + prompts, installed to `~/.claude/code-review/`
+- `scripts/` — shell helpers + JSON (`register_triggers.sh`, `healer_patterns.json`); installed to `~/.claude/code-review/scripts/`. The orchestrators + dispatch infra were migrated to `tools/` (TypeScript).
+- `skill/` — all skills (`skill/stark-*/SKILL.md`, 20 skills), packaged as marketplace plugins
 - `org/evinced/` — Evinced org config overrides
 - `data/` — persona roster, review coverage HTML, generated showcase pages
 - `automation/` — CCR automation fleet: 12 triggers, prompts, logs, cost tracking, reports
@@ -27,6 +27,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `docs/` — specs, ADRs, retrospectives, generated skill docs (`docs/plans/` is a frozen archive — see Conventions)
 - `standards/` — org-wide doc templates and workflows
 - `plugins/stark-gh/` — local plugin source, packaged by the marketplace
+- `runtime-overrides/codex/` — complete Codex-only skill/command variants plus changed support files; mirrors source-relative paths and must never replace canonical Claude files
 
 ## Key Files
 
@@ -56,7 +57,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 
 ### TS tools
 - `tools/stark_persona_lib.ts` + `tools/stark_persona.ts` — pure-TypeScript `/stark-persona` (replaces the deleted `scripts/stark_persona.py`). Library: roster grammar, active.json, weight math, fuzzy match, SQLite schema, selection / combo / rating / survey / add. CLI: 11 subcommands (`select` / `deactivate` / `rate` / `survey` / `survey-answer` / `add` / `stats` / `history` / `print-roster` / `print-weights` / `session-end`).
-- `tools/session_id_lib.ts` + `tools/session_id.ts` — pure-TS session ID resolver (replaces the deleted `scripts/session_id.py`). Explicit `STARK_SESSION_ID`/`CODEX_THREAD_ID` values are portable inputs; Claude can additionally use `CLAUDE_SESSION_ID` or its newest local project marker before the uuid4 fallback. Consumed by `tools/session_state_lib.ts` and `tools/context_compactor_lib.ts`.
+- `tools/session_id_lib.ts` + `tools/session_id.ts` — pure-TS session ID resolver (replaces the deleted `scripts/session_id.py`). Three-tier: CLAUDE_SESSION_ID > newest-mtime marker in `~/.claude/projects/` > uuid4. Consumed by `tools/session_state_lib.ts` and `tools/context_compactor_lib.ts`.
 - `tools/session_state_lib.ts` + `tools/session_state.ts` — pure-TS session state machine (replaces the deleted `scripts/session_state.py`). Same on-disk JSON shape, same path sanitization. CLI: `[--session-id ID] [--json]` (Python parity) + `set --field <name|start_head|last_checkpoint> --value VAL` for the SKILL.md mutators.
 - `tools/self_healer_lib.ts` + `tools/self_healer.ts` — pattern-based auto-fixer (replaces the deleted `scripts/self_healer.py`). Same gate ladder as the Python (guard → max_per_session → auto-mode allowlist → circuit breaker → suggest/auto branch). Atomic writes. Emits alerts through `alert_delivery_lib`.
 - `tools/healer_canary_lib.ts` + `tools/healer_canary.ts` — canary rollout for self_healer patterns (replaces the deleted `scripts/healer_canary.py`). CLI: `--status` (Python parity) + new `--check` (oncall paging, exits 2 on tripped auto-pattern), `--close-circuit PATTERN_ID` (manual recovery), `--explain PATTERN_ID` (audit trail). Atomic config writes. Configurable promotion gate.
@@ -77,19 +78,21 @@ This is a **personal playground**, not production. No customers depend on it; th
 
 ## Distribution
 
-Skills + tools ship through [bifrost](https://github.com/21StarkCom/bifrost). Its `catalog/` is generated from this repo by `stark sync`; it renders Claude Code plugins, native Codex skills under `.agents/skills/` with `agents/openai.yaml`, and Gemini installs. Per-skill `references/`, `scripts/`, and `assets/` plus shared `tools/`, `global/`, and persona data are vendored into the bundle. `.github/workflows/marketplace-sync.yml` auto-publishes on every push to `main` touching a vendored asset root — `skill/`, `tools/`, `global/`, `scripts/`, `standards/`, or `plugins/stark-gh/`.
+Skills + tools ship as separate self-contained Claude Code and native Codex plugin packages via the [bifrost](https://github.com/21StarkCom/bifrost) marketplace. Canonical `skill/`, `plugins/stark-gh/commands/`, and shared assets are the Claude-authored source. Host-specific Codex behavior belongs only under `runtime-overrides/codex/`; Bifrost imports it as runtime overrides and generates a separate `dist/codex-plugins/` tree. Never make a canonical Claude file “portable” to satisfy Codex, and never layer a Codex override into `dist/claude/`. `.github/workflows/marketplace-sync.yml` auto-publishes changes to either source surface.
 
 ```
 /plugin marketplace add 21StarkCom/bifrost
 /plugin install stark-analyze@bifrost   # + stark-plan, stark-implement, stark-gh, stark-ops, ...
 /plugin update  stark-analyze@bifrost   # pull the latest published version
+
+codex plugin marketplace add 21StarkCom/bifrost
+codex plugin add stark-gh@bifrost
+# Start a new thread, then invoke: $cleanup --dry-run
 ```
 
 ## Skills
 
-All canonical skills live in `skill/*/SKILL.md`. Invoke them explicitly as
-`/skill-name` on Claude Code or `$skill-name` on Codex when model invocation is
-disabled.
+All skills live in `skill/stark-*/SKILL.md` and are packaged into marketplace plugins.
 
 ### Pipeline (end-to-end, in order)
 

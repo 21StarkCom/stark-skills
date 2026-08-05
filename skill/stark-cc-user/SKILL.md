@@ -4,15 +4,13 @@ disable-model-invocation: true
 description: >-
   Switch the active Claude Code account between stored profiles when a 5-hour
   or 7-day rate-limit window runs out. Credentials live in macOS Keychain
-  (service `stark-cc-token`); headroom comes from statusline snapshots. May be
-  orchestrated from Claude Code, Codex, or another host, but always targets the
-  local Claude Code login.
+  (service `stark-cc-token`); headroom comes from statusline snapshots.
 argument-hint: "[show|list|add <name>|use <name>|remove <name>|prune|reset|limits|next|order] [--dry-run] [--best] [--yes]"
 ---
 
 ## Help
 
-If the invocation arguments contain a standalone `--help`, `-h`, or `help` token,
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop — do not run any phase.
 
@@ -25,54 +23,29 @@ identity when a GraphQL/REST bucket runs dry), but the mechanics differ — read
 
 ## Arguments
 
-Parse the subcommand and options directly from the user's current request after
-the explicitly invoked skill name.
+**Raw input:** `$ARGUMENTS`
 
-- No subcommand or `show` — active account + its headroom
-- `list` — registered profiles (`*` marks the active one)
-- `add <name>` — store the CURRENT login as profile `<name>`
-- `use <name>` — switch to profile `<name>`
-- `remove <name>` — forget a profile (credentials + registry entry)
-- `prune [--dry-run]` — forget every profile with no stored credentials
-- `reset [--yes] [--snapshots]` — forget **every** stored login and start over (previews unless `--yes`)
-- `limits` — headroom for every profile, best target first
-- `next` — **switch to the next profile in the rotation**
-- `next --dry-run` — preview that pick without switching
-- `next --best` — emptiest window instead of the next one
-- `order [names...]` — show the rotation cycle, or set it
+- `/stark-cc-user` or `show` — active account + its headroom
+- `/stark-cc-user list` — registered profiles (`*` marks the active one)
+- `/stark-cc-user add <name>` — store the CURRENT login as profile `<name>`
+- `/stark-cc-user use <name>` — switch to profile `<name>`
+- `/stark-cc-user remove <name>` — forget a profile (credentials + registry entry)
+- `/stark-cc-user prune [--dry-run]` — forget every profile with no stored credentials
+- `/stark-cc-user reset [--yes] [--snapshots]` — forget **every** stored login and start over (previews unless `--yes`)
+- `/stark-cc-user limits` — headroom for every profile, best target first
+- `/stark-cc-user next` — **switch to the next profile in the rotation**
+- `/stark-cc-user next --dry-run` — preview that pick without switching
+- `/stark-cc-user next --best` — emptiest window instead of the next one
+- `/stark-cc-user order [names...]` — show the rotation cycle, or set it
 
 ## Behavior
 
-This skill targets macOS Keychain. If `uname -s` is not `Darwin` or the
-`security` command is unavailable, stop without changing state and explain the
-platform requirement.
+Resolve `tools/cc_account.ts` (worktree-relative, falling back to
+`${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/cc_account.ts`) and run
+it with the parsed subcommand:
 
-Resolve the bundled `tools/cc_account.ts` through the current runtime's asset
-root. In a stark-skills source checkout, use the repo-local tool. Otherwise
-prefer `STARK_ASSET_ROOT`, then `STARK_PLUGIN_ROOT`, then the host-provided plugin
-root. If none resolves to a real file, stop and ask the user to reinstall the
-bundle. Run the parsed subcommand with one self-contained shell call:
-
-```bash
-set -euo pipefail
-# Replace this example array with the subcommand and arguments parsed from the
-# current request; the default invocation is `show`.
-command_args=(show)
-[ "$(uname -s)" = "Darwin" ] && command -v security >/dev/null || {
-  echo "stark-cc-user requires macOS Keychain (security command)" >&2
-  exit 1
-}
-if [ -f "skill/stark-cc-user/SKILL.md" ] && [ -f "tools/cc_account.ts" ]; then
-  script="$(pwd)/tools/cc_account.ts"
-else
-  asset_root="${STARK_ASSET_ROOT:-${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
-  script="${asset_root:+$asset_root/tools/cc_account.ts}"
-fi
-[ -n "${script:-}" ] && [ -f "$script" ] || {
-  echo "bundled tools/cc_account.ts not found; reinstall the skill bundle" >&2
-  exit 1
-}
-node --experimental-strip-types --no-warnings "$script" "${command_args[@]}"
+```
+node --experimental-strip-types --no-warnings <script> <subcommand> [args]
 ```
 
 Pass stdout through verbatim. The tool is the single source of truth for
@@ -85,16 +58,21 @@ authenticated as. OAuth blobs cannot be synthesized, and `claude setup-token`
 mints a token for the *current* login only. So bootstrapping is manual and
 one-time per account:
 
-Start Claude Code, run its interactive `/login` command for the account, then
-explicitly invoke this skill with `add s1` to capture it.
+```
+claude /login          # log in as the account
+/stark-cc-user add s1  # capture it
+```
 
 Repeat per account. `add` is also safe to re-run — it refreshes a stored
 profile whose token has since rotated.
 
 ## Forgetting an account
 
-Explicitly invoke this skill with `remove <name>` for one profile,
-`prune --dry-run` to preview empty profiles, or `prune` to forget them.
+```
+/stark-cc-user remove <name>     # one profile: credentials + registry entry
+/stark-cc-user prune --dry-run   # list profiles with no stored credentials
+/stark-cc-user prune             # forget them
+```
 
 `remove` is **irreversible**. An OAuth blob cannot be re-derived, so recovering
 the account means `claude /login` + `add` again.
@@ -116,8 +94,11 @@ position, so a removal never rewrites a cycle you arranged by hand.
 
 ## Starting over — `reset`
 
-Explicitly invoke this skill with `reset` to preview, `reset --yes` to act, or
-`reset --yes --snapshots` to also clear headroom history.
+```
+/stark-cc-user reset               # preview: exactly what would go
+/stark-cc-user reset --yes         # do it
+/stark-cc-user reset --yes --snapshots   # ...and clear headroom history too
+```
 
 Use it when the registry has drifted past repair — mismatched seats, profiles
 you can no longer account for, a keying scheme from an older version. Rebuilding
@@ -278,9 +259,13 @@ contributing. Practical consequences:
 you always know which account comes next without reading percentages, and the
 cycle visits every seat before repeating any.
 
-Explicit invocation examples: `order Com-Max Net-T0 Net-M0 Net-T1 Net-M1 …`
-sets the cycle; `order` shows it; `list` shows live status in the same order;
-`next` advances; and `next --dry-run` previews the next seat.
+```
+/stark-cc-user order Com-Max Net-T0 Net-M0 Net-T1 Net-M1 …
+/stark-cc-user order                 # show the current cycle
+/stark-cc-user list                  # same order, with live status
+/stark-cc-user next                  # advance one step (switches)
+/stark-cc-user next --dry-run        # show the pick without switching
+```
 
 - **Switches by default.** `next` exists to advance the rotation; `--dry-run` is
   the preview. (`--apply` is still accepted, and now just names the default.)

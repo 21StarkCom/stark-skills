@@ -11,7 +11,7 @@ revision_date: 2026-05-18T19:17:41Z
 
 ## Help
 
-If the invocation arguments contain a standalone `--help`, `-h`, or `help` token,
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop — do not run preflight or any phase.
 
@@ -19,36 +19,20 @@ usage, and arguments, then stop — do not run preflight or any phase.
 
 Run environment validation before proceeding:
 ```bash
-set -euo pipefail
-if [ -f "skill/stark-copilot/SKILL.md" ] && [ -f "tools/preflight.ts" ]; then
-  ASSET_ROOT="$(pwd)"
-else
-  ASSET_ROOT="${STARK_ASSET_ROOT:-${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
-fi
-TOOLS="${STARK_REVIEW_TOOLS:-${ASSET_ROOT:+$ASSET_ROOT/tools}}"
-[ -f "$TOOLS/preflight.ts" ] || { echo "bundled preflight.ts not found" >&2; exit 1; }
-node --experimental-strip-types "$TOOLS/preflight.ts" --workflow stark-copilot --json
+node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/preflight.ts --workflow stark-copilot --json
 ```
 Parse the JSON result:
 - If `overall` is "blocked": print the failing checks and stop. Do not proceed.
 - If `overall` is "degraded": print a warning with the failing checks, then continue if both the configured lead and wing agents are available.
 - If `overall` is "ready": continue silently.
-- In non-interactive automation contexts, a blocked preflight must emit a
-  `preflight_check` event with `status=blocked`, use the runtime's configured
-  alert sink when one exists, and exit non-zero so the trigger is marked failed.
+- In non-interactive automation contexts, a blocked preflight must emit a `preflight_check` event with `status=blocked`, append an entry to `~/.claude/code-review/alerts.jsonl`, and exit non-zero so the trigger is marked failed.
 
 # stark-copilot
 
 Autonomous implementation with a paired **lead/wing** subagent loop:
 
-- **Lead** — implements the step in a git worktree
-- **Wing** — reviews the lead's diff and either approves or returns blocking findings
-
-Defaults are capability-based: choose the first enabled implementation agent,
-preferring the current host, then choose a different enabled review agent. Do
-not assume the Claude CLI exists merely because the skill was invoked. If two
-different enabled agents are unavailable, stop and ask the user to configure
-`--lead` and `--wing`; a paired review cannot safely collapse to self-review.
+- **Lead** (default `claude`) — implements the step in a git worktree
+- **Wing** (default `codex`) — reviews the lead's diff and either approves or returns blocking findings
 
 Each step runs a review→fix loop until the wing approves or `--max-rounds` fix rounds are exhausted.
 
@@ -61,15 +45,15 @@ re-implement that logic here.
 - `<plan-or-prompt>` — path to implementation plan, or inline task description
 - `--plan-slug SLUG` — fetch issues labeled `plan:{SLUG}` from GitHub and use as steps (alternative to plan file)
 - `--test-command CMD` — test command to run after each lead pass (e.g., `npm test`, `pytest`)
-- `--lead AGENT` — lead implementer agent ID. One of `claude`, `codex`, `gemini`; default is the first enabled implementation-capable agent, preferring the current host.
-- `--wing AGENT` — wing reviewer agent ID. Must differ from `--lead`; default is the first different enabled review-capable agent.
+- `--lead AGENT` — lead implementer agent ID (default: `claude`). One of `claude`, `codex`, `gemini`.
+- `--wing AGENT` — wing reviewer agent ID (default: `codex`). Must differ from `--lead`.
 - `--max-rounds N` — maximum **fix** rounds after the initial implement (default: `1`). The wing reviews up to `N+1` times. One round is the evidence-backed default — retry budget past first-failure buys review churn, not fixes (2026-07-25 autopsy); unresolved-after-one goes to the human.
 - `--timeout N` — per-lead-invocation timeout in seconds (default: 900)
 - `--wing-timeout N` — per-wing-invocation timeout in seconds (default: 600)
-- `--no-goal` — disable the optional goal-driven lead loop. Goal mode is considered only when the resolved lead is Claude and that CLI advertises the feature; it is ignored for Codex, Gemini, and native host workers.
+- `--no-goal` — disable the goal-driven lead loop. When the lead is `claude` (the default), the lead's implement prompt is prefixed with a `/goal` directive (§2a) so it keeps iterating until tests pass; `--no-goal` reverts to a single bounded pass. Ignored when the lead is `codex`/`gemini` (`/goal` is a Claude Code feature).
 - `--parallel` — force-treat ALL steps as mutually independent (one wave), overriding the dependency DAG. Use only when you know the deps metadata is over-conservative. Parallelism within a wave is otherwise **on by default** via the execution DAG (§1.4); see [Parallel waves](#parallel-waves-default).
 - `--sequential` — disable DAG-driven parallelism entirely; run every step one at a time in dependency order (the pre-DAG behavior).
-- `--ready` (alias `--no-draft`) — open the impl PR ready-for-review instead of draft. Draft is the repo default (§2.6 lands the impl PR as a draft unless this is passed). Set `open_ready` while parsing the current invocation when either token is present.
+- `--ready` (alias `--no-draft`) — open the impl PR ready-for-review instead of draft. Draft is the repo default (§2.6 lands the impl PR as a draft unless this is passed). `open_ready` (used in §2.6) is non-empty when either token is present in `$ARGUMENTS`.
 - `--dry-run` — show what would happen without executing
 
 If `--lead` and `--wing` resolve to the same agent, error and stop:
@@ -80,26 +64,16 @@ If both `--parallel` and `--sequential` are given, error and stop:
 
 If no input provided, ask: "What should I build?"
 
-Parse the plan/prompt and flags directly from the user's current request after
-the explicitly invoked skill name.
+**Raw input:** `$ARGUMENTS`
 
 ## Constants
 
 ```bash
-set -euo pipefail
-if [ -f "skill/stark-copilot/SKILL.md" ] && [ -d "tools" ]; then
-  ASSET_ROOT="$(pwd)"
-else
-  ASSET_ROOT="${STARK_ASSET_ROOT:-${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
-fi
-TOOLS="${STARK_REVIEW_TOOLS:-${ASSET_ROOT:+$ASSET_ROOT/tools}}"
+TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-[ -d "$TOOLS" ] || { echo "bundled tools directory not found" >&2; exit 1; }
-# Resolve LEAD and WING from explicit flags + runtime capabilities in this call.
+# LEAD  — resolved from --lead, default claude
+# WING  — resolved from --wing, default codex
 ```
-
-Treat this as a resolution pattern, not persistent shell state. Every later
-shell block re-resolves the paths and values it uses.
 
 ## Phase 1: Setup
 
@@ -107,23 +81,20 @@ shell block re-resolves the paths and values it uses.
 
 Three input modes, resolved in this order:
 
-**Issue-driven (preferred — from `stark-plan-to-tasks` output):** If `--plan-slug SLUG` is provided, or if the input is a `.md` file path, attempt to load steps from GitHub issues:
+**Issue-driven (preferred — from `/stark-plan-to-tasks` output):** If `--plan-slug SLUG` is provided, or if the input is a `.md` file path, attempt to load steps from GitHub issues:
 
 1. Derive `PLAN_SLUG`:
    - If `--plan-slug` was given, use it directly
-   - If a plan file was given, derive from filename: strip `.md`, strip known suffixes (`-design`, `-spec`, `-plan`). Truncate to 47 chars + 3-char hash if >50. Use the same slug contract as `stark-plan-to-tasks` §1.7.
+   - If a plan file was given, derive from filename: strip `.md`, strip known suffixes (`-design`, `-spec`, `-plan`). Truncate to 47 chars + 3-char hash if >50. Same logic as `/stark-plan-to-tasks` §1.7.
 
 2. Detect target repo (frontmatter → body scan → `git remote -v` → ask user).
 
 3. Fetch issues:
    ```bash
-   set -euo pipefail
-   PLAN_SLUG="<resolved-plan-slug>"
-   ORG_REPO="<resolved-org/repo>"
    unset GH_TOKEN
    gh issue list \
      --label "plan:$PLAN_SLUG" \
-     --repo "$ORG_REPO" \
+     --repo $ORG_REPO \
      --state all \
      --json number,title,body,labels,state \
      --limit 200
@@ -189,11 +160,11 @@ If no test command found, warn: "No test command detected. Wing review will rely
 
 ### 1.4 Plan the execution — dependency DAG → waves
 
-Before showing the battle plan, compute an **execution plan**: level the §1.2 steps into **waves**. Steps in the same wave have no dependency edge between them and run **concurrently** (each dispatcher already owns its own worktree; see [Parallel waves](#parallel-waves-default)); waves run sequentially, each branching from the previous wave's merged result.
+Before showing the battle plan, compute an **execution plan**: level the §1.2 steps into **waves**. Steps in the same wave have no dependency edge between them and run **concurrently** (each in its own worktree via the Workflow fan-out — see [Parallel waves](#parallel-waves-default)); waves run sequentially, each branching from the previous wave's merged result.
 
 **Edges, per mode:**
 
-- **Issue-driven:** the projected task-level edges from §1.2.7 (`step.depends_on`), **plus phase barriers**: every step in phase P depends on every step of the phases P `depends_on`. Phases stay checkpoints — waves never span a phase boundary; the parallelism unlock is *within* a phase, where `stark-plan-to-tasks` wrote explicit task deps. (Cross-phase pipelining from task metadata alone would trust silence; barriers are the fail-closed reading.)
+- **Issue-driven:** the projected task-level edges from §1.2.7 (`step.depends_on`), **plus phase barriers**: every step in phase P depends on every step of the phases P `depends_on`. Phases stay checkpoints — waves never span a phase boundary; the parallelism unlock is *within* a phase, where `/stark-plan-to-tasks` wrote explicit task deps. (Cross-phase pipelining from task metadata alone would trust silence; barriers are the fail-closed reading.)
 - **Plan-file:** parse each step section for an explicit `Dependencies:` / `depends_on:` line. If the plan carries no dependency metadata at all, do NOT infer independence from silence — read each step's task text and mark an edge wherever a step names files, modules, interfaces, or outputs another step creates. When you cannot rule a dependency out, keep the edge.
 - **Inline:** you decomposed the steps yourself — declare `depends_on` per step as you decompose.
 
@@ -209,8 +180,8 @@ Record the result as `waves = [[step, ...], ...]` and carry it into Phase 2.
 stark-copilot — Battle Plan
 ───────────────────────────
 Mode:         issue-driven (plan:widget-system, 11 tasks across 4 phases → 5 steps in 4 waves, 2 skipped)
-Lead:         {resolved lead}   (implementer)
-Wing:         {resolved wing}   (reviewer)
+Lead:         claude   (implementer)
+Wing:         codex    (reviewer)
 Max rounds:   4 fix rounds (up to 5 reviews per step)
 Test command: pytest
 Timeout:      900s lead / 600s wing
@@ -237,18 +208,7 @@ If `--dry-run`, stop here.
 Only when `plan_path` is set (plan-file or issue-driven mode that originated from a plan file). Inline mode skips this step.
 
 ```bash
-set -euo pipefail
-PLAN_PATH="<absolute-plan-path-or-empty>"
-if [ -n "$PLAN_PATH" ]; then
-  if [ -f "skill/stark-copilot/SKILL.md" ] && [ -f "tools/approach_contract.ts" ]; then
-    ASSET_ROOT="$(pwd)"
-  else
-    ASSET_ROOT="${STARK_ASSET_ROOT:-${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
-  fi
-  TOOLS="${STARK_REVIEW_TOOLS:-${ASSET_ROOT:+$ASSET_ROOT/tools}}"
-  node --experimental-strip-types --no-warnings "$TOOLS/approach_contract.ts" \
-    --plan-file "$PLAN_PATH" --force-confirm
-fi
+[ -n "$plan_path" ] && node --experimental-strip-types --no-warnings ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/approach_contract.ts --plan-file "$plan_path" --force-confirm
 ```
 
 ### 1.7 Prepare the impl branch
@@ -256,30 +216,22 @@ fi
 Historically copilot committed every step directly onto whatever branch was checked out and never opened a PR — forge had no impl PR number to record or merge. Fix that here, **before any step commits**: adopt-or-create a deterministic impl branch so §2g's per-step commits land somewhere reachable, and resolve the repo + default branch §2.6 needs to land the PR.
 
 ```bash
-set -euo pipefail
-if [ -f "skill/stark-copilot/SKILL.md" ] && [ -f "tools/copilot_land.ts" ]; then
-  ASSET_ROOT="$(pwd)"
-else
-  ASSET_ROOT="${STARK_ASSET_ROOT:-${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
-fi
-TOOLS="${STARK_REVIEW_TOOLS:-${ASSET_ROOT:+$ASSET_ROOT/tools}}"
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-PLAN_SLUG="<resolved-plan-slug-or-empty>"
-PLAN_OR_PROMPT="<raw-positional-input>"
-fallback_slug=$(printf '%s' "$PLAN_OR_PROMPT" | tr '[:upper:]' '[:lower:]' \
+repo="${ORG_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)}"
+default_branch=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')
+default_branch=${default_branch:-main}
+
+# fallback_slug only matters in inline mode — issue-driven and plan-file mode
+# already derived PLAN_SLUG in §1.1. Slugify the raw <plan-or-prompt> arg.
+fallback_slug=$(printf '%s' "$plan_or_prompt" | tr '[:upper:]' '[:lower:]' \
   | tr -c 'a-z0-9' '-' | sed -E 's/-+/-/g; s/^-|-$//g' | cut -c1-40)
 
 branch=$(node --experimental-strip-types "$TOOLS/copilot_land.ts" branch-name \
   --plan-slug "${PLAN_SLUG:-}" --fallback-slug "$fallback_slug")
 
-base=$(git -C "$REPO_ROOT" rev-parse HEAD)
+base=$(git rev-parse HEAD)
 node --experimental-strip-types "$TOOLS/copilot_land.ts" prepare-branch \
-  --branch "$branch" --repo-dir "$REPO_ROOT" --require-base "$base" --json
-printf 'branch=%s\nbase=%s\n' "$branch" "$base"
+  --branch "$branch" --require-base "$base" --json
 ```
-
-Record the printed branch and base; later independent calls receive them as
-concrete values rather than relying on this shell's variables.
 
 **`--require-base` is not optional here.** `branch-name` is deterministic, so
 a re-run whose earlier attempt was abandoned finds a leftover
@@ -287,7 +239,7 @@ a re-run whose earlier attempt was abandoned finds a leftover
 **resets `$REPO_ROOT` onto that older codebase** while reporting `ok: true`.
 Every later wave then diffs, tests, and commits against the wrong tree.
 Copilot runs against the real checkout rather than a throwaway worktree, so
-the blast radius is larger than the `stark-build` case this guard was first
+the blast radius is larger than the `/stark-build` case this guard was first
 added for. Pinning the current `HEAD` is the correct base: a branch that
 legitimately continues this work already contains it, and one that doesn't is
 precisely the stale branch you must not silently rewind onto.
@@ -301,7 +253,7 @@ precisely the stale branch you must not silently rewind onto.
 Execute the waves from §1.4 **in order**. Within a wave:
 
 - **Single-step wave** — run §2a0–§2j inline, exactly as below.
-- **Multi-step wave** — launch the fully staged dispatcher commands concurrently with the portable shell fan-out in [Parallel waves](#parallel-waves-default), then apply each approved diff and commit **in a deterministic order** (step order within the wave), running §2e–§2g1 per step and §2h cleanup. A non-`approved` step's diff is never applied; surface it and — since later waves may depend on it — stop before the next wave unless every remaining wave is provably independent of the failed step.
+- **Multi-step wave** — fan the steps out concurrently via the **Workflow** tool (see [Parallel waves](#parallel-waves-default)), then apply each approved diff and commit **in a deterministic order** (step order within the wave), running §2e–§2g1 per step and §2h cleanup. A non-`approved` step's diff is never applied; surface it and — since later waves may depend on it — stop before the next wave unless every remaining wave is provably independent of the failed step.
 
 For each step, sequential or fanned-out:
 
@@ -311,97 +263,33 @@ Update issue status and project board. For commands, see [references/issue-manag
 
 ### 2a. Stage prompt files
 
-Create one unique absolute run directory with `mktemp -d`, record the returned
-path as `RUN_DIR`, and stage three files per step. Resolve templates under the
-**installed** `prompts/copilot/` layout — never insert an extra source-tree
-segment into an installed asset path:
+Write three files for the dispatcher (replace `$$` with the orchestration PID or any unique tag):
 
-- `$RUN_DIR/step-$STEP_ID-implement.md` — the lead's full implement prompt,
-  composed from `$ASSET_ROOT/prompts/copilot/$LEAD/implement.md`, previous-step
-  context, and the step task. Do **not** embed a `/goal` directive; the optional
-  Claude-only goal mode is enabled through §2b's flag.
-- `$RUN_DIR/step-$STEP_ID-review.md` — a verbatim copy of
-  `$ASSET_ROOT/prompts/copilot/$WING/review.md`.
-- `$RUN_DIR/step-$STEP_ID-task.md` — the raw task description.
-
-Before dispatch, verify both template files exist. If the runtime asset root or
-either selected agent's template is unavailable, stop before creating a
-worktree. A self-contained resolution example:
-
-```bash
-set -euo pipefail
-LEAD="<resolved-lead>"
-WING="<resolved-wing>"
-STEP_ID="<step-id>"
-if [ -d "global/prompts" ] && [ -f "skill/stark-copilot/SKILL.md" ]; then
-  ASSET_ROOT="$(pwd)/global"
-else
-  ASSET_ROOT="${STARK_ASSET_ROOT:-${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
-fi
-PROMPT_ROOT="${ASSET_ROOT:+$ASSET_ROOT/prompts/copilot}"
-RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/stark-copilot.XXXXXX")"
-IMPLEMENT_TEMPLATE="$PROMPT_ROOT/$LEAD/implement.md"
-REVIEW_TEMPLATE="$PROMPT_ROOT/$WING/review.md"
-[ -f "$IMPLEMENT_TEMPLATE" ] && [ -f "$REVIEW_TEMPLATE" ] || {
-  echo "copilot prompt templates missing under $PROMPT_ROOT" >&2
-  exit 1
-}
-cp "$REVIEW_TEMPLATE" "$RUN_DIR/step-$STEP_ID-review.md"
-# Compose implement.md + previous-step context + task into:
-#   "$RUN_DIR/step-$STEP_ID-implement.md"
-# Write the raw task into:
-#   "$RUN_DIR/step-$STEP_ID-task.md"
-printf '%s\n' "$RUN_DIR"
-```
-
-Record the printed directory and substitute that absolute path into later
-independent shell calls; do not expect `RUN_DIR` to persist between them.
+- `/tmp/stark-copilot-$$/step-$step_id-implement.md` — the lead's full implement prompt (composed from `global/prompts/copilot/{LEAD}/implement.md` + previous-step context + step task). Do **not** embed a `/goal` directive in this file — goal mode is enabled via the `--goal-condition` flag in §2b instead (a `/goal` line in a stdin-piped prompt is read as plain text and does **not** loop; verified 2026-06-03, Claude Code 2.1.161). The dispatcher prepends `/goal` and routes the prompt as a `-p` argument for you.
+- `/tmp/stark-copilot-$$/step-$step_id-review.md` — the wing's review prompt template (verbatim copy of `global/prompts/copilot/{WING}/review.md`)
+- `/tmp/stark-copilot-$$/step-$step_id-task.md` — the step's raw task description (used by the dispatcher to build the wing's review payload and the lead's fix prompts)
 
 ### 2b. Dispatch the copilot loop
 
 ```bash
-set -euo pipefail
-if [ -f "skill/stark-copilot/SKILL.md" ] && [ -f "tools/copilot_dispatch.ts" ]; then
-  ASSET_ROOT="$(pwd)"
-else
-  ASSET_ROOT="${STARK_ASSET_ROOT:-${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
-fi
-TOOLS="${STARK_REVIEW_TOOLS:-${ASSET_ROOT:+$ASSET_ROOT/tools}}"
-REPO_ROOT="<absolute-repo-root>"
-RUN_DIR="<absolute-run-dir-from-2a>"
-STEP_ID="<step-id>"
-LEAD="<resolved-lead>"
-WING="<resolved-wing>"
-MAX_ROUNDS="<max-rounds-or-1>"
-TIMEOUT="<timeout-or-900>"
-TEST_COMMAND="<test-command-or-empty>"
-GOAL_MODE="<true-only-for-supported-claude-goal-mode>"
-cmd=(node --experimental-strip-types "$TOOLS/copilot_dispatch.ts"
-  --repo-root "$REPO_ROOT"
-  --step-id "$STEP_ID"
-  --implement-prompt-file "$RUN_DIR/step-$STEP_ID-implement.md"
-  --review-prompt-file "$RUN_DIR/step-$STEP_ID-review.md"
-  --step-task-file "$RUN_DIR/step-$STEP_ID-task.md"
-  --lead "$LEAD"
-  --wing "$WING"
-  --max-rounds "$MAX_ROUNDS"
-  --timeout "$TIMEOUT"
-  --diff-out "$RUN_DIR/step-$STEP_ID-final.diff")
-[ -n "$TEST_COMMAND" ] && cmd+=(--test-command "$TEST_COMMAND")
-if [ "$GOAL_MODE" = "true" ] && [ "$LEAD" = "claude" ]; then
-  cmd+=(--goal-condition "the step is fully implemented and the project's test suite passes"
-    --goal-max-budget-usd "${STARK_GOAL_MAX_BUDGET_USD:-10}")
-fi
-"${cmd[@]}"
+node --experimental-strip-types "$TOOLS/copilot_dispatch.ts" \
+  --repo-root $REPO_ROOT \
+  --step-id "$step_id" \
+  --implement-prompt-file /tmp/stark-copilot-$$/step-$step_id-implement.md \
+  --review-prompt-file /tmp/stark-copilot-$$/step-$step_id-review.md \
+  --step-task-file /tmp/stark-copilot-$$/step-$step_id-task.md \
+  --lead "$LEAD" \
+  --wing "$WING" \
+  --max-rounds "$max_rounds" \
+  --timeout "$timeout" \
+  --diff-out /tmp/stark-copilot-$$/step-$step_id-final.diff \
+  [--test-command "$test_command"] \
+  [--goal-condition "the step is fully implemented and the project's test suite passes" --goal-max-budget-usd "${STARK_GOAL_MAX_BUDGET_USD:-10}"]
 ```
 
 `--test-command` is optional even when the repo has tests: when omitted, the dispatcher auto-detects one from the trusted repo root (`stark_review_lib.ts::detectTestCommand` — Makefile `test:`, `npm test`, `go test`, …) and runs it in the worktree after every round. **A wing `approve` over red or never-ran tests does not land** — the dispatcher returns `unresolved` with `error=approved_but_tests_red`; completion is the runnable check, never the wing's verdict.
 
-Pass `--goal-condition` only when the resolved lead is Claude, the installed CLI
-supports goal mode, and `--no-goal` was not supplied. With it set, the dispatcher
-uses that vendor-specific loop for round 1. Fix rounds are never goal loops. For
-Codex, Gemini, or a host-native lead, omit the flag and run a bounded single
-implementation pass before wing review.
+Pass `--goal-condition` **by default when `LEAD` is `claude`** (omit it when `--no-goal` is set or the lead is `codex`/`gemini`). With it set, the dispatcher prefixes the lead's prompt with `/goal …` and runs **round 1** as a `-p`-argument goal loop that iterates until tests pass, bounded by `--goal-max-budget-usd` and `--timeout`. Fix rounds are never goal loops — the dispatcher enforces single-pass targeted patches regardless of this flag. The condition omits "committed" on purpose — rule 6 of the implement prompt keeps the lead from committing; the dispatcher owns git and the wing reviews the worktree diff.
 
 > **Budget guard:** `--goal-max-budget-usd` is mandatory in goal mode. A missing, zero, or non-numeric value never disables the guard — the dispatcher falls back to its built-in default ($10) rather than running unbounded.
 >
@@ -422,9 +310,9 @@ The dispatcher prints a JSON object with this shape:
 ```json
 {
   "step_id": "...",
-  "lead": "<resolved-lead>",
-  "wing": "<resolved-wing>",
-  "worktree_path": "/.../.worktrees/copilot-<lead>-...",
+  "lead": "claude",
+  "wing": "codex",
+  "worktree_path": "/.../.worktrees/copilot-claude-...",
   "final_verdict": "approved | blocked | aborted | max_rounds_unresolved | unresolved",
   "error": null,
   "duration_s": 123.4,
@@ -446,7 +334,7 @@ The dispatcher prints a JSON object with this shape:
     }
   ],
   "final_diff": "",
-  "final_diff_path": "<absolute-run-dir>/step-<step-id>-final.diff"
+  "final_diff_path": "/tmp/stark-copilot-$$/step-$step_id-final.diff"
 }
 ```
 
@@ -481,9 +369,9 @@ Run the gates against the lead's worktree (use `worktree_path` from §2c). If a 
 
 **Seeded re-dispatch** (used here and by the fan-out conflict path): a re-dispatch with the same `--step-id` force-recreates the worktree from HEAD — the dispatcher has no resume mode — so the approved work must be seeded back in. Seed it as a **diff file the prompt references by path**, never pasted inline (a diff can run to hundreds of KB):
 
-1. The approved diff is already on disk at the step's `final_diff_path` (§2b `--diff-out`); copy it to the recorded absolute run directory as `step-<step-id>-approved.diff` (only write it from JSON if the run predates `--diff-out`).
-2. Re-stage prompt files under a **suffixed step id** (`<step-id>-r2`, so the original run's artifacts and worktree aren't clobbered). The implement prompt uses "REVISION" framing: first apply the recorded approved-diff path in the new worktree (resolving any conflicts), then address the listed findings.
-3. Invoke with the concrete suffixed step id, `--max-rounds 1`, and **without** `--goal-condition` — the retry is one bounded fix round, not a fresh goal loop with a fresh budget.
+1. The approved diff is already on disk at the step's `final_diff_path` (§2b `--diff-out`); copy it to `/tmp/stark-copilot-$$/step-$step_id-approved.diff` (only write it from JSON if the run predates `--diff-out`).
+2. Re-stage prompt files under a **suffixed step id** (`$step_id-r2`, so the original run's artifacts and worktree aren't clobbered). The implement prompt uses "REVISION" framing: first `git apply --3way /tmp/stark-copilot-$$/step-$step_id-approved.diff` in your worktree (resolving any conflicts), then address the listed findings.
+3. Invoke with `--step-id $step_id-r2 --max-rounds 1` and **without** `--goal-condition` — the retry is one bounded fix round, not a fresh goal loop with a fresh budget.
 4. Afterwards run §2h cleanup for **both** step ids.
 
 ### 2f. Apply approved diff
@@ -493,21 +381,12 @@ Apply the dispatcher's final diff **from disk** (`final_diff_path`, §2b `--diff
 The diff is the dispatcher's `--binary --full-index` rendering, so binary and rename-heavy changes replay correctly. The working tree must be clean before applying (guaranteed by the Phase 2 precondition + per-step commits). On failure, **reset before doing anything else** — `git apply --3way` exits non-zero having already written conflict markers/partial hunks into the tree, and §2g's `git add -A` would commit that garbage:
 
 ```bash
-set -euo pipefail
-REPO_ROOT="<absolute-repo-root>"
-FINAL_DIFF_PATH="<absolute-final-diff-path>"
-cd "$REPO_ROOT"
-git apply --3way "$FINAL_DIFF_PATH" || {
-  git reset --hard HEAD
-  git clean -fd
-  echo "approved diff failed to apply cleanly" >&2
-  exit 1
-}
+git apply --3way "$final_diff_path" || { git reset --hard HEAD && git clean -fd && apply_failed=1; }
 ```
 
 (`git clean -fd` is safe here **only** because the tree was clean pre-apply — the only untracked files are ones the failed apply just created. That is what the Phase 2 precondition buys.)
 
-When the self-contained apply command reports failure:
+On `apply_failed`:
 
 - **Sequential step (HEAD unchanged since the worktree branched):** a conflict is rare here. Fall back to copying changed files from `worktree_path` over to `$REPO_ROOT` — sound only because both trees share the same base.
 - **Fan-out step (HEAD moved — a sibling step in this wave already committed):** the file-copy fallback is **forbidden** — the worktree's files are based on the pre-wave HEAD and copying them silently reverts the sibling's committed edits. Instead, re-dispatch this single step against the new HEAD (see the conflict path in [Parallel waves](#parallel-waves-default)), or stop and surface it.
@@ -515,15 +394,8 @@ When the self-contained apply command reports failure:
 ### 2g. Commit step
 
 ```bash
-set -euo pipefail
-REPO_ROOT="<absolute-repo-root>"
-LEAD="<resolved-lead>"
-WING="<resolved-wing>"
-ROUNDS_COUNT="<round-count>"
-STEP_TITLE="<step-title>"
-git -C "$REPO_ROOT" add -A
-git -C "$REPO_ROOT" commit -m \
-  "feat: $STEP_TITLE (copilot: $LEAD impl, $WING review, $ROUNDS_COUNT rounds)"
+git add -A
+git commit -m "feat: [step title] (copilot: $LEAD impl, $WING review, $rounds_count rounds)"
 ```
 
 `$rounds_count` is `len(rounds)` from §2c.
@@ -535,19 +407,9 @@ Close issues with commit reference and update project board. For commands, see [
 ### 2h. Clean up worktree
 
 ```bash
-set -euo pipefail
-if [ -f "skill/stark-copilot/SKILL.md" ] && [ -f "tools/copilot_dispatch.ts" ]; then
-  ASSET_ROOT="$(pwd)"
-else
-  ASSET_ROOT="${STARK_ASSET_ROOT:-${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
-fi
-TOOLS="${STARK_REVIEW_TOOLS:-${ASSET_ROOT:+$ASSET_ROOT/tools}}"
-REPO_ROOT="<absolute-repo-root>"
-STEP_ID="<step-id>"
-LEAD="<resolved-lead>"
 node --experimental-strip-types "$TOOLS/copilot_dispatch.ts" \
-  --repo-root "$REPO_ROOT" \
-  --step-id "$STEP_ID" \
+  --repo-root $REPO_ROOT \
+  --step-id "$step_id" \
   --lead "$LEAD" \
   --cleanup
 ```
@@ -558,23 +420,14 @@ Print step summary (lead, wing, rounds count, final verdict, files changed, test
 
 ### 2j. Session state update
 
-After each step completes, run both optional state helpers in one self-contained
-call. They are best-effort; a runtime without their state backend continues:
+After each step completes:
 ```bash
-if [ -f "skill/stark-copilot/SKILL.md" ] && [ -d "tools" ]; then
-  ASSET_ROOT="$(pwd)"
-else
-  ASSET_ROOT="${STARK_ASSET_ROOT:-${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
-fi
-TOOLS="${STARK_REVIEW_TOOLS:-${ASSET_ROOT:+$ASSET_ROOT/tools}}"
-[ -f "$TOOLS/session_state.ts" ] && \
-  node --experimental-strip-types --no-warnings "$TOOLS/session_state.ts" --json 2>/dev/null || true
-[ -f "$TOOLS/context_compactor.ts" ] && \
-  node --experimental-strip-types --no-warnings "$TOOLS/context_compactor.ts" --json 2>/dev/null || true
+node --experimental-strip-types --no-warnings ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/session_state.ts --json 2>/dev/null || true
 ```
-
-Generate checkpoints according to `context_compaction.checkpoint_interval_minutes`
-(default 15); do not assume a Claude session ID exists.
+Generate a checkpoint every `context_compaction.checkpoint_interval_minutes` minutes (default 15):
+```bash
+node --experimental-strip-types --no-warnings ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/context_compactor.ts --json 2>/dev/null || true
+```
 
 ## Phase 2.5: End-of-Run Verification (MANDATORY)
 
@@ -589,37 +442,19 @@ Push the branch prepared in §1.7 and adopt-or-open its PR. Steps only commit **
 Skip entirely if no step ever reached §2g (every step failed before its first commit) — there is nothing to push. Leave `pr_number` and `prs` unset for Phase 3/4.
 
 ```bash
-set -euo pipefail
-if [ -f "skill/stark-copilot/SKILL.md" ] && [ -f "tools/copilot_land.ts" ]; then
-  ASSET_ROOT="$(pwd)"
-else
-  ASSET_ROOT="${STARK_ASSET_ROOT:-${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
-fi
-TOOLS="${STARK_REVIEW_TOOLS:-${ASSET_ROOT:+$ASSET_ROOT/tools}}"
-REPO_ROOT="<absolute-repo-root>"
-REPO="<resolved-org/repo>"
-BRANCH="<branch-from-1.7>"
-DEFAULT_BRANCH="<resolved-default-branch>"
-PLAN_LABEL="<plan-slug-or-input-basename>"
-LEAD="<resolved-lead>"
-WING="<resolved-wing>"
-STEPS_TOTAL="<step-count>"
-WAVES_TOTAL="<wave-count>"
-ROUNDS_TOTAL="<round-count>"
-OPEN_READY="<true-or-false>"
-title="Impl: $PLAN_LABEL"
-body="Autonomous copilot implementation (lead \`$LEAD\`, wing \`$WING\`). $STEPS_TOTAL step(s) across $WAVES_TOTAL wave(s), $ROUNDS_TOTAL total review round(s)."
+title="Impl: ${PLAN_SLUG:-$(basename -- "${plan_path:-$plan_or_prompt}")}"
+body="Autonomous copilot implementation (lead \`$LEAD\`, wing \`$WING\`). $steps_total step(s) across $waves_total wave(s), $rounds_total total review round(s)."
+
 ready_flag=()
-[ "$OPEN_READY" = "true" ] && ready_flag=(--ready)
+[ -n "$open_ready" ] && ready_flag=(--ready)
 
 landed=$(node --experimental-strip-types "$TOOLS/copilot_land.ts" land \
-  --repo "$REPO" \
-  --branch "$BRANCH" \
-  --base "$DEFAULT_BRANCH" \
+  --repo "$repo" \
+  --branch "$branch" \
+  --base "$default_branch" \
   --title "$title" \
   --body "$body" \
   --lead "$LEAD" \
-  --repo-dir "$REPO_ROOT" \
   "${ready_flag[@]}" \
   --json)
 
@@ -627,7 +462,7 @@ pr_number=$(printf '%s' "$landed" | node -e 'process.stdout.write(String(JSON.pa
 prs_csv=$(printf '%s' "$landed" | node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("fs").readFileSync(0,"utf8")).prs))')
 ```
 
-`land` pushes plainly — **never** `--force` (`tools/copilot_land_lib.ts`) — then adopts the open PR whose head is the resolved branch or opens a fresh one, draft by default (`--ready`/`--no-draft` opts out), using the authenticated human `gh` identity. Review comments may use agent-specific app identities. A rejected (non-fast-forward) push is a hard error from the CLI — stop the run and surface it; never force past it.
+`land` pushes plainly — **never** `--force` (`tools/copilot_land_lib.ts`) — then adopts the open PR whose head is `$branch` or opens a fresh one, draft by default (`--ready`/`--no-draft` opts out), authored by the lead's GitHub App. A rejected (non-fast-forward) push is a hard error from the CLI — stop the run and surface it; never force past it.
 
 `pr_number` is this run's branch's PR. `prs_csv` is the JSON array `land` returned — the complete set of impl PRs this run knows about (newly opened plus adopted) — carried into Phase 3's summary, §4b's comment, and the §4c completion line.
 
@@ -644,11 +479,7 @@ Print:
 ### 4a. Save history
 
 ```bash
-STATE_ROOT="${STARK_STATE_ROOT:-$HOME/.stark/code-review}"
-TASK_SLUG="<task-slug>"
-HISTORY_DIR="$STATE_ROOT/history/copilot/$TASK_SLUG"
-mkdir -p "$HISTORY_DIR"
-printf '%s\n' "$HISTORY_DIR"
+mkdir -p ~/.claude/code-review/history/copilot/{task-slug}
 ```
 
 Write:
@@ -675,12 +506,9 @@ For the `gh api` posting snippet, see [references/issue-management.md](reference
 As the literal last line of output, on **every** path through this skill — success or not — print exactly one `STARK_STAGE_SUMMARY` line (`standards/stage-completion-line.md`). It is additive: everything above it (Phase 3's summary, §4b's comment) is unchanged, and this line is not gated behind any `--json` flag (this skill has none).
 
 ```bash
-OUTCOME="<terminal-outcome>"
-PLAN_SLUG="<plan-slug-or-empty>"
-PRS_JSON='<json-array-or-[]>'
 if [ -n "$PLAN_SLUG" ]; then plan_slug_json="\"$PLAN_SLUG\""; else plan_slug_json=null; fi
 cat <<EOF
-STARK_STAGE_SUMMARY {"skill":"stark-copilot","outcome":"$OUTCOME","plan_slug":$plan_slug_json,"prs":$PRS_JSON}
+STARK_STAGE_SUMMARY {"skill":"stark-copilot","outcome":"$outcome","plan_slug":$plan_slug_json,"prs":${prs_csv:-[]}}
 EOF
 ```
 
@@ -688,43 +516,36 @@ EOF
 
 ## Parallel waves (default)
 
-Multi-step waves require no host-specific workflow DSL. The portable baseline is
-one backgrounded `copilot_dispatch.ts` process per step; each dispatcher already
-isolates its worktree. A host may use an equivalent native parallel-worker API,
-but lack of that API must not disable the default parallel path.
+Multi-step waves from the §1.4 execution DAG fan out via the **Workflow** tool: one `copilot_dispatch.ts` lead/wing loop per step, concurrently, each in its own worktree (the dispatcher already isolates per step, so no extra `isolation` flag is needed beyond distinct `--step-id`s). All worktrees in a wave branch from the same HEAD — the previous wave's merged result — which is exactly what the DAG guarantees is sufficient context.
 
-Stage every step's prompt files and issue transitions before launch. For each
-step, write an executable `$WAVE_DIR/run-$STEP_ID.sh` containing a fully expanded
-version of §2b: concrete absolute asset, repo, run, prompt, result, and diff
-paths; no inherited shell variables. Redirect stdout to
-`$WAVE_DIR/step-$STEP_ID-result.json`, stderr to a sibling `.stderr`, and write
-the dispatcher exit code to `.exit`. Then launch the wave with this standalone
-Bash call (replace the directory placeholder first):
+Stage each step's three prompt files (§2a) and issue transitions (§2a0) **before** invoking the Workflow. Compose each step's §2b command **fully expanded** — concrete absolute paths, no `$TOOLS`/`$step_id` shell variables (the subagent's shell doesn't have the orchestrator's variables) — and redirect its stdout to a per-step result file: `… > /tmp/stark-copilot-$$/step-$step_id-result.json`. With §2b's `--diff-out` the diff bytes already live in their own file; the stdout redirect keeps the rest of the JSON out of model output too — the subagent returns only a small verdict record, and the orchestrator reads the full JSON from the file itself. Then run one Workflow per multi-step wave:
 
-```bash
-set -u
-WAVE_DIR="<absolute-wave-directory>"
-shopt -s nullglob
-scripts=("$WAVE_DIR"/run-*.sh)
-[ "${#scripts[@]}" -gt 0 ] || { echo "wave has no staged dispatch scripts" >&2; exit 1; }
-pids=()
-for script in "${scripts[@]}"; do
-  bash "$script" </dev/null &
-  pids+=("$!")
-done
-failed=0
-for pid in "${pids[@]}"; do
-  if ! wait "$pid"; then failed=1; fi
-done
-printf '%s\n' "$failed" > "$WAVE_DIR/wave-had-failures"
+```js
+export const meta = {
+  name: 'copilot-wave',
+  description: 'Run one wave of independent copilot lead/wing loops concurrently',
+  phases: [{ title: 'Build' }],
+}
+const VERDICT = {
+  type: 'object',
+  required: ['step_id', 'final_verdict', 'exit_code'],
+  properties: {
+    step_id: { type: 'string' },
+    final_verdict: { type: 'string' },
+    exit_code: { type: 'integer' },
+    error: { type: ['string', 'null'] },
+  },
+}
+// args.steps = the current wave: [{step_id, cmd, result_file}]
+// cmd is fully expanded and already redirects stdout to result_file.
+const results = await parallel(args.steps.map(s => () =>
+  agent(`Run this command with Bash (it may take many minutes; a non-zero exit means a non-approved verdict — that is data, not an error to retry): ${s.cmd}
+Then Read ${s.result_file} and return {step_id, final_verdict, exit_code, error} extracted from it.`,
+        { label: `copilot:${s.step_id}`, phase: 'Build', schema: VERDICT })))
+return results.filter(Boolean)
 ```
 
-Do not use `set -e` around the waits: a non-zero dispatcher exit is a
-non-approved verdict to parse, not permission to abandon sibling processes.
-After every process has returned, read each result and exit file. A missing or
-unparseable result is failed. Process approved steps **in deterministic wave
-order**: verify gates (§2e) → apply diff (§2f) → commit (§2g) → close issues
-(§2g1) → cleanup (§2h). Caveats specific to fan-out:
+After the Workflow returns, read each step's `result_file` for the full §2c JSON (`final_diff_path`, `worktree_path`, `rounds`), then for each step **in deterministic wave order**: verify gates (§2e) → apply diff (§2f) → commit (§2g) → close issues (§2g1) → cleanup (§2h). Caveats specific to fan-out:
 
 - **Cross-step apply conflicts:** every worktree branched from the same HEAD, so a later step's `git apply --3way` may conflict with an earlier step's just-committed diff (the DAG missed a real file-level overlap). §2f already resets the tree on failure; do NOT hand-merge or file-copy — run a **seeded re-dispatch** (§2e) against the new HEAD, with the conflicting files named alongside the findings. Or stop and surface it.
 - **A null result** (skipped/dead subagent) or a missing/unparseable `result_file` is a failed step — treat as non-`approved`.

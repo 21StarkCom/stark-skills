@@ -11,8 +11,6 @@ set -euo pipefail
 REPO="${1:?usage: gha-repo-actions-drill.sh <owner/repo> [since=YYYY-MM-DD]}"
 SINCE="${2:-$(date -u +%Y-%m-01)}"   # default: start of current month
 : "${GH_TOKEN:?set GH_TOKEN}"; export GH_TOKEN
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-JSON_TOOL="$SCRIPT_DIR/gha-cost-json.ts"
 
 # STEP 0 — visibility. Public repos get UNLIMITED FREE GitHub-hosted Actions
 # minutes AND storage. If this repo is public, its Actions runs cost $0 no matter
@@ -40,12 +38,9 @@ done
 
 echo "-- job fan-out + billable timing on recent runs (matrix explosion detector) --"
 gh api "repos/$REPO/actions/runs?per_page=20&created=>=$SINCE" --jq '.workflow_runs[] | "\(.id)\t\(.name)"' 2>/dev/null | while IFS=$'\t' read -r rid rname; do
-  summary=$(gh api --paginate --slurp "repos/$REPO/actions/runs/$rid/jobs?per_page=100" 2>/dev/null \
-    | node --experimental-strip-types --no-warnings "$JSON_TOOL" jobs)
-  timing_ms=$(gh api "repos/$REPO/actions/runs/$rid/timing" \
-    --jq '[.billable[]?.total_ms // 0] | add // 0' 2>/dev/null || echo 0)
-  timing_min=$(( (${timing_ms:-0} + 59999) / 60000 ))
-  printf '  %-11s %s api_timing_min=%s  (%s)\n' "$rid" "$summary" "$timing_min" "$rname"
+  jobs=$(gh api "repos/$REPO/actions/runs/$rid/jobs?per_page=100" --jq '.total_count' 2>/dev/null)
+  bill=$(gh api "repos/$REPO/actions/runs/$rid/timing" --jq '.billable.UBUNTU.total_ms // 0' 2>/dev/null)
+  printf '  %-11s jobs=%-3s billable_min=%s  (%s)\n' "$rid" "${jobs:-?}" "$(( ${bill:-0} / 60000 ))" "$rname"
 done
 
 cat <<'EOF'
@@ -55,9 +50,7 @@ cat <<'EOF'
   cancel-in-progress, path filters). See references/levers.md.
 - jobs >> 1 per run               -> matrix fan-out; every job rounds UP to 1
   billed minute, so N short jobs = N billed minutes. Trim the matrix.
-- linux_equiv_min applies per-job rounding and OS multipliers; compare it with
-  actual_min to expose short-job/matrix waste.
-- api_timing_min ~0 on every run but the billing report shows huge minutes
+- billable_min ~0 on every run but the billing report shows huge minutes
   -> ANOMALY. GitHub's own billing and timing APIs disagree. This is not fixable
      by editing workflows — open a Support ticket. See references/support-ticket.md.
 EOF

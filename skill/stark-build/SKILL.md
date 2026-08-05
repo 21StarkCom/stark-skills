@@ -1,46 +1,37 @@
 ---
 name: stark-build
 description: >-
-  Stage 2 — autonomous implementation from an accepted stark-author spec: one fresh isolated writer per task, runner-owned immutable checks, evidence per task, commit per green task, held-out e2e gate, one cross-vendor advisory review, ONE bounded fix round for medium+ findings, draft PR. No LLM review loops. Use for build, implement a spec.
-argument-hint: '<spec-path> [--dry-run] [--no-advisory] [--no-fix] [--stay-draft] [--agent auto|claude|codex|gemini] [--max-turns N] [--model ID]'
+  Stage 2 — autonomous implementation from an accepted stark-author spec: one fresh headless session per task, gated by checks the agent cannot edit (PreToolUse path-deny + Stop-hook gate), evidence per task, commit per green task, held-out e2e gate, one cross-vendor advisory review, ONE bounded fix round for medium+ findings, draft PR. No LLM review loops. Use for build, implement a spec.
+argument-hint: '<spec-path> [--dry-run] [--no-advisory] [--no-fix] [--stay-draft] [--max-turns N] [--model ID]'
 disable-model-invocation: true
 ---
 
 ## Help
 
-If the invocation arguments contain a standalone `--help`, `-h`, or `help` token,
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop — do not run any phase.
 
-# stark-build — Stage 2: fresh writer per task, runner-owned checks
+# stark-build — Stage 2: fresh session per task, checks the agent cannot edit
 
 You are the RUNNER: an interactive session that sets up the harness, then
-dispatches one fresh isolated writer per spec task and verifies each result
-deterministically. The current host coordinates the run; the writer may be a
-native isolated worker or an enabled headless agent CLI. The implementer never
-grades itself.
+dispatches one fresh headless `claude -p` session per spec task and verifies
+each result deterministically. The implementer never grades itself.
 
 Evidence base: [references/stage2-dossier.md](references/stage2-dossier.md)
-(`[RQn]`/`[§n]` tags cite it). Consumes a spec accepted by the
-`stark-author` skill.
+(`[RQn]`/`[§n]` tags cite it). Consumes a `/stark-author` accepted spec.
 
 **Non-negotiables** [§1]:
 - **Completion is a runnable pass/fail check, never a model verdict.** Agents
   fake completion at scale (100% submitted / 44% resolved, measured) — a
   "done" claim is noise.
-- **Checks are read-only to the writer, enforced by capabilities, not prompts.**
-  For a hook-capable Claude writer, use the existing path-deny and Stop hooks.
-  For any other writer, keep harness state outside its writable root, restrict
-  writes to the task worktree, snapshot protected paths before dispatch, and
-  reject/reset the result if the protected-path diff is non-empty. If the host
-  cannot enforce that boundary and verify it afterwards, stop rather than run
-  an unprotected autonomous build. Anti-cheat prompting alone fails (80–95%
-  still hacked under explicit instructions).
+- **Checks are read-only to the writer, enforced by hooks, not prompts.**
+  Anti-cheat prompting alone fails (80–95% still hacked under explicit
+  instructions).
 - **Abort is a first-class success.** An explicit give-up path cuts cheating
   ~5x (54%→9%). A logged deviation + stop beats a gamed green, always.
-- **One task per fresh session.** Spec + the runner-injected PROGRESS summary +
-  git are the only cross-session memory. The worker never writes runner state.
-  [RQ3]
+- **One task per fresh session.** Spec + PROGRESS.md + git are the only
+  cross-session memory. [RQ3]
 - **Sequential single writer.** No parallel writers in this skill — the
   serialized-integration exception in [§3.5] is future work. [RQ4]
 - **ONE advisory review, cross-vendor, at the end — then AT MOST ONE fix
@@ -52,19 +43,22 @@ Evidence base: [references/stage2-dossier.md](references/stage2-dossier.md)
   2026-07-26 ahead of the A/B the dossier asked for; the dossier's §1.8
   still argues against this round. Read §6.4a before widening it.]
 
-**Harness subprocess rule — stdin closed, always.** Every dispatched headless
-agent subprocess must have `</dev/null` before its
+**Harness subprocess rule — stdin closed, always.** Every dispatched
+subprocess (`claude -p`, `codex exec`) must have `</dev/null` before its
 output redirect. **A hung reviewer is indistinguishable from a thorough
-one.** Agent CLIs may read stdin *in addition to* the prompt argument, so an
-open pipe that never delivers EOF — which is what stdin is under a backgrounded
-or orchestrated shell — can block them. Pass prompts as arguments or staged
-files, then add `</dev/null` before `>` on every dispatch below; any new
-dispatch inherits this rule.
+one.** Both CLIs read stdin *in addition to* the prompt argument, so an
+open pipe that never delivers EOF — which is what stdin is under a
+backgrounded or orchestrated shell — blocks them. `codex exec` blocks
+silently and forever (confirmed live: 5h14m, 39 bytes of output, all of it
+"Reading additional input from stdin..."). `claude -p` fails fast instead,
+but into the redirect file where nobody is looking (`Warning: no stdin data
+received in 3s` then `Execution error`). Add `</dev/null` before `>` on
+every dispatch below; any new dispatch inherits this rule.
 
 The rule covers **every** process this skill starts, not just the LLM
 dispatches:
-- **Claude hooks, when selected** — `stop-gate.sh` runs the task's check with stdin closed,
-  because a Stop hook's own stdin is the host payload pipe and a
+- **the hooks** — `stop-gate.sh` runs the task's check with stdin closed,
+  because a Stop hook's own stdin is the Claude Code payload pipe and a
   gate that transitively reads stdin would hang turn-end inside the gate;
 - **the runner's own gate invocations** — Phase 2 §Verify 1, the Phase 3
   e2e command, and the Phase 4b sweep all run under the orchestrated
@@ -77,17 +71,13 @@ dispatches:
 `protect-paths.sh` is the one deliberate exception — it *must* read stdin
 to get the tool payload.
 
-Parse the spec path and options directly from the user's current request after
-the explicitly invoked skill name. Resolve `--agent auto` to an available fresh
-writer, preferring the current host's isolated worker or CLI. Resolve model IDs
-from runtime configuration unless the user supplied `--model`; never hardcode a
-vendor model.
+**Raw input:** `$ARGUMENTS`
 
 ## Phase 0 — Preflight
 
 1. Resolve `SPEC` to an absolute path; it must contain `accepted-base: <sha>`
    in the header — refuse an ungated spec (send the operator to
-   the `stark-author` skill). Derive `SLUG` from the spec filename
+   `/stark-author`). Derive `SLUG` from the spec filename
    (strip `YYYY-MM-DD-` prefix and `-spec.md` suffix).
 2. Parse `## Tasks`: per task — id, title, declared file set, done-when
    command, depends-on. **Every task needs a machine-checkable done-when**;
@@ -95,7 +85,7 @@ vendor model.
    Stage-1 defect, not yours to improvise). A done-when containing `grep -q`
    in a pipeline is refused the same way — a fails-on-success gate: under
    `pipefail` it can SIGPIPE a still-writing producer, failing the gate on
-   success (return to the `stark-author` skill). Topo-sort by declared edges;
+   success (return to `/stark-author`). Topo-sort by declared edges;
    ties keep spec order.
 3. Verify `git cat-file -e <accepted-base>` in the target repo; run
    `git status --porcelain` — a dirty tree is a hard stop.
@@ -105,36 +95,17 @@ vendor model.
 
 ## Phase 1 — Run setup (once per spec) [§3.1]
 
-State lives OUTSIDE the repo and outside the writer's writable root:
-`STATE=${STARK_STATE_ROOT:-$HOME/.stark/code-review}/history/build/<slug>/<run-id>/`
-(`run-id` = UTC timestamp). Set `umask 077`, then let the runner create
-`$STATE/{hooks,tasks,evidence}` and every file below them. Never place `STATE`
-under the task worktree. The runner is the sole writer of this tree: workers
-emit stdout markers; they never create, append, truncate, chmod, rename, or
-delete runner state.
+State lives OUTSIDE the repo:
+`STATE=~/.claude/code-review/history/build/<slug>/<run-id>/`
+(`run-id` = UTC timestamp; `mkdir -p "$STATE"/{hooks,tasks,evidence}`).
 
 1. **Worktree at the pin:** `git worktree add <wt> <accepted-base>`, then
    branch `build/<slug>` via the create-or-adopt plumbing (never force):
    ```bash
-   set -euo pipefail
-   if [ -f "skill/stark-build/SKILL.md" ] && [ -f "tools/copilot_land.ts" ]; then
-     ASSET_ROOT="$(pwd)"
-   else
-     ASSET_ROOT="${STARK_ASSET_ROOT:-${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
-   fi
-   TOOLS="${ASSET_ROOT:+$ASSET_ROOT/tools}"
-   WT="<absolute-worktree-path>"
-   SLUG="<resolved-slug>"
-   ACCEPTED_BASE="<accepted-base-sha>"
-   [ -f "$TOOLS/copilot_land.ts" ] || { echo "copilot_land.ts not found" >&2; exit 1; }
+   TOOLS="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools"
    node --experimental-strip-types --no-warnings "$TOOLS/copilot_land.ts" \
-     prepare-branch --branch "build/$SLUG" --repo-dir "$WT" \
-     --require-base "$ACCEPTED_BASE" \
-     || { echo "HARD STOP: prepare-branch refused — read its message." >&2; exit 1; }
-   git -C "$WT" rev-parse --abbrev-ref HEAD | grep -qx "build/$SLUG" \
-     || { echo "HARD STOP: worktree is detached or on the wrong branch." >&2; exit 1; }
-   git -C "$WT" merge-base --is-ancestor "$ACCEPTED_BASE" HEAD \
-     || { echo "HARD STOP: HEAD does not contain accepted-base." >&2; exit 1; }
+     prepare-branch --branch "build/<slug>" --repo-dir "<wt>" \
+     --require-base <accepted-base>
    ```
    **`--require-base` is mandatory here.** Without it, a leftover
    `origin/build/<slug>` from a prior abandoned run is adopted via
@@ -143,15 +114,22 @@ delete runner state.
    gate measures a tree predating the pin. Reproduced and fixed live; the
    flag refuses the stale adoption without moving the worktree.
 
-   **Check the exit code FIRST, then assert.** The self-contained command above
-   does both. A refusal is the guard
+   **Check the exit code FIRST, then assert.** A refusal is the guard
    working, and it leaves HEAD exactly where it was — so a bare
    `merge-base --is-ancestor <accepted-base> HEAD` compares the base to
    itself, exits 0, and sails past a run that never got its branch. (The
    downstream symptom is an opaque `src refspec build/<slug> does not
    match any` from Phase 1 step 2, after an empty commit lands on a
    detached HEAD.) Both checks are required — the assertion is the backstop
-   for an older vendored `copilot_land.ts` that predates the flag.
+   for an older vendored `copilot_land.ts` that predates the flag:
+   ```bash
+   node ... "$TOOLS/copilot_land.ts" prepare-branch ... --require-base <accepted-base> \
+     || { echo "HARD STOP: prepare-branch refused — read its message." >&2; exit 1; }
+   git -C "<wt>" rev-parse --abbrev-ref HEAD | grep -qx "build/<slug>" \
+     || { echo "HARD STOP: worktree is not on build/<slug> (detached or wrong branch)." >&2; exit 1; }
+   git -C "<wt>" merge-base --is-ancestor <accepted-base> HEAD \
+     || { echo "HARD STOP: HEAD does not contain accepted-base <sha>." >&2; exit 1; }
+   ```
    **Remedy for a stale branch — do NOT reflexively delete the remote.**
    `git push origin --delete build/<slug>` **closes any open PR on that head
    ref**, taking its posted advisory findings and review threads with it —
@@ -167,37 +145,19 @@ delete runner state.
 3. **Harness files:** copy this skill's
    [references/hooks/protect-paths.sh](references/hooks/protect-paths.sh) and
    [references/hooks/stop-gate.sh](references/hooks/stop-gate.sh) into
-   `$STATE/hooks/`, `chmod +x`, and create `$STATE/PROGRESS.md` and
-   `$STATE/protected.list` mode `0600`. Write one absolute path per line to the
-   protected list, with **no trailing slash on directory entries**. Its first
-   entry is `$STATE` itself, which protects the list, `PROGRESS.md`, evidence,
-   hooks, task checks/settings/prompts/logs/counters, advisory artifacts, and
-   every later runner-created descendant. Then list the spec + `.human.md`
-   sidecar, every EXISTING test named by any done-when, and the repo's CI config
-   dir. [RQ1/RQ5 — read-only tests, measured]
-
-   For a Claude writer, materialize `settings.json` with the hooks below. For a
-   non-Claude writer, do not pass Claude settings: keep `STATE` outside its
-   writable sandbox. **For every writer, including Claude**, compute a
-   deterministic manifest of every descendant under `$STATE` plus every
-   protected repo/spec path before dispatch: relative path, type, mode, symlink
-   target, and SHA-256 content for regular files. Hold that manifest in the
-   runner process, never in a worker-visible file or prompt. After dispatch,
-   require an exact match except for the predeclared runner output channels
-   (`$T/session.log` and the hook-owned numeric `$T/blocks`). Validate those two
-   separately, then take a new full manifest after each runner-owned append.
-   Any other added, removed, content-changed, mode-changed, or symlinked state
-   path is harness tampering and aborts the run. Hash evidence and PROGRESS too;
-   they are not trusted merely because the runner intends to write them.
+   `$STATE/hooks/`, `chmod +x`. Write `$STATE/protected.list` — one absolute
+   path per line, **no trailing slash on directory entries**: the spec + its
+   `.human.md` sidecar, every EXISTING test file named by any done-when,
+   `$STATE/hooks`, `$STATE/tasks` (check scripts + settings), and the repo's
+   CI config dir. [RQ1/RQ5 — read-only tests, measured]
 
    A trailing slash builds the glob `<dir>//*`, whose double slash matches
    **nothing** — the Edit/Write deny branch silently passes every file under
    it, and a task session can rewrite its own `check.sh` and `stop-gate.sh`
    to land a fabricated green. `protect-paths.sh` now normalizes trailing
    slashes itself, so this is belt-and-braces; write them without anyway.
-4. **Initialize `$STATE/PROGRESS.md`**. Only the runner appends canonical
-   per-task status, evidence hashes/pointers, deviations, and fix dispositions.
-   Recompute the runner-held state manifest after every append. [RQ3]
+4. **Materialize `$STATE/PROGRESS.md`** (append-only: per-task status,
+   evidence pointers, deviations). [RQ3]
 
 ## Phase 2 — Per-task loop (sequential) [§3.2]
 
@@ -206,102 +166,50 @@ For each task `<id>`, in topo order:
 **Prepare** (`T=$STATE/tasks/<id>`): write `$T/check.sh` = the task's
 done-when command verbatim, running in the worktree (`set -euo pipefail; cd
 <wt>; <done-when>`) — a piped `grep -q` here means Phase 0 missed a
-fails-on-success gate: stop, never silently rewrite. When the writer is Claude,
-also write `$T/settings.json`:
+fails-on-success gate: stop, never silently rewrite; `$T/settings.json`:
 
 ```json
 {"hooks": {
   "PreToolUse": [{"matcher": "Edit|Write|NotebookEdit|Bash",
-    "hooks": [{"type": "command", "command": "$STATE/hooks/protect-paths.sh $STATE/protected.list <id>"}]}],
+    "hooks": [{"type": "command", "command": "$STATE/hooks/protect-paths.sh $STATE/protected.list"}]}],
   "Stop": [{"hooks": [{"type": "command",
-    "command": "$STATE/hooks/stop-gate.sh $T/check.sh $T/blocks $T/session.log <id>"}]}]
+    "command": "$STATE/hooks/stop-gate.sh $T/check.sh $T/blocks $STATE/PROGRESS.md <id>"}]}]
 }}
 ```
 
-(absolute, shell-quoted paths; `printf '0' > "$T/blocks"` and pre-create mode
-`0600` `$T/session.log`). Other writers do not receive this Claude-specific
-settings file. For every writer, create `$T/prompt.md` from this template — fill
-every `<>`:
+(absolute paths, `printf '0' > $T/blocks`); and `$T/prompt.md` from this
+template — fill every `<>`:
 
 > Implement exactly ONE task of an accepted spec. Repo: `<wt>`. Spec (read
 > it, treat as immutable): `<SPEC>`. Task: `<id> — <title>`. Declared files:
-> `<file set>`. Done-when: `<command>`. Progress summary: `<runner-provided
-> prior-task status and deviations>`.
-> 1. Orient: read the spec's task, the progress summary embedded below, and
+> `<file set>`. Done-when: `<command>`.
+> 1. Orient: read the spec's task, `<$STATE>/PROGRESS.md`, and
 >    `git log --oneline -15`; run `<cheapest existing check>` to catch
 >    undocumented breakage before you build on it.
 > 2. Check first: run the done-when; SHOW its failing output before any
 >    implementation. If it cannot fail meaningfully (config/docs/wiring),
 >    first write the task's verification per the spec's fallback ladder.
-> 3. Implement until the done-when passes. Gated files are runner-protected —
->    add NEW tests freely, never edit existing ones. The runner rejects any
->    protected-path change even when this host has no live hook.
-> 4. Evidence: run checks normally and include their output in your response.
->    The runner captures the whole session log under its private state tree.
->    Never write outside `<wt>`.
+> 3. Implement until the done-when passes. Gated files are hook-protected —
+>    add NEW tests freely, never edit existing ones.
+> 4. Evidence: run checks via `... 2>&1 | tee -a <$STATE>/evidence/<id>.log`.
+>    (`$STATE/tasks/` is write-protected; write evidence to `$STATE/evidence/` instead.)
 > 5. Touch only the declared files. If you must touch outside the set,
->    print exactly this one-line marker on stdout and stop:
->    `STARK_DEVIATION task=<id> class=<blocked|spec-defect|scope-move> message=<single-line reason>`
->    Use no fence, prefix, suffix, control character, or extra marker. The
->    reason must be 1–500 characters. The runner validates the fields and
->    appends a canonical entry to PROGRESS.md.
+>    append `- [deviation] task=<id> class=<blocked|spec-defect> ...` to
+>    PROGRESS.md; if the SCOPE BOUNDARY moves, log `class=scope-move` and
+>    stop immediately.
 > 6. Finish with exactly one commit: `build(<slug>): <id> <title>`.
-> 7. Abort is success: if blocked, print the deviation marker and stop. The gate
+> 7. Abort is success: if blocked, log the deviation and stop. The gate
 >    accepts a logged deviation — never fake a green.
-
-`STARK_DEVIATION` is the only task-session control marker. A worker must never
-write `protected.list`, `PROGRESS.md`, `evidence/`, `hooks/`, or `tasks/`
-directly. The runner accepts at most one anchored marker for the current task;
-the id must equal `<id>`, class must be one of the three literals above, and the
-reason must be a printable single line of 1–500 characters. Multiple, malformed,
-wrong-task, or control-character-bearing markers are a blocked result. Treat the
-line as data: never `eval` it or interpolate it into a command.
 
 **Dispatch** (fresh session; budget per task, not per run [§3.3]):
 
-Before dispatch, embed the current runner-owned PROGRESS summary in the prompt.
-Use the host's native fresh writable worker only if it supports no inherited
-conversation, a writable root limited to `WT`, and no write access to `STATE`.
-Otherwise use an enabled headless CLI. The following self-contained fallback
-supports the installed Claude, Codex, and Gemini CLIs. Replace placeholders from
-the parsed run state before executing. Claude receives the hook settings; Codex
-and Gemini rely on workspace isolation plus the mandatory post-dispatch tamper
-gate.
-
 ```bash
-set -euo pipefail
-AGENT="<resolved-agent>"
-MODEL="<configured-or-user-model>"
-MAX_TURNS="<max-turns-or-30>"
-WT="<absolute-worktree-path>"
-T="<absolute-task-state-path>"
-case "$AGENT" in
-  claude)
-    claude -p --model "$MODEL" --settings "$T/settings.json" \
-      --max-turns "$MAX_TURNS" --dangerously-skip-permissions \
-      "$(cat "$T/prompt.md")" </dev/null > "$T/session.log" 2>&1
-    ;;
-  codex)
-    codex exec -C "$WT" --full-auto --ephemeral -m "$MODEL" \
-      "$(cat "$T/prompt.md")" </dev/null > "$T/session.log" 2>&1
-    ;;
-  gemini)
-    (cd "$WT" && gemini -m "$MODEL" -p "$(cat "$T/prompt.md")" \
-      --sandbox --approval-mode auto_edit --skip-trust \
-      </dev/null > "$T/session.log" 2>&1)
-    ;;
-  *) echo "No supported isolated writer is available" >&2; exit 1 ;;
-esac
+claude -p --model "<--model | claude-opus-5>" --settings "$T/settings.json" \
+  --max-turns "<--max-turns | 30>" --dangerously-skip-permissions \
+  "$(cat "$T/prompt.md")" </dev/null > "$T/session.log" 2>&1
 ```
 
 **Verify (you, deterministically — never ask the session how it went):**
-Before interpreting any worker output, compare the runner-held pre/post state
-manifests. Only `$T/session.log` and a numeric `$T/blocks` may differ during the
-dispatch; every other state/protected-path delta is a hard tamper abort. The
-runner then copies and hashes `$T/session.log` as worker evidence. For every
-runner-owned gate, the runner captures stdout/stderr under
-`$STATE/evidence/<id>.log` while preserving the gate's exact exit status, then
-refreshes the full state manifest.
 1. Gate: run `bash "$T/check.sh" </dev/null` yourself → green / red.
    Keep the `bash` prefix — `check.sh` is written without a shebang and is
    never `chmod +x` (only `$STATE/hooks/` is), so executing it directly
@@ -357,33 +265,25 @@ refreshes the full state manifest.
    absent or broken; without `pipefail` a piped done-when exits with the
    last stage's status and greens a failing suite. Both are the vacuous
    green this skill exists to prevent. Re-run to confirm (Phase 3's ≤3×
-   flaky discipline applies), and have the runner record in PROGRESS.md that
-   the wrapper did not return, that direct invocation was used, and both
-   outcomes.
+   flaky discipline applies), and record in PROGRESS.md that the wrapper
+   did not return, that direct invocation was used, and both outcomes.
    Never paraphrase or adapt the command. The root cause here is
    **undiagnosed** — do not invent one. The non-negotiable "completion is a
    runnable check, never a model verdict" holds precisely because the
    command and its envelope are identical and the runner still runs it.
 2. Tamper: `git -C <wt> diff --name-only <pre-sha>..HEAD` (plus dirty files)
-   ∩ the protected repo/spec entries must be EMPTY. The full runner-state
-   comparison described above applies to **every** writer, including Claude;
-   never waive it because hooks were installed. A hit aborts the whole run
-   (`class=blocked`, runner-authored harness-tamper note, straight to Phase 5).
+   ∩ `protected.list` must be EMPTY — a hit aborts the whole run
+   (`class=blocked`, harness-tamper note, straight to Phase 5 report).
 3. Scope: same diff vs declared file set → out-of-set paths get a deviation
-   line. Parse only a complete line matching
-   `^STARK_DEVIATION task=<id> class=(blocked|spec-defect|scope-move) message=.{1,500}$`
-   from the worker log. Require the literal current task id, printable text,
-   and exactly one marker; reject malformed or conflicting markers. The runner
-   writes the canonical PROGRESS entry itself and never executes marker text.
+   line (runner-written if the session didn't).
 4. Commit: green + uncommitted → commit `build(<slug>): <id> (runner-committed)`;
    red-abort or crash → commit WIP as `wip(<slug>): <id>`. Every green task
    is durable. [RQ8]
-5. The runner appends the task entry to PROGRESS.md: status (`green | deviation
-   | crashed`), evidence path + SHA-256, blocks count; then refreshes the state
-   manifest.
+5. Append the task entry to PROGRESS.md: status (`green | deviation | crashed`),
+   evidence path, blocks count.
 6. Crash/timeout without green or deviation → re-dispatch the SAME task ONCE
    (it resumes from PROGRESS.md + commits — never from zero [RQ2]); still no
-   exit → the runner writes a `class=blocked` deviation and moves on.
+   exit → runner writes `class=blocked` deviation and moves on.
 7. A `class=scope-move` deviation → STOP the run: push what exists, report to
    the operator (the gate owns scope, not you). [§3.8]
 
@@ -403,52 +303,21 @@ pattern.
 
 - **Green** → proceed.
 - **Red with all tasks green** → the divergence signal (build gamed or spec
-  mis-decomposed [RQ9]): the runner appends it to PROGRESS.md, refreshes the
-  state manifest, continues to Phase 4, keeps the PR DRAFT, and says it plainly
-  in the report. There is NO fix loop — the human decides.
+  mis-decomposed [RQ9]): append to PROGRESS.md, continue to Phase 4, PR
+  STAYS DRAFT, and say it plainly in the report. There is NO fix loop —
+  the human decides.
 
 ## Phase 4 — Advisory review (one-shot; skip with `--no-advisory`) [§3.7]
 
 Skip-rule (speculative, log when used): diff < ~50 changed lines AND only
 in-set files AND e2e green.
 
-Choose one enabled reviewer from a different vendor than the task writer. Honor
-runtime configuration; do not hardcode Codex when Codex was the writer or host.
-Use a native zero-context read-only worker when the host provides one, otherwise
-use an installed headless reviewer CLI with writes disabled. If no different
-vendor can run read-only, record `advisory=unavailable`, leave the PR draft, and
-stop before any fix round; never relabel a same-vendor self-review as
-cross-vendor.
-
-Stage the final diff and advisory prompt, then dispatch with a self-contained
-call. This CLI fallback covers Claude and Codex; use a host-native isolated
-reviewer for Gemini unless the runtime can provision a read-only Gemini home:
+One reviewer, different model family, fresh context, read-only — codex:
 
 ```bash
-set -euo pipefail
-REVIEWER="<different-vendor-reviewer>"
-MODEL="<configured-reviewer-model>"
-WT="<absolute-worktree-path>"
-ACCEPTED_BASE="<accepted-base-sha>"
-STATE="<absolute-run-state-path>"
-git -C "$WT" diff "$ACCEPTED_BASE"..HEAD > "$STATE/final.diff"
-case "$REVIEWER" in
-  codex)
-    codex exec -C "$WT" -s read-only --ephemeral -m "$MODEL" \
-      "$(cat "$STATE/advisory-prompt.md")" </dev/null > "$STATE/advisory.out" 2>&1
-    ;;
-  claude)
-    claude -p --model "$MODEL" --allowedTools "Read,Glob,Grep" \
-      "$(cat "$STATE/advisory-prompt.md")" </dev/null > "$STATE/advisory.out" 2>&1
-    ;;
-  *) echo "Use a host-native zero-context read-only reviewer for $REVIEWER" >&2; exit 2 ;;
-esac
+git -C <wt> diff <accepted-base>..HEAD > "$STATE/final.diff"
+codex exec -s read-only "$(cat "$STATE/advisory-prompt.md")" </dev/null > "$STATE/advisory.out" 2>&1
 ```
-
-The runner creates `final.diff`, `advisory-prompt.md`, and `advisory.out`, hashes
-them, and refreshes the state manifest. The reviewer receives prompt bytes, not
-write access to `$STATE`; the output redirect is the only permitted state delta
-during this dispatch.
 
 `advisory-prompt.md` = the spec text + the full diff + this contract
 verbatim: *"Report defects and spec deviations only — bugs, contradictions
@@ -462,10 +331,10 @@ consequence if left unfixed: critical = data loss / crash on the normal path
 / security hole; high = wrong output or a broken spec contract; medium = a
 real defect on a reachable edge path; low = everything else."*
 
-Post the findings as ONE PR comment authored by the selected reviewer's app
-identity (`stark-claude`, `stark-codex`, or `stark-gemini`) — ALL of them,
-every severity, before any fixing. Then re-run the pass NEVER, whatever Phase
-4b does. [RQ6][A1]
+Post the findings as ONE PR comment authored by stark-codex
+(`github_app.ts --app stark-codex pr comment ...`) — ALL of them, every
+severity, before any fixing. Then re-run the pass NEVER, whatever Phase 4b
+does. [RQ6][A1]
 
 ## Phase 4b — ONE fix round, medium+ only (skip with `--no-fix`) [§3.7]
 
@@ -484,28 +353,26 @@ budget past the first attempt is deliberately zero. [RQ1][RQ2]
    demanding scope the spec never asked for — those are the reviewer
    overreaching, not defects. Log each discard with its reason; if that
    empties the set, treat it as no-findings.
-3. **Dispatch ONE fresh writer** — use the same resolved writer and the same
-   portable dispatch procedure as Phase 2. Create an absolute
-   `$STATE/tasks/fix` directory, write its check as the spec's `## Verification`
-   command(s) verbatim, and use that check as the terminal gate. A Claude writer
-   receives the path-deny/Stop settings; any other writer receives a worktree-
-   only writable sandbox and the runner's before/after protected-path gate.
-   Close stdin and write its output to `session.log`, exactly as in Phase 2.
+3. **Dispatch ONE fresh headless session** — same harness as Phase 2, so
+   the spec and every gated existing test stay hook-protected and the
+   Stop-gate check is the **e2e command** (fixes cross task boundaries):
+
+   ```bash
+   T=$STATE/tasks/fix; mkdir -p "$T"; printf '0' > "$T/blocks"
+   # $T/check.sh = the spec's ## Verification command(s), verbatim
+   # $T/settings.json = Phase 2's, with Stop -> stop-gate.sh $T/check.sh ...
+   claude -p --model "<--model | claude-opus-5>" --settings "$T/settings.json" \
+     --max-turns "<--max-turns | 30>" --dangerously-skip-permissions \
+     "$(cat "$T/prompt.md")" </dev/null > "$T/session.log" 2>&1
+   ```
 
    `$T/prompt.md`: the spec, the selected findings verbatim, and — *"Fix
    these findings and nothing else. The spec is immutable and the gated
    tests are hook-protected. Do not refactor, do not harden, do not touch a
-   file no finding names. A finding you judge WRONG is not fixed — print the
-   exact rejection marker described below and move on; do not write runner
-   state. Rejecting on evidence is a success, faking a fix is not. Finish with
+   file no finding names. A finding you judge WRONG is not fixed — append
+   `- [finding-rejected] id=<n> <one-line reason>` to PROGRESS.md and move
+   on; rejecting on evidence is a success, faking a fix is not. Finish with
    exactly one commit: `fix(<slug>): advisory round`."*
-
-   Include this exact one-line grammar in the rendered prompt:
-   `STARK_FINDING_REJECTED task=fix id=<n> reason=<single-line reason>`.
-   The runner accepts only complete lines with `task=fix`, an id in the selected
-   findings set, and a printable 1–500 character reason; duplicate, unknown,
-   malformed, or conflicting ids are blocked results. Only the runner appends
-   validated rejections to PROGRESS.md. Never evaluate marker text.
 4. **Verify (you, deterministically — the reviewer is not consulted again):**
    re-run EVERY task's `check.sh` plus the e2e command yourself. This is the
    heaviest gate sweep in the run, so **Phase 2 §Verify 1's execution rules
@@ -518,11 +385,10 @@ budget past the first attempt is deliberately zero. [RQ1][RQ2]
    tasks). Any check that was green before the round and is
    red after → `git revert` the fix commit, log `class=fix-regression`, PR
    stays draft. All green → keep it. Tamper + scope checks run exactly as in
-   Phase 2 §Verify, including the every-writer state manifest comparison.
-5. **Record.** The runner appends to PROGRESS.md: findings selected, fixed,
-   validated rejected markers (with reasons), and gate outcome, then refreshes
-   the state manifest. Post ONE follow-up PR comment listing what
-   was fixed, what was rejected and why, and what remains open — the
+   Phase 2 §Verify.
+5. **Record.** Append to PROGRESS.md: findings selected, fixed, rejected
+   (with reasons), gate outcome. Post ONE follow-up PR comment listing what
+   was fixed, what was rejected and why, and what remains open — CLAUDE.md's
    nothing-lost rule: a finding is fixed, or answered on the thread. Open
    medium+ findings after the round → **PR stays draft.**
 
@@ -564,8 +430,8 @@ No wall-clock, no self-report, no completion-rate dashboards.
 
 ## What this replaces
 
-For implementation from an accepted spec, this replaces the `stark-copilot`
-lead/wing review loop, `stark-plan-to-tasks`, and `stark-phase-execute`
+For implementation from an accepted spec, this replaces `/stark-copilot`'s
+lead/wing review loop, `/stark-plan-to-tasks`, and `/stark-phase-execute`
 (the latter two deleted in the 2026-07-26 demolition; copilot survives for
 plan-file work with a 1-round cap and a hard test gate). The antipatterns
 this skill must never grow back: [references/stage2-dossier.md](references/stage2-dossier.md) §5.

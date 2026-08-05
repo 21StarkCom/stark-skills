@@ -25,16 +25,34 @@ done
 [ -n "$SCOPE" ] || { echo "usage: $0 --enterprise <slug> | --org <login>" >&2; exit 2; }
 : "${GH_TOKEN:?set GH_TOKEN to an admin:enterprise / admin:org PAT}"
 export GH_TOKEN
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-JSON_TOOL="$SCRIPT_DIR/gha-cost-json.ts"
 
 echo "### Billing usage — $SCOPE_KIND/$SCOPE"
 # The old orgs/{org}/settings/billing/actions endpoint is GONE (HTTP 410). The
 # enhanced-billing usage endpoint returns per-line-item {product,sku,quantity,
 # unitType,netAmount,repositoryName}. Enterprise slug works even though the
 # top-level enterprises/{slug} REST route 404s (it's GraphQL-only).
-gh api "$SCOPE_KIND/$SCOPE/settings/billing/usage" 2>/dev/null \
-  | node --experimental-strip-types --no-warnings "$JSON_TOOL" billing
+gh api "$SCOPE_KIND/$SCOPE/settings/billing/usage" 2>/dev/null | python3 -c "
+import json,sys
+from collections import defaultdict
+d=json.load(sys.stdin); items=d.get('usageItems',[])
+if not items: print('  no usageItems (wrong scope/period, or nothing billed)'); sys.exit()
+tot=0.0; byprod=defaultdict(float); bysku=defaultdict(float); byrepo=defaultdict(float)
+for i in items:
+    net=i.get('netAmount',0) or 0; tot+=net
+    byprod[i.get('product','?')]+=net
+    bysku[(i.get('product','?'),i.get('sku','?'))]+=net
+    if i.get('product')=='actions': byrepo[i.get('repositoryName','(none)')]+=net
+print(f'  TOTAL net \${tot:.2f}  ({len(items)} line items)')
+print('  -- by product --')
+for p,v in sorted(byprod.items(),key=lambda x:-x[1]):
+    if abs(v)>0.005: print(f'    {v:9.2f}  {p}')
+print('  -- top SKUs --')
+for (p,s),v in sorted(bysku.items(),key=lambda x:-x[1])[:12]:
+    if abs(v)>0.005: print(f'    {v:9.2f}  {p} / {s}')
+print('  -- Actions \$ by repo (the cost driver lives here) --')
+for r,v in sorted(byrepo.items(),key=lambda x:-x[1])[:15]:
+    if abs(v)>0.005: print(f'    {v:9.2f}  {r}')
+"
 
 # GHAS seats only make sense at enterprise scope.
 if [ "$SCOPE_KIND" = enterprises ]; then
