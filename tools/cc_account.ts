@@ -38,6 +38,7 @@ import * as path from "node:path";
 import {
   KEYCHAIN,
   applyOrder,
+  classifyNextOutcome,
   describeProjection,
   nextInCycle,
   orderedProfiles,
@@ -58,6 +59,7 @@ import {
   validateStoredProfile,
   writeClaudeCredsArgv,
   writeProfileArgv,
+  type CredentialState,
   type Profile,
   type UsageSnapshot,
 } from "./cc_account_lib.ts";
@@ -90,6 +92,28 @@ function securityOrNull(argv: string[]): string | null {
     return security(argv);
   } catch {
     return null;
+  }
+}
+
+/** `security` exit status for "the item does not exist". */
+const ERR_ITEM_NOT_FOUND = 44;
+
+/**
+ * Probe a stored profile, distinguishing "not there" from "could not look".
+ *
+ * `securityOrNull` collapses both into null, which is fine where the caller
+ * only needs a value, but not where the ANSWER drives a remedy: telling an
+ * operator with a locked keychain that their profiles have no credentials
+ * points them at `add <name>`, which overwrites the intact record with the
+ * currently-logged-in seat's token.
+ */
+function probeProfile(name: string): CredentialState {
+  try {
+    security(readProfileArgv(name));
+    return "present";
+  } catch (err) {
+    const status = (err as { status?: number }).status;
+    return status === ERR_ITEM_NOT_FOUND ? "absent" : "unreadable";
   }
 }
 
@@ -660,61 +684,100 @@ function cmdLimits(): void {
  *
  * Switches by default — `--dry-run` to preview the pick instead.
  */
+/**
+ * Warn about registered profiles whose stored record is gone.
+ *
+ * Without this the rotation collapses silently: with one good profile left and
+ * nine emptied by a partial `reset` or a few `remove`s, `next` reported a clean
+ * "already active" every time and never named the nine. The operator learns the
+ * rotation is gone when the 5h window closes and there is nothing to switch to.
+ */
+function reportStale(stale: readonly string[]): void {
+  if (stale.length === 0) return;
+  process.stderr.write(
+    `cc_account: warning: no stored credentials for ${stale.join(", ")} — ` +
+      "re-`add` them (while logged in as each) or `prune` to drop them\n",
+  );
+}
+
 function cmdNext(apply: boolean, best: boolean): void {
   const profiles = readRegistry();
   const active = currentSeatKey();
-  const hasCreds = (p: Profile) =>
-    securityOrNull(readProfileArgv(p.name)) !== null;
 
-  let target: Profile | null;
-  let why: string;
-  if (best) {
-    const ranked = rankProfiles(profiles, loadSnapshots(), nowSec(), {
-      exclude: active ? [active] : [],
-    }).filter((r) => hasCreds(r.profile));
-    target = ranked[0]?.profile ?? null;
-    why = ranked[0] ? describeProjection(ranked[0].projection) : "";
-  } else {
-    target = nextInCycle(profiles, active, hasCreds);
-    why = "next in rotation";
-  }
+  // ONE keychain sweep, read before any decision. The previous shape probed
+  // every profile inside the picker and then again to classify the dead end,
+  // so the two halves of one decision came from two reads of live state: a
+  // keychain locking between them (screen lock, a concurrent token refresh, a
+  // parallel `reset`) produced "nothing to switch to" — the one message naming
+  // neither a remedy nor a profile — on a fully populated registry. It also
+  // doubled the `security` spawns per run.
+  const credentials = new Map<string, CredentialState>(
+    profiles.map((p) => [p.name, probeProfile(p.name)]),
+  );
 
-  if (!target) {
-    // Three distinct dead ends, and telling them apart matters: only the first
-    // is fixed by `add`. `--best` always excludes the active seat, so it can
-    // never reach the "already active" branch below — without this split it
-    // reports an empty registry while a profile is registered and in use, and
-    // the remedy it names is a no-op.
-    if (profiles.length === 0) {
+  let why = "next in rotation";
+  const outcome = classifyNextOutcome({
+    profiles,
+    active,
+    credentials,
+    pick: (candidates) => {
+      if (!best) return nextInCycle(candidates, active);
+      const ranked = rankProfiles(candidates, loadSnapshots(), nowSec(), {
+        exclude: active ? [active] : [],
+      });
+      why = ranked[0] ? describeProjection(ranked[0].projection) : "";
+      return ranked[0]?.profile ?? null;
+    },
+  });
+
+  switch (outcome.kind) {
+    case "empty":
       fail("no candidate profile — register one with `add <name>`");
-    }
-    const usable = profiles.filter(hasCreds);
-    if (usable.length === 0) {
+    // falls through — `fail` never returns
+    case "unreadable":
+      // Deliberately NOT "re-run `add`": the records may be perfectly intact
+      // and `add` would overwrite them with the current login's token.
+      fail(
+        "cannot read the keychain for: " +
+          outcome.names.join(", ") +
+          "\nUnlock the login keychain and retry. Do NOT run `add` to " +
+          "'fix' this — it would overwrite the stored credentials, which " +
+          "cannot be re-derived.",
+      );
+    case "no-credentials":
       fail(
         "no profile has stored credentials — re-run `add <name>` for one of: " +
-          profiles.map((p) => p.name).join(", "),
+          outcome.names.join(", ") +
+          "\n(`add` captures the CURRENT login, so log in as that account first.)",
       );
-    }
-    const onlyActive =
-      active &&
-      usable.every(
-        (p) => p.seatKey && p.seatKey.toLowerCase() === active.toLowerCase(),
+    case "unknown-active":
+      // Without the live seat we cannot tell "switch" from "switch to the one
+      // already in use", and the headroom picker excludes nothing in this
+      // state — so it would return the live account and report a successful
+      // switch. Refusing is the only answer that cannot be wrong.
+      fail(
+        "cannot determine the active seat from ~/.claude.json — refusing to " +
+          "switch.\nRun `show` to inspect it; `claude /login` rewrites it.",
       );
-    if (onlyActive) {
-      // Same outcome, same exit code, as the cycle-mode branch below: nothing
-      // to switch to is not an error, and a caller branching on `rc` must not
-      // get a different answer depending on which mode it asked for.
-      console.log(
-        `${usable[0].name} is the only switchable profile — already active`,
-      );
-      return;
-    }
-    fail("no candidate profile — nothing to switch to");
+    case "none":
+      fail("no candidate profile — nothing to switch to");
+    default:
+      break;
   }
-  if (target.seatKey && active && target.seatKey.toLowerCase() === active.toLowerCase()) {
-    console.log(`${target.name} is the only switchable profile — already active`);
+
+  reportStale(outcome.kind === "switch" || outcome.kind === "already-active" ? outcome.stale : []);
+
+  if (outcome.kind === "already-active") {
+    // Not an error: nothing to do is a clean outcome, and a caller branching
+    // on `rc` must not get a different answer depending on the mode it asked
+    // for. Both modes reach this one line, naming the same profile.
+    console.log(
+      `${outcome.target.name} is the only switchable profile — already active`,
+    );
     return;
   }
+
+  const target = outcome.target;
   if (!apply) {
     console.log(
       `${target.name}  ${target.email}${orgSuffix(target)}  ${why}`,
@@ -818,7 +881,15 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     case "limits":
       return cmdLimits();
     case "next": {
-      const { apply, best } = parseNextFlags(rest);
+      const { apply, best, unknown } = parseNextFlags(rest);
+      // Hard error, never ignore: this command's default ACTS, so a typo'd
+      // `--dry-run` silently performed a live swap.
+      if (unknown.length > 0) {
+        fail(
+          `unknown flag(s) for next: ${unknown.join(", ")} — ` +
+            "expected --dry-run, --apply or --best",
+        );
+      }
       return cmdNext(apply, best);
     }
     case "order":

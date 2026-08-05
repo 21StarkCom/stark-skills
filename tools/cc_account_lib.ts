@@ -451,15 +451,124 @@ export function removeProfile(
  * `--dry-run` is the preview. `--apply` is still accepted so muscle memory and
  * any existing script keep working; it now simply names the default. A
  * contradictory pair resolves to the safe reading — never switch unasked.
+ *
+ * Unknown flags are a hard error, for the same reason `parseResetFlags` makes
+ * them one — and more urgently here, because this command's default ACTS.
+ * `apply` was computed as `!args.includes("--dry-run")`, so any misspelling
+ * (`--dry-rn`, `--dryrun`, `-n`) silently meant the opposite of what was
+ * asked and performed a live swap; `--bset` silently degraded `--best` to
+ * cycle mode. A swap while another `claude` is running can bottle the wrong
+ * seat's token, which surfaces much later as "Credit balance is too low" with
+ * nothing pointing back at the typo.
  */
 export function parseNextFlags(args: readonly string[]): {
   apply: boolean;
   best: boolean;
+  unknown: string[];
 } {
+  const known = new Set(["--dry-run", "--apply", "--best"]);
   return {
     apply: !args.includes("--dry-run"),
     best: args.includes("--best"),
+    unknown: args.filter((a) => !known.has(a)),
   };
+}
+
+/**
+ * Whether a profile's stored credentials could be READ — three states, not two.
+ *
+ * `security` exits 44 for "item not found" but non-zero for a locked keychain,
+ * a denied ACL, or a missing keychain too, and collapsing those into "absent"
+ * is not a cosmetic loss: the remedy for absent is `add <name>`, which captures
+ * the CURRENT login and OVERWRITES the stored record. Prescribing it for a
+ * merely-unreadable profile destroys an intact OAuth blob that cannot be
+ * re-derived, and silently rebinds that name to whatever seat is live.
+ */
+export type CredentialState = "present" | "absent" | "unreadable";
+
+/** What `next` should do, decided from state alone. */
+export type NextOutcome =
+  /** Switch to `target`. */
+  | { kind: "switch"; target: Profile; stale: readonly string[] }
+  /** Nothing to switch to: the only usable profile(s) are the live seat. */
+  | { kind: "already-active"; target: Profile; stale: readonly string[] }
+  /** Registry is empty — the one case `add <name>` actually fixes. */
+  | { kind: "empty" }
+  /** Registered, but no stored credentials anywhere. */
+  | { kind: "no-credentials"; names: readonly string[] }
+  /** The keychain could not be read; say so instead of prescribing `add`. */
+  | { kind: "unreadable"; names: readonly string[] }
+  /** The live seat is unknown, so "is this the active one?" cannot be answered. */
+  | { kind: "unknown-active" }
+  /** Usable profiles exist but the picker chose none. */
+  | { kind: "none" };
+
+function sameSeat(p: Profile, active: string): boolean {
+  return !!p.seatKey && p.seatKey.toLowerCase() === active.toLowerCase();
+}
+
+/**
+ * Classify what `next` should do. Pure: the only I/O is done by the caller,
+ * which probes the keychain ONCE and passes the result in.
+ *
+ * Lives here rather than in `cmdNext` because it is the decision the command
+ * exists to make, and every sibling decision (`nextInCycle`, `rankProfiles`,
+ * `seatIncoherence`) is a tested lib function. In the CLI it was reachable only
+ * by running the binary against a real keychain, so the exit-code contract had
+ * no coverage at all.
+ *
+ * `pick` receives only the usable candidates and returns the chosen one —
+ * headroom-ranked or next-in-cycle, supplied by the caller.
+ *
+ * Two subtleties worth keeping:
+ *
+ *  - `active === null` is its own outcome, never "proceed". The headroom picker
+ *    excludes the active seat by passing it to `rankProfiles`, so a null active
+ *    excludes NOTHING and the picker will happily return the live account —
+ *    "switching" to the seat already in use while reporting success. Refusing is
+ *    the only answer that cannot be wrong.
+ *  - the all-active case names `orderedProfiles(usable)[0]`, so both modes name
+ *    the SAME profile. Naming the picker's own choice made the two modes print
+ *    different names for identical state.
+ */
+export function classifyNextOutcome(opts: {
+  profiles: readonly Profile[];
+  active: string | null;
+  credentials: ReadonlyMap<string, CredentialState>;
+  pick: (candidates: readonly Profile[]) => Profile | null;
+}): NextOutcome {
+  const { profiles, active, credentials, pick } = opts;
+  if (profiles.length === 0) return { kind: "empty" };
+
+  const stateOf = (p: Profile): CredentialState =>
+    credentials.get(p.name) ?? "absent";
+
+  // Unreadable outranks absent: a keychain we could not read tells us nothing
+  // about what it holds, and the remedy for the two is opposite (wait/unlock
+  // vs. re-add). Reporting even one unreadable profile as absent risks the
+  // destructive remedy.
+  const unreadable = profiles.filter((p) => stateOf(p) === "unreadable");
+  if (unreadable.length > 0) {
+    return { kind: "unreadable", names: unreadable.map((p) => p.name) };
+  }
+
+  const usable = profiles.filter((p) => stateOf(p) === "present");
+  const stale = profiles.filter((p) => stateOf(p) === "absent").map((p) => p.name);
+  if (usable.length === 0) {
+    return { kind: "no-credentials", names: profiles.map((p) => p.name) };
+  }
+
+  if (active === null) return { kind: "unknown-active" };
+
+  if (usable.every((p) => sameSeat(p, active))) {
+    const target = orderedProfiles(usable)[0];
+    if (target) return { kind: "already-active", target, stale };
+  }
+
+  const target = pick(usable);
+  if (!target) return { kind: "none" };
+  if (sameSeat(target, active)) return { kind: "already-active", target, stale };
+  return { kind: "switch", target, stale };
 }
 
 /**
