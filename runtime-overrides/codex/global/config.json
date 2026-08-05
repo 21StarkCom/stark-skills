@@ -1,0 +1,303 @@
+{
+  "agents": [
+    "claude",
+    "codex"
+  ],
+  "quick_domains": [],
+  "default_agent": "codex",
+  "test_command": null,
+  "allow_no_test_command": true,
+  "untrusted_fix_loop": false,
+  "history_retention_days": 90,
+  "domain_agents": {
+    "architecture": "codex",
+    "behavior": "codex",
+    "type-safety": "codex",
+    "security": "codex",
+    "test-coverage": "codex",
+    "spec-conformance": "codex",
+    "ssot": "codex"
+  },
+  "fix_threshold": "low",
+  "max_rounds": 3,
+  "verify_before_clean": true,
+  "disabled_domains": [],
+  "extra_domains": [],
+  "context_files": [],
+  "severity_overrides": {},
+  "iac_review": {
+    "enabled": true,
+    "agents": [
+      "codex",
+      "gemini"
+    ],
+    "timeout_sec": 600,
+    "max_files": 80,
+    "max_bytes_per_file": 100000
+  },
+  "github_apps": {
+    "claude": "stark-claude",
+    "codex": "stark-codex",
+    "gemini": "stark-gemini"
+  },
+  "session": {
+    "health_checks": [],
+    "doc_paths": [
+      "docs/",
+      "AGENTS.md",
+      "CLAUDE.md"
+    ],
+    "pr_merge_strategy": "squash"
+  },
+  "models": {
+    "claude": {
+      "enabled": true,
+      "model_id": "claude-opus-5[1m]",
+      "auth": "subscription"
+    },
+    "codex": {
+      "enabled": true,
+      "model_id": "gpt-5.6-sol"
+    },
+    "gemini": {
+      "enabled": true,
+      "model_id": "gemini-3.1-pro-preview",
+      "auth": "oauth",
+      "vertex_project": "",
+      "vertex_location": "global"
+    }
+  },
+  "runtime": {
+    "lock_ttl_minutes": 30,
+    "subagent_env_allowlist": [
+      "PATH",
+      "HOME",
+      "USER",
+      "SHELL",
+      "LANG",
+      "TERM",
+      "ANTHROPIC_AGENTS",
+      "TEST_DATABASE_URL",
+      "DATABASE_URL"
+    ],
+    "test_env_allowlist": [
+      "PATH",
+      "HOME",
+      "LANG",
+      "LC_ALL",
+      "SHELL",
+      "TMPDIR",
+      "USER",
+      "LOGNAME",
+      "VTT_TEST_PG_DSN"
+    ],
+    "max_concurrent_agents": 3,
+    "max_concurrent_per_agent": {
+      "codex": 1
+    },
+    "temp_dir_prefix": "stark-env",
+    "large_pr_file_threshold": 40,
+    "large_pr_line_threshold": 3000,
+    "large_pr_timeout_s": 1800
+  },
+  "self_heal": {
+    "enabled": true,
+    "mode": "suggest",
+    "max_auto_retries": 0,
+    "patterns_file": "healer_patterns.json",
+    "circuit_breaker_threshold": 3,
+    "auto_patterns": []
+  },
+  "validation_gate": {
+    "enabled": true,
+    "run_on": [
+      "implementation",
+      "autopilot"
+    ],
+    "skip_domains": [],
+    "timeout_seconds": 60
+  },
+  "skill_activation": {
+    "enabled": true,
+    "suggest_after_review_rounds": 3,
+    "max_suggestions": 2,
+    "cooldown_hours": 24,
+    "suppressed_skills": [],
+    "activation_signals": [
+      "review_finding",
+      "correction",
+      "skill_invocation"
+    ]
+  },
+  "context_compaction": {
+    "enabled": true,
+    "checkpoint_interval_minutes": 15,
+    "max_checkpoint_size_kb": 50,
+    "include_file_summaries": true
+  },
+  "cost": {
+    "weekly_budget_usd": 50,
+    "daily_alert_usd": 15,
+    "hard_stop_usd": 100,
+    "track_rolling_7d": true
+  },
+  "triage": {
+    "mode": "conservative",
+    "agent": "claude",
+    "timeout": 15,
+    "conservative_confidence_threshold": 0.8,
+    "insights_url": "http://localhost:7420"
+  },
+  "model_rates": {
+    "o3": {
+      "input_per_1m_usd": 15,
+      "output_per_1m_usd": 60
+    },
+    "claude-opus-5[1m]": {
+      "input_per_1m_usd": 5,
+      "output_per_1m_usd": 25
+    },
+    "claude-opus-5": {
+      "input_per_1m_usd": 5,
+      "output_per_1m_usd": 25
+    },
+    "claude-opus-4-8": {
+      "input_per_1m_usd": 15,
+      "output_per_1m_usd": 75
+    },
+    "gpt-5.4": {
+      "input_per_1m_usd": 5,
+      "output_per_1m_usd": 15
+    },
+    "gpt-5.5": {
+      "input_per_1m_usd": 5,
+      "output_per_1m_usd": 15
+    },
+    "gpt-5.6-sol": {
+      "input_per_1m_usd": 5,
+      "output_per_1m_usd": 30
+    },
+    "gpt-5.6-terra": {
+      "input_per_1m_usd": 2.5,
+      "output_per_1m_usd": 15
+    },
+    "gpt-5.6-luna": {
+      "input_per_1m_usd": 1,
+      "output_per_1m_usd": 6
+    },
+    "gpt-5.4-pro": {
+      "input_per_1m_usd": 20,
+      "output_per_1m_usd": 80
+    },
+    "gpt-5.5-pro": {
+      "input_per_1m_usd": 25,
+      "output_per_1m_usd": 100
+    },
+    "_fallback": {
+      "input_per_1m_usd": 100,
+      "output_per_1m_usd": 300
+    }
+  },
+  "model_limits": {
+    "claude-opus-5[1m]": {
+      "max_output_tokens": 64000,
+      "context_window": 1000000
+    },
+    "claude-opus-5": {
+      "max_output_tokens": 128000,
+      "context_window": 1000000
+    },
+    "gpt-5.5-pro": {
+      "max_output_tokens": 128000,
+      "context_window": 1050000
+    },
+    "gpt-5.6-sol": {
+      "max_output_tokens": 128000,
+      "context_window": 1050000
+    },
+    "_fallback": {
+      "max_output_tokens": 16000,
+      "context_window": 128000
+    }
+  },
+  "automation": {
+    "model": "claude-opus-5[1m]",
+    "connectors": {
+      "slack": "cf414024-1eec-4f23-8b5d-c6c0eb4b100e",
+      "context7": "088e0653-356a-4362-8b07-bd93b9acabbb"
+    },
+    "github_app_ids": {
+      "claude": {
+        "app_id": 4094779,
+        "installation_id": 141330560
+      },
+      "codex": {
+        "app_id": 4094776,
+        "installation_id": 141330526
+      },
+      "gemini": {
+        "app_id": 4094781,
+        "installation_id": 141330618
+      }
+    },
+    "cost_alert_threshold_usd_per_week": 50,
+    "slack_channel": "#stark-automation",
+    "triggers": {
+      "stark-evolution": {
+        "cron": "0 3 * * 0",
+        "tier": 1,
+        "budget_usd": 10
+      },
+      "stark-self-review": {
+        "cron": "0 6 * * 1",
+        "tier": 1,
+        "budget_usd": 5
+      },
+      "stark-sentinel": {
+        "cron": "0 5 * * 0-3,5-6",
+        "tier": 2,
+        "budget_usd": 1
+      },
+      "stark-dependency-audit": {
+        "cron": "0 4 * * 2",
+        "tier": 2,
+        "budget_usd": 3
+      },
+      "stark-infra-drift": {
+        "cron": "0 6 * * *",
+        "tier": 2,
+        "budget_usd": 1
+      },
+      "stark-api-compat": {
+        "cron": "0 7 * * *",
+        "tier": 2,
+        "budget_usd": 1
+      },
+      "stark-intelligence": {
+        "cron": "0 6 * * 3",
+        "tier": 3,
+        "budget_usd": 3
+      },
+      "stark-claude-md-sync": {
+        "cron": "0 4 * * 4",
+        "tier": 3,
+        "budget_usd": 2
+      },
+      "stark-digest": {
+        "cron": "0 14 * * 5",
+        "tier": 4,
+        "budget_usd": 2
+      },
+      "stark-automation-monitor": {
+        "cron": "0 9 * * *",
+        "tier": 4,
+        "budget_usd": 2
+      },
+      "stark-hooks-auditor": {
+        "cron": "0 5 * * 4",
+        "tier": 4,
+        "budget_usd": 2
+      }
+    }
+  }
+}

@@ -27,6 +27,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `docs/` — specs, ADRs, retrospectives, generated skill docs (`docs/plans/` is a frozen archive — see Conventions)
 - `standards/` — org-wide doc templates and workflows
 - `plugins/stark-gh/` — local plugin source, packaged by the marketplace
+- `runtime-overrides/codex/` — complete Codex-only skill/command variants plus changed support files; mirrors source-relative paths and must never replace canonical Claude files
 
 ## Key Files
 
@@ -77,12 +78,16 @@ This is a **personal playground**, not production. No customers depend on it; th
 
 ## Distribution
 
-Skills + tools ship as self-contained Claude Code plugins via the [bifrost](https://github.com/21StarkCom/bifrost) marketplace — its `catalog/` is generated from this repo by `stark sync`, and each plugin vendors the `tools/` + `global/` it needs (no symlinks, no local install step). `.github/workflows/marketplace-sync.yml` auto-publishes on every push to `main` touching a vendored asset root — `skill/`, `tools/`, `global/`, `scripts/`, `standards/`, or `plugins/stark-gh/`.
+Skills + tools ship as separate self-contained Claude Code and native Codex plugin packages via the [bifrost](https://github.com/21StarkCom/bifrost) marketplace. Canonical `skill/`, `plugins/stark-gh/commands/`, and shared assets are the Claude-authored source. Host-specific Codex behavior belongs only under `runtime-overrides/codex/`; Bifrost imports it as runtime overrides and generates a separate `dist/codex-plugins/` tree. Never make a canonical Claude file “portable” to satisfy Codex, and never layer a Codex override into `dist/claude/`. `.github/workflows/marketplace-sync.yml` auto-publishes changes to either source surface.
 
 ```
 /plugin marketplace add 21StarkCom/bifrost
 /plugin install stark-analyze@bifrost   # + stark-plan, stark-implement, stark-gh, stark-ops, ...
 /plugin update  stark-analyze@bifrost   # pull the latest published version
+
+codex plugin marketplace add 21StarkCom/bifrost
+codex plugin add stark-gh@bifrost
+# Start a new thread, then invoke: $cleanup --dry-run
 ```
 
 ## Skills

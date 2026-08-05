@@ -22,6 +22,7 @@ on:
       - "scripts/**"
       - "standards/**"
       - "plugins/stark-gh/**"
+      - "runtime-overrides/codex/**"
   workflow_dispatch:
 
 permissions:
@@ -67,24 +68,23 @@ jobs:
           set -euo pipefail
           SK="$GITHUB_WORKSPACE/stark-skills"
 
-          # 1. regenerate catalog skills/commands + vendor snapshot, then build
-          #    dist so per-bundle change detection sees vendored assets too.
+          # 1. Regenerate the catalog + vendor snapshot, then build both runtime
+          #    surfaces. This first build deliberately reads bifrost's current
+          #    root VERSION; if Codex output changes, step 3 bumps VERSION and
+          #    the final build emits the new cache-invalidating version.
           ( cd engine
             go run ./cmd/stark sync --from "$SK" ../catalog
             go run ./cmd/stark build ../catalog )
 
-          # 2. bump the patch version of every bundle whose content changed, so
-          #    the per-artifact version-bump gate (check-bumps) is satisfied AND
-          #    the installed-plugin cache (keyed only by version) invalidates.
-          #    Detection covers catalog/<b>/{skills,commands} AND dist/claude/<b>
-          #    — the latter catches tools/config/prompts vendored into every
-          #    plugin, which the old skills/commands-only filter missed: a
-          #    tools-only change regenerated dist under an unchanged version and
-          #    every installed copy kept running stale code (bifrost#103).
-          changed=$( { git status --porcelain catalog \
-              | sed -nE 's#^.{2} "?catalog/([^/]+)/(skills|commands)/.*#\1#p'
-            git status --porcelain dist/claude \
-              | sed -nE 's#^.{2} "?dist/claude/([^/]+)/.*#\1#p'; } | sort -u)
+          # 2. Bump the patch version of every Claude bundle whose rendered
+          #    package changed. dist/claude/<bundle> is the complete Claude
+          #    distribution surface, including vendored tools/config/prompts.
+          #    Do not infer Claude version bumps from catalog paths: the catalog
+          #    also carries Codex-only runtime overrides that must not change
+          #    Claude package versions.
+          changed=$(git status --porcelain dist/claude \
+            | sed -nE 's#^.{2} "?dist/claude/([^/]+)/.*#\1#p' \
+            | sort -u)
           for b in $changed; do
             f="catalog/$b/bundle.yaml"
             cur=$(sed -nE 's/^version: ([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' "$f")
@@ -94,7 +94,25 @@ jobs:
             echo "bumped $b: $cur -> $new"
           done
 
-          # 3. re-sync (re-stamps artifacts with the new bundle versions) + rebuild.
+          # 3. Codex marketplace plugins use the bifrost root VERSION as their
+          #    cache key. If the first build changed any Codex package, advance
+          #    that VERSION exactly one patch before rebuilding so installed
+          #    Codex caches cannot retain the prior package contents.
+          if [ -n "$(git status --porcelain dist/codex-plugins)" ]; then
+            root_cur=$(tr -d '\r\n' < VERSION)
+            if ! [[ "$root_cur" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "invalid bifrost VERSION: $root_cur" >&2
+              exit 1
+            fi
+            IFS=. read -r ROOT_MA ROOT_MI ROOT_PA <<< "$root_cur"
+            root_new="$ROOT_MA.$ROOT_MI.$((ROOT_PA + 1))"
+            printf '%s\n' "$root_new" > VERSION
+            echo "bumped bifrost VERSION for Codex plugins: $root_cur -> $root_new"
+          fi
+
+          # 4. Re-sync (re-stamps artifacts with any new Claude bundle
+          #    versions), then rebuild. This second build reads the bumped root
+          #    VERSION and emits it into dist/codex-plugins before all gates run.
           ( cd engine
             go run ./cmd/stark sync --from "$SK" ../catalog
             go run ./cmd/stark build ../catalog

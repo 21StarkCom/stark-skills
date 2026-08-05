@@ -1,6 +1,6 @@
 # stark-skills
 
-AI-powered development workflow system for Claude Code. 18 skills covering the full development lifecycle — from planning through code review, shipping, and maintenance. Claude and Codex are enabled by default, with optional Gemini support available through config.
+AI-powered development workflow system for Claude Code and Codex, covering the full development lifecycle — from planning through code review, shipping, and maintenance. Optional Gemini support is available through config.
 
 ## Quick Start
 
@@ -8,6 +8,11 @@ AI-powered development workflow system for Claude Code. 18 skills covering the f
 # Install the plugins from the marketplace (in Claude Code)
 /plugin marketplace add 21StarkCom/bifrost
 /plugin install stark-analyze@bifrost   # + stark-plan, stark-implement, stark-gh, stark-ops, ...
+
+# Or install the same bundles in Codex
+codex plugin marketplace add 21StarkCom/bifrost
+codex plugin add stark-gh@bifrost
+# Start a new Codex thread, then invoke: $cleanup --dry-run
 
 # Start a work session (context loading, health checks, briefing)
 /stark-session start
@@ -19,7 +24,7 @@ AI-powered development workflow system for Claude Code. 18 skills covering the f
 /stark-session end
 ```
 
-All skills are available as `/slash-commands` in Claude Code after installing the plugins. Each plugin is self-contained — it vendors the `tools/` and `global/` (config + prompts) it needs, so there is nothing to symlink and no local install step.
+All skills are available as `/slash-commands` in Claude Code and `$skill-name` mentions in Codex after installing the plugins. Each plugin is self-contained — it vendors the tools, config, prompts, and support files it needs, so there is nothing to symlink and no local install step.
 
 ---
 
@@ -172,6 +177,7 @@ stark-skills/
 │   ├── config.json               ← global defaults
 │   └── prompts/{claude,codex,gemini}/  ← per-agent × per-domain review prompts (6 domains)
 ├── plugins/stark-gh/             ← local plugin source (packaged by the marketplace)
+├── runtime-overrides/codex/      ← Codex-only artifact + support overlays; never shipped to Claude
 ├── data/                         ← persona roster, review coverage, showcase pages
 ├── automation/                   ← CCR automation fleet (11 triggers, logs, costs)
 ├── .github/workflows/            ← GitHub Actions (project sync, gate checks, marketplace-sync)
@@ -185,15 +191,20 @@ stark-skills/
 
 ## Distribution
 
-This repo is the **source of truth** for the skills + tools; they ship as self-contained Claude Code plugins via the [bifrost](https://github.com/21StarkCom/bifrost) marketplace.
+This repo is the **source of truth** for the skills + tools; they ship as separate self-contained Claude Code and native Codex plugin packages via the [bifrost](https://github.com/21StarkCom/bifrost) marketplace.
 
-- The marketplace `catalog/` is **generated from this repo** by `stark sync`, and its engine vendors `tools/` + `global/` (config + prompts) into each plugin — so an install needs no symlinks and no local setup step.
-- CI auto-publishes: `.github/workflows/marketplace-sync.yml` regenerates the marketplace and opens a PR on every push to `main` touching a vendored asset root — `skill/`, `tools/`, `global/`, `scripts/`, `standards/`, or `plugins/stark-gh/`.
+- Canonical `skill/`, `plugins/stark-gh/commands/`, and shared support files remain the Claude-authored surface. `runtime-overrides/codex/` contains complete Codex-only variants and their changed support files. Bifrost keeps those inputs and generated packages isolated; a Codex overlay must never enter `dist/claude/`.
+- The marketplace `catalog/` is **generated from this repo** by `stark sync`. Bifrost emits Claude packages under `dist/claude/`, native Codex packages under `dist/codex-plugins/`, and host-specific marketplace manifests at the repository root.
+- CI auto-publishes on every push to `main` touching a canonical vendored asset root or `runtime-overrides/codex/`.
 
 ```
 /plugin marketplace add 21StarkCom/bifrost
 /plugin install stark-analyze@bifrost   # then stark-plan, stark-implement, stark-gh, stark-ops, ...
 /plugin update  stark-analyze@bifrost   # pull the latest published version
+
+codex plugin marketplace add 21StarkCom/bifrost
+codex plugin add stark-gh@bifrost
+# Open a new thread after install/update; invoke cleanup with: $cleanup --dry-run
 ```
 
 Immutable assets (tools/prompts/config) resolve from the installed plugin root (`${CLAUDE_PLUGIN_ROOT}`) via `tools/asset_root_lib.ts`; mutable state (`history/`, `sessions/`, `locks/`, …) lives under `~/.claude/code-review/` (`stateRoot()`).
