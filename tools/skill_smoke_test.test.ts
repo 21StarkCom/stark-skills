@@ -215,11 +215,15 @@ for (const name of SKILLS) {
     );
   });
 
-  test(`skill smoke: ${name} — description fits the Codex limit`, () => {
+  test(`skill smoke: ${name} — description meets Codex constraints`, () => {
     const description = SKILL_CONTENT[name].fm?.description ?? "";
     assert.ok(
       [...description].length <= 1024,
       `${name} description is ${[...description].length} characters; Codex allows at most 1024`,
+    );
+    assert.ok(
+      !/[<>]/.test(description),
+      `${name} description contains an angle bracket, which Codex rejects`,
     );
   });
 }
