@@ -108,7 +108,6 @@ const DEFAULT_RUNTIME_ALLOWLIST: readonly string[] = [
   "SHELL",
   "LANG",
   "TERM",
-  "ANTHROPIC_AGENTS",
 ];
 
 const DEFAULT_GITHUB_APPS: Record<AgentName, string> = {
