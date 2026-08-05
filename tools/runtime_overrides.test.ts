@@ -3,6 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
+import {
+  mayDeleteLocalBranch,
+  shouldFetchForPlan,
+} from "../runtime-overrides/codex/tools/cleanup_policy.ts";
+
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 const CODEX_ROOT = path.join(REPO_ROOT, "runtime-overrides", "codex");
 
@@ -50,7 +55,11 @@ const SUPPORT_FILES = [
   "standards/preflight.md",
   "tools/iac_review.ts",
   "tools/iac_review_lib.ts",
+  "tools/cleanup_policy.ts",
+  "tools/gh_cleanup.ts",
   "tools/jury.ts",
+  "tools/lib/runtime.ts",
+  "tools/lib/watcher_paths.ts",
 ] as const;
 
 function walkFiles(root: string, rel = ""): string[] {
@@ -79,7 +88,27 @@ test("Codex runtime override inventory is exact", () => {
   ].sort();
 
   assert.deepEqual(walkFiles(CODEX_ROOT), expected);
-  assert.equal(expected.length, 42);
+  assert.equal(expected.length, 46);
+});
+
+test("Codex cleanup dry-run never fetches or prunes refs", () => {
+  assert.equal(shouldFetchForPlan({ dryRun: true }), false);
+  assert.equal(shouldFetchForPlan({ dryRun: false }), true);
+});
+
+test("Codex cleanup preserves unique post-merge commits without --force", () => {
+  assert.equal(mayDeleteLocalBranch({ safeDelete: false }, { force: false }), false);
+  assert.equal(mayDeleteLocalBranch({ safeDelete: true }, { force: false }), true);
+  assert.equal(mayDeleteLocalBranch({ safeDelete: false }, { force: true }), true);
+});
+
+test("Codex GitHub state defaults are runtime-neutral", () => {
+  for (const rel of ["tools/lib/runtime.ts", "tools/lib/watcher_paths.ts"]) {
+    const body = fs.readFileSync(path.join(CODEX_ROOT, rel), "utf8");
+    assert.match(body, /STARK_STATE_ROOT/);
+    assert.match(body, /"\.stark", "code-review"/);
+    assert.doesNotMatch(body, /"\.claude", "code-review"/);
+  }
 });
 
 test("Codex artifact overrides preserve canonical identities", () => {

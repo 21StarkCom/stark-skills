@@ -34,8 +34,9 @@ Interactive skill invocations skip steps 1–2 and just print + stop.
 
 ## Constants
 
-The fallback includes `CLAUDE_PLUGIN_ROOT` deliberately: Bifrost retargets that
-portable marker to the runtime's vendored asset root during installation.
+The nested host-root fallback is a portable build marker. Bifrost retargets it
+to Codex's vendored asset root during installation; do not copy the source
+marker into runtime instructions.
 
 Shell state does not persist between independent tool calls. Every later shell
 call that needs a dispatcher must resolve `TOOLS` again in that same call; do
