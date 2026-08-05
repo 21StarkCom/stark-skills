@@ -6,7 +6,7 @@ import test from "node:test";
 import {
   mayDeleteLocalBranch,
   shouldFetchForPlan,
-} from "../runtime-overrides/codex/tools/cleanup_policy.ts";
+} from "../runtime-overrides/codex/plugins/stark-gh/tools/cleanup_policy.ts";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 const CODEX_ROOT = path.join(REPO_ROOT, "runtime-overrides", "codex");
@@ -55,11 +55,11 @@ const SUPPORT_FILES = [
   "standards/preflight.md",
   "tools/iac_review.ts",
   "tools/iac_review_lib.ts",
-  "tools/cleanup_policy.ts",
-  "tools/gh_cleanup.ts",
   "tools/jury.ts",
-  "tools/lib/runtime.ts",
-  "tools/lib/watcher_paths.ts",
+  "plugins/stark-gh/tools/cleanup_policy.ts",
+  "plugins/stark-gh/tools/gh_cleanup.ts",
+  "plugins/stark-gh/tools/lib/runtime.ts",
+  "plugins/stark-gh/tools/lib/watcher_paths.ts",
 ] as const;
 
 function walkFiles(root: string, rel = ""): string[] {
@@ -103,7 +103,10 @@ test("Codex cleanup preserves unique post-merge commits without --force", () => 
 });
 
 test("Codex GitHub state defaults are runtime-neutral", () => {
-  for (const rel of ["tools/lib/runtime.ts", "tools/lib/watcher_paths.ts"]) {
+  for (const rel of [
+    "plugins/stark-gh/tools/lib/runtime.ts",
+    "plugins/stark-gh/tools/lib/watcher_paths.ts",
+  ]) {
     const body = fs.readFileSync(path.join(CODEX_ROOT, rel), "utf8");
     assert.match(body, /STARK_STATE_ROOT/);
     assert.match(body, /"\.stark", "code-review"/);
