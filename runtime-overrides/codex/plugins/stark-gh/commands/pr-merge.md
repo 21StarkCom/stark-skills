@@ -66,7 +66,7 @@ if [ "$RESUME_MODE" = "attached" ]; then
 fi
 ```
 
-A live **ci-observer** watcher (the one `/stark-gh:pr-open` spawns) does NOT
+A live **ci-observer** watcher (the one `$pr-open` spawns) does NOT
 produce `attached` — preflight pre-empts it and proceeds, because the head it
 is watching is about to be invalidated by the rebase + force-push. So
 `pr-open --ready` immediately followed by `pr-merge` no longer fails with

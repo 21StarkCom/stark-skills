@@ -1,5 +1,5 @@
 #!/bin/bash
-# Stop-hook gate for /stark-build task sessions.
+# Stop-hook gate for $stark-build task sessions.
 # The task's done-when check owns turn-end: red blocks the stop (exit 2,
 # reason fed back); green allows it. An exact deviation marker already emitted
 # by this task also allows it — abort-with-deviation is a first-class successful

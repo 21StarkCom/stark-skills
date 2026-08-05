@@ -1,5 +1,5 @@
 #!/bin/bash
-# PreToolUse path-deny for /stark-build task sessions.
+# PreToolUse path-deny for $stark-build task sessions.
 # Blocks writes to gated files (spec, gated existing tests, harness scripts,
 # CI config). Deterministic deny — exit 2 blocks the tool call; prompts are
 # never the gate. Belt only: the runner's post-task diff-vs-protected-list

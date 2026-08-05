@@ -102,8 +102,8 @@ Get merged PR head refs: `gh api "/repos/${ORG_REPO}/pulls?state=closed&per_page
 
 ### 2.5 Dangling skill symlinks
 
-Check each skill root that exists on this machine — `~/.claude/skills/`,
-`~/.codex/skills/`, `~/.agents/skills/`, and the current repository's
+Check each Codex skill root that exists on this machine — `~/.codex/skills/`,
+`~/.agents/skills/`, and the current repository's
 `.agents/skills/` — for broken symlinks with
 `find <root> -type l ! -exec test -e {} \; -print`. Mark only the explicit
 paths returned by that audit for removal.
@@ -171,12 +171,12 @@ Issues closed: {N}  (Phase parents: {n}, PR-referenced: {n}, Plan parents: {n}, 
 Branches deleted: {N}  (Local: {n}, Remote: {n})
 Worktrees cleaned: {N}
 Dangling symlinks removed: {N}
-Session files removed: {N}
-Checkpoint files removed: {N}
-Stale locks removed: {N}
-Logs rotated: {N}
-Validation logs removed: {N}
-Artifacts archived: {N} files into {M} archives
+Codex session files removed: {N}
+Codex checkpoint files removed: {N}
+Codex logs rotated: {N}
+Codex validation logs removed: {N}
+Codex artifacts archived: {N} files into {M} archives
+Claude Code state/install paths touched: 0
 
 Remaining open issues: {N}  {for each: #{number} — {title} ({labels})}
 Orphaned plan labels: {N}  {for each: plan:{slug} ({n} closed issues)}
@@ -188,7 +188,7 @@ Unreleased commits: {N} since {last_tag}
 
 ---
 
-## Phase 5: Infrastructure Cleanup
+## Phase 5: Codex Infrastructure Cleanup
 
 ```bash
 set -euo pipefail
@@ -199,7 +199,7 @@ else
 fi
 TOOLS="${ASSET_ROOT:+$ASSET_ROOT/tools}"
 [ -n "$TOOLS" ] && [ -f "$TOOLS/housekeeping_infra.ts" ] || {
-  echo "bundled housekeeping tool not found; skipping infrastructure cleanup" >&2
+  echo "bundled Codex housekeeping tool not found; skipping infrastructure cleanup" >&2
   exit 0
 }
 dry_run_args=()
@@ -209,32 +209,12 @@ INFRA_JSON="$(node --experimental-strip-types "$TOOLS/housekeeping_infra.ts" \
 printf '%s\n' "$INFRA_JSON"
 ```
 
-Replace the dry-run placeholder from the parsed invocation before running. This
-tool intentionally audits legacy/shared Stark state under `~/.claude`; invoking
-the skill from Codex or another host does not make those paths the host's own
-state. If that tree does not exist, render an empty infrastructure section.
-
-The tool runs all seven sub-phases in one pass, returning a receipt the skill
-renders into the Phase 4 summary block:
-
-| Sub-phase | Target | Threshold |
-|-----------|--------|-----------|
-| 5.1 | `~/.claude/code-review/sessions/*.json` | 30 days |
-| 5.2 | `~/.claude/code-review/sessions/**/checkpoint-*.md` | 7 days |
-| 5.3 | Stale `.lock` files in `~/.claude/code-review/` and `/tmp/` | `tools/lock_helpers_lib.ts::isLockStale` (TTL + PID alive + start_time match) |
-| 5.3b | Per-run/session statusline state under `~/.claude` (`.statusline-procstart-*`, `.statusline-lastreply-*`) | 14 days. Single-file caches (`.statusline-git-dirty-cache`, `.statusline-account-cache`) excluded — they self-refresh, never multiply. |
-| 5.4 | `healer.jsonl`, `preflight.jsonl`, `approach-contracts.jsonl` | keep last 1000 lines |
-| 5.5 | `~/.claude/code-review/logs/*.stderr` | 14 days |
-| 5.6 | `automation/logs/` and `~/.claude/code-review/history/autopilot/` | tar.gz files older than 30 days, grouped by YYYY-MM into `~/.claude/code-review/archives/` |
-| 5.7 | Legacy stark-skills asset symlinks under `~/.claude` (`ASSET_SYMLINKS`) | Repoint when **dangling** or the target carries a renamed segment (`STALE_SEGMENT_RENAMES`, e.g. `Code/Playground/`→`Code/21Stark/`). Repairs only when the corrected target exists; else reported in `errors`, link never deleted. |
-
-Receipt: `{ dryRun, sessionsRemoved[], checkpointsRemoved[],
-staleLocksRemoved[], statuslineStateRemoved[], validationLogsRemoved[], logsRotated[],
-artifactsArchived[{archive, files[]}], symlinksRepaired[{path, from, to}],
-errors[] }`. Exit code is non-zero
-only when `errors` is non-empty (e.g. an unlink permission error). Tar
-archive creation verifies via `tar -tzf` before unlinking originals; on
-verification failure the originals are left in place and `errors` notes it.
+Replace the dry-run placeholder from the parsed invocation before running. The
+Codex overlay cleans only `$STARK_STATE_ROOT` (default
+`~/.stark/code-review`) plus this repository's `automation/logs/` archives. It
+does not scan or mutate Claude Code state, statusline files, or installation
+symlinks. Native review locks keep their owner-managed heartbeat lifecycle and
+are not deleted by housekeeping. Render the receipt into the Phase 4 summary.
 
 ---
 

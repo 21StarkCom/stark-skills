@@ -27,7 +27,8 @@ Parse the JSON `overall` field:
 When the skill runs from automation (CCR triggers, scheduled jobs, CI), a
 `blocked` result MUST also:
 
-1. Append an entry to `~/.claude/code-review/alerts.jsonl`.
+1. Append an entry to `$STARK_STATE_ROOT/alerts.jsonl` (default:
+   `~/.stark/code-review/alerts.jsonl`).
 2. Exit non-zero so the trigger is marked failed.
 
 Interactive skill invocations skip steps 1–2 and just print + stop.

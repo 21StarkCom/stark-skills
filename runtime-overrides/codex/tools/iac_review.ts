@@ -3,8 +3,8 @@
  * iac_review — CLI for multi-agent Terraform / Terragrunt review.
  *
  * Dispatches the review across one or more configured LLM agents (each its own
- * headless subagent) and merges the findings. Backs /stark-terraform-review and
- * /stark-terragrunt-review.
+ * headless subagent) and merges the findings. Backs $stark-terraform-review and
+ * $stark-terragrunt-review.
  *
  * Usage:
  *   iac_review.ts --kind terraform|terragrunt [path] [options]

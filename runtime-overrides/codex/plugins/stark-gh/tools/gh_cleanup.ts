@@ -277,7 +277,7 @@ function discoverWatcherDirs(repo: RepoCtx): WatcherDirPlan[] {
 }
 
 // A review worktree path looks like `review-<repo-slug>-pr<N>-<mode>`. The
-// `/stark-review` skill provisions these detached (no branch ref), so the
+// `$stark-review` skill provisions these detached (no branch ref), so the
 // branch-pinned sweep misses them once their PR merges.
 function reviewWorktreePrNumber(wtPath: string): number | null {
   const base = path.basename(wtPath);
@@ -719,7 +719,7 @@ export function executePlan(plan: CleanupPlan, args: CleanupArgs): ExecuteReceip
 
 export function renderPlan(plan: CleanupPlan, args: CleanupArgs): string {
   const lines: string[] = [];
-  const head = args.pr !== null ? `/stark-gh:cleanup --pr ${args.pr}` : `/stark-gh:cleanup`;
+  const head = args.pr !== null ? `$cleanup --pr ${args.pr}` : `$cleanup`;
   lines.push(`${head} — ${plan.repo.nameWithOwner} (on ${plan.repo.currentBranch})`);
   if (args.dryRun) lines.push("DRY RUN — no changes will be made.");
   lines.push("");
