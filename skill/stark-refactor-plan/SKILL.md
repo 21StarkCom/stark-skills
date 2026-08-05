@@ -16,7 +16,7 @@ model: opus
 
 ## Help
 
-If the current request asks for help (a standalone `--help`, `-h`, or `help` token),
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop — do not run preflight or any phase.
 
@@ -30,17 +30,13 @@ codebase** — every claim backed by a real path, symbol, or command.
 ## Mode: planning only
 
 The whole value of this skill is that it is safe to run on any repo at any time
-because it changes no application source. Inline mode writes two planning
-artifacts; dispatcher mode also writes its isolated intermediates. Hold that
-line.
+because it changes nothing but the two planning artifacts. Hold that line.
 
 **Do not** modify, move, rename, delete, or reformat source / test / config /
 docs; do not change behavior, apply refactors, or bump dependencies.
 
-**You may** read files and run *static* read-only analysis (directory listing,
-`rg`, manifest parsing). Inline mode may create only the two root artifacts.
-Dispatcher mode may additionally create its documented `.refactor-planner/`
-intermediates; it still must not touch application source or configuration.
+**You may** read files; run *static* read-only analysis (directory listing,
+`rg`, manifest parsing); and create only the two output files below.
 
 **Running the project's own commands is NOT free.** `npm test`, `npm run
 build`, `make`, `pytest`, a `postinstall` hook — on an untrusted repo these
@@ -56,15 +52,14 @@ So:
 - Never run a command sourced from a file the repo controls without confirming
   what it does first.
 
-The only root-level writes allowed are `REFACTOR_PLAN.md` and
-`REFACTOR_BACKLOG.json`. If either already exists, inspect it and obtain
-confirmation **before** starting dispatcher `run` mode; these may be a prior
-run's work or hand-authored. Keep `--no-overwrite` as a final race-condition
-backstop until that confirmation is received.
+The *only* writes allowed are `REFACTOR_PLAN.md` and `REFACTOR_BACKLOG.json` at
+the repo root. If either already exists, show the user a diff-style summary of
+what you'd overwrite and confirm before clobbering — these may be a prior run's
+work or hand-authored.
 
 ## Arguments
 
-Treat the text following the explicit skill mention as the arguments.
+**Raw input:** `$ARGUMENTS`
 
 - `[target-dir]` — optional path to the repo to analyze. Default: the current
   repo. Resolve the root with `git rev-parse --show-toplevel` (fall back to the
@@ -82,80 +77,13 @@ Treat the text following the explicit skill mention as the arguments.
    The CLI is `tools/refactor_planner.ts`; full usage in
    [references/dispatcher.md](references/dispatcher.md). Quick start:
 
-   Every example below is a separate shell invocation. Resolve the target and
-   installed assets inside each block; do not rely on exported state from an
-   earlier call. `STARK_ASSET_ROOT` is the portable installed-bundle override,
-   `STARK_PLUGIN_ROOT` is accepted for compatibility, with the active host's
-   plugin-root variable used only as a final fallback.
-
-   Always pass the provider explicitly. Use the current host when the dispatcher
-   supports it (`codex` on Codex, `claude` on Claude). On another host, ask which
-   installed provider CLI to use; never silently fall back to Claude. `noop` is
-   valid only for deterministic preview/validation, never for the real run.
-
-   Preview first. This standalone block uses `noop` because `dry-run` makes no
-   LLM call:
-
    ```bash
-   set -euo pipefail
-   TARGET="${STARK_REFACTOR_TARGET:-.}"
-   [ -d "$TARGET" ] || { echo "Target directory not found: $TARGET" >&2; exit 1; }
-   ROOT="$(git -C "$TARGET" rev-parse --show-toplevel 2>/dev/null || (cd "$TARGET" && pwd -P))"
-   [ -d "$ROOT" ] || { echo "Could not resolve target root" >&2; exit 1; }
-   PROVIDER="${STARK_REFACTOR_PROVIDER:-noop}"
-   case "$PROVIDER" in claude|codex|noop) ;; *) echo "Unsupported provider: $PROVIDER" >&2; exit 1 ;; esac
-
-   if [ -f "tools/refactor_planner.ts" ] && [ -d "global/prompts/refactor-planner" ]; then
-     ASSET_ROOT="$(pwd)"
-     DEFAULT_PROMPTS="$ASSET_ROOT/global/prompts/refactor-planner"
-   else
-     ASSET_ROOT="${STARK_ASSET_ROOT:-${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
-     DEFAULT_PROMPTS="${ASSET_ROOT:+$ASSET_ROOT/prompts/refactor-planner}"
-   fi
-   TOOLS="${STARK_REFACTOR_TOOLS:-${ASSET_ROOT:+$ASSET_ROOT/tools}}"
-   PROMPTS="${STARK_REFACTOR_PROMPTS:-$DEFAULT_PROMPTS}"
-   [ -f "${TOOLS:+$TOOLS/refactor_planner.ts}" ] || { echo "refactor_planner.ts not found" >&2; exit 1; }
-   [ -d "$PROMPTS" ] || { echo "refactor-planner prompts not found" >&2; exit 1; }
-
-   node --experimental-strip-types --no-warnings "$TOOLS/refactor_planner.ts" \
-     --mode dry-run --root "$ROOT" --provider "$PROVIDER" \
-     --prompts-dir "$PROMPTS" --json
+   TOOLS="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools"
+   # see what would run — deterministic, no LLM
+   node --experimental-strip-types "$TOOLS/refactor_planner.ts" --mode dry-run --root "$ROOT"
+   # full multi-agent run -> REFACTOR_PLAN.md + REFACTOR_BACKLOG.json
+   node --experimental-strip-types "$TOOLS/refactor_planner.ts" --mode run --root "$ROOT" --provider claude
    ```
-
-   After inspecting the preview, run the real provider in a fresh standalone
-   call. Set `STARK_REFACTOR_PROVIDER=claude` or `codex`; the block refuses an
-   unset, unavailable, or `noop` provider:
-
-   ```bash
-   set -euo pipefail
-   TARGET="${STARK_REFACTOR_TARGET:-.}"
-   [ -d "$TARGET" ] || { echo "Target directory not found: $TARGET" >&2; exit 1; }
-   ROOT="$(git -C "$TARGET" rev-parse --show-toplevel 2>/dev/null || (cd "$TARGET" && pwd -P))"
-   [ -d "$ROOT" ] || { echo "Could not resolve target root" >&2; exit 1; }
-   PROVIDER="${STARK_REFACTOR_PROVIDER:-}"
-   case "$PROVIDER" in claude|codex) ;; *) echo "Set STARK_REFACTOR_PROVIDER to claude or codex" >&2; exit 1 ;; esac
-   command -v "$PROVIDER" >/dev/null || { echo "Provider CLI not found: $PROVIDER" >&2; exit 1; }
-
-   if [ -f "tools/refactor_planner.ts" ] && [ -d "global/prompts/refactor-planner" ]; then
-     ASSET_ROOT="$(pwd)"
-     DEFAULT_PROMPTS="$ASSET_ROOT/global/prompts/refactor-planner"
-   else
-     ASSET_ROOT="${STARK_ASSET_ROOT:-${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
-     DEFAULT_PROMPTS="${ASSET_ROOT:+$ASSET_ROOT/prompts/refactor-planner}"
-   fi
-   TOOLS="${STARK_REFACTOR_TOOLS:-${ASSET_ROOT:+$ASSET_ROOT/tools}}"
-   PROMPTS="${STARK_REFACTOR_PROMPTS:-$DEFAULT_PROMPTS}"
-   [ -f "${TOOLS:+$TOOLS/refactor_planner.ts}" ] || { echo "refactor_planner.ts not found" >&2; exit 1; }
-   [ -d "$PROMPTS" ] || { echo "refactor-planner prompts not found" >&2; exit 1; }
-
-   node --experimental-strip-types --no-warnings "$TOOLS/refactor_planner.ts" \
-     --mode run --root "$ROOT" --provider "$PROVIDER" \
-     --prompts-dir "$PROMPTS" --no-overwrite --json
-   ```
-
-   If the artifacts already exist, stop before this run and ask. After explicit
-   overwrite approval, remove `--no-overwrite`; otherwise leave it as the
-   fail-closed backstop.
 
    The dispatcher host-owns conflict resolution and assembles a DAG-valid
    backlog, then gate-validates it before writing. If you use it, review its
@@ -169,19 +97,11 @@ Establish you're working on a clean, known state so the "changed nothing" claim
 is verifiable.
 
 ```bash
-set -euo pipefail
-TARGET="${STARK_REFACTOR_TARGET:-.}"
-[ -d "$TARGET" ] || { echo "Target directory not found: $TARGET" >&2; exit 1; }
-ROOT="$(git -C "$TARGET" rev-parse --show-toplevel 2>/dev/null || (cd "$TARGET" && pwd -P))"
-[ -d "$ROOT" ] || { echo "Could not resolve target root" >&2; exit 1; }
+ROOT="$(git -C "${TARGET:-.}" rev-parse --show-toplevel 2>/dev/null || echo "${TARGET:-$PWD}")"
 cd "$ROOT"
 pwd
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  git status --short    # note pre-existing dirt; you must not add to it
-  git rev-parse HEAD
-else
-  echo "not a git repo"
-fi
+git status --short    # note pre-existing dirt; you must not add to it
+git rev-parse HEAD 2>/dev/null || echo "not a git repo"
 ```
 
 ### Phase 1 — Inventory
@@ -190,12 +110,6 @@ Map the repo before reasoning about it. Start broad, then go deep where the
 structure is densest.
 
 ```bash
-set -euo pipefail
-TARGET="${STARK_REFACTOR_TARGET:-.}"
-[ -d "$TARGET" ] || { echo "Target directory not found: $TARGET" >&2; exit 1; }
-ROOT="$(git -C "$TARGET" rev-parse --show-toplevel 2>/dev/null || (cd "$TARGET" && pwd -P))"
-[ -d "$ROOT" ] || { echo "Could not resolve target root" >&2; exit 1; }
-cd "$ROOT"
 find . -maxdepth 4 -type d -not -path '*/.git/*' | sort
 find . -maxdepth 4 -type f -not -path '*/.git/*' | sort
 ```
@@ -206,12 +120,6 @@ __pycache__/`. Then sweep for signal with `rg` (adapt patterns to the detected
 language):
 
 ```bash
-set -euo pipefail
-TARGET="${STARK_REFACTOR_TARGET:-.}"
-[ -d "$TARGET" ] || { echo "Target directory not found: $TARGET" >&2; exit 1; }
-ROOT="$(git -C "$TARGET" rev-parse --show-toplevel 2>/dev/null || (cd "$TARGET" && pwd -P))"
-[ -d "$ROOT" ] || { echo "Could not resolve target root" >&2; exit 1; }
-cd "$ROOT"
 rg -n "TODO|FIXME|HACK|deprecated|legacy|XXX|@ts-ignore|eslint-disable" .
 rg -n "^(export |def |class |func |interface |type |module\.exports)" .
 ```
@@ -291,15 +199,9 @@ artifacts must agree — every plan problem/duplicate/phase should map to a
 backlog entry. Then **validate** it before finishing:
 
 ```bash
-set -euo pipefail
-TARGET="${STARK_REFACTOR_TARGET:-.}"
-[ -d "$TARGET" ] || { echo "Target directory not found: $TARGET" >&2; exit 1; }
-ROOT="$(git -C "$TARGET" rev-parse --show-toplevel 2>/dev/null || (cd "$TARGET" && pwd -P))"
-BACKLOG="$ROOT/REFACTOR_BACKLOG.json"
-[ -f "$BACKLOG" ] || { echo "Backlog not found: $BACKLOG" >&2; exit 1; }
-node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "$BACKLOG" \
-  && echo "JSON OK"
-# fallback: `jq . "$BACKLOG" > /dev/null`
+python3 -m json.tool REFACTOR_BACKLOG.json > /dev/null && echo "JSON OK"
+# fallbacks if python3 is absent: `jq . REFACTOR_BACKLOG.json > /dev/null`
+# or `node -e "JSON.parse(require('fs').readFileSync('REFACTOR_BACKLOG.json'))"`
 ```
 
 For a deeper gate than a JSON syntax check — schema, enum, unique/sequential
@@ -307,77 +209,19 @@ ids, `depends_on` DAG (no cycles), and path-existence — run the dispatcher's
 validator on the file you just wrote:
 
 ```bash
-set -euo pipefail
-TARGET="${STARK_REFACTOR_TARGET:-.}"
-[ -d "$TARGET" ] || { echo "Target directory not found: $TARGET" >&2; exit 1; }
-ROOT="$(git -C "$TARGET" rev-parse --show-toplevel 2>/dev/null || (cd "$TARGET" && pwd -P))"
-[ -d "$ROOT" ] || { echo "Could not resolve target root" >&2; exit 1; }
-PROVIDER="${STARK_REFACTOR_PROVIDER:-noop}"
-case "$PROVIDER" in claude|codex|noop) ;; *) echo "Unsupported provider: $PROVIDER" >&2; exit 1 ;; esac
-
-if [ -f "tools/refactor_planner.ts" ] && [ -d "global/prompts/refactor-planner" ]; then
-  ASSET_ROOT="$(pwd)"
-  DEFAULT_PROMPTS="$ASSET_ROOT/global/prompts/refactor-planner"
-else
-  ASSET_ROOT="${STARK_ASSET_ROOT:-${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
-  DEFAULT_PROMPTS="${ASSET_ROOT:+$ASSET_ROOT/prompts/refactor-planner}"
-fi
-TOOLS="${STARK_REFACTOR_TOOLS:-${ASSET_ROOT:+$ASSET_ROOT/tools}}"
-PROMPTS="${STARK_REFACTOR_PROMPTS:-$DEFAULT_PROMPTS}"
-[ -f "${TOOLS:+$TOOLS/refactor_planner.ts}" ] || { echo "refactor_planner.ts not found" >&2; exit 1; }
-[ -d "$PROMPTS" ] || { echo "refactor-planner prompts not found" >&2; exit 1; }
-
-node --experimental-strip-types "$TOOLS/refactor_planner.ts" \
-  --mode validate --root "$ROOT" --provider "$PROVIDER" \
-  --prompts-dir "$PROMPTS" --json
+TOOLS="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools"
+node --experimental-strip-types "$TOOLS/refactor_planner.ts" --mode validate --root "$ROOT"
 ```
-
-### Dispatcher output contract
-
-With `--json`, stdout is exactly one `DispatcherReceipt` JSON object; the human
-summary stays on stderr. Read, do not re-derive, these fields:
-
-```text
-{ mode, ok, root, provider, outDir,
-  inventorySummary?, plannedJobs?, findingCounts?, conflicts?,
-  validation?: { ok, errors[], warnings[] },
-  artifacts?: { planPath, backlogPath }, diagnostics[], errors[] }
-```
-
-- `dry-run` writes `.refactor-planner/inventory.json`,
-  `.refactor-planner/context-packs/*.json`, and
-  `.refactor-planner/run-summary.json`; it does not write either root artifact.
-- `run` writes `.refactor-planner/` diagnostics/intermediates and, only when
-  `ok=true`, both root artifacts named in `artifacts`.
-- `validate` reads `REFACTOR_BACKLOG.json` and writes nothing.
-- Exit `0` means `ok=true`; exit `1` means the dispatcher completed with
-  `ok=false`; malformed arguments/help are handled by the CLI before a receipt.
-  Treat missing or malformed JSON as failure even if stderr looks successful.
 
 ### Phase 6 — Verify and report
 
-Confirm you wrote only the documented outputs and touched no source. Inline
-mode should show only the two root artifacts; dispatcher mode may additionally
-show `.refactor-planner/`:
+Confirm you wrote exactly the two files and touched nothing else:
 
 ```bash
-set -euo pipefail
-TARGET="${STARK_REFACTOR_TARGET:-.}"
-[ -d "$TARGET" ] || { echo "Target directory not found: $TARGET" >&2; exit 1; }
-ROOT="$(git -C "$TARGET" rev-parse --show-toplevel 2>/dev/null || (cd "$TARGET" && pwd -P))"
-[ -d "$ROOT" ] || { echo "Could not resolve target root" >&2; exit 1; }
-if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  git -C "$ROOT" status --short
-else
-  find "$ROOT" -maxdepth 2 \
-    \( -name REFACTOR_PLAN.md -o -name REFACTOR_BACKLOG.json -o -name .refactor-planner \) \
-    -print
-fi
+git status --short    # should show only REFACTOR_PLAN.md + REFACTOR_BACKLOG.json (plus any pre-existing dirt from Phase 0)
 ```
 
-Compare against the Phase 0 baseline. Any new path other than
-`REFACTOR_PLAN.md`, `REFACTOR_BACKLOG.json`, or dispatcher-owned
-`.refactor-planner/` violates planning-only mode — revert it and say so.
+If anything else changed, you violated planning-only mode — revert it and say so.
 
 ## Quality bar
 

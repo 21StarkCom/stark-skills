@@ -11,7 +11,7 @@ revision_date: 2026-04-10T17:10:53+03:00
 
 ## Help
 
-If the invocation arguments contain a standalone `--help`, `-h`, or `help` token,
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop — do not run preflight or any phase.
 
@@ -28,32 +28,13 @@ Scaffold a standardized developer documentation structure into any repository. F
 - Modes are combinable: `--upgrade --backfill` migrates existing docs then generates new ones
 - If no arguments given, show the four options and ask which mode to use
 
-Parse mode flags directly from the user's current request after the explicitly
-invoked skill name.
+**Raw input:** `$ARGUMENTS`
 
 ## Constants
 
-```bash
-if [ -d "skill/stark-init-docs" ] && [ -d "standards/templates" ]; then
-  TEMPLATES="$(pwd)/standards/templates"
-else
-  ASSET_ROOT="${STARK_ASSET_ROOT:-${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
-  TEMPLATES="${ASSET_ROOT:+$ASSET_ROOT/standards/templates}"
-fi
-[ -n "${TEMPLATES:-}" ] && [ -d "$TEMPLATES" ] || {
-  echo "bundled standards/templates directory not found; reinstall the skill bundle" >&2
-  exit 1
-}
 ```
-
-Resolve `TEMPLATES` at the point of use; do not assume a variable from an
-earlier shell call still exists.
-
-Before any mutating mode, require a git repository and check
-`git diff --cached --quiet`. If unrelated changes are already staged, stop and
-ask the user to commit or unstage them; this skill's commits must never absorb a
-pre-existing index. Record the initial `git status --short` and preserve every
-unrelated path.
+TEMPLATES = ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/standards/templates/
+```
 
 ## No-arg Mode
 
@@ -104,34 +85,16 @@ Create `.github/` directory if needed for the PR template.
 If `CODEOWNERS` or `.github/CODEOWNERS` does not exist:
 
 ```bash
-set -euo pipefail
-if [ -d "standards/templates" ] && [ -f "skill/stark-init-docs/SKILL.md" ]; then
-  TEMPLATES="$(pwd)/standards/templates"
-else
-  ASSET_ROOT="${STARK_ASSET_ROOT:-${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
-  TEMPLATES="${ASSET_ROOT:+$ASSET_ROOT/standards/templates}"
-fi
-[ -f "$TEMPLATES/CODEOWNERS" ] || { echo "CODEOWNERS template missing" >&2; exit 1; }
-if [ ! -e CODEOWNERS ] && [ ! -e .github/CODEOWNERS ]; then
-  owner="$(gh api user --jq .login 2>/dev/null || printf 'OWNER')"
-  mkdir -p .github
-  sed "s/__OWNER__/$owner/g" "$TEMPLATES/CODEOWNERS" > .github/CODEOWNERS
-fi
+git_user=$(git config user.name || echo "OWNER")
 ```
 
-The GitHub login is a valid CODEOWNERS token; a display name from
-`git config user.name` may contain spaces and is not. If CODEOWNERS already
-exists anywhere in the repo, skip.
+Create `.github/CODEOWNERS` with `__OWNER__` substituted with `$git_user`. If CODEOWNERS already exists anywhere in the repo, skip.
 
 ### Step 4: Commit
 
 ```bash
-set -euo pipefail
-paths=(docs mkdocs.yml .doc-staleness.yml .github/pull_request_template.md .github/CODEOWNERS)
-existing=()
-for path in "${paths[@]}"; do [ -e "$path" ] && existing+=("$path"); done
-[ "${#existing[@]}" -gt 0 ] && git add -- "${existing[@]}"
-git diff --cached --quiet || git commit -m "docs: scaffold dev docs structure"
+git add docs/ mkdocs.yml .doc-staleness.yml .github/pull_request_template.md .github/CODEOWNERS
+git commit -m "docs: scaffold dev docs structure"
 ```
 
 If nothing was added (all files already existed), skip the commit.
@@ -147,22 +110,12 @@ Execute the full `--template` mode first to ensure the directory structure exist
 ### Step 2: Gather repository data
 
 ```bash
-set -euo pipefail
-TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/stark-init-docs.XXXXXX")"
-git log --oneline --all -200 > "$TMP_DIR/commits.txt"
-if command -v gh >/dev/null && \
-   gh pr list --state merged --limit 50 --json number,title,body,mergedAt \
-     > "$TMP_DIR/prs.json" 2>/dev/null; then
-  :
-else
-  printf '[]\n' > "$TMP_DIR/prs.json"
-  echo "Could not fetch PR history; continuing with commits and codebase only" >&2
-fi
-printf '%s\n' "$TMP_DIR"
-```
+# Recent commit history
+git log --oneline --all -200 > /tmp/init-docs-commits.txt
 
-Record the printed temporary directory for this run; do not assume a shell
-variable survives into a later call.
+# Merged PRs (requires gh CLI)
+gh pr list --state merged --limit 50 --json number,title,body,mergedAt > /tmp/init-docs-prs.json 2>/dev/null
+```
 
 If `gh` is not available or fails, warn "Could not fetch PR history, generating docs from commits and codebase only" and continue.
 
@@ -194,7 +147,7 @@ Be CONSERVATIVE. Only generate ADRs for major technology choices:
 
 Each ADR follows the template in `docs/adr/0000-template.md`. Number them starting from `0001`. Set status to "Accepted" and date to the earliest commit that introduced the technology (from git log).
 
-For ADRs going forward, prefer `brain adr new "<title>"` (the `stark-adr` skill), which auto-numbers and renders this same template; this backfill step is only for bootstrapping historical decisions. The layout follows the doc convention `docs/{adr,specs,retros}/` (folder per type — `adr` stays the established acronym, the rest are plural; see `stark-2nd-brain-cli/docs/CONVENTIONS.md`). There is **no `docs/plans/`** — the spec carries the plan.
+For ADRs going forward, prefer `brain adr new "<title>"` (the `/stark-adr` skill), which auto-numbers and renders this same template; this backfill step is only for bootstrapping historical decisions. The layout follows the doc convention `docs/{adr,specs,retros}/` (folder per type — `adr` stays the established acronym, the rest are plural; see `stark-2nd-brain-cli/docs/CONVENTIONS.md`). There is **no `docs/plans/`** — the spec carries the plan.
 
 Do NOT generate ADRs for:
 - Dev dependencies (linters, formatters, test frameworks)
@@ -245,12 +198,8 @@ nav:
 ### Step 8: Commit
 
 ```bash
-set -euo pipefail
-paths=(docs mkdocs.yml)
-existing=()
-for path in "${paths[@]}"; do [ -e "$path" ] && existing+=("$path"); done
-[ "${#existing[@]}" -gt 0 ] && git add -- "${existing[@]}"
-git diff --cached --quiet || git commit -m "docs: backfill docs from repo history"
+git add docs/ mkdocs.yml
+git commit -m "docs: backfill docs from repo history"
 ```
 
 ## `--upgrade` Mode
@@ -259,46 +208,13 @@ Migrate existing scattered Markdown docs into the standard layout.
 
 ### Step 1: Scan for existing docs
 
-Build a candidate list from tracked Markdown outside `docs/`. The following are
-**immutable locations**, not migration candidates:
-
-- every `AGENTS.md` and `CLAUDE.md`, at any depth;
-- generated or vendored trees whose path contains `generated/`, `vendor/`,
-  `catalog/`, or `dist/`;
-- build/dependency output such as `node_modules/`, `build/`, `target/`,
-  `coverage/`, and `.next/`;
-- host/repository control directories such as `.github/`, `.openai/`,
-  `.claude/`, and `.codex/`;
-- root policy/community files: `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`,
-  and license files.
-
-Use explicit exclude pathspecs rather than scanning broadly and relying only on
-later classification:
+Find all Markdown files outside `docs/` (excluding `node_modules`, `.git`, `vendor`, `CHANGELOG.md`, `LICENSE.md`):
 
 ```bash
-git ls-files '*.md' \
-  ':(exclude)docs/**' \
-  ':(exclude)AGENTS.md' ':(exclude)CLAUDE.md' \
-  ':(exclude)**/AGENTS.md' ':(exclude)**/CLAUDE.md' \
-  ':(exclude)generated/**' ':(exclude)**/generated/**' \
-  ':(exclude)vendor/**' ':(exclude)**/vendor/**' \
-  ':(exclude)catalog/**' ':(exclude)**/catalog/**' \
-  ':(exclude)dist/**' ':(exclude)**/dist/**' \
-  ':(exclude)node_modules/**' ':(exclude)**/node_modules/**' \
-  ':(exclude)build/**' ':(exclude)**/build/**' \
-  ':(exclude)target/**' ':(exclude)**/target/**' \
-  ':(exclude)coverage/**' ':(exclude)**/coverage/**' \
-  ':(exclude).next/**' ':(exclude)**/.next/**' \
-  ':(exclude).github/**' ':(exclude).openai/**' \
-  ':(exclude).claude/**' ':(exclude).codex/**' \
-  ':(exclude)README.md' ':(exclude)CHANGELOG.md' \
-  ':(exclude)CONTRIBUTING.md' ':(exclude)LICENSE.md' ':(exclude)LICENSE'
+git ls-files '*.md' ':!docs/**' ':!node_modules/**' ':!vendor/**' ':!CHANGELOG.md' ':!LICENSE.md' ':!LICENSE' ':!CONTRIBUTING.md'
 ```
 
-Before classification, also skip any candidate whose first 20 lines contain a
-generated-file marker such as `DO NOT EDIT`, `Code generated`, or `Generated by`.
-These content guards are additive: no later instruction may override the path
-exclusions above.
+Exclude `README.md` at repo root — it stays in place.
 
 ### Step 2: Classify each document
 
@@ -319,35 +235,17 @@ If uncertain, classify as `reference`.
 For each classified file:
 
 ```bash
-set -euo pipefail
-source="<candidate-from-step-1>"
-classification="<adr|spec|guide|reference|architecture>"
-base="$(basename -- "$source")"
-case "$base" in
-  AGENTS.md|CLAUDE.md) echo "Skipping protected $source"; exit 0 ;;
-esac
-case "/$source/" in
-  */generated/*|*/vendor/*|*/catalog/*|*/dist/*)
-    echo "Skipping generated/vendor path $source"; exit 0 ;;
-esac
-if sed -n '1,20p' "$source" | grep -Eqi 'DO NOT EDIT|Code generated|Generated by'; then
-  echo "Skipping generated file $source"; exit 0
-fi
-case "$classification" in
-  spec) target_dir="specs" ;;
-  guide) target_dir="guides" ;;
-  adr|reference|architecture) target_dir="$classification" ;;
-  *) echo "Unknown classification: $classification" >&2; exit 1 ;;
-esac
-target="docs/$target_dir/$base"
-mkdir -p "$(dirname -- "$target")"
-git mv -- "$source" "$target"
+# Determine target path
+target="docs/{classification}/{filename}"
+
+# Create target directory if needed
+mkdir -p "docs/{classification}"
+
+# Move via git
+git mv "{source}" "{target}"
 ```
 
-Replace the two placeholders before running. Preserve original filenames. If a
-naming conflict exists, prefix with the source directory name. Re-run the same
-protected-path checks after choosing the target; never move a protected file
-because classification or collision handling changed its name.
+Preserve original filenames. If a naming conflict exists, prefix with the source directory name.
 
 ### Step 4: Update internal links
 
@@ -356,8 +254,6 @@ After all moves, scan all Markdown files in the repo for broken internal links:
 - Find links matching a moved Markdown path, for example `text -> docs/old-path.md`
 - Update to the new path relative to the linking file
 - Also update any relative image references
-- Never rewrite files in the immutable locations from Step 1; report a stale
-  generated/vendor link for its owner to regenerate instead.
 
 ### Step 5: Update mkdocs.yml
 
@@ -369,11 +265,10 @@ Execute `--template` mode to create any missing directories and config files.
 
 ### Step 7: Commit
 
-Stage only the exact source/target paths moved by Step 3, the exact hand-authored
-Markdown files changed in Step 4, and scaffold files created by `--template`.
-Never use `git add -A`: unrelated or generated work may already be present.
-Commit those staged paths as `docs: upgrade to standard doc structure`. If the
-staged set is empty, skip the commit.
+```bash
+git add -A
+git commit -m "docs: upgrade to standard doc structure"
+```
 
 ## `--clean` Mode
 
@@ -415,16 +310,16 @@ rmdir docs/ 2>/dev/null
 
 ### Step 5: Commit
 
-Stage only the scaffold paths actually removed in Step 2 and commit them as
-`docs: remove doc scaffold`. Never use `git add -A`.
+```bash
+git add -A
+git commit -m "docs: remove doc scaffold"
+```
 
 If nothing was removed, skip the commit.
 
 ## Error Handling
 
-- If the resolved templates directory doesn't exist: stop and ask the user to
-  reinstall or update the bundle using the current host runtime's package
-  mechanism. Do not guess a Claude-only install path or command.
+- If `$TEMPLATES` directory doesn't exist: error "Templates not found at ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/standards/templates/. Reinstall the plugin: /plugin update <bundle>@bifrost."
 - If not in a git repo: error "Not a git repository."
 - If `gh` CLI is unavailable during `--backfill`: warn and continue without PR data.
 - If `git mv` fails during `--upgrade` (file already exists at target): warn, skip that file, continue.

@@ -13,13 +13,13 @@ model: opus
 
 ## Help
 
-If the invocation arguments contain a standalone `--help`, `-h`, or `help` token,
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop — do not run preflight or any phase.
 
 # stark-blog-sharpen
 
-Take a long-form post and make it do two things at once: **matter** (one non-obvious idea per post, no padding) and **read human** (no AI tells, the voice of a blunt engineering manager, not a content team). This skill is the editing pass; `stark-voice` is the drafting voice and the source of truth for register. If that skill is installed, read its **Long-form register** section before you start; otherwise use the complete register checklist below.
+Take a long-form post and make it do two things at once: **matter** (one non-obvious idea per post, no padding) and **read human** (no AI tells, the voice of a blunt engineering manager, not a content team). This skill is the editing pass; `stark-voice` is the drafting voice and the source of truth for register. Read that skill's **Long-form register** section before you start - this skill assumes it.
 
 Stance: **guilty of padding until proven otherwise.** The most common failure is a post that got longer without getting smarter - it restates one idea three times, signposts its own insight, and lands on a tidy maxim. Your job is to find and cut that, then verify the post still sounds like a person.
 

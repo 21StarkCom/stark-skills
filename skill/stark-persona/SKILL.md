@@ -1,8 +1,8 @@
 ---
 name: stark-persona
 description: >-
-  Assign a famous character persona to the current agent for the session, with
-  weighted random selection. Use for persona, character, or voice requests.
+  Assign a famous character persona for the session with weighted random selection. Use for persona, character, voice.
+  /stark-persona.
 disable-model-invocation: true
 model: opus
 revision: fefc4b333b06e7ec73b8bd0e396449f25f4dd359
@@ -11,47 +11,41 @@ revision_date: 2026-05-18T07:25:44Z
 
 ## Help
 
-If the current user request includes a standalone `--help`, `-h`, or `help` token,
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop — do not run preflight or any phase.
 
 # stark-persona
 
-Session persona system — assigns a character voice to the current agent for the
-session.
+Session persona system — assigns a character voice to Claude for the session.
 
 ## Invocation
 
-Invoke the skill explicitly using the active host's skill syntax, then append
-one of these inputs:
-
-| Input | Behavior |
+| Command | Behavior |
 |---------|----------|
-| no input | Weighted random pick |
-| `"Name"` | Pick specific character |
-| `--combo` | Mashup of 2-3 characters |
-| `--off` | Deactivate persona |
-| `--like` | Thumbs up current |
-| `--hate` | Thumbs down current |
-| `--survey` | Quick preference questions |
-| `--add "Name" --from "Source" --traits "t1,t2"` | Add character |
-| `--stats` | Inline summary |
-| `--print-stats` | Full stats table |
-| `--print-history` | Session history |
-| `--print-roster` | All characters |
-| `--print-weights` | Selection weights |
+| `/stark-persona` | Weighted random pick |
+| `/stark-persona "Name"` | Pick specific character |
+| `/stark-persona --combo` | Mashup of 2-3 characters |
+| `/stark-persona --off` | Deactivate persona |
+| `/stark-persona --like` | Thumbs up current |
+| `/stark-persona --hate` | Thumbs down current |
+| `/stark-persona --survey` | Quick preference questions |
+| `/stark-persona --add "Name" --from "Source" --traits "t1,t2"` | Add character |
+| `/stark-persona --stats` | Inline summary |
+| `/stark-persona --print-stats` | Full stats table |
+| `/stark-persona --print-history` | Session history |
+| `/stark-persona --print-roster` | All characters |
+| `/stark-persona --print-weights` | Selection weights |
 
 ## Execution
 
 Delegate all stateful operations to the TypeScript CLI:
 
 ```bash
-TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
-node --experimental-strip-types "$TOOLS/stark_persona.ts" <subcommand> [args]
+node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/stark_persona.ts <subcommand> [args]
 ```
 
-Parse the invocation input from the current user request and map it to the
-appropriate subcommand:
+Parse the ARGUMENTS and map to the appropriate subcommand:
 - No args or random → `select`
 - `"Name"` → `select --name "Name"`
 - `--combo` → `select --combo`
@@ -83,8 +77,7 @@ Rules:
 
 ## Voice Reset
 
-When the skill is explicitly invoked with `--off`, or when the session ends,
-emit this reset instruction:
+When `/stark-persona --off` is invoked or the session ends, emit this reset instruction:
 
 "The persona has been deactivated. For the remainder of this session, return to your standard communication style. No character voice, no catchphrases, no persona-specific vocabulary. Back to normal."
 

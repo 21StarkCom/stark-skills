@@ -1,21 +1,21 @@
 ---
 name: stark-fresh-eyes
 description: >-
-  One-shot zero-context review of a prompt, research brief, spec, or doc before it ships: a single isolated read-only reviewer re-verifies every checkable claim by a DIFFERENT method and reports defects only. Findings return to the author once — no second round, no loops. Use for fresh eyes, review prompt, check brief.
-argument-hint: '<doc-path> [--focus "aspect"] [--reviewer auto|claude|codex|gemini]'
+  One-shot zero-context review of a prompt, research brief, spec, or doc before it ships: a single read-only subagent re-verifies every checkable claim by a DIFFERENT method and reports defects only. Findings return to the author once — no second round, no loops. Use for fresh eyes, review prompt, check brief.
+argument-hint: '<doc-path> [--focus "aspect"] [--model opus|fable]'
 disable-model-invocation: true
 ---
 
 ## Help
 
-If the invocation arguments contain a standalone `--help`, `-h`, or `help` token,
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop — do not run any phase.
 
 # stark-fresh-eyes — one pass, different method, findings die at the author
 
 A document's author cannot check it — they re-read their own intent, not the
-text. This skill dispatches ONE isolated reviewer with **zero shared context** (it gets
+text. This skill dispatches ONE subagent with **zero shared context** (it gets
 the file path and the contract below, never your reasoning or history) to
 verify every checkable claim by a **different method** than the doc's own,
 then returns defects to you exactly once.
@@ -34,14 +34,13 @@ then returns defects to you exactly once.
 - **ONE dispatch per document revision.** Apply findings once, ship. If the
   doc is later revised substantially, that NEW revision may get its own single
   pass — never re-run on the same text, never a round 3.
-- **Zero shared context.** The reviewer receives the path + contract only.
+- **Zero shared context.** The subagent receives the path + contract only.
   Sharing your intent turns verification into confirmation.
 - **Read-only reviewer.** It never edits the doc; you (the author) apply
   what's real, with a stated disposition per finding.
 - **Zero findings is a valid output.** Do not fish; do not re-ask.
 
-Parse the document path and options directly from the user's current request
-after the explicitly invoked skill name.
+**Raw input:** `$ARGUMENTS`
 
 ## Phase 1 — Preconditions
 
@@ -55,26 +54,12 @@ after the explicitly invoked skill name.
    seed the contract's verification list. `--focus` adds an aspect to
    emphasize; it never removes the default checks.
 
-## Phase 2 — Dispatch (one isolated reviewer)
+## Phase 2 — Dispatch (one subagent)
 
-Choose the reviewer without hardcoding a model ID:
-
-1. Honor `--reviewer` when supplied and verify that reviewer is available.
-2. For `auto`, prefer an enabled reviewer from a different vendor than the
-   current host. Resolve its model through the installed runtime configuration.
-3. If no different vendor is available, use the host's own fresh isolated
-   worker only when it can start with no conversation history and read-only
-   access.
-4. If the host cannot provide a zero-context, read-only worker, stop and explain
-   that a fresh-eyes verdict would be contaminated; do not self-review as a
-   fallback.
-
-Use the host's native isolated-worker capability when available. A headless CLI
-fallback must run in a fresh empty working directory, receive only the absolute
-document path plus the contract, have writes disabled, and have stdin closed.
-Dispatch exactly once. Its prompt is the doc path, the claim classes from Phase
-1 with the concrete different-method instruction per class, and this contract
-**verbatim**:
+Model: `fable` by default (judgment task); `--model opus` for mechanical-heavy
+docs. Dispatch a read-only subagent whose prompt is: the doc path, the claim
+classes from Phase 1 with the concrete different-method instruction per class,
+and this contract **verbatim**:
 
 > Read <path>. You have NO other context — that is deliberate. Verify every
 > CHECKABLE claim by a DIFFERENT method than the doc's own: recount counts

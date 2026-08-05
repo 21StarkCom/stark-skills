@@ -44,7 +44,6 @@
     "health_checks": [],
     "doc_paths": [
       "docs/",
-      "AGENTS.md",
       "CLAUDE.md"
     ],
     "pr_merge_strategy": "squash"

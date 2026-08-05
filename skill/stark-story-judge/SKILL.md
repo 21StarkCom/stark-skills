@@ -16,7 +16,7 @@ argument-hint: "<post-path-or-draft>"
 
 ## Help
 
-If the current request asks for help (a standalone `--help`, `-h`, or `help` token),
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop - do not run any phase.
 
@@ -155,90 +155,33 @@ Body:
 
 A second opinion is a DIFFERENT vendor's model reading the same payload -
 never a re-roll. Run it when the grade gates a publish decision or when the
-author asks for another round; skip it for quick draft checks.
+author asks for another round; skip it for quick draft checks. The default
+second judge is the `codex` CLI at **xhigh** reasoning effort (grading is a
+hard-reasoning task and the CLI's ambient default is often low; the model id
+comes from config, never from this file).
 
-Determine the current host vendor first. The first cold judge normally uses
-that host's isolated subagent. Select the second vendor by this rule:
-
-- Codex host -> Claude; Claude host -> Codex; Gemini host -> Codex.
-- If that provider is unavailable or disabled, report that the second opinion
-  could not run. Never substitute another model from the current host and call
-  it cross-vendor.
-
-The model id comes from fleet config. Create a named run directory and keep its
-absolute paths accessible until both scorecards have been relayed; do not hide
-the files behind `cd "$(mktemp -d)"` and then lose the directory name.
+Dispatch shape - every detail is a scar, keep all of them:
 
 ````bash
-CURRENT_HOST="<current-host-vendor>" # runner fills: codex | claude | gemini
-case "$CURRENT_HOST" in
-  codex)  SECOND_VENDOR="claude" ;;
-  claude) SECOND_VENDOR="codex" ;;
-  gemini) SECOND_VENDOR="codex" ;;
-  *) echo "unsupported current host: $CURRENT_HOST" >&2; exit 2 ;;
-esac
-case "$SECOND_VENDOR" in
-  codex|claude) ;;
-  *) echo "unsupported second judge: $SECOND_VENDOR" >&2; exit 2 ;;
-esac
-command -v "$SECOND_VENDOR" >/dev/null 2>&1 || {
-  echo "second-judge CLI unavailable: $SECOND_VENDOR" >&2
-  exit 2
-}
-
-ASSET_ROOT="${STARK_PLUGIN_ROOT:-}"
-[ -n "$ASSET_ROOT" ] || \
-  ASSET_ROOT="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}"
-TOOLS="$ASSET_ROOT/tools"
-RUN_ROOT="${STARK_STORY_JUDGE_ROOT:-${TMPDIR:-/tmp}/stark-story-judge}"
-RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-JUDGE_DIR="$RUN_ROOT/$RUN_ID"
-mkdir -p "$JUDGE_DIR"
-
-PROMPT_FILE="$JUDGE_DIR/judge-prompt.txt"
-SCORECARD_FILE="$JUDGE_DIR/$SECOND_VENDOR-scorecard.txt"
-STDERR_FILE="$JUDGE_DIR/$SECOND_VENDOR-stderr.txt"
-# Write the completed template + payload once to $PROMPT_FILE. Every judge
-# receives these exact bytes.
-
-MODEL="$(node --experimental-strip-types "$TOOLS/stark_config_lib.ts" \
-  --model "$SECOND_VENDOR" 2>/dev/null || true)"
-
-case "$SECOND_VENDOR" in
-  codex)
-    MODEL_ARGS=()
-    [ -z "$MODEL" ] || MODEL_ARGS=(-m "$MODEL")
-    (cd "$JUDGE_DIR" && codex exec --skip-git-repo-check -s read-only \
-      "${MODEL_ARGS[@]}" -c model_reasoning_effort="xhigh" - \
-      < "$PROMPT_FILE" > "$SCORECARD_FILE" 2> "$STDERR_FILE")
-    ;;
-  claude)
-    MODEL_ARGS=()
-    [ -z "$MODEL" ] || MODEL_ARGS=(--model "$MODEL")
-    (cd "$JUDGE_DIR" && claude -p - --output-format text \
-      "${MODEL_ARGS[@]}" --no-session-persistence --tools "" \
-      < "$PROMPT_FILE" > "$SCORECARD_FILE" 2> "$STDERR_FILE")
-    ;;
-  *)
-    echo "unsupported second judge: $SECOND_VENDOR" >&2
-    exit 2
-    ;;
-esac
-
-printf 'judge_dir=%s\nscorecard=%s\nstderr=%s\n' \
-  "$JUDGE_DIR" "$SCORECARD_FILE" "$STDERR_FILE"
+# model from fleet config; empty var falls back to the CLI's own default
+CODEX_MODEL="$(node --experimental-strip-types \
+  "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/stark_config_lib.ts" \
+  --model codex 2>/dev/null || true)"
+cd "$(mktemp -d)" && codex exec --skip-git-repo-check -s read-only \
+  ${CODEX_MODEL:+-m "$CODEX_MODEL"} -c model_reasoning_effort="xhigh" \
+  "$(cat /path/to/judge-prompt.txt)" </dev/null > scorecard.txt 2> stderr.txt
 ````
 
 - **The judge prompt is byte-identical for every judge.** Same template, same
   payload, same rubric - a grade difference must come from the judge, never
   from a prompt difference.
-- **Prompt stdin reaches EOF.** Both commands read the saved prompt file, so an
-  orchestrated shell cannot leave the CLI waiting on an open pipe.
-- **Empty temp cwd and tool lockdown.** Codex uses
-  `--skip-git-repo-check -s read-only`; Claude uses `--tools ""`. A cold reader
-  gets nothing except the prompt.
-- Read the absolute scorecard path and relay it verbatim. Keep the run directory
-  on failure and report both absolute output paths for diagnosis.
+- **`</dev/null` is mandatory.** `codex exec` reads stdin in addition to the
+  prompt argument; an orchestrated shell's stdin is a pipe that never EOFs
+  and the run hangs forever.
+- **Empty temp cwd + `--skip-git-repo-check` + `-s read-only`.** A cold
+  reader greps nothing; give it a directory with nothing to grep.
+- Write the prompt to a file and pass `"$(cat ...)"` - inlining a full post
+  into a shell heredoc invites quoting bugs.
 
 ## Reading two scorecards
 

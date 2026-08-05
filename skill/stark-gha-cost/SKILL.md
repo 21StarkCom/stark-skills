@@ -1,20 +1,28 @@
 ---
 name: stark-gha-cost
 description: >-
-  Diagnose and reduce GitHub Actions and GHAS billing for an organization or
-  enterprise. Use for surprising GitHub bills, Actions minutes or runner cost,
-  slow or expensive CI, runaway workflows, wide matrices, poor caches, artifact
-  or registry storage, self-hosted-runner decisions, and right-sizing Secret
-  Protection or Code Security seats. Trace spend from product to repository,
-  workflow, and run; apply the highest-value fixes through a PR; and escalate
-  genuine billing anomalies to GitHub Support.
+  Diagnose and cut GitHub Actions + GHAS (Advanced Security) billing costs for an
+  org or enterprise. Use whenever the user is surprised by or wants to reduce a
+  GitHub bill, mentions Actions minutes / runner cost / CI spend, asks "why is my
+  GitHub bill so high", "are we paying for GHAS/secret scanning/code scanning",
+  "should I self-host runners", "which repo is burning Actions minutes", or wants
+  to right-size GitHub security seats (Secret Protection vs Code Security). Also
+  triggers on a mystery Actions charge, a runaway workflow, or a billing number
+  that looks wrong. Also use for making CI cheaper/faster the right way — slow or
+  expensive pipelines, build/dependency caching that isn't hitting, wide test
+  matrices, merge queues, flaky-test cost, artifact/registry storage, or measuring
+  CI spend (cost-per-PR, budgets, usage APIs). Diagnoses where the money goes
+  (product → repo → workflow → run), applies the highest-value levers via PR, and
+  escalates genuine mis-billing to Support. Reach for it even when the user only
+  says "GitHub is expensive this month" or "our CI is too slow" without naming
+  Actions.
 disable-model-invocation: true
 model: opus
 ---
 
 ## Help
 
-If the current user request includes a standalone `--help`, `-h`, or `help` token,
+If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop — do not run preflight or any phase.
 
@@ -45,13 +53,11 @@ up optimizing a $0 line item.
 
 ### 1. Diagnose — find where the money actually goes
 
-Never guess. Resolve `SKILL_DIR` to the directory containing this `SKILL.md`,
-then run the breakdown before proposing anything:
+Never guess. Run the breakdown before proposing anything:
 
 ```bash
-SKILL_DIR=/absolute/path/to/stark-gha-cost
 GH_TOKEN=<admin:enterprise or admin:org PAT> \
-  bash "$SKILL_DIR/scripts/gha-cost-breakdown.sh" --enterprise <slug>
+  scripts/gha-cost-breakdown.sh --enterprise <slug>
 ```
 
 Read the PAT into the env; never print it. This ranks spend by product → SKU →
@@ -60,8 +66,7 @@ repo, and shows GHAS seat usage. Almost always one or two repos dominate.
 Then drill the top repo:
 
 ```bash
-SKILL_DIR=/absolute/path/to/stark-gha-cost
-GH_TOKEN=<pat> bash "$SKILL_DIR/scripts/gha-repo-actions-drill.sh" <owner/repo> [since=YYYY-MM-DD]
+GH_TOKEN=<pat> scripts/gha-repo-actions-drill.sh <owner/repo> [since=YYYY-MM-DD]
 ```
 
 This classifies the driver: high run **volume**, matrix **fan-out** (jobs ≫ 1),
@@ -138,8 +143,8 @@ is availability-only and won't toggle off).
 
 ### 4. Ship it — every change via branch + PR
 
-These are workflow/config/Terraform edits; land them through the workspace's
-branch, PR, and merge workflow. Test live where you
+These are workflow/config/Terraform edits; land them on a branch and open a PR
+per the workspace rules (`/branch → /pr → /merge-to-main`). Test live where you
 can — check that the path filter actually skips (the PR touching only workflow
 files should NOT trigger the macOS/expensive job), and confirm 0 drift after a
 Terraform apply. Config actions that aren't files (disabling CodeQL default

@@ -1,66 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import {
   resolveAgents,
   parseFindings,
   dedupeFindings,
   renderReport,
-  buildCodexCmd,
-  collectFiles,
-  runScanners,
   type IacFinding,
   type IacReviewReceipt,
 } from "./iac_review_lib.ts";
-
-test("iac_review --help documents the preview and mandatory consent flags", () => {
-  const cli = path.join(path.dirname(fileURLToPath(import.meta.url)), "iac_review.ts");
-  const result = spawnSync(
-    process.execPath,
-    ["--experimental-strip-types", "--no-warnings", cli, "--help"],
-    { encoding: "utf8" },
-  );
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /--dry-run[\s\S]*preview resolved agents \+ selected files/);
-  assert.match(result.stdout, /--allow-agent-dispatch[\s\S]*REQUIRED for model dispatch/);
-  assert.match(result.stdout, /--trust-source[\s\S]*REQUIRED before scanners\/provider tools/);
-  assert.match(result.stdout, /--include-tfvars[\s\S]*separately acknowledge inclusion/);
-  assert.match(result.stdout, /--dry-run --no-tools --json/);
-  assert.match(result.stdout, /--allow-agent-dispatch --no-tools/);
-  assert.match(result.stdout, /--allow-agent-dispatch --trust-source --include-tfvars/);
-});
-
-test("collectFiles: tfvars are excluded unless explicitly included", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "iac-review-files-"));
-  try {
-    fs.writeFileSync(path.join(dir, "main.tf"), "resource \"x\" \"y\" {}\n");
-    fs.writeFileSync(path.join(dir, "secret.tfvars"), "password = \"secret\"\n");
-    const safe = collectFiles("terraform", dir, false, 20, 10_000);
-    assert.deepEqual(safe.map((f) => f.rel), ["main.tf"]);
-    const optedIn = collectFiles("terraform", dir, false, 20, 10_000, true);
-    assert.deepEqual(optedIn.map((f) => f.rel), ["main.tf", "secret.tfvars"]);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("runScanners: untrusted source skips every host scanner", () => {
-  const result = runScanners("terraform", ".", false);
-  assert.deepEqual(result.ran, []);
-  assert.equal(result.report, "");
-  assert.ok(result.skipped[0]?.includes("source not trusted"));
-});
-
-test("Codex IaC dispatch works outside a git checkout in a read-only sandbox", () => {
-  const cmd = buildCodexCmd();
-  assert.ok(cmd.args.includes("--skip-git-repo-check"));
-  assert.ok(cmd.args.includes("read-only"));
-});
 
 test("renderReport: never leaks an absolute local path into the title", () => {
   const receipt: IacReviewReceipt = {

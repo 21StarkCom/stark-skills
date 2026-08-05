@@ -14,30 +14,16 @@
  *                        Default: config `iac_review.agents`, else "codex".
  *   --changed            review only HCL changed vs the merge-base / working tree
  *   --no-tools           skip host scanners (review by reading only)
- *   --allow-agent-dispatch
- *                        REQUIRED for a real model dispatch; acknowledges that
- *                        selected file contents are sent to the configured CLIs
- *   --include-tfvars     Terraform only; separately acknowledge inclusion of
- *                        .tfvars, which are excluded because they may be secret
- *   --trust-source       REQUIRED before installed scanners/provider tools may
- *                        inspect or evaluate source; otherwise use --no-tools
  *   --min-severity S     drop findings below S (critical|high|medium|low)
  *   --pr N --repo O/R    post findings to PR N (authored by the first agent's App)
  *   --timeout SEC        per-agent timeout (default from config)
- *   --dry-run            preview resolved agents + selected files; run no
- *                        scanners and dispatch nothing (no consent flags needed)
+ *   --dry-run            resolve agents + files, dispatch nothing
  *   --json               print the receipt as JSON instead of the markdown report
  *   --help               show this help
  *
  * Examples:
- *   # Safe preview before consent (no scanners, no model dispatch):
- *   iac_review.ts --kind terraform infra/ --agents gemini,codex --dry-run --no-tools --json
- *   # Real review after model-dispatch consent, with scanners disabled:
- *   iac_review.ts --kind terraform infra/ --agents gemini,codex --allow-agent-dispatch --no-tools
- *   # Add only after separate source-execution and tfvars consent:
- *   iac_review.ts --kind terraform infra/ --allow-agent-dispatch --trust-source --include-tfvars
- *   # Terragrunt real review after dispatch consent; no HCL evaluation:
- *   iac_review.ts --kind terragrunt live/ --changed --allow-agent-dispatch --no-tools
+ *   iac_review.ts --kind terraform infra/ --agents gemini,codex
+ *   iac_review.ts --kind terragrunt live/ --changed --pr 42 --repo 21-Stark-AI/foo
  */
 import {
   runIacReview,
@@ -57,8 +43,6 @@ function parseArgs(argv: string[]): {
   agents: string[] | null;
   changed: boolean;
   noTools: boolean;
-  allowAgentDispatch: boolean;
-  includeTfvars: boolean;
   trustSource: boolean;
   minSeverity: Severity | null;
   pr: number | null;
@@ -74,8 +58,6 @@ function parseArgs(argv: string[]): {
     agents: null as string[] | null,
     changed: false,
     noTools: false,
-    allowAgentDispatch: false,
-    includeTfvars: false,
     trustSource: false,
     minSeverity: null as Severity | null,
     pr: null as number | null,
@@ -95,8 +77,6 @@ function parseArgs(argv: string[]): {
       case "--agents": o.agents = String(next() ?? "").split(",").map((s) => s.trim()).filter(Boolean); break;
       case "--changed": o.changed = true; break;
       case "--no-tools": o.noTools = true; break;
-      case "--allow-agent-dispatch": o.allowAgentDispatch = true; break;
-      case "--include-tfvars": o.includeTfvars = true; break;
       case "--trust-source": o.trustSource = true; break;
       case "--min-severity": {
         const v = String(next() ?? "").toLowerCase();
@@ -125,30 +105,13 @@ Usage: iac_review.ts --kind terraform|terragrunt [path] [options]
   --agents a,b       agents to run (claude,codex,gemini); overrides config
   --changed          review only changed HCL (git)
   --no-tools         skip host scanners
-  --allow-agent-dispatch
-                     REQUIRED for model dispatch; acknowledges sending selected
-                     file contents to the configured model CLIs
-  --include-tfvars   Terraform only; separately acknowledge inclusion of .tfvars,
-                     which are excluded by default because they may contain secrets
-  --trust-source     REQUIRED before scanners/provider tools may inspect or evaluate
-                     source; otherwise use --no-tools
+  --trust-source     allow HCL-evaluating scanners (terragrunt) — trusted source only
   --min-severity S   critical|high|medium|low floor
   --pr N --repo O/R  post findings to PR N
   --timeout SEC      per-agent timeout
-  --dry-run          preview resolved agents + selected files; run no scanners and
-                     dispatch nothing (no consent flags required)
+  --dry-run          resolve only, dispatch nothing
   --json             print receipt JSON
   --help             this help
-
-Consent-safe examples:
-  # Preview first; no file content leaves the machine.
-  iac_review.ts --kind terraform infra/ --agents gemini,codex --dry-run --no-tools --json
-  # After dispatch consent; scanners remain disabled.
-  iac_review.ts --kind terraform infra/ --agents gemini,codex --allow-agent-dispatch --no-tools
-  # Only after separate scanner and .tfvars consent.
-  iac_review.ts --kind terraform infra/ --allow-agent-dispatch --trust-source --include-tfvars
-  # Terragrunt without evaluating repository-controlled HCL.
-  iac_review.ts --kind terragrunt live/ --changed --allow-agent-dispatch --no-tools
 `;
 
 async function main(): Promise<void> {
@@ -179,8 +142,6 @@ async function main(): Promise<void> {
     agents: opts.agents,
     changed: opts.changed,
     noTools: opts.noTools,
-    allowAgentDispatch: opts.allowAgentDispatch,
-    includeTfvars: opts.includeTfvars,
     trustSource: opts.trustSource,
     minSeverity: opts.minSeverity ?? undefined,
     pr: opts.pr,

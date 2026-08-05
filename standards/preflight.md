@@ -6,7 +6,7 @@ Skills point at this doc instead of inlining the pattern.
 ## Invocation
 
 ```bash
-TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
+TOOLS="${STARK_REVIEW_TOOLS:-$HOME/.claude/code-review/tools}"
 node --experimental-strip-types "$TOOLS/preflight.ts" --workflow <skill-slug> --json
 ```
 
@@ -34,13 +34,9 @@ Interactive skill invocations skip steps 1–2 and just print + stop.
 
 ## Constants
 
-The fallback includes `CLAUDE_PLUGIN_ROOT` deliberately: Bifrost retargets that
-portable marker to the runtime's vendored asset root during installation.
-
-Shell state does not persist between independent tool calls. Every later shell
-call that needs a dispatcher must resolve `TOOLS` again in that same call; do
-not rely on the assignment above surviving. Skills that still call into Python
-orchestrators likewise resolve
-`SCRIPTS="${STARK_REVIEW_SCRIPTS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/scripts}"`
-and `PYTHON="$SCRIPTS/.venv/bin/python3"` in the call that uses them. Preflight
-itself no longer requires Python.
+`TOOLS` set above is reused throughout the skill body for other TS dispatchers
+(`stark_review.ts`, `github_app.ts`, etc.) — define it once in this preflight
+block and rely on it later. Skills that still call into Python orchestrators
+also need `SCRIPTS=${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}` and a
+`PYTHON="$SCRIPTS/.venv/bin/python3"` fallback alongside; preflight itself
+no longer requires the Python interpreter.

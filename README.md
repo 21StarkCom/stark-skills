@@ -1,6 +1,6 @@
 # stark-skills
 
-AI-powered development workflow system with 27 canonical skills covering planning, implementation, review, shipping, and maintenance. Bifrost renders the same source skills for Claude Code, native Codex, and Gemini; Claude and Codex are enabled by default, with optional Gemini support through config.
+AI-powered development workflow system for Claude Code. 18 skills covering the full development lifecycle — from planning through code review, shipping, and maintenance. Claude and Codex are enabled by default, with optional Gemini support available through config.
 
 ## Quick Start
 
@@ -19,7 +19,7 @@ AI-powered development workflow system with 27 canonical skills covering plannin
 /stark-session end
 ```
 
-In Claude Code, installed skills use `/slash-command` syntax. In Codex, Bifrost installs native `.agents/skills/<name>/SKILL.md` trees and explicit invocations use `$skill-name`. Bundles vendor the tools, prompts, config, per-skill support directories, and shared persona data they need.
+All skills are available as `/slash-commands` in Claude Code after installing the plugins. Each plugin is self-contained — it vendors the `tools/` and `global/` (config + prompts) it needs, so there is nothing to symlink and no local install step.
 
 ---
 
@@ -33,7 +33,7 @@ The human provides the idea and writes the spec. Everything after `/stark-plan-t
 
 ## Skills
 
-> Every skill supports side-effect-free `--help`: `/stark-<skill> --help` on Claude Code or `$stark-<skill> --help` on Codex.
+> Every skill supports `--help` (`/stark-<skill> --help`) — prints its purpose, usage, and arguments without running anything.
 
 ### Quality Gates
 
@@ -185,9 +185,9 @@ stark-skills/
 
 ## Distribution
 
-This repo is the **source of truth** for the skills + tools; [bifrost](https://github.com/21StarkCom/bifrost) renders runtime-native Claude Code, Codex, and Gemini bundles.
+This repo is the **source of truth** for the skills + tools; they ship as self-contained Claude Code plugins via the [bifrost](https://github.com/21StarkCom/bifrost) marketplace.
 
-- The Bifrost `catalog/` is **generated from this repo** by `stark sync`. Its engine vendors shared assets plus each skill's standard `references/`, `scripts/`, and `assets/` directories, so installs need no symlinks or source checkout.
+- The marketplace `catalog/` is **generated from this repo** by `stark sync`, and its engine vendors `tools/` + `global/` (config + prompts) into each plugin — so an install needs no symlinks and no local setup step.
 - CI auto-publishes: `.github/workflows/marketplace-sync.yml` regenerates the marketplace and opens a PR on every push to `main` touching a vendored asset root — `skill/`, `tools/`, `global/`, `scripts/`, `standards/`, or `plugins/stark-gh/`.
 
 ```
@@ -196,7 +196,7 @@ This repo is the **source of truth** for the skills + tools; [bifrost](https://g
 /plugin update  stark-analyze@bifrost   # pull the latest published version
 ```
 
-Immutable assets resolve from the installed bundle root (the source uses a portable marker that Bifrost retargets per runtime); mutable state (`history/`, `sessions/`, `locks/`, …) remains under the user's runtime state root.
+Immutable assets (tools/prompts/config) resolve from the installed plugin root (`${CLAUDE_PLUGIN_ROOT}`) via `tools/asset_root_lib.ts`; mutable state (`history/`, `sessions/`, `locks/`, …) lives under `~/.claude/code-review/` (`stateRoot()`).
 
 ## Config Hierarchy
 
