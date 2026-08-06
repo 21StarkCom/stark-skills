@@ -438,19 +438,24 @@ async function main(argv: string[]): Promise<number> {
     }
   };
 
-  // Step 11: capture pre-edit CHANGELOG.md to durable tempfile
+  // Step 11: capture pre-edit CHANGELOG.md to durable tempfile.
+  // A repo with no root CHANGELOG.md skips the changelog machinery wholesale
+  // (edit, commit, restore). A CHANGELOG that exists but lacks the
+  // '## [Unreleased]' section is still a hard error — that is a malformed
+  // changelog, not the absence of one.
   const changelogPath = path.resolve("CHANGELOG.md");
-  if (!fs.existsSync(changelogPath)) {
-    restoreToOriginalHead();
-    die(MergeExit.NO_CHANGELOG, `CHANGELOG.md not found at repo root`);
+  let preEditPath: string | null = null;
+  if (fs.existsSync(changelogPath)) {
+    const changelogContent = fs.readFileSync(changelogPath, "utf8");
+    if (!/^## \[Unreleased\]\s*$/m.test(changelogContent)) {
+      restoreToOriginalHead();
+      die(MergeExit.NO_CHANGELOG, `CHANGELOG.md missing '## [Unreleased]' section`);
+    }
+    preEditPath = path.join(dirs.runtime, `${runId}-changelog-pre-edit.md`);
+    fs.writeFileSync(preEditPath, changelogContent, { mode: 0o600 });
+  } else {
+    process.stderr.write(`no CHANGELOG.md at repo root; changelog step will be skipped\n`);
   }
-  const changelogContent = fs.readFileSync(changelogPath, "utf8");
-  if (!/^## \[Unreleased\]\s*$/m.test(changelogContent)) {
-    restoreToOriginalHead();
-    die(MergeExit.NO_CHANGELOG, `CHANGELOG.md missing '## [Unreleased]' section`);
-  }
-  const preEditPath = path.join(dirs.runtime, `${runId}-changelog-pre-edit.md`);
-  fs.writeFileSync(preEditPath, changelogContent, { mode: 0o600 });
 
   // Step 12: resolve section
   const section = userArgs.changelogSection ?? inferSection(pr.labels);
@@ -460,7 +465,7 @@ async function main(argv: string[]): Promise<number> {
   const baseOidRecheck = gitLib.revParse(`refs/remotes/origin/${pr.baseRefName}`);
   if (baseOidRecheck !== baseOid) {
     restoreToOriginalHead();
-    fs.unlinkSync(preEditPath);
+    if (preEditPath !== null) fs.unlinkSync(preEditPath);
     die(MergeExit.BASE_OID_MOVED,
       `base ${pr.baseRefName} moved during preflight (${baseOid} → ${baseOidRecheck}); rerun`);
   }
@@ -489,7 +494,7 @@ async function main(argv: string[]): Promise<number> {
     changelogCommitOid: null,
     pushedHeadOid: null,
     originalChangelogPath: preEditPath,
-    changelog: { filePath: changelogPath, section, markerComment },
+    changelog: preEditPath === null ? null : { filePath: changelogPath, section, markerComment },
     startingRef,
     forceReason: userArgs.forceReason,
     stage2: (() => {

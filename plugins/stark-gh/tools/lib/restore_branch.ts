@@ -88,7 +88,9 @@ export function restoreBranchFromPlan(planFilePath: string, opts: { exec?: ExecF
     }
   }
 
-  // Step 3: restore CHANGELOG.md from originalChangelogPath if both exist and differ.
+  // Step 3: restore CHANGELOG.md from originalChangelogPath if both exist and
+  // differ. Skipped wholesale when the repo keeps no CHANGELOG.md.
+  if (plan.changelog === null || plan.originalChangelogPath === null) return result;
   try {
     const tempExists = fs.existsSync(plan.originalChangelogPath);
     const liveExists = fs.existsSync(plan.changelog.filePath);

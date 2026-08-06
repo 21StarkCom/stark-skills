@@ -175,6 +175,25 @@ test("restoreBranchFromPlan no-op CHANGELOG when content is byte-identical", () 
   fs.rmSync(dir, { recursive: true });
 });
 
+test("restoreBranchFromPlan skips CHANGELOG step when plan.changelog is null (repo without CHANGELOG.md)", () => {
+  const tmp = `/tmp/plan-restore-nocl-${Date.now()}.json`;
+  writePrMergePlan(tmp, makePlan({ changelog: null, originalChangelogPath: null, startingRef: "main" }));
+  try {
+    const { exec, calls } = makeExec({
+      "git rev-parse refs/heads/feat/foo": "rebased-sha\n",
+      "git symbolic-ref --short HEAD": "main\n",
+    });
+    const result = restoreBranchFromPlan(tmp, { exec });
+    assert.equal(result.branchUpdated, true);   // branch restore still runs
+    assert.equal(result.changelogRestored, false);
+    assert.equal(result.warnings.length, 0);
+    const updateRefCall = calls.find(c => c.args[0] === "update-ref");
+    assert.ok(updateRefCall, "branch restore must not be skipped with the changelog step");
+  } finally {
+    fs.unlinkSync(tmp);
+  }
+});
+
 test("restoreBranchFromPlan tolerates rev-parse failure (fresh branch)", () => {
   const tmp = `/tmp/plan-restore-noref-${Date.now()}.json`;
   writePrMergePlan(tmp, makePlan());

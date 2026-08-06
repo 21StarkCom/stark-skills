@@ -225,12 +225,14 @@ export interface PrMergePlan {
   rebasedHeadOid: string;
   changelogCommitOid: string | null;
   pushedHeadOid: string | null;
-  originalChangelogPath: string;     // absolute path to durable tempfile copy
+  // Both null when the target repo keeps no root CHANGELOG.md — the changelog
+  // edit/commit/restore steps are skipped wholesale. Always null together.
+  originalChangelogPath: string | null;  // absolute path to durable tempfile copy
   changelog: {
     filePath: string;
     section: "Added" | "Changed" | "Fixed" | "Removed" | "Deprecated" | "Security";
     markerComment: string;
-  };
+  } | null;
   startingRef: string;
   forceReason: string | null;
   stage2: {
@@ -262,10 +264,10 @@ export function validatePrMergePlan(p: unknown): asserts p is PrMergePlan {
   requirePlan(o.command === "pr-merge", "command must be 'pr-merge'");
   requirePlan(o.schemaVersion === 1, "schemaVersion must be 1");
   for (const f of ["createdAt", "runId", "baseOid", "originalHeadOid", "rebasedHeadOid",
-    "originalChangelogPath", "startingRef"]) {
+    "startingRef"]) {
     requirePlan(typeof o[f] === "string", `${f} must be string`);
   }
-  for (const f of ["changelogCommitOid", "pushedHeadOid", "forceReason"]) {
+  for (const f of ["changelogCommitOid", "pushedHeadOid", "forceReason", "originalChangelogPath"]) {
     requirePlan(o[f] === null || typeof o[f] === "string", `${f} must be string|null`);
   }
 
@@ -278,13 +280,17 @@ export function validatePrMergePlan(p: unknown): asserts p is PrMergePlan {
   requirePlan(typeof pr.isCrossRepository === "boolean", "pr.isCrossRepository must be boolean");
   requirePlan(pr.wasDraft === undefined || typeof pr.wasDraft === "boolean", "pr.wasDraft must be boolean when present");
 
-  requirePlan(isObj(o.changelog), "changelog missing");
-  const cl = o.changelog as Record<string, unknown>;
-  for (const f of ["filePath", "markerComment"]) {
-    requirePlan(typeof cl[f] === "string", `changelog.${f} must be string`);
+  requirePlan(o.changelog === null || isObj(o.changelog), "changelog must be object|null");
+  requirePlan((o.changelog === null) === (o.originalChangelogPath === null),
+    "changelog and originalChangelogPath must be null together");
+  if (o.changelog !== null) {
+    const cl = o.changelog as Record<string, unknown>;
+    for (const f of ["filePath", "markerComment"]) {
+      requirePlan(typeof cl[f] === "string", `changelog.${f} must be string`);
+    }
+    requirePlan(typeof cl.section === "string" && CHANGELOG_SECTIONS.has(cl.section as string),
+      "changelog.section must be one of Added|Changed|Fixed|Removed|Deprecated|Security");
   }
-  requirePlan(typeof cl.section === "string" && CHANGELOG_SECTIONS.has(cl.section as string),
-    "changelog.section must be one of Added|Changed|Fixed|Removed|Deprecated|Security");
 
   requirePlan(isObj(o.stage2), "stage2 missing");
   const s2 = o.stage2 as Record<string, unknown>;
