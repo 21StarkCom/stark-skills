@@ -172,6 +172,21 @@ test("validatePrMergePlan rejects missing command", () => {
   assert.throws(() => validatePrMergePlan(bad), /command must be 'pr-merge'/);
 });
 
+test("validatePrMergePlan accepts null changelog pair (repo without CHANGELOG.md)", () => {
+  const noChangelog = { ...minimalMerge, changelog: null, originalChangelogPath: null };
+  validatePrMergePlan(noChangelog);
+});
+
+test("validatePrMergePlan rejects changelog null with originalChangelogPath set", () => {
+  const bad = { ...minimalMerge, changelog: null };
+  assert.throws(() => validatePrMergePlan(bad), /null together/);
+});
+
+test("validatePrMergePlan rejects originalChangelogPath null with changelog set", () => {
+  const bad = { ...minimalMerge, originalChangelogPath: null };
+  assert.throws(() => validatePrMergePlan(bad), /null together/);
+});
+
 test("validatePrMergePlan rejects bad section", () => {
   const bad = { ...minimalMerge, changelog: { ...minimalMerge.changelog, section: "Bogus" as never } };
   assert.throws(() => validatePrMergePlan(bad), /changelog.section/);

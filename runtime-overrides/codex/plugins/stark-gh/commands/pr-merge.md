@@ -1,11 +1,12 @@
 ---
 name: pr-merge
 description: >-
-  Rebase a PR, draft squash-commit prose + CHANGELOG bullet via Codex,
+  Rebase a PR, draft squash-commit prose + CHANGELOG bullet via Codex
+  (changelog step skipped when the repo keeps no root CHANGELOG.md),
   force-push, mark a draft PR ready-for-review, and squash-merge once CI is green.
 argument-hint: "[--pr N] [--changelog-section Added|Changed|Fixed|Removed|Deprecated|Security] [--force --force-reason TEXT] [--no-watch] [--watch-timeout HOURS] [--allow-secret-commit] [--allow-secret-to-llm] [--allow-no-required-checks]"
 allowed-tools: Bash, Read
-model: sonnet
+model: opus
 ---
 
 # pr-merge

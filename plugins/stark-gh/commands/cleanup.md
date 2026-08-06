@@ -7,7 +7,7 @@ description: >-
   onto upstream and applies linear-tree git config so the history stays sharp.
 argument-hint: "[--pr N] [--dry-run] [--keep-branch NAME ...] [--no-rebase] [--no-watcher-cleanup] [--no-config] [--no-gc] [--drop-stale-stashes] [--force] [--json]"
 allowed-tools: Bash
-model: sonnet
+model: opus
 ---
 
 # /stark-gh:cleanup

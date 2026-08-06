@@ -159,32 +159,36 @@ async function main(argv: string[]): Promise<number> {
     process.stderr.write(`pre-commit secret scan: redacted ${initial.categories.join(", ")} in subject/body/bullet\n`);
   }
 
-  // Step 3: apply changelog edit
-  const bulletText = fs.readFileSync(plan.stage2.changelogBulletFile, "utf8").replace(/\n+$/, "");
-  const changelogContent = fs.readFileSync(plan.changelog.filePath, "utf8");
-  const updated = updateUnreleasedChangelog({
-    content: changelogContent,
-    pr: plan.pr.number,
-    runId: plan.runId,
-    section: plan.changelog.section,
-    bullet: bulletText,
-  });
-
+  // Step 3: apply changelog edit (skipped when the repo keeps no CHANGELOG.md)
   let changelogCommitOid: string | null = null;
-  if (updated.changed) {
-    fs.writeFileSync(plan.changelog.filePath, updated.content);
-    gitLib.add([plan.changelog.filePath]);
-    if (gitLib.diffCachedEmpty()) {
-      // Race condition: file content rolled back between read and stage.
-      // Skip commit; nothing to commit.
-    } else {
-      gitLib.commitWithSubject(`chore(changelog): ${bulletToSubject(bulletText)}`);
-      changelogCommitOid = gitLib.headOid();
-    }
+  if (plan.changelog === null) {
+    changelogCommitOid = plan.rebasedHeadOid;
   } else {
-    // Byte-identical no-op rerun. Try to reuse previous changelogCommitOid;
-    // else use rebasedHeadOid as the rollback anchor.
-    changelogCommitOid = plan.changelogCommitOid ?? plan.rebasedHeadOid;
+    const bulletText = fs.readFileSync(plan.stage2.changelogBulletFile, "utf8").replace(/\n+$/, "");
+    const changelogContent = fs.readFileSync(plan.changelog.filePath, "utf8");
+    const updated = updateUnreleasedChangelog({
+      content: changelogContent,
+      pr: plan.pr.number,
+      runId: plan.runId,
+      section: plan.changelog.section,
+      bullet: bulletText,
+    });
+
+    if (updated.changed) {
+      fs.writeFileSync(plan.changelog.filePath, updated.content);
+      gitLib.add([plan.changelog.filePath]);
+      if (gitLib.diffCachedEmpty()) {
+        // Race condition: file content rolled back between read and stage.
+        // Skip commit; nothing to commit.
+      } else {
+        gitLib.commitWithSubject(`chore(changelog): ${bulletToSubject(bulletText)}`);
+        changelogCommitOid = gitLib.headOid();
+      }
+    } else {
+      // Byte-identical no-op rerun. Try to reuse previous changelogCommitOid;
+      // else use rebasedHeadOid as the rollback anchor.
+      changelogCommitOid = plan.changelogCommitOid ?? plan.rebasedHeadOid;
+    }
   }
 
   // Step 4: origin URL match
@@ -192,9 +196,9 @@ async function main(argv: string[]): Promise<number> {
   const normalized = origin ? normalizeOriginUrl(origin) : null;
   if (normalized !== plan.pr.nameWithOwner) {
     // Roll back the changelog commit (if any) and exit.
-    if (changelogCommitOid && changelogCommitOid !== plan.rebasedHeadOid) {
+    if (plan.changelog !== null && changelogCommitOid && changelogCommitOid !== plan.rebasedHeadOid) {
       gitLib.resetHard(plan.rebasedHeadOid);
-      fs.writeFileSync(plan.changelog.filePath, fs.readFileSync(plan.originalChangelogPath));
+      fs.writeFileSync(plan.changelog.filePath, fs.readFileSync(plan.originalChangelogPath!));
     }
     die(MergeExit.PUSH_REJECTED, `origin URL ${origin} does not match PR repo ${plan.pr.nameWithOwner}`);
   }
@@ -215,9 +219,11 @@ async function main(argv: string[]): Promise<number> {
   } catch (err) {
     // Roll back: reset to rebasedHeadOid + restore CHANGELOG.md from durable tempfile.
     try { gitLib.resetHard(plan.rebasedHeadOid); } catch { /* best-effort */ }
-    try {
-      fs.writeFileSync(plan.changelog.filePath, fs.readFileSync(plan.originalChangelogPath));
-    } catch { /* best-effort */ }
+    if (plan.changelog !== null) {
+      try {
+        fs.writeFileSync(plan.changelog.filePath, fs.readFileSync(plan.originalChangelogPath!));
+      } catch { /* best-effort */ }
+    }
     // Clear pushedHeadOid in the retained plan so resume can't pick it up.
     plan = { ...plan, pushedHeadOid: null };
     writePrMergePlan(planFile, plan);
@@ -313,7 +319,9 @@ async function runNoWatch(plan: PrMergePlan, planFile: string): Promise<number> 
   try { fs.unlinkSync(plan.stage2.subjectFile!); } catch { /* nothing */ }
   try { fs.unlinkSync(plan.stage2.bodyFile!); } catch { /* nothing */ }
   try { fs.unlinkSync(plan.stage2.changelogBulletFile!); } catch { /* nothing */ }
-  try { fs.unlinkSync(plan.originalChangelogPath); } catch { /* nothing */ }
+  if (plan.originalChangelogPath !== null) {
+    try { fs.unlinkSync(plan.originalChangelogPath); } catch { /* nothing */ }
+  }
 
   return 0;
 }

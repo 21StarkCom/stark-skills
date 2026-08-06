@@ -49,6 +49,9 @@ export function buildScrubbedEnv(parent: NodeJS.ProcessEnv): Record<string, stri
   return out;
 }
 
+// When plan.changelog is null (repo keeps no CHANGELOG.md) the 3-key output
+// contract is kept and the bullet is simply never applied — execute skips the
+// changelog step. One schema beats a second validation path.
 export function buildMergePrompt(plan: PrMergePlan, ctx: {
   prTitle: string;
   prBody: string;
@@ -71,7 +74,7 @@ trusted:
   pr_number:        ${JSON.stringify(plan.pr.number)}
   base_ref:         ${JSON.stringify(plan.pr.baseRef)}
   head_ref:         ${JSON.stringify(plan.pr.headRef)}
-  changelog_section: ${JSON.stringify(plan.changelog.section)}
+  changelog_section: ${JSON.stringify(plan.changelog?.section ?? "Changed")}
 
 untrusted:
   pr_title:         ${JSON.stringify(ctx.prTitle)}

@@ -40,7 +40,7 @@ export const MergeExit = {
   CHECK_FAIL: 12,                // failing/missing required checks; or --no-watch with non-green
   CONFLICT_OR_DIRTY: 13,         // rebase conflict; or working tree dirty / git op in progress
   BASE_OID_MOVED: 14,            // base OID moved between fetch and plan write
-  NO_CHANGELOG: 15,              // CHANGELOG.md missing or no [Unreleased] section
+  NO_CHANGELOG: 15,              // CHANGELOG.md exists but has no [Unreleased] section (absent file = skip, not error)
   SECRET_LLM: 16,                // secret in pre-LLM scan, no --allow-secret-to-llm
   FORK_OR_HEAD_MISMATCH: 17,     // cross-repo PR; or origin/<headRef> != PR's headRefOid
   LOCAL_DIVERGED: 18,            // local <headRef> has unpushed commits or diverges from origin
