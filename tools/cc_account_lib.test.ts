@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import {
+  classifyNextOutcome,
   applyOrder,
   deleteAnyProfileArgv,
   deleteProfileArgv,
@@ -26,6 +27,7 @@ import {
   validateStoredProfile,
   writeClaudeCredsArgv,
   writeProfileArgv,
+  type CredentialState,
   type Profile,
   type UsageSnapshot,
 } from "./cc_account_lib.ts";
@@ -547,16 +549,24 @@ test("removeProfile: survivors keep their slots, gaps and all", () => {
 test("parseNextFlags: switching is the default — no flag needed", () => {
   // `next` exists to advance the rotation. Requiring `--apply` made the common
   // case two commands and the bare form a no-op that looked like a failure.
-  assert.deepEqual(parseNextFlags([]), { apply: true, best: false });
+  assert.deepEqual(parseNextFlags([]), { apply: true, best: false, unknown: [] });
 });
 
 test("parseNextFlags: --dry-run previews without switching", () => {
-  assert.deepEqual(parseNextFlags(["--dry-run"]), { apply: false, best: false });
+  assert.deepEqual(parseNextFlags(["--dry-run"]), {
+    apply: false,
+    best: false,
+    unknown: [],
+  });
 });
 
 test("parseNextFlags: --apply still accepted, now a no-op", () => {
   // Kept for muscle memory and any script that already passes it.
-  assert.deepEqual(parseNextFlags(["--apply"]), { apply: true, best: false });
+  assert.deepEqual(parseNextFlags(["--apply"]), {
+    apply: true,
+    best: false,
+    unknown: [],
+  });
 });
 
 test("parseNextFlags: --dry-run wins over --apply", () => {
@@ -564,14 +574,20 @@ test("parseNextFlags: --dry-run wins over --apply", () => {
   assert.deepEqual(parseNextFlags(["--apply", "--dry-run"]), {
     apply: false,
     best: false,
+    unknown: [],
   });
 });
 
 test("parseNextFlags: --best composes with both modes", () => {
-  assert.deepEqual(parseNextFlags(["--best"]), { apply: true, best: true });
+  assert.deepEqual(parseNextFlags(["--best"]), {
+    apply: true,
+    best: true,
+    unknown: [],
+  });
   assert.deepEqual(parseNextFlags(["--best", "--dry-run"]), {
     apply: false,
     best: true,
+    unknown: [],
   });
 });
 
@@ -849,4 +865,276 @@ test("applyOrder: omitted profiles stay in the cycle, just unplaced", () => {
 test("applyOrder: is case-insensitive and ignores unknown names", () => {
   const out = applyOrder(CYCLE, ["net-t1", "ghost"]);
   assert.equal(out.find((p) => p.name === "Net-T1")?.order, 0);
+});
+
+// ---------------------------------------------------------------------------
+// classifyNextOutcome — the `next` decision table
+//
+// Previously inlined in `cmdNext`, so the exit-code contract this covers was
+// reachable only by running the binary against a real Keychain.
+// ---------------------------------------------------------------------------
+
+const SEAT_A = "aaaa:oooo";
+const SEAT_B = "bbbb:oooo";
+
+function prof(name: string, seatKey: string, order?: number): Profile {
+  return {
+    name,
+    email: `${name}@example.net`,
+    seatKey,
+    ...(order === undefined ? {} : { order }),
+  };
+}
+
+function creds(
+  entries: Record<string, CredentialState>,
+): Map<string, CredentialState> {
+  return new Map(Object.entries(entries));
+}
+
+const pickFirst = (c: readonly Profile[]): Profile | null => c[0] ?? null;
+
+test("classifyNextOutcome: empty registry is the only `add`-fixable state", () => {
+  const out = classifyNextOutcome({
+    profiles: [],
+    active: SEAT_A,
+    credentials: creds({}),
+    pick: pickFirst,
+    pickerExcludesActive: false,
+  });
+  assert.equal(out.kind, "empty");
+});
+
+test("classifyNextOutcome: an unreadable keychain is NOT reported as absent", () => {
+  // The destructive confusion: `absent` prescribes `add`, which overwrites the
+  // stored record with the current login. An unreadable probe says nothing
+  // about what the keychain holds, so it must never reach `stale` — the list
+  // whose printed remedy is exactly that.
+  const out = classifyNextOutcome({
+    profiles: [prof("P1", SEAT_A), prof("P2", SEAT_B)],
+    active: SEAT_A,
+    credentials: creds({ P1: "unreadable", P2: "present" }),
+    pick: pickFirst,
+    pickerExcludesActive: false,
+  });
+  assert.equal(out.kind, "switch");
+  assert.deepEqual(out.kind === "switch" ? [...out.stale] : ["!"], []);
+  assert.deepEqual(out.kind === "switch" ? [...out.unreadable] : [], ["P1"]);
+});
+
+test("classifyNextOutcome: one unreadable profile does NOT block a healthy switch", () => {
+  // The first version returned `unreadable` here, so a single denied ACL
+  // hard-failed the whole rotation while other profiles sat switchable — the
+  // operator's window is exhausted and the tool refuses to help. It blocks
+  // only when nothing is usable; otherwise the names ride along as a warning.
+  const out = classifyNextOutcome({
+    profiles: [prof("P1", SEAT_A), prof("P2", SEAT_B), prof("Locked", "cccc:oooo")],
+    active: SEAT_A,
+    credentials: creds({ P1: "present", P2: "present", Locked: "unreadable" }),
+    pick: (c) => c.find((p) => p.name === "P2") ?? null,
+    pickerExcludesActive: false,
+  });
+  assert.equal(out.kind, "switch");
+  assert.deepEqual(out.kind === "switch" ? [...out.unreadable] : [], ["Locked"]);
+});
+
+test("classifyNextOutcome: unreadable blocks only when nothing is usable", () => {
+  const out = classifyNextOutcome({
+    profiles: [prof("P1", SEAT_A), prof("P2", SEAT_B)],
+    active: SEAT_A,
+    credentials: creds({ P1: "unreadable", P2: "absent" }),
+    pick: pickFirst,
+    pickerExcludesActive: false,
+  });
+  assert.equal(out.kind, "unreadable");
+  assert.deepEqual(out.kind === "unreadable" ? [...out.names] : [], ["P1"]);
+});
+
+test("classifyNextOutcome: an incoherent profile is skipped, not switched to", () => {
+  // `use` refuses an incoherent profile, so treating it as usable dead-ends
+  // the rotation forever: the picker is deterministic and selects it again on
+  // every run, never reaching the healthy profiles behind it.
+  const out = classifyNextOutcome({
+    profiles: [prof("Bad", SEAT_B), prof("Good", "cccc:oooo")],
+    active: SEAT_A,
+    credentials: creds({ Bad: "incoherent", Good: "present" }),
+    pick: pickFirst,
+    pickerExcludesActive: false,
+  });
+  assert.equal(out.kind, "switch");
+  assert.equal(out.kind === "switch" ? out.target.name : "", "Good");
+  assert.deepEqual(out.kind === "switch" ? [...out.unreadable] : [], ["Bad"]);
+});
+
+test("classifyNextOutcome: every profile incoherent is its own outcome", () => {
+  const out = classifyNextOutcome({
+    profiles: [prof("Bad", SEAT_B)],
+    active: SEAT_A,
+    credentials: creds({ Bad: "incoherent" }),
+    pick: pickFirst,
+    pickerExcludesActive: false,
+  });
+  assert.equal(out.kind, "all-incoherent");
+});
+
+test("classifyNextOutcome: no stored credentials anywhere names every profile", () => {
+  const out = classifyNextOutcome({
+    profiles: [prof("P1", SEAT_A), prof("P2", SEAT_B)],
+    active: SEAT_A,
+    credentials: creds({ P1: "absent", P2: "absent" }),
+    pick: pickFirst,
+    pickerExcludesActive: false,
+  });
+  assert.equal(out.kind, "no-credentials");
+  assert.deepEqual(out.kind === "no-credentials" ? [...out.names] : [], ["P1", "P2"]);
+});
+
+test("classifyNextOutcome: cycle mode still recovers when the active seat is unknown", () => {
+  // The sole route back from a ~/.claude.json that lost its oauthAccount:
+  // cycle mode's documented "start from the beginning". Refusing here removed
+  // the one command that writes both credential halves back.
+  const out = classifyNextOutcome({
+    profiles: [prof("P1", SEAT_A), prof("P2", SEAT_B)],
+    active: null,
+    credentials: creds({ P1: "present", P2: "present" }),
+    pick: pickFirst,
+    pickerExcludesActive: false,
+  });
+  assert.equal(out.kind, "switch");
+  assert.equal(out.kind === "switch" ? out.target.name : "", "P1");
+});
+
+test("classifyNextOutcome: an unknown active seat refuses rather than switching", () => {
+  // The regression this pins: the headroom picker excludes the active seat by
+  // passing it to rankProfiles, so a null active excludes NOTHING — it would
+  // return the live account and report a successful switch onto the seat
+  // already in use.
+  const out = classifyNextOutcome({
+    profiles: [prof("P1", SEAT_A)],
+    active: null,
+    credentials: creds({ P1: "present" }),
+    pick: pickFirst,
+    // --best excludes the active seat via rankProfiles, so a null active
+    // excludes nothing and the picker would return the live account.
+    pickerExcludesActive: true,
+  });
+  assert.equal(out.kind, "unknown-active");
+});
+
+test("classifyNextOutcome: only the active seat is usable → already-active, not empty", () => {
+  const out = classifyNextOutcome({
+    profiles: [prof("P1", SEAT_A)],
+    active: SEAT_A,
+    // A picker that excludes the active seat (headroom mode) returns null here.
+    credentials: creds({ P1: "present" }),
+    pick: () => null,
+    pickerExcludesActive: false,
+  });
+  assert.equal(out.kind, "already-active");
+  assert.equal(out.kind === "already-active" ? out.target.name : "", "P1");
+});
+
+test("classifyNextOutcome: two profiles on ONE seat name the same profile either mode", () => {
+  // Must bite on a picker that would choose something OTHER than the
+  // ordered-first profile. The first version passed `pickFirst`, which returns
+  // the same entry `orderedProfiles` does, and both pickers took the
+  // all-active early return before `pick` was ever called — so the assertion
+  // held by construction and the mode-divergence fix was unpinned.
+  const profiles = [prof("Zed", SEAT_A, 0), prof("P1", SEAT_A, 1)];
+  const credentials = creds({ Zed: "present", P1: "present" });
+  let pickCalled = false;
+  const lastPicker = (c: readonly Profile[]): Profile | null => {
+    pickCalled = true;
+    return c[c.length - 1] ?? null;
+  };
+  const excluding = classifyNextOutcome({
+    profiles,
+    active: SEAT_A,
+    credentials,
+    pick: () => null,
+    pickerExcludesActive: true,
+  });
+  const permissive = classifyNextOutcome({
+    profiles,
+    active: SEAT_A,
+    credentials,
+    pick: lastPicker,
+    pickerExcludesActive: false,
+  });
+  assert.equal(excluding.kind, "already-active");
+  assert.equal(permissive.kind, "already-active");
+  assert.equal(
+    excluding.kind === "already-active" ? excluding.target.name : "x",
+    permissive.kind === "already-active" ? permissive.target.name : "y",
+  );
+  // Both must name the ordered-first profile, NOT whatever the picker prefers.
+  assert.equal(
+    permissive.kind === "already-active" ? permissive.target.name : "",
+    "Zed",
+  );
+  assert.equal(pickCalled, false, "all-active short-circuits before pick");
+});
+
+test("classifyNextOutcome: a real switch reports the profiles it had to skip", () => {
+  // The silent-collapse case: without `stale`, a rotation emptied down to one
+  // usable seat reported a clean result and never named the broken profiles.
+  const out = classifyNextOutcome({
+    profiles: [prof("P1", SEAT_A), prof("P2", SEAT_B), prof("Ghost", "cccc:oooo")],
+    active: SEAT_A,
+    credentials: creds({ P1: "present", P2: "present", Ghost: "absent" }),
+    pick: (c) => c.find((p) => p.name === "P2") ?? null,
+    pickerExcludesActive: false,
+  });
+  assert.equal(out.kind, "switch");
+  assert.equal(out.kind === "switch" ? out.target.name : "", "P2");
+  assert.deepEqual(out.kind === "switch" ? [...out.stale] : [], ["Ghost"]);
+});
+
+test("classifyNextOutcome: already-active also reports stale profiles", () => {
+  const out = classifyNextOutcome({
+    profiles: [prof("P1", SEAT_A), prof("Ghost", SEAT_B)],
+    active: SEAT_A,
+    credentials: creds({ P1: "present", Ghost: "absent" }),
+    pick: () => null,
+    pickerExcludesActive: false,
+  });
+  assert.equal(out.kind, "already-active");
+  assert.deepEqual(out.kind === "already-active" ? [...out.stale] : [], ["Ghost"]);
+});
+
+test("classifyNextOutcome: a missing credentials entry defaults to absent", () => {
+  const out = classifyNextOutcome({
+    profiles: [prof("P1", SEAT_A)],
+    active: SEAT_A,
+    credentials: creds({}),
+    pick: pickFirst,
+    pickerExcludesActive: false,
+  });
+  assert.equal(out.kind, "no-credentials");
+});
+
+// ---------------------------------------------------------------------------
+// parseNextFlags — unknown flags
+// ---------------------------------------------------------------------------
+
+test("parseNextFlags: unknown flags are surfaced, not ignored", () => {
+  // Each of these used to parse to `{apply: true}` — a live account swap when
+  // a preview was asked for.
+  for (const typo of ["--dry-rn", "--dryrun", "-n", "--bset"]) {
+    assert.deepEqual(parseNextFlags([typo]).unknown, [typo], `${typo} must be reported`);
+  }
+});
+
+test("parseNextFlags: the known flags still parse and report nothing unknown", () => {
+  assert.deepEqual(parseNextFlags(["--dry-run"]), {
+    apply: false,
+    best: false,
+    unknown: [],
+  });
+  assert.deepEqual(parseNextFlags(["--best", "--apply"]), {
+    apply: true,
+    best: true,
+    unknown: [],
+  });
+  assert.deepEqual(parseNextFlags([]), { apply: true, best: false, unknown: [] });
 });

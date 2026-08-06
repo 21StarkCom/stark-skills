@@ -38,6 +38,7 @@ import * as path from "node:path";
 import {
   KEYCHAIN,
   applyOrder,
+  classifyNextOutcome,
   describeProjection,
   nextInCycle,
   orderedProfiles,
@@ -58,6 +59,7 @@ import {
   validateStoredProfile,
   writeClaudeCredsArgv,
   writeProfileArgv,
+  type CredentialState,
   type Profile,
   type UsageSnapshot,
 } from "./cc_account_lib.ts";
@@ -91,6 +93,78 @@ function securityOrNull(argv: string[]): string | null {
   } catch {
     return null;
   }
+}
+
+/** `security` exit status for "the item does not exist". */
+const ERR_ITEM_NOT_FOUND = 44;
+
+/**
+ * Probe a stored profile, distinguishing "not there" from "could not look".
+ *
+ * `securityOrNull` collapses both into null, which is fine where the caller
+ * only needs a value, but not where the ANSWER drives a remedy: telling an
+ * operator with a locked keychain that their profiles have no credentials
+ * points them at `add <name>`, which overwrites the intact record with the
+ * currently-logged-in seat's token.
+ */
+function probeProfile(name: string): CredentialState {
+  return readProfileRecord(name).state;
+}
+
+/**
+ * Read a stored profile, distinguishing "not there" from "could not look".
+ *
+ * Every command that asks "does this profile have credentials?" goes through
+ * here. The two-state `securityOrNull` shape is what made a locked keychain
+ * look identical to an empty one, and the remedy for those two is opposite:
+ * `add` for absent, unlock-and-retry for unreadable. Wiring the tri-state into
+ * `next` alone left `prune` (which rewrites the registry), `list` and `use`
+ * (which print the destructive remedy) reading the old way, so the commands
+ * contradicted each other for identical state.
+ */
+function readProfileRecord(
+  name: string,
+): { state: CredentialState; raw: string | null } {
+  try {
+    return { state: "present", raw: security(readProfileArgv(name)) };
+  } catch (err) {
+    const status = (err as { status?: number }).status;
+    return {
+      state: status === ERR_ITEM_NOT_FOUND ? "absent" : "unreadable",
+      raw: null,
+    };
+  }
+}
+
+/**
+ * Probe including coherence — the state `next` needs.
+ *
+ * A profile whose two halves contradict each other reads fine but `use`
+ * refuses it, so treating it as switchable dead-ends the rotation forever:
+ * the picker is deterministic, so it selects the same broken profile on every
+ * run and never reaches the healthy ones behind it.
+ */
+function probeProfileForSwitch(name: string): CredentialState {
+  const { state, raw } = readProfileRecord(name);
+  if (state !== "present" || raw === null) return state;
+  try {
+    return seatIncoherence(validateStoredProfile(JSON.parse(raw)))
+      ? "incoherent"
+      : "present";
+  } catch {
+    // Corrupt/unparseable is not switchable either, and `use` reports the
+    // specific parse error far better than this probe could.
+    return "incoherent";
+  }
+}
+
+/** Shared refusal for a keychain that could not be read. Never says `add`. */
+function failUnreadable(names: readonly string[]): never {
+  return fail(
+    `cannot read the keychain for: ${names.join(", ")}\n` +
+      "Unlock the login keychain and retry. Do NOT run `add` to 'fix' this — " +
+      "it would overwrite stored credentials that cannot be re-derived.",
+  );
 }
 
 // ── ~/.claude.json ──────────────────────────────────────────────────────
@@ -294,8 +368,15 @@ function cmdList(): void {
   // sequence `next` will walk, so it must show that sequence.
   for (const p of orderedProfiles(profiles)) {
     const mark = p.seatKey && p.seatKey.toLowerCase() === active ? "*" : " ";
-    const stored = securityOrNull(readProfileArgv(p.name)) !== null;
-    const state = stored ? "" : "  (no stored credentials — re-run `add`)";
+    // Tri-state: "could not read" must NOT print the `add` remedy, which
+    // overwrites the very blob that is probably still intact.
+    const probed = probeProfile(p.name);
+    const state =
+      probed === "present"
+        ? ""
+        : probed === "absent"
+          ? "  (no stored credentials — re-run `add`)"
+          : "  (credentials unreadable — unlock the keychain; do NOT `add`)";
     const pos = p.order === undefined ? "  -" : String(p.order + 1).padStart(3);
     console.log(
       `${mark}${pos}  ${p.name.padEnd(8)} ${p.email}${orgSuffix(p)}${state}`,
@@ -379,7 +460,12 @@ function cmdAdd(name: string): void {
 }
 
 function cmdUse(name: string): void {
-  const raw = securityOrNull(readProfileArgv(name));
+  const probed = readProfileRecord(name);
+  // `next` refuses on an unreadable keychain and tells the operator not to
+  // run `add`; naming the target directly is the natural next command, so it
+  // must not hand back the destructive remedy `next` just withheld.
+  if (probed.state === "unreadable") failUnreadable([name]);
+  const raw = probed.raw;
   if (raw === null) {
     fail(
       `no stored profile ${JSON.stringify(name)} under keychain service ` +
@@ -470,7 +556,12 @@ function cmdUse(name: string): void {
 function cmdRemove(name: string): void {
   const { profiles, removed } = removeProfile(readRegistry(), name);
   const storedName = removed?.name ?? name;
-  const hadRecord = securityOrNull(readProfileArgv(storedName)) !== null;
+  // Refuse rather than guess: reporting "no stored credentials" for a record
+  // we could not read drops the registry entry while leaving the blob behind,
+  // orphaned where neither `remove` nor `prune` can ever reach it again.
+  const removeProbe = probeProfile(storedName);
+  if (removeProbe === "unreadable") failUnreadable([storedName]);
+  const hadRecord = removeProbe === "present";
   if (!removed && !hadRecord) {
     fail(`no profile ${JSON.stringify(name)} — nothing to remove`);
   }
@@ -502,9 +593,15 @@ function cmdRemove(name: string): void {
  */
 function cmdPrune(dryRun: boolean): void {
   const profiles = readRegistry();
-  const dead = profiles.filter(
-    (p) => securityOrNull(readProfileArgv(p.name)) === null,
-  );
+  const probed = profiles.map((p) => ({ p, state: probeProfile(p.name) }));
+  // Refuse outright rather than prune a partial picture. `prune` is the only
+  // command that rewrites the registry on the strength of "this profile has no
+  // credentials", so reading a locked keychain as "all absent" emptied the
+  // whole registry — names, seat keys and the hand-set order cycle — while the
+  // Keychain records survived with nothing left to enumerate them by name.
+  const unreadable = probed.filter((x) => x.state === "unreadable");
+  if (unreadable.length > 0) failUnreadable(unreadable.map((x) => x.p.name));
+  const dead = probed.filter((x) => x.state === "absent").map((x) => x.p);
   if (dead.length === 0) {
     console.log("nothing to prune — every profile has stored credentials");
     return;
@@ -660,32 +757,136 @@ function cmdLimits(): void {
  *
  * Switches by default — `--dry-run` to preview the pick instead.
  */
+/**
+ * Warn about registered profiles whose stored record is gone.
+ *
+ * Without this the rotation collapses silently: with one good profile left and
+ * nine emptied by a partial `reset` or a few `remove`s, `next` reported a clean
+ * "already active" every time and never named the nine. The operator learns the
+ * rotation is gone when the 5h window closes and there is nothing to switch to.
+ */
+function reportStale(stale: readonly string[]): void {
+  if (stale.length === 0) return;
+  // Deliberately does NOT prescribe `prune`. A credential-less entry is often
+  // an intentional placeholder — CLAUDE.md tells the operator to keep them,
+  // because they hold their rotation slot while a pruned one rejoins at the
+  // end of the cycle. Printing the one remedy that costs the slot, on every
+  // single run, trains the reader to ignore a channel that also has to carry
+  // genuinely-broken profiles.
+  process.stderr.write(
+    `cc_account: note: skipped ${stale.join(", ")} — no stored credentials ` +
+      "(re-`add` while logged in as each to restore; harmless if a placeholder)\n",
+  );
+}
+
+/** Profiles skipped because they could not be read or are internally inconsistent. */
+function reportUnusable(names: readonly string[]): void {
+  if (names.length === 0) return;
+  process.stderr.write(
+    `cc_account: warning: skipped ${names.join(", ")} — unreadable or ` +
+      "internally inconsistent; `list` and `use <name>` report which\n",
+  );
+}
+
 function cmdNext(apply: boolean, best: boolean): void {
   const profiles = readRegistry();
   const active = currentSeatKey();
-  const hasCreds = (p: Profile) =>
-    securityOrNull(readProfileArgv(p.name)) !== null;
 
-  let target: Profile | null;
-  let why: string;
-  if (best) {
-    const ranked = rankProfiles(profiles, loadSnapshots(), nowSec(), {
-      exclude: active ? [active] : [],
-    }).filter((r) => hasCreds(r.profile));
-    target = ranked[0]?.profile ?? null;
-    why = ranked[0] ? describeProjection(ranked[0].projection) : "";
-  } else {
-    target = nextInCycle(profiles, active, hasCreds);
-    why = "next in rotation";
+  // One sweep for the DECISION: the picker and the dead-end classification now
+  // read the same snapshot, where before they swept independently and a
+  // keychain locking between them produced "nothing to switch to" — the one
+  // message naming neither a remedy nor a profile — on a full registry.
+  //
+  // Not the only keychain read in this command, and the comment used to claim
+  // otherwise: `readRegistry()` above backfills a missing `seatKey` from the
+  // stored record, through the two-state reader. A legacy entry probed while
+  // the keychain is locked therefore keeps no seatKey and compares unequal to
+  // the live seat. Legacy entries are the only ones affected, and the backfill
+  // rewrites them once they can be read.
+  const credentials = new Map<string, CredentialState>(
+    profiles.map((p) => [p.name, probeProfileForSwitch(p.name)]),
+  );
+
+  let why = "next in rotation";
+  const outcome = classifyNextOutcome({
+    profiles,
+    active,
+    credentials,
+    pick: (candidates) => {
+      if (!best) return nextInCycle(candidates, active);
+      const ranked = rankProfiles(candidates, loadSnapshots(), nowSec(), {
+        exclude: active ? [active] : [],
+      });
+      why = ranked[0] ? describeProjection(ranked[0].projection) : "";
+      return ranked[0]?.profile ?? null;
+    },
+    // Only `--best` filters the active seat out (via rankProfiles' exclude),
+    // so only `--best` is unanswerable without knowing it. Cycle mode has a
+    // documented answer and is the sole route back from a lost login.
+    pickerExcludesActive: best,
+  });
+
+  switch (outcome.kind) {
+    case "empty":
+      fail("no candidate profile — register one with `add <name>`");
+    // falls through — `fail` never returns
+    case "unreadable":
+      // Deliberately NOT "re-run `add`": the records may be perfectly intact
+      // and `add` would overwrite them with the current login's token.
+      fail(
+        "cannot read the keychain for: " +
+          outcome.names.join(", ") +
+          "\nUnlock the login keychain and retry. Do NOT run `add` to " +
+          "'fix' this — it would overwrite the stored credentials, which " +
+          "cannot be re-derived.",
+      );
+    case "no-credentials":
+      fail(
+        "no profile has stored credentials — re-run `add <name>` for one of: " +
+          outcome.names.join(", ") +
+          "\n(`add` captures the CURRENT login, so log in as that account first.)",
+      );
+    case "unknown-active":
+      // Without the live seat we cannot tell "switch" from "switch to the one
+      // already in use", and the headroom picker excludes nothing in this
+      // state — so it would return the live account and report a successful
+      // switch. Refusing is the only answer that cannot be wrong.
+      fail(
+        "cannot determine the active seat from ~/.claude.json — refusing to " +
+          "switch.\nRun `show` to inspect it; `claude /login` rewrites it.",
+      );
+    case "all-incoherent":
+      fail(
+        "every profile's stored halves contradict each other: " +
+          outcome.names.join(", ") +
+          "\nQuit every other `claude`, `/login` as each, pick the right " +
+          "organization, then re-`add` it.",
+      );
+    case "none":
+      fail("no candidate profile — nothing to switch to");
+    default:
+      break;
   }
 
-  if (!target) {
-    fail("no candidate profile — register one with `add <name>`");
+  if (outcome.kind === "switch" || outcome.kind === "already-active") {
+    reportStale(outcome.stale);
+    reportUnusable(outcome.unreadable);
   }
-  if (target.seatKey && active && target.seatKey.toLowerCase() === active.toLowerCase()) {
-    console.log(`${target.name} is the only switchable profile — already active`);
+
+  if (outcome.kind === "already-active") {
+    // Not an error: nothing to do is a clean outcome, and a caller branching
+    // on `rc` must not get a different answer depending on the mode it asked
+    // for. Both modes reach this one line, naming the same profile.
+    // "the only" would be a lie when several profiles share the active seat —
+    // `list` marks them all, and the operator reads the singular as evidence
+    // that a registry entry was lost.
+    console.log(
+      `${outcome.target.name} is already active — nothing to switch to`,
+    );
     return;
   }
+
+  const target = outcome.target;
   if (!apply) {
     console.log(
       `${target.name}  ${target.email}${orgSuffix(target)}  ${why}`,
@@ -758,6 +959,14 @@ const USAGE = `usage: cc_account.ts <command>
 
 export function main(argv: string[] = process.argv.slice(2)): void {
   const [cmd, ...rest] = argv;
+  // A help request anywhere wins, before any per-command flag parse. The
+  // unknown-flag guards below are hard errors, so without this `next --help`
+  // answered a request for the usage text with exit 1 — and this CLI's own
+  // convention (and the repo's) is that every tool honors `--help`.
+  if (rest.some((a) => a === "-h" || a === "--help" || a === "help")) {
+    process.stdout.write(USAGE);
+    return;
+  }
   switch (cmd) {
     case undefined:
     case "show":
@@ -774,8 +983,19 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     case "rm":
       if (!rest[0]) fail("remove requires a profile name");
       return cmdRemove(rest[0]);
-    case "prune":
+    case "prune": {
+      // Same guard as `next` and `reset`, and for the same reason: `prune`
+      // writes the registry by default, so `--dry-rn` silently dropped every
+      // credential-less entry — including the placeholders kept on purpose to
+      // hold their rotation slot.
+      const unknown = rest.filter((a) => a !== "--dry-run");
+      if (unknown.length > 0) {
+        fail(
+          `prune: unknown flag(s) ${unknown.join(", ")} — accepts --dry-run`,
+        );
+      }
       return cmdPrune(rest.includes("--dry-run"));
+    }
     case "reset": {
       const { confirmed, snapshots, unknown } = parseResetFlags(rest);
       if (unknown.length > 0) {
@@ -789,11 +1009,30 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     case "limits":
       return cmdLimits();
     case "next": {
-      const { apply, best } = parseNextFlags(rest);
+      const { apply, best, unknown } = parseNextFlags(rest);
+      // Hard error, never ignore: this command's default ACTS, so a typo'd
+      // `--dry-run` silently performed a live swap.
+      if (unknown.length > 0) {
+        fail(
+          `unknown flag(s) for next: ${unknown.join(", ")} — ` +
+            "expected --dry-run, --apply or --best",
+        );
+      }
       return cmdNext(apply, best);
     }
-    case "order":
-      return cmdOrder(rest.filter((a) => !a.startsWith("-")));
+    case "order": {
+      // Was `rest.filter((a) => !a.startsWith("-"))`, which SWALLOWED flags:
+      // `order --dry-run T0 T1` discarded the flag and rewrote the cycle,
+      // dropping the `order` of every profile the operator did not list.
+      const unknown = rest.filter((a) => a.startsWith("-"));
+      if (unknown.length > 0) {
+        fail(
+          `order: unknown flag(s) ${unknown.join(", ")} — ` +
+            "order takes profile names only (no flags)",
+        );
+      }
+      return cmdOrder(rest);
+    }
     case "-h":
     case "--help":
     case "help":
