@@ -484,18 +484,41 @@ export function parseNextFlags(args: readonly string[]): {
  * merely-unreadable profile destroys an intact OAuth blob that cannot be
  * re-derived, and silently rebinds that name to whatever seat is live.
  */
-export type CredentialState = "present" | "absent" | "unreadable";
+export type CredentialState =
+  | "present"
+  | "absent"
+  | "unreadable"
+  /**
+   * Readable, but its two halves contradict each other (a `max` token under a
+   * `claude_team` seat, the live 2026-08-01 case). `use` refuses these, so a
+   * picker that treats them as usable dead-ends the rotation permanently:
+   * `nextInCycle` is deterministic, so every subsequent `next` picks the same
+   * broken profile and fails again, never reaching the healthy ones behind it.
+   */
+  | "incoherent";
 
 /** What `next` should do, decided from state alone. */
 export type NextOutcome =
   /** Switch to `target`. */
-  | { kind: "switch"; target: Profile; stale: readonly string[] }
-  /** Nothing to switch to: the only usable profile(s) are the live seat. */
-  | { kind: "already-active"; target: Profile; stale: readonly string[] }
+  | {
+      kind: "switch";
+      target: Profile;
+      stale: readonly string[];
+      unreadable: readonly string[];
+    }
+  /** Nothing to switch to: every usable profile sits on the live seat. */
+  | {
+      kind: "already-active";
+      target: Profile;
+      stale: readonly string[];
+      unreadable: readonly string[];
+    }
   /** Registry is empty — the one case `add <name>` actually fixes. */
   | { kind: "empty" }
   /** Registered, but no stored credentials anywhere. */
   | { kind: "no-credentials"; names: readonly string[] }
+  /** Readable but unusable — `use` would refuse every one of them. */
+  | { kind: "all-incoherent"; names: readonly string[] }
   /** The keychain could not be read; say so instead of prescribing `add`. */
   | { kind: "unreadable"; names: readonly string[] }
   /** The live seat is unknown, so "is this the active one?" cannot be answered. */
@@ -536,39 +559,66 @@ export function classifyNextOutcome(opts: {
   active: string | null;
   credentials: ReadonlyMap<string, CredentialState>;
   pick: (candidates: readonly Profile[]) => Profile | null;
+  /** True when `pick` filters the active seat out (headroom mode). */
+  pickerExcludesActive: boolean;
 }): NextOutcome {
-  const { profiles, active, credentials, pick } = opts;
+  const { profiles, active, credentials, pick, pickerExcludesActive } = opts;
   if (profiles.length === 0) return { kind: "empty" };
 
   const stateOf = (p: Profile): CredentialState =>
     credentials.get(p.name) ?? "absent";
 
-  // Unreadable outranks absent: a keychain we could not read tells us nothing
-  // about what it holds, and the remedy for the two is opposite (wait/unlock
-  // vs. re-add). Reporting even one unreadable profile as absent risks the
-  // destructive remedy.
-  const unreadable = profiles.filter((p) => stateOf(p) === "unreadable");
-  if (unreadable.length > 0) {
-    return { kind: "unreadable", names: unreadable.map((p) => p.name) };
-  }
-
   const usable = profiles.filter((p) => stateOf(p) === "present");
+  const unreadable = profiles.filter((p) => stateOf(p) === "unreadable");
   const stale = profiles.filter((p) => stateOf(p) === "absent").map((p) => p.name);
+
+  // Unreadable blocks only when it is load-bearing — i.e. when no healthy
+  // candidate exists. Reporting it outright, as the first version did, meant a
+  // single denied ACL or oversized item hard-failed the whole rotation while
+  // four other profiles sat switchable: the operator's window is exhausted and
+  // the tool refuses to do the one thing that would help. When something IS
+  // switchable the unreadable names ride along as a warning instead.
+  const incoherent = profiles.filter((p) => stateOf(p) === "incoherent");
   if (usable.length === 0) {
+    if (unreadable.length > 0) {
+      return { kind: "unreadable", names: unreadable.map((p) => p.name) };
+    }
+    if (incoherent.length > 0) {
+      return { kind: "all-incoherent", names: incoherent.map((p) => p.name) };
+    }
     return { kind: "no-credentials", names: profiles.map((p) => p.name) };
   }
 
-  if (active === null) return { kind: "unknown-active" };
+  // Both classes are reported alongside a successful pick rather than blocking
+  // it: they name profiles the rotation had to skip, which is exactly what the
+  // operator needs to know before the window closes.
+  const unreadableNames = [
+    ...unreadable.map((p) => p.name),
+    ...incoherent.map((p) => p.name),
+  ];
 
-  if (usable.every((p) => sameSeat(p, active))) {
+  // A null active seat is only unanswerable for a picker that EXCLUDES the
+  // active seat — `--best` passes it to `rankProfiles`, so a null excludes
+  // nothing and the picker would return the live account. Cycle mode has a
+  // documented answer for it ("the active seat is not in the list, so start
+  // from the beginning"), and it is the only path that can restore a login
+  // when ~/.claude.json has lost its oauthAccount. Refusing there removed the
+  // one recovery route at exactly the moment it is needed.
+  if (active === null && pickerExcludesActive) return { kind: "unknown-active" };
+
+  if (active !== null && usable.every((p) => sameSeat(p, active))) {
     const target = orderedProfiles(usable)[0];
-    if (target) return { kind: "already-active", target, stale };
+    if (target) {
+      return { kind: "already-active", target, stale, unreadable: unreadableNames };
+    }
   }
 
   const target = pick(usable);
   if (!target) return { kind: "none" };
-  if (sameSeat(target, active)) return { kind: "already-active", target, stale };
-  return { kind: "switch", target, stale };
+  if (active !== null && sameSeat(target, active)) {
+    return { kind: "already-active", target, stale, unreadable: unreadableNames };
+  }
+  return { kind: "switch", target, stale, unreadable: unreadableNames };
 }
 
 /**

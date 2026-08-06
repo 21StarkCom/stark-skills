@@ -83,11 +83,20 @@ intact — but `use` re-captures the outgoing account only while it is still
 registered. Without its entry, switching away drops that seat's credentials for
 good.
 
-`prune` destroys nothing: an entry qualifies precisely because there is no
-credential left to destroy. `next` already skips these, so they only pad `list`
-and `order`. Keep them if you plan to re-`add` those accounts — a placeholder
-entry holds its slot in the rotation, while a pruned one rejoins at the end of
-the cycle and needs `order` run again.
+`prune` refuses outright when any profile's credentials cannot be READ —
+`security` exits non-zero for a locked keychain and a denied ACL as well as for
+item-not-found, and treating those alike emptied the whole registry (names,
+seat keys, the `order` cycle) while the Keychain records survived with nothing
+left to enumerate them by name. Unlock the keychain and retry; do **not** run
+`add` to "fix" it, since that overwrites an intact, non-re-derivable blob with
+whatever seat is currently logged in.
+
+Given a readable keychain `prune` destroys nothing recoverable: an entry
+qualifies precisely because there is no credential left to destroy. `next`
+already skips these, so they only pad `list` and `order`. Keep them if you plan
+to re-`add` those accounts — a placeholder entry holds its slot in the
+rotation, while a pruned one rejoins at the end of the cycle and needs `order`
+run again.
 
 Survivors keep their `order` values, gaps and all — those are a sort key, not a
 position, so a removal never rewrites a cycle you arranged by hand.
@@ -280,6 +289,37 @@ cycle visits every seat before repeating any.
 
 Use `next --best` when you want the emptiest window rather than the next in
 line; the ranking logic is unchanged.
+
+### When `next` won't switch
+
+Every dead end is a distinct outcome, and **only the first is fixed by `add`**:
+
+| State | What you get | rc |
+|---|---|---|
+| Nothing registered | `register one with add <name>` | 1 |
+| Nothing readable | names them, says **do NOT `add`** — unlock and retry | 1 |
+| Nothing has credentials | re-`add` *while logged in as each* | 1 |
+| Every profile incoherent | `/login` per account, pick the org, re-`add` | 1 |
+| `--best` with an unknown active seat | refuses — see below | 1 |
+| Only the active seat is usable | `already active — nothing to switch to` | **0** |
+
+Exit **0** for the last one, in both modes: nothing to do is not a failure, and
+a script branching on `rc` must not get a different answer depending on whether
+it passed `--best`.
+
+**Skipped profiles are reported on stderr, not hidden.** A rotation quietly
+emptied down to one seat used to report a clean result every run, so the window
+wall arrived unannounced. A profile that is merely unreadable or incoherent
+does **not** block the switch when something healthy is available.
+
+**`--best` refuses when the active seat is unknown** (a `~/.claude.json` with no
+`oauthAccount`) because it excludes the active seat by name — with nothing to
+exclude it would pick the account already in use and report a successful
+switch. Plain `next` still works in that state and is the way back.
+
+**Unknown flags are a hard error** on `next`, `reset`, `prune` and `order` — a
+typo'd `--dry-run` used to mean a real switch. `--help` works after any
+subcommand.
 
 ## Notes
 
