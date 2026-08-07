@@ -1,5 +1,17 @@
 # Implementation Plan — `/stark-forge` Pipeline Orchestrator
 
+> **ABANDONED 2026-08-07 — not built, and not going to be.** Owner decision. All ten
+> delivery issues (#739–#747, #777) are closed `not planned`, and nothing ever shipped:
+> no branch, no `tools/forge_state{,_lib}.ts`, no `skill/stark-forge/`, no config section.
+>
+> Kept as the record of what was considered and why it stopped, per the `docs/plans/`
+> archive convention — **not** as a description of anything that exists. Every "will" and
+> "is" below is a plan that was never executed; do not read this file as documentation of
+> the repo, and do not resurrect tasks from it without re-deciding the whole thing.
+>
+> Unrelated despite the name, and still live: `global/forge_heuristics.json` (review-domain
+> heuristics) and the "stark-forged review" comment in `tools/skill_lib.ts`.
+
 ## 1. Overview
 
 Forge is a **thin conductor** over six existing pipeline skills plus one new pure-TS state manager. The only real engineering is `forge_state_lib.ts` — a deterministic, clock-free, network-free, disk-free state machine — plus a host CLI wrapper (`forge_state.ts`) that owns all persistence, a config section, and the orchestrator skill markdown. Everything else (LLM work, git, merges) is delegated to stages that already exist and own their own contracts — **except where a stage does not yet report an output §4 requires; those gaps are closed by concrete stage-side tasks in this plan, not assumed away.**

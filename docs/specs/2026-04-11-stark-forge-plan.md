@@ -1,6 +1,15 @@
 # stark-forge Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **ABANDONED — do NOT implement this plan.** Superseded 2026-07-19, then stark-forge was
+> dropped outright by owner decision 2026-08-07. Nothing shipped from any iteration.
+>
+> The instruction that used to sit here told an agentic worker to execute the plan
+> task-by-task. It is removed rather than left below this banner, because a worker that reads
+> a directive and stops has already started — and what it would build is **8 Python modules**,
+> in a repo that is TypeScript-only under `tools/` and deleted its Python orchestrators.
+>
+> Design: `2026-04-11-stark-forge-design.md`. Later iteration: `2026-07-19-stark-forge-spec.md`
+> + `docs/plans/2026-07-19-stark-forge-plan.md`. All abandoned.
 
 **Goal:** Build `/stark-forge` as 8 Python modules + 1 skill that wraps existing dispatch primitives into an end-to-end design-to-tasks pipeline with per-domain model routing, crash recovery, and self-improvement.
 

@@ -1,7 +1,15 @@
 # stark-forge — End-to-End Design-to-Tasks Pipeline
 
+> **ABANDONED — superseded 2026-07-19, then dropped outright 2026-08-07.** This is the FIRST
+> stark-forge concept (8 **Python** modules). It was superseded by the 2026-07-19 spec + plan,
+> which were themselves abandoned by owner decision; nothing from either shipped.
+>
+> **Its approach is now forbidden, not merely stale:** the repo is TypeScript-only under
+> `tools/` and the former Python orchestrators under `scripts/` were migrated out and deleted.
+> Do not implement anything below.
+
 **Date:** 2026-04-11
-**Status:** Design
+**Status:** Abandoned (was: Design)
 **Approach:** B — Phase-Based Pipeline with 8 Modules
 **Schema Version:** 1
 
