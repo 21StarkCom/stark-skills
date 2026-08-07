@@ -227,6 +227,23 @@ is defective — regenerate it, don't present.
 gate read (Phase 5). If the doc outgrows one gate sitting, the tier was
 wrong or the scope is two changes. [RQ7]
 
+**Intent read-back (mandatory; the last act of Phase 3).** With both files
+written, tell the operator — in your own words, built from their interview
+answers, never the doc's phrasing — what they are trying to accomplish: the
+immediate deliverable AND the underlying goal it serves, layered if the
+interview revealed layers. Close with one sentence naming the point of it
+all, then ask them to confirm or correct. On confirm, fold the validated
+formulation into `## Intent` — compressed, but keeping what the operator
+recognized as the real product. On correction, fix Intent and any section
+the correction invalidates before Phase 4. This mirrors gate item 1 in the
+opposite direction: there the operator proves they can restate the doc; here
+the author proves they understood the operator. An intent you cannot state
+back convincingly is a doc defect, not an operator problem. The folded
+Intent is narrative, not tasks or criteria — it does not trigger the Phase 4
+expiry rule. (Origin: the 2026-08-07 alfred-foundation session, where the
+read-back surfaced the real product — "a management system for an AI
+workforce" — that the drafted Intent had understated as ticket plumbing.)
+
 ## Phase 4 — Advisory pass (one-shot; skip with `--no-advisory`)
 
 Dispatch ONE read-only subagent with **zero shared context** — it receives
