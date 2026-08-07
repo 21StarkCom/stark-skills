@@ -1,5 +1,14 @@
 # `/stark-forge` — Pipeline Orchestrator Skill
 
+> **ABANDONED 2026-08-07 — not built, and not going to be.** Owner decision. Its ten delivery
+> issues (#739–#747, #777) are closed `not planned` and nothing shipped: no
+> `tools/forge_state{,_lib}.ts`, no `skill/stark-forge/`, no config section, no branch.
+> Delivery plan: `docs/plans/2026-07-19-stark-forge-plan.md`, likewise abandoned.
+>
+> Kept as the record of what was considered. **`/stark-forge` does not exist** — the six
+> pipeline skills it would have conducted are still invoked one at a time, which is the
+> status quo this spec was written to replace.
+
 ## intent — Intent & Soundness
 
 **Problem.** The stark-skills repo has a complete spec→plan→implementation pipeline, but it is six discrete skills (eight with red-team) that a human must run one after another: invoke `/stark-write-spec`, read its receipt for the spec path, invoke `/stark-review-spec` (which adopts write-spec's PR), un-draft and merge that spec PR, invoke `/stark-spec-to-plan`, thread the plan path forward, review and merge the plan PR, and so on down to `/stark-copilot`. The artifact threading is manual and error-prone (which receipt field holds the plan slug?), the merges happen at non-obvious points (once per artifact, *not* once per stage), and a crash mid-chain leaves no record of how far the run got — the operator restarts from memory.
