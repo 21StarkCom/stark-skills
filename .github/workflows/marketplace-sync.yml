@@ -122,6 +122,7 @@ jobs:
             go run ./cmd/stark check-bumps ../catalog )
 
       - name: Open or update the sync PR
+        id: pr
         working-directory: bifrost
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -130,22 +131,77 @@ jobs:
           set -euo pipefail
           if git diff --quiet; then
             echo "marketplace already in sync — nothing to publish"
+            echo "published=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           short="${SRC_SHA::7}"
           branch="auto/marketplace-sync"
+          title="chore(sync): regenerate from stark-skills@${short}"
+          body="Automated regeneration from stark-skills@${SRC_SHA} by the marketplace-sync workflow. Merged by that workflow once this repo's CI is green."
           git config user.name "stark-claude[bot]"
           git config user.email "stark-claude[bot]@users.noreply.github.com"
           git switch -C "$branch"
           git add -A
-          git commit -m "chore(sync): regenerate from stark-skills@${short}"
+          git commit -m "$title"
           git push --force -u origin "$branch"
-          # NOT draft (exempt from the draft-by-default policy): this is an
-          # automated publish PR that must run bifrost's CI and merge once green —
-          # there is no local-test/WIP phase to keep it out of CI for. See
-          # standards/workflows/skip-draft-guard.md ("What is NOT guarded").
-          gh pr create --repo 21StarkCom/bifrost \
-            --head "$branch" --base main \
-            --title "chore(sync): regenerate from stark-skills@${short}" \
-            --body "Automated regeneration from stark-skills@${SRC_SHA} by the marketplace-sync workflow. Merges once this repo's CI is green." \
-            2>/dev/null || echo "PR already open for $branch — updated by force-push"
+
+          # Ask whether the PR exists instead of inferring it from a failed create.
+          # `gh pr create ... 2>/dev/null || echo "already open"` mapped EVERY failure
+          # — a revoked token, a missing App install, an API outage — onto the same
+          # reassuring line, and the job still went green having published nothing.
+          # That is how three syncs (#848/#849/#851) reported success while the fix
+          # they carried never reached a single installed plugin.
+          num="$(gh pr list --repo 21StarkCom/bifrost --head "$branch" --state open \
+            --json number --jq '.[0].number // empty')"
+          if [ -n "$num" ]; then
+            # The branch is long-lived and force-pushed, so an existing PR keeps the
+            # title of the FIRST sync that opened it while its head moves on. PR #160
+            # read "@950f79f" for a head that was already "@e71f532"; anyone trusting
+            # the title was reading a stale claim about live content.
+            gh pr edit "$num" --repo 21StarkCom/bifrost --title "$title" --body "$body"
+            echo "updated existing PR #${num}"
+          else
+            # NOT draft (exempt from the draft-by-default policy): this is an
+            # automated publish PR that must run bifrost's CI and merge once green —
+            # there is no local-test/WIP phase to keep it out of CI for. See
+            # standards/workflows/skip-draft-guard.md ("What is NOT guarded").
+            num="$(gh pr create --repo 21StarkCom/bifrost \
+              --head "$branch" --base main --title "$title" --body "$body" \
+              | sed -nE 's#.*/pull/([0-9]+).*#\1#p')"
+            echo "opened PR #${num}"
+          fi
+          [ -n "$num" ] || { echo "could not resolve the sync PR number" >&2; exit 1; }
+          echo "published=true" >> "$GITHUB_OUTPUT"
+          echo "number=$num" >> "$GITHUB_OUTPUT"
+
+      # Publishing is the point of this workflow, so it does not end at "a PR exists".
+      # bifrost has NO required status checks and auto-merge is disabled on the repo, so
+      # `--auto` would merge on contact, ahead of its own CI — this waits explicitly
+      # instead, and fails the run (loudly, where someone sees it) if bifrost goes red.
+      - name: Merge the sync PR once bifrost CI is green
+        if: steps.pr.outputs.published == 'true'
+        timeout-minutes: 30
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          # A just-pushed head carries no check runs for a few seconds. Wait for one to
+          # EXIST — a positive assertion on the count, not on an exit code — because
+          # "zero checks" and "all checks green" are the two states `--watch` cannot tell
+          # apart, and merging on the first would be a gate that passes by finding
+          # nothing to measure.
+          count=0
+          for _ in $(seq 1 30); do
+            count="$(gh pr checks "$PR" --repo 21StarkCom/bifrost --json name --jq 'length' 2>/dev/null || echo 0)"
+            [ "$count" -gt 0 ] && break
+            sleep 10
+          done
+          if [ "$count" -eq 0 ]; then
+            echo "no check runs registered for PR #${PR} after 5 minutes — refusing to merge unverified" >&2
+            exit 1
+          fi
+          echo "watching $count check run(s) on PR #${PR}"
+          gh pr checks "$PR" --repo 21StarkCom/bifrost --watch --fail-fast
+          gh pr merge "$PR" --repo 21StarkCom/bifrost --squash
+          echo "published: bifrost PR #${PR} merged"
