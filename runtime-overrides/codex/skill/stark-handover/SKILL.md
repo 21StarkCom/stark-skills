@@ -4,7 +4,7 @@ disable-model-invocation: true
 description: >-
   Use when pausing or splitting work across sessions — before clearing context,
   when context runs low, at end of day, when switching tasks — or when resuming.
-  Triggers: "handover", "handoff", "save context", "save progress", "resume",
+  Triggers: "handover", "save context", "save progress", "resume",
   "continue where we left off", "what was I doing". Persists a numbered
   handover chain + PROGRESS.md tracker per task; resume needs no recap.
 argument-hint: "[save|resume|status] [--task slug]"
@@ -26,6 +26,10 @@ fresh session continues without a recap. Root default: `~/Code/Handovers`
 
 The CLI owns paths/numbering/writes; **you** author the content — the value
 of a handover is what you mine from the conversation, which only you have.
+
+**Not this skill:** authoring a standalone prompt file for another agent or a
+later session — route that to `/stark-handoff`. This skill persists *this*
+session's state; `/stark-handoff` writes a self-contained mission prompt.
 
 ## Execution rule
 

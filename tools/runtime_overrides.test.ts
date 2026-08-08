@@ -41,6 +41,11 @@ const SKILLS = [
   "stark-voice",
 ] as const;
 
+// Skills that deliberately ship NO Codex variant (Claude-session protocol only).
+// A new canonical skill must land in exactly one of the two lists — the union
+// assertion below is what forces that conscious choice.
+const CLAUDE_ONLY_SKILLS = ["stark-handoff"] as const;
+
 const COMMANDS = ["cleanup", "pr-merge", "pr-open"] as const;
 
 const SUPPORT_FILES = [
@@ -156,7 +161,7 @@ test("Codex artifact overrides preserve canonical identities", () => {
     .map((entry) => entry.name)
     .sort();
 
-  assert.deepEqual([...SKILLS].sort(), canonicalSkills);
+  assert.deepEqual([...SKILLS, ...CLAUDE_ONLY_SKILLS].sort(), canonicalSkills);
 
   const canonicalCommands = fs
     .readdirSync(path.join(REPO_ROOT, "plugins", "stark-gh", "commands"), { withFileTypes: true })

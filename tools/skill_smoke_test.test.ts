@@ -13,6 +13,11 @@
 //   2. `name:` field matches the directory name.
 //   3. Every in-repo `tools/X.ts` reference resolves to a real file.
 //   4. Every in-repo `scripts/X.py` reference resolves to a real file.
+//   6. Every `references/X.md` link resolves under that skill's own
+//      `references/` dir. Skills carry their templates there, and a
+//      SKILL.md that points at a template which was renamed or never
+//      written is a broken skill at runtime — silently, since nothing
+//      else reads those links.
 //
 // Plus, ONCE across the whole skill set:
 //   5. Every distinct `tools/*.ts` CLI mentioned by any skill exits
@@ -125,6 +130,21 @@ function extractRefs(text: string): FileRef[] {
 }
 
 // ---------------------------------------------------------------------------
+// `references/*.md` links — a skill's own template dir. Matched against the
+// SKILL.md body regardless of link syntax (markdown link, bare mention, code
+// span). The negative lookbehind on `\w` and `/` keeps `some_references/x.md`
+// and cross-repo `~/other/references/x.md` from matching a local template.
+// ---------------------------------------------------------------------------
+
+const REFERENCE_RE = /(?<![\w/])references\/([\w_\-./]+\.md)/g;
+
+function extractReferenceLinks(text: string): string[] {
+  const seen = new Set<string>();
+  for (const m of text.matchAll(REFERENCE_RE)) seen.add(m[1]);
+  return [...seen].sort();
+}
+
+// ---------------------------------------------------------------------------
 // Skill discovery
 // ---------------------------------------------------------------------------
 
@@ -150,6 +170,8 @@ interface SkillContent {
   text: string;
   fm: Frontmatter | null;
   refs: FileRef[];
+  /** `references/*.md` links, relative to the skill's own dir. */
+  referenceLinks: string[];
 }
 
 const SKILL_CONTENT: Record<string, SkillContent> = {};
@@ -158,7 +180,8 @@ for (const name of SKILLS) {
   const text = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
   const fm = text ? parseFrontmatter(text) : null;
   const refs = text ? extractRefs(text) : [];
-  SKILL_CONTENT[name] = { name, text, fm, refs };
+  const referenceLinks = text ? extractReferenceLinks(text) : [];
+  SKILL_CONTENT[name] = { name, text, fm, refs, referenceLinks };
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +252,28 @@ for (const name of SKILLS) {
       }
     }
     assert.deepEqual(broken, [], `unresolved refs in ${name}`);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 6. Every `references/*.md` link resolves under the skill's own dir.
+// ---------------------------------------------------------------------------
+
+for (const name of SKILLS) {
+  test(`skill smoke: ${name} — every references/*.md link resolves`, () => {
+    const c = SKILL_CONTENT[name];
+    const skillDir = path.join(SKILLS_ROOT, name);
+    const broken: string[] = [];
+    for (const link of c.referenceLinks) {
+      if (!fs.existsSync(path.join(skillDir, "references", link))) {
+        broken.push(`references/${link}`);
+      }
+    }
+    assert.deepEqual(
+      broken,
+      [],
+      `unresolved references/*.md links in ${name} — the SKILL.md points at templates that do not exist`,
+    );
   });
 }
 
