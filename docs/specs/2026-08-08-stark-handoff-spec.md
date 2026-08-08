@@ -52,8 +52,9 @@ ritual down.
 
 ## Non-derivable context
 
-- **Corpus:** `~/Code/.scratch/*prompt*.md` — 46 files, 2026-07-11 →
-  2026-08-08, plus handoff-shaped files without the suffix
+- **Corpus:** `~/Code/.scratch/*prompt*.md` — 46 files (top-level glob, dated
+  by mtime; filename-embedded dates diverge — don't recount by those),
+  2026-07-11 → 2026-08-08, plus handoff-shaped files without the suffix
   (`2026-07-31-kotodama-g3-next-step.md`, `miro-list-group-items-fix-plan-2026-08-04.md`).
 - **Analyzed specimens** (the three grammars): `draupnir-S7-S8-prompt.md`
   (execution), `fix-meridian-gcp-cost-advisory-lock-flake-prompt.md`
@@ -66,7 +67,8 @@ ritual down.
   description **currently claims the "handoff" trigger word** — take it back.
 - **Skill mandates:** every skill honors `--help` via `standards/help.md`;
   `tools/skill_smoke_test.test.ts` asserts frontmatter, name/dir match, and
-  that every referenced in-repo file resolves.
+  that `tools/*.ts` / `scripts/*.py` references resolve. It does **not**
+  check `references/*.md` links — T2 carries its own existence+link check.
 - **Distribution gotcha:** a new skill is invisible to bifrost auto-sync until
   its bundle membership lands — `catalog/stark-ops/bundle.yaml` in
   `21StarkCom/bifrost` (stark-handover's bundle, verified 2026-08-08).
@@ -87,19 +89,24 @@ ritual down.
   verify-state commands the prompt names, and start on the first item.
 - WHEN `use` runs bare, the skill SHALL filter candidates by header-comment
   repo == current repo (newest wins); zero matches → refuse and `list`.
-  Bare `use` SHALL NOT cross repos.
+  Bare `use` SHALL NOT cross repos and considers only header-bearing files;
+  explicit `use <name>` may target any file in the root.
 - WHEN `launch <name>` runs on an execution or investigation type, the skill
   SHALL start a headless `claude -p` in the target repo with **stdin closed**
   (`</dev/null` — the stark-build lesson), backgrounded, log beside the prompt
   file (`<slug>-launch.log`), and report PID + log path + how to monitor.
   Permission mode: `--permission-mode acceptEdits` default, flag passthrough;
-  never `--dangerously-skip-permissions`.
+  never `--dangerously-skip-permissions`. Target dir: header `repo` is an
+  absolute path → use it; `org/name` → the current repo if its `origin`
+  matches, else the unique checkout under `~/Code` (maxdepth 4) whose
+  `origin` matches; zero or several matches → refuse, listing candidates.
 - WHEN `launch` targets a brainstorm or research prompt, the skill SHALL
   refuse, naming the reason.
 - WHEN the ask is "save context to resume this same task here", the skill
   SHALL route to `/stark-handover` and stop.
 - WHEN `list` runs, the skill SHALL table the root's prompt files from their
-  header comments: name, type, repo, date — newest first.
+  header comments: name, type, repo, date — newest first. Pre-skill files
+  without a header list too, `type`/`repo` shown as `—`, dated by mtime.
 
 ## The header comment
 
@@ -166,9 +173,9 @@ traceability, bounded deliverable (structure + word budget).
 
 | # | Task | Files | Done-when |
 |---|------|-------|-----------|
-| T1 | SKILL.md: frontmatter, Help, Guards, four verbs, write/use/launch/list phases | `skill/stark-handoff/SKILL.md` | `npm test` smoke green (frontmatter parses, name matches dir, help protocol referenced) |
-| T2 | Templates: spine + three skeletons + rubric checklist | `skill/stark-handoff/references/{spine,skeleton-execution,skeleton-investigation,skeleton-inquiry,rubric-checklist}.md` | every reference resolves in the smoke test; T1 links them |
-| T3 | Take "handoff" back from the sibling | `skill/stark-handover/SKILL.md` | `grep -ci handoff skill/stark-handover/SKILL.md` → 0 |
+| T1 | SKILL.md: frontmatter, Help, Guards, four verbs, write/use/launch/list phases | `skill/stark-handoff/SKILL.md` | `(cd tools && npm test)` smoke green (frontmatter parses, name matches dir, help protocol referenced) |
+| T2 | Templates: spine + three skeletons + rubric checklist | `skill/stark-handoff/references/{spine,skeleton-execution,skeleton-investigation,skeleton-inquiry,rubric-checklist}.md` | all 5 files exist and SKILL.md links each (`test -f` + `grep -q "references/<name>.md"`); the smoke test does NOT cover these |
+| T3 | Take "handoff" back from the sibling | `skill/stark-handover/SKILL.md` | `! grep -qi handoff skill/stark-handover/SKILL.md` (rc 0) |
 | T4 | Docs same-change | `CLAUDE.md`, `AGENTS.md` | `/stark-handoff` entry present in both |
 | T5 | bifrost membership (separate repo, follow-up PR) | `bifrost:catalog/stark-ops/bundle.yaml` | marketplace lists stark-handoff after sync |
 
@@ -178,9 +185,12 @@ this one merges.
 ## Closing verification
 
 ```bash
-npm test   # skill_smoke_test walks every skill incl. stark-handoff
-grep -ci handoff skill/stark-handover/SKILL.md   # expect 0
-grep -c "stark-handoff" CLAUDE.md AGENTS.md      # expect ≥1 each
+(cd tools && npm test)   # skill_smoke_test walks every skill incl. stark-handoff
+for f in spine skeleton-execution skeleton-investigation skeleton-inquiry rubric-checklist; do
+  test -f "skill/stark-handoff/references/$f.md" && grep -q "references/$f.md" skill/stark-handoff/SKILL.md
+done
+! grep -qi handoff skill/stark-handover/SKILL.md   # rc 0 only when the word is gone
+grep -c "stark-handoff" CLAUDE.md AGENTS.md        # expect ≥1 each
 ```
 
 ## Deviations
