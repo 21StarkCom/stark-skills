@@ -37,11 +37,8 @@ they get no conversation, no scrollback, no you.
 # directly under it IS a handoff (non-recursive — that is the whole
 # selection rule for `list` and `use`).
 handoff_root() {
-  local r="${STARK_HANDOFF_ROOT:-}" cfg
-  for cfg in "$HOME/.claude/code-review/config.json" "${CLAUDE_PLUGIN_ROOT:-}/config.json"; do
-    [ -n "$r" ] && break
-    [ -f "$cfg" ] && r=$(jq -r '.handoff.root // empty' "$cfg" 2>/dev/null)
-  done
+  local r="${STARK_HANDOFF_ROOT:-}" cfg="$HOME/.claude/code-review/config.json"
+  [ -n "$r" ] || { [ -f "$cfg" ] && r=$(jq -r '.handoff.root // empty' "$cfg" 2>/dev/null); }
   r="${r:-$HOME/Code/Handoffs}"
   printf '%s\n' "${r/#\~/$HOME}"
 }
@@ -52,7 +49,10 @@ cur_repo() { git remote get-url origin 2>/dev/null | norm_repo; }
 
 # Header comment of a handoff file, or empty when it has none.
 hdr() { sed -n '1s/^<!-- *stark-handoff \(.*[^ ]\) *-->.*/\1/p' "$1"; }
-hdr_field() { hdr "$1" | tr ' ' '\n' | sed -n "s/^$2=//p"; }
+# Split on ` key=` boundaries, not on spaces — repo values may be absolute
+# paths containing spaces (`/Users/aryeh/Code/My Project`).
+hdr_field() { hdr "$1" | sed -E 's/ ([a-z_]+=)/\
+\1/g' | sed -n "s/^$2=//p"; }
 ```
 
 Functions, not string vars — zsh does not word-split `$VAR`, so define these
@@ -157,7 +157,10 @@ must satisfy checks 4–8 explicitly, in the text.
 ```bash
 ROOT=$(handoff_root); mkdir -p "$ROOT"
 FILE="$ROOT/<slug>-prompt.md"
-[ -e "$FILE" ] && FILE="$ROOT/<slug>-2-prompt.md"   # collision -> -2 suffix
+N=2
+while [ -e "$FILE" ]; do                 # collision -> -2, -3, ... until free
+  FILE="$ROOT/<slug>-$N-prompt.md"; N=$((N+1))
+done
 ```
 
 Slug: 2–4 kebab words naming the mission. First line is the header comment
@@ -212,8 +215,11 @@ newest wins; zero matches → refuse and `list` (never cross repos):
 
 - header `repo=org/name` → equals `cur_repo` exactly (normalized both sides).
 - header `repo=/abs/path` → same repo iff
-  `realpath $(git -C <path> rev-parse --git-common-dir)` equals this
-  checkout's, so a linked worktree equals its main checkout.
+  `git -C "<path>" rev-parse --path-format=absolute --git-common-dir` equals
+  this checkout's, so a linked worktree equals its main checkout. Let **git**
+  absolutize it — a normal checkout answers a bare relative `.git`, and
+  `realpath` would resolve that against the *caller's* cwd, so an unrelated
+  checkout would compare equal to wherever you happen to be standing.
 
 ### Phase 2 — Ingest + brief
 
@@ -238,14 +244,26 @@ step one.
 ROOT=$(handoff_root); FILE="$ROOT/<name>"
 [ -n "$(hdr "$FILE")" ] || { echo "no header comment — refusing"; exit 2; }
 TYPE=$(hdr_field "$FILE" type)
-case "$TYPE" in brainstorm|research) echo "inquiry type — refusing"; exit 2;; esac
+# Allow-list, not a deny-list: a missing or unknown `type` is unclassifiable.
+case "$TYPE" in
+  continuation|fork|fix) ;;
+  brainstorm|research) echo "inquiry type — refusing"; exit 2;;
+  *) echo "missing/unknown type '${TYPE:-—}' — refusing"; exit 2;;
+esac
 ```
 
 - **No header** → refuse: without `type` the inquiry gate cannot classify it,
-  without `repo` there is no target dir.
+  without `repo` there is no target dir. A partial header with no `type`, or a
+  `type` outside the five, is refused for the same reason.
 - **`brainstorm` / `research`** → refuse, naming the reason: brainstorms need
   Aryeh interactive (their own text says "ask questions one at a time"),
   research prompts run in web deep-research tools.
+- **Spec-tier work → refuse.** `launch` is for *bounded* missions: a fix, a
+  next slice, one review round. If the payload is a full accepted spec (a task
+  DAG, per-task done-whens, a closing verification command — the
+  `/stark-author` shape), say so and route it to `/stark-author` →
+  `/stark-build`, which gates it with checks the agent cannot edit. A
+  `continuation` label does not make a spec bounded.
 
 ### Phase 2 — Resolve the target dir
 
@@ -257,9 +275,11 @@ Header `repo`:
 
 ```bash
 WANT=$(hdr_field "$FILE" repo)
-for g in $(find "$HOME/Code" -maxdepth 4 -name .git -print 2>/dev/null); do
+# -print0 / read -d '': checkout paths may contain spaces.
+find "$HOME/Code" -maxdepth 4 -name .git -print0 2>/dev/null |
+while IFS= read -r -d '' g; do
   d=$(dirname "$g")
-  [ "$(git -C "$d" remote get-url origin 2>/dev/null | norm_repo)" = "$WANT" ] && echo "$d"
+  [ "$(git -C "$d" remote get-url origin 2>/dev/null | norm_repo)" = "$WANT" ] && printf '%s\n' "$d"
 done
 ```
 
@@ -270,6 +290,8 @@ Zero or several matches → **refuse**, listing the candidates. Never guess.
 ```bash
 SLUG=$(basename "$FILE" .md); SLUG="${SLUG%-prompt}"
 LOG="$ROOT/$SLUG-launch-$(date +%Y%m%d-%H%M%S).log"
+K=2                                      # same-second relaunch: never truncate
+while [ -e "$LOG" ]; do LOG="${LOG%.log}-$K.log"; K=$((K+1)); done
 PAYLOAD=$(awk 'f{print} /^---$/{f=1}' "$FILE")   # below the envelope rule
 [ -n "$PAYLOAD" ] || PAYLOAD=$(tail -n +2 "$FILE")
 ( cd "$TARGET_DIR" && nohup claude -p "$PAYLOAD" \
