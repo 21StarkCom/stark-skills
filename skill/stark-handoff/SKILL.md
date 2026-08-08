@@ -1,6 +1,8 @@
 ---
 name: stark-handoff
 disable-model-invocation: true
+runtimes:
+  - claude
 description: >-
   Use when the next move belongs to someone else — a fresh session after
   /compact, a fix dispatched into another repo, a parallel fork, a brainstorm
