@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - phase-execute: the goal loop's `--model "$(… stark_config_lib.ts --model claude || echo <fallback>)"` passed an **empty** model — `stark_config_lib.ts` had no CLI, so it exited 0 with no output and the `||` fallback never fired. Added the `--model <agent>` CLI (prints the resolved id; exit 1 + empty stdout on an unknown agent, `--help` exits 0) and quoted the fallback so `[1m]` isn't glob-expanded.
 
 ### Added
+<!-- stark-gh:pr-merge pr=856 runId=1989ffe8-d244-48c2-9d6e-6afe44136fb5 -->
+- Removed the obsolete project gate workflow that generated a failed run on every push.
 <!-- stark-gh:pr-merge pr=855 runId=8cb32b80-e3f2-4b86-b82c-6e5b018301d5 -->
 - Removed the obsolete GitHub Actions workflow for mirroring branches and tags to the former Infra-Group repository.
 <!-- stark-gh:pr-merge pr=854 runId=7a6c404f-cda1-4632-a5d0-a9ef2a0ecee0 -->
