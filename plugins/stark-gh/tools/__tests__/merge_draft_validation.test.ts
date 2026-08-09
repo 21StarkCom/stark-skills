@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { validateDraft } from "../lib/draft_schema.ts";
+import { validateDraft, extractTicketPrefix } from "../lib/draft_schema.ts";
 
 const ok = {
   subject: "feat: add pr-merge command",
@@ -90,4 +90,63 @@ test("rejects non-object input", () => {
 test("rejects missing required field", () => {
   const r = validateDraft({ subject: "x", body: "y" });   // no changelog_bullet
   assert.equal(r.ok, false);
+});
+
+// --- ticket-prefix inheritance (STARK-229) ---------------------------------
+
+test("extractTicketPrefix: pulls type(TICKET-n) from a PR title", () => {
+  assert.equal(
+    extractTicketPrefix("feat(STARK-193): Human plane slice A — todo store and CLI"),
+    "feat(STARK-193):",
+  );
+  assert.equal(extractTicketPrefix("  fix(STARK-7): trim leading space  "), "fix(STARK-7):");
+  assert.equal(extractTicketPrefix("feat(STARK-193)!: breaking"), "feat(STARK-193)!:");
+  assert.equal(extractTicketPrefix("chore(EI-1234): jira-style key"), "chore(EI-1234):");
+});
+
+test("extractTicketPrefix: null when the title carries no ticket scope", () => {
+  for (const t of [
+    "feat: no scope",
+    "feat(tools): non-ticket scope",
+    "Add cool feature",
+    "STARK-193: no type",
+    "feat(STARK-abc): no number",
+    "",
+  ]) {
+    assert.equal(extractTicketPrefix(t), null, `expected null for ${JSON.stringify(t)}`);
+  }
+});
+
+test("requires the ticket prefix on the subject when one is given", () => {
+  const r = validateDraft(ok, { requiredSubjectPrefix: "feat(STARK-193):" });
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.match(r.reason, /must start with the PR title's ticket prefix/);
+});
+
+test("accepts a subject that carries the required prefix", () => {
+  const r = validateDraft(
+    { ...ok, subject: "feat(STARK-193): add pr-merge command" },
+    { requiredSubjectPrefix: "feat(STARK-193):" },
+  );
+  assert.equal(r.ok, true);
+});
+
+test("rejects a prefix that is not followed by a space", () => {
+  const r = validateDraft(
+    { ...ok, subject: "feat(STARK-193):add pr-merge command" },
+    { requiredSubjectPrefix: "feat(STARK-193):" },
+  );
+  assert.equal(r.ok, false);
+});
+
+test("rejects a different ticket number or type than the PR title's", () => {
+  for (const subject of ["feat(STARK-194): wrong ticket", "fix(STARK-193): wrong type"]) {
+    const r = validateDraft({ ...ok, subject }, { requiredSubjectPrefix: "feat(STARK-193):" });
+    assert.equal(r.ok, false, `should reject ${subject}`);
+  }
+});
+
+test("no prefix requirement when the option is absent or null", () => {
+  assert.equal(validateDraft(ok).ok, true);
+  assert.equal(validateDraft(ok, { requiredSubjectPrefix: null }).ok, true);
 });

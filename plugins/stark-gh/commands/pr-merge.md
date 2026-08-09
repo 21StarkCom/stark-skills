@@ -87,6 +87,14 @@ env (no GitHub tokens), validates output against `lib/draft_schema.ts`, retries
 once on validation failure, writes prose tempfiles, and atomic-updates the
 plan-file.
 
+**Ticket prefix inheritance.** When the PR title starts with a `type(TICKET-<n>):`
+prefix (e.g. `feat(STARK-193):`), the squash subject must begin with that exact
+prefix — otherwise the merged commit on main loses the ticket trail. The drafter
+puts the requirement in the prompt and `validateDraft` enforces it, so a
+prefix-less subject is rejected and retried; a second failure aborts the merge
+(`DRAFT_INVALID`) rather than landing a prefix-less commit. A PR title with no
+such prefix imposes no requirement.
+
 ## Stage 3 — Execute
 
 ```bash
