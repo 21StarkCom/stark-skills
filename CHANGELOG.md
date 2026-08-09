@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=860 runId=ac491710-188f-48a4-b15b-fdb8c114c42c -->
+- Add a retrospective on the lost squash-commit ticket prefix, including failure analysis, validation lessons, and follow-up safeguards.
 - **`/stark-handoff`** — prompt-file handoffs for fresh executors (STARK-197, PR #857): four verbs (`write`/`list`/`use`/`launch`), five types over three skeletons (execution / investigation / inquiry) with the shared six-element spine and the 9-check rubric as `references/` templates; storage root `STARK_HANDOFF_ROOT` env > `handoff.root` config > `~/Code/Handoffs`; greppable header comment drives `list`/bare-`use` repo filtering; `launch` dispatches headless `claude -p` (stdin closed, backgrounded, timestamped log, `acceptEdits`, never skip-permissions) and refuses inquiry types, headerless files, and ambiguous repo matches. The tools smoke test now resolves every skill's `references/*.md` links, permanently; `runtime_overrides.test.ts` gained a `CLAUDE_ONLY_SKILLS` allowlist (stark-handoff ships deliberately without a Codex variant); the bare "handoff" trigger word was reclaimed from both `stark-handover` variants, which now route prompt-file asks to `/stark-handoff`.
 
 ### Changed
