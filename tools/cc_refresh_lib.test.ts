@@ -6,9 +6,10 @@ import {
   DEFAULT_MARGIN_MS,
   TOKEN_URL,
   accessTokenHoursLeft,
-  activeCopyIsStale,
   buildRefreshRequest,
   classifyRefresh,
+  compareActiveCopy,
+  planActiveSeat,
   mergeRefreshedCredentials,
   parseRefreshFlags,
   parseRefreshResponse,
@@ -233,24 +234,57 @@ test("a full renewal round-trips into a blob the CLI can consume", () => {
   assert.equal(accessTokenHoursLeft(merged, NOW), 8);
 });
 
-test("activeCopyIsStale spots the token rotation nothing else can see", () => {
+test("compareActiveCopy spots the rotation nothing else can see", () => {
   // The live item rotated; the stored copy still holds the dead token while its
-  // own expiresAt reads hours ahead — so `classifyRefresh` says `fresh` and the
+  // own expiresAt reads hours ahead — so classifyRefresh says `fresh` and the
   // profile is silently unusable. This is the Team-3/Team-4 failure.
   const stored = blob({ refreshToken: "rt-old", expiresAt: NOW + 8 * 3.6e6 });
-  const live = blob({ refreshToken: "rt-rotated" });
-  assert.equal(activeCopyIsStale(stored, live), true);
+  assert.equal(compareActiveCopy(stored, blob({ refreshToken: "rt-new" })), "stale");
   assert.equal(classifyRefresh(stored, NOW), "fresh");
 });
 
-test("activeCopyIsStale is false when the copies agree", () => {
-  assert.equal(activeCopyIsStale(blob(), blob()), false);
+test("compareActiveCopy separates match from cannot-compare", () => {
+  assert.equal(compareActiveCopy(blob(), blob()), "match");
+  // A boolean collapsed these into the `match` message — an affirmative claim of
+  // health over a blob that was never parsed.
+  assert.equal(compareActiveCopy("nope", blob()), "indeterminate");
+  assert.equal(compareActiveCopy(blob(), "{}"), "indeterminate");
+  assert.equal(compareActiveCopy(blob({ refreshToken: "" }), blob()), "indeterminate");
 });
 
-test("activeCopyIsStale never claims staleness from an unreadable blob", () => {
-  // `use`/`add` already refuse on unparseable blobs; a "stale" verdict here
-  // would send the operator to re-capture over a different problem.
-  assert.equal(activeCopyIsStale("nope", blob()), false);
-  assert.equal(activeCopyIsStale(blob(), "{}"), false);
-  assert.equal(activeCopyIsStale(blob({ refreshToken: "" }), blob()), false);
+test("planActiveSeat NEVER prescribes a write of the shared live item", () => {
+  // Auto-re-capture was worse than the bug: with two same-plan seats it bottles
+  // one account's token under another's identity, destroying a token that cannot
+  // be re-derived. The plan is a report; the operator repairs deliberately.
+  const p = planActiveSeat("Team-3", blob({ refreshToken: "rt-old" }), {
+    state: "present",
+    credentials: blob({ refreshToken: "rt-new" }),
+  });
+  assert.equal(p.status, "stale-copy");
+  assert.match(p.detail, /Quit other running/);
+  assert.match(p.detail, /add Team-3/);
+});
+
+test("planActiveSeat reports a healthy active seat plainly", () => {
+  const p = planActiveSeat("Team-3", blob(), { state: "present", credentials: blob() });
+  assert.equal(p.status, "active");
+  assert.match(p.detail, /matches the live token/);
+});
+
+test("planActiveSeat calls an unreadable stored blob corrupt, not healthy", () => {
+  // The active seat used to be the ONE profile whose corruption went unreported,
+  // because its branch returned before classifyRefresh ran.
+  const p = planActiveSeat("Team-3", "{}", { state: "present", credentials: blob() });
+  assert.equal(p.status, "corrupt");
+  assert.match(p.detail, /add Team-3/);
+});
+
+test("planActiveSeat distinguishes an absent live item from an unreadable one", () => {
+  // Opposite remedies: log in vs unlock the keychain. Collapsing them made this
+  // command contradict `add` for identical state.
+  const absent = planActiveSeat("T", blob(), { state: "absent" });
+  assert.match(absent.detail, /log in/);
+  const locked = planActiveSeat("T", blob(), { state: "unreadable" });
+  assert.match(locked.detail, /unreadable/);
+  assert.match(locked.detail, /do NOT run `add`/);
 });

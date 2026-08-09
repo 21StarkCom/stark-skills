@@ -313,37 +313,129 @@ export function accessTokenHoursLeft(
 
 /**
  * Does a stored profile still hold the same refresh token as the live Keychain
- * item? Only meaningful for the ACTIVE seat, where both describe one account.
+ * item? Only asked about the ACTIVE seat, where both are supposed to describe
+ * one account.
  *
  * The failure this detects: the live `Claude Code-credentials` item is global
  * and every running `claude` rewrites it on refresh, rotating the token. The
  * stored copy keeps the token it was captured with — now dead — while its own
  * `expiresAt` field still reads hours into the future, so `classifyRefresh`
- * reports `fresh` and `refresh` skips it as the active seat. The profile is
- * silently unusable and nothing says so until a `use` lands a dead credential.
+ * reports `fresh` and the active seat is skipped. The profile is silently
+ * unusable and nothing says so until a `use` lands a dead credential.
  *
  * Observed twice in one hour on 2026-08-09: `Team-3` held `448e201b` while the
  * live item had rotated to `ac8674c7`, and `Team-4` — skipped as the active seat
  * by a full `refresh --all` — reached `400 invalid_grant` / `401 revoked` and
  * needed a browser login, the one outcome this fleet exists to avoid.
  *
- * Comparing tokens is the whole check, and it costs nothing: both values are
- * already in hand, and a mismatch is a fact rather than an inference from
- * timestamps that the rotation never updates.
+ * **Three states, not a boolean.** The first cut returned `false` for both "the
+ * tokens are identical" and "I could not compare them", and the caller printed
+ * the former's message either way — an affirmative claim of health over a blob
+ * it never parsed. `indeterminate` keeps those apart.
  */
-export function activeCopyIsStale(
+export type ActiveCopyState =
+  /** Stored copy holds the same refresh token the live item does. */
+  | "match"
+  /** Definitely different tokens — the live item has rotated since capture. */
+  | "stale"
+  /** A blob could not be read well enough to compare. Not a health claim. */
+  | "indeterminate";
+
+export function compareActiveCopy(
   storedCredentials: string,
   liveCredentials: string,
-): boolean {
-  const stored = readOauthBlob(storedCredentials);
-  const live = readOauthBlob(liveCredentials);
-  const a = stored?.["refreshToken"];
-  const b = live?.["refreshToken"];
-  // Unreadable either side ⇒ not a claim of staleness. `use` and `add` already
-  // refuse on blobs they cannot parse; inventing a "stale" verdict here would
-  // send the operator to re-capture a profile whose real problem is elsewhere.
-  if (typeof a !== "string" || typeof b !== "string" || !a || !b) return false;
-  return a !== b;
+): ActiveCopyState {
+  const a = readOauthBlob(storedCredentials)?.["refreshToken"];
+  const b = readOauthBlob(liveCredentials)?.["refreshToken"];
+  if (typeof a !== "string" || !a || typeof b !== "string" || !b) {
+    return "indeterminate";
+  }
+  return a === b ? "match" : "stale";
+}
+
+/** What the CLI knows about the live global credentials item. */
+export type LiveCredentials =
+  | { state: "present"; credentials: string }
+  | { state: "absent" }
+  | { state: "unreadable" };
+
+export interface ActiveSeatPlan {
+  status: "active" | "stale-copy" | "corrupt";
+  detail: string;
+}
+
+/**
+ * Decide what to report for the profile that IS the active login.
+ *
+ * **It never writes, and that is the whole point of this function's existence.**
+ * The first cut re-captured automatically — copying the live blob into the stored
+ * profile — which reintroduced the clobber this tool was built to prevent, in a
+ * worse form. Reproduced: with two same-plan seats, a live item holding seat A's
+ * token (another session refreshed it) while `~/.claude.json` still names seat B
+ * makes `compareActiveCopy` report `stale` for B purely because the strings
+ * differ — it cannot tell "same account, rotated" from "different account". The
+ * only guard available without a network call is `seatIncoherence`, which
+ * compares plan strings and so fails open for `team`↔`team` and `max`↔`max`,
+ * i.e. about half this fleet. The write would then bottle A's token under B's
+ * identity, destroying B's non-re-derivable refresh token.
+ *
+ * Nothing local can identify whose token the live blob is: the blob carries no
+ * account uuid, and the only identity source (`~/.claude.json`) is exactly what
+ * has gone stale in this scenario. So detection is the deliverable and repair is
+ * the operator's: `add <name>` after quitting other sessions, which is a
+ * deliberate act carrying the warning this path cannot enforce.
+ *
+ * That still fixes the original defect, because the original defect was
+ * SILENCE — `Team-4` reported `fresh` while its stored token was revoked.
+ */
+export function planActiveSeat(
+  name: string,
+  storedCredentials: string,
+  live: LiveCredentials,
+): ActiveSeatPlan {
+  if (live.state === "absent") {
+    return {
+      status: "active",
+      detail:
+        "active login, but no live credentials item exists for this login " +
+        "user — cannot compare; run `claude` and log in",
+    };
+  }
+  if (live.state === "unreadable") {
+    return {
+      status: "active",
+      detail:
+        "active login; live credentials item unreadable (locked keychain or " +
+        "denied ACL) — cannot compare. Unlock and retry; do NOT run `add`",
+    };
+  }
+  switch (compareActiveCopy(storedCredentials, live.credentials)) {
+    case "match":
+      return {
+        status: "active",
+        detail: "active login; stored copy matches the live token",
+      };
+    case "indeterminate":
+      // Reported as corrupt, matching what a NON-active profile with the same
+      // blob gets from `classifyRefresh`. The active branch returns before that
+      // classification runs, so without this the one profile guaranteed to be
+      // in use is the one whose corruption goes unreported.
+      return {
+        status: "corrupt",
+        detail:
+          "active login, but the stored blob has no readable refresh token — " +
+          `re-capture it with \`add ${name}\``,
+      };
+    case "stale":
+      return {
+        status: "stale-copy",
+        detail:
+          "stored copy is STALE — the live token has rotated since capture, so " +
+          `the stored one is dead. Not re-captured automatically (the live item ` +
+          `is shared and may hold another account's token). Quit other running ` +
+          `\`claude\` sessions, then \`add ${name}\`.`,
+      };
+  }
 }
 
 export interface RefreshFlags {
