@@ -65,8 +65,10 @@ export function buildMergePrompt(plan: PrMergePlan, ctx: {
   const prefixRule = prefix
     ? `\nREQUIRED SUBJECT PREFIX
 The subject MUST begin with exactly "${prefix} " (copied verbatim from the PR
-title), then your own summary. The prefix counts toward the 72-char limit, so
-keep the summary short enough to fit. A subject without this prefix is rejected.\n`
+title), followed by one space and your own summary. The 72-char limit applies to
+the summary AFTER the prefix — the prefix itself is free. Do not repeat the
+prefix inside the summary. You may write "${prefix.slice(0, -1)}!: " instead if the
+change is breaking. A subject without this prefix is rejected.\n`
     : "";
   return `You are drafting prose for a GitHub PR squash-merge. Output exactly three pieces:
 - subject:           the squash commit subject (≤72 chars, single line, no markdown)

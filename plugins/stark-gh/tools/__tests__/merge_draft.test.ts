@@ -140,6 +140,9 @@ test("buildMergePrompt: demands the PR title's ticket prefix on the subject", ()
   const prompt = buildMergePrompt(minimalPlan, ticketCtx);
   assert.match(prompt, /REQUIRED SUBJECT PREFIX/);
   assert.match(prompt, /MUST begin with exactly "feat\(STARK-193\): "/);
+  // The length budget the validator actually applies, so the model can satisfy
+  // both constraints on the first attempt.
+  assert.match(prompt, /72-char limit applies to\nthe summary AFTER the prefix/);
 });
 
 test("buildMergePrompt: no prefix rule when the title has no ticket scope", () => {

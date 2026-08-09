@@ -100,8 +100,11 @@ test("extractTicketPrefix: pulls type(TICKET-n) from a PR title", () => {
     "feat(STARK-193):",
   );
   assert.equal(extractTicketPrefix("  fix(STARK-7): trim leading space  "), "fix(STARK-7):");
-  assert.equal(extractTicketPrefix("feat(STARK-193)!: breaking"), "feat(STARK-193)!:");
   assert.equal(extractTicketPrefix("chore(EI-1234): jira-style key"), "chore(EI-1234):");
+});
+
+test("extractTicketPrefix: the breaking marker is not part of the prefix", () => {
+  assert.equal(extractTicketPrefix("feat(STARK-193)!: breaking"), "feat(STARK-193):");
 });
 
 test("extractTicketPrefix: null when the title carries no ticket scope", () => {
@@ -115,6 +118,26 @@ test("extractTicketPrefix: null when the title carries no ticket scope", () => {
   ]) {
     assert.equal(extractTicketPrefix(t), null, `expected null for ${JSON.stringify(t)}`);
   }
+});
+
+test("extractTicketPrefix: ordinary word-digit scopes are not ticket keys", () => {
+  // A merge-blocking requirement must never be minted from a scope that is
+  // simply versioned or numbered — these repos have no ticket convention.
+  for (const t of [
+    "docs(adr-0007): record the caching decision",
+    "feat(gpt-5): switch model",
+    "chore(node-22): bump",
+    "fix(utf-8): decode fix",
+    "refactor(es-2015): x",
+  ]) {
+    assert.equal(extractTicketPrefix(t), null, `expected null for ${JSON.stringify(t)}`);
+  }
+});
+
+test("extractTicketPrefix: a capitalized type mints no requirement (fail open)", () => {
+  // The drafter emits lower-case types; requiring "Fix(STARK-7): " would be
+  // unsatisfiable and would abort the merge over one character's case.
+  assert.equal(extractTicketPrefix("Fix(STARK-7): correct the watcher backoff"), null);
 });
 
 test("requires the ticket prefix on the subject when one is given", () => {
@@ -137,6 +160,50 @@ test("rejects a prefix that is not followed by a space", () => {
     { requiredSubjectPrefix: "feat(STARK-193):" },
   );
   assert.equal(r.ok, false);
+});
+
+test("accepts a breaking-marker subject under a non-breaking title prefix", () => {
+  const r = validateDraft(
+    { ...ok, subject: "feat(STARK-193)!: swap the config resolver" },
+    { requiredSubjectPrefix: "feat(STARK-193):" },
+  );
+  assert.equal(r.ok, true);
+});
+
+test("rejects a doubled separator after the prefix", () => {
+  const r = validateDraft(
+    { ...ok, subject: "feat(STARK-193):  add the todo store" },
+    { requiredSubjectPrefix: "feat(STARK-193):" },
+  );
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.match(r.reason, /single space/);
+});
+
+test("rejects a prefix echoed inside the summary", () => {
+  const r = validateDraft(
+    { ...ok, subject: "feat(STARK-193): feat(STARK-193): add the todo store" },
+    { requiredSubjectPrefix: "feat(STARK-193):" },
+  );
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.match(r.reason, /repeated/);
+});
+
+test("rejects a prefix with an empty summary", () => {
+  const r = validateDraft(
+    { ...ok, subject: "feat(STARK-193): " },
+    { requiredSubjectPrefix: "feat(STARK-193):" },
+  );
+  assert.equal(r.ok, false);
+});
+
+test("the required prefix does not eat the 72-char summary budget", () => {
+  const prefix = "feat(STARK-193):";
+  const subject = `${prefix} ${"x".repeat(72)}`;      // 72 chars of summary
+  assert.equal(validateDraft({ ...ok, subject }, { requiredSubjectPrefix: prefix }).ok, true);
+  const tooLong = `${prefix} ${"x".repeat(73)}`;
+  const r = validateDraft({ ...ok, subject: tooLong }, { requiredSubjectPrefix: prefix });
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.match(r.reason, /subject length \d+ not in \[1,89\]/);
 });
 
 test("rejects a different ticket number or type than the PR title's", () => {

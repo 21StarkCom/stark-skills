@@ -9,7 +9,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 72,
-      "description": "Squash commit subject. Single line, no embedded newlines. When the PR title carries a type(TICKET-<n>): prefix, the subject must start with that exact prefix followed by a space (enforced in draft_schema.ts via ValidateOptions.requiredSubjectPrefix — not expressible here, since it depends on the PR title)."
+      "description": "Squash commit subject. Single line, no embedded newlines. A PR-title-dependent ticket-prefix rule may also apply; draft_schema.ts is the contract (not expressible here)."
     },
     "body": {
       "type": "string",
