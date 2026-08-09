@@ -65,6 +65,7 @@ import {
 } from "./cc_account_lib.ts";
 import {
   accessTokenHoursLeft,
+  activeCopyIsStale,
   buildRefreshRequest,
   classifyRefresh,
   mergeRefreshedCredentials,
@@ -999,15 +1000,18 @@ interface RefreshOutcome {
   name: string;
   status:
     | "refreshed"
+    /** Active seat whose stale stored copy was replaced from the live item. */
+    | "recaptured"
     | "fresh"
     | "dead"
     | "active"
     | "no-credentials"
     | "unreadable"
     | "corrupt"
-    | "seat-mismatch"
     | "http-error"
-    | "would-refresh";
+    | "would-refresh"
+    /** Active seat whose stored copy is stale; `--dry-run` preview. */
+    | "would-recapture";
   detail?: string;
 }
 
@@ -1066,6 +1070,13 @@ async function cmdRefresh(flags: RefreshFlags): Promise<void> {
   }
   const renewed = outcomes.filter((o) => o.status === "refreshed").length;
   const dead = outcomes.filter((o) => o.status === "dead").length;
+  const recaptured = outcomes.filter((o) => o.status === "recaptured").length;
+  if (recaptured > 0) {
+    console.log(
+      `\n${recaptured} active-seat profile(s) re-captured — their stored copy ` +
+        `had gone stale against the live keychain item.`,
+    );
+  }
   if (renewed > 0) {
     console.log(
       `\n${renewed} profile(s) renewed — access tokens good for ~8h, refresh ` +
@@ -1118,12 +1129,57 @@ async function refreshOne(
     seatKey &&
     seatKey.toLowerCase() === ctx.activeSeat.toLowerCase()
   ) {
+    // The active seat must never be refreshed — rotating the live login's token
+    // leaves the running CLI to discover it hours later as a forced `/login`.
+    // But skipping outright is what let `Team-4` rot into a revoked token: the
+    // running CLI rotates the shared item on its own schedule, so the stored
+    // copy goes dead while still reporting `fresh`.
+    //
+    // Re-capture is the right repair and needs no network: copy the live blob
+    // into the stored profile. It only ever replaces a credential that is
+    // already invalid, so there is nothing to lose by doing it.
+    const live = securityOrNull(readClaudeCredsArgv(CLAUDE_ACCOUNT));
+    if (live === null) {
+      return {
+        name,
+        status: "active",
+        detail: "active login; live credentials unreadable, left untouched",
+      };
+    }
+    if (!activeCopyIsStale(record.credentials, live)) {
+      return {
+        name,
+        status: "active",
+        detail: "active login; stored copy matches the live token",
+      };
+    }
+    if (ctx.flags.dryRun) {
+      return {
+        name,
+        status: "would-recapture",
+        detail: "active login; stored copy is stale (live token has rotated)",
+      };
+    }
+    // Same guard `add` applies: a live item holding another account's token
+    // (another session refreshed it) must not be bottled under this identity.
+    const snapshot = { credentials: live, oauthAccount: record.oauthAccount };
+    const bad = seatIncoherence(validateStoredProfile(snapshot));
+    if (bad) {
+      return {
+        name,
+        status: "active",
+        detail:
+          `stored copy is stale, but not re-captured: ${bad}. Quit other ` +
+          `running \`claude\` sessions, then \`add ${name}\`.`,
+      };
+    }
+    security(writeProfileArgv(name, JSON.stringify(snapshot)));
     return {
       name,
-      status: "active",
+      status: "recaptured",
       detail:
-        "skipped — this seat is the active login; rotating its token would " +
-        "break the running session",
+        "active login; stale stored copy replaced from the live keychain item " +
+        "(no refresh needed)",
     };
   }
 
@@ -1205,16 +1261,11 @@ async function refreshOne(
     };
   }
 
+  // Reported, never acted on. Skipping the write here would discard the token
+  // that just rotated — the old one is already dead, so the response is the
+  // only live credential for that seat and dropping it kills the profile. The
+  // credential is right and the registry label is what drifted.
   const mismatch = seatMismatch(tokens, seatKey);
-  if (mismatch) {
-    return {
-      name,
-      status: "seat-mismatch",
-      detail:
-        `${mismatch}. Not written — this profile holds another seat's token; ` +
-        `re-\`add\` it while logged in as the right one.`,
-    };
-  }
 
   security(
     writeProfileArgv(
@@ -1235,7 +1286,12 @@ async function refreshOne(
     detail:
       `access +${Math.round((tokens.expiresAt - Date.now()) / 3.6e6)}h` +
       (rtDays === null ? "" : `, refresh +${rtDays}d`) +
-      (seatKey ? "" : " (seat unverified — profile not in the registry)"),
+      (seatKey ? "" : " (seat unverified — profile not in the registry)") +
+      (mismatch
+        ? `\n         WARNING: ${mismatch}. The credential was written (it is ` +
+          `the only live one for that seat); re-\`add\` this profile under the ` +
+          `right name to fix the label.`
+        : ""),
   };
 }
 

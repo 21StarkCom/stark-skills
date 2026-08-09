@@ -102,18 +102,29 @@ work — and each one constrains the implementation:
 
 Consequences worth knowing before you touch this code:
 
-- **The active seat is refused, not warned about.** Rotating the live login's
-  token leaves the running CLI holding a dead one, and it discovers that hours
-  later as a forced `/login`. Switch away first if you must renew it.
+- **The active seat is never refreshed — it is RE-CAPTURED.** Rotating the live
+  login's token leaves the running CLI holding a dead one, discovered hours later
+  as a forced `/login`. But skipping the active seat is what let a profile rot
+  into a revoked token: the running CLI rotates the *global* Keychain item on its
+  own schedule, so the stored copy dies while its own `expiresAt` still reads
+  hours ahead and every staleness check says `fresh`. So `refresh` compares the
+  stored refresh token against the live one and, when they differ, copies the
+  live blob into the profile — no network, no rotation, and it only ever
+  overwrites a credential that is already dead. Reported as `recaptured`
+  (`would-recapture` under `--dry-run`).
 - **`--dry-run` stops before the network call.** A preview that contacted the
   endpoint would rotate the token it was only meant to inspect.
 - **Runs hold a lock** (`~/.claude/.cc-refresh.lock`). Two concurrent refreshes
   of one profile both send the same token; the server honours one and kills it
   for the other, so the loser stores a dead credential.
 - **The response names the seat** (`account.uuid` + `organization.uuid`), so a
-  profile holding a *different* seat's token is refused instead of silently
-  re-pointed. This is the only check that catches a swap between two profiles on
-  the same plan type — `seatIncoherence` compares plan strings and cannot.
+  profile holding a *different* seat's token is reported. This is the only check
+  that catches a swap between two profiles on the same plan type —
+  `seatIncoherence` compares plan strings and cannot. It **warns and still
+  writes**: the token that was sent is already dead, so the response is the only
+  live credential for that seat and refusing to store it would destroy the
+  profile. The credential is right; the registry *label* is what drifted, and
+  `add <name>` re-labels it.
 - **`dead` means `dead`.** Once the refresh token itself expires, nothing here
   recovers it: `claude /login` + `add <name>`.
 

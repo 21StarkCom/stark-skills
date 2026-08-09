@@ -170,20 +170,29 @@ export function seatKeyOfTokens(t: RefreshedTokens): string | null {
 }
 
 /**
- * Refuse a write whose response describes a DIFFERENT seat than the profile it
- * would land in.
+ * Report — but never act on — a response describing a DIFFERENT seat than the
+ * registry expected for this profile.
  *
- * This closes a hole nothing else could see. A stored blob is opaque — until
- * now the only identity signal was `subscriptionType`, so `seatIncoherence`
- * could catch a team/max swap and nothing finer. With ten seats split across
- * five `max` orgs and five `team` orgs, every realistic mixup was invisible.
- * The token endpoint names the seat outright, so a mismatch is now a hard fact:
- * the profile is holding someone else's refresh token, and writing the response
- * would quietly re-point the profile at that other seat instead of exposing it.
+ * This sees a hole nothing else could. A stored blob is opaque, so the only
+ * identity signal used to be `subscriptionType`: `seatIncoherence` catches a
+ * team/max swap and nothing finer. With ten seats split across five `max` and
+ * five `team` orgs, every realistic mixup was invisible. The token endpoint
+ * names the seat outright.
+ *
+ * WHY THIS IS A WARNING AND NOT A REFUSAL. The first cut skipped the write when
+ * the seats disagreed — which THREW AWAY the rotated token and killed the
+ * profile, the exact outcome the rest of this module is built to prevent. The
+ * old token died the instant the response arrived; the new one is the only live
+ * credential for that seat, and the caller is holding it. Refusing does not
+ * restore the previous state, it destroys the current one.
+ *
+ * The disagreement is also not evidence that the credential is wrong. The
+ * profile has been refreshing that seat's token all along, so the *registry
+ * label* is what drifted — most cheaply by an `add` that re-pointed a name. So:
+ * write the credential, surface the mismatch, and let the operator re-label.
  *
  * Fails open on an absent expectation or an identity-less response — an unknown
- * seat is not evidence of a wrong one, and stranding a working profile on
- * missing metadata is worse than the mismatch this guards against.
+ * seat is not evidence of a wrong one.
  */
 export function seatMismatch(
   t: RefreshedTokens,
@@ -300,6 +309,41 @@ export function accessTokenHoursLeft(
 ): number | null {
   const exp = msField(readOauthBlob(credentials), "expiresAt");
   return exp === undefined ? null : Math.round((exp - now) / 3.6e6);
+}
+
+/**
+ * Does a stored profile still hold the same refresh token as the live Keychain
+ * item? Only meaningful for the ACTIVE seat, where both describe one account.
+ *
+ * The failure this detects: the live `Claude Code-credentials` item is global
+ * and every running `claude` rewrites it on refresh, rotating the token. The
+ * stored copy keeps the token it was captured with — now dead — while its own
+ * `expiresAt` field still reads hours into the future, so `classifyRefresh`
+ * reports `fresh` and `refresh` skips it as the active seat. The profile is
+ * silently unusable and nothing says so until a `use` lands a dead credential.
+ *
+ * Observed twice in one hour on 2026-08-09: `Team-3` held `448e201b` while the
+ * live item had rotated to `ac8674c7`, and `Team-4` — skipped as the active seat
+ * by a full `refresh --all` — reached `400 invalid_grant` / `401 revoked` and
+ * needed a browser login, the one outcome this fleet exists to avoid.
+ *
+ * Comparing tokens is the whole check, and it costs nothing: both values are
+ * already in hand, and a mismatch is a fact rather than an inference from
+ * timestamps that the rotation never updates.
+ */
+export function activeCopyIsStale(
+  storedCredentials: string,
+  liveCredentials: string,
+): boolean {
+  const stored = readOauthBlob(storedCredentials);
+  const live = readOauthBlob(liveCredentials);
+  const a = stored?.["refreshToken"];
+  const b = live?.["refreshToken"];
+  // Unreadable either side ⇒ not a claim of staleness. `use` and `add` already
+  // refuse on blobs they cannot parse; inventing a "stale" verdict here would
+  // send the operator to re-capture a profile whose real problem is elsewhere.
+  if (typeof a !== "string" || typeof b !== "string" || !a || !b) return false;
+  return a !== b;
 }
 
 export interface RefreshFlags {

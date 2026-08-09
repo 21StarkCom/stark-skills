@@ -6,6 +6,7 @@ import {
   DEFAULT_MARGIN_MS,
   TOKEN_URL,
   accessTokenHoursLeft,
+  activeCopyIsStale,
   buildRefreshRequest,
   classifyRefresh,
   mergeRefreshedCredentials,
@@ -230,4 +231,26 @@ test("a full renewal round-trips into a blob the CLI can consume", () => {
   const merged = mergeRefreshedCredentials(blob({ expiresAt: NOW - 1 }), t);
   assert.equal(classifyRefresh(merged, NOW), "fresh");
   assert.equal(accessTokenHoursLeft(merged, NOW), 8);
+});
+
+test("activeCopyIsStale spots the token rotation nothing else can see", () => {
+  // The live item rotated; the stored copy still holds the dead token while its
+  // own expiresAt reads hours ahead — so `classifyRefresh` says `fresh` and the
+  // profile is silently unusable. This is the Team-3/Team-4 failure.
+  const stored = blob({ refreshToken: "rt-old", expiresAt: NOW + 8 * 3.6e6 });
+  const live = blob({ refreshToken: "rt-rotated" });
+  assert.equal(activeCopyIsStale(stored, live), true);
+  assert.equal(classifyRefresh(stored, NOW), "fresh");
+});
+
+test("activeCopyIsStale is false when the copies agree", () => {
+  assert.equal(activeCopyIsStale(blob(), blob()), false);
+});
+
+test("activeCopyIsStale never claims staleness from an unreadable blob", () => {
+  // `use`/`add` already refuse on unparseable blobs; a "stale" verdict here
+  // would send the operator to re-capture over a different problem.
+  assert.equal(activeCopyIsStale("nope", blob()), false);
+  assert.equal(activeCopyIsStale(blob(), "{}"), false);
+  assert.equal(activeCopyIsStale(blob({ refreshToken: "" }), blob()), false);
 });
