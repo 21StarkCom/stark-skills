@@ -63,6 +63,18 @@ import {
   type Profile,
   type UsageSnapshot,
 } from "./cc_account_lib.ts";
+import {
+  accessTokenHoursLeft,
+  buildRefreshRequest,
+  classifyRefresh,
+  mergeRefreshedCredentials,
+  parseRefreshFlags,
+  parseRefreshResponse,
+  readOauthBlob,
+  seatMismatch,
+  type RefreshFlags,
+} from "./cc_refresh_lib.ts";
+import { isLockStale } from "./lock_helpers_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
 
 const HOME = os.homedir();
@@ -929,6 +941,304 @@ function cmdOrder(names: string[]): void {
   }
 }
 
+// ── refresh ─────────────────────────────────────────────────────────────
+
+/**
+ * Serialises refresh runs. Rotation makes a lost race destructive: two
+ * concurrent refreshes of one profile both send the same token, the server
+ * honours one and kills it for the other, and whichever writes last stores a
+ * token that is already dead. The lock is therefore correctness, not politeness.
+ */
+const REFRESH_LOCK = path.join(HOME, ".claude", ".cc-refresh.lock");
+const REFRESH_LOCK_TTL_MIN = 10;
+
+function acquireRefreshLock(): void {
+  mkdirSync(path.dirname(REFRESH_LOCK), { recursive: true });
+  const payload = JSON.stringify({
+    pid: process.pid,
+    start_time: processStartTime(process.pid),
+    timestamp: new Date().toISOString(),
+    ttl_minutes: REFRESH_LOCK_TTL_MIN,
+  });
+  for (const attempt of [0, 1]) {
+    try {
+      writeFileSync(REFRESH_LOCK, payload, { flag: "wx", mode: 0o600 });
+      return;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      // A crashed run leaves the file behind; `isLockStale` is the same
+      // pid+start-time probe the rest of the fleet uses, so a recycled pid
+      // cannot make a dead lock look alive.
+      if (attempt === 0 && isLockStale(REFRESH_LOCK)) {
+        rmSync(REFRESH_LOCK, { force: true });
+        continue;
+      }
+      fail(
+        `another refresh is running (${REFRESH_LOCK}). Wait for it, or remove ` +
+          `the lock if you are sure it is dead.`,
+      );
+    }
+  }
+}
+
+function releaseRefreshLock(): void {
+  rmSync(REFRESH_LOCK, { force: true });
+}
+
+function processStartTime(pid: number): string {
+  try {
+    return execFileSync("/bin/ps", ["-o", "lstart=", "-p", String(pid)], {
+      encoding: "utf8",
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+
+interface RefreshOutcome {
+  name: string;
+  status:
+    | "refreshed"
+    | "fresh"
+    | "dead"
+    | "active"
+    | "no-credentials"
+    | "unreadable"
+    | "corrupt"
+    | "seat-mismatch"
+    | "http-error"
+    | "would-refresh";
+  detail?: string;
+}
+
+/**
+ * Renew stored profiles' tokens against the OAuth token endpoint.
+ *
+ * Sequential by design. Beyond the lock's reasoning, a failure mid-run must
+ * leave every profile either untouched or fully written — fanning out would
+ * multiply in-flight rotations with nothing to roll back to.
+ */
+async function cmdRefresh(flags: RefreshFlags): Promise<void> {
+  const registry = readRegistry();
+  const targets: Profile[] = flags.all
+    ? orderedProfiles(registry)
+    : flags.names.map((n) => {
+        const hit = registry.find(
+          (p) => p.name.toLowerCase() === n.toLowerCase(),
+        );
+        // An unregistered name can still have a stored record (a lost registry
+        // entry). Refresh it anyway — but with no seatKey, `seatMismatch` fails
+        // open, so say so rather than implying the seat was checked.
+        return hit ?? { name: n, email: "(unregistered)" };
+      });
+  if (targets.length === 0) {
+    console.log("no registered profiles — `add <name>` while logged in first");
+    return;
+  }
+
+  // The seat a live session owns is off limits: rotating its refresh token
+  // out-of-band leaves the running CLI holding a dead one, and the next time it
+  // renews — hours later, mid-task — it hard-fails to `/login`. Nothing in this
+  // tool can un-rotate a token, so this is a refusal, not a warning.
+  const activeSeat = currentSeatKey();
+  const now = Date.now();
+  const outcomes: RefreshOutcome[] = [];
+
+  acquireRefreshLock();
+  try {
+    for (const target of targets) {
+      outcomes.push(
+        await refreshOne(target, { activeSeat, now, flags, single: !flags.all }),
+      );
+    }
+  } finally {
+    releaseRefreshLock();
+  }
+
+  if (flags.json) {
+    console.log(JSON.stringify(outcomes, null, 2));
+    return;
+  }
+  for (const o of outcomes) {
+    console.log(
+      `${o.name.padEnd(8)} ${o.status.padEnd(14)} ${o.detail ?? ""}`.trimEnd(),
+    );
+  }
+  const renewed = outcomes.filter((o) => o.status === "refreshed").length;
+  const dead = outcomes.filter((o) => o.status === "dead").length;
+  if (renewed > 0) {
+    console.log(
+      `\n${renewed} profile(s) renewed — access tokens good for ~8h, refresh ` +
+        `tokens for ~28 days.`,
+    );
+  }
+  if (dead > 0) {
+    console.log(
+      `${dead} profile(s) need \`claude /login\` + \`add <name>\` — their ` +
+        `refresh tokens have expired and nothing can renew those.`,
+    );
+  }
+}
+
+async function refreshOne(
+  target: Profile,
+  ctx: {
+    activeSeat: string | null;
+    now: number;
+    flags: RefreshFlags;
+    single: boolean;
+  },
+): Promise<RefreshOutcome> {
+  const { name } = target;
+  const probed = readProfileRecord(name);
+  if (probed.state === "unreadable") {
+    // Naming one profile explicitly deserves the same hard stop `use` gives:
+    // "unreadable" means a locked keychain or a denied ACL, and the remedy is
+    // to unlock, never to overwrite.
+    if (ctx.single) failUnreadable([name]);
+    return { name, status: "unreadable", detail: "keychain unreadable" };
+  }
+  if (probed.raw === null) {
+    return {
+      name,
+      status: "no-credentials",
+      detail: `nothing stored — \`add ${name}\` while logged in as it`,
+    };
+  }
+  let record;
+  try {
+    record = validateStoredProfile(JSON.parse(probed.raw));
+  } catch (err) {
+    return { name, status: "corrupt", detail: (err as Error).message };
+  }
+
+  const seatKey = target.seatKey ?? seatKeyOf(record.oauthAccount) ?? undefined;
+  if (
+    ctx.activeSeat &&
+    seatKey &&
+    seatKey.toLowerCase() === ctx.activeSeat.toLowerCase()
+  ) {
+    return {
+      name,
+      status: "active",
+      detail:
+        "skipped — this seat is the active login; rotating its token would " +
+        "break the running session",
+    };
+  }
+
+  const verdict = classifyRefresh(record.credentials, ctx.now, ctx.flags.marginMs);
+  const hoursLeft = accessTokenHoursLeft(record.credentials, ctx.now);
+  if (verdict === "fresh") {
+    return { name, status: "fresh", detail: `access token good for ${hoursLeft}h` };
+  }
+  if (verdict === "dead") {
+    return {
+      name,
+      status: "dead",
+      detail: "refresh token expired or absent — `claude /login` required",
+    };
+  }
+  if (verdict === "unknown") {
+    return { name, status: "corrupt", detail: "no claudeAiOauth in the blob" };
+  }
+
+  // Dry run stops HERE, before the network call. A preview that contacted the
+  // endpoint would rotate the token it was only supposed to inspect — the one
+  // outcome a dry run must never have.
+  if (ctx.flags.dryRun) {
+    return {
+      name,
+      status: "would-refresh",
+      detail:
+        hoursLeft === null
+          ? "no expiry recorded"
+          : `access token ${hoursLeft >= 0 ? `expires in ${hoursLeft}h` : `expired ${-hoursLeft}h ago`}`,
+    };
+  }
+
+  const oauth = readOauthBlob(record.credentials)!;
+  const req = buildRefreshRequest(String(oauth["refreshToken"]));
+  let res: Response;
+  let body: string;
+  try {
+    res = await fetch(req.url, {
+      method: req.method,
+      headers: req.headers,
+      body: req.body,
+    });
+    body = await res.text();
+  } catch (err) {
+    return {
+      name,
+      status: "http-error",
+      detail: `${(err as Error).message} — token NOT consumed, safe to retry`,
+    };
+  }
+  if (!res.ok) {
+    // A rejected grant never consumes the token, so the stored record is still
+    // exactly as valid (or invalid) as it was a moment ago.
+    return {
+      name,
+      status: res.status === 400 || res.status === 401 ? "dead" : "http-error",
+      detail:
+        `HTTP ${res.status} ${body.slice(0, 160)}` +
+        (res.status === 400 || res.status === 401
+          ? " — `claude /login` + `add` to recover"
+          : " — token NOT consumed, safe to retry"),
+    };
+  }
+
+  let tokens;
+  try {
+    tokens = parseRefreshResponse(body, Date.now());
+  } catch (err) {
+    // The server rotated; we cannot read what it returned. Say so loudly — this
+    // is the one path that loses a credential, and hiding it would leave the
+    // operator to discover it hours later as an auth failure.
+    return {
+      name,
+      status: "http-error",
+      detail:
+        `${(err as Error).message} — WARNING: the old token was consumed, ` +
+        `${name} likely needs \`claude /login\``,
+    };
+  }
+
+  const mismatch = seatMismatch(tokens, seatKey);
+  if (mismatch) {
+    return {
+      name,
+      status: "seat-mismatch",
+      detail:
+        `${mismatch}. Not written — this profile holds another seat's token; ` +
+        `re-\`add\` it while logged in as the right one.`,
+    };
+  }
+
+  security(
+    writeProfileArgv(
+      name,
+      JSON.stringify({
+        credentials: mergeRefreshedCredentials(record.credentials, tokens),
+        oauthAccount: record.oauthAccount,
+      }),
+    ),
+  );
+  const rtDays =
+    tokens.refreshTokenExpiresAt === undefined
+      ? null
+      : Math.round((tokens.refreshTokenExpiresAt - Date.now()) / 8.64e7);
+  return {
+    name,
+    status: "refreshed",
+    detail:
+      `access +${Math.round((tokens.expiresAt - Date.now()) / 3.6e6)}h` +
+      (rtDays === null ? "" : `, refresh +${rtDays}d`) +
+      (seatKey ? "" : " (seat unverified — profile not in the registry)"),
+  };
+}
+
 // ── plumbing ────────────────────────────────────────────────────────────
 
 function nowSec(): number {
@@ -951,6 +1261,10 @@ const USAGE = `usage: cc_account.ts <command>
                     ( --dry-run = list them only )
   reset             forget EVERY stored login and start over
                     ( previews unless --yes · --snapshots also clears headroom )
+  refresh <name>    renew a profile's tokens without a browser
+  refresh --all     renew every stale profile ( skips the active seat )
+                    ( --dry-run previews WITHOUT contacting the endpoint ·
+                      --margin-hours N · --json )
   limits            headroom for every profile, best target first
   next              switch to the next profile in the rotation
                     ( --dry-run = preview only · --best = emptiest instead )
@@ -1005,6 +1319,22 @@ export function main(argv: string[] = process.argv.slice(2)): void {
         );
       }
       return cmdReset(confirmed, snapshots);
+    }
+    case "refresh": {
+      let flags: RefreshFlags;
+      try {
+        flags = parseRefreshFlags(rest);
+      } catch (err) {
+        fail(`refresh: ${(err as Error).message}`);
+      }
+      // `main` stays synchronous for every other caller; the pending fetch keeps
+      // the event loop alive on its own, so returning here does not truncate the
+      // run. The catch is mandatory — an unhandled rejection would exit 0 with
+      // profiles half-processed and no error text.
+      void cmdRefresh(flags).catch((err: unknown) =>
+        fail(`refresh: ${(err as Error).message}`),
+      );
+      return;
     }
     case "limits":
       return cmdLimits();
