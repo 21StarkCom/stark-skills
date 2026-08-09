@@ -147,3 +147,54 @@ test("buildPrompt names the Conventional Commits prefix rule", () => {
   assert.match(p, /Conventional Commits type prefix/);
   assert.match(p, /feat, fix, chore/);
 });
+
+// --- ticket-scoped titles (STARK-247) --------------------------------------
+
+test("validateOutput requires the pinned ticket on a drafted title", () => {
+  const bad = validateOutput(
+    { title: "feat: add the thing", body: null, commit_message: null },
+    { needTitle: true, needBody: false, needCommitMessage: false, requiredTitleTicket: "STARK-247" },
+  );
+  assert.equal(bad.ok, false);
+  assert.match(bad.reason || "", /must carry a ticket scope/);
+
+  const wrong = validateOutput(
+    { title: "feat(STARK-1): wrong ticket", body: null, commit_message: null },
+    { needTitle: true, needBody: false, needCommitMessage: false, requiredTitleTicket: "STARK-247" },
+  );
+  assert.equal(wrong.ok, false);
+
+  const good = validateOutput(
+    { title: "feat(STARK-247): gate pr-open on a ticket scope", body: null, commit_message: null },
+    { needTitle: true, needBody: false, needCommitMessage: false, requiredTitleTicket: "STARK-247" },
+  );
+  assert.equal(good.ok, true, `expected ok, reason=${good.reason}`);
+});
+
+test("validateOutput leaves titles alone when no ticket is pinned", () => {
+  const r = validateOutput(
+    { title: "feat: add the thing", body: null, commit_message: null },
+    { needTitle: true, needBody: false, needCommitMessage: false, requiredTitleTicket: null },
+  );
+  assert.equal(r.ok, true);
+});
+
+test("buildPrompt names the pinned ticket, and omits the rule when unpinned", () => {
+  const base: any = {
+    branch: "stark-247",
+    baseBranch: "main",
+    candidateIssues: { preflight: [] },
+    userArgs: { title: null, commitMessage: null },
+    stage2: { needTitle: true, needBody: false, needCommitMessage: false },
+    untrustedInputs: {
+      combinedStat: "", committedDiff: "", stagedDiff: "",
+      unstagedDiff: null, untrackedFiles: null, prTemplate: null,
+      commitMessages: "", userBody: null,
+    },
+  };
+  assert.doesNotMatch(buildPrompt(base), /REQUIRES A TICKET SCOPE/);
+  const pinned = { ...base, stage2: { ...base.stage2, requiredTitleTicket: "STARK-247" } };
+  const p = buildPrompt(pinned);
+  assert.match(p, /REQUIRES A TICKET SCOPE/);
+  assert.match(p, /"type\(STARK-247\): subject"/);
+});

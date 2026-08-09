@@ -12,6 +12,7 @@ const fakeExec = (responses: Record<string, string>) =>
 test("collectState returns shape including branch + base", () => {
   const exec = fakeExec({
     "git rev-parse --git-dir": ".git\n",
+    "git rev-parse --show-toplevel": "/tmp/no-such-repo\n",
     "git rev-parse --abbrev-ref HEAD": "feat/1-foo\n",
     "gh repo view --json nameWithOwner,defaultBranchRef,url": JSON.stringify({
       nameWithOwner: "evinced/stark",
@@ -36,6 +37,7 @@ test("collectState returns shape including branch + base", () => {
 test("collectState refuses on default branch", () => {
   const exec = fakeExec({
     "git rev-parse --git-dir": ".git\n",
+    "git rev-parse --show-toplevel": "/tmp/no-such-repo\n",
     "git rev-parse --abbrev-ref HEAD": "main\n",
     "gh repo view --json nameWithOwner,defaultBranchRef,url": JSON.stringify({
       nameWithOwner: "evinced/stark",

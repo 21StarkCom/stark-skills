@@ -37,6 +37,7 @@ test("redactSecrets leaves low-entropy long strings alone", () => {
 test("collectState refuses detached HEAD", () => {
   const exec = fakeExec({
     "git rev-parse --git-dir": ".git",
+    "git rev-parse --show-toplevel": "/tmp/no-such-repo\n",
     "git rev-parse --abbrev-ref HEAD": "HEAD\n",
   });
   assert.throws(() => collectState({ exec }), /detached HEAD/);
@@ -45,6 +46,7 @@ test("collectState refuses detached HEAD", () => {
 test("decideStage3: existing PR + only metadata flags routes to edit (not push-only)", () => {
   const exec = fakeExec({
     "git rev-parse --git-dir": ".git",
+    "git rev-parse --show-toplevel": "/tmp/no-such-repo\n",
     "git rev-parse --abbrev-ref HEAD": "feat/9-x\n",
     "gh repo view --json nameWithOwner,defaultBranchRef,url": fakeRepoView,
     "git status --porcelain": "",
@@ -165,6 +167,7 @@ test("prEdit argv routes metadata-only flags through --add-*", () => {
 test("preflight: secret in user --body content trips pre-LLM scan", () => {
   const exec = fakeExec({
     "git rev-parse --git-dir": ".git",
+    "git rev-parse --show-toplevel": "/tmp/no-such-repo\n",
     "git rev-parse --abbrev-ref HEAD": "feat/9-x\n",
     "gh repo view --json nameWithOwner,defaultBranchRef,url": fakeRepoView,
     "git status --porcelain": "",

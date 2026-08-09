@@ -38,6 +38,10 @@ export function isGitRepo(opts: { exec?: ExecFn } = {}): boolean {
   }
 }
 
+export function repoRoot(opts: { exec?: ExecFn } = {}): string {
+  return git(["rev-parse", "--show-toplevel"], opts).trim();
+}
+
 export function currentBranch(opts: { exec?: ExecFn } = {}): string {
   return git(["rev-parse", "--abbrev-ref", "HEAD"], opts).trim();
 }

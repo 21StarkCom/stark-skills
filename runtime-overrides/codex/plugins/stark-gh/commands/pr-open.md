@@ -59,6 +59,17 @@ with its scrubbed environment, validates model output, writes prose tempfiles,
 and atomically updates the plan. If `plan.stage2.skip` is true, it exits `0`
 immediately. Do not construct prompts or invoke another agent directly.
 
+**Ticket-scoped titles (opt-in, per repo).** A repo with a `type(TICKET-<n>):`
+title convention declares it in `.stark-gh.json` at the repo root
+(`{ "requireTicketScope": true, "ticketKey": "STARK" }`). Preflight then resolves
+the ticket from the branch name and pins it, so the drafted title must come back
+as `type(STARK-247): subject`. An explicit `--title` is validated, never
+rewritten: one without a ticket, or naming a different ticket than the branch,
+exits **33** — as does a drafted title when no ticket can be resolved from the
+branch. Existing PRs are never gated. Default is off, so repos without the
+convention are unaffected; a malformed config warns and falls back to off. This
+is the front half of the rule `$pr-merge` enforces on the squash subject.
+
 Parse the result JSON and print `result.prUrl`.
 
 If `result.watcherPid` is set, print:

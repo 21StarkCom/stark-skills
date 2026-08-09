@@ -15,6 +15,13 @@ import { writePlan, type Plan } from "./lib/plan.ts";
 import { mktempInRuntime } from "./lib/runtime.ts";
 import { redactSecrets } from "./lib/redact.ts";
 import { appendSecretOverride } from "./lib/audit.ts";
+import {
+  loadTicketPolicy,
+  extractTicketFromBranch,
+  extractTicketFromTitle,
+  checkTitleTicket,
+  type TicketPolicy,
+} from "./lib/ticket.ts";
 
 export interface UserArgs {
   pr: number | null;
@@ -303,6 +310,41 @@ function mergeCandidates(candidates: Candidate[]): Candidate[] {
   return [...map.values()];
 }
 
+// Ticket-scope gate (STARK-247). Decides, BEFORE any Codex spend, whether this
+// PR may proceed and what ticket the title must carry. Returns the ticket to
+// pin (null = no requirement), or throws a `ticket-scope:` error the CLI maps
+// to Exit.TICKET_SCOPE_REQUIRED.
+//
+// Only pr-open's create path is gated: an existing PR's title is not being
+// written here, and failing on it would strand branches whose PR predates the
+// policy with no way forward but a manual title edit.
+export function decideTicketRequirement(input: {
+  policy: TicketPolicy;
+  branch: string;
+  userTitle: string | null;
+  existingPr: boolean;
+}): string | null {
+  if (!input.policy.requireTicketScope) return null;
+  if (input.existingPr) return null;
+  const fromBranch = extractTicketFromBranch(input.branch, input.policy.ticketKey);
+  if (input.userTitle !== null) {
+    // An explicit title is the author's word: validate it, never rewrite it.
+    // The branch ticket is only used to catch a mismatch, and only when the
+    // branch actually names one.
+    const why = checkTitleTicket(input.userTitle, fromBranch);
+    if (why) throw new Error(`ticket-scope:${why}`);
+    return extractTicketFromTitle(input.userTitle);
+  }
+  if (!fromBranch) {
+    throw new Error(
+      `ticket-scope:this repo requires a ticket-scoped PR title and no ticket could be resolved from branch ${JSON.stringify(input.branch)}. ` +
+      `Open one (alfred task new "<title>") and either name it in the branch (e.g. feat/${input.policy.ticketKey ?? "TICKET"}-123-slug) ` +
+      `or pass --title "type(${input.policy.ticketKey ?? "TICKET"}-123): subject".`,
+    );
+  }
+  return fromBranch;
+}
+
 function decideStage2(input: {
   existingPr: ghLib.ExistingPr | null;
   dirty: boolean;
@@ -487,6 +529,15 @@ export function buildPlan(input: BuildPlanInput): Plan {
     repoNameWithOwner: state.repo.nameWithOwner,
   });
 
+  const { policy: ticketPolicy, warning: ticketWarning } = loadTicketPolicy(gitLib.repoRoot({ exec: input.exec }));
+  if (ticketWarning) process.stderr.write(`${ticketWarning}\n`);
+  const requiredTitleTicket = decideTicketRequirement({
+    policy: ticketPolicy,
+    branch: state.branch,
+    userTitle: userArgs.title,
+    existingPr: state.existingPr !== null,
+  });
+
   const stage2 = decideStage2({ existingPr: state.existingPr, dirty: state.dirty, userArgs });
   const stage3 = decideStage3({ existingPr: state.existingPr, dirty: state.dirty, userArgs });
 
@@ -524,7 +575,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
       userBody,
     },
     userArgs,
-    stage2: { ...stage2, outputs: { titleFile: null, bodyFile: null, commitMessageFile: null } },
+    stage2: { ...stage2, requiredTitleTicket, outputs: { titleFile: null, bodyFile: null, commitMessageFile: null } },
     stage3,
   };
 }
@@ -549,6 +600,7 @@ function main(): never {
     if (msg.startsWith("invalid branch name")) die(Exit.INVALID_BRANCH_NAME, msg);
     if (msg.startsWith("unstaged-only changes")) die(Exit.UNSTAGED_ONLY, msg);
     if (msg === "prompt budget exceeded even after summarization") die(Exit.PROMPT_BUDGET_EXCEEDED, msg);
+    if (msg.startsWith("ticket-scope:")) die(Exit.TICKET_SCOPE_REQUIRED, msg.slice("ticket-scope:".length));
     die(Exit.GENERIC, msg);
   }
 

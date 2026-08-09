@@ -70,6 +70,9 @@ export interface PrOpenPlan {
     needBody: boolean;
     needCommitMessage: boolean;
     skip: boolean;
+    // The ticket the drafted title must carry, e.g. "STARK-247"; null = no
+    // requirement. Optional so plan files written before STARK-247 still load.
+    requiredTitleTicket?: string | null;
     outputs: { titleFile: string | null; bodyFile: string | null; commitMessageFile: string | null };
   };
   stage3: {
@@ -154,6 +157,10 @@ export function validatePlan(p: unknown): asserts p is Plan {
   for (const f of ["needTitle", "needBody", "needCommitMessage", "skip"]) {
     requirePlan(typeof s2[f] === "boolean", `stage2.${f} must be boolean`);
   }
+  requirePlan(
+    s2.requiredTitleTicket === undefined || s2.requiredTitleTicket === null || typeof s2.requiredTitleTicket === "string",
+    "stage2.requiredTitleTicket must be string|null",
+  );
   requirePlan(isObj(s2.outputs), "stage2.outputs missing");
   const outs = s2.outputs as Record<string, unknown>;
   for (const f of ["titleFile", "bodyFile", "commitMessageFile"]) {

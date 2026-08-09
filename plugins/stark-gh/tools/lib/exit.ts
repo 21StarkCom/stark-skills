@@ -25,6 +25,7 @@ export const Exit = {
   DRAFT_INVALID_OUTPUT: 30,
   BASE_OID_DRIFT: 31,
   PR_NOT_RESOLVED: 32,
+  TICKET_SCOPE_REQUIRED: 33,     // repo requires a ticket-scoped title; none supplied or resolvable
 } as const;
 
 export type ExitCode = (typeof Exit)[keyof typeof Exit];

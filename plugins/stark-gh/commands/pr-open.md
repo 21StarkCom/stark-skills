@@ -46,6 +46,32 @@ On nonzero exit, surface stderr verbatim and stop. The command prints only the
 plan-file path. The plan-file contains the full plan and lives under the
 stark-gh runtime directory with mode `0600`.
 
+**Ticket-scoped titles (opt-in, per repo).** A repo that keeps a
+`type(TICKET-<n>):` title convention declares it in `.stark-gh.json` at the repo
+root:
+
+```json
+{ "requireTicketScope": true, "ticketKey": "STARK" }
+```
+
+With it on, preflight resolves the ticket from the branch name (`stark-247`,
+`worktree-STARK-229`, `feat/STARK-7-thing` — matched case-insensitively against
+`ticketKey`) and pins it, so the drafted title must come back as
+`type(STARK-247): subject`. An explicit `--title` is validated, never rewritten:
+one without a ticket, or naming a different ticket than the branch, exits **33**.
+If nothing can be resolved and no `--title` was given, preflight exits **33**
+naming the remedy — open a ticket and put it in the branch name or the title.
+Existing PRs are never gated (their title is not being written here).
+
+Default is **off**: stark-gh also runs against repos where `STARK-` means
+nothing, and a global default would block every one of them. A malformed
+`.stark-gh.json` warns on stderr and falls back to off. Without `ticketKey`,
+only an UPPER-CASE key is recognised in a branch, so `feat/fix-2-things` cannot
+be mistaken for ticket `FIX-2`.
+
+This is the front half of the rule `/stark-gh:pr-merge` enforces on the squash
+subject — the title is where the ticket trail starts.
+
 ## Stage 2 - Draft
 
 ```bash
