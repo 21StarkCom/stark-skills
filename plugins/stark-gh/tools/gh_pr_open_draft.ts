@@ -6,10 +6,12 @@ import { readPlan, writePlan, type Plan } from "./lib/plan.ts";
 import { resolveDraftConfig } from "./lib/config.ts";
 import { callCodex } from "./lib/codex.ts";
 import { mktempInRuntime } from "./lib/runtime.ts";
+import { checkTitleTicket } from "./lib/ticket.ts";
 
-// Conventional-commit types accepted by the repo's PR-title linter
-// (.github/workflows/pr-title.yml -> amannn/action-semantic-pull-request).
-// Keep this list in sync with the workflow's `types:` block.
+// Conventional-commit types this tool accepts in a PR title. There is no
+// PR-title CI workflow — an earlier version of this comment cited a
+// `.github/workflows/pr-title.yml` that does not exist in any target repo, so
+// THIS list plus `lib/ticket.ts` are the only enforcement that actually runs.
 export const CONVENTIONAL_COMMIT_TYPES = [
   "feat",
   "fix",
@@ -31,6 +33,16 @@ export const CONVENTIONAL_COMMIT_TYPES = [
 export const CONVENTIONAL_COMMIT_TITLE_RE = new RegExp(
   `^(?:${CONVENTIONAL_COMMIT_TYPES.join("|")})(?:\\([^)\\s][^)]*\\))?!?: \\S.*$`,
 );
+
+// The scope is not free when the repo pins a ticket: this is what the squash
+// subject later inherits, so the title is where the ticket trail starts.
+function ticketRule(ticket: string | null): string {
+  if (!ticket) return "";
+  return `
+   THIS REPO REQUIRES A TICKET SCOPE: the scope MUST be exactly "${ticket}",
+   i.e. "type(${ticket}): subject". Do not invent a different ticket, do not
+   omit it, and do not put it anywhere else in the title.`;
+}
 
 export function buildPrompt(plan: Plan): string {
   const stage2 = plan.stage2;
@@ -78,7 +90,7 @@ RULES:
    without behavior change, docs/test/ci/build/chore as appropriate.
    Examples: "feat(observability): add request_id propagation",
    "fix(slack): handle 429 retry-after honoring jitter",
-   "chore(deps): bump golang.org/x/net to 0.27.0".
+   "chore(deps): bump golang.org/x/net to 0.27.0".${ticketRule(stage2.requiredTitleTicket ?? null)}
 2. needBody: <= 32 KB; fill prTemplate if present, else use "## Summary", "## Why", "## Test plan".
 3. needCommitMessage: subject <= 72 chars plus optional body <= 1 KB. Subject
    MUST also start with the same Conventional Commits type prefix.
@@ -118,7 +130,7 @@ export interface ValidatedOutput {
 
 export function validateOutput(
   parsed: unknown,
-  need: { needTitle: boolean; needBody: boolean; needCommitMessage: boolean },
+  need: { needTitle: boolean; needBody: boolean; needCommitMessage: boolean; requiredTitleTicket?: string | null },
 ): ValidatedOutput {
   const warnings: string[] = [];
   if (typeof parsed !== "object" || parsed === null) {
@@ -141,6 +153,10 @@ export function validateOutput(
         reason: `title missing Conventional Commits type prefix (one of: ${CONVENTIONAL_COMMIT_TYPES.join(", ")}). Required format: "type: subject" or "type(scope): subject"`,
         warnings,
       };
+    }
+    if (need.requiredTitleTicket) {
+      const why = checkTitleTicket(title, need.requiredTitleTicket);
+      if (why) return { ok: false, reason: why, warnings };
     }
   }
 

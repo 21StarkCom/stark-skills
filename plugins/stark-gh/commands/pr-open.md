@@ -46,6 +46,37 @@ On nonzero exit, surface stderr verbatim and stop. The command prints only the
 plan-file path. The plan-file contains the full plan and lives under the
 stark-gh runtime directory with mode `0600`.
 
+**Ticket-scoped titles (opt-in, per repo).** A repo that keeps a
+`type(TICKET-<n>):` title convention declares it in `.stark-gh.json` at the repo
+root:
+
+```json
+{ "requireTicketScope": true, "ticketKey": "STARK" }
+```
+
+`ticketKey` is **required** when `requireTicketScope` is on — enforcement anchors
+on it, and a keyless scan would fabricate tickets out of version tokens like
+`AWS-2`. With the gate on, preflight resolves the ticket from the branch name
+(`stark-247`, `worktree-STARK-229`, `feat/STARK-7-thing`, `feature_STARK-247` —
+matched case-insensitively against `ticketKey`, underscore counts as a
+separator) and pins it, so the drafted title must come back as
+`type(STARK-247): subject`. An **explicit `--title` is validated, never
+rewritten** — for a new PR *and* when editing an existing one's title, since
+pr-open writes `--title` onto an existing PR too. A title with no ticket, the
+wrong ticket, or the right ticket in the wrong case exits **33**. If nothing can
+be resolved and no `--title` was given on a *new* PR, preflight exits **33**
+naming the remedy. An existing PR whose title is left alone is not gated.
+
+Default is **off**: stark-gh also runs against repos where `STARK-` means
+nothing, and a global default would block every one of them. But a
+`.stark-gh.json` that is *present* yet broken — malformed JSON, wrong-typed
+field, or `requireTicketScope` without a `ticketKey` — is a **fatal** config
+error (exit 33), never a silent revert to off: a gate you opted into must fail
+closed.
+
+This is the front half of the rule `/stark-gh:pr-merge` enforces on the squash
+subject — the title is where the ticket trail starts.
+
 ## Stage 2 - Draft
 
 ```bash

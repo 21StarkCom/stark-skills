@@ -12,6 +12,7 @@ const fakeExec = (m: Record<string, string>) =>
 test("buildPlan emits a valid plan with TS-emitted refs line", () => {
   const exec = fakeExec({
     "git rev-parse --git-dir": ".git",
+    "git rev-parse --show-toplevel": "/tmp/no-such-repo\n",
     "git rev-parse --abbrev-ref HEAD": "feat/123-foo\n",
     "gh repo view --json nameWithOwner,defaultBranchRef,url": JSON.stringify({
       nameWithOwner: "evinced/stark",

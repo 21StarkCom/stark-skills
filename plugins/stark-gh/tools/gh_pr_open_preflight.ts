@@ -15,6 +15,13 @@ import { writePlan, type Plan } from "./lib/plan.ts";
 import { mktempInRuntime } from "./lib/runtime.ts";
 import { redactSecrets } from "./lib/redact.ts";
 import { appendSecretOverride } from "./lib/audit.ts";
+import {
+  loadTicketPolicy,
+  extractTicketFromBranch,
+  extractTicketFromTitle,
+  checkTitleTicket,
+  type TicketPolicy,
+} from "./lib/ticket.ts";
 
 export interface UserArgs {
   pr: number | null;
@@ -303,6 +310,47 @@ function mergeCandidates(candidates: Candidate[]): Candidate[] {
   return [...map.values()];
 }
 
+// Ticket-scope gate (STARK-247). Decides, BEFORE any Codex spend, whether this
+// PR may proceed and what ticket the title must carry. Returns the ticket to
+// pin (null = no requirement), or throws a `ticket-scope:` error the CLI maps
+// to Exit.TICKET_SCOPE_REQUIRED.
+//
+// An EXPLICIT --title is always validated, whether the PR is new or already
+// exists: pr-open writes a --title onto an existing PR (willEditTitle), so
+// exempting existing PRs from that check would let a gated repo be retitled
+// ticket-less and merge ticket-less. Only the "resolve from branch and REQUIRE
+// one" branch is skipped for an existing PR whose title is being left alone —
+// failing there would strand PRs that predate the policy.
+export function decideTicketRequirement(input: {
+  policy: TicketPolicy;
+  branch: string;
+  userTitle: string | null;
+  existingPr: boolean;
+}): string | null {
+  if (!input.policy.requireTicketScope) return null;
+  const fromBranch = extractTicketFromBranch(input.branch, input.policy.ticketKey);
+  if (input.userTitle !== null) {
+    // An explicit title is the author's word: validate it, never rewrite it.
+    // The branch ticket is only used to catch a mismatch, and only when the
+    // branch actually names one.
+    const why = checkTitleTicket(input.userTitle, fromBranch);
+    if (why) throw new Error(`ticket-scope:${why}`);
+    return extractTicketFromTitle(input.userTitle);
+  }
+  // No explicit title. An existing PR keeps its current title untouched — do
+  // not require one. A new PR's title is about to be drafted, so it must carry
+  // a resolvable ticket.
+  if (input.existingPr) return null;
+  if (!fromBranch) {
+    throw new Error(
+      `ticket-scope:this repo requires a ticket-scoped PR title and no ticket could be resolved from branch ${JSON.stringify(input.branch)}. ` +
+      `Open one (alfred task new "<title>") and either name it in the branch (e.g. feat/${input.policy.ticketKey ?? "TICKET"}-123-slug) ` +
+      `or pass --title "type(${input.policy.ticketKey ?? "TICKET"}-123): subject".`,
+    );
+  }
+  return fromBranch;
+}
+
 function decideStage2(input: {
   existingPr: ghLib.ExistingPr | null;
   dirty: boolean;
@@ -343,6 +391,19 @@ function decideStage3(input: { existingPr: ghLib.ExistingPr | null; dirty: boole
 export function buildPlan(input: BuildPlanInput): Plan {
   const userArgs = parseRawArgs(input.rawArgs);
   const state = collectState({ exec: input.exec, baseOverride: userArgs.base, commitAll: userArgs.commitAll });
+
+  // Ticket-scope gate — evaluated here, before the base fetch / diffs / secret
+  // scan, so a rejection fails fast instead of after that network+CPU work.
+  const ticketLoad = loadTicketPolicy(gitLib.repoRoot({ exec: input.exec }));
+  if (ticketLoad.error) throw new Error(`ticket-scope:${ticketLoad.error}`);
+  if (ticketLoad.warning) process.stderr.write(`${ticketLoad.warning}\n`);
+  const requiredTitleTicket = decideTicketRequirement({
+    policy: ticketLoad.policy,
+    branch: state.branch,
+    userTitle: userArgs.title,
+    existingPr: state.existingPr !== null,
+  });
+
   const { baseOid, source: baseOidSource } = fetchBase(state.baseBranch, { exec: input.exec });
   const diffBaseRef = baseOidSource === "remote" ? `origin/${state.baseBranch}` : state.baseBranch;
 
@@ -524,7 +585,7 @@ export function buildPlan(input: BuildPlanInput): Plan {
       userBody,
     },
     userArgs,
-    stage2: { ...stage2, outputs: { titleFile: null, bodyFile: null, commitMessageFile: null } },
+    stage2: { ...stage2, requiredTitleTicket, outputs: { titleFile: null, bodyFile: null, commitMessageFile: null } },
     stage3,
   };
 }
@@ -540,7 +601,12 @@ function main(): never {
     plan = buildPlan({ rawArgs: raw });
   } catch (e) {
     const msg = String((e as Error).message);
+    // Prefix-tagged errors are routed FIRST and unambiguously — their payload
+    // can contain the user's --title, which may hold substrings ("requires a
+    // value", "too long") that the loose substring matchers below would
+    // otherwise misclassify. The prefix is stripped from the surfaced message.
     if (msg.startsWith("secret-scan-hit:")) die(Exit.SECRET_HIT_PREFLIGHT, msg);
+    if (msg.startsWith("ticket-scope:")) die(Exit.TICKET_SCOPE_REQUIRED, msg.slice("ticket-scope:".length));
     if (msg.startsWith("unrecognized flag") || msg.includes("requires a value") || msg.includes("too many") || msg.includes("too long")) {
       die(Exit.UNRECOGNIZED_FLAG, msg);
     }
