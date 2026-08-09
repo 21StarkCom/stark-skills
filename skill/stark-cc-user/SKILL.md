@@ -5,7 +5,7 @@ description: >-
   Switch the active Claude Code account between stored profiles when a 5-hour
   or 7-day rate-limit window runs out. Credentials live in macOS Keychain
   (service `stark-cc-token`); headroom comes from statusline snapshots.
-argument-hint: "[show|list|add <name>|use <name>|remove <name>|prune|reset|limits|next|order] [--dry-run] [--best] [--yes]"
+argument-hint: "[show|list|add <name>|use <name>|refresh <name>|remove <name>|prune|reset|limits|next|order] [--all] [--dry-run] [--best] [--yes]"
 ---
 
 ## Help
@@ -32,6 +32,9 @@ identity when a GraphQL/REST bucket runs dry), but the mechanics differ — read
 - `/stark-cc-user remove <name>` — forget a profile (credentials + registry entry)
 - `/stark-cc-user prune [--dry-run]` — forget every profile with no stored credentials
 - `/stark-cc-user reset [--yes] [--snapshots]` — forget **every** stored login and start over (previews unless `--yes`)
+- `/stark-cc-user refresh <name>` — renew that profile's tokens, no browser
+- `/stark-cc-user refresh --all` — renew every stale profile (skips the active seat)
+- `/stark-cc-user refresh --all --dry-run` — report what is due **without contacting the endpoint**
 - `/stark-cc-user limits` — headroom for every profile, best target first
 - `/stark-cc-user next` — **switch to the next profile in the rotation**
 - `/stark-cc-user next --dry-run` — preview that pick without switching
@@ -63,8 +66,56 @@ claude /login          # log in as the account
 /stark-cc-user add s1  # capture it
 ```
 
-Repeat per account. `add` is also safe to re-run — it refreshes a stored
-profile whose token has since rotated.
+Repeat per account. `add` is also safe to re-run — it re-captures the current
+login into an existing profile.
+
+**Log in once per account, then never again**: keeping a profile alive is
+`refresh`'s job, not `/login`'s — see the next section.
+
+## Renewing without a browser — `refresh`
+
+A stored profile's access token lives **8 hours** and its refresh token about
+**28 days**. Nothing used to renew either, so profiles went stale within a day
+and dead within a month, and the only known repair was `claude /login` per
+account. `refresh` renews them against the OAuth token endpoint instead:
+
+```
+/stark-cc-user refresh --all            # renew everything that's due
+/stark-cc-user refresh Max-1            # or one profile
+/stark-cc-user refresh --all --dry-run  # what's due, no network call
+```
+
+Three facts, measured against CLI 2.1.205 on 2026-08-09, are what make this
+work — and each one constrains the implementation:
+
+1. **`POST https://platform.claude.com/v1/oauth/token`** with
+   `grant_type=refresh_token` and the CLI's own public client id returns a fresh
+   pair: HTTP 200, `expires_in=28800`, `refresh_token_expires_in≈2405096`.
+2. **The refresh token rotates.** The token that was sent is dead the moment the
+   response arrives, so a refresh whose result isn't persisted *destroys* the
+   profile. That is exactly how profiles rotted before: `use` restored a
+   snapshot, the CLI refreshed, and the rotated token was never written back.
+3. **`CLAUDE_CODE_OAUTH_REFRESH_TOKEN` does not help.** Injected alongside an
+   expired access token, the CLI fails `401 OAuth access token has expired`
+   without attempting a refresh — verified twice with the same token, which the
+   second failure proves was never consumed.
+
+Consequences worth knowing before you touch this code:
+
+- **The active seat is refused, not warned about.** Rotating the live login's
+  token leaves the running CLI holding a dead one, and it discovers that hours
+  later as a forced `/login`. Switch away first if you must renew it.
+- **`--dry-run` stops before the network call.** A preview that contacted the
+  endpoint would rotate the token it was only meant to inspect.
+- **Runs hold a lock** (`~/.claude/.cc-refresh.lock`). Two concurrent refreshes
+  of one profile both send the same token; the server honours one and kills it
+  for the other, so the loser stores a dead credential.
+- **The response names the seat** (`account.uuid` + `organization.uuid`), so a
+  profile holding a *different* seat's token is refused instead of silently
+  re-pointed. This is the only check that catches a swap between two profiles on
+  the same plan type — `seatIncoherence` compares plan strings and cannot.
+- **`dead` means `dead`.** Once the refresh token itself expires, nothing here
+  recovers it: `claude /login` + `add <name>`.
 
 ## Forgetting an account
 
