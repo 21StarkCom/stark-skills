@@ -37,7 +37,6 @@ test("redactSecrets leaves low-entropy long strings alone", () => {
 test("collectState refuses detached HEAD", () => {
   const exec = fakeExec({
     "git rev-parse --git-dir": ".git",
-    "git rev-parse --show-toplevel": "/tmp/no-such-repo\n",
     "git rev-parse --abbrev-ref HEAD": "HEAD\n",
   });
   assert.throws(() => collectState({ exec }), /detached HEAD/);

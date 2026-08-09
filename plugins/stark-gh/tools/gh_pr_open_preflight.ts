@@ -315,9 +315,12 @@ function mergeCandidates(candidates: Candidate[]): Candidate[] {
 // pin (null = no requirement), or throws a `ticket-scope:` error the CLI maps
 // to Exit.TICKET_SCOPE_REQUIRED.
 //
-// Only pr-open's create path is gated: an existing PR's title is not being
-// written here, and failing on it would strand branches whose PR predates the
-// policy with no way forward but a manual title edit.
+// An EXPLICIT --title is always validated, whether the PR is new or already
+// exists: pr-open writes a --title onto an existing PR (willEditTitle), so
+// exempting existing PRs from that check would let a gated repo be retitled
+// ticket-less and merge ticket-less. Only the "resolve from branch and REQUIRE
+// one" branch is skipped for an existing PR whose title is being left alone —
+// failing there would strand PRs that predate the policy.
 export function decideTicketRequirement(input: {
   policy: TicketPolicy;
   branch: string;
@@ -325,7 +328,6 @@ export function decideTicketRequirement(input: {
   existingPr: boolean;
 }): string | null {
   if (!input.policy.requireTicketScope) return null;
-  if (input.existingPr) return null;
   const fromBranch = extractTicketFromBranch(input.branch, input.policy.ticketKey);
   if (input.userTitle !== null) {
     // An explicit title is the author's word: validate it, never rewrite it.
@@ -335,6 +337,10 @@ export function decideTicketRequirement(input: {
     if (why) throw new Error(`ticket-scope:${why}`);
     return extractTicketFromTitle(input.userTitle);
   }
+  // No explicit title. An existing PR keeps its current title untouched — do
+  // not require one. A new PR's title is about to be drafted, so it must carry
+  // a resolvable ticket.
+  if (input.existingPr) return null;
   if (!fromBranch) {
     throw new Error(
       `ticket-scope:this repo requires a ticket-scoped PR title and no ticket could be resolved from branch ${JSON.stringify(input.branch)}. ` +
@@ -385,6 +391,19 @@ function decideStage3(input: { existingPr: ghLib.ExistingPr | null; dirty: boole
 export function buildPlan(input: BuildPlanInput): Plan {
   const userArgs = parseRawArgs(input.rawArgs);
   const state = collectState({ exec: input.exec, baseOverride: userArgs.base, commitAll: userArgs.commitAll });
+
+  // Ticket-scope gate — evaluated here, before the base fetch / diffs / secret
+  // scan, so a rejection fails fast instead of after that network+CPU work.
+  const ticketLoad = loadTicketPolicy(gitLib.repoRoot({ exec: input.exec }));
+  if (ticketLoad.error) throw new Error(`ticket-scope:${ticketLoad.error}`);
+  if (ticketLoad.warning) process.stderr.write(`${ticketLoad.warning}\n`);
+  const requiredTitleTicket = decideTicketRequirement({
+    policy: ticketLoad.policy,
+    branch: state.branch,
+    userTitle: userArgs.title,
+    existingPr: state.existingPr !== null,
+  });
+
   const { baseOid, source: baseOidSource } = fetchBase(state.baseBranch, { exec: input.exec });
   const diffBaseRef = baseOidSource === "remote" ? `origin/${state.baseBranch}` : state.baseBranch;
 
@@ -529,15 +548,6 @@ export function buildPlan(input: BuildPlanInput): Plan {
     repoNameWithOwner: state.repo.nameWithOwner,
   });
 
-  const { policy: ticketPolicy, warning: ticketWarning } = loadTicketPolicy(gitLib.repoRoot({ exec: input.exec }));
-  if (ticketWarning) process.stderr.write(`${ticketWarning}\n`);
-  const requiredTitleTicket = decideTicketRequirement({
-    policy: ticketPolicy,
-    branch: state.branch,
-    userTitle: userArgs.title,
-    existingPr: state.existingPr !== null,
-  });
-
   const stage2 = decideStage2({ existingPr: state.existingPr, dirty: state.dirty, userArgs });
   const stage3 = decideStage3({ existingPr: state.existingPr, dirty: state.dirty, userArgs });
 
@@ -591,7 +601,12 @@ function main(): never {
     plan = buildPlan({ rawArgs: raw });
   } catch (e) {
     const msg = String((e as Error).message);
+    // Prefix-tagged errors are routed FIRST and unambiguously — their payload
+    // can contain the user's --title, which may hold substrings ("requires a
+    // value", "too long") that the loose substring matchers below would
+    // otherwise misclassify. The prefix is stripped from the surfaced message.
     if (msg.startsWith("secret-scan-hit:")) die(Exit.SECRET_HIT_PREFLIGHT, msg);
+    if (msg.startsWith("ticket-scope:")) die(Exit.TICKET_SCOPE_REQUIRED, msg.slice("ticket-scope:".length));
     if (msg.startsWith("unrecognized flag") || msg.includes("requires a value") || msg.includes("too many") || msg.includes("too long")) {
       die(Exit.UNRECOGNIZED_FLAG, msg);
     }
@@ -600,7 +615,6 @@ function main(): never {
     if (msg.startsWith("invalid branch name")) die(Exit.INVALID_BRANCH_NAME, msg);
     if (msg.startsWith("unstaged-only changes")) die(Exit.UNSTAGED_ONLY, msg);
     if (msg === "prompt budget exceeded even after summarization") die(Exit.PROMPT_BUDGET_EXCEEDED, msg);
-    if (msg.startsWith("ticket-scope:")) die(Exit.TICKET_SCOPE_REQUIRED, msg.slice("ticket-scope:".length));
     die(Exit.GENERIC, msg);
   }
 

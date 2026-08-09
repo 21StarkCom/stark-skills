@@ -24,23 +24,35 @@ test("loadTicketPolicy: reads the opt-in", () => {
   const r = loadTicketPolicy("/repo", () => '{"requireTicketScope":true,"ticketKey":"stark"}', () => true);
   assert.deepEqual(r.policy, { requireTicketScope: true, ticketKey: "STARK" });
   assert.equal(r.warning, null);
+  assert.equal(r.error, null);
 });
 
-test("loadTicketPolicy: malformed config falls back to off, with a warning", () => {
-  // A broken config must not silently start blocking every PR — nor silently
-  // stop enforcing without saying so.
+test("loadTicketPolicy: a PRESENT but broken config is a FATAL error, not silent-off", () => {
+  // A gate that has been opted into must fail closed on a broken config, never
+  // revert to off unnoticed.
   for (const body of ["{ not json", '"a string"', "[1,2]"]) {
     const r = loadTicketPolicy("/repo", () => body, () => true);
-    assert.equal(r.policy.requireTicketScope, false);
-    assert.notEqual(r.warning, null);
+    assert.notEqual(r.error, null, body);
   }
 });
 
-test("loadTicketPolicy: wrong-typed fields warn and keep the default", () => {
-  const r = loadTicketPolicy("/repo", () => '{"requireTicketScope":"yes","ticketKey":"way-too-long-key!"}', () => true);
-  assert.deepEqual(r.policy, DEFAULT_TICKET_POLICY);
-  assert.match(r.warning!, /requireTicketScope must be a boolean/);
-  assert.match(r.warning!, /ticketKey must be/);
+test("loadTicketPolicy: wrong-typed fields are fatal", () => {
+  for (const body of ['{"requireTicketScope":"yes"}', '{"ticketKey":"way-too-long-key!"}']) {
+    const r = loadTicketPolicy("/repo", () => body, () => true);
+    assert.notEqual(r.error, null, body);
+  }
+});
+
+test("loadTicketPolicy: enforcement without a ticketKey is fatal", () => {
+  // A keyless generic scan would fabricate tickets from version tokens.
+  const r = loadTicketPolicy("/repo", () => '{"requireTicketScope":true}', () => true);
+  assert.match(r.error!, /needs a "ticketKey"/);
+});
+
+test("loadTicketPolicy: unknown keys warn but do not block", () => {
+  const r = loadTicketPolicy("/repo", () => '{"requireTicketScope":true,"ticketKey":"STARK","nope":1}', () => true);
+  assert.equal(r.error, null);
+  assert.match(r.warning!, /unknown key/);
 });
 
 // --- branch resolution -----------------------------------------------------
@@ -52,12 +64,21 @@ test("extractTicketFromBranch: finds the configured key in any case", () => {
   assert.equal(extractTicketFromBranch("stark-229-retro", "STARK"), "STARK-229");
 });
 
-test("extractTicketFromBranch: no configured key means UPPER-CASE only", () => {
-  // Without a key to anchor on, an any-case scan turns ordinary branch names
-  // into fabricated tickets.
-  assert.equal(extractTicketFromBranch("feat/fix-2-things", null), null);
-  assert.equal(extractTicketFromBranch("chore/bump-node-22", null), null);
-  assert.equal(extractTicketFromBranch("feat/STARK-9-thing", null), "STARK-9");
+test("extractTicketFromBranch: underscore counts as a separator", () => {
+  // `\b` treats `_` as a word char; a common branch convention uses it.
+  for (const b of ["feature_STARK-247", "STARK-247_wip", "wip_STARK-247"]) {
+    assert.equal(extractTicketFromBranch(b, "STARK"), "STARK-247", b);
+  }
+});
+
+test("extractTicketFromBranch: a key glued to another alnum does not match", () => {
+  assert.equal(extractTicketFromBranch("XSTARK-1", "STARK"), null);
+  assert.equal(extractTicketFromBranch("STARK-1x", "STARK"), null);
+});
+
+test("extractTicketFromBranch: a null key resolves nothing (no keyless mode)", () => {
+  assert.equal(extractTicketFromBranch("feat/STARK-9-thing", null), null);
+  assert.equal(extractTicketFromBranch("chore/AWS-2-upgrade", null), null);
 });
 
 test("extractTicketFromBranch: unrelated branches resolve to nothing", () => {
@@ -88,6 +109,14 @@ test("checkTitleTicket: rejects the wrong ticket", () => {
 test("checkTitleTicket: accepts the right ticket", () => {
   assert.equal(checkTitleTicket("feat(STARK-247): gate pr-open", "STARK-247"), null);
   assert.equal(checkTitleTicket("feat(STARK-9): any ticket", null), null);
+});
+
+test("checkTitleTicket: a wrong-case ticket names the real problem", () => {
+  // The ecosystem canonical is uppercase (the merge side requires it), so a
+  // lowercase title is still rejected — but the message must say why.
+  const why = checkTitleTicket("feat(stark-247): x", "STARK-247");
+  assert.match(why!, /must be upper-case/);
+  assert.doesNotMatch(why!, /must carry a ticket scope/);
 });
 
 // --- the preflight decision ------------------------------------------------
@@ -135,11 +164,27 @@ test("decideTicketRequirement: an explicit title on a ticket-less branch is hono
   );
 });
 
-test("decideTicketRequirement: an existing PR is never gated", () => {
-  // Its title is not being written here; failing would strand branches whose
-  // PR predates the policy.
+test("decideTicketRequirement: an existing PR with NO title change is not gated", () => {
+  // Its title is left untouched; failing would strand branches whose PR
+  // predates the policy.
   assert.equal(
     decideTicketRequirement({ policy: ON, branch: "feat/no-ticket", userTitle: null, existingPr: true }),
     null,
+  );
+});
+
+test("decideTicketRequirement: an existing PR retitled ticket-less is refused", () => {
+  // pr-open WRITES an explicit --title onto an existing PR, so it must be
+  // validated — otherwise the gate is bypassed by editing rather than creating.
+  assert.throws(
+    () => decideTicketRequirement({ policy: ON, branch: "stark-247", userTitle: "feat: no ticket", existingPr: true }),
+    /must carry a ticket scope/,
+  );
+});
+
+test("decideTicketRequirement: an existing PR retitled WITH the ticket is accepted", () => {
+  assert.equal(
+    decideTicketRequirement({ policy: ON, branch: "stark-247", userTitle: "feat(STARK-247): retitle", existingPr: true }),
+    "STARK-247",
   );
 });
