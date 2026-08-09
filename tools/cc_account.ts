@@ -70,8 +70,10 @@ import {
   mergeRefreshedCredentials,
   parseRefreshFlags,
   parseRefreshResponse,
+  planActiveSeat,
   readOauthBlob,
   seatMismatch,
+  type LiveCredentials,
   type RefreshFlags,
 } from "./cc_refresh_lib.ts";
 import { isLockStale } from "./lock_helpers_lib.ts";
@@ -145,6 +147,27 @@ function readProfileRecord(
       state: status === ERR_ITEM_NOT_FOUND ? "absent" : "unreadable",
       raw: null,
     };
+  }
+}
+
+/**
+ * Read the LIVE global credentials item as a tri-state.
+ *
+ * Same reasoning as `readProfileRecord` above, applied to the other Keychain
+ * item: `securityOrNull` collapses absent and unreadable, and the remedies are
+ * opposite — log in vs unlock the keychain. `cmdAdd` reads the same item and
+ * reports "run `claude` and log in first", so collapsing them here would make
+ * the two commands describe identical state contradictorily.
+ */
+function readLiveCredentials(): LiveCredentials {
+  try {
+    return {
+      state: "present",
+      credentials: security(readClaudeCredsArgv(CLAUDE_ACCOUNT)),
+    };
+  } catch (err) {
+    const status = (err as { status?: number }).status;
+    return { state: status === ERR_ITEM_NOT_FOUND ? "absent" : "unreadable" };
   }
 }
 
@@ -999,13 +1022,16 @@ interface RefreshOutcome {
   name: string;
   status:
     | "refreshed"
+    /** Renewed, but the endpoint named a seat the registry disagrees with. */
+    | "refreshed-mislabeled"
     | "fresh"
     | "dead"
     | "active"
+    /** Active seat whose stored copy is dead: the live token has rotated. */
+    | "stale-copy"
     | "no-credentials"
     | "unreadable"
     | "corrupt"
-    | "seat-mismatch"
     | "http-error"
     | "would-refresh";
   detail?: string;
@@ -1036,10 +1062,13 @@ async function cmdRefresh(flags: RefreshFlags): Promise<void> {
     return;
   }
 
-  // The seat a live session owns is off limits: rotating its refresh token
+  // The seat a live session owns is never refreshed: rotating its refresh token
   // out-of-band leaves the running CLI holding a dead one, and the next time it
   // renews — hours later, mid-task — it hard-fails to `/login`. Nothing in this
-  // tool can un-rotate a token, so this is a refusal, not a warning.
+  // tool can un-rotate a token. It is not skipped silently either — silence is
+  // how a stored copy rots into a revoked token — so `planActiveSeat` reports
+  // that copy's true state (read-only; see its docstring for why it must not
+  // write).
   const activeSeat = currentSeatKey();
   const now = Date.now();
   const outcomes: RefreshOutcome[] = [];
@@ -1061,11 +1090,29 @@ async function cmdRefresh(flags: RefreshFlags): Promise<void> {
   }
   for (const o of outcomes) {
     console.log(
-      `${o.name.padEnd(8)} ${o.status.padEnd(14)} ${o.detail ?? ""}`.trimEnd(),
+      `${o.name.padEnd(8)} ${o.status.padEnd(20)} ${o.detail ?? ""}`.trimEnd(),
     );
   }
   const renewed = outcomes.filter((o) => o.status === "refreshed").length;
   const dead = outcomes.filter((o) => o.status === "dead").length;
+  const stale = outcomes.filter((o) => o.status === "stale-copy").length;
+  const mislabeled = outcomes.filter(
+    (o) => o.status === "refreshed-mislabeled",
+  ).length;
+  if (stale > 0) {
+    console.log(
+      `\n${stale} active-seat profile(s) hold a STALE copy — the live token has ` +
+        `rotated, so the stored one is dead. Quit other \`claude\` sessions, ` +
+        `then \`add <name>\` each.`,
+    );
+  }
+  if (mislabeled > 0) {
+    console.log(
+      `${mislabeled} profile(s) renewed but are MISLABELED — the endpoint named ` +
+        `a different seat than the registry. The credential was written; the ` +
+        `name/seat mapping needs fixing.`,
+    );
+  }
   if (renewed > 0) {
     console.log(
       `\n${renewed} profile(s) renewed — access tokens good for ~8h, refresh ` +
@@ -1118,12 +1165,17 @@ async function refreshOne(
     seatKey &&
     seatKey.toLowerCase() === ctx.activeSeat.toLowerCase()
   ) {
+    // The active seat is never refreshed — rotating the live login's token
+    // leaves the running CLI to discover it hours later as a forced `/login`.
+    // But skipping silently is what let `Team-4` rot into a revoked token, so
+    // this reports the stored copy's true state instead. `planActiveSeat` owns
+    // the decision (pure + tested) and deliberately never writes — see its
+    // docstring for why auto-re-capture was worse than the bug it fixed.
+    //
+    // Read-only, so it is identical under --dry-run: no branch on the flag.
     return {
       name,
-      status: "active",
-      detail:
-        "skipped — this seat is the active login; rotating its token would " +
-        "break the running session",
+      ...planActiveSeat(name, record.credentials, readLiveCredentials()),
     };
   }
 
@@ -1205,16 +1257,11 @@ async function refreshOne(
     };
   }
 
+  // Reported, never acted on. Skipping the write here would discard the token
+  // that just rotated — the old one is already dead, so the response is the
+  // only live credential for that seat and dropping it kills the profile. The
+  // credential is right and the registry label is what drifted.
   const mismatch = seatMismatch(tokens, seatKey);
-  if (mismatch) {
-    return {
-      name,
-      status: "seat-mismatch",
-      detail:
-        `${mismatch}. Not written — this profile holds another seat's token; ` +
-        `re-\`add\` it while logged in as the right one.`,
-    };
-  }
 
   security(
     writeProfileArgv(
@@ -1231,11 +1278,18 @@ async function refreshOne(
       : Math.round((tokens.refreshTokenExpiresAt - Date.now()) / 8.64e7);
   return {
     name,
-    status: "refreshed",
+    // A mismatch gets its own status so it is never tallied as a clean renewal.
+    status: mismatch ? "refreshed-mislabeled" : "refreshed",
     detail:
       `access +${Math.round((tokens.expiresAt - Date.now()) / 3.6e6)}h` +
       (rtDays === null ? "" : `, refresh +${rtDays}d`) +
-      (seatKey ? "" : " (seat unverified — profile not in the registry)"),
+      (seatKey ? "" : " (seat unverified — profile not in the registry)") +
+      (mismatch
+        ? `\n         WARNING: ${mismatch}. The credential WAS written — it is ` +
+          `the only live token for that seat, and discarding it would destroy ` +
+          `the profile. Only the label is wrong: \`remove ${name}\`, then ` +
+          `\`add\` it while logged in as the seat that name should mean.`
+        : ""),
   };
 }
 
@@ -1262,7 +1316,9 @@ const USAGE = `usage: cc_account.ts <command>
   reset             forget EVERY stored login and start over
                     ( previews unless --yes · --snapshots also clears headroom )
   refresh <name>    renew a profile's tokens without a browser
-  refresh --all     renew every stale profile ( skips the active seat )
+  refresh --all     renew every stale profile
+                    ( the active seat is never refreshed — its stored copy
+                      is checked and reported instead )
                     ( --dry-run previews WITHOUT contacting the endpoint ·
                       --margin-hours N · --json )
   limits            headroom for every profile, best target first

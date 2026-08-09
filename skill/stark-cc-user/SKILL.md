@@ -33,7 +33,7 @@ identity when a GraphQL/REST bucket runs dry), but the mechanics differ — read
 - `/stark-cc-user prune [--dry-run]` — forget every profile with no stored credentials
 - `/stark-cc-user reset [--yes] [--snapshots]` — forget **every** stored login and start over (previews unless `--yes`)
 - `/stark-cc-user refresh <name>` — renew that profile's tokens, no browser
-- `/stark-cc-user refresh --all` — renew every stale profile (skips the active seat)
+- `/stark-cc-user refresh --all` — renew every stale profile (the active seat is checked and reported, never refreshed)
 - `/stark-cc-user refresh --all --dry-run` — report what is due **without contacting the endpoint**
 - `/stark-cc-user limits` — headroom for every profile, best target first
 - `/stark-cc-user next` — **switch to the next profile in the rotation**
@@ -102,18 +102,38 @@ work — and each one constrains the implementation:
 
 Consequences worth knowing before you touch this code:
 
-- **The active seat is refused, not warned about.** Rotating the live login's
-  token leaves the running CLI holding a dead one, and it discovers that hours
-  later as a forced `/login`. Switch away first if you must renew it.
+- **The active seat is never refreshed — its stored copy is CHECKED and
+  REPORTED.** Rotating the live login's token leaves the running CLI holding a
+  dead one, discovered hours later as a forced `/login`. But skipping it silently
+  is what let a profile rot into a revoked token: the running CLI rotates the
+  *global* Keychain item on its own schedule, so the stored copy dies while its
+  own `expiresAt` still reads hours ahead and every staleness check says `fresh`.
+  So `refresh` compares the stored refresh token against the live one and reports
+  `stale-copy` when they differ. **It does not repair it automatically**, and that
+  restraint is load-bearing: nothing local can tell "same account, rotated" from
+  "a different account's token is in the shared item right now" — the blob carries
+  no account uuid, and `~/.claude.json` is exactly what has gone stale in that
+  scenario. `seatIncoherence` only compares plan strings, so it fails open for
+  `team`↔`team` and `max`↔`max`, about half this fleet. An automatic copy would
+  therefore bottle one seat's token under another's identity and destroy a
+  non-re-derivable refresh token — worse than the silence it replaced. Repair is
+  deliberate: quit other `claude` sessions, then `add <name>`.
 - **`--dry-run` stops before the network call.** A preview that contacted the
   endpoint would rotate the token it was only meant to inspect.
 - **Runs hold a lock** (`~/.claude/.cc-refresh.lock`). Two concurrent refreshes
   of one profile both send the same token; the server honours one and kills it
   for the other, so the loser stores a dead credential.
 - **The response names the seat** (`account.uuid` + `organization.uuid`), so a
-  profile holding a *different* seat's token is refused instead of silently
-  re-pointed. This is the only check that catches a swap between two profiles on
-  the same plan type — `seatIncoherence` compares plan strings and cannot.
+  profile holding a *different* seat's token is reported. This is the only check
+  that catches a swap between two profiles on the same plan type —
+  `seatIncoherence` compares plan strings and cannot. It **warns and still
+  writes** (status `refreshed-mislabeled`, tallied separately from clean
+  renewals): the token that was sent is already dead, so the response is the only
+  live credential for that seat and refusing to store it would destroy the
+  profile. The credential is right; the registry *label* is what drifted. Fixing
+  the label means `remove <name>` then `add` while logged in as the seat that name
+  should mean — a bare `add` overwrites the credential with the current login's
+  rather than re-labelling the one you have.
 - **`dead` means `dead`.** Once the refresh token itself expires, nothing here
   recovers it: `claude /login` + `add <name>`.
 
