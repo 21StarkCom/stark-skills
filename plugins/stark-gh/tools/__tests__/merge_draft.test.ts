@@ -132,6 +132,54 @@ test("driveDraft: handles bare JSON output (no fence)", async () => {
   assert.equal(r.subject, "feat: bare");
 });
 
+// --- ticket-prefix inheritance (STARK-229) ---------------------------------
+
+const ticketCtx: DraftCtx = { ...ctx, prTitle: "feat(STARK-193): Human plane slice A" };
+
+test("buildMergePrompt: demands the PR title's ticket prefix on the subject", () => {
+  const prompt = buildMergePrompt(minimalPlan, ticketCtx);
+  assert.match(prompt, /REQUIRED SUBJECT PREFIX/);
+  assert.match(prompt, /MUST begin with exactly "feat\(STARK-193\): "/);
+  // The length budget the validator actually applies, so the model can satisfy
+  // both constraints on the first attempt.
+  assert.match(prompt, /72-char limit applies to\nthe summary AFTER the prefix/);
+});
+
+test("buildMergePrompt: no prefix rule when the title has no ticket scope", () => {
+  const prompt = buildMergePrompt(minimalPlan, ctx);
+  assert.doesNotMatch(prompt, /REQUIRED SUBJECT PREFIX/);
+});
+
+test("driveDraft: retries a prefix-less subject and accepts the corrected one", async () => {
+  let calls = 0;
+  const callCodex = (prompt: string) => {
+    calls++;
+    if (calls === 1) {
+      return '```json\n{"subject":"feat: add ClickUp-backed todo store","body":"b","changelog_bullet":"- ok"}\n```';
+    }
+    assert.match(prompt, /PREVIOUS ATTEMPT REJECTED/);
+    assert.match(prompt, /ticket prefix/);
+    return '```json\n{"subject":"feat(STARK-193): add ClickUp-backed todo store","body":"b","changelog_bullet":"- ok"}\n```';
+  };
+  const r = await driveDraft(minimalPlan, ticketCtx, callCodex);
+  assert.equal(calls, 2);
+  assert.equal(r.subject, "feat(STARK-193): add ClickUp-backed todo store");
+});
+
+test("driveDraft: throws rather than landing a prefix-less subject", async () => {
+  const callCodex = () => '```json\n{"subject":"feat: prefix-less","body":"b","changelog_bullet":"- ok"}\n```';
+  await assert.rejects(
+    () => driveDraft(minimalPlan, ticketCtx, callCodex),
+    /ticket prefix/,
+  );
+});
+
+test("driveDraft: unchanged when the PR title carries no ticket prefix", async () => {
+  const callCodex = () => '```json\n{"subject":"feat: no ticket here","body":"b","changelog_bullet":"- ok"}\n```';
+  const r = await driveDraft(minimalPlan, ctx, callCodex);
+  assert.equal(r.subject, "feat: no ticket here");
+});
+
 test("driveDraft: rejects output containing forbidden Closes #N", async () => {
   let calls = 0;
   const callCodex = () => {

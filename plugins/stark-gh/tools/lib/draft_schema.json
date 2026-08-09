@@ -9,7 +9,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 72,
-      "description": "Squash commit subject. Single line, no embedded newlines."
+      "description": "Squash commit subject. Single line, no embedded newlines. A PR-title-dependent ticket-prefix rule may also apply; draft_schema.ts is the contract (not expressible here)."
     },
     "body": {
       "type": "string",
