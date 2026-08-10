@@ -43,6 +43,9 @@ const SKILLS_ROOT = path.join(REPO_ROOT, "skill");
 // Add new entries here if a skill ever references another sibling repo.
 const CROSS_REPO_PREFIXES: readonly string[] = [
   "~/Code/21Stark/stark-insights/",
+  // stark-bury references the Náströnd graveyard repo (its README/template
+  // are the ritual's source of truth).
+  "~/Code/21Stark/nastrond/",
   // The Evinced production repos are mounted at ~/Code/Evinced; if a
   // skill ever references them directly, it would also be cross-repo.
   "~/Code/Evinced/",
