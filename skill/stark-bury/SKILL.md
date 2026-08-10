@@ -71,8 +71,9 @@ For every candidate file:
 
 ## Phase 2 — interment (nastrond PR #1)
 
-1. Dig `graves/<repo>/{code,data,backups}/` if absent — lazily, first corpse
-   only.
+1. Dig `graves/<repo>/<corpse>/{code,data,backups}/` — the `<repo>/` plot on
+   its first corpse, a fresh `<corpse>/` grave (kebab-case slug) every burial.
+   A repo can die many deaths; graves are never shared or reused.
 2. Copy the dedicated source **verbatim** into `code/`, preserving original
    paths so the snapshot reads coherently. Include tests, the feature's own
    docs (runbooks/specs/plans), and the schema DDL that defined its tables —
@@ -98,7 +99,7 @@ For every candidate file:
 
 - Rows worth remembering: `pg_dump` the corpse's tables, **age-seal** anything
   sensitive (`age -R ~/Code/21Stark/nastrond/.age-recipients -o
-  graves/<repo>/data/<name>-YYYY-MM-DD.sql.age <dump>.sql`), commit only the
+  graves/<repo>/<corpse>/data/<name>-YYYY-MM-DD.sql.age <dump>.sql`), commit only the
   `.age` file, shred the plaintext. Conversation transcripts and personal data
   are ALWAYS sensitive.
 - Dropping the live tables is a separate, operator-gated decision: sealed dump
@@ -110,7 +111,7 @@ For every candidate file:
 ## Full retirement (whole repo dies)
 
 `git bundle create /tmp/<repo>.bundle --all` in the dead repo → age-seal it to
-`graves/<repo>/backups/<repo>.bundle.age` → delete the plaintext bundle →
+`graves/<repo>/<repo>/backups/<repo>.bundle.age` (a full retirement is the plot's last grave, slugged after the repo itself) → delete the plaintext bundle →
 tombstone + INDEX row → archive the GitHub repo. A full history resurrects
 every secret ever committed — the bundle is NEVER committed raw.
 
