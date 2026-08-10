@@ -17,6 +17,7 @@ const NO_CLI = {
   allowSecretToLlm: false,
   allowSecretCommit: false,
   noWatch: false,
+  watchTimeoutExplicit: false,
 };
 
 // --- loading ---------------------------------------------------------------
@@ -74,10 +75,50 @@ test("present-but-broken fails closed", () => {
 
 // A read failure is not a syntax error, and saying so sent operators to inspect
 // the syntax of a file whose syntax was never the problem.
-test("a read failure is reported as a read failure", () => {
-  const r = loadMergeDefaults(() => { throw new Error("EACCES: permission denied"); });
-  assert.match(r.error ?? "", /could not be read from the merge base/);
+test("a read failure is reported as a read failure, naming the real source", () => {
+  const r = loadMergeDefaults(
+    () => { throw new Error("EACCES: permission denied"); },
+    "/repo/.stark-gh.json",
+  );
+  assert.match(r.error ?? "", /could not be read/);
+  // The message must name what was actually read. pr-open validates the local
+  // file, so blaming "the merge base" sent operators to inspect a ref that was
+  // fine while the real problem was a file mode.
+  assert.match(r.error ?? "", /\/repo\/\.stark-gh\.json/);
   assert.doesNotMatch(r.error ?? "", /not valid JSON/);
+});
+
+// A misspelling one level down is the same silently-inert config the top-level
+// check exists to refuse.
+test("a near-miss key INSIDE the merge block is fatal too", () => {
+  for (const key of ["allowNoRequiredCheck", "AllowSecretToLlm", "noWatchs"]) {
+    const r = loadMergeDefaults(at(JSON.stringify({ merge: { [key]: true } })));
+    assert.match(r.error ?? "", /did you mean/, `expected a fatal error for ${key}`);
+  }
+});
+
+test("a genuinely foreign merge key still only warns", () => {
+  const r = loadMergeDefaults(at('{"merge":{"someFutureKey":true}}'));
+  assert.equal(r.error, null);
+  assert.match(r.warning ?? "", /unknown merge key/);
+});
+
+// Announcing a timeout the CLI already overrode misreports the run on the one
+// line the operator reads to learn what is in force.
+test("a config timeout the CLI overrode is not announced", () => {
+  const cfg = { ...DEFAULT_MERGE_DEFAULTS, watchTimeoutHours: 24 };
+  const typed = describeSource(cfg, { ...NO_CLI, watchTimeoutExplicit: true });
+  assert.deepEqual(typed.filter((n) => n.flag.startsWith("--watch-timeout")), []);
+  const untyped = describeSource(cfg, NO_CLI);
+  assert.deepEqual(untyped.map((n) => n.flag), ["--watch-timeout 24"]);
+});
+
+// The cap is load-bearing on BOTH paths: the hours-for-milliseconds mix-up it
+// exists to catch is a typed mistake, so capping only the config half left the
+// likelier half open.
+test("--watch-timeout is capped like the config value", () => {
+  assert.throws(() => parseRawArgs(`19 --watch-timeout ${MAX_WATCH_TIMEOUT_HOURS + 1}`), /at most 168/);
+  assert.equal(parseRawArgs(`19 --watch-timeout ${MAX_WATCH_TIMEOUT_HOURS}`).watchTimeoutHours, MAX_WATCH_TIMEOUT_HOURS);
 });
 
 // The whole point is to stop a merge failing for a reason the file appears to
@@ -93,12 +134,6 @@ test("an unrelated unknown top-level key only warns", () => {
   const r = loadMergeDefaults(at('{"somethingElse":1}'));
   assert.equal(r.error, null);
   assert.match(r.warning ?? "", /unknown top-level key/);
-});
-
-test("unknown merge keys warn but do not block", () => {
-  const r = loadMergeDefaults(at('{"merge":{"nope":true}}'));
-  assert.equal(r.error, null);
-  assert.match(r.warning ?? "", /unknown merge key/);
 });
 
 // An unbounded timeout strands the PR behind a watcher that never exits.

@@ -36,8 +36,7 @@
 // is that escape hatch: it drops the file entirely for this run, which is also
 // the only way past a config that is committed-and-broken.
 
-import * as fs from "node:fs";
-import { REPO_CONFIG_BASENAME } from "./ticket.ts";
+import { KNOWN_TOP_LEVEL_KEYS, REPO_CONFIG_BASENAME } from "./ticket.ts";
 
 export interface MergeDefaults {
   allowNoRequiredChecks: boolean;
@@ -72,11 +71,6 @@ const BOOL_KEYS = [
   "noWatch",
 ] as const;
 
-// Keys the FILE may carry at the top level. `requireTicketScope`/`ticketKey`
-// belong to lib/ticket.ts; they are listed so this loader does not call them
-// unknown, exactly as ticket.ts lists `merge`.
-const KNOWN_TOP_LEVEL = new Set(["requireTicketScope", "ticketKey", "merge"]);
-
 // One week. A watcher's timeout is its only guaranteed exit: it holds a lock
 // that blocks every later merge of the same PR, so an unbounded value (a
 // milliseconds-for-hours mix-up, say) strands the PR behind a process that must
@@ -91,7 +85,11 @@ export const MAX_WATCH_TIMEOUT_HOURS = 168;
 // not exist there. Injecting it keeps this module pure and testable, and keeps
 // the trust boundary in one place.
 export function loadMergeDefaults(
-  readAtRef: () => string | null,
+  read: () => string | null,
+  // How to name the source in an error. The merge path reads a git ref; pr-open
+  // validates the working-tree copy. Hardcoding "the merge base" sent operators
+  // to inspect a ref that was fine when the real problem was a local file mode.
+  sourceLabel = REPO_CONFIG_BASENAME,
 ): MergeDefaultsLoad {
   const clean = { defaults: { ...DEFAULT_MERGE_DEFAULTS }, warning: null, error: null };
   const fatal = (msg: string): MergeDefaultsLoad => ({
@@ -105,9 +103,9 @@ export function loadMergeDefaults(
   // never the problem — and, for EACCES, one they cannot open at all.
   let text: string | null;
   try {
-    text = readAtRef();
+    text = read();
   } catch (err) {
-    return fatal(`could not be read from the merge base (${(err as Error).message})`);
+    return fatal(`could not be read (${sourceLabel}): ${(err as Error).message}`);
   }
   if (text === null) return clean;
 
@@ -127,7 +125,7 @@ export function loadMergeDefaults(
   // exists to remove, wearing a correct-looking config file: `{"Merge":{…}}`
   // would otherwise be silently inert and the operator would watch the merge
   // fail for reasons the file appears to have already handled.
-  const unknownTop = Object.keys(o).filter((k) => !KNOWN_TOP_LEVEL.has(k));
+  const unknownTop = Object.keys(o).filter((k) => !KNOWN_TOP_LEVEL_KEYS.has(k));
   if (unknownTop.length) {
     const nearMiss = unknownTop.find((k) => k.toLowerCase().replace(/s$/, "") === "merge");
     if (nearMiss) {
@@ -167,8 +165,19 @@ export function loadMergeDefaults(
     defaults.watchTimeoutHours = v;
   }
 
+  // A misspelling INSIDE the block is the same failure as one at the top level:
+  // the file looks correct, the setting does nothing, and the operator watches
+  // the merge fail for a reason the config appears to have handled. So a key
+  // that is a near-miss of a real one is fatal; only a genuinely foreign key
+  // (a future version's, say) degrades to a warning.
   const known = new Set<string>([...BOOL_KEYS, "watchTimeoutHours"]);
+  const canon = (k: string) => k.toLowerCase().replace(/s$/, "");
+  const knownCanon = new Map([...known].map((k) => [canon(k), k]));
   const unknown = Object.keys(m).filter((k) => !known.has(k));
+  for (const k of unknown) {
+    const hit = knownCanon.get(canon(k));
+    if (hit) return fatal(`unknown merge key "${k}" — did you mean "${hit}"?`);
+  }
   if (unknown.length) warnings.push(`ignoring unknown merge key(s) ${unknown.join(", ")}`);
   return {
     defaults,
@@ -195,6 +204,7 @@ export function describeSource(
     allowSecretToLlm: boolean;
     allowSecretCommit: boolean;
     noWatch: boolean;
+    watchTimeoutExplicit: boolean;
   },
 ): WaiverNote[] {
   const out: WaiverNote[] = [];
@@ -206,7 +216,10 @@ export function describeSource(
   note("--allow-secret-to-llm", cli.allowSecretToLlm, defaults.allowSecretToLlm);
   note("--allow-secret-commit", cli.allowSecretCommit, defaults.allowSecretCommit);
   note("--no-watch", cli.noWatch, defaults.noWatch);
-  if (defaults.watchTimeoutHours !== null) {
+  // Only when it is actually the value in force. Announcing a config timeout an
+  // explicit --watch-timeout already overrode tells the operator a number that
+  // is not the one being used, on the very line they read to find out.
+  if (defaults.watchTimeoutHours !== null && !cli.watchTimeoutExplicit) {
     out.push({ flag: `--watch-timeout ${defaults.watchTimeoutHours}`, fromConfig: true });
   }
   return out;

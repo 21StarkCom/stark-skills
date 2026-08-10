@@ -24,19 +24,22 @@ tool, which subprocess-calls `codex exec` with a scrubbed env.
 ## Per-repo defaults
 
 A target repo may state its own defaults in a `merge` block of `.stark-gh.json`
-at its root — the same file `$stark-gh:pr-open` reads for ticket enforcement:
+on its **default branch** — the same file `$stark-gh:pr-open` reads for ticket
+enforcement:
 
 ```json
 { "merge": { "allowNoRequiredChecks": true, "noWatch": true } }
 ```
 
 Keys: `allowNoRequiredChecks`, `allowSecretToLlm`, `allowSecretCommit`,
-`noWatch`, `watchTimeoutHours` (≤168).
+`noWatch`, `watchTimeoutHours` (≤168, same cap as the flag).
 
-**Read from the merge BASE, never the working tree.** These settings waive the
-gates that police the diff being merged, so a branch cannot ship the waivers
-that would clear its own contents. A branch may propose a change; it takes
-effect once merged.
+**Read from the DEFAULT branch, after the fetch — never the working tree, and
+never the PR's own base.** These settings waive the gates that police the diff
+being merged, so a branch could otherwise ship the waivers that clear its own
+contents; a stacked PR could do the same by targeting a branch its author just
+pushed. A PR based on anything other than the default branch is told the file
+was skipped.
 
 **Config supplies defaults; the command line wins.** Since every key only turns
 something on, there is no way to OR one back off — `--ignore-repo-config` drops
@@ -44,8 +47,8 @@ the file for a single run, and is also the way past a config that is committed
 and broken.
 
 You do not pass any of this yourself: preflight resolves it and prints
-`in effect — <flag>: .stark-gh.json` for everything it picked up, gate waivers
-included in the audit log with their provenance.
+`in effect — <flag>: .stark-gh.json` for everything it applied, with gate
+waivers written to the audit log carrying their provenance.
 
 Why it exists: some of these flags describe a fact about the repo rather than a
 choice about one run. A repo with no PR CI has no required checks to wait for,

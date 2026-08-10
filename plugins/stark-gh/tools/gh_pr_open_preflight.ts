@@ -404,22 +404,48 @@ export function buildPlan(input: BuildPlanInput): Plan {
   const userArgs = parseRawArgs(input.rawArgs);
   const state = collectState({ exec: input.exec, baseOverride: userArgs.base, commitAll: userArgs.commitAll });
 
+  // Both halves of `.stark-gh.json` are read here, from ONE repoRoot lookup and
+  // ONE file read. Each loader used to resolve the root and re-read/re-parse the
+  // file itself, which spawned two subprocesses for a value that cannot change
+  // mid-run and printed two near-identical warnings for a single unknown key.
+  const repoRootPath = gitLib.repoRoot({ exec: input.exec });
+  const cfgPath = path.join(repoRootPath, REPO_CONFIG_BASENAME);
+  let cfgText: string | null = null;
+  let cfgReadError: Error | null = null;
+  try {
+    cfgText = fs.existsSync(cfgPath) ? fs.readFileSync(cfgPath, "utf8") : null;
+  } catch (err) {
+    cfgReadError = err as Error;
+  }
+
   // Ticket-scope gate — evaluated here, before the base fetch / diffs / secret
   // scan, so a rejection fails fast instead of after that network+CPU work.
-  const ticketLoad = loadTicketPolicy(gitLib.repoRoot({ exec: input.exec }));
+  const ticketLoad = loadTicketPolicy(
+    repoRootPath,
+    () => { if (cfgReadError) throw cfgReadError; return cfgText ?? ""; },
+    () => cfgText !== null || cfgReadError !== null,
+  );
   if (ticketLoad.error) throw new Error(`ticket-scope:${ticketLoad.error}`);
   if (ticketLoad.warning) process.stderr.write(`${ticketLoad.warning}\n`);
 
-  // Validate the file's `merge` half here too. pr-open is the command that runs
-  // FIRST, and a typo in that block is otherwise silent until pr-merge — where
-  // it is fatal, so the operator learns about it at the one command that can no
-  // longer proceed, with a PR already open. This validates only; pr-merge is
-  // still the only consumer, and reads it from the base ref rather than here.
-  const mergeBlock = loadMergeDefaults(() => {
-    const p = path.join(gitLib.repoRoot({ exec: input.exec }), REPO_CONFIG_BASENAME);
-    return fs.existsSync(p) ? fs.readFileSync(p, "utf8") : null;
-  });
-  if (mergeBlock.error) throw new Error(`repo-config:${mergeBlock.error}`);
+  // The `merge` half is VALIDATED here but never applied — pr-merge is its only
+  // consumer, and reads it from the default branch rather than the working tree.
+  // Validating early is the whole point: pr-open runs first, so a typo caught
+  // here is a one-line fix, while the same typo discovered at pr-merge is
+  // discovered at the one command that can no longer proceed, with the PR
+  // already open.
+  //
+  // A WARNING, deliberately, not a hard failure. Refusing to open a PR because
+  // a file it does not use is malformed would let one bad commit on the default
+  // branch block every branch in the repo — and unlike pr-merge, pr-open has no
+  // --ignore-repo-config to get past it.
+  const mergeBlock = loadMergeDefaults(
+    () => { if (cfgReadError) throw cfgReadError; return cfgText; },
+    cfgPath,
+  );
+  if (mergeBlock.error) {
+    process.stderr.write(`warning: ${mergeBlock.error} — /stark-gh:pr-merge will refuse until this is fixed\n`);
+  }
   if (mergeBlock.warning) process.stderr.write(`${mergeBlock.warning}\n`);
   const requiredTitleTicket = decideTicketRequirement({
     policy: ticketLoad.policy,
