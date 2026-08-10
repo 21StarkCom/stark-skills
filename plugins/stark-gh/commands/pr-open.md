@@ -100,9 +100,13 @@ On nonzero exit, surface stderr verbatim and stop.
 `--commit-all` runs `git add -A`, which stages **untracked** files as well as
 modified ones. Before it does, the staging step lists what `-A` would newly add
 (`git ls-files --others --exclude-standard`) and **refuses** if any of it looks
-like local config or credential material — `.envrc`, `.env*`, `*.pem`, `*.key`,
-`id_rsa`, `client_secret*.json`, `service-account*.json`, `credentials.json`,
-`*.tfstate`, `.direnv/`, `.claude/`, `.netrc`, `.DS_Store`.
+like local config or credential material: local environment and direnv files,
+key and certificate material, SSH private keys, service-credential JSON,
+Terraform state and variable files, and editor/agent/OS local state.
+
+The exact pattern list lives in `tools/lib/untracked_guard.ts` and is not
+duplicated here — a copy in prose drifts from the code it describes, and the
+code is the thing that actually decides.
 
 This is **path**-based on purpose, and complements the existing **content**-based
 secret scan rather than duplicating it. On 2026-08-10 `git add -A` swept a repo's
@@ -122,8 +126,8 @@ is nothing to unstage. It names each file and both remedies:
 - **If you mean it:** re-run with `--allow-untracked-config`, or stage the files
   yourself and use `--staged-only`.
 
-Published examples (`.env.example`, `.envrc.sample`, `*.pub`, `*pubkeys/*.pem`)
-are never flagged — friction that stops ordinary work gets disabled, and then it
+Published example variants (the `.example` / `.sample` / `.template` forms),
+public keys and `*pubkeys/` directories are never flagged — friction that stops ordinary work gets disabled, and then it
 protects nothing. A repo whose `.gitignore` already covers these files sees no
 behaviour change at all: `--exclude-standard` means the guard never sees them.
 
