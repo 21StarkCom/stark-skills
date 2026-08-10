@@ -1,5 +1,9 @@
 ---
 name: stark-bury
+# Claude-only: burials are deliberate operator ceremonies run in Claude Code;
+# no Codex runtime override is authored (exempts the bifrost codex overlay gate).
+runtimes:
+  - claude
 description: >-
   Use when retiring 21Stark code into the Náströnd graveyard — burying a
   subsystem of a living repo (partial burial) or putting down a whole repo
