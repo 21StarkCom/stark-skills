@@ -85,7 +85,10 @@ export function loadTicketPolicy(
     return fatal('requireTicketScope needs a "ticketKey" (e.g. "STARK") to anchor on');
   }
 
-  const known = new Set(["requireTicketScope", "ticketKey"]);
+  // "merge" is the pr-merge defaults block, owned by lib/merge_config.ts. It is
+  // known-but-not-ours: without it here, every repo using merge defaults would
+  // draw an "ignoring unknown key" warning from the ticket loader.
+  const known = new Set(["requireTicketScope", "ticketKey", "merge"]);
   const unknown = Object.keys(o).filter((k) => !known.has(k));
   const warning = unknown.length ? `${REPO_CONFIG_BASENAME}: ignoring unknown key(s) ${unknown.join(", ")}` : null;
   return { policy: { requireTicketScope, ticketKey }, warning, error: null };

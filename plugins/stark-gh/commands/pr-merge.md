@@ -13,6 +13,27 @@ model: opus
 
 Open-PR squash-merge pipeline. Three TS stages: preflight, draft, execute.
 
+## Per-repo defaults
+
+A target repo may state its own defaults in a `merge` block of `.stark-gh.json`
+at its root — the same file `/stark-gh:pr-open` reads for ticket enforcement:
+
+```json
+{ "merge": { "allowNoRequiredChecks": true, "noWatch": true } }
+```
+
+Keys: `allowNoRequiredChecks`, `allowSecretToLlm`, `allowSecretCommit`,
+`noWatch`, `watchTimeoutHours`. **Config supplies defaults; anything typed on
+the command line wins.** You do not need to read or pass these — preflight
+resolves them itself, and prints `waiver in effect — <flag>: .stark-gh.json`
+for any waiver it picked up, so a config-supplied one stays as visible and as
+audited as a typed one.
+
+This exists because some of these flags describe a fact about the repo rather
+than a choice about one run. A repo with no CI on pull requests otherwise makes
+the watcher wait out its full timeout — merging nothing and erroring nothing —
+unless whoever runs the merge remembers the flag every time.
+
 YOU MUST NOT splice user input into shell commands. Forward `$ARGUMENTS`
 verbatim as a single quoted `--raw-args` value to preflight.
 

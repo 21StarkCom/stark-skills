@@ -32,6 +32,7 @@ import { scanSecrets } from "./lib/secret.ts";
 import { evaluateLockLiveness, lockKind, preemptCiObserver, readLock, watcherLockPath, watcherStateLatestPath } from "./lib/watcher_lock.ts";
 import { appendPrMergeOverride, SECRET_TO_LLM_WARNING } from "./lib/audit.ts";
 import { resolveDraftConfig } from "./lib/config.ts";
+import { applyMergeDefaults, describeSource, loadMergeDefaults } from "./lib/merge_config.ts";
 import { fetchRequiredCheckRollup, summarizeVerdict } from "./lib/checks_graphql.ts";
 
 export interface MergeUserArgs {
@@ -45,6 +46,11 @@ export interface MergeUserArgs {
   allowSecretToLlm: boolean;
   allowNoRequiredChecks: boolean;
   allowSkippedChecks: boolean;
+  // Whether --watch-timeout was actually typed. Needed because the field is
+  // pre-seeded with the default, so its value alone cannot distinguish "not
+  // passed" from "passed the same number as the default" — and a repo config
+  // must not silently lose to a value the operator never gave.
+  watchTimeoutExplicit: boolean;
 }
 
 const DEFAULT_WATCH_TIMEOUT_HOURS = 6;
@@ -63,6 +69,7 @@ export function parseRawArgs(raw: string): MergeUserArgs {
     allowSecretToLlm: false,
     allowNoRequiredChecks: false,
     allowSkippedChecks: false,
+    watchTimeoutExplicit: false,
   };
   const need = (i: number, flag: string): string => {
     if (i >= tokens.length) throw new Error(`flag ${flag} requires a value`);
@@ -106,6 +113,7 @@ export function parseRawArgs(raw: string): MergeUserArgs {
         const v = Number(need(++i, t));
         if (!(v > 0)) throw new Error(`--watch-timeout must be positive number of hours; got ${tokens[i]}`);
         a.watchTimeoutHours = v;
+        a.watchTimeoutExplicit = true;
         break;
       }
       case "--allow-secret-commit":
@@ -194,6 +202,28 @@ async function main(argv: string[]): Promise<number> {
     die(MergeExit.BAD_ARGS, `argument parse error: ${(err as Error).message}`);
   }
 
+  // Repo-local defaults are resolved BEFORE the audit block, so a waiver that
+  // came from `.stark-gh.json` is audited exactly like a typed one. Moving a
+  // flag into a file is meant to stop it being forgotten, not to stop it being
+  // recorded. That needs the repo root, so the is-a-git-repo check moves up
+  // here from the working-tree gate below; it is a read, and gates nothing.
+  if (!gitLib.isGitRepo()) {
+    die(MergeExit.BAD_ARGS, "not in a git repository");
+  }
+  const mergeCfg = loadMergeDefaults(gitLib.repoRoot());
+  if (mergeCfg.error) {
+    // Fails CLOSED, like the ticket policy: a repo that opted into merge
+    // defaults and then broke them must not silently fall back to the built-ins
+    // — the silent fallback is the exact failure this feature removes.
+    die(MergeExit.BAD_ARGS, mergeCfg.error);
+  }
+  if (mergeCfg.warning) process.stderr.write(mergeCfg.warning + "\n");
+  const cliArgs = userArgs;
+  userArgs = applyMergeDefaults(userArgs, mergeCfg.defaults, userArgs.watchTimeoutExplicit);
+  for (const line of describeSource(mergeCfg.defaults, cliArgs)) {
+    process.stderr.write(`waiver in effect — ${line}\n`);
+  }
+
   // Always-on overrides audit (write before any auditable gate per plan H15).
   const runId = crypto.randomUUID();
   const stamp = new Date().toISOString();
@@ -213,10 +243,8 @@ async function main(argv: string[]): Promise<number> {
     process.stderr.write(SECRET_TO_LLM_WARNING + "\n");
   }
 
-  // Step 2: working-tree gate
-  if (!gitLib.isGitRepo()) {
-    die(MergeExit.BAD_ARGS, "not in a git repository");
-  }
+  // Step 2: working-tree gate (the is-a-git-repo check ran above, with the
+  // repo-config load that needs it).
   const gitDir = gitLib.git(["rev-parse", "--git-dir"]).trim();
   const wtBlocker = workingTreeBlocker({
     porcelain: gitLib.statusPorcelain(),
