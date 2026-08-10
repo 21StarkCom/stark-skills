@@ -29,6 +29,22 @@ export function git(
   return exec("git", args, { input: opts.input, streamStderr: opts.streamStderr }).toString("utf8");
 }
 
+// Content of a path as it exists at `ref`, or null when the path is absent
+// there. Used to read repo policy from the merge BASE rather than the checked
+// out branch, so a PR cannot supply the settings that police its own diff.
+// Distinguishes "not present at that ref" (null) from a real git failure
+// (throws), because treating an unreachable ref as an absent file would
+// silently drop the policy.
+export function fileAtRef(ref: string, relPath: string, opts: { exec?: ExecFn } = {}): string | null {
+  try {
+    return git(["show", `${ref}:${relPath}`], opts);
+  } catch (err) {
+    const msg = String((err as { stderr?: unknown }).stderr ?? (err as Error).message ?? "");
+    if (/does not exist|exists on disk, but not in|path .* does not exist/i.test(msg)) return null;
+    throw err;
+  }
+}
+
 export function isGitRepo(opts: { exec?: ExecFn } = {}): boolean {
   try {
     git(["rev-parse", "--git-dir"], opts);

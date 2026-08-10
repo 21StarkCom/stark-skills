@@ -45,13 +45,24 @@ export function appendSecretOverride(entry: SecretOverrideAuditEntry): void {
 // whether the override actually bypassed a gate. runId is generated before
 // any auditable gate so the line is logged once per run.
 
+export type PrMergeOverrideFlag =
+  | "--force"
+  | "--allow-secret-commit"
+  | "--allow-secret-to-llm"
+  | "--allow-no-required-checks";
+
 export interface PrMergeOverrideEntry {
   timestamp: string;
   runId: string;
   pr: number;
-  flag: "--force" | "--allow-secret-commit" | "--allow-secret-to-llm";
+  flag: PrMergeOverrideFlag;
   user: string;
   hostname: string;
+  // Where the override came from. A repo-config waiver is standing policy and
+  // recurs on every run; a typed one is a decision someone made about THIS
+  // merge. Recording them identically made the log unable to answer the
+  // question it exists for, since the standing ones drown the deliberate one.
+  source: "cli" | "repo-config";
   reason: string;          // required for --force; freeform but non-empty
 }
 

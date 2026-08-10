@@ -2,13 +2,28 @@
 // policy lives in (lib/ticket.ts owns that file's other half).
 //
 // Why this exists: several merge flags describe a FACT about the target repo,
-// not a choice about one run. `workplan-tools` deliberately has no CI on pull
-// requests, so `/stark-gh:pr-merge` there spawns a watcher, observes no
-// required checks, and waits out its 6-hour timeout — merging nothing, erroring
-// nothing, and explaining nothing. The only fix was for whoever ran the merge to
-// remember `--allow-no-required-checks` every single time. A rule an operator
-// has to remember is a rule that gets missed; a repo-local file states the fact
-// once, next to the repo it is true of.
+// not a choice about one run. A repo with no CI on pull requests has no
+// required checks to wait for, so `/stark-gh:pr-merge` stops with
+// `no_required_checks` after the 300s grace (gh_watch_runs.ts) — naming
+// `--allow-no-required-checks` as the remedy — and the operator must retype
+// that flag on every single merge, forever, for a fact that never changes.
+// Stating it once, in the repo it is true of, is what this replaces.
+//
+// NOTE what the motivation is NOT. It is not a silent hang: since 2026-07-29
+// a persistently vacuous rollup goes terminal with an explicit named remedy,
+// and a non-draft PR is refused up front. The cost here is repetition, not
+// data loss — which is exactly why the SECRET waivers are read from the base
+// branch only (below) rather than treated as ordinary conveniences.
+//
+// # Trust boundary: config comes from the BASE, never the working tree
+//
+// These settings waive gates that police the very diff being merged. Reading
+// them from the checked-out branch would let a PR authorize itself: a branch
+// that commits `{"merge":{"allowSecretCommit":true}}` next to a live token
+// would turn off the scan that would have caught it, and the token would land
+// on main. So the file is read from the merge BASE ref — content that is
+// already on the trunk, reviewed by whatever process guards it. A branch may
+// propose a change to these settings; it cannot benefit from it until merged.
 //
 // Shape (all keys optional):
 //
@@ -16,17 +31,12 @@
 //
 // Precedence: config supplies DEFAULTS; the command line wins. Every flag here
 // is a boolean that only ever turns something ON, so "CLI wins" reduces to a
-// logical OR — with the deliberate consequence that a config cannot be
-// overridden back to off from the command line. If that is ever needed, the
-// answer is an explicit `--no-<flag>`, not making the file authoritative.
-//
-// The secret waivers are settable here by explicit decision (2026-08-10), so a
-// repo whose committed fixtures trip the scanner every run can say so once.
-// They are reported on every run regardless of where they came from — see
-// describeSource — because a waiver nobody can see is a waiver nobody reviews.
+// logical OR — and a config could therefore never be turned back off for one
+// run, which stranded merges behind settings nobody typed. `--ignore-repo-config`
+// is that escape hatch: it drops the file entirely for this run, which is also
+// the only way past a config that is committed-and-broken.
 
 import * as fs from "node:fs";
-import * as path from "node:path";
 import { REPO_CONFIG_BASENAME } from "./ticket.ts";
 
 export interface MergeDefaults {
@@ -50,8 +60,8 @@ export interface MergeDefaultsLoad {
   warning: string | null;
   // Fatal: the file is PRESENT but its `merge` block is unusable. Same rule the
   // ticket policy follows — a config that was opted into fails CLOSED rather
-  // than silently reverting to the built-in defaults, because the silent revert
-  // is indistinguishable from the bug this feature exists to remove.
+  // than silently reverting to the built-in defaults. `--ignore-repo-config`
+  // is the deliberate way past it, so one bad commit cannot wedge a repo.
   error: string | null;
 }
 
@@ -62,27 +72,48 @@ const BOOL_KEYS = [
   "noWatch",
 ] as const;
 
-// Reads the `merge` block of <repoRoot>/.stark-gh.json. A missing file, or a
-// file with no `merge` key, yields the built-in defaults and is not an error:
-// most repos never need this.
-export function loadMergeDefaults(
-  repoRoot: string,
-  readFile: (p: string) => string = (p) => fs.readFileSync(p, "utf8"),
-  exists: (p: string) => boolean = fs.existsSync,
-): MergeDefaultsLoad {
-  const cfgPath = path.join(repoRoot, REPO_CONFIG_BASENAME);
-  const clean = { defaults: { ...DEFAULT_MERGE_DEFAULTS }, warning: null, error: null };
-  if (!exists(cfgPath)) return clean;
+// Keys the FILE may carry at the top level. `requireTicketScope`/`ticketKey`
+// belong to lib/ticket.ts; they are listed so this loader does not call them
+// unknown, exactly as ticket.ts lists `merge`.
+const KNOWN_TOP_LEVEL = new Set(["requireTicketScope", "ticketKey", "merge"]);
 
+// One week. A watcher's timeout is its only guaranteed exit: it holds a lock
+// that blocks every later merge of the same PR, so an unbounded value (a
+// milliseconds-for-hours mix-up, say) strands the PR behind a process that must
+// be found and killed by hand.
+export const MAX_WATCH_TIMEOUT_HOURS = 168;
+
+// Reads the `merge` block of `<ref>:.stark-gh.json`. A missing file, or a file
+// with no `merge` key, yields the built-in defaults and is not an error: most
+// repos never need this.
+//
+// `readAtRef` returns the file's content at the base ref, or null when it does
+// not exist there. Injecting it keeps this module pure and testable, and keeps
+// the trust boundary in one place.
+export function loadMergeDefaults(
+  readAtRef: () => string | null,
+): MergeDefaultsLoad {
+  const clean = { defaults: { ...DEFAULT_MERGE_DEFAULTS }, warning: null, error: null };
   const fatal = (msg: string): MergeDefaultsLoad => ({
     defaults: { ...DEFAULT_MERGE_DEFAULTS },
     warning: null,
     error: `${REPO_CONFIG_BASENAME}: ${msg}`,
   });
 
+  // Read failures are reported as read failures. Folding them into the JSON
+  // catch below sent operators to inspect the syntax of a file whose syntax was
+  // never the problem — and, for EACCES, one they cannot open at all.
+  let text: string | null;
+  try {
+    text = readAtRef();
+  } catch (err) {
+    return fatal(`could not be read from the merge base (${(err as Error).message})`);
+  }
+  if (text === null) return clean;
+
   let raw: unknown;
   try {
-    raw = JSON.parse(readFile(cfgPath));
+    raw = JSON.parse(text);
   } catch (err) {
     return fatal(`not valid JSON (${(err as Error).message})`);
   }
@@ -90,7 +121,28 @@ export function loadMergeDefaults(
     return fatal("must be a JSON object");
   }
   const o = raw as Record<string, unknown>;
-  if (o.merge === undefined) return clean;
+
+  const warnings: string[] = [];
+  // A misspelled or miscased top-level key is the failure this whole feature
+  // exists to remove, wearing a correct-looking config file: `{"Merge":{…}}`
+  // would otherwise be silently inert and the operator would watch the merge
+  // fail for reasons the file appears to have already handled.
+  const unknownTop = Object.keys(o).filter((k) => !KNOWN_TOP_LEVEL.has(k));
+  if (unknownTop.length) {
+    const nearMiss = unknownTop.find((k) => k.toLowerCase().replace(/s$/, "") === "merge");
+    if (nearMiss) {
+      return fatal(`unknown top-level key "${nearMiss}" — did you mean "merge"?`);
+    }
+    warnings.push(`ignoring unknown top-level key(s) ${unknownTop.join(", ")}`);
+  }
+
+  if (o.merge === undefined) {
+    return {
+      defaults: { ...DEFAULT_MERGE_DEFAULTS },
+      warning: warnings.length ? `${REPO_CONFIG_BASENAME}: ${warnings.join("; ")}` : null,
+      error: null,
+    };
+  }
   if (typeof o.merge !== "object" || o.merge === null || Array.isArray(o.merge)) {
     return fatal("merge must be a JSON object");
   }
@@ -107,34 +159,61 @@ export function loadMergeDefaults(
     if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) {
       return fatal("merge.watchTimeoutHours must be a positive number of hours");
     }
+    if (v > MAX_WATCH_TIMEOUT_HOURS) {
+      return fatal(
+        `merge.watchTimeoutHours must be at most ${MAX_WATCH_TIMEOUT_HOURS} (one week); got ${v} — hours, not milliseconds`,
+      );
+    }
     defaults.watchTimeoutHours = v;
   }
 
   const known = new Set<string>([...BOOL_KEYS, "watchTimeoutHours"]);
   const unknown = Object.keys(m).filter((k) => !known.has(k));
-  const warning = unknown.length
-    ? `${REPO_CONFIG_BASENAME}: ignoring unknown merge key(s) ${unknown.join(", ")}`
-    : null;
-  return { defaults, warning, error: null };
+  if (unknown.length) warnings.push(`ignoring unknown merge key(s) ${unknown.join(", ")}`);
+  return {
+    defaults,
+    warning: warnings.length ? `${REPO_CONFIG_BASENAME}: ${warnings.join("; ")}` : null,
+    error: null,
+  };
 }
 
-// Which waivers this run is operating under, and where each came from. Printed
-// by preflight so a config-supplied waiver is as visible as a typed one — the
-// point of moving them into a file was to stop them being FORGOTTEN, not to
-// stop them being seen.
+export interface WaiverNote {
+  flag: string;
+  fromConfig: boolean;
+}
+
+// Every setting this run is operating under, and where each came from.
+//
+// ALL of them, not just the allow* trio: a config-supplied `noWatch` skips the
+// wait for CI to go green, which is as consequential as any waiver and was
+// previously the one setting nothing printed. A waiver nobody can see is a
+// waiver nobody reviews.
 export function describeSource(
   defaults: MergeDefaults,
-  cli: { allowNoRequiredChecks: boolean; allowSecretToLlm: boolean; allowSecretCommit: boolean },
-): string[] {
-  const out: string[] = [];
+  cli: {
+    allowNoRequiredChecks: boolean;
+    allowSecretToLlm: boolean;
+    allowSecretCommit: boolean;
+    noWatch: boolean;
+  },
+): WaiverNote[] {
+  const out: WaiverNote[] = [];
   const note = (flag: string, fromCli: boolean, fromCfg: boolean) => {
     if (!fromCli && !fromCfg) return;
-    out.push(`${flag}: ${fromCli ? "command line" : `${REPO_CONFIG_BASENAME}`}`);
+    out.push({ flag, fromConfig: !fromCli });
   };
   note("--allow-no-required-checks", cli.allowNoRequiredChecks, defaults.allowNoRequiredChecks);
   note("--allow-secret-to-llm", cli.allowSecretToLlm, defaults.allowSecretToLlm);
   note("--allow-secret-commit", cli.allowSecretCommit, defaults.allowSecretCommit);
+  note("--no-watch", cli.noWatch, defaults.noWatch);
+  if (defaults.watchTimeoutHours !== null) {
+    out.push({ flag: `--watch-timeout ${defaults.watchTimeoutHours}`, fromConfig: true });
+  }
   return out;
+}
+
+export function renderWaiver(n: WaiverNote): string {
+  return `${n.flag}: ${n.fromConfig ? REPO_CONFIG_BASENAME : "command line"}`;
 }
 
 // Config supplies defaults; the command line wins. Booleans only turn things on,
@@ -146,8 +225,9 @@ export function applyMergeDefaults<
     allowSecretCommit: boolean;
     noWatch: boolean;
     watchTimeoutHours: number;
+    watchTimeoutExplicit: boolean;
   },
->(args: T, defaults: MergeDefaults, watchTimeoutWasExplicit: boolean): T {
+>(args: T, defaults: MergeDefaults): T {
   return {
     ...args,
     allowNoRequiredChecks: args.allowNoRequiredChecks || defaults.allowNoRequiredChecks,
@@ -155,7 +235,7 @@ export function applyMergeDefaults<
     allowSecretCommit: args.allowSecretCommit || defaults.allowSecretCommit,
     noWatch: args.noWatch || defaults.noWatch,
     watchTimeoutHours:
-      watchTimeoutWasExplicit || defaults.watchTimeoutHours === null
+      args.watchTimeoutExplicit || defaults.watchTimeoutHours === null
         ? args.watchTimeoutHours
         : defaults.watchTimeoutHours,
   };

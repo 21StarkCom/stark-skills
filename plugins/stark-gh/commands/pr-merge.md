@@ -4,7 +4,7 @@ description: >-
   Rebase a PR, draft squash-commit prose + CHANGELOG bullet via Codex
   (changelog step skipped when the repo keeps no root CHANGELOG.md),
   force-push, mark a draft PR ready-for-review, and squash-merge once CI is green.
-argument-hint: "[--pr N] [--changelog-section Added|Changed|Fixed|Removed|Deprecated|Security] [--force --force-reason TEXT] [--no-watch] [--watch-timeout HOURS] [--allow-secret-commit] [--allow-secret-to-llm] [--allow-no-required-checks] [--allow-skipped-checks]"
+argument-hint: "[--pr N] [--changelog-section Added|Changed|Fixed|Removed|Deprecated|Security] [--force --force-reason TEXT] [--no-watch] [--watch-timeout HOURS] [--allow-secret-commit] [--allow-secret-to-llm] [--allow-no-required-checks] [--allow-skipped-checks] [--ignore-repo-config]"
 allowed-tools: Bash, Read
 model: opus
 ---
@@ -23,22 +23,26 @@ at its root — the same file `/stark-gh:pr-open` reads for ticket enforcement:
 ```
 
 Keys: `allowNoRequiredChecks`, `allowSecretToLlm`, `allowSecretCommit`,
-`noWatch`, `watchTimeoutHours`. **Config supplies defaults; anything typed on
-the command line wins.** You do not need to read or pass these — preflight
-resolves them itself, and prints `waiver in effect — <flag>: .stark-gh.json`
-for any waiver it picked up, so a config-supplied one stays as visible and as
-audited as a typed one.
+`noWatch`, `watchTimeoutHours` (≤168).
 
-This exists because some of these flags describe a fact about the repo rather
-than a choice about one run. A repo with no CI on pull requests otherwise makes
-the watcher wait out its full timeout — merging nothing and erroring nothing —
-unless whoever runs the merge remembers the flag every time.
+**Read from the merge BASE, never the working tree.** These settings waive the
+gates that police the diff being merged, so a branch cannot ship the waivers
+that would clear its own contents. A branch may propose a change; it takes
+effect once merged.
 
-YOU MUST NOT splice user input into shell commands. Forward `$ARGUMENTS`
-verbatim as a single quoted `--raw-args` value to preflight.
+**Config supplies defaults; the command line wins.** Since every key only turns
+something on, there is no way to OR one back off — `--ignore-repo-config` drops
+the file for a single run, and is also the way past a config that is committed
+and broken.
 
-YOU MUST NOT draft any prose. Stage 2 owns drafting via the TypeScript draft
-tool, which subprocess-calls `codex exec` with a scrubbed env.
+You do not pass any of this yourself: preflight resolves it and prints
+`in effect — <flag>: .stark-gh.json` for everything it picked up, gate waivers
+included in the audit log with their provenance.
+
+Why it exists: some of these flags describe a fact about the repo rather than a
+choice about one run. A repo with no PR CI has no required checks to wait for,
+so every merge stops after the 300s grace naming `--allow-no-required-checks` as
+the remedy — and the operator retypes it forever for a fact that never changes.
 
 ## Constants
 

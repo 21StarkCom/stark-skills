@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { tokenize } from "./lib/shell_quote.ts";
 import { Exit } from "./lib/exit.ts";
 import { die, printJson } from "./lib/output.ts";
@@ -10,6 +11,7 @@ import type { Candidate, ExecFn, Provenance } from "./lib/types.ts";
 import { fingerprintFromInputs } from "./lib/state.ts";
 import { emitLines, extractCandidates } from "./lib/issue.ts";
 import { scanSecrets } from "./lib/secret.ts";
+import { loadMergeDefaults } from "./lib/merge_config.ts";
 import { estimateTokens, summarizeDiff, truncateDiffByFile, truncateLeading, withinBudget } from "./lib/budget.ts";
 import { writePlan, type Plan } from "./lib/plan.ts";
 import { mktempInRuntime } from "./lib/runtime.ts";
@@ -17,6 +19,7 @@ import { redactSecrets } from "./lib/redact.ts";
 import { appendSecretOverride } from "./lib/audit.ts";
 import {
   loadTicketPolicy,
+  REPO_CONFIG_BASENAME,
   extractTicketFromBranch,
   extractTicketFromTitle,
   checkTitleTicket,
@@ -406,6 +409,18 @@ export function buildPlan(input: BuildPlanInput): Plan {
   const ticketLoad = loadTicketPolicy(gitLib.repoRoot({ exec: input.exec }));
   if (ticketLoad.error) throw new Error(`ticket-scope:${ticketLoad.error}`);
   if (ticketLoad.warning) process.stderr.write(`${ticketLoad.warning}\n`);
+
+  // Validate the file's `merge` half here too. pr-open is the command that runs
+  // FIRST, and a typo in that block is otherwise silent until pr-merge — where
+  // it is fatal, so the operator learns about it at the one command that can no
+  // longer proceed, with a PR already open. This validates only; pr-merge is
+  // still the only consumer, and reads it from the base ref rather than here.
+  const mergeBlock = loadMergeDefaults(() => {
+    const p = path.join(gitLib.repoRoot({ exec: input.exec }), REPO_CONFIG_BASENAME);
+    return fs.existsSync(p) ? fs.readFileSync(p, "utf8") : null;
+  });
+  if (mergeBlock.error) throw new Error(`repo-config:${mergeBlock.error}`);
+  if (mergeBlock.warning) process.stderr.write(`${mergeBlock.warning}\n`);
   const requiredTitleTicket = decideTicketRequirement({
     policy: ticketLoad.policy,
     branch: state.branch,
