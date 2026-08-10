@@ -98,6 +98,17 @@ export function add(args: string[] = ["-A"], opts: { exec?: ExecFn } = {}): void
   git(["add", ...args], opts);
 }
 
+// The files `git add -A` would NEWLY stage: untracked and not already
+// ignored. --exclude-standard is what makes a correct .gitignore mean "this
+// guard never sees the file", so a repo that ignores its local config
+// notices no behaviour change at all.
+export function listUntracked(opts: { exec?: ExecFn } = {}): string[] {
+  return git(["ls-files", "--others", "--exclude-standard"], opts)
+    .split("\n")
+    .map(l => l.trim())
+    .filter(Boolean);
+}
+
 export function commitWithMessageFile(messageFile: string, opts: { exec?: ExecFn } = {}): void {
   git(["commit", "-F", messageFile], opts);
 }

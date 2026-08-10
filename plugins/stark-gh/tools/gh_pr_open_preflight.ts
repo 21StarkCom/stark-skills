@@ -40,6 +40,7 @@ export interface UserArgs {
   draft: boolean;
   allowSecretCommit: boolean;
   allowSecretToLlm: boolean;
+  allowUntrackedConfig: boolean;
 }
 
 const STRING_MAX = 4096;
@@ -72,6 +73,7 @@ export function parseRawArgs(raw: string): UserArgs {
     // merge time via /stark-gh:pr-merge, never here.
     draft: true,
     allowSecretCommit: false,
+    allowUntrackedConfig: false,
     allowSecretToLlm: false,
   };
   const need = (i: number, flag: string): string => {
@@ -154,6 +156,13 @@ export function parseRawArgs(raw: string): UserArgs {
         break;
       case "--allow-secret-to-llm":
         a.allowSecretToLlm = true;
+        break;
+      // Overrides the PATH-based untracked guard in stageChanges. Deliberately
+      // NOT folded into --allow-secret-commit: that one says "this content is
+      // fine to commit", this one says "yes, publish this local config file",
+      // and the 2026-08-10 .envrc case passed the content scan cleanly.
+      case "--allow-untracked-config":
+        a.allowUntrackedConfig = true;
         break;
       default:
         throw new Error(`unrecognized flag: ${t}`);
