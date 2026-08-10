@@ -13,6 +13,7 @@ import * as ghLib from "./lib/gh.ts";
 import type { Candidate, ExecFn, Provenance } from "./lib/types.ts";
 import { downgradeLlmCloses, extractCandidates, formatLine } from "./lib/issue.ts";
 import { scanSecrets } from "./lib/secret.ts";
+import { classifyUntracked, formatRefusal } from "./lib/untracked_guard.ts";
 import { mktempInRuntime } from "./lib/runtime.ts";
 import { fetchBase } from "./gh_pr_open_preflight.ts";
 import { appendSecretOverride } from "./lib/audit.ts";
@@ -47,7 +48,19 @@ export function reverifyState(plan: Plan, opts: { exec?: ExecFn } = {}): void {
 
 export function stageChanges(plan: Plan, opts: { exec?: ExecFn } = {}): void {
   if (!plan.stage3.willCommit) return;
-  if (plan.stage3.commitStrategy === "commit-all") gitLib.add(["-A"], opts);
+  if (plan.stage3.commitStrategy === "commit-all") {
+    // PATH-based guard, ahead of the staging call rather than after it: the
+    // content scanner downstream reads the staged diff, and a local config
+    // file with no high-entropy string in it sails straight through. That is
+    // not hypothetical — it is how a .envrc reached a PR on 2026-08-10.
+    // Refusing here means the index is never touched, so there is nothing to
+    // unstage and no half-staged tree to explain.
+    if (!plan.userArgs.allowUntrackedConfig) {
+      const risky = classifyUntracked(gitLib.listUntracked(opts));
+      if (risky.length > 0) throw new Error(formatRefusal(risky));
+    }
+    gitLib.add(["-A"], opts);
+  }
   if (plan.stage3.commitStrategy === "staged-only") {
     const cached = gitLib.diffCached(opts);
     if (!cached.trim()) throw new Error("nothing-staged");

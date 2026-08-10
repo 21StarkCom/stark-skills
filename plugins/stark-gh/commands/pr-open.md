@@ -2,7 +2,7 @@
 name: pr-open
 description: >-
   Open or update a PR with Codex-drafted prose, stage-all commit (default), push, and CI watcher. New PRs open as DRAFT by default (override --ready).
-argument-hint: "[--title T] [--body B] [--body-file F] [--commit-message M] [--commit-message-file F] [--base BRANCH] [--reviewer LIST] [--label LIST] [--assignee LIST] [--staged-only] [--commit-all] [--full-context] [--no-watch] [--ready] [--allow-secret-commit] [--allow-secret-to-llm]"
+argument-hint: "[--title T] [--body B] [--body-file F] [--commit-message M] [--commit-message-file F] [--base BRANCH] [--reviewer LIST] [--label LIST] [--assignee LIST] [--staged-only] [--commit-all] [--full-context] [--no-watch] [--ready] [--allow-secret-commit] [--allow-secret-to-llm] [--allow-untracked-config]"
 allowed-tools: Bash, Read
 model: opus
 ---
@@ -94,6 +94,38 @@ You do NOT construct prompts. You do NOT invoke any LLM or Agent tool. You only
 run the TypeScript subprocess.
 
 On nonzero exit, surface stderr verbatim and stop.
+
+## Untracked-file guard (`--commit-all`)
+
+`--commit-all` runs `git add -A`, which stages **untracked** files as well as
+modified ones. Before it does, the staging step lists what `-A` would newly add
+(`git ls-files --others --exclude-standard`) and **refuses** if any of it looks
+like local config or credential material — `.envrc`, `.env*`, `*.pem`, `*.key`,
+`id_rsa`, `client_secret*.json`, `service-account*.json`, `credentials.json`,
+`*.tfstate`, `.direnv/`, `.claude/`, `.netrc`, `.DS_Store`.
+
+This is **path**-based on purpose, and complements the existing **content**-based
+secret scan rather than duplicating it. On 2026-08-10 `git add -A` swept a repo's
+`.envrc` into a PR and pushed it: the file held only paths and email subjects, so
+every entropy and token rule passed it cleanly. The hazard was the file's
+identity, not a string inside it.
+
+The refusal happens **before** `git add`, so the index is never touched and there
+is nothing to unstage. It names each file and both remedies:
+
+- **Usually right:** add it to `.gitignore`. Verify with the exit code —
+  `git check-ignore -q <path> && echo ignored || echo EXPOSED` — because a later
+  negation in `.gitignore` can silently kill an earlier rule. A repo-level
+  negation also overrides your **global** gitignore, which is how the 2026-08-10
+  case happened: `.envrc` was covered globally, and a `!/*.*` line in the repo
+  punched a hole straight through that cover.
+- **If you mean it:** re-run with `--allow-untracked-config`, or stage the files
+  yourself and use `--staged-only`.
+
+Published examples (`.env.example`, `.envrc.sample`, `*.pub`, `*pubkeys/*.pem`)
+are never flagged — friction that stops ordinary work gets disabled, and then it
+protects nothing. A repo whose `.gitignore` already covers these files sees no
+behaviour change at all: `--exclude-standard` means the guard never sees them.
 
 ## Stage 3 - Execute
 

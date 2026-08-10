@@ -19,6 +19,7 @@ test("parse empty raw-args", () => {
     noWatch: false,
     draft: true,
     allowSecretCommit: false,
+    allowUntrackedConfig: false,
     allowSecretToLlm: false,
   });
 });
