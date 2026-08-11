@@ -32,11 +32,14 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Read PAT from Keychain
-PAT=$(security find-generic-password -s STARK_TRIGGERS_PAT -w 2>/dev/null) || {
-    echo "Error: STARK_TRIGGERS_PAT not found in Keychain"
-    exit 1
-}
+# No credential is read here. STARK_TRIGGERS_PAT used to be fetched from the
+# macOS Keychain at this point and then never referenced again — the trigger
+# create/update paths below are still stubs ("would go here via RemoteTrigger
+# API"), so the script performs no authenticated work. The fetch only made the
+# script exit 1 on any machine without that Keychain entry, which meant every
+# mode including --list and --dry-run, and every non-macOS host. Re-add a
+# credential read here when the API calls actually land, gated on the modes that
+# need it rather than at the top of the script.
 
 # Read config
 TRIGGERS=$(jq -r '.automation.triggers | keys[]' "$CONFIG")

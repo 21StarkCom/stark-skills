@@ -1,0 +1,82 @@
+# Run the TypeScript test suite.
+#
+# This gate exists because nothing ran these tests until 2026-08-11: a broken
+# `runtime_overrides.test.ts` sat red on `main` across three merged PRs (#866,
+# #867, #868) and no one could have known. The CodeQL "Analyze" checks that
+# already run on PRs are code scanning, not tests.
+#
+# The suite needs no dependency install — every import is a `node:` builtin, and
+# `tools/`'s only devDependencies (typescript, @types/node) are for the optional
+# typecheck below. So there is no `npm ci` on the test path.
+
+name: tests
+
+on:
+  pull_request:
+    # `ready_for_review` fires when a draft PR is un-drafted. Under the
+    # draft-by-default policy that is the moment CI should finally run — the
+    # draft guard below skips everything before it.
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+
+# Cancel superseded runs for the same PR / branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Skip-draft guard, per standards/workflows/skip-draft-guard.md. `!= true`
+    # rather than `== false` because this workflow also runs on `push`, whose
+    # payload carries no pull_request object — there `draft` is undefined, and
+    # `undefined == false` is false, which would skip every push run.
+    if: github.event.pull_request.draft != true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # `--experimental-strip-types` (Node >= 22.6) and `node:sqlite`
+          # (tools/stark_persona_lib.ts) both need a recent runtime; 24 is the
+          # oldest LTS carrying both without extra flags.
+          node-version: '24'
+
+      # `npm test` = ./check-rest-only.sh && node --experimental-strip-types
+      # --test *.test.ts. Run it from tools/, which is where package.json lives —
+      # the repo has no root package.json.
+      - name: Run tests
+        working-directory: tools
+        run: npm test
+
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event.pull_request.draft != true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: tools/package-lock.json
+
+      - name: Install typecheck deps
+        working-directory: tools
+        run: npm ci
+
+      # Advisory only. `tsc -p .` currently reports 3 pre-existing errors
+      # (housekeeping_infra.ts TS1470, cc_account_lib.test.ts TS2322,
+      # runtime_env_lib.ts TS2353). Failing the build on them would make this
+      # gate red on arrival and block unrelated work, so the step reports and
+      # does not gate. Make it blocking once those three are fixed.
+      - name: Typecheck (advisory)
+        working-directory: tools
+        continue-on-error: true
+        run: npx tsc -p .
