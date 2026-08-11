@@ -186,7 +186,7 @@ renders into the Phase 4 summary block:
 | 5.3b | Per-run/session statusline state under `~/.claude` (`.statusline-procstart-*`, `.statusline-lastreply-*`) | 14 days. Single-file caches (`.statusline-git-dirty-cache`, `.statusline-account-cache`) excluded — they self-refresh, never multiply. |
 | 5.4 | `healer.jsonl`, `preflight.jsonl`, `approach-contracts.jsonl` | keep last 1000 lines |
 | 5.5 | `~/.claude/code-review/logs/*.stderr` | 14 days |
-| 5.6 | `automation/logs/` and `~/.claude/code-review/history/autopilot/` | tar.gz files older than 30 days, grouped by YYYY-MM into `~/.claude/code-review/archives/` |
+| 5.6 | `~/.claude/code-review/history/autopilot/` | tar.gz files older than 30 days, grouped by YYYY-MM into `~/.claude/code-review/archives/` |
 | 5.7 | Legacy stark-skills asset symlinks under `~/.claude` (`ASSET_SYMLINKS`) | Repoint when **dangling** or the target carries a renamed segment (`STALE_SEGMENT_RENAMES`, e.g. `Code/Playground/`→`Code/21Stark/`). Repairs only when the corrected target exists; else reported in `errors`, link never deleted. |
 
 Receipt: `{ dryRun, sessionsRemoved[], checkpointsRemoved[],

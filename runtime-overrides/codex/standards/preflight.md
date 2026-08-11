@@ -24,7 +24,7 @@ Parse the JSON `overall` field:
 
 ## Non-interactive automation
 
-When the skill runs from automation (CCR triggers, scheduled jobs, CI), a
+When the skill runs unattended (scheduled jobs, CI), a
 `blocked` result MUST also:
 
 1. Append an entry to `$STARK_STATE_ROOT/alerts.jsonl` (default:

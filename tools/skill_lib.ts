@@ -30,7 +30,6 @@ const IGNORE_DIRS = new Set([
 ]);
 
 const ROOT_RELATIVE_PREFIXES = [
-  "automation/",
   "config/",
   "data/",
   "docs/",

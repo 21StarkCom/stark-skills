@@ -532,7 +532,6 @@ export type CleanupReceipt = {
 export type CleanupOptions = {
   dryRun?: boolean;
   homeDir?: string; // override for tests
-  cwd?: string; // override for archival source rooted at the repo's automation/
   now?: Date;
   ageProvider?: AgeProvider;
   clock?: StaleClock;
@@ -542,7 +541,6 @@ export type CleanupOptions = {
 export function cleanInfra(opts: CleanupOptions = {}): CleanupReceipt {
   const dryRun = opts.dryRun ?? false;
   const home = opts.homeDir ?? os.homedir();
-  const cwd = opts.cwd ?? process.cwd();
   const codeReview = stateRootForHome(home);
   const sessions = path.join(codeReview, "sessions");
   const archiveDir = path.join(codeReview, "archives");
@@ -599,7 +597,6 @@ export function cleanInfra(opts: CleanupOptions = {}): CleanupReceipt {
   }
 
   const archivalSources: ArchiveSource[] = [
-    { slug: "automation-logs", rootDir: path.join(cwd, "automation", "logs") },
     { slug: "history-autopilot", rootDir: path.join(codeReview, "history", "autopilot") },
   ];
   const artifactsArchived: ArchiveResult[] = [];

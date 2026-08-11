@@ -30,11 +30,10 @@ This repo is the **source of truth** for the skills + tools. Distribution is **m
 ## Repo Layout
 
 - `global/` — global config + prompts, vendored into each marketplace plugin
-- `scripts/` — shell helpers + JSON (`register_triggers.sh`, `healer_patterns.json`), vendored into plugins. The orchestrator + dispatch infra were migrated to `tools/` (TypeScript) — see the Python→TS migration spec.
+- `scripts/` — shell helpers + JSON (`healer_patterns.json`), vendored into plugins. The orchestrator + dispatch infra were migrated to `tools/` (TypeScript) — see the Python→TS migration spec.
 - `skill/` — all skills (`skill/stark-*/SKILL.md`, 28 skills; 29 counting `skill/remember/`, which is not `stark-*`), packaged as marketplace plugins
 - `org/evinced/` — Evinced org config overrides
 - `data/` — persona roster, review coverage HTML, generated showcase pages
-- `automation/` — CCR automation fleet: 12 triggers, prompts, logs, cost tracking, reports
 - `.github/workflows/` — GitHub Actions: project sync, gate checks, stale detection, heartbeat, `marketplace-sync` (auto-publish to bifrost)
 - `standards/` — org-wide doc templates and workflows
 - `plugins/stark-gh/` — local plugin source, packaged by the marketplace

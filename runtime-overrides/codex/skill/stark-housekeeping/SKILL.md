@@ -211,7 +211,7 @@ printf '%s\n' "$INFRA_JSON"
 
 Replace the dry-run placeholder from the parsed invocation before running. The
 Codex overlay cleans only `$STARK_STATE_ROOT` (default
-`~/.stark/code-review`) plus this repository's `automation/logs/` archives. It
+`~/.stark/code-review`). It
 does not scan or mutate Claude Code state, statusline files, or installation
 symlinks. Native review locks keep their owner-managed heartbeat lifecycle and
 are not deleted by housekeeping. Render the receipt into the Phase 4 summary.
