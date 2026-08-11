@@ -28,8 +28,11 @@ The CLI owns paths/numbering/writes; **you** author the content — the value
 of a handover is what you mine from the conversation, which only you have.
 
 **Not this skill:** authoring a standalone prompt file for another agent or a
-later session — route that to `/stark-handoff`. This skill persists *this*
-session's state; `/stark-handoff` writes a self-contained mission prompt.
+later session. This skill persists *this* session's state into a numbered
+chain; a self-contained mission prompt is a different artifact with a
+different reader. The skill that writes one (`stark-handoff`) is Claude-only
+and ships no Codex variant — do not try to invoke it here. Compose the prompt
+by hand, or run that skill from a Claude session.
 
 ## Execution rule
 
@@ -137,8 +140,8 @@ node --experimental-strip-types --no-warnings \
   "$TOOLS/stark_handover.ts" resume             # add: --task "<slug>"
 ```
 
-Exit 2 → nothing to resume: say so, show `handover list`, ask what to
-work on. Otherwise the JSON carries `handover_content` (latest in chain),
+Exit 2 → nothing to resume: say so, run the `list` command from Status Mode
+below, ask what to work on. Otherwise the JSON carries `handover_content` (latest in chain),
 `progress_content`, `chain`, `task_slugs`.
 
 ### Phase 2 — Ingest + brief
