@@ -10,7 +10,7 @@
 //
 // That is not an edge case here: these tools are *designed* to be reached
 // through the `~/.claude/code-review` fallback (a symlink into this repo) on
-// direct / automation-fleet-cron invocations — see `asset_root_lib.ts`. So the
+// direct (non-plugin) invocations — see `asset_root_lib.ts`. So the
 // symlinked path is the common one, and the naive guard no-ops exactly it.
 //
 // This resolves BOTH sides to a canonical filesystem path (following symlinks)

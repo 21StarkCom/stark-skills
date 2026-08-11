@@ -33,15 +33,14 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `tools/` — **all** TypeScript tooling: dispatchers, agent utilities, session/state, GitHub App auth, skill meta-tooling. The only executable surface.
 - `skill/` — all skills (`skill/stark-*/SKILL.md`, **28** skills), packaged as marketplace plugins
 - `global/` — global config + prompts, vendored into each plugin
-- `scripts/` — shell helpers + JSON only (`register_triggers.sh`, `healer_patterns.json`). **No Python lives here any more.**
+- `scripts/` — shell helpers + JSON only (`healer_patterns.json`). **No Python lives here any more.**
 - `plugins/stark-gh/` — local plugin source, packaged by the marketplace
 - `runtime-overrides/codex/` — **your tree.** Complete Codex-only skill/command variants plus changed support files; mirrors source-relative paths. Bifrost imports it as runtime overrides into a separate `dist/codex-plugins/` surface. **Never** make a canonical Claude file "portable" to satisfy Codex, and **never** layer a Codex override into `dist/claude/`.
 - `org/evinced/` — Evinced org config overrides
 - `data/` — persona roster, review coverage HTML, generated showcase pages
-- `automation/` — CCR automation fleet: 12 triggers, prompts, logs, cost tracking, reports
 - `standards/` — org-wide doc templates and workflows
 - `docs/` — specs, ADRs, retrospectives, generated skill docs
-- `.github/workflows/` — project sync, gate checks, stale detection, heartbeat, `marketplace-sync`
+- `.github/workflows/` — tests, project sync, stale detection, `marketplace-sync`
 
 ## Skills
 

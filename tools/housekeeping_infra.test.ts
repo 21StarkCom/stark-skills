@@ -527,7 +527,6 @@ test("cleanInfra wires asset-symlink healing into the receipt", (t) => {
 
     const receipt = cleanInfra({
       homeDir: home,
-      cwd: tmp,
       dryRun: true, // report the repair without mutating (and without touching /tmp locks)
       ageProvider: () => days(0),
       now: NOW,
@@ -561,7 +560,6 @@ test("cleanInfra dry-run reports counts without mutating", (t) => {
       p === oldSession ? days(45) : days(0);
     const receipt = cleanInfra({
       homeDir: home,
-      cwd: tmp,
       dryRun: true,
       ageProvider,
       now: NOW,
@@ -588,7 +586,6 @@ test("cleanInfra surfaces unlink errors but keeps going", (t) => {
     // the directories exist. This guards against any startup error paths.
     const receipt = cleanInfra({
       homeDir: home,
-      cwd: tmp,
       ageProvider: () => days(0),
       now: NOW,
       clock: liveClock,

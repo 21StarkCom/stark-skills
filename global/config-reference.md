@@ -4,21 +4,6 @@ Explanatory context for `global/config.json`. Does not duplicate the values them
 
 ---
 
-## Automation Trigger Tiers
-
-Triggers are grouped into four tiers by urgency and cost. When multiple triggers would run at the same time (cron overlap), higher-tier triggers take priority and lower-tier ones are deferred to the next scheduled slot.
-
-| Tier | Purpose | Typical Budget | Examples |
-|------|---------|---------------|---------|
-| 1 | Strategic / high-value evolution work | $5–$10/run | `stark-evolution`, `stark-self-review` |
-| 2 | Active monitoring, dependency & drift detection | $1–$3/run | `stark-sentinel`, `stark-dependency-audit`, `stark-infra-drift`, `stark-api-compat` |
-| 3 | Periodic intelligence gathering and sync | $2–$3/run | `stark-intelligence`, `stark-claude-md-sync` |
-| 4 | Reporting, housekeeping | $1–$2/run | `stark-digest`, `stark-automation-monitor`, `stark-hooks-auditor` |
-
-Per-trigger `budget_usd` is a soft cap: the trigger posts a Slack alert to `#stark-automation` if it exceeds the allocation, but does not hard-stop mid-run.
-
----
-
 ## Feature Flag Interactions
 
 Four subsystems can be enabled or disabled independently. They interact as follows:
@@ -40,10 +25,10 @@ Three thresholds govern spend at different scopes:
 
 | Key | Scope | Behavior |
 |-----|-------|---------|
-| `cost.weekly_budget_usd` ($50) | Rolling 7-day window across all triggers | Matches `automation.cost_alert_threshold_usd_per_week`; posts Slack alert when crossed. Does not stop execution. |
+| `cost.weekly_budget_usd` ($50) | Rolling 7-day window across all runs | Posts a Slack alert when crossed. Does not stop execution. |
 | `cost.daily_alert_usd` ($15) | Single calendar day | Posts Slack alert if daily spend exceeds threshold. |
 | `cost.hard_stop_usd` ($100) | Per-session / per-run ceiling | Terminates the current orchestration immediately when hit. Prevents runaway spend on stuck loops. |
 
-Budget evaluation order: per-trigger `budget_usd` check → daily alert → weekly alert → hard stop. A trigger that would breach `hard_stop_usd` is not started.
+Budget evaluation order: daily alert → weekly alert → hard stop. A run that would breach `hard_stop_usd` is not started.
 
 `cost.track_rolling_7d: true` means spend is accumulated over a sliding 7-day window, not a fixed Mon–Sun week.

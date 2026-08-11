@@ -134,7 +134,6 @@ test("Codex housekeeping cleans only Codex-owned state", () => {
   try {
     const receipt = cleanInfra({
       homeDir: root,
-      cwd: root,
       now: new Date("2026-08-05T00:00:00Z"),
       ageProvider: () => new Date("2020-01-01T00:00:00Z"),
     });

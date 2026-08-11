@@ -35,7 +35,7 @@ Parse the JSON result:
 - If `overall` is "ready": continue silently.
 - In non-interactive automation contexts, a blocked preflight must emit a
   `preflight_check` event with `status=blocked`, use the runtime's configured
-  alert sink when one exists, and exit non-zero so the trigger is marked failed.
+  alert sink when one exists, and exit non-zero so the caller sees the failure.
 
 # stark-copilot
 
