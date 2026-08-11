@@ -162,4 +162,3 @@ explicitly handed to `stark-terraform-review`. Full rubric:
 `global/prompts/iac-review/terragrunt.md`.
 
 > Rules adapted from jfr992/terragrunt-skill (Apache-2.0) and TerraShark.
-> Research: `docs/specs/2026-06-24-terraform-terragrunt-review-research.md`.

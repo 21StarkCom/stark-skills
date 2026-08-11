@@ -82,5 +82,4 @@ suppresses advice the detected TF/OpenTofu version can't use. Full rubric:
 `global/prompts/iac-review/terraform.md`.
 
 > Rules adapted from the HashiCorp Terraform Style Guide (MPL-2.0), Anton
-> Babenko's terraform-skill (Apache-2.0), and TerraShark. Research:
-> `docs/specs/2026-06-24-terraform-terragrunt-review-research.md`.
+> Babenko's terraform-skill (Apache-2.0), and TerraShark.

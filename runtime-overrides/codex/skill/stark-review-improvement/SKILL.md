@@ -50,7 +50,7 @@ PROMPTS="$STARK_REPO/global/prompts"
 TOOLS="$STARK_REPO/tools"
 CONFIG="$STARK_REPO/global/config.json"
 ORG_CONFIG="$STARK_REPO/org/evinced/config.json"
-CHANGELOG="$STARK_REPO/docs/prompt-changelog.md"
+CHANGELOG="${STARK_STATE_ROOT:-$HOME/.stark/code-review}/history/prompt-changelog.md"
 ```
 
 ```
@@ -212,7 +212,7 @@ changes.
 
 ```bash
 cd $STARK_REPO
-git add -- "${EDITED_PATHS[@]}" docs/prompt-changelog.md
+git add -- "${EDITED_PATHS[@]}"
 git diff --cached --name-only
 git commit -m "improve: {1-line summary of changes}
 
