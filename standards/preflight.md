@@ -28,7 +28,7 @@ When the skill runs unattended (scheduled jobs, CI), a
 `blocked` result MUST also:
 
 1. Append an entry to `~/.claude/code-review/alerts.jsonl`.
-2. Exit non-zero so the trigger is marked failed.
+2. Exit non-zero so the caller sees the failure.
 
 Interactive skill invocations skip steps 1–2 and just print + stop.
 

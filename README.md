@@ -158,7 +158,7 @@ stark-skills/
 │   ├── stark-review/SKILL.md
 │   ├── stark-persona/SKILL.md
 │   └── ...
-├── scripts/                      ← automation-fleet trigger registration + JSON schemas
+├── scripts/                      ← shell helpers + JSON (healer_patterns.json)
 │   └── *.{sh,json}
 ├── tools/                        ← TypeScript dispatch infra, agent CLIs, meta-tooling
 │   ├── multi_review.ts           ← PR review orchestrator
@@ -169,7 +169,7 @@ stark-skills/
 ├── plugins/stark-gh/             ← local plugin source (packaged by the marketplace)
 ├── runtime-overrides/codex/      ← Codex-only artifact + support overlays; never shipped to Claude
 ├── data/                         ← persona roster, review coverage, showcase pages
-├── .github/workflows/            ← GitHub Actions (project sync, gate checks, marketplace-sync)
+├── .github/workflows/            ← GitHub Actions (tests, project sync, marketplace-sync)
 ├── org/evinced/                  ← org config overrides
 ├── docs/
 │   ├── skills/                   ← generated skill docs (Markdown, Mermaid, JSON, and PNG artifacts)

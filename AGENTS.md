@@ -40,7 +40,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `data/` — persona roster, review coverage HTML, generated showcase pages
 - `standards/` — org-wide doc templates and workflows
 - `docs/` — specs, ADRs, retrospectives, generated skill docs
-- `.github/workflows/` — project sync, gate checks, stale detection, heartbeat, `marketplace-sync`
+- `.github/workflows/` — tests, project sync, stale detection, `marketplace-sync`
 
 ## Skills
 

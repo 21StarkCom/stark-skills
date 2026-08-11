@@ -29,7 +29,7 @@ When the skill runs unattended (scheduled jobs, CI), a
 
 1. Append an entry to `$STARK_STATE_ROOT/alerts.jsonl` (default:
    `~/.stark/code-review/alerts.jsonl`).
-2. Exit non-zero so the trigger is marked failed.
+2. Exit non-zero so the caller sees the failure.
 
 Interactive skill invocations skip steps 1–2 and just print + stop.
 
