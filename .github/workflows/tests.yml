@@ -13,33 +13,59 @@ name: tests
 
 on:
   pull_request:
-    # `ready_for_review` fires when a draft PR is un-drafted. Under the
-    # draft-by-default policy that is the moment CI should finally run — the
-    # draft guard below skips everything before it.
+    # `ready_for_review` is redundant for THIS workflow now that no job is
+    # draft-guarded — `opened`/`synchronize` already produced a real result for
+    # the head sha. It is kept because it costs one cheap run and covers the
+    # case where the un-draft is the only signal the merge tooling is waiting
+    # on. It does mean two runs can report the same check for one sha; the merge
+    # gate collapses same-named contexts to the latest, and nothing is cancelled
+    # (see the concurrency note below).
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
-  # Fire the gate by hand without pushing. The `!= true` guard below stays
-  # correct for this trigger: its payload has no pull_request object either.
+  # Fire the gate by hand without pushing. Useful for re-running against a
+  # branch, but NOT a repair for a missing PR check: a `workflow_dispatch` run
+  # does not join a pull request's status rollup. Measured on #877 — the
+  # dispatch produced `test: SUCCESS` on the head sha while the rollup
+  # (and therefore every merge gate reading it) still carried `test: SKIPPED`.
   workflow_dispatch: {}
 
-# Cancel superseded runs for the same PR / branch.
+# Serialize per PR / branch, but NEVER cancel — `test` is a required check.
+#
+# `cancel-in-progress: true` was correct while the jobs were draft-guarded: they
+# finished in ~5 seconds, so there was never anything in flight to cancel. Now
+# they take ~1 minute, and `pr-merge` force-pushes and then marks the PR ready
+# moments later — two events for the SAME sha. Cancelling meant the second run
+# killed the first and left `test: CANCELLED` sitting on the head commit.
+#
+# GitHub counts CANCELLED as a failing required check, so that row can block the
+# merge outright, and if the replacement run never materializes it is the ONLY
+# row — a required check that reports failure for a commit whose suite actually
+# passed. A workflow backing a required check should not manufacture rows for
+# runs it intends to discard.
+#
+# The cost is a wasted ~1 runner-minute when two pushes land close together.
+# That is cheaper than either failure mode it removes.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
+  # DELIBERATELY NOT draft-guarded — the carve-out in
+  # standards/workflows/skip-draft-guard.md. A guarded job reports `skipped`,
+  # which GitHub counts as satisfying a required check and renders identically
+  # to a pass, so a lost run reads as green. #877 merged that way: the only
+  # `pull_request` run on its head sha was the draft-time one, and no repair
+  # existed (a re-run replays the original payload and skips again; a dispatch
+  # run never joins the rollup). Running unconditionally makes every commit
+  # carry a real conclusion. It costs ~1 runner-minute per push and this suite
+  # installs nothing.
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Skip-draft guard, per standards/workflows/skip-draft-guard.md. `!= true`
-    # rather than `== false` because this workflow also runs on `push`, whose
-    # payload carries no pull_request object — there `draft` is undefined, and
-    # `undefined == false` is false, which would skip every push run.
-    if: github.event.pull_request.draft != true
     steps:
       - uses: actions/checkout@v6
 
@@ -57,10 +83,17 @@ jobs:
         working-directory: tools
         run: npm test
 
+      # The stark-gh merge tooling lives in its own tree with its own test
+      # files, which `tools/`'s `*.test.ts` glob never reached — 393 tests
+      # covering the code that decides whether a PR is green, none of them run
+      # by this gate until 2026-08-11. It needs no install either.
+      - name: Run stark-gh tests
+        working-directory: plugins/stark-gh
+        run: npm test
+
   typecheck:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.event.pull_request.draft != true
     steps:
       - uses: actions/checkout@v6
 
@@ -78,7 +111,14 @@ jobs:
       # (housekeeping_infra.ts TS1470, cc_account_lib.test.ts TS2322,
       # runtime_env_lib.ts TS2353). Failing the build on them would make this
       # gate red on arrival and block unrelated work, so the step reports and
-      # does not gate. Make it blocking once those three are fixed.
+      # does not gate.
+      #
+      # CONSEQUENCE: `continue-on-error` means the `typecheck` CHECK reports
+      # SUCCESS whether or not tsc passed — the errors are visible only in the
+      # step log. So `typecheck` must NOT be added to the branch ruleset's
+      # required checks: it would satisfy the gate unconditionally, which is the
+      # same false-green shape this workflow was rewritten to remove. Drop
+      # `continue-on-error` first, THEN require it.
       - name: Typecheck (advisory)
         working-directory: tools
         continue-on-error: true

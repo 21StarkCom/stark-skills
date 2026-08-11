@@ -24,7 +24,7 @@ import * as ghLib from "./lib/gh.ts";
 import { scanSecrets } from "./lib/secret.ts";
 import { redactSecrets } from "./lib/redact.ts";
 import { updateUnreleasedChangelog } from "./lib/changelog.ts";
-import { fetchRequiredCheckRollup, summarizeVerdict } from "./lib/checks_graphql.ts";
+import { fetchRequiredCheckRollup, summarizeVerdict, isGreen } from "./lib/checks_graphql.ts";
 import { verifyMergeOids } from "./lib/verify_oids.ts";
 import { appendPrMergeOverride } from "./lib/audit.ts";
 import { ensureRuntimeDirs } from "./lib/runtime.ts";
@@ -292,9 +292,22 @@ async function runNoWatch(plan: PrMergePlan, planFile: string): Promise<number> 
     die(MergeExit.CHECK_FAIL,
       `no required checks observed on pushedHeadOid; --no-watch refuses vacuous pass. Pass --allow-no-required-checks (audited) or use default-watch.`);
   }
-  if (!verdict.allPassing) {
+  // Named separately from the generic not-all-passing case because the remedy
+  // is different and non-obvious: a skipped check cannot be re-run into
+  // success (the replay skips again) and a `workflow_dispatch` run never joins
+  // the rollup, so only a new commit clears it.
+  if (verdict.anySkipped && plan.execute.allowSkippedChecks !== true) {
     die(MergeExit.CHECK_FAIL,
-      `--no-watch: required checks not all passing (passing=${verdict.passing}, pending=${verdict.pending}, failing=${verdict.failing})`);
+      `--no-watch: required check(s) skipped, so the suite never ran on this commit: ${verdict.skippedNames.join(", ")}. ` +
+      (plan.pr.wasDraft
+        ? `This PR was just un-drafted, so this may simply be the draft-time run: --no-watch takes the single sample it is ` +
+          `given, and the ready_for_review run may not have registered yet. Drop --no-watch so the merge waits it out. `
+        : ``) +
+      `Otherwise push a commit to re-fire CI, or pass --allow-skipped-checks if these checks skip by design.`);
+  }
+  if (!isGreen(verdict, { allowSkippedChecks: plan.execute.allowSkippedChecks === true })) {
+    die(MergeExit.CHECK_FAIL,
+      `--no-watch: required checks not all passing (passing=${verdict.passing}, pending=${verdict.pending}, failing=${verdict.failing}, skipped=${verdict.skipped})`);
   }
 
   // Merge.

@@ -42,12 +42,14 @@ function rawCheckRun(name: string, conclusion: string | null, isRequired: boolea
 function rawStatus(context: string, state: string, isRequired: boolean): any {
   return { __typename: "StatusContext", context, state, isRequired };
 }
-// Normalized Context (uses kind) — for predicate tests.
+// Normalized Context (uses kind) — for predicate tests. The timestamp fields
+// are part of the type (latestPerName orders on them), so they are set here
+// even though these predicate tests do not exercise ordering.
 function makeCheckRun(name: string, conclusion: any, isRequired: boolean): Context {
-  return { kind: "CheckRun", name, conclusion, status: "COMPLETED", isRequired };
+  return { kind: "CheckRun", name, conclusion, status: "COMPLETED", isRequired, startedAt: null, completedAt: null };
 }
 function makeStatus(context: string, state: any, isRequired: boolean): Context {
-  return { kind: "StatusContext", context, state, isRequired };
+  return { kind: "StatusContext", context, state, isRequired, createdAt: null };
 }
 
 test("fetchRequiredCheckRollup aggregates a single page", async () => {
@@ -122,10 +124,13 @@ test("fetchRequiredCheckRollup throws on missing pullRequest payload", async () 
   ), /pullRequest payload missing/);
 });
 
-test("isCheckPassing: CheckRun SUCCESS/NEUTRAL/SKIPPED count as passing", () => {
+// SKIPPED moved out of this set on 2026-08-11 (STARK-357). It used to count as
+// passing, mirroring GitHub's own required-check semantics — which is precisely
+// how #877 merged with its suite never having run. See checks_skipped.test.ts.
+test("isCheckPassing: CheckRun SUCCESS/NEUTRAL count as passing, SKIPPED does not", () => {
   assert.equal(isCheckPassing(makeCheckRun("c", "SUCCESS", true)), true);
   assert.equal(isCheckPassing(makeCheckRun("c", "NEUTRAL", true)), true);
-  assert.equal(isCheckPassing(makeCheckRun("c", "SKIPPED", true)), true);
+  assert.equal(isCheckPassing(makeCheckRun("c", "SKIPPED", true)), false);
   assert.equal(isCheckPassing(makeCheckRun("c", "FAILURE", true)), false);
   assert.equal(isCheckPassing(makeCheckRun("c", null, true)), false);  // pending
   assert.equal(isCheckPassing(makeCheckRun("c", "SUCCESS", false)), false);  // not required

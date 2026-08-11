@@ -4,7 +4,7 @@ description: >-
   Rebase a PR, draft squash-commit prose + CHANGELOG bullet via Codex
   (changelog step skipped when the repo keeps no root CHANGELOG.md),
   force-push, mark a draft PR ready-for-review, and squash-merge once CI is green.
-argument-hint: "[--pr N] [--changelog-section Added|Changed|Fixed|Removed|Deprecated|Security] [--force --force-reason TEXT] [--no-watch] [--watch-timeout HOURS] [--allow-secret-commit] [--allow-secret-to-llm] [--allow-no-required-checks]"
+argument-hint: "[--pr N] [--changelog-section Added|Changed|Fixed|Removed|Deprecated|Security] [--force --force-reason TEXT] [--no-watch] [--watch-timeout HOURS] [--allow-secret-commit] [--allow-secret-to-llm] [--allow-no-required-checks] [--allow-skipped-checks]"
 allowed-tools: Bash, Read
 model: opus
 ---
@@ -128,3 +128,20 @@ exit $EXECUTE_RC
 
 Parse the execute JSON for `prUrl`, `mergeSha` (sync mode), or `watcherStateFile`
 + `watcherPid` (default-watch mode), and report to the user.
+
+### A skipped required check is not a green one
+
+Both the `--no-watch` gate and the watcher **refuse to merge when a required
+check reports `SKIPPED`**, naming it. This is deliberately stricter than GitHub,
+which counts a skipped check as satisfying the requirement — the two are
+indistinguishable in the merge box, which is how `stark-skills#877` merged with
+its test suite never having run.
+
+A skip is terminal, not pending: re-running the workflow replays the original
+event payload (so a draft-guarded job skips again) and a `workflow_dispatch` run
+never joins the PR's status rollup. **Push a commit to re-fire CI.** If the
+target repo skips that check by design — a path-filtered required check —
+re-run with `--allow-skipped-checks`.
+
+Related: a workflow whose check is required must not carry a draft guard at all
+(`standards/workflows/skip-draft-guard.md`).

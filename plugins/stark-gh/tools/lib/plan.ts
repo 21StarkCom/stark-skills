@@ -256,6 +256,10 @@ export interface PrMergePlan {
     watchTimeoutHours: number;       // default 6
     secretOverrides: { commit: boolean; toLlm: boolean };
     allowNoRequiredChecks: boolean;
+    // Optional so a plan written by an older preflight still validates. Absent
+    // reads as false at every consumer, which is the safe direction: the merge
+    // refuses a skipped required check rather than accepting it.
+    allowSkippedChecks?: boolean;
   };
 }
 
@@ -314,6 +318,8 @@ export function validatePrMergePlan(p: unknown): asserts p is PrMergePlan {
   for (const f of ["watch", "force", "allowNoRequiredChecks"]) {
     requirePlan(typeof ex[f] === "boolean", `execute.${f} must be boolean`);
   }
+  requirePlan(ex.allowSkippedChecks === undefined || typeof ex.allowSkippedChecks === "boolean",
+    "execute.allowSkippedChecks must be boolean when present");
   requirePlan(typeof ex.watchTimeoutHours === "number" && (ex.watchTimeoutHours as number) > 0,
     "execute.watchTimeoutHours must be positive number");
   requirePlan(isObj(ex.secretOverrides), "execute.secretOverrides missing");

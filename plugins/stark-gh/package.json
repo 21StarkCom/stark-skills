@@ -1,5 +1,8 @@
 {
   "name": "stark-gh",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-strip-types --test tools/__tests__/*.test.ts"
+  }
 }

@@ -5,7 +5,7 @@ import * as crypto from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { stateFile, lockFile, latestPointer, ensurePrDir, atomicWriteJson } from "./lib/watcher_paths.ts";
 import * as ghLib from "./lib/gh.ts";
-import { fetchRequiredCheckRollup, summarizeVerdict, type Context } from "./lib/checks_graphql.ts";
+import { fetchRequiredCheckRollup, summarizeVerdict, isGreen, type Context } from "./lib/checks_graphql.ts";
 import { resolveCallback } from "./lib/watcher_callbacks.ts";
 import { readPrMergePlan, type PrMergePlan } from "./lib/plan.ts";
 import type { WatcherKind } from "./lib/watcher_lock.ts";
@@ -416,6 +416,11 @@ interface PollOutcome {
   // decideVacuousTransition for why that case is time-bounded rather than
   // waited on indefinitely.
   vacuous?: boolean;
+  // Set only on a `wait` produced by a rollup whose latest context for some
+  // REQUIRED check is SKIPPED. Same shape as `vacuous`: transient right after
+  // the draft-time push, permanent once the real run has had time to register.
+  skipped?: boolean;
+  skippedNames?: string[];
 }
 
 // Constants exported for the unit-test of decideHeadMovedTransition.
@@ -467,11 +472,29 @@ export function decideVacuousTransition(
   return vacuousElapsedSec < graceSec ? "wait" : "terminal";
 }
 
+// How long a SKIPPED required check may persist before the watcher stops.
+//
+// Same two readings as the vacuous case, so the same treatment. TRANSIENT: the
+// merge flow force-pushed while the PR was still a draft, so a draft-guarded
+// required check reported SKIPPED, and the `ready_for_review` run that replaces
+// it has not registered yet. PERMANENT: the check skips by configuration (or
+// its real run was lost), and nothing but a new commit will ever change it.
+// Shorter than the vacuous window because the replacement run is fired by this
+// tool's own `gh pr ready` moments earlier — it is late by seconds, not minutes.
+export const SKIPPED_CHECK_GRACE_SEC = 120;
+
+export function decideSkippedTransition(
+  skippedElapsedSec: number,
+  graceSec: number = SKIPPED_CHECK_GRACE_SEC,
+): "wait" | "terminal" {
+  return skippedElapsedSec < graceSec ? "wait" : "terminal";
+}
+
 // Pure function: maps a rollup result (mismatch | contexts) + plan policy
 // into a PollOutcome. Easy to unit-test.
 export function evaluateRollup(
   rollup: { mismatch: boolean; contexts: Context[] | null; headRefOid: string },
-  policy: { allowNoRequiredChecks: boolean },
+  policy: { allowNoRequiredChecks: boolean; allowSkippedChecks?: boolean },
 ): PollOutcome {
   if (rollup.mismatch) return { kind: "head_moved", reason: `headRefOid=${rollup.headRefOid}` };
   const v = summarizeVerdict(rollup.contexts!);
@@ -483,7 +506,31 @@ export function evaluateRollup(
     return { kind: "wait", reason: "no required checks observed yet", vacuous: true };
   }
   if (v.anyFailing) return { kind: "fatal", reason: `failing checks: ${v.failing}` };
-  if (v.allPassing) return { kind: "ready", reason: "all required passing" };
+  // A skipped required check will not resolve itself: re-running the workflow
+  // replays the original event payload (so a draft-guarded job skips again), and
+  // a `workflow_dispatch` run does not join the PR's status rollup at all —
+  // measured on #877, where the dispatch produced `test: SUCCESS` on the head
+  // sha that the rollup never carried. Only a new commit clears it.
+  //
+  // But it is NOT terminal on sight, for the same reason a vacuous rollup is
+  // not: this flow manufactures a transient skip. `pr-merge` force-pushes while
+  // the PR is still a draft (creating a SKIPPED run in any target repo that
+  // still draft-guards that check) and only then marks it ready, which fires the
+  // real run. A first poll landing in that gap would abort seconds before the
+  // genuine run registers, telling the operator to push a commit they do not
+  // need. Time separates the two readings, exactly as with vacuous — the caller
+  // bounds it via decideSkippedTransition.
+  if (v.anySkipped && !policy.allowSkippedChecks) {
+    return {
+      kind: "wait",
+      reason: `required check(s) skipped, so the suite has not run on this commit: ${v.skippedNames.join(", ")}`,
+      skipped: true,
+      skippedNames: v.skippedNames,
+    };
+  }
+  if (isGreen(v, { allowSkippedChecks: policy.allowSkippedChecks })) {
+    return { kind: "ready", reason: "all required passing" };
+  }
   return { kind: "wait", reason: `pending: ${v.pending}` };
 }
 
@@ -494,7 +541,10 @@ async function pollOnce(plan: PrMergePlan): Promise<PollOutcome> {
     prNumber: plan.pr.number,
     expectedHeadOid: plan.pushedHeadOid!,
   });
-  return evaluateRollup(r as any, { allowNoRequiredChecks: plan.execute.allowNoRequiredChecks });
+  return evaluateRollup(r as any, {
+    allowNoRequiredChecks: plan.execute.allowNoRequiredChecks,
+    allowSkippedChecks: plan.execute.allowSkippedChecks === true,
+  });
 }
 
 interface BackoffState {
@@ -589,6 +639,9 @@ async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
   // Timestamped rather than counted so the grace window is wall-clock and stays
   // meaningful as the poll interval backs off under rate limiting.
   let vacuousSinceMs: number | null = null;
+  // Same shape, for a rollup whose latest context on some required check is
+  // SKIPPED. See decideSkippedTransition.
+  let skippedSinceMs: number | null = null;
   const REQUIRED_GREEN = 2; // PR4-claude H13 debounce
   // Tolerate transient head-OID mismatch right after force-push: GitHub's
   // GraphQL `pullRequest.headRefOid` can lag the push receiver by hundreds
@@ -684,6 +737,7 @@ async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
     if (outcome!.kind === "ready") {
       consecutiveGreen++;
       vacuousSinceMs = null;
+      skippedSinceMs = null;
       writeStatus({ consecutiveGreen, status: "watching", lastWait: null });
       if (consecutiveGreen >= REQUIRED_GREEN) {
         // Fire callback. Spawn detached so its lifetime is independent.
@@ -728,6 +782,33 @@ async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
         }
       } else {
         vacuousSinceMs = null;
+      }
+
+      // A SKIPPED required check reads the same two ways, and gets the same
+      // wall-clock separation: transient while this flow's own `gh pr ready`
+      // run is still registering, permanent once it should have.
+      if (outcome!.skipped) {
+        if (skippedSinceMs === null) skippedSinceMs = Date.now();
+        const elapsedSec = (Date.now() - skippedSinceMs) / 1000;
+        if (decideSkippedTransition(elapsedSec) === "terminal") {
+          const names = (outcome!.skippedNames ?? []).join(", ");
+          const reason =
+            `required check(s) still SKIPPED after ${Math.round(elapsedSec)}s: ${names}. The suite never ran against this ` +
+            `commit, and nothing will change that on its own — re-running the workflow replays the original event payload ` +
+            `(a draft-guarded job skips again) and a workflow_dispatch run does not join this PR's status rollup. GitHub ` +
+            `itself counts a skipped check as satisfying the requirement, which is why the merge box looks green; it is not. ` +
+            `Push a commit to re-fire CI, or re-run the merge with --allow-skipped-checks if these checks skip by design.`;
+          writeStatus({ status: "checks_skipped", finishedAt: new Date().toISOString(), reason });
+          atomicWriteJson(latestPointer(host, plan.pr.headRepositoryOwner, plan.pr.headRepositoryName, plan.pr.number), {
+            headSha: plan.pushedHeadOid,
+            status: "checks_skipped",
+            updatedAt: new Date().toISOString(),
+          });
+          releaseAllMerge();
+          return 0;
+        }
+      } else {
+        skippedSinceMs = null;
       }
     }
     await new Promise(r => setTimeout(r, jitter(args.pollSeconds) * 1000));

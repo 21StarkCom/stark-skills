@@ -57,13 +57,62 @@ runs on the current head. Marking ready is the single CI-triggering moment.
 - **Merge gates that read PR status** — a draft never reaches "Ready to Merge",
   so a status-driven gate is already a no-op on drafts; the guard is just
   belt-and-suspenders (and, for `check_run`-triggered gates, must use `!= true`).
+- **Any workflow whose check is a REQUIRED status check.** See below — this one
+  is not a preference, it is a correctness rule.
+
+## Never guard a required check
+
+**A guarded job reports `skipped`, and GitHub counts `skipped` as satisfying a
+required status check.** In the merge box it is indistinguishable from a pass.
+So the guard converts "CI did not run" into "CI is green", which is the exact
+failure the required check exists to prevent.
+
+It is not theoretical. `21StarkCom/stark-skills#877` merged on 2026-08-11 with
+the only `pull_request` run on its head commit being the draft-time one:
+`test: SKIPPED`. The suite never executed against what landed on `main`.
+
+**There is also no repair path once it happens:**
+
+- **Re-running the workflow replays the original event payload** — a run that
+  skipped because `draft` was true skips again, forever.
+- **A `workflow_dispatch` run does not join the pull request's status rollup.**
+  Measured on the same commit: the dispatch produced `test: SUCCESS` in
+  `gh run list`, while the GraphQL `statusCheckRollup` — which is what every
+  merge gate reads — still carried only the SKIPPED entry. A manual re-fire
+  *looks* like it fixed the problem and changes nothing that matters.
+
+Only a new commit clears it.
+
+**The rule:** if a check is required (or you intend to require it), the job runs
+unconditionally and the workflow is kept cheap enough that running it on every
+draft push is fine. Cost the guard would have saved is measured in
+runner-minutes; cost of a skipped required check is a merge with no verification
+at all.
+
+### Two things that follow from removing the guard
+
+- **Set `cancel-in-progress: false`.** Unguarded jobs take minutes instead of
+  seconds, and `pr-merge` force-pushes then marks the PR ready moments later —
+  two events for the same commit. Cancelling means the second run kills the
+  first and leaves `test: CANCELLED` on the head sha. GitHub counts CANCELLED as
+  a *failing* required check, so it can block the merge, and if the replacement
+  never materializes it is the only row: a required check reporting failure for
+  a commit whose suite passed. A workflow backing a required check should not
+  manufacture rows for runs it means to discard.
+- **Never require a check whose step carries `continue-on-error: true`.** It
+  reports SUCCESS whether the step passed or not, so requiring it satisfies the
+  gate unconditionally — the same false-green shape, wearing a different hat.
+
+`.github/workflows/tests.yml` in this repo is the reference: no `if:` on either
+job, `cancel-in-progress: false`, and the advisory `typecheck` job explicitly
+marked as not-requirable while it stays advisory.
 
 ## Reference implementations in this repo
 
 - `.github/workflows/project-pr-sync.yml` — `== false` (pull_request +
   pull_request_review only), plus a `ready_for_review → Human Review` mapping.
-- `.github/workflows/tests.yml` — `!= true` (also runs on `push` to main, whose
-  payload has no `pull_request` object).
+- `.github/workflows/tests.yml` — **deliberately unguarded**, per "Never guard a
+  required check" above.
 - `standards/workflows/doc-staleness.yml` — `== false`, the adoptable template.
 
 ## Downstream, per target repo
