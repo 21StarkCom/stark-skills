@@ -19,6 +19,9 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
+  # Fire the gate by hand without pushing. The `!= true` guard below stays
+  # correct for this trigger: its payload has no pull_request object either.
+  workflow_dispatch: {}
 
 # Cancel superseded runs for the same PR / branch.
 concurrency:
@@ -38,9 +41,9 @@ jobs:
     # `undefined == false` is false, which would skip every push run.
     if: github.event.pull_request.draft != true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           # `--experimental-strip-types` (Node >= 22.6) and `node:sqlite`
           # (tools/stark_persona_lib.ts) both need a recent runtime; 24 is the
@@ -59,9 +62,9 @@ jobs:
     timeout-minutes: 10
     if: github.event.pull_request.draft != true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '24'
           cache: npm
