@@ -1,4 +1,0 @@
-{
-  "doc_content": {},
-  "alt_text": "A clean internal architecture page titled \u201cstark-review-improvement\u201d showing a vertical workflow from assessment extraction through user approval, targeted prompt or orchestrator edits, validation, changelog logging, and local commit. Blue nodes mark workflow phases, purple nodes mark decisions, green nodes mark editable system layers, amber nodes mark outputs, gray nodes show external inputs like conversation context and history files, and a red node shows the failure path when no assessment is found. Below the flow are tables and cards explaining write targets, data-source resolution order, mutation boundaries, extension points, and failure safeguards for the prompt-improvement loop.\"}}"
-}

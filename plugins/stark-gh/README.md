@@ -6,11 +6,6 @@ Claude Code plugin housing GitHub workflow slash commands.
 - v1: `/stark-gh:pr-merge`
 - v1: `/stark-gh:cleanup`
 
-Design specs:
-- `docs/superpowers/specs/2026-04-28-stark-gh-pr-open-design.md`
-- `docs/superpowers/specs/2026-04-28-stark-gh-pr-merge-design.md`
-- `docs/superpowers/specs/2026-04-28-stark-gh-pr-merge-plan.md`
-
 ## /stark-gh:pr-merge — disposable-PR smoke runbook
 
 **Destructive: rebases, force-pushes, and merges. Use a fixture branch in this
@@ -20,7 +15,7 @@ repo or a sandbox repo, not main.**
 2. Create a disposable PR:
    ```bash
    git checkout -b smoke/pr-merge-$(date +%s)
-   echo "smoke" >> docs/SMOKE.md && git add docs/SMOKE.md
+   echo "smoke" >> SMOKE.md && git add SMOKE.md
    git commit -m "smoke: disposable pr-merge target"
    git push -u origin HEAD
    gh pr create --base main --title "smoke: pr-merge" --body "Disposable smoke target"

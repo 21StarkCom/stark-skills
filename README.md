@@ -30,8 +30,6 @@ All skills are available as `/slash-commands` in Claude Code and `$skill-name` m
 
 ## The Development Lifecycle
 
-[![Development Lifecycle](docs/skills/lifecycle.png)](docs/skills/index.md)
-
 The human writes and gates the spec (`/stark-author`). Everything after that gate runs autonomously (`/stark-build`) — branching, implementation, one commit per green task, a draft PR, one cross-vendor advisory review, and exactly one fix round over its medium+ findings. Anything still open dies at the human, not in another loop.
 
 ---
@@ -47,7 +45,7 @@ Review artifacts before they ship. Each review skill dispatches the enabled LLM 
 | Skill | What it reviews | When to use |
 |-------|----------------|-------------|
 | `/stark-review` | PR code changes | Triage-selected domains, 1 LLM × N domains — fast, cheap, default agent configurable per domain. |
-| [`/stark-review-improvement`](docs/skills/stark-review-improvement/usage.md) | Review prompt effectiveness | After reviews produce too many false positives. Tunes agent prompts based on assessment data. |
+| [`/stark-review-improvement`](skill/stark-review-improvement/SKILL.md) | Review prompt effectiveness | After reviews produce too many false positives. Tunes agent prompts based on assessment data. |
 
 **Best practice:** Gate the spec at `/stark-author`'s human checklist *before* implementation starts — it's cheaper to fix a spec than to fix code. Use `/stark-review` on every PR.
 
@@ -79,7 +77,7 @@ Move code from branch to production.
 
 | Skill | What it does | When to use |
 |-------|-------------|-------------|
-| [`/stark-release`](docs/skills/stark-release/usage.md) | CHANGELOG → version bump → tag → GitHub Release | When a set of changes is ready to ship. Reads CHANGELOG.md to determine bump type. |
+| [`/stark-release`](skill/stark-release/SKILL.md) | CHANGELOG → version bump → tag → GitHub Release | When a set of changes is ready to ship. Reads CHANGELOG.md to determine bump type. |
 
 **Best practice:** Always run `/stark-release` when shipping — never tag manually.
 
@@ -89,8 +87,8 @@ Start and end your work sessions with consistent context loading and cleanup.
 
 | Skill | What it does | When to use |
 |-------|-------------|-------------|
-| [`/stark-session start`](docs/skills/stark-session/usage.md) | Load context, git state, health checks, briefing | Beginning of every work session. Catches stale branches, failing tests, open PRs. |
-| [`/stark-session end`](docs/skills/stark-session/usage.md) | Tests, merge PRs, commit docs, push | End of every work session. Ensures nothing is left dangling. |
+| [`/stark-session start`](skill/stark-session/SKILL.md) | Load context, git state, health checks, briefing | Beginning of every work session. Catches stale branches, failing tests, open PRs. |
+| [`/stark-session end`](skill/stark-session/SKILL.md) | Tests, merge PRs, commit docs, push | End of every work session. Ensures nothing is left dangling. |
 | [`/stark-persona`](skill/stark-persona/SKILL.md) | Session character voices | Adds personality to sessions. Weighted selection, date-aware combos, catchphrases, feedback loop. |
 
 **Best practice:** Make `/stark-session start` and `/stark-session end` habitual — like opening and closing a shift. The start briefing catches context you'd otherwise miss (someone pushed to your branch, CI is red, a PR needs your review).
@@ -99,7 +97,7 @@ Start and end your work sessions with consistent context loading and cleanup.
 
 | Skill | What it does | When to use |
 |-------|-------------|-------------|
-| [`/stark-init-docs`](docs/skills/stark-init-docs/usage.md) | Scaffold docs structure (ADRs, runbooks, etc.) | When starting a new project or adding docs to an existing one. Modes: template, backfill, upgrade, clean. |
+| [`/stark-init-docs`](skill/stark-init-docs/SKILL.md) | Scaffold docs structure (ADRs, runbooks, etc.) | When starting a new project or adding docs to an existing one. Modes: template, backfill, upgrade, clean. |
 
 ### Project Management
 
@@ -243,13 +241,8 @@ Domains are auto-discovered at startup.
 
 ## Skill Documentation
 
-Every skill has auto-generated documentation with visual workflow diagrams:
-
-- **[Skill Routing Guide](docs/skills/README.md)** — Mermaid decision trees: "which skill do I use?"
-- **[Skill Index](docs/skills/index.md)** — Full list with links to usage and internals docs
-- **Per-skill docs** — Each skill has `usage.md` (how to use) and `internals.md` (how it works), plus HTML visualizations and PNG screenshots
-
-## Design Specs
-
-- `docs/specs/2026-03-16-multi-agent-code-review-system-design.md` — code review engine design
-- `docs/superpowers/specs/` — design specs for individual skills
+Each skill documents itself: `skill/<name>/SKILL.md` is the source of truth, and
+every skill answers `--help`. There is no generated documentation layer — the
+previous one drifted two generations out of date and its generator was deleted,
+so it described a pipeline that no longer existed. Read the skill, or run it
+with `--help`.

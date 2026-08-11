@@ -1,4 +1,0 @@
-{
-  "doc_content": {},
-  "alt_text": "A clean internal architecture diagram for the \u201cstark-session\u201d skill showing two parallel workflow narratives: Start Mode on top with config resolution, silent context gathering, git and PR inspection, health checks, skill discovery, and a briefing output; and End Mode below with tests/build, optional PR merges, docs/devlog commit, project field updates, push decision logic, and a final session summary. Blue nodes mark phases, green nodes mark config and policy, purple marks decision points, amber marks user-visible outputs, gray callouts mark external systems like git, gh, and project config, and tables below document config hierarchy, session keys, extension points, and failure recovery behavior.\"}}"
-}

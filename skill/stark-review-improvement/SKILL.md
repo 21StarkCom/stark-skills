@@ -34,7 +34,7 @@ TOOLS       = $STARK_REPO/tools
 CONFIG      = $STARK_REPO/global/config.json
 ORG_CONFIG  = $STARK_REPO/org/evinced/config.json
 HISTORY     = ~/.claude/code-review/history
-CHANGELOG   = $STARK_REPO/docs/prompt-changelog.md
+CHANGELOG   = $HISTORY/prompt-changelog.md
 ```
 
 ```
