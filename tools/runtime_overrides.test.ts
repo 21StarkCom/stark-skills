@@ -10,41 +10,60 @@ import {
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 const CODEX_ROOT = path.join(REPO_ROOT, "runtime-overrides", "codex");
+const SKILL_ROOT = path.join(REPO_ROOT, "skill");
 
-const SKILLS = [
-  "remember",
-  "stark-adr",
-  "stark-author",
-  "stark-blog-sharpen",
-  "stark-build",
-  "stark-cc-user",
-  "stark-copilot",
-  "stark-fresh-eyes",
-  "stark-gh-user",
-  "stark-gha-cost",
-  "stark-handover",
-  "stark-housekeeping",
-  "stark-init-docs",
-  "stark-jury",
-  "stark-logging",
-  "stark-persona",
-  "stark-refactor-plan",
-  "stark-release",
-  "stark-review",
-  "stark-review-improvement",
-  "stark-session",
-  "stark-ssot",
-  "stark-story-edit",
-  "stark-story-judge",
-  "stark-terraform-review",
-  "stark-terragrunt-review",
-  "stark-voice",
-] as const;
+// The skill roster is the filesystem, and whether a skill ships a Codex variant
+// is declared exactly ONCE — in its own SKILL.md `runtimes:` frontmatter. That
+// key is what bifrost's importer reads (engine/internal/importer/
+// runtime_override.go::artifactTargetsCodex) to decide whether a missing Codex
+// overlay is a hard import error, so a hand-kept mirror of it here was only ever
+// a second answer that could disagree — and did: stark-bury declared
+// `runtimes: [claude]` in #867 and never reached the array, leaving main red
+// across three merged PRs. Adding a skill still forces a conscious choice; the
+// choice is now made once, in the file the real consumer reads.
+function canonicalSkillNames(): string[] {
+  return fs
+    .readdirSync(SKILL_ROOT, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .filter((entry) => fs.existsSync(path.join(SKILL_ROOT, entry.name, "SKILL.md")))
+    .map((entry) => entry.name)
+    .sort();
+}
 
-// Skills that deliberately ship NO Codex variant (Claude-session protocol only).
-// A new canonical skill must land in exactly one of the two lists — the union
-// assertion below is what forces that conscious choice.
-const CLAUDE_ONLY_SKILLS = ["stark-handoff"] as const;
+/** Runtimes a skill declares, or null when it declares none. Mirrors the forms
+ * bifrost's parseToolList accepts: a block sequence, and a bare or comma-joined
+ * scalar. Returns null for an EMPTY list on purpose — bifrost keeps Runtimes
+ * unset when `len(rts) == 0` (importer/skill.go) and then defaults it to
+ * [claude, codex] (importer/defaults.go), so `runtimes: []` REQUIRES an overlay.
+ * Reading it as an exemption here would green a tree that `stark sync` rejects. */
+function declaredRuntimes(file: string): string[] | null {
+  const block = fs.readFileSync(file, "utf8").match(/^---\n([\s\S]*?)\n---/);
+  if (!block) return null;
+  let runtimes: string[] | null = null;
+  const sequence = block[1].match(/^runtimes:[ \t]*\n((?:[ \t]+-[ \t]*\S+[ \t]*\n?)+)/m);
+  if (sequence) {
+    runtimes = [...sequence[1].matchAll(/-[ \t]*(\S+)/g)].map((m) => m[1]);
+  } else {
+    const scalar = block[1].match(/^runtimes:[ \t]*(\S[^\n]*)$/m);
+    if (scalar) {
+      runtimes = scalar[1]
+        .replace(/^\[|\]$/g, "")
+        .split(",")
+        .map((entry) => entry.trim().replace(/^['"]|['"]$/g, ""))
+        .filter(Boolean);
+    }
+  }
+  return runtimes && runtimes.length > 0 ? runtimes : null;
+}
+
+function isClaudeOnly(name: string): boolean {
+  const runtimes = declaredRuntimes(path.join(SKILL_ROOT, name, "SKILL.md"));
+  return runtimes !== null && !runtimes.includes("codex");
+}
+
+const CANONICAL_SKILLS = canonicalSkillNames();
+const CLAUDE_ONLY_SKILLS = CANONICAL_SKILLS.filter(isClaudeOnly);
+const SKILLS = CANONICAL_SKILLS.filter((name) => !isClaudeOnly(name));
 
 const COMMANDS = ["cleanup", "pr-merge", "pr-open"] as const;
 
@@ -120,7 +139,15 @@ test("Codex runtime override inventory is exact", () => {
   ].sort();
 
   assert.deepEqual(walkFiles(CODEX_ROOT), expected);
-  assert.equal(expected.length, 73);
+  // The last hand-maintained fact in this file, and deliberately so: with SKILLS
+  // derived, this literal is the only tripwire that fires when a Codex-backed
+  // artifact is added or deleted. Deriving it from the three list lengths would
+  // make it a tautology.
+  assert.equal(
+    expected.length,
+    73,
+    `runtime-overrides/codex inventory size changed (computed ${expected.length}) — if the tree is right, bump this literal`,
+  );
 });
 
 test("Codex cleanup dry-run never fetches or prunes refs", () => {
@@ -154,14 +181,19 @@ test("Codex GitHub state defaults are runtime-neutral", () => {
 });
 
 test("Codex artifact overrides preserve canonical identities", () => {
-  const canonicalSkills = fs
-    .readdirSync(path.join(REPO_ROOT, "skill"), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .filter((entry) => fs.existsSync(path.join(REPO_ROOT, "skill", entry.name, "SKILL.md")))
-    .map((entry) => entry.name)
-    .sort();
+  // SKILLS and CLAUDE_ONLY_SKILLS are complementary filters over the same
+  // directory listing, so asserting their union equals it can no longer fail.
+  // What CAN fail is the parse itself, and the half of the contract the old
+  // union never covered: a claude-only skill must ship no Codex overlay.
+  assert.ok(SKILLS.length > 0, "no skill targets Codex — the runtimes: parse is broken");
 
-  assert.deepEqual([...SKILLS, ...CLAUDE_ONLY_SKILLS].sort(), canonicalSkills);
+  for (const name of CLAUDE_ONLY_SKILLS) {
+    assert.equal(
+      fs.existsSync(path.join(CODEX_ROOT, "skill", name)),
+      false,
+      `${name} declares claude-only runtimes yet ships runtime-overrides/codex/skill/${name}/ — drop the override, or drop the narrowing`,
+    );
+  }
 
   const canonicalCommands = fs
     .readdirSync(path.join(REPO_ROOT, "plugins", "stark-gh", "commands"), { withFileTypes: true })
@@ -172,9 +204,16 @@ test("Codex artifact overrides preserve canonical identities", () => {
   assert.deepEqual([...COMMANDS].sort(), canonicalCommands);
 
   for (const name of SKILLS) {
+    // Guard before the read: without it a missing overlay surfaces as an opaque
+    // ENOENT out of frontmatterName rather than an actionable message.
+    const override = path.join(CODEX_ROOT, "skill", name, "SKILL.md");
+    assert.ok(
+      fs.existsSync(override),
+      `${name} targets Codex but has no override: add runtime-overrides/codex/skill/${name}/SKILL.md, or narrow skill/${name}/SKILL.md to 'runtimes:\n  - claude'`,
+    );
     assert.equal(
-      frontmatterName(path.join(CODEX_ROOT, "skill", name, "SKILL.md")),
-      frontmatterName(path.join(REPO_ROOT, "skill", name, "SKILL.md")),
+      frontmatterName(override),
+      frontmatterName(path.join(SKILL_ROOT, name, "SKILL.md")),
       `skill identity drift: ${name}`,
     );
   }
