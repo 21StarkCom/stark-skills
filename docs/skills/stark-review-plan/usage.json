@@ -1,4 +1,0 @@
-{
-  "doc_content": {},
-  "alt_text": "A clean single-page diagram for the stark-review-plan skill showing a usage-focused flow from command invocation, setup, validation, and PR detection into a 21-agent review-fix loop, a dispatch-failure branch, a final review round, consolidated summary generation, and output artifacts like a .review.md file, PR comments, and saved history, with cards explaining arguments, common workflows, outputs, observability, and troubleshooting.\"}}"
-}

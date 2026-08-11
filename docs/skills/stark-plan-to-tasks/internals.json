@@ -1,4 +1,0 @@
-{
-  "doc_content": {},
-  "alt_text": "A clean internal architecture infographic for the stark-plan-to-tasks skill showing a vertical workflow spine from setup through quality gate, decomposition, validation, issue creation, optional GitHub Project integration, knowledge extraction, and summary. Blue nodes mark core phases, purple nodes mark decision loops like reruns and validation retries, green nodes show config and auth inputs, amber nodes show artifacts such as the breakdown JSON and run manifest, and red nodes mark abort or warning states. Below the flow are cards and tables explaining data contracts, config hierarchy, auth switching, failure semantics, and extension points for contributors.\"}}"
-}
