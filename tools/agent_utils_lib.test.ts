@@ -240,6 +240,12 @@ test("setupGeminiHome: approval mode patched into settings.json", () => {
 
 test("setupGeminiHome: vertex mode forces Vertex AI auth + global region", () => {
   process.env.STARK_GEMINI_AUTH = "vertex";
+  // Pin the project explicitly. Without it `resolveVertexProject` falls through
+  // to the host's `gcloud config get-value project`, so these assertions passed
+  // only on a machine with gcloud configured — green here, red on any CI runner
+  // and on a fresh checkout. The env var is precedence #1, so this exercises the
+  // same code path deterministically.
+  process.env.STARK_GEMINI_VERTEX_PROJECT = "test-vertex-project";
   const home = setupGeminiHome("agentutil-test-", "/tmp/proj", "t");
   try {
     const settings = JSON.parse(
@@ -251,12 +257,17 @@ test("setupGeminiHome: vertex mode forces Vertex AI auth + global region", () =>
     assert.ok(settings.security.auth.vertexAi.projectId);
   } finally {
     delete process.env.STARK_GEMINI_AUTH;
+    delete process.env.STARK_GEMINI_VERTEX_PROJECT;
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
 test("setupGeminiHome: oauth mode (default) selects oauth-personal, no vertexAi", () => {
   process.env.STARK_GEMINI_AUTH = "oauth";
+  // Same reason as the vertex tests: oauth mode still resolves a project (it is
+  // the Code Assist licensing project), so without this the assertion depends on
+  // the host's gcloud config.
+  process.env.STARK_GEMINI_VERTEX_PROJECT = "test-vertex-project";
   const home = setupGeminiHome("agentutil-test-", "/tmp/proj", "t");
   try {
     const settings = JSON.parse(
@@ -267,6 +278,7 @@ test("setupGeminiHome: oauth mode (default) selects oauth-personal, no vertexAi"
     assert.equal(settings.security.auth.vertexAi, undefined);
   } finally {
     delete process.env.STARK_GEMINI_AUTH;
+    delete process.env.STARK_GEMINI_VERTEX_PROJECT;
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
@@ -315,6 +327,12 @@ test("makeGeminiEnv: trustWorkspace opt-in", () => {
 test("makeGeminiEnv: vertex mode forces Vertex AI env, overrides a host regional pin", () => {
   const prev = process.env.GOOGLE_CLOUD_LOCATION;
   process.env.STARK_GEMINI_AUTH = "vertex";
+  // Pin the project explicitly. Without it `resolveVertexProject` falls through
+  // to the host's `gcloud config get-value project`, so these assertions passed
+  // only on a machine with gcloud configured — green here, red on any CI runner
+  // and on a fresh checkout. The env var is precedence #1, so this exercises the
+  // same code path deterministically.
+  process.env.STARK_GEMINI_VERTEX_PROJECT = "test-vertex-project";
   process.env.GOOGLE_CLOUD_LOCATION = "us-east1";
   try {
     const env = makeGeminiEnv("/tmp/h");
@@ -323,6 +341,7 @@ test("makeGeminiEnv: vertex mode forces Vertex AI env, overrides a host regional
     assert.equal(env.GOOGLE_CLOUD_LOCATION, "global");
   } finally {
     delete process.env.STARK_GEMINI_AUTH;
+    delete process.env.STARK_GEMINI_VERTEX_PROJECT;
     if (prev === undefined) delete process.env.GOOGLE_CLOUD_LOCATION;
     else process.env.GOOGLE_CLOUD_LOCATION = prev;
   }
@@ -330,6 +349,10 @@ test("makeGeminiEnv: vertex mode forces Vertex AI env, overrides a host regional
 
 test("makeGeminiEnv: oauth mode keeps Vertex env out, keeps licensing project", () => {
   process.env.STARK_GEMINI_AUTH = "oauth";
+  // Same reason as the vertex tests: oauth mode still resolves a project (it is
+  // the Code Assist licensing project), so without this the assertion depends on
+  // the host's gcloud config.
+  process.env.STARK_GEMINI_VERTEX_PROJECT = "test-vertex-project";
   try {
     const env = makeGeminiEnv("/tmp/h");
     assert.equal(env.GOOGLE_GENAI_USE_VERTEXAI, undefined);
@@ -337,6 +360,7 @@ test("makeGeminiEnv: oauth mode keeps Vertex env out, keeps licensing project", 
     assert.ok(env.GOOGLE_CLOUD_PROJECT, "Code Assist licensing project must survive");
   } finally {
     delete process.env.STARK_GEMINI_AUTH;
+    delete process.env.STARK_GEMINI_VERTEX_PROJECT;
   }
 });
 

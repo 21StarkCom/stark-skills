@@ -1,7 +1,7 @@
 # Skip-draft guard — keep CI off WIP pull requests
 
-**Policy:** PRs open as **drafts** by default (the stark-gh / review /
-phase-execute / spec-to-plan skills all do this). Work is verified locally while
+**Policy:** PRs open as **drafts** by default (the stark-gh / review / author /
+build skills all do this). Work is verified locally while
 the PR is a draft; when it's ready, it's marked ready-for-review — which is the
 moment CI should run. A draft PR should **not** burn CI minutes or trigger any
 `pull_request`-driven automation.
@@ -62,7 +62,8 @@ runs on the current head. Marking ready is the single CI-triggering moment.
 
 - `.github/workflows/project-pr-sync.yml` — `== false` (pull_request +
   pull_request_review only), plus a `ready_for_review → Human Review` mapping.
-- `.github/workflows/project-gate-check.yml` — `!= true` (also `check_run`).
+- `.github/workflows/tests.yml` — `!= true` (also runs on `push` to main, whose
+  payload has no `pull_request` object).
 - `standards/workflows/doc-staleness.yml` — `== false`, the adoptable template.
 
 ## Downstream, per target repo
