@@ -17,8 +17,9 @@ on:
     # draft-guarded — `opened`/`synchronize` already produced a real result for
     # the head sha. It is kept because it costs one cheap run and covers the
     # case where the un-draft is the only signal the merge tooling is waiting
-    # on; the merge gate tolerates the resulting duplicate rows by design (see
-    # the concurrency note below).
+    # on. It does mean two runs can report the same check for one sha; the merge
+    # gate collapses same-named contexts to the latest, and nothing is cancelled
+    # (see the concurrency note below).
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
@@ -29,21 +30,25 @@ on:
   # (and therefore every merge gate reading it) still carried `test: SKIPPED`.
   workflow_dispatch: {}
 
-# Cancel superseded runs for the same PR / branch.
+# Serialize per PR / branch, but NEVER cancel — `test` is a required check.
 #
-# Now that the jobs are unguarded they take ~1 minute rather than ~5 seconds, so
-# un-drafting mid-run genuinely cancels the in-flight `synchronize` run and
-# leaves a CANCELLED check beside the `ready_for_review` run on the SAME sha.
-# The merge gate handles that pair in two steps (lib/checks_graphql.ts): while
-# the replacement is still running it wins its group outright, because a running
-# context always outranks a finished one — so the gate reports PENDING and waits
-# rather than reading the CANCELLED as a failing required check. Once the
-# replacement finishes, `latestPerName` picks it on recency. Neither step relies
-# on comparing a running context's timestamps against a finished one's, which is
-# not a well-defined ordering.
+# `cancel-in-progress: true` was correct while the jobs were draft-guarded: they
+# finished in ~5 seconds, so there was never anything in flight to cancel. Now
+# they take ~1 minute, and `pr-merge` force-pushes and then marks the PR ready
+# moments later — two events for the SAME sha. Cancelling meant the second run
+# killed the first and left `test: CANCELLED` sitting on the head commit.
+#
+# GitHub counts CANCELLED as a failing required check, so that row can block the
+# merge outright, and if the replacement run never materializes it is the ONLY
+# row — a required check that reports failure for a commit whose suite actually
+# passed. A workflow backing a required check should not manufacture rows for
+# runs it intends to discard.
+#
+# The cost is a wasted ~1 runner-minute when two pushes land close together.
+# That is cheaper than either failure mode it removes.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read

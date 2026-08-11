@@ -89,8 +89,23 @@ draft push is fine. Cost the guard would have saved is measured in
 runner-minutes; cost of a skipped required check is a merge with no verification
 at all.
 
+### Two things that follow from removing the guard
+
+- **Set `cancel-in-progress: false`.** Unguarded jobs take minutes instead of
+  seconds, and `pr-merge` force-pushes then marks the PR ready moments later —
+  two events for the same commit. Cancelling means the second run kills the
+  first and leaves `test: CANCELLED` on the head sha. GitHub counts CANCELLED as
+  a *failing* required check, so it can block the merge, and if the replacement
+  never materializes it is the only row: a required check reporting failure for
+  a commit whose suite passed. A workflow backing a required check should not
+  manufacture rows for runs it means to discard.
+- **Never require a check whose step carries `continue-on-error: true`.** It
+  reports SUCCESS whether the step passed or not, so requiring it satisfies the
+  gate unconditionally — the same false-green shape, wearing a different hat.
+
 `.github/workflows/tests.yml` in this repo is the reference: no `if:` on either
-job, with the reasoning in a comment at the job.
+job, `cancel-in-progress: false`, and the advisory `typecheck` job explicitly
+marked as not-requirable while it stays advisory.
 
 ## Reference implementations in this repo
 
