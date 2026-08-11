@@ -1,0 +1,23 @@
+---
+title: "Automation Fleet Report — Week {{ week }}"
+---
+
+# Automation Fleet Report — Week {{ week }}
+
+<table>
+<thead><tr><th>Trigger</th><th>Runs</th><th>Est. Tokens</th><th>Est. Cost</th><th>Avg Duration</th><th>Status</th></tr></thead>
+<tbody>
+{% for t in triggers -%}
+<tr><td>{{ t.name }}</td><td>{{ t.runs }}</td><td>{{ "{:,}".format(t.tokens) }}</td><td>${{ "%.2f"|format(t.cost) }}</td><td>{{ t.avg_duration }}s</td><td>{{ t.status }}</td></tr>
+{% endfor -%}
+<tr><td><strong>Total</strong></td><td><strong>{{ total_runs }}</strong></td><td><strong>{{ "{:,}".format(total_tokens) }}</strong></td><td><strong>${{ "%.2f"|format(total_cost) }}</strong></td><td></td><td></td></tr>
+</tbody>
+</table>
+
+{% if alerts %}
+## Alerts
+
+{% for alert in alerts -%}
+- {{ alert }}
+{% endfor %}
+{% endif %}
