@@ -122,10 +122,13 @@ test("fetchRequiredCheckRollup throws on missing pullRequest payload", async () 
   ), /pullRequest payload missing/);
 });
 
-test("isCheckPassing: CheckRun SUCCESS/NEUTRAL/SKIPPED count as passing", () => {
+// SKIPPED moved out of this set on 2026-08-11 (STARK-357). It used to count as
+// passing, mirroring GitHub's own required-check semantics — which is precisely
+// how #877 merged with its suite never having run. See checks_skipped.test.ts.
+test("isCheckPassing: CheckRun SUCCESS/NEUTRAL count as passing, SKIPPED does not", () => {
   assert.equal(isCheckPassing(makeCheckRun("c", "SUCCESS", true)), true);
   assert.equal(isCheckPassing(makeCheckRun("c", "NEUTRAL", true)), true);
-  assert.equal(isCheckPassing(makeCheckRun("c", "SKIPPED", true)), true);
+  assert.equal(isCheckPassing(makeCheckRun("c", "SKIPPED", true)), false);
   assert.equal(isCheckPassing(makeCheckRun("c", "FAILURE", true)), false);
   assert.equal(isCheckPassing(makeCheckRun("c", null, true)), false);  // pending
   assert.equal(isCheckPassing(makeCheckRun("c", "SUCCESS", false)), false);  // not required

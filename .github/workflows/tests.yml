@@ -13,17 +13,27 @@ name: tests
 
 on:
   pull_request:
-    # `ready_for_review` fires when a draft PR is un-drafted. Under the
-    # draft-by-default policy that is the moment CI should finally run — the
-    # draft guard below skips everything before it.
+    # `ready_for_review` is kept in the list even though nothing is
+    # draft-guarded any more: un-drafting a PR whose head has not moved since
+    # the last push would otherwise produce no run at all.
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
-  # Fire the gate by hand without pushing. The `!= true` guard below stays
-  # correct for this trigger: its payload has no pull_request object either.
+  # Fire the gate by hand without pushing. Useful for re-running against a
+  # branch, but NOT a repair for a missing PR check: a `workflow_dispatch` run
+  # does not join a pull request's status rollup. Measured on #877 — the
+  # dispatch produced `test: SUCCESS` on the head sha while the rollup
+  # (and therefore every merge gate reading it) still carried `test: SKIPPED`.
   workflow_dispatch: {}
 
 # Cancel superseded runs for the same PR / branch.
+#
+# Now that the jobs are unguarded they take ~1 minute rather than ~5 seconds, so
+# un-drafting mid-run genuinely cancels the in-flight `synchronize` run and
+# leaves a CANCELLED check beside the `ready_for_review` run's SUCCESS on the
+# SAME sha. That is safe only because the merge gate collapses same-named
+# contexts to the latest (lib/checks_graphql.ts::latestPerName) — without it the
+# stale CANCELLED would read as a failing required check and block the merge.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -32,14 +42,18 @@ permissions:
   contents: read
 
 jobs:
+  # DELIBERATELY NOT draft-guarded — the carve-out in
+  # standards/workflows/skip-draft-guard.md. A guarded job reports `skipped`,
+  # which GitHub counts as satisfying a required check and renders identically
+  # to a pass, so a lost run reads as green. #877 merged that way: the only
+  # `pull_request` run on its head sha was the draft-time one, and no repair
+  # existed (a re-run replays the original payload and skips again; a dispatch
+  # run never joins the rollup). Running unconditionally makes every commit
+  # carry a real conclusion. It costs ~1 runner-minute per push and this suite
+  # installs nothing.
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Skip-draft guard, per standards/workflows/skip-draft-guard.md. `!= true`
-    # rather than `== false` because this workflow also runs on `push`, whose
-    # payload carries no pull_request object — there `draft` is undefined, and
-    # `undefined == false` is false, which would skip every push run.
-    if: github.event.pull_request.draft != true
     steps:
       - uses: actions/checkout@v6
 
@@ -57,10 +71,17 @@ jobs:
         working-directory: tools
         run: npm test
 
+      # The stark-gh merge tooling lives in its own tree with its own test
+      # files, which `tools/`'s `*.test.ts` glob never reached — 388 tests
+      # covering the code that decides whether a PR is green, none of them run
+      # by this gate until 2026-08-11. It needs no install either.
+      - name: Run stark-gh tests
+        working-directory: plugins/stark-gh
+        run: npm test
+
   typecheck:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.event.pull_request.draft != true
     steps:
       - uses: actions/checkout@v6
 

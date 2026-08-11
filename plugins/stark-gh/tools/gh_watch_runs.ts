@@ -5,7 +5,7 @@ import * as crypto from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { stateFile, lockFile, latestPointer, ensurePrDir, atomicWriteJson } from "./lib/watcher_paths.ts";
 import * as ghLib from "./lib/gh.ts";
-import { fetchRequiredCheckRollup, summarizeVerdict, type Context } from "./lib/checks_graphql.ts";
+import { fetchRequiredCheckRollup, summarizeVerdict, isGreen, type Context } from "./lib/checks_graphql.ts";
 import { resolveCallback } from "./lib/watcher_callbacks.ts";
 import { readPrMergePlan, type PrMergePlan } from "./lib/plan.ts";
 import type { WatcherKind } from "./lib/watcher_lock.ts";
@@ -471,7 +471,7 @@ export function decideVacuousTransition(
 // into a PollOutcome. Easy to unit-test.
 export function evaluateRollup(
   rollup: { mismatch: boolean; contexts: Context[] | null; headRefOid: string },
-  policy: { allowNoRequiredChecks: boolean },
+  policy: { allowNoRequiredChecks: boolean; allowSkippedChecks?: boolean },
 ): PollOutcome {
   if (rollup.mismatch) return { kind: "head_moved", reason: `headRefOid=${rollup.headRefOid}` };
   const v = summarizeVerdict(rollup.contexts!);
@@ -483,7 +483,23 @@ export function evaluateRollup(
     return { kind: "wait", reason: "no required checks observed yet", vacuous: true };
   }
   if (v.anyFailing) return { kind: "fatal", reason: `failing checks: ${v.failing}` };
-  if (v.allPassing) return { kind: "ready", reason: "all required passing" };
+  // A skipped required check is terminal, not pending. Unlike a queued run it
+  // can never resolve on its own: re-running the workflow replays the original
+  // event payload (so a draft-guarded job skips again), and a
+  // `workflow_dispatch` run does not join the PR's status rollup at all —
+  // measured on #877, where the dispatch produced `test: SUCCESS` on the head
+  // sha that the rollup never carried. Waiting here would burn to the 6h
+  // timeout on a condition only a new commit can clear.
+  if (v.anySkipped && !policy.allowSkippedChecks) {
+    return {
+      kind: "fatal",
+      reason: `required check(s) skipped, so the suite never ran on this commit: ${v.skippedNames.join(", ")}. ` +
+        `Push a commit to re-fire CI, or re-run the merge with --allow-skipped-checks if these checks skip by design.`,
+    };
+  }
+  if (isGreen(v, { allowSkippedChecks: policy.allowSkippedChecks })) {
+    return { kind: "ready", reason: "all required passing" };
+  }
   return { kind: "wait", reason: `pending: ${v.pending}` };
 }
 
@@ -494,7 +510,10 @@ async function pollOnce(plan: PrMergePlan): Promise<PollOutcome> {
     prNumber: plan.pr.number,
     expectedHeadOid: plan.pushedHeadOid!,
   });
-  return evaluateRollup(r as any, { allowNoRequiredChecks: plan.execute.allowNoRequiredChecks });
+  return evaluateRollup(r as any, {
+    allowNoRequiredChecks: plan.execute.allowNoRequiredChecks,
+    allowSkippedChecks: plan.execute.allowSkippedChecks === true,
+  });
 }
 
 interface BackoffState {

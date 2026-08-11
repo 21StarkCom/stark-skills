@@ -44,6 +44,7 @@ export interface MergeUserArgs {
   allowSecretCommit: boolean;
   allowSecretToLlm: boolean;
   allowNoRequiredChecks: boolean;
+  allowSkippedChecks: boolean;
 }
 
 const DEFAULT_WATCH_TIMEOUT_HOURS = 6;
@@ -72,6 +73,7 @@ export function parseRawArgs(raw: string): MergeUserArgs {
     allowSecretCommit: false,
     allowSecretToLlm: false,
     allowNoRequiredChecks: false,
+    allowSkippedChecks: false,
   };
   const need = (i: number, flag: string): string => {
     if (i >= tokens.length) throw new Error(`flag ${flag} requires a value`);
@@ -125,6 +127,9 @@ export function parseRawArgs(raw: string): MergeUserArgs {
         break;
       case "--allow-no-required-checks":
         a.allowNoRequiredChecks = true;
+        break;
+      case "--allow-skipped-checks":
+        a.allowSkippedChecks = true;
         break;
       default:
         throw new Error(`unknown flag: ${t}`);
@@ -520,6 +525,7 @@ async function main(argv: string[]): Promise<number> {
       watchTimeoutHours: userArgs.watchTimeoutHours,
       secretOverrides: { commit: userArgs.allowSecretCommit, toLlm: userArgs.allowSecretToLlm },
       allowNoRequiredChecks: userArgs.allowNoRequiredChecks,
+      allowSkippedChecks: userArgs.allowSkippedChecks,
     },
   };
 
