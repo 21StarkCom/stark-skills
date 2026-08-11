@@ -2,8 +2,11 @@ import { test, describe } from "node:test";
 import * as assert from "node:assert/strict";
 
 import {
+  anchorableLinesFromPatch,
   bodyFor,
   buildHumanSummary,
+  flattenSlurped,
+  isAnchorable,
   parseArgs,
   parsePrContext,
   severityFromVerdict,
@@ -163,16 +166,115 @@ describe("buildHumanSummary", () => {
 
 describe("parsePrContext", () => {
   test("extracts head sha and changed file paths", () => {
-    const ctx = parsePrContext(JSON.stringify({
-      headRefOid: "abc123",
-      files: [{ path: "a.ts" }, { path: "b/c.ts" }],
-    }));
+    const ctx = parsePrContext("abc123\n", JSON.stringify([
+      { filename: "a.ts", patch: "@@ -1,1 +1,2 @@\n ctx\n+added" },
+      { filename: "b/c.ts", patch: "@@ -1,1 +1,1 @@\n ctx" },
+    ]));
     assert.equal(ctx.headSha, "abc123");
     assert.deepEqual([...ctx.changedFiles].sort(), ["a.ts", "b/c.ts"]);
   });
 
-  test("missing headRefOid is a hard error — a review with no commit_id cannot anchor", () => {
-    assert.throws(() => parsePrContext(JSON.stringify({ files: [] })), /headRefOid/);
+  test("missing head sha is a hard error — a review with no commit_id cannot anchor", () => {
+    assert.throws(() => parsePrContext("  \n", "[]"), /head sha/);
+  });
+
+  test("a file with no patch maps to null, so every line stays anchorable", () => {
+    const ctx = parsePrContext("sha", JSON.stringify([{ filename: "big.bin" }]));
+    assert.equal(ctx.anchorable.get("big.bin"), null);
+    assert.equal(isAnchorable(ctx.anchorable, "big.bin", 99999), true);
+  });
+
+  test("a file absent from the PR is never anchorable", () => {
+    const ctx = parsePrContext("sha", JSON.stringify([{ filename: "a.ts", patch: "@@ -1 +1 @@\n x" }]));
+    assert.equal(isAnchorable(ctx.anchorable, "elsewhere.ts", 1), false);
+  });
+});
+
+// --- hunk parsing ------------------------------------------------------------
+
+describe("anchorableLinesFromPatch", () => {
+  test("added and context lines are anchorable, deleted lines are not", () => {
+    // new-side numbering: 10 ctx, 11 added, 12 ctx  (the removed line has no
+    // right-side number at all)
+    const lines = anchorableLinesFromPatch("@@ -10,2 +10,3 @@\n keep\n+new\n-gone\n tail");
+    assert.deepEqual([...lines].sort((a, b) => a - b), [10, 11, 12]);
+  });
+
+  test("multiple hunks each restart the cursor from their own header", () => {
+    const lines = anchorableLinesFromPatch(
+      "@@ -1,1 +1,1 @@\n a\n@@ -50,2 +60,2 @@\n b\n c",
+    );
+    assert.deepEqual([...lines].sort((a, b) => a - b), [1, 60, 61]);
+  });
+
+  test("a gap between hunks is NOT anchorable — the PR #870 failure", () => {
+    // Hunks covering new lines 10-11 and 139-140: line 123 falls between them.
+    // GitHub 422s on it, names no index, and postReview's fallback then demotes
+    // every other anchor in the batch.
+    const lines = anchorableLinesFromPatch("@@ -10,2 +10,2 @@\n a\n b\n@@ -120,2 +139,2 @@\n c\n d");
+    assert.equal(lines.has(139), true);
+    assert.equal(lines.has(123), false);
+  });
+
+  test("the no-newline marker does not advance the cursor", () => {
+    const lines = anchorableLinesFromPatch("@@ -1,1 +1,2 @@\n a\n+b\n\\ No newline at end of file");
+    assert.deepEqual([...lines].sort((a, b) => a - b), [1, 2]);
+  });
+
+  test("text before any hunk header is ignored", () => {
+    assert.equal(anchorableLinesFromPatch("diff --git a/x b/x\n+stray").size, 0);
+  });
+});
+
+describe("flattenSlurped", () => {
+  test("flattens the array-of-pages --slurp shape", () => {
+    const out = flattenSlurped(JSON.stringify([[{ filename: "a" }], [{ filename: "b" }]]));
+    assert.deepEqual(JSON.parse(out), [{ filename: "a" }, { filename: "b" }]);
+  });
+
+  test("a single already-flat array passes through", () => {
+    const out = flattenSlurped(JSON.stringify([{ filename: "a" }]));
+    assert.deepEqual(JSON.parse(out), [{ filename: "a" }]);
+  });
+});
+
+// --- anchor filtering end to end --------------------------------------------
+
+describe("toFindings anchor validation", () => {
+  const ctx = parsePrContext("sha", JSON.stringify([
+    { filename: "a.ts", patch: "@@ -10,2 +10,2 @@\n keep\n+new" },
+  ]));
+
+  test("a finding on an in-hunk line keeps its anchor", () => {
+    const [f] = toFindings({ findings: [{ file: "a.ts", line: 11, summary: "s" }] }, "claude", ctx.anchorable);
+    assert.equal(f.line, 11);
+    assert.doesNotMatch(f.body, /not anchorable/);
+  });
+
+  test("a finding outside every hunk loses its anchor but keeps the location in the body", () => {
+    const [f] = toFindings({ findings: [{ file: "a.ts", line: 999, summary: "s" }] }, "claude", ctx.anchorable);
+    assert.equal(f.line, null, "line must be null or GitHub 422s the whole batch");
+    assert.match(f.body, /\*\*Location:\*\* `a\.ts:999` \(outside this PR's diff — not anchorable\)/);
+    assert.match(f.body, /s/);
+  });
+
+  test("one unanchorable finding does not cost the others their anchors", () => {
+    const findings = toFindings({
+      findings: [
+        { file: "a.ts", line: 10, short_summary: "good" },
+        { file: "a.ts", line: 999, short_summary: "bad anchor" },
+        { file: "a.ts", line: 11, short_summary: "also good" },
+      ],
+    }, "claude", ctx.anchorable);
+    const { inline, bodyFindings } = partitionInlineVsBody(findings, ctx.changedFiles, "low");
+    assert.equal(inline.length, 2);
+    assert.equal(bodyFindings.length, 1);
+    assert.equal(inline.length + bodyFindings.length, 3);
+  });
+
+  test("omitting the anchor map preserves the old file-granularity behavior", () => {
+    const [f] = toFindings({ findings: [{ file: "a.ts", line: 999, summary: "s" }] }, "claude");
+    assert.equal(f.line, 999);
   });
 });
 
