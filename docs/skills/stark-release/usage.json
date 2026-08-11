@@ -5,9 +5,7 @@
     "common_patterns": "**Patch release after bug fix:**\n`/stark-release patch`\nBumps patch version (e.g., 0.2.1 \u2192 0.2.2), tags, and creates GitHub Release.\n\n**Feature release with auto-detection:**\n`/stark-release`\nReads `CHANGELOG.md` first; if `[Unreleased]` is empty, it backfills notes from git log before choosing the bump.\n\n**Explicit major bump:**\n`/stark-release major`\nFor breaking changes or major milestones (e.g., 0.3.0 \u2192 1.0.0).",
     "troubleshooting": "**\"Not on main\" error:** Run `git checkout main && git pull --rebase origin main` first.\n\n**\"Empty [Unreleased]\" case:** If there are commits since the last tag, the skill auto-generates release notes from git log. If there are no changelog entries and no commits, it aborts with nothing to release.\n\n**\"Tag already exists\" error:** The version was already released \u2014 the skill will suggest the next available version.\n\n**Push fails:** Run `git pull --rebase origin main` and retry. The tag and commit exist locally.\n\n**GitHub Release not created:** Verify `gh auth status`. Ensure `GH_TOKEN` is unset so `gh` uses your native PAT.",
     "related_skills": [
-      "stark-pr-flow",
-      "stark-session",
-      "stark-phase-execute"
+      "stark-session"
     ],
     "arguments_table": "| Argument | Required | Description |\n|----------|----------|-------------|\n| `patch` | No | Bug fixes, small corrections (0.1.2 \u2192 0.1.3) |\n| `minor` | No | New features, session deliverables (0.1.3 \u2192 0.2.0) |\n| `major` | No | Breaking changes, major milestones (0.2.0 \u2192 1.0.0) |\n| *(omitted)* | \u2014 | Auto-detects from assembled CHANGELOG or git-log categories |"
   },

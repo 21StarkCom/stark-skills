@@ -101,4 +101,4 @@ For breaking changes or major milestones (e.g., 0.3.0 → 1.0.0).
 
 ## Related Skills
 
-`/stark-pr-flow`, `/stark-session`, `/stark-phase-execute`
+`/stark-session`

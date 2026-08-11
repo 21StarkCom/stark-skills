@@ -1,16 +1,12 @@
 # Skill Documentation Index
 
-## Pipeline Skills (in order)
+## Pipeline Skills
+
+The ordered five-stage chain this section listed was retired on 2026-07-26.
+The pipeline is now `/stark-author` -> `/stark-build`; see the repo README.
 
 | Skill | Description | Docs |
 |-------|-------------|------|
-| `/stark-review-spec` | Multi-agent design/spec review — N agents × 12 domains with fix loop | [source](../../skill/stark-review-spec/SKILL.md) |
-| `/stark-spec-to-plan` | Generate implementation plan from design — 3 agents generate, 6 cross-review, synthesize | [usage](stark-spec-to-plan/usage.md) · [internals](stark-spec-to-plan/internals.md) |
-| `/stark-red-team-spec` | Adversarial 5-persona challenge of a design doc | [source](../../skill/stark-red-team-spec/SKILL.md) |
-| `/stark-review-plan` | Multi-agent plan review — N agents × 10 adversarial domains with fix loop | [usage](stark-review-plan/usage.md) · [internals](stark-review-plan/internals.md) |
-| `/stark-red-team-plan` | Adversarial 5-persona challenge of an execution plan | [source](../../skill/stark-red-team-plan/SKILL.md) |
-| `/stark-plan-to-tasks` | Decompose plan into phased GitHub issues with story points | [usage](stark-plan-to-tasks/usage.md) · [internals](stark-plan-to-tasks/internals.md) |
-| `/stark-phase-execute` | Autonomous phase execution — implement, PR, review, merge | [usage](stark-phase-execute/usage.md) · [internals](stark-phase-execute/internals.md) |
 | `/stark-copilot` | Paired lead/wing autonomous implementation — lead implements, wing reviews, fix-loop | [source](../../skill/stark-copilot/SKILL.md) |
 
 ## Workflow & Ops
@@ -18,8 +14,7 @@
 | Skill | Description | Docs |
 |-------|-------------|------|
 | `/stark-review-improvement` | Improve review prompts from assessment feedback | [usage](stark-review-improvement/usage.md) · [internals](stark-review-improvement/internals.md) |
-| `/stark-review-spec-improvement` | Improve design review prompts from assessment feedback | [source](../../skill/stark-review-spec-improvement/SKILL.md) |
-| `/stark-review` | Single-agent PR code review — 1 agent × 9 domains | [source](../../skill/stark-review/SKILL.md) |
+| `/stark-review` | Single-agent PR code review — 1 agent × triage-selected domains | [source](../../skill/stark-review/SKILL.md) |
 | `/stark-session` | Session management: briefing on start, cleanup on end | [usage](stark-session/usage.md) · [internals](stark-session/internals.md) |
 | `/stark-release` | Cut a release: changelog, tag, GitHub Release | [usage](stark-release/usage.md) · [internals](stark-release/internals.md) |
 | `/stark-housekeeping` | Audit and clean stale issues, dead branches, and worktree remnants | [source](../../skill/stark-housekeeping/SKILL.md) |

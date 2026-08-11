@@ -17,7 +17,7 @@ codex plugin add stark-gh@bifrost
 # Start a work session (context loading, health checks, briefing)
 /stark-session start
 
-# PR review (1 LLM × 6 domains, triage-selected)
+# PR review (1 LLM × triage-selected domains)
 /stark-review 42
 
 # End the session (tests, cleanup, push)
@@ -32,7 +32,7 @@ All skills are available as `/slash-commands` in Claude Code and `$skill-name` m
 
 [![Development Lifecycle](docs/skills/lifecycle.png)](docs/skills/index.md)
 
-The human provides the idea and writes the spec. Everything after `/stark-plan-to-tasks` runs autonomously — branching, implementation, PRs, multi-agent review with up to 3 fix rounds, merge, and release. The system closes GitHub issues as PRs merge and updates project boards automatically.
+The human writes and gates the spec (`/stark-author`). Everything after that gate runs autonomously (`/stark-build`) — branching, implementation, one commit per green task, a draft PR, one cross-vendor advisory review, and exactly one fix round over its medium+ findings. Anything still open dies at the human, not in another loop.
 
 ---
 
@@ -47,25 +47,21 @@ Review artifacts before they ship. Each review skill dispatches the enabled LLM 
 | Skill | What it reviews | When to use |
 |-------|----------------|-------------|
 | `/stark-review` | PR code changes | Triage-selected domains, 1 LLM × N domains — fast, cheap, default agent configurable per domain. |
-| [`/stark-review-spec`](skill/stark-review-spec/SKILL.md) | Architecture and design docs | Before committing to a design. Reviews across 8 domains (completeness, security, scope, etc.). |
-| [`/stark-review-plan`](docs/skills/stark-review-plan/usage.md) | Execution plans and deployment plans | Before executing. Adversarial SRE review across 4 failure vectors (completeness, security, sequencing, viability) — assumes the plan will break. |
 | [`/stark-review-improvement`](docs/skills/stark-review-improvement/usage.md) | Review prompt effectiveness | After reviews produce too many false positives. Tunes agent prompts based on assessment data. |
-| [`/stark-review-spec-improvement`](skill/stark-review-spec-improvement/SKILL.md) | Design review prompt effectiveness | After design reviews produce too many false positives. Wraps `/stark-review-improvement` with design-review prompts. |
 
-**Best practice:** Run `/stark-review-plan` on specs *before* implementation starts. It's cheaper to fix a plan than to fix code. Use `/stark-review` on every PR.
+**Best practice:** Gate the spec at `/stark-author`'s human checklist *before* implementation starts — it's cheaper to fix a spec than to fix code. Use `/stark-review` on every PR.
 
 ### Planning and Execution
 
-Turn ideas into tracked, phased GitHub issues, then execute them autonomously.
+Author a spec you have actually gated, then implement from it autonomously.
 
 | Skill | What it does | When to use |
 |-------|-------------|-------------|
-| [`/stark-spec-to-plan`](docs/skills/stark-spec-to-plan/usage.md) | Generate implementation plan from design doc | Starting a new feature. Enabled agents generate plans from a brainstormed design, then cross-review one another before synthesis. |
-| [`/stark-plan-to-tasks`](docs/skills/stark-plan-to-tasks/usage.md) | Decompose a spec into phased GitHub issues | After a spec/plan is reviewed and approved. 3 LLM passes: quality gate → decomposition → validation. |
-| [`/stark-phase-execute`](docs/skills/stark-phase-execute/usage.md) | Autonomously implement all tasks in a phase | When you have GitHub issues ready. Branches, implements, PRs, reviews, merges — zero intervention. |
-| [`/stark-copilot`](skill/stark-copilot/SKILL.md) | Autonomous implementation with paired lead/wing agents | When you want a paired lead/wing build loop — lead implements, wing reviews diff, fix-loop until approved. |
+| [`/stark-author`](skill/stark-author/SKILL.md) | Human-gated spec + task DAG in one session | Starting anything non-trivial. Time-boxed recon, structured interview, then a spec you sign off on before a line is written. |
+| [`/stark-build`](skill/stark-build/SKILL.md) | Check-gated autonomous implementation from that spec | After the spec is accepted. One fresh session per task, gated by checks the agent cannot edit. |
+| [`/stark-copilot`](skill/stark-copilot/SKILL.md) | Autonomous implementation with paired lead/wing agents | When you want a paired lead/wing build loop — lead implements, wing reviews diff, one fix round. |
 
-**Best practice:** The full pipeline is: brainstorm a design (`superpowers:brainstorming`) → `/stark-review-spec` → `/stark-spec-to-plan` → `/stark-review-plan` → `/stark-plan-to-tasks` → `/stark-phase-execute`. Each step feeds the next. Don't skip the review steps — unreviewed plans produce ambiguous issues that block autonomous execution.
+**Best practice:** The pipeline is two stages — `/stark-author` (you gate the spec) → `/stark-build` (checks gate the code). There is no LLM-reviewing-LLM loop between them, by design: the 2026-07-25 autopsy found those loops burned tokens without converging, and the five-stage chain they powered was demolished on 2026-07-26.
 
 ### Refactoring
 
@@ -75,7 +71,7 @@ Plan a restructure of an existing codebase before touching it.
 |-------|-------------|-------------|
 | [`/stark-refactor-plan`](skill/stark-refactor-plan/SKILL.md) | Inspect any repo and emit `REFACTOR_PLAN.md` + `REFACTOR_BACKLOG.json` | Before a refactor. Planning-only — produces an evidence-based, phased, file-by-file plan another agent can execute. Never modifies source. |
 
-**Best practice:** Run `/stark-refactor-plan` first, review the plan and backlog, then hand the backlog to `/stark-copilot` or `/stark-plan-to-tasks` to execute one low-risk PR at a time. The plan changes nothing but the two artifacts, so it's always safe to run.
+**Best practice:** Run `/stark-refactor-plan` first, review the plan and backlog, then hand the backlog to `/stark-copilot` to execute one low-risk PR at a time. The plan changes nothing but the two artifacts, so it's always safe to run.
 
 ### PR and Shipping
 
@@ -119,11 +115,8 @@ Start and end your work sessions with consistent context loading and cleanup.
 
 ```
 /stark-session start                          # context + briefing
-                                              # write spec.md
-/stark-review-plan docs/specs/my-feature.md   # lead/wing adversarial review
-                                              # fix spec based on findings
-/stark-plan-to-tasks docs/specs/my-feature.md # decompose into GitHub issues
-/stark-phase-execute my-feature               # autonomous implementation
+/stark-author "my feature"                    # spec + task DAG, you gate it
+/stark-build docs/specs/2026-01-01-my-feature-spec.md   # autonomous implementation
 /stark-session end                            # cleanup + push
 ```
 
@@ -147,16 +140,16 @@ The core engine dispatches the enabled AI agents across the configured review do
 
 ```
 Default install:
-├── claude × {architecture, behavior, type-safety, security, test-coverage, spec-conformance}
-└── codex  × {same 6 domains}
+├── claude × {architecture, behavior, security, test-coverage, spec-conformance}
+└── codex  × {same 5 domains}
 
 Optional:
-└── gemini × {same 6 domains} when `models.gemini.enabled` is true
+└── gemini × {same 5 domains} when `models.gemini.enabled` is true
 ```
 
 Each agent posts a consolidated review via its own GitHub App bot:
 - **stark-claude** — architecture, accessibility, spec conformance focus
-- **stark-codex** — correctness, type safety, test coverage focus
+- **stark-codex** — correctness, behavior, test coverage focus
 - **stark-gemini** — security, regression prevention, UI conformance focus
 
 ## Repo Structure

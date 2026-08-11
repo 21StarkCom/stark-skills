@@ -1,28 +1,41 @@
 # stark-skills
 
-A multi-agent AI engineering system. 18 skills that take you from a napkin idea to production code, with adversarial review at every stage.
+A multi-agent AI engineering system: 30 skills that take you from a napkin idea
+to production code, with review where it earns its keep.
 
 ## The Pipeline
 
-The core of stark-skills is a 6-step pipeline where each skill's output feeds the next. You can enter at any point — if you already have a design, skip straight to step 1.
+Two stages, not six. The five-stage chain this page used to describe
+(`/stark-review-spec` -> `/stark-spec-to-plan` -> `/stark-review-plan` ->
+`/stark-plan-to-tasks` -> `/stark-phase-execute`) was demolished on 2026-07-26:
+the 2026-07-25 autopsy measured its LLM-reviews-LLM loops burning tokens without
+converging. What replaced it has no such loop anywhere.
+
+> **Stale diagram:** `pipeline.png` below still draws the retired chain. The tool
+> that generated it (`/stark-generate-docs`) no longer exists, so the image can
+> only be redrawn or dropped — tracked separately. Trust this text, not the picture.
 
 ![Pipeline](pipeline.png)
 
-Two patterns recur throughout. **Generate** skills (blue) dispatch 3 agents to independently produce a document, then have each agent cross-review the other two — 3 competing outputs, 6 adversarial reviews, one synthesized winner. **Review** skills (orange) dispatch N agents across M specialized domains in parallel, classify the findings, fix the document, and repeat until clean.
+**Stage 1 - `/stark-author`** turns an intent into one self-contained spec in a
+single session: time-boxed recon, a structured interview, an EARS-shaped
+behaviour contract, and a task DAG whose done-whens are machine-checkable. It
+ends at a human gate — you sign the spec off, and the accepted commit is pinned
+into it. At most one advisory review pass informs you; it never loops.
 
-Designs are produced by `superpowers:brainstorming` (outside this repo). From there:
+**Stage 2 - `/stark-build`** implements that spec autonomously, one fresh session
+per task, gated by checks the agent cannot edit: a hook write-protects the spec
+and the gated tests, and a stop-gate blocks turn-end while a task's check is red.
+Aborting is a first-class outcome — measured to cut cheating from 54% to 9%. One
+commit per green task, a draft PR, one cross-vendor advisory review, and exactly
+one fix round over its medium+ findings. Anything still open dies at the human.
 
-**Step 1 — `/stark-review-spec`** puts that design through 12 domain specialists (general, completeness, security, scope, api-design, data-modeling, consistency, scalability, extensibility, resilience, accessibility, test-plan) running across 2-3 agents. It fixes issues autonomously for up to 3 rounds, then runs a final review-only pass.
+**`/stark-copilot`** is the alternative execution mode: a paired lead/wing loop
+where the lead implements in a worktree and the wing reviews the diff, with one
+fix round.
 
-**Step 2 — `/stark-spec-to-plan`** converts the reviewed design into a phased implementation plan. 3-generate + 6-cross-review pattern, scoring on completeness, feasibility, phasing, risk coverage, and testability.
-
-**Step 3 — `/stark-review-plan`** reviews the implementation plan through 10 adversarial domains (general, completeness, security, feasibility, operability, sequencing, rollback, risk, gates, timeline). It assumes the plan will fail and hunts for where it will break.
-
-**Step 4 — `/stark-plan-to-tasks`** decomposes the reviewed plan into phased GitHub issues with story points, risk labels, and confidence scores. Three LLM passes ensure consistency.
-
-**Step 5 — `/stark-phase-execute`** picks up those issues and autonomously implements them — for each issue: implement, create PR, run multi-agent review, fix findings, merge. Zero user intervention. `/stark-copilot` is the alternative execution mode: a paired lead/wing build loop where the lead implements in a worktree and the wing reviews the diff until it approves.
-
-**Step 6 — `/stark-review`** is the PR code review that runs during execution (or standalone). One agent across triage-selected domains, posted to GitHub under the agent's bot identity.
+**`/stark-review`** is the PR code review, standalone or during execution — one
+agent across triage-selected domains, posted under that agent's bot identity.
 
 ## The Ecosystem
 

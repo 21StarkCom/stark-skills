@@ -4,23 +4,8 @@
     "script_version": "1.0.0"
   },
   "skills": {
-    "stark-spec-to-plan": {
-      "hash": "d2ac1a09b5f929d8",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
-    },
     "stark-init-docs": {
       "hash": "f6829ed4ebf3e57d",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
-    },
-    "stark-phase-execute": {
-      "hash": "f0b69bdf76eb9eb0",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
-    },
-    "stark-plan-to-tasks": {
-      "hash": "3e3382dcf363810b",
       "usage_quality": "ok",
       "internals_quality": "ok"
     },
@@ -41,11 +26,6 @@
     },
     "stark-review-improvement": {
       "hash": "0acf97fb0630ca5f",
-      "usage_quality": "ok",
-      "internals_quality": "ok"
-    },
-    "stark-review-plan": {
-      "hash": "02e5f20f0b629176",
       "usage_quality": "ok",
       "internals_quality": "ok"
     },
