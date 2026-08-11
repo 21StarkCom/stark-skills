@@ -43,7 +43,7 @@ re-implement that logic here.
 ## Arguments
 
 - `<plan-or-prompt>` — path to implementation plan, or inline task description
-- `--plan-slug SLUG` — fetch issues labeled `plan:{SLUG}` from GitHub and use as steps (alternative to plan file)
+- `--plan-slug SLUG` — the run's identity slug (threaded from stark-author's recorded slug). Names the impl branch `copilot/<slug>` (§1.7), the impl PR title (§2.6) and the completion line (§4c). Used verbatim when given, never re-derived from the filename.
 - `--test-command CMD` — test command to run after each lead pass (e.g., `npm test`, `pytest`)
 - `--lead AGENT` — lead implementer agent ID (default: `claude`). One of `claude`, `codex`, `gemini`.
 - `--wing AGENT` — wing reviewer agent ID (default: `codex`). Must differ from `--lead`.
@@ -79,72 +79,27 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 
 ### 1.1 Parse input
 
-Three input modes, resolved in this order:
+Two input modes:
 
-**Issue-driven (only when task issues already exist):** If `--plan-slug SLUG` is provided, or if the input is a `.md` file path, attempt to load steps from GitHub issues. Nothing in the fleet creates these issues any more — `/stark-plan-to-tasks` produced them and was retired on 2026-07-26. Write them by hand (`gh issue create --label "plan:<slug>"`) when you want this mode; otherwise the plan-file and inline paths below are the live ones.
+**Plan file:** If the input is a `.md` file path, read it and extract the step list. Each `## Phase N` or `### Task N` heading becomes a step. Resolve `PLAN_SLUG` from `--plan-slug` when given; otherwise derive it from the filename — strip `.md`, strip the known suffixes (`-design`, `-spec`, `-plan`), truncate to 47 chars + a 3-char hash when longer than 50.
 
-1. Derive `PLAN_SLUG`:
-   - If `--plan-slug` was given, use it directly
-   - If a plan file was given, derive from filename: strip `.md`, strip known suffixes (`-design`, `-spec`, `-plan`). Truncate to 47 chars + 3-char hash if >50.
+**Inline prompt:** If the input is a description rather than a file path, decompose it into steps yourself. `PLAN_SLUG` is whatever `--plan-slug` carried, otherwise unset.
 
-2. Detect target repo (frontmatter → body scan → `git remote -v` → ask user).
-
-3. Fetch issues:
-   ```bash
-   unset GH_TOKEN
-   gh issue list \
-     --label "plan:$PLAN_SLUG" \
-     --repo $ORG_REPO \
-     --state all \
-     --json number,title,body,labels,state \
-     --limit 200
-   ```
-
-4. If issues found: enter **issue-driven mode** (see §1.2).
-5. If no issues found and input is a `.md` file: fall back to **plan-file mode** with a warning.
-6. If no issues found and `--plan-slug` was explicit: error and stop.
-
-**Plan file (fallback):** If input is a `.md` file and no matching issues were found, read it and extract the step list. Each `## Phase N` or `### Task N` heading becomes a step.
-
-**Inline prompt:** If input is a description (not a file path, no `--plan-slug`), decompose into steps yourself.
+> **There is no issue-driven mode.** Until 2026-07-26 copilot could load steps from GitHub issues labelled `plan:{SLUG}`, created by `/stark-plan-to-tasks`. That skill was deleted in the demolition and nothing in the fleet creates task issues any more — `/stark-author` writes the task DAG into the spec, `/stark-build` executes it from there, and `tools/github_app.ts` refuses `issue create` outright. The mode was removed rather than reframed because its **safety gate could never fire**: §1.2 filtered on `ai_suitability` "from the issue body metadata", but that value never existed in an issue body — the producer's template had 13 sections and none was suitability, its labels were `plan:`/`risk:`/`confidence:` with no `ai:`, and AI Suitability lived only as a GitHub Projects V2 field, invisible to the `gh issue list --json body,labels` this mode ran. A task marked `human-led` would have been run autonomously, silently.
 
 When a plan file path is available, retain it as `plan_path` for the approach contract step. When in inline mode, leave `plan_path` unset. Retain the raw `<plan-or-prompt>` positional value itself (flags stripped) as `plan_or_prompt` — §1.7 uses it as the inline-mode branch-name fallback.
 
 ### 1.2 Extract steps
 
-**Issue-driven mode:**
+Parse the plan — or your own decomposition — into an ordered list of steps. A step is the dispatch unit: one worktree, one lead/wing loop.
 
-Group fetched issues into phases and tasks:
+If the sections carry dependency metadata, **collapse chains**: merge section B into section A's step when A is B's only dependency and B is A's only dependent. A fully-linear plan collapses to exactly **one** step (shared context, one dispatcher loop, zero extra overhead); genuinely independent sections or branches become separate steps that can share a wave (§1.4). With no dependency metadata at all, each section is one step and §1.4's fail-closed reading applies.
 
-1. **Identify phase tracking issues** — issues whose title starts with "Phase" and whose body contains a task checklist (`- [ ] #NNN`)
-2. **Identify task issues** — all other issues with the `plan:{PLAN_SLUG}` label
-3. **Group tasks under phases** by matching the phase reference in each task's Dependencies section or by the task checklist in the phase issue
-4. **Order phases** by their dependency links (phase `depends_on` from the issue body)
-5. **Filter by ai_suitability** (from the issue body metadata):
-   - `autonomous` and `assisted` tasks → include in steps
-   - `human-led` tasks → skip with warning:
-     > Skipping human-led task #{number}: {title} — requires manual implementation
-6. **Skip already-closed tasks** — if `state` is `CLOSED`, skip:
-   > Skipping #{number}: {title} — already closed
-
-If ALL tasks in a phase are closed or human-led, skip the entire phase:
-> Skipping phase {step_id}: all tasks are closed or human-led.
-
-7. **Derive steps from the task DAG (chain-collapse).** A step is the dispatch unit — one worktree, one lead/wing loop. Steps are NOT fixed at phase granularity; they come from the **task-level** dependency graph (each task's `## Dependencies` `#NNN` links), per phase:
-   - An edge to a `CLOSED` task is satisfied — drop it (reconnect its predecessors to its dependents).
-   - An edge to an **open human-led** task is unsatisfiable this run — skip the dependent task and everything downstream of it, warning with the blocking issue: skipped-because-human ≠ done; never build on work that doesn't exist yet.
-   - **Collapse chains:** merge task B into task A's step when A is B's only in-phase dependency and B is A's only dependent. A fully-linear phase collapses to exactly **one step** (today's behavior — shared context, one dispatcher loop, zero extra overhead); genuinely independent tasks or branches become separate steps that can share a wave (§1.4).
-
-**Plan-file mode / Inline mode:**
-
-Parse the plan into an ordered list of steps. If the sections carry dependency metadata, apply the same chain-collapse; otherwise each section is one step.
-
-Regardless of mode, each step contains:
+Each step contains:
 - `step_id` — the phase slug when the phase collapsed to one step (e.g., `phase-1-data-model`); otherwise `<phase-slug>--<first-task-slug>` (e.g., `phase-2-api--rest-endpoints`)
 - `title` — the phase name, or `{phase name}: {first task title} (+K more)` for a multi-step phase
-- `task` — the raw step task description (the step's issue bodies concatenated in chain order, or the parsed plan section, or the inline prompt). Saved to `step-$step_id-task.md` for the dispatcher.
+- `task` — the raw step task description (the parsed plan section, or the inline prompt). Saved to `step-$step_id-task.md` for the dispatcher.
 - `prompt` — the lead's full implement prompt (composed from the agent-specific `implement.md` template + previous-step context + `task`). Saved to `step-$step_id-implement.md`.
-- `issue_numbers` — issue numbers covered by the step
 - `depends_on` — step ids this step's tasks depend on (external edges, projected onto steps)
 
 ### 1.3 Detect test command
@@ -164,7 +119,6 @@ Before showing the battle plan, compute an **execution plan**: level the §1.2 s
 
 **Edges, per mode:**
 
-- **Issue-driven:** the projected task-level edges from §1.2.7 (`step.depends_on`), **plus phase barriers**: every step in phase P depends on every step of the phases P `depends_on`. Phases stay checkpoints — waves never span a phase boundary; the parallelism unlock is *within* a phase, where the issue bodies carry explicit task deps. (Cross-phase pipelining from task metadata alone would trust silence; barriers are the fail-closed reading.)
 - **Plan-file:** parse each step section for an explicit `Dependencies:` / `depends_on:` line. If the plan carries no dependency metadata at all, do NOT infer independence from silence — read each step's task text and mark an edge wherever a step names files, modules, interfaces, or outputs another step creates. When you cannot rule a dependency out, keep the edge.
 - **Inline:** you decomposed the steps yourself — declare `depends_on` per step as you decompose.
 
@@ -179,18 +133,17 @@ Record the result as `waves = [[step, ...], ...]` and carry it into Phase 2.
 ```
 stark-copilot — Battle Plan
 ───────────────────────────
-Mode:         issue-driven (plan:widget-system, 11 tasks across 4 phases → 5 steps in 4 waves, 2 skipped)
+Mode:         plan-file (docs/specs/2026-08-01-widget-system-spec.md → 5 steps in 4 waves)
 Lead:         claude   (implementer)
 Wing:         codex    (reviewer)
 Max rounds:   4 fix rounds (up to 5 reviews per step)
 Test command: pytest
 Timeout:      900s lead / 600s wing
 
-Wave 1: phase-1-data-model            (#37 → #38 → #39, chain)
-Wave 2: phase-2-api--rest-endpoints   (#40 → #41)   ∥   phase-2-api--graphql (#42)
-Wave 3: phase-3-cli                   (#43 → #44)
-Wave 4: phase-4-docs                  (#45)
-Skipped: #46 (human-led, open) and its dependent #47
+Wave 1: phase-1-data-model            (3 sections, chain-collapsed)
+Wave 2: phase-2-api--rest-endpoints   ∥   phase-2-api--graphql
+Wave 3: phase-3-cli
+Wave 4: phase-4-docs
 
 Each step: lead implements in worktree → wing reviews diff → fix-loop until approved → merge
 Steps sharing a wave run concurrently; waves run in order.
@@ -199,13 +152,13 @@ Widest wave: 2 steps — in goal mode that is up to 2 × $10 goal budget in flig
 
 In plan-file or inline mode, replace the Mode line with `Mode: plan-file` or `Mode: inline`.
 
-**No-op case:** If every phase is skipped (all tasks closed or human-led), still print the banner with `Steps: 0` and a `(no actionable steps)` line in place of the per-step list, followed by a `Skipped phases:` block enumerating each skipped phase with the phase number, issue number, and `(N/M closed)` count. Then exit with a clear "Nothing to do — all tasks already implemented." message. Do not invoke the dispatcher.
+**No-op case:** If the plan yields no steps, still print the banner with `Steps: 0` and a `(no actionable steps)` line in place of the per-step list, followed by a `Skipped phases:` block enumerating each skipped phase with the phase number, issue number, and `(N/M closed)` count. Then exit with a clear "Nothing to do — all tasks already implemented." message. Do not invoke the dispatcher.
 
 If `--dry-run`, stop here.
 
 ### 1.6 Approach Contract
 
-Only when `plan_path` is set (plan-file or issue-driven mode that originated from a plan file). Inline mode skips this step.
+Only when `plan_path` is set (plan-file mode). Inline mode skips this step.
 
 ```bash
 [ -n "$plan_path" ] && node --experimental-strip-types --no-warnings ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/approach_contract.ts --plan-file "$plan_path" --force-confirm
@@ -220,7 +173,7 @@ repo="${ORG_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev
 default_branch=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')
 default_branch=${default_branch:-main}
 
-# fallback_slug only matters in inline mode — issue-driven and plan-file mode
+# fallback_slug only matters in inline mode — plan-file mode
 # already derived PLAN_SLUG in §1.1. Slugify the raw <plan-or-prompt> arg.
 fallback_slug=$(printf '%s' "$plan_or_prompt" | tr '[:upper:]' '[:lower:]' \
   | tr -c 'a-z0-9' '-' | sed -E 's/-+/-/g; s/^-|-$//g' | cut -c1-40)
@@ -252,14 +205,10 @@ precisely the stale branch you must not silently rewind onto.
 
 Execute the waves from §1.4 **in order**. Within a wave:
 
-- **Single-step wave** — run §2a0–§2j inline, exactly as below.
+- **Single-step wave** — run §2a–§2j inline, exactly as below.
 - **Multi-step wave** — fan the steps out concurrently via the **Workflow** tool (see [Parallel waves](#parallel-waves-default)), then apply each approved diff and commit **in a deterministic order** (step order within the wave), running §2e–§2g1 per step and §2h cleanup. A non-`approved` step's diff is never applied; surface it and — since later waves may depend on it — stop before the next wave unless every remaining wave is provably independent of the failed step.
 
 For each step, sequential or fanned-out:
-
-### 2a0. Transition issues to In Progress
-
-Update issue status and project board. For commands, see [references/issue-management.md](references/issue-management.md).
 
 ### 2a. Stage prompt files
 
@@ -400,10 +349,6 @@ git commit -m "feat: [step title] (copilot: $LEAD impl, $WING review, $rounds_co
 
 `$rounds_count` is `len(rounds)` from §2c.
 
-### 2g1. Transition issues to Done
-
-Close issues with commit reference and update project board. For commands, see [references/issue-management.md](references/issue-management.md).
-
 ### 2h. Clean up worktree
 
 ```bash
@@ -499,7 +444,7 @@ Post the summary as a PR comment to the PR §2.6 already resolved (`$pr_number`)
 
 Skip this step if `$pr_number` is unset (§2.6 never ran).
 
-For the `gh api` posting snippet, see [references/issue-management.md](references/issue-management.md).
+For the comment body, see [references/summary-template.md](references/summary-template.md).
 
 ### 4c. Completion line
 
@@ -518,7 +463,7 @@ EOF
 
 Multi-step waves from the §1.4 execution DAG fan out via the **Workflow** tool: one `copilot_dispatch.ts` lead/wing loop per step, concurrently, each in its own worktree (the dispatcher already isolates per step, so no extra `isolation` flag is needed beyond distinct `--step-id`s). All worktrees in a wave branch from the same HEAD — the previous wave's merged result — which is exactly what the DAG guarantees is sufficient context.
 
-Stage each step's three prompt files (§2a) and issue transitions (§2a0) **before** invoking the Workflow. Compose each step's §2b command **fully expanded** — concrete absolute paths, no `$TOOLS`/`$step_id` shell variables (the subagent's shell doesn't have the orchestrator's variables) — and redirect its stdout to a per-step result file: `… > /tmp/stark-copilot-$$/step-$step_id-result.json`. With §2b's `--diff-out` the diff bytes already live in their own file; the stdout redirect keeps the rest of the JSON out of model output too — the subagent returns only a small verdict record, and the orchestrator reads the full JSON from the file itself. Then run one Workflow per multi-step wave:
+Stage each step's three prompt files (§2a) **before** invoking the Workflow. Compose each step's §2b command **fully expanded** — concrete absolute paths, no `$TOOLS`/`$step_id` shell variables (the subagent's shell doesn't have the orchestrator's variables) — and redirect its stdout to a per-step result file: `… > /tmp/stark-copilot-$$/step-$step_id-result.json`. With §2b's `--diff-out` the diff bytes already live in their own file; the stdout redirect keeps the rest of the JSON out of model output too — the subagent returns only a small verdict record, and the orchestrator reads the full JSON from the file itself. Then run one Workflow per multi-step wave:
 
 ```js
 export const meta = {
