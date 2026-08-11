@@ -42,12 +42,14 @@ function rawCheckRun(name: string, conclusion: string | null, isRequired: boolea
 function rawStatus(context: string, state: string, isRequired: boolean): any {
   return { __typename: "StatusContext", context, state, isRequired };
 }
-// Normalized Context (uses kind) — for predicate tests.
+// Normalized Context (uses kind) — for predicate tests. The timestamp fields
+// are part of the type (latestPerName orders on them), so they are set here
+// even though these predicate tests do not exercise ordering.
 function makeCheckRun(name: string, conclusion: any, isRequired: boolean): Context {
-  return { kind: "CheckRun", name, conclusion, status: "COMPLETED", isRequired };
+  return { kind: "CheckRun", name, conclusion, status: "COMPLETED", isRequired, startedAt: null, completedAt: null };
 }
 function makeStatus(context: string, state: any, isRequired: boolean): Context {
-  return { kind: "StatusContext", context, state, isRequired };
+  return { kind: "StatusContext", context, state, isRequired, createdAt: null };
 }
 
 test("fetchRequiredCheckRollup aggregates a single page", async () => {

@@ -181,11 +181,23 @@ export function contextName(c: Context): string {
   return c.kind === "CheckRun" ? c.name : c.context;
 }
 
-// Recency key for same-named contexts. `max` rather than a preferred field
-// because GitHub's own data is not internally ordered: on #877's head sha the
-// skipped `test` reported startedAt=10:32:17Z with completedAt=10:32:08Z, i.e.
-// completed nine seconds before it started. Taking the max makes the key
-// monotone regardless of which field is populated or sane.
+// Still running — no verdict yet. A CheckRun carries no `conclusion` until it
+// finishes, which is the reliable signal; `status` corroborates but is not
+// populated in every payload shape, so conclusion is the anchor.
+export function isCheckPending(c: Context): boolean {
+  if (c.kind === "StatusContext") return c.state === "PENDING" || c.state === "EXPECTED";
+  return c.conclusion === null;
+}
+
+// Recency key for same-named contexts, used ONLY to order contexts that have
+// both finished. `max` rather than a preferred field because GitHub's own data
+// is not internally ordered: on #877's head sha the skipped `test` reported
+// startedAt=10:32:17Z with completedAt=10:32:08Z, i.e. completed nine seconds
+// before it started. Taking the max makes the key monotone regardless of which
+// field is populated or sane.
+//
+// It must NEVER be used to rank a running context against a finished one — see
+// latestPerName.
 function recencyKey(c: Context): string {
   if (c.kind === "StatusContext") return c.createdAt ?? "";
   const a = c.startedAt ?? "";
@@ -199,14 +211,32 @@ function recencyKey(c: Context): string {
 // `required` and lets a stale entry decide the verdict. Observed on #877, whose
 // rollup carried `sync` twice (SKIPPED 10:32:08Z, then SUCCESS 10:35:15Z).
 //
-// Ties are broken fail-closed: with indistinguishable timestamps we keep the
-// entry that is NOT passing, so an ambiguous pair can never resolve to green.
+// A STILL-RUNNING context always wins its group, regardless of timestamps. That
+// is not a tie-break preference — timestamps cannot order these two states at
+// all. A running check has `completedAt: null`, so its key is frozen at
+// startedAt while a finished sibling's key advances to its completedAt; whenever
+// two runs for one check overlap, the OLDER finished one therefore out-keys the
+// newer running one. Ranking by timestamp would hand the verdict to the stale
+// row and report `pending: 0` while the check that actually gates the merge is
+// mid-flight — merging on a result that has not happened yet. A queued run is
+// worse still: it has no startedAt either, so its key is the empty string and
+// it loses to everything.
+//
+// Among contexts that have all finished, ties are broken fail-closed: with
+// indistinguishable timestamps we keep the entry that is NOT passing, so an
+// ambiguous pair can never resolve to green.
 export function latestPerName(contexts: Context[]): Context[] {
   const byName = new Map<string, Context>();
   for (const c of contexts) {
     const key = contextName(c);
     const incumbent = byName.get(key);
     if (!incumbent) { byName.set(key, c); continue; }
+    const dPending = isCheckPending(c);
+    const iPending = isCheckPending(incumbent);
+    if (dPending !== iPending) {
+      if (dPending) byName.set(key, c);   // running beats finished, either direction
+      continue;
+    }
     const dk = recencyKey(c);
     const ik = recencyKey(incumbent);
     if (dk > ik) byName.set(key, c);
@@ -241,8 +271,10 @@ export interface RollupVerdict {
 
 // Policy-aware green test. `allPassing` on the verdict is the strict reading —
 // every required check actually reported success — and stays that way so the
-// skipped count is never silently folded into it. This is the reading the
-// callers use, and the only place `--allow-skipped-checks` takes effect.
+// skipped count is never silently folded into it. Callers additionally refuse a
+// skipped required check outright (with their own operator-facing message)
+// before reaching here; this helper is what lets an allowed skip still count
+// toward green once they have.
 export function isGreen(v: RollupVerdict, opts: { allowSkippedChecks?: boolean } = {}): boolean {
   if (v.required === 0) return true;
   const passing = opts.allowSkippedChecks ? v.passing + v.skipped : v.passing;
@@ -251,11 +283,18 @@ export function isGreen(v: RollupVerdict, opts: { allowSkippedChecks?: boolean }
 
 // Counts the LATEST context per name (see latestPerName), so `required` is a
 // count of distinct required checks rather than of rollup rows.
+//
+// Required-filter FIRST, dedupe second. The other order lets a non-required
+// context erase a required one of the same name: dedupe would pick the
+// non-required row as the group's winner, the `isRequired` filter would then
+// drop it, and the required check would vanish from the count entirely rather
+// than fail the verdict — shrinking `required` toward the vacuous pass. Filtering
+// first makes the two sets disjoint, so no non-required row can ever shadow a
+// gate.
 export function summarizeVerdict(contexts: Context[]): RollupVerdict {
   let required = 0, passing = 0, failing = 0;
   const skippedNames: string[] = [];
-  for (const c of latestPerName(contexts)) {
-    if (!c.isRequired) continue;
+  for (const c of latestPerName(contexts.filter(c => c.isRequired))) {
     required++;
     if (isCheckPassing(c)) passing++;
     else if (isCheckFailing(c)) failing++;

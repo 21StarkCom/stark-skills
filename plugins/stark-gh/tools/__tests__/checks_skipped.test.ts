@@ -12,12 +12,14 @@ import assert from "node:assert/strict";
 import {
   isCheckPassing,
   isCheckSkipped,
+  isCheckPending,
   latestPerName,
   summarizeVerdict,
+  isGreen,
   contextName,
   type Context,
 } from "../lib/checks_graphql.ts";
-import { evaluateRollup } from "../gh_watch_runs.ts";
+import { evaluateRollup, decideSkippedTransition, SKIPPED_CHECK_GRACE_SEC } from "../gh_watch_runs.ts";
 
 function run(
   name: string,
@@ -105,6 +107,71 @@ test("recency uses max(startedAt, completedAt) — GitHub emits completedAt befo
   assert.equal(isCheckSkipped(kept[0]!), true);
 });
 
+// The defect an adversarial review caught in the first cut of this file, and
+// the reason recencyKey is never allowed to rank a running context against a
+// finished one. A running CheckRun has completedAt=null, so its key is stuck at
+// startedAt while a finished sibling's key advances to completedAt — whenever
+// two runs for one check overlap, the OLDER finished row out-keys the newer
+// running one. The old code then reported passing=1, pending=0, allPassing=true
+// and dispatched the merge callback while the gating run was still executing.
+// Timestamps below are the reviewer's reproduction, verbatim.
+test("a still-running context beats an older completed one, in both list orders", () => {
+  const finished = run("test", "SUCCESS", true, "2026-08-11T10:00:00Z", "2026-08-11T10:12:00Z");
+  const running = run("test", null, true, "2026-08-11T10:05:00Z", null);
+  for (const ctx of [[finished, running], [running, finished]]) {
+    const kept = latestPerName(ctx);
+    assert.equal(kept.length, 1);
+    assert.equal(isCheckPending(kept[0]!), true, "the in-flight run must decide the group");
+    const v = summarizeVerdict(ctx);
+    assert.equal(v.pending, 1);
+    assert.equal(v.passing, 0);
+    assert.equal(v.allPassing, false);
+    assert.equal(isGreen(v), false);
+    assert.equal(evaluateRollup({ mismatch: false, contexts: ctx, headRefOid: "sha" },
+      { allowNoRequiredChecks: false }).kind, "wait", "must not merge while a required check is mid-flight");
+  }
+});
+
+test("a QUEUED context with no startedAt still beats a completed sibling", () => {
+  // Worse than the in-progress case: the key is the empty string, so a
+  // timestamp comparison would rank it below literally everything.
+  const ctx = [
+    run("test", "SUCCESS", true, "2026-08-11T10:00:00Z", "2026-08-11T10:12:00Z"),
+    run("test", null, true, null, null),
+  ];
+  assert.equal(summarizeVerdict(ctx).pending, 1);
+  assert.equal(summarizeVerdict(ctx).allPassing, false);
+});
+
+test("a cancelled run does not outrank the still-running one that replaced it", () => {
+  // cancel-in-progress leaves a CANCELLED row on the same sha. Its completedAt
+  // is later than the replacement's startedAt, so a pure timestamp key would
+  // let it decide the group and report a failing required check.
+  const ctx = [
+    run("test", "CANCELLED", true, "2026-08-11T10:00:00Z", "2026-08-11T10:05:00Z"),
+    run("test", null, true, "2026-08-11T10:04:50Z", null),
+  ];
+  const v = summarizeVerdict(ctx);
+  assert.equal(v.failing, 0, "the cancelled row must not decide the verdict");
+  assert.equal(v.pending, 1);
+});
+
+test("a non-required context never shadows a required check of the same name", () => {
+  // Dedupe must run AFTER the required filter. The other order let the
+  // non-required row win the group, the isRequired filter then dropped it, and
+  // the required check vanished from the count instead of failing the verdict —
+  // shrinking `required` toward a vacuous pass.
+  const ctx = [
+    run("test", "SKIPPED", true, "2026-08-11T10:00:00Z", "2026-08-11T10:00:05Z"),
+    run("test", "SUCCESS", false, "2026-08-11T10:30:00Z", "2026-08-11T10:31:00Z"),
+  ];
+  const v = summarizeVerdict(ctx);
+  assert.equal(v.required, 1, "the required check must survive dedupe");
+  assert.equal(v.vacuous, false);
+  assert.equal(v.anySkipped, true);
+  assert.deepEqual(v.skippedNames, ["test"]);
+});
+
 test("indistinguishable timestamps resolve fail-closed", () => {
   for (const order of [0, 1]) {
     const pair: Context[] = [
@@ -125,15 +192,22 @@ test("non-required contexts never enter the verdict", () => {
   assert.equal(v.allPassing, true, "vacuous still passes here; the callers refuse it separately");
 });
 
-test("evaluateRollup: a skipped required check is FATAL, not a wait", () => {
-  // Terminal because nothing repairs it in place: a re-run replays the
-  // original event payload, and a workflow_dispatch run never joins the
-  // rollup. Waiting would burn the full 6h watch timeout.
+test("evaluateRollup: a skipped required check waits, flagged for time-bounding", () => {
+  // NOT fatal on sight: pr-merge force-pushes while the PR is still a draft,
+  // so a draft-guarded required check reports SKIPPED moments before the
+  // ready_for_review run registers. The caller bounds the wait instead
+  // (decideSkippedTransition), the same way it bounds a vacuous rollup.
   const ctx = [run("test", "SKIPPED"), run("lint", "SUCCESS")];
   const r = evaluateRollup({ mismatch: false, contexts: ctx, headRefOid: "sha" }, { allowNoRequiredChecks: false });
-  assert.equal(r.kind, "fatal");
-  assert.match(r.reason!, /skipped/);
-  assert.match(r.reason!, /test/);
+  assert.equal(r.kind, "wait");
+  assert.equal(r.skipped, true);
+  assert.deepEqual(r.skippedNames, ["test"]);
+});
+
+test("decideSkippedTransition: waits inside the grace window, terminal past it", () => {
+  assert.equal(decideSkippedTransition(0), "wait");
+  assert.equal(decideSkippedTransition(SKIPPED_CHECK_GRACE_SEC - 1), "wait");
+  assert.equal(decideSkippedTransition(SKIPPED_CHECK_GRACE_SEC), "terminal");
 });
 
 test("evaluateRollup: --allow-skipped-checks lets a by-design skip through", () => {

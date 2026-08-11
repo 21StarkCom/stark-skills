@@ -13,9 +13,12 @@ name: tests
 
 on:
   pull_request:
-    # `ready_for_review` is kept in the list even though nothing is
-    # draft-guarded any more: un-drafting a PR whose head has not moved since
-    # the last push would otherwise produce no run at all.
+    # `ready_for_review` is redundant for THIS workflow now that no job is
+    # draft-guarded — `opened`/`synchronize` already produced a real result for
+    # the head sha. It is kept because it costs one cheap run and covers the
+    # case where the un-draft is the only signal the merge tooling is waiting
+    # on; the merge gate tolerates the resulting duplicate rows by design (see
+    # the concurrency note below).
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
@@ -30,10 +33,14 @@ on:
 #
 # Now that the jobs are unguarded they take ~1 minute rather than ~5 seconds, so
 # un-drafting mid-run genuinely cancels the in-flight `synchronize` run and
-# leaves a CANCELLED check beside the `ready_for_review` run's SUCCESS on the
-# SAME sha. That is safe only because the merge gate collapses same-named
-# contexts to the latest (lib/checks_graphql.ts::latestPerName) — without it the
-# stale CANCELLED would read as a failing required check and block the merge.
+# leaves a CANCELLED check beside the `ready_for_review` run on the SAME sha.
+# The merge gate handles that pair in two steps (lib/checks_graphql.ts): while
+# the replacement is still running it wins its group outright, because a running
+# context always outranks a finished one — so the gate reports PENDING and waits
+# rather than reading the CANCELLED as a failing required check. Once the
+# replacement finishes, `latestPerName` picks it on recency. Neither step relies
+# on comparing a running context's timestamps against a finished one's, which is
+# not a well-defined ordering.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -72,7 +79,7 @@ jobs:
         run: npm test
 
       # The stark-gh merge tooling lives in its own tree with its own test
-      # files, which `tools/`'s `*.test.ts` glob never reached — 388 tests
+      # files, which `tools/`'s `*.test.ts` glob never reached — 393 tests
       # covering the code that decides whether a PR is green, none of them run
       # by this gate until 2026-08-11. It needs no install either.
       - name: Run stark-gh tests
@@ -99,7 +106,14 @@ jobs:
       # (housekeeping_infra.ts TS1470, cc_account_lib.test.ts TS2322,
       # runtime_env_lib.ts TS2353). Failing the build on them would make this
       # gate red on arrival and block unrelated work, so the step reports and
-      # does not gate. Make it blocking once those three are fixed.
+      # does not gate.
+      #
+      # CONSEQUENCE: `continue-on-error` means the `typecheck` CHECK reports
+      # SUCCESS whether or not tsc passed — the errors are visible only in the
+      # step log. So `typecheck` must NOT be added to the branch ruleset's
+      # required checks: it would satisfy the gate unconditionally, which is the
+      # same false-green shape this workflow was rewritten to remove. Drop
+      # `continue-on-error` first, THEN require it.
       - name: Typecheck (advisory)
         working-directory: tools
         continue-on-error: true

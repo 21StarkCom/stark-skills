@@ -299,7 +299,11 @@ async function runNoWatch(plan: PrMergePlan, planFile: string): Promise<number> 
   if (verdict.anySkipped && plan.execute.allowSkippedChecks !== true) {
     die(MergeExit.CHECK_FAIL,
       `--no-watch: required check(s) skipped, so the suite never ran on this commit: ${verdict.skippedNames.join(", ")}. ` +
-      `Push a commit to re-fire CI, or pass --allow-skipped-checks if these checks skip by design.`);
+      (plan.pr.wasDraft
+        ? `This PR was just un-drafted, so this may simply be the draft-time run: --no-watch takes the single sample it is ` +
+          `given, and the ready_for_review run may not have registered yet. Drop --no-watch so the merge waits it out. `
+        : ``) +
+      `Otherwise push a commit to re-fire CI, or pass --allow-skipped-checks if these checks skip by design.`);
   }
   if (!isGreen(verdict, { allowSkippedChecks: plan.execute.allowSkippedChecks === true })) {
     die(MergeExit.CHECK_FAIL,
