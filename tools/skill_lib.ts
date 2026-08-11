@@ -55,8 +55,8 @@ const ROOT_INSTALL_PREFIXES = ["$ROOT/", "${ROOT}/"];
 /**
  * Walk up from `start` until a `.git/` entry is found. Returns `null` when
  * no ancestor has one — prior versions silently returned `path.resolve(start)`
- * and forced every caller to re-check `.git` independently, which led to the
- * bypass described in round 24 of the stark-forged review.
+ * and forced every caller to re-check `.git` independently, which led to a
+ * silent bypass in a caller that assumed the fallback was a real repo root.
  */
 export function findRepoRoot(start: string): string | null {
   let current = path.resolve(start);

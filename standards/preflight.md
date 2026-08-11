@@ -10,7 +10,7 @@ TOOLS="${STARK_REVIEW_TOOLS:-$HOME/.claude/code-review/tools}"
 node --experimental-strip-types "$TOOLS/preflight.ts" --workflow <skill-slug> --json
 ```
 
-The skill provides its own `<skill-slug>` (e.g. `stark-review`, `stark-review-plan`).
+The skill provides its own `<skill-slug>` (e.g. `stark-review`, `stark-terraform-review`).
 
 ## Result handling
 

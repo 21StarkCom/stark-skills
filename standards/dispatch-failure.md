@@ -1,8 +1,8 @@
 # Multi-Agent Dispatch Failure Handling
 
-Shared semantics for the doc-review skills (`stark-review-spec`,
-`stark-review-plan`) when a dispatch round returns no usable findings.
-Skills point here instead of inlining identical §2d blocks.
+Shared semantics for any skill that dispatches review domains and gets a
+round back with no usable findings. Skills point here instead of inlining
+identical §2d blocks.
 
 ## Health check (run after every dispatch round)
 

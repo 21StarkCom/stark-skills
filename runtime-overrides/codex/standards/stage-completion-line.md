@@ -1,10 +1,13 @@
-# Stage completion line — the `$stark-forge` §4 channel contract
+# Stage completion line — the channel contract
 
-`$stark-forge` chains stage skills **in-session** and records what each one
-produced (spec §4, "Stage completion output sources"). Forge invokes each stage
-through its plain slash command — **never with `--json`** (spec §2 command
-table) — so the completion channel must live on the stage's *normal* output
+A chaining caller runs stage skills **in-session** and records what each one
+produced. It invokes each stage through its plain slash command — **never with
+`--json`** — so the completion channel must live on the stage's *normal* output
 path.
+
+> **No caller consumes this today.** `$stark-forge` chained the stages and was
+> retired on 2026-07-26; nothing since parses the line. `$stark-copilot` still
+> emits it, and the format below is what any future chainer should read.
 
 This file is the single owner of that channel's format. A stage that forge
 orchestrates emits it; a stage run standalone emits it too (it is additive

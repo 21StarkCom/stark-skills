@@ -14,7 +14,7 @@
  *
  * Usage:
  *   node --experimental-strip-types tools/optimize_skill_description.ts \
- *     --skill-path skill/stark-forged-review \
+ *     --skill-path skill/stark-review \
  *     --eval-set path/to/trigger_eval.json \
  *     --model claude-opus-5[1m] \
  *     --max-iterations 3 \

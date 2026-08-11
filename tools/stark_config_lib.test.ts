@@ -302,7 +302,7 @@ test("getValidationGateConfig: surfaces extra keys like per_repo_commands", asyn
 });
 
 // ---------------------------------------------------------------------------
-// CLI — `--model <agent>` (consumed by stark-phase-execute's goal loop)
+// CLI — `--model <agent>` (was consumed by the retired stark-phase-execute goal loop)
 // ---------------------------------------------------------------------------
 
 test("CLI: --model prints the resolved id; unknown agent exits 1 with no stdout", () => {

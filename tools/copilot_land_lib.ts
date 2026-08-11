@@ -1,7 +1,7 @@
 /**
  * copilot_land_lib.ts — pure, individually-testable helpers for the
  * `/stark-copilot` create-or-adopt impl-PR landing flow (#773, the copilot
- * slice of #772). `/stark-forge` treats `copilot` as the merge point for the
+ * slice of #772). `copilot` is the merge point for the
  * `impl` artifact — it cannot reach `done` without a non-empty
  * `artifact_prs.impl`, so this is a blocking channel.
  *
@@ -85,7 +85,7 @@ export function pickPrForHead(openPrs: readonly OpenPr[], headRef: string): Open
 // ── Multi-PR union (the `impl` artifact's incremental registry) ─────────────
 
 /**
- * `impl` is the one artifact `/stark-forge` allows to accumulate MULTIPLE
+ * `impl` is the one artifact allowed to accumulate MULTIPLE
  * PRs (copilot may open PR 1, be checkpointed, then later land PR 2 on a
  * different branch/wave). Union, de-duplicated, first-seen order — mirrors
  * `plan_to_tasks_dedup_lib.ts::mergeIssueNumbers` exactly. Re-reporting an

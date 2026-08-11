@@ -4,8 +4,9 @@
  * `$stark-copilot` (#773). This CLI owns EVERY git + PR side effect; the
  * deterministic decisions live in `copilot_land_lib.ts` (pure, unit-proven).
  *
- * `$stark-forge` treats `copilot` as the merge point for the `impl`
- * artifact — it cannot reach `done` without a non-empty `artifact_prs.impl`.
+ * `copilot` is the merge point for the `impl` artifact: a run is not done
+ * without a non-empty `artifact_prs.impl`. (The `$stark-forge` chainer that
+ * enforced this was retired 2026-07-26; the invariant outlived it.)
  * Copilot itself only commits locally (SKILL.md §2g); this CLI runs AFTER
  * that work is committed and lands it: adopt-or-create the impl branch,
  * push (never force), adopt-or-create the PR, report its number(s).
