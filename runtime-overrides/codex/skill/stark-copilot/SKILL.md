@@ -107,11 +107,11 @@ shell block re-resolves the paths and values it uses.
 
 Three input modes, resolved in this order:
 
-**Issue-driven (preferred — from `stark-plan-to-tasks` output):** If `--plan-slug SLUG` is provided, or if the input is a `.md` file path, attempt to load steps from GitHub issues:
+**Issue-driven (only when task issues already exist):** If `--plan-slug SLUG` is provided, or if the input is a `.md` file path, attempt to load steps from GitHub issues. Nothing in the fleet creates these issues any more — `stark-plan-to-tasks` produced them and was retired on 2026-07-26. Write them by hand (`gh issue create --label "plan:<slug>"`) when you want this mode; otherwise the plan-file and inline paths below are the live ones.
 
 1. Derive `PLAN_SLUG`:
    - If `--plan-slug` was given, use it directly
-   - If a plan file was given, derive from filename: strip `.md`, strip known suffixes (`-design`, `-spec`, `-plan`). Truncate to 47 chars + 3-char hash if >50. Use the same slug contract as `stark-plan-to-tasks` §1.7.
+   - If a plan file was given, derive from filename: strip `.md`, strip known suffixes (`-design`, `-spec`, `-plan`). Truncate to 47 chars + 3-char hash if >50.
 
 2. Detect target repo (frontmatter → body scan → `git remote -v` → ask user).
 
@@ -193,7 +193,7 @@ Before showing the battle plan, compute an **execution plan**: level the §1.2 s
 
 **Edges, per mode:**
 
-- **Issue-driven:** the projected task-level edges from §1.2.7 (`step.depends_on`), **plus phase barriers**: every step in phase P depends on every step of the phases P `depends_on`. Phases stay checkpoints — waves never span a phase boundary; the parallelism unlock is *within* a phase, where `stark-plan-to-tasks` wrote explicit task deps. (Cross-phase pipelining from task metadata alone would trust silence; barriers are the fail-closed reading.)
+- **Issue-driven:** the projected task-level edges from §1.2.7 (`step.depends_on`), **plus phase barriers**: every step in phase P depends on every step of the phases P `depends_on`. Phases stay checkpoints — waves never span a phase boundary; the parallelism unlock is *within* a phase, where the issue bodies carry explicit task deps. (Cross-phase pipelining from task metadata alone would trust silence; barriers are the fail-closed reading.)
 - **Plan-file:** parse each step section for an explicit `Dependencies:` / `depends_on:` line. If the plan carries no dependency metadata at all, do NOT infer independence from silence — read each step's task text and mark an edge wherever a step names files, modules, interfaces, or outputs another step creates. When you cannot rule a dependency out, keep the edge.
 - **Inline:** you decomposed the steps yourself — declare `depends_on` per step as you decompose.
 

@@ -410,7 +410,7 @@ export function discoverConfig(opts: DiscoverConfigOpts = {}): DiscoveredConfig 
 
 // ---------------------------------------------------------------------------
 // CLI — `stark_config_lib.ts --model <agent>` prints the resolved model id.
-// The stark-phase-execute skill shells out to this to pin the goal loop's
+// The retired stark-phase-execute skill shelled out to this to pin its goal loop's
 // `--model` from config instead of hardcoding one; before it existed the
 // invocation exited 0 with no output and the `|| echo <fallback>` guard never
 // fired, so `--model ""` was passed. Exits 1 (no output) on an unknown agent

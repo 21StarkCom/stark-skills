@@ -8,7 +8,8 @@
  *                  [--mode suggest|auto] [--json]
  *
  * Consumed by:
- *   - `skill/stark-phase-execute/SKILL.md` (subprocess hop to this CLI).
+ *   - No skill today. `skill/stark-phase-execute/SKILL.md` was the sole caller
+ *     until it was deleted on 2026-07-26; the CLI remains for manual use.
  *
  * Reads `circuit_breaker_threshold` and `auto_patterns` from
  * `config.self_heal.*` from Codex's state overlay on the packaged config.
