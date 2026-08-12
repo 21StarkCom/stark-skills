@@ -4,7 +4,6 @@
 //   1. Parse --raw-args
 //   2. Working-tree gate (--force does not bypass)
 //   3. Resolve PR (--pr N or current branch)
-//   4. Self-modifying PR gate
 //   5. Watcher-recovery / resume detection
 //   6. Fetch with explicit destination refspecs
 //   7. PR identity (rt1) + local sync gate
@@ -49,17 +48,6 @@ export interface MergeUserArgs {
 
 const DEFAULT_WATCH_TIMEOUT_HOURS = 6;
 const VALID_SECTIONS = new Set(["Added", "Changed", "Fixed", "Removed", "Deprecated", "Security"]);
-
-// Guarded path prefixes (PR4-claude H06). v1 conservatively guards every dir
-// install.sh symlinks. If install.sh changes, this list must be updated.
-const GUARDED_PREFIXES = [
-  "plugins/stark-gh/",
-  "scripts/",
-  "tools/",
-  "global/",
-  "skill/",
-  "standards/",
-];
 
 export function parseRawArgs(raw: string): MergeUserArgs {
   const tokens = tokenize(raw);
@@ -150,28 +138,6 @@ export function inferSection(labels: { name: string }[]): PrMergePlan["changelog
   return "Added";
 }
 
-// Self-modifying PR gate (PR4-claude H06). Refuses if any changed file path
-// matches a guarded prefix — but only in the stark-skills repo itself. The
-// guarded prefixes are generic dir names (tools/, scripts/, …) that exist in
-// unrelated repos too, and the gate exists to stop the tool rewriting its own
-// runtime mid-run, not to police other repos' merges. Matched by repo NAME
-// (not owner/name) so an org migration doesn't silently disable the guard.
-const SELF_REPO_NAME = "stark-skills";
-
-export function isSelfModifying(
-  files: { path: string }[],
-  repoNameWithOwner: string,
-): { offending: string | null } {
-  const repoName = repoNameWithOwner.split("/").pop() ?? "";
-  if (repoName !== SELF_REPO_NAME) return { offending: null };
-  for (const f of files) {
-    for (const prefix of GUARDED_PREFIXES) {
-      if (f.path.startsWith(prefix)) return { offending: f.path };
-    }
-  }
-  return { offending: null };
-}
-
 // Working-tree gate. Returns null if clean, else a marker name describing the
 // blocker. Pure-fn variant for tests; CLI wraps with real fs/git calls.
 export function workingTreeBlocker(args: {
@@ -255,13 +221,6 @@ async function main(argv: string[]): Promise<number> {
     : ghLib.fetchMergePrForCurrentBranch();
   if (!pr) {
     die(MergeExit.BAD_ARGS, "no PR for current branch; pass --pr N");
-  }
-
-  // Step 4: self-modifying gate
-  const sm = isSelfModifying(pr.files, repoInfo.nameWithOwner);
-  if (sm.offending) {
-    die(MergeExit.SELF_MODIFYING_PR,
-      `PR modifies stark-skills runtime files (${sm.offending}); refuse to self-execute. Merge via plain 'gh pr merge' after manual review.`);
   }
 
   // Step 5: watcher-recovery / resume detection

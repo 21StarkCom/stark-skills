@@ -45,7 +45,11 @@ export const MergeExit = {
   SECRET_LLM: 16,                // secret in pre-LLM scan, no --allow-secret-to-llm
   FORK_OR_HEAD_MISMATCH: 17,     // cross-repo PR; or origin/<headRef> != PR's headRefOid
   LOCAL_DIVERGED: 18,            // local <headRef> has unpushed commits or diverges from origin
-  SELF_MODIFYING_PR: 19,         // PR diff touches stark-skills runtime files
+  // 19 is retired: it was SELF_MODIFYING_PR, the gate that refused to merge any
+  // stark-skills PR touching tools/, skill/, global/, scripts/, standards/ or
+  // plugins/stark-gh/. Removed 2026-08-12 — it guarded dirs that install.sh
+  // symlinked, and install.sh was deleted in 2026-07 when distribution went
+  // marketplace-only. Do not reuse the number.
   DRAFT_INVALID: 20,             // codex error / invalid output after retry
   SECRET_COMMIT: 28,             // secret in pre-commit scan, no --allow-secret-commit
   OID_DRIFT: 30,                 // base OID or rebased HEAD moved between push and merge

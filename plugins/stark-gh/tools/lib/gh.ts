@@ -164,7 +164,6 @@ export interface MergePrMetadata {
   headRepositoryOwner: { login: string } | null;
   headRepository: { name: string } | null;
   labels: { name: string }[];
-  files: { path: string }[];
   nameWithOwner: string;
 }
 
@@ -184,7 +183,6 @@ const MERGE_PR_FIELDS = [
   "headRepositoryOwner",
   "headRepository",
   "labels",
-  "files",
 ].join(",");
 
 export function fetchMergePrByNumber(prNumber: number, repoSlug: string, opts: { exec?: ExecFn } = {}): MergePrMetadata {
