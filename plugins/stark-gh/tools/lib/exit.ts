@@ -47,9 +47,21 @@ export const MergeExit = {
   LOCAL_DIVERGED: 18,            // local <headRef> has unpushed commits or diverges from origin
   // 19 is retired: it was SELF_MODIFYING_PR, the gate that refused to merge any
   // stark-skills PR touching tools/, skill/, global/, scripts/, standards/ or
-  // plugins/stark-gh/. Removed 2026-08-12 — it guarded dirs that install.sh
-  // symlinked, and install.sh was deleted in 2026-07 when distribution went
-  // marketplace-only. Do not reuse the number.
+  // plugins/stark-gh/ — i.e. every real PR in this repo, making it the one repo
+  // its own merge tool would not serve. Removed 2026-08-12. Do not reuse 19.
+  //
+  // Read this before rebuilding it. The legacy symlinks it was written for DO
+  // still exist (`~/.claude/plugins/stark-gh` and `~/.claude/code-review/{tools,
+  // prompts,scripts,standards}` all point into the live checkout, and
+  // housekeeping_infra.ts keeps them pointed there) — install.sh created them
+  // and was deleted, but the links outlived it. What closes the hazard is that
+  // the RUNNING tool is not read through them: `installed_plugins.json` resolves
+  // stark-gh@bifrost to a versioned copy under ~/.claude/plugins/cache, which is
+  // what ${CLAUDE_PLUGIN_ROOT} expands to. The residual exposure is direct,
+  // non-plugin invocation through ~/.claude/code-review/tools, which does read
+  // the checkout — and preflight's Step-10 checkout moves that checkout to the
+  // PR branch and never moves it back on success. That is a real defect of the
+  // restore path, not something a merge-refusal gate should be papering over.
   DRAFT_INVALID: 20,             // codex error / invalid output after retry
   SECRET_COMMIT: 28,             // secret in pre-commit scan, no --allow-secret-commit
   OID_DRIFT: 30,                 // base OID or rebased HEAD moved between push and merge

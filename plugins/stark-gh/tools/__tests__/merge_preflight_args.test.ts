@@ -13,6 +13,10 @@ test("parseRawArgs: defaults", () => {
   assert.equal(a.allowSecretCommit, false);
   assert.equal(a.allowSecretToLlm, false);
   assert.equal(a.allowNoRequiredChecks, false);
+  // The STARK-357 skipped-required-check refusal has exactly one opt-out. If
+  // this default ever flips, every merge silently accepts a SKIPPED required
+  // check again — the #877 false-green.
+  assert.equal(a.allowSkippedChecks, false);
 });
 
 test("bare integer sets pr", () => {
@@ -71,11 +75,16 @@ test("parseRawArgs: --watch-timeout positive number", () => {
 });
 
 test("parseRawArgs: secret + no-required + no-watch flags", () => {
-  const a = parseRawArgs("--no-watch --allow-secret-commit --allow-secret-to-llm --allow-no-required-checks");
+  const a = parseRawArgs("--no-watch --allow-secret-commit --allow-secret-to-llm --allow-no-required-checks --allow-skipped-checks");
   assert.equal(a.noWatch, true);
   assert.equal(a.allowSecretCommit, true);
   assert.equal(a.allowSecretToLlm, true);
   assert.equal(a.allowNoRequiredChecks, true);
+  assert.equal(a.allowSkippedChecks, true);
+});
+
+test("parseRawArgs: --allow-skipped-checks parses on its own", () => {
+  assert.equal(parseRawArgs("--allow-skipped-checks").allowSkippedChecks, true);
 });
 
 test("parseRawArgs: rejects unknown flag", () => {
@@ -94,6 +103,29 @@ test("inferSection: default Added", () => {
   assert.equal(inferSection([]), "Added");
   assert.equal(inferSection([{ name: "feature" }]), "Added");
   assert.equal(inferSection([{ name: "documentation" }]), "Added");
+});
+
+test("inferSection: fix-type title → Fixed when no labels", () => {
+  // The label-only version filed PR #882 (`fix(STARK-408): …`, zero labels)
+  // under ### Added, which makes release_changelog recommend a minor bump for
+  // a patch-only cycle.
+  assert.equal(inferSection([], "fix(STARK-408): kill the pr-merge self-modifying gate"), "Fixed");
+  assert.equal(inferSection([], "fix: stop the watcher lying"), "Fixed");
+  assert.equal(inferSection([], "Fix(scope): capitalized type still counts"), "Fixed");
+  assert.equal(inferSection([], "fix(scope)!: breaking fix"), "Fixed");
+  assert.equal(inferSection([], "revert(STARK-1): back out the thing"), "Fixed");
+});
+
+test("inferSection: non-fix titles stay Added", () => {
+  assert.equal(inferSection([], "feat(STARK-9): add a thing"), "Added");
+  assert.equal(inferSection([], "chore: bump deps"), "Added");
+  assert.equal(inferSection([], "prefix fix: not at the start"), "Added");
+  assert.equal(inferSection([], "fixture(STARK-2): not a fix type"), "Added");
+  assert.equal(inferSection([], ""), "Added");
+});
+
+test("inferSection: labels still win over the title", () => {
+  assert.equal(inferSection([{ name: "bug" }], "feat(STARK-9): add a thing"), "Fixed");
 });
 
 test("workingTreeBlocker: clean tree returns null", () => {
