@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=882 runId=2423f4bb-ae3a-4a5c-ac8e-cf54ea6389b0 -->
+- Remove the obsolete self-modifying gate from PR merge preflight, restoring merges for runtime source changes.
 <!-- stark-gh:pr-merge pr=860 runId=ac491710-188f-48a4-b15b-fdb8c114c42c -->
 - Add a retrospective on the lost squash-commit ticket prefix, including failure analysis, validation lessons, and follow-up safeguards.
 - **`/stark-bury`** — the burial ritual for retiring 21Stark code into the Náströnd graveyard (STARK-300/STARK-307, PRs #866/#867/#868): partial burial of a subsystem or full retirement of a repo, via footprint verification → interment PR → deletion PR → optional sealed dump and table drop, under five non-negotiable laws (bury before delete, the dead stay dead, the living repo stays green, destructive steps operator-gated with a sealed dump before any drop, never commit a raw bundle / unencrypted dump / age identity). `disable-model-invocation: true` and Claude-only — no Codex variant. Now documented in `CLAUDE.md` and `AGENTS.md`, which it had never reached.
