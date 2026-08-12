@@ -4,10 +4,11 @@
 //   1. Parse --raw-args
 //   2. Working-tree gate (--force does not bypass)
 //   3. Resolve PR (--pr N or current branch)
-//   5. Watcher-recovery / resume detection
-//   6. Fetch with explicit destination refspecs
-//   7. PR identity (rt1) + local sync gate
-//   8. PR-state gates (gate matrix)
+//   4. (retired: self-modifying PR gate — see the note at lib/exit.ts's hole at 19)
+//   5. Watcher-recovery / resume detection (pre-emption deferred to step 10)
+//   6. Reject fork PRs BEFORE fetch
+//   7. Fetch with explicit destination refspecs
+//   8. PR identity (rt1) + local sync gate, then PR-state gates (gate matrix)
 //   9. Pre-LLM secret scan (BEFORE rebase)
 //  10. Rebase
 //  11. Capture pre-edit CHANGELOG.md to durable tempfile
@@ -129,12 +130,25 @@ export function parseRawArgs(raw: string): MergeUserArgs {
   return a;
 }
 
-// Label-inferred section: bug/fix → Fixed; else Added.
-export function inferSection(labels: { name: string }[]): PrMergePlan["changelog"]["section"] {
+// Inferred changelog section: bug/fix label → Fixed, else a `fix(...)` /
+// `revert(...)` conventional-commit title type → Fixed, else Added.
+//
+// Labels alone were not enough: this repo files no labels at all, so every PR
+// — including deletions and bug fixes — landed its bullet under `### Added`.
+// That is not cosmetic. `tools/release_changelog.ts::recommendBump` reads
+// `added.length > 0` as "feature", so a patch-only cycle silently became a
+// minor release. The title carries the type the labels don't.
+const FIX_TYPE_TITLE = /^(fix|bugfix|revert)(\([^)]*\))?!?:/i;
+
+export function inferSection(
+  labels: { name: string }[],
+  title = "",
+): PrMergePlan["changelog"]["section"] {
   for (const { name } of labels) {
     const n = name.toLowerCase();
     if (n === "bug" || n === "fix" || n.startsWith("bug:") || n.startsWith("fix:")) return "Fixed";
   }
+  if (FIX_TYPE_TITLE.test(title.trim())) return "Fixed";
   return "Added";
 }
 
@@ -214,16 +228,34 @@ async function main(argv: string[]): Promise<number> {
   }
   const startingRef = gitLib.symbolicHead();
 
-  // Step 3: resolve PR
-  const repoInfo = ghLib.repoView();
-  const pr = userArgs.pr !== null
-    ? ghLib.fetchMergePrByNumber(userArgs.pr, repoInfo.nameWithOwner)
-    : ghLib.fetchMergePrForCurrentBranch();
+  // Step 3: resolve PR.
+  // Both gh calls throw on non-zero exit (execFileSync). Unhandled, that leaves
+  // main() through the top-level catch as a generic exit 1 with a raw gh
+  // message — while the very next branch promises BAD_ARGS (10) for the same
+  // class of failure. Catch both so a typo'd --pr, an unauthed gh, or a
+  // remote-less checkout all report the documented code.
+  let repoInfo: ReturnType<typeof ghLib.repoView>;
+  try {
+    repoInfo = ghLib.repoView();
+  } catch (err) {
+    die(MergeExit.BAD_ARGS, `cannot resolve repo via gh: ${(err as Error).message}`);
+  }
+  let pr: ReturnType<typeof ghLib.fetchMergePrForCurrentBranch>;
+  if (userArgs.pr !== null) {
+    try {
+      pr = ghLib.fetchMergePrByNumber(userArgs.pr, repoInfo.nameWithOwner);
+    } catch (err) {
+      die(MergeExit.BAD_ARGS, `cannot resolve PR #${userArgs.pr} in ${repoInfo.nameWithOwner}: ${(err as Error).message}`);
+    }
+  } else {
+    pr = ghLib.fetchMergePrForCurrentBranch();
+  }
   if (!pr) {
     die(MergeExit.BAD_ARGS, "no PR for current branch; pass --pr N");
   }
 
   // Step 5: watcher-recovery / resume detection
+  let pendingPreempt: { pid: number; lockPath: string } | null = null;
   const dirs = ensureRuntimeDirs();
   const latestPath = watcherStateLatestPath(repoInfo.host, repoInfo.owner, repoInfo.name, pr.number, dirs.watchers);
   const lockPath = watcherLockPath(latestPath);
@@ -237,11 +269,15 @@ async function main(argv: string[]): Promise<number> {
       // everything it is watching — obsolete. Blocking on it made
       // `pr-open --ready` immediately followed by `pr-merge` fail with exit 34
       // until the observer aged out on its own poll cadence. Pre-empt it.
-      const owner = existingLock as { pid: number };
-      preemptCiObserver(owner.pid, lockPath);
-      process.stderr.write(
-        `pre-empted pr-open CI watcher (pid ${owner.pid}) for PR #${pr.number}: `
-        + `its head becomes obsolete at force-push\n`);
+      //
+      // But NOT here. Pre-emption SIGKILLs another process and unlinks its
+      // lock, and every gate between this point and the rebase can still
+      // refuse the merge (fork PR, closed/merged, CHANGES_REQUESTED, failing
+      // required check, secret hit). Killing first meant a refused merge left
+      // the operator with no CI watcher and no notification, for a PR this run
+      // never touched. Defer it to the last moment before the rebase, which is
+      // still before the force-push that invalidates the watched head.
+      pendingPreempt = { pid: (existingLock as { pid: number }).pid, lockPath };
     } else if (liveness.alive) {
       // A live merge-driver (or an unclassifiable lock, handled conservatively)
       // will itself mark-ready and merge — do not race it.
@@ -378,14 +414,33 @@ async function main(argv: string[]): Promise<number> {
       `secrets detected pre-LLM: ${llmHits.map(h => h.category).join(", ")}; pass --allow-secret-to-llm to override`);
   }
 
+  // Every gate that can refuse this merge has now passed, so pre-empting the
+  // pr-open CI observer (detected at Step 5) can no longer orphan a watcher
+  // for a merge we then decline. The rebase + force-push below is what makes
+  // its watched head obsolete.
+  if (pendingPreempt) {
+    preemptCiObserver(pendingPreempt.pid, pendingPreempt.lockPath);
+    process.stderr.write(
+      `pre-empted pr-open CI watcher (pid ${pendingPreempt.pid}) for PR #${pr.number}: `
+      + `its head becomes obsolete at force-push\n`);
+  }
+
   // Step 10: rebase
-  gitLib.checkout(pr.headRefName);
+  // The checkout is inside the try: a head ref held by another worktree fails
+  // with `fatal: '<ref>' is already used by worktree at …`, and left unguarded
+  // that escaped main() as a generic exit 1 instead of a stable MergeExit.
+  let checkedOut = false;
   try {
+    gitLib.checkout(pr.headRefName);
+    checkedOut = true;
     gitLib.rebaseOnto(`refs/remotes/origin/${pr.baseRefName}`);
   } catch (err) {
     try { gitLib.abortRebase(); } catch { /* nothing to abort */ }
     try { gitLib.checkout(startingRef); } catch { /* best-effort */ }
-    die(MergeExit.CONFLICT_OR_DIRTY, `rebase onto origin/${pr.baseRefName} failed: ${(err as Error).message}`);
+    const what = checkedOut
+      ? `rebase onto origin/${pr.baseRefName} failed`
+      : `cannot check out ${pr.headRefName} (is it checked out in another worktree?)`;
+    die(MergeExit.CONFLICT_OR_DIRTY, `${what}: ${(err as Error).message}`);
   }
   const rebasedHeadOid = gitLib.headOid();
 
@@ -422,7 +477,7 @@ async function main(argv: string[]): Promise<number> {
   }
 
   // Step 12: resolve section
-  const section = userArgs.changelogSection ?? inferSection(pr.labels);
+  const section = userArgs.changelogSection ?? inferSection(pr.labels, pr.title);
 
   // Step 13: pre-plan-write base re-check
   gitLib.fetchRefs("origin", [pr.baseRefName]);

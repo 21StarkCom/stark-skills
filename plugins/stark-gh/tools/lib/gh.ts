@@ -164,8 +164,14 @@ export interface MergePrMetadata {
   headRepositoryOwner: { login: string } | null;
   headRepository: { name: string } | null;
   labels: { name: string }[];
-  nameWithOwner: string;
 }
+
+// NOTE: every name here must be a valid `gh pr view --json` field. gh rejects
+// the whole call on an unknown one, and `fetchMergePrForCurrentBranch` reports
+// that as "no PR for current branch" — which is how a `nameWithOwner` in this
+// list (a `gh repo view` field) made the bare `/stark-gh:pr-merge` invocation
+// fail on every branch until 2026-08-12. The repo slug comes from
+// `repoView()`, never from the PR payload.
 
 const MERGE_PR_FIELDS = [
   "number",
@@ -187,13 +193,12 @@ const MERGE_PR_FIELDS = [
 
 export function fetchMergePrByNumber(prNumber: number, repoSlug: string, opts: { exec?: ExecFn } = {}): MergePrMetadata {
   const out = gh(["pr", "view", String(prNumber), "--repo", repoSlug, "--json", MERGE_PR_FIELDS], opts);
-  const j = JSON.parse(out);
-  return { ...j, nameWithOwner: repoSlug };
+  return JSON.parse(out);
 }
 
 export function fetchMergePrForCurrentBranch(opts: { exec?: ExecFn } = {}): MergePrMetadata | null {
   try {
-    const out = gh(["pr", "view", "--json", `${MERGE_PR_FIELDS},nameWithOwner`], opts);
+    const out = gh(["pr", "view", "--json", MERGE_PR_FIELDS], opts);
     const j = JSON.parse(out);
     return j;
   } catch {
