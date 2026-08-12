@@ -151,7 +151,7 @@ async function main(argv: string[]): Promise<number> {
       timestamp: new Date().toISOString(),
       runId: plan.runId,
       pr: plan.pr.number,
-      flag: "--allow-secret-commit",
+      flag: "--allow-secret-commit", source: "cli",
       user: process.env.USER || "unknown",
       hostname: os.hostname(),
       reason: `redacted spans in ${initial.categories.join(", ")}`,

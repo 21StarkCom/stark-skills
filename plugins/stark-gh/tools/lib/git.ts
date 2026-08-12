@@ -29,6 +29,22 @@ export function git(
   return exec("git", args, { input: opts.input, streamStderr: opts.streamStderr }).toString("utf8");
 }
 
+// Content of a path as it exists at `ref`, or null when the path is absent
+// there. Used to read repo policy from a trusted ref rather than the checked
+// out branch, so a PR cannot supply the settings that police its own diff.
+//
+// Absence is established by ASKING git (`ls-tree` prints nothing for a path
+// that is not in the tree), never by matching its error text. The message is
+// localized — under a non-English locale a repo that simply has no config file
+// would have looked like a fatal error and aborted every merge. A bad ref still
+// throws, because an unreachable ref is not the same as an absent file and
+// treating it as one would silently drop the policy.
+export function fileAtRef(ref: string, relPath: string, opts: { exec?: ExecFn } = {}): string | null {
+  const listed = git(["ls-tree", "--name-only", ref, "--", relPath], opts).trim();
+  if (listed === "") return null;
+  return git(["show", `${ref}:${relPath}`], opts);
+}
+
 export function isGitRepo(opts: { exec?: ExecFn } = {}): boolean {
   try {
     git(["rev-parse", "--git-dir"], opts);

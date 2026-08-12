@@ -25,7 +25,7 @@ test("appendPrMergeOverride writes JSONL line to expected path", () => {
       timestamp: "2026-04-28T12:00:00Z",
       runId: "run-1",
       pr: 42,
-      flag: "--allow-secret-commit",
+      flag: "--allow-secret-commit", source: "cli",
       user: "alice",
       hostname: "host",
       reason: "intentional secret in fixture",
@@ -47,7 +47,7 @@ test("appendPrMergeOverride file mode is 0600", () => {
       timestamp: "2026-04-28T12:00:01Z",
       runId: "run-mode",
       pr: 1,
-      flag: "--allow-secret-to-llm",
+      flag: "--allow-secret-to-llm", source: "cli",
       user: "u",
       hostname: "h",
       reason: "",
@@ -66,7 +66,7 @@ test("appendPrMergeOverride --force requires non-empty reason", () => {
         timestamp: "2026-04-28T12:00:02Z",
         runId: "run-noforce",
         pr: 99,
-        flag: "--force",
+        flag: "--force", source: "cli",
         user: "u",
         hostname: "h",
         reason: "",
@@ -78,7 +78,7 @@ test("appendPrMergeOverride --force requires non-empty reason", () => {
         timestamp: "2026-04-28T12:00:03Z",
         runId: "run-spaces",
         pr: 99,
-        flag: "--force",
+        flag: "--force", source: "cli",
         user: "u",
         hostname: "h",
         reason: "   ",
@@ -91,7 +91,7 @@ test("appendPrMergeOverride --force requires non-empty reason", () => {
       timestamp: "2026-04-28T12:00:04Z",
       runId: "run-ok",
       pr: 99,
-      flag: "--force",
+      flag: "--force", source: "cli",
       user: "u",
       hostname: "h",
       reason: "release-train rolling forward",
@@ -102,11 +102,11 @@ test("appendPrMergeOverride --force requires non-empty reason", () => {
 test("appendPrMergeOverride append-mode creates separate JSONL records", () => {
   withSandbox(() => {
     appendPrMergeOverride({
-      timestamp: "t1", runId: "r-multi", pr: 1, flag: "--force",
+      timestamp: "t1", runId: "r-multi", pr: 1, flag: "--force", source: "cli",
       user: "u", hostname: "h", reason: "first",
     });
     appendPrMergeOverride({
-      timestamp: "t2", runId: "r-multi", pr: 1, flag: "--allow-secret-commit",
+      timestamp: "t2", runId: "r-multi", pr: 1, flag: "--allow-secret-commit", source: "cli",
       user: "u", hostname: "h", reason: "",
     });
     const lines = fs.readFileSync(prMergeAuditPath(), "utf8").trim().split("\n");

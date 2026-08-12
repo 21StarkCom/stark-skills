@@ -30,8 +30,11 @@ import { writePrMergePlan, type PrMergePlan } from "./lib/plan.ts";
 import { ensureRuntimeDirs, mktempInRuntime } from "./lib/runtime.ts";
 import { scanSecrets } from "./lib/secret.ts";
 import { evaluateLockLiveness, lockKind, preemptCiObserver, readLock, watcherLockPath, watcherStateLatestPath } from "./lib/watcher_lock.ts";
-import { appendPrMergeOverride, SECRET_TO_LLM_WARNING } from "./lib/audit.ts";
+import { appendPrMergeOverride, SECRET_TO_LLM_WARNING, type PrMergeOverrideFlag } from "./lib/audit.ts";
 import { resolveDraftConfig } from "./lib/config.ts";
+import { applyMergeDefaults, describeSource, loadMergeDefaults, renderWaiver, MAX_WATCH_TIMEOUT_HOURS } from "./lib/merge_config.ts";
+import { REPO_CONFIG_BASENAME } from "./lib/ticket.ts";
+
 import { fetchRequiredCheckRollup, summarizeVerdict } from "./lib/checks_graphql.ts";
 
 export interface MergeUserArgs {
@@ -45,7 +48,20 @@ export interface MergeUserArgs {
   allowSecretToLlm: boolean;
   allowNoRequiredChecks: boolean;
   allowSkippedChecks: boolean;
+  // Drop `.stark-gh.json` for this run. The escape hatch for a config that is
+  // committed-and-wrong, and the only way to turn a configured waiver back off
+  // for a single merge (the defaults are OR-ed in, so nothing else can).
+  ignoreRepoConfig: boolean;
+  // Whether --watch-timeout was actually typed. Needed because the field is
+  // pre-seeded with the default, so its value alone cannot distinguish "not
+  // passed" from "passed the same number as the default" — and a repo config
+  // must not silently lose to a value the operator never gave.
+  watchTimeoutExplicit: boolean;
 }
+
+// Which waivers get an audit line. --no-watch and --watch-timeout change how
+// long we wait, not which gate applies, so they are reported but not audited.
+const AUDITED_FLAGS = new Set(["--allow-no-required-checks", "--allow-secret-to-llm", "--allow-secret-commit"]);
 
 const DEFAULT_WATCH_TIMEOUT_HOURS = 6;
 const VALID_SECTIONS = new Set(["Added", "Changed", "Fixed", "Removed", "Deprecated", "Security"]);
@@ -63,6 +79,8 @@ export function parseRawArgs(raw: string): MergeUserArgs {
     allowSecretToLlm: false,
     allowNoRequiredChecks: false,
     allowSkippedChecks: false,
+    watchTimeoutExplicit: false,
+    ignoreRepoConfig: false,
   };
   const need = (i: number, flag: string): string => {
     if (i >= tokens.length) throw new Error(`flag ${flag} requires a value`);
@@ -105,7 +123,16 @@ export function parseRawArgs(raw: string): MergeUserArgs {
       case "--watch-timeout": {
         const v = Number(need(++i, t));
         if (!(v > 0)) throw new Error(`--watch-timeout must be positive number of hours; got ${tokens[i]}`);
+        // Same ceiling the config path enforces, and for the same reason: a
+        // watcher's timeout is its only guaranteed exit, and it holds a lock
+        // that blocks every later merge of this PR. The hours-for-milliseconds
+        // mix-up the cap exists to catch is a TYPED mistake, so capping only
+        // the config half left the likelier half open.
+        if (v > MAX_WATCH_TIMEOUT_HOURS) {
+          throw new Error(`--watch-timeout must be at most ${MAX_WATCH_TIMEOUT_HOURS} (one week); got ${v} — hours, not milliseconds`);
+        }
         a.watchTimeoutHours = v;
+        a.watchTimeoutExplicit = true;
         break;
       }
       case "--allow-secret-commit":
@@ -119,6 +146,9 @@ export function parseRawArgs(raw: string): MergeUserArgs {
         break;
       case "--allow-skipped-checks":
         a.allowSkippedChecks = true;
+        break;
+      case "--ignore-repo-config":
+        a.ignoreRepoConfig = true;
         break;
       default:
         throw new Error(`unknown flag: ${t}`);
@@ -195,21 +225,24 @@ async function main(argv: string[]): Promise<number> {
   }
 
   // Always-on overrides audit (write before any auditable gate per plan H15).
+  // Repo-config-sourced waivers are audited separately, after the base ref is
+  // known — resolving them here would need the working tree, which is the one
+  // place they must never come from.
   const runId = crypto.randomUUID();
   const stamp = new Date().toISOString();
   const user = os.userInfo().username || "unknown";
   const hostname = os.hostname();
   if (userArgs.force) {
     appendPrMergeOverride({ timestamp: stamp, runId, pr: userArgs.pr ?? -1, flag: "--force",
-      user, hostname, reason: userArgs.forceReason || "" });
+      user, hostname, source: "cli", reason: userArgs.forceReason || "" });
   }
   if (userArgs.allowSecretCommit) {
     appendPrMergeOverride({ timestamp: stamp, runId, pr: userArgs.pr ?? -1, flag: "--allow-secret-commit",
-      user, hostname, reason: userArgs.forceReason || "" });
+      user, hostname, source: "cli", reason: userArgs.forceReason || "" });
   }
   if (userArgs.allowSecretToLlm) {
     appendPrMergeOverride({ timestamp: stamp, runId, pr: userArgs.pr ?? -1, flag: "--allow-secret-to-llm",
-      user, hostname, reason: userArgs.forceReason || "" });
+      user, hostname, source: "cli", reason: userArgs.forceReason || "" });
     process.stderr.write(SECRET_TO_LLM_WARNING + "\n");
   }
 
@@ -252,6 +285,14 @@ async function main(argv: string[]): Promise<number> {
   }
   if (!pr) {
     die(MergeExit.BAD_ARGS, "no PR for current branch; pass --pr N");
+  }
+
+  // The required-checks waiver bypasses a gate like the others, so it is
+  // audited like the others — the execute-side error text already promises the
+  // operator it is "(audited)".
+  if (userArgs.allowNoRequiredChecks) {
+    appendPrMergeOverride({ timestamp: stamp, runId, pr: pr.number, flag: "--allow-no-required-checks",
+      user, hostname, source: "cli", reason: userArgs.forceReason || "" });
   }
 
   // Step 5: watcher-recovery / resume detection
@@ -301,6 +342,69 @@ async function main(argv: string[]): Promise<number> {
 
   // Step 7: fetch with explicit destination refspecs
   gitLib.fetchRefs("origin", [pr.baseRefName, pr.headRefName]);
+
+  // Step 7b: per-repo merge defaults, read from the DEFAULT branch.
+  //
+  // Two constraints put this here rather than earlier, and both were learned by
+  // getting them wrong.
+  //
+  // 1. Not the working tree. These settings waive the gates that police the
+  //    diff being merged, so a checked-out read lets a PR authorize itself: a
+  //    branch committing allowSecretCommit next to a live token would disable
+  //    the scan that would have caught it.
+  // 2. Not the PR's own base either. `pr.baseRefName` is whatever branch the
+  //    author aimed at, so in a stacked PR (B -> A, same repo, so the fork gate
+  //    never fires) the "base" is a branch that author just pushed. The trust
+  //    only holds for the repo's DEFAULT branch, which is what protection rules
+  //    and review actually guard. A PR based elsewhere gets the built-in
+  //    defaults and is told so.
+  //
+  // And it runs AFTER the fetch above, because reading a remote-tracking ref
+  // that was never fetched fails outright — turning a repo with no config at
+  // all into a hard merge abort — and reading it pre-fetch silently applies a
+  // stale copy of policy that has since changed on the trunk.
+  const cliArgs = userArgs;
+  const policyRef = `origin/${repoInfo.defaultBranch}`;
+  const basedOnDefault = pr.baseRefName === repoInfo.defaultBranch;
+  if (userArgs.ignoreRepoConfig) {
+    process.stderr.write(`${REPO_CONFIG_BASENAME} skipped by --ignore-repo-config\n`);
+  } else if (!basedOnDefault) {
+    process.stderr.write(
+      `${REPO_CONFIG_BASENAME} skipped: this PR targets ${pr.baseRefName}, not the default branch ` +
+      `${repoInfo.defaultBranch} — repo policy is only honoured from the default branch\n`,
+    );
+  } else {
+    const mergeCfg = loadMergeDefaults(
+      () => gitLib.fileAtRef(policyRef, REPO_CONFIG_BASENAME),
+      `${REPO_CONFIG_BASENAME} at ${policyRef}`,
+    );
+    if (mergeCfg.error) {
+      // Fails CLOSED, like the ticket policy: a repo that opted into merge
+      // defaults and then broke them must not silently fall back to the
+      // built-ins. `--ignore-repo-config` is the way past, so one bad commit
+      // cannot wedge every merge in the repo.
+      die(MergeExit.BAD_ARGS, `${mergeCfg.error} — --ignore-repo-config skips the file`);
+    }
+    if (mergeCfg.warning) process.stderr.write(mergeCfg.warning + "\n");
+    userArgs = applyMergeDefaults(userArgs, mergeCfg.defaults);
+    for (const note of describeSource(mergeCfg.defaults, cliArgs)) {
+      process.stderr.write(`in effect — ${renderWaiver(note)}\n`);
+      // A waiver the operator did not type is still a waiver. Audited with its
+      // provenance so the log can answer "was this a decision, or a standing
+      // repo setting?" — which one indistinguishable line per run cannot.
+      if (note.fromConfig && AUDITED_FLAGS.has(note.flag)) {
+        appendPrMergeOverride({
+          timestamp: stamp, runId, pr: pr.number,
+          flag: note.flag as PrMergeOverrideFlag,
+          user, hostname, source: "repo-config",
+          reason: `${REPO_CONFIG_BASENAME} at ${policyRef}`,
+        });
+      }
+    }
+    if (mergeCfg.defaults.allowSecretToLlm && !cliArgs.allowSecretToLlm) {
+      process.stderr.write(SECRET_TO_LLM_WARNING + "\n");
+    }
+  }
 
   // Step 8: PR identity + local sync
   const remoteHeadOid = gitLib.revParse(`refs/remotes/origin/${pr.headRefName}`);

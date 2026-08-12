@@ -32,6 +32,12 @@ export const DEFAULT_TICKET_POLICY: TicketPolicy = {
 
 export const REPO_CONFIG_BASENAME = ".stark-gh.json";
 
+// Every top-level key the file may carry, across BOTH halves of it: the ticket
+// policy here and the `merge` block owned by lib/merge_config.ts. One set, not
+// two — when each loader kept its own, adding a block meant editing both or the
+// other would warn about it on every run.
+export const KNOWN_TOP_LEVEL_KEYS = new Set(["requireTicketScope", "ticketKey", "merge"]);
+
 export interface PolicyLoad {
   policy: TicketPolicy;
   // Non-fatal note (e.g. an unknown key). Printed to stderr.
@@ -85,8 +91,7 @@ export function loadTicketPolicy(
     return fatal('requireTicketScope needs a "ticketKey" (e.g. "STARK") to anchor on');
   }
 
-  const known = new Set(["requireTicketScope", "ticketKey"]);
-  const unknown = Object.keys(o).filter((k) => !known.has(k));
+  const unknown = Object.keys(o).filter((k) => !KNOWN_TOP_LEVEL_KEYS.has(k));
   const warning = unknown.length ? `${REPO_CONFIG_BASENAME}: ignoring unknown key(s) ${unknown.join(", ")}` : null;
   return { policy: { requireTicketScope, ticketKey }, warning, error: null };
 }
