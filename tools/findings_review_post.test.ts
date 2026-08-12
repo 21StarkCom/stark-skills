@@ -2,8 +2,10 @@ import { test, describe } from "node:test";
 import * as assert from "node:assert/strict";
 
 import {
+  GH_MAX_BUFFER,
   anchorableLinesFromPatch,
   bodyFor,
+  defaultRun,
   buildHumanSummary,
   flattenSlurped,
   isAnchorable,
@@ -317,5 +319,42 @@ describe("parseArgs", () => {
 
   test("a flag missing its value errors instead of consuming the next flag", () => {
     assert.throws(() => parseArgs(["--repo"]), /--repo requires a value/);
+  });
+});
+
+// --- subprocess buffering ----------------------------------------------------
+
+describe("defaultRun", () => {
+  // `gh api /pulls/N/files --paginate --slurp` carries every file's full PATCH,
+  // so its payload scales with the DIFF, not with the number of findings. Node's
+  // 1 MiB spawnSync default silently killed the child on a 78-file PR (measured
+  // 1.27 MB), and the tool reported `failed (exit null):` with empty stderr —
+  // a review-posting tool failing precisely on the large PRs whose findings
+  // matter most. 2 MB here is over the old default and far under the new one.
+  test("returns the whole payload when it exceeds Node's 1 MiB default", () => {
+    const bytes = 2 * 1024 * 1024;
+    const r = defaultRun(process.execPath, [
+      "-e",
+      `process.stdout.write("x".repeat(${bytes}))`,
+    ]);
+    assert.equal(r.status, 0, `expected a clean exit, got ${r.status}: ${r.stderr}`);
+    assert.equal(r.stdout.length, bytes);
+  });
+
+  test("GH_MAX_BUFFER is well above the payloads gh actually returns", () => {
+    assert.ok(GH_MAX_BUFFER > 1024 * 1024, "must exceed Node's default");
+  });
+
+  // A signal kill sets status null and leaves stderr empty, which is
+  // indistinguishable from a crash. The caller interpolates stderr straight
+  // into its error, so an empty one produced a message ending in a bare colon.
+  test("a signal kill with no stderr is explained, not reported as empty", () => {
+    const r = defaultRun(process.execPath, [
+      "-e",
+      "process.kill(process.pid, 'SIGKILL')",
+    ]);
+    assert.equal(r.status, null, "expected a signal kill, not a normal exit");
+    assert.notEqual(r.stderr, "", "a killed child must not report empty stderr");
+    assert.match(r.stderr, /terminated/);
   });
 });

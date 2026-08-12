@@ -204,9 +204,32 @@ export interface PrContext {
 
 type RunFn = (cmd: string, args: string[]) => { status: number | null; stdout: string; stderr: string };
 
-const defaultRun: RunFn = (cmd, args) => {
-  const sp = spawnSync(cmd, args, { encoding: "utf8" });
-  return { status: sp.status, stdout: sp.stdout ?? "", stderr: sp.stderr ?? "" };
+/**
+ * 64 MiB. Node's spawnSync default is 1 MiB, and `gh api /pulls/N/files
+ * --paginate --slurp` carries every file's full PATCH — so the payload scales
+ * with the size of the diff, not the number of findings. A 78-file branch
+ * measured 1.27 MB and blew straight through it.
+ *
+ * The failure was worse than the limit: exceeding maxBuffer makes Node KILL the
+ * child, which sets `status` to null and leaves `stderr` empty, so the tool
+ * reported `failed (exit null):` with nothing after the colon — a review-posting
+ * tool that fails silently on exactly the large PRs whose findings matter most.
+ * The cause is now surfaced explicitly below.
+ */
+export const GH_MAX_BUFFER = 64 * 1024 * 1024;
+
+export const defaultRun: RunFn = (cmd, args) => {
+  const sp = spawnSync(cmd, args, { encoding: "utf8", maxBuffer: GH_MAX_BUFFER });
+  // A signal kill with no stderr is otherwise indistinguishable from a crash.
+  // ENOBUFS is the one cause we can name precisely, so name it.
+  let stderr = sp.stderr ?? "";
+  if (sp.status === null && !stderr) {
+    const why = (sp.error as NodeJS.ErrnoException | undefined)?.code === "ENOBUFS"
+      ? `output exceeded maxBuffer (${GH_MAX_BUFFER} bytes)`
+      : sp.error?.message ?? `killed by signal ${sp.signal ?? "unknown"}`;
+    stderr = `${cmd} produced no stderr and was terminated: ${why}`;
+  }
+  return { status: sp.status, stdout: sp.stdout ?? "", stderr };
 };
 
 /**
