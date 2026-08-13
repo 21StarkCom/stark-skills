@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import { tokenize } from "./lib/shell_quote.ts";
 import { printJson, die } from "./lib/output.ts";
 import { watcherDir, prDir } from "./lib/watcher_paths.ts";
@@ -844,6 +845,10 @@ function main(): void {
   process.exit(receipt.errors.length > 0 ? CleanupExit.GENERIC : CleanupExit.OK);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Entry-point guard. Compare URL to URL: `file://${process.argv[1]}` leaves the
+// path raw, while import.meta.url percent-encodes it — so any plugin path with a
+// space (Claude installs under ~/Library/Application Support) never matched and
+// main() silently never ran, exiting 0 having done nothing.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main();
 }
