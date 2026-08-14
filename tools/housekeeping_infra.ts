@@ -390,6 +390,10 @@ export const ASSET_SYMLINKS: AssetSymlink[] = [
   { link: ".claude/code-review/orchestrator.md", target: "Code/21Stark/stark-skills/global/orchestrator.md" },
   { link: ".claude/plugins/stark-gh", target: "Code/21Stark/stark-skills/plugins/stark-gh" },
   { link: ".claude/output-styles/concrete.md", target: "Code/21Stark/stark-skills/config/output-styles/concrete.md" },
+  // Written by `statusline_setup.ts --install`, which also points settings.json
+  // at THIS link rather than at the repo path — so a dangling link takes the
+  // statusline down with nothing else to repoint it.
+  { link: ".claude/statusline-command.sh", target: "Code/21Stark/stark-skills/config/statusline-command.sh" },
 ];
 
 export type SymlinkRepair = { path: string; from: string; to: string };

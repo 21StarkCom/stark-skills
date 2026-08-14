@@ -498,7 +498,7 @@ test("healAssetSymlinks never deletes the original when the mutation fails mid-r
 });
 
 test("ASSET_SYMLINKS is a sane, deduped table of ~/.claude → stark-skills mappings", () => {
-  assert.equal(ASSET_SYMLINKS.length, 8);
+  assert.equal(ASSET_SYMLINKS.length, 9);
   const linkSet = new Set<string>();
   for (const entry of ASSET_SYMLINKS) {
     assert.ok(entry.link.startsWith(".claude/"), `link under .claude: ${entry.link}`);
