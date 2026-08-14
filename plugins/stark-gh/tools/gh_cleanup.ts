@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { isMainModule } from "./lib/main_module.ts";
 import { tokenize } from "./lib/shell_quote.ts";
 import { printJson, die } from "./lib/output.ts";
 import { watcherDir, prDir } from "./lib/watcher_paths.ts";
@@ -844,6 +845,10 @@ function main(): void {
   process.exit(receipt.errors.length > 0 ? CleanupExit.GENERIC : CleanupExit.OK);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Entry-point guard — see `lib/main_module.ts` for why neither the raw
+// `file://${process.argv[1]}` comparison nor a plain `pathToFileURL` one is
+// safe. Both fail the same way: main() silently never runs and the process
+// exits 0 having done nothing.
+if (isMainModule(import.meta.url)) {
   main();
 }
