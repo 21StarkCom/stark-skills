@@ -390,13 +390,25 @@ export const ASSET_SYMLINKS: AssetSymlink[] = [
   { link: ".claude/code-review/orchestrator.md", target: "Code/21Stark/stark-skills/global/orchestrator.md" },
   { link: ".claude/plugins/stark-gh", target: "Code/21Stark/stark-skills/plugins/stark-gh" },
   { link: ".claude/output-styles/concrete.md", target: "Code/21Stark/stark-skills/config/output-styles/concrete.md" },
+  // The register spec ~/Code/CLAUDE.md defers to, and what settings.json's
+  // `outputStyle: "Blunt"` resolves against — absent from this table until
+  // 2026-08-14, when it turned out to be absent from the disk as well.
+  { link: ".claude/output-styles/blunt.md", target: "Code/21Stark/stark-skills/config/output-styles/blunt.md" },
   // Written by `statusline_setup.ts --install`, which also points settings.json
   // at THIS link rather than at the repo path — so a dangling link takes the
   // statusline down with nothing else to repoint it.
   { link: ".claude/statusline-command.sh", target: "Code/21Stark/stark-skills/config/statusline-command.sh" },
 ];
 
-export type SymlinkRepair = { path: string; from: string; to: string };
+// `from` is the target the link used to carry. For a link that was ABSENT and
+// has just been created, there is no previous target: `from` is "" and
+// `provisioned` is true, so a caller can tell "repointed" from "created".
+export type SymlinkRepair = {
+  path: string;
+  from: string;
+  to: string;
+  provisioned?: boolean;
+};
 
 // Injectable filesystem seam so a test can force a mid-repair failure (e.g.
 // symlink() throwing) and assert the load-bearing link is never left absent.
@@ -406,6 +418,7 @@ export type LinkOps = {
   rename: (from: string, to: string) => void;
   unlink: (p: string) => void;
   exists: (p: string) => boolean;
+  mkdirp: (p: string) => void;
 };
 
 const REAL_LINK_OPS: LinkOps = {
@@ -414,6 +427,9 @@ const REAL_LINK_OPS: LinkOps = {
   rename: (from, to) => fs.renameSync(from, to),
   unlink: (p) => fs.unlinkSync(p),
   exists: (p) => fs.existsSync(p),
+  mkdirp: (p) => {
+    fs.mkdirSync(p, { recursive: true });
+  },
 };
 
 function errMsg(err: unknown): string {
@@ -446,16 +462,46 @@ export function healAssetSymlinks(
     const linkPath = path.join(home, entry.link);
     const canonicalTarget = path.join(home, entry.target);
 
-    // Only heal things that are actually symlinks. ENOENT (nothing there) and
-    // EINVAL (a real file/dir, not a symlink) are "not ours to heal" → skip
-    // silently. Any other error (EACCES, EIO, ELOOP) is a real problem worth
-    // surfacing rather than swallowing.
+    // ENOENT means the link is ABSENT, and absent is the failure mode that
+    // actually bites: on 2026-08-13 a rebuilt ~/.claude came back without any
+    // of these links, and a healer that only repaired *existing* broken ones
+    // reported errors: [] over 8 missing entries. So an absent link is
+    // PROVISIONED from the canonical target — that is what makes this table a
+    // declarative desired-state and /stark-housekeeping a recovery command.
+    // EINVAL (a real file or dir sits there, not a symlink) is still skipped
+    // silently: never clobber real content with a link.
     let currentTarget: string;
     try {
       currentTarget = ops.readlink(linkPath);
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code !== "ENOENT" && code !== "EINVAL") {
+      if (code === "ENOENT") {
+        // Cannot invent content — if the canonical target is missing too, say so.
+        if (!ops.exists(canonicalTarget)) {
+          errors.push(
+            `asset symlink ${linkPath} is absent and canonical target ` +
+              `${canonicalTarget} is missing; cannot provision`,
+          );
+          continue;
+        }
+        if (!dryRun) {
+          try {
+            ops.mkdirp(path.dirname(linkPath));
+            ops.symlink(canonicalTarget, linkPath);
+          } catch (e) {
+            errors.push(`provision ${linkPath}: ${errMsg(e)}`);
+            continue;
+          }
+        }
+        repaired.push({
+          path: linkPath,
+          from: "",
+          to: canonicalTarget,
+          provisioned: true,
+        });
+        continue;
+      }
+      if (code !== "EINVAL") {
         errors.push(`readlink ${linkPath}: ${errMsg(err)}`);
       }
       continue;
@@ -536,6 +582,10 @@ export type CleanupOptions = {
   ageProvider?: AgeProvider;
   clock?: StaleClock;
   tarRunner?: (args: string[]) => string;
+  // Override for tests. Defaults to ASSET_SYMLINKS. A test exercising an
+  // unrelated phase passes [] so provisioning does not report every real
+  // entry as missing against its synthetic home.
+  assetLinks?: AssetSymlink[];
 };
 
 export function cleanInfra(opts: CleanupOptions = {}): CleanupReceipt {
@@ -624,7 +674,7 @@ export function cleanInfra(opts: CleanupOptions = {}): CleanupReceipt {
   // segment) so directly-invoked tools keep resolving prompts/tools/config.
   const { repaired: symlinksRepaired, errors: symlinkErrors } = healAssetSymlinks(
     home,
-    { dryRun },
+    { dryRun, links: opts.assetLinks },
   );
   errors.push(...symlinkErrors);
 
