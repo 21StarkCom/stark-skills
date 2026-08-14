@@ -476,14 +476,14 @@ export function healAssetSymlinks(
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === "ENOENT") {
-        // Cannot invent content — if the canonical target is missing too, say so.
-        if (!ops.exists(canonicalTarget)) {
-          errors.push(
-            `asset symlink ${linkPath} is absent and canonical target ` +
-              `${canonicalTarget} is missing; cannot provision`,
-          );
-          continue;
-        }
+        // Absent link AND absent target = nothing to reconcile: no broken link
+        // to complain about, and nothing to point one at. Skip SILENTLY — this
+        // is the state of every machine that has not cloned stark-skills to the
+        // canonical path (CI included), and reporting 10 errors plus a non-zero
+        // exit there makes "the repo lives elsewhere" indistinguishable from
+        // real breakage. Table-vs-repo drift is caught statically instead, by
+        // the ASSET_SYMLINKS test that asserts every target exists in-tree.
+        if (!ops.exists(canonicalTarget)) continue;
         if (!dryRun) {
           try {
             ops.mkdirp(path.dirname(linkPath));

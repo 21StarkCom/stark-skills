@@ -545,15 +545,16 @@ test("healAssetSymlinks provisions an absent link from the canonical target", (t
   }
 });
 
-test("healAssetSymlinks reports rather than throws when an absent link has no target to point at", (t) => {
+test("healAssetSymlinks skips silently when an absent link has no target to point at", (t) => {
   const fx = symlinkFixture(t);
   if (!fx) return;
   try {
-    // Neither the link nor its canonical target exists — nothing to invent.
+    // Neither the link nor its canonical target exists. Nothing to invent and
+    // no broken link to report — this is every machine that has not cloned
+    // stark-skills to the canonical path, so it must not error or exit non-zero.
     const { repaired, errors } = healAssetSymlinks(fx.home, { links: fx.links });
     assert.deepEqual(repaired, []);
-    assert.equal(errors.length, 1);
-    assert.match(errors[0]!, /absent and canonical target .* is missing; cannot provision/);
+    assert.deepEqual(errors, []);
     assert.equal(fs.existsSync(path.join(fx.home, ".claude/code-review/tools")), false);
   } finally {
     fs.rmSync(path.dirname(fx.home), { recursive: true, force: true });
@@ -629,6 +630,28 @@ test("ASSET_SYMLINKS is a sane, deduped table of ~/.claude → stark-skills mapp
     );
     assert.equal(linkSet.has(entry.link), false, `duplicate link: ${entry.link}`);
     linkSet.add(entry.link);
+  }
+});
+
+// healAssetSymlinks skips absent-link-with-absent-target silently, because that
+// is just "stark-skills is not cloned here". The signal that would otherwise be
+// lost — an entry naming a path this repo does not actually ship — is asserted
+// statically instead, which is strictly better: it fails in CI on the commit
+// that introduces the drift rather than on whichever machine runs housekeeping
+// next.
+test("every ASSET_SYMLINKS target exists in this repo", () => {
+  const repoRoot = path.resolve(import.meta.dirname, "..");
+  const PREFIX = "Code/21Stark/stark-skills/";
+  for (const entry of ASSET_SYMLINKS) {
+    assert.ok(
+      entry.target.startsWith(PREFIX),
+      `target must be repo-relative under ${PREFIX}: ${entry.target}`,
+    );
+    const inRepo = path.join(repoRoot, entry.target.slice(PREFIX.length));
+    assert.ok(
+      fs.existsSync(inRepo),
+      `ASSET_SYMLINKS entry ${entry.link} points at ${entry.target}, which this repo does not ship (${inRepo})`,
+    );
   }
 });
 
