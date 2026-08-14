@@ -187,7 +187,7 @@ renders into the Phase 4 summary block:
 | 5.4 | `healer.jsonl`, `preflight.jsonl`, `approach-contracts.jsonl` | keep last 1000 lines |
 | 5.5 | `~/.claude/code-review/logs/*.stderr` | 14 days |
 | 5.6 | `~/.claude/code-review/history/autopilot/` | tar.gz files older than 30 days, grouped by YYYY-MM into `~/.claude/code-review/archives/` |
-| 5.7 | Legacy stark-skills asset symlinks under `~/.claude` (`ASSET_SYMLINKS`) | Repoint when **dangling** or the target carries a renamed segment (`STALE_SEGMENT_RENAMES`, e.g. `Code/Playground/`→`Code/21Stark/`). Repairs only when the corrected target exists; else reported in `errors`, link never deleted. |
+| 5.7 | stark-skills asset symlinks under `~/.claude` (`ASSET_SYMLINKS`, 10 entries) | Declarative desired-state, so this phase is the **recovery step** for a rebuilt `~/.claude`. **Provision** when the link is absent; **repoint** when it is dangling or its target carries a renamed segment (`STALE_SEGMENT_RENAMES`, e.g. `Code/Playground/`→`Code/21Stark/`). Never clobbers a real file/dir at the link path, never invents a missing canonical target (reported in `errors`), never deletes a link. Provisioned entries carry `provisioned: true`. |
 
 Receipt: `{ dryRun, sessionsRemoved[], checkpointsRemoved[],
 staleLocksRemoved[], statuslineStateRemoved[], validationLogsRemoved[], logsRotated[],

@@ -17,17 +17,6 @@
     ]
   },
   "hooks": {
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/aryeh/Code/.persona-memory-backup/backup-personas.sh >/dev/null 2>&1 &"
-          }
-        ]
-      }
-    ],
     "SessionStart": [
       {
         "hooks": [
@@ -97,7 +86,7 @@
       }
     }
   },
-  "outputStyle": "Proactive",
+  "outputStyle": "Blunt",
   "effortLevel": "low",
   "autoUpdatesChannel": "latest",
   "skipDangerousModePermissionPrompt": true,

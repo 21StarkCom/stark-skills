@@ -348,8 +348,25 @@ function symlinkFixture(t: TestContext): {
   const repoDir = path.join(home, "Code", "21Stark", "stark-skills");
   const links: AssetSymlink[] = [
     { link: ".claude/code-review/tools", target: "Code/21Stark/stark-skills/tools" },
-    { link: ".claude/code-review/prompts", target: "Code/21Stark/stark-skills/global/prompts" },
+    // Deliberately under a DIFFERENT parent than links[0]: seeding this one must
+    // not create .claude/code-review/, or the provisioning tests below could not
+    // assert that a missing parent directory gets created.
+    {
+      link: ".claude/output-styles/concrete.md",
+      target: "Code/21Stark/stark-skills/config/output-styles/concrete.md",
+    },
   ];
+  // Seed every entry EXCEPT the first as already-healthy. Each test below owns
+  // links[0] and breaks it in one specific way; the rest must not contribute
+  // repairs or errors of their own. Since an absent link is now provisioned
+  // rather than skipped, leaving them unseeded would add a repair per test.
+  for (const l of links.slice(1)) {
+    const target = path.join(home, l.target);
+    fs.mkdirSync(target, { recursive: true });
+    const linkPath = path.join(home, l.link);
+    fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+    fs.symlinkSync(target, linkPath);
+  }
   return { home, links, repoDir };
 }
 
@@ -424,9 +441,10 @@ test("healAssetSymlinks is a no-op on a healthy tree", (t) => {
   if (!fx) return;
   try {
     for (const l of fx.links) {
+      const linkPath = path.join(fx.home, l.link);
+      if (fs.existsSync(linkPath)) continue; // already seeded healthy by the fixture
       const target = path.join(fx.home, l.target);
       fs.mkdirSync(target, { recursive: true });
-      const linkPath = path.join(fx.home, l.link);
       fs.mkdirSync(path.dirname(linkPath), { recursive: true });
       fs.symlinkSync(target, linkPath);
     }
@@ -480,6 +498,9 @@ test("healAssetSymlinks never deletes the original when the mutation fails mid-r
       rename: (a, b) => fs.renameSync(a, b),
       unlink: (p) => fs.unlinkSync(p),
       exists: (p) => fs.existsSync(p),
+      mkdirp: (p) => {
+        fs.mkdirSync(p, { recursive: true });
+      },
     };
     const { repaired, errors } = healAssetSymlinks(fx.home, {
       links: fx.links,
@@ -497,8 +518,109 @@ test("healAssetSymlinks never deletes the original when the mutation fails mid-r
   }
 });
 
+// The 2026-08-13 ~/.claude rebuild came back with 8 of 9 asset links ABSENT and
+// healAssetSymlinks reported errors: [] over all of them — it only repaired
+// links that existed and were broken. Absent is now provisioned.
+
+test("healAssetSymlinks provisions an absent link from the canonical target", (t) => {
+  const fx = symlinkFixture(t);
+  if (!fx) return;
+  try {
+    fs.mkdirSync(path.join(fx.repoDir, "tools"), { recursive: true });
+    const linkPath = path.join(fx.home, ".claude/code-review/tools");
+    assert.equal(fs.existsSync(path.dirname(linkPath)), false); // parent absent too
+
+    const { repaired, errors } = healAssetSymlinks(fx.home, { links: fx.links });
+    assert.deepEqual(errors, []);
+    assert.equal(repaired.length, 1);
+    assert.equal(repaired[0]!.provisioned, true);
+    assert.equal(repaired[0]!.from, ""); // nothing to point away from
+    assert.equal(repaired[0]!.to, path.join(fx.repoDir, "tools"));
+    // Created, resolves, and is a symlink rather than a copy.
+    assert.equal(fs.lstatSync(linkPath).isSymbolicLink(), true);
+    assert.equal(fs.existsSync(linkPath), true);
+    assert.equal(fs.readlinkSync(linkPath), path.join(fx.repoDir, "tools"));
+  } finally {
+    fs.rmSync(path.dirname(fx.home), { recursive: true, force: true });
+  }
+});
+
+test("healAssetSymlinks skips silently when an absent link has no target to point at", (t) => {
+  const fx = symlinkFixture(t);
+  if (!fx) return;
+  try {
+    // Neither the link nor its canonical target exists. Nothing to invent and
+    // no broken link to report — this is every machine that has not cloned
+    // stark-skills to the canonical path, so it must not error or exit non-zero.
+    const { repaired, errors } = healAssetSymlinks(fx.home, { links: fx.links });
+    assert.deepEqual(repaired, []);
+    assert.deepEqual(errors, []);
+    assert.equal(fs.existsSync(path.join(fx.home, ".claude/code-review/tools")), false);
+  } finally {
+    fs.rmSync(path.dirname(fx.home), { recursive: true, force: true });
+  }
+});
+
+test("healAssetSymlinks dry-run reports a provision without creating anything", (t) => {
+  const fx = symlinkFixture(t);
+  if (!fx) return;
+  try {
+    fs.mkdirSync(path.join(fx.repoDir, "tools"), { recursive: true });
+    const linkPath = path.join(fx.home, ".claude/code-review/tools");
+
+    const { repaired, errors } = healAssetSymlinks(fx.home, {
+      links: fx.links,
+      dryRun: true,
+    });
+    assert.deepEqual(errors, []);
+    assert.equal(repaired.length, 1);
+    assert.equal(repaired[0]!.provisioned, true);
+    // Neither the link nor its parent directory was created.
+    assert.equal(fs.existsSync(linkPath), false);
+    assert.equal(fs.existsSync(path.dirname(linkPath)), false);
+  } finally {
+    fs.rmSync(path.dirname(fx.home), { recursive: true, force: true });
+  }
+});
+
+test("healAssetSymlinks never replaces a real file sitting at the link path", (t) => {
+  const fx = symlinkFixture(t);
+  if (!fx) return;
+  try {
+    fs.mkdirSync(path.join(fx.repoDir, "tools"), { recursive: true });
+    const linkPath = path.join(fx.home, ".claude/code-review/tools");
+    fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+    // A REAL file, not a symlink — readlink gives EINVAL, and clobbering it
+    // with a link would destroy content this tool does not own.
+    fs.writeFileSync(linkPath, "hand-written content");
+
+    const { repaired, errors } = healAssetSymlinks(fx.home, { links: fx.links });
+    assert.deepEqual(repaired, []);
+    assert.deepEqual(errors, []);
+    assert.equal(fs.readFileSync(linkPath, "utf8"), "hand-written content");
+    assert.equal(fs.lstatSync(linkPath).isSymbolicLink(), false);
+  } finally {
+    fs.rmSync(path.dirname(fx.home), { recursive: true, force: true });
+  }
+});
+
+test("healAssetSymlinks provisioning is idempotent", (t) => {
+  const fx = symlinkFixture(t);
+  if (!fx) return;
+  try {
+    fs.mkdirSync(path.join(fx.repoDir, "tools"), { recursive: true });
+    const first = healAssetSymlinks(fx.home, { links: fx.links });
+    assert.equal(first.repaired.length, 1);
+    const second = healAssetSymlinks(fx.home, { links: fx.links });
+    assert.deepEqual(second.repaired, []);
+    assert.deepEqual(second.errors, []);
+  } finally {
+    fs.rmSync(path.dirname(fx.home), { recursive: true, force: true });
+  }
+});
+
 test("ASSET_SYMLINKS is a sane, deduped table of ~/.claude → stark-skills mappings", () => {
-  assert.equal(ASSET_SYMLINKS.length, 9);
+  assert.equal(ASSET_SYMLINKS.length, 10);
   const linkSet = new Set<string>();
   for (const entry of ASSET_SYMLINKS) {
     assert.ok(entry.link.startsWith(".claude/"), `link under .claude: ${entry.link}`);
@@ -508,6 +630,28 @@ test("ASSET_SYMLINKS is a sane, deduped table of ~/.claude → stark-skills mapp
     );
     assert.equal(linkSet.has(entry.link), false, `duplicate link: ${entry.link}`);
     linkSet.add(entry.link);
+  }
+});
+
+// healAssetSymlinks skips absent-link-with-absent-target silently, because that
+// is just "stark-skills is not cloned here". The signal that would otherwise be
+// lost — an entry naming a path this repo does not actually ship — is asserted
+// statically instead, which is strictly better: it fails in CI on the commit
+// that introduces the drift rather than on whichever machine runs housekeeping
+// next.
+test("every ASSET_SYMLINKS target exists in this repo", () => {
+  const repoRoot = path.resolve(import.meta.dirname, "..");
+  const PREFIX = "Code/21Stark/stark-skills/";
+  for (const entry of ASSET_SYMLINKS) {
+    assert.ok(
+      entry.target.startsWith(PREFIX),
+      `target must be repo-relative under ${PREFIX}: ${entry.target}`,
+    );
+    const inRepo = path.join(repoRoot, entry.target.slice(PREFIX.length));
+    assert.ok(
+      fs.existsSync(inRepo),
+      `ASSET_SYMLINKS entry ${entry.link} points at ${entry.target}, which this repo does not ship (${inRepo})`,
+    );
   }
 });
 
@@ -532,6 +676,11 @@ test("cleanInfra wires asset-symlink healing into the receipt", (t) => {
       now: NOW,
       clock: liveClock,
       tarRunner: () => "",
+      // Scope to the one entry this test seeds — the other real entries have no
+      // target under this synthetic home and would each report a provision.
+      assetLinks: [
+        { link: ".claude/code-review/tools", target: "Code/21Stark/stark-skills/tools" },
+      ],
     });
     assert.equal(receipt.symlinksRepaired.length, 1);
     assert.equal(receipt.symlinksRepaired[0]!.path, linkPath);
@@ -565,6 +714,7 @@ test("cleanInfra dry-run reports counts without mutating", (t) => {
       now: NOW,
       clock: liveClock,
       tarRunner: () => "",
+      assetLinks: [], // unrelated phase — keep symlink provisioning out of it
     });
     assert.equal(receipt.dryRun, true);
     assert.equal(receipt.sessionsRemoved.length, 1);
@@ -590,6 +740,7 @@ test("cleanInfra surfaces unlink errors but keeps going", (t) => {
       now: NOW,
       clock: liveClock,
       tarRunner: () => "",
+      assetLinks: [], // unrelated phase — keep symlink provisioning out of it
     });
     assert.equal(receipt.errors.length, 0);
   } finally {
