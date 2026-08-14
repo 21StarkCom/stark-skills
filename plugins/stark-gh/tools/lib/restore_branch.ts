@@ -15,7 +15,7 @@
 
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
-import { pathToFileURL } from "node:url";
+import { isMainModule } from "./main_module.ts";
 import { readPrMergePlan } from "./plan.ts";
 import type { ExecFn } from "./types.ts";
 
@@ -131,10 +131,10 @@ function main(): number {
   }
 }
 
-// Entry-point guard — see the note in gh_cleanup.ts. This one is load-bearing:
-// pr-merge installs this script as its rollback trap, so a guard that never
-// fires leaves a failed merge rebased with no restore, which is the exact state
-// the trap exists to prevent.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Entry-point guard — see `main_module.ts`. This one is load-bearing: pr-merge
+// installs this script as its rollback trap, behind a `|| true`, so a guard
+// that never fires leaves a failed merge rebased with no restore and no
+// complaint — the exact state the trap exists to prevent.
+if (isMainModule(import.meta.url)) {
   process.exit(main());
 }
