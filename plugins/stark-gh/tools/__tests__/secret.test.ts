@@ -89,3 +89,42 @@ test("assignment split keeps the correct line number", () => {
   assert.equal(r.length, 1);
   assert.equal(r[0]!.lineNumber, 2);
 });
+
+// --- word-structured identifier carve-out (apple-developer STARK-552) ----
+// A long, descriptive camelCase test name is entropy-dense enough to cross the
+// 4.5 base threshold, yet it is code, not credential material. Shortening such
+// names to appease the scanner removes the disambiguation detailed names give an
+// LLM reader, so the scanner exempts word-structured identifiers instead.
+
+test("long camelCase identifier does NOT flag (STARK-552 regression)", () => {
+  // The exact Go test name whose pr-open preflight blocked apple-developer #87:
+  // 56 chars, Shannon entropy ~4.57, over the 4.5 threshold.
+  const line =
+    "+func TestPullGracefullySkipsDefaultedDomain403WithoutWipingIt(t *testing.T) {";
+  assert.deepEqual(scanSecrets(line), []);
+});
+
+test("long snake_case identifier does NOT flag", () => {
+  assert.deepEqual(
+    scanSecrets("+  resolve_by_local_id_index_lookup_helper_function := nil"),
+    [],
+  );
+});
+
+test("a real base64 secret is NOT exempted by the carve-out", () => {
+  // 44-char base64 body with + / = — word-structured carve-out must not touch it.
+  const r = scanSecrets("+const k = aGVsbG8rd29ybGQvdGhpcz1zZWNyZXQxMjM0NTY3ODkw");
+  assert.ok(r.find((h) => h.category === "high-entropy"));
+});
+
+test("a random letters+digits blob (no vowel-words) is NOT exempted", () => {
+  // 56 chars, high entropy, but segments are consonant clusters — stays flagged.
+  const r = scanSecrets("+id := kJ8fQ2xZ9pLmN4vWbT7yRcA1sD6gH0uYeI3oPzXqBnMwErTyUiO");
+  assert.ok(r.find((h) => h.category === "high-entropy"));
+});
+
+test("high-entropy assignment with a word-structured value still flags on the name side", () => {
+  // name side is a real secret, value side reads like words — must NOT be exempted.
+  const r = scanSecrets(`+${HIGH_ENTROPY_64}=SomeReadableCamelCaseWordsHereForTheValue`);
+  assert.ok(r.find((h) => h.category === "high-entropy"));
+});
