@@ -421,6 +421,14 @@ interface PollOutcome {
   // the draft-time push, permanent once the real run has had time to register.
   skipped?: boolean;
   skippedNames?: string[];
+  // Set only on a `wait` produced when the required-check ROLLUP reads green but
+  // GitHub still reports the merge BLOCKED/UNKNOWN — a required check GitHub knows
+  // about (from branch config) has not registered a context on this SHA yet, or a
+  // required review is missing. Same time-bounded shape as `vacuous`/`skipped`.
+  blocked?: boolean;
+  // GitHub's mergeStateStatus captured when the rollup reached green, for the
+  // operator-facing message (present on a `ready` or a `blocked` outcome).
+  mergeState?: string;
 }
 
 // Constants exported for the unit-test of decideHeadMovedTransition.
@@ -490,6 +498,66 @@ export function decideSkippedTransition(
   return skippedElapsedSec < graceSec ? "wait" : "terminal";
 }
 
+// GitHub `mergeStateStatus` values under which firing the merge is pointless
+// because branch protection would reject it, no matter what the required-check
+// ROLLUP says.
+//
+// The rollup is built ONLY from the check contexts currently attached to the head
+// SHA (see checks_graphql.ts). A slow REQUIRED check — a ubuntu build that takes
+// minutes just to spin up — has no context yet, so it is ABSENT from the rollup,
+// not pending: `summarizeVerdict` counts `required` over the contexts that exist,
+// `passing === required` holds over that incomplete set, and `isGreen` returns
+// true before the required set is even complete. GitHub, which knows the full
+// required set from the base branch's protection config, still reports BLOCKED.
+// Firing then is a guaranteed "the base branch policy prohibits the merge" — the
+// exact way the watcher for 21StarkCom/Atlas#73 fired at consecutiveGreen=2 only
+// 31s in and dead-ended on merge_failed while build-test (5m21s) had not started.
+//
+// UNKNOWN is grouped in: an un-computed mergeability is not a green light either
+// (a `gh pr view` triggers the computation, so the next poll usually resolves it).
+// Everything else — CLEAN, and notably UNSTABLE (mergeable, only NON-required
+// checks outstanding) and HAS_HOOKS — is left to fire, preserving the design's
+// refusal to wait on non-required checks.
+export function mergeStateBlocksFiring(mergeStateStatus: string): boolean {
+  return mergeStateStatus === "BLOCKED" || mergeStateStatus === "UNKNOWN";
+}
+
+// How long a rollup-green-but-GitHub-BLOCKED reading may persist before the
+// watcher stops. Generous relative to the vacuous/skipped windows: the whole
+// point is to outlast a slow required check's REGISTRATION latency (the context
+// appearing at all), after which the rollup itself shows `pending` and the normal
+// wait path — bounded only by the 6h watch timeout — takes over. If BLOCKED still
+// stands past this window WITH the rollup green, the cause is not a late check but
+// a required review CI can never supply, and stopping with that message is right.
+export const MERGE_BLOCKED_GRACE_SEC = 600;
+
+export function decideBlockedTransition(
+  blockedElapsedSec: number,
+  graceSec: number = MERGE_BLOCKED_GRACE_SEC,
+): "wait" | "terminal" {
+  return blockedElapsedSec < graceSec ? "wait" : "terminal";
+}
+
+// Pure gate applied AFTER the rollup verdict: a `ready` rollup is downgraded to a
+// time-bounded `blocked` wait when GitHub still refuses the merge. Any non-`ready`
+// outcome passes through untouched — the rollup already decided to wait/fail, and
+// GitHub's mergeability adds nothing there. On a genuine `ready` the observed
+// mergeState is stamped on for the operator-facing message.
+export function applyMergeStateGate(outcome: PollOutcome, mergeStateStatus: string): PollOutcome {
+  if (outcome.kind !== "ready") return outcome;
+  if (mergeStateBlocksFiring(mergeStateStatus)) {
+    return {
+      kind: "wait",
+      reason:
+        `every required check in the rollup passes, but GitHub still reports the merge ${mergeStateStatus} — ` +
+        `a required check has not registered a result on this commit yet, or a required review is missing`,
+      blocked: true,
+      mergeState: mergeStateStatus,
+    };
+  }
+  return { ...outcome, mergeState: mergeStateStatus };
+}
+
 // Pure function: maps a rollup result (mismatch | contexts) + plan policy
 // into a PollOutcome. Easy to unit-test.
 export function evaluateRollup(
@@ -534,17 +602,28 @@ export function evaluateRollup(
   return { kind: "wait", reason: `pending: ${v.pending}` };
 }
 
-async function pollOnce(plan: PrMergePlan): Promise<PollOutcome> {
+async function pollOnce(
+  plan: PrMergePlan,
+  deps: { fetchMergeState?: (prNumber: number, repoSlug: string) => string } = {},
+): Promise<PollOutcome> {
   const r = await fetchRequiredCheckRollup({
     owner: plan.pr.headRepositoryOwner,
     repo: plan.pr.headRepositoryName,
     prNumber: plan.pr.number,
     expectedHeadOid: plan.pushedHeadOid!,
   });
-  return evaluateRollup(r as any, {
+  const outcome = evaluateRollup(r as any, {
     allowNoRequiredChecks: plan.execute.allowNoRequiredChecks,
     allowSkippedChecks: plan.execute.allowSkippedChecks === true,
   });
+  // Only when the rollup itself says green do we spend an extra call to confirm
+  // GitHub agrees the PR is mergeable — the rollup can read green over a required
+  // set that has not fully registered (see mergeStateBlocksFiring). One call per
+  // green poll, never on the pending/failing/vacuous/skipped paths.
+  if (outcome.kind !== "ready") return outcome;
+  const fetchMergeState =
+    deps.fetchMergeState ?? ((n: number, slug: string) => ghLib.prMergeStateStatus(n, slug));
+  return applyMergeStateGate(outcome, fetchMergeState(plan.pr.number, plan.pr.nameWithOwner));
 }
 
 interface BackoffState {
@@ -642,6 +721,10 @@ async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
   // Same shape, for a rollup whose latest context on some required check is
   // SKIPPED. See decideSkippedTransition.
   let skippedSinceMs: number | null = null;
+  // Same shape, for a rollup that reads green while GitHub still BLOCKS the merge
+  // (a required check not yet registered, or a required review). See
+  // decideBlockedTransition and mergeStateBlocksFiring.
+  let blockedSinceMs: number | null = null;
   const REQUIRED_GREEN = 2; // PR4-claude H13 debounce
   // Tolerate transient head-OID mismatch right after force-push: GitHub's
   // GraphQL `pullRequest.headRefOid` can lag the push receiver by hundreds
@@ -738,6 +821,7 @@ async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
       consecutiveGreen++;
       vacuousSinceMs = null;
       skippedSinceMs = null;
+      blockedSinceMs = null;
       writeStatus({ consecutiveGreen, status: "watching", lastWait: null });
       if (consecutiveGreen >= REQUIRED_GREEN) {
         // Fire callback. Spawn detached so its lifetime is independent.
@@ -809,6 +893,34 @@ async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
         }
       } else {
         skippedSinceMs = null;
+      }
+
+      // The rollup reads green but GitHub still refuses the merge. Transient while
+      // a slow required check registers its context (the case that dead-ended
+      // Atlas#73); permanent once it is a missing required review. Bounded exactly
+      // like vacuous/skipped: past the grace window, stop and name it rather than
+      // fire a callback GitHub will only reject.
+      if (outcome!.blocked) {
+        if (blockedSinceMs === null) blockedSinceMs = Date.now();
+        const elapsedSec = (Date.now() - blockedSinceMs) / 1000;
+        if (decideBlockedTransition(elapsedSec) === "terminal") {
+          const reason =
+            `GitHub still reports the merge ${outcome!.mergeState ?? "BLOCKED"} after ${Math.round(elapsedSec)}s while every ` +
+            `required check in the rollup passes. The rollup only sees contexts already attached to this commit, so a required ` +
+            `check that never registered — or a required review CI cannot supply — reads green here yet stays blocked at GitHub. ` +
+            `Add the missing approval, push a commit to re-fire the required check, or re-run the merge with ` +
+            `--allow-no-required-checks if the base branch is meant to require none.`;
+          writeStatus({ status: "merge_blocked", finishedAt: new Date().toISOString(), reason });
+          atomicWriteJson(latestPointer(host, plan.pr.headRepositoryOwner, plan.pr.headRepositoryName, plan.pr.number), {
+            headSha: plan.pushedHeadOid,
+            status: "merge_blocked",
+            updatedAt: new Date().toISOString(),
+          });
+          releaseAllMerge();
+          return 0;
+        }
+      } else {
+        blockedSinceMs = null;
       }
     }
     await new Promise(r => setTimeout(r, jitter(args.pollSeconds) * 1000));

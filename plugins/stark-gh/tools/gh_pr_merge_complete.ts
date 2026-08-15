@@ -36,6 +36,23 @@ function buildRunbook(plan: PrMergePlan): OperatorRunbook {
   };
 }
 
+// GitHub refused the merge because the base branch's protection is not satisfied
+// — NOT because the merge itself is broken. It happens when the watcher fired a
+// hair before a required check registered (the watcher's mergeState gate makes
+// this rare, but the check-registration vs merge-call race is not zero), or when
+// a required review is missing. Classified apart from a genuine failure so the
+// terminal state says "blocked, re-runnable" instead of "failed": re-running
+// /stark-gh:pr-merge resumes and completes once the block clears. A merge
+// CONFLICT ("not mergeable" with no policy phrasing) is deliberately NOT matched
+// — that is a real failure needing a rebase.
+function isBranchProtectionRejection(msg: string): boolean {
+  return (
+    /base branch policy prohibits the merge/i.test(msg) ||
+    /required status check/i.test(msg) ||
+    /approving review/i.test(msg)
+  );
+}
+
 function watcherStatePathForPlan(plan: PrMergePlan): string {
   const dirs = ensureRuntimeDirs();
   return path.join(
@@ -121,10 +138,18 @@ async function main(argv: string[]): Promise<number> {
     });
     mergeSha = r.mergeSha;
   } catch (err) {
-    writeTerminalState(plan, "merge_failed", {
-      error: (err as Error).message,
-      // Plan + tempfiles retained for diagnosis.
-    });
+    const message = (err as Error).message;
+    // Branch protection blocked it (transient not-yet-mergeable, or a missing
+    // required review) → merge_blocked, re-runnable. Anything else is a genuine
+    // merge_failed. Plan + tempfiles retained either way for diagnosis / re-run.
+    if (isBranchProtectionRejection(message)) {
+      writeTerminalState(plan, "merge_blocked", {
+        error: message,
+        retryHint: `GitHub blocked the merge (branch protection not satisfied). Re-run once green: /stark-gh:pr-merge --pr ${plan.pr.number}`,
+      });
+      return 0;
+    }
+    writeTerminalState(plan, "merge_failed", { error: message });
     return 0;
   }
 
@@ -143,7 +168,7 @@ async function main(argv: string[]): Promise<number> {
 }
 
 // Exports for tests
-export { buildRunbook, watcherStatePathForPlan };
+export { buildRunbook, watcherStatePathForPlan, isBranchProtectionRejection };
 
 if (process.argv[1]?.endsWith("gh_pr_merge_complete.ts")) {
   main(process.argv.slice(2)).then(c => process.exit(c)).catch(err => {

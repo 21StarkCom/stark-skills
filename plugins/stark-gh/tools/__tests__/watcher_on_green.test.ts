@@ -9,6 +9,10 @@ import {
   decideVacuousTransition,
   HEAD_MOVED_REQUIRED_RECONFIRMS,
   NO_REQUIRED_CHECKS_GRACE_SEC,
+  mergeStateBlocksFiring,
+  decideBlockedTransition,
+  applyMergeStateGate,
+  MERGE_BLOCKED_GRACE_SEC,
 } from "../gh_watch_runs.ts";
 
 test("parsePrMergeArgs: returns null when --on-green absent", () => {
@@ -198,4 +202,78 @@ test("evaluateRollup: not-required contexts ignored", () => {
   assert.equal(r1.kind, "wait");        // vacuous → wait without override
   const r2 = evaluateRollup({ mismatch: false, contexts: ctx, headRefOid: "sha" }, { allowNoRequiredChecks: true });
   assert.equal(r2.kind, "ready");
+});
+
+// =============================================================================
+// STARK-579 — GitHub-mergeability gate. The required-check ROLLUP is assembled
+// only from the contexts already attached to the head SHA, so a slow REQUIRED
+// check that has not registered a context yet is ABSENT — the rollup reads green
+// over an incomplete required set and the watcher fired at consecutiveGreen=2,
+// only for GitHub's branch protection to reject the merge (Atlas#73). The gate
+// defers to GitHub's own verdict before letting the callback fire.
+// =============================================================================
+
+test("mergeStateBlocksFiring: BLOCKED and UNKNOWN block; mergeable states do not", () => {
+  assert.equal(mergeStateBlocksFiring("BLOCKED"), true);
+  assert.equal(mergeStateBlocksFiring("UNKNOWN"), true);
+  assert.equal(mergeStateBlocksFiring("CLEAN"), false);
+  // UNSTABLE = mergeable, only NON-required checks outstanding — must fire, or the
+  // design's deliberate refusal to wait on non-required checks would regress.
+  assert.equal(mergeStateBlocksFiring("UNSTABLE"), false);
+  assert.equal(mergeStateBlocksFiring("HAS_HOOKS"), false);
+  assert.equal(mergeStateBlocksFiring("BEHIND"), false);
+});
+
+test("decideBlockedTransition: waits inside the grace window, terminal past it", () => {
+  assert.equal(decideBlockedTransition(0), "wait");
+  assert.equal(decideBlockedTransition(MERGE_BLOCKED_GRACE_SEC - 1), "wait");
+  assert.equal(decideBlockedTransition(MERGE_BLOCKED_GRACE_SEC), "terminal");
+  assert.equal(decideBlockedTransition(MERGE_BLOCKED_GRACE_SEC + 600), "terminal");
+});
+
+test("decideBlockedTransition: grace window is configurable", () => {
+  assert.equal(decideBlockedTransition(10, 60), "wait");
+  assert.equal(decideBlockedTransition(60, 60), "terminal");
+});
+
+// The core of the fix: a rollup that reads green must NOT fire while GitHub still
+// blocks the merge. The downgrade is marked `blocked` so the loop can time-bound
+// it (decideBlockedTransition) exactly as it does vacuous/skipped.
+test("applyMergeStateGate: ready + BLOCKED downgrades to a blocked wait", () => {
+  const r = applyMergeStateGate({ kind: "ready", reason: "all required passing" }, "BLOCKED");
+  assert.equal(r.kind, "wait");
+  assert.equal(r.blocked, true);
+  assert.equal(r.mergeState, "BLOCKED");
+});
+
+test("applyMergeStateGate: ready + UNKNOWN downgrades to a blocked wait", () => {
+  const r = applyMergeStateGate({ kind: "ready", reason: "all required passing" }, "UNKNOWN");
+  assert.equal(r.kind, "wait");
+  assert.equal(r.blocked, true);
+  assert.equal(r.mergeState, "UNKNOWN");
+});
+
+// Non-vacuity: the gate must let a genuinely mergeable PR through, or the watcher
+// would never merge anything. CLEAN and UNSTABLE both fire, mergeState stamped.
+test("applyMergeStateGate: ready + CLEAN stays ready and stamps mergeState", () => {
+  const r = applyMergeStateGate({ kind: "ready", reason: "all required passing" }, "CLEAN");
+  assert.equal(r.kind, "ready");
+  assert.ok(!r.blocked);
+  assert.equal(r.mergeState, "CLEAN");
+});
+
+test("applyMergeStateGate: ready + UNSTABLE stays ready", () => {
+  const r = applyMergeStateGate({ kind: "ready", reason: "all required passing" }, "UNSTABLE");
+  assert.equal(r.kind, "ready");
+  assert.ok(!r.blocked);
+});
+
+// A non-ready outcome is never rewritten: a failing or pending rollup already
+// decided, and the mergeability gate must not touch it even under BLOCKED.
+test("applyMergeStateGate: non-ready outcomes pass through untouched", () => {
+  const failing = applyMergeStateGate({ kind: "fatal", reason: "failing checks: 1" }, "BLOCKED");
+  assert.equal(failing.kind, "fatal");
+  const waiting = applyMergeStateGate({ kind: "wait", reason: "pending: 1" }, "BLOCKED");
+  assert.equal(waiting.kind, "wait");
+  assert.ok(!waiting.blocked);
 });

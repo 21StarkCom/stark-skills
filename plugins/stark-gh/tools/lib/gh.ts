@@ -119,6 +119,19 @@ export function prHeadOid(number: number, owner: string, repo: string, opts: { e
   return JSON.parse(out).headRefOid as string;
 }
 
+// GitHub's own mergeability verdict for the PR (CLEAN, UNSTABLE, BLOCKED, BEHIND,
+// DIRTY, HAS_HOOKS, DRAFT, UNKNOWN). Unlike the required-check ROLLUP — which is
+// assembled from the check contexts currently ATTACHED to the head SHA — this is
+// computed by GitHub against the base branch's full required-check configuration,
+// so it knows a required check is still outstanding even before that check has
+// registered a context. That is exactly the gap the merge watcher needs it for.
+// A single field, deliberately not folded into MERGE_PR_FIELDS: that list feeds
+// many callers and once broke the whole flow on an invalid field name.
+export function prMergeStateStatus(number: number, repoSlug: string, opts: { exec?: ExecFn } = {}): string {
+  const out = gh(["pr", "view", String(number), "--repo", repoSlug, "--json", "mergeStateStatus"], opts);
+  return (JSON.parse(out) as { mergeStateStatus?: string }).mergeStateStatus ?? "UNKNOWN";
+}
+
 export function prChecks(pr: number, owner: string, repo: string, opts: { exec?: ExecFn } = {}): unknown[] {
   const out = gh(
     [
