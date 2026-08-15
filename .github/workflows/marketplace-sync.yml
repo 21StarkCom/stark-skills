@@ -3,10 +3,18 @@
 # build --check / check-bumps / tests / gitleaks) gates the PR before merge.
 #
 # PREREQUISITES (one-time, set in this repo's settings):
-#   - Secret STARK_CLAUDE_APP_ID        = the Stark Claude 21S GitHub App ID (4094779)
-#   - Secret STARK_CLAUDE_PRIVATE_KEY   = the Stark Claude 21S App private key (PEM)
-#   - The Stark Claude 21S App must be INSTALLED on 21StarkCom/bifrost with
-#     `contents: write` + `pull_requests: write` (it mints a scoped token here).
+#   - Variable STARK_MERIDIAN_CI_APP_ID      = the stark-meridian-ci GitHub App ID (4572744)
+#   - Secret   STARK_MERIDIAN_CI_PRIVATE_KEY = the stark-meridian-ci App private key (PEM)
+#   - The stark-meridian-ci App must be INSTALLED on 21StarkCom/bifrost with
+#     `contents: write` + `pull_requests: write` (it mints a scoped token here to
+#     push a branch AND open the PR). The App ships with `pull_requests: write`
+#     but only `contents: read` by default — GRANT `contents: write` in the App's
+#     permissions, or the `git push` below 403s.
+#
+# History: this workflow used the `stark-claude-21s` App until its installation
+# was suspended 2026-08-12 alongside the other stark-*-21s review apps; every
+# sync after that failed at token mint ("This installation has been suspended"),
+# silently stranding merged source changes off the marketplace.
 #
 # The engine is pure Go (no Node needed): `stark sync` copies the .ts tools
 # verbatim into the vendor snapshot; nothing executes them in CI.
@@ -36,12 +44,12 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Mint stark-claude token (scoped to bifrost)
+      - name: Mint stark-meridian-ci token (scoped to bifrost)
         id: app-token
         uses: actions/create-github-app-token@v1
         with:
-          app-id: ${{ secrets.STARK_CLAUDE_APP_ID }}
-          private-key: ${{ secrets.STARK_CLAUDE_PRIVATE_KEY }}
+          app-id: ${{ vars.STARK_MERIDIAN_CI_APP_ID }}
+          private-key: ${{ secrets.STARK_MERIDIAN_CI_PRIVATE_KEY }}
           owner: 21StarkCom
           repositories: bifrost
 
@@ -138,8 +146,8 @@ jobs:
           branch="auto/marketplace-sync"
           title="chore(sync): regenerate from stark-skills@${short}"
           body="Automated regeneration from stark-skills@${SRC_SHA} by the marketplace-sync workflow. Merged by that workflow once this repo's CI is green."
-          git config user.name "stark-claude[bot]"
-          git config user.email "stark-claude[bot]@users.noreply.github.com"
+          git config user.name "stark-meridian-ci[bot]"
+          git config user.email "stark-meridian-ci[bot]@users.noreply.github.com"
           git switch -C "$branch"
           git add -A
           git commit -m "$title"
