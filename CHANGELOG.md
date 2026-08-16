@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=894 runId=5268747f-b373-40a9-95ae-9480ab50b3d6 -->
+- Show elapsed-only human and bot durations on status line 3, hiding stale bot timing during active turns.
 <!-- stark-gh:pr-merge pr=893 runId=1d2232c9-2118-42af-a89f-8187b2253dde -->
 - Prioritize the current session time and distinguish human input and agent responses with 👤 and 🤖 icons.
 <!-- stark-gh:pr-merge pr=892 runId=41a61920-bce8-4219-8ac7-b32b5edf23a3 -->

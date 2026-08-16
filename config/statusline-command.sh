@@ -617,7 +617,7 @@ if _on code_churn; then
 fi
 
 # ═════════════════════════════════════════════════════════════════════════
-# Line 3: session clocks — now+age · started · enter · running|last-reply
+# Line 3: session clocks — now+age · started · 👤 since-enter · 🤖 since-reply
 # (now leads; 👤 marks the human's Enter, 🤖 the agent's last reply.)
 # ═════════════════════════════════════════════════════════════════════════
 # "Started" = when the Claude Code PROCESS opened (survives /clear, unlike
@@ -635,10 +635,12 @@ fi
 # ~/.claude/.statusline-stop-<sid> (config/statusline-stop-hook.sh): the agent
 # is RUNNING while the prompt stamp is the newer of the two (prompt_ts ≥
 # stop_ts), and IDLE once Stop fires and advances its stamp past the prompt.
-#   • running → ⏱ elapsed since Enter — the live turn duration; Enter drops its
-#     "(N ago)" because this segment already carries the same number.
-#   • idle    → 🤖 the last-reply time (the Stop stamp): the response now
-#     waiting for the next instruction; Enter keeps its "(N ago)".
+# Both segments are RELATIVE durations ("N ago"), never a clock time:
+#   • 👤 human = elapsed since Enter, ALWAYS shown — while running it is the live
+#     turn duration, while idle it is "how long since I asked".
+#   • 🤖 bot   = elapsed since the last reply, shown ONLY when idle. A running
+#     turn has no completed reply of its own, and the human counter above is
+#     already the live one, so the bot segment would just be stale noise.
 # Both stamps come from hooks, not the payload, so a segment is hidden rather
 # than faked when its hook has not fired this session.
 l3=""
@@ -672,22 +674,17 @@ if _on session_times; then
   _running=0
   [ "$_pt" -gt 0 ] && [ "$_pt" -ge "$_st" ] && _running=1
 
+  # 👤 human — elapsed since Enter, always (running = live turn counter, idle =
+  # since I asked). Relative only, no clock time.
   if [ "$_pt" -gt 0 ]; then
-    printf -v _ptc '%(%H:%M)T' "$_pt"
-    if [ "$_running" = 1 ]; then
-      seg3 "${PEACH}\U0001f464 ${_ptc}${R}"                     # enter (bare, running)
-    else
-      fmt_dur $(( NOW - _pt ))
-      seg3 "${PEACH}\U0001f464 ${_ptc}${DIM} (${FD} ago)${R}"   # enter · since (idle)
-    fi
+    fmt_dur $(( NOW - _pt ))
+    seg3 "${PEACH}\U0001f464 ${FD}${DIM} ago${R}"  # 👤 since enter
   fi
 
-  if [ "$_running" = 1 ]; then
-    fmt_dur $(( NOW - _pt ))
-    seg3 "${TEAL}⏱ ${FD}${R}"                      # running: live turn duration
-  elif [ "$_st" -gt 0 ]; then
-    printf -v _stc '%(%H:%M)T' "$_st"
-    seg3 "${GRN}\U0001f916 ${_stc}${R}"            # idle: last reply (waiting)
+  # 🤖 bot — elapsed since the last reply, only while idle.
+  if [ "$_running" != 1 ] && [ "$_st" -gt 0 ]; then
+    fmt_dur $(( NOW - _st ))
+    seg3 "${GRN}\U0001f916 ${FD}${DIM} ago${R}"    # 🤖 since last reply (waiting)
   fi
 fi
 
