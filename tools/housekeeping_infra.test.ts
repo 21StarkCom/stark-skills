@@ -146,28 +146,32 @@ test("findStaleCheckpointFiles walks subdirs and flags old checkpoint markdowns"
 
 // ── findStaleStatuslineStateFiles ───────────────────────────────
 
-test("findStaleStatuslineStateFiles flags old procstart/lastreply files, spares fresh + single-file caches", (t) => {
+test("findStaleStatuslineStateFiles flags old procstart/lastreply/prompt/stop files, spares fresh + single-file caches", (t) => {
   const tmp = makeTmp(t);
   if (!tmp) return;
   try {
     const oldProc = path.join(tmp, ".statusline-procstart-1234");
     const freshProc = path.join(tmp, ".statusline-procstart-5678");
     const oldReply = path.join(tmp, ".statusline-lastreply-sessA");
+    const oldStop = path.join(tmp, ".statusline-stop-sessA");
+    const freshStop = path.join(tmp, ".statusline-stop-sessB");
     const gitCache = path.join(tmp, ".statusline-git-dirty-cache");
     const acctCache = path.join(tmp, ".statusline-account-cache");
-    for (const f of [oldProc, freshProc, oldReply, gitCache, acctCache]) {
+    for (const f of [oldProc, freshProc, oldReply, oldStop, freshStop, gitCache, acctCache]) {
       fs.writeFileSync(f, "x");
     }
     const ages: Record<string, Date> = {
       [oldProc]: days(30),
       [freshProc]: days(3),
       [oldReply]: days(20),
+      [oldStop]: days(18),
+      [freshStop]: days(2),
       [gitCache]: days(99), // excluded by prefix, not age
       [acctCache]: days(99),
     };
     const ageProvider: AgeProvider = (p) => ages[p] ?? new Date(0);
     const stale = findStaleStatuslineStateFiles(tmp, 14, ageProvider, NOW);
-    assert.deepEqual(stale.sort(), [oldReply, oldProc].sort());
+    assert.deepEqual(stale.sort(), [oldReply, oldProc, oldStop].sort());
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -620,7 +624,7 @@ test("healAssetSymlinks provisioning is idempotent", (t) => {
 });
 
 test("ASSET_SYMLINKS is a sane, deduped table of ~/.claude → stark-skills mappings", () => {
-  assert.equal(ASSET_SYMLINKS.length, 10);
+  assert.equal(ASSET_SYMLINKS.length, 12);
   const linkSet = new Set<string>();
   for (const entry of ASSET_SYMLINKS) {
     assert.ok(entry.link.startsWith(".claude/"), `link under .claude: ${entry.link}`);

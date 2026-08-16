@@ -108,6 +108,15 @@ fmt_dur() { # seconds → sets FD: "XhYm" | "Xm" | "Xs"
   else FD="${1}s"; fi
 }
 
+fmt_age() { # seconds → sets FA: "Xs" | "Xm" | "H:MM" — session-age scale
+  # Sub-minute stays in seconds, sub-hour in whole minutes, hours as a clock
+  # face (2:06) rather than fmt_dur's "2h6m": a long-lived process reads as an
+  # elapsed clock, which is what "session age" wants.
+  if [ "$1" -lt 60 ]; then FA="${1}s"
+  elif [ "$1" -lt 3600 ]; then FA="$(( $1 / 60 ))m"
+  else printf -v FA '%d:%02d' $(( $1 / 3600 )) $(( ($1 % 3600) / 60 )); fi
+}
+
 fmt_n() { # token count → sets FN: "1.2k" / "145k" / "1.5M"
   local n=${1:-0}
   if [ "$n" -ge 1000000 ] 2>/dev/null; then
@@ -608,22 +617,29 @@ if _on code_churn; then
 fi
 
 # ═════════════════════════════════════════════════════════════════════════
-# Line 3: session clocks — started · prompt+elapsed · last output · now
+# Line 3: session clocks — started · now+age · enter · running|last-reply
 # ═════════════════════════════════════════════════════════════════════════
 # "Started" = when the Claude Code PROCESS opened (survives /clear, unlike
 # cost.total_duration_ms which resets per session), read from the parent
 # process' start time (ps lstart → epoch). Cached per PPID so the ps+date
 # forks run once per Claude Code run, not every render.
-# "Prompt" + "elapsed" originate from ONE event: prompt submission, stamped
-# to ~/.claude/.statusline-prompt-<sid> by the UserPromptSubmit hook
-# (config/statusline-prompt-hook.sh). Elapsed = NOW − that stamp — never any
-# other on-screen time. No stamp yet (hook not fired this session) → the
-# pair is hidden rather than faked from process start.
-# "Last output" has no payload field, so it's derived: the monotonic
-# cost.total_api_duration_ms only advances when an API call completes, so a
-# change since the previous render marks THIS render as the output — we stamp
-# NOW and cache {sig,ts} per session. Timer (refreshInterval) renders leave
-# the signature unchanged, so the stamp holds between outputs.
+# "Now (age)" = current wall clock plus session age (NOW − process start),
+# scaled by fmt_age (Xs / Xm / H:MM).
+# "Enter" = the last prompt-submission epoch, stamped to
+# ~/.claude/.statusline-prompt-<sid> by the UserPromptSubmit hook
+# (config/statusline-prompt-hook.sh). No stamp yet (hook not fired this
+# session) → the segment is hidden rather than faked from process start.
+# The status segment resolves running-vs-idle from TWO hook stamps — the
+# prompt stamp above and the Stop-hook stamp in
+# ~/.claude/.statusline-stop-<sid> (config/statusline-stop-hook.sh): the agent
+# is RUNNING while the prompt stamp is the newer of the two (prompt_ts ≥
+# stop_ts), and IDLE once Stop fires and advances its stamp past the prompt.
+#   • running → ⏱ elapsed since Enter — the live turn duration; Enter drops its
+#     "(N ago)" because this segment already carries the same number.
+#   • idle    → 💬 the last-reply time (the Stop stamp): the response now
+#     waiting for the next instruction; Enter keeps its "(N ago)".
+# Both stamps come from hooks, not the payload, so a segment is hidden rather
+# than faked when its hook has not fired this session.
 l3=""
 if _on session_times; then
   resolve_procstart; _procstart="$PROCSTART"
@@ -632,34 +648,45 @@ if _on session_times; then
     seg3 "${DIM}\U0001f7e2 ${_startc}${R}"        # started (CC opened)
   fi
 
-  # Prompt + elapsed — both read the UserPromptSubmit hook's stamp, so they
-  # share one origin event: the moment the command was submitted.
-  _ppf="$HOME/.claude/.statusline-prompt-${sid:-default}"
-  _pt=""
-  [ -r "$_ppf" ] && IFS= read -r _pt < "$_ppf"
-  if [ "$_pt" -gt 0 ] 2>/dev/null; then
-    printf -v _ptc '%(%H:%M)T' "$_pt"
-    fmt_dur $(( NOW - _pt ))
-    seg3 "${PEACH}\U0001f4e4 ${_ptc}${R} ${TEAL}⏱ ${FD}${R}"  # prompt · elapsed since it
-  fi
-
-  # Last output — api-duration signature cached per session (sid keeps
-  # concurrent sessions from clobbering each other's stamp).
-  _lrf="$HOME/.claude/.statusline-lastreply-${sid:-default}"
-  _sig="${api_dur_ms:-0}" _psig="" _lrt=""
-  [ -r "$_lrf" ] && { IFS= read -r _psig; IFS= read -r _lrt; } < "$_lrf"
-  if [ "$_psig" != "$_sig" ] || ! [ "$_lrt" -gt 0 ] 2>/dev/null; then
-    _lrt="$NOW"
-    printf '%s\n%s\n' "$_sig" "$_lrt" > "$_lrf" 2>/dev/null
-  fi
-  if [ "$_lrt" -gt 0 ] 2>/dev/null; then
-    printf -v _lrc '%(%H:%M)T' "$_lrt"
-    fmt_dur $(( NOW - _lrt ))
-    seg3 "${GRN}\U0001f4ac ${_lrc}${DIM} (${FD} ago)${R}"   # last output
-  fi
-
+  # Now + session age.
   printf -v _nowc '%(%H:%M)T' "$NOW"
-  seg3 "${SAP}\U0001f552 ${_nowc}${R}"            # current time
+  if [ "$_procstart" -gt 0 ] 2>/dev/null; then
+    fmt_age $(( NOW - _procstart ))
+    seg3 "${SAP}\U0001f552 ${_nowc}${DIM} (${FA})${R}"  # now · session age
+  else
+    seg3 "${SAP}\U0001f552 ${_nowc}${R}"          # now (age unresolved)
+  fi
+
+  # Enter + running/idle status — both from hook stamps (see block comment).
+  # Coerce each stamp to a clean integer (0 when absent/garbage) so the -ge
+  # comparison below is always numeric.
+  _ppf="$HOME/.claude/.statusline-prompt-${sid:-default}"
+  _spf="$HOME/.claude/.statusline-stop-${sid:-default}"
+  _pt="" _st=""
+  [ -r "$_ppf" ] && IFS= read -r _pt < "$_ppf"
+  [ -r "$_spf" ] && IFS= read -r _st < "$_spf"
+  [ "$_pt" -gt 0 ] 2>/dev/null || _pt=0
+  [ "$_st" -gt 0 ] 2>/dev/null || _st=0
+  _running=0
+  [ "$_pt" -gt 0 ] && [ "$_pt" -ge "$_st" ] && _running=1
+
+  if [ "$_pt" -gt 0 ]; then
+    printf -v _ptc '%(%H:%M)T' "$_pt"
+    if [ "$_running" = 1 ]; then
+      seg3 "${PEACH}\U0001f4e4 ${_ptc}${R}"                     # enter (bare, running)
+    else
+      fmt_dur $(( NOW - _pt ))
+      seg3 "${PEACH}\U0001f4e4 ${_ptc}${DIM} (${FD} ago)${R}"   # enter · since (idle)
+    fi
+  fi
+
+  if [ "$_running" = 1 ]; then
+    fmt_dur $(( NOW - _pt ))
+    seg3 "${TEAL}⏱ ${FD}${R}"                      # running: live turn duration
+  elif [ "$_st" -gt 0 ]; then
+    printf -v _stc '%(%H:%M)T' "$_st"
+    seg3 "${GRN}\U0001f4ac ${_stc}${R}"            # idle: last reply (waiting)
+  fi
 fi
 
 if [ -n "$l3" ]; then
