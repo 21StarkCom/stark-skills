@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=891 runId=a9f3b899-2dad-49d3-a57f-fcf1ed507094 -->
+- Simplify Node.js commands by relying on Node.js 24's native TypeScript stripping and declaring the minimum runtime version.
 <!-- stark-gh:pr-merge pr=865 runId=f6a428f9-c498-4cad-b213-c7b49c3876d1 -->
 - Add validated repository-level PR merge defaults with CLI precedence, source-aware auditing, and default-branch trust enforcement.
 <!-- stark-gh:pr-merge pr=860 runId=ac491710-188f-48a4-b15b-fdb8c114c42c -->
