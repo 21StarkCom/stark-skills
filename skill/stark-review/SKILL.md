@@ -96,7 +96,7 @@ one — never overwrite a caller-provided token.
 
 ```bash
 if [ -z "${GH_TOKEN:-}" ]; then
-    if GH_TOKEN_TMP=$(node --experimental-strip-types "$TOOLS/github_app.ts" --app stark-claude token 2>/dev/null); then
+    if GH_TOKEN_TMP=$(node "$TOOLS/github_app.ts" --app stark-claude token 2>/dev/null); then
         export GH_TOKEN="$GH_TOKEN_TMP"
     else
         if [ -n "${DRY_RUN:-}" ]; then
@@ -120,7 +120,7 @@ else
     gh auth status
 fi
 
-SETUP_JSON=$(node --experimental-strip-types "$TOOLS/review_setup_worktree.ts" \
+SETUP_JSON=$(node "$TOOLS/review_setup_worktree.ts" \
     --pr "$PR_NUM" --repo "$REPO" --mode single --json)
 WORKTREE_PATH=$(printf '%s' "$SETUP_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["worktreePath"])')
 HEAD_SHA=$(printf '%s'   "$SETUP_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["pr"]["headSha"])')
@@ -159,7 +159,7 @@ review_args=(
 [ -n "${DRY_RUN:-}" ] && review_args+=(--dry-run)
 
 set +e
-RECEIPT_JSON=$(node --experimental-strip-types "$TOOLS/stark_review.ts" "${review_args[@]}")
+RECEIPT_JSON=$(node "$TOOLS/stark_review.ts" "${review_args[@]}")
 TS_EXIT=$?
 set -e
 ```
@@ -353,7 +353,7 @@ manage history.
 ```bash
 cd - >/dev/null
 
-node --experimental-strip-types "$TOOLS/review_cleanup_worktree.ts" \
+node "$TOOLS/review_cleanup_worktree.ts" \
     --worktree "$WORKTREE_PATH" --head-sha "$HEAD_SHA" --json
 ```
 

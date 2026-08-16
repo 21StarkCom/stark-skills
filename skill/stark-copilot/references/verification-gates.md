@@ -1,7 +1,7 @@
 # Verification Gates
 
 These gates are **language-agnostic in concept** but **TypeScript-first in mechanics** — this
-repo and most stark-copilot targets are TypeScript (run via `node --experimental-strip-types`),
+repo and most stark-copilot targets are TypeScript (run via `node`),
 with some Go. Each gate below states the concept, then gives concrete commands for TypeScript
 (primary) and Go (secondary). For any other language, apply the same gate concepts with the
 project's native toolchain (build, symbol-existence, interface-match, tests).
@@ -24,7 +24,7 @@ import errors that `tsc` misses (missing exports resolved at runtime, side-effec
 npx tsc -p . --noEmit
 
 # Load each new/modified entry module (repeat per file the diff touched)
-node --experimental-strip-types path/to/changed-module.ts >/dev/null
+node path/to/changed-module.ts >/dev/null
 ```
 
 **Go:**
@@ -49,7 +49,7 @@ common case. For symbols that escape static checking (dynamic imports, `any`-typ
 JS-only deps without types), assert existence at runtime:
 
 ```bash
-node --experimental-strip-types -e "
+node -e "
 import { TheClient } from './path/to/module.ts';
 for (const m of ['methodA', 'methodB', 'methodC']) {
   if (typeof (TheClient.prototype as any)[m] !== 'function') {
@@ -97,7 +97,7 @@ together.
 npx tsc -p . --noEmit
 # Then load every entry/index module the build produces (loop over your real entry points)
 for f in $(git diff --name-only --diff-filter=d main... | grep '\.ts$'); do
-  node --experimental-strip-types "$f" >/dev/null || echo "FAIL load: $f"
+  node "$f" >/dev/null || echo "FAIL load: $f"
 done
 ```
 
@@ -118,7 +118,7 @@ The goal is to exercise the **real** construction path, not a mock.
 **TypeScript:**
 
 ```bash
-node --experimental-strip-types -e "
+node -e "
 import { getSettings } from './src/config.ts';
 import { loadAllAgents } from './src/schema.ts';
 const settings = getSettings();
@@ -139,7 +139,7 @@ Run the project's tests — they are the highest-fidelity gate.
 ```bash
 npm test
 # or a single file:
-node --experimental-strip-types --test path/to/module.test.ts
+node --test path/to/module.test.ts
 ```
 
 **Go:**

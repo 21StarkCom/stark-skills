@@ -71,13 +71,13 @@ parses `"$@"` without word-splitting. Default subcommand: `show`.
 ### `show`
 
 1. Read `$STARK_GH_USER` (default `primary`).
-2. Run `node --experimental-strip-types --no-warnings <script> --user <active>` to confirm a token is reachable. If it raises, surface the keychain account name that's missing.
+2. Run `node --no-warnings <script> --user <active>` to confirm a token is reachable. If it raises, surface the keychain account name that's missing.
 3. Spawn `gh api rate_limit --jq '.resources | {core, graphql}'` with `GH_TOKEN` set to that token.
 4. Print: active user, login (`gh api user --jq .login`), core remaining/limit, graphql remaining/limit.
 
 ### `primary` / `secondary`
 
-1. Resolve token via `node --experimental-strip-types --no-warnings <script> --user <name> --kind <kind>`.
+1. Resolve token via `node --no-warnings <script> --user <name> --kind <kind>`.
 2. Validate that the requested Keychain entry exists, discarding the resolved
    value rather than printing it.
 3. Print one guarded deferred export block (no markdown or commentary), so the

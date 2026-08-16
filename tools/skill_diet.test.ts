@@ -35,7 +35,7 @@ function makeRepo(t: TestContext): string | null {
 function runCli(repo: string, args: string[]): SpawnSyncReturns<string> {
   return spawnSync(
     process.execPath,
-    ["--experimental-strip-types", CLI, ...args],
+    [CLI, ...args],
     { cwd: repo, encoding: "utf8" },
   );
 }
@@ -271,7 +271,7 @@ test("CLI --check exits 0 when every skill links to the standard", (t) => {
   }
 });
 
-// Regression: under Node 25's --experimental-strip-types, the entry-point
+// Regression: under Node type-stripping (Node 25+), the entry-point
 // gate goes silent when the script is invoked through a symlink (e.g.
 // ~/.claude/code-review/tools/ → stark-skills/tools/). See
 // review_setup_worktree for the full root cause. Guard by invoking through
@@ -292,7 +292,7 @@ test("CLI runs when invoked through a symlink (Node 25 strip-types regression)",
     fs.symlinkSync(realScript, linkedScript);
     const res = spawnSync(
       process.execPath,
-      ["--experimental-strip-types", linkedScript, "--json"],
+      [linkedScript, "--json"],
       { encoding: "utf8" },
     );
     // --json always prints a summary line; empty stdout means the gate

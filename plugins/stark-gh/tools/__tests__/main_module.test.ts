@@ -19,7 +19,7 @@ if (isMainModule(import.meta.url)) console.log("MAIN_RAN");
 `;
 
 function runProbe(entry: string): string {
-  return execFileSync(process.execPath, ["--experimental-strip-types", entry], {
+  return execFileSync(process.execPath, [entry], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   }).trim();

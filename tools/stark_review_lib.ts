@@ -525,7 +525,7 @@ export function detectTestCommand(trustedRoot: string): string | null {
   for (const dir of ["tools", "test", "tests", "src", "."]) {
     if (dirHasSuffix(dir, ".test.ts")) {
       const glob = dir === "." ? "*.test.ts" : `${dir}/*.test.ts`;
-      return `node --experimental-strip-types --test ${glob}`;
+      return `node --test ${glob}`;
     }
   }
   // 6. Plain JS node:test files.

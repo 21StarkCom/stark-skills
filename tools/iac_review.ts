@@ -1,4 +1,4 @@
-#!/usr/bin/env -S node --experimental-strip-types
+#!/usr/bin/env -S node
 /**
  * iac_review — CLI for multi-agent Terraform / Terragrunt review.
  *

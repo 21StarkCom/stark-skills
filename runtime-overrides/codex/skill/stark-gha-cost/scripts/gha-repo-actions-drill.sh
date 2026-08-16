@@ -41,7 +41,7 @@ done
 echo "-- job fan-out + billable timing on recent runs (matrix explosion detector) --"
 gh api "repos/$REPO/actions/runs?per_page=20&created=>=$SINCE" --jq '.workflow_runs[] | "\(.id)\t\(.name)"' 2>/dev/null | while IFS=$'\t' read -r rid rname; do
   summary=$(gh api --paginate --slurp "repos/$REPO/actions/runs/$rid/jobs?per_page=100" 2>/dev/null \
-    | node --experimental-strip-types --no-warnings "$JSON_TOOL" jobs)
+    | node --no-warnings "$JSON_TOOL" jobs)
   timing_ms=$(gh api "repos/$REPO/actions/runs/$rid/timing" \
     --jq '[.billable[]?.total_ms // 0] | add // 0' 2>/dev/null || echo 0)
   timing_min=$(( (${timing_ms:-0} + 59999) / 60000 ))

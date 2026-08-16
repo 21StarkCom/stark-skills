@@ -234,7 +234,7 @@ Domains are auto-discovered at startup.
 
 - macOS (keychain-based auth)
 - `claude`, `codex`, `gemini` CLI tools in PATH
-- Node.js (TS tooling runs via `node --experimental-strip-types`)
+- Node.js (TS tooling runs via `node`)
 - GitHub App private keys in macOS Keychain
 
 ## Skill Documentation

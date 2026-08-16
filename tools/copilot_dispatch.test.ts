@@ -448,7 +448,7 @@ describe("CLI", () => {
     const file = path.resolve(import.meta.dirname ?? "", "copilot_dispatch.ts");
     const out = execFileSync(
       "node",
-      ["--experimental-strip-types", file, "--help"],
+      [file, "--help"],
       { encoding: "utf-8" },
     );
     assert.match(out, /Usage: copilot_dispatch/);
@@ -459,7 +459,7 @@ describe("CLI", () => {
     try {
       execFileSync(
         "node",
-        ["--experimental-strip-types", file, "--repo-root", "/tmp", "--step-id", "x"],
+        [file, "--repo-root", "/tmp", "--step-id", "x"],
         { encoding: "utf-8" },
       );
       assert.fail("should have exited non-zero");
@@ -475,7 +475,7 @@ describe("CLI", () => {
       try {
         execFileSync(
           "node",
-          ["--experimental-strip-types", file,
+          [file,
             "--repo-root", "/tmp", "--step-id", "x",
             "--implement-prompt-file", "/tmp/i", "--review-prompt-file", "/tmp/r",
             "--step-task-file", "/tmp/t", "--goal-max-budget-usd", bad],
@@ -492,7 +492,7 @@ describe("CLI", () => {
   test("--help documents the goal-mode flags", () => {
     const file = path.resolve(import.meta.dirname ?? "", "copilot_dispatch.ts");
     const out = execFileSync(
-      "node", ["--experimental-strip-types", file, "--help"], { encoding: "utf-8" },
+      "node", [file, "--help"], { encoding: "utf-8" },
     );
     assert.match(out, /--goal-condition/);
     assert.match(out, /--goal-max-budget-usd/);

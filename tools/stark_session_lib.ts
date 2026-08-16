@@ -180,7 +180,6 @@ export async function collectCanaryStatus(
   const toolsDir = `${deps.scriptsDir.replace(/\/scripts$/, "")}/tools`;
   const cmd = [
     "node",
-    "--experimental-strip-types",
     "--no-warnings",
     `${toolsDir}/healer_canary.ts`,
     "--status",
@@ -225,7 +224,6 @@ export async function collectAlerts(
   const toolsDir = `${deps.scriptsDir.replace(/\/scripts$/, "")}/tools`;
   const cmd = [
     "node",
-    "--experimental-strip-types",
     "--no-warnings",
     `${toolsDir}/alert_delivery.ts`,
     "--check",
@@ -265,7 +263,6 @@ export async function collectSkillSuggestions(
   const toolsDir = `${deps.scriptsDir.replace(/\/scripts$/, "")}/tools`;
   const cmd = [
     "node",
-    "--experimental-strip-types",
     "--no-warnings",
     `${toolsDir}/skill_router.ts`,
     "--context",
@@ -305,7 +302,6 @@ export async function collectPersona(
   const toolsDir = `${deps.scriptsDir.replace(/\/scripts$/, "")}/tools`;
   const cmd = [
     "node",
-    "--experimental-strip-types",
     "--no-warnings",
     `${toolsDir}/stark_persona.ts`,
     "select",
@@ -391,7 +387,6 @@ export async function collectSessionState(
   const toolsDir = `${deps.scriptsDir.replace(/\/scripts$/, "")}/tools`;
   const cmd = [
     "node",
-    "--experimental-strip-types",
     "--no-warnings",
     `${toolsDir}/session_state.ts`,
     "--json",

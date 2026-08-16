@@ -71,14 +71,14 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          # `--experimental-strip-types` (Node >= 22.6) and `node:sqlite`
-          # (tools/stark_persona_lib.ts) both need a recent runtime; 24 is the
-          # oldest LTS carrying both without extra flags.
+          # Type-stripping runs `.ts` with no build step but is only ON by
+          # default from Node 23.6; `node:sqlite` (tools/stark_persona_lib.ts)
+          # also needs a recent runtime. 24 is the oldest LTS carrying both.
           node-version: '24'
 
-      # `npm test` = ./check-rest-only.sh && node --experimental-strip-types
-      # --test *.test.ts. Run it from tools/, which is where package.json lives —
-      # the repo has no root package.json.
+      # `npm test` = ./check-rest-only.sh && node --test *.test.ts. Run it from
+      # tools/, which is where package.json lives — the repo has no root
+      # package.json.
       - name: Run tests
         working-directory: tools
         run: npm test

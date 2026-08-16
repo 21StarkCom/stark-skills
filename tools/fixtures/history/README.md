@@ -27,7 +27,7 @@ schema. Drift on either side silently breaks consumers.
 The fixture began life as a real round file from a `multi_review.ts` run on
 an internal PR. The capture and sanitize procedure:
 
-1. Run `node --experimental-strip-types tools/multi_review.ts --pr <N> --repo <ORG/REPO>`
+1. Run `node tools/multi_review.ts --pr <N> --repo <ORG/REPO>`
    against a small PR (one or two findings is plenty).
 2. Locate the resulting file at
    `~/.claude/code-review/history/<ORG>/<REPO>/<N>/round-1.json`.
@@ -41,7 +41,7 @@ an internal PR. The capture and sanitize procedure:
      otherwise.
    - Findings' `body` text → trim or replace if it leaks PR-specific detail.
    - `timestamp` → set to `2026-04-15T00:00:00.000000+00:00`.
-5. Run the parity test (`node --experimental-strip-types --test
+5. Run the parity test (`node --test
    stark_review.history.test.ts`); fix any drift.
 
 ## Refresh policy

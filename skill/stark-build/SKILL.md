@@ -103,7 +103,7 @@ State lives OUTSIDE the repo:
    branch `build/<slug>` via the create-or-adopt plumbing (never force):
    ```bash
    TOOLS="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools"
-   node --experimental-strip-types --no-warnings "$TOOLS/copilot_land.ts" \
+   node --no-warnings "$TOOLS/copilot_land.ts" \
      prepare-branch --branch "build/<slug>" --repo-dir "<wt>" \
      --require-base <accepted-base>
    ```

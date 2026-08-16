@@ -26,7 +26,7 @@ execute the marker literally.
 ```bash
 TOOLS="${CLAUDE_PLUGIN_ROOT}/tools"
 RAW_ARGS='<argument tail from the current user request, safely shell-quoted>'
-node --experimental-strip-types "$TOOLS/gh_cleanup.ts" --raw-args "$RAW_ARGS"
+node "$TOOLS/gh_cleanup.ts" --raw-args "$RAW_ARGS"
 ```
 
 The tool handles its own preflight (in-repo, gh authed, clean tree), discovery,

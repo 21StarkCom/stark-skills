@@ -748,7 +748,7 @@ test("cleanInfra surfaces unlink errors but keeps going", (t) => {
   }
 });
 
-// Regression: under Node 25's --experimental-strip-types, the entry-point
+// Regression: under Node type-stripping (Node 25+), the entry-point
 // gate goes silent when the script is invoked through a symlink (e.g.
 // ~/.claude/code-review/tools/ → stark-skills/tools/). See
 // review_setup_worktree for the full root cause. Guard by invoking through
@@ -764,7 +764,7 @@ test("CLI runs when invoked through a symlink (Node 25 strip-types regression)",
     fs.symlinkSync(realScript, linkedScript);
     const stdout = execFileSync(
       process.execPath,
-      ["--experimental-strip-types", linkedScript, "--dry-run", "--json"],
+      [linkedScript, "--dry-run", "--json"],
       { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
     );
     // Parse the JSON receipt — empty stdout (gate misfire) or text-mode

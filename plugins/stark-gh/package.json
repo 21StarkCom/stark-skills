@@ -2,7 +2,10 @@
   "name": "stark-gh",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
-    "test": "node --experimental-strip-types --test tools/__tests__/*.test.ts"
+    "test": "node --test tools/__tests__/*.test.ts"
   }
 }

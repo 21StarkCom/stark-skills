@@ -4,7 +4,7 @@
  * workflow execution. TypeScript port of `scripts/approach_contract.py`.
  *
  * Usage:
- *   node --experimental-strip-types approach_contract.ts --plan-file PATH [--force-confirm] [--json]
+ *   node approach_contract.ts --plan-file PATH [--force-confirm] [--json]
  */
 
 import fs from "node:fs";

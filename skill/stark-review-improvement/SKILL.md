@@ -151,7 +151,7 @@ Add new fields with safe defaults:
 After all edits:
 
 1. **Syntax check prompts** — ensure no broken markdown, no missing sections
-2. **TS type-check** — if orchestrator was edited: `node --experimental-strip-types --check "$ORCHESTRATOR"`
+2. **TS type-check** — if orchestrator was edited: `node --check "$ORCHESTRATOR"`
 3. **JSON validity** — if config was edited: `node -e "JSON.parse(require('fs').readFileSync('$CONFIG','utf8'))"`
 4. **Diff review** — show `git diff` in `$STARK_REPO` to the user for confirmation
 

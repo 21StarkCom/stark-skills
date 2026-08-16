@@ -19,7 +19,7 @@ usage, and arguments, then stop — do not run preflight or any phase.
 
 Run environment validation before proceeding:
 ```bash
-node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/preflight.ts --workflow stark-copilot --json
+node ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/preflight.ts --workflow stark-copilot --json
 ```
 Parse the JSON result:
 - If `overall` is "blocked": print the failing checks and stop. Do not proceed.
@@ -161,7 +161,7 @@ If `--dry-run`, stop here.
 Only when `plan_path` is set (plan-file mode). Inline mode skips this step.
 
 ```bash
-[ -n "$plan_path" ] && node --experimental-strip-types --no-warnings ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/approach_contract.ts --plan-file "$plan_path" --force-confirm
+[ -n "$plan_path" ] && node --no-warnings ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/approach_contract.ts --plan-file "$plan_path" --force-confirm
 ```
 
 ### 1.7 Prepare the impl branch
@@ -178,11 +178,11 @@ default_branch=${default_branch:-main}
 fallback_slug=$(printf '%s' "$plan_or_prompt" | tr '[:upper:]' '[:lower:]' \
   | tr -c 'a-z0-9' '-' | sed -E 's/-+/-/g; s/^-|-$//g' | cut -c1-40)
 
-branch=$(node --experimental-strip-types "$TOOLS/copilot_land.ts" branch-name \
+branch=$(node "$TOOLS/copilot_land.ts" branch-name \
   --plan-slug "${PLAN_SLUG:-}" --fallback-slug "$fallback_slug")
 
 base=$(git rev-parse HEAD)
-node --experimental-strip-types "$TOOLS/copilot_land.ts" prepare-branch \
+node "$TOOLS/copilot_land.ts" prepare-branch \
   --branch "$branch" --require-base "$base" --json
 ```
 
@@ -221,7 +221,7 @@ Write three files for the dispatcher (replace `$$` with the orchestration PID or
 ### 2b. Dispatch the copilot loop
 
 ```bash
-node --experimental-strip-types "$TOOLS/copilot_dispatch.ts" \
+node "$TOOLS/copilot_dispatch.ts" \
   --repo-root $REPO_ROOT \
   --step-id "$step_id" \
   --implement-prompt-file /tmp/stark-copilot-$$/step-$step_id-implement.md \
@@ -352,7 +352,7 @@ git commit -m "feat: [step title] (copilot: $LEAD impl, $WING review, $rounds_co
 ### 2h. Clean up worktree
 
 ```bash
-node --experimental-strip-types "$TOOLS/copilot_dispatch.ts" \
+node "$TOOLS/copilot_dispatch.ts" \
   --repo-root $REPO_ROOT \
   --step-id "$step_id" \
   --lead "$LEAD" \
@@ -367,11 +367,11 @@ Print step summary (lead, wing, rounds count, final verdict, files changed, test
 
 After each step completes:
 ```bash
-node --experimental-strip-types --no-warnings ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/session_state.ts --json 2>/dev/null || true
+node --no-warnings ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/session_state.ts --json 2>/dev/null || true
 ```
 Generate a checkpoint every `context_compaction.checkpoint_interval_minutes` minutes (default 15):
 ```bash
-node --experimental-strip-types --no-warnings ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/context_compactor.ts --json 2>/dev/null || true
+node --no-warnings ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/context_compactor.ts --json 2>/dev/null || true
 ```
 
 ## Phase 2.5: End-of-Run Verification (MANDATORY)
@@ -393,7 +393,7 @@ body="Autonomous copilot implementation (lead \`$LEAD\`, wing \`$WING\`). $steps
 ready_flag=()
 [ -n "$open_ready" ] && ready_flag=(--ready)
 
-landed=$(node --experimental-strip-types "$TOOLS/copilot_land.ts" land \
+landed=$(node "$TOOLS/copilot_land.ts" land \
   --repo "$repo" \
   --branch "$branch" \
   --base "$default_branch" \

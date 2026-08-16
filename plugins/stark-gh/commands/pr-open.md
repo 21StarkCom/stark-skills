@@ -37,7 +37,7 @@ TOOLS="${CLAUDE_PLUGIN_ROOT}/tools"
 The raw arg may be a bare PR number OR a flag list — the parser accepts both.
 
 ```bash
-PLAN_FILE=$(node --experimental-strip-types "$TOOLS/gh_pr_open_preflight.ts" \
+PLAN_FILE=$(node "$TOOLS/gh_pr_open_preflight.ts" \
   --raw-args "$ARGUMENTS" \
   --emit-plan-path)
 ```
@@ -80,7 +80,7 @@ subject — the title is where the ticket trail starts.
 ## Stage 2 - Draft
 
 ```bash
-node --experimental-strip-types "$TOOLS/gh_pr_open_draft.ts" --plan-file "$PLAN_FILE"
+node "$TOOLS/gh_pr_open_draft.ts" --plan-file "$PLAN_FILE"
 ```
 
 The draft tool reads `$PLAN_FILE`, internally subprocess-calls `codex exec`
@@ -134,7 +134,7 @@ behaviour change at all: `--exclude-standard` means the guard never sees them.
 ## Stage 3 - Execute
 
 ```bash
-node --experimental-strip-types "$TOOLS/gh_pr_open_execute.ts" --plan-file "$PLAN_FILE"
+node "$TOOLS/gh_pr_open_execute.ts" --plan-file "$PLAN_FILE"
 ```
 
 Parse the result JSON and print `result.prUrl`.

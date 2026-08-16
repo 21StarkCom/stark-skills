@@ -72,7 +72,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 SCRIPT=$(resolve_token_script)
-run_token() { node --experimental-strip-types --no-warnings "$SCRIPT" "$@"; }
+run_token() { node --no-warnings "$SCRIPT" "$@"; }
 ACTIVE_USER=${STARK_GH_USER:-primary}
 case "$ACTIVE_USER" in
   primary|secondary) ;;
@@ -81,7 +81,7 @@ esac
 
 emit_exports() {
   local user=$1 kind=$2
-  printf 'if GH_TOKEN="$(node --experimental-strip-types --no-warnings %q --user %q --kind %q)"; then\n' \
+  printf 'if GH_TOKEN="$(node --no-warnings %q --user %q --kind %q)"; then\n' \
     "$SCRIPT" "$user" "$kind"
   printf '  export GH_TOKEN\n'
   printf '  export GITHUB_TOKEN="$GH_TOKEN"\n'

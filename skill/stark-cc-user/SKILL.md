@@ -48,7 +48,7 @@ Resolve `tools/cc_account.ts` (worktree-relative, falling back to
 it with the parsed subcommand:
 
 ```
-node --experimental-strip-types --no-warnings <script> <subcommand> [args]
+node --no-warnings <script> <subcommand> [args]
 ```
 
 Pass stdout through verbatim. The tool is the single source of truth for

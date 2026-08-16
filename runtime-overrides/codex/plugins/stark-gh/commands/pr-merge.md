@@ -72,7 +72,7 @@ RAW_ARGS='<argument tail from the current user request, safely shell-quoted>'
 The raw arg may be a bare PR number OR a flag list — the parser accepts both.
 
 ```bash
-if PREFLIGHT_OUT="$(node --experimental-strip-types "$TOOLS/gh_pr_merge_preflight.ts" \
+if PREFLIGHT_OUT="$(node "$TOOLS/gh_pr_merge_preflight.ts" \
   --raw-args "$RAW_ARGS" \
   --emit-plan-path)"; then
   :
@@ -119,7 +119,7 @@ restore_on_failure() {
   restore_rc=$?
   trap - EXIT
   if [ "$restore_rc" -ne 0 ]; then
-    node --experimental-strip-types "$TOOLS/lib/restore_branch.ts" "$PLAN_FILE" >&2 || true
+    node "$TOOLS/lib/restore_branch.ts" "$PLAN_FILE" >&2 || true
   fi
   exit "$restore_rc"
 }
@@ -132,7 +132,7 @@ If `RESUME_MODE=spawn-only`, skip drafting (already done in the prior run).
 
 ```bash
 if [ "$RESUME_MODE" != "spawn-only" ]; then
-  node --experimental-strip-types "$TOOLS/gh_pr_merge_draft.ts" --plan-file "$PLAN_FILE"
+  node "$TOOLS/gh_pr_merge_draft.ts" --plan-file "$PLAN_FILE"
 fi
 ```
 
@@ -155,14 +155,14 @@ prefix — including non-ticket scopes like `docs(adr-0007):` — impose nothing
 
 ```bash
 if [ "$RESUME_MODE" = "spawn-only" ]; then
-  if EXECUTE_OUT="$(node --experimental-strip-types "$TOOLS/gh_pr_merge_execute.ts" \
+  if EXECUTE_OUT="$(node "$TOOLS/gh_pr_merge_execute.ts" \
     --plan-file "$PLAN_FILE" --resume-from-spawn)"; then
     EXECUTE_RC=0
   else
     EXECUTE_RC=$?
   fi
 else
-  if EXECUTE_OUT="$(node --experimental-strip-types "$TOOLS/gh_pr_merge_execute.ts" \
+  if EXECUTE_OUT="$(node "$TOOLS/gh_pr_merge_execute.ts" \
     --plan-file "$PLAN_FILE")"; then
     EXECUTE_RC=0
   else

@@ -10,7 +10,7 @@
 //
 // Plus restores CHANGELOG.md from originalChangelogPath if present and differs.
 //
-// Usage: node --experimental-strip-types lib/restore_branch.ts <plan-file>
+// Usage: node lib/restore_branch.ts <plan-file>
 // Exits 0 if restore succeeded or was a no-op; non-zero on hard error.
 
 import { execFileSync } from "node:child_process";

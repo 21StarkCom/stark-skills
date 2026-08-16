@@ -342,7 +342,7 @@ function main(): void {
 }
 
 // Match against both the lexical and realpath form of argv[1]:
-//   - Node's --experimental-strip-types loader (Node 25+) sets import.meta.url
+//   - Node type-stripping loader (Node 25+) sets import.meta.url
 //     to the realpath, so a symlinked invocation needs the realpath comparison.
 //   - NODE_OPTIONS=--preserve-symlinks-main keeps import.meta.url at the
 //     symlink URL, so we need the lexical comparison too.

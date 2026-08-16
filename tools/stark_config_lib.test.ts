@@ -313,7 +313,7 @@ test("CLI: --model prints the resolved id; unknown agent exits 1 with no stdout"
     JSON.stringify({ models: { claude: { enabled: true, model_id: "test-model-id" } } }),
   );
   const run = (args: string[]) =>
-    spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", cli, ...args], {
+    spawnSync(process.execPath, ["--no-warnings", cli, ...args], {
       encoding: "utf8",
       env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot },
     });

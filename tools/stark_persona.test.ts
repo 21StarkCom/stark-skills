@@ -27,7 +27,7 @@ function runCli(args: string[], envOverrides: Record<string, string> = {}): CliR
   const queueDir = path.join(home, ".stark-insights");
   const result = spawnSync(
     process.execPath,
-    ["--experimental-strip-types", CLI, ...args],
+    [CLI, ...args],
     {
       env: {
         ...process.env,

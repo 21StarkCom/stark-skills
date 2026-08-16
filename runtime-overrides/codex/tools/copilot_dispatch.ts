@@ -1,4 +1,4 @@
-#!/usr/bin/env -S node --experimental-strip-types
+#!/usr/bin/env -S node
 /**
  * Copilot dispatch — paired lead/wing implementation with review-fix loop.
  *
@@ -505,7 +505,7 @@ async function fetchGitHubAppToken(appName: string): Promise<string | null> {
   if (!existsSync(ts)) return null;
   const res = await run(
     "node",
-    ["--experimental-strip-types", ts, "--app", appName, "token"],
+    [ts, "--app", appName, "token"],
     { timeoutSec: 30, env: process.env },
   );
   if (res.code !== 0) {

@@ -87,7 +87,7 @@ test("main: exits 1 on unknown subcommand", async () => {
 test("main start: returns parsed JSON envelope with errors slot present", async () => {
   // All collectors stub to no-op; we just check the envelope keys.
   const deps = makeStubDeps([
-    { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/session_state.ts", "--json"], stdout: JSON.stringify({
+    { cmd: ["node", "--no-warnings", "/tools/session_state.ts", "--json"], stdout: JSON.stringify({
       session_id: "S", started_at: "", branch: "", repo: "",
       tasks_completed: [], last_checkpoint: null, name: null, start_head: null,
     }) },
@@ -98,10 +98,10 @@ test("main start: returns parsed JSON envelope with errors slot present", async 
     { cmd: ["git", "log", "--oneline", "--format=%h|%s|%ar", "-5"], stdout: "" },
     { cmd: ["gh", "pr", "list", "--author", "@me"], stdout: "[]" },
     { cmd: ["gh", "pr", "view"], code: 1 },
-    { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/alert_delivery.ts"], stdout: JSON.stringify({ unacknowledged: [] }) },
-    { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/healer_canary.ts"], stdout: JSON.stringify({ patterns: [] }) },
-    { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/skill_router.ts"], stdout: JSON.stringify({ suggestions: [] }) },
-    { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/stark_persona.ts"], stdout: "{}" },
+    { cmd: ["node", "--no-warnings", "/tools/alert_delivery.ts"], stdout: JSON.stringify({ unacknowledged: [] }) },
+    { cmd: ["node", "--no-warnings", "/tools/healer_canary.ts"], stdout: JSON.stringify({ patterns: [] }) },
+    { cmd: ["node", "--no-warnings", "/tools/skill_router.ts"], stdout: JSON.stringify({ suggestions: [] }) },
+    { cmd: ["node", "--no-warnings", "/tools/stark_persona.ts"], stdout: "{}" },
     { cmd: ["python3", "/scripts/github_projects.py"], stdout: "[]" },
     { cmd: ["sh", "-c"], stdout: "" },
   ]);
@@ -119,7 +119,7 @@ test("main start: returns parsed JSON envelope with errors slot present", async 
 
 test("main end: returns parsed JSON envelope with diff + branch + session", async () => {
   const deps = makeStubDeps([
-    { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/session_state.ts", "--json"], stdout: JSON.stringify({
+    { cmd: ["node", "--no-warnings", "/tools/session_state.ts", "--json"], stdout: JSON.stringify({
       session_id: "S", started_at: "T", branch: "main", repo: "x/y",
       tasks_completed: [], last_checkpoint: null, name: null, start_head: "persisted",
     }) },

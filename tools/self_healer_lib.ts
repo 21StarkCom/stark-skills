@@ -256,7 +256,7 @@ function executeAction(
     const toolsDir = path.join(path.dirname(scriptsDir), "tools");
     const result = spawnSync(
       "node",
-      ["--experimental-strip-types", path.join(toolsDir, "github_app.ts"), "token"],
+      [path.join(toolsDir, "github_app.ts"), "token"],
       { encoding: "utf8", timeout: 30_000 },
     );
     success = result.status === 0;

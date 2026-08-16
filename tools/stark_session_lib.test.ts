@@ -89,7 +89,7 @@ test("collectStart: honors opts.session_id, start_head, started_at in session bl
     envLog,
     runs: [
       {
-        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/session_state.ts", "--json"],
+        cmd: ["node", "--no-warnings", "/tools/session_state.ts", "--json"],
         stdout: JSON.stringify({
           session_id: "from-state", started_at: "from-state",
           branch: "feat/x", repo: "x/y",
@@ -105,10 +105,10 @@ test("collectStart: honors opts.session_id, start_head, started_at in session bl
       { cmd: ["gh", "pr", "list", "--author", "@me", "--state", "open"], stdout: "[]" },
       { cmd: ["gh", "pr", "view", "--json", "number,title,state,reviewDecision,statusCheckRollup"], code: 1 },
       // alerts, canary, suggestions, persona, available, board — all OK
-      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"], stdout: JSON.stringify({ unacknowledged: [] }) },
-      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/healer_canary.ts", "--status", "--json"], stdout: JSON.stringify({ patterns: [] }) },
-      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/skill_router.ts", "--context", "session", "--json"], stdout: JSON.stringify({ suggestions: [] }) },
-      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/stark_persona.ts", "select", "--auto"], stdout: JSON.stringify({ name: "Tony" }) },
+      { cmd: ["node", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"], stdout: JSON.stringify({ unacknowledged: [] }) },
+      { cmd: ["node", "--no-warnings", "/tools/healer_canary.ts", "--status", "--json"], stdout: JSON.stringify({ patterns: [] }) },
+      { cmd: ["node", "--no-warnings", "/tools/skill_router.ts", "--context", "session", "--json"], stdout: JSON.stringify({ suggestions: [] }) },
+      { cmd: ["node", "--no-warnings", "/tools/stark_persona.ts", "select", "--auto"], stdout: JSON.stringify({ name: "Tony" }) },
       { cmd: ["python3", "/scripts/github_projects.py", "list-items"], stdout: "[]" },
       { cmd: ["sh", "-c"], stdout: "" },
     ],
@@ -135,7 +135,7 @@ test("collectStart: enforces total wall-clock deadline, slow collectors get null
   const deps = makeDeps({
     runs: [
       {
-        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/session_state.ts", "--json"],
+        cmd: ["node", "--no-warnings", "/tools/session_state.ts", "--json"],
         delayMs: 500,
         stdout: JSON.stringify({ session_id: "S", started_at: "", branch: "", repo: "",
           tasks_completed: [], last_checkpoint: null, name: null, start_head: null }),
@@ -147,10 +147,10 @@ test("collectStart: enforces total wall-clock deadline, slow collectors get null
       { cmd: ["git", "log", "--oneline", "--format=%h|%s|%ar", "-5"], stdout: "" },
       { cmd: ["gh", "pr", "list", "--author", "@me", "--state", "open"], stdout: "[]" },
       { cmd: ["gh", "pr", "view", "--json", "number,title,state,reviewDecision,statusCheckRollup"], code: 1 },
-      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"], stdout: JSON.stringify({ unacknowledged: [] }) },
-      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/healer_canary.ts", "--status", "--json"], stdout: JSON.stringify({ patterns: [] }) },
-      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/skill_router.ts", "--context", "session", "--json"], stdout: JSON.stringify({ suggestions: [] }) },
-      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/stark_persona.ts", "select", "--auto"], stdout: "{}" },
+      { cmd: ["node", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"], stdout: JSON.stringify({ unacknowledged: [] }) },
+      { cmd: ["node", "--no-warnings", "/tools/healer_canary.ts", "--status", "--json"], stdout: JSON.stringify({ patterns: [] }) },
+      { cmd: ["node", "--no-warnings", "/tools/skill_router.ts", "--context", "session", "--json"], stdout: JSON.stringify({ suggestions: [] }) },
+      { cmd: ["node", "--no-warnings", "/tools/stark_persona.ts", "select", "--auto"], stdout: "{}" },
       { cmd: ["python3", "/scripts/github_projects.py", "list-items"], stdout: "[]" },
       { cmd: ["sh", "-c"], stdout: "" },
     ],
@@ -171,7 +171,7 @@ test("collectEnd: falls back to session_state.start_head when opts.start_head is
   const deps = makeDeps({
     runs: [
       {
-        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/session_state.ts", "--json"],
+        cmd: ["node", "--no-warnings", "/tools/session_state.ts", "--json"],
         stdout: JSON.stringify({
           session_id: "S", started_at: "", branch: "main", repo: "x/y",
           tasks_completed: [], last_checkpoint: null, name: null,
@@ -235,7 +235,7 @@ test("pushSubprocessError: redacts GitHub tokens / Bearer headers from stderr", 
   const deps = makeDeps({
     runs: [
       {
-        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/session_state.ts", "--json"],
+        cmd: ["node", "--no-warnings", "/tools/session_state.ts", "--json"],
         code: 1,
         stderr: "fatal: authentication failed: token ghp_abcdefghijklmnopqrstuvwxyz0123456789 Bearer secret-token-here",
       },
@@ -254,7 +254,7 @@ test("collector: marks slot null + records timeout when result.timedOut", async 
   const deps = makeDeps({
     runs: [
       {
-        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"],
+        cmd: ["node", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"],
         code: 124, timedOut: true, stderr: "",
       },
     ],
@@ -282,7 +282,7 @@ test("collectHealerCategories: returns null when healer.jsonl is missing", async
 test("collectCanaryStatus: returns null when canary script not found", async () => {
   const deps = makeDeps({
     runs: [
-      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/healer_canary.ts", "--status", "--json"], code: 2, stderr: "no" },
+      { cmd: ["node", "--no-warnings", "/tools/healer_canary.ts", "--status", "--json"], code: 2, stderr: "no" },
     ],
   });
   const errors: ErrSlot[] = [];
@@ -300,7 +300,7 @@ test("collectCanaryStatus: extracts circuits_open + near_promotion", async () =>
   const deps = makeDeps({
     runs: [
       {
-        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/healer_canary.ts", "--status", "--json"],
+        cmd: ["node", "--no-warnings", "/tools/healer_canary.ts", "--status", "--json"],
         stdout: JSON.stringify(payload),
       },
     ],
@@ -318,7 +318,7 @@ test("collectCanaryStatus: extracts circuits_open + near_promotion", async () =>
 test("collectAlerts: returns null when alert_delivery script fails", async () => {
   const deps = makeDeps({
     runs: [
-      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"], code: 1 },
+      { cmd: ["node", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"], code: 1 },
     ],
   });
   assert.equal(await collectAlerts(deps, []), null);
@@ -328,7 +328,7 @@ test("collectAlerts: returns unacknowledged list with normalized fields", async 
   const deps = makeDeps({
     runs: [
       {
-        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"],
+        cmd: ["node", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"],
         stdout: JSON.stringify({
           unacknowledged: [
             { level: "warning", message: "stale branch", context: "topic-a" },
@@ -352,7 +352,7 @@ test("collectAlerts: returns unacknowledged list with normalized fields", async 
 test("collectSkillSuggestions: returns [] when script fails", async () => {
   const deps = makeDeps({
     runs: [
-      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/skill_router.ts", "--context", "session", "--json"], code: 1 },
+      { cmd: ["node", "--no-warnings", "/tools/skill_router.ts", "--context", "session", "--json"], code: 1 },
     ],
   });
   assert.deepEqual(await collectSkillSuggestions(deps, []), []);
@@ -362,7 +362,7 @@ test("collectSkillSuggestions: capped at 2 entries", async () => {
   const deps = makeDeps({
     runs: [
       {
-        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/skill_router.ts", "--context", "session", "--json"],
+        cmd: ["node", "--no-warnings", "/tools/skill_router.ts", "--context", "session", "--json"],
         stdout: JSON.stringify({
           suggestions: [
             { name: "a", reason: "r1" },
@@ -383,7 +383,7 @@ test("collectSkillSuggestions: capped at 2 entries", async () => {
 test("collectPersona: returns null when stark_persona script fails", async () => {
   const deps = makeDeps({
     runs: [
-      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/stark_persona.ts", "select", "--auto"], code: 1 },
+      { cmd: ["node", "--no-warnings", "/tools/stark_persona.ts", "select", "--auto"], code: 1 },
     ],
   });
   assert.equal(await collectPersona(deps, []), null);
@@ -394,7 +394,7 @@ test("collectPersona: passes through name + catchphrase + source", async () => {
   const deps = makeDeps({
     runs: [
       {
-        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/stark_persona.ts", "select", "--auto"],
+        cmd: ["node", "--no-warnings", "/tools/stark_persona.ts", "select", "--auto"],
         stdout: JSON.stringify(persona),
       },
     ],
@@ -444,7 +444,7 @@ test("collectBoard: bucket items into in_flight / blocked / needs_attention", as
 test("collectSessionState: returns null when script fails", async () => {
   const deps = makeDeps({
     runs: [
-      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/session_state.ts", "--json"], code: 1 },
+      { cmd: ["node", "--no-warnings", "/tools/session_state.ts", "--json"], code: 1 },
     ],
   });
   assert.equal(await collectSessionState(deps, []), null);
@@ -463,7 +463,7 @@ test("collectSessionState: returns parsed state payload", async () => {
   };
   const deps = makeDeps({
     runs: [
-      { cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/session_state.ts", "--json"], stdout: JSON.stringify(state) },
+      { cmd: ["node", "--no-warnings", "/tools/session_state.ts", "--json"], stdout: JSON.stringify(state) },
     ],
   });
   const result = await collectSessionState(deps, []);
@@ -689,7 +689,7 @@ test("collectStart: assembles every slot with overrides honored", async () => {
     runs: [
       // session_state
       {
-        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/session_state.ts", "--json"],
+        cmd: ["node", "--no-warnings", "/tools/session_state.ts", "--json"],
         stdout: JSON.stringify({
           session_id: "S1", started_at: "T0", branch: "feat/x", repo: "x/y",
           tasks_completed: [], last_checkpoint: null, name: null, start_head: null,
@@ -711,22 +711,22 @@ test("collectStart: assembles every slot with overrides honored", async () => {
       },
       // alerts
       {
-        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"],
+        cmd: ["node", "--no-warnings", "/tools/alert_delivery.ts", "--check", "--json"],
         stdout: JSON.stringify({ unacknowledged: [] }),
       },
       // canary
       {
-        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/healer_canary.ts", "--status", "--json"],
+        cmd: ["node", "--no-warnings", "/tools/healer_canary.ts", "--status", "--json"],
         stdout: JSON.stringify({ patterns: [] }),
       },
       // skills suggestions
       {
-        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/skill_router.ts", "--context", "session", "--json"],
+        cmd: ["node", "--no-warnings", "/tools/skill_router.ts", "--context", "session", "--json"],
         stdout: JSON.stringify({ suggestions: [] }),
       },
       // persona
       {
-        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/stark_persona.ts", "select", "--auto"],
+        cmd: ["node", "--no-warnings", "/tools/stark_persona.ts", "select", "--auto"],
         stdout: JSON.stringify({ name: "Tony", source: "manual", catchphrase: "..." }),
       },
       // available skills
@@ -753,7 +753,7 @@ test("collectEnd: assembles session + diff + branch state", async () => {
   const deps = makeDeps({
     runs: [
       {
-        cmd: ["node", "--experimental-strip-types", "--no-warnings", "/tools/session_state.ts", "--json"],
+        cmd: ["node", "--no-warnings", "/tools/session_state.ts", "--json"],
         stdout: JSON.stringify({
           session_id: "S1", started_at: "T0", branch: "feat/x", repo: "x/y",
           tasks_completed: [], last_checkpoint: null, name: null, start_head: "deadbeef",

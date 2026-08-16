@@ -1,4 +1,4 @@
-#!/usr/bin/env -S node --experimental-strip-types
+#!/usr/bin/env -S node
 
 /** Pure JSON summarizers used by the GHA cost shell probes. */
 
