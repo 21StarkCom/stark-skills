@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=893 runId=1d2232c9-2118-42af-a89f-8187b2253dde -->
+- Prioritize the current session time and distinguish human input and agent responses with 👤 and 🤖 icons.
 <!-- stark-gh:pr-merge pr=892 runId=41a61920-bce8-4219-8ac7-b32b5edf23a3 -->
 - Show session age, last-enter time, live turn duration, and running or idle state on statusline line 3.
 <!-- stark-gh:pr-merge pr=891 runId=a9f3b899-2dad-49d3-a57f-fcf1ed507094 -->
