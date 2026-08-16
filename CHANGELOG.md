@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=895 runId=8a708e50-ea18-47ce-96e8-69b708982e2c -->
+- Replace recurring statusline `jq` payload parsing with a fork-free Bash parser, backed by parity regression tests.
 <!-- stark-gh:pr-merge pr=894 runId=5268747f-b373-40a9-95ae-9480ab50b3d6 -->
 - Show elapsed-only human and bot durations on status line 3, hiding stale bot timing during active turns.
 <!-- stark-gh:pr-merge pr=893 runId=1d2232c9-2118-42af-a89f-8187b2253dde -->
