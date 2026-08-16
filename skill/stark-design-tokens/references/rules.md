@@ -96,8 +96,13 @@ spec mandate. Volatile facts date-stamped. Normative keywords per RFC 2119.
   (`color.focus.ring`, `focus.ring.width`/`offset`, `motion.duration.*`);
   components MUST consume them rather than restyling `outline` or hardcoding
   durations ad hoc. Focus rings MUST pass 3:1 non-text contrast; motion tokens
-  MUST re-bind to `0`/minimal under `prefers-reduced-motion`. *(WCAG 2.2 focus /
-  non-text contrast; reduced-motion technique.)*
+  MUST re-bind to `0`/minimal under `prefers-reduced-motion`. Under
+  `forced-colors: active` (Windows High Contrast Mode), a high-contrast theme
+  SHOULD map its semantic color/border tokens to the CSS system-color keywords
+  (`Canvas`, `CanvasText`, `LinkText`, `ButtonText`, `Highlight`,
+  `HighlightText`) and MUST NOT paint over the user's forced palette. *(WCAG 2.2
+  focus / non-text contrast; reduced-motion technique; CSS Color 4 system colors
+  / `forced-colors`.)*
 
 ## Distribution (shared / restricted / CSP-constrained package)
 
