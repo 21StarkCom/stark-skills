@@ -10,6 +10,7 @@ description: >-
   semver/deprecation. Triggers: "design tokens", "token architecture", "semantic
   tokens", "theme tokens", "dark mode tokens", "DTCG", "Style Dictionary", "token
   naming", "multi-brand theming", "unified tokens".
+runtimes: [claude]
 ---
 
 ## Help
