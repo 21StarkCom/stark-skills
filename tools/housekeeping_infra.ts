@@ -207,12 +207,15 @@ export function findStaleCheckpointFiles(
 
 // Per-run / per-session statusline state files live directly under ~/.claude
 // (`.statusline-procstart-<pid>`, `.statusline-lastreply-<sid>`,
-// `.statusline-prompt-<sid>`). One accretes
+// `.statusline-prompt-<sid>` written by the UserPromptSubmit hook,
+// `.statusline-stop-<sid>` written by the Stop hook). One accretes
 // per Claude Code process / session, so they pile up over time. They are tiny
-// and self-rebuild on the next render, so anything untouched for a while is
-// safe to drop. The single-file caches (`.statusline-git-dirty-cache`,
-// `.statusline-account-cache`) are deliberately excluded — they self-refresh
-// in place and never multiply.
+// and self-rebuild on the next render / hook fire, so anything untouched for a
+// while is safe to drop. (`.statusline-lastreply-<sid>` is no longer written —
+// line 3's status segment now derives idle-time from the Stop stamp — but the
+// prefix stays here to sweep files left by older statusline versions.) The
+// single-file caches (`.statusline-git-dirty-cache`, `.statusline-account-cache`)
+// are deliberately excluded — they self-refresh in place and never multiply.
 export function findStaleStatuslineStateFiles(
   claudeDir: string,
   maxAgeDays: number,
@@ -226,7 +229,8 @@ export function findStaleStatuslineStateFiles(
       if (
         !base.startsWith(".statusline-procstart-") &&
         !base.startsWith(".statusline-lastreply-") &&
-        !base.startsWith(".statusline-prompt-")
+        !base.startsWith(".statusline-prompt-") &&
+        !base.startsWith(".statusline-stop-")
       ) {
         return false;
       }
@@ -398,6 +402,13 @@ export const ASSET_SYMLINKS: AssetSymlink[] = [
   // at THIS link rather than at the repo path — so a dangling link takes the
   // statusline down with nothing else to repoint it.
   { link: ".claude/statusline-command.sh", target: "Code/21Stark/stark-skills/config/statusline-command.sh" },
+  // The two statusline session-clock hooks (line 3). settings.json registers
+  // UserPromptSubmit → statusline-prompt-hook.sh (last-enter stamp) and Stop →
+  // statusline-stop-hook.sh (last-reply / running-vs-idle stamp) against THESE
+  // links, so a dangling link silently drops the enter + status segments with
+  // no error anywhere — the same failure class as statusline-command.sh above.
+  { link: ".claude/statusline-prompt-hook.sh", target: "Code/21Stark/stark-skills/config/statusline-prompt-hook.sh" },
+  { link: ".claude/statusline-stop-hook.sh", target: "Code/21Stark/stark-skills/config/statusline-stop-hook.sh" },
 ];
 
 // `from` is the target the link used to carry. For a link that was ABSENT and
