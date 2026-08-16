@@ -3,7 +3,9 @@
 # Input: JSON via stdin
 #
 # Runs on every refresh tick (1s), so forks are the enemy:
-#   • one jq parses stdin AND statusline-segments.json together
+#   • the stdin payload + statusline-segments.json are parsed in PURE BASH
+#     ([[ =~ ]] + BASH_REMATCH, zero forks) — replaced the one-jq parse, which
+#     profiled as ~5ms of a ~17ms render (see parse_payload below)
 #   • account identity (~/.claude.json is big) is mtime-cached to a tab file
 #   • repo root / worktree / branch are read straight off .git files in bash
 #     (pointer file, commondir, HEAD) — no `git rev-parse` fork
@@ -15,44 +17,95 @@
 #   • gauge bars substring a pre-built fill string — no per-cell loop
 #   • helpers return via printf -v globals (TC/FN/FD/FR/GRAD) — no $(...) subshells
 
-# ── Extract all fields + segment visibility (single jq call) ─────────────
-# statusline-segments.json (from statusline-setup) is slurped into the same
-# invocation; keys toggled false land in $skip. jq reads stdin directly.
-_cfg="$HOME/.claude/statusline-segments.json"
-_segsrc=(--argjson _seg '[{}]')
-[ -f "$_cfg" ] && _segsrc=(--slurpfile _seg "$_cfg")
+# ── Extract all fields (pure bash, no jq fork) ───────────────────────────
+# The statusline runs on every 1s refresh across every open window, so the
+# single jq that used to parse the payload was the dominant per-render cost:
+# ~5ms of a ~17ms render (measured — the bash body + everything else profiled
+# under 1ms combined). parse_payload reads the same fields with `[[ =~ ]]` +
+# BASH_REMATCH and ZERO forks — no $(...) and no echoing helpers, since a
+# command substitution forks a subshell PER FIELD, which is the very cost this
+# removes (see the header). Verified byte-identical to the old jq across a
+# payload matrix by config/statusline-parse.test.sh (run in CI via
+# tools/statusline_parse.test.ts).
+parse_payload() {
+  local j="$1" _m _eff _vim _ag _os _sd _fh _cu _rest
+  local Sr='":"([^"]*)"' Nr='":(-?[0-9][0-9.eE+-]*)'   # string / number key-tails
 
-eval "$(jq -r "${_segsrc[@]}" '{
-  cwd:          (.workspace.current_dir // .cwd // ""),
-  model:        (.model.display_name // ""),
-  model_id:     (.model.id // ""),
-  used_pct:     (.context_window.used_percentage // ""),
-  ctx_size:     (.context_window.context_window_size // ""),
-  vim_mode:     (.vim.mode // ""),
-  session_name: (.session_name // ""),
-  effort:       (.effort.level // ""),
-  thinking:     (if ((.thinking // {}) | has("enabled")) then (.thinking.enabled | tostring) else "" end),
-  agent_name:   (.agent.name // ""),
-  out_style:    (.output_style.name // ""),
-  week_pct:     (.rate_limits.seven_day.used_percentage // ""),
-  week_reset:   (.rate_limits.seven_day.resets_at // ""),
-  five_pct:     (.rate_limits.five_hour.used_percentage // ""),
-  five_reset:   (.rate_limits.five_hour.resets_at // ""),
-  tokens_in:    (.context_window.total_input_tokens // ""),
-  tokens_out:   (.context_window.total_output_tokens // ""),
-  cur_in:       (.context_window.current_usage.input_tokens // ""),
-  cur_out:      (.context_window.current_usage.output_tokens // ""),
-  cur_cw:       (.context_window.current_usage.cache_creation_input_tokens // ""),
-  cur_cr:       (.context_window.current_usage.cache_read_input_tokens // ""),
-  over_200k:    (.exceeds_200k_tokens // false),
-  sid:          (.session_id // ""),
-  api_dur_ms:   (.cost.total_api_duration_ms // ""),
-  s_added:      (.cost.total_lines_added // ""),
-  s_removed:    (.cost.total_lines_removed // ""),
-  skip:         ([($_seg[0] // {}) | objects | to_entries[] | select(.value == false) | .key] | join(" "))
-} | to_entries[] | "\(.key)=\(.value | tostring | @sh)"' 2>/dev/null)"
+  # cwd: workspace.current_dir, else top-level cwd (jq's // only falls through
+  # on absent/null, so a present current_dir — even "" — wins, matching jq).
+  if   [[ $j =~ \"current_dir\":\"([^\"]*)\" ]]; then cwd="${BASH_REMATCH[1]}"
+  elif [[ $j =~ \"cwd\":\"([^\"]*)\" ]];         then cwd="${BASH_REMATCH[1]}"
+  else cwd=""; fi
 
-_skip=" ${skip:-} "
+  session_name=""; [[ $j =~ \"session_name$Sr ]] && session_name="${BASH_REMATCH[1]}"
+  sid="";          [[ $j =~ \"session_id$Sr ]]   && sid="${BASH_REMATCH[1]}"
+
+  ctx_size="";   [[ $j =~ \"context_window_size$Nr ]]   && ctx_size="${BASH_REMATCH[1]}"
+  tokens_in="";  [[ $j =~ \"total_input_tokens$Nr ]]    && tokens_in="${BASH_REMATCH[1]}"
+  tokens_out=""; [[ $j =~ \"total_output_tokens$Nr ]]   && tokens_out="${BASH_REMATCH[1]}"
+  api_dur_ms=""; [[ $j =~ \"total_api_duration_ms$Nr ]] && api_dur_ms="${BASH_REMATCH[1]}"
+  s_added="";    [[ $j =~ \"total_lines_added$Nr ]]     && s_added="${BASH_REMATCH[1]}"
+  s_removed="";  [[ $j =~ \"total_lines_removed$Nr ]]   && s_removed="${BASH_REMATCH[1]}"
+
+  # scoped scalars — capture the FLAT parent body ([^{}]* = no nested object),
+  # then read the field from it (order-independent within the parent).
+  _m=""; [[ $j =~ \"model\":\{([^{}]*)\} ]] && _m="${BASH_REMATCH[1]}"
+  model="";    [[ $_m =~ \"display_name$Sr ]] && model="${BASH_REMATCH[1]}"
+  model_id=""; [[ $_m =~ \"id$Sr ]]           && model_id="${BASH_REMATCH[1]}"
+
+  _eff=""; [[ $j =~ \"effort\":\{([^{}]*)\} ]] && _eff="${BASH_REMATCH[1]}"
+  effort=""; [[ $_eff =~ \"level$Sr ]] && effort="${BASH_REMATCH[1]}"
+  _vim=""; [[ $j =~ \"vim\":\{([^{}]*)\} ]] && _vim="${BASH_REMATCH[1]}"
+  vim_mode=""; [[ $_vim =~ \"mode$Sr ]] && vim_mode="${BASH_REMATCH[1]}"
+  _ag=""; [[ $j =~ \"agent\":\{([^{}]*)\} ]] && _ag="${BASH_REMATCH[1]}"
+  agent_name=""; [[ $_ag =~ \"name$Sr ]] && agent_name="${BASH_REMATCH[1]}"
+  _os=""; [[ $j =~ \"output_style\":\{([^{}]*)\} ]] && _os="${BASH_REMATCH[1]}"
+  out_style=""; [[ $_os =~ \"name$Sr ]] && out_style="${BASH_REMATCH[1]}"
+
+  # thinking: "" unless a thinking object carries an "enabled" bool
+  thinking=""; [[ $j =~ \"thinking\":\{[^{}]*\"enabled\":(true|false) ]] && thinking="${BASH_REMATCH[1]}"
+  over_200k=false; [[ $j =~ \"exceeds_200k_tokens\":(true|false) ]] && over_200k="${BASH_REMATCH[1]}"
+
+  _sd=""; [[ $j =~ \"seven_day\":\{([^{}]*)\} ]] && _sd="${BASH_REMATCH[1]}"
+  week_pct="";   [[ $_sd =~ \"used_percentage$Nr ]] && week_pct="${BASH_REMATCH[1]}"
+  week_reset=""; [[ $_sd =~ \"resets_at$Nr ]]       && week_reset="${BASH_REMATCH[1]}"
+  _fh=""; [[ $j =~ \"five_hour\":\{([^{}]*)\} ]] && _fh="${BASH_REMATCH[1]}"
+  five_pct="";   [[ $_fh =~ \"used_percentage$Nr ]] && five_pct="${BASH_REMATCH[1]}"
+  five_reset=""; [[ $_fh =~ \"resets_at$Nr ]]       && five_reset="${BASH_REMATCH[1]}"
+
+  _cu=""; [[ $j =~ \"current_usage\":\{([^{}]*)\} ]] && _cu="${BASH_REMATCH[1]}"
+  cur_in="";  [[ $_cu =~ \"input_tokens$Nr ]]  && cur_in="${BASH_REMATCH[1]}"
+  cur_out=""; [[ $_cu =~ \"output_tokens$Nr ]] && cur_out="${BASH_REMATCH[1]}"
+  cur_cw="";  [[ $_cu =~ \"cache_creation_input_tokens$Nr ]] && cur_cw="${BASH_REMATCH[1]}"
+  cur_cr="";  [[ $_cu =~ \"cache_read_input_tokens$Nr ]]     && cur_cr="${BASH_REMATCH[1]}"
+
+  # context_window.used_percentage: 3 keys share the name (context_window +
+  # seven_day + five_hour). Drop the two flat rate-limit blocks (captured above)
+  # so context_window's is the only used_percentage left — order-independent,
+  # no brace walking.
+  _rest="$j"
+  [ -n "$_sd" ] && _rest="${_rest/\"seven_day\":\{$_sd\}/}"
+  [ -n "$_fh" ] && _rest="${_rest/\"five_hour\":\{$_fh\}/}"
+  used_pct=""; [[ $_rest =~ \"used_percentage$Nr ]] && used_pct="${BASH_REMATCH[1]}"
+}
+
+# Slurp the whole stdin payload into a var, fork-free (`read -d ''` reads to
+# EOF; the nonzero rc at EOF is expected and ignored).
+IFS= read -r -d '' _payload 2>/dev/null || true
+parse_payload "$_payload"
+
+# Segment visibility: statusline-segments.json (from statusline-setup) lists
+# segments toggled off. Read it in bash — each key with a literal false value
+# lands in $skip. Absent file (the common case) → nothing skipped, no fork.
+_cfg="$HOME/.claude/statusline-segments.json" skip=""
+if [ -f "$_cfg" ]; then
+  _segj=""; IFS= read -r -d '' _segj < "$_cfg" 2>/dev/null || true
+  while [[ $_segj =~ \"([a-zA-Z_]+)\"[[:space:]]*:[[:space:]]*false ]]; do
+    skip="$skip ${BASH_REMATCH[1]}"
+    _segj="${_segj/${BASH_REMATCH[0]}/}"        # drop the match so the loop advances
+  done
+fi
+_skip=" ${skip} "
 _on() { [[ "$_skip" != *" $1 "* ]]; }
 
 # ── Colors (Catppuccin Mocha 256-color) ──────────────────────────────────
