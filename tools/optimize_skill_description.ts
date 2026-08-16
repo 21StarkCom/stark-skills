@@ -13,7 +13,7 @@
  * subprocess path. The improver half is what runs here.
  *
  * Usage:
- *   node --experimental-strip-types tools/optimize_skill_description.ts \
+ *   node tools/optimize_skill_description.ts \
  *     --skill-path skill/stark-review \
  *     --eval-set path/to/trigger_eval.json \
  *     --model claude-opus-5[1m] \

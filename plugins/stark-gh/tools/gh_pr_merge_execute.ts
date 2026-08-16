@@ -349,7 +349,7 @@ function spawnWatcher(plan: PrMergePlan, planFile: string): number {
   }
 
   const argv = [
-    "--experimental-strip-types", watcherPath,
+    watcherPath,
     "--on-green", "pr-merge-complete",
     "--plan-file", planFile,
     "--watch-timeout", String(plan.execute.watchTimeoutHours),

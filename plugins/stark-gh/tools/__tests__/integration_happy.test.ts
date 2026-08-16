@@ -47,7 +47,7 @@ test("preflight emits a plan-file for a basic feature branch", () => {
     const testDir = path.dirname(fileURLToPath(import.meta.url));
     const repoRoot = path.resolve(testDir, "..", "..", "..", "..");
     const preflight = path.join(repoRoot, "plugins/stark-gh/tools/gh_pr_open_preflight.ts");
-    const r = spawnSync("node", ["--experimental-strip-types", preflight, "--raw-args", "", "--emit-plan-path"], {
+    const r = spawnSync("node", [preflight, "--raw-args", "", "--emit-plan-path"], {
       cwd: tmpRepo,
       env,
       encoding: "utf8",

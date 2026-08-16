@@ -34,7 +34,7 @@ echo "### Billing usage — $SCOPE_KIND/$SCOPE"
 # unitType,netAmount,repositoryName}. Enterprise slug works even though the
 # top-level enterprises/{slug} REST route 404s (it's GraphQL-only).
 gh api "$SCOPE_KIND/$SCOPE/settings/billing/usage" 2>/dev/null \
-  | node --experimental-strip-types --no-warnings "$JSON_TOOL" billing
+  | node --no-warnings "$JSON_TOOL" billing
 
 # GHAS seats only make sense at enterprise scope.
 if [ "$SCOPE_KIND" = enterprises ]; then

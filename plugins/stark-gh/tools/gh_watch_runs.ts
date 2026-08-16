@@ -647,7 +647,7 @@ function backoffDelaySeconds(state: BackoffState, base: number): number {
 
 function spawnCallback(callbackPath: string, planFile: string): { pid: number } {
   // Detached spawn so the watcher's exit doesn't kill the callback.
-  const child = spawn("node", ["--experimental-strip-types", callbackPath, "--plan-file", planFile], {
+  const child = spawn("node", [callbackPath, "--plan-file", planFile], {
     detached: true,
     stdio: "ignore",
   });

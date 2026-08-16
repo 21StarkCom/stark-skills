@@ -47,7 +47,7 @@ Delegate all stateful operations to the TypeScript CLI:
 
 ```bash
 TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
-node --experimental-strip-types "$TOOLS/stark_persona.ts" <subcommand> [args]
+node "$TOOLS/stark_persona.ts" <subcommand> [args]
 ```
 
 Parse the invocation input from the current user request and map it to the

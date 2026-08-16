@@ -50,11 +50,11 @@ test("go.mod → go test ./...", () => {
   assert.equal(detectTestCommand(root), "go test ./...");
 });
 
-test("tools/*.test.ts → node --experimental-strip-types (the stark-skills layout)", () => {
+test("tools/*.test.ts → node (the stark-skills layout)", () => {
   write("tools/foo.test.ts", "// test");
   assert.equal(
     detectTestCommand(root),
-    "node --experimental-strip-types --test tools/*.test.ts",
+    "node --test tools/*.test.ts",
   );
 });
 

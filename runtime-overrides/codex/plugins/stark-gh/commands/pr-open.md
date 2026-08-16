@@ -41,15 +41,15 @@ The raw arg may be a bare PR number OR a flag list — the parser accepts both.
 set -euo pipefail
 TOOLS="${CLAUDE_PLUGIN_ROOT}/tools"
 RAW_ARGS='<argument tail from the current user request, safely shell-quoted>'
-PLAN_FILE="$(node --experimental-strip-types "$TOOLS/gh_pr_open_preflight.ts" \
+PLAN_FILE="$(node "$TOOLS/gh_pr_open_preflight.ts" \
   --raw-args "$RAW_ARGS" \
   --emit-plan-path)"
 [ -n "$PLAN_FILE" ] && [ -f "$PLAN_FILE" ] || {
   echo "preflight did not return a readable plan file" >&2
   exit 1
 }
-node --experimental-strip-types "$TOOLS/gh_pr_open_draft.ts" --plan-file "$PLAN_FILE"
-EXECUTE_OUT="$(node --experimental-strip-types "$TOOLS/gh_pr_open_execute.ts" --plan-file "$PLAN_FILE")"
+node "$TOOLS/gh_pr_open_draft.ts" --plan-file "$PLAN_FILE"
+EXECUTE_OUT="$(node "$TOOLS/gh_pr_open_execute.ts" --plan-file "$PLAN_FILE")"
 printf '%s\n' "$EXECUTE_OUT"
 ```
 

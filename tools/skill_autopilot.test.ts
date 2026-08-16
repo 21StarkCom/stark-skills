@@ -73,7 +73,6 @@ function runAutopilot(repo: string, outputPath: string): SpawnSyncReturns<string
   return spawnSync(
     process.execPath,
     [
-      "--experimental-strip-types",
       path.join(repo, "tools", "skill_autopilot.ts"),
       "--skill",
       "demo",

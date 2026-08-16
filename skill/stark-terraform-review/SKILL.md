@@ -62,7 +62,7 @@ Raw input: `$ARGUMENTS`
 
 ```bash
 TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
-node --experimental-strip-types --no-warnings "$TOOLS/iac_review.ts" \
+node --no-warnings "$TOOLS/iac_review.ts" \
   --kind terraform "${PATH_ARG:-.}" ${EXTRA_FLAGS}
 ```
 

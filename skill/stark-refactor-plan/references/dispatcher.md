@@ -25,17 +25,17 @@ context. On a large repo that degrades. The dispatcher instead:
 
 ## Run it
 
-No `pnpm` in this repo — invoke with `node --experimental-strip-types`:
+No `pnpm` in this repo — invoke with `node`:
 
 ```bash
 # Inventory + planned subagent jobs, NO LLM calls (always safe, fast)
-node --experimental-strip-types tools/refactor_planner.ts --mode dry-run
+node tools/refactor_planner.ts --mode dry-run
 
 # Full multi-agent planning workflow -> REFACTOR_PLAN.md + REFACTOR_BACKLOG.json
-node --experimental-strip-types tools/refactor_planner.ts --mode run --provider claude
+node tools/refactor_planner.ts --mode run --provider claude
 
 # Validate an existing REFACTOR_BACKLOG.json (schema + DAG + enum + path checks)
-node --experimental-strip-types tools/refactor_planner.ts --mode validate
+node tools/refactor_planner.ts --mode validate
 ```
 
 Add `--json` for a machine-readable receipt on stdout (human summary stays on

@@ -164,7 +164,7 @@ Dispatch shape - every detail is a scar, keep all of them:
 
 ````bash
 # model from fleet config; empty var falls back to the CLI's own default
-CODEX_MODEL="$(node --experimental-strip-types \
+CODEX_MODEL="$(node \
   "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/stark_config_lib.ts" \
   --model codex 2>/dev/null || true)"
 cd "$(mktemp -d)" && codex exec --skip-git-repo-check -s read-only \

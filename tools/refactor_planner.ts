@@ -1,9 +1,9 @@
-#!/usr/bin/env -S node --experimental-strip-types
+#!/usr/bin/env -S node
 // CLI entry point for the refactor-planner dispatcher.
 //
-//   node --experimental-strip-types tools/refactor_planner.ts --mode dry-run
-//   node --experimental-strip-types tools/refactor_planner.ts --mode run --provider claude
-//   node --experimental-strip-types tools/refactor_planner.ts --mode validate
+//   node tools/refactor_planner.ts --mode dry-run
+//   node tools/refactor_planner.ts --mode run --provider claude
+//   node tools/refactor_planner.ts --mode validate
 //
 // Modes:
 //   dry-run   build the inventory + planned subagent jobs, no LLM calls
@@ -30,7 +30,7 @@ interface CliArgs {
 const HELP = `refactor_planner — multi-agent repository refactor-planning dispatcher
 
 Usage:
-  node --experimental-strip-types tools/refactor_planner.ts --mode <dry-run|run|validate> [options]
+  node tools/refactor_planner.ts --mode <dry-run|run|validate> [options]
 
 Options:
   --mode <m>             dry-run (default) | run | validate

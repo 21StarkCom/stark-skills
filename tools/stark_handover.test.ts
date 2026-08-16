@@ -12,7 +12,7 @@ function tmpDir(prefix: string): string {
 }
 
 function runCli(args: string[], opts: { cwd: string; root: string; home: string }) {
-  return spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", CLI, ...args], {
+  return spawnSync(process.execPath, ["--no-warnings", CLI, ...args], {
     cwd: opts.cwd,
     encoding: "utf8",
     env: {

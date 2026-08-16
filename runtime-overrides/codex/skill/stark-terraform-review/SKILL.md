@@ -112,7 +112,7 @@ TOOLS="${STARK_REVIEW_TOOLS:-${ASSET_ROOT:+$ASSET_ROOT/tools}}"
 IAC_REVIEW="${TOOLS:+$TOOLS/iac_review.ts}"
 [ -f "$IAC_REVIEW" ] || { echo "iac_review.ts not found; set STARK_ASSET_ROOT or STARK_REVIEW_TOOLS" >&2; exit 1; }
 PREVIEW_ARGS=(--kind terraform "$TARGET_PATH" "${REVIEW_ARGS[@]}" --dry-run --no-tools --json)
-node --experimental-strip-types --no-warnings "$IAC_REVIEW" "${PREVIEW_ARGS[@]}"
+node --no-warnings "$IAC_REVIEW" "${PREVIEW_ARGS[@]}"
 ```
 
 Run this second block only after recording the user's decisions. Set the three
@@ -141,7 +141,7 @@ IAC_REVIEW="${TOOLS:+$TOOLS/iac_review.ts}"
 RUN_ARGS=(--kind terraform "$TARGET_PATH" "${REVIEW_ARGS[@]}" --allow-agent-dispatch)
 if [ "$SCANNER_CONSENT" = true ]; then RUN_ARGS+=(--trust-source); else RUN_ARGS+=(--no-tools); fi
 if [ "$TFVARS_CONSENT" = true ]; then RUN_ARGS+=(--include-tfvars); fi
-node --experimental-strip-types --no-warnings "$IAC_REVIEW" "${RUN_ARGS[@]}"
+node --no-warnings "$IAC_REVIEW" "${RUN_ARGS[@]}"
 ```
 
 The dispatcher:

@@ -65,7 +65,7 @@ depend on a host-populated argument placeholder.
 
 ```bash
 TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
-node --experimental-strip-types --no-warnings \
+node --no-warnings \
   "$TOOLS/stark_handover.ts" resolve            # add: --task "<slug>"
 ```
 
@@ -112,7 +112,7 @@ Write both to temp files, following the templates **exactly**
 TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
 HB=$(mktemp -t stark-handover-body) && PB=$(mktemp -t stark-handover-progress)
 # Write handover body to $HB and progress to $PB, then:
-node --experimental-strip-types --no-warnings \
+node --no-warnings \
   "$TOOLS/stark_handover.ts" save --task "<slug>" \
   --handover-file "$HB" --progress-file "$PB"
 ```
@@ -136,7 +136,7 @@ reporting if thin. Then tell the user:
 
 ```bash
 TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
-node --experimental-strip-types --no-warnings \
+node --no-warnings \
   "$TOOLS/stark_handover.ts" resume             # add: --task "<slug>"
 ```
 
@@ -168,7 +168,7 @@ first step; ask exactly those.
 
 ```bash
 TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
-node --experimental-strip-types --no-warnings \
+node --no-warnings \
   "$TOOLS/stark_handover.ts" list               # add --all for every project/worktree
 ```
 

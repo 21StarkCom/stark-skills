@@ -85,7 +85,7 @@ SKILL_ID=blog-sharpen
   echo "missing jury payload: $SKILLS_ROOT/stark-$SKILL_ID/SKILL.md" >&2
   exit 2
 }
-STARK_JURY_SKILLS_ROOT="$SKILLS_ROOT" node --experimental-strip-types \
+STARK_JURY_SKILLS_ROOT="$SKILLS_ROOT" node \
   "$TOOLS/jury.ts" run --skill "$SKILL_ID" --input /path/to/post.md
 ```
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env node --experimental-strip-types --no-warnings
+#!/usr/bin/env node --no-warnings
 /**
  * cc_account.ts — CLI behind `/stark-cc-user`. Switches the active Claude Code
  * account and reports each profile's rate-limit headroom.

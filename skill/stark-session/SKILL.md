@@ -39,7 +39,7 @@ TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/to
 # A function, not a string var: zsh does NOT word-split `$VAR`, so a
 # multi-word command stuffed in a variable is run as one bogus command name.
 # Define this in the SAME Bash call that uses it (shells don't persist across calls).
-session() { node --experimental-strip-types --no-warnings "$TOOLS/stark_session.ts" "$@"; }
+session() { node --no-warnings "$TOOLS/stark_session.ts" "$@"; }
 ```
 
 ## Config
@@ -63,7 +63,7 @@ Path: `.code-review/config.json` (hierarchical: global → org → repo). Readin
 ### Phase 0 — Record start HEAD
 
 ```bash
-SESSION_ID="${CLAUDE_SESSION_ID:-$(node --experimental-strip-types --no-warnings "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/session_id.ts")}"
+SESSION_ID="${CLAUDE_SESSION_ID:-$(node --no-warnings "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/session_id.ts")}"
 START_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
 STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 ```
@@ -111,7 +111,7 @@ STATE_JSON=$(session start \
 ### Phase 3 — Persist start HEAD
 
 ```bash
-node --experimental-strip-types --no-warnings \
+node --no-warnings \
   "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/session_state.ts" set \
   --field start_head --value "$START_HEAD" 2>/dev/null || true
 ```
@@ -156,7 +156,7 @@ On "go", work sequentially without prompting between tasks — only pause for ge
 
 ```bash
 if [ -f "$HOME/.stark-persona/active.json" ]; then
-  node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/stark_persona.ts" session-end 2>/dev/null || true
+  node "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/stark_persona.ts" session-end 2>/dev/null || true
 fi
 ```
 Display the 20% fun-fact callout AFTER the summary (if any).
@@ -189,9 +189,9 @@ git commit -m "docs: session update — <summary>"
 ### Phase 3b — Session checkpoint
 
 ```bash
-node --experimental-strip-types --no-warnings \
+node --no-warnings \
   "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/context_compactor.ts" --json 2>/dev/null || true
-node --experimental-strip-types --no-warnings \
+node --no-warnings \
   "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/session_state.ts" --json 2>/dev/null || true
 ```
 
@@ -251,7 +251,7 @@ Render the end summary:
 6. **Persist session name**:
 
 ```bash
-node --experimental-strip-types --no-warnings \
+node --no-warnings \
   "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/session_state.ts" set \
   --field name --value "$SESSION_NAME" 2>/dev/null || true
 ```

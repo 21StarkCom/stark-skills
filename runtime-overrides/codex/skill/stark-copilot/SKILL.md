@@ -27,7 +27,7 @@ else
 fi
 TOOLS="${STARK_REVIEW_TOOLS:-${ASSET_ROOT:+$ASSET_ROOT/tools}}"
 [ -f "$TOOLS/preflight.ts" ] || { echo "bundled preflight.ts not found" >&2; exit 1; }
-node --experimental-strip-types "$TOOLS/preflight.ts" --workflow stark-copilot --json
+node "$TOOLS/preflight.ts" --workflow stark-copilot --json
 ```
 Parse the JSON result:
 - If `overall` is "blocked": print the failing checks and stop. Do not proceed.
@@ -196,7 +196,7 @@ if [ -n "$PLAN_PATH" ]; then
     ASSET_ROOT="${STARK_ASSET_ROOT:-${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
   fi
   TOOLS="${STARK_REVIEW_TOOLS:-${ASSET_ROOT:+$ASSET_ROOT/tools}}"
-  node --experimental-strip-types --no-warnings "$TOOLS/approach_contract.ts" \
+  node --no-warnings "$TOOLS/approach_contract.ts" \
     --plan-file "$PLAN_PATH" --force-confirm
 fi
 ```
@@ -219,11 +219,11 @@ PLAN_OR_PROMPT="<raw-positional-input>"
 fallback_slug=$(printf '%s' "$PLAN_OR_PROMPT" | tr '[:upper:]' '[:lower:]' \
   | tr -c 'a-z0-9' '-' | sed -E 's/-+/-/g; s/^-|-$//g' | cut -c1-40)
 
-branch=$(node --experimental-strip-types "$TOOLS/copilot_land.ts" branch-name \
+branch=$(node "$TOOLS/copilot_land.ts" branch-name \
   --plan-slug "${PLAN_SLUG:-}" --fallback-slug "$fallback_slug")
 
 base=$(git -C "$REPO_ROOT" rev-parse HEAD)
-node --experimental-strip-types "$TOOLS/copilot_land.ts" prepare-branch \
+node "$TOOLS/copilot_land.ts" prepare-branch \
   --branch "$branch" --repo-dir "$REPO_ROOT" --require-base "$base" --json
 printf 'branch=%s\nbase=%s\n' "$branch" "$base"
 ```
@@ -322,7 +322,7 @@ MAX_ROUNDS="<max-rounds-or-1>"
 TIMEOUT="<timeout-or-900>"
 TEST_COMMAND="<test-command-or-empty>"
 GOAL_MODE="<true-only-for-supported-claude-goal-mode>"
-cmd=(node --experimental-strip-types "$TOOLS/copilot_dispatch.ts"
+cmd=(node "$TOOLS/copilot_dispatch.ts"
   --repo-root "$REPO_ROOT"
   --step-id "$STEP_ID"
   --implement-prompt-file "$RUN_DIR/step-$STEP_ID-implement.md"
@@ -487,7 +487,7 @@ TOOLS="${STARK_REVIEW_TOOLS:-${ASSET_ROOT:+$ASSET_ROOT/tools}}"
 REPO_ROOT="<absolute-repo-root>"
 STEP_ID="<step-id>"
 LEAD="<resolved-lead>"
-node --experimental-strip-types "$TOOLS/copilot_dispatch.ts" \
+node "$TOOLS/copilot_dispatch.ts" \
   --repo-root "$REPO_ROOT" \
   --step-id "$STEP_ID" \
   --lead "$LEAD" \
@@ -510,9 +510,9 @@ else
 fi
 TOOLS="${STARK_REVIEW_TOOLS:-${ASSET_ROOT:+$ASSET_ROOT/tools}}"
 [ -f "$TOOLS/session_state.ts" ] && \
-  node --experimental-strip-types --no-warnings "$TOOLS/session_state.ts" --json 2>/dev/null || true
+  node --no-warnings "$TOOLS/session_state.ts" --json 2>/dev/null || true
 [ -f "$TOOLS/context_compactor.ts" ] && \
-  node --experimental-strip-types --no-warnings "$TOOLS/context_compactor.ts" --json 2>/dev/null || true
+  node --no-warnings "$TOOLS/context_compactor.ts" --json 2>/dev/null || true
 ```
 
 Generate checkpoints according to `context_compaction.checkpoint_interval_minutes`
@@ -554,7 +554,7 @@ body="Autonomous copilot implementation (lead \`$LEAD\`, wing \`$WING\`). $STEPS
 ready_flag=()
 [ "$OPEN_READY" = "true" ] && ready_flag=(--ready)
 
-landed=$(node --experimental-strip-types "$TOOLS/copilot_land.ts" land \
+landed=$(node "$TOOLS/copilot_land.ts" land \
   --repo "$REPO" \
   --branch "$BRANCH" \
   --base "$DEFAULT_BRANCH" \

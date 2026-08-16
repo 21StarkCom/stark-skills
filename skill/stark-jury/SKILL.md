@@ -66,7 +66,7 @@ Three phases, all in the tool. You read the handoff block it prints.
    override by judgement** - fix the rule or re-run.
 
 ```bash
-node --experimental-strip-types \
+node \
   "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/jury.ts" \
   run --skill blog-sharpen --input /path/to/post.md
 ```

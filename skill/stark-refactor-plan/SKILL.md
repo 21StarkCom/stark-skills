@@ -80,9 +80,9 @@ work or hand-authored.
    ```bash
    TOOLS="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools"
    # see what would run — deterministic, no LLM
-   node --experimental-strip-types "$TOOLS/refactor_planner.ts" --mode dry-run --root "$ROOT"
+   node "$TOOLS/refactor_planner.ts" --mode dry-run --root "$ROOT"
    # full multi-agent run -> REFACTOR_PLAN.md + REFACTOR_BACKLOG.json
-   node --experimental-strip-types "$TOOLS/refactor_planner.ts" --mode run --root "$ROOT" --provider claude
+   node "$TOOLS/refactor_planner.ts" --mode run --root "$ROOT" --provider claude
    ```
 
    The dispatcher host-owns conflict resolution and assembles a DAG-valid
@@ -210,7 +210,7 @@ validator on the file you just wrote:
 
 ```bash
 TOOLS="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools"
-node --experimental-strip-types "$TOOLS/refactor_planner.ts" --mode validate --root "$ROOT"
+node "$TOOLS/refactor_planner.ts" --mode validate --root "$ROOT"
 ```
 
 ### Phase 6 — Verify and report

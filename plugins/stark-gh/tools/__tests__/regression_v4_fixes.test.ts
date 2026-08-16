@@ -111,7 +111,6 @@ test("F-1: spawnWatcher launches gh_watch_runs.ts with the expected argv", () =>
     assert.ok(captured, "spawnFn must be called when no lock is present");
     const c = captured as unknown as { cmd: string; argv: readonly string[] };
     assert.equal(c.cmd, process.execPath);
-    assert.ok(c.argv.includes("--experimental-strip-types"));
     assert.ok(c.argv.some(a => a.endsWith("gh_watch_runs.ts")));
     const idx = (flag: string) => c.argv.indexOf(flag);
     assert.equal(c.argv[idx("--host") + 1], "github.com");

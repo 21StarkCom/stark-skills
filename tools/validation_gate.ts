@@ -6,7 +6,7 @@
  * Exit code is always 0; failures are reported in the output only.
  *
  * Usage:
- *   node --experimental-strip-types validation_gate.ts [--json] [--repo-root PATH] [--timeout SECONDS]
+ *   node validation_gate.ts [--json] [--repo-root PATH] [--timeout SECONDS]
  */
 
 import fs from "node:fs";

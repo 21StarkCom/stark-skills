@@ -32,7 +32,7 @@ function runThroughSymlink(tool: string, args: string[]): { stdout: string; stat
 
     const res = spawnSync(
       process.execPath,
-      ["--experimental-strip-types", path.join(linkedTools, tool), ...args],
+      [path.join(linkedTools, tool), ...args],
       { encoding: "utf8" },
     );
     return { stdout: res.stdout ?? "", status: res.status };

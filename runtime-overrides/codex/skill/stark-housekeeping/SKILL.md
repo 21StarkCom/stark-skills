@@ -204,7 +204,7 @@ TOOLS="${ASSET_ROOT:+$ASSET_ROOT/tools}"
 }
 dry_run_args=()
 [ "<dry-run:true-or-false>" = "true" ] && dry_run_args=(--dry-run)
-INFRA_JSON="$(node --experimental-strip-types "$TOOLS/housekeeping_infra.ts" \
+INFRA_JSON="$(node "$TOOLS/housekeeping_infra.ts" \
   "${dry_run_args[@]}" --json)"
 printf '%s\n' "$INFRA_JSON"
 ```

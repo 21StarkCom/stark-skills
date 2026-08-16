@@ -215,7 +215,6 @@ export function spawnWatcher(
   const child = spawnFn(
     process.execPath,
     [
-      "--experimental-strip-types",
       watcher,
       "--host",
       args.host,

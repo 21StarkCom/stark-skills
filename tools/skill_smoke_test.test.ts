@@ -308,7 +308,7 @@ for (const relative of ALL_TS_REFS) {
     }
     const result = spawnSync(
       "node",
-      ["--experimental-strip-types", "--no-warnings", file, "--help"],
+      ["--no-warnings", file, "--help"],
       { encoding: "utf8", timeout: 15_000 },
     );
     // Exit 0 (help printed) or 1 (some CLIs return 1 from --help) are

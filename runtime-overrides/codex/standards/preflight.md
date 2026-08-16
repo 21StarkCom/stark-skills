@@ -7,7 +7,7 @@ Skills point at this doc instead of inlining the pattern.
 
 ```bash
 TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools}"
-node --experimental-strip-types "$TOOLS/preflight.ts" --workflow <skill-slug> --json
+node "$TOOLS/preflight.ts" --workflow <skill-slug> --json
 ```
 
 The skill provides its own `<skill-slug>` (e.g. `stark-review`, `stark-terraform-review`).

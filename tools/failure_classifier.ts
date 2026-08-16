@@ -4,7 +4,7 @@
  * categories. TypeScript port of `scripts/failure_classifier.py`.
  *
  * Usage:
- *   node --experimental-strip-types failure_classifier.ts --stderr-file PATH [--json]
+ *   node failure_classifier.ts --stderr-file PATH [--json]
  */
 
 import fs from "node:fs";

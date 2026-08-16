@@ -172,9 +172,8 @@ test("stark-session invokes packaged TS tools and discovers Codex skills", async
     const boardCall = calls.find((entry) =>
       entry.cmd.some((token) => token.endsWith("/github_projects.ts")),
     );
-    assert.deepEqual(boardCall?.cmd.slice(0, 4), [
+    assert.deepEqual(boardCall?.cmd.slice(0, 3), [
       "node",
-      "--experimental-strip-types",
       "--no-warnings",
       "/plugin/tools/github_projects.ts",
     ]);

@@ -12,7 +12,7 @@ else
   exit 1
 fi
 
-run_token() { node --experimental-strip-types --no-warnings "$SCRIPT" "$@"; }
+run_token() { node --no-warnings "$SCRIPT" "$@"; }
 
 # Parse arguments: extract subcommand and --kind flag
 SUBCOMMAND="show"

@@ -72,7 +72,7 @@ fi
   echo "bundled tools/cc_account.ts not found; reinstall the skill bundle" >&2
   exit 1
 }
-node --experimental-strip-types --no-warnings "$script" "${command_args[@]}"
+node --no-warnings "$script" "${command_args[@]}"
 ```
 
 Pass stdout through verbatim. The tool is the single source of truth for

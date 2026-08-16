@@ -38,7 +38,7 @@ TOOLS="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools"
 # A function, not a string var: zsh does NOT word-split `$VAR`, so a
 # multi-word command stuffed in a variable is run as one bogus command name.
 # Define this in the SAME Bash call that uses it (shells don't persist across calls).
-handover() { node --experimental-strip-types --no-warnings "$TOOLS/stark_handover.ts" "$@"; }
+handover() { node --no-warnings "$TOOLS/stark_handover.ts" "$@"; }
 ```
 
 ## Arguments

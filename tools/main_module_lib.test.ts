@@ -1,6 +1,6 @@
 // Tests for `tools/main_module_lib.ts` — the symlink-safe entrypoint guard.
 //
-// Run: node --experimental-strip-types --test tools/main_module_lib.test.ts
+// Run: node --test tools/main_module_lib.test.ts
 //
 // The bug this locks down: the naive guard
 //   `import.meta.url === pathToFileURL(process.argv[1]).href`
@@ -26,7 +26,7 @@ const REPO_ROOT = path.resolve(HERE, "..");
 function run(script: string, args: string[] = []) {
   const r = spawnSync(
     process.execPath,
-    ["--experimental-strip-types", script, ...args],
+    [script, ...args],
     { encoding: "utf8", cwd: REPO_ROOT, stdio: ["ignore", "pipe", "pipe"] },
   );
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };

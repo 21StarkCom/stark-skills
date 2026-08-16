@@ -450,7 +450,6 @@ export async function tokenForAgent(
   const tools = opts.toolsDir ?? assetToolsDir();
   const node = opts.nodeBin ?? "node";
   const args = [
-    "--experimental-strip-types",
     path.join(tools, "github_app.ts"),
     "--app", `stark-${agent}`,
   ];

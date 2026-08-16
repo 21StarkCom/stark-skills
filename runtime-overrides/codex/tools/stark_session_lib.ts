@@ -180,7 +180,6 @@ export async function collectCanaryStatus(
   // healer_canary went pure-TS in the 2026-05-18 cutover (Python deleted).
   const cmd = [
     "node",
-    "--experimental-strip-types",
     "--no-warnings",
     `${deps.toolsDir}/healer_canary.ts`,
     "--status",
@@ -224,7 +223,6 @@ export async function collectAlerts(
   // consumer). Talks to the CLI sibling under `tools/`.
   const cmd = [
     "node",
-    "--experimental-strip-types",
     "--no-warnings",
     `${deps.toolsDir}/alert_delivery.ts`,
     "--check",
@@ -263,7 +261,6 @@ export async function collectSkillSuggestions(
   // was deleted with that slice — no other callers).
   const cmd = [
     "node",
-    "--experimental-strip-types",
     "--no-warnings",
     `${deps.toolsDir}/skill_router.ts`,
     "--context",
@@ -299,7 +296,6 @@ export async function collectPersona(
   // Persona is a packaged TypeScript sibling under the immutable tools root.
   const cmd = [
     "node",
-    "--experimental-strip-types",
     "--no-warnings",
     `${deps.toolsDir}/stark_persona.ts`,
     "select",
@@ -333,7 +329,7 @@ export async function collectBoard(
   errors: ErrSlot[],
 ): Promise<BoardState | null> {
   const cmd = [
-    "node", "--experimental-strip-types", "--no-warnings",
+    "node", "--no-warnings",
     `${deps.toolsDir}/github_projects.ts`, "list-items",
     "--status", "In Progress,Blocked,Needs Clarification", "--json",
   ];
@@ -383,7 +379,6 @@ export async function collectSessionState(
   // root. Its JSON shape matches the collector contract below.
   const cmd = [
     "node",
-    "--experimental-strip-types",
     "--no-warnings",
     `${deps.toolsDir}/session_state.ts`,
     "--json",

@@ -1,5 +1,5 @@
 // Integration tests for the skill_optimize CLI. Spawns `node
-// --experimental-strip-types tools/skill_optimize.ts` in an isolated tmp git
+// tools/skill_optimize.ts` in an isolated tmp git
 // repo so that argument parsing, disk I/O, and top-level control flow are
 // actually exercised on every run.
 //
@@ -101,7 +101,7 @@ function runCli(
 ): SpawnSyncReturns<string> {
   return spawnSync(
     process.execPath,
-    ["--experimental-strip-types", CLI, ...args],
+    [CLI, ...args],
     { cwd: repo, encoding: "utf8", env: { ...process.env, ...env } },
   );
 }
@@ -117,7 +117,7 @@ function runCliAsync(
   return new Promise((resolve) => {
     const child = spawn(
       process.execPath,
-      ["--experimental-strip-types", CLI, ...args],
+      [CLI, ...args],
       { cwd: repo, env: { ...process.env, ...env } },
     );
     let stdout = "";

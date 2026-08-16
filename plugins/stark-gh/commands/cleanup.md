@@ -28,7 +28,7 @@ TOOLS="${CLAUDE_PLUGIN_ROOT}/tools"
 ## Run
 
 ```bash
-node --experimental-strip-types "$TOOLS/gh_cleanup.ts" --raw-args "$ARGUMENTS"
+node "$TOOLS/gh_cleanup.ts" --raw-args "$ARGUMENTS"
 ```
 
 The tool handles its own preflight (in-repo, gh authed, clean tree), discovery,

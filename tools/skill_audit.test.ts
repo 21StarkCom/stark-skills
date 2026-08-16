@@ -28,7 +28,7 @@ function makeRepo(t: TestContext): string | null {
 function runCli(repo: string, args: string[]): SpawnSyncReturns<string> {
   return spawnSync(
     process.execPath,
-    ["--experimental-strip-types", CLI, ...args],
+    [CLI, ...args],
     { cwd: repo, encoding: "utf8" },
   );
 }

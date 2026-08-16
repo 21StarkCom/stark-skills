@@ -136,7 +136,7 @@ test("cleanupWorktree removes a clean worktree at the expected HEAD", () => {
   assert.deepEqual(removeCalls, ["/tmp/x"]);
 });
 
-// Regression: under Node 25's --experimental-strip-types, import.meta.url is
+// Regression: under Node type-stripping (Node 25+), import.meta.url is
 // resolved through realpath while process.argv[1] keeps the symlinked path,
 // so the prior `pathToFileURL(path.resolve(argv[1]))` gate silently never
 // fired when the script was invoked through a symlink (e.g. ~/.claude/
@@ -154,7 +154,7 @@ test("CLI runs when invoked through a symlink (Node 25 strip-types regression)",
     fs.symlinkSync(realScript, linkedScript);
     const stdout = execFileSync(
       process.execPath,
-      ["--experimental-strip-types", linkedScript, "--help"],
+      [linkedScript, "--help"],
       { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
     );
     assert.match(stdout, /Usage: review_cleanup_worktree/);

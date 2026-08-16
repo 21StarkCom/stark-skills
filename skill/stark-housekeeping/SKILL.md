@@ -171,7 +171,7 @@ Unreleased commits: {N} since {last_tag}
 
 ```bash
 TOOLS="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools"
-INFRA_JSON=$(node --experimental-strip-types "$TOOLS/housekeeping_infra.ts" \
+INFRA_JSON=$(node "$TOOLS/housekeeping_infra.ts" \
   ${DRY_RUN:+--dry-run} --json)
 ```
 

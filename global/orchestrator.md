@@ -40,7 +40,7 @@ Each domain prompt is in `~/.claude/code-review/prompts/{agent}/`. Every agent g
 ## Tools
 
 ```bash
-REVIEW="node --experimental-strip-types ~/.claude/code-review/tools/multi_review.ts"
+REVIEW="node ~/.claude/code-review/tools/multi_review.ts"
 
 # Single PR in current repo
 $REVIEW --pr <N> --json

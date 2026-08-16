@@ -147,7 +147,7 @@ Store as `$CURRENT_VERSION`.
 
 ```bash
 TOOLS="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools"
-CHANGES_JSON=$(node --experimental-strip-types "$TOOLS/release_changelog.ts" --json)
+CHANGES_JSON=$(node "$TOOLS/release_changelog.ts" --json)
 ```
 
 The tool reads `CHANGELOG.md`, then falls back to `git log <last-tag>..HEAD`
@@ -192,7 +192,7 @@ Calculate `$NEXT_VERSION` accordingly. Do NOT ask for confirmation — proceed a
 ## Step 5: Bump Version in Source
 
 ```bash
-BUMP_JSON=$(node --experimental-strip-types "$TOOLS/release_version_bump.ts" \
+BUMP_JSON=$(node "$TOOLS/release_version_bump.ts" \
   --version "$NEXT_VERSION" --json)
 ```
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env node --experimental-strip-types --no-warnings
+#!/usr/bin/env node --no-warnings
 /**
  * gcp_scope.ts — install and verify per-repo GCP project scope.
  *
