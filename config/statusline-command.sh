@@ -617,7 +617,8 @@ if _on code_churn; then
 fi
 
 # ═════════════════════════════════════════════════════════════════════════
-# Line 3: session clocks — started · now+age · enter · running|last-reply
+# Line 3: session clocks — now+age · started · enter · running|last-reply
+# (now leads; 👤 marks the human's Enter, 🤖 the agent's last reply.)
 # ═════════════════════════════════════════════════════════════════════════
 # "Started" = when the Claude Code PROCESS opened (survives /clear, unlike
 # cost.total_duration_ms which resets per session), read from the parent
@@ -636,25 +637,26 @@ fi
 # stop_ts), and IDLE once Stop fires and advances its stamp past the prompt.
 #   • running → ⏱ elapsed since Enter — the live turn duration; Enter drops its
 #     "(N ago)" because this segment already carries the same number.
-#   • idle    → 💬 the last-reply time (the Stop stamp): the response now
+#   • idle    → 🤖 the last-reply time (the Stop stamp): the response now
 #     waiting for the next instruction; Enter keeps its "(N ago)".
 # Both stamps come from hooks, not the payload, so a segment is hidden rather
 # than faked when its hook has not fired this session.
 l3=""
 if _on session_times; then
   resolve_procstart; _procstart="$PROCSTART"
-  if [ "$_procstart" -gt 0 ] 2>/dev/null; then
-    printf -v _startc '%(%H:%M)T' "$_procstart"
-    seg3 "${DIM}\U0001f7e2 ${_startc}${R}"        # started (CC opened)
-  fi
 
-  # Now + session age.
+  # Now + session age — the leading segment.
   printf -v _nowc '%(%H:%M)T' "$NOW"
   if [ "$_procstart" -gt 0 ] 2>/dev/null; then
     fmt_age $(( NOW - _procstart ))
     seg3 "${SAP}\U0001f552 ${_nowc}${DIM} (${FA})${R}"  # now · session age
   else
     seg3 "${SAP}\U0001f552 ${_nowc}${R}"          # now (age unresolved)
+  fi
+
+  if [ "$_procstart" -gt 0 ] 2>/dev/null; then
+    printf -v _startc '%(%H:%M)T' "$_procstart"
+    seg3 "${DIM}\U0001f7e2 ${_startc}${R}"        # started (CC opened)
   fi
 
   # Enter + running/idle status — both from hook stamps (see block comment).
@@ -673,10 +675,10 @@ if _on session_times; then
   if [ "$_pt" -gt 0 ]; then
     printf -v _ptc '%(%H:%M)T' "$_pt"
     if [ "$_running" = 1 ]; then
-      seg3 "${PEACH}\U0001f4e4 ${_ptc}${R}"                     # enter (bare, running)
+      seg3 "${PEACH}\U0001f464 ${_ptc}${R}"                     # enter (bare, running)
     else
       fmt_dur $(( NOW - _pt ))
-      seg3 "${PEACH}\U0001f4e4 ${_ptc}${DIM} (${FD} ago)${R}"   # enter · since (idle)
+      seg3 "${PEACH}\U0001f464 ${_ptc}${DIM} (${FD} ago)${R}"   # enter · since (idle)
     fi
   fi
 
@@ -685,7 +687,7 @@ if _on session_times; then
     seg3 "${TEAL}⏱ ${FD}${R}"                      # running: live turn duration
   elif [ "$_st" -gt 0 ]; then
     printf -v _stc '%(%H:%M)T' "$_st"
-    seg3 "${GRN}\U0001f4ac ${_stc}${R}"            # idle: last reply (waiting)
+    seg3 "${GRN}\U0001f916 ${_stc}${R}"            # idle: last reply (waiting)
   fi
 fi
 
