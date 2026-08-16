@@ -681,8 +681,11 @@ fi
 # scaled by fmt_age (Xs / Xm / H:MM).
 # "Enter" = the last prompt-submission epoch, stamped to
 # ~/.claude/.statusline-prompt-<sid> by the UserPromptSubmit hook
-# (config/statusline-prompt-hook.sh). No stamp yet (hook not fired this
-# session) → the segment is hidden rather than faked from process start.
+# (config/statusline-prompt-hook.sh). That hook carries an idle-gap guard
+# (STARK-662): machine re-prompts (/loop, cron) that fire within ~5s of a Stop
+# do NOT re-stamp, so 👤 tracks the human's real enter, not each loop tick.
+# No stamp yet (hook not fired this session) → the segment is hidden rather
+# than faked from process start.
 # The status segment resolves running-vs-idle from TWO hook stamps — the
 # prompt stamp above and the Stop-hook stamp in
 # ~/.claude/.statusline-stop-<sid> (config/statusline-stop-hook.sh): the agent
