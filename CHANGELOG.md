@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=900 runId=7cc8f497-92e1-441d-9bba-1a0d8996e908 -->
+- Add dedicated statusline labels and color palettes for the four `aryeh.stark` Max accounts, with equivalent Team-plan mappings.
 <!-- stark-gh:pr-merge pr=899 runId=ad1fa7db-c092-44a0-ae61-b2031aa691d2 -->
 - Add distinct statusline labels and a rose-gold palette for the Kiovetsky Team and personal Max seats.
 <!-- stark-gh:pr-merge pr=898 runId=308dd062-c70f-432e-9e14-a363561810b4 -->
