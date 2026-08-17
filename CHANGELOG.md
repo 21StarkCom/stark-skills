@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=898 runId=308dd062-c70f-432e-9e14-a363561810b4 -->
+- Map six agent team accounts to distinct statusline labels and gradients.
 <!-- stark-gh:pr-merge pr=897 runId=09c73df3-b488-4147-b103-9f3e6c91a4ef -->
 - Add the `stark-design-tokens` skill for accessible, multi-theme and multi-brand design-token architecture, tooling, distribution, and governance.
 <!-- stark-gh:pr-merge pr=895 runId=8a708e50-ea18-47ce-96e8-69b708982e2c -->
