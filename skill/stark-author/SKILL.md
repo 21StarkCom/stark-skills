@@ -15,33 +15,33 @@ usage, and arguments, then stop — do not run any phase.
 # stark-author — Stage 1: spec+plan, one session, the human is the gate
 
 One interactive session: interview the operator, author ONE self-contained
-spec+plan doc, run at most one zero-context advisory pass, gate it on the
-human, pin it, hand off. Replaces the write-spec → review-spec →
-spec-to-plan → review-plan chain for new work.
+spec+plan doc, run at most one zero-context advisory pass, gate it on the human,
+pin it, hand off. Replaces the write-spec → review-spec → spec-to-plan →
+review-plan chain for new work.
 
 Evidence base: [references/stage1-dossier.md](references/stage1-dossier.md)
 (61 claims, 3-vote adversarial verification; `[RQn]` tags below cite it).
 
 **Non-negotiables:**
-- **No LLM-reviews-LLM loop.** One advisory pass per *body of text*; its
-  findings die at the human. Never revise from them autonomously, never re-run
-  a pass over text it already saw. [A1][A2] Text the gate ADDS is unreviewed
-  text, not a re-review — see Phase 4's expiry rule.
+- **No LLM-reviews-LLM loop.** One advisory pass per *body of text*; its findings
+  die at the human. Never revise from them autonomously, never re-run a pass over
+  text it already saw. [A1][A2] Text the gate ADDS is unreviewed — see Phase 4's
+  expiry rule.
 - **One writer.** This session authors everything; subagents only read. [A4]
-- **Every task carries a machine-checkable done-when that is also
-  NON-VACUOUS** — it must fail if the work were never done. A check that
-  passes on an untouched repo is worse than no check: it reads as proof.
-  [A3][RQ3]
-- **You are drafting for a fresh implementer session** that knows nothing the
-  doc doesn't say. Pin decisions; leave the greppable out. [RQ8]
+- **Vacuous checks are YOUR defect to catch, not the operator's.** Every task
+  carries a machine-checkable done-when that is also NON-VACUOUS — it must fail if
+  the work were never done. Catching this is the authoring checklist's job (Phase
+  3), not something you outsource to the gate. [A3][RQ3]
+- **You are drafting for a fresh implementer session** that knows nothing the doc
+  doesn't say. Pin decisions; leave the greppable out. [RQ8]
 
 **Raw input:** `$ARGUMENTS`
 
 ## Phase 0 — Tier
 
-Decide before any work; announce the tier and the trigger. Re-check once
-after recon; refuse inflation (a Short change dressed in Full ceremony is the
-documented failure). `--tier` overrides. [RQ7]
+Decide before any work; announce the tier and the trigger. Re-check once after
+recon; refuse inflation (a Short change dressed in Full ceremony is a documented
+failure). `--tier` overrides. [RQ7]
 
 | Tier | Trigger | Artifact |
 |---|---|---|
@@ -51,10 +51,10 @@ documented failure). `--tier` overrides. [RQ7]
 
 ## Phase 1 — Recon (time-boxed)
 
-Read the repo map, root CLAUDE.md, and the files/interfaces plausibly
-touched. **Hard budget: ~10–15 tool calls.** Everything else is looked up on
-demand while authoring — recon is orientation, not an audit. Verify that
-every file/interface you intend to name actually exists. [RQ6]
+Read the repo map, root CLAUDE.md, and the files/interfaces plausibly touched.
+**Hard budget: ~10–15 tool calls.** Everything else is looked up on demand while
+authoring — recon is orientation, not an audit. Verify that every file/interface
+you intend to name actually exists. [RQ6]
 
 ## Phase 2 — Interview
 
@@ -64,30 +64,30 @@ Question wording, coverage, and order are fixed here — do not improvise them
 **Order:**
 1. **Scope boundary** — what's in; what's explicitly OUT.
 2. **Files & interfaces** — named, and verified to exist (Phase 1).
-3. **Behavior + edge cases**, EARS-shaped — walk the *unwanted-behaviour*
-   pattern explicitly: "what must NOT happen?"
+3. **Behavior + edge cases**, EARS-shaped — walk the *unwanted-behaviour* pattern
+   explicitly: "what must NOT happen?"
 4. **Verification** — "what command proves this works, end to end?"
-5. **Tradeoffs the operator hasn't considered** — at least ONE adversarial
-   probe with a concrete failure scenario. Don't ask obvious questions.
+5. **Tradeoffs the operator hasn't considered** — at least ONE adversarial probe
+   with a concrete failure scenario. Don't ask obvious questions.
 
-**Budgets:** 2–4 questions per `AskUserQuestion` call; ≤3 calls at Full tier,
-≤1 at Short. [RQ1]
+**Budgets:** 2–4 questions per `AskUserQuestion` call; ≤3 calls at Full tier, ≤1
+at Short. [RQ1]
 
-**Ambiguity rule — voice, never silently resolve.** The one way tacit
-knowledge is lost is a silent wrong disambiguation. State your intended
-interpretation and ask. A "whatever you think" answer gets ONE concrete A/B
-re-ask, then is marked. **Max 3 open ambiguities**, inline:
+**Ambiguity rule — voice, never silently resolve.** The one way tacit knowledge
+is lost is a silent wrong disambiguation. State your intended interpretation and
+ask. A "whatever you think" answer gets ONE concrete A/B re-ask, then is marked.
+**Max 3 open ambiguities**, inline:
 `[NEEDS CLARIFICATION: <question> | default: <your default>]`. [RQ1]
 
 **Stopping rule — all five, then stop asking:**
-(a) files+interfaces named and verified · (b) OUT has ≥1 real entry ·
-(c) every task has a machine-checkable done-when · (d) open ambiguities ≤3
-and marked · (e) the last question round produced zero new decisions. [RQ1][RQ3]
+(a) files+interfaces named and verified · (b) OUT has ≥1 real entry · (c) every
+task has a machine-checkable done-when · (d) open ambiguities ≤3 and marked ·
+(e) the last question round produced zero new decisions. [RQ1][RQ3]
 
 ## Phase 3 — Author the doc
 
-One self-contained markdown doc: `docs/specs/YYYY-MM-DD-<slug>-spec.md`
-(today's date; `--out` overrides). [RQ2]
+One self-contained markdown doc: `docs/specs/YYYY-MM-DD-<slug>-spec.md` (today's
+date; `--out` overrides). [RQ2]
 
 ```
 # <slug> — spec+plan            | header: date · author · accepted-base: (filled at gate)
@@ -105,7 +105,7 @@ One self-contained markdown doc: `docs/specs/YYYY-MM-DD-<slug>-spec.md`
 ## Deviations (append-only)     | empty at acceptance; implementer-only.
 ```
 
-**EARS templates** (use these shapes for the behavior contract) [RQ3]:
+**EARS templates** (shapes for the behavior contract) [RQ3]:
 - Ubiquitous: `The <system> shall <response>.`
 - Event-driven: `WHEN <trigger>, the <system> shall <response>.`
 - State-driven: `WHILE <state>, the <system> shall <response>.`
@@ -113,211 +113,148 @@ One self-contained markdown doc: `docs/specs/YYYY-MM-DD-<slug>-spec.md`
 - Optional: `WHERE <feature is present>, the <system> shall <response>.`
 
 **Task sizing:** tens of human-minutes each — agent reliability decays
-exponentially with task length, and the dependable horizon is 4–6× shorter
-than the headline one. [RQ4] **Edges are author-declared**, default
-independent; add an edge only when a named artifact (file/interface) forces
-it. A cycle is a defect — fix the decomposition. [RQ4]
+exponentially with task length, and the dependable horizon is 4–6× shorter than
+the headline one. [RQ4] **Edges are author-declared**, default independent; add an
+edge only when a named artifact forces it. A cycle is a defect — fix the
+decomposition. [RQ4]
 
-**Wiring-seam checklist — before a task's file set is final.** Ask: *if
-this task's diff were applied and nothing else, would the behavior
-criterion actually hold at runtime?* A done-when can pass while the
-answer is no — that is the highest-value failure mode the skill exists to
-prevent (observed: 5 of 8 tasks in the hibob-profiles-cache run required
-files outside their declared set, in the same four categories every time).
+**Write checks the operator won't have to second-guess.** Before a task's file
+set and done-when are final, run the
+[authoring checklist](references/authoring-checklist.md): wiring-seam (does the
+diff actually take effect at runtime), non-vacuous done-whens (would it pass on an
+untouched repo), SIGPIPE-safe pipelines, the verification fallback ladder.
+**This QA is yours.** What you catch, you fix. What you cannot fully resolve
+becomes a flagged risk you carry to the gate in plain words — that honest list is
+the most useful thing you hand the operator.
 
-For every task, scan these classes before locking the file set:
-
-- **Registration/dispatch** — does the task add a step, capability, route,
-  or handler? The registry/step-list/route-table that causes it to be
-  invoked MUST be in the set. A migration `.sql` is inert data without the
-  step list entry that makes the runner call it; a capability struct is
-  dead code without a catalog entry.
-- **Generated artifacts pinned by tests** — does the task add or change a
-  struct field, schema, or generated doc? `TestSchema_GoStructSync`,
-  `TestCatalogUpToDate`, and doc-conformance tests compare generated
-  artifacts against on-disk snapshots. Adding a field makes the snapshot
-  stale by construction; the snapshot file(s) and any catalog JSON must be
-  in the set.
-- **Call sites** — does the task add a new helper, function, or audit
-  point? A helper with zero callers is dead code behind a green gate. The
-  file(s) where the call or audit-append lives MUST be in the set; name
-  them explicitly. If no call site exists yet, the task is incomplete —
-  either add the call site or add a task for it.
-- **Doc/description generators** — does the task produce user-visible
-  text (descriptions, labels, help strings)? The file where the generator
-  reads or writes those descriptions (e.g. `dbdoc.go`, a `descriptions`
-  map) must be in the set, not just the struct or table definition.
-
-The question to answer for every task before moving on: **"if this task's
-diff were applied and nothing else, would the behavior criterion actually
-hold at runtime?"** If the honest answer is "no — something else must also
-change", add that something to the file set or add a task for it.
-
-**Vacuous done-whens — the named anti-patterns.** Each of these is
-machine-checkable AND proves nothing. Reject them at authoring time:
-- a test-filter that may match **zero** tests (`go test ./... -run 'Docs'`
-  when no `Docs*` test covers this area — it exits 0 on an untouched repo)
-- a multi-file `grep`/`rg` whose exit code doesn't require **every** file to
-  match (`rg -c a.md b.md c.md` exits 0 when only one matched)
-- a build/lint/format command standing in for a behavior check
-- any assertion on a mock the same task defines
-
-The general test: **would this check still pass if the task were never
-done?** If yes, it is not a done-when. Prefer a check that names the exact
-artifact and fails per-item.
-
-**Fails-on-success gates — the inverse defect.** `cmd | grep -q X` under
-`set -o pipefail` can SIGPIPE a still-writing producer when grep exits at
-first match — small/buffered output may pass, which is what makes it
-nondeterministic: the gate fails on SUCCESS (proven live on the 2026-07-27
-db-dwh-replan build run — 3/3 e2e runs false-negative). Done-when and
-verification commands must use pipeline-safe forms:
-`cmd | grep -e 'X' >/dev/null` (reads to EOF), or capture-then-match
-preserving producer failure: `output=$(cmd) && grep -e 'X' <<<"$output"`.
-
-**Verification fallback ladder** (only when no single command can prove it):
-scripted probe (Playwright/CLI harness) → screenshot diff vs accepted
-baseline → named human checklist item at the gate, last resort. Pick one
-explicitly per task that needs it. [RQ3]
-
-**Two files, one truth.** Alongside the spec, write the operator digest as a
+**Two files, one truth.** Alongside the spec, write the operator brief as a
 sidecar: `docs/specs/YYYY-MM-DD-<slug>-spec.human.md`. NON-normative: on any
-conflict the spec wins, and the gate (Phase 5) still runs against the spec.
-Regenerate it on every spec revision — it must never carry a decision the
-spec lacks.
+conflict the spec wins, and the gate (Phase 5) runs against the spec. Regenerate
+it on every spec revision.
 
-**Its job is not summary — it is the gate's raw material in plain English.**
-A digest that prose-summarizes strips exactly what the checklist bites on
-(the interfaces, the verification command, the IF/THEN criteria, the
-done-whens), so the human forms their whole picture from it and arrives at
-the gate with nothing to catch. Fixed sections, one per gate item:
+**The sidecar is your honest gate brief in plain English** — the same material
+you present at Phase 5, Step A. Not a marketing summary; not a hedge. Fixed
+sections:
 
-| Digest section | Feeds gate item | Contents |
-|---|---|---|
-| What this does | 1 | 2–3 short sentences, plain English |
-| What it will NOT do | 2 | every OUT bullet, verbatim |
-| Files and interfaces I claim exist | 3 | one line each: path + the exact signature |
-| How we prove it works | 4 | the closing verification command **verbatim**, plus one line on what a real pass prints |
-| What must NOT happen | 6 | every unwanted-behaviour criterion, one plain line each — none dropped, none merged |
-| Tasks and their checks | 5, 7 | table: # · what it does in one line · its done-when **command verbatim** |
-| What I decided for you | 8 | each marked ambiguity as a question + the default I took |
-| What the advisory pass flagged | — | one line per finding, each marked open/addressed; "none" if none |
+| Section | Contents |
+|---|---|
+| What this does | 2–3 plain sentences |
+| What it will NOT do | every OUT bullet, verbatim |
+| What I verified myself | files exist · each done-when fails on an untouched repo · the closing command **verbatim** + what a real pass prints |
+| Where I'm unsure | your flagged risks, one plain line each: weakest done-when, thinnest OUT boundary, any unresolved advisory finding, each defaulted ambiguity. Mandatory — "no residual risks" only if the authoring pass was genuinely clean |
+| Open choices I made for you | each defaulted ambiguity as a question + the default you took |
 
-**Verbatim wherever it is checkable.** Commands, interface signatures, and
-unwanted-behaviour criteria are copied exactly, in code spans. Paraphrasing
-`go test ./... -run 'Docs'` into "runs the docs tests" is precisely how a
-vacuous check survives the gate — item 7 cannot fire on prose.
+**Verbatim wherever it is checkable.** Commands and interface signatures are
+copied exactly, in code spans. Paraphrasing `go test ./... -run 'Docs'` into "runs
+the docs tests" hides exactly the detail the operator would catch on.
 
-**Material, never verdicts.** The digest hands over the evidence and stops.
-Banned, because each is a checklist item's *answer* and pre-supplying it is
-what makes rubber-stamping easy: what a false PASS would look like · what's
-missing from OUT · which done-when is weak · which task is safe to cut · any
-reassurance about risk, quality, or simplicity.
+**Budget: ≤40 lines Full, ≤15 Short.** Every line is brief material or a flagged
+risk. Background, architecture narration, restated repo context live in the spec —
+cut them here. If the mandatory sections alone blow the budget, the tier was wrong
+or the scope is two changes.
 
-**Budget: ≤60 lines at Full tier, ≤20 at Short.** The bound is density, not
-brevity of content: every line traces to a gate item. Background, rationale,
-architecture narration, and restated repo context are what make digests long
-— cut them, they live in the spec. If the mandatory sections alone blow the
-budget, the tier was wrong or the scope is two changes.
-
-Before presenting: if any gate item has no material in the digest, the digest
-is defective — regenerate it, don't present.
-
-**Length follows tier.** There is no doc-length quota; what's bounded is the
-gate read (Phase 5). If the doc outgrows one gate sitting, the tier was
-wrong or the scope is two changes. [RQ7]
+**Length follows tier.** No doc-length quota; what's bounded is the gate read
+(Phase 5). If the doc outgrows one gate sitting, the tier was wrong or the scope is
+two changes. [RQ7]
 
 **Intent read-back (mandatory; the last act of Phase 3).** With both files
 written, tell the operator — in your own words, built from their interview
 answers, never the doc's phrasing — what they are trying to accomplish: the
-immediate deliverable AND the underlying goal it serves, layered if the
-interview revealed layers. Close with one sentence naming the point of it
-all, then ask them to confirm or correct. On confirm, fold the validated
-formulation into `## Intent` — compressed, but keeping what the operator
-recognized as the real product. On correction, fix Intent and any section
-the correction invalidates before Phase 4. This mirrors gate item 1 in the
-opposite direction: there the operator proves they can restate the doc; here
-the author proves they understood the operator. An intent you cannot state
-back convincingly is a doc defect, not an operator problem. The folded
-Intent is narrative, not tasks or criteria — it does not trigger the Phase 4
-expiry rule. (Origin: the 2026-08-07 alfred-foundation session, where the
-read-back surfaced the real product — "a management system for an AI
-workforce" — that the drafted Intent had understated as ticket plumbing.)
+immediate deliverable AND the underlying goal it serves, layered if the interview
+revealed layers. Close with one sentence naming the point of it all, then ask them
+to confirm or correct. On confirm, fold the validated formulation into `## Intent`.
+On correction, fix Intent and any section the correction invalidates before Phase
+4. An intent you cannot state back convincingly is a doc defect, not an operator
+problem. The folded Intent is narrative — it does not trigger the Phase 4 expiry
+rule. (Origin: the 2026-08-07 alfred-foundation session, where the read-back
+surfaced the real product the drafted Intent had understated.)
 
 ## Phase 4 — Advisory pass (one-shot; skip with `--no-advisory`)
 
-Dispatch ONE read-only subagent with **zero shared context** — it receives
-only the doc path and this contract, never your reasoning or the interview:
+Dispatch ONE read-only subagent with **zero shared context** — it receives only
+the doc path and this contract, never your reasoning or the interview:
 
 > Read <doc path>. Report ONLY gaps that affect correctness or the stated
-> requirements — contradictions, criteria that cannot be checked as written,
-> named files/interfaces that don't exist, tasks whose done-when is not
-> machine-checkable, and tasks whose done-when is machine-checkable but
-> VACUOUS (it would pass on an untouched repo — e.g. a test-filter matching
-> zero tests, or a multi-file grep that exits 0 on a partial match). Run the
-> done-when commands where you can rather than reasoning about them.
-> Everything else is optional and unwanted. Zero findings is a valid,
-> expected answer for a sound doc.
+> requirements — contradictions, criteria that cannot be checked as written, named
+> files/interfaces that don't exist, tasks whose done-when is not machine-checkable,
+> and tasks whose done-when is machine-checkable but VACUOUS (it would pass on an
+> untouched repo — e.g. a test-filter matching zero tests, or a multi-file grep that
+> exits 0 on a partial match). Run the done-when commands where you can rather than
+> reasoning about them. Everything else is optional and unwanted. Zero findings is a
+> valid, expected answer for a sound doc.
 
-Append its findings verbatim under `## Advisory findings (gate)` — they are
-input for the human, not for you. Do not act on them, reply to them, or
-re-run the pass over text it already saw. [RQ5][A1][A2]
+Append its findings verbatim under `## Advisory findings (gate)`. They are input
+for the human, not for you. Do not act on them, reply to them, or re-run the pass
+over text it already saw. [RQ5][A1][A2] Anything the pass surfaces that you agree
+with, fold into your "Where I'm unsure" brief so the operator sees it framed
+honestly rather than as a raw dump.
 
-**Expiry — the pass covers the doc it read, not the doc you ship.** If the
-Phase 5 gate sends you back to Phase 2 and the operator's deltas ADD tasks or
-behavior criteria, the shipped doc now contains material nothing has reviewed.
-Before re-presenting, run ONE further pass **scoped to the added sections
-only** — name them explicitly in the prompt, and tell the subagent to ignore
-the rest. This is not a re-review and does not violate the no-loop rule: it is
-a first review of new text. Findings still die at the human. A revision that
-only edits or deletes existing text triggers no new pass.
+**Expiry — the pass covers the doc it read, not the doc you ship.** If the Phase 5
+gate sends you back to Phase 2 and the operator's deltas ADD tasks or behavior
+criteria, the shipped doc now contains material nothing has reviewed. Before
+re-presenting, run ONE further pass **scoped to the added sections only** — name
+them explicitly, tell the subagent to ignore the rest. This is a first review of
+new text, not a re-review; findings still die at the human. A revision that only
+edits or deletes existing text triggers no new pass.
 
 ## Phase 5 — Human gate
 
-Budget: **one sitting, <60 minutes, <400 lines read.** [RQ5]
+The gate is short by design: **one sitting, aim ~10 minutes, hard cap 60 minutes /
+400 lines read.** [RQ5]
 
-**Offer the plain-language walk first.** If the operator is not the coder — or
-asks to have the gate "walked simply" — offer the **`simple-gate`** skill: it
-runs these 8 items as dead-simple, non-technical multiple-choice questions (plus
-a free-text answer) grounded in this spec and its `.human.md` sidecar. Same gate,
-made approachable. The stated-value checklist below stays the source of truth and
-the fallback; because multiple-choice can invite rubber-stamping, `simple-gate`
-keeps a wrong-answer decoy in most items and **the Tripwires below still apply**.
+**You already did the mechanical QA** (files exist, checks are non-vacuous, seams
+wired — the authoring checklist). The gate does not ask the operator to redo it. It
+asks the operator only what the operator alone knows, and asks them to sanity-check
+the risks you already found. The operator is the oracle, not the QA department.
 
-Tell the operator to open the doc in their editor, then walk them through
-the checklist — every item demands a **stated value**, never yes/no [RQ5]:
+**Step A — hand over your honest brief** (this is the `.human.md` sidecar). Before
+any question, say plainly:
+- the change in one sentence — your read of their intent;
+- what you verified yourself: the named files exist; each done-when fails on an
+  untouched repo (or which don't, and why); the closing command proves the behavior
+  end-to-end;
+- **where you are genuinely unsure** — your flagged risks, one plain sentence each.
+  Do not soften them. The flagged risks are the point.
 
-1. Restate the change in one sentence of your own words.
-2. Name the one thing most plausibly missing from OUT-of-scope.
-3. Open two named files; confirm the stated interfaces exist as written.
-4. Read the verification command; describe what a false PASS would look like.
-5. Name the task you'd cut first, and why that is safe or not.
-6. For each unwanted-behaviour criterion: name a trigger it misses, or say "none".
-7. Name a done-when that would still pass if the work were never done — or
-   say "none". (The one item aimed at vacuous checks; they are invisible to a
-   reader who only asks "is this checkable?".)
-8. Answer or explicitly accept each marked ambiguity — no silent defaults
-   through the gate.
-9. Edit the doc directly.
+**Step B — ask only the operator-oracle questions.** Every answer states a value,
+never yes/no [RQ5] — these are questions only the operator can answer, so there is
+no rubber-stamp option to pick:
 
-**Tripwires** — each is a rubber-stamp signature, not a pass:
-- A Full-tier doc accepted in under a minute, or with zero human edits — say
-  so and re-present ONCE. [RQ5]
-- An answer that reproduces the digest's own wording (items 1, 2, 6 are the
-  parrotable ones). That is an echo, not a value — re-ask that item once with
-  the digest closed. The digest carries material so the human has something
-  to catch defects WITH; it never supplies the catch.
+1. **Intent.** "Here's what I think you want: `<sentence>`. Right? Fix it if not."
+   — you cannot supply this; the operator is the only oracle.
+2. **Scope.** "What's the one thing most likely missing from the OUT list?" —
+   domain knowledge only they hold.
+3. **Decisions.** For each defaulted ambiguity: "I chose `<default>`. Keep it or
+   change it?" — no silent defaults through the gate.
+4. **Edge cases.** "Any unwanted-behaviour trigger I missed?" — domain knowledge.
+5. **Validate my risks.** "These are the risks I flagged: `<list>`. Do you agree
+   these are the real ones, or am I worried about the wrong thing?" — the operator
+   judges your self-assessment; they don't hunt for it.
+
+**Critical first:** items 1 and 5 carry the most weight — point the operator's
+attention there. [RQ5]
+
+**The one honest guard.** If the operator's restatement of intent just echoes your
+sentence back, you learned nothing — ask once more, in their own words, with the
+sidecar closed. Not a trap: you need to hear it from them to know you understood.
+[RQ5] A fast accept is the operator's call to own; your duty was to point their
+attention at items 1 and 5 and tell the truth in the brief.
+
+**Offer the plain-language walk.** If the operator is not the coder — or asks to
+have the gate "walked simply" — offer the **`simple-gate`** skill: it renders this
+same brief and these same questions in plain, non-technical words with
+multiple-choice + free-text. Same gate, made approachable, no trick answers.
 
 Gate verdicts: **accept** → Phase 6 · **revise** → back to Phase 2 with the
-human's deltas (human-driven; this is not a review loop) · **abandon** → stop.
+operator's deltas (operator-driven; not a review loop) · **abandon** → stop.
 
 ## Phase 6 — Pin & land
 
 On accept (all git via Bash; never touch the default branch):
 
 1. `base=$(git rev-parse HEAD)` — stamp the doc header: `accepted-base: <base>`.
-2. Branch `spec/<slug>` from the default branch; commit **both files** (the
-   spec and its `.human.md` sidecar); push.
+2. Branch `spec/<slug>` from the default branch; commit **both files** (the spec
+   and its `.human.md` sidecar); push.
 3. Open a **draft** PR. It must be authored by **`aryeh-stark`**, so this goes
    through `gh` — never `github_app.ts`, whose installation token authors as
    `app/stark-claude[bot]`. (`--ready` on the skill opts out of draft.)
@@ -330,26 +267,25 @@ gh pr create --head "spec/<slug>" --base main --draft \
 
 ## Phase 7 — Handoff
 
-Print, as the final report: the doc path · PR number · `accepted-base` hash ·
-and the implementer's first-move contract, verbatim [RQ8]:
+Print, as the final report: the doc path · PR number · `accepted-base` hash · and
+the implementer's first-move contract, verbatim [RQ8]:
 
-> Fresh session. Read the spec. Critically review it; raise blockers to the
-> human BEFORE executing. Verify the repo contains `accepted-base`. Then per
-> task: turn the criterion into the first failing check → implement → verify
-> → commit. The accepted spec text is immutable — surprises go to
-> `## Deviations` (append-only). A deviation that moves the scope boundary
-> stops work and returns to the gate as a diff-review.
+> Fresh session. Read the spec. Critically review it; raise blockers to the human
+> BEFORE executing. Verify the repo contains `accepted-base`. Then per task: turn
+> the criterion into the first failing check → implement → verify → commit. The
+> accepted spec text is immutable — surprises go to `## Deviations` (append-only). A
+> deviation that moves the scope boundary stops work and returns to the gate as a
+> diff-review.
 
 ## Measurement
 
-Nothing to run — metrics derive from git/PR metadata per merged change:
-first-pass acceptance (implementation merged with zero re-plan), re-plan
-count, deviation count, tokens-per-merged-PR. Never wall-clock, never
-self-report. [RQ9]
+Nothing to run — metrics derive from git/PR metadata per merged change: first-pass
+acceptance (implementation merged with zero re-plan), re-plan count, deviation
+count, tokens-per-merged-PR. Never wall-clock, never self-report. [RQ9]
 
 ## What this replaces
 
 This single session replaced `/stark-write-spec`, `/stark-review-spec`,
-`/stark-red-team-spec`, `/stark-spec-to-plan`, and `/stark-review-plan` —
-all five were deleted in the 2026-07-26 demolition. This is the authoring
-stage; `/stark-build` is the implementation stage.
+`/stark-red-team-spec`, `/stark-spec-to-plan`, and `/stark-review-plan` — all five
+deleted in the 2026-07-26 demolition. This is the authoring stage; `/stark-build`
+is the implementation stage.
