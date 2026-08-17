@@ -17,13 +17,18 @@ usage, and `## Arguments`, then stop — do not walk the gate.
 
 ## Overview
 
-Walk a person through the 8 stark-author gate items in a live terminal session.
-Each item is one multiple-choice question with plain, simple words, plus a free-text
-"Other" for their own answer. The goal: a smart non-coder can pass the gate without
-knowing any jargon.
+Walk a non-coder through the stark-author human gate in plain words. First you
+**hand them an honest brief** — what the change does, what you checked yourself,
+and where you are unsure. Then you ask them the few things **only they can
+answer**, as multiple-choice questions with a free-text "Other".
 
-**Core rule: write every question as if to a bright 10-year-old.** Short words. Short
-sentences. Real choices.
+**This is not a test you give them.** It is help. You did the technical QA
+already; the gate asks the person for the things a machine cannot supply — what
+they actually want, what's out of scope, which way to decide the open choices,
+and whether the risks you flagged are the real ones. There are no trick answers.
+
+**Core rule: write every question as if to a bright 10-year-old.** Short words.
+Short sentences. Real choices, honestly labelled.
 
 ## When to use
 
@@ -31,12 +36,14 @@ sentences. Real choices.
 - They say "explain it like I'm five", "I don't understand the checklist", "just give me choices".
 - Any spec/plan sign-off where the reader is not the coder.
 
-**Do NOT use** to skip the gate. This makes the gate *easy*, not *fake*. The checks still bite.
+**Do NOT use** to skip the gate. This makes the gate *easy*, not *fake*. The
+questions still need a real answer — but the answer is theirs to give, not a
+gotcha to survive.
 
 ## Arguments
 
-- `[spec-path]` — optional path to the spec+plan doc under gate. When omitted, use the
-  spec+plan the current session just authored (and its `.human.md` sidecar).
+- `[spec-path]` — optional path to the spec+plan doc under gate. When omitted, use
+  the spec+plan the current session just authored (and its `.human.md` sidecar).
 
 ## The hard language rules (the whole point)
 
@@ -74,86 +81,83 @@ Say the thing plainly. If a 10-year-old would stop and frown, rewrite it.
 | DAG / depends-on | which task must come first |
 
 Add rows as needed. When in doubt, name the everyday effect, not the mechanism.
-If a word is not in this table and a 10-year-old would not know it, do not use it —
-say the effect in plain words instead.
+If a word is not in this table and a 10-year-old would not know it, say the effect
+in plain words instead.
 
 ## How to run it
 
-1. **Read the spec and its `.human.md` sidecar** for the change under gate. Build every
-   option from what THAT doc actually says. Never invent facts.
-2. **Ask with the `AskUserQuestion` tool.** It shows your options AND a free-text "Other".
-   That is "choices plus free text" — use it, do not type questions as plain prose.
-3. **Ask up to 4 items per call.** 8 items = about 2 calls. Do not dump all 8 at once.
-4. **Put a wrong choice (a decoy) in most questions.** Picking must be a real test, not a
-   rubber stamp. Mark nothing as "(right)" — the person must choose.
-5. **If they pick the decoy, stop.** Say why it is wrong, in kid words. Ask that one again.
-6. **At the end, give the verdict in simple words:** all good (accept) · fix some things
-   (revise) · stop (abandon). Name what they still must decide.
+1. **Read the spec and its `.human.md` sidecar** for the change under gate. Build
+   everything you say from what THAT doc says. Never invent facts.
+2. **Give the brief first, in plain words** (3 short parts):
+   - what this change does — 2-3 short lines;
+   - what you checked yourself — the files are real, the checks are honest, the
+     proof-it-works command does what it claims;
+   - **where you are unsure** — the risks the spec's "Where I'm unsure" section
+     lists, one plain line each. Say them straight. Do not hide them.
+3. **Then ask with the `AskUserQuestion` tool.** It shows your options AND a
+   free-text "Other". That is "choices plus free text" — use it, do not type
+   questions as plain prose.
+4. **Ask up to 4 items per call.** The questions below are about 2 calls.
+5. **Every option is honest.** No planted wrong answer. Where you offer more than
+   one real reading, all of them are things the doc could truly mean — you are
+   asking which one THEY meant, not baiting them.
+6. **If they pick the first option every time without reading, slow down.** Say so
+   kindly, and read the brief out loud with them before asking again.
+7. **At the end, give the verdict in simple words:** all good (accept) · fix some
+   things (revise) · stop (abandon). Name what they still must decide.
 
-## The 8 questions (simple stem + how to build options)
+## The questions (simple stem + how to build options)
 
-Worked example uses the `alfredd-spine` spec. Copy the shape; swap the facts.
+These mirror the five things the stark-author gate asks — the things only the
+person can answer. Copy the shape; swap the facts from the doc.
 
-**1. What does it do?** — "Pick the line that says what this change does."
-Give 2 true lines (different words) + 1 decoy from the "will NOT do" list.
-- "It makes the app send tasks to ClickUp on its own."
-- "A background helper sends the work with no chat open."
-- "It adds a planner for future jobs." ← decoy (that is a later slice)
+**1. Is this what you wanted?** — "Here is what I think you want. Is that right?"
+Give your best plain read first, then one honest alternative read the doc could
+also mean, then let them fix it.
+- "You want the app to send tasks to ClickUp on its own." (my read)
+- "You want it to only get ready, and send later." (a real other meaning)
+- "Not quite — let me tell you." (free text)
 
 **2. What is missing from the "will NOT do" list?** — "What might be missing here?"
-Give 2 plausible-missing items + "Nothing, it looks full."
+Give the items YOU suspect might be missing, then "nothing", plus free text.
 - "It should say it won't touch other computers."
 - "It should say it won't change the old send paths."
 - "Nothing. The list looks full."
 
-**3. Do the files really exist?** — "Open 2 files. Find 2 pieces of code. Did you?"
-Name the two files and the two code names, in plain path form.
-- "Yes. Both are there."
-- "No. One is missing."
-- "I could not open the file."
-
-**4. When could a green check lie?** — "It says one command proves it works. When could that lie?"
-Give 2 real ways it could lie + 1 decoy that trusts green blindly.
-- "If the tests do not really run."
-- "If it never talks to the real ClickUp."
-- "It cannot lie. Green means done." ← decoy
-
-**5. Which task would you drop first?** — "Which task could you skip? Is that safe?"
-List 2-3 tasks by plain label, each with a safe/not-safe hint.
-- "The docs task. Fairly safe. Docs can wait."
-- "The crash tests. Not safe. They catch bad crashes."
-- "None. I would keep them all."
-
-**6. What bad thing could still happen?** — "It lists bad things to stop. Did it miss one?"
-Give 2 already-covered cases + "None, it covers them" + let them type a real gap.
-- "Two helpers could run at once." (already covered)
-- "A stuck helper could freeze the app." (already covered)
-- "None. The list covers it."
-
-**7. Which check passes even with no work done?** — "A good check fails if the work is skipped.
-Any check here that stays green anyway?"
-Give 2 checks that ARE real (decoys) + "None, all real."
-- "The docs check." (it is real)
-- "The live test." (it is real)
-- "None. Every check needs the work."
-
-**8. The one open choice** — state the real open question from the doc, plainly.
-Give the default first, then the other way, then "not sure".
-- "Keep the old send path on. It is harmless." (the default)
-- "Plan to turn it off later."
+**3. The open choices** — for each open choice in the doc, ask it plainly.
+Give the choice you made first, then the other way, then "not sure".
+- "Keep the old send path on. It is harmless." (what I chose)
+- "Turn it off later instead."
 - "I'm not sure. Tell me more."
+
+**4. Did I miss a bad thing to stop?** — "It lists bad things it must stop. Did I
+miss one?" List what it already covers (so they don't repeat it), then ask.
+- "It already stops two helpers running at once."
+- "It already stops a stuck helper freezing the app."
+- "You missed one — let me tell you." (free text) · or "No, it covers them."
+
+**5. Are these the real risks?** — "These are the things I am unsure about. Are
+these the real worries, or am I worried about the wrong thing?" State your flagged
+risks plainly, then ask them to judge.
+- "Yes. Those are the real worries."
+- "No. The real worry is something else." (free text)
+- "I don't think any of those matter, because…" (free text)
 
 ## Common mistakes
 
 - **Typing questions as prose.** Wrong. Use `AskUserQuestion` so they get real choices.
-- **Marking the right answer.** Wrong. Then it is not a test.
-- **No decoy.** A gate with no wrong option is a rubber stamp.
+- **Planting a trick answer.** Wrong. This is help, not a trap. Every option is honest.
+- **Hiding your doubts.** Wrong. The "Where I'm unsure" brief is the most useful thing you give.
 - **Sneaking in jargon** ("the dispatcher reconciles"). Translate it or cut it.
 - **Long sentences.** Over 10 words? Split it.
 - **Inventing options** the doc does not support. Read the doc first, always.
 
 ## Honesty note
 
-Choices make a gate easy to pass — and easy to fake. Two guards keep it honest: a wrong
-decoy in most questions, and the free-text "Other" for a real answer. If someone only ever
-picks the safe option with no thought, the gate did not work. Slow down and re-ask.
+Choices make a gate easy to pass — so the honesty lives in *what* you ask, not in
+tricking the reader. Every question here is something only the person can answer:
+what they want, what's out of scope, how to decide, and whether your worries are
+the right ones. There is no safe option to rubber-stamp, because there is no answer
+you could have supplied for them. If they breeze through without reading, that is
+theirs to own — but slow down, read the brief together, and make sure they saw
+your flagged risks.
