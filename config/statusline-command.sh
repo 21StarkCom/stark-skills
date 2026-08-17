@@ -265,9 +265,9 @@ gradient() { # text [palette] → sets GRAD: per-account color sweep
   # EPOCHREALTIME and drifts the gradient a frame (30s cadence, not a smooth
   # animation clock). Palette ($2)
   # selects the account's color family: gold (Max/Com), violet (Max/Net), blue
-  # (Enterprise), magenta (Team#0 fallback), plus a shade per stark account —
-  # ice/cyan (S1), lime (S2), crimson→rose (S3), emerald→teal (S4) — with a
-  # darker Team/S sibling each. Pure bash fixed-point math, no forks. GRAD holds
+  # (Enterprise), magenta (Team#0 fallback), plus a shade per agent account —
+  # ice/cyan (A1), lime (A2), crimson→rose (A3), emerald→teal (A4),
+  # amber/orange (A5), indigo (A6). Pure bash fixed-point math, no forks. GRAD holds
   # interpreted ESC bytes (printf -v %b) — embed directly, don't re-%b it.
   local text="$1" pal="${2:-gold}" RST=$'\033[0m'
   local -a PR PG PB
@@ -275,14 +275,12 @@ gradient() { # text [palette] → sets GRAD: per-account color sweep
     violet) PR=(203 180 224 150) PG=(140 110 120 90 ) PB=(247 250 255 240) ;;  # purple→magenta — Max/Net
     blue)   PR=(0   64  138 33 ) PG=(160 196 224 182) PB=(255 255 255 255) ;;  # strong light blue — Enterprise
     team0)  PR=(225 255 240 210) PG=(60  95  72  48 ) PB=(200 230 215 190) ;;  # magenta/fuchsia — Team#0 (.net fallback)
-    stark1) PR=(56  103 125 80 ) PG=(189 232 240 210) PB=(248 249 255 250) ;;  # ice/cyan→sky — Max/S1
-    stark2) PR=(190 214 163 235) PG=(242 255 230 250) PB=(100 133 80  120) ;;  # lime→chartreuse — Max/S2
-    stark1t) PR=(30  72  96  52 ) PG=(148 196 214 172) PB=(210 238 248 226) ;; # steel/deep cyan — Team/S1
-    stark2t) PR=(150 178 128 196) PG=(196 214 176 226) PB=(60  92  48  110) ;; # olive→moss — Team/S2
-    stark3) PR=(255 255 240 250) PG=(90  130 70  105) PB=(110 150 95  130) ;;  # crimson→rose — Max/S3
-    stark3t) PR=(178 205 150 196) PG=(52  88  38  70 ) PB=(72  105 60  90 ) ;; # wine/maroon — Team/S3
-    stark4) PR=(52  45  34  110) PG=(211 212 211 231) PB=(153 191 238 183) ;;  # emerald→teal→cyan — Max/S4
-    stark4t) PR=(34  30  24  76 ) PG=(150 152 150 168) PB=(108 138 172 132) ;; # deep emerald→slate teal — Team/S4
+    agent1) PR=(56  103 125 80 ) PG=(189 232 240 210) PB=(248 249 255 250) ;; # ice/cyan→sky — A1
+    agent2) PR=(190 214 163 235) PG=(242 255 230 250) PB=(100 133 80  120) ;; # lime→chartreuse — A2
+    agent3) PR=(255 255 240 250) PG=(90  130 70  105) PB=(110 150 95  130) ;; # crimson→rose — A3
+    agent4) PR=(52  45  34  110) PG=(211 212 211 231) PB=(153 191 238 183) ;; # emerald→teal→cyan — A4
+    agent5) PR=(255 240 255 235) PG=(165 125 180 145) PB=(70  48  92  62 ) ;; # amber→orange→coral — A5
+    agent6) PR=(150 120 100 175) PG=(130 100 80  140) PB=(252 240 220 248) ;; # indigo→blue-violet — A6
     *)      PR=(230 255 255 250) PG=(150 190 224 204) PB=(0   0   60  15 ) ;;  # amber→gold — Max/Com
   esac
   local n=${#PR[@]} len=${#text}
@@ -463,9 +461,10 @@ _on vim_mode && [ -n "$vim_mode" ] && { [ "$vim_mode" = "NORMAL" ] && seg "${YEL
 # ═════════════════════════════════════════════════════════════════════════
 l2=""
 
-# Logged-in account — 4 accounts across 2 emails (.com / .net), each with an
-# org account (Enterprise / Team) and a personal Max plan. Resolve from
-# ~/.claude.json oauthAccount {emailAddress, organizationType}; the statusline
+# Logged-in account — the .com accounts (Enterprise / Max) plus the six
+# agent.{1..6}@evinced.net Team accounts, distinguished by email + org type.
+# Resolve from ~/.claude.json oauthAccount {emailAddress, organizationType};
+# the statusline
 # stdin payload doesn't carry it. ~/.claude.json is big and changes rarely
 # relative to the 1s tick, so the jq parse is mtime-cached ([ -nt ] is a
 # builtin — zero forks on the hot path).
@@ -501,44 +500,47 @@ acct_label=""
         else acct_label="Enterprise"; fi ;;
       *.net)
         # Several accounts share the .net domain — disambiguate by the email
-        # local part: aryeh.stark.{1,2,3,4} → Max/S{1..4} on a Max plan,
-        # Team/S{1..4} on a Team plan (the old aryeh.kiovetsky{1-4} Team
-        # accounts are retired). Anything else → Max/Net or Team#0.
+        # local part: agent.{1..6} → Team/A{1..6} (all six are Team plans;
+        # the old aryeh.stark.{1..4} and aryeh.kiovetsky{1..4} accounts are
+        # retired). A Max plan is not expected on these but is mapped to
+        # Max/A{1..6} for robustness. Anything else → Max/Net or Team#0.
         if [ "$acct_otype" = "claude_max" ]; then
           case "${acct_email%%@*}" in
-            aryeh.stark.1) acct_label="Max/S1" ;;
-            aryeh.stark.2) acct_label="Max/S2" ;;
-            aryeh.stark.3) acct_label="Max/S3" ;;
-            aryeh.stark.4) acct_label="Max/S4" ;;
-            *)             acct_label="Max/Net" ;;
+            agent.1) acct_label="Max/A1" ;;
+            agent.2) acct_label="Max/A2" ;;
+            agent.3) acct_label="Max/A3" ;;
+            agent.4) acct_label="Max/A4" ;;
+            agent.5) acct_label="Max/A5" ;;
+            agent.6) acct_label="Max/A6" ;;
+            *)       acct_label="Max/Net" ;;
           esac
         else case "${acct_email%%@*}" in
-          aryeh.stark.1) acct_label="Team/S1" ;;
-          aryeh.stark.2) acct_label="Team/S2" ;;
-          aryeh.stark.3) acct_label="Team/S3" ;;
-          aryeh.stark.4) acct_label="Team/S4" ;;
-          *)             acct_label="Team#0" ;;
+          agent.1) acct_label="Team/A1" ;;
+          agent.2) acct_label="Team/A2" ;;
+          agent.3) acct_label="Team/A3" ;;
+          agent.4) acct_label="Team/A4" ;;
+          agent.5) acct_label="Team/A5" ;;
+          agent.6) acct_label="Team/A6" ;;
+          *)       acct_label="Team#0" ;;
         esac; fi ;;
       *) acct_label="$acct_dom" ;;
     esac
     if _on account && [ -n "$acct_label" ]; then
       # Color family per account: Max/Net → violet, Max/Com → gold, Enterprise →
-      # blue. Each stark account gets its own shade — Max/S{1..4} bright,
-      # Team/S{1..4} the darker sibling; Team#0 magenta is the .net fallback.
+      # blue. Each agent account gets its own distinct hue (A1..A6), shared by
+      # its Max and Team labels; Team#0 magenta is the .net fallback.
       case "$acct_label" in
-        Max/Net)    _pal=violet ;;
-        Max/S1)     _pal=stark1 ;;
-        Max/S2)     _pal=stark2 ;;
-        Max/S3)     _pal=stark3 ;;
-        Max/S4)     _pal=stark4 ;;
-        Max/*)      _pal=gold ;;
-        Enterprise) _pal=blue ;;
-        Team/S1)    _pal=stark1t ;;
-        Team/S2)    _pal=stark2t ;;
-        Team/S3)    _pal=stark3t ;;
-        Team/S4)    _pal=stark4t ;;
-        Team*)      _pal=team0 ;;
-        *)          _pal=gold ;;
+        Max/Net)        _pal=violet ;;
+        Max/A1|Team/A1) _pal=agent1 ;;
+        Max/A2|Team/A2) _pal=agent2 ;;
+        Max/A3|Team/A3) _pal=agent3 ;;
+        Max/A4|Team/A4) _pal=agent4 ;;
+        Max/A5|Team/A5) _pal=agent5 ;;
+        Max/A6|Team/A6) _pal=agent6 ;;
+        Max/*)          _pal=gold ;;
+        Enterprise)     _pal=blue ;;
+        Team*)          _pal=team0 ;;
+        *)              _pal=gold ;;
       esac
       gradient "$acct_label" "$_pal"
       # Emoji stays static (glyphs ignore fg color); the label carries the gradient.
@@ -597,8 +599,8 @@ _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
 #
 # Keyed by SEAT — accountUuid:organizationUuid — because neither component is
 # unique. One address holds seats in several orgs (a Team seat and a personal Max
-# plan share aryeh.kiovetsky@evinced.net) and one org holds many members
-# (aryeh.kiovetsky and aryeh.stark.1 both sit in Evinced RD). Team limits are
+# plan share one email) and one org holds many members (several agent.{1..6}
+# accounts can sit in the same Evinced org). Team limits are
 # per-member, so every (account, org) pair has its own budget. Keying by either
 # component alone pointed two seats at one file, so each reported the other's
 # usage. The `:` is replaced by `_` on disk (see sanitizeKey).
