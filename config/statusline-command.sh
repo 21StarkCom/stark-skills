@@ -267,9 +267,10 @@ gradient() { # text [palette] → sets GRAD: per-account color sweep
   # selects the account's color family: gold (Max/Com), violet (Max/Net), blue
   # (Enterprise), magenta (Team#0 fallback), plus a shade per agent account —
   # ice/cyan (A1), lime (A2), crimson→rose (A3), emerald→teal (A4),
-  # amber/orange (A5), indigo (A6), rose-gold for aryeh.kiovetsky (K), and the
-  # four aryeh.stark.{1..4} Max accounts — yellow (S1), green (S2), pink (S3),
-  # slate (S4). Pure bash fixed-point math, no forks. GRAD holds
+  # amber/orange (A5), indigo (A6), rose-gold (K), and the four stark slots —
+  # yellow (S1), green (S2), pink (S3), slate (S4). The label→slot map is in the
+  # private roster (see the resolvers below). Pure bash fixed-point math, no
+  # forks. GRAD holds
   # interpreted ESC bytes (printf -v %b) — embed directly, don't re-%b it.
   local text="$1" pal="${2:-gold}" RST=$'\033[0m'
   local -a PR PG PB
@@ -283,7 +284,7 @@ gradient() { # text [palette] → sets GRAD: per-account color sweep
     agent4) PR=(52  45  34  110) PG=(211 212 211 231) PB=(153 191 238 183) ;; # emerald→teal→cyan — A4
     agent5) PR=(255 240 255 235) PG=(165 125 180 145) PB=(70  48  92  62 ) ;; # amber→orange→coral — A5
     agent6) PR=(150 120 100 175) PG=(130 100 80  140) PB=(252 240 220 248) ;; # indigo→blue-violet — A6
-    kiovetsky) PR=(240 250 235 245) PG=(200 165 150 180) PB=(150 130 165 140) ;; # rose-gold — aryeh.kiovetsky (K)
+    acctk) PR=(240 250 235 245) PG=(200 165 150 180) PB=(150 130 165 140) ;; # rose-gold — account slot K
     stark1) PR=(225 240 210 235) PG=(220 235 230 225) PB=(60  85  95  70 ) ;; # yellow — S1 (cyan is now A1)
     stark2) PR=(90  120 70  140) PG=(210 230 195 235) PB=(110 140 90  150) ;; # green — S2 (lime is now A2)
     stark3) PR=(255 250 255 250) PG=(130 160 120 150) PB=(180 200 175 195) ;; # pink/rose — S3 (crimson is now A3)
@@ -316,6 +317,33 @@ gradient() { # text [palette] → sets GRAD: per-account color sweep
   done
   printf -v GRAD '%b' "${out}${RST}"
 }
+
+# ── Account label + palette resolvers ────────────────────────────────────
+# GENERIC defaults: domain + org type only, no personal roster. The full
+# per-account map (email local-parts → S1/A3/K labels + per-account hues) is
+# PII and lives in the PRIVATE stark-workspace repo, sourced below to override
+# these. Absent (CI, a fresh machine, a public clone), the statusline degrades
+# to these generic labels. Both set caller-scope vars in place — no command
+# substitution, to stay fork-free on the tick.
+_stark_resolve_account_label() {   # $1=email $2=orgType → sets acct_label
+  local dom=${1##*@} otype="$2"
+  case "$dom" in
+    *.com) [ "$otype" = "claude_max" ] && acct_label="Max/Com" || acct_label="Enterprise" ;;
+    *.net) [ "$otype" = "claude_max" ] && acct_label="Max/Net" || acct_label="Team#0" ;;
+    *)     acct_label="$dom" ;;
+  esac
+}
+_stark_resolve_account_palette() { # $1=label → sets _pal (a gradient palette slot)
+  case "$1" in
+    Max/Net)    _pal=violet ;;
+    Enterprise) _pal=blue ;;
+    Max/*)      _pal=gold ;;
+    Team*)      _pal=team0 ;;
+    *)          _pal=gold ;;
+  esac
+}
+# Private roster override (see stark-workspace config/statusline-accounts.sh).
+source "$HOME/.claude/.statusline-accounts.sh" 2>/dev/null || true
 
 # ── Git (pure-bash discovery, TTL-cached dirty scan) ─────────────────────
 # Repo root / worktree / branch come straight off the filesystem (.git
@@ -468,8 +496,9 @@ _on vim_mode && [ -n "$vim_mode" ] && { [ "$vim_mode" = "NORMAL" ] && seg "${YEL
 # ═════════════════════════════════════════════════════════════════════════
 l2=""
 
-# Logged-in account — the .com accounts (Enterprise / Max) plus the six
-# agent.{1..6}@evinced.net Team accounts, distinguished by email + org type.
+# Logged-in account — distinguished by email + org type, mapped to a short
+# label by the resolvers above (generic domain-only here, the personal roster
+# when the private map is sourced).
 # Resolve from ~/.claude.json oauthAccount {emailAddress, organizationType};
 # the statusline
 # stdin payload doesn't carry it. ~/.claude.json is big and changes rarely
@@ -500,75 +529,16 @@ acct_label=""
     printf '%s\t%s\t%s\n' "$acct_email" "$acct_otype" "$acct_seat" > "$_ac" 2>/dev/null
   fi
   if [ -n "$acct_email" ]; then
-    acct_dom=${acct_email##*@}            # evinced.com / evinced.net
-    case "$acct_dom" in
-      *.com)
-        # aryeh.kiovetsky@evinced.com is the sole .com account, with both an
-        # Enterprise seat and a personal Max plan — no local-part disambiguation
-        # needed: Max → Max/Com, Enterprise → Enterprise.
-        if [ "$acct_otype" = "claude_max" ]; then acct_label="Max/Com"
-        else acct_label="Enterprise"; fi ;;
-      *.net)
-        # Several accounts share the .net domain — disambiguate by the email
-        # local part: agent.{1..6} → A{1..6} (Team plans), aryeh.stark.{1..4} →
-        # S{1..4} (Max plans), and aryeh.kiovetsky → K (a Team seat + a personal
-        # Max plan). The numbered aryeh.kiovetsky{1..4} accounts are retired.
-        # Team plan → Team/*, Max plan → Max/*. Both branches carry every
-        # account for robustness. Anything else → Max/Net or Team#0.
-        if [ "$acct_otype" = "claude_max" ]; then
-          case "${acct_email%%@*}" in
-            agent.1)         acct_label="Max/A1" ;;
-            agent.2)         acct_label="Max/A2" ;;
-            agent.3)         acct_label="Max/A3" ;;
-            agent.4)         acct_label="Max/A4" ;;
-            agent.5)         acct_label="Max/A5" ;;
-            agent.6)         acct_label="Max/A6" ;;
-            aryeh.stark.1)   acct_label="Max/S1" ;;
-            aryeh.stark.2)   acct_label="Max/S2" ;;
-            aryeh.stark.3)   acct_label="Max/S3" ;;
-            aryeh.stark.4)   acct_label="Max/S4" ;;
-            aryeh.kiovetsky) acct_label="Max/K" ;;
-            *)               acct_label="Max/Net" ;;
-          esac
-        else case "${acct_email%%@*}" in
-          agent.1)         acct_label="Team/A1" ;;
-          agent.2)         acct_label="Team/A2" ;;
-          agent.3)         acct_label="Team/A3" ;;
-          agent.4)         acct_label="Team/A4" ;;
-          agent.5)         acct_label="Team/A5" ;;
-          agent.6)         acct_label="Team/A6" ;;
-          aryeh.stark.1)   acct_label="Team/S1" ;;
-          aryeh.stark.2)   acct_label="Team/S2" ;;
-          aryeh.stark.3)   acct_label="Team/S3" ;;
-          aryeh.stark.4)   acct_label="Team/S4" ;;
-          aryeh.kiovetsky) acct_label="Team/K" ;;
-          *)               acct_label="Team#0" ;;
-        esac; fi ;;
-      *) acct_label="$acct_dom" ;;
-    esac
+    # Resolve email + org type → label. The generic resolver defined above knows
+    # only domain + plan (Max/Com, Enterprise, Max/Net, Team#0); the private
+    # roster sourced above overrides it with the per-account labels (S1/A3/K).
+    _stark_resolve_account_label "$acct_email" "$acct_otype"
     if _on account && [ -n "$acct_label" ]; then
-      # Color family per account: Max/Net → violet, Max/Com → gold, Enterprise →
-      # blue. Each agent (A1..A6) and stark (S1..S4) account gets its own
-      # distinct hue and aryeh.kiovetsky (K) a rose-gold, each shared by its Max
-      # and Team labels; Team#0 magenta is the .net fallback.
-      case "$acct_label" in
-        Max/Net)        _pal=violet ;;
-        Max/A1|Team/A1) _pal=agent1 ;;
-        Max/A2|Team/A2) _pal=agent2 ;;
-        Max/A3|Team/A3) _pal=agent3 ;;
-        Max/A4|Team/A4) _pal=agent4 ;;
-        Max/A5|Team/A5) _pal=agent5 ;;
-        Max/A6|Team/A6) _pal=agent6 ;;
-        Max/S1|Team/S1) _pal=stark1 ;;
-        Max/S2|Team/S2) _pal=stark2 ;;
-        Max/S3|Team/S3) _pal=stark3 ;;
-        Max/S4|Team/S4) _pal=stark4 ;;
-        Max/K|Team/K)   _pal=kiovetsky ;;
-        Max/*)          _pal=gold ;;
-        Enterprise)     _pal=blue ;;
-        Team*)          _pal=team0 ;;
-        *)              _pal=gold ;;
-      esac
+      # Palette family per label. Generic: Max/Net → violet, Enterprise → blue,
+      # Max/* → gold, Team* → team0. The private roster override maps each
+      # per-account label to its own hue slot (agent1..stark4 / acctk) below.
+      _pal=gold
+      _stark_resolve_account_palette "$acct_label"
       gradient "$acct_label" "$_pal"
       # Emoji stays static (glyphs ignore fg color); the label carries the gradient.
       seg2 "${MAUVE}\U0001f464${R} ${GRAD}"
@@ -625,9 +595,9 @@ _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
 # redirect (no fork), matching the account/git caches alongside it.
 #
 # Keyed by SEAT — accountUuid:organizationUuid — because neither component is
-# unique. One address holds seats in several orgs (aryeh.kiovetsky@evinced.net
-# has both a Team seat and a personal Max plan) and one org holds many members
-# (several agent.{1..6} accounts can sit in the same Evinced org). Team limits are
+# unique. One address can hold seats in several orgs (e.g. both a Team seat and
+# a personal Max plan) and one org can hold many members (several distinct
+# accounts in the same org). Team limits are
 # per-member, so every (account, org) pair has its own budget. Keying by either
 # component alone pointed two seats at one file, so each reported the other's
 # usage. The `:` is replaced by `_` on disk (see sanitizeKey).

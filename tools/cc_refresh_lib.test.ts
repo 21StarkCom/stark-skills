@@ -31,7 +31,7 @@ function response(over: Record<string, unknown> = {}): string {
     scope: "user:inference user:profile",
     token_uuid: "tok-1",
     refresh_token_expires_in: 2405096,
-    organization: { uuid: "org-1", name: "Evinced RD" },
+    organization: { uuid: "org-1", name: "Acme Team" },
     account: { uuid: "acct-1", email_address: "a@example.com" },
     ...over,
   });
@@ -78,7 +78,7 @@ test("parseRefreshResponse converts durations to absolute timestamps", () => {
   assert.equal(t.accountUuid, "acct-1");
   assert.equal(t.organizationUuid, "org-1");
   assert.equal(t.accountEmail, "a@example.com");
-  assert.equal(t.organizationName, "Evinced RD");
+  assert.equal(t.organizationName, "Acme Team");
 });
 
 test("parseRefreshResponse refuses a response with no refresh_token", () => {

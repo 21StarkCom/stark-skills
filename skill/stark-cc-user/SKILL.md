@@ -245,7 +245,7 @@ API usage — surfacing as **"Credit balance is too low"** on an account that ha
 no metered balance at all. Nothing in the message points at the switch.
 
 Hit live on 2026-08-01: profile `Net-T3` held a `max` token under an
-`Evinced RD` (`claude_team`) seat — the only incoherent one of five team
+`Acme Team` (`claude_team`) seat — the only incoherent one of five team
 profiles. `seatIncoherence()` now compares `credentials.claudeAiOauth`
 `.subscriptionType` against `oauthAccount.organizationType` and blocks all
 three write paths: `add` refuses to store a mismatched pair, `use` refuses to
@@ -264,9 +264,9 @@ Neither email nor org is unique. Real profiles on one machine:
 
 | profile | accountUuid | organizationUuid |
 |---|---|---|
-| `Net-T0` | `f05d659e` | `32e87edd` (Evinced RD) |
-| `Net-M0` | `f05d659e` ← same account | `b5c2bf52` (personal Max) |
-| `Net-T1` | `67ce42fe` | `32e87edd` ← same org |
+| `Net-T0` | `aaaa1111` | `bbbb2222` (Acme Team) |
+| `Net-M0` | `aaaa1111` ← same account | `cccc3333` (personal Max) |
+| `Net-T1` | `dddd4444` | `bbbb2222` ← same org |
 
 One address holds seats in several orgs (a team seat plus a personal Max plan);
 one org holds many members. **Team-plan limits are per-member**, so every

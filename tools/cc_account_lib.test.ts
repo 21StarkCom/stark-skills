@@ -174,9 +174,9 @@ test("projectUsage: age never goes negative on a future-stamped snapshot", () =>
 // ── ranking ─────────────────────────────────────────────────────────────
 
 const PROFILES: Profile[] = [
-  { name: "com", email: "aryeh.kiovetsky@evinced.com", seatKey: "acct-com:org-com" },
-  { name: "s1", email: "aryeh.stark.1@evinced.net", seatKey: "acct-s1:org-s1" },
-  { name: "s2", email: "aryeh.stark.2@evinced.net", seatKey: "acct-s2:org-s2" },
+  { name: "com", email: "k@evinced.com", seatKey: "acct-com:org-com" },
+  { name: "s1", email: "s1@evinced.net", seatKey: "acct-s1:org-s1" },
+  { name: "s2", email: "s2@evinced.net", seatKey: "acct-s2:org-s2" },
 ];
 
 function snapMap(entries: Record<string, UsageSnapshot>) {
@@ -255,14 +255,13 @@ test("rankProfiles: empty profile list yields empty ranking", () => {
 
 // ── two orgs, one email (the real-world case that broke this) ───────────
 //
-// aryeh.kiovetsky@evinced.net holds BOTH a seat in the Evinced RD team org and
-// a personal Max org. Same address, same accountUuid, different organizationUuid
-// — and entirely independent rate-limit budgets. The first cut keyed on email
-// and conflated them.
+// One address can hold BOTH a seat in a team org and a personal Max org. Same
+// address, same accountUuid, different organizationUuid — and entirely
+// independent rate-limit budgets. The first cut keyed on email and conflated them.
 
-const SHARED_EMAIL = "aryeh.kiovetsky@evinced.net";
+const SHARED_EMAIL = "k@evinced.net";
 const TWO_ORGS: Profile[] = [
-  { name: "Net-T0", email: SHARED_EMAIL, seatKey: "acct-t0:org-team", label: "Evinced RD" },
+  { name: "Net-T0", email: SHARED_EMAIL, seatKey: "acct-t0:org-team", label: "team" },
   { name: "Net-M0", email: SHARED_EMAIL, seatKey: "acct-t0:org-max", label: "personal" },
 ];
 
@@ -286,12 +285,12 @@ test("excluding the active seat does not exclude its same-email sibling", () => 
   assert.deepEqual(out.map((r) => r.profile.name), ["Net-M0"]);
 });
 
-// The inverse collision, which org-only keying missed: aryeh.kiovetsky and
-// aryeh.stark.1 are BOTH members of Evinced RD. Same org, different member,
+// The inverse collision, which org-only keying missed: two distinct accounts
+// can BOTH be members of the same team org. Same org, different member,
 // and Team limits are per-member — so two independent budgets.
 const SAME_ORG: Profile[] = [
-  { name: "Net-T0", email: "aryeh.kiovetsky@evinced.net", seatKey: "acct-t0:org-team", label: "Evinced RD" },
-  { name: "Net-T1", email: "aryeh.stark.1@evinced.net", seatKey: "acct-t1:org-team", label: "Evinced RD" },
+  { name: "Net-T0", email: "k@evinced.net", seatKey: "acct-t0:org-team", label: "team" },
+  { name: "Net-T1", email: "s1@evinced.net", seatKey: "acct-t1:org-team", label: "team" },
 ];
 
 test("same-org profiles keep independent usage readings", () => {
@@ -374,7 +373,7 @@ function pair(orgType: string, subType: unknown) {
       emailAddress: "a@evinced.net",
       accountUuid: "acct-a",
       organizationUuid: "org-a",
-      organizationName: "Evinced RD",
+      organizationName: "Acme Team",
       organizationType: orgType,
     },
   };
@@ -387,7 +386,7 @@ test("seatIncoherence: flags a max token stored under a team seat", () => {
   const why = seatIncoherence(pair("claude_team", "max"));
   assert.match(String(why), /`max` token/);
   assert.match(String(why), /`claude_team`/);
-  assert.match(String(why), /Evinced RD/);
+  assert.match(String(why), /Acme Team/);
 });
 
 test("seatIncoherence: flags a team token stored under a max seat", () => {
@@ -642,14 +641,14 @@ test("mergeProfile: dedupes on name and seat, never on email or org", () => {
 // ── paths + formatting ──────────────────────────────────────────────────
 
 test("sanitizeKey: lowercases, strips path-hostile chars, keeps seats distinct", () => {
-  assert.equal(sanitizeKey("A1:B5C2BF52-78F2-4DD7"), "a1_b5c2bf52-78f2-4dd7");
+  assert.equal(sanitizeKey("A1:CCCC3333-0000-0000"), "a1_cccc3333-0000-0000");
   assert.equal(sanitizeKey("a/../../b"), "a_.._.._b");
   assert.ok(!sanitizeKey("a/b").includes("/"), "no path separators");
 });
 
 test("snapshotPath: keyed by seat, lands under the home .claude dir", () => {
-  const p = snapshotPath("/Users/aryeh", "67ce42fe:32e87edd");
-  assert.equal(p, "/Users/aryeh/.claude/.cc-usage-67ce42fe_32e87edd");
+  const p = snapshotPath("/Users/aryeh", "dddd4444:bbbb2222");
+  assert.equal(p, "/Users/aryeh/.claude/.cc-usage-dddd4444_bbbb2222");
 });
 
 test("keychain argv: writes use -U so an existing item updates in place", () => {
