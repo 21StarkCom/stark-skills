@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=901 runId=761910f6-8e41-4df5-b64b-84607d9632c4 -->
+- Externalize the statusline account roster behind an optional private map and replace public account PII with synthetic placeholders.
 <!-- stark-gh:pr-merge pr=900 runId=7cc8f497-92e1-441d-9bba-1a0d8996e908 -->
 - Add dedicated statusline labels and color palettes for the four `aryeh.stark` Max accounts, with equivalent Team-plan mappings.
 <!-- stark-gh:pr-merge pr=899 runId=ad1fa7db-c092-44a0-ae61-b2031aa691d2 -->
