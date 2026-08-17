@@ -323,8 +323,8 @@ export function accessTokenHoursLeft(
  * reports `fresh` and the active seat is skipped. The profile is silently
  * unusable and nothing says so until a `use` lands a dead credential.
  *
- * Observed twice in one hour on 2026-08-09: `Team-3` held `448e201b` while the
- * live item had rotated to `ac8674c7`, and `Team-4` — skipped as the active seat
+ * Observed twice in one hour on 2026-08-09: `Team-3` held `eeee5555` while the
+ * live item had rotated to `ffff6666`, and `Team-4` — skipped as the active seat
  * by a full `refresh --all` — reached `400 invalid_grant` / `401 revoked` and
  * needed a browser login, the one outcome this fleet exists to avoid.
  *

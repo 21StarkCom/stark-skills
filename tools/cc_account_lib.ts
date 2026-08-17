@@ -55,9 +55,9 @@
  * The identity is the SEAT: the `accountUuid` + `organizationUuid` pair. Neither
  * component is unique on its own, as one machine's real profiles show:
  *
- *   Net-T0  account f05d659e  org 32e87edd   (Evinced RD team seat)
- *   Net-M0  account f05d659e  org b5c2bf52   <- same account, different org
- *   Net-T1  account 67ce42fe  org 32e87edd   <- same org, different account
+ *   Net-T0  account aaaa1111  org bbbb2222   (Acme Team team seat)
+ *   Net-M0  account aaaa1111  org cccc3333   <- same account, different org
+ *   Net-T1  account dddd4444  org bbbb2222   <- same org, different account
  *
  * One address can hold seats in several orgs (a team seat plus a personal Max
  * plan), and one org holds many members. Team-plan limits are per-member, so
@@ -81,7 +81,7 @@ export interface Profile {
    * earlier versions, which the CLI backfills from the stored record on read.
    */
   seatKey?: string;
-  /** Org name, e.g. `Evinced RD` — display only, disambiguates shared emails. */
+  /** Org name, e.g. `Acme Team` — display only, disambiguates shared emails. */
   label?: string;
   /**
    * Position in the rotation cycle that `next` walks. Lower comes first.
@@ -798,7 +798,7 @@ export function validateStoredProfile(v: unknown): StoredProfile {
  * balance is too low" on an account that has no metered balance at all.
  *
  * Observed live on 2026-08-01: profile `Net-T3` held a `max` token under an
- * `Evinced RD` (`claude_team`) seat — the only incoherent one of five team
+ * `Acme Team` (`claude_team`) seat — the only incoherent one of five team
  * profiles.
  *
  * Returns a human-readable reason, or null when the halves agree OR when
