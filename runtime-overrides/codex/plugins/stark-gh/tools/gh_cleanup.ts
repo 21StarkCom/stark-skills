@@ -363,7 +363,10 @@ export function buildPlanFullSweep(args: CleanupArgs): CleanupPlan {
   // run because it mutates refs even though the executor is skipped.
   let fetchPruned = false;
   if (shouldFetchForPlan(args)) {
-    const fetched = tryGit(["fetch", "--all", "--prune", "--prune-tags"]);
+    // --force lets a moved tag update instead of rejecting the whole fetch (CI
+    // re-points nightly-tested at each green nightly); remote-tracking branches
+    // are already force-updated by the default `+` refspec, so this only tags.
+    const fetched = tryGit(["fetch", "--all", "--prune", "--prune-tags", "--force"]);
     fetchPruned = fetched.ok;
     if (!fetched.ok) notes.push(`fetch --all --prune failed: ${fetched.stderr.split("\n")[0]}`);
   } else {
