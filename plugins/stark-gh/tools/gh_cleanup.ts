@@ -357,8 +357,11 @@ export function buildPlanFullSweep(args: CleanupArgs): CleanupPlan {
     new Set([repo.defaultBranch, repo.currentBranch, "main", "master", ...args.keepBranches]),
   );
 
-  // Fetch + prune (best-effort; surface in notes if it fails).
-  const fetched = tryGit(["fetch", "--all", "--prune", "--prune-tags"]);
+  // Fetch + prune (best-effort; surface in notes if it fails). --force lets a
+  // moved tag update instead of rejecting the whole fetch (CI re-points
+  // nightly-tested at each green nightly); remote-tracking branches are already
+  // force-updated by the default `+` refspec, so this only affects tags.
+  const fetched = tryGit(["fetch", "--all", "--prune", "--prune-tags", "--force"]);
   const notes: string[] = [];
   if (!fetched.ok) notes.push(`fetch --all --prune failed: ${fetched.stderr.split("\n")[0]}`);
 
