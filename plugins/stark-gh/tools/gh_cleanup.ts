@@ -347,6 +347,19 @@ function looseObjectCount(): number {
 
 const GC_LOOSE_OBJECT_THRESHOLD = 50;
 
+// release-please REUSES a single branch name for every release
+// (`release-please--branches--<base>[--components--<pkg>]`). A branch->merged-PR
+// sweep matches that name to an OLD merged release PR and would delete the branch
+// out from under the LIVE release PR that reuses it — closing it unmerged. These
+// branches are release-please-managed, so never sweep them, in any mode. Matching
+// the prefix (not an exact name) is deliberate: the name varies by base/component,
+// and the double-dash form is release-please-action's own convention.
+const RELEASE_PLEASE_BRANCH_RE = /^release-please--/;
+
+export function isProtectedBranch(name: string, protectedBranches: readonly string[]): boolean {
+  return protectedBranches.includes(name) || RELEASE_PLEASE_BRANCH_RE.test(name);
+}
+
 // =============================================================================
 // Plan builder — full sweep
 // =============================================================================
@@ -405,7 +418,7 @@ export function buildPlanFullSweep(args: CleanupArgs): CleanupPlan {
   const localBranches: LocalBranchPlan[] = [];
   const defaultRef = `origin/${repo.defaultBranch}`;
   for (const b of allLocal) {
-    if (protectedBranches.includes(b.name)) continue;
+    if (isProtectedBranch(b.name, protectedBranches)) continue;
     const mergedPr = mergedByHead.get(b.name);
     if (mergedPr) {
       localBranches.push({
@@ -440,7 +453,7 @@ export function buildPlanFullSweep(args: CleanupArgs): CleanupPlan {
   const allRemote = listRemoteBranches("origin");
   const remoteBranches: RemoteBranchPlan[] = [];
   for (const name of allRemote) {
-    if (protectedBranches.includes(name)) continue;
+    if (isProtectedBranch(name, protectedBranches)) continue;
     const mergedPr = mergedByHead.get(name);
     if (mergedPr) remoteBranches.push({ name, reason: "merged-pr", prNumber: mergedPr.number });
   }
@@ -533,7 +546,7 @@ export function buildPlanSinglePr(prNumber: number, args: CleanupArgs): CleanupP
   const remoteExists = tryGit(["show-ref", "--verify", "--quiet", `refs/remotes/origin/${pr.headRefName}`]).ok;
 
   const localBranches: LocalBranchPlan[] = [];
-  if (localExists && !protectedBranches.includes(pr.headRefName)) {
+  if (localExists && !isProtectedBranch(pr.headRefName, protectedBranches)) {
     const safe = isAncestor(pr.headRefName, "HEAD") || isAncestor(pr.headRefName, `origin/${repo.defaultBranch}`);
     localBranches.push({
       name: pr.headRefName,
@@ -543,7 +556,7 @@ export function buildPlanSinglePr(prNumber: number, args: CleanupArgs): CleanupP
     });
   }
   const remoteBranches: RemoteBranchPlan[] = [];
-  if (remoteExists && !protectedBranches.includes(pr.headRefName) && pr.state === "MERGED") {
+  if (remoteExists && !isProtectedBranch(pr.headRefName, protectedBranches) && pr.state === "MERGED") {
     remoteBranches.push({ name: pr.headRefName, reason: "merged-pr", prNumber: pr.number });
   }
 
