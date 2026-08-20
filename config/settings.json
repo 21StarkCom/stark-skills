@@ -25,6 +25,34 @@
             "command": "mkdir -p \"${CLAUDE_PROJECT_DIR:-.}/.remember/logs\""
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.config/cmux/cmux-autoname.sh\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.config/cmux/cmux-status-hook.sh\" working"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.config/cmux/cmux-status-hook.sh\" idle"
+          }
+        ]
       }
     ]
   },
