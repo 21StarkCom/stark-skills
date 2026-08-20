@@ -28,7 +28,7 @@
 # payload matrix by config/statusline-parse.test.sh (run in CI via
 # tools/statusline_parse.test.ts).
 parse_payload() {
-  local j="$1" _m _eff _vim _ag _os _sd _fh _cu _rest
+  local j="$1" _m _eff _vim _ag _os _sd _fh _rest
   local Sr='":"([^"]*)"' Nr='":(-?[0-9][0-9.eE+-]*)'   # string / number key-tails
 
   # cwd: workspace.current_dir, else top-level cwd (jq's // only falls through
@@ -41,8 +41,6 @@ parse_payload() {
   sid="";          [[ $j =~ \"session_id$Sr ]]   && sid="${BASH_REMATCH[1]}"
 
   ctx_size="";   [[ $j =~ \"context_window_size$Nr ]]   && ctx_size="${BASH_REMATCH[1]}"
-  tokens_in="";  [[ $j =~ \"total_input_tokens$Nr ]]    && tokens_in="${BASH_REMATCH[1]}"
-  tokens_out=""; [[ $j =~ \"total_output_tokens$Nr ]]   && tokens_out="${BASH_REMATCH[1]}"
   api_dur_ms=""; [[ $j =~ \"total_api_duration_ms$Nr ]] && api_dur_ms="${BASH_REMATCH[1]}"
   s_added="";    [[ $j =~ \"total_lines_added$Nr ]]     && s_added="${BASH_REMATCH[1]}"
   s_removed="";  [[ $j =~ \"total_lines_removed$Nr ]]   && s_removed="${BASH_REMATCH[1]}"
@@ -72,12 +70,6 @@ parse_payload() {
   _fh=""; [[ $j =~ \"five_hour\":\{([^{}]*)\} ]] && _fh="${BASH_REMATCH[1]}"
   five_pct="";   [[ $_fh =~ \"used_percentage$Nr ]] && five_pct="${BASH_REMATCH[1]}"
   five_reset=""; [[ $_fh =~ \"resets_at$Nr ]]       && five_reset="${BASH_REMATCH[1]}"
-
-  _cu=""; [[ $j =~ \"current_usage\":\{([^{}]*)\} ]] && _cu="${BASH_REMATCH[1]}"
-  cur_in="";  [[ $_cu =~ \"input_tokens$Nr ]]  && cur_in="${BASH_REMATCH[1]}"
-  cur_out=""; [[ $_cu =~ \"output_tokens$Nr ]] && cur_out="${BASH_REMATCH[1]}"
-  cur_cw="";  [[ $_cu =~ \"cache_creation_input_tokens$Nr ]] && cur_cw="${BASH_REMATCH[1]}"
-  cur_cr="";  [[ $_cu =~ \"cache_read_input_tokens$Nr ]]     && cur_cr="${BASH_REMATCH[1]}"
 
   # context_window.used_percentage: 3 keys share the name (context_window +
   # seven_day + five_hour). Drop the two flat rate-limit blocks (captured above)
@@ -552,23 +544,6 @@ printf -v ctx '%.0f' "${used_pct:-0}"
 tcolor "$ctx" 80 50; mkbar "$ctx" _CTX_FB
 seg2 "${CTX_COL}CTX${R} ${BAR} ${TC}${ctx}%${R}"
 
-# Turn flow — what flowed in/out on the last API call, read as one
-# narrative connected with arrows:
-#   ⬆ fresh   = input + cache_creation (full price + cache-write surcharge)
-#   📖 cache  = cache_read with hit% (10% price)
-#   ⬇ out    = generated output
-if _on tokens && [ -n "$cur_in" ]; then
-  cin=${cur_in:-0} ccw=${cur_cw:-0} ccr=${cur_cr:-0} cot=${cur_out:-0}
-  fresh=$(( cin + ccw ))
-  total_in=$(( fresh + ccr ))
-  hit=0
-  [ "$total_in" -gt 0 ] && hit=$(( ccr * 100 / total_in ))
-  fmt_n "$fresh"; tok="${SAP}⬆ ${FN}${R}"
-  [ "$ccr" -gt 0 ] && { fmt_n "$ccr"; tok="${tok} ${DIM}→ ${GRN}\U0001f4d6 ${FN} ${hit}%${R}"; }
-  [ "$cot" -gt 0 ] && { fmt_n "$cot"; tok="${tok} ${DIM}→ ${PEACH}⬇ ${FN}${R}"; }
-  seg2 "$tok"
-fi
-
 # 5-hour rate-limit window: fixed-color "5H" label instead of a dynamic-
 # colored emoji; countdown is a bare duration, no emoji/label of its own.
 # Always visible (missing pct → 0%); Enterprise fills with 🔸 instead of
@@ -650,15 +625,6 @@ if [ -n "$acct_seat" ] && [ -n "$five_pct" ]; then
       "$_fpct" "${five_reset:-0}" "$_wpct" "${week_reset:-0}" "$NOW" "$acct_email" "$acct_seat" \
       > "$HOME/.claude/.cc-usage-${acct_seat//:/_}" 2>/dev/null
   fi
-fi
-
-# Cumulative session tokens — opt-in (off by default; misleading because
-# every API call's full input is summed, including cache rereads).
-if _on tokens_total && { [ -n "$tokens_in" ] || [ -n "$tokens_out" ]; }; then
-  tok=""
-  [ -n "$tokens_in" ]  && { fmt_n "${tokens_in:-0}";  tok="${DIM}Σ⬆ ${FN}${R}"; }
-  [ -n "$tokens_out" ] && { fmt_n "${tokens_out:-0}"; tok="${tok} ${DIM}Σ⬇ ${FN}${R}"; }
-  seg2 "$tok"
 fi
 
 if _on code_churn; then
