@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=905 runId=b429650c-ad6c-4e42-975a-5862f6c79a5f -->
+- Add cmux hooks that name sessions, assign repository colors, and show working or idle status in the sidebar.
 <!-- stark-gh:pr-merge pr=902 runId=2731eae5-e85b-4b97-a488-1531344d6114 -->
 - Refocused author gates on operator decisions and moved technical QA into an agent-completed authoring checklist.
 <!-- stark-gh:pr-merge pr=901 runId=761910f6-8e41-4df5-b64b-84607d9632c4 -->
