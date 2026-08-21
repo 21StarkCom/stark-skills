@@ -19,8 +19,8 @@ eval "$(sed -n '/^parse_payload() {/,/^}/p' "$SCRIPT")"
 type parse_payload >/dev/null 2>&1 || { echo "FAIL: could not extract parse_payload from $SCRIPT"; exit 1; }
 
 VARS=(cwd model model_id used_pct ctx_size vim_mode session_name effort thinking
-      agent_name out_style week_pct week_reset five_pct five_reset tokens_in
-      tokens_out cur_in cur_out cur_cw cur_cr over_200k sid api_dur_ms s_added s_removed)
+      agent_name out_style week_pct week_reset five_pct five_reset over_200k sid
+      api_dur_ms s_added s_removed)
 
 jq_parse() { # the EXACT filter statusline-command.sh used before the bash rewrite
   jq -r '{
@@ -34,12 +34,6 @@ jq_parse() { # the EXACT filter statusline-command.sh used before the bash rewri
     week_reset:(.rate_limits.seven_day.resets_at // ""),
     five_pct:(.rate_limits.five_hour.used_percentage // ""),
     five_reset:(.rate_limits.five_hour.resets_at // ""),
-    tokens_in:(.context_window.total_input_tokens // ""),
-    tokens_out:(.context_window.total_output_tokens // ""),
-    cur_in:(.context_window.current_usage.input_tokens // ""),
-    cur_out:(.context_window.current_usage.output_tokens // ""),
-    cur_cw:(.context_window.current_usage.cache_creation_input_tokens // ""),
-    cur_cr:(.context_window.current_usage.cache_read_input_tokens // ""),
     over_200k:(.exceeds_200k_tokens // false), sid:(.session_id // ""),
     api_dur_ms:(.cost.total_api_duration_ms // ""),
     s_added:(.cost.total_lines_added // ""), s_removed:(.cost.total_lines_removed // "")
