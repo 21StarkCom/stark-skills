@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=909 runId=bacfb24a-ae41-4cac-8edf-3a76c292f19c -->
+- Add next-step hints to the cc-user CLI account setup workflow.
 <!-- stark-gh:pr-merge pr=907 runId=550763c7-616e-45a3-abf8-23174f612212 -->
 - Removed the obsolete cmux sidebar status integration and its Claude Code hooks.
 <!-- stark-gh:pr-merge pr=905 runId=b429650c-ad6c-4e42-975a-5862f6c79a5f -->
