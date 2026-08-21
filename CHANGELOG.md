@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=911 runId=ff8777c1-9dce-4f22-8893-13fbe28249df -->
+- Retired `/remember` and updated `/stark-adr` to use the TypeScript Atlas CLI instead of the obsolete Go installation.
 <!-- stark-gh:pr-merge pr=909 runId=bacfb24a-ae41-4cac-8edf-3a76c292f19c -->
 - Add next-step hints to the cc-user CLI account setup workflow.
 <!-- stark-gh:pr-merge pr=907 runId=550763c7-616e-45a3-abf8-23174f612212 -->
