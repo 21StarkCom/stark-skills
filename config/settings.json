@@ -34,26 +34,6 @@
           }
         ]
       }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"$HOME/.config/cmux/cmux-status-hook.sh\" working"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"$HOME/.config/cmux/cmux-status-hook.sh\" idle"
-          }
-        ]
-      }
     ]
   },
   "statusLine": {
