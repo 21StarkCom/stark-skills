@@ -495,9 +495,16 @@ function cmdAdd(name: string): void {
   // `add` captures the CURRENT login, so the new profile is always the active
   // seat right now — pointing at `use ${name}` would be a no-op. The real next
   // step is placing it: a fresh add leaves it unplaced at the tail of the cycle.
-  hint(
-    `it is now the active profile but unplaced — \`order\` sets its spot in the rotation.`,
-  );
+  // But a re-add (the token-refresh path) or a seat rename INHERITS its slot
+  // (`mergeProfile`: `prior?.order ?? displaced?.order`), so only nudge toward
+  // `order` when the profile genuinely joined unplaced — otherwise the hint
+  // tells the operator to re-place a slot that never moved.
+  const added = profiles.find((p) => p.name === name);
+  if (added && added.order === undefined) {
+    hint(
+      `it is now the active profile but unplaced — \`order\` sets its spot in the rotation.`,
+    );
+  }
 }
 
 function cmdUse(name: string): void {
