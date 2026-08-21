@@ -492,6 +492,19 @@ function cmdAdd(name: string): void {
   if (displaced) {
     console.log(`replaced ${displaced.name} — same seat, renamed`);
   }
+  // `add` captures the CURRENT login, so the new profile is always the active
+  // seat right now — pointing at `use ${name}` would be a no-op. The real next
+  // step is placing it: a fresh add leaves it unplaced at the tail of the cycle.
+  // But a re-add (the token-refresh path) or a seat rename INHERITS its slot
+  // (`mergeProfile`: `prior?.order ?? displaced?.order`), so only nudge toward
+  // `order` when the profile genuinely joined unplaced — otherwise the hint
+  // tells the operator to re-place a slot that never moved.
+  const added = profiles.find((p) => p.name === name);
+  if (added && added.order === undefined) {
+    hint(
+      `it is now the active profile but unplaced — \`order\` sets its spot in the rotation.`,
+    );
+  }
 }
 
 function cmdUse(name: string): void {
@@ -927,6 +940,9 @@ function cmdNext(apply: boolean, best: boolean): void {
       `${target.name}  ${target.email}${orgSuffix(target)}  ${why}`,
     );
     console.log("# --dry-run: not switched");
+    hint(
+      `drop --dry-run to switch to ${target.name}, or \`use <name>\` for a specific profile.`,
+    );
     return;
   }
   cmdUse(target.name);
@@ -962,6 +978,7 @@ function cmdOrder(names: string[]): void {
   for (const [i, p] of orderedProfiles(readRegistry()).entries()) {
     console.log(`${String(i + 1).padStart(3)}  ${p.name}`);
   }
+  hint("`next` walks the cycle from the account after the active one.");
 }
 
 // ── refresh ─────────────────────────────────────────────────────────────
@@ -1302,6 +1319,16 @@ function nowSec(): number {
 function fail(msg: string): never {
   process.stderr.write(`cc_account: ${msg}\n`);
   process.exit(1);
+}
+
+/**
+ * Print a next-step hint after a setup command.
+ *
+ * Guidance only — never a warning or an error. Kept to one prefix so the hints
+ * read as a single channel the operator can learn to scan for "what now?".
+ */
+function hint(msg: string): void {
+  console.log(`hint: ${msg}`);
 }
 
 const USAGE = `usage: cc_account.ts <command>
