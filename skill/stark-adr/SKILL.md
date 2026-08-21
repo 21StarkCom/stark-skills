@@ -20,7 +20,7 @@ usage, and arguments, then stop — do not run preflight or any phase.
 Manage Architecture Decision Records the way the doc convention defines them:
 `docs/adr/NNNN-kebab-title.md`, **MADR-lite** (Status / Context / Decision /
 Alternatives / Consequences), one decision per file, numbered monotonically,
-immutable — supersede, don't edit. See `stark-2nd-brain-cli/docs/CONVENTIONS.md`.
+immutable — supersede, don't edit. See `docs/CONVENTIONS.md` in `21StarkCom/atlas`.
 
 This skill is a thin wrapper over the `brain adr` command group, so the CLI and
 the skill share one tested engine.
@@ -29,18 +29,15 @@ the skill share one tested engine.
 
 ## Prerequisite
 
-`brain` must be on PATH. It lives in the private `stark-2nd-brain-cli` repo, so
-set `GOPRIVATE` (otherwise `go install` hits the public proxy/sumdb and fails):
+`brain` must be on PATH. It is the **TypeScript Atlas engine** (`21StarkCom/atlas`,
+`atlas/apps/cli`) — the `adr` group is a byte-identical port of the retired Go `brain adr`.
 
 ```bash
-GOPRIVATE=github.com/21-Stark-AI \
-  go install github.com/21-Stark-AI/stark-2nd-brain-cli/cmd/brain@latest
-# or from a brain-cli checkout:  go build -o "$(go env GOPATH)/bin/brain" ./cmd/brain
-brain adr --help   # verify ($(go env GOPATH)/bin must be on PATH)
+brain adr list   # verify brain is on PATH and the adr group is available
 ```
 
-If `brain` is missing, stop and tell the user to install it (don't hand-roll the
-ADR file — the whole point is one engine).
+If `brain` is missing, stop and tell the user to install it (build the Atlas engine and put
+its `brain` on PATH) — don't hand-roll the ADR file, the whole point is one engine.
 
 ## Operations
 
