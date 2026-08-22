@@ -132,6 +132,77 @@ export function prMergeStateStatus(number: number, repoSlug: string, opts: { exe
   return (JSON.parse(out) as { mergeStateStatus?: string }).mergeStateStatus ?? "UNKNOWN";
 }
 
+export function closePr(prNumber: number, repoSlug: string, opts: { exec?: ExecFn } = {}): void {
+  gh(["pr", "close", String(prNumber), "--repo", repoSlug], opts);
+}
+
+// Idempotent, like markPrReady: reopening an already-open PR is a no-op success.
+// This makes refirePrViaReopen's retry loop safe — a reopen whose first attempt
+// timed out AFTER actually applying leaves the PR open, and the retry must not
+// then read "already open" as a failure and manufacture a false LEFT_CLOSED.
+export function reopenPr(prNumber: number, repoSlug: string, opts: { exec?: ExecFn } = {}): void {
+  try {
+    gh(["pr", "reopen", String(prNumber), "--repo", repoSlug], opts);
+  } catch (err) {
+    const msg = String((err as Error)?.message ?? err);
+    // Swallow ONLY the "it is already open" family (the idempotency case). A
+    // "cannot be reopened" (e.g. the PR was merged) is a real failure and must
+    // propagate — silently accepting it would strand the flow believing it reopened.
+    if (!/already open|is not closed/i.test(msg)) {
+      throw err;
+    }
+  }
+}
+
+// Re-fire CI on a stuck PR by closing then immediately reopening it. The
+// `reopened` activity is a DEFAULT `pull_request` type, so it re-triggers the
+// target repo's workflows on the SAME head SHA — no commit rewrite. This is the
+// only reliable recovery for a dropped `synchronize` webhook: re-running a
+// workflow replays the original event payload (a draft-guarded job skips again),
+// and a `workflow_dispatch` run never joins the PR's status rollup. Proven on
+// 21StarkCom/atlas#103, where a rapid retarget+ready swallowed the synchronize
+// event and a close+reopen on the same SHA fired a clean run.
+//
+// A PR left CLOSED by a half-done re-fire is worse than the stuck state it was
+// meant to cure, so the reopen is retried and — if close SUCCEEDED but every
+// reopen failed — a distinctive `LEFT_CLOSED` error is thrown so the caller can
+// surface it loudly rather than silently strand the PR. A close that itself
+// fails leaves the PR intact and is thrown plain (no `LEFT_CLOSED` marker): the
+// caller can treat that as "the re-fire did not happen" and keep waiting.
+export function refirePrViaReopen(
+  prNumber: number,
+  repoSlug: string,
+  opts: { exec?: ExecFn; reopenAttempts?: number } = {},
+): void {
+  closePr(prNumber, repoSlug, opts); // throws plain on failure → PR untouched
+  const attempts = Math.max(1, opts.reopenAttempts ?? 5);
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      reopenPr(prNumber, repoSlug, opts);
+      return;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw new Error(
+    `LEFT_CLOSED: PR #${prNumber} was closed to re-fire CI but reopen failed ${attempts}× — ` +
+    `reopen it by hand: gh pr reopen ${prNumber} --repo ${repoSlug}. ` +
+    `Cause: ${String((lastErr as Error)?.message ?? lastErr)}`,
+  );
+}
+
+// GitHub's aggregate review verdict for the PR: REVIEW_REQUIRED (a required
+// review is still outstanding), CHANGES_REQUESTED, APPROVED, or null (no review
+// requirement / rule). The watcher consults it to tell a vacuous+BLOCKED that a
+// close+reopen re-fire CAN cure (a required check that has not registered) from
+// one it cannot (a required review) — mergeStateStatus alone reports BLOCKED for
+// both. Returns "" when the field is absent so callers read "no review gate".
+export function prReviewDecision(number: number, repoSlug: string, opts: { exec?: ExecFn } = {}): string {
+  const out = gh(["pr", "view", String(number), "--repo", repoSlug, "--json", "reviewDecision"], opts);
+  return (JSON.parse(out) as { reviewDecision?: string | null }).reviewDecision ?? "";
+}
+
 export function prChecks(pr: number, owner: string, repo: string, opts: { exec?: ExecFn } = {}): unknown[] {
   const out = gh(
     [
