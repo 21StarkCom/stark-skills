@@ -13,7 +13,12 @@ import {
   decideBlockedTransition,
   applyMergeStateGate,
   MERGE_BLOCKED_GRACE_SEC,
+  decideRefireTransition,
+  CHECK_REGISTRATION_REFIRE_SEC,
+  MAX_CHECK_REFIRES,
+  MAX_REFIRE_ATTEMPTS,
 } from "../gh_watch_runs.ts";
+import { refirePrViaReopen, reopenPr } from "../lib/gh.ts";
 
 test("parsePrMergeArgs: returns null when --on-green absent", () => {
   assert.equal(parsePrMergeArgs([]), null);
@@ -276,4 +281,201 @@ test("applyMergeStateGate: non-ready outcomes pass through untouched", () => {
   const waiting = applyMergeStateGate({ kind: "wait", reason: "pending: 1" }, "BLOCKED");
   assert.equal(waiting.kind, "wait");
   assert.ok(!waiting.blocked);
+});
+
+// =============================================================================
+// STARK-1053 — the watcher must not treat a vacuous rollup as terminal during the
+// post-force-push pre-registration window. atlas#102 force-pushed, the rollup read
+// zero required contexts before atlas-gate attached, and the watcher gave up at
+// the 300s vacuous grace; #102 then sat green+CLEAN+MERGEABLE for ~90 min, unmerged.
+// The fix: GitHub's own mergeStateStatus disambiguates a pre-registration vacuous
+// (BLOCKED → wait/re-fire) from a genuinely-unprotected base (CLEAN → the existing
+// vacuous terminal).
+// =============================================================================
+
+test("applyMergeStateGate: vacuous + BLOCKED becomes a re-fireable blocked wait", () => {
+  const r = applyMergeStateGate(
+    { kind: "wait", reason: "no required checks observed yet", vacuous: true },
+    "BLOCKED",
+  );
+  assert.equal(r.kind, "wait");
+  assert.equal(r.blocked, true);
+  assert.equal(r.refireable, true);
+  assert.equal(r.mergeState, "BLOCKED");
+  // Dropping the vacuous flag is load-bearing: it routes the loop AWAY from the
+  // 300s no_required_checks terminal and INTO the bounded blocked/re-fire path.
+  assert.ok(!r.vacuous, "must drop the vacuous flag");
+});
+
+test("applyMergeStateGate: vacuous + UNKNOWN becomes a re-fireable blocked wait", () => {
+  const r = applyMergeStateGate({ kind: "wait", vacuous: true }, "UNKNOWN");
+  assert.equal(r.blocked, true);
+  assert.equal(r.refireable, true);
+  assert.ok(!r.vacuous);
+});
+
+// The genuinely-unprotected base (kotodama#861): a vacuous rollup GitHub does NOT
+// block is a real vacuous pass. It must STAY vacuous so the existing 300s terminal
+// names --allow-no-required-checks — never reclassified as blocked/refireable.
+test("applyMergeStateGate: vacuous + CLEAN stays vacuous, not blocked", () => {
+  const r = applyMergeStateGate({ kind: "wait", vacuous: true }, "CLEAN");
+  assert.equal(r.kind, "wait");
+  assert.equal(r.vacuous, true);
+  assert.ok(!r.blocked);
+  assert.ok(!r.refireable);
+  assert.equal(r.mergeState, "CLEAN");
+});
+
+test("applyMergeStateGate: vacuous + UNSTABLE stays vacuous", () => {
+  const r = applyMergeStateGate({ kind: "wait", vacuous: true }, "UNSTABLE");
+  assert.equal(r.vacuous, true);
+  assert.ok(!r.blocked);
+});
+
+// A green-but-BLOCKED wait (STARK-579) stays NON-refireable: the suite demonstrably
+// ran, so close+reopen would re-run the whole set and, for a missing review, do
+// nothing. Only the ZERO-required-contexts case is a dropped-webhook signature.
+test("applyMergeStateGate: ready + BLOCKED is blocked but NOT refireable", () => {
+  const r = applyMergeStateGate({ kind: "ready", reason: "all required passing" }, "BLOCKED");
+  assert.equal(r.blocked, true);
+  assert.ok(!r.refireable);
+});
+
+test("decideRefireTransition: waits inside the registration window", () => {
+  assert.equal(decideRefireTransition(0, 0), "wait");
+  assert.equal(decideRefireTransition(CHECK_REGISTRATION_REFIRE_SEC - 1, 0), "wait");
+});
+
+test("decideRefireTransition: re-fires once the window elapses with budget unspent", () => {
+  assert.equal(decideRefireTransition(CHECK_REGISTRATION_REFIRE_SEC, 0), "refire");
+});
+
+test("decideRefireTransition: budget spent → waits inside grace, terminal past it", () => {
+  assert.equal(decideRefireTransition(CHECK_REGISTRATION_REFIRE_SEC, MAX_CHECK_REFIRES), "wait");
+  assert.equal(decideRefireTransition(MERGE_BLOCKED_GRACE_SEC, MAX_CHECK_REFIRES), "terminal");
+});
+
+// Re-fire is tested BEFORE terminal: a state that jumped past both bounds (a long
+// poll gap under rate limiting) still gets its one cure attempt before we abandon it.
+test("decideRefireTransition: re-fire takes precedence over terminal when never fired", () => {
+  assert.equal(decideRefireTransition(MERGE_BLOCKED_GRACE_SEC + 100, 0), "refire");
+});
+
+test("decideRefireTransition: windows are configurable", () => {
+  const o = { refireAfterSec: 10, maxRefires: 1, terminalAfterSec: 30 };
+  assert.equal(decideRefireTransition(5, 0, o), "wait");
+  assert.equal(decideRefireTransition(10, 0, o), "refire");
+  assert.equal(decideRefireTransition(30, 1, o), "terminal");
+});
+
+test("MAX_CHECK_REFIRES is 1 — one automatic close+reopen per blocked episode", () => {
+  assert.equal(MAX_CHECK_REFIRES, 1);
+});
+
+// refirePrViaReopen: close THEN reopen (order-sensitive), reopen retried, and a
+// reopen that never lands surfaces LEFT_CLOSED so the watcher stops loudly rather
+// than strand the PR closed. A close that itself fails leaves the PR intact.
+test("refirePrViaReopen: closes then reopens in order on the happy path", () => {
+  const calls: string[] = [];
+  const exec = (_cmd: string, args: string[]) => {
+    calls.push(args.slice(0, 2).join(" "));
+    return Buffer.from("");
+  };
+  refirePrViaReopen(42, "o/r", { exec: exec as never });
+  assert.deepEqual(calls, ["pr close", "pr reopen"]);
+});
+
+test("refirePrViaReopen: retries a failing reopen and succeeds within budget", () => {
+  const closes: number[] = [];
+  let reopenTries = 0;
+  const exec = (_cmd: string, args: string[]) => {
+    const verb = args.slice(0, 2).join(" ");
+    if (verb === "pr close") closes.push(1);
+    if (verb === "pr reopen") {
+      reopenTries++;
+      if (reopenTries < 3) throw new Error("502 server error");
+    }
+    return Buffer.from("");
+  };
+  refirePrViaReopen(42, "o/r", { exec: exec as never, reopenAttempts: 5 });
+  assert.equal(reopenTries, 3);
+  assert.equal(closes.length, 1, "close is issued exactly once");
+});
+
+test("refirePrViaReopen: LEFT_CLOSED when close succeeds but every reopen fails", () => {
+  const exec = (_cmd: string, args: string[]) => {
+    if (args.slice(0, 2).join(" ") === "pr reopen") throw new Error("reopen boom");
+    return Buffer.from("");
+  };
+  assert.throws(
+    () => refirePrViaReopen(42, "o/r", { exec: exec as never, reopenAttempts: 3 }),
+    /LEFT_CLOSED/,
+  );
+});
+
+test("refirePrViaReopen: a failing close throws plain (no LEFT_CLOSED), PR intact", () => {
+  const exec = (_cmd: string, args: string[]) => {
+    if (args.slice(0, 2).join(" ") === "pr close") throw new Error("close denied");
+    return Buffer.from("");
+  };
+  assert.throws(
+    () => refirePrViaReopen(42, "o/r", { exec: exec as never }),
+    (err: Error) => /close denied/.test(err.message) && !/LEFT_CLOSED/.test(err.message),
+  );
+});
+
+// =============================================================================
+// STARK-1053 review round 2 — a vacuous+BLOCKED reading is only re-fireable when
+// the block is NOT a required review. mergeStateStatus alone cannot tell a
+// missing check from a missing review; reviewDecision does. A close+reopen cannot
+// supply a review, so a review-blocked PR must route to merge_blocked, never get
+// churned — the same carve-out the ready+BLOCKED path already makes.
+// =============================================================================
+
+test("applyMergeStateGate: vacuous + BLOCKED + REVIEW_REQUIRED is blocked but NOT refireable", () => {
+  const r = applyMergeStateGate(
+    { kind: "wait", vacuous: true }, "BLOCKED", { reviewDecision: "REVIEW_REQUIRED" },
+  );
+  assert.equal(r.blocked, true);
+  assert.ok(!r.refireable, "a required review cannot be cured by close+reopen");
+  assert.match(r.reason!, /review/i);
+});
+
+test("applyMergeStateGate: vacuous + BLOCKED + CHANGES_REQUESTED is blocked but NOT refireable", () => {
+  const r = applyMergeStateGate(
+    { kind: "wait", vacuous: true }, "BLOCKED", { reviewDecision: "CHANGES_REQUESTED" },
+  );
+  assert.equal(r.blocked, true);
+  assert.ok(!r.refireable);
+});
+
+test("applyMergeStateGate: vacuous + BLOCKED + APPROVED stays refireable (block is not the review)", () => {
+  const r = applyMergeStateGate(
+    { kind: "wait", vacuous: true }, "BLOCKED", { reviewDecision: "APPROVED" },
+  );
+  assert.equal(r.blocked, true);
+  assert.equal(r.refireable, true);
+});
+
+test("applyMergeStateGate: vacuous + BLOCKED + no review gate stays refireable", () => {
+  const r = applyMergeStateGate({ kind: "wait", vacuous: true }, "BLOCKED", { reviewDecision: "" });
+  assert.equal(r.refireable, true);
+});
+
+test("MAX_REFIRE_ATTEMPTS bounds transient-close retries above the single-recovery cap", () => {
+  assert.ok(MAX_REFIRE_ATTEMPTS >= 1);
+  assert.ok(MAX_REFIRE_ATTEMPTS >= MAX_CHECK_REFIRES);
+});
+
+// reopenPr is idempotent (like markPrReady): an "already open" reopen is a no-op
+// success, so refirePrViaReopen's retry after a silently-applied reopen cannot
+// manufacture a false LEFT_CLOSED. A genuine failure still throws.
+test("reopenPr: swallows an 'already open' error as success", () => {
+  const exec = () => { throw new Error("! Pull request #42 is already open"); };
+  assert.doesNotThrow(() => reopenPr(42, "o/r", { exec: exec as never }));
+});
+
+test("reopenPr: rethrows a non-idempotent failure (e.g. cannot be reopened / auth)", () => {
+  const exec = () => { throw new Error("Pull request #42 cannot be reopened because it was merged"); };
+  assert.throws(() => reopenPr(42, "o/r", { exec: exec as never }), /cannot be reopened/);
 });

@@ -426,6 +426,13 @@ interface PollOutcome {
   // about (from branch config) has not registered a context on this SHA yet, or a
   // required review is missing. Same time-bounded shape as `vacuous`/`skipped`.
   blocked?: boolean;
+  // Set on a `blocked` wait that is safe to recover by re-firing CI (close+reopen
+  // on the same SHA): the rollup carries ZERO required contexts yet GitHub blocks
+  // the merge, so the base DOES require a check that never attached to this SHA —
+  // the signature of a dropped `synchronize` webhook. NOT set on a green-but-BLOCKED
+  // wait (STARK-579), where the suite demonstrably ran and re-firing the whole set
+  // would be wasteful and, if the block is a missing review, useless.
+  refireable?: boolean;
   // GitHub's mergeStateStatus captured when the rollup reached green, for the
   // operator-facing message (present on a `ready` or a `blocked` outcome).
   mergeState?: string;
@@ -538,24 +545,126 @@ export function decideBlockedTransition(
   return blockedElapsedSec < graceSec ? "wait" : "terminal";
 }
 
-// Pure gate applied AFTER the rollup verdict: a `ready` rollup is downgraded to a
-// time-bounded `blocked` wait when GitHub still refuses the merge. Any non-`ready`
-// outcome passes through untouched — the rollup already decided to wait/fail, and
-// GitHub's mergeability adds nothing there. On a genuine `ready` the observed
-// mergeState is stamped on for the operator-facing message.
-export function applyMergeStateGate(outcome: PollOutcome, mergeStateStatus: string): PollOutcome {
-  if (outcome.kind !== "ready") return outcome;
-  if (mergeStateBlocksFiring(mergeStateStatus)) {
-    return {
-      kind: "wait",
-      reason:
-        `every required check in the rollup passes, but GitHub still reports the merge ${mergeStateStatus} — ` +
-        `a required check has not registered a result on this commit yet, or a required review is missing`,
-      blocked: true,
-      mergeState: mergeStateStatus,
-    };
+// How long a vacuous-but-BLOCKED reading (zero required contexts on the SHA, yet
+// GitHub blocks the merge) may persist before the watcher stops passively waiting
+// and actively re-fires CI. Short: GitHub attaches a check-run when a workflow is
+// QUEUED, which happens seconds after the triggering event — so a required gate
+// with no context after two minutes is the signature of an event that never
+// arrived (the swallowed `synchronize` on 21StarkCom/atlas#103 left #103 BLOCKED
+// with zero checks for 20 minutes), not a runner that is merely slow to start.
+export const CHECK_REGISTRATION_REFIRE_SEC = 120;
+
+// At most one SUCCESSFUL close+reopen recovery per blocked episode. A second one
+// that still yields nothing is not a transient webhook drop but a real
+// misconfiguration (a required context no workflow produces), which another
+// re-fire cannot cure — so we stop and name it instead of thrashing the PR.
+export const MAX_CHECK_REFIRES = 1;
+
+// A cap on close+reopen ATTEMPTS (as opposed to successful recoveries). A transient
+// `gh pr close` failure must NOT permanently burn the one recovery — the loop
+// retries on the next poll — but a persistently failing close cannot retry forever,
+// so it is bounded. Distinct from MAX_CHECK_REFIRES: the recovery budget counts
+// successes; this counts tries, so one flaky close does not foreclose the recovery
+// the whole feature exists for.
+export const MAX_REFIRE_ATTEMPTS = 3;
+
+// Pure: drives the vacuous-but-BLOCKED recovery. `blockedElapsedSec` is the age of
+// the current blocked episode; `refireCount` how many re-fires it has already had.
+//   wait     — inside the registration window, still expecting the context.
+//   refire   — window elapsed and the re-fire budget is unspent: close+reopen once.
+//   terminal — past the overall grace (MERGE_BLOCKED_GRACE_SEC); give up and name it.
+// `refire` is tested BEFORE `terminal` so a state that jumped straight past both
+// bounds (a long poll gap under rate limiting) still gets its one cure attempt
+// before the watcher abandons it.
+export function decideRefireTransition(
+  blockedElapsedSec: number,
+  refireCount: number,
+  opts: { refireAfterSec?: number; maxRefires?: number; terminalAfterSec?: number } = {},
+): "wait" | "refire" | "terminal" {
+  const refireAfter = opts.refireAfterSec ?? CHECK_REGISTRATION_REFIRE_SEC;
+  const maxRefires = opts.maxRefires ?? MAX_CHECK_REFIRES;
+  const terminalAfter = opts.terminalAfterSec ?? MERGE_BLOCKED_GRACE_SEC;
+  if (refireCount < maxRefires && blockedElapsedSec >= refireAfter) return "refire";
+  if (blockedElapsedSec >= terminalAfter) return "terminal";
+  return "wait";
+}
+
+// Pure gate applied AFTER the rollup verdict, using GitHub's own mergeability to
+// disambiguate the two cases a single rollup sample cannot tell apart:
+//
+//   READY rollup + BLOCKED/UNKNOWN → the rollup read green over a required set
+//     that has not fully registered (STARK-579). Downgrade to a bounded `blocked`
+//     wait; it is NOT re-fireable — the suite demonstrably ran.
+//
+//   VACUOUS rollup (zero required contexts) + BLOCKED/UNKNOWN → GitHub enforces a
+//     merge requirement that is unmet, and the rollup carries no context to explain
+//     it. This is NOT a vacuous pass: treating it as "no required checks → give up
+//     at the 300s grace" is the exact STARK-1053 bug (atlas#102 sat green+CLEAN for
+//     ~90 min, unmerged). Reclassify OUT of the vacuous terminal into a bounded
+//     `blocked` wait. Whether it is ALSO re-fireable depends on reviewDecision:
+//       - a required REVIEW is outstanding (REVIEW_REQUIRED / CHANGES_REQUESTED) →
+//         a close+reopen cannot supply it, so NOT refireable — same carve-out the
+//         ready+BLOCKED path already makes. Routes to the merge_blocked terminal,
+//         whose message names the missing approval.
+//       - otherwise → the block is most consistent with a required check that has
+//         not attached to this SHA (pre-registration / dropped webhook), which a
+//         close+reopen CAN cure → refireable.
+//
+//   VACUOUS rollup + non-blocking mergeState (CLEAN/UNSTABLE/…) → the base
+//     genuinely requires no checks (kotodama#861). Leave it vacuous; the existing
+//     300s terminal names `--allow-no-required-checks`.
+//
+// Any other outcome (a non-vacuous pending wait, fatal, head_moved) passes through
+// untouched — the rollup already decided and GitHub's mergeability adds nothing.
+//
+// reviewDecision is only meaningful for the vacuous case, so it is optional; the
+// ready path never reads it (a green rollup that GitHub still blocks is never
+// re-fired regardless of why).
+export function applyMergeStateGate(
+  outcome: PollOutcome,
+  mergeStateStatus: string,
+  opts: { reviewDecision?: string } = {},
+): PollOutcome {
+  if (outcome.kind === "ready") {
+    if (mergeStateBlocksFiring(mergeStateStatus)) {
+      return {
+        kind: "wait",
+        reason:
+          `every required check in the rollup passes, but GitHub still reports the merge ${mergeStateStatus} — ` +
+          `a required check has not registered a result on this commit yet, or a required review is missing`,
+        blocked: true,
+        mergeState: mergeStateStatus,
+      };
+    }
+    return { ...outcome, mergeState: mergeStateStatus };
   }
-  return { ...outcome, mergeState: mergeStateStatus };
+  if (outcome.kind === "wait" && outcome.vacuous) {
+    if (mergeStateBlocksFiring(mergeStateStatus)) {
+      const reviewBlocked =
+        opts.reviewDecision === "REVIEW_REQUIRED" || opts.reviewDecision === "CHANGES_REQUESTED";
+      if (reviewBlocked) {
+        return {
+          kind: "wait",
+          reason:
+            `no required check has reported on this commit, and GitHub reports the merge ${mergeStateStatus} because a ` +
+            `required review is outstanding (reviewDecision=${opts.reviewDecision}) — a re-fire cannot supply a review`,
+          blocked: true,
+          mergeState: mergeStateStatus,
+        };
+      }
+      return {
+        kind: "wait",
+        reason:
+          `no required check has reported on this commit yet, but GitHub reports the merge ${mergeStateStatus} — ` +
+          `the base branch requires a check that has not registered a context on this SHA (pre-registration window, or a dropped CI trigger)`,
+        blocked: true,
+        refireable: true,
+        mergeState: mergeStateStatus,
+      };
+    }
+    return { ...outcome, mergeState: mergeStateStatus };
+  }
+  return outcome;
 }
 
 // Pure function: maps a rollup result (mismatch | contexts) + plan policy
@@ -604,7 +713,10 @@ export function evaluateRollup(
 
 async function pollOnce(
   plan: PrMergePlan,
-  deps: { fetchMergeState?: (prNumber: number, repoSlug: string) => string } = {},
+  deps: {
+    fetchMergeState?: (prNumber: number, repoSlug: string) => string;
+    fetchReviewDecision?: (prNumber: number, repoSlug: string) => string;
+  } = {},
 ): Promise<PollOutcome> {
   const r = await fetchRequiredCheckRollup({
     owner: plan.pr.headRepositoryOwner,
@@ -616,14 +728,27 @@ async function pollOnce(
     allowNoRequiredChecks: plan.execute.allowNoRequiredChecks,
     allowSkippedChecks: plan.execute.allowSkippedChecks === true,
   });
-  // Only when the rollup itself says green do we spend an extra call to confirm
-  // GitHub agrees the PR is mergeable — the rollup can read green over a required
-  // set that has not fully registered (see mergeStateBlocksFiring). One call per
-  // green poll, never on the pending/failing/vacuous/skipped paths.
-  if (outcome.kind !== "ready") return outcome;
+  // Spend the extra mergeability call on exactly two rollup readings, both of
+  // which GitHub's own verdict is needed to interpret (see applyMergeStateGate):
+  //   READY   — the rollup can read green over a required set that has not fully
+  //             registered, and GitHub still BLOCKs (STARK-579).
+  //   VACUOUS  — zero required contexts is ambiguous: pre-registration/dropped
+  //             trigger (GitHub BLOCKs) vs a genuinely unprotected base (STARK-1053).
+  // Never on the pending/failing/skipped paths — those the rollup decides alone.
+  const isVacuousWait = outcome.kind === "wait" && outcome.vacuous === true;
+  if (outcome.kind !== "ready" && !isVacuousWait) return outcome;
   const fetchMergeState =
     deps.fetchMergeState ?? ((n: number, slug: string) => ghLib.prMergeStateStatus(n, slug));
-  return applyMergeStateGate(outcome, fetchMergeState(plan.pr.number, plan.pr.nameWithOwner));
+  const mergeState = fetchMergeState(plan.pr.number, plan.pr.nameWithOwner);
+  // reviewDecision is needed ONLY to gate the vacuous re-fire (a review block is
+  // not re-fireable). One extra call, on the rare vacuous path only.
+  let reviewDecision: string | undefined;
+  if (isVacuousWait && mergeStateBlocksFiring(mergeState)) {
+    const fetchReviewDecision =
+      deps.fetchReviewDecision ?? ((n: number, slug: string) => ghLib.prReviewDecision(n, slug));
+    reviewDecision = fetchReviewDecision(plan.pr.number, plan.pr.nameWithOwner);
+  }
+  return applyMergeStateGate(outcome, mergeState, { reviewDecision });
 }
 
 interface BackoffState {
@@ -725,6 +850,15 @@ async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
   // (a required check not yet registered, or a required review). See
   // decideBlockedTransition and mergeStateBlocksFiring.
   let blockedSinceMs: number | null = null;
+  // Successful re-fires in the CURRENT blocked episode (reset whenever the blocked
+  // state clears). Only the vacuous-but-BLOCKED path (refireable) consumes it;
+  // caps the automatic close+reopen recovery at MAX_CHECK_REFIRES. See
+  // decideRefireTransition.
+  let refireCount = 0;
+  // Total close+reopen ATTEMPTS this episode (success or transient-close-failure).
+  // Bounds retry of a flaky `gh pr close` at MAX_REFIRE_ATTEMPTS without burning the
+  // one recovery budget on the first hiccup.
+  let refireAttempts = 0;
   const REQUIRED_GREEN = 2; // PR4-claude H13 debounce
   // Tolerate transient head-OID mismatch right after force-push: GitHub's
   // GraphQL `pullRequest.headRefOid` can lag the push receiver by hundreds
@@ -895,15 +1029,110 @@ async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
         skippedSinceMs = null;
       }
 
-      // The rollup reads green but GitHub still refuses the merge. Transient while
-      // a slow required check registers its context (the case that dead-ended
-      // Atlas#73); permanent once it is a missing required review. Bounded exactly
-      // like vacuous/skipped: past the grace window, stop and name it rather than
-      // fire a callback GitHub will only reject.
+      // A `blocked` wait arrives in two flavors (applyMergeStateGate sets them):
+      //   NON-refireable — the rollup read green but GitHub still refuses (Atlas#73:
+      //     a slow required check whose context has not registered, or a missing
+      //     review CI cannot supply). Passive bounded wait, then name it.
+      //   refireable — the rollup carries ZERO required contexts yet GitHub blocks:
+      //     the base requires a check that never attached to this SHA, the signature
+      //     of a dropped `synchronize` webhook (STARK-1053 / atlas#102, #103). Wait
+      //     out the registration window, then close+reopen ONCE to re-fire CI on the
+      //     same SHA, then keep waiting to the overall grace before giving up.
       if (outcome!.blocked) {
-        if (blockedSinceMs === null) blockedSinceMs = Date.now();
+        if (blockedSinceMs === null) { blockedSinceMs = Date.now(); refireCount = 0; refireAttempts = 0; }
         const elapsedSec = (Date.now() - blockedSinceMs) / 1000;
-        if (decideBlockedTransition(elapsedSec) === "terminal") {
+        if (outcome!.refireable) {
+          const decision = decideRefireTransition(elapsedSec, refireCount);
+          if (decision === "refire" && refireAttempts >= MAX_REFIRE_ATTEMPTS) {
+            // The recovery window came and went spent entirely on close attempts
+            // that all failed (a persistently unusable `gh pr close`). We never got
+            // the PR closed, so it was never stranded — but we also cannot re-fire,
+            // so stop and name it rather than retry to the 6h timeout.
+            const reason =
+              `could not re-fire CI on PR #${plan.pr.number}: ${refireAttempts} close attempts all failed within ` +
+              `${Math.round(elapsedSec)}s while GitHub reports the merge ${outcome!.mergeState ?? "BLOCKED"} with no required ` +
+              `check registered. Re-fire by hand (close+reopen), push a commit, or re-run the merge.`;
+            writeStatus({ status: "checks_never_registered", finishedAt: new Date().toISOString(), reason });
+            atomicWriteJson(latestPointer(host, plan.pr.headRepositoryOwner, plan.pr.headRepositoryName, plan.pr.number), {
+              headSha: plan.pushedHeadOid,
+              status: "checks_never_registered",
+              updatedAt: new Date().toISOString(),
+            });
+            releaseAllMerge();
+            return 0;
+          }
+          if (decision === "refire") {
+            refireAttempts++;
+            // Record the intent BEFORE the close: if the process dies in the ~1-2s
+            // close→reopen window the state reads `refiring` (PR possibly closed),
+            // not a stale `watching` that hides why the PR is closed.
+            writeStatus({
+              status: "refiring",
+              refireAttempts,
+              lastWarning: `re-firing CI on PR #${plan.pr.number} via close+reopen (attempt ${refireAttempts}/${MAX_REFIRE_ATTEMPTS})`,
+            });
+            try {
+              ghLib.refirePrViaReopen(plan.pr.number, plan.pr.nameWithOwner);
+              refireCount++;
+              // Reset the clock so the re-fired CI gets a fresh registration window.
+              // Without this a re-fire issued late (near the grace bound, via the
+              // refire-before-terminal precedence) would go terminal on the very next
+              // poll and waste the recovery. refireCount stays spent → no second re-fire.
+              blockedSinceMs = Date.now();
+              process.stdout.write(JSON.stringify({
+                event: "ci-refired",
+                prNumber: plan.pr.number,
+                afterSec: Math.round(elapsedSec),
+              }) + "\n");
+              writeStatus({
+                status: "watching",
+                refireCount,
+                lastWarning:
+                  `no required check registered after ${Math.round(elapsedSec)}s; closed+reopened PR #${plan.pr.number} ` +
+                  `on the same head to re-fire CI (dropped-webhook recovery)`,
+              });
+            } catch (err) {
+              const msg = String((err as Error)?.message ?? err);
+              if (/^LEFT_CLOSED:/.test(msg)) {
+                // Close succeeded but reopen did not — the PR is CLOSED, which is
+                // worse than the stuck state. Stop loudly with the manual-fix line.
+                writeStatus({ status: "refire_failed", finishedAt: new Date().toISOString(), reason: msg });
+                atomicWriteJson(latestPointer(host, plan.pr.headRepositoryOwner, plan.pr.headRepositoryName, plan.pr.number), {
+                  headSha: plan.pushedHeadOid,
+                  status: "refire_failed",
+                  updatedAt: new Date().toISOString(),
+                });
+                releaseAllMerge();
+                return 1;
+              }
+              // Close itself failed → the PR is intact and the re-fire did not
+              // happen. Do NOT burn the recovery budget (refireCount): only the
+              // attempt counter advanced, so a later poll retries — bounded by
+              // MAX_REFIRE_ATTEMPTS — instead of one flaky close foreclosing recovery.
+              writeStatus({
+                status: "watching",
+                refireAttempts,
+                lastWarning: `re-fire attempt ${refireAttempts} could not close PR #${plan.pr.number} (PR intact), will retry: ${msg}`,
+              });
+            }
+          } else if (decision === "terminal") {
+            const reason =
+              `no required check registered a result on this commit after ${Math.round(elapsedSec)}s` +
+              `${refireCount > 0 ? " (a close+reopen re-fire was attempted)" : ""}, while GitHub still reports the merge ` +
+              `${outcome!.mergeState ?? "BLOCKED"}. Either a CI trigger never fired (a re-fire could not recover it), or the ` +
+              `base enforces a merge requirement no check can satisfy — an unresolved conversation or a signed-commits rule. ` +
+              `Check the PR's merge box: push a commit to re-fire CI, resolve/sign as needed, or re-run the merge with ` +
+              `--allow-no-required-checks if the base is meant to require none.`;
+            writeStatus({ status: "checks_never_registered", finishedAt: new Date().toISOString(), reason });
+            atomicWriteJson(latestPointer(host, plan.pr.headRepositoryOwner, plan.pr.headRepositoryName, plan.pr.number), {
+              headSha: plan.pushedHeadOid,
+              status: "checks_never_registered",
+              updatedAt: new Date().toISOString(),
+            });
+            releaseAllMerge();
+            return 0;
+          }
+        } else if (decideBlockedTransition(elapsedSec) === "terminal") {
           const reason =
             `GitHub still reports the merge ${outcome!.mergeState ?? "BLOCKED"} after ${Math.round(elapsedSec)}s while every ` +
             `required check in the rollup passes. The rollup only sees contexts already attached to this commit, so a required ` +
@@ -921,6 +1150,8 @@ async function prMergeWatchLoop(args: PrMergeWatchArgs): Promise<number> {
         }
       } else {
         blockedSinceMs = null;
+        refireCount = 0;
+        refireAttempts = 0;
       }
     }
     await new Promise(r => setTimeout(r, jitter(args.pollSeconds) * 1000));

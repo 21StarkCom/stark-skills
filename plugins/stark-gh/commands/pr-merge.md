@@ -179,3 +179,46 @@ re-run with `--allow-skipped-checks`.
 
 Related: a workflow whose check is required must not carry a draft guard at all
 (`standards/workflows/skip-draft-guard.md`).
+
+### Zero required checks is not proof there are none (STARK-1053)
+
+The required-check rollup is built only from the contexts already ATTACHED to the
+head SHA. Right after the force-push, before the target repo attaches its
+check-runs, the rollup is empty — `required: 0`. That reading is ambiguous, and
+GitHub's own `mergeStateStatus` is what disambiguates it:
+
+- **`BLOCKED` / `UNKNOWN`** — the base branch enforces a merge requirement the
+  rollup carries no context for. This is **not** a vacuous pass. The watcher keeps
+  waiting rather than giving up at the 300s grace — the fix for the failure where
+  `atlas#102` force-pushed, the watcher quit at the vacuous grace, and the PR sat
+  green + CLEAN + MERGEABLE for ~90 min, unmerged. What it does while waiting
+  depends on WHY GitHub blocks (see recovery below).
+- **`CLEAN` / `UNSTABLE`** — the base genuinely requires no checks
+  (`kotodama#861`). The existing 300s grace still applies: the watcher stops with
+  `no_required_checks`, naming `--allow-no-required-checks`.
+
+**Re-fire only what a re-fire can cure.** A vacuous+BLOCKED reading has two causes
+a single sample cannot separate, so the watcher consults GitHub's `reviewDecision`:
+
+- **A required review is outstanding** (`REVIEW_REQUIRED` / `CHANGES_REQUESTED`) —
+  a close+reopen cannot supply a review, so the PR is **not** re-fired. It routes
+  to `merge_blocked`, whose message names the missing approval. (Same carve-out
+  the green-but-`BLOCKED` path already makes.)
+- **No review is outstanding** — the block is most consistent with a required
+  check that never attached (the pre-registration window, or a dropped webhook: a
+  rapid force-push → retarget → ready can swallow the `synchronize`, so CI never
+  fires — `atlas#103` sat BLOCKED with zero checks for 20 min). After
+  `CHECK_REGISTRATION_REFIRE_SEC` (120s) the watcher **closes and reopens the PR on
+  the same head SHA, once**, to re-fire CI — `reopened` is a default `pull_request`
+  type, so it re-triggers workflows with no commit rewrite (re-running a workflow
+  replays the draft-time skip; a `workflow_dispatch` run never joins the rollup).
+  A transient `gh pr close` failure does **not** burn that one recovery — the
+  attempt retries up to `MAX_REFIRE_ATTEMPTS` (3). A successful re-fire resets the
+  wait so the re-fired CI gets a fresh registration window.
+
+If nothing registers even after the re-fire, the watcher stops at
+`checks_never_registered` — whose message is honest that the residual cause may be
+a check that never fired **or** a requirement no check can satisfy (an unresolved
+conversation, a signed-commits rule). A close that succeeds but whose reopen fails
+leaves the PR closed and stops at `refire_failed` (exit 1) with the manual
+`gh pr reopen` command — that state needs a human.
