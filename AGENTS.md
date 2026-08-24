@@ -28,6 +28,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 - **Language: Go for backend, TypeScript for scripts.** **No new Python.** The repo's tooling is TypeScript-only under `tools/`; the former Python orchestrators and dispatch infra under `scripts/` were migrated out and deleted. If you find a `scripts/*.py` path named in any doc, it is stale — delete the reference, don't recreate the file.
 - **Test live.** Local-only verification is not enough. If a flow touches GCP, exercise the real GCP surface.
 - **Update docs in the same change.** Any change to behavior, structure, commands, env vars or operations updates the relevant docs — **this file and `CLAUDE.md` both**.
+- **GCP worktree scope stays local and narrow.** `tools/gcp_scope.ts install` owns each mapped repo's generated `.envrc` block and the exact `.envrc` row in `.worktreeinclude`; `check` validates both. Preserve other include rows/comments and never add credentials or broad globs. Codex-managed worktrees consume the file; plain Git-worktree helpers must copy the explicitly named safe files themselves.
 
 ## Repo Layout
 
@@ -63,10 +64,11 @@ All skills live in `skill/stark-*/SKILL.md`. Full per-skill detail — arguments
 | Skill | What it does |
 |---|---|
 | `/stark-gh:pr-open` · `pr-merge` · `cleanup` | The PR lifecycle. Open draft → un-draft + squash-merge on green → sweep branches/worktrees. |
+| `/simple-gate [spec-path]` | Walk the human sign-off gate in short, jargon-free language; Codex uses structured choices when available and a one-question conversational fallback otherwise. |
 | `/stark-session [start\|end]` | Briefing on start, cleanup on end. |
 | `/stark-handover [save\|resume\|status]` | Cross-`/clear` continuity under `~/Code/Handovers/`. |
-| `/stark-handoff [write\|list\|use\|launch]` | Writes ONE self-contained prompt file a **different** executor starts from (fresh session after `/compact`, a fix into another repo, a fork, a brainstorm/research brief) under `~/Code/Handoffs/`; also lists, loads, or headlessly launches one. Sibling of `/stark-handover` — that one is disk state for resuming the *same* task in place. Claude-session only, no Codex variant. |
-| `/stark-bury <corpse>` | Retire code into the Náströnd graveyard — a subsystem of a living repo, or a whole repo. Footprint verification, interment PR **before** any deletion, deletion PR, optional sealed dump + table drop. The fleet's only destructive ritual: five non-negotiable laws, operator-gated at every prod mutation. Claude-session only, no Codex variant. |
+| `/stark-handoff [write\|list\|use\|launch]` | Writes ONE self-contained prompt file a **different** executor starts from (fresh session after `/compact`, a fix into another repo, a fork, a brainstorm/research brief) under `~/Code/Handoffs/`; also lists, loads, or headlessly launches one. Sibling of `/stark-handover` — that one is disk state for resuming the *same* task in place. The Codex override launches `codex exec` with bounded `--full-auto`, never the dangerous bypass. |
+| `/stark-bury <corpse>` | Retire code into the Náströnd graveyard — a subsystem of a living repo, or a whole repo. Footprint verification, interment PR **before** any deletion, deletion PR, optional sealed dump + table drop. The fleet's only destructive ritual: five non-negotiable laws, operator-gated at every prod mutation. Claude and Codex variants share the same gates. |
 | `/stark-fresh-eyes <doc>` | One-shot zero-context review of a doc before it ships. One dispatch per revision, never a round 2. |
 | `/stark-ssot [area]` | Give a duplicated value/rule one owner; route the copies through it. |
 | `/stark-housekeeping` | Stale issues, dead branches, worktree remnants, asset-symlink self-heal. |

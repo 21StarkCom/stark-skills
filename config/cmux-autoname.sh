@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# cmux-autoname.sh — auto-name the cmux workspace + tab for a Claude Code session.
+# cmux-autoname.sh — auto-name the cmux workspace + tab for an agent session.
 #
-# Generic: no personal data lives here. Wired from a Claude Code SessionStart
-# hook (see config/settings.json). No-op outside cmux and outside a git repo,
-# so it is safe to run from every Claude session.
+# Generic: no personal data lives here. Wired from Claude and Codex SessionStart
+# hooks. No-op outside cmux and outside a git repo, so it is safe to run from
+# every agent session.
 #
 #   Workspace (first session only): named after the REPO, colored from the map.
 #   Tab (every session):            worktree folder name, UPPERCASE, ROOT for main.
@@ -18,10 +18,10 @@ set -euo pipefail
 
 # --- act only inside a cmux surface ---
 [ -n "${CMUX_WORKSPACE_ID:-}" ] || exit 0
-cmux_bin="${CMUX_CLAUDE_HOOK_CMUX_BIN:-cmux}"
+cmux_bin="${CMUX_AUTONAME_CMUX_BIN:-${CMUX_CLAUDE_HOOK_CMUX_BIN:-cmux}}"
 command -v "$cmux_bin" >/dev/null 2>&1 || exit 0
 
-proj="${CLAUDE_PROJECT_DIR:-$PWD}"
+proj="${AGENT_PROJECT_DIR:-${CODEX_PROJECT_DIR:-${CLAUDE_PROJECT_DIR:-$PWD}}}"
 
 # --- must be a git repo ---
 root="$(git -C "$proj" rev-parse --show-toplevel 2>/dev/null)" || exit 0

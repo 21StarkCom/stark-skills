@@ -1,9 +1,6 @@
 ---
 name: stark-handoff
 disable-model-invocation: true
-runtimes:
-  - claude
-  - codex
 description: >-
   Use when the next move belongs to someone else — a fresh session after
   /compact, a fix dispatched into another repo, a parallel fork, a brainstorm
@@ -16,22 +13,23 @@ argument-hint: "[write|list|use|launch] [name] [--type continuation|fork|fix|bra
 
 ## Help
 
-If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+If the current user request includes a standalone `--help`, `-h`, or `help` token,
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop — do not run any phase.
 
 # stark-handoff — a prompt file a fresh executor starts from
 
-**Handover vs handoff.** `/stark-handover` = disk state, **same task, same
-repo, resume in place**. `/stark-handoff` = a **prompt file** someone else
+**Handover vs handoff.** `$stark-handover` = disk state, **same task, same
+repo, resume in place**. `$stark-handoff` = a **prompt file** someone else
 starts from: another session, another repo, another agent, or this session
-after `/compact`. If the ask is "save context so I can resume this same task
-here" → say so, route to `/stark-handover`, stop.
+after a context reset. If the ask is "save context so I can resume this same
+task here" → say so, route to `$stark-handover`, stop.
 
 The file **is** the product. Everything the executor needs must be in it —
 they get no conversation, no scrollback, no you.
 
-**Raw input:** `$ARGUMENTS`
+Read the mode and flags from the current user request that explicitly invoked
+this skill. Do not depend on a host-populated argument placeholder.
 
 ## Constants
 
@@ -40,7 +38,7 @@ they get no conversation, no scrollback, no you.
 # directly under it IS a handoff (non-recursive — that is the whole
 # selection rule for `list` and `use`).
 handoff_root() {
-  local r="${STARK_HANDOFF_ROOT:-}" cfg="$HOME/.claude/code-review/config.json"
+  local r="${STARK_HANDOFF_ROOT:-}" cfg="$HOME/.stark/code-review/config.json"
   [ -n "$r" ] || { [ -f "$cfg" ] && r=$(jq -r '.handoff.root // empty' "$cfg" 2>/dev/null); }
   r="${r:-$HOME/Code/Handoffs}"
   printf '%s\n' "${r/#\~/$HOME}"
@@ -63,19 +61,19 @@ in the **same** Bash call that uses them (shells do not persist between calls).
 
 ## Arguments
 
-- `/stark-handoff` or `/stark-handoff write` — write a handoff file (default)
+- `$stark-handoff` or `$stark-handoff write` — write a handoff file (default)
   - `--type continuation|fork|fix|brainstorm|research` — skip type inference
-  - `--fresh-eyes` — ONE `/stark-fresh-eyes` pass on the written file
-- `/stark-handoff list` — table every handoff under the root, newest first
-- `/stark-handoff use [name]` — load a handoff and start executing it. Bare
+  - `--fresh-eyes` — ONE `$stark-fresh-eyes` pass on the written file
+- `$stark-handoff list` — table every handoff under the root, newest first
+- `$stark-handoff use [name]` — load a handoff and start executing it. Bare
   `use` picks the newest whose header repo is **this** repo.
-- `/stark-handoff launch <name>` — dispatch a headless `claude -p` on it in
+- `$stark-handoff launch <name>` — dispatch a headless `codex exec` on it in
   the target repo, backgrounded. Execution/investigation types only.
-  - `--permission-mode <mode>` — passthrough; default `acceptEdits`
+  - `--model <model>` — optional Codex model override
 
 ## Guards
 
-- **Same-task-same-repo resume ask → `/stark-handover`.** Say so, stop.
+- **Same-task-same-repo resume ask → `$stark-handover`.** Say so, stop.
 - **Never launch an inquiry type** (`brainstorm`, `research`) — refuse with
   the reason. Never auto-launch anything: `use` and `launch` fire on explicit
   invocation only.
@@ -83,7 +81,8 @@ in the **same** Bash call that uses them (shells do not persist between calls).
 - **Bare `use` never crosses repos.**
 - **Max ONE fresh-eyes pass per file revision**, findings dispositioned once —
   never a round 2 (LLM-review loops do not converge).
-- **Never `--dangerously-skip-permissions`.**
+- **Never `--dangerously-bypass-approvals-and-sandbox`.** This detached
+  launcher uses Codex's bounded `--full-auto` preset, never the bypass flag.
 - Not in plan mode — this skill writes files.
 
 ## Types → skeletons
@@ -114,7 +113,7 @@ the checkout has no remote.
 
 ### Phase 1 — Route + type
 
-1. Resume-in-place ask? → `/stark-handover`, stop (Guards).
+1. Resume-in-place ask? → `$stark-handover`, stop (Guards).
 2. Type: `--type` if given, else infer from the ask. **State the choice in one
    line and move on** — do not interrogate. Wrong guess is cheap; an interview
    is not.
@@ -172,7 +171,7 @@ envelope, then `---`, then the payload.
 
 ### Phase 6 — Fresh eyes (only with `--fresh-eyes`)
 
-One `/stark-fresh-eyes <file>` pass. Disposition every finding once (fix /
+One `$stark-fresh-eyes <file>` pass. Disposition every finding once (fix /
 reject with a reason / accept as known) and stop. No second pass on the same
 text — ever.
 
@@ -182,9 +181,9 @@ Path, type, and the delivery instruction for that type:
 
 | Type | Delivery |
 |------|----------|
-| `continuation` | `/clear` (or a fresh session) in the repo, paste the payload |
+| `continuation` | a fresh Codex thread in the repo, paste the payload |
 | `fork` | second session in its own worktree, paste the payload |
-| `fix` | a session in the target repo — or `/stark-handoff launch <name>` |
+| `fix` | a session in the target repo — or `$stark-handoff launch <name>` |
 | `brainstorm` | paste into an interactive session; it asks one question at a time |
 | `research` | paste into a web deep-research tool |
 
@@ -232,8 +231,8 @@ left, the first action, any blocking open question).
 
 ### Phase 3 — Rebuild + start
 
-Recreate the payload's task list as session tasks (TaskCreate, in order), run
-whatever verify-state commands the prompt names, then start the first item.
+Recreate the payload's task list with the current host's task or plan mechanism,
+run whatever verify-state commands the prompt names, then start the first item.
 Zero recap friction is the point. Pause only for an open question that blocks
 step one.
 
@@ -264,8 +263,8 @@ esac
 - **Spec-tier work → refuse.** `launch` is for *bounded* missions: a fix, a
   next slice, one review round. If the payload is a full accepted spec (a task
   DAG, per-task done-whens, a closing verification command — the
-  `/stark-author` shape), say so and route it to `/stark-author` →
-  `/stark-build`, which gates it with checks the agent cannot edit. A
+  `$stark-author` shape), say so and route it to `$stark-author` →
+  `$stark-build`, which gates it with checks the agent cannot edit. A
   `continuation` label does not make a spec bounded.
 
 ### Phase 2 — Resolve the target dir
@@ -297,19 +296,20 @@ K=2                                      # same-second relaunch: never truncate
 while [ -e "$LOG" ]; do LOG="${LOG%.log}-$K.log"; K=$((K+1)); done
 PAYLOAD=$(awk 'f{print} /^---$/{f=1}' "$FILE")   # below the envelope rule
 [ -n "$PAYLOAD" ] || PAYLOAD=$(tail -n +2 "$FILE")
-( cd "$TARGET_DIR" && nohup claude -p "$PAYLOAD" \
-    --permission-mode "${MODE:-acceptEdits}" </dev/null >"$LOG" 2>&1 & echo "$!" )
+MODEL_ARGS=()
+[ -z "${MODEL:-}" ] || MODEL_ARGS=(-m "$MODEL")
+( nohup codex exec -C "$TARGET_DIR" --full-auto --ephemeral \
+    "${MODEL_ARGS[@]}" "$PAYLOAD" </dev/null >"$LOG" 2>&1 & echo "$!" )
 ```
 
 Non-negotiables in that command:
 
-- **`</dev/null`** — `claude -p` reads stdin *in addition to* the prompt arg;
-  an orchestrating shell's stdin is a pipe that never EOFs, and the dispatch
-  hangs forever (the stark-build lesson: 5h14m for 39 bytes).
+- **`</dev/null`** — the detached run must never inherit an orchestrator's
+  never-EOF input stream or wait for interactive input.
 - **Backgrounded**, log **timestamped** — a relaunch never clobbers a running
   run's log, and `-2` collision-suffixed prompts never share one.
-- **`--permission-mode acceptEdits`** by default, flag passthrough allowed;
-  `--dangerously-skip-permissions` is never permitted.
+- **`--full-auto`** gives the detached worker bounded workspace-write autonomy;
+  `--dangerously-bypass-approvals-and-sandbox` is never permitted here.
 
 ### Phase 4 — Report
 
@@ -320,7 +320,7 @@ survives this session, and nothing here polls it.
 
 | Failure | Recovery |
 |---------|----------|
-| Ask is really "resume this task here" | `/stark-handover`, stop |
+| Ask is really "resume this task here" | `$stark-handover`, stop |
 | Bare `use`, zero header matches for this repo | Refuse + `list`; never cross repos |
 | `launch` on a headerless file | Refuse — copy the header format in, or `use` it manually |
 | `launch` repo matches 0 or 2+ checkouts | Refuse, list candidates, let Aryeh name the dir |

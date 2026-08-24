@@ -81,6 +81,59 @@ const SOURCE_UP_HEADER = [
 /** Repo-local overrides go here; `install` never reads or writes this file. */
 export const LOCAL_OVERRIDE = ".envrc.local";
 
+/** Safe local file copied by Codex-managed worktrees. */
+export const WORKTREE_INCLUDE_PATH = ".envrc";
+export const WORKTREE_INCLUDE_COMMENT =
+  "# Managed by gcp_scope.ts: copy the generated scope into Codex worktrees.";
+
+export type WorktreeIncludeResult = {
+  content: string;
+  action: "create" | "append" | "deduplicate" | "unchanged";
+  count: number;
+};
+
+/**
+ * Ensure `.worktreeinclude` names `.envrc` exactly once. Every unrelated line,
+ * including comments and ordering, is preserved byte-for-byte. Duplicate
+ * `.envrc` rows are collapsed to the first row; no broad glob is introduced.
+ */
+export function ensureWorktreeInclude(existing: string | null): WorktreeIncludeResult {
+  if (existing === null) {
+    return {
+      content: `${WORKTREE_INCLUDE_COMMENT}\n${WORKTREE_INCLUDE_PATH}\n`,
+      action: "create",
+      count: 1,
+    };
+  }
+
+  const lines = existing.split("\n");
+  let seen = 0;
+  const kept: string[] = [];
+  for (const line of lines) {
+    if (line.trim() === WORKTREE_INCLUDE_PATH) {
+      seen += 1;
+      if (seen > 1) continue;
+    }
+    kept.push(line);
+  }
+  if (seen > 1) {
+    return { content: kept.join("\n"), action: "deduplicate", count: 1 };
+  }
+  if (seen === 1) return { content: existing, action: "unchanged", count: 1 };
+
+  const separator = existing.length === 0 || existing.endsWith("\n") ? "" : "\n";
+  const commentSeparator = existing.length === 0 ? "" : "\n";
+  return {
+    content: `${existing}${separator}${commentSeparator}${WORKTREE_INCLUDE_COMMENT}\n${WORKTREE_INCLUDE_PATH}\n`,
+    action: "append",
+    count: 1,
+  };
+}
+
+export function worktreeIncludeCount(content: string): number {
+  return content.split("\n").filter((line) => line.trim() === WORKTREE_INCLUDE_PATH).length;
+}
+
 // ---------------------------------------------------------------------------
 // Map loading
 // ---------------------------------------------------------------------------

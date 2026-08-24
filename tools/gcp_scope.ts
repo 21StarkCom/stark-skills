@@ -33,12 +33,14 @@ import {
   MAP_DOC,
   acceptedProjects,
   ambientProblems,
+  ensureWorktreeInclude,
   exportsProject,
   parseMap,
   probeProblem,
   renderBlock,
   spliceBlock,
   spliceDirenvrc,
+  worktreeIncludeCount,
 } from "./gcp_scope_lib.ts";
 import type { RepoScope } from "./gcp_scope_lib.ts";
 import { direnvrcFunctions } from "./gcp_scope_direnvrc.ts";
@@ -230,10 +232,16 @@ function install(opts: Options): number {
       if (allow) execFileSync("direnv", ["allow", dir], { stdio: "ignore" });
     }
 
+    const includePath = join(dir, ".worktreeinclude");
+    const include = ensureWorktreeInclude(readIfExists(includePath));
+    if (include.action !== "unchanged" && !opts.dryRun) {
+      writeFileSync(includePath, include.content, "utf8");
+    }
+
     console.log(
       `  ${result.action.padEnd(14)} ${scope.repo.padEnd(46)} ${scope.project}${
         scope.region ? ` (${scope.region})` : ""
-      }`,
+      } [worktree ${include.action}]`,
     );
     wired += 1;
   }
@@ -322,6 +330,8 @@ function check(opts: Options): number {
 
     const path = join(dir, ".envrc");
     const content = readIfExists(path);
+    const includePath = join(dir, ".worktreeinclude");
+    const includeContent = readIfExists(includePath);
 
     if (content === null) {
       problems.push(`${scope.repo}: no .envrc — run \`gcp_scope.ts install\``);
@@ -329,6 +339,17 @@ function check(opts: Options): number {
     }
     if (!content.includes(renderBlock(scope))) {
       problems.push(`${scope.repo}: .envrc block is stale — run \`gcp_scope.ts install\``);
+    }
+    if (includeContent === null) {
+      problems.push(`${scope.repo}: no .worktreeinclude — run \`gcp_scope.ts install\``);
+    } else {
+      const count = worktreeIncludeCount(includeContent);
+      if (count !== 1) {
+        problems.push(
+          `${scope.repo}: .worktreeinclude must contain .envrc exactly once (found ${count}) — ` +
+            "run `gcp_scope.ts install`",
+        );
+      }
     }
     if (!live) continue;
 
