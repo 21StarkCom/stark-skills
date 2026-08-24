@@ -9,6 +9,7 @@ import {
   acceptedProjects,
   ambientProblems,
   definesUseGcp,
+  ensureWorktreeInclude,
   exportsProject,
   findBlock,
   hasSourceUp,
@@ -17,6 +18,7 @@ import {
   renderBlock,
   spliceBlock,
   spliceDirenvrc,
+  worktreeIncludeCount,
 } from "./gcp_scope_lib.ts";
 import type { RepoScope } from "./gcp_scope_lib.ts";
 import { DIRENVRC_FUNCTIONS, direnvrcFunctions } from "./gcp_scope_direnvrc.ts";
@@ -257,6 +259,38 @@ test("spliceDirenvrc refuses a mangled managed block", () => {
 test("definesUseGcp ignores comments", () => {
   assert.equal(definesUseGcp("use_gcp() {\n}\n"), true);
   assert.equal(definesUseGcp("# use_gcp() is documented here\n"), false);
+});
+
+// --- Codex worktree inclusion ---------------------------------------------
+
+test("a new .worktreeinclude contains only the narrow .envrc contract", () => {
+  const result = ensureWorktreeInclude(null);
+  assert.equal(result.action, "create");
+  assert.equal(worktreeIncludeCount(result.content), 1);
+  assert.equal(result.content.includes("*"), false);
+  assert.equal(result.content.includes("credential"), false);
+});
+
+test("worktree inclusion preserves existing comments and paths", () => {
+  const existing = "# human comment\n.local-safe\n";
+  const result = ensureWorktreeInclude(existing);
+  assert.equal(result.action, "append");
+  assert.ok(result.content.startsWith(existing));
+  assert.equal(worktreeIncludeCount(result.content), 1);
+});
+
+test("worktree inclusion is idempotent", () => {
+  const once = ensureWorktreeInclude("# keep\n").content;
+  const twice = ensureWorktreeInclude(once);
+  assert.equal(twice.action, "unchanged");
+  assert.equal(twice.content, once);
+});
+
+test("worktree inclusion removes duplicate .envrc rows but no other row", () => {
+  const result = ensureWorktreeInclude("# keep\n.envrc\nother\n  .envrc  \n");
+  assert.equal(result.action, "deduplicate");
+  assert.equal(worktreeIncludeCount(result.content), 1);
+  assert.ok(result.content.includes("# keep\n.envrc\nother\n"));
 });
 
 // --- shipped shell ---------------------------------------------------------

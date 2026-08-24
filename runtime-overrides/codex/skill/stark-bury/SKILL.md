@@ -1,23 +1,19 @@
 ---
 name: stark-bury
-runtimes:
-  - claude
-  - codex
 description: >-
   Use when retiring 21Stark code into the Náströnd graveyard — burying a
   subsystem of a living repo (partial burial) or putting down a whole repo
-  (full retirement). Symptoms: "bury X", "retire the <feature>", "kill this
+  (full retirement). Symptoms: "bury X", "retire the named feature", "kill this
   service and keep the memory", "new corpse for nastrond", "dig a grave",
   "tombstone", "exhume". Runs the full ritual: footprint verification,
   interment PR, deletion PR, optional sealed data dump and table drop.
 argument-hint: "[corpse — the subsystem or repo to bury]"
 disable-model-invocation: true
-model: opus[1m]
 ---
 
 ## Help
 
-If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+If the current user request includes a standalone `--help`, `-h`, or `help` token,
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop — do not run preflight or any phase.
 
@@ -65,8 +61,9 @@ For every candidate file:
   wiring, config structs + env loads, job/rule registries, **metrics
   registrations** (the classic miss), alert rules (all copies), deploy/startup
   env, provisioning scripts, docs, per-package CLAUDE.md files, CHANGELOG.
-- Dispatch a read-only subagent for the import/entanglement map when the
-  corpse is more than a few files; verify its claims against the code.
+- Use an independent read-only inspection for the import/entanglement map when
+  the corpse is more than a few files. Delegate only when available and
+  authorized; in every case verify its claims against the code.
 
 ## Phase 2 — interment (nastrond PR #1)
 
@@ -81,7 +78,7 @@ For every candidate file:
 3. Write `TOMBSTONE.md` from the template. `cause_of_death` = why it was
    KILLED; "What it was" = why it EXISTED. Record footprint corrections.
 4. Append one row to `INDEX.md`.
-5. PR via `stark-gh:pr-open` → merge. The grave is filled.
+5. PR via `$pr-open` → `$pr-merge`. The grave is filled.
 
 ## Phase 3 — deletion (living-repo PR #2)
 

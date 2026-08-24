@@ -1,16 +1,13 @@
 ---
 name: simple-gate
-runtimes:
-  - claude
-  - codex
-description: Use when running the stark-author human gate (Phase 5), or any spec/plan sign-off checklist, and the operator wants the checks walked interactively in dead-simple, non-technical, ELI5 language with multiple-choice questions plus free text. Triggers include "walk me through the gate simply", "explain the gate like I'm five", "gate in plain English", "I don't get the checklist", "make the review easy".
+description: Use when running the stark-author human gate (Phase 5), or any spec/plan sign-off checklist, and the operator wants the checks walked interactively in dead-simple, non-technical language. Uses structured choices plus free text when Codex exposes them, with a one-question conversational fallback.
 ---
 
 # simple-gate
 
 ## Help
 
-If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
+If the current user request includes a standalone `--help`, `-h`, or `help` token,
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and `## Arguments`, then stop — do not walk the gate.
 
@@ -19,7 +16,9 @@ usage, and `## Arguments`, then stop — do not walk the gate.
 Walk a non-coder through the stark-author human gate in plain words. First you
 **hand them an honest brief** — what the change does, what you checked yourself,
 and where you are unsure. Then you ask them the few things **only they can
-answer**, as multiple-choice questions with a free-text "Other".
+answer**. Prefer Codex's structured choice UI, which includes free text. When
+that UI is unavailable, ask one short open-ended question per turn; do not
+imitate controls in prose.
 
 **This is not a test you give them.** It is help. You did the technical QA
 already; the gate asks the person for the things a machine cannot supply — what
@@ -93,10 +92,11 @@ in plain words instead.
      proof-it-works command does what it claims;
    - **where you are unsure** — the risks the spec's "Where I'm unsure" section
      lists, one plain line each. Say them straight. Do not hide them.
-3. **Then ask with the `AskUserQuestion` tool.** It shows your options AND a
-   free-text "Other". That is "choices plus free text" — use it, do not type
-   questions as plain prose.
-4. **Ask up to 4 items per call.** The questions below are about 2 calls.
+3. **Then use the current host's structured user-input UI when it is exposed.**
+   It must show honest options and accept free text. If it is unavailable, ask
+   one short open-ended question, wait for the answer, then continue.
+4. **Ask up to 3 items per structured call.** The questions below take about
+   two calls. The conversational fallback asks one at a time.
 5. **Every option is honest.** No planted wrong answer. Where you offer more than
    one real reading, all of them are things the doc could truly mean — you are
    asking which one THEY meant, not baiting them.
@@ -144,7 +144,8 @@ risks plainly, then ask them to judge.
 
 ## Common mistakes
 
-- **Typing questions as prose.** Wrong. Use `AskUserQuestion` so they get real choices.
+- **Faking structured controls in prose.** Wrong. Use the structured UI when
+  available; otherwise ask one open-ended question at a time.
 - **Planting a trick answer.** Wrong. This is help, not a trap. Every option is honest.
 - **Hiding your doubts.** Wrong. The "Where I'm unsure" brief is the most useful thing you give.
 - **Sneaking in jargon** ("the dispatcher reconciles"). Translate it or cut it.
