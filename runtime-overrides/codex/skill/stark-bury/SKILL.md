@@ -8,7 +8,7 @@ description: >-
   "tombstone", "exhume". Runs the full ritual: footprint verification,
   interment PR, deletion PR, optional sealed data dump and table drop.
 argument-hint: "[corpse — the subsystem or repo to bury]"
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 ## Help

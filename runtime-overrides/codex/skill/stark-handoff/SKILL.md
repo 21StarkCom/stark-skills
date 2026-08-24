@@ -1,6 +1,6 @@
 ---
 name: stark-handoff
-disable-model-invocation: true
+disable-model-invocation: false
 description: >-
   Use when the next move belongs to someone else — a fresh session after
   /compact, a fix dispatched into another repo, a parallel fork, a brainstorm
