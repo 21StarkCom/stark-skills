@@ -150,6 +150,20 @@ test("Codex runtime override inventory is exact", () => {
   );
 });
 
+test("required Codex parity skills remain model-discoverable", () => {
+  for (const name of ["stark-bury", "stark-handoff", "simple-gate"]) {
+    const body = fs.readFileSync(
+      path.join(CODEX_ROOT, "skill", name, "SKILL.md"),
+      "utf8",
+    );
+    assert.doesNotMatch(
+      body,
+      /^disable-model-invocation:\s*true$/m,
+      `${name} must enter Codex's model-visible skill catalog`,
+    );
+  }
+});
+
 test("Codex cleanup dry-run never fetches or prunes refs", () => {
   assert.equal(shouldFetchForPlan({ dryRun: true }), false);
   assert.equal(shouldFetchForPlan({ dryRun: false }), true);
