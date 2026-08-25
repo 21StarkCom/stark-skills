@@ -10,7 +10,7 @@ import { validateBranchName } from "./lib/branch.ts";
 import type { Candidate, ExecFn, Provenance } from "./lib/types.ts";
 import { fingerprintFromInputs } from "./lib/state.ts";
 import { emitLines, extractCandidates } from "./lib/issue.ts";
-import { scanSecrets } from "./lib/secret.ts";
+import { scanSecrets, type ScanSegment } from "./lib/secret.ts";
 import { loadMergeDefaults } from "./lib/merge_config.ts";
 import { estimateTokens, summarizeDiff, truncateDiffByFile, truncateLeading, withinBudget } from "./lib/budget.ts";
 import { writePlan, type Plan } from "./lib/plan.ts";
@@ -471,18 +471,23 @@ export function buildPlan(input: BuildPlanInput): Plan {
   const userCommitForScan =
     userArgs.commitMessage ?? (userArgs.commitMessageFile ? fs.readFileSync(userArgs.commitMessageFile, "utf8") : "");
   const prTemplateForScan = readPrTemplate() ?? "";
-  const scanTargets = [
-    committedDiff.text,
-    stagedDiff.text,
-    unstagedDiff?.text ?? "",
-    ...(untrackedFiles ?? []).map(u => u.content ?? ""),
-    commitMessages,
-    userArgs.title ?? "",
-    userBodyForScan,
-    userCommitForScan,
-    prTemplateForScan,
-  ].join("\n");
-  const hits = scanSecrets(scanTargets);
+  // Diffs and prose are scanned as separate segments so a lockfile's entropy
+  // exemption (STARK-1323) stays inside its own diff and cannot leak into a
+  // commit message or PR body. Untracked file bodies carry their path so an
+  // untracked lockfile is exempted too. Line numbers are unchanged: segments
+  // joined by "\n" reproduce the previous whole-blob numbering.
+  const scanSegments: ScanSegment[] = [
+    { text: committedDiff.text },
+    { text: stagedDiff.text },
+    { text: unstagedDiff?.text ?? "" },
+    ...(untrackedFiles ?? []).map(u => ({ text: u.content ?? "", path: u.path })),
+    { text: commitMessages },
+    { text: userArgs.title ?? "" },
+    { text: userBodyForScan },
+    { text: userCommitForScan },
+    { text: prTemplateForScan },
+  ];
+  const hits = scanSecrets(scanSegments);
   if (hits.length > 0 && !userArgs.allowSecretCommit && !userArgs.allowSecretToLlm) {
     const cats = [...new Set(hits.map(h => h.category))].join(", ");
     throw new Error(`secret-scan-hit:${cats}`);

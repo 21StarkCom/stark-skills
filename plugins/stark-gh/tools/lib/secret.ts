@@ -10,6 +10,18 @@ export interface SecretHit {
   lineNumber: number;
 }
 
+// A scan input segment. `text` is scanned line by line; an optional `path`
+// seeds the file context (e.g. an untracked file's own path) so a bare file
+// body with no diff header is still recognized as a lockfile. A plain string
+// input is treated as one path-less segment — identical to prior behavior.
+// Callers that concatenate DIFFS and PROSE into one scan pass segments so a
+// lockfile's entropy exemption cannot leak past the diff into a commit message
+// or PR body (each segment resets the file context).
+export interface ScanSegment {
+  text: string;
+  path?: string;
+}
+
 const REGEX_PATTERNS: { category: SecretCategory; re: RegExp }[] = [
   { category: "aws-access-key", re: /AKIA[0-9A-Z]{16}/ },
   { category: "github-token", re: /\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36}\b/ },
@@ -56,6 +68,56 @@ function exceedsEntropyThreshold(tok: string): boolean {
 const IDENT_CHARSET_RE = /^[A-Za-z0-9_]+$/;
 const VOWEL_RE = /[aeiou]/i;
 
+// Dependency lockfiles / checksum manifests. Every line is a base64/hex CONTENT
+// hash: legitimately high-entropy, but public and required — never a secret. A
+// go.sum change alone flags 100+ lines (frigg PR #13: 188 hits, zero real
+// secrets), which trains `--allow-secret-commit` as a reflex and would wave a
+// real secret in the same diff straight through. So the ENTROPY detector is
+// skipped inside a lockfile's diff hunk. The regex/token detectors
+// (AWS/GitHub/Slack/PEM) still run, so a pasted credential in a lockfile flags.
+const LOCKFILE_BASENAMES = new Set([
+  "go.sum",
+  "package-lock.json",
+  "npm-shrinkwrap.json",
+  "yarn.lock",
+  "pnpm-lock.yaml",
+  "bun.lock",
+  "bun.lockb",
+  "deno.lock",
+  "Cargo.lock",
+  "poetry.lock",
+  "pdm.lock",
+  "uv.lock",
+  "Pipfile.lock",
+  "composer.lock",
+  "Gemfile.lock",
+  "Podfile.lock",
+  "packages.lock.json",
+  "flake.lock",
+  "mix.lock",
+  "pubspec.lock",
+  "Package.resolved",
+]);
+// Gradle emits `<config>.lockfile`; keep this a suffix rule, the rest exact.
+const LOCKFILE_SUFFIX_RE = /\.lockfile$/;
+
+function isLockfilePath(p: string | null): boolean {
+  if (!p) return false;
+  const base = p.slice(p.lastIndexOf("/") + 1);
+  return LOCKFILE_BASENAMES.has(base) || LOCKFILE_SUFFIX_RE.test(base);
+}
+
+// git-diff structure markers used to track which file a line belongs to.
+// `diff --git a/X b/Y` opens a new file block and resets context. The pre-image
+// (`--- a/<path>`) and post-image (`+++ b/<path>`) path lines set the current
+// file; `/dev/null` on either side is ignored so a file ADD keeps the post-image
+// path and a file DELETE keeps the pre-image path (its removed `-` lines are
+// still lockfile content). Tracking stops the exemption at the next file, so a
+// secret in the file after a lockfile hunk is still scanned.
+const DIFF_HEADER_RE = /^diff --git /;
+const DIFF_PREIMAGE_RE = /^--- (?:a\/)?(.+?)\s*$/;
+const DIFF_POSTIMAGE_RE = /^\+\+\+ (?:b\/)?(.+?)\s*$/;
+
 function isWordStructuredIdentifier(tok: string): boolean {
   const bare = tok.replace(/^[+-]/, ""); // drop a leading diff marker
   if (/[+/=]/.test(bare)) return false; // base64 alphabet/padding → never exempt
@@ -83,32 +145,60 @@ function shannonEntropy(s: string): number {
   return h;
 }
 
-export function scanSecrets(text: string): SecretHit[] {
+export function scanSecrets(input: string | ScanSegment[]): SecretHit[] {
+  // A plain string is one path-less segment. Segments joined by "\n" reproduce
+  // the old whole-blob line numbering exactly (base += lines.length), so string
+  // callers and their reported line numbers are unchanged.
+  const segments: ScanSegment[] = typeof input === "string" ? [{ text: input }] : input;
   const hits: SecretHit[] = [];
-  const lines = text.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    for (const { category, re } of REGEX_PATTERNS) {
-      if (re.test(line)) hits.push({ category, lineNumber: i + 1 });
-    }
-    for (const m of line.matchAll(ENTROPY_TOKEN_RE)) {
-      const tok = m[0];
-      // In raw `git diff` text the +/- marker abuts column-0 content and both
-      // chars sit in the token charset, so a `.env`-style `+NAME=value` line
-      // fuses the marker into the token. Drop ONE leading marker before the
-      // assignment probe; a non-assignment token is still scored whole.
-      const assignment = ASSIGNMENT_RE.exec(tok.replace(/^[+-]/, ""));
-      // A word-structured identifier is code, not a secret — exempt it. For an
-      // assignment, exempt only when BOTH sides are word-structured, so a real
-      // secret on either side of the `=` still flags.
-      const flagged = assignment
-        ? (exceedsEntropyThreshold(assignment[1]!) || exceedsEntropyThreshold(assignment[2]!)) &&
-          !(isWordStructuredIdentifier(assignment[1]!) && isWordStructuredIdentifier(assignment[2]!))
-        : exceedsEntropyThreshold(tok) && !isWordStructuredIdentifier(tok);
-      if (flagged) {
-        hits.push({ category: "high-entropy", lineNumber: i + 1 });
+  let lineBase = 0;
+  for (const seg of segments) {
+    // File context resets per segment, so a lockfile exemption cannot leak from
+    // a diff segment into a following prose segment (commit message, PR body).
+    let currentFile: string | null = seg.path ?? null;
+    const lines = seg.text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]!;
+      if (DIFF_HEADER_RE.test(line)) {
+        currentFile = null;
+      } else {
+        // Pre-image first (`--- a/x`), then post-image (`+++ b/x`) which wins
+        // for a modify/rename; `/dev/null` on either side is left as-is so a
+        // delete keeps its pre-image path and an add keeps its post-image path.
+        const pre = DIFF_PREIMAGE_RE.exec(line);
+        if (pre && pre[1] !== "/dev/null") currentFile = pre[1]!;
+        const post = DIFF_POSTIMAGE_RE.exec(line);
+        if (post && post[1] !== "/dev/null") currentFile = post[1]!;
+      }
+      const lineNumber = lineBase + i + 1;
+      // Regex/token detectors run everywhere — a pasted credential flags even
+      // inside a lockfile.
+      for (const { category, re } of REGEX_PATTERNS) {
+        if (re.test(line)) hits.push({ category, lineNumber });
+      }
+      // Entropy detector is skipped inside lockfiles: their content hashes are
+      // legitimately high-entropy but public, never secrets (STARK-1323).
+      if (isLockfilePath(currentFile)) continue;
+      for (const m of line.matchAll(ENTROPY_TOKEN_RE)) {
+        const tok = m[0];
+        // In raw `git diff` text the +/- marker abuts column-0 content and both
+        // chars sit in the token charset, so a `.env`-style `+NAME=value` line
+        // fuses the marker into the token. Drop ONE leading marker before the
+        // assignment probe; a non-assignment token is still scored whole.
+        const assignment = ASSIGNMENT_RE.exec(tok.replace(/^[+-]/, ""));
+        // A word-structured identifier is code, not a secret — exempt it. For an
+        // assignment, exempt only when BOTH sides are word-structured, so a real
+        // secret on either side of the `=` still flags.
+        const flagged = assignment
+          ? (exceedsEntropyThreshold(assignment[1]!) || exceedsEntropyThreshold(assignment[2]!)) &&
+            !(isWordStructuredIdentifier(assignment[1]!) && isWordStructuredIdentifier(assignment[2]!))
+          : exceedsEntropyThreshold(tok) && !isWordStructuredIdentifier(tok);
+        if (flagged) {
+          hits.push({ category: "high-entropy", lineNumber });
+        }
       }
     }
+    lineBase += lines.length;
   }
   return hits;
 }
