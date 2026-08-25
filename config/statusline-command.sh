@@ -2,7 +2,7 @@
 # Claude Code status line — Catppuccin Mocha palette
 # Input: JSON via stdin
 #
-# Runs on every refresh tick (1s), so forks are the enemy:
+# Runs on every refresh tick (60s), so forks are the enemy:
 #   • the stdin payload + statusline-segments.json are parsed in PURE BASH
 #     ([[ =~ ]] + BASH_REMATCH, zero forks) — replaced the one-jq parse, which
 #     profiled as ~5ms of a ~17ms render (see parse_payload below)
@@ -146,18 +146,18 @@ tcolor() { # val hi_thresh mid_thresh → sets TC
   else TC="$DIM"; fi
 }
 
-fmt_dur() { # seconds → sets FD: "XhYm" | "Xm" | "Xs"
+fmt_dur() { # seconds → sets FD: "XhYm" | "Xm" | "<1m"  (minute granularity, no seconds)
   local h=$(( $1 / 3600 )) m=$(( ($1 % 3600) / 60 ))
   if [ "$h" -gt 0 ]; then FD="${h}h${m}m"
   elif [ "$m" -gt 0 ]; then FD="${m}m"
-  else FD="${1}s"; fi
+  else FD="<1m"; fi
 }
 
-fmt_age() { # seconds → sets FA: "Xs" | "Xm" | "H:MM" — session-age scale
-  # Sub-minute stays in seconds, sub-hour in whole minutes, hours as a clock
-  # face (2:06) rather than fmt_dur's "2h6m": a long-lived process reads as an
-  # elapsed clock, which is what "session age" wants.
-  if [ "$1" -lt 60 ]; then FA="${1}s"
+fmt_age() { # seconds → sets FA: "<1m" | "Xm" | "H:MM" — session-age scale
+  # Minute granularity (no seconds): sub-minute reads "<1m", sub-hour in whole
+  # minutes, hours as a clock face (2:06) rather than fmt_dur's "2h6m" — a
+  # long-lived process reads as an elapsed clock, which is what "session age" wants.
+  if [ "$1" -lt 60 ]; then FA="<1m"
   elif [ "$1" -lt 3600 ]; then FA="$(( $1 / 60 ))m"
   else printf -v FA '%d:%02d' $(( $1 / 3600 )) $(( ($1 % 3600) / 60 )); fi
 }
@@ -251,10 +251,10 @@ mkbar_ent() { # pct → sets BAR: railed 🔸 bar, width-matched to the █ bars
 }
 
 gradient() { # text [palette] → sets GRAD: per-account color sweep
-  # Static spatial gradient across the label. A 30s `refreshInterval` (settings.json)
+  # Static spatial gradient across the label. A 60s `refreshInterval` (settings.json)
   # re-runs the command on a timer so time-based segments (CTX / 5H / 7D, git
   # state) stay current while the session is idle — each re-render reads a fresh
-  # EPOCHREALTIME and drifts the gradient a frame (30s cadence, not a smooth
+  # EPOCHREALTIME and drifts the gradient a frame (60s cadence, not a smooth
   # animation clock). Palette ($2)
   # selects the account's color family: gold (Max/Com), violet (Max/Net), blue
   # (Enterprise), magenta (Team#0 fallback), plus a shade per agent account —
@@ -494,7 +494,7 @@ l2=""
 # Resolve from ~/.claude.json oauthAccount {emailAddress, organizationType};
 # the statusline
 # stdin payload doesn't carry it. ~/.claude.json is big and changes rarely
-# relative to the 1s tick, so the jq parse is mtime-cached ([ -nt ] is a
+# relative to the 60s tick, so the jq parse is mtime-cached ([ -nt ] is a
 # builtin — zero forks on the hot path).
 # Resolved unconditionally (not just when the account segment is shown):
 # the 5H/7D gauges below key their fill style off acct_label (Enterprise → 🔸).
