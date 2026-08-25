@@ -197,7 +197,14 @@ fmt_remain() { # reset_epoch [time_emoji] → sets FR: " ⏳ XdYh" or " XdYh" (e
 # miss touches ps+date. If a shell wrapper ever sits between (PPID != claude),
 # walk ancestors to find claude and skip the cache — the wrapper pid is
 # ephemeral, so caching it would leak a file per render and never hit anyway.
+#
+# Memoized for the render: process start can't change within a single tick, and
+# two call sites need it (the usage-snapshot guard and the session-times block).
+# The first call resolves; the second returns instantly, sparing a file read on
+# the warm path and an entire ps-ancestor-walk + date fork on a cold miss.
 resolve_procstart() {
+  [ -n "${_PS_DONE:-}" ] && return
+  _PS_DONE=1
   PROCSTART=0
   local _ccpid="$PPID" _psf="$HOME/.claude/.statusline-procstart-${PPID}"
   local _v="" _ppcomm _p _c _ls
