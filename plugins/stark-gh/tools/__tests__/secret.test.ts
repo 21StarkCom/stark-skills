@@ -128,3 +128,124 @@ test("high-entropy assignment with a word-structured value still flags on the na
   const r = scanSecrets(`+${HIGH_ENTROPY_64}=SomeReadableCamelCaseWordsHereForTheValue`);
   assert.ok(r.find((h) => h.category === "high-entropy"));
 });
+
+// --- lockfile / checksum-manifest exemption (STARK-1323) -----------------
+// go.sum and friends are base64/hex CONTENT hashes: legitimately high-entropy,
+// but public and required, never secrets. The entropy detector is skipped
+// inside a lockfile's diff hunk while the regex/token detectors stay active so
+// a pasted credential in a lockfile still flags. Repro: frigg PR #13 added the
+// modernc.org/sqlite tree → 188 go.sum lines flagged, zero real secrets.
+
+// A go.sum h1: checksum is base64(SHA-256) — 44 chars incl. `+ / =` padding.
+// Genuinely high-entropy: the paired .go test below proves the fixture trips
+// the detector when it is NOT inside a lockfile.
+const LOCK_HASH = "h1:" + HIGH_ENTROPY_64.slice(20, 62) + "==";
+
+function goSumDiff(hashLine: string): string {
+  return [
+    "diff --git a/go.sum b/go.sum",
+    "index 1234567..89abcde 100644",
+    "--- a/go.sum",
+    "+++ b/go.sum",
+    "@@ -1,2 +1,3 @@",
+    hashLine,
+  ].join("\n");
+}
+
+test("go.sum checksum line does NOT flag high-entropy (STARK-1323)", () => {
+  const diff = goSumDiff(`+modernc.org/sqlite v1.34.1 ${LOCK_HASH}`);
+  assert.deepEqual(scanSecrets(diff), []);
+});
+
+test("same high-entropy token in a .go file STILL flags (exemption is lockfile-scoped)", () => {
+  const diff = [
+    "diff --git a/main.go b/main.go",
+    "+++ b/main.go",
+    `+const key = "${LOCK_HASH}"`,
+  ].join("\n");
+  assert.ok(scanSecrets(diff).find((h) => h.category === "high-entropy"));
+});
+
+test("regex detector still fires inside a go.sum hunk (STARK-1323)", () => {
+  // Key assembled from parts so pr-open's own secret scan doesn't flag this
+  // test fixture; the runtime value still exercises the AWS detector.
+  const awsKey = "AKIA" + "IOSFODNN7EXAMPLE";
+  const diff = goSumDiff(`+${awsKey} leaked into a lockfile`);
+  assert.ok(scanSecrets(diff).find((h) => h.category === "aws-access-key"));
+});
+
+test("package-lock.json integrity hash does NOT flag (STARK-1323)", () => {
+  const diff = [
+    "diff --git a/package-lock.json b/package-lock.json",
+    "+++ b/package-lock.json",
+    "@@ -1 +1,2 @@",
+    `+      "integrity": "sha512-${HIGH_ENTROPY_64}==",`,
+  ].join("\n");
+  assert.deepEqual(scanSecrets(diff), []);
+});
+
+test("nested-path lockfile (frontend/pnpm-lock.yaml) does NOT flag (STARK-1323)", () => {
+  const diff = [
+    "diff --git a/frontend/pnpm-lock.yaml b/frontend/pnpm-lock.yaml",
+    "+++ b/frontend/pnpm-lock.yaml",
+    `+  resolution: {integrity: sha512-${HIGH_ENTROPY_64}==}`,
+  ].join("\n");
+  assert.deepEqual(scanSecrets(diff), []);
+});
+
+test("DELETING a go.sum does NOT flag its removed hashes (STARK-1323)", () => {
+  // A delete has `+++ /dev/null`; file identity is the pre-image `--- a/go.sum`,
+  // so the removed `-<hash>` lines must still be exempt.
+  const diff = [
+    "diff --git a/go.sum b/go.sum",
+    "deleted file mode 100644",
+    "index 89abcde..0000000",
+    "--- a/go.sum",
+    "+++ /dev/null",
+    "@@ -1,2 +0,0 @@",
+    `-modernc.org/sqlite v1.34.1 ${LOCK_HASH}`,
+  ].join("\n");
+  assert.deepEqual(scanSecrets(diff), []);
+});
+
+test("file after a go.sum block in the SAME diff is scanned normally (STARK-1323)", () => {
+  // Exemption must end at the next `diff --git`, not leak into the next file.
+  const diff = [
+    goSumDiff(`+modernc.org/x v1.0.0 ${LOCK_HASH}`),
+    "diff --git a/secrets.txt b/secrets.txt",
+    "+++ b/secrets.txt",
+    `+${HIGH_ENTROPY_64}`,
+  ].join("\n");
+  assert.ok(scanSecrets(diff).find((h) => h.category === "high-entropy"));
+});
+
+test("secret in a separate prose segment after a go.sum diff still flags (no context leak)", () => {
+  const diff = goSumDiff(`+modernc.org/x v1.0.0 ${LOCK_HASH}`);
+  const prose = `commit message pasting a token ${HIGH_ENTROPY_64}`;
+  const r = scanSecrets([{ text: diff }, { text: prose }]);
+  assert.ok(r.find((h) => h.category === "high-entropy"));
+});
+
+test("segment path hint exempts bare lockfile content with no diff header (STARK-1323)", () => {
+  const content = `modernc.org/sqlite v1.34.1 ${LOCK_HASH}`;
+  assert.deepEqual(scanSecrets([{ text: content, path: "go.sum" }]), []);
+});
+
+test("segment path hint on a non-lockfile does NOT exempt", () => {
+  const content = `const key = ${HIGH_ENTROPY_64}`;
+  const r = scanSecrets([{ text: content, path: "config.ts" }]);
+  assert.ok(r.find((h) => h.category === "high-entropy"));
+});
+
+test("string-form line numbers unchanged by segment refactor", () => {
+  const text = ["clean", `KEY=${HIGH_ENTROPY_64}`, "clean"].join("\n");
+  const r = scanSecrets(text);
+  assert.equal(r.length, 1);
+  assert.equal(r[0]!.lineNumber, 2);
+});
+
+test("multi-segment line numbers are cumulative as if joined by newline", () => {
+  const r = scanSecrets([{ text: "a\nb" }, { text: `KEY=${HIGH_ENTROPY_64}` }]);
+  assert.equal(r.length, 1);
+  assert.equal(r[0]!.lineNumber, 3); // seg1 = lines 1,2; seg2 first line = 3
+});
