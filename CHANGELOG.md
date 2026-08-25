@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=916 runId=967b1a26-917a-46d0-a2ed-3e81e4c2a3dc -->
+- Memoize process-start resolution within each statusline render to avoid redundant cache reads and cold-path process lookups.
 <!-- stark-gh:pr-merge pr=915 runId=e760bea3-7646-4123-bce1-f6b163e5759a -->
 - Display statusline durations with minute-level precision and show sub-minute values as `<1m`.
 <!-- stark-gh:pr-merge pr=913 runId=4dac48ea-ea8f-40a7-97ba-f5adb72bfc2a -->
