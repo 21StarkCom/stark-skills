@@ -283,6 +283,8 @@ gradient() { # text [palette] → sets GRAD: per-account color sweep
     agent4) PR=(52  45  34  110) PG=(211 212 211 231) PB=(153 191 238 183) ;; # emerald→teal→cyan — A4
     agent5) PR=(255 240 255 235) PG=(165 125 180 145) PB=(70  48  92  62 ) ;; # amber→orange→coral — A5
     agent6) PR=(150 120 100 175) PG=(130 100 80  140) PB=(252 240 220 248) ;; # indigo→blue-violet — A6
+    agent7) PR=(232 255 246 214) PG=(20  70  36  96 ) PB=(180 214 150 205) ;; # magenta→hot-pink — A7
+    agent8) PR=(64  112 150 92 ) PG=(224 242 255 232) PB=(208 216 205 212) ;; # turquoise→aqua — A8
     acctk) PR=(240 250 235 245) PG=(200 165 150 180) PB=(150 130 165 140) ;; # rose-gold — account slot K
     stark1) PR=(225 240 210 235) PG=(220 235 230 225) PB=(60  85  95  70 ) ;; # yellow — S1 (cyan is now A1)
     stark2) PR=(90  120 70  140) PG=(210 230 195 235) PB=(110 140 90  150) ;; # green — S2 (lime is now A2)
