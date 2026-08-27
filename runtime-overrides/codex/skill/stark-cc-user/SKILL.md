@@ -47,11 +47,11 @@ This skill targets macOS Keychain. If `uname -s` is not `Darwin` or the
 `security` command is unavailable, stop without changing state and explain the
 platform requirement.
 
-Resolve the bundled `tools/cc_account.ts` through the current runtime's asset
-root. In a stark-skills source checkout, use the repo-local tool. Otherwise
-prefer `STARK_ASSET_ROOT`, then `STARK_PLUGIN_ROOT`, then the host-provided plugin
-root. If none resolves to a real file, stop and ask the user to reinstall the
-bundle. Run the parsed subcommand with one self-contained shell call:
+`idun cc` is the native port of this tool — the former `tools/cc_account.ts`
+(+ `cc_account_lib.ts`, `cc_refresh_lib.ts`) was removed once every verb went
+native (see idun's ADR 0010). There is no bundled script to resolve any more;
+run `idun cc` directly. Run the parsed subcommand with one self-contained shell
+call:
 
 ```bash
 set -euo pipefail
@@ -62,17 +62,11 @@ command_args=(show)
   echo "stark-cc-user requires macOS Keychain (security command)" >&2
   exit 1
 }
-if [ -f "skill/stark-cc-user/SKILL.md" ] && [ -f "tools/cc_account.ts" ]; then
-  script="$(pwd)/tools/cc_account.ts"
-else
-  asset_root="${STARK_ASSET_ROOT:-${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
-  script="${asset_root:+$asset_root/tools/cc_account.ts}"
-fi
-[ -n "${script:-}" ] && [ -f "$script" ] || {
-  echo "bundled tools/cc_account.ts not found; reinstall the skill bundle" >&2
+command -v idun >/dev/null || {
+  echo "stark-cc-user requires 'idun' on PATH (native cc port); install idun" >&2
   exit 1
 }
-node --no-warnings "$script" "${command_args[@]}"
+idun cc "${command_args[@]}"
 ```
 
 Pass stdout through verbatim. The tool is the single source of truth for
@@ -240,7 +234,7 @@ an account live would spend quota from the window being measured.
 
 So `config/statusline-command.sh` snapshots the four fields to
 `~/.claude/.cc-usage-<accountUuid>_<organizationUuid>` on each render (free — already parsed, and a
-fork-free bash redirect). `cc_account_lib.ts` then reasons over the snapshots
+fork-free bash redirect). `idun cc` then reasons over the snapshots
 using two properties that make stale data far more useful than it sounds:
 
 - **A rolled window is provably empty.** If `now >= resets_at`, that window
