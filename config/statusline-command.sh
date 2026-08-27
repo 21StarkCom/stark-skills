@@ -592,7 +592,8 @@ _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
 # snapshot in place, which the reader ages honestly.
 #
 # `seat_key=` is written LAST so a torn read degrades to "unknown" rather than
-# to a falsely-low percentage — see cc_account_lib.ts::formatSnapshot.
+# to a falsely-low percentage — see idun's cc_lib.ts::formatSnapshot (the
+# cross-language snapshot wire-format contract this bash writer must match).
 #
 # GUARD — a snapshot is only attributable when the RENDERING process was
 # launched under the currently-recorded identity.
