@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=919 runId=bd1de857-edd4-4e7f-b97d-aecaf7de96d8 -->
+- Delegated `/stark-cc-user` account operations to `idun cc` and removed the superseded local implementation.
 <!-- stark-gh:pr-merge pr=916 runId=967b1a26-917a-46d0-a2ed-3e81e4c2a3dc -->
 - Memoize process-start resolution within each statusline render to avoid redundant cache reads and cold-path process lookups.
 <!-- stark-gh:pr-merge pr=915 runId=e760bea3-7646-4123-bce1-f6b163e5759a -->
