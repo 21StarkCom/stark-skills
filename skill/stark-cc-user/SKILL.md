@@ -49,9 +49,9 @@ Run `idun cc` with the parsed subcommand:
 idun cc <subcommand> [args]
 ```
 
-`idun cc` is the native port of this tool (the former `tools/cc_account.ts` +
-`cc_account_lib.ts` + `cc_refresh_lib.ts` were removed once every verb went
-native — see idun's ADR 0010). It requires `idun` on `PATH`; if it is missing,
+`idun cc` is the native port of this tool (the former stark-skills `cc_account`
+tool and its libs were removed once every verb went native — see idun's ADR
+0010). It requires `idun` on `PATH`; if it is missing,
 stop and say so rather than falling back to a bundled script (there is none any
 more). Pass stdout through verbatim — `idun cc` renders natively; do not
 re-render its tables.

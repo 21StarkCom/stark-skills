@@ -47,9 +47,9 @@ This skill targets macOS Keychain. If `uname -s` is not `Darwin` or the
 `security` command is unavailable, stop without changing state and explain the
 platform requirement.
 
-`idun cc` is the native port of this tool — the former `tools/cc_account.ts`
-(+ `cc_account_lib.ts`, `cc_refresh_lib.ts`) was removed once every verb went
-native (see idun's ADR 0010). There is no bundled script to resolve any more;
+`idun cc` is the native port of this tool — the former stark-skills `cc_account`
+tool and its libs were removed once every verb went native (see idun's ADR
+0010). There is no bundled script to resolve any more;
 run `idun cc` directly. Run the parsed subcommand with one self-contained shell
 call:
 
