@@ -43,16 +43,18 @@ identity when a GraphQL/REST bucket runs dry), but the mechanics differ — read
 
 ## Behavior
 
-Resolve `tools/cc_account.ts` (worktree-relative, falling back to
-`${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools/cc_account.ts`) and run
-it with the parsed subcommand:
+Run `idun cc` with the parsed subcommand:
 
 ```
-node --no-warnings <script> <subcommand> [args]
+idun cc <subcommand> [args]
 ```
 
-Pass stdout through verbatim. The tool is the single source of truth for
-formatting; do not re-render its tables.
+`idun cc` is the native port of this tool (the former stark-skills `cc_account`
+tool and its libs were removed once every verb went native — see idun's ADR
+0010). It requires `idun` on `PATH`; if it is missing,
+stop and say so rather than falling back to a bundled script (there is none any
+more). Pass stdout through verbatim — `idun cc` renders natively; do not
+re-render its tables.
 
 ## Setup — one `add` per account, while logged in as it
 
@@ -301,7 +303,7 @@ an account live would spend quota from the window being measured.
 
 So `config/statusline-command.sh` snapshots the four fields to
 `~/.claude/.cc-usage-<accountUuid>_<organizationUuid>` on each render (free — already parsed, and a
-fork-free bash redirect). `cc_account_lib.ts` then reasons over the snapshots
+fork-free bash redirect). `idun cc` then reasons over the snapshots
 using two properties that make stale data far more useful than it sounds:
 
 - **A rolled window is provably empty.** If `now >= resets_at`, that window
