@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=922 runId=e976673d-5fb7-46e7-a3ae-474148a7c050 -->
+- Retire `stark-cc-user`; use `idun cc` for Claude Code account rotation.
 <!-- stark-gh:pr-merge pr=920 runId=939c0c30-5207-45c7-9893-335b23d78ee2 -->
 - Add per-repo GCP identity selection alongside project scoping.
 <!-- stark-gh:pr-merge pr=919 runId=bd1de857-edd4-4e7f-b97d-aecaf7de96d8 -->
