@@ -33,6 +33,7 @@ export const MAP_DOC = `The map is local data, never committed. Default location
         "project":    "<gcp project id>",
         "region":     "<compute region, optional>",
         "account":    "<gcloud account, optional — omit to leave gcloud's own>",
+        "identity":   "<gcloud config-dir under ~/.config/gcloud, optional — e.g. 'personal'; omit for default>",
         "sourceUp":   true,          // emit source_up_if_exists (parent .envrc matters)
         "alternates": ["<project>"], // other projects check should accept for this repo
         "why":        "<evidence for this mapping>",
@@ -51,6 +52,13 @@ export type RepoScope = {
   region: string;
   /** gcloud account to pin. Empty = leave gcloud's own account resolution alone. */
   account: string;
+  /**
+   * gcloud config-dir name under `~/.config/gcloud` (e.g. "personal"). Empty =
+   * the default config. Non-empty emits `use_gcp_identity <name>` before
+   * `use_gcp`, flipping CLOUDSDK_CONFIG so a non-default account's own login +
+   * ADC drive this repo — the ACCOUNT boundary, not just the project.
+   */
+  identity: string;
   /**
    * Emit `source_up_if_exists`. Needed wherever a parent directory's `.envrc`
    * carries state (keys, tokens) that a repo-level `.envrc` would shadow.
@@ -191,11 +199,18 @@ export function parseMap(doc: unknown): ParsedMap {
       continue;
     }
 
+    const identity = typeof row.identity === "string" ? row.identity : "";
+    if (identity && !/^[a-z][a-z0-9-]*$/.test(identity)) {
+      errors.push(`${at} (${repo}): "${identity}" is not a valid gcloud config-dir name`);
+      continue;
+    }
+
     scopes.push({
       repo,
       project,
       region,
       account: typeof row.account === "string" ? row.account : "",
+      identity,
       sourceUp: row.sourceUp === true,
       alternates: asStringArray(row.alternates),
       why: typeof row.why === "string" ? row.why : "",
@@ -225,6 +240,13 @@ export function renderBlock(scope: RepoScope): string {
     "# Managed by gcp_scope.ts — edit the map, not this block.",
   ];
   if (scope.why) lines.push(`# Why this project: ${scope.why}`);
+  if (scope.identity) {
+    lines.push(
+      `# Non-default identity: flip CLOUDSDK_CONFIG to ~/.config/gcloud/${scope.identity}`,
+      "# (its own gcloud login + ADC) before pinning the project below.",
+      `use_gcp_identity ${scope.identity}`,
+    );
+  }
   lines.push(`use_gcp ${args}`);
   for (const note of scope.notes) lines.push(`# ${note}`);
   if (scope.alternates.length > 0) {

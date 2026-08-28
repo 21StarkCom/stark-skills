@@ -167,6 +167,7 @@ function init(opts: Options): number {
         project: "example-project-id",
         region: "us-central1",
         account: "",
+        identity: "",
         sourceUp: false,
         alternates: [],
         why: "replace with real evidence for this mapping",
