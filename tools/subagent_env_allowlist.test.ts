@@ -66,6 +66,36 @@ test("USER survives in every copy", () => {
   assert.ok(shippedAllowlist().includes("USER"));
 });
 
+test("no allowlist carries a headless-claude OAuth seat var", () => {
+  // The claude CLI authenticates from CLAUDE_CODE_OAUTH_TOKEN (+ _SCOPES)
+  // alone. Allowlisting any of them forwards whatever the LAUNCHING shell
+  // carries, which shadows a seat a dispatch site deliberately injected — the
+  // subprocess then bills an account nobody chose. Rationale in
+  // agent_env_lib.ts::AGENT_ENV_ALLOWLIST.
+  //
+  // The credential test below already covers the two `*_TOKEN` names via
+  // isCredentialEnvKey; `_SCOPES` matches no credential pattern, so without
+  // this test the rule holds for two names out of three.
+  const banned = [
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_SCOPES",
+    "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
+  ];
+  for (const [label, list] of [
+    ["global/config.json", shippedAllowlist()],
+    ["DEFAULT_RUNTIME_ALLOWLIST", [...DEFAULT_RUNTIME_ALLOWLIST]],
+    ["DEFAULT_RUNTIME", [...DEFAULT_RUNTIME.subagent_env_allowlist]],
+    ["AGENT_ENV_ALLOWLIST", [...AGENT_ENV_ALLOWLIST]],
+  ] as const) {
+    for (const key of banned) {
+      assert.ok(
+        !list.includes(key),
+        `${label} allowlists ${key}; an ambient value would shadow an injected seat`,
+      );
+    }
+  }
+});
+
 test("no allowlist ships a credential", () => {
   // The allowlists are data; a credential added to one would be forwarded to a
   // subprocess whose input is untrusted diff text. Cross-check every copy

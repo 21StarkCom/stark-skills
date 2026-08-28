@@ -584,7 +584,8 @@ _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
 # accounts in the same org). Team limits are
 # per-member, so every (account, org) pair has its own budget. Keying by either
 # component alone pointed two seats at one file, so each reported the other's
-# usage. The `:` is replaced by `_` on disk (see sanitizeKey).
+# usage. The `:` is replaced by `_` on disk (see idun's cc_lib.ts::sanitizeKey —
+# the reader that must resolve the same filename).
 #
 # Guarded on the RAW $five_pct, not the rounded $_fpct: when the payload omits
 # rate_limits entirely, $_fpct is 0, and persisting that would claim the account
