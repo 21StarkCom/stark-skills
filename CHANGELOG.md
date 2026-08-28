@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=920 runId=939c0c30-5207-45c7-9893-335b23d78ee2 -->
+- Add per-repo GCP identity selection alongside project scoping.
 <!-- stark-gh:pr-merge pr=919 runId=bd1de857-edd4-4e7f-b97d-aecaf7de96d8 -->
 - Delegated `/stark-cc-user` account operations to `idun cc` and removed the superseded local implementation.
 <!-- stark-gh:pr-merge pr=916 runId=967b1a26-917a-46d0-a2ed-3e81e4c2a3dc -->

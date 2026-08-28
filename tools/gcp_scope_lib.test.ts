@@ -28,6 +28,7 @@ const SCOPE: RepoScope = {
   project: "demo-project",
   region: "us-east1",
   account: "",
+  identity: "",
   sourceUp: false,
   alternates: [],
   why: "test fixture",
@@ -52,6 +53,7 @@ test("parseMap accepts a minimal row and defaults the rest", () => {
     project: "some-project",
     region: "",
     account: "",
+    identity: "",
     sourceUp: false,
     alternates: [],
     why: "",
@@ -107,6 +109,28 @@ test("renderBlock passes the account through as the third arg", () => {
     renderBlock({ ...SCOPE, account: "someone@example.test" }).includes(
       "use_gcp demo-project us-east1 someone@example.test",
     ),
+  );
+});
+
+test("renderBlock emits use_gcp_identity before use_gcp when an identity is set", () => {
+  const block = renderBlock({ ...SCOPE, identity: "personal" });
+  const directives = block.split("\n").filter((l) => l.startsWith("use_gcp"));
+  assert.deepEqual(directives, ["use_gcp_identity personal", "use_gcp demo-project us-east1"]);
+});
+
+test("renderBlock omits use_gcp_identity when no identity is set", () => {
+  assert.equal(renderBlock(SCOPE).includes("use_gcp_identity"), false);
+});
+
+test("parseMap reads a valid identity and rejects a path-unsafe one", () => {
+  const { scopes, errors } = parseMap({
+    repos: [{ repo: "a/b", project: "good-project", identity: "personal" }],
+  });
+  assert.deepEqual(errors, []);
+  assert.equal(scopes[0]?.identity, "personal");
+  assert.match(
+    parseMap({ repos: [{ repo: "a/b", project: "good-project", identity: "../evil" }] }).errors[0] ?? "",
+    /not a valid gcloud config-dir/,
   );
 });
 
