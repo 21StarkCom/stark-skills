@@ -107,11 +107,12 @@ jobs:
         working-directory: tools
         run: npm ci
 
-      # Advisory only. `tsc -p .` currently reports 3 pre-existing errors
-      # (housekeeping_infra.ts TS1470, cc_account_lib.test.ts TS2322,
+      # Advisory only. `tsc -p .` currently reports 2 pre-existing errors
+      # (runtime-overrides/codex/tools/housekeeping_infra.ts TS1470,
       # runtime_env_lib.ts TS2353). Failing the build on them would make this
       # gate red on arrival and block unrelated work, so the step reports and
-      # does not gate.
+      # does not gate. (Was 3 — the cc_account_lib.test.ts TS2322 error left
+      # with the file when Claude Code account rotation moved to `idun cc`.)
       #
       # CONSEQUENCE: `continue-on-error` means the `typecheck` CHECK reports
       # SUCCESS whether or not tsc passed — the errors are visible only in the

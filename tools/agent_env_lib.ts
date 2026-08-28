@@ -73,6 +73,22 @@ export function resolvedPath(
  *
  * `copilot_dispatch.ts` already allowlisted USER; that fix was never
  * back-ported here, which is exactly the drift this shared constant ends.
+ *
+ * `CLAUDE_CODE_OAUTH_TOKEN` / `CLAUDE_CODE_OAUTH_SCOPES` /
+ * `CLAUDE_CODE_OAUTH_REFRESH_TOKEN` must NEVER be added here. Measured: the
+ * claude CLI authenticates from those env vars alone (empty HOME, no
+ * credentials written, `oauthAccount` left absent, global Keychain item
+ * untouched), so a dispatch site can hand a subprocess its OWN seat instead of
+ * riding the one global login every parallel session fights over. Allowlisting
+ * them forwards whatever the LAUNCHING shell happens to carry, which silently
+ * shadows an injected seat — the subprocess then bills an account nobody chose,
+ * and a personal-org token on a team seat surfaces as "Credit balance is too
+ * low" with nothing pointing at the env. `CLAUDE_CODE_OAUTH_REFRESH_TOKEN` is
+ * additionally inert: injected with an expired access token the CLI fails
+ * `401 OAuth access token has expired` without attempting a refresh, so it buys
+ * nothing even when it is the value you wanted. Two of the three are already
+ * credential-shaped (`isCredentialEnvKey`), but `..._SCOPES` is not — the
+ * exclusion is pinned explicitly in `subagent_env_allowlist.test.ts`.
  */
 export const AGENT_ENV_ALLOWLIST: readonly string[] = [
   "PATH",

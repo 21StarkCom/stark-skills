@@ -570,7 +570,7 @@ seg2 "${DAY_COL}7D${R} ${BAR} ${TC}${_wpct}%${FR}${R}"
 
 _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
 
-# Persist this account's rate-limit windows for `/stark-cc-user limits`.
+# Persist this account's rate-limit windows for `idun cc limits`.
 #
 # These four fields arrive ONLY in the statusline stdin payload — they are not
 # written to ~/.claude.json or anywhere else on disk, so a tool asking "how much
@@ -584,7 +584,8 @@ _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
 # accounts in the same org). Team limits are
 # per-member, so every (account, org) pair has its own budget. Keying by either
 # component alone pointed two seats at one file, so each reported the other's
-# usage. The `:` is replaced by `_` on disk (see sanitizeKey).
+# usage. The `:` is replaced by `_` on disk (see idun's cc_lib.ts::sanitizeKey —
+# the reader that must resolve the same filename).
 #
 # Guarded on the RAW $five_pct, not the rounded $_fpct: when the payload omits
 # rate_limits entirely, $_fpct is 0, and persisting that would claim the account

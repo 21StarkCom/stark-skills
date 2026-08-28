@@ -9,7 +9,7 @@ The stark skills + tools fleet:
 - **A two-stage development pipeline** — `/stark-author` (human-gated spec+plan) → `/stark-build` (check-gated implementation). No LLM-reviews-LLM loops, per the 2026-07-25 autopsy.
 - **A single-agent PR code reviewer** — `/stark-review`, evidence-contract prompts, 5 triage-selected domains.
 - **Multi-agent IaC review** — `/stark-terraform-review`, `/stark-terragrunt-review`.
-- **The ops/session tier** — session, handover, housekeeping, release, persona, account switching.
+- **The ops/session tier** — session, handover, housekeeping, release, persona, GitHub identity swap.
 
 Claude, Codex and Gemini are all enabled (Gemini → `gemini-3.1-pro-preview`, default auth `oauth`). Vertex project/location resolve at runtime via `tools/vertex_config_lib.ts` — **never hardcoded or committed**. Hierarchical config: global → org → repo.
 
@@ -75,9 +75,10 @@ All skills live in `skill/stark-*/SKILL.md`. Full per-skill detail — arguments
 | `/stark-release [patch\|minor\|major]` | Changelog, tag, GitHub Release. |
 | `/stark-persona` | Session character voices. |
 | `/stark-refactor-plan [dir]` | Planning-only refactor analysis. Never modifies source. |
-| `/stark-cc-user` | Switch the active Claude Code account when a window runs out. |
 | `/stark-gh-user` | Human-only GitHub identity swap. See the rule above. |
 | `/stark-init-docs` | Scaffold dev docs. |
+
+**Claude Code account rotation is not a skill here — run `idun cc`** (the `/stark-cc-user` wrapper was retired in STARK-1697; the engine went native in STARK-1614, idun ADR 0010). One piece stays in this repo and must not be mistaken for dead code: `config/statusline-command.sh` is the **only** writer of `~/.claude/.cc-usage-<account>_<org>`, since the 5h/7d percentages arrive only in the statusline stdin payload — `idun cc limits` / `next --best` have no other source of headroom for an inactive seat. Cross-language wire contract with `idun/src/cc/cc_lib.ts`; see the comment block above the writer, and `CLAUDE.md`.
 
 **Every skill honors `--help`** — a standalone `--help` / `-h` / `help` token prints purpose + usage + arguments and stops, with no preflight and no phases. Guarded by `skill_smoke_test.test.ts`.
 
