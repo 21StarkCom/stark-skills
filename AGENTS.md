@@ -75,7 +75,6 @@ All skills live in `skill/stark-*/SKILL.md`. Full per-skill detail — arguments
 | `/stark-release [patch\|minor\|major]` | Changelog, tag, GitHub Release. |
 | `/stark-persona` | Session character voices. |
 | `/stark-refactor-plan [dir]` | Planning-only refactor analysis. Never modifies source. |
-| `/stark-cc-user` | Switch the active Claude Code account when a window runs out. |
 | `/stark-gh-user` | Human-only GitHub identity swap. See the rule above. |
 | `/stark-init-docs` | Scaffold dev docs. |
 

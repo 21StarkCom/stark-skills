@@ -570,7 +570,7 @@ seg2 "${DAY_COL}7D${R} ${BAR} ${TC}${_wpct}%${FR}${R}"
 
 _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
 
-# Persist this account's rate-limit windows for `/stark-cc-user limits`.
+# Persist this account's rate-limit windows for `idun cc limits`.
 #
 # These four fields arrive ONLY in the statusline stdin payload — they are not
 # written to ~/.claude.json or anywhere else on disk, so a tool asking "how much

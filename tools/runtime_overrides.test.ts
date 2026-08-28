@@ -145,7 +145,7 @@ test("Codex runtime override inventory is exact", () => {
   // make it a tautology.
   assert.equal(
     expected.length,
-    75,
+    74,
     `runtime-overrides/codex inventory size changed (computed ${expected.length}) — if the tree is right, bump this literal`,
   );
 });
