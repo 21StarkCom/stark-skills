@@ -57,6 +57,16 @@ export function bodyOf(content: string): string {
   return after === -1 ? "" : content.slice(after + 1);
 }
 
+/** Frontmatter `description:` — the memory schema's one-line fact summary. */
+export function descriptionOf(content: string): string {
+  if (!content.startsWith("---")) return "";
+  const end = content.indexOf("\n---", 3);
+  if (end === -1) return "";
+  const fm = content.slice(3, end);
+  const m = fm.match(/^\s*description:\s*(.+)$/m);
+  return m ? m[1].trim() : "";
+}
+
 // Product-level "which thing / when to reach / how the fleet connects" language.
 const PRODUCT_LANG =
   /\b(reach for|when to reach|is the|is a |instead of|\bvs\b|owns |routes? to|which (?:tool|repo|thing)|use .{0,30} for|sibling|superseded|the tool for|product-level|capability)\b/i;
@@ -69,7 +79,8 @@ const IMPL_MARKERS =
 export function fleetSlugsMentioned(text: string, fleetSlugs: readonly string[]): string[] {
   const lower = text.toLowerCase();
   return fleetSlugs.filter((s) => {
-    const re = new RegExp(`(^|[^a-z0-9-])${s.toLowerCase()}([^a-z0-9-]|$)`);
+    const esc = s.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`(^|[^a-z0-9-])${esc}([^a-z0-9-]|$)`);
     return re.test(lower);
   });
 }
@@ -91,26 +102,30 @@ export function classifyMemory(
   // feedback = how Claude works; user = who the user is. Both belong in memory.
   if (type === "feedback" || type === "user") return null;
 
-  const body = bodyOf(content);
-  const slugs = fleetSlugsMentioned(body, fleetSlugs);
+  // Scan the description (where the memory schema puts the one-line fact) as
+  // well as the body — a fact stated mainly in the frontmatter would otherwise
+  // slip through.
+  const text = (descriptionOf(content) + "\n" + bodyOf(content)).trim();
+  const slugs = fleetSlugsMentioned(text, fleetSlugs);
+  const productLang = PRODUCT_LANG.test(text);
+  const impl = IMPL_MARKERS.test(text);
 
-  const productLang = PRODUCT_LANG.test(body);
-  const impl = IMPL_MARKERS.test(body);
-
-  // class 1 — product-level fleet fact: names a fleet entity AND reads product-
-  // level, OR relates two+ fleet entities (a cross-repo relationship).
-  if ((slugs.length >= 1 && productLang) || slugs.length >= 2) {
-    return {
-      route: "corpus",
-      reason: `product-level, mentions ${slugs.slice(0, 4).join("/") || "fleet"}${productLang ? " + when-to-reach language" : " (cross-repo)"}`,
-    };
+  // class 1 — product-level fleet fact: names a fleet entity AND reads
+  // product-level ("when to reach", relationship, selection).
+  if (slugs.length >= 1 && productLang) {
+    return { route: "corpus", reason: `product-level, mentions ${slugs.slice(0, 4).join("/")} + when-to-reach language` };
   }
-
-  // class 2 — repo implementation/invariant that ended up in memory.
+  // class 2 — repo implementation/invariant that ended up in memory. Checked
+  // BEFORE the bare multi-slug rule so a multi-repo *implementation* fact routes
+  // to the repo's CLAUDE.md, not the corpus (repo-impl is the dominant mis-store).
   if (impl && slugs.length >= 1) {
     return { route: "repo-claude", reason: `implementation detail about ${slugs.slice(0, 3).join("/")} — belongs in its CLAUDE.md` };
   }
-
+  // class 1 — a cross-repo relationship (two+ entities, no impl markers, no
+  // explicit when-to-reach language) is still product-level.
+  if (slugs.length >= 2) {
+    return { route: "corpus", reason: `cross-repo relationship: ${slugs.slice(0, 4).join("/")}` };
+  }
   return null;
 }
 
@@ -127,14 +142,24 @@ export function appendToQueue(entry: QueueEntry, queuePath: string): void {
   fs.appendFileSync(queuePath, JSON.stringify(entry) + "\n", "utf8");
 }
 
-/** Resolve the fleet slug list from a vault-ecosystem checkout, with a fallback. */
+// Non-slug markdown files that can live under repos/ or systems/ — never fleet
+// entities, and common enough words that treating them as slugs would false-match.
+const NON_SLUG_MD = new Set(["readme", "index", "template", "_template", "contributing"]);
+
+/** Resolve the fleet slug list from a vault-ecosystem checkout, with a fallback.
+ *  Only kebab-case entity filenames count — a `README.md`/`index.md` dropped in
+ *  the dir must not become a slug that matches those words in every memory note. */
 export function resolveFleetSlugs(corpusPath: string): string[] {
   const out: string[] = [];
   for (const sub of ["repos", "systems"]) {
     const dir = path.join(corpusPath, sub);
     try {
       for (const f of fs.readdirSync(dir)) {
-        if (f.endsWith(".md")) out.push(f.slice(0, -3));
+        if (!f.endsWith(".md")) continue;
+        const slug = f.slice(0, -3);
+        if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) continue; // kebab entity slugs only
+        if (NON_SLUG_MD.has(slug)) continue;
+        out.push(slug);
       }
     } catch {
       /* corpus not present on this machine — fall through to whatever we found */

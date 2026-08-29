@@ -11,10 +11,12 @@ import {
   classifyMemory,
   frontmatterType,
   bodyOf,
+  descriptionOf,
   fleetSlugsMentioned,
   makeEntry,
   appendToQueue,
   defaultQueuePath,
+  resolveFleetSlugs,
 } from "./fact_routing_hook_lib.ts";
 
 const SLUGS = ["tyr", "frigg", "alfred", "meridian", "stark-tui", "plume"];
@@ -51,6 +53,23 @@ test("class 2 — implementation detail about a repo routes to repo-claude", () 
   assert.equal(classifyMemory(c, "/x/projects/p/memory/f.md", SLUGS)?.route, "repo-claude");
 });
 
+test("class 2 — a multi-repo IMPLEMENTATION fact routes to repo-claude, not corpus", () => {
+  // Two slugs, but impl markers present → the repo, not the corpus. Guards the
+  // dominant mis-store class (repo-implementation) against the bare 2-slug rule.
+  const c = note("project", "frigg's cache schema is imported by tyr's sql adapter in internal/db.go.");
+  assert.equal(classifyMemory(c, "/x/projects/p/memory/f.md", SLUGS)?.route, "repo-claude");
+});
+
+test("classifier scans the description field, not only the body", () => {
+  const c = "---\nname: x\ntype: project\ndescription: Reach for meridian instead of a one-off cron script.\n---\n\nterse body.\n";
+  assert.equal(descriptionOf(c), "Reach for meridian instead of a one-off cron script.");
+  assert.equal(classifyMemory(c, "/x/projects/p/memory/f.md", SLUGS)?.route, "corpus");
+});
+
+test("fleetSlugsMentioned tolerates a regex-metachar slug (no throw)", () => {
+  assert.deepEqual(fleetSlugsMentioned("built on node.js runtime", ["node.js", "frigg"]), ["node.js"]);
+});
+
 test("null — feedback and user types stay in Claude memory", () => {
   assert.equal(classifyMemory(note("feedback", "Reach for meridian; frigg is the cache."), "/x/projects/p/memory/f.md", SLUGS), null);
   assert.equal(classifyMemory(note("user", "Aryeh prefers Go and tyr."), "/x/projects/p/memory/f.md", SLUGS), null);
@@ -81,4 +100,18 @@ test("queue roundtrip — makeEntry extracts the project, appendToQueue writes J
 
 test("defaultQueuePath is under the Claude home", () => {
   assert.equal(defaultQueuePath("/home/x"), "/home/x/.claude/.fact-routing-queue.jsonl");
+});
+
+test("resolveFleetSlugs takes kebab entity slugs only — no README/non-kebab", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fact-corpus-"));
+  try {
+    fs.mkdirSync(path.join(dir, "repos"));
+    fs.mkdirSync(path.join(dir, "systems"));
+    fs.writeFileSync(path.join(dir, "repos", "plume.md"), "x");
+    fs.writeFileSync(path.join(dir, "repos", "README.md"), "x");
+    fs.writeFileSync(path.join(dir, "systems", "mimir.md"), "x");
+    assert.deepEqual(resolveFleetSlugs(dir).sort(), ["mimir", "plume"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

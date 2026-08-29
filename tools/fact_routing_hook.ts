@@ -55,7 +55,9 @@ function main(): void {
   const fp = data?.tool_input?.file_path;
   if (typeof fp !== "string") return;
   if (!["Write", "Edit", "MultiEdit"].includes(tool)) return;
-  if (!/\/memory\/[^/]+\.md$/.test(fp)) return;
+  // Only Claude auto-memory under ~/.claude/projects/<proj>/memory/ — not an
+  // ordinary repo that happens to have a memory/ dir.
+  if (!/\.claude\/projects\/[^/]+\/memory\/[^/]+\.md$/.test(fp)) return;
 
   let content: string;
   try {
