@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=923 runId=822fd9a8-6b91-4871-bd6d-03e664215fd2 -->
+- Add an incremental hook and fold command for routing durable Claude memory facts to the ecosystem corpus or repository guidance.
 <!-- stark-gh:pr-merge pr=922 runId=e976673d-5fb7-46e7-a3ae-474148a7c050 -->
 - Retire `stark-cc-user`; use `idun cc` for Claude Code account rotation.
 <!-- stark-gh:pr-merge pr=920 runId=939c0c30-5207-45c7-9893-335b23d78ee2 -->
