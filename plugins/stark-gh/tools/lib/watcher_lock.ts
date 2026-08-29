@@ -8,6 +8,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import * as crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 
 // Which command owns a live watcher. pr-merge preflight needs this because the
@@ -155,6 +156,163 @@ export function preemptCiObserver(
     try { kill(pid, "SIGKILL"); } catch { /* raced with its own exit */ }
   }
   try { fs.unlinkSync(mirrorLockPath); } catch { /* already released */ }
+}
+
+// ===========================================================================
+// Per-SHA lock (the watcher's own acquire/release) + the per-PR mirror lock.
+//
+// Two lock SHAPES, deliberately, one module:
+//
+//   Per-SHA lock  (LockFileContent, at <sha>.json.lock) — the watcher's own
+//     mutex against a duplicate watcher for the same head. Liveness = kill(0)
+//     on the recorded pid, keyed by headSha. Written and read here.
+//
+//   Mirror lock   (LockRecord, at latest.json.lock) — a SHA-INDEPENDENT copy
+//     so pr-merge preflight can detect a live watcher WITHOUT knowing the SHA
+//     (it cannot enumerate per-SHA locks for a head it has not computed yet).
+//     Liveness = evaluateLockLiveness (hostname + kill(0) + ps-lstart start
+//     time), which is why its `startedAt` is the `ps -o lstart=` STRING, not an
+//     ISO timestamp — see mirrorLockToLatest.
+//
+// The two are not merged into one shape because they guard different failure
+// modes (a same-head duplicate vs a cross-host / PID-reuse false-attach) and
+// their liveness checks disagree on the timestamp format on purpose.
+// ===========================================================================
+
+export interface LockFileContent {
+  pid: number;
+  startedAt: string;
+  headSha: string;
+  command: "gh-watch-runs";
+  ownerToken: string;
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function acquireLock(
+  filepath: string,
+  args: { headSha: string },
+): { acquired: boolean; alreadyRunning?: boolean; ownerToken?: string } {
+  // Inspect first; if a live owner holds it for our headSha, defer.
+  if (fs.existsSync(filepath)) {
+    try {
+      const c: LockFileContent = JSON.parse(fs.readFileSync(filepath, "utf8"));
+      if (c.command === "gh-watch-runs" && c.headSha === args.headSha && pidAlive(c.pid)) {
+        return { acquired: false, alreadyRunning: true };
+      }
+    } catch {
+      // Malformed lock is stale.
+    }
+  }
+  const ownerToken = crypto.randomUUID();
+  const content: LockFileContent = {
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    headSha: args.headSha,
+    command: "gh-watch-runs",
+    ownerToken,
+  };
+  // Per-process tempfile to avoid two concurrent acquirers stomping the same
+  // .tmp path; then atomic O_EXCL link to win the race deterministically.
+  const tmp = `${filepath}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(content), { mode: 0o600 });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      fs.linkSync(tmp, filepath);
+      fs.unlinkSync(tmp);
+      return { acquired: true, ownerToken };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
+        try { fs.unlinkSync(tmp); } catch { /* best-effort */ }
+        throw err;
+      }
+      // Re-read existing lock; defer if still held by a live owner.
+      try {
+        const c: LockFileContent = JSON.parse(fs.readFileSync(filepath, "utf8"));
+        if (c.command === "gh-watch-runs" && c.headSha === args.headSha && pidAlive(c.pid)) {
+          fs.unlinkSync(tmp);
+          return { acquired: false, alreadyRunning: true };
+        }
+      } catch {
+        // Malformed: fall through to take it over.
+      }
+      try { fs.unlinkSync(filepath); } catch { /* race ok */ }
+    }
+  }
+  try { fs.unlinkSync(tmp); } catch { /* best-effort */ }
+  return { acquired: false };
+}
+
+// Mirror an active per-SHA lock to the per-PR latest.json.lock pointer in the
+// LockRecord shape that evaluateLockLiveness (used by pr-merge preflight)
+// expects. This bridges the two lock contracts so preflight's recovery check
+// can detect a live watcher without having to enumerate per-SHA locks.
+//
+// Best-effort: if the mirror write fails (disk full, permissions), the
+// per-SHA lock still protects against a duplicate watcher; preflight will
+// just lose its fast-path attach signal.
+export function mirrorLockToLatest(
+  latestLockPath: string,
+  perShaLockContent: LockFileContent,
+  kind: Exclude<WatcherKind, "unknown">,
+): void {
+  try {
+    // The mirror lock is consumed by evaluateLockLiveness, which compares
+    // `startedAt` to `ps -o lstart= -p <pid>`. We must write the ps lstart
+    // string here — not an ISO timestamp — or every live watcher looks like
+    // PID reuse and preflight always re-spawns instead of attaching.
+    const lstart = (() => {
+      try {
+        return execFileSync("ps", ["-o", "lstart=", "-p", String(perShaLockContent.pid)], {
+          stdio: ["pipe", "pipe", "pipe"],
+        }).toString("utf8").trim();
+      } catch {
+        return "";
+      }
+    })();
+    if (!lstart) return; // Without lstart the mirror can't pass liveness — skip.
+    const record: LockRecord = {
+      pid: perShaLockContent.pid,
+      startedAt: lstart,
+      hostname: os.hostname(),
+      ownerToken: perShaLockContent.ownerToken,
+      kind,
+    };
+    const tmp = `${latestLockPath}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(record), { mode: 0o600 });
+    try { fs.unlinkSync(latestLockPath); } catch { /* may not exist */ }
+    fs.renameSync(tmp, latestLockPath);
+  } catch {
+    // Best-effort mirror; per-SHA lock remains the source of truth.
+  }
+}
+
+export function releaseMirrorLatestLock(latestLockPath: string, ownerToken: string): void {
+  if (!fs.existsSync(latestLockPath)) return;
+  try {
+    const c = JSON.parse(fs.readFileSync(latestLockPath, "utf8")) as { ownerToken?: string };
+    if (c.ownerToken === ownerToken) fs.unlinkSync(latestLockPath);
+  } catch {
+    // Malformed mirror lock — leave it; preflight's liveness check will treat
+    // unknown shapes as live (conservative) which is fine for one stale write.
+  }
+}
+
+export function releaseLockIfOwner(filepath: string, ownerToken: string): void {
+  if (!fs.existsSync(filepath)) return;
+  try {
+    const c: LockFileContent = JSON.parse(fs.readFileSync(filepath, "utf8"));
+    if (c.ownerToken === ownerToken) fs.unlinkSync(filepath);
+  } catch {
+    // Leave malformed lock for the next acquisition path.
+  }
 }
 
 export function watcherStateLatestPath(host: string, owner: string, repo: string, prNumber: number, watchersRoot: string): string {
