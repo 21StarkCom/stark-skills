@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=924 runId=08ad88d3-2cae-4588-b586-10664ba9f989 -->
+- Removed the unused `/stark-handoff` skill after preserving it in Náströnd, including its references, runtime override, documentation entries, and parity coverage.
 <!-- stark-gh:pr-merge pr=923 runId=822fd9a8-6b91-4871-bd6d-03e664215fd2 -->
 - Add an incremental hook and fold command for routing durable Claude memory facts to the ecosystem corpus or repository guidance.
 <!-- stark-gh:pr-merge pr=922 runId=e976673d-5fb7-46e7-a3ae-474148a7c050 -->
