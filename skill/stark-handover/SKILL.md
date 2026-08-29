@@ -28,8 +28,9 @@ The CLI owns paths/numbering/writes; **you** author the content — the value
 of a handover is what you mine from the conversation, which only you have.
 
 **Not this skill:** authoring a standalone prompt file for another agent or a
-later session — route that to `/stark-handoff`. This skill persists *this*
-session's state; `/stark-handoff` writes a self-contained mission prompt.
+later session. This skill persists *this* session's state for resuming the same
+task in place; a self-contained mission prompt is a different artifact you
+compose by hand.
 
 ## Constants
 

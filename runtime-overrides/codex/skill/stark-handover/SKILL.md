@@ -30,9 +30,8 @@ of a handover is what you mine from the conversation, which only you have.
 **Not this skill:** authoring a standalone prompt file for another agent or a
 later session. This skill persists *this* session's state into a numbered
 chain; a self-contained mission prompt is a different artifact with a
-different reader. The skill that writes one (`stark-handoff`) is Claude-only
-and ships no Codex variant — do not try to invoke it here. Compose the prompt
-by hand, or run that skill from a Claude session.
+different reader. Compose such a prompt by hand — there is no dedicated skill
+for it.
 
 ## Execution rule
 
