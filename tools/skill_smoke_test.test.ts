@@ -99,21 +99,46 @@ function parseFrontmatter(text: string): Frontmatter | null {
 // strict YAML reads as a nested mapping. This smoke test passed; bifrost's Go
 // importer rejected it with `mapping values are not allowed in this context`
 // and blocked the marketplace sync. tools/ carries no YAML dependency (node:
-// builtins only), so this is a TARGETED check for the one trap that bit us: a
-// top-level plain-scalar mapping value must not contain ": " (colon + space).
-// Quoted, flow (`[`/`{`), and block (`>`/`|`) scalars are exempt — they carry
-// colons safely.
+// builtins only), so this is a TARGETED check for the mapping-indicator trap: a
+// plain scalar must not contain a colon that YAML reads as a key. That is a
+// colon followed by a space/tab (": ") OR a colon at end-of-line — BOTH are
+// rejected as "mapping values are not allowed" (verified against a strict
+// parser). The value is checked on the key line AND on the continuation lines
+// of a multi-line plain scalar (the colon-space can hide on line 2+ just as
+// easily as on line 1). Quoted, flow (`[`/`{`), and block (`>`/`|`) scalars are
+// exempt — they carry colons safely.
 // ---------------------------------------------------------------------------
+
+// A colon that strict YAML treats as a mapping key: colon + space/tab, or a
+// colon at end-of-line. A bare `foo:bar` (colon, no following space) is a valid
+// plain scalar and is deliberately NOT matched.
+const YAML_MAPPING_INDICATOR = /:([ \t]|$)/;
 
 function strictYamlFrontmatterIssues(frontmatter: string): string[] {
   const issues: string[] = [];
   let inBlockScalar = false;
   let blockIndent = 0;
+  let inPlainScalar = false; // inside a plain multi-line scalar's folded body
+  let plainIndent = 0;
   for (const line of frontmatter.split("\n")) {
+    const indent = line.length - line.trimStart().length;
     if (inBlockScalar) {
-      const indent = line.length - line.trimStart().length;
       if (line.trim() === "" || indent > blockIndent) continue;
       inBlockScalar = false; // dedented out of the block scalar body
+    }
+    if (inPlainScalar) {
+      if (line.trim() === "") continue;
+      if (indent > plainIndent) {
+        // Continuation line of a plain multi-line scalar — a mapping indicator
+        // here is the same "mapping values are not allowed" trap as on line 1.
+        if (YAML_MAPPING_INDICATOR.test(line.trimStart())) {
+          issues.push(
+            `plain multi-line scalar continuation "${line.trim()}" contains a mapping indicator (": " or a trailing ":") — strict YAML rejects it; quote the value or use a ">-" block scalar`,
+          );
+        }
+        continue;
+      }
+      inPlainScalar = false; // dedented back to a key line
     }
     const m = line.match(/^([A-Za-z0-9_-]+):(.*)$/);
     if (!m) continue; // list items / continuation lines start with whitespace
@@ -121,15 +146,20 @@ function strictYamlFrontmatterIssues(frontmatter: string): string[] {
     if (value === "") continue; // empty value → nested mapping or block follows
     if (/^[|>]/.test(value)) {
       inBlockScalar = true;
-      blockIndent = line.length - line.trimStart().length;
+      blockIndent = indent;
       continue;
     }
     if (/^["'[{]/.test(value)) continue; // quoted or flow scalar — colons allowed
-    if (/:[ \t]/.test(value)) {
+    if (YAML_MAPPING_INDICATOR.test(value)) {
       issues.push(
-        `key "${m[1]}": plain-scalar value contains ": " (colon-space) — strict YAML reads it as a nested mapping; quote the value or use a ">-" block scalar`,
+        `key "${m[1]}": plain-scalar value contains a mapping indicator (": " colon-space or a trailing ":") — strict YAML reads it as a nested mapping; quote the value or use a ">-" block scalar`,
       );
+      continue;
     }
+    // Clean plain scalar so far — it may fold onto following indented lines, so
+    // arm continuation scanning until the next key-level (or less) line.
+    inPlainScalar = true;
+    plainIndent = indent;
   }
   return issues;
 }
