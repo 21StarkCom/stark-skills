@@ -124,6 +124,11 @@ broadcast re-syncs whoever is still in flight after each merge lands.
 
 Every dispatch is a **packet** with these slots, sent via SendMessage:
 
+- **load the worker skill first (if present):** the packet's opening instruction
+  is "run `/team-minion-agent` before intake if your environment has it" — it
+  primes the minion with the worker half of this protocol; but every guardrail
+  below still rides the packet regardless, because a tab minion in a plugin-less
+  repo won't have the skill.
 - minion identity + your current session name (their only upstream — questions
   to **you**, never the human).
 - ticket + spec section pointer, with "quote the done-when back in your first
