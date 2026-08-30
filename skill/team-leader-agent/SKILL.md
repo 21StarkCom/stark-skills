@@ -60,14 +60,16 @@ decide — record the divergence, don't relitigate it.
 | **SendMessage** (built-in tool) | briefs, answers, board updates, rebase broadcasts — all work content | arrives as a message; immune to paste buffering and ref churn |
 | **control-client `send` + `send-key`** | session-control slash commands only (`/clear`, `/effort …`) on an **idle, verified** minion | slash commands can't ride a message |
 
-The **control client** is the terminal-driving tool. **hermod is the current
-one; cmux-client is the prior one** — same two-step contract, prefer hermod:
+The **control client** is the terminal-driving tool. **hermod is THE control
+client now.** cmux-client was its predecessor and has been **retired** (the repo
+is gone) — it is named here and in the older `minion` personas only so you
+recognize it; hermod has the same CLI surface, so any `cmux-client` verb in an
+older doc maps one-for-one onto hermod. Measured two-step:
 
 ```
-# CURRENT — hermod:
+# hermod — the /clear two-step:
 bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts send --enter <uuid> "/clear"
 bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts send-key <uuid> enter
-# PRIOR — cmux-client (same flags), only if hermod is unavailable.
 ```
 
 `--enter` is a **leading** flag: `send --enter <uuid> "/clear"`. A trailing
@@ -129,7 +131,9 @@ Every dispatch is a **packet** with these slots, sent via SendMessage:
 - declared files + the shared-file rules that touch them.
 - merge-order gate + the merge-queue handshake (below) when the task touches a
   shared seam.
-- the board (who is on what; who is idle by design).
+- the board (who is on what; who is idle by design) — post board state with
+  `status set <minion> "<ticket> <state>"`; **never touch the human's cmux
+  `todo` checklist, it's theirs.**
 - **session-start ritual:** fetch + rebase onto `origin/main` → report head +
   `git status --short`; `alfred task use`; validate ticket vs spec vs main, fix
   the ticket first; **move the ticket to in-progress** (see Ticket lifecycle).
@@ -256,9 +260,15 @@ Every task's PR flow runs **e2e**, and e2e **includes a mandatory
 - Run `/code-review xhigh --fix` on the task's diff. **Apply ALL findings** —
   fix them, or reject a wrong one with a stated reason on the thread; never drop
   one silently (repo rule: findings are never summarized away).
-- **Post the findings as a PR review under the operator's GH account.** Confirm
-  the operator's identity is what `gh` is authed as first (`gh auth status` — for
-  this fleet that is `aryeh-stark`); the review lands as the operator, not a bot.
+- **Post the findings as ONE PR review under the operator's GH account** (confirm
+  the operator's identity is what `gh` is authed as first — `gh auth status`; for
+  this fleet that is `aryeh-stark`). Post it as a **single review**
+  (`gh api .../pulls/N/reviews` with every inline comment in one call), **never
+  `--comment`** — that opens one empty review per finding. When the operator's
+  account also authored the PR (the common case here — every PR action is the
+  operator), GitHub forbids self-`APPROVE`/`REQUEST_CHANGES`, so the review MUST
+  use `event: COMMENT`; a genuinely required non-author blocking review is the
+  target repo's bot-App path, not the operator identity.
 - The review gate's result is part of the report contract. A task is not "done"
   until its findings are applied-or-answered and posted.
 
@@ -346,14 +356,12 @@ same failure: acting past the point you should have asked.
 
 ## Quick reference
 
-The control client is **hermod** (current) or **cmux-client** (prior) — same
-flags. Prefer the repo checkout; a brew binary can lag, check `version` first.
+The control client is **hermod** (cmux-client, its predecessor, is retired — same
+CLI surface). Prefer the repo checkout; a brew binary can lag, check `version`
+first.
 
 ```
-# hermod (current control client):
 CC="bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts"
-# cmux-client (prior — same surface, only if hermod is unavailable):
-# CC="bun /Users/aryeh/Code/21Stark/cmux-client/bin/cmux-client.ts"
 
 $CC tabs --workspace <ws> --json          # UUID ↔ ref ↔ title
 $CC sessions --workspace <ws> --json      # agent_lifecycle, updatedAt, pid, cwd, transcriptPath
