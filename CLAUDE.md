@@ -34,7 +34,7 @@ This repo is the **source of truth** for the skills + tools. Distribution is **m
 
 - `global/` — global config + prompts, vendored into each marketplace plugin
 - `scripts/` — shell helpers + JSON (`healer_patterns.json`), vendored into plugins. The orchestrator + dispatch infra were migrated to `tools/` (TypeScript) — see the Python→TS migration spec.
-- `skill/` — all skills (`skill/stark-*/SKILL.md`, 28 skills), packaged as marketplace plugins
+- `skill/` — all skills (`skill/*/SKILL.md`, 30 skills: 27 `stark-*` plus `simple-gate`, `team-leader-agent`, `team-minion-agent`), packaged as marketplace plugins
 - `org/evinced/` — Evinced org config overrides
 - `data/` — persona roster, review coverage HTML, generated showcase pages
 - `.github/workflows/` — GitHub Actions: tests, project sync, stale detection, `marketplace-sync` (auto-publish to bifrost)
@@ -119,7 +119,7 @@ This repo is the **source of truth** for the skills + tools. Distribution is **m
 
 ## Skills
 
-All skills live in `skill/stark-*/SKILL.md` and are packaged into marketplace plugins (see Distribution above).
+All skills live in `skill/*/SKILL.md` and are packaged into marketplace plugins (see Distribution above).
 
 ### Pipeline (end-to-end, in order)
 
