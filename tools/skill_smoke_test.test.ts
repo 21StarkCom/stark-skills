@@ -18,6 +18,12 @@
 //      SKILL.md that points at a template which was renamed or never
 //      written is a broken skill at runtime — silently, since nothing
 //      else reads those links.
+//   7. Frontmatter is strict-YAML safe (no plain-scalar colon-space trap that
+//      the lenient parser accepts but bifrost's Go importer rejects).
+//
+// Discovery covers EVERY `skill/<name>/SKILL.md`, not just `stark-*` — the old
+// prefix filter left the non-`stark-` skills (`simple-gate`, the team-agent
+// pair) unvalidated, which is how a strict-YAML frontmatter bug reached bifrost.
 //
 // Plus, ONCE across the whole skill set:
 //   5. Every distinct `tools/*.ts` CLI mentioned by any skill exits
@@ -83,6 +89,79 @@ function parseFrontmatter(text: string): Frontmatter | null {
   }
   if (descLines.length > 0) fm.description = descLines.join(" ").trim();
   return fm;
+}
+
+// ---------------------------------------------------------------------------
+// Strict-YAML frontmatter lint. `parseFrontmatter` above is deliberately
+// lenient — it hand-rolls the parse and accepts things a real YAML parser
+// rejects. That gap shipped a live bug: team-minion-agent's `description` held
+// an unquoted colon-space ("a minion runs under: untrusted-content"), which
+// strict YAML reads as a nested mapping. This smoke test passed; bifrost's Go
+// importer rejected it with `mapping values are not allowed in this context`
+// and blocked the marketplace sync. tools/ carries no YAML dependency (node:
+// builtins only), so this is a TARGETED check for the mapping-indicator trap: a
+// plain scalar must not contain a colon that YAML reads as a key. That is a
+// colon followed by a space/tab (": ") OR a colon at end-of-line — BOTH are
+// rejected as "mapping values are not allowed" (verified against a strict
+// parser). The value is checked on the key line AND on the continuation lines
+// of a multi-line plain scalar (the colon-space can hide on line 2+ just as
+// easily as on line 1). Quoted, flow (`[`/`{`), and block (`>`/`|`) scalars are
+// exempt — they carry colons safely.
+// ---------------------------------------------------------------------------
+
+// A colon that strict YAML treats as a mapping key: colon + space/tab, or a
+// colon at end-of-line. A bare `foo:bar` (colon, no following space) is a valid
+// plain scalar and is deliberately NOT matched.
+const YAML_MAPPING_INDICATOR = /:([ \t]|$)/;
+
+function strictYamlFrontmatterIssues(frontmatter: string): string[] {
+  const issues: string[] = [];
+  let inBlockScalar = false;
+  let blockIndent = 0;
+  let inPlainScalar = false; // inside a plain multi-line scalar's folded body
+  let plainIndent = 0;
+  for (const line of frontmatter.split("\n")) {
+    const indent = line.length - line.trimStart().length;
+    if (inBlockScalar) {
+      if (line.trim() === "" || indent > blockIndent) continue;
+      inBlockScalar = false; // dedented out of the block scalar body
+    }
+    if (inPlainScalar) {
+      if (line.trim() === "") continue;
+      if (indent > plainIndent) {
+        // Continuation line of a plain multi-line scalar — a mapping indicator
+        // here is the same "mapping values are not allowed" trap as on line 1.
+        if (YAML_MAPPING_INDICATOR.test(line.trimStart())) {
+          issues.push(
+            `plain multi-line scalar continuation "${line.trim()}" contains a mapping indicator (": " or a trailing ":") — strict YAML rejects it; quote the value or use a ">-" block scalar`,
+          );
+        }
+        continue;
+      }
+      inPlainScalar = false; // dedented back to a key line
+    }
+    const m = line.match(/^([A-Za-z0-9_-]+):(.*)$/);
+    if (!m) continue; // list items / continuation lines start with whitespace
+    const value = m[2].replace(/^[ \t]+/, "");
+    if (value === "") continue; // empty value → nested mapping or block follows
+    if (/^[|>]/.test(value)) {
+      inBlockScalar = true;
+      blockIndent = indent;
+      continue;
+    }
+    if (/^["'[{]/.test(value)) continue; // quoted or flow scalar — colons allowed
+    if (YAML_MAPPING_INDICATOR.test(value)) {
+      issues.push(
+        `key "${m[1]}": plain-scalar value contains a mapping indicator (": " colon-space or a trailing ":") — strict YAML reads it as a nested mapping; quote the value or use a ">-" block scalar`,
+      );
+      continue;
+    }
+    // Clean plain scalar so far — it may fold onto following indented lines, so
+    // arm continuation scanning until the next key-level (or less) line.
+    inPlainScalar = true;
+    plainIndent = indent;
+  }
+  return issues;
 }
 
 // ---------------------------------------------------------------------------
@@ -152,12 +231,21 @@ function extractReferenceLinks(text: string): string[] {
 // ---------------------------------------------------------------------------
 
 function listSkills(): string[] {
+  // Discover every skill dir that carries a SKILL.md — NOT just `stark-*`.
+  // The old `startsWith("stark-")` filter silently skipped the non-`stark-`
+  // skills (`simple-gate`, `team-leader-agent`, `team-minion-agent`), so
+  // nothing validated their frontmatter, refs, or --help contract — that is how
+  // the team-minion-agent colon-space frontmatter bug (see the strict-YAML
+  // check below) reached bifrost. Keying on SKILL.md presence also excludes
+  // non-skill dirs like `evals/`.
   return fs
     .readdirSync(SKILLS_ROOT)
-    .filter((n) => n.startsWith("stark-"))
     .filter((n) => {
       try {
-        return fs.statSync(path.join(SKILLS_ROOT, n)).isDirectory();
+        return (
+          fs.statSync(path.join(SKILLS_ROOT, n)).isDirectory() &&
+          fs.existsSync(path.join(SKILLS_ROOT, n, "SKILL.md"))
+        );
       } catch {
         return false;
       }
@@ -192,7 +280,7 @@ for (const name of SKILLS) {
 //    in `listSkills()` itself.
 // ---------------------------------------------------------------------------
 
-test("skill smoke: discovers at least 15 stark-* skills", () => {
+test("skill smoke: discovers at least 15 skills", () => {
   assert.ok(
     SKILLS.length >= 15,
     `expected >= 15 skills, found ${SKILLS.length}`,
@@ -227,6 +315,17 @@ for (const name of SKILLS) {
     assert.ok(
       c.text.includes("standards/help.md"),
       `${name} SKILL.md has no reference to standards/help.md — every skill must honor --help`,
+    );
+  });
+
+  test(`skill smoke: ${name} — frontmatter is strict-YAML safe`, () => {
+    const c = SKILL_CONTENT[name];
+    const block = c.text.match(/^---\n([\s\S]*?)\n---/);
+    assert.ok(block, `${name}: SKILL.md has no frontmatter block`);
+    assert.deepEqual(
+      strictYamlFrontmatterIssues(block![1]),
+      [],
+      `${name}: frontmatter is not strict-YAML safe (bifrost's Go importer will reject it)`,
     );
   });
 }

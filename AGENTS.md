@@ -33,7 +33,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 ## Repo Layout
 
 - `tools/` — **all** TypeScript tooling: dispatchers, agent utilities, session/state, GitHub App auth, skill meta-tooling. The only executable surface.
-- `skill/` — all skills (`skill/stark-*/SKILL.md`, **28** skills), packaged as marketplace plugins
+- `skill/` — all skills (`skill/*/SKILL.md`, **30** skills: 27 `stark-*` plus `simple-gate`, `team-leader-agent`, `team-minion-agent`), packaged as marketplace plugins
 - `global/` — global config + prompts, vendored into each plugin
 - `scripts/` — shell helpers + JSON only (`healer_patterns.json`). **No Python lives here any more.**
 - `plugins/stark-gh/` — local plugin source, packaged by the marketplace
@@ -46,7 +46,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 
 ## Skills
 
-All skills live in `skill/stark-*/SKILL.md`. Full per-skill detail — arguments, failure modes, the reasons behind each guard — is in `CLAUDE.md § Skills`. This is the index.
+All skills live in `skill/*/SKILL.md`. Full per-skill detail — arguments, failure modes, the reasons behind each guard — is in `CLAUDE.md § Skills`. This is the index.
 
 **Pipeline (in order)**
 
