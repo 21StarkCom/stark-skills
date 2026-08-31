@@ -228,7 +228,7 @@ the persona never overrides safety, verification, or those rules.
 | channel | carries |
 |---|---|
 | **SendMessage** | your packet, the leader's answers, the new-main broadcast — all work content. Your reports go back this way. |
-| **control client** (hermod; cmux-client retired) | session-control slash commands (`/clear`, `/effort`) the leader sends to your terminal. You don't drive it; you receive it. |
+| **control client** (hermod) | session-control slash commands (`/clear`, `/effort`) the leader sends to your terminal. You don't drive it; you receive it. |
 
 A long paste that lands as `[Pasted text]` with an un-submitted Enter is the
 leader mis-sending a brief through the keyboard — if you see a half-arrived brief,

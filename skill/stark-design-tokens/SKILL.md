@@ -84,9 +84,7 @@ four rules broken.
 
 ## Provenance
 
-This skill is the synthesis of **three independent deep-research passes** (Claude,
-ChatGPT, Qwen; 2026-08) over the same brief, which converged almost completely.
-The two genuine divergences are resolved in the rules: reference depth is **≤ 3
-SHOULD / ≤ 4 MUST**, and a shared **names-only package is deliberately NOT a
-conforming DTCG file** (DTCG requires `$value`) — its DTCG source lives in a
-build-only workspace and it publishes generated names. Do not re-litigate these.
+Two design decisions are settled — do not re-litigate them: reference depth is
+**≤ 3 SHOULD / ≤ 4 MUST**, and a shared **names-only package is deliberately NOT
+a conforming DTCG file** (DTCG requires `$value`) — its DTCG source lives in a
+build-only workspace and it publishes generated names.

@@ -16,8 +16,7 @@ usage, and arguments, then stop — do not run any phase.
 
 One interactive session: interview the operator, author ONE self-contained
 spec+plan doc, run at most one zero-context advisory pass, gate it on the human,
-pin it, hand off. Replaces the write-spec → review-spec → spec-to-plan →
-review-plan chain for new work.
+pin it, hand off.
 
 Evidence base: [references/stage1-dossier.md](references/stage1-dossier.md)
 (61 claims, 3-vote adversarial verification; `[RQn]` tags below cite it).
@@ -40,8 +39,8 @@ Evidence base: [references/stage1-dossier.md](references/stage1-dossier.md)
 ## Phase 0 — Tier
 
 Decide before any work; announce the tier and the trigger. Re-check once after
-recon; refuse inflation (a Short change dressed in Full ceremony is a documented
-failure). `--tier` overrides. [RQ7]
+recon; refuse inflation — don't dress a Short change in Full ceremony. `--tier`
+overrides. [RQ7]
 
 | Tier | Trigger | Artifact |
 |---|---|---|
@@ -58,8 +57,8 @@ you intend to name actually exists. [RQ6]
 
 ## Phase 2 — Interview
 
-Question wording, coverage, and order are fixed here — do not improvise them
-(unaided interviewers never improve on exactly these). [RQ1]
+Question wording, coverage, and order are fixed here — do not improvise them.
+[RQ1]
 
 **Order:**
 1. **Scope boundary** — what's in; what's explicitly OUT.
@@ -166,8 +165,7 @@ to confirm or correct. On confirm, fold the validated formulation into `## Inten
 On correction, fix Intent and any section the correction invalidates before Phase
 4. An intent you cannot state back convincingly is a doc defect, not an operator
 problem. The folded Intent is narrative — it does not trigger the Phase 4 expiry
-rule. (Origin: the 2026-08-07 alfred-foundation session, where the read-back
-surfaced the real product the drafted Intent had understated.)
+rule.
 
 ## Phase 4 — Advisory pass (one-shot; skip with `--no-advisory`)
 
@@ -285,7 +283,5 @@ count, tokens-per-merged-PR. Never wall-clock, never self-report. [RQ9]
 
 ## What this replaces
 
-This single session replaced `/stark-write-spec`, `/stark-review-spec`,
-`/stark-red-team-spec`, `/stark-spec-to-plan`, and `/stark-review-plan` — all five
-deleted in the 2026-07-26 demolition. This is the authoring stage; `/stark-build`
-is the implementation stage.
+One authoring session covers spec + plan in one pass; `/stark-build` is the
+implementation stage.

@@ -39,9 +39,8 @@ Evidence base: [references/stage2-dossier.md](references/stage2-dossier.md)
   its output is verified by the deterministic gates only, and the advisory
   reviewer is NEVER re-run. There is no second opinion for a ratchet to
   live in. Everything below medium, and everything still open after the one
-  round, dies at the human. [RQ6][A1 — relaxed by operator decision
-  2026-07-26 ahead of the A/B the dossier asked for; the dossier's §1.8
-  still argues against this round. Read §6.4a before widening it.]
+  round, dies at the human. [RQ6][A1 — read §6.4a before widening this
+  round.]
 
 **Harness subprocess rule — stdin closed, always.** Every dispatched
 subprocess (`claude -p`, `codex exec`) must have `</dev/null` before its
@@ -49,8 +48,8 @@ output redirect. **A hung reviewer is indistinguishable from a thorough
 one.** Both CLIs read stdin *in addition to* the prompt argument, so an
 open pipe that never delivers EOF — which is what stdin is under a
 backgrounded or orchestrated shell — blocks them. `codex exec` blocks
-silently and forever (confirmed live: 5h14m, 39 bytes of output, all of it
-"Reading additional input from stdin..."). `claude -p` fails fast instead,
+silently and forever (emitting only `Reading additional input from
+stdin...`). `claude -p` fails fast instead,
 but into the redirect file where nobody is looking (`Warning: no stdin data
 received in 3s` then `Execution error`). Add `</dev/null` before `>` on
 every dispatch below; any new dispatch inherits this rule.
@@ -111,8 +110,8 @@ State lives OUTSIDE the repo:
    `origin/build/<slug>` from a prior abandoned run is adopted via
    `git checkout -B <branch> origin/<branch>`, which silently resets HEAD
    onto that older codebase — reporting `ok: true` while every subsequent
-   gate measures a tree predating the pin. Reproduced and fixed live; the
-   flag refuses the stale adoption without moving the worktree.
+   gate measures a tree predating the pin. The flag refuses the stale
+   adoption without moving the worktree.
 
    **Check the exit code FIRST, then assert.** A refusal is the guard
    working, and it leaves HEAD exactly where it was — so a bare
@@ -154,7 +153,7 @@ State lives OUTSIDE the repo:
    A trailing slash builds the glob `<dir>//*`, whose double slash matches
    **nothing** — the Edit/Write deny branch silently passes every file under
    it, and a task session can rewrite its own `check.sh` and `stop-gate.sh`
-   to land a fabricated green. `protect-paths.sh` now normalizes trailing
+   to land a fabricated green. `protect-paths.sh` normalizes trailing
    slashes itself, so this is belt-and-braces; write them without anyway.
 4. **Materialize `$STATE/PROGRESS.md`** (append-only: per-task status,
    evidence pointers, deviations). [RQ3]
@@ -223,12 +222,11 @@ claude -p --model "<--model | claude-opus-5>" --settings "$T/settings.json" \
    NOT kill the child process tree. Every retry then competes with all
    prior `go test` (or equivalent) processes for build caches, producing a
    self-inflicted escalating slowdown that looks like external contention
-   and causes real misdiagnosis (observed: four concurrent T3/check.sh
-   processes, oldest at 52 min). Run long gates as background tasks and
+   and causes real misdiagnosis. Run long gates as background tasks and
    terminate them via the harness's own task-stop, never via a foreground
    timeout.
-   **macOS has no `timeout(1)`** (verified on this fleet — and `gtimeout`
-   is not installed by default either; it needs `brew install coreutils`).
+   **macOS has no `timeout(1)`** (and `gtimeout` is not installed by
+   default either; it needs `brew install coreutils`).
    A gate sweep written with `timeout 120 bash check.sh` reports every gate
    as red in 0s, because `timeout: command not found` exits 127 — a **false
    red that is indistinguishable from a correct one**. Never bare
@@ -243,12 +241,10 @@ claude -p --model "<--model | claude-opus-5>" --settings "$T/settings.json" \
    **group** (`set -m`, then `kill -- -"$PGID"`), and verify nothing
    survived before retrying.
    **Broad kill patterns kill YOUR OWN gate first.** `pkill -f "go test"`
-   matches on command-line text, not on process ownership. In the live run
-   it killed the runner's own in-flight verification and produced
-   `rc=143` — which was then misread as a gate failure, not as
-   self-inflicted. It also killed a *different* concurrent `stark-build`
-   run (`auth0-write-surface`) mid-task, because that run's prompt text
-   contained the string `go test`. Any cleanup pattern must be scoped to
+   matches on command-line text, not on process ownership — it can kill the
+   runner's own in-flight verification (producing a misread `rc=143`) or a
+   *different* concurrent `stark-build` run whose prompt text contains the
+   string `go test`. Any cleanup pattern must be scoped to
    this run's unique `$STATE` path and dry-run listed **with the command
    text visible** — `pgrep -lf "$STATE"` or `ps -eo pid,command | grep -F
    "$STATE"`. **Not `pgrep -af`**: on macOS `-a` means "include process
@@ -432,6 +428,6 @@ No wall-clock, no self-report, no completion-rate dashboards.
 
 For implementation from an accepted spec, this replaces `/stark-copilot`'s
 lead/wing review loop, `/stark-plan-to-tasks`, and `/stark-phase-execute`
-(the latter two deleted in the 2026-07-26 demolition; copilot survives for
-plan-file work with a 1-round cap and a hard test gate). The antipatterns
-this skill must never grow back: [references/stage2-dossier.md](references/stage2-dossier.md) §5.
+(copilot survives for plan-file work with a 1-round cap and a hard test
+gate). The antipatterns this skill must never grow back:
+[references/stage2-dossier.md](references/stage2-dossier.md) §5.
