@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=936 runId=8314c58b-8d62-4e55-b784-096540826993 -->
+- Add surface-keyed activity stamps for hermod's fleet cockpit.
 <!-- stark-gh:pr-merge pr=934 runId=05a24125-8032-459b-8bd8-6e6de46f1833 -->
 - Streamlined repository guidance by removing historical narratives while preserving current rules, configuration details, and safety mechanisms.
 <!-- stark-gh:pr-merge pr=933 runId=dec278f4-72f3-42fe-b4bb-65bdca881ff1 -->

@@ -11,6 +11,17 @@
 # concurrent Claude Code windows don't clobber each other.
 sid=$(jq -r '.session_id // "default"' 2>/dev/null)
 sid=${sid//[^a-zA-Z0-9_-]/}
-printf '%s\n' "${EPOCHSECONDS:-$(date +%s)}" \
+now="${EPOCHSECONDS:-$(date +%s)}"
+printf '%s\n' "$now" \
   > "$HOME/.claude/.statusline-stop-${sid:-default}" 2>/dev/null
+
+# Surface-addressable activity stamp — the fleet cockpit (hermod) reads this
+# file's mtime per surface for its LAST ACTIVE column. Keyed by the STABLE cmux
+# surface UUID ($CMUX_SURFACE_ID, present in-process), because the session-id
+# stamp above is not reachable from outside the process (the cmux session store
+# drifts on resume/fork). Best-effort; absent when not running under cmux.
+if [ -n "$CMUX_SURFACE_ID" ]; then
+  _sfid=${CMUX_SURFACE_ID//[^a-zA-Z0-9_-]/}
+  printf '%s\n' "$now" > "$HOME/.claude/.surface-activity-${_sfid}" 2>/dev/null
+fi
 exit 0
