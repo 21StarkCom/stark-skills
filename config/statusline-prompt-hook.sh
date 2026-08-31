@@ -29,6 +29,15 @@ sid=${sid//[^a-zA-Z0-9_-]/}
 sid=${sid:-default}
 now="${EPOCHSECONDS:-$(date +%s)}"
 
+# Surface-addressable activity stamp for hermod's fleet cockpit (see
+# statusline-stop-hook.sh). BEFORE the idle-gap guard below on purpose: a machine
+# re-prompt (/loop, cron) IS activity for the fleet view even though it must not
+# move the human 👤 clock. Keyed by the stable cmux surface UUID.
+if [ -n "$CMUX_SURFACE_ID" ]; then
+  _sfid=${CMUX_SURFACE_ID//[^a-zA-Z0-9_-]/}
+  printf '%s\n' "$now" > "$HOME/.claude/.surface-activity-${_sfid}" 2>/dev/null
+fi
+
 # Continuation check: if the last Stop was < IDLE_GAP seconds ago, this prompt
 # is a machine re-fire, not a fresh human enter — leave prompt_ts untouched.
 _stopf="$HOME/.claude/.statusline-stop-${sid}"
