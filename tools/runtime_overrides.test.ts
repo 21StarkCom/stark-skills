@@ -145,7 +145,7 @@ test("Codex runtime override inventory is exact", () => {
   // make it a tautology.
   assert.equal(
     expected.length,
-    73,
+    72,
     `runtime-overrides/codex inventory size changed (computed ${expected.length}) — if the tree is right, bump this literal`,
   );
 });
@@ -245,7 +245,6 @@ test("Codex runtime instructions never target Claude-owned state", () => {
   const portableClaudeAssetMarker = /\$\{CLAUDE_PLUGIN_ROOT:-\$HOME\/\.claude\/code-review\}/g;
 
   for (const rel of walkFiles(CODEX_ROOT)) {
-    if (rel === "skill/stark-ssot/SKILL.md") continue;
     const body = fs
       .readFileSync(path.join(CODEX_ROOT, rel), "utf8")
       .replace(portableClaudeAssetMarker, "${CLAUDE_PLUGIN_ROOT}");
