@@ -301,8 +301,8 @@ you don't get to claim a check you had no way to run.
    `read-screen` shows the effort tag (assume `/clear` reset it until measured
    otherwise).
 5. `ListAgents` — re-resolve the SendMessage name.
-6. Send the next full packet (guardrails included — the old ones died with the
-   context) via SendMessage; confirm by lifecycle flip to `running`.
+6. Send the next full packet with guardrails via SendMessage; confirm by
+   lifecycle flip to `running`.
 
 ## Cleanup — one sweep, at the end
 
