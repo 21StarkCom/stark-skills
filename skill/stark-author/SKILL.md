@@ -16,32 +16,28 @@ usage, and arguments, then stop — do not run any phase.
 
 One interactive session: interview the operator, author ONE self-contained
 spec+plan doc, run at most one zero-context advisory pass, gate it on the human,
-pin it, hand off. Replaces the write-spec → review-spec → spec-to-plan →
-review-plan chain for new work.
-
-Evidence base: [references/stage1-dossier.md](references/stage1-dossier.md)
-(61 claims, 3-vote adversarial verification; `[RQn]` tags below cite it).
+pin it, hand off.
 
 **Non-negotiables:**
 - **No LLM-reviews-LLM loop.** One advisory pass per *body of text*; its findings
   die at the human. Never revise from them autonomously, never re-run a pass over
-  text it already saw. [A1][A2] Text the gate ADDS is unreviewed — see Phase 4's
+  text it already saw. Text the gate ADDS is unreviewed — see Phase 4's
   expiry rule.
-- **One writer.** This session authors everything; subagents only read. [A4]
+- **One writer.** This session authors everything; subagents only read.
 - **Vacuous checks are YOUR defect to catch, not the operator's.** Every task
   carries a machine-checkable done-when that is also NON-VACUOUS — it must fail if
   the work were never done. Catching this is the authoring checklist's job (Phase
-  3), not something you outsource to the gate. [A3][RQ3]
+  3), not something you outsource to the gate.
 - **You are drafting for a fresh implementer session** that knows nothing the doc
-  doesn't say. Pin decisions; leave the greppable out. [RQ8]
+  doesn't say. Pin decisions; leave the greppable out.
 
 **Raw input:** `$ARGUMENTS`
 
 ## Phase 0 — Tier
 
 Decide before any work; announce the tier and the trigger. Re-check once after
-recon; refuse inflation (a Short change dressed in Full ceremony is a documented
-failure). `--tier` overrides. [RQ7]
+recon; refuse inflation — don't dress a Short change in Full ceremony. `--tier`
+overrides.
 
 | Tier | Trigger | Artifact |
 |---|---|---|
@@ -54,12 +50,11 @@ failure). `--tier` overrides. [RQ7]
 Read the repo map, root CLAUDE.md, and the files/interfaces plausibly touched.
 **Hard budget: ~10–15 tool calls.** Everything else is looked up on demand while
 authoring — recon is orientation, not an audit. Verify that every file/interface
-you intend to name actually exists. [RQ6]
+you intend to name actually exists.
 
 ## Phase 2 — Interview
 
-Question wording, coverage, and order are fixed here — do not improvise them
-(unaided interviewers never improve on exactly these). [RQ1]
+Question wording, coverage, and order are fixed here — do not improvise them.
 
 **Order:**
 1. **Scope boundary** — what's in; what's explicitly OUT.
@@ -71,23 +66,23 @@ Question wording, coverage, and order are fixed here — do not improvise them
    with a concrete failure scenario. Don't ask obvious questions.
 
 **Budgets:** 2–4 questions per `AskUserQuestion` call; ≤3 calls at Full tier, ≤1
-at Short. [RQ1]
+at Short.
 
 **Ambiguity rule — voice, never silently resolve.** The one way tacit knowledge
 is lost is a silent wrong disambiguation. State your intended interpretation and
 ask. A "whatever you think" answer gets ONE concrete A/B re-ask, then is marked.
 **Max 3 open ambiguities**, inline:
-`[NEEDS CLARIFICATION: <question> | default: <your default>]`. [RQ1]
+`[NEEDS CLARIFICATION: <question> | default: <your default>]`.
 
 **Stopping rule — all five, then stop asking:**
 (a) files+interfaces named and verified · (b) OUT has ≥1 real entry · (c) every
 task has a machine-checkable done-when · (d) open ambiguities ≤3 and marked ·
-(e) the last question round produced zero new decisions. [RQ1][RQ3]
+(e) the last question round produced zero new decisions.
 
 ## Phase 3 — Author the doc
 
 One self-contained markdown doc: `docs/specs/YYYY-MM-DD-<slug>-spec.md` (today's
-date; `--out` overrides). [RQ2]
+date; `--out` overrides).
 
 ```
 # <slug> — spec+plan            | header: date · author · accepted-base: (filled at gate)
@@ -105,7 +100,7 @@ date; `--out` overrides). [RQ2]
 ## Deviations (append-only)     | empty at acceptance; implementer-only.
 ```
 
-**EARS templates** (shapes for the behavior contract) [RQ3]:
+**EARS templates** (shapes for the behavior contract):
 - Ubiquitous: `The <system> shall <response>.`
 - Event-driven: `WHEN <trigger>, the <system> shall <response>.`
 - State-driven: `WHILE <state>, the <system> shall <response>.`
@@ -114,9 +109,8 @@ date; `--out` overrides). [RQ2]
 
 **Task sizing:** tens of human-minutes each — agent reliability decays
 exponentially with task length, and the dependable horizon is 4–6× shorter than
-the headline one. [RQ4] **Edges are author-declared**, default independent; add an
-edge only when a named artifact forces it. A cycle is a defect — fix the
-decomposition. [RQ4]
+the headline one. **Edges are author-declared**, default independent; add an edge
+only when a named artifact forces it. A cycle is a defect — fix the decomposition.
 
 **Write checks the operator won't have to second-guess.** Before a task's file
 set and done-when are final, run the
@@ -155,7 +149,7 @@ or the scope is two changes.
 
 **Length follows tier.** No doc-length quota; what's bounded is the gate read
 (Phase 5). If the doc outgrows one gate sitting, the tier was wrong or the scope is
-two changes. [RQ7]
+two changes.
 
 **Intent read-back (mandatory; the last act of Phase 3).** With both files
 written, tell the operator — in your own words, built from their interview
@@ -166,8 +160,7 @@ to confirm or correct. On confirm, fold the validated formulation into `## Inten
 On correction, fix Intent and any section the correction invalidates before Phase
 4. An intent you cannot state back convincingly is a doc defect, not an operator
 problem. The folded Intent is narrative — it does not trigger the Phase 4 expiry
-rule. (Origin: the 2026-08-07 alfred-foundation session, where the read-back
-surfaced the real product the drafted Intent had understated.)
+rule.
 
 ## Phase 4 — Advisory pass (one-shot; skip with `--no-advisory`)
 
@@ -185,8 +178,8 @@ the doc path and this contract, never your reasoning or the interview:
 
 Append its findings verbatim under `## Advisory findings (gate)`. They are input
 for the human, not for you. Do not act on them, reply to them, or re-run the pass
-over text it already saw. [RQ5][A1][A2] Anything the pass surfaces that you agree
-with, fold into your "Where I'm unsure" brief so the operator sees it framed
+over text it already saw. Anything the pass surfaces that you agree with, fold into
+your "Where I'm unsure" brief so the operator sees it framed
 honestly rather than as a raw dump.
 
 **Expiry — the pass covers the doc it read, not the doc you ship.** If the Phase 5
@@ -200,7 +193,7 @@ edits or deletes existing text triggers no new pass.
 ## Phase 5 — Human gate
 
 The gate is short by design: **one sitting, aim ~10 minutes, hard cap 60 minutes /
-400 lines read.** [RQ5]
+400 lines read.**
 
 **You already did the mechanical QA** (files exist, checks are non-vacuous, seams
 wired — the authoring checklist). The gate does not ask the operator to redo it. It
@@ -217,7 +210,7 @@ any question, say plainly:
   Do not soften them. The flagged risks are the point.
 
 **Step B — ask only the operator-oracle questions.** Every answer states a value,
-never yes/no [RQ5] — these are questions only the operator can answer, so there is
+never yes/no — these are questions only the operator can answer, so there is
 no rubber-stamp option to pick:
 
 1. **Intent.** "Here's what I think you want: `<sentence>`. Right? Fix it if not."
@@ -232,12 +225,12 @@ no rubber-stamp option to pick:
    judges your self-assessment; they don't hunt for it.
 
 **Critical first:** items 1 and 5 carry the most weight — point the operator's
-attention there. [RQ5]
+attention there.
 
 **The one honest guard.** If the operator's restatement of intent just echoes your
 sentence back, you learned nothing — ask once more, in their own words, with the
 sidecar closed. Not a trap: you need to hear it from them to know you understood.
-[RQ5] A fast accept is the operator's call to own; your duty was to point their
+A fast accept is the operator's call to own; your duty was to point their
 attention at items 1 and 5 and tell the truth in the brief.
 
 **Offer the plain-language walk.** If the operator is not the coder — or asks to
@@ -268,7 +261,7 @@ gh pr create --head "spec/<slug>" --base main --draft \
 ## Phase 7 — Handoff
 
 Print, as the final report: the doc path · PR number · `accepted-base` hash · and
-the implementer's first-move contract, verbatim [RQ8]:
+the implementer's first-move contract, verbatim:
 
 > Fresh session. Read the spec. Critically review it; raise blockers to the human
 > BEFORE executing. Verify the repo contains `accepted-base`. Then per task: turn
@@ -281,11 +274,9 @@ the implementer's first-move contract, verbatim [RQ8]:
 
 Nothing to run — metrics derive from git/PR metadata per merged change: first-pass
 acceptance (implementation merged with zero re-plan), re-plan count, deviation
-count, tokens-per-merged-PR. Never wall-clock, never self-report. [RQ9]
+count, tokens-per-merged-PR. Never wall-clock, never self-report.
 
-## What this replaces
+## Workflow
 
-This single session replaced `/stark-write-spec`, `/stark-review-spec`,
-`/stark-red-team-spec`, `/stark-spec-to-plan`, and `/stark-review-plan` — all five
-deleted in the 2026-07-26 demolition. This is the authoring stage; `/stark-build`
-is the implementation stage.
+One authoring session covers spec + plan in one pass; `/stark-build` is the
+implementation stage.

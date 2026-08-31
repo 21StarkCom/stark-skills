@@ -160,7 +160,7 @@ second judge is the `codex` CLI at **xhigh** reasoning effort (grading is a
 hard-reasoning task and the CLI's ambient default is often low; the model id
 comes from config, never from this file).
 
-Dispatch shape - every detail is a scar, keep all of them:
+Dispatch shape - keep every detail:
 
 ````bash
 # model from fleet config; empty var falls back to the CLI's own default

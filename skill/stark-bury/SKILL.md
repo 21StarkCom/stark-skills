@@ -50,11 +50,11 @@ first shovel of dirt.
 - One alfred ticket per phase, in the repo that phase's PR lands in
   (`alfred task new …`); every PR title is `type(STARK-<n>): subject`.
 
-## Phase 1 — verify the footprint (the step that has bitten before)
+## Phase 1 — verify the footprint
 
 Never trust a name-based file list — not the operator's, not a brief's, not
-grep's. A file called `*_nudge*` belonged to a DIFFERENT living subsystem the
-one time this ritual ran unverified.
+grep's. A matching filename can belong to a DIFFERENT living subsystem — verify
+each file's ownership before burial.
 
 For every candidate file:
 

@@ -60,11 +60,8 @@ decide — record the divergence, don't relitigate it.
 | **SendMessage** (built-in tool) | briefs, answers, board updates, rebase broadcasts — all work content | arrives as a message; immune to paste buffering and ref churn |
 | **control-client `send` + `send-key`** | session-control slash commands only (`/clear`, `/effort …`) on an **idle, verified** minion | slash commands can't ride a message |
 
-The **control client** is the terminal-driving tool. **hermod is THE control
-client now.** cmux-client was its predecessor and has been **retired** (the repo
-is gone) — it is named here and in the older `minion` personas only so you
-recognize it; hermod has the same CLI surface, so any `cmux-client` verb in an
-older doc maps one-for-one onto hermod. Measured two-step:
+The **control client** is the terminal-driving tool. **Use hermod.** The
+two-step:
 
 ```
 # hermod — the /clear two-step:
@@ -248,7 +245,7 @@ A minion's "done / merged / green" gates a dependent dispatch **and a `/clear`**
 only after all four:
 
 1. `gh pr view <n> --repo <org/repo> --json state,mergedAt,mergeCommit` →
-   `MERGED` + SHA (`pr-merge` can exit 0 without merging — measured race).
+   `MERGED` + SHA (`pr-merge` can exit 0 without merging).
 2. `git fetch origin` + `git log origin/main --oneline -3` → the SHA is on main.
 3. `alfred task show STARK-n --json --no-comments` → `done`.
 4. Re-run the task's done-when yourself on `origin/main` (rebase your own
@@ -304,8 +301,8 @@ you don't get to claim a check you had no way to run.
    `read-screen` shows the effort tag (assume `/clear` reset it until measured
    otherwise).
 5. `ListAgents` — re-resolve the SendMessage name.
-6. Send the next full packet (guardrails included — the old ones died with the
-   context) via SendMessage; confirm by lifecycle flip to `running`.
+6. Send the next full packet with guardrails via SendMessage; confirm by
+   lifecycle flip to `running`.
 
 ## Cleanup — one sweep, at the end
 
@@ -361,9 +358,8 @@ same failure: acting past the point you should have asked.
 
 ## Quick reference
 
-The control client is **hermod** (cmux-client, its predecessor, is retired — same
-CLI surface). Prefer the repo checkout; a brew binary can lag, check `version`
-first.
+The control client is **hermod**. Prefer the repo checkout; a brew binary can
+lag, check `version` first.
 
 ```
 CC="bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts"

@@ -30,7 +30,7 @@ the skill share one tested engine.
 ## Prerequisite
 
 `brain` must be on PATH. It is the **TypeScript Atlas engine** (`21StarkCom/atlas`,
-`atlas/apps/cli`) — the `adr` group is a byte-identical port of the retired Go `brain adr`.
+`atlas/apps/cli`).
 
 ```bash
 brain adr list   # verify brain is on PATH and the adr group is available

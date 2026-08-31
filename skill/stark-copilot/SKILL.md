@@ -47,12 +47,12 @@ re-implement that logic here.
 - `--test-command CMD` — test command to run after each lead pass (e.g., `npm test`, `pytest`)
 - `--lead AGENT` — lead implementer agent ID (default: `claude`). One of `claude`, `codex`, `gemini`.
 - `--wing AGENT` — wing reviewer agent ID (default: `codex`). Must differ from `--lead`.
-- `--max-rounds N` — maximum **fix** rounds after the initial implement (default: `1`). The wing reviews up to `N+1` times. One round is the evidence-backed default — retry budget past first-failure buys review churn, not fixes (2026-07-25 autopsy); unresolved-after-one goes to the human.
+- `--max-rounds N` — maximum **fix** rounds after the initial implement (default: `1`). The wing reviews up to `N+1` times. One round is the default; unresolved-after-one goes to the human.
 - `--timeout N` — per-lead-invocation timeout in seconds (default: 900)
 - `--wing-timeout N` — per-wing-invocation timeout in seconds (default: 600)
 - `--no-goal` — disable the goal-driven lead loop. When the lead is `claude` (the default), the lead's implement prompt is prefixed with a `/goal` directive (§2a) so it keeps iterating until tests pass; `--no-goal` reverts to a single bounded pass. Ignored when the lead is `codex`/`gemini` (`/goal` is a Claude Code feature).
 - `--parallel` — force-treat ALL steps as mutually independent (one wave), overriding the dependency DAG. Use only when you know the deps metadata is over-conservative. Parallelism within a wave is otherwise **on by default** via the execution DAG (§1.4); see [Parallel waves](#parallel-waves-default).
-- `--sequential` — disable DAG-driven parallelism entirely; run every step one at a time in dependency order (the pre-DAG behavior).
+- `--sequential` — disable DAG-driven parallelism entirely; run every step one at a time in dependency order.
 - `--ready` (alias `--no-draft`) — open the impl PR ready-for-review instead of draft. Draft is the repo default (§2.6 lands the impl PR as a draft unless this is passed). `open_ready` (used in §2.6) is non-empty when either token is present in `$ARGUMENTS`.
 - `--dry-run` — show what would happen without executing
 
@@ -85,7 +85,7 @@ Two input modes:
 
 **Inline prompt:** If the input is a description rather than a file path, decompose it into steps yourself. `PLAN_SLUG` is whatever `--plan-slug` carried, otherwise unset.
 
-> **There is no issue-driven mode.** Until 2026-07-26 copilot could load steps from GitHub issues labelled `plan:{SLUG}`, created by `/stark-plan-to-tasks`. That skill was deleted in the demolition and nothing in the fleet creates task issues any more — `/stark-author` writes the task DAG into the spec, `/stark-build` executes it from there, and `tools/github_app.ts` refuses `issue create` outright. The mode was removed rather than reframed because its **safety gate could never fire**: §1.2 filtered on `ai_suitability` "from the issue body metadata", but that value never existed in an issue body — the producer's template had 13 sections and none was suitability, its labels were `plan:`/`risk:`/`confidence:` with no `ai:`, and AI Suitability lived only as a GitHub Projects V2 field, invisible to the `gh issue list --json body,labels` this mode ran. A task marked `human-led` would have been run autonomously, silently.
+> **There is no issue-driven mode.** Input is a plan file or an inline prompt only. `/stark-author` writes the task DAG into the spec and `/stark-build` executes it from there; nothing in the fleet creates task issues, and `tools/github_app.ts` refuses `issue create` outright.
 
 When a plan file path is available, retain it as `plan_path` for the approach contract step. When in inline mode, leave `plan_path` unset. Retain the raw `<plan-or-prompt>` positional value itself (flags stripped) as `plan_or_prompt` — §1.7 uses it as the inline-mode branch-name fallback.
 
@@ -166,7 +166,7 @@ Only when `plan_path` is set (plan-file mode). Inline mode skips this step.
 
 ### 1.7 Prepare the impl branch
 
-Historically copilot committed every step directly onto whatever branch was checked out and never opened a PR — forge had no impl PR number to record or merge. Fix that here, **before any step commits**: adopt-or-create a deterministic impl branch so §2g's per-step commits land somewhere reachable, and resolve the repo + default branch §2.6 needs to land the PR.
+**Before any step commits**, adopt-or-create a deterministic impl branch so §2g's per-step commits land somewhere reachable, and resolve the repo + default branch §2.6 needs to land the PR.
 
 ```bash
 repo="${ORG_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)}"
@@ -191,9 +191,7 @@ a re-run whose earlier attempt was abandoned finds a leftover
 `copilot/<slug>` and adopts it via `git checkout -B <b> origin/<b>` — which
 **resets `$REPO_ROOT` onto that older codebase** while reporting `ok: true`.
 Every later wave then diffs, tests, and commits against the wrong tree.
-Copilot runs against the real checkout rather than a throwaway worktree, so
-the blast radius is larger than the `/stark-build` case this guard was first
-added for. Pinning the current `HEAD` is the correct base: a branch that
+Pinning the current `HEAD` is the correct base: a branch that
 legitimately continues this work already contains it, and one that doesn't is
 precisely the stale branch you must not silently rewind onto.
 
@@ -214,7 +212,7 @@ For each step, sequential or fanned-out:
 
 Write three files for the dispatcher (replace `$$` with the orchestration PID or any unique tag):
 
-- `/tmp/stark-copilot-$$/step-$step_id-implement.md` — the lead's full implement prompt (composed from `global/prompts/copilot/{LEAD}/implement.md` + previous-step context + step task). Do **not** embed a `/goal` directive in this file — goal mode is enabled via the `--goal-condition` flag in §2b instead (a `/goal` line in a stdin-piped prompt is read as plain text and does **not** loop; verified 2026-06-03, Claude Code 2.1.161). The dispatcher prepends `/goal` and routes the prompt as a `-p` argument for you.
+- `/tmp/stark-copilot-$$/step-$step_id-implement.md` — the lead's full implement prompt (composed from `global/prompts/copilot/{LEAD}/implement.md` + previous-step context + step task). Do **not** embed a `/goal` directive in this file — goal mode is enabled via the `--goal-condition` flag in §2b instead (a `/goal` line in a stdin-piped prompt is read as plain text and does **not** loop). The dispatcher prepends `/goal` and routes the prompt as a `-p` argument for you.
 - `/tmp/stark-copilot-$$/step-$step_id-review.md` — the wing's review prompt template (verbatim copy of `global/prompts/copilot/{WING}/review.md`)
 - `/tmp/stark-copilot-$$/step-$step_id-task.md` — the step's raw task description (used by the dispatcher to build the wing's review payload and the lead's fix prompts)
 
@@ -382,7 +380,7 @@ If ANY check fails, fix before proceeding to Phase 3.
 
 ## Phase 2.6: Land the impl PR
 
-Push the branch prepared in §1.7 and adopt-or-open its PR. Steps only commit **locally** (§2g) — this phase is what makes that work reachable as a reviewable PR, and is what fixes copilot never having had an impl PR number to report or merge.
+Push the branch prepared in §1.7 and adopt-or-open its PR. Steps only commit **locally** (§2g) — this phase is what makes that work reachable as a reviewable PR.
 
 Skip entirely if no step ever reached §2g (every step failed before its first commit) — there is nothing to push. Leave `pr_number` and `prs` unset for Phase 3/4.
 

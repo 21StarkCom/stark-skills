@@ -18,30 +18,25 @@ You are the RUNNER: an interactive session that sets up the harness, then
 dispatches one fresh headless `claude -p` session per spec task and verifies
 each result deterministically. The implementer never grades itself.
 
-Evidence base: [references/stage2-dossier.md](references/stage2-dossier.md)
-(`[RQn]`/`[§n]` tags cite it). Consumes a `/stark-author` accepted spec.
+Consumes a `/stark-author` accepted spec.
 
-**Non-negotiables** [§1]:
-- **Completion is a runnable pass/fail check, never a model verdict.** Agents
-  fake completion at scale (100% submitted / 44% resolved, measured) — a
-  "done" claim is noise.
+**Non-negotiables:**
+- **Completion is a runnable pass/fail check, never a model verdict.** A "done"
+  claim is noise.
 - **Checks are read-only to the writer, enforced by hooks, not prompts.**
-  Anti-cheat prompting alone fails (80–95% still hacked under explicit
-  instructions).
-- **Abort is a first-class success.** An explicit give-up path cuts cheating
-  ~5x (54%→9%). A logged deviation + stop beats a gamed green, always.
+  Anti-cheat prompting alone fails.
+- **Abort is a first-class success.** A logged deviation + stop beats a gamed
+  green, always.
 - **One task per fresh session.** Spec + PROGRESS.md + git are the only
-  cross-session memory. [RQ3]
+  cross-session memory.
 - **Sequential single writer.** No parallel writers in this skill — the
-  serialized-integration exception in [§3.5] is future work. [RQ4]
+  serialized-integration exception is future work.
 - **ONE advisory review, cross-vendor, at the end — then AT MOST ONE fix
   round for medium+ findings.** The fix round is single-pass and terminal:
   its output is verified by the deterministic gates only, and the advisory
   reviewer is NEVER re-run. There is no second opinion for a ratchet to
   live in. Everything below medium, and everything still open after the one
-  round, dies at the human. [RQ6][A1 — relaxed by operator decision
-  2026-07-26 ahead of the A/B the dossier asked for; the dossier's §1.8
-  still argues against this round. Read §6.4a before widening it.]
+  round, dies at the human.
 
 **Harness subprocess rule — stdin closed, always.** Every dispatched
 subprocess (`claude -p`, `codex exec`) must have `</dev/null` before its
@@ -49,8 +44,8 @@ output redirect. **A hung reviewer is indistinguishable from a thorough
 one.** Both CLIs read stdin *in addition to* the prompt argument, so an
 open pipe that never delivers EOF — which is what stdin is under a
 backgrounded or orchestrated shell — blocks them. `codex exec` blocks
-silently and forever (confirmed live: 5h14m, 39 bytes of output, all of it
-"Reading additional input from stdin..."). `claude -p` fails fast instead,
+silently and forever (emitting only `Reading additional input from
+stdin...`). `claude -p` fails fast instead,
 but into the redirect file where nobody is looking (`Warning: no stdin data
 received in 3s` then `Execution error`). Add `</dev/null` before `>` on
 every dispatch below; any new dispatch inherits this rule.
@@ -93,7 +88,7 @@ to get the tool payload.
    set, the protected-paths list, per-task dispatch command — then stop.
    Zero side effects.
 
-## Phase 1 — Run setup (once per spec) [§3.1]
+## Phase 1 — Run setup (once per spec)
 
 State lives OUTSIDE the repo:
 `STATE=~/.claude/code-review/history/build/<slug>/<run-id>/`
@@ -111,8 +106,8 @@ State lives OUTSIDE the repo:
    `origin/build/<slug>` from a prior abandoned run is adopted via
    `git checkout -B <branch> origin/<branch>`, which silently resets HEAD
    onto that older codebase — reporting `ok: true` while every subsequent
-   gate measures a tree predating the pin. Reproduced and fixed live; the
-   flag refuses the stale adoption without moving the worktree.
+   gate measures a tree predating the pin. The flag refuses the stale
+   adoption without moving the worktree.
 
    **Check the exit code FIRST, then assert.** A refusal is the guard
    working, and it leaves HEAD exactly where it was — so a bare
@@ -141,7 +136,7 @@ State lives OUTSIDE the repo:
    `git commit --allow-empty -m "build(<slug>): run start (accepted-base <sha>)"`,
    then `copilot_land.ts land --repo <owner/repo> --branch "build/<slug>"
    --title "build: <slug>" --body "<spec path + run id>" --repo-dir "<wt>"`
-   (draft by default). Prevents F6-class base ambiguity.
+   (draft by default). Prevents base ambiguity.
 3. **Harness files:** copy this skill's
    [references/hooks/protect-paths.sh](references/hooks/protect-paths.sh) and
    [references/hooks/stop-gate.sh](references/hooks/stop-gate.sh) into
@@ -149,17 +144,17 @@ State lives OUTSIDE the repo:
    path per line, **no trailing slash on directory entries**: the spec + its
    `.human.md` sidecar, every EXISTING test file named by any done-when,
    `$STATE/hooks`, `$STATE/tasks` (check scripts + settings), and the repo's
-   CI config dir. [RQ1/RQ5 — read-only tests, measured]
+   CI config dir.
 
    A trailing slash builds the glob `<dir>//*`, whose double slash matches
    **nothing** — the Edit/Write deny branch silently passes every file under
    it, and a task session can rewrite its own `check.sh` and `stop-gate.sh`
-   to land a fabricated green. `protect-paths.sh` now normalizes trailing
+   to land a fabricated green. `protect-paths.sh` normalizes trailing
    slashes itself, so this is belt-and-braces; write them without anyway.
 4. **Materialize `$STATE/PROGRESS.md`** (append-only: per-task status,
-   evidence pointers, deviations). [RQ3]
+   evidence pointers, deviations).
 
-## Phase 2 — Per-task loop (sequential) [§3.2]
+## Phase 2 — Per-task loop (sequential)
 
 For each task `<id>`, in topo order:
 
@@ -201,7 +196,7 @@ template — fill every `<>`:
 > 7. Abort is success: if blocked, log the deviation and stop. The gate
 >    accepts a logged deviation — never fake a green.
 
-**Dispatch** (fresh session; budget per task, not per run [§3.3]):
+**Dispatch** (fresh session; budget per task, not per run):
 
 ```bash
 claude -p --model "<--model | claude-opus-5>" --settings "$T/settings.json" \
@@ -223,12 +218,11 @@ claude -p --model "<--model | claude-opus-5>" --settings "$T/settings.json" \
    NOT kill the child process tree. Every retry then competes with all
    prior `go test` (or equivalent) processes for build caches, producing a
    self-inflicted escalating slowdown that looks like external contention
-   and causes real misdiagnosis (observed: four concurrent T3/check.sh
-   processes, oldest at 52 min). Run long gates as background tasks and
+   and causes real misdiagnosis. Run long gates as background tasks and
    terminate them via the harness's own task-stop, never via a foreground
    timeout.
-   **macOS has no `timeout(1)`** (verified on this fleet — and `gtimeout`
-   is not installed by default either; it needs `brew install coreutils`).
+   **macOS has no `timeout(1)`** (and `gtimeout` is not installed by
+   default either; it needs `brew install coreutils`).
    A gate sweep written with `timeout 120 bash check.sh` reports every gate
    as red in 0s, because `timeout: command not found` exits 127 — a **false
    red that is indistinguishable from a correct one**. Never bare
@@ -243,12 +237,10 @@ claude -p --model "<--model | claude-opus-5>" --settings "$T/settings.json" \
    **group** (`set -m`, then `kill -- -"$PGID"`), and verify nothing
    survived before retrying.
    **Broad kill patterns kill YOUR OWN gate first.** `pkill -f "go test"`
-   matches on command-line text, not on process ownership. In the live run
-   it killed the runner's own in-flight verification and produced
-   `rc=143` — which was then misread as a gate failure, not as
-   self-inflicted. It also killed a *different* concurrent `stark-build`
-   run (`auth0-write-surface`) mid-task, because that run's prompt text
-   contained the string `go test`. Any cleanup pattern must be scoped to
+   matches on command-line text, not on process ownership — it can kill the
+   runner's own in-flight verification (producing a misread `rc=143`) or a
+   *different* concurrent `stark-build` run whose prompt text contains the
+   string `go test`. Any cleanup pattern must be scoped to
    this run's unique `$STATE` path and dry-run listed **with the command
    text visible** — `pgrep -lf "$STATE"` or `ps -eo pid,command | grep -F
    "$STATE"`. **Not `pgrep -af`**: on macOS `-a` means "include process
@@ -278,16 +270,16 @@ claude -p --model "<--model | claude-opus-5>" --settings "$T/settings.json" \
    line (runner-written if the session didn't).
 4. Commit: green + uncommitted → commit `build(<slug>): <id> (runner-committed)`;
    red-abort or crash → commit WIP as `wip(<slug>): <id>`. Every green task
-   is durable. [RQ8]
+   is durable.
 5. Append the task entry to PROGRESS.md: status (`green | deviation | crashed`),
    evidence path, blocks count.
 6. Crash/timeout without green or deviation → re-dispatch the SAME task ONCE
-   (it resumes from PROGRESS.md + commits — never from zero [RQ2]); still no
+   (it resumes from PROGRESS.md + commits — never from zero); still no
    exit → runner writes `class=blocked` deviation and moves on.
 7. A `class=scope-move` deviation → STOP the run: push what exists, report to
-   the operator (the gate owns scope, not you). [§3.8]
+   the operator (the gate owns scope, not you).
 
-## Phase 3 — Closing e2e gate (held out) [§3.6]
+## Phase 3 — Closing e2e gate (held out)
 
 Run the spec's `## Verification` command(s) yourself in the worktree — the
 per-task loop never iterates on them. Flaky discipline: re-run the IDENTICAL
@@ -303,11 +295,11 @@ pattern.
 
 - **Green** → proceed.
 - **Red with all tasks green** → the divergence signal (build gamed or spec
-  mis-decomposed [RQ9]): append to PROGRESS.md, continue to Phase 4, PR
+  mis-decomposed): append to PROGRESS.md, continue to Phase 4, PR
   STAYS DRAFT, and say it plainly in the report. There is NO fix loop —
   the human decides.
 
-## Phase 4 — Advisory review (one-shot; skip with `--no-advisory`) [§3.7]
+## Phase 4 — Advisory review (one-shot; skip with `--no-advisory`)
 
 Skip-rule (speculative, log when used): diff < ~50 changed lines AND only
 in-set files AND e2e green.
@@ -334,15 +326,12 @@ real defect on a reachable edge path; low = everything else."*
 Post the findings as ONE PR comment authored by stark-codex
 (`github_app.ts --app stark-codex pr comment ...`) — ALL of them, every
 severity, before any fixing. Then re-run the pass NEVER, whatever Phase 4b
-does. [RQ6][A1]
+does.
 
-## Phase 4b — ONE fix round, medium+ only (skip with `--no-fix`) [§3.7]
+## Phase 4b — ONE fix round, medium+ only (skip with `--no-fix`)
 
 Exactly one pass. Not a loop, and there is no round 2 under any outcome —
 red gates after the round mean the human decides, never another dispatch.
-Repeated submissions against reviewer feedback *raise* cheating (33%→38%,
-ImpossibleBench) and longer search raises hack severity (SpecBench), so the
-budget past the first attempt is deliberately zero. [RQ1][RQ2]
 
 1. **Select.** Parse `SEVERITY:` tokens from `$STATE/advisory.out` into
    `$STATE/findings.json`; keep `critical|high|medium`. Drop `low` (posted,
@@ -392,7 +381,7 @@ budget past the first attempt is deliberately zero. [RQ1][RQ2]
    nothing-lost rule: a finding is fixed, or answered on the thread. Open
    medium+ findings after the round → **PR stays draft.**
 
-## Phase 5 — Land [§3.9]
+## Phase 5 — Land
 
 1. Mirror every deviation line into the spec's `## Deviations` (append-only;
    you edit the spec here — task sessions never could) in the MAIN checkout
@@ -411,14 +400,14 @@ budget past the first attempt is deliberately zero. [RQ1][RQ2]
 
 ## Phase 6 — Report
 
-Final message, in the operator's read order [§3.9]: PR number · spec digest
+Final message, in the operator's read order: PR number · spec digest
 path (`.human.md`) · deviations (verbatim) · advisory findings split into
 **fixed / rejected-with-reason / still-open** · evidence dir · e2e verdict ·
 the diff hot spots worth a human spot-check. Every rejection prints its
 reason — that is the line you audit. The human is the merge gate: never
 merge, and never treat a fix round as having closed a finding.
 
-## Measurement [RQ9]
+## Measurement
 
 Per run, from git/PR metadata + `$STATE` only: tasks green first dispatch ·
 re-dispatch count · deviation count by class · Stop-block histogram ·
@@ -427,11 +416,3 @@ human · **fix-round yield** (medium+ selected vs fixed-and-still-green vs
 rejected vs regressed). That last one is the kill-switch metric: a round
 that mostly rejects or regresses is the loop earning its way back out.
 No wall-clock, no self-report, no completion-rate dashboards.
-
-## What this replaces
-
-For implementation from an accepted spec, this replaces `/stark-copilot`'s
-lead/wing review loop, `/stark-plan-to-tasks`, and `/stark-phase-execute`
-(the latter two deleted in the 2026-07-26 demolition; copilot survives for
-plan-file work with a 1-round cap and a hard test gate). The antipatterns
-this skill must never grow back: [references/stage2-dossier.md](references/stage2-dossier.md) §5.

@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=933 runId=dec278f4-72f3-42fe-b4bb-65bdca881ff1 -->
+- Simplified skill documentation by removing dated narratives and historical context while preserving current commands, configuration, and safety guidance.
 <!-- stark-gh:pr-merge pr=935 runId=ccf52285-ef0e-4029-9fb2-dbbef324e36a -->
 - Removed the redundant `stark-ssot` skill; SSOT detection remains available through the `spec-conformance` review domain.
 <!-- stark-gh:pr-merge pr=923 runId=822fd9a8-6b91-4871-bd6d-03e664215fd2 -->

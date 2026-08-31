@@ -24,12 +24,7 @@ guidance loaded into the turn, not a CLI wrapper.
 
 How to build a **unified, multi-theme, multi-brand design-token system** —
 taxonomy, naming, color, format, tooling, distribution, and governance — distilled
-into rules you can enforce. It is the common denominator of the **W3C Design
-Tokens Community Group spec**, Style Dictionary, Figma Variables / Tokens Studio,
-and the vendor systems that converged independently (Material 3, Primer, Spectrum,
-Radix, Carbon, Atlassian), cross-checked against Nathan Curtis's naming taxonomy
-and the CSS Color 4 / WCAG accessibility baselines. Compiled 2026-08; volatile
-claims are date-stamped in the references.
+into rules you can enforce.
 
 ## When to use
 
@@ -52,14 +47,14 @@ theming seam.
 
 **The load-bearing rules** (full, lintable form in `references/rules.md`):
 
-1. Author in **DTCG JSON v2025.10** (stable since 2025-10-28). Don't hand-roll a format.
+1. Author in **DTCG JSON v2025.10**. Don't hand-roll a format.
 2. **Exactly three tiers.** Components consume **semantic only** — a component touching a primitive is a lint error.
 3. **Modes flip the semantic binding, never component code.** Dark, brand, density, contrast are orthogonal axes resolved at the semantic tier. Flip the wrong tier and the theme matrix goes multiplicative.
 4. **Name by role, never by value, in the semantic tier.** `color.text.danger`, not `color.red.600`. Value-names live only in primitives.
 5. **One naming grammar, mechanically enforced,** generated from one canonical dot-path. Never hand-maintain parallel platform names.
 6. **Reference depth ≤ 3 (SHOULD), ≤ 4 (MUST), acyclic (MUST).** `component → semantic → primitive`.
 7. **Generate color scales in OKLCH** (or HCT), hand-tune, and adopt **Radix's 12-step role** semantics even with your own values.
-8. **Contrast is a build-time invariant, not a review-time check.** Every semantic fg/bg pair asserted ≥ **WCAG 2.2 AA** in CI, per theme. APCA advisory-only — never the sole gate (removed from the WCAG 3 draft in 2023, still exploratory).
+8. **Contrast is a build-time invariant, not a review-time check.** Every semantic fg/bg pair asserted ≥ **WCAG 2.2 AA** in CI, per theme. APCA advisory-only — never the sole gate.
 9. **The runtime carrier is plain CSS custom properties.** All transformation is build-time; nothing that evaluates code ships to the client. CSP-safe by construction.
 10. **`[data-theme]` is authoritative over `prefers-color-scheme`.** Explicit attribute wins; system preference is fallback, scoped to `:root:not([data-theme])`.
 11. **Reconcile Tailwind** by redefining its `dark` variant against `[data-theme]` via `@custom-variant`, and register token vars in `@theme` so Tailwind consumes the token layer instead of competing with it.
@@ -84,9 +79,7 @@ four rules broken.
 
 ## Provenance
 
-This skill is the synthesis of **three independent deep-research passes** (Claude,
-ChatGPT, Qwen; 2026-08) over the same brief, which converged almost completely.
-The two genuine divergences are resolved in the rules: reference depth is **≤ 3
-SHOULD / ≤ 4 MUST**, and a shared **names-only package is deliberately NOT a
-conforming DTCG file** (DTCG requires `$value`) — its DTCG source lives in a
-build-only workspace and it publishes generated names. Do not re-litigate these.
+Two design decisions are settled — do not re-litigate them: reference depth is
+**≤ 3 SHOULD / ≤ 4 MUST**, and a shared **names-only package is deliberately NOT
+a conforming DTCG file** (DTCG requires `$value`) — its DTCG source lives in a
+build-only workspace and it publishes generated names.

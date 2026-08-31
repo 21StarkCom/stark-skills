@@ -116,7 +116,7 @@ A post can be padding-free and still read like a machine. Scrub these. (Full reg
 
 ## Cross-post repetition (mandatory when reviewing 2+ posts)
 
-At length, the same writer reaches for the same well. Across a single blog this reads as one war story told nine ways. Check for:
+At length, the same writer reaches for the same well. Check for:
 
 - **Reused metaphors / images.** The "scoreboard" frame, "[bad thing] wearing a [respectable] costume/coat", "the friction is the sound of X". One home per image. List each with the files that share it.
 - **Reused biographical wells.** The France-acquisition / offshore-team / "Paris decided" backstory is a finite resource. If four posts lean on it, vary the framing or redistribute. Two posts invoking the *same* scar should not sit adjacent.

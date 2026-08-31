@@ -85,7 +85,7 @@ count — not test logic. Read `references/matrix-runners.md` before optimizing 
   durations understates spend; a `billed-minutes ÷ actual-runtime` ratio per
   workflow is the rounding-waste detector.
 - **The dominant CI cost is often developer WAIT time, not runner minutes**
-  (measured wait-to-compute ratios of 25–100×). For a team, the true unit is
+  (wait-to-compute ratios of 25–100×). For a team, the true unit is
   **cost-per-merged-PR including loaded wait** — so queue-time and pipeline
   duration are usually the real levers, not $/minute. Free org-wide **Actions
   Insights** (queue time + failure rate, UI-only) and `self-actuated/actions-usage`
