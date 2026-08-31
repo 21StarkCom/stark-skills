@@ -40,7 +40,13 @@ export function git(
 // throws, because an unreachable ref is not the same as an absent file and
 // treating it as one would silently drop the policy.
 export function fileAtRef(ref: string, relPath: string, opts: { exec?: ExecFn } = {}): string | null {
-  const listed = git(["ls-tree", "--name-only", ref, "--", relPath], opts).trim();
+  // --full-tree makes the pathspec root-relative regardless of CWD. Without it,
+  // `ls-tree -- <relPath>` resolves the path against the process's working
+  // directory, so running from a repo SUBDIRECTORY (e.g. a leftover `cd ts/`)
+  // looks for `<subdir>/<relPath>`, misses a repo-root file like `.stark-gh.json`,
+  // and returns null — silently skipping repo config. The `git show <ref>:<path>`
+  // below is already root-relative, so the two disagreed only inside a subdir.
+  const listed = git(["ls-tree", "--full-tree", "--name-only", ref, "--", relPath], opts).trim();
   if (listed === "") return null;
   return git(["show", `${ref}:${relPath}`], opts);
 }
