@@ -5,9 +5,11 @@ produced. It invokes each stage through its plain slash command — **never with
 `--json`** — so the completion channel must live on the stage's *normal* output
 path.
 
-> **No caller consumes this today.** `/stark-forge` chained the stages and was
-> retired on 2026-07-26; nothing since parses the line. `/stark-copilot` still
-> emits it, and the format below is what any future chainer should read.
+> **No caller consumes this today, and no stage emits it.** `/stark-forge`
+> chained the stages and was retired on 2026-07-26; nothing since parses the
+> line. `/stark-copilot` was its last emitter and was retired on 2026-09-01
+> (STARK-2100). The format below is preserved as the contract any future
+> emitter/chainer should follow.
 
 This file is the single owner of that channel's format. A stage that forge
 orchestrates emits it; a stage run standalone emits it too (it is additive
@@ -44,9 +46,9 @@ Rules:
 
 | Skill | Fields beyond `skill` + `outcome` |
 |---|---|
-| `stark-copilot` | `plan_slug: string\|null`, `prs: number[]` |
+| _(none current)_ | — the last emitter, `stark-copilot`, carried `plan_slug: string\|null` + `prs: number[]` before it was retired |
 
-`pr` is the artifact PR the stage opened **or adopted** — the number forge
+`pr` is the artifact PR a stage opened **or adopted** — the number forge
 seeds/validates against its `artifact_prs` registry. A continuation stage that
 adopted an existing PR reports that same number (reporting a different one is
 an `adoption_mismatch` in forge).
@@ -57,11 +59,11 @@ Forge maps the line straight onto `forge_state.ts record-output`:
 
 | Stage | `record-output` flags |
 |---|---|
-| copilot | `--prs <prs csv>` |
+| _(none current)_ | copilot mapped `--prs <prs csv>` before it was retired |
 
 ## Ownership
 
 `spec_path` and `plan_slug` have exactly **one** producer: `stark-author` — the
 spec IS the plan, so there is no separate plan doc and no `plan_path`.
-Downstream stages (`stark-build`, `stark-copilot`) **consume** the recorded slug
-via `--plan-slug` and never re-derive it from a filename.
+Downstream stage `stark-build` **consumes** the recorded slug via `--plan-slug`
+(threaded to `copilot_land.ts`) and never re-derives it from a filename.

@@ -3,13 +3,13 @@
 //
 //   1. `global/config.json`                        — the shipped data
 //   2. `stark_config_lib.ts::DEFAULT_RUNTIME`      — the no-config default
-//   3. `copilot_dispatch.ts::DEFAULT_RUNTIME_ALLOWLIST` — copilot's own default
+//   3. `agent_dispatch_lib.ts::DEFAULT_RUNTIME_ALLOWLIST` — the dispatch default
 //
 // Nothing pinned them together, and they were already divergent (8 entries vs
 // 6) with `npm test` green: `stark_config_lib.test.ts` compares
 // `getRuntimeConfig()` to `DEFAULT_RUNTIME` under a scratch HOME, so it passes
 // no matter what the shipped JSON says. The failure that costs a session is
-// dropping USER from one copy only — copilot keeps working while a no-config
+// dropping USER from one copy only — a dispatch keeps working while a no-config
 // cron invocation fails every claude dispatch with "Not logged in · Please run
 // /login" and nothing pointing at the env.
 
@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { AGENT_ENV_ALLOWLIST, isCredentialEnvKey } from "./agent_env_lib.ts";
-import { DEFAULT_RUNTIME_ALLOWLIST } from "./copilot_dispatch.ts";
+import { DEFAULT_RUNTIME_ALLOWLIST } from "./agent_dispatch_lib.ts";
 import { DEFAULT_RUNTIME } from "./stark_config_lib.ts";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -39,7 +39,7 @@ test("the two TS defaults are the same list", () => {
   assert.deepEqual(
     [...DEFAULT_RUNTIME_ALLOWLIST],
     [...DEFAULT_RUNTIME.subagent_env_allowlist],
-    "copilot_dispatch::DEFAULT_RUNTIME_ALLOWLIST and " +
+    "agent_dispatch_lib::DEFAULT_RUNTIME_ALLOWLIST and " +
       "stark_config_lib::DEFAULT_RUNTIME.subagent_env_allowlist must stay identical",
   );
 });

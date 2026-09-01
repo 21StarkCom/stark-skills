@@ -83,7 +83,7 @@ const SUPPORT_FILES = [
   "tools/alert_delivery_lib.ts",
   "tools/approach_contract_lib.ts",
   "tools/asset_root_lib.ts",
-  "tools/copilot_dispatch.ts",
+  "tools/agent_dispatch_lib.ts",
   "tools/copilot_land.ts",
   "tools/failure_classifier_lib.ts",
   "tools/gemini_utils_lib.ts",
@@ -145,7 +145,7 @@ test("Codex runtime override inventory is exact", () => {
   // make it a tautology.
   assert.equal(
     expected.length,
-    72,
+    71,
     `runtime-overrides/codex inventory size changed (computed ${expected.length}) — if the tree is right, bump this literal`,
   );
 });

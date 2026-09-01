@@ -1,7 +1,7 @@
 // Provider abstraction for the refactor-planner.
 //
 // The repo already has a CLI-based agent backend (claude/codex via
-// copilot_dispatch.ts), so we adapt to it rather than pulling in a vendor SDK.
+// agent_dispatch_lib.ts), so we adapt to it rather than pulling in a vendor SDK.
 // The dispatcher's business logic talks ONLY to the AgentProvider interface;
 // provider + model are chosen from config/env, never hardcoded. A deterministic
 // `noop` provider lets the full pipeline run (and be tested) with no LLM calls.
@@ -9,7 +9,7 @@
 import {
   buildAgentEnv, isAgentEnabled, parseCodexJsonl, releaseAgentTempDir, resolveModel, run,
   type AgentName as VendorAgent,
-} from "./copilot_dispatch.ts";
+} from "./agent_dispatch_lib.ts";
 import type { AgentName, ContextFile } from "./refactor_planner_schemas.ts";
 
 export interface AgentRunInput {

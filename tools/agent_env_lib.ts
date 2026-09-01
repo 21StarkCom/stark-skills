@@ -71,8 +71,9 @@ export function resolvedPath(
  *   env -i HOME=… PATH=… LANG=… TMPDIR=…        claude -p x  -> is_error
  *   env -i HOME=… PATH=… LANG=… TMPDIR=… USER=… claude -p x  -> ok
  *
- * `copilot_dispatch.ts` already allowlisted USER; that fix was never
- * back-ported here, which is exactly the drift this shared constant ends.
+ * `agent_dispatch_lib.ts` (then `copilot_dispatch.ts`) already allowlisted USER;
+ * that fix was never back-ported here, which is exactly the drift this shared
+ * constant ends.
  *
  * `CLAUDE_CODE_OAUTH_TOKEN` / `CLAUDE_CODE_OAUTH_SCOPES` /
  * `CLAUDE_CODE_OAUTH_REFRESH_TOKEN` must NEVER be added here. Measured: the
@@ -103,7 +104,7 @@ export const AGENT_ENV_ALLOWLIST: readonly string[] = [
  * Credentials an agent subprocess must never receive, by exact name.
  *
  * The allowlist above is the primary defense, but not every dispatch path
- * uses one: `copilot_dispatch.ts::makeGeminiEnv` copies the ambient env
+ * uses one: `agent_dispatch_lib.ts::makeGeminiEnv` copies the ambient env
  * wholesale because the gemini CLI needs its own auth vars, and a denylist is
  * the only control available there. A gemini lead runs `--yolo` (every tool
  * call auto-approved) over attacker-controllable diff text, so an inherited
