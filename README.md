@@ -57,7 +57,6 @@ Author a spec you have actually gated, then implement from it autonomously.
 |-------|-------------|-------------|
 | [`/stark-author`](skill/stark-author/SKILL.md) | Human-gated spec + task DAG in one session | Starting anything non-trivial. Time-boxed recon, structured interview, then a spec you sign off on before a line is written. |
 | [`/stark-build`](skill/stark-build/SKILL.md) | Check-gated autonomous implementation from that spec | After the spec is accepted. One fresh session per task, gated by checks the agent cannot edit. |
-| [`/stark-copilot`](skill/stark-copilot/SKILL.md) | Autonomous implementation with paired lead/wing agents | When you want a paired lead/wing build loop — lead implements, wing reviews diff, one fix round. |
 
 **Best practice:** The pipeline is two stages — `/stark-author` (you gate the spec) → `/stark-build` (checks gate the code). There is no LLM-reviewing-LLM loop between them, by design: the 2026-07-25 autopsy found those loops burned tokens without converging, and the five-stage chain they powered was demolished on 2026-07-26.
 
@@ -69,7 +68,7 @@ Plan a restructure of an existing codebase before touching it.
 |-------|-------------|-------------|
 | [`/stark-refactor-plan`](skill/stark-refactor-plan/SKILL.md) | Inspect any repo and emit `REFACTOR_PLAN.md` + `REFACTOR_BACKLOG.json` | Before a refactor. Planning-only — produces an evidence-based, phased, file-by-file plan another agent can execute. Never modifies source. |
 
-**Best practice:** Run `/stark-refactor-plan` first, review the plan and backlog, then hand the backlog to `/stark-copilot` to execute one low-risk PR at a time. The plan changes nothing but the two artifacts, so it's always safe to run.
+**Best practice:** Run `/stark-refactor-plan` first, review the plan and backlog, then execute the backlog one low-risk PR at a time (feed each task through `/stark-author` → `/stark-build`, or drive it by hand). The plan changes nothing but the two artifacts, so it's always safe to run.
 
 ### PR and Shipping
 

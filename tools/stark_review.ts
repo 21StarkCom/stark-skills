@@ -766,7 +766,7 @@ const FORBIDDEN_REVIEWER_ENV_KEYS = ["DATABASE_URL", "TEST_DATABASE_URL"] as con
  * the allowlist DATA was the only thing keeping a credential out of a
  * prompt-injectable subprocess — re-adding one entry re-armed the leak with
  * zero test failures. The two sibling builders (`runtime_env_lib`,
- * `copilot_dispatch`) both had such a block; this one did not.
+ * `agent_dispatch_lib`) both had such a block; this one did not.
  */
 function isForbiddenReviewerEnvKey(key: string): boolean {
   if (FORBIDDEN_ENV_KEYS.includes(key as (typeof FORBIDDEN_ENV_KEYS)[number])) {

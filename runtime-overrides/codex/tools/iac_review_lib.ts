@@ -8,7 +8,7 @@
  * skills. Agents are configurable (CLI `--agents` > config `iac_review.agents`
  * > default) so you can, e.g., run reviews with Gemini AND Codex.
  *
- * Reuses the proven dispatch primitives from copilot_dispatch.ts (subprocess
+ * Reuses the proven dispatch primitives from agent_dispatch_lib.ts (subprocess
  * runner, isolated env, gemini-home + Vertex/API-key fallback, output parsers),
  * the same way plan_dispatch.ts does. Agent sandboxes are read-only and the
  * dispatcher never writes the target. Host scanners are opt-in because tools
@@ -41,7 +41,7 @@ import {
   tryGeminiApiKeyFallback,
   VALID_AGENTS,
   type AgentName,
-} from "./copilot_dispatch.ts";
+} from "./agent_dispatch_lib.ts";
 import { assetPromptsDir } from "./asset_root_lib.ts";
 import { getIacReviewConfig } from "./stark_config_lib.ts";
 import { prReview, type AppName } from "./github_app_lib.ts";
