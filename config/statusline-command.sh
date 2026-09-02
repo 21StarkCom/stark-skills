@@ -644,7 +644,23 @@ if [ -n "$acct_seat" ] && [ -n "$five_pct" ]; then
     # Claude Code's read of this line. Guarded by a no-fork `command -v` builtin so
     # a machine without idun installed never spawns a failing subshell every tick;
     # `idun daemon send` is itself fail-silent when the daemon is down.
-    if command -v idun >/dev/null 2>&1; then
+    #
+    # Change-detection guard (fork-free): forks-are-the-enemy here, and spawning a
+    # ~20ms bun binary on EVERY attributed render across EVERY window would re-push
+    # an unchanged reading dozens of times a second for nothing. So we fork idun
+    # only when the reading actually moved — a bash string compare of the seat +
+    # rounded 5H/7D percents against a marker file, no fork. Any real change (usage
+    # ticking toward the wall, a window reset, or a seat rotation — the seat is in
+    # the signature) fires exactly one push; a flat idle reading fires none. The
+    # marker is shared across windows, so N sessions on the same reading dedup to a
+    # single push. The daemon still reacts live because a move that matters IS a
+    # signature change. (Marker is best-effort; a rare double-push is harmless — the
+    # daemon's own cooldown absorbs it.)
+    _dpf="$HOME/.claude/.idun-daemon-lastpush"
+    _dpsig="${acct_seat}:${_fpct}:${_wpct}"
+    _dplast=""; [ -r "$_dpf" ] && IFS= read -r _dplast < "$_dpf"
+    if [ "$_dpsig" != "$_dplast" ] && command -v idun >/dev/null 2>&1; then
+      printf '%s\n' "$_dpsig" > "$_dpf" 2>/dev/null
       idun daemon send --from-file "$_ccu" >/dev/null 2>&1 &
     fi
   fi
