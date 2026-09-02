@@ -7,12 +7,12 @@ AI-powered development workflow system for Claude Code and Codex, covering the f
 ```bash
 # Install the plugins from the marketplace (in Claude Code)
 /plugin marketplace add 21StarkCom/bifrost
-/plugin install stark-analyze@bifrost   # + stark-plan, stark-implement, stark-gh, stark-ops, ...
+/plugin install stark-analyze@bifrost   # + stark-plan, stark-implement, stark-ops, ...
 
 # Or install the same bundles in Codex
 codex plugin marketplace add 21StarkCom/bifrost
-codex plugin add stark-gh@bifrost
-# Start a new Codex thread, then invoke: $cleanup --dry-run
+codex plugin add stark-ops@bifrost
+# Start a new Codex thread, then invoke: $stark-housekeeping --dry-run
 
 # Start a work session (context loading, health checks, briefing)
 /stark-session start
@@ -165,7 +165,6 @@ stark-skills/
 ├── global/                       ← config + prompts vendored into each plugin
 │   ├── config.json               ← global defaults
 │   └── prompts/{claude,codex,gemini}/  ← per-agent × per-domain review prompts (6 domains)
-├── plugins/stark-gh/             ← local plugin source (packaged by the marketplace)
 ├── runtime-overrides/codex/      ← Codex-only artifact + support overlays; never shipped to Claude
 ├── data/                         ← persona roster, review coverage, showcase pages
 ├── .github/workflows/            ← GitHub Actions (tests, project sync, marketplace-sync)
@@ -181,18 +180,18 @@ stark-skills/
 
 This repo is the **source of truth** for the skills + tools; they ship as separate self-contained Claude Code and native Codex plugin packages via the [bifrost](https://github.com/21StarkCom/bifrost) marketplace.
 
-- Canonical `skill/`, `plugins/stark-gh/commands/`, and shared support files remain the Claude-authored surface. `runtime-overrides/codex/` contains complete Codex-only variants and their changed support files. Bifrost keeps those inputs and generated packages isolated; a Codex overlay must never enter `dist/claude/`.
+- Canonical `skill/` and shared support files remain the Claude-authored surface. `runtime-overrides/codex/` contains complete Codex-only variants and their changed support files. Bifrost keeps those inputs and generated packages isolated; a Codex overlay must never enter `dist/claude/`.
 - The marketplace `catalog/` is **generated from this repo** by `stark sync`. Bifrost emits Claude packages under `dist/claude/`, native Codex packages under `dist/codex-plugins/`, and host-specific marketplace manifests at the repository root.
 - CI auto-publishes on every push to `main` touching a canonical vendored asset root or `runtime-overrides/codex/`.
 
 ```
 /plugin marketplace add 21StarkCom/bifrost
-/plugin install stark-analyze@bifrost   # then stark-plan, stark-implement, stark-gh, stark-ops, ...
+/plugin install stark-analyze@bifrost   # then stark-plan, stark-implement, stark-ops, ...
 /plugin update  stark-analyze@bifrost   # pull the latest published version
 
 codex plugin marketplace add 21StarkCom/bifrost
-codex plugin add stark-gh@bifrost
-# Open a new thread after install/update; invoke cleanup with: $cleanup --dry-run
+codex plugin add stark-ops@bifrost
+# Open a new thread after install/update; invoke with: $stark-housekeeping --dry-run
 ```
 
 Immutable assets (tools/prompts/config) resolve from the installed plugin root (`${CLAUDE_PLUGIN_ROOT}`) via `tools/asset_root_lib.ts`; mutable state (`history/`, `sessions/`, `locks/`, …) lives under `~/.claude/code-review/` (`stateRoot()`).

@@ -392,7 +392,6 @@ export const ASSET_SYMLINKS: AssetSymlink[] = [
   { link: ".claude/code-review/scripts", target: "Code/21Stark/stark-skills/scripts" },
   { link: ".claude/code-review/standards", target: "Code/21Stark/stark-skills/standards" },
   { link: ".claude/code-review/orchestrator.md", target: "Code/21Stark/stark-skills/global/orchestrator.md" },
-  { link: ".claude/plugins/stark-gh", target: "Code/21Stark/stark-skills/plugins/stark-gh" },
   { link: ".claude/output-styles/concrete.md", target: "Code/21Stark/stark-skills/config/output-styles/concrete.md" },
   // The register spec ~/Code/CLAUDE.md defers to, and what settings.json's
   // `outputStyle: "Blunt"` resolves against — absent from this table until

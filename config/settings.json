@@ -63,7 +63,6 @@
     "gopls-lsp@claude-plugins-official": true,
     "stark-analyze@bifrost": true,
     "stark-constitution@bifrost": true,
-    "stark-gh@bifrost": true,
     "stark-implement@bifrost": true,
     "stark-ops@bifrost": true,
     "stark-plan@bifrost": true

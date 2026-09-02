@@ -29,7 +29,6 @@ on:
       - "global/**"
       - "scripts/**"
       - "standards/**"
-      - "plugins/stark-gh/**"
       - "runtime-overrides/codex/**"
   workflow_dispatch:
 

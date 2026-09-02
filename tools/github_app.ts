@@ -137,8 +137,8 @@ export function reviewEventFromFlags(
 
 // draftFromFlags / mergeMethodFromFlags removed 2026-08-04 with the `pr create`
 // and `pr merge` actions they served. The draft default now lives on the `gh`
-// path only — plugins/stark-gh/tools/gh_pr_open_execute.ts resolves it via the
-// shared draft config, so pr-open and pr-merge agree on one answer.
+// path only — `idun gh pr-open` resolves it via idun's shared draft config, so
+// pr-open and pr-merge agree on one answer.
 
 export function parseArgs(argv: string[]): Parsed {
   const out: Parsed = {

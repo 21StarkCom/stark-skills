@@ -1,8 +1,0 @@
-{
-  "name": "stark-gh",
-  "description": "GitHub workflow slash commands: open PRs, merge, clean, fetch, trigger workflows",
-  "author": {
-    "name": "Evinced",
-    "email": "engineering@evinced.com"
-  }
-}
