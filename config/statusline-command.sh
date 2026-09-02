@@ -632,9 +632,21 @@ if [ -n "$acct_seat" ] && [ -n "$five_pct" ]; then
   if [ "$PROCSTART" -gt 0 ] 2>/dev/null &&
      [ "${_cur_since:-0}" -gt 0 ] 2>/dev/null &&
      [ "$PROCSTART" -ge "$_cur_since" ]; then
+    _ccu="$HOME/.claude/.cc-usage-${acct_seat//:/_}"
     printf 'five_pct=%s\nfive_reset=%s\nweek_pct=%s\nweek_reset=%s\nstamped_at=%s\nemail=%s\nseat_key=%s\n' \
       "$_fpct" "${five_reset:-0}" "$_wpct" "${week_reset:-0}" "$NOW" "$acct_email" "$acct_seat" \
-      > "$HOME/.claude/.cc-usage-${acct_seat//:/_}" 2>/dev/null
+      > "$_ccu" 2>/dev/null
+    # Push the fresh reading to the idun daemon (spec: slice 3). Fire-and-forget:
+    # the singleton watcher decides whether to rotate the login before this seat's
+    # 5H/7D wall blocks work; the statusline never waits on that. Backgrounded so
+    # the socket round-trip stays off the render path, and stdout/stderr are sunk
+    # to /dev/null — load-bearing, since an inherited open render pipe would stall
+    # Claude Code's read of this line. Guarded by a no-fork `command -v` builtin so
+    # a machine without idun installed never spawns a failing subshell every tick;
+    # `idun daemon send` is itself fail-silent when the daemon is down.
+    if command -v idun >/dev/null 2>&1; then
+      idun daemon send --from-file "$_ccu" >/dev/null 2>&1 &
+    fi
   fi
 fi
 
