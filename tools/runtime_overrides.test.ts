@@ -64,7 +64,6 @@ const SUPPORT_FILES = [
   "global/config.json",
   "skill/stark-build/references/hooks/protect-paths.sh",
   "skill/stark-build/references/hooks/stop-gate.sh",
-  "skill/stark-gh-user/scripts/handler.sh",
   "skill/stark-gha-cost/scripts/gha-cost-breakdown.sh",
   "skill/stark-gha-cost/scripts/gha-cost-json.ts",
   "skill/stark-gha-cost/scripts/gha-repo-actions-drill.sh",
@@ -129,7 +128,7 @@ test("Codex runtime override inventory is exact", () => {
   // make it a tautology.
   assert.equal(
     expected.length,
-    60,
+    58,
     `runtime-overrides/codex inventory size changed (computed ${expected.length}) — if the tree is right, bump this literal`,
   );
 });
@@ -196,12 +195,6 @@ test("Codex runtime instructions never target Claude-owned state", () => {
   );
   assert.match(housekeeping, /~\/\.stark\/code-review/);
   assert.doesNotMatch(housekeeping, /~\/\.claude/);
-
-  const ghUserHandler = fs.readFileSync(
-    path.join(CODEX_ROOT, "skill/stark-gh-user/scripts/handler.sh"),
-    "utf8",
-  );
-  assert.doesNotMatch(ghUserHandler, /CLAUDE_PLUGIN_ROOT|~\/\.claude/);
 });
 
 test("Codex user-facing output uses dollar skill invocation", () => {
