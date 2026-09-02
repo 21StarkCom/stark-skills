@@ -690,7 +690,7 @@ export async function graphql(
 //                  which is why those two stay.
 //   NOT here       opening a PR, merging, un-drafting, opening an issue.
 //                  Those go through the `gh` CLI (logged in as `aryeh-stark`):
-//                  plugins/stark-gh/tools/lib/gh.ts, or `gh` directly.
+//                  `idun gh`, or `gh` directly.
 //
 // `prCreate`, `prMerge`, `prReady` and `issueCreate` were removed here — see
 // the deletion note in tools/github_app.ts for the callers that moved.
@@ -722,7 +722,7 @@ export async function prView(
 
 // prCreate / prReady removed 2026-08-04 — see the IDENTITY POLICY block above.
 // Opening a PR is Aryeh's act and must carry his name: use
-// `plugins/stark-gh/tools/lib/gh.ts::prCreate` (shells `gh pr create`).
+// `idun gh pr-open` (shells `gh pr create`).
 //
 // prReady was already unusable by design and is worth recording, so nobody
 // re-adds it expecting a permission grant to fix it: all three installs hold
@@ -730,7 +730,7 @@ export async function prView(
 // yet `markPullRequestReadyForReview` / `convertPullRequestToDraft` are simply
 // NOT exposed to GitHub App installation tokens — every call returns
 // `Resource not accessible by integration`. Un-drafting needs a user token.
-// Use `gh.ts::markPrReady` / `gh pr ready`.
+// Use `idun gh pr-merge` / `gh pr ready`.
 
 export type PrReviewEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
 
@@ -749,7 +749,7 @@ export async function prReview(
 }
 
 // prMerge removed 2026-08-04 — see the IDENTITY POLICY block above. A merge is
-// Aryeh's act; `/stark-gh:pr-merge` already does it through `gh`.
+// Aryeh's act; `idun gh pr-merge` already does it through `gh`.
 
 export async function prComment(
   repo: string,

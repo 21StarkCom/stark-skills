@@ -1,7 +1,7 @@
 # Skip-draft guard — keep CI off WIP pull requests
 
-**Policy:** PRs open as **drafts** by default (the stark-gh / review / author /
-build skills all do this). Work is verified locally while
+**Policy:** PRs open as **drafts** by default (`idun gh pr-open` and the review /
+author / build skills all do this). Work is verified locally while
 the PR is a draft; when it's ready, it's marked ready-for-review — which is the
 moment CI should run. A draft PR should **not** burn CI minutes or trigger any
 `pull_request`-driven automation.
@@ -92,7 +92,7 @@ at all.
 ### Two things that follow from removing the guard
 
 - **Set `cancel-in-progress: false`.** Unguarded jobs take minutes instead of
-  seconds, and `pr-merge` force-pushes then marks the PR ready moments later —
+  seconds, and `idun gh pr-merge` force-pushes then marks the PR ready moments later —
   two events for the same commit. Cancelling means the second run kills the
   first and leaves `test: CANCELLED` on the head sha. GitHub counts CANCELLED as
   a *failing* required check, so it can block the merge, and if the replacement

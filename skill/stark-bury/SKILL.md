@@ -81,7 +81,7 @@ For every candidate file:
 3. Write `TOMBSTONE.md` from the template. `cause_of_death` = why it was
    KILLED; "What it was" = why it EXISTED. Record footprint corrections.
 4. Append one row to `INDEX.md`.
-5. PR via `stark-gh:pr-open` → merge. The grave is filled.
+5. PR via `idun gh pr-open` → merge. The grave is filled.
 
 ## Phase 3 — deletion (living-repo PR #2)
 

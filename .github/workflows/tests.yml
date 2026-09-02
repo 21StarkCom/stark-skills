@@ -83,14 +83,6 @@ jobs:
         working-directory: tools
         run: npm test
 
-      # The stark-gh merge tooling lives in its own tree with its own test
-      # files, which `tools/`'s `*.test.ts` glob never reached — 393 tests
-      # covering the code that decides whether a PR is green, none of them run
-      # by this gate until 2026-08-11. It needs no install either.
-      - name: Run stark-gh tests
-        working-directory: plugins/stark-gh
-        run: npm test
-
   typecheck:
     runs-on: ubuntu-latest
     timeout-minutes: 10

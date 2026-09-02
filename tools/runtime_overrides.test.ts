@@ -3,11 +3,6 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-import {
-  mayDeleteLocalBranch,
-  shouldFetchForPlan,
-} from "../runtime-overrides/codex/plugins/stark-gh/tools/cleanup_policy.ts";
-
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 const CODEX_ROOT = path.join(REPO_ROOT, "runtime-overrides", "codex");
 const SKILL_ROOT = path.join(REPO_ROOT, "skill");
@@ -65,8 +60,6 @@ const CANONICAL_SKILLS = canonicalSkillNames();
 const CLAUDE_ONLY_SKILLS = CANONICAL_SKILLS.filter(isClaudeOnly);
 const SKILLS = CANONICAL_SKILLS.filter((name) => !isClaudeOnly(name));
 
-const COMMANDS = ["cleanup", "pr-merge", "pr-open"] as const;
-
 const SUPPORT_FILES = [
   "global/config.json",
   "skill/stark-build/references/hooks/protect-paths.sh",
@@ -103,14 +96,6 @@ const SUPPORT_FILES = [
   "tools/stark_review_doc_analytics_lib.ts",
   "tools/stark_session_lib.ts",
   "tools/validation_gate_lib.ts",
-  "plugins/stark-gh/tools/cleanup_policy.ts",
-  "plugins/stark-gh/tools/gh_cleanup.ts",
-  "plugins/stark-gh/tools/gh_pr_merge_complete.ts",
-  "plugins/stark-gh/tools/gh_pr_merge_execute.ts",
-  "plugins/stark-gh/tools/gh_pr_open_execute.ts",
-  "plugins/stark-gh/tools/lib/audit.ts",
-  "plugins/stark-gh/tools/lib/runtime.ts",
-  "plugins/stark-gh/tools/lib/watcher_paths.ts",
 ] as const;
 
 function walkFiles(root: string, rel = ""): string[] {
@@ -134,18 +119,17 @@ function frontmatterName(file: string): string {
 test("Codex runtime override inventory is exact", () => {
   const expected = [
     ...SKILLS.map((name) => `skill/${name}/SKILL.md`),
-    ...COMMANDS.map((name) => `plugins/stark-gh/commands/${name}.md`),
     ...SUPPORT_FILES,
   ].sort();
 
   assert.deepEqual(walkFiles(CODEX_ROOT), expected);
   // The last hand-maintained fact in this file, and deliberately so: with SKILLS
   // derived, this literal is the only tripwire that fires when a Codex-backed
-  // artifact is added or deleted. Deriving it from the three list lengths would
+  // artifact is added or deleted. Deriving it from the two list lengths would
   // make it a tautology.
   assert.equal(
     expected.length,
-    71,
+    60,
     `runtime-overrides/codex inventory size changed (computed ${expected.length}) — if the tree is right, bump this literal`,
   );
 });
@@ -164,36 +148,6 @@ test("required Codex parity skills remain model-discoverable", () => {
   }
 });
 
-test("Codex cleanup dry-run never fetches or prunes refs", () => {
-  assert.equal(shouldFetchForPlan({ dryRun: true }), false);
-  assert.equal(shouldFetchForPlan({ dryRun: false }), true);
-});
-
-test("Codex cleanup preserves unique post-merge commits without --force", () => {
-  assert.equal(mayDeleteLocalBranch({ safeDelete: false }, { force: false }), false);
-  assert.equal(mayDeleteLocalBranch({ safeDelete: true }, { force: false }), true);
-  assert.equal(mayDeleteLocalBranch({ safeDelete: false }, { force: true }), true);
-});
-
-test("Codex GitHub state defaults are runtime-neutral", () => {
-  for (const rel of [
-    "plugins/stark-gh/tools/lib/runtime.ts",
-    "plugins/stark-gh/tools/lib/watcher_paths.ts",
-  ]) {
-    const body = fs.readFileSync(path.join(CODEX_ROOT, rel), "utf8");
-    assert.match(body, /STARK_STATE_ROOT/);
-    assert.match(body, /"\.stark", "code-review"/);
-    assert.doesNotMatch(body, /"\.claude", "code-review"/);
-  }
-
-  const cleanup = fs.readFileSync(
-    path.join(CODEX_ROOT, "plugins/stark-gh/commands/cleanup.md"),
-    "utf8",
-  );
-  assert.match(cleanup, /~\/.stark\/code-review\/stark-gh\/watchers/);
-  assert.doesNotMatch(cleanup, /~\/.claude\/code-review\/stark-gh\/watchers/);
-});
-
 test("Codex artifact overrides preserve canonical identities", () => {
   // SKILLS and CLAUDE_ONLY_SKILLS are complementary filters over the same
   // directory listing, so asserting their union equals it can no longer fail.
@@ -209,14 +163,6 @@ test("Codex artifact overrides preserve canonical identities", () => {
     );
   }
 
-  const canonicalCommands = fs
-    .readdirSync(path.join(REPO_ROOT, "plugins", "stark-gh", "commands"), { withFileTypes: true })
-    .filter((entry) => entry.isFile() && path.extname(entry.name) === ".md")
-    .map((entry) => path.basename(entry.name, ".md"))
-    .sort();
-
-  assert.deepEqual([...COMMANDS].sort(), canonicalCommands);
-
   for (const name of SKILLS) {
     // Guard before the read: without it a missing overlay surfaces as an opaque
     // ENOENT out of frontmatterName rather than an actionable message.
@@ -229,14 +175,6 @@ test("Codex artifact overrides preserve canonical identities", () => {
       frontmatterName(override),
       frontmatterName(path.join(SKILL_ROOT, name, "SKILL.md")),
       `skill identity drift: ${name}`,
-    );
-  }
-
-  for (const name of COMMANDS) {
-    assert.equal(
-      frontmatterName(path.join(CODEX_ROOT, "plugins", "stark-gh", "commands", `${name}.md`)),
-      frontmatterName(path.join(REPO_ROOT, "plugins", "stark-gh", "commands", `${name}.md`)),
-      `command identity drift: ${name}`,
     );
   }
 });
@@ -268,11 +206,6 @@ test("Codex runtime instructions never target Claude-owned state", () => {
 
 test("Codex user-facing output uses dollar skill invocation", () => {
   const rels = [
-    ...COMMANDS.map((name) => `plugins/stark-gh/commands/${name}.md`),
-    "plugins/stark-gh/tools/gh_cleanup.ts",
-    "plugins/stark-gh/tools/gh_pr_merge_complete.ts",
-    "plugins/stark-gh/tools/gh_pr_merge_execute.ts",
-    "plugins/stark-gh/tools/gh_pr_open_execute.ts",
     "standards/index.md",
     "standards/stage-completion-line.md",
     "standards/templates/docs-index.md",

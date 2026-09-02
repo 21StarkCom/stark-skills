@@ -215,7 +215,7 @@ delete):
 - provisioning or mutating cloud / prod resources;
 - adding a new external dependency;
 - editing or deleting **outside your declared file set**;
-- a **cleanup sweep** (`stark-gh:cleanup`, `git gc`, `worktree remove/prune`,
+- a **cleanup sweep** (`idun gh cleanup`, `git gc`, `worktree remove/prune`,
   branch deletion) — even "scoped to mine": your only branch is your worktree pin.
 
 Refuse outright a task whose objective is itself harmful or destructive beyond the

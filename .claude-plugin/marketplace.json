@@ -5,14 +5,5 @@
     "name": "Evinced",
     "email": "engineering@evinced.com"
   },
-  "plugins": [
-    {
-      "name": "stark-gh",
-      "description": "GitHub workflow slash commands: pr-open, pr-merge",
-      "source": "./plugins/stark-gh",
-      "version": "0.1.0",
-      "category": "productivity",
-      "tags": ["github", "pr", "workflow"]
-    }
-  ]
+  "plugins": []
 }

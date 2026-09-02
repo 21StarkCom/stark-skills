@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=938 runId=938 -->
+- Retire the stark-gh plugin from stark-skills; idun (`idun gh`) is now the sole source of truth for pr-open/pr-merge/cleanup/watch.
 <!-- stark-gh:pr-merge pr=937 runId=c9ea0be7-3237-4736-9912-520db67efbdc -->
 - Retired the superseded stark-copilot workflow and extracted its reusable agent-dispatch primitives for active review and planning tools.
 <!-- stark-gh:pr-merge pr=936 runId=8314c58b-8d62-4e55-b784-096540826993 -->

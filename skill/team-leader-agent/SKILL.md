@@ -245,7 +245,7 @@ A minion's "done / merged / green" gates a dependent dispatch **and a `/clear`**
 only after all four:
 
 1. `gh pr view <n> --repo <org/repo> --json state,mergedAt,mergeCommit` →
-   `MERGED` + SHA (`pr-merge` can exit 0 without merging).
+   `MERGED` + SHA (`idun gh pr-merge` can exit 0 without merging).
 2. `git fetch origin` + `git log origin/main --oneline -3` → the SHA is on main.
 3. `alfred task show STARK-n --json --no-comments` → `done`.
 4. Re-run the task's done-when yourself on `origin/main` (rebase your own
@@ -307,7 +307,7 @@ you don't get to claim a check you had no way to run.
 ## Cleanup — one sweep, at the end
 
 While **any** minion session is live under the repo's worktrees: no
-`stark-gh:cleanup`, no `git gc`, no `worktree remove/prune`, no branch deletion —
+`idun gh cleanup`, no `git gc`, no `worktree remove/prune`, no branch deletion —
 repo-wide *or* "scoped to mine" (a minion's only branch is its worktree pin;
 "scoped" is a no-op or self-harm). Cleanup sweeps classify ancestor-of-main
 worktree pins as safe-to-delete and don't honor `locked`. The one sweep: from

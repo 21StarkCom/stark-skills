@@ -21,7 +21,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 - **No rollout ceremony.** Skip soaking, gating, smoking, canary and gradual-rollout patterns. Merge once green.
 - **Every review's findings get posted on the PR.** Inline where anchored, summary comment otherwise. This repo *is* the review system — `stark_review.ts` already does the posting. Don't drop, downgrade or summarize findings away, and don't merge with open findings unaddressed: fix them, or reply on the thread saying why not.
 - **Draft PRs by default.** Every PR-opening path opens a **draft**, so WIP stays out of draft-guarded CI. Test locally, then un-draft to merge. Opt out per-run with `--ready` (alias `--no-draft`). You cannot merge a draft, so the merge paths run `gh pr ready` first — which fires target CI via `ready_for_review` — then wait for green, then squash-merge. Target repos need the skip-draft guard for "no CI on WIP" to hold: `standards/workflows/skip-draft-guard.md`.
-  - **But never guard a workflow whose check is REQUIRED** (STARK-357). A guarded job reports `skipped`, GitHub counts that as satisfying the required check, and it looks identical to a pass — so the guard turns "CI did not run" into "CI is green". PR #877 merged that way; the suite never ran against what landed. Nothing repairs it after the fact: a re-run replays the original payload and skips again, and a `workflow_dispatch` run never joins the PR's status rollup. `.github/workflows/tests.yml` is deliberately unguarded and runs both suites (`tools/` and `plugins/stark-gh/`, the latter never covered by CI before). The merge paths refuse a skipped required check, naming it; `--allow-skipped-checks` opts back in for path-filtered checks that skip by design.
+  - **But never guard a workflow whose check is REQUIRED** (STARK-357). A guarded job reports `skipped`, GitHub counts that as satisfying the required check, and it looks identical to a pass — so the guard turns "CI did not run" into "CI is green". PR #877 merged that way; the suite never ran against what landed. Nothing repairs it after the fact: a re-run replays the original payload and skips again, and a `workflow_dispatch` run never joins the PR's status rollup. `.github/workflows/tests.yml` is deliberately unguarded and runs the `tools/` suite. The merge paths (`idun gh pr-merge`) refuse a skipped required check, naming it; `--allow-skipped-checks` opts back in for path-filtered checks that skip by design.
 - **Every PR action is `aryeh-stark`; bots only post reviews.** Opening a PR, commenting, resolving a thread, un-drafting, merging, opening an issue — all go through `gh`, logged in as `aryeh-stark`. The `stark-{claude,codex,gemini}` **21S** Apps exist for exactly one reason: posting multi-LLM review findings, where three distinct bot authors make "which model said this" readable. `tools/github_app{,_lib}.ts` therefore exposes reads plus `pr review` / `pr comment` and **nothing that authors** — `pr create`, `pr ready`, `pr merge` and `issue create` were removed 2026-08-04 and exit `2` naming the `gh` command to run. **Never re-add a bot PR-create path.**
   - **CI is the one exception** — a workflow has no human token, so `marketplace-sync.yml` mints an app token and uses it to open the bifrost sync PR **and merge it once bifrost's CI is green** (#852). GitHub Actions only; never anything running on this Mac.
   - **`/stark-gh-user` is the other exception, and it is human-invoked only.** It moves `gh` to a relief account when `aryeh-stark`'s rate bucket runs dry. `disable-model-invocation: true`, and **no tool, skill or hook may call `tools/user_token.ts`** — it exports `GH_TOKEN`, which overrides `gh`'s keyring for every later call in that shell, so an automated swap silently re-authors whatever runs next.
@@ -36,7 +36,6 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `skill/` — all skills (`skill/*/SKILL.md`, **30** skills: 27 `stark-*` plus `simple-gate`, `team-leader-agent`, `team-minion-agent`), packaged as marketplace plugins
 - `global/` — global config + prompts, vendored into each plugin
 - `scripts/` — shell helpers + JSON only (`healer_patterns.json`). **No Python lives here any more.**
-- `plugins/stark-gh/` — local plugin source, packaged by the marketplace
 - `runtime-overrides/codex/` — **your tree.** Complete Codex-only skill/command variants plus changed support files; mirrors source-relative paths. Bifrost imports it as runtime overrides into a separate `dist/codex-plugins/` surface. **Never** make a canonical Claude file "portable" to satisfy Codex, and **never** layer a Codex override into `dist/claude/`.
 - `org/evinced/` — Evinced org config overrides
 - `data/` — persona roster, review coverage HTML, generated showcase pages
@@ -62,7 +61,7 @@ All skills live in `skill/*/SKILL.md`. Full per-skill detail — arguments, fail
 
 | Skill | What it does |
 |---|---|
-| `/stark-gh:pr-open` · `pr-merge` · `cleanup` | The PR lifecycle. Open draft → un-draft + squash-merge on green → sweep branches/worktrees. |
+| `idun gh pr-open` · `pr-merge` · `cleanup` · `watch` | The PR lifecycle — **moved to idun** (STARK-2211). Open draft → un-draft + squash-merge on green → sweep branches/worktrees. Not a stark-skills skill any more. |
 | `/simple-gate [spec-path]` | Walk the human sign-off gate in short, jargon-free language; Codex uses structured choices when available and a one-question conversational fallback otherwise. |
 | `/stark-session [start\|end]` | Briefing on start, cleanup on end. |
 | `/stark-handover [save\|resume\|status]` | Cross-`/clear` continuity under `~/Code/Handovers/`. |
@@ -86,16 +85,16 @@ Skills + tools ship as separate self-contained **Claude Code** and native **Code
 ```
 # Codex
 codex plugin marketplace add 21StarkCom/bifrost
-codex plugin add stark-gh@bifrost
-# Start a new thread, then invoke: $cleanup --dry-run
+codex plugin add stark-plan@bifrost
+# Start a new thread, then invoke: $simple-gate --help
 
 # Claude Code
 /plugin marketplace add 21StarkCom/bifrost
-/plugin install stark-analyze@bifrost   # + stark-plan, stark-implement, stark-gh, stark-ops, ...
+/plugin install stark-analyze@bifrost   # + stark-plan, stark-implement, stark-ops, ...
 /plugin update  stark-analyze@bifrost
 ```
 
-Canonical `skill/`, `plugins/stark-gh/commands/` and shared assets are the Claude-authored source. Host-specific Codex behavior belongs **only** under `runtime-overrides/codex/`. `.github/workflows/marketplace-sync.yml` auto-publishes changes to either source surface.
+Canonical `skill/` and shared assets are the Claude-authored source. Host-specific Codex behavior belongs **only** under `runtime-overrides/codex/`. `.github/workflows/marketplace-sync.yml` auto-publishes changes to either source surface.
 
 **Local dev is not live.** Editing a file here does nothing until it is published (merge to `main` → `marketplace-sync` PR → merge) and the plugin is updated. To test an in-progress edit against a real install, run `stark sync` in the marketplace repo, then `/plugin update` locally.
 

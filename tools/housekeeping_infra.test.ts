@@ -624,7 +624,7 @@ test("healAssetSymlinks provisioning is idempotent", (t) => {
 });
 
 test("ASSET_SYMLINKS is a sane, deduped table of ~/.claude → stark-skills mappings", () => {
-  assert.equal(ASSET_SYMLINKS.length, 12);
+  assert.equal(ASSET_SYMLINKS.length, 11);
   const linkSet = new Set<string>();
   for (const entry of ASSET_SYMLINKS) {
     assert.ok(entry.link.startsWith(".claude/"), `link under .claude: ${entry.link}`);
