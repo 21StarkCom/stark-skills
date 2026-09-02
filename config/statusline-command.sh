@@ -632,9 +632,37 @@ if [ -n "$acct_seat" ] && [ -n "$five_pct" ]; then
   if [ "$PROCSTART" -gt 0 ] 2>/dev/null &&
      [ "${_cur_since:-0}" -gt 0 ] 2>/dev/null &&
      [ "$PROCSTART" -ge "$_cur_since" ]; then
+    _ccu="$HOME/.claude/.cc-usage-${acct_seat//:/_}"
     printf 'five_pct=%s\nfive_reset=%s\nweek_pct=%s\nweek_reset=%s\nstamped_at=%s\nemail=%s\nseat_key=%s\n' \
       "$_fpct" "${five_reset:-0}" "$_wpct" "${week_reset:-0}" "$NOW" "$acct_email" "$acct_seat" \
-      > "$HOME/.claude/.cc-usage-${acct_seat//:/_}" 2>/dev/null
+      > "$_ccu" 2>/dev/null
+    # Push the fresh reading to the idun daemon (spec: slice 3). Fire-and-forget:
+    # the singleton watcher decides whether to rotate the login before this seat's
+    # 5H/7D wall blocks work; the statusline never waits on that. Backgrounded so
+    # the socket round-trip stays off the render path, and stdout/stderr are sunk
+    # to /dev/null — load-bearing, since an inherited open render pipe would stall
+    # Claude Code's read of this line. Guarded by a no-fork `command -v` builtin so
+    # a machine without idun installed never spawns a failing subshell every tick;
+    # `idun daemon send` is itself fail-silent when the daemon is down.
+    #
+    # Change-detection guard (fork-free): forks-are-the-enemy here, and spawning a
+    # ~20ms bun binary on EVERY attributed render across EVERY window would re-push
+    # an unchanged reading dozens of times a second for nothing. So we fork idun
+    # only when the reading actually moved — a bash string compare of the seat +
+    # rounded 5H/7D percents against a marker file, no fork. Any real change (usage
+    # ticking toward the wall, a window reset, or a seat rotation — the seat is in
+    # the signature) fires exactly one push; a flat idle reading fires none. The
+    # marker is shared across windows, so N sessions on the same reading dedup to a
+    # single push. The daemon still reacts live because a move that matters IS a
+    # signature change. (Marker is best-effort; a rare double-push is harmless — the
+    # daemon's own cooldown absorbs it.)
+    _dpf="$HOME/.claude/.idun-daemon-lastpush"
+    _dpsig="${acct_seat}:${_fpct}:${_wpct}"
+    _dplast=""; [ -r "$_dpf" ] && IFS= read -r _dplast < "$_dpf"
+    if [ "$_dpsig" != "$_dplast" ] && command -v idun >/dev/null 2>&1; then
+      printf '%s\n' "$_dpsig" > "$_dpf" 2>/dev/null
+      idun daemon send --from-file "$_ccu" >/dev/null 2>&1 &
+    fi
   fi
 fi
 
