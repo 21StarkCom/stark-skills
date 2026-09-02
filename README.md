@@ -11,8 +11,8 @@ AI-powered development workflow system for Claude Code and Codex, covering the f
 
 # Or install the same bundles in Codex
 codex plugin marketplace add 21StarkCom/bifrost
-codex plugin add stark-ops@bifrost
-# Start a new Codex thread, then invoke: $stark-housekeeping --dry-run
+codex plugin add stark-plan@bifrost
+# Start a new Codex thread, then invoke: $simple-gate --help
 
 # Start a work session (context loading, health checks, briefing)
 /stark-session start
@@ -164,7 +164,7 @@ stark-skills/
 │   └── ...
 ├── global/                       ← config + prompts vendored into each plugin
 │   ├── config.json               ← global defaults
-│   └── prompts/{claude,codex,gemini}/  ← per-agent × per-domain review prompts (6 domains)
+│   └── prompts/{claude,codex,gemini}/  ← per-agent × per-domain review prompts (5 domains)
 ├── runtime-overrides/codex/      ← Codex-only artifact + support overlays; never shipped to Claude
 ├── data/                         ← persona roster, review coverage, showcase pages
 ├── .github/workflows/            ← GitHub Actions (tests, project sync, marketplace-sync)
@@ -190,8 +190,8 @@ This repo is the **source of truth** for the skills + tools; they ship as separa
 /plugin update  stark-analyze@bifrost   # pull the latest published version
 
 codex plugin marketplace add 21StarkCom/bifrost
-codex plugin add stark-ops@bifrost
-# Open a new thread after install/update; invoke with: $stark-housekeeping --dry-run
+codex plugin add stark-plan@bifrost
+# Open a new thread after install/update; invoke with: $simple-gate --help
 ```
 
 Immutable assets (tools/prompts/config) resolve from the installed plugin root (`${CLAUDE_PLUGIN_ROOT}`) via `tools/asset_root_lib.ts`; mutable state (`history/`, `sessions/`, `locks/`, …) lives under `~/.claude/code-review/` (`stateRoot()`).

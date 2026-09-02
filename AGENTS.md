@@ -85,8 +85,8 @@ Skills + tools ship as separate self-contained **Claude Code** and native **Code
 ```
 # Codex
 codex plugin marketplace add 21StarkCom/bifrost
-codex plugin add stark-ops@bifrost
-# Start a new thread, then invoke: $stark-housekeeping --dry-run
+codex plugin add stark-plan@bifrost
+# Start a new thread, then invoke: $simple-gate --help
 
 # Claude Code
 /plugin marketplace add 21StarkCom/bifrost
