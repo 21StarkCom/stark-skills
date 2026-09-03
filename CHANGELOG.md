@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=942 runId=942 -->
+- Add `/stark-memory` skill + `memory_tidy` tool: read-only measurer that flags Claude Code memory files over the load/recall caps and cross-repo facts.
 <!-- stark-gh:pr-merge pr=943 runId=943 -->
 - Refresh `/team-leader-agent` for hermod v0.12.0 verbs: tri-state `claude <sub>` driver for clear/effort, new Retire section, mandatory cadence progress bar, and dead-tab/API-error recovery.
 <!-- stark-gh:pr-merge pr=938 runId=938 -->
