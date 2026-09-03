@@ -118,9 +118,16 @@ Work one project at a time; on `--all`, say so and proceed project by project.
    (a title and a single-clause hook, ~150 chars max). The detail already lives in
    the topic file — the index is a pointer, not a summary. Preserve each line's
    link target; never drop an entry.
-2. **Split over-cap files.** A file over 4 KB has an invisible tail. Tighten its
-   prose to one fact, or split a multi-fact note into separate one-fact files
-   (new file via Write, new index line, retire the old line). Keep every fact.
+2. **Over-cap files — verify or flag, never blind-tighten.** A file over 4 KB has
+   an invisible tail. You MAY tighten its prose to fit **only if** you can drop
+   nothing load-bearing (every id, path, Mímir reference, STARK number, decision)
+   **and** land under 4,096 bytes — check the rewrite against the original before
+   writing it. If the note is too fact-dense to tighten losslessly (measured: dense
+   recipe / credential notes usually are), do **not** rewrite it: either split it
+   into separate one-fact files (new file via Write, new index line, retire the old
+   line), or leave the original and flag it for a manual split. A lossy auto-rewrite
+   over a real note is the failure mode here — keeping the over-cap original beats
+   silently dropping a fact.
 3. **Move a strong cross-repo fact** into the target repo's memory dir:
    `~/.claude/projects/<target-slug>/memory/`. Resolve `<target-slug>` by listing
    `~/.claude/projects` and matching the foreign slug (create `MEMORY.md` there if
