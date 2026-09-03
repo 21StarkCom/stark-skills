@@ -48,7 +48,7 @@ decide — record the divergence, don't relitigate it.
 |---|---|---|
 | cmux surface **UUID** | never (survives moves, `/clear`) | **the** binding key; record at spawn |
 | surface ref `surface:N` | app restarts, over hours | display-only — cmux accepts the UUID wherever a ref is, so **send by UUID**; `tabs --json` is a liveness check |
-| SendMessage name `minion-x-NN` | possibly on `/clear` (unmeasured) | re-run `ListAgents` after every reset before messaging |
+| SendMessage `name [ref]` token | the **name** churns on `/rename` (measured) and can on `/clear` | re-resolve via `ListAgents` **before every send**; a remembered name/token is worthless (see Two channels) |
 | session id / transcript path | on `/clear` | re-bind tickets (`alfred task use`) in every packet |
 | tab title | on rename | display only, never a key |
 | `CMUX_WORKSPACE_ID` env | goes **stale on surface move** | pass explicit `--workspace <uuid>` to signal verbs |
@@ -57,8 +57,19 @@ decide — record the divergence, don't relitigate it.
 
 | channel | carries | why |
 |---|---|---|
-| **SendMessage** (built-in tool) | briefs, answers, board updates, rebase broadcasts — all work content | arrives as a message; immune to paste buffering and ref churn |
+| **SendMessage** (built-in tool) | briefs, answers, board updates, rebase broadcasts — all work content | arrives as a message; immune to paste buffering. Re-resolve the address every send (below) |
 | **control-client slash-command driver** | session-control slash commands only (`/clear`, `/effort …`) on an **idle, verified** minion | slash commands can't ride a message |
+
+**SendMessage addressing — re-resolve every send.** The `to` field is a
+`name [ref]` token, and the tool is name-primary: a fresh, unique name resolves.
+But the **name churns** — a `/rename` renames it (measured), and a `/clear` can
+too — so run `ListAgents` **immediately before every send** and use the exact
+token it prints. The `[ref]` is a disambiguator, **not** a standalone address:
+measured — after a session renamed itself, `RENAME [d0ff49]` was rejected while
+`new-name [d0ff49]` (same ref) delivered. So a remembered name or token is
+worthless, and `ListAgents` is a per-send step, not per-spawn. When you're
+**answering** a minion's incoming message, the robust reply path is to copy that
+message's `from` attribute straight into your `to`.
 
 The **control client** is the terminal-driving tool. **Use hermod.** Prefer the
 purpose-built `hermod claude <sub>` driver, which sends the slash command and
@@ -329,7 +340,9 @@ you don't get to claim a check you had no way to run.
    effort tag. A `completed` means it applied inline (only on a truly fresh
    session, no menu); either way don't treat the minion as re-primed until you've
    seen the tag.
-5. `ListAgents` — re-resolve the SendMessage name.
+5. `ListAgents` — re-resolve the exact `name [ref]` token and send **that**,
+   never a remembered name or token (a `/clear` can churn the name, and a stale
+   name fails even with the right ref).
 6. Send the next full packet with guardrails via SendMessage; confirm by
    lifecycle flip to `running`.
 
@@ -412,6 +425,7 @@ same failure: acting past the point you should have asked.
 | "It's finished but I'll leave the tab open in case" | A finished minion out of DAG work is waste and a stale board slot. Verify its last task, then `close` it. |
 | "I'll post a status when something changes" | The 5-min progress bar is a fixed heartbeat, not event-driven. A silent leader looks identical to a dead one. `progress set` every 5 min. |
 | "The `/clear` send returned, so it's reset" | A returned send is not an observed clear. Use `claude clear` and require `completed`; a `blocked`/`timed-out` didn't land. |
+| "That SendMessage name/token worked before — I'll reuse it" | The name churns on `/rename` (measured) and can on `/clear`; a stale name fails even paired with the right ref. Re-resolve via `ListAgents` every send and use the exact token it prints. |
 
 ## Quick reference
 
@@ -449,8 +463,11 @@ cmux workspace status                                                           
   Leading, always.
 - Briefing through the control client's `send` — buffers as `[Pasted text]`,
   Enter lands inside the paste.
-- Keying on `surface:N` or a remembered SendMessage name — both churn; UUID +
-  re-resolve.
+- Keying on `surface:N` or a remembered SendMessage name/token — both churn (a
+  `/rename` alone renames the SendMessage name, and `/clear` can too). For
+  control-client sends use the **UUID**; for SendMessage re-resolve via
+  `ListAgents` every send and use the exact `name [ref]` token it prints — a stale
+  name fails ("no agent named … is reachable") even with the correct ref.
 - `cmux workspace list --json` has **no lane field** — lanes are `cmux workspace
   status`; per-minion state is `sessions`.
 - Letting a slow ticket tool (~40s/call) become the gate, or skipping the

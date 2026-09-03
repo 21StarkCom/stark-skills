@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=944 runId=944 -->
+- docs(STARK-2389): team-leader-agent now requires re-resolving the fresh `name [ref]` token via ListAgents before every SendMessage, not just after reset
 <!-- stark-gh:pr-merge pr=942 runId=942 -->
 - Add `/stark-memory` skill + `memory_tidy` tool: read-only measurer that flags Claude Code memory files over the load/recall caps and cross-repo facts.
 <!-- stark-gh:pr-merge pr=943 runId=943 -->

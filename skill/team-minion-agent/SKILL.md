@@ -47,7 +47,7 @@ CLAUDE.md decide.
 | anchor | rule |
 |---|---|
 | your cmux **UUID** | how the leader addresses you; it survives `/clear` — you don't manage it |
-| your **leader** (their session name, given in the packet) | your **only** upstream. Every question, blocker, progress note, and final report goes to them via SendMessage — **never** to the human directly |
+| your **leader** (their session name, given in the packet) | your **only** upstream — every question, blocker, progress note, and final report goes to them via SendMessage, **never** to the human. Their name can churn (a `/rename` or `/clear` on their side), so **reply by copying the incoming message's `from` attribute into your `to`**; if you must initiate, re-resolve via `ListAgents` first — a stale cached name fails ("no agent named … is reachable") |
 | your **ticket** (e.g. `STARK-n`) | bind it every packet (`alfred task use`); it churns on `/clear`, so re-bind from the packet, never from memory |
 | your **worktree** | you work only here; never `cd` into another minion's worktree or the main checkout |
 
