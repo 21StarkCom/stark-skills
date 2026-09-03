@@ -68,7 +68,7 @@ reads back a **tri-state result** (`completed` / `blocked` / `timed-out` — exi
 ```
 # hermod — driven, with a measured result:
 bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts claude clear  --surface <uuid> --json   # DESTRUCTIVE: --surface REQUIRED, never env-defaulted
-bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts claude effort <level> --surface <uuid> --json   # a confirm menu ⇒ `blocked`
+bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts claude effort <level> --surface <uuid> --json   # established minion ⇒ `blocked` at the confirm menu (expected), then send-key <uuid> enter
 bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts claude context --surface <uuid> --json   # read the CTX panel (verify the ~10% baseline)
 ```
 
@@ -321,9 +321,14 @@ you don't get to claim a check you had no way to run.
    the clear did **not** land — fall back to the two-step (`send --enter <uuid>
    "/clear"` then `send-key <uuid> enter`, proven by `read-screen`) before you
    treat the minion as reset.
-4. Re-prime effort with `claude effort <level> --surface <uuid> --json` → require
-   `completed` (a confirm menu returns `blocked`; don't assume the level took
-   until the result says so).
+4. Re-prime effort with `claude effort <level> --surface <uuid> --json`. On an
+   **established** minion — the post-`/clear` case, since the CLI process is
+   long-lived — `/effort` opens a "Change effort level?" confirm menu and returns
+   `blocked`: that is the **expected** result, not a failure. Confirm it with
+   `send-key <uuid> enter` (selects "Yes, switch"), then `read-screen` for the
+   effort tag. A `completed` means it applied inline (only on a truly fresh
+   session, no menu); either way don't treat the minion as re-primed until you've
+   seen the tag.
 5. `ListAgents` — re-resolve the SendMessage name.
 6. Send the next full packet with guardrails via SendMessage; confirm by
    lifecycle flip to `running`.
@@ -359,9 +364,10 @@ While **any** minion session is live under the repo's worktrees: no
 repo-wide *or* "scoped to mine" (a minion's only branch is its worktree pin;
 "scoped" is a no-op or self-harm). Cleanup sweeps classify ancestor-of-main
 worktree pins as safe-to-delete and don't honor `locked`. The one sweep: from
-the **main checkout**, after every minion is **closed** (Retire) and
-`sessions --json` shows no live cwd under the worktrees — `--dry-run` first,
-`--keep-branch` for any worktree still hosting a session.
+the **main checkout**, after every minion is **closed** (Retire) so
+`sessions --json` shows no live cwd under the worktrees — `--dry-run` first, and
+defensively `--keep-branch` for any worktree the sweep still finds hosting a
+session (belt-and-suspenders if the liveness read is stale).
 
 ## Escalation and substitution
 
@@ -424,7 +430,7 @@ bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts tabs --workspace <ws> --js
 bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts sessions --workspace <ws> --json  # agent_lifecycle, updatedAt, pid, cwd, transcriptPath
 bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts read-screen <uuid> --lines 40     # one look; --follow --interval 3000 only while babysitting
 bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts claude clear  --surface <uuid> --json   # DRIVE /clear, tri-state result (0/4/3); DESTRUCTIVE, --surface required
-bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts claude effort <level> --surface <uuid> --json   # DRIVE /effort; confirm menu ⇒ blocked
+bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts claude effort <level> --surface <uuid> --json   # DRIVE /effort; established minion ⇒ blocked at confirm (expected), then send-key <uuid> enter
 bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts claude context --surface <uuid>          # read the CTX panel (verify ~10% baseline post-clear)
 bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts send --enter <uuid> "/clear"      # FALLBACK only; LEADING flag; then a discrete `… send-key <uuid> enter`
 bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts progress set <0.0-1.0> --workspace <ws>   ·   progress clear   # the 5-min fleet bar (merged ÷ total)
@@ -465,5 +471,7 @@ cmux workspace status                                                           
   DAG work — waste, stale board slots, and it blocks the one Cleanup sweep.
 - Letting the 5-minute progress bar go stale (or never setting it) — the operator
   can't tell a live fleet from a dead leader without the heartbeat.
-- Assuming a `/clear` or `/effort` landed off a returned `send` — drive it with
-  `claude clear`/`claude effort` and require the `completed` tri-state result.
+- Assuming a `/clear` or `/effort` landed off a returned `send` — drive `/clear`
+  with `claude clear` (require `completed`), and `/effort` with `claude effort`
+  (an established minion returns `blocked` at the confirm menu — expected — so
+  confirm with `send-key <uuid> enter`, then read the effort tag).
