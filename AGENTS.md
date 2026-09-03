@@ -68,7 +68,7 @@ All skills live in `skill/*/SKILL.md`. Full per-skill detail — arguments, fail
 | `/stark-bury <corpse>` | Retire code into the Náströnd graveyard — a subsystem of a living repo, or a whole repo. Footprint verification, interment PR **before** any deletion, deletion PR, optional sealed dump + table drop. The fleet's only destructive ritual: five non-negotiable laws, operator-gated at every prod mutation. The Codex override is model-discoverable; Claude and Codex variants share the same mutation gates. |
 | `/stark-fresh-eyes <doc>` | One-shot zero-context review of a doc before it ships. One dispatch per revision, never a round 2. |
 | `/stark-housekeeping` | Stale issues, dead branches, worktree remnants, asset-symlink self-heal. |
-| `/stark-memory [--project <slug>\|--all] [--apply]` | Keep Claude auto-memory under the load/recall caps: `memory_tidy.ts` measures each `MEMORY.md` + topic file (200 lines/25KB index, 200 lines/4KB per file) and flags cross-repo facts; Claude shortens index lines, splits over-cap files, moves foreign-repo facts to their own memory dir. **Dry-run is the default; `--apply` writes.** |
+| `/stark-memory [--project <slug>\|--all] [--dry-run] [--apply]` | Keep Claude auto-memory under the load/recall caps: `memory_tidy.ts` measures each `MEMORY.md` + topic file (200 lines/25KB index, 200 lines/4KB per file) and flags cross-repo facts; Claude shortens index lines, splits over-cap files, moves foreign-repo facts to their own memory dir. **Dry-run is the default; `--apply` writes.** |
 | `/stark-release [patch\|minor\|major]` | Changelog, tag, GitHub Release. |
 | `/stark-persona` | Session character voices. |
 | `/stark-refactor-plan [dir]` | Planning-only refactor analysis. Never modifies source. |

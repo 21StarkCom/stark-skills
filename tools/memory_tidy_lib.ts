@@ -39,9 +39,8 @@ export const INDEX_MAX_CHARS = 25000;
 /** Per topic-file recall caps: first 200 lines / 4,096 BYTES. */
 export const FILE_MAX_LINES = 200;
 export const FILE_MAX_BYTES = 4096;
-/** Prompt guidance for an index line (the binary's WARNING says ~200). */
+/** Prompt guidance for an index line (binary WARNING says ~200; we flag 150). */
 export const INDEX_LINE_SOFT_MAX = 150;
-export const INDEX_LINE_HARD_MAX = 200;
 
 // Fleet slugs to fall back on when the vault-ecosystem corpus is not checked out
 // (CI, a fresh machine). Copied — NOT imported — from fact_routing_hook.ts:
@@ -74,7 +73,11 @@ export interface MemoryFileReport {
 /** Measure one topic file against the recall caps (bytes, then lines). */
 export function measureFile(content: string, filePath = "", name = ""): MemoryFileReport {
   const bytes = Buffer.byteLength(content, "utf8");
-  const lines = content === "" ? 0 : content.split("\n").length;
+  // Count lines of text, not split segments: a file ends in a newline, so the
+  // trailing "" from split must not inflate the count (else an exactly-200-line
+  // file reads as 201 and false-flags overLineCap). measureIndex trims; mirror it.
+  const body = content.endsWith("\n") ? content.slice(0, -1) : content;
+  const lines = body === "" ? 0 : body.split("\n").length;
   const overByteCap = bytes > FILE_MAX_BYTES;
   const overLineCap = lines > FILE_MAX_LINES;
   return { path: filePath, name, bytes, lines, overByteCap, overLineCap, recallTruncated: overByteCap || overLineCap };
@@ -109,20 +112,22 @@ const ENTRY_RE = /^\s*-\s*\[[^\]]*\]\(([^)]+)\)/;
 /**
  * Replicate the binary's cut: keep the first INDEX_MAX_LINES lines, then if that
  * still exceeds INDEX_MAX_CHARS, cut at the last newline before the char cap.
- * Returns the 1-based number of the first line NOT loaded, or null.
+ * Operates on the RAW content so the returned line number lines up with the raw
+ * line numbers reported for stray/long lines. Returns the 1-based number of the
+ * first line NOT loaded, or null.
  */
-function firstDroppedLine(trimmed: string): number | null {
-  const lines = trimmed.split("\n");
-  if (lines.length <= INDEX_MAX_LINES && trimmed.length <= INDEX_MAX_CHARS) return null;
+function firstDroppedLine(raw: string): number | null {
+  const lines = raw.split("\n");
+  if (lines.length <= INDEX_MAX_LINES && raw.length <= INDEX_MAX_CHARS) return null;
   const capped = lines.slice(0, INDEX_MAX_LINES);
   const joined = capped.join("\n");
   if (joined.length <= INDEX_MAX_CHARS) {
     // Only the line cap bit: line INDEX_MAX_LINES+1 is the first dropped.
     return lines.length > INDEX_MAX_LINES ? INDEX_MAX_LINES + 1 : null;
   }
-  // Char cap bites inside the first 200 lines: find the last newline before the
-  // cap and count how many lines survive.
-  const cut = joined.lastIndexOf("\n", INDEX_MAX_CHARS);
+  // Char cap bites inside the first 200 lines: find the last newline strictly
+  // before the char cap (indices 0..CAP-1) and count how many lines survive.
+  const cut = joined.lastIndexOf("\n", INDEX_MAX_CHARS - 1);
   const kept = cut === -1 ? joined.slice(0, INDEX_MAX_CHARS) : joined.slice(0, cut);
   const survivingLines = kept === "" ? 0 : kept.split("\n").length;
   return survivingLines + 1;
@@ -176,7 +181,7 @@ export function measureIndex(content: string, indexPath = "", topicFiles: string
     bytes: Buffer.byteLength(content, "utf8"),
     overLineCap: lines > INDEX_MAX_LINES,
     overCharCap: chars > INDEX_MAX_CHARS,
-    firstDroppedLine: firstDroppedLine(trimmed),
+    firstDroppedLine: firstDroppedLine(content),
     entries: linkedFiles.length,
     linkedFiles,
     strayLines,
@@ -309,8 +314,12 @@ function measureProject(projectsDir: string, slug: string, fleetSlugs: readonly 
       continue;
     }
     files.push(measureFile(content, full, name));
-    const cross = crossRepoStrength(content, name, ownSlug, fleetSlugs);
-    if (cross) crossRepo.push({ ...cross, file: full });
+    // With no known own slug we cannot separate this project's own subject from a
+    // foreign one, so every fleet mention would false-flag — skip cross-repo here.
+    if (ownSlug !== null) {
+      const cross = crossRepoStrength(content, name, ownSlug, fleetSlugs);
+      if (cross) crossRepo.push({ ...cross, file: full });
+    }
   }
 
   const indexPath = path.join(memoryDir, "MEMORY.md");
@@ -374,8 +383,11 @@ export function listMemoryProjects(projectsDir: string): string[] {
 export function measureTree(opts: MeasureTreeOptions = {}): TreeReport {
   const projectsDir = opts.projectsDir ?? defaultProjectsDir();
   const corpusPath = opts.corpusPath ?? defaultCorpusPath();
-  const corpusPresent = resolveFleetSlugs(corpusPath).length > 0;
-  const fleetSlugs = resolveFleetSlugSet(corpusPath);
+  // Resolve the corpus once, then union with the fallback inline — a second
+  // resolveFleetSlugSet() call would re-walk the corpus repos/ + systems/ dirs.
+  const corpusSlugs = resolveFleetSlugs(corpusPath);
+  const corpusPresent = corpusSlugs.length > 0;
+  const fleetSlugs = [...new Set([...corpusSlugs, ...FALLBACK_SLUGS])].sort();
 
   const slugs = opts.project ? [opts.project] : listMemoryProjects(projectsDir);
   const projects = slugs.map((slug) => measureProject(projectsDir, slug, fleetSlugs));

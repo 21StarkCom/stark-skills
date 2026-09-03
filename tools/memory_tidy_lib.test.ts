@@ -67,6 +67,16 @@ test("measureFile leaves a small file untruncated", () => {
   assert.equal(r.recallTruncated, false);
 });
 
+test("measureFile does not count a file's trailing newline as an extra line", () => {
+  // Exactly FILE_MAX_LINES lines of text plus the terminating newline: the
+  // split's trailing "" must not push the count to 201 and false-flag over-cap.
+  const content = Array.from({ length: FILE_MAX_LINES }, (_, i) => `l${i}`).join("\n") + "\n";
+  const r = measureFile(content);
+  assert.equal(r.lines, FILE_MAX_LINES);
+  assert.equal(r.overLineCap, false);
+  assert.equal(r.recallTruncated, false);
+});
+
 // ---- index parsing ----
 
 const idx = (lines: string[]) => lines.join("\n") + "\n";
@@ -256,6 +266,25 @@ test("measureTree reports over-cap files, index long-lines, and cross-repo facts
     assert.equal(scratch.empty, true);
   } finally {
     cleanup();
+  }
+});
+
+test("measureTree does not flag cross-repo facts for a project with no known own slug", () => {
+  // A project dir that ends in no fleet slug (ownSlug null) cannot tell its own
+  // subject from a foreign one, so every fleet mention would false-flag. Suppress
+  // cross-repo detection there rather than call the whole vault a move candidate.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "memory-tidy-noown-"));
+  try {
+    const d = path.join(root, "projects", "-Users-x-Code-Evinced-site-scanner", "memory");
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, "MEMORY.md"), "- [T](tyr-fact.md) — hook\n");
+    fs.writeFileSync(path.join(d, "tyr-fact.md"), note("tyr-fact", "how tyr handles a write", "tyr body"));
+    const report = measureTree({ projectsDir: path.join(root, "projects"), corpusPath: path.join(os.tmpdir(), "no-corpus") });
+    const p = report.projects[0]!;
+    assert.equal(p.ownSlug, null);
+    assert.deepEqual(p.crossRepo, []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
