@@ -358,20 +358,25 @@ same failure: acting past the point you should have asked.
 
 ## Quick reference
 
-The control client is **hermod**. Prefer the repo checkout; a brew binary can
-lag, check `version` first.
+The control client is **hermod**, invoked by its literal repo-checkout path
+`bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts` (a brew binary can lag —
+check `version` first). **Type that literal path on every call; never stash it in
+a `$CC`-style shell variable.** Every minion is a worktree-isolated session, and
+the Claude Code harness worktree-guard refuses a command whose name is computed
+at runtime — it cannot prove the computed name is not `git` leaving the worktree.
+The same guard refuses `$(...)` substitution in an argument, so pass a large or
+multiline body from a file (`alfred task comment --body-file <path>`), never
+`"$(cat file)"`.
 
 ```
-CC="bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts"
-
-$CC tabs --workspace <ws> --json          # UUID ↔ ref ↔ title
-$CC sessions --workspace <ws> --json      # agent_lifecycle, updatedAt, pid, cwd, transcriptPath
-$CC read-screen <uuid> --lines 40         # one look; --follow --interval 3000 only while babysitting
-$CC send --enter <uuid> "/clear"          # LEADING flag; then: $CC send-key <uuid> enter
-$CC status set <key> "<value>" --workspace <ws>   ·   status list   ·   log add "<msg>"
-$CC notify send "<title>" --body "<b>" --workspace <ws>   # attention to the human
-$CC minions <x> --workspace <ws>          # spawn dick tabs primed with /effort ultracode
-cmux workspace status                     # lane todo|working|needs-attention|review|done — per WORKSPACE, not per tab
+bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts tabs --workspace <ws> --json      # UUID ↔ ref ↔ title
+bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts sessions --workspace <ws> --json  # agent_lifecycle, updatedAt, pid, cwd, transcriptPath
+bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts read-screen <uuid> --lines 40     # one look; --follow --interval 3000 only while babysitting
+bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts send --enter <uuid> "/clear"      # LEADING flag; then a discrete `… send-key <uuid> enter`
+bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts status set <key> "<value>" --workspace <ws>   ·   status list   ·   log add "<msg>"
+bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts notify send "<title>" --body "<b>" --workspace <ws>   # attention to the human
+bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts minions <x> --workspace <ws>      # spawn dick tabs primed with /effort ultracode
+cmux workspace status                                                                    # lane todo|working|needs-attention|review|done — per WORKSPACE, not per tab
 ```
 
 ## Common mistakes
