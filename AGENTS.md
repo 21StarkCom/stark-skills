@@ -33,7 +33,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 ## Repo Layout
 
 - `tools/` — **all** TypeScript tooling: dispatchers, agent utilities, session/state, GitHub App auth, skill meta-tooling. The only executable surface.
-- `skill/` — all skills (`skill/*/SKILL.md`, **27** skills: 24 `stark-*` plus `simple-gate`, `team-leader-agent`, `team-minion-agent`), packaged as marketplace plugins
+- `skill/` — all skills (`skill/*/SKILL.md`, **28** skills: 25 `stark-*` plus `simple-gate`, `team-leader-agent`, `team-minion-agent`), packaged as marketplace plugins
 - `global/` — global config + prompts, vendored into each plugin
 - `scripts/` — shell helpers + JSON only (`healer_patterns.json`). **No Python lives here any more.**
 - `runtime-overrides/codex/` — **your tree.** Complete Codex-only skill/command variants plus changed support files; mirrors source-relative paths. Bifrost imports it as runtime overrides into a separate `dist/codex-plugins/` surface. **Never** make a canonical Claude file "portable" to satisfy Codex, and **never** layer a Codex override into `dist/claude/`.
@@ -68,6 +68,7 @@ All skills live in `skill/*/SKILL.md`. Full per-skill detail — arguments, fail
 | `/stark-bury <corpse>` | Retire code into the Náströnd graveyard — a subsystem of a living repo, or a whole repo. Footprint verification, interment PR **before** any deletion, deletion PR, optional sealed dump + table drop. The fleet's only destructive ritual: five non-negotiable laws, operator-gated at every prod mutation. The Codex override is model-discoverable; Claude and Codex variants share the same mutation gates. |
 | `/stark-fresh-eyes <doc>` | One-shot zero-context review of a doc before it ships. One dispatch per revision, never a round 2. |
 | `/stark-housekeeping` | Stale issues, dead branches, worktree remnants, asset-symlink self-heal. |
+| `/stark-memory [--project <slug>\|--all] [--dry-run] [--apply]` | Keep Claude auto-memory under the load/recall caps: `memory_tidy.ts` measures each `MEMORY.md` + topic file (200 lines/25KB index, 200 lines/4KB per file) and flags cross-repo facts; Claude shortens index lines, splits over-cap files, moves foreign-repo facts to their own memory dir. **Dry-run is the default; `--apply` writes.** |
 | `/stark-release [patch\|minor\|major]` | Changelog, tag, GitHub Release. |
 | `/stark-persona` | Session character voices. |
 | `/stark-refactor-plan [dir]` | Planning-only refactor analysis. Never modifies source. |
