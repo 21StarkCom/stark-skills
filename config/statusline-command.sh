@@ -28,7 +28,7 @@
 # payload matrix by config/statusline-parse.test.sh (run in CI via
 # tools/statusline_parse.test.ts).
 parse_payload() {
-  local j="$1" _m _eff _vim _ag _os _sd _fh _rest
+  local j="$1" _m _eff _vim _ag _os _sd _fh _rest _pr
   local Sr='":"([^"]*)"' Nr='":(-?[0-9][0-9.eE+-]*)'   # string / number key-tails
 
   # cwd: workspace.current_dir, else top-level cwd (jq's // only falls through
@@ -63,6 +63,18 @@ parse_payload() {
   # thinking: "" unless a thinking object carries an "enabled" bool
   thinking=""; [[ $j =~ \"thinking\":\{[^{}]*\"enabled\":(true|false) ]] && thinking="${BASH_REMATCH[1]}"
   over_200k=false; [[ $j =~ \"exceeds_200k_tokens\":(true|false) ]] && over_200k="${BASH_REMATCH[1]}"
+
+  # PR for this branch — payload `pr` block (present only when one exists). Flat
+  # object (no nested braces), so the parent-scope trick applies.
+  _pr=""; [[ $j =~ \"pr\":\{([^{}]*)\} ]] && _pr="${BASH_REMATCH[1]}"
+  pr_number=""; [[ $_pr =~ \"number$Nr ]]       && pr_number="${BASH_REMATCH[1]}"
+  pr_state="";  [[ $_pr =~ \"review_state$Sr ]] && pr_state="${BASH_REMATCH[1]}"
+
+  # Prompt-cache health — payload `prompt_cache`. Read keys straight from $j:
+  # their names are unique in the payload, and the block carries a nested
+  # miss_causes:{} that would defeat the flat-parent capture used above.
+  cache_warm=""; [[ $j =~ \"warm\":(true|false) ]] && cache_warm="${BASH_REMATCH[1]}"
+  cache_hit="";  [[ $j =~ \"hit_ratio$Nr ]]        && cache_hit="${BASH_REMATCH[1]}"
 
   _sd=""; [[ $j =~ \"seven_day\":\{([^{}]*)\} ]] && _sd="${BASH_REMATCH[1]}"
   week_pct="";   [[ $_sd =~ \"used_percentage$Nr ]] && week_pct="${BASH_REMATCH[1]}"
@@ -244,6 +256,23 @@ mkbar() { # pct gradarray → sets BAR: railed █ bar, filled cells fading ligh
   BAR="${_BORD}▐${R}${_fb[filled]}${DIM}${_E10:0:10-filled}${_BORD}▌${R}"
 }
 
+_O10="○○○○○○○○○○"
+mkdots() { # pct → sets BAR: railless ● gauge. Each pip carries its OWN colour on a
+  # fixed per-position ramp — red (#e05a4a, cell 0 / low) → blue (#4da5dc, cell 9 /
+  # full), so the gradient shows at every fill level and the fill front tracks health.
+  # Empty slots are dim ○. Fork-free (one 10-iter loop, no per-cell subshell).
+  local pct=$1 filled i r g b out=""
+  (( pct > 100 )) && pct=100; (( pct < 0 )) && pct=0
+  filled=$(( (pct * 10 + 50) / 100 )); (( filled > 10 )) && filled=10
+  for (( i = 0; i < filled; i++ )); do
+    r=$(( 224 + ( 77 - 224) * i / 9 ))
+    g=$((  90 + (165 -  90) * i / 9 ))
+    b=$((  74 + (220 -  74) * i / 9 ))
+    out+="\033[38;2;${r};${g};${b}m●"
+  done
+  BAR="${out}${DIM}${_O10:0:10-filled}${R}"
+}
+
 # Enterprise variant: rate-limit bars fill with 🔸 instead of the gradient
 # (org plan — the windows aren't the personal quota story, so the fill is a
 # marker, not a heat gradient).
@@ -266,7 +295,8 @@ gradient() { # text [palette] → sets GRAD: per-account color sweep
   # selects the account's color family: gold (Max/Com), violet (Max/Net), blue
   # (Enterprise), magenta (Team#0 fallback), plus a shade per agent account —
   # ice/cyan (A1), lime (A2), crimson→rose (A3), emerald→teal (A4),
-  # amber/orange (A5), indigo (A6), rose-gold (K), and the four stark slots —
+  # amber/orange (A5), indigo (A6), magenta (A7), turquoise (A8),
+  # copper (A9), lavender (A10), rose-gold (K), and the four stark slots —
   # yellow (S1), green (S2), pink (S3), slate (S4). The label→slot map is in the
   # private roster (see the resolvers below). Pure bash fixed-point math, no
   # forks. GRAD holds
@@ -285,6 +315,8 @@ gradient() { # text [palette] → sets GRAD: per-account color sweep
     agent6) PR=(150 120 100 175) PG=(130 100 80  140) PB=(252 240 220 248) ;; # indigo→blue-violet — A6
     agent7) PR=(232 255 246 214) PG=(20  70  36  96 ) PB=(180 214 150 205) ;; # magenta→hot-pink — A7
     agent8) PR=(64  112 150 92 ) PG=(224 242 255 232) PB=(208 216 205 212) ;; # turquoise→aqua — A8
+    agent9) PR=(210 235 190 225) PG=(120 150 100 135) PB=(40  60  30  50 ) ;; # copper→bronze — A9
+    agent10) PR=(180 210 160 195) PG=(200 225 185 212) PB=(255 255 240 250) ;; # lavender→periwinkle — A10
     acctk) PR=(240 250 235 245) PG=(200 165 150 180) PB=(150 130 165 140) ;; # rose-gold — account slot K
     stark1) PR=(225 240 210 235) PG=(220 235 230 225) PB=(60  85  95  70 ) ;; # yellow — S1 (cyan is now A1)
     stark2) PR=(90  120 70  140) PG=(210 230 195 235) PB=(110 140 90  150) ;; # green — S2 (lime is now A2)
@@ -439,7 +471,7 @@ if [ -n "$_root" ]; then
 fi
 
 # ═════════════════════════════════════════════════════════════════════════
-# Line 1: repo · branch · model · operational
+# Line 1: repo · branch · PR · model · operational
 # ═════════════════════════════════════════════════════════════════════════
 out=""
 if _on repo_name && [ -n "$repo_name" ]; then
@@ -452,6 +484,19 @@ _on wt_name && [ -n "$wt_name" ] && seg "${TEAL}\U0001f332 ${wt_name}${R}"
 if _on git_branch && [ -n "$git_branch" ]; then
   seg "${GRN}☘️ ${git_branch}${R}"
   _on git_dirty && [ -n "$git_dirty" ] && out="${out} ${MAR}${git_dirty}${R}"
+fi
+
+# Open PR for this branch (payload `pr` block; absent unless a PR exists).
+# Colour + glyph by review state; the number is always shown when present.
+if _on pr && [ -n "$pr_number" ]; then
+  case "${pr_state,,}" in
+    approved)          _prc="$GRN"   _prg="✓" ;;   # ✓ approved
+    changes_requested) _prc="$RED"   _prg="✗" ;;   # ✗ changes requested
+    commented)         _prc="$SAP"   _prg="\U0001f4ac" ;; # 💬 commented
+    pending|"")        _prc="$YEL"   _prg="⏳" ;;   # ⏳ pending / no review yet
+    *)                 _prc="$DIM"   _prg="$pr_state" ;;
+  esac
+  seg "${_prc}\U0001f500 #${pr_number} ${_prg}${R}"
 fi
 
 # Model: keep the version, shorten " (1M context)" → " 1M" —
@@ -474,12 +519,6 @@ if _on effort && [ -n "$effort" ]; then
     *)      _ec="$DIM";   _el="${effort:0:2}";;
   esac
   seg "${_ec}${_el}${R}"
-fi
-
-# Extended-thinking toggle (chat:thinkingToggle / alt+t) — 🧠 lit when on,
-# dimmed when explicitly off. Absent field (model has no thinking) → hidden.
-if _on thinking && [ -n "$thinking" ]; then
-  [ "$thinking" = "true" ] && seg "${MAUVE}\U0001f9e0${R}" || seg "${DIM}\U0001f9e0 off${R}"
 fi
 
 # Active subagent (--agent foo or via agent settings).
@@ -674,7 +713,7 @@ if _on code_churn; then
 fi
 
 # ═════════════════════════════════════════════════════════════════════════
-# Line 3: session clocks — now+age · started · 👤 since-enter · 🤖 since-reply
+# Line 3: session clocks — now+age · 👤 since-enter · 🤖 since-reply · 🔥 cache
 # (now leads; 👤 marks the human's Enter, 🤖 the agent's last reply.)
 # ═════════════════════════════════════════════════════════════════════════
 # "Started" = when the Claude Code PROCESS opened (survives /clear, unlike
@@ -716,10 +755,6 @@ if _on session_times; then
     seg3 "${SAP}\U0001f552 ${_nowc}${R}"          # now (age unresolved)
   fi
 
-  if [ "$_procstart" -gt 0 ] 2>/dev/null; then
-    printf -v _startc '%(%H:%M)T' "$_procstart"
-    seg3 "${DIM}\U0001f7e2 ${_startc}${R}"        # started (CC opened)
-  fi
 
   # Enter + running/idle status — both from hook stamps (see block comment).
   # Coerce each stamp to a clean integer (0 when absent/garbage) so the -ge
@@ -745,6 +780,25 @@ if _on session_times; then
   if [ "$_running" != 1 ] && [ "$_st" -gt 0 ]; then
     fmt_dur $(( NOW - _st ))
     seg3 "${GRN}\U0001f916 ${FD}${DIM} ago${R}"    # 🤖 since last reply (waiting)
+  fi
+fi
+
+# Prompt-cache health (payload `prompt_cache`) on the telemetry line: warm shows
+# the hit ratio as a percent, cold shows a dimmed marker. Ratio→percent is
+# fork-free integer math on the "0.xxx" digits (round half-up).
+if _on cache && [ -n "$cache_warm" ]; then
+  if [ "$cache_warm" = "true" ]; then
+    _cpct=0
+    case "$cache_hit" in
+      1|1.*) _cpct=100 ;;
+      0.*)   _cf="${cache_hit#0.}000"
+             _cpct=$(( 10#${_cf:0:1}*10 + 10#${_cf:1:1} ))
+             (( 10#${_cf:2:1} >= 5 )) && (( _cpct++ )) ;;
+    esac
+    mkdots "$_cpct"
+    seg3 "\U0001f525 ${BAR}${DIM} ${_cpct}%${R}"   # warm: hit-ratio circle gauge (per-pip red→blue gradient)
+  else
+    seg3 "${DIM}\U0001f9ca cold${R}"            # cache cold
   fi
 fi
 
