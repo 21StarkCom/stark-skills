@@ -20,7 +20,7 @@ type parse_payload >/dev/null 2>&1 || { echo "FAIL: could not extract parse_payl
 
 VARS=(cwd model model_id used_pct ctx_size vim_mode session_name effort thinking
       agent_name out_style week_pct week_reset five_pct five_reset over_200k sid
-      api_dur_ms s_added s_removed)
+      api_dur_ms s_added s_removed pr_number pr_state cache_warm cache_hit)
 
 jq_parse() { # the EXACT filter statusline-command.sh used before the bash rewrite
   jq -r '{
@@ -36,7 +36,10 @@ jq_parse() { # the EXACT filter statusline-command.sh used before the bash rewri
     five_reset:(.rate_limits.five_hour.resets_at // ""),
     over_200k:(.exceeds_200k_tokens // false), sid:(.session_id // ""),
     api_dur_ms:(.cost.total_api_duration_ms // ""),
-    s_added:(.cost.total_lines_added // ""), s_removed:(.cost.total_lines_removed // "")
+    s_added:(.cost.total_lines_added // ""), s_removed:(.cost.total_lines_removed // ""),
+    pr_number:(.pr.number // ""), pr_state:(.pr.review_state // ""),
+    cache_warm:(if ((.prompt_cache // {})|has("warm")) then (.prompt_cache.warm|tostring) else "" end),
+    cache_hit:(.prompt_cache.hit_ratio // "")
   } | to_entries[] | "\(.key)=\(.value|tostring)"' <<<"$1"
 }
 
@@ -65,6 +68,8 @@ check thinking-none '{"model":{"display_name":"O","id":"o"},"thinking":{}}'
 check spaces        '{"workspace":{"current_dir":"/Users/aryeh/My Code/stark skills"},"model":{"display_name":"Opus 4.8 (1M context)","id":"o"},"session_name":"feat: thing"}'
 check cwd-fallback  '{"cwd":"/fallback/dir","model":{"display_name":"X","id":"x"}}'
 check empty         '{}'
+check pr-cache-warm '{"model":{"display_name":"X","id":"x"},"pr":{"number":944,"url":"https://x/pull/944","review_state":"pending"},"prompt_cache":{"warm":true,"hit_ratio":0.97,"requests":43,"miss_causes":{}}}'
+check pr-cache-cold '{"model":{"display_name":"X","id":"x"},"pr":{"number":12,"review_state":"approved"},"prompt_cache":{"warm":false,"hit_ratio":0.5,"miss_causes":{}}}'
 
 [ "$FAIL" -eq 0 ] && echo "ALL PASS" || echo "FAILURES"
 exit "$FAIL"
