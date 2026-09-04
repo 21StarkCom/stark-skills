@@ -716,12 +716,11 @@ fi
 # Line 3: session clocks — now+age · 👤 since-enter · 🤖 since-reply · 🔥 cache
 # (now leads; 👤 marks the human's Enter, 🤖 the agent's last reply.)
 # ═════════════════════════════════════════════════════════════════════════
-# "Started" = when the Claude Code PROCESS opened (survives /clear, unlike
-# cost.total_duration_ms which resets per session), read from the parent
-# process' start time (ps lstart → epoch). Cached per PPID so the ps+date
-# forks run once per Claude Code run, not every render.
 # "Now (age)" = current wall clock plus session age (NOW − process start),
-# scaled by fmt_age (Xs / Xm / H:MM).
+# scaled by fmt_age (Xs / Xm / H:MM). Process start = when the Claude Code
+# PROCESS opened (survives /clear, unlike cost.total_duration_ms which resets
+# per session), read from the parent process' start time (ps lstart → epoch)
+# and cached per PPID so the ps+date forks run once per run, not every render.
 # "Enter" = the last prompt-submission epoch, stamped to
 # ~/.claude/.statusline-prompt-<sid> by the UserPromptSubmit hook
 # (config/statusline-prompt-hook.sh). That hook carries an idle-gap guard
@@ -754,7 +753,6 @@ if _on session_times; then
   else
     seg3 "${SAP}\U0001f552 ${_nowc}${R}"          # now (age unresolved)
   fi
-
 
   # Enter + running/idle status — both from hook stamps (see block comment).
   # Coerce each stamp to a clean integer (0 when absent/garbage) so the -ge
