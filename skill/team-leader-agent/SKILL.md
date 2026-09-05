@@ -65,9 +65,10 @@ decide — record the divergence, don't relitigate it.
 But the **name churns** — a `/rename` renames it (measured), and a `/clear` can
 too — so run `ListAgents` **immediately before every send** and use the exact
 token it prints. The `[ref]` is a disambiguator, **not** a standalone address:
-measured — after a session renamed itself, `RENAME [d0ff49]` was rejected while
-`new-name [d0ff49]` (same ref) delivered. So a remembered name or token is
-worthless, and `ListAgents` is a per-send step, not per-spawn. When you're
+measured — after a session renamed itself, `RENAME [d0ff49]` was rejected
+(`no agent named … is reachable`) while `new-name [d0ff49]` (same ref)
+delivered. So a remembered name or token is worthless, and `ListAgents` is a
+per-send step, not per-spawn. When you're
 **answering** a minion's incoming message, the robust reply path is to copy that
 message's `from` attribute straight into your `to`.
 
@@ -456,7 +457,7 @@ Pure mechanics and reference; the judgment-call failures are in Rationalizations
 above.
 
 - Trailing `--enter` (`send <uuid> "/clear" --enter`) is typed as literal text.
-  The flag is **leading**, always. For a control-client send target by **UUID**
+  The flag is **leading**, always. Target a control-client send by **UUID**
   (`surface:N` is display-only and churns).
 - `cmux workspace list --json` has **no lane field** — lanes are `cmux workspace
   status` (raw cmux binary, not hermod); per-minion state is `sessions --json`.
