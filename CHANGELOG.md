@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=946 runId=946 -->
+- Dedup team-leader-agent skill's command fence and tail sections, keeping every taught rule while trimming ~260 words of redundant text.
 <!-- stark-gh:pr-merge pr=944 runId=944 -->
 - docs(STARK-2389): team-leader-agent now requires re-resolving the fresh `name [ref]` token via ListAgents before every SendMessage, not just after reset
 <!-- stark-gh:pr-merge pr=942 runId=942 -->
