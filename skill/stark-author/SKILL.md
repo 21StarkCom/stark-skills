@@ -171,7 +171,7 @@ jargon, no `go test` shorthand left unexplained. Fixed sections:
 |---|---|
 | What this does | 2–3 plain sentences |
 | What it will NOT do | every OUT bullet, in plain words |
-| What I checked myself, so you don't have to | the code you're naming is really there · the checks you wrote would actually catch a broken build · the one command that proves it works, and what a passing run looks like |
+| What I checked myself, so you don't have to | the code you're naming is really there · the checks you wrote would fail if the work wasn't actually done · the one command that proves it works, and what a passing run looks like |
 | Where I'm genuinely unsure | your flagged risks, one plain line each: the weakest check, the thinnest OUT boundary, any unresolved advisory finding, each call you defaulted. Mandatory — "no residual risks" only if the authoring pass was genuinely clean |
 | Calls I made for you | each defaulted ambiguity as a plain question + the default you took + one-line why |
 
@@ -244,8 +244,8 @@ It should feel like a teammate showing their work — not an exam.
 sidecar, walked through). Before any question, say plainly:
 - **the change in one sentence** — your read of what they want;
 - **what you checked yourself, so they don't have to** — the code you're naming is
-  really there; the checks you wrote would catch a broken build; the one command
-  that proves it works end-to-end, and what a passing run looks like;
+  really there; the checks you wrote would fail if the work wasn't actually done;
+  the one command that proves it works end-to-end, and what a passing run looks like;
 - **where you're genuinely unsure** — your flagged risks, one plain sentence each.
   Don't soften them and don't drown them. This honest short list is the point.
 
