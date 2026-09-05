@@ -51,7 +51,7 @@ All skills live in `skill/*/SKILL.md`. Full per-skill detail — arguments, fail
 
 | Skill | What it does |
 |---|---|
-| `/stark-author <intent>` | Stage 1 — human-gated spec + plan in one session. Emits `docs/specs/YYYY-MM-DD-<slug>-spec.md` + a `.human.md` operator digest, pins an `accepted-base`, opens a draft spec PR. |
+| `/stark-author <intent>` | Stage 1 — spec + plan in one session; the operator decides. Agent does all technical QA and asks only operator-oracle questions, then ends with a dead-simple three-layer intent read-back + plain-language sign-off. Emits `docs/specs/YYYY-MM-DD-<slug>-spec.md` + a `.human.md` operator digest, pins an `accepted-base`, opens a draft spec PR. |
 | `/stark-build <spec-path>` | Stage 2 — autonomous implementation from an accepted spec. One fresh headless session per task, gated by hooks the agent cannot edit. Abort is a first-class success. |
 | `/stark-review [PR]` | Single-agent PR review, triage-selected domains, auto-detected test command. |
 | `/stark-terraform-review` · `/stark-terragrunt-review` | Multi-agent IaC review over `.tf` / `.hcl`. |
