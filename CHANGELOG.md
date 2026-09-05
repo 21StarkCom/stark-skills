@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=947 runId=947 -->
+- `/stark-author`: operator-first Stage-1 restructure — 3-question human gate, no file/interface quizzing, mandatory 3-layer intent read-back before sign-off.
 <!-- stark-gh:pr-merge pr=946 runId=946 -->
 - Dedup team-leader-agent skill's command fence and tail sections, keeping every taught rule while trimming ~260 words of redundant text.
 <!-- stark-gh:pr-merge pr=944 runId=944 -->
